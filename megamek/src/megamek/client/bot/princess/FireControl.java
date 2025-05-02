@@ -741,7 +741,7 @@ public class FireControl {
         // Make sure we have ammo.
         final WeaponType weaponType = (WeaponType) weapon.getType();
         final Mounted<?> firingAmmo;
-        if (AmmoType.T_NA != weaponType.getAmmoType()) {
+        if (!weaponType.hasCompatibleAmmoType(AmmoType.T_NA)) {
             // Use ammo arg if provided, else use linked ammo.
             firingAmmo = (ammo == null) ? weapon.getLinkedAmmo() : ammo;
             if (null == firingAmmo) {
@@ -926,7 +926,7 @@ public class FireControl {
         }
 
         // ammo mods
-        if (AmmoType.T_NA != weaponType.getAmmoType()
+        if (!weaponType.hasCompatibleAmmoType(AmmoType.T_NA)
                 && (null != firingAmmo)
                 && (firingAmmo.getType() instanceof AmmoType ammoType)) {
             // Set of munitions we'll consider for Flak targeting
@@ -1125,7 +1125,7 @@ public class FireControl {
 
         // Is the weapon loaded?
         AmmoMounted firingAmmo = (ammo == null) ? weapon.getLinkedAmmo() : ammo;
-        if (AmmoType.T_NA != (weapon.getType()).ammoType) {
+        if (!(weapon.getType()).hasCompatibleAmmoType(AmmoType.T_NA)) {
             if (null == firingAmmo) {
                 return new ToHitData(TH_WEAPON_NO_AMMO);
             }
@@ -1312,7 +1312,7 @@ public class FireControl {
                 } else {
                     // For certain weapon types, look over all their loaded ammos
                     List<AmmoMounted> ammos;
-                    if (List.of(AmmoType.T_ATM, AmmoType.T_IATM, AmmoType.T_MML).contains(weaponType.getAmmoType())) {
+                    if (weaponType.hasAnyCompatibleAmmoType(List.of(AmmoType.T_ATM, AmmoType.T_IATM, AmmoType.T_MML))) {
                         ammos = shooter.getAmmo(weapon);
                     } else {
                         // Otherwise assume the current loaded ammo is suitable representative
@@ -1777,7 +1777,7 @@ public class FireControl {
             } else {
                 // For certain weapon types, look over all their loaded ammos
                 List<AmmoMounted> ammos;
-                if (List.of(AmmoType.T_ATM, AmmoType.T_IATM, AmmoType.T_MML).contains(weaponType.getAmmoType())) {
+                if (weaponType.hasAnyCompatibleAmmoType(List.of(AmmoType.T_ATM, AmmoType.T_IATM, AmmoType.T_MML))) {
                     ammos = shooter.getAmmo(weapon);
                 } else {
                     // Otherwise assume the current loaded ammo is suitable representative
@@ -1927,7 +1927,7 @@ public class FireControl {
             } else {
                 // For certain weapon types, look over all their loaded ammos
                 List<AmmoMounted> ammos;
-                if (List.of(AmmoType.T_ATM, AmmoType.T_IATM, AmmoType.T_MML).contains(weaponType.getAmmoType())) {
+                if (weaponType.hasAnyCompatibleAmmoType(List.of(AmmoType.T_ATM, AmmoType.T_IATM, AmmoType.T_MML))) {
                     ammos = shooter.getAmmo(weapon);
                 } else {
                     // Otherwise assume the current loaded ammo is suitable representative
@@ -2825,7 +2825,7 @@ public class FireControl {
 
                 // For certain weapon types, look over all their loaded ammos
                 List<AmmoMounted> ammos;
-                if (List.of(AmmoType.T_ATM, AmmoType.T_IATM, AmmoType.T_MML).contains(weaponType.getAmmoType())) {
+                if (weaponType.hasAnyCompatibleAmmoType(List.of(AmmoType.T_ATM, AmmoType.T_IATM, AmmoType.T_MML))) {
                     ammos = shooter.getAmmo(weapon);
                 } else {
                     // Otherwise assume the current loaded ammo is suitable representative
@@ -3801,6 +3801,6 @@ public class FireControl {
         List<Integer> ammoTypes = Arrays.asList(
                 AmmoType.T_NA,
                 AmmoType.T_INFANTRY);
-        return ammoTypes.contains(weaponType.getAmmoType());
+        return weaponType.hasAnyCompatibleAmmoType(ammoTypes);
     }
 }

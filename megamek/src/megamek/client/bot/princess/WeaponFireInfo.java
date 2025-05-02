@@ -543,8 +543,7 @@ public class WeaponFireInfo {
                 (weaponType.getDamage() == WeaponType.DAMAGE_ARTILLERY)) {
             // Assume average cluster size for this weapon, unless it has Streak
             // capabilities
-            if (!List.of(AmmoType.T_SRM_STREAK, AmmoType.T_LRM_STREAK, AmmoType.T_IATM)
-                    .contains(weaponType.getAmmoType())) {
+            if (!weaponType.hasAnyCompatibleAmmoType(List.of(AmmoType.T_SRM_STREAK, AmmoType.T_LRM_STREAK, AmmoType.T_IATM))) {
                 boolean artillery = (weaponType.getDamage() == WeaponType.DAMAGE_ARTILLERY);
                 int rs = weaponType.getRackSize();
                 int damage = Compute.calculateClusterHitTableAmount(7, rs);

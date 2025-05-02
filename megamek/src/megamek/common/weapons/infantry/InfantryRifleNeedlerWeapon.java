@@ -35,7 +35,7 @@ public class InfantryRifleNeedlerWeapon extends InfantryWeapon {
 		name = "Needler Rifle";
 		setInternalName(name);
 		addLookupName("InfantryNeedlerRifle");
-		ammoType = AmmoType.T_INFANTRY;
+		addCompatibleAmmoType(AmmoType.T_INFANTRY);
 		cost = 75;
 		bv = 0.21;
 		tonnage = .001;

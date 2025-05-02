@@ -1022,9 +1022,8 @@ public final class UnitToolTip {
                 // Add ammo info if the weapon has ammo
                 // Check wpInfos for dual entries to avoid displaying ammo twice for
                 // non/rapid-fire
-                if ((wtype.getAmmoType() != AmmoType.T_NA)
-                    && (!wtype.hasFlag(WeaponType.F_ONESHOT) || wtype.hasFlag(WeaponType.F_BA_INDIVIDUAL))
-                    && (wtype.getAmmoType() != AmmoType.T_INFANTRY)) {
+                if (!(wtype.hasAnyCompatibleAmmoType(List.of(AmmoType.T_NA, AmmoType.T_INFANTRY)))
+                    && (!wtype.hasFlag(WeaponType.F_ONESHOT) || wtype.hasFlag(WeaponType.F_BA_INDIVIDUAL))) {
                     String msg_ammo = Messages.getString("BoardView1.Tooltip.Ammo");
 
                     if (wpInfos.containsKey(curWp.getName() + msg_ammo)) {

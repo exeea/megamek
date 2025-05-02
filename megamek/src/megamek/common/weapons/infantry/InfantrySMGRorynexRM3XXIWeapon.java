@@ -36,7 +36,7 @@ public class InfantrySMGRorynexRM3XXIWeapon extends InfantryWeapon {
 		setInternalName(name);
 		addLookupName("InfantryRorynexRM3XXI");
 		addLookupName("Rorynex RM-3/XXI");
-		ammoType = AmmoType.T_INFANTRY;
+		addCompatibleAmmoType(AmmoType.T_INFANTRY);
 		cost = 80;
 		bv = 0.18;
 		tonnage = .003;

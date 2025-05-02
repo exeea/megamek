@@ -45,7 +45,7 @@ public class ISAC2Primitive extends ACWeapon {
         addLookupName("IS Autocannon/2 Primitive");
         sortingName = "Primitive Prototype Autocannon/02";
         shortName = "AC/2p";
-        ammoType = AmmoType.T_AC_PRIMITIVE;
+        addCompatibleAmmoType(AmmoType.T_AC_PRIMITIVE);
         heat = 1;
         damage = 2;
         rackSize = 2;

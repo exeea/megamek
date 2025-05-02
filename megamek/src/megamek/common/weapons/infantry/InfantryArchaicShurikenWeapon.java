@@ -36,7 +36,7 @@ public class InfantryArchaicShurikenWeapon extends InfantryWeapon {
         setInternalName(name);
         addLookupName("InfantryShuriken");
         addLookupName("Shuriken");
-        ammoType = AmmoType.T_NA;
+        addCompatibleAmmoType(AmmoType.T_NA);
         cost = 5;
         bv = 0;
         tonnage = .0001; 

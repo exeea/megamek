@@ -36,7 +36,7 @@ public class InfantryPistolStettaAutoPistolWeapon extends InfantryWeapon {
         setInternalName(name);
         addLookupName("InfantryStettaAutopistol");
         addLookupName("Stetta AutoPistol");
-        ammoType = AmmoType.T_INFANTRY;
+        addCompatibleAmmoType(AmmoType.T_INFANTRY);
         cost = 150;
         bv = 0.16;
         tonnage = .002;

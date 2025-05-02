@@ -51,7 +51,7 @@ public class AlamoMissileWeapon extends CapitalMissileWeapon {
         medAV = 10;
         missileArmor = 20;
         maxRange = RANGE_MED;
-        ammoType = AmmoType.T_ALAMO;
+        addCompatibleAmmoType(AmmoType.T_ALAMO);
         capital = true;
         techAdvancement.setTechBase(TechAdvancement.TECH_BASE_IS);
         techAdvancement.setISAdvancement(3071, DATE_NONE, DATE_NONE);

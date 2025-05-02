@@ -34,7 +34,7 @@ public class InfantrySniperRifleFNFJ12DarkCaste extends InfantryWeapon {
        name = "Sniper Rifle (FNF-J12 (Dark Caste))";
        setInternalName(name);
        addLookupName("FNF-J12 (Dark Caste)");
-       ammoType = AmmoType.T_INFANTRY;
+       addCompatibleAmmoType(AmmoType.T_INFANTRY);
        bv = .336;
        tonnage =  0.006;
        infantryDamage =  0.42;

@@ -468,7 +468,7 @@ public class WeaponAttackAction extends AbstractAttackAction {
         // 2003-01-02 BattleArmor MG and Small Lasers have unlimited ammo.
         // 2002-09-16 Infantry weapons have unlimited ammo.
 
-        final boolean usesAmmo = (wtype.getAmmoType() != AmmoType.T_NA) && !isWeaponInfantry;
+        final boolean usesAmmo = (!wtype.hasCompatibleAmmoType(AmmoType.T_NA)) && !isWeaponInfantry;
 
         final AmmoMounted ammo = usesAmmo ? linkedAmmo : null;
 
@@ -720,7 +720,7 @@ public class WeaponAttackAction extends AbstractAttackAction {
 
         boolean mpMelevationHack = false;
         if (usesAmmo &&
-                  ((wtype.getAmmoType() == AmmoType.T_LRM) || (wtype.getAmmoType() == AmmoType.T_LRM_IMP)) &&
+                  wtype.hasAnyCompatibleAmmoType(List.of(AmmoType.T_LRM,AmmoType.T_LRM_IMP)) &&
                   (atype != null) &&
                   (munition.contains(AmmoType.Munitions.M_MULTI_PURPOSE)) &&
                   (ae.getElevation() == -1) &&
@@ -1601,7 +1601,7 @@ public class WeaponAttackAction extends AbstractAttackAction {
         // Only screen launchers may target a hex for screen launch
         if (Targetable.TYPE_HEX_SCREEN == target.getTargetType()) {
             if (wtype != null &&
-                      (!((wtype.getAmmoType() == AmmoType.T_SCREEN_LAUNCHER) ||
+                      (!((wtype.hasCompatibleAmmoType(AmmoType.T_SCREEN_LAUNCHER)) ||
                                (wtype instanceof ScreenLauncherBayWeapon)))) {
                 return Messages.getString("WeaponAttackAction.ScreenLauncherOnly");
             }
@@ -1610,7 +1610,7 @@ public class WeaponAttackAction extends AbstractAttackAction {
         // Screen Launchers can only target hexes
         if ((Targetable.TYPE_HEX_SCREEN != target.getTargetType()) &&
                   (wtype != null &&
-                         ((wtype.getAmmoType() == AmmoType.T_SCREEN_LAUNCHER) ||
+                         ((wtype.hasCompatibleAmmoType(AmmoType.T_SCREEN_LAUNCHER)) ||
                                 (wtype instanceof ScreenLauncherBayWeapon)))) {
             return Messages.getString("WeaponAttackAction.ScreenHexOnly");
         }
@@ -1812,7 +1812,7 @@ public class WeaponAttackAction extends AbstractAttackAction {
                   wtype != null &&
                   (ae.getConversionMode() == LandAirMek.CONV_MODE_MEK) &&
                   wtype.hasFlag(WeaponType.F_BOMB_WEAPON) &&
-                  wtype.getAmmoType() != AmmoType.T_RL_BOMB &&
+                  !wtype.hasCompatibleAmmoType(AmmoType.T_RL_BOMB) &&
                   !wtype.hasFlag(WeaponType.F_TAG)) {
             return Messages.getString("WeaponAttackAction.NoBombInMekMode");
         }
@@ -1827,7 +1827,7 @@ public class WeaponAttackAction extends AbstractAttackAction {
                 boolean usable = false;
                 for (WeaponMounted m : weapon.getBayWeapons()) {
                     WeaponType bayWType = m.getType();
-                    boolean bayWUsesAmmo = (bayWType.getAmmoType() != AmmoType.T_NA);
+                    boolean bayWUsesAmmo = (!bayWType.hasCompatibleAmmoType(AmmoType.T_NA));
                     if (m.canFire()) {
                         if (bayWUsesAmmo) {
                             if ((m.getLinked() != null) && (m.getLinked().getUsableShotsLeft() > 0)) {
@@ -2244,13 +2244,12 @@ public class WeaponAttackAction extends AbstractAttackAction {
                                     return Messages.getString("WeaponAttackAction.OnlyArrowArty");
                                 }
                             }
-                        } else if ((wtype.getAmmoType() != AmmoType.T_ARROW_IV) &&
-                                         (wtype.getAmmoType() != AmmoType.T_ARROW_IV_BOMB)) {
+                        } else if (!wtype.hasAnyCompatibleAmmoType(List.of(AmmoType.T_ARROW_IV,AmmoType.T_ARROW_IV_BOMB))) {
                             // For Fighters, LAMs, Small Craft and VTOLs
                             return Messages.getString("WeaponAttackAction.OnlyArrowArty");
                         }
                     }
-                } else if ((wtype.getAmmoType() == AmmoType.T_ARROW_IV) &&
+                } else if ((wtype.hasCompatibleAmmoType(AmmoType.T_ARROW_IV)) &&
                                  atype != null &&
                                  atype.getMunitionType().contains(AmmoType.Munitions.M_ADA)) {
                     // Air-Defense Arrow IV can only target airborne enemy units between 1 and 51 hexes away
@@ -2420,7 +2419,7 @@ public class WeaponAttackAction extends AbstractAttackAction {
 
             // BA NARCs and Tasers can only fire at one target in a round
             if ((ae instanceof BattleArmor) &&
-                      (wtype.hasFlag(WeaponType.F_TASER) || wtype.getAmmoType() == AmmoType.T_NARC)) {
+                      (wtype.hasFlag(WeaponType.F_TASER) || wtype.hasCompatibleAmmoType(AmmoType.T_NARC))) {
                 // Go through all of the current actions to see if a NARC or Taser
                 // has been fired
                 for (Enumeration<EntityAction> i = game.getActions(); i.hasMoreElements(); ) {
@@ -2437,7 +2436,7 @@ public class WeaponAttackAction extends AbstractAttackAction {
                                   weapon.getType().hasFlag(WeaponType.F_TASER)) {
                             return Messages.getString("WeaponAttackAction.BATaserSameTarget");
                         }
-                        if (prevWtype.getAmmoType() == AmmoType.T_NARC && wtype.getAmmoType() == AmmoType.T_NARC) {
+                        if (prevWtype.hasCompatibleAmmoType(AmmoType.T_NARC) && wtype.hasCompatibleAmmoType(AmmoType.T_NARC)) {
                             return Messages.getString("WeaponAttackAction.BANarcSameTarget");
                         }
                     }
@@ -2459,7 +2458,7 @@ public class WeaponAttackAction extends AbstractAttackAction {
             }
 
             // ASEW Missiles cannot be launched in an atmosphere
-            if ((wtype.getAmmoType() == AmmoType.T_ASEW_MISSILE) && !ae.isSpaceborne()) {
+            if ((wtype.hasCompatibleAmmoType(AmmoType.T_ASEW_MISSILE)) && !ae.isSpaceborne()) {
                 return Messages.getString("WeaponAttackAction.ASEWAtmo");
             }
 
@@ -2930,7 +2929,7 @@ public class WeaponAttackAction extends AbstractAttackAction {
             }
 
             // NARC and iNARC
-            if ((wtype.getAmmoType() == AmmoType.T_NARC) || (wtype.getAmmoType() == AmmoType.T_INARC)) {
+            if (wtype.hasAnyCompatibleAmmoType(List.of(AmmoType.T_NARC,AmmoType.T_INARC))) {
                 // Cannot be used against targets inside buildings
                 if (targetInBuilding) {
                     return Messages.getString("WeaponAttackAction.NoNarcInBuilding");
@@ -3155,7 +3154,7 @@ public class WeaponAttackAction extends AbstractAttackAction {
 
         // Screen launchers target hexes and hit automatically (if in range)
         if (wtype != null &&
-                  ((wtype.getAmmoType() == AmmoType.T_SCREEN_LAUNCHER) || (wtype instanceof ScreenLauncherBayWeapon)) &&
+                  ((wtype.hasCompatibleAmmoType(AmmoType.T_SCREEN_LAUNCHER)) || (wtype instanceof ScreenLauncherBayWeapon)) &&
                   distance <= wtype.getExtremeRange()) {
             return Messages.getString("WeaponAttackAction.ScreenAutoHit");
         }
@@ -3484,7 +3483,7 @@ public class WeaponAttackAction extends AbstractAttackAction {
         }
 
         // +4 for trying to fire ASEW or antiship missile at a target of < 500 tons
-        if ((wtype.hasFlag(WeaponType.F_ANTI_SHIP) || wtype.getAmmoType() == AmmoType.T_ASEW_MISSILE) &&
+        if ((wtype.hasFlag(WeaponType.F_ANTI_SHIP) || wtype.hasCompatibleAmmoType(AmmoType.T_ASEW_MISSILE)) &&
                   (te != null) &&
                   (te.getWeight() < 500)) {
             toHit.addModifier(4, Messages.getString("WeaponAttackAction.TeTooSmallForASM"));
@@ -4144,7 +4143,7 @@ public class WeaponAttackAction extends AbstractAttackAction {
             // (isn't recoil fun?)
             // So it's here instead of with other weapon mods that apply across the board
             if ((wtype != null) &&
-                      ((wtype.ammoType == AmmoType.T_GAUSS_HEAVY) || (wtype.ammoType == AmmoType.T_IGAUSS_HEAVY)) &&
+                      (wtype.hasAnyCompatibleAmmoType(List.of(AmmoType.T_GAUSS_HEAVY,AmmoType.T_IGAUSS_HEAVY))) &&
                       !(ae instanceof Dropship) &&
                       !(ae instanceof Jumpship)) {
                 toHit.addModifier(+1, Messages.getString("WeaponAttackAction.FighterHeavyGauss"));

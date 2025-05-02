@@ -1054,8 +1054,8 @@ public abstract class BotClient extends Client {
             AmmoType at = (AmmoType) weapon.getLinked().getType();
 
             float fHits;
-            if ((wt.getAmmoType() == AmmoType.T_SRM_STREAK)
-                    || (wt.getAmmoType() == AmmoType.T_LRM_STREAK)) {
+            if ((wt.hasCompatibleAmmoType(AmmoType.T_SRM_STREAK))
+                    || (wt.hasCompatibleAmmoType(AmmoType.T_LRM_STREAK))) {
                 fHits = wt.getRackSize();
             } else if ((wt.getRackSize() == 40) || (wt.getRackSize() == 30)) {
                 fHits = 2.0f * expectedHitsByRackSize[wt.getRackSize() / 2];

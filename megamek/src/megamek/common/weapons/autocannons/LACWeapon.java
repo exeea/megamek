@@ -23,6 +23,6 @@ public abstract class LACWeapon extends ACWeapon {
 
     public LACWeapon() {
         super();
-        ammoType = AmmoType.T_LAC;
+        addCompatibleAmmoType(AmmoType.T_LAC);
     }
 }

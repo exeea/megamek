@@ -30,7 +30,7 @@ public class ISCruiseMissile70 extends ArtilleryWeapon {
         sortingName = "Cruise Missile/070";
         heat = 70;
         rackSize = 70;
-        ammoType = AmmoType.T_CRUISE_MISSILE;
+        addCompatibleAmmoType(AmmoType.T_CRUISE_MISSILE);
         shortRange = 1;
         mediumRange = 2;
         longRange = 90;

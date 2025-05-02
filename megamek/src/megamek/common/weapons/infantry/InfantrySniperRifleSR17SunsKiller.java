@@ -34,7 +34,7 @@ public class InfantrySniperRifleSR17SunsKiller extends InfantryWeapon {
        name = "Sniper Rifle (SR-17 Suns Killer)";
        setInternalName(name);
        addLookupName("SR-17 Suns Killer");
-       ammoType = AmmoType.T_INFANTRY;
+       addCompatibleAmmoType(AmmoType.T_INFANTRY);
        bv = .35;
        tonnage =  0.006;
        infantryDamage =  0.35;

@@ -75,7 +75,7 @@ public class ArtilleryTracker implements Serializable {
 
     public boolean ammoTypeInList(int ammoType) {
         for (Mounted<?> mounted : weapons.keySet()) {
-            if (((WeaponType) mounted.getType()).getAmmoType() == ammoType) {
+            if (((WeaponType) mounted.getType()).hasCompatibleAmmoType(ammoType)) {
                 return true;
             }
         }

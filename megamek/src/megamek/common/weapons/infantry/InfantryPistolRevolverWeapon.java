@@ -35,7 +35,7 @@ public class InfantryPistolRevolverWeapon extends InfantryWeapon {
 		name = "Revolver";
 		setInternalName(name);
 		addLookupName("InfantryRevolver");
-		ammoType = AmmoType.T_INFANTRY;
+		addCompatibleAmmoType(AmmoType.T_INFANTRY);
 		cost = 60;
 		bv = 0.16;
 		tonnage = .0005;

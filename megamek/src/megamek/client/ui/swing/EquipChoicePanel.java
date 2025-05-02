@@ -665,7 +665,7 @@ public class EquipChoicePanel extends JPanel {
 
         for (WeaponMounted weapon : entity.getWeaponList()) {
             // don't deal with bay or grouped weapons for now
-            if (weapon.getType().getAmmoType() == AmmoType.T_NA) {
+            if (weapon.getType().hasCompatibleAmmoType(AmmoType.T_NA)) {
                 continue;
             }
 

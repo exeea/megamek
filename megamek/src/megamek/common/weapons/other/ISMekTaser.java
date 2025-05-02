@@ -39,7 +39,7 @@ public class ISMekTaser extends AmmoWeapon {
         heat = 6;
         rackSize = 1;
         damage = 1;
-        ammoType = AmmoType.T_TASER;
+        addCompatibleAmmoType(AmmoType.T_TASER);
         shortRange = 1;
         mediumRange = 2;
         longRange = 4;

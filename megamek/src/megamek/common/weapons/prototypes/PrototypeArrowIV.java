@@ -32,7 +32,7 @@ public class PrototypeArrowIV extends ArtilleryWeapon {
         shortName = "Arrow IV (P)";
         heat = 10;
         rackSize = 20;
-        ammoType = AmmoType.T_ARROWIV_PROTO;
+        addCompatibleAmmoType(AmmoType.T_ARROWIV_PROTO);
         shortRange = 1;
         mediumRange = 2;
         longRange = 8;

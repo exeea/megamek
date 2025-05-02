@@ -37,7 +37,7 @@ public class CLBAMicroBomb extends Weapon {
         heat = 0;
         damage = DAMAGE_VARIABLE;
         rackSize = 2;
-        ammoType = AmmoType.T_BA_MICRO_BOMB;
+        addCompatibleAmmoType(AmmoType.T_BA_MICRO_BOMB);
         shortRange = 0;
         mediumRange = 0;
         longRange = 0;

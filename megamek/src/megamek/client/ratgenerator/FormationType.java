@@ -251,13 +251,12 @@ public class FormationType {
                     continue;
                 }
                 int damage = 0;
-                if (weapon.getAmmoType() != AmmoType.T_NA) {
+                if (!weapon.hasCompatibleAmmoType(AmmoType.T_NA)) {
                     Optional<EquipmentType> ammo = ms.getEquipmentNames()
                                                          .stream()
                                                          .map(EquipmentType::get)
                                                          .filter(eq -> eq instanceof AmmoType &&
-                                                                             ((AmmoType) eq).getAmmoType() ==
-                                                                                   weapon.getAmmoType() &&
+                                                                             weapon.hasCompatibleAmmoType(((AmmoType) eq).getAmmoType()) &&
                                                                              ((AmmoType) eq).getRackSize() ==
                                                                                    weapon.getRackSize())
                                                          .findFirst();

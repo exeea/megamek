@@ -2843,16 +2843,11 @@ public abstract class Entity extends TurnOrdered
                 }
             }
 
-            int ammotype = mounted.getType().getAmmoType();
-            if ((ammotype == AmmoType.T_AC_ROTARY) && mounted.isJammed() && !mounted.isDestroyed()) {
+            if ((mounted.getType().hasCompatibleAmmoType(AmmoType.T_AC_ROTARY)) && mounted.isJammed() && !mounted.isDestroyed()) {
                 return true;
             }
-            if (((ammotype == AmmoType.T_AC_ULTRA) ||
-                       (ammotype == AmmoType.T_AC_ULTRA_THB) ||
-                       (ammotype == AmmoType.T_AC) ||
-                       (ammotype == AmmoType.T_LAC) ||
-                       (ammotype == AmmoType.T_AC_IMP) ||
-                       (ammotype == AmmoType.T_PAC)) &&
+            if ((mounted.getType().hasAnyCompatibleAmmoType(
+                List.of(AmmoType.T_AC_ULTRA,AmmoType.T_AC_ULTRA_THB,AmmoType.T_AC,AmmoType.T_LAC,AmmoType.T_AC_IMP,AmmoType.T_PAC))) &&
                       mounted.isJammed() &&
                       !mounted.isDestroyed() &&
                       game.getOptions().booleanOption(OptionsConstants.ADVCOMBAT_UNJAM_UAC)) {
@@ -6688,7 +6683,7 @@ public abstract class Entity extends TurnOrdered
         for (WeaponMounted mounted : getTotalWeaponList()) {
             WeaponType weaponType = mounted.getType();
 
-            if (weaponType.getAmmoType() != AmmoType.T_NA) {
+            if (!weaponType.hasCompatibleAmmoType(AmmoType.T_NA)) {
                 if ((mounted.getLinked() == null) ||
                           (mounted.getLinked().getUsableShotsLeft() <= 0) ||
                           mounted.getLinked().isDumping()) {
@@ -11674,11 +11669,10 @@ public abstract class Entity extends TurnOrdered
      */
     public void setRapidFire() {
         for (WeaponMounted m : getTotalWeaponList()) {
-            int ammoType = m.getType().getAmmoType();
-            if (ammoType == AmmoType.T_AC_ROTARY) {
+            if (m.getType().hasCompatibleAmmoType(AmmoType.T_AC_ROTARY)) {
                 m.setMode("6-shot");
                 m.setModeSwitchable(false);
-            } else if (ammoType == AmmoType.T_AC_ULTRA) {
+            } else if (m.getType().hasCompatibleAmmoType(AmmoType.T_AC_ULTRA)) {
                 m.setMode("Ultra");
                 m.setModeSwitchable(false);
             }

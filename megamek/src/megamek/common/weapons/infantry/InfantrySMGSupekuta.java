@@ -30,7 +30,7 @@ public class InfantrySMGSupekuta extends InfantryWeapon {
        name = "SMG (Supekuta)";
        setInternalName(name);
        addLookupName("Supekuta");
-       ammoType = AmmoType.T_INFANTRY;
+       addCompatibleAmmoType(AmmoType.T_INFANTRY);
        bv = .33;
        tonnage =  0.0025;
        infantryDamage =  0.33;

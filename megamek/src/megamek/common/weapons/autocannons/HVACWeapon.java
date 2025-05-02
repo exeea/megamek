@@ -40,7 +40,7 @@ public abstract class HVACWeapon extends ACWeapon {
 
     public HVACWeapon() {
         super();
-        ammoType = AmmoType.T_HYPER_VELOCITY;
+        addCompatibleAmmoType(AmmoType.T_HYPER_VELOCITY);
     }
 
     @Override

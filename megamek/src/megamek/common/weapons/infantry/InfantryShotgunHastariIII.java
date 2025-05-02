@@ -31,7 +31,7 @@ public class InfantryShotgunHastariIII extends InfantryWeapon {
        name = "Shotgun (Hastari III)";
        setInternalName(name);
        addLookupName("Hastari III");
-       ammoType = AmmoType.T_INFANTRY;
+       addCompatibleAmmoType(AmmoType.T_INFANTRY);
        bv = .27;
        tonnage =  0.0035;
        infantryDamage =  0.27;

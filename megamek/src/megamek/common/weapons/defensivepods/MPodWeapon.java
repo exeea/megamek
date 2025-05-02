@@ -34,7 +34,7 @@ public abstract class MPodWeapon extends AmmoWeapon {
         super();
         heat = 0;
         damage = 15;
-        ammoType = AmmoType.T_MPOD;
+        addCompatibleAmmoType(AmmoType.T_MPOD);
         rackSize = 15;
         minimumRange = 0;
         shortRange = 1;

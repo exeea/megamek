@@ -35,7 +35,7 @@ public class InfantrySupportHeavyFlamerWeapon extends InfantryWeapon {
 		name = "Flamer (Heavy)";
 		setInternalName(name);
 		addLookupName("InfantryHeavyFlamer");
-		ammoType = AmmoType.T_INFANTRY;
+		addCompatibleAmmoType(AmmoType.T_INFANTRY);
 		// Flamer (Heavy), TM p. 300
 		cost = 200;
 		bv = 0.72;

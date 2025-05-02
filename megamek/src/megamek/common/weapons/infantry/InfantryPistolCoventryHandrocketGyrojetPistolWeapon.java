@@ -36,7 +36,7 @@ public class InfantryPistolCoventryHandrocketGyrojetPistolWeapon extends Infantr
         setInternalName(name);
         addLookupName("InfantryCoventryHandrocketGyrojetpistol");
         addLookupName("Coventry Handrocket");
-        ammoType = AmmoType.T_INFANTRY;
+        addCompatibleAmmoType(AmmoType.T_INFANTRY);
         cost = 250;
         bv = 0.43;
         tonnage = .0031;

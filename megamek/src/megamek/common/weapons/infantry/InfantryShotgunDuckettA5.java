@@ -31,7 +31,7 @@ public class InfantryShotgunDuckettA5 extends InfantryWeapon {
        name = "Shotgun (Duckett A-5)";
        setInternalName(name);
        addLookupName("Duckett A-5");
-       ammoType = AmmoType.T_INFANTRY;
+       addCompatibleAmmoType(AmmoType.T_INFANTRY);
        bv = .288;
        tonnage =  0.0029;
        infantryDamage =  0.36;

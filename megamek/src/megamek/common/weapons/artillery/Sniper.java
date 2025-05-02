@@ -36,7 +36,7 @@ public class Sniper extends ArtilleryWeapon {
         addLookupName("Clan Sniper");
         heat = 10;
         rackSize = 20;
-        ammoType = AmmoType.T_SNIPER;
+        addCompatibleAmmoType(AmmoType.T_SNIPER);
         shortRange = 1;
         mediumRange = 2;
         longRange = 18;

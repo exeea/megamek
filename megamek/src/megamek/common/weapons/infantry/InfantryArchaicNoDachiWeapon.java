@@ -37,7 +37,7 @@ public class InfantryArchaicNoDachiWeapon extends InfantryWeapon {
         setInternalName(name);
         addLookupName("InfantryNoDachi");
         addLookupName("No Dachi");
-        ammoType = AmmoType.T_NA;
+        addCompatibleAmmoType(AmmoType.T_NA);
         cost = 300;
         bv = 0.05;
         tonnage = .0045; 

@@ -28,7 +28,7 @@ public class InfantryPulseLaserRifleTirbuni extends InfantryWeapon {
         name = "Pulse Laser Rifle (Tirbuni)";
         setInternalName(name);
         addLookupName("TIRBUNI");
-        ammoType = AmmoType.T_INFANTRY;
+        addCompatibleAmmoType(AmmoType.T_INFANTRY);
         cost = 1900;
         bv = 0.9;
         tonnage = 0.0074;

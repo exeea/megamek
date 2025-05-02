@@ -39,7 +39,7 @@ public abstract class MRMWeapon extends MissileWeapon {
 
     public MRMWeapon() {
         super();
-        ammoType = AmmoType.T_MRM;
+        addCompatibleAmmoType(AmmoType.T_MRM);
         toHitModifier = 1;
         atClass = CLASS_MRM;
     }

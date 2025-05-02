@@ -36,7 +36,7 @@ public class InfantryRifleBoltActionWeapon extends InfantryWeapon {
 		setInternalName(name);
 		addLookupName("InfantryBoltActionRifle");
 		addLookupName("Infantry Bolt Action Rifle");
-		ammoType = AmmoType.T_INFANTRY;
+		addCompatibleAmmoType(AmmoType.T_INFANTRY);
 		cost = 60;
 		bv = 0.43;
 		tonnage = .003;

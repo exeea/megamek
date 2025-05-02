@@ -36,7 +36,7 @@ public class InfantryRifleMakeshiftWeapon extends InfantryWeapon {
 		setInternalName(name);
 		addLookupName("InfantryMakeshiftRifle");
 		addLookupName("Makeshift Rifle");
-		ammoType = AmmoType.T_INFANTRY;
+		addCompatibleAmmoType(AmmoType.T_INFANTRY);
 		cost = 20;
 		bv = 0.09;
 		tonnage = .006;

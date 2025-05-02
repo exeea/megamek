@@ -37,7 +37,7 @@ public class InfantryArchaicImprovisedClubWeapon extends InfantryWeapon {
         addLookupName("InfantryClub");
         addLookupName("InfantryImprovised");
         addLookupName("Club");
-        ammoType = AmmoType.T_NA;
+        addCompatibleAmmoType(AmmoType.T_NA);
         cost = 0;
         bv = 0.02;
         tonnage = .002; 

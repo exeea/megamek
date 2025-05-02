@@ -34,7 +34,7 @@ public class InfantrySniperRiflePraetorianS3 extends InfantryWeapon {
        name = "Sniper Rifle (Praetorian S-3)";
        setInternalName(name);
        addLookupName("Praetorian S-3");
-       ammoType = AmmoType.T_INFANTRY;
+       addCompatibleAmmoType(AmmoType.T_INFANTRY);
        bv = .875;
        tonnage =  0.008;
        infantryDamage =  0.44;

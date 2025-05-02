@@ -36,7 +36,7 @@ public class InfantryArchaicVibroAxeWeapon extends InfantryWeapon {
         setInternalName(name);
         addLookupName("InfantryVibroAxe");
         addLookupName("Vibro Axe");
-        ammoType = AmmoType.T_NA;
+        addCompatibleAmmoType(AmmoType.T_NA);
         cost = 150;
         bv = 0.39;
         tonnage = .005; 

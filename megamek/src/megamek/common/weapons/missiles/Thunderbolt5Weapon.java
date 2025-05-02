@@ -26,7 +26,7 @@ public abstract class Thunderbolt5Weapon extends ThunderBoltWeapon {
 
     public Thunderbolt5Weapon() {
         super();
-        ammoType = AmmoType.T_TBOLT_5;
+        addCompatibleAmmoType(AmmoType.T_TBOLT_5);
         heat = 3;
         shortAV = 5;
         medAV = 5;

@@ -28,7 +28,7 @@ public class InfantryPulseLaserPistolMedusaIV extends InfantryWeapon {
         name = "Pulse Laser Pistol (Medusa IV)";
         setInternalName(name);
         addLookupName("MEDUSAIV");
-        ammoType = AmmoType.T_INFANTRY;
+        addCompatibleAmmoType(AmmoType.T_INFANTRY);
         cost = 1500;
         bv = 0.063;
         tonnage = 0.0001;

@@ -33,7 +33,7 @@ public class NGaussWeaponHeavy extends NGaussWeapon {
         shortName = "Heavy NGauss";
         heat = 18;
         damage = 30;
-        ammoType = AmmoType.T_HEAVY_NGAUSS;
+        addCompatibleAmmoType(AmmoType.T_HEAVY_NGAUSS);
         shortRange = 12;
         mediumRange = 24;
         longRange = 36;

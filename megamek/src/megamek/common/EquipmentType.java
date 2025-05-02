@@ -417,7 +417,7 @@ public class EquipmentType implements ITechnology {
 
         // special-case. RACs only explode when jammed
         if ((mounted.getType() instanceof WeaponType) &&
-                  (((WeaponType) mounted.getType()).getAmmoType() == AmmoType.T_AC_ROTARY)) {
+                  (((WeaponType) mounted.getType()).hasCompatibleAmmoType(AmmoType.T_AC_ROTARY))) {
             if (!mounted.isJammed()) {
                 return false;
             }
@@ -425,10 +425,8 @@ public class EquipmentType implements ITechnology {
 
         // special case. ACs only explode when firing incendiary ammo
         if ((mounted.getType() instanceof WeaponType) &&
-                  ((((WeaponType) mounted.getType()).getAmmoType() == AmmoType.T_AC) ||
-                         (((WeaponType) mounted.getType()).getAmmoType() == AmmoType.T_LAC) ||
-                         (((WeaponType) mounted.getType()).getAmmoType() == AmmoType.T_AC_IMP) ||
-                         (((WeaponType) mounted.getType()).getAmmoType() == AmmoType.T_PAC))) {
+                  ((WeaponType) mounted.getType()).hasAnyCompatibleAmmoType(
+                    List.of(AmmoType.T_AC,AmmoType.T_LAC,AmmoType.T_AC_IMP,AmmoType.T_PAC))) {
             if (!mounted.isUsedThisRound()) {
                 return false;
             }

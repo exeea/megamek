@@ -35,7 +35,7 @@ public class InfantryArchaicNunchakuWeapon extends InfantryWeapon {
         name = "Staff (Nunchaku/Pole Arm)";
         setInternalName(name);
         addLookupName("InfantryNunchaku");
-        ammoType = AmmoType.T_NA;
+        addCompatibleAmmoType(AmmoType.T_NA);
         cost = 10;
         bv = 0.02;
         tonnage = .00015; 

@@ -208,7 +208,7 @@ public class FireCommand extends ClientCommand {
         WeaponAttackAction waa = new WeaponAttackAction(cen, target
                 .getTargetType(), target.getId(), weaponNum);
 
-        if (mounted.getLinked() != null && ((WeaponType) mounted.getType()).getAmmoType() != AmmoType.T_NA) {
+        if (mounted.getLinked() != null && !((WeaponType) mounted.getType()).hasCompatibleAmmoType(AmmoType.T_NA)) {
             Mounted<?> ammoMount = mounted.getLinked();
             AmmoType ammoType = (AmmoType) ammoMount.getType();
             waa.setAmmoId(ammoMount.getEntity().getEquipmentNum(ammoMount));

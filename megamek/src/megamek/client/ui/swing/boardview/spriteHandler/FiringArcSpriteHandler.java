@@ -354,12 +354,7 @@ public class FiringArcSpriteHandler extends BoardViewSpriteHandler implements IP
         // gather underwater ranges
         ranges[1] = wtype.getWRanges();
         if (atype != null) {
-            if ((wtype.getAmmoType() == AmmoType.T_SRM)
-                    || (wtype.getAmmoType() == AmmoType.T_SRM_IMP)
-                    || (wtype.getAmmoType() == AmmoType.T_MRM)
-                    || (wtype.getAmmoType() == AmmoType.T_LRM)
-                    || (wtype.getAmmoType() == AmmoType.T_LRM_IMP)
-                    || (wtype.getAmmoType() == AmmoType.T_MML)) {
+            if (wtype.hasAnyCompatibleAmmoType(List.of(AmmoType.T_SRM,AmmoType.T_SRM_IMP,AmmoType.T_MRM,AmmoType.T_LRM,AmmoType.T_LRM_IMP,AmmoType.T_MML))) {
                 if (atype.getMunitionType().contains(AmmoType.Munitions.M_TORPEDO)) {
                     ranges[1] = wtype.getRanges(weapon, ammoMounted);
                 } else if (atype.getMunitionType().contains(AmmoType.Munitions.M_MULTI_PURPOSE)) {

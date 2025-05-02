@@ -15,6 +15,8 @@
 package megamek.common;
 
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.CopyOnWriteArraySet;
 
 import megamek.common.alphaStrike.AlphaStrikeElement;
 import megamek.common.equipment.AmmoMounted;
@@ -330,7 +332,7 @@ public class WeaponType extends EquipmentType {
     protected int explosionDamage = 0;
 
     public int rackSize; // or AC size, or whatever
-    public int ammoType;
+    private final Set<Integer> compatibleAmmoTypes = new CopyOnWriteArraySet<>();
 
     public int minimumRange;
     public int shortRange;
@@ -398,10 +400,6 @@ public class WeaponType extends EquipmentType {
         waterExtremeRange = ext;
     }
 
-    public void setAmmoType(int inAT) {
-        ammoType = inAT;
-    }
-
     public void setRackSize(int inRS) {
         rackSize = inRS;
     }
@@ -456,10 +454,27 @@ public class WeaponType extends EquipmentType {
         return rackSize;
     }
 
-    public int getAmmoType() {
-        return ammoType;
+    public Set<Integer> getCompatibleAmmoTypes() {
+        return compatibleAmmoTypes;
     }
 
+    public void addCompatibleAmmoType(int ammoType) {
+        if (compatibleAmmoTypes.contains(ammoType)) return;
+        compatibleAmmoTypes.add(ammoType);
+    }
+
+    public boolean hasCompatibleAmmoType(int ammoType) {
+        return compatibleAmmoTypes.contains(ammoType);
+    }
+
+    public boolean hasAnyCompatibleAmmoType(List<Integer> ammoType) {
+        for (int i = 0; i < ammoType.size(); i++) {
+            if (compatibleAmmoTypes.contains(ammoType.get(i))) {
+                return true;
+            }
+        }
+        return false;
+    }
     public int[] getRanges(Mounted<?> weapon) {
         return getRanges(weapon, weapon.getLinked());
     }
@@ -473,7 +488,7 @@ public class WeaponType extends EquipmentType {
         int lRange = getLongRange();
         int eRange = getExtremeRange();
         boolean hasLoadedAmmo = (ammo != null);
-        if ((getAmmoType() == AmmoType.T_ATM) && hasLoadedAmmo) {
+        if ((hasCompatibleAmmoType(AmmoType.T_ATM)) && hasLoadedAmmo) {
             AmmoType ammoType = (AmmoType) ammo.getType();
             if ((ammoType.getAmmoType() == AmmoType.T_ATM)
                     && (ammoType.getMunitionType().contains(AmmoType.Munitions.M_EXTENDED_RANGE))) {
@@ -491,7 +506,7 @@ public class WeaponType extends EquipmentType {
                 eRange = 12;
             }
         }
-        if ((getAmmoType() == AmmoType.T_IATM) && hasLoadedAmmo) {
+        if (hasCompatibleAmmoType(AmmoType.T_IATM) && hasLoadedAmmo) {
             AmmoType ammoType = (AmmoType) ammo.getType();
             if ((ammoType.getAmmoType() == AmmoType.T_IATM)
                     && (ammoType.getMunitionType().contains(AmmoType.Munitions.M_EXTENDED_RANGE))) {
@@ -510,9 +525,9 @@ public class WeaponType extends EquipmentType {
                 eRange = 12;
             }
         }
-        if ((getAmmoType() == AmmoType.T_MML) && hasLoadedAmmo) {
+        if (hasCompatibleAmmoType(AmmoType.T_MML) && hasLoadedAmmo) {
             AmmoType ammoType = (AmmoType) ammo.getType();
-            if (ammoType.hasFlag(AmmoType.F_MML_LRM) || (getAmmoType() == AmmoType.T_LRM_TORPEDO)) {
+            if (ammoType.hasFlag(AmmoType.F_MML_LRM) || hasCompatibleAmmoType(AmmoType.T_LRM_TORPEDO)) {
                 minRange = 6;
                 sRange = 7;
                 mRange = 14;
@@ -541,7 +556,7 @@ public class WeaponType extends EquipmentType {
                 }
             }
         }
-        if ((getAmmoType() == AmmoType.T_LRM) && hasLoadedAmmo) {
+        if (hasCompatibleAmmoType(AmmoType.T_LRM) && hasLoadedAmmo) {
             AmmoType ammoType = (AmmoType) ammo.getType();
             if ((ammoType.getAmmoType() == AmmoType.T_LRM)
                     && (ammoType.getMunitionType().contains(AmmoType.Munitions.M_DEAD_FIRE))) {
@@ -552,7 +567,7 @@ public class WeaponType extends EquipmentType {
                 eRange = 20;
             }
         }
-        if ((getAmmoType() == AmmoType.T_SRM) && hasLoadedAmmo) {
+        if (hasCompatibleAmmoType(AmmoType.T_SRM) && hasLoadedAmmo) {
             AmmoType ammoType = (AmmoType) ammo.getType();
             if ((ammoType.getAmmoType() == AmmoType.T_SRM)
                     && (ammoType.getMunitionType().contains(AmmoType.Munitions.M_DEAD_FIRE))) {
@@ -645,9 +660,9 @@ public class WeaponType extends EquipmentType {
                 }
             }
         }
-        if (getAmmoType() == AmmoType.T_MML) {
+        if (hasCompatibleAmmoType(AmmoType.T_MML)) {
             AmmoType ammoType = ammo.getType();
-            if (ammoType.hasFlag(AmmoType.F_MML_LRM) || (getAmmoType() == AmmoType.T_LRM_TORPEDO)) {
+            if (ammoType.hasFlag(AmmoType.F_MML_LRM) || hasCompatibleAmmoType(AmmoType.T_LRM_TORPEDO)) {
                 return RANGE_LONG;
             } else {
                 return RANGE_SHORT;

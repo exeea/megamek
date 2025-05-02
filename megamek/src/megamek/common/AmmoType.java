@@ -16059,7 +16059,7 @@ public class AmmoType extends EquipmentType {
     public static boolean isAmmoValid(AmmoType ammoType, WeaponType weaponType) {
         if (ammoType == null) {
             return false;
-        } else if (ammoType.getAmmoType() != weaponType.getAmmoType()) {
+        } else if (weaponType.hasCompatibleAmmoType(ammoType.getAmmoType())) {
             return false;
         } else {
             return ammoType.getRackSize() == weaponType.getRackSize();

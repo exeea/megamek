@@ -29,7 +29,7 @@ public class InfantryPistolISPulseLaserPistolWeapon extends InfantryWeapon {
 		setInternalName(name);
 		addLookupName("InfantryPulseLaserPistol");
 		addLookupName("Pulse Laser Pistol");
-		ammoType = AmmoType.T_INFANTRY;
+		addCompatibleAmmoType(AmmoType.T_INFANTRY);
 		cost = 1000;
 		bv = 0.13;
 		tonnage = .001;

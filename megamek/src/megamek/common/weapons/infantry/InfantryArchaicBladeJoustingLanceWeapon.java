@@ -29,7 +29,7 @@ public class InfantryArchaicBladeJoustingLanceWeapon extends InfantryWeapon {
         setInternalName(name);
         addLookupName("InfantryLance");
         addLookupName("JoustingLance");
-        ammoType = AmmoType.T_NA;
+        addCompatibleAmmoType(AmmoType.T_NA);
         cost = 65;
         tonnage = .0035;
         bv = 0.0;

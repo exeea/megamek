@@ -1254,7 +1254,7 @@ public class FiringDisplay extends AttackPhaseDisplay implements ItemListener, L
             }
 
             if ((mounted.getLinked() != null)
-                    && (mounted.getType().getAmmoType() != AmmoType.T_NA)
+                    && (!mounted.getType().hasCompatibleAmmoType(AmmoType.T_NA))
                     && (mounted.getLinked().getType() instanceof AmmoType)) {
                 AmmoMounted ammoMount = mounted.getLinkedAmmo();
                 AmmoType ammoType = ammoMount.getType();

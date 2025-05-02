@@ -36,7 +36,7 @@ public class InfantryPistolMydronAutoPistolWeapon extends InfantryWeapon {
 		setInternalName(name);
 		addLookupName("InfantryMydronAutopistol");
 		addLookupName("Mydron Auto Pistol");
-		ammoType = AmmoType.T_INFANTRY;
+		addCompatibleAmmoType(AmmoType.T_INFANTRY);
 		cost = 100;
 		bv = 0.13;
 		tonnage = .0015;

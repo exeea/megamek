@@ -59,7 +59,7 @@ public class InfantryPistolHoldoutGyrojetPistolWeapon extends InfantryWeapon {
         setInternalName(name);
         addLookupName("InfantryHoldoutGyrojetpistol");
         addLookupName("Holdout Gyrojet Pistol");
-        ammoType = AmmoType.T_INFANTRY;
+        addCompatibleAmmoType(AmmoType.T_INFANTRY);
         cost = 30;
         bv = 0.04;
         tonnage = .00005;

@@ -40,7 +40,7 @@ public class CLImprovedSRM4 extends SRMWeapon {
         shortAV = 6;
         medAV = 6;
         maxRange = RANGE_MED;
-        ammoType = AmmoType.T_SRM_IMP;
+        addCompatibleAmmoType(AmmoType.T_SRM_IMP);
         rulesRefs = "96, IO";
         flags = flags.andNot(F_PROTO_WEAPON);
         techAdvancement.setTechBase(TECH_BASE_CLAN).setTechRating(RATING_F)

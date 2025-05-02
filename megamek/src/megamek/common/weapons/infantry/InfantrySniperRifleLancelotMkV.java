@@ -34,7 +34,7 @@ public class InfantrySniperRifleLancelotMkV extends InfantryWeapon {
        name = "Sniper Rifle (Lancelot Mk V)";
        setInternalName(name);
        addLookupName("Lancelot Mk V");
-       ammoType = AmmoType.T_INFANTRY;
+       addCompatibleAmmoType(AmmoType.T_INFANTRY);
        bv = .28;
        tonnage =  0.006;
        infantryDamage =  0.28;

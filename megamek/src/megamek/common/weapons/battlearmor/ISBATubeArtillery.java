@@ -31,7 +31,7 @@ public class ISBATubeArtillery extends ArtilleryWeapon {
         name = "Tube Artillery (BA)";
         setInternalName(EquipmentTypeLookup.IS_BA_TUBE_ARTY);
         rackSize = 3;
-        ammoType = AmmoType.T_BA_TUBE;
+        addCompatibleAmmoType(AmmoType.T_BA_TUBE);
         shortRange = 2;
         mediumRange = 2;
         longRange = 2;

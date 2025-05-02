@@ -56,7 +56,7 @@ public class CLASMissileWeapon extends ThunderBoltWeapon {
         longAV = 30;
         flags = flags.or(F_ANTI_SHIP).or(F_MISSILE).or(F_LARGEMISSILE).or(F_BOMB_WEAPON).andNot(F_MEK_WEAPON).andNot(F_TANK_WEAPON);
         maxRange = RANGE_LONG;
-        ammoType = AmmoType.T_AS_MISSILE;
+        addCompatibleAmmoType(AmmoType.T_AS_MISSILE);
         capital = false;
         this.missileArmor = 30;
         rulesRefs = "358, TO";

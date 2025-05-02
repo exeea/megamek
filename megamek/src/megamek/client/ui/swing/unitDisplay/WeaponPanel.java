@@ -251,10 +251,9 @@ public class WeaponPanel extends PicMap implements ListSelectionListener, Action
             }
             wn.append(']');
             // determine shots left & total shots left
-            if ((wtype.getAmmoType() != AmmoType.T_NA)
+            if (!wtype.hasAnyCompatibleAmmoType(List.of(AmmoType.T_NA,AmmoType.T_INFANTRY))
                     && (!wtype.hasFlag(WeaponType.F_ONESHOT)
-                            || wtype.hasFlag(WeaponType.F_BA_INDIVIDUAL))
-                    && (wtype.getAmmoType() != AmmoType.T_INFANTRY)) {
+                            || wtype.hasFlag(WeaponType.F_BA_INDIVIDUAL))) {
                 int shotsLeft = 0;
                 if ((mounted.getLinked() != null)
                         && !mounted.getLinked().isDumping()) {
@@ -269,7 +268,7 @@ public class WeaponPanel extends PicMap implements ListSelectionListener, Action
                 wn.append(totalShotsLeft);
                 wn.append(')');
             } else if (wtype.hasFlag(WeaponType.F_DOUBLE_ONESHOT)
-                    || (en.isSupportVehicle() && (wtype.getAmmoType() == AmmoType.T_INFANTRY))) {
+                    || (en.isSupportVehicle() && (wtype.hasCompatibleAmmoType(AmmoType.T_INFANTRY)))) {
                 int shotsLeft = 0;
                 int totalShots = 0;
                 EnumSet<AmmoType.Munitions> munition = ((AmmoType) mounted.getLinked().getType()).getMunitionType();
@@ -1191,7 +1190,7 @@ public class WeaponPanel extends PicMap implements ListSelectionListener, Action
             if ((entity instanceof LandAirMek)
                     && (entity.getConversionMode() == LandAirMek.CONV_MODE_MEK)
                     && mounted.getType().hasFlag(WeaponType.F_BOMB_WEAPON)
-                    && mounted.getType().getAmmoType() != AmmoType.T_RL_BOMB
+                    && !mounted.getType().hasCompatibleAmmoType(AmmoType.T_RL_BOMB)
                     && !mounted.getType().hasFlag(WeaponType.F_TAG)) {
                 continue;
             }
@@ -2033,10 +2032,10 @@ public class WeaponPanel extends PicMap implements ListSelectionListener, Action
             wtype = mounted.getType();
         }
 
-        if (wtype.getAmmoType() == AmmoType.T_NA) {
+        if (wtype.hasCompatibleAmmoType(AmmoType.T_NA)) {
             m_chAmmo.setEnabled(false);
         } else if (wtype.hasFlag(WeaponType.F_DOUBLE_ONESHOT)
-                || (entity.isSupportVehicle() && (wtype.getAmmoType() == AmmoType.T_INFANTRY))) {
+                || (entity.isSupportVehicle() && (wtype.hasCompatibleAmmoType(AmmoType.T_INFANTRY)))) {
             int count = 0;
             vAmmo = new ArrayList<>();
             for (AmmoMounted current = mounted.getLinkedAmmo(); current != null; current = (AmmoMounted) current
@@ -2094,7 +2093,7 @@ public class WeaponPanel extends PicMap implements ListSelectionListener, Action
                 boolean canSwitchToAmmo = AmmoType.canSwitchToAmmo(mounted, atype);
 
                 if (ammo.isAmmoUsable() && sameLocationIfLargeAero && rightBay && canSwitchToAmmo
-                        && (atype.getAmmoType() == wtype.getAmmoType())
+                        && (wtype.hasCompatibleAmmoType(atype.getAmmoType()))
                         && (atype.getRackSize() == wtype.getRackSize())) {
 
                     vAmmo.add(ammo);

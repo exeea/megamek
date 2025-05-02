@@ -33,7 +33,7 @@ public class InfantrySMGDSKLargoSGA extends InfantryWeapon {
        name = "SMG (DSK Largo SGA)";
        setInternalName(name);
        addLookupName("DSK Largo SGA");
-       ammoType = AmmoType.T_INFANTRY;
+       addCompatibleAmmoType(AmmoType.T_INFANTRY);
        bv = .44;
        tonnage =  0.0037;
        infantryDamage =  0.44;

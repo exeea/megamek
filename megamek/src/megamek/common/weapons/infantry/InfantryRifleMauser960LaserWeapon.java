@@ -35,7 +35,7 @@ public class InfantryRifleMauser960LaserWeapon extends InfantryWeapon {
         setInternalName(name);
         addLookupName("InfantryMauser960");
         addLookupName("Mauser 960 Assault System");
-        ammoType = AmmoType.T_NA;
+        addCompatibleAmmoType(AmmoType.T_NA);
         cost = 8000;
         bv = 4.75;
         tonnage = .0108;

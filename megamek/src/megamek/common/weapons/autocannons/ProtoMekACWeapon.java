@@ -23,7 +23,7 @@ public abstract class ProtoMekACWeapon extends ACWeapon {
 
     public ProtoMekACWeapon() {
         super();
-        ammoType = AmmoType.T_PAC;
+        addCompatibleAmmoType(AmmoType.T_PAC);
         explosive = false;
         flags = flags.or(F_PROTO_WEAPON);
     }

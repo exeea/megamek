@@ -571,7 +571,7 @@ public class PointblankShotDisplay extends FiringDisplay {
         }
 
         if ((mounted.getLinked() != null)
-                && (((WeaponType) mounted.getType()).getAmmoType() != AmmoType.T_NA)
+                && (!((WeaponType) mounted.getType()).hasCompatibleAmmoType(AmmoType.T_NA))
                 && (mounted.getLinked().getType() instanceof AmmoType)) {
             Mounted<?> ammoMount = mounted.getLinked();
             AmmoType ammoType = (AmmoType) ammoMount.getType();

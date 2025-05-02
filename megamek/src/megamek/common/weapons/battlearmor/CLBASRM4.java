@@ -42,7 +42,7 @@ public class CLBASRM4 extends SRMWeapon {
         setInternalName("CLBASRM4");
         addLookupName("Clan BA SRM-4");
         addLookupName("Clan BA SRM 4");
-        ammoType = AmmoType.T_SRM;
+        addCompatibleAmmoType(AmmoType.T_SRM);
         heat = 3;
         rackSize = 4;
         shortRange = 3;

@@ -36,7 +36,7 @@ public class InfantryArchaicVibroMaceWeapon extends InfantryWeapon {
         setInternalName(name);
         addLookupName("InfantryVibroMace");
         addLookupName("IS Vibro Mace");
-        ammoType = AmmoType.T_NA;
+        addCompatibleAmmoType(AmmoType.T_NA);
         cost = 300;
         bv = 0.24;
         tonnage = .004;

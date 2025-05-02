@@ -28,7 +28,7 @@ public class InfantryPulseLaserPistolNWW12 extends InfantryWeapon {
         name = "Pulse Laser Pistol (NWW-12)";
         setInternalName(name);
         addLookupName("NWW12");
-        ammoType = AmmoType.T_INFANTRY;
+        addCompatibleAmmoType(AmmoType.T_INFANTRY);
         cost = 850;
         bv = 0.054;
         tonnage = 0.0009;

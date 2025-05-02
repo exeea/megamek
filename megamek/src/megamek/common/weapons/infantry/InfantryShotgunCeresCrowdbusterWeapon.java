@@ -35,7 +35,7 @@ public class InfantryShotgunCeresCrowdbusterWeapon extends InfantryWeapon {
 		name = "Ceres Arms Crowdbuster";
 		setInternalName(name);
 		addLookupName("InfantryCeresCrowdbuster");
-		ammoType = AmmoType.T_INFANTRY;
+		addCompatibleAmmoType(AmmoType.T_INFANTRY);
 		cost = 150;
 		bv = 0.10;
 		tonnage = .001;

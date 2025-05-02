@@ -48,7 +48,7 @@ public class CLImprovedAC2 extends ACWeapon {
         longAV = 2;
         maxRange = RANGE_LONG;
         explosionDamage = damage;
-        ammoType = AmmoType.T_AC_IMP;
+        addCompatibleAmmoType(AmmoType.T_AC_IMP);
         rulesRefs = "96, IO";
         techAdvancement.setTechBase(TECH_BASE_CLAN).setTechRating(RATING_D)
                 .setAvailability(RATING_X, RATING_C, RATING_X, RATING_X)
