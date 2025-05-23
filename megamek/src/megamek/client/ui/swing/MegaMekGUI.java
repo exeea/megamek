@@ -43,6 +43,7 @@ import java.awt.Image;
 import java.awt.Insets;
 import java.awt.KeyboardFocusManager;
 import java.awt.MediaTracker;
+import java.awt.Rectangle;
 import java.awt.SystemColor;
 import java.awt.event.ActionListener;
 import java.awt.event.WindowAdapter;
@@ -194,7 +195,10 @@ public class MegaMekGUI implements IPreferenceChangeListener {
                 super.paint(g); // Draw background, border, and children first
                 // Now draw the tip on top is the splash is visible
                 if (splash != null && splash.isShowing() && splash.getWidth() > 0 && splash.getHeight() > 0 && tipOfTheDay != null) {
-                    tipOfTheDay.drawTipOfTheDay((Graphics2D) g, splash.getBounds(), TipOfTheDay.Position.BOTTOM_LEFT_CORNER, false);
+                    Rectangle bounds = splash.getBounds();
+                    bounds.x = bounds.x + 5; // TODO: I have no idea why but the splash screen is reporting wrong bounds, might need to fix that
+                    bounds.width = bounds.width - 10;
+                    tipOfTheDay.drawTipOfTheDay((Graphics2D) g, bounds, TipOfTheDay.Position.BOTTOM_LEFT_CORNER, false);
                 }
             }
         });
