@@ -90,6 +90,7 @@ public class MtfFile implements IMekLoader {
     private String model;
     private String clanChassisName = "";
     private int mulId = -1;
+    private boolean unique = false;
 
     private String chassisConfig;
     private String techBase;
@@ -210,6 +211,7 @@ public class MtfFile implements IMekLoader {
     public static final String SIZE = ":SIZE:";
     public static final String UUID = "uuid:";
     public static final String MUL_ID = "mul id:";
+    public static final String UNIQUE = "unique:";
     public static final String QUIRK = "quirk:";
     public static final String WEAPON_QUIRK = "weaponquirk:";
     public static final String ROLE = "role:";
@@ -345,6 +347,7 @@ public class MtfFile implements IMekLoader {
             }
             mek.storeOriginalUnitData();
             mek.setMulId(mulId);
+            mek.setUnique(unique);
             mek.setYear(Integer.parseInt(techYear.substring(ERA.length()).trim()));
             String originalYearStr = originalTechYear.substring(ORIGINAL_ERA.length()).trim();
             if (!originalYearStr.isBlank()) {            
@@ -1865,6 +1868,11 @@ public class MtfFile implements IMekLoader {
 
         if (lineLower.startsWith(CLAN_CASE_OPT_OUT)) {
             clanCaseOptOut = line.substring(CLAN_CASE_OPT_OUT.length()).trim();
+            return true;
+        }
+
+        if (lineLower.startsWith(UNIQUE)) {
+            unique = Integer.parseInt(line.substring(UNIQUE.length()).trim()) != 0;
             return true;
         }
 

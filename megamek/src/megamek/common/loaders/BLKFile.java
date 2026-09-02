@@ -181,6 +181,10 @@ public class BLKFile {
             entity.getFluff().setFluffImage(dataFile.getDataAsString("fluffimage")[0]);
         }
 
+        if (dataFile.exists("unique")) {
+            entity.setUnique(dataFile.getDataAsInt("unique")[0] != 0);
+        }
+
         if (dataFile.exists("icon")) {
             entity.setIcon(dataFile.getDataAsString("icon")[0]);
         }
@@ -1356,6 +1360,10 @@ public class BLKFile {
         // so the correct value can be set when loading the unit
         if ((t instanceof Jumpship || t instanceof SmallCraft) && t.getArmorWeight() != t.getLabArmorTonnage()) {
             blk.writeBlockData("armorWeight", t.getLabArmorTonnage());
+        }
+        
+        if (t.isUnique()) {
+            blk.writeBlockData("unique", 1);
         }
         return blk;
     }

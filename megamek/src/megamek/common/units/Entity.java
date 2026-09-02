@@ -312,6 +312,9 @@ public abstract class Entity extends TurnOrdered
      */
     protected int mulId = -1;
 
+    /** Whether this unit represents a one-of-a-kind design. */
+    protected boolean unique = false;
+
     protected int year = 3071;
     protected int techLevel;
     private CompositeTechLevel compositeTechLevel;
@@ -18191,6 +18194,14 @@ public abstract class Entity extends TurnOrdered
      */
     public boolean hasMulId() {
         return mulId > 0;
+    }
+
+    public boolean isUnique() {
+        return unique;
+    }
+
+    public void setUnique(boolean unique) {
+        this.unique = unique;
     }
 
     /**

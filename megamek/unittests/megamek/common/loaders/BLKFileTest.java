@@ -102,6 +102,27 @@ class BLKFileTest {
     }
 
     @Test
+    void uniqueFlagRoundtripsThroughBLK() throws Exception {
+        Tank tank = createMinimalTank();
+        tank.setUnique(true);
+
+        BuildingBlock blk = BLKFile.getBlock(tank);
+        Tank loaded = (Tank) new BLKTankFile(blk).getEntity();
+
+        assertEquals(1, blk.getDataAsInt("unique")[0]);
+        assertTrue(loaded.isUnique());
+    }
+
+    @Test
+    void nonUniqueUnitWritesNoUniqueBlock() throws Exception {
+        Tank tank = createMinimalTank();
+
+        BuildingBlock blk = BLKFile.getBlock(tank);
+
+        assertFalse(blk.exists("unique"));
+    }
+
+    @Test
     void missingUnitFileUUIDKeepsGeneratedVersion7UUID() throws Exception {
         BuildingBlock blk = new BuildingBlock();
         blk.writeBlockData("Name", "Legacy Unit");

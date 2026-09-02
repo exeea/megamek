@@ -106,6 +106,36 @@ class MtfFileTest {
     }
 
     @Test
+    void uniqueFlagRoundTrips() throws Exception {
+        Mek mek = new BipedMek();
+        mek.setUnique(true);
+
+        String mtf = mek.getMtf();
+
+        assertTrue(mtf.contains(MtfFile.UNIQUE + "1\n"));
+        assertTrue(toMtfFile(mek).getEntity().isUnique());
+    }
+
+    @Test
+    void uniqueFlagLoadsFromEndOfFile() throws Exception {
+        Mek mek = new BipedMek();
+        mek.setWeight(20.0);
+        mek.setEngine(new Engine(100, Engine.NORMAL_ENGINE, 0));
+        String mtf = mek.getMtf() + "\n" + MtfFile.UNIQUE + "1\n";
+
+        Entity loaded = new MtfFile(new ByteArrayInputStream(mtf.getBytes(StandardCharsets.UTF_8))).getEntity();
+
+        assertTrue(loaded.isUnique());
+    }
+
+    @Test
+    void nonUniqueUnitWritesNoUniqueFlag() {
+        Mek mek = new BipedMek();
+
+        assertFalse(mek.getMtf().contains(MtfFile.UNIQUE));
+    }
+
+    @Test
     void forceGeneratorAvailabilityRoundTrips() throws Exception {
         Mek mek = new BipedMek();
         mek.setForceGeneratorAvailability(List.of(

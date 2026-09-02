@@ -5499,6 +5499,10 @@ public abstract class Mek extends Entity implements Fortifiable, RubbleClearer, 
             sb.append(getFluff().getBase64FluffImage().getBase64String());
             sb.append(newLine);
         }
+        
+        if (isUnique()) {
+            sb.append(MtfFile.UNIQUE).append(1).append(newLine);
+        }
 
         return sb.toString();
     }
