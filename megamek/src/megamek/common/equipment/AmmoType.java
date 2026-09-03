@@ -920,19 +920,19 @@ public class AmmoType extends EquipmentType {
                 .setStaticTechLevel(SimpleTechLevel.EXPERIMENTAL),
           rulesRefs(SourceBookCode.TO_AUE, 180));
 
-    private static final MunitionMutator CLAN_SEMI_GUIDED = new MunitionMutator("(Clan) Semi-Guided", "SG",
-          1,
-          Munitions.M_SEMIGUIDED,
-          new TechAdvancement(TechBase.CLAN).setIntroLevel(false)
-                .setUnofficial(true)
-                .setTechRating(TechRating.E)
-                .setAvailability(AvailabilityValue.X, AvailabilityValue.X, AvailabilityValue.D, AvailabilityValue.D)
-                .setClanAdvancement(3053, 3057, 3065, DATE_NONE, DATE_NONE)
-                .setClanApproximate(true, false, false, false, false)
-                .setPrototypeFactions(Faction.FW)
-                .setProductionFactions(Faction.FW)
-                .setStaticTechLevel(SimpleTechLevel.STANDARD),
-          rulesRefs(SourceBookCode.TM, 231));
+//     private static final MunitionMutator CLAN_SEMI_GUIDED = new MunitionMutator("(Clan) Semi-Guided", "SG",
+//           1,
+//           Munitions.M_SEMIGUIDED,
+//           new TechAdvancement(TechBase.CLAN).setIntroLevel(false)
+//                 .setUnofficial(true)
+//                 .setTechRating(TechRating.E)
+//                 .setAvailability(AvailabilityValue.X, AvailabilityValue.X, AvailabilityValue.D, AvailabilityValue.D)
+//                 .setClanAdvancement(3053, 3057, 3065, DATE_NONE, DATE_NONE)
+//                 .setClanApproximate(true, false, false, false, false)
+//                 .setPrototypeFactions(Faction.FW)
+//                 .setProductionFactions(Faction.FW)
+//                 .setStaticTechLevel(SimpleTechLevel.STANDARD),
+//           rulesRefs(SourceBookCode.TM, 231));
 
     private static final MunitionMutator CLAN_SMOKE_STANDARD_MUNITION_MUTATOR = new MunitionMutator("(Clan) Smoke",
           1,
@@ -3591,7 +3591,7 @@ public class AmmoType extends EquipmentType {
         munitions.add(CLAN_FOLLOW_THE_LEADER_MUNITION_MUTATOR);
         // Incendiary LRM is created via createIncendiaryVariants() as separate ammo types
         munitions.add(CLAN_HEAT_SEEKING_MUNITIONS_MUTATOR);
-        munitions.add(CLAN_SEMI_GUIDED);
+        // munitions.add(CLAN_SEMI_GUIDED);
         munitions.add(CLAN_SMOKE_STANDARD_MUNITION_MUTATOR);
         munitions.add(CLAN_SWARM_MUNITION_MUTATOR);
         munitions.add(CLAN_SWARM_I_ADV_MUNITION_MUTATOR);
