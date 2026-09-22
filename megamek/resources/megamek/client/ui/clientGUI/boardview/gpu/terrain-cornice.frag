@@ -23,7 +23,8 @@ void main() {
     // Alpha is the strip's shape, including the fade at its lower end. On a mask, gray is lightness about mid
     // gray, so the tint arrives unchanged at 128, darkens into the shadowed rows and lightens on the lit ones;
     // on colorized art the same channels already carry the strip's color, which is therefore left alone.
-    vec3 albedo = mix(v_color.rgb * art.rgb * 2.0, art.rgb, u_corniceColorized);
+    // The texture stores premultiplied color, including its mip levels. 128 is exactly neutral for a mask.
+    vec3 albedo = mix(v_color.rgb * art.rgb * (255.0 / 128.0), art.rgb, u_corniceColorized);
     float alpha = art.a * v_color.a;
     vec3 normal = normalize(v_normal);
     // A skirt is a vertical face, so it takes the rain film the ground shares with it, using its own
@@ -31,13 +32,13 @@ void main() {
     float response = max(0.0, u_groundResponse);
     float wet = u_wetness * step(0.0, u_groundResponse);
     float runOff = 0.0;
-    if (wet > 0.0) {
+    if (wet * u_rainDetail > 0.0) {
         // Rain drains down the wall as rivulets. The strip's own UV keeps them vertical whichever way the
         // edge faces, and the clock is the one the ground's ripples already use.
         vec2 flow = vec2(v_diffuseUV.x * RUNOFF_COLUMNS, v_diffuseUV.y - u_rainTime * RUNOFF_SPEED);
         float broad = texture2D(u_rainNoise, flow).r;
         float fine = texture2D(u_rainNoise, flow * vec2(2.1, 3.3) + 0.37).r;
-        runOff = smoothstep(0.52, 0.86, broad * 0.62 + fine * 0.38) * wet;
+        runOff = smoothstep(0.52, 0.86, broad * 0.62 + fine * 0.38) * wet * u_rainDetail;
     }
     albedo *= 1.0 - wet * mix(0.175, 0.10, response) - runOff * RUNOFF_DARKENING;
 #ifdef lightingFlag
@@ -46,7 +47,7 @@ void main() {
     // material it faces. A rivulet is standing water, so it takes the whole film where it runs (mix to one).
     surfaceLighting(normal, wet * mix(response, 1.0, runOff), ambient, direct, sheen);
     albedo *= ambient + direct;
-    albedo += sheen;
+    albedo += sheen * art.a;
 #endif
-    gl_FragColor = vec4(albedo, alpha);
+    gl_FragColor = vec4(albedo * v_color.a, alpha);
 }

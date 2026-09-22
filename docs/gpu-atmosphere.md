@@ -36,7 +36,7 @@ change. Opening another board captures its starting conditions.
 | God rays | Default 0.5; scale shaft density from 0 to 2; zero disables the shaft pass when ordinary fog/haze is also off |
 | Sun glare | Default 0.35, range 0–1; bright golden glare, a warm veil and soft lens reflections when facing the sun, strongest near dawn/dusk. Zero disables it. This lens effect remains available in vacuum |
 | Moon shadow contrast | Default from `BoardAtmosphere.MOONLIGHT_SHADOW_CONTRAST`, range 0–1; strengthen Full Moon shadows while preserving lit level-ground RGB. Zero restores the original moonlight balance; disabled when moonlight is off |
-| Taint strength | Default 2, range 0–10; scale the selected taint's palette across the sky/horizon, existing fog/haze and the board's display grade. Zero disables the tint and higher values stop at the palette; disabled for breathable air and vacuum |
+| Taint strength | Default 1, range 0–10; scale the selected taint's palette across the sky/horizon, existing fog/haze and the board's display grade. Zero disables the tint and higher values stop at the palette; disabled for breathable air and vacuum |
 | Cloud shadow min / max | Defaults from `GpuClouds.MIN_SHADOW_STRENGTH` / `MAX_SHADOW_STRENGTH`; interpolate the cloud-patch opacity cap from sparse cover to full overcast, without changing density or ambient light |
 | Defaults | Return to the current game conditions and restore geometry and all extra visual controls to their constants |
 
@@ -109,15 +109,17 @@ air muted grey-violet (`POISON_TAINT_COLOR`), and flammable air copper/amber
 chemical color, density, or emissions. Breathable air keeps the original palette.
 `BoardAtmosphere.TAINTED_COLOR_STRENGTH` and `TOXIC_COLOR_STRENGTH`
 set the palette weight per severity unit and `DEFAULT_TAINT_STRENGTH` the default
-multiplier, which stays below the blend ceiling so severities and pressures remain
-distinguishable. Taint is strongest near the horizon and in existing fog, the overhead
-blend is 35% as strong, and the display grade that covers every drawn surface uses
+multiplier. Taint is strongest near the horizon and in existing fog, the overhead
+blend is 55% as strong, and the display grade that covers every drawn surface uses
 `TAINT_GRADE_SHARE` of it. Trace/thin air scales the effect to 15%/45%,
 vacuum and space suppress it, and night and dawn/dusk reduce it: the warm horizon
 light owns the twilight windows, so the palette fades there rather than cooling the
 dawn and dusk horizon. Every blend is clamped to the palette, because a longer blend
 overshoots the luminance-matched target and channel clipping would then change
-brightness.
+brightness. The strength and pressure factors apply to the horizon and fog as well
+as the upper sky; reducing strength toward zero continuously removes every tint.
+The multiplicative display grade may have channels above one to preserve its
+luminance. Only the blend weight is clamped, not that grade's intermediate channels.
 
 Every blend preserves the luminance of the color it tints, so the palette never
 adds emission or changes exposure. It does grade the scene now: the taint is mixed

@@ -153,15 +153,21 @@ hex boundaries. A 0.16-world-unit deck clearance at default scale
 separates zero-elevation bridges from the riverbank and its road decals, avoiding
 coplanar depth flicker without changing the game's bridge elevation.
 
-Exposed grassland faces use dirt; sand uses sandstone; rough/rubble and rocky
-themes use rock; pavement uses concrete. Snow has rock beneath snow cover.
+Exposed grassland faces use dirt; sand uses sandstone; rocky themes use rock;
+pavement uses concrete. Rough and rubble scatter retain the underlying surface
+family. Snow uses compacted snow and firn on exposed sides.
 World-scaled UVs repeat the wall material once per 96 world units, with a stable
-world-space phase instead of restarting each face. Repeating materials sample
-at no more than 128 texels across, matching the original board artwork more
-closely. Building facades and geology ship as 128 by 128 PNGs under
-`textures/buildings/` and `textures/terrain/`; untouched originals live in each
-folder's `full-resolution/` subdirectory. `tools/prepare_board_textures.py`
-rebuilds those runtime copies. Light-building window spacing is
+world-space phase instead of restarting each face. Vertical cliffs use the
+1024-pixel color, normal and packed height/roughness/occlusion sets under
+`textures/cliffs/`, with close-up parallax and material lighting. See
+[Cliff materials](gpu-cliff-materials.md) for their authoring, fallback, cost and
+limitations; these additional samples and texture storage belong to vertical
+walls, independently of the upper-rim atlas composition described below.
+A missing cliff set falls back to the original color material in
+`textures/terrain/`. Other repeating materials, including building facades,
+retain the 128-texel sampling limit. `tools/prepare_board_textures.py` rebuilds
+those legacy copies from any available `full-resolution/` originals, while
+`tools/prepare_cliff_materials.py` owns the new wall sets. Light-building window spacing is
 eight windows per 128 world units. Exposed sides carry a skirt: a
 `textures/terrain/cornice_*` strip hangs from the upper edge. Its art is normally a
 mask rather than a palette: alpha is the strip's shape, including the fade at its lower
@@ -203,9 +209,13 @@ The cliff-top rim uses one pair of masks for every family. An exposed edge whose
 adjacent hex sits no more than two levels lower wears `textures/terrain/incline_dark`;
 anything deeper is a high incline and wears the coarser
 `textures/terrain/high_incline_dark`, exactly the board's own split, and a board-edge
-drop is judged by its own depth. Like a skirt strip both carry no palette: alpha is
-their coverage and gray is lightness about mid gray, so 128 leaves the top layer alone
-and a dark mask shades the rim it lands on, weighted by its own alpha. Each is mapped
+drop is judged by its own depth. Both retain their authored coverage and distinct
+stone pattern. At first use `BoardRim.relief` centers each mask's covered brightness
+around neutral gray (128), retaining pigment variation and restrained crevice shading.
+It also derives a small height field from the pattern and an outward bevel: the
+incline has shallow stone relief, while the high incline has a deeper broken lip.
+Finite differences of that height field produce tangent-space normals. These are
+artistic height estimates, not measured geometry. Each pattern is mapped
 to its own exposed edge and clipped around road approaches, so one image serves every
 orientation instead of per-material south-edge variants. Coverage comes from the shared
 `BoardSurface` top triangles and exposed side segments, preserving road mouths and
@@ -213,19 +223,23 @@ corners. The composed color occupies one aligned ground-atlas slot, so the rim r
 ground lighting, geometry shadows and the normal-map toggle without a separately lit
 transparent top mesh.
 
-The dark masks carry no detail normals, so the rim keeps whatever relief the top
-layer's own normal map already has. Should a normal variant arrive, `BoardRim` still
-composes it with reoriented normal mapping and rotates its directions to the edge.
+`BoardRim` rotates those normals with the edge and combines them with the ground's
+existing relief using reoriented normal mapping. Color channels saturate independently
+when bright patches overlap. Composition is cached by ground images and exposed geometry;
+changing the light only updates shader uniforms. Both camera views use the same maps.
+The existing ground shader supplies per-pixel directional lighting, geometry/cloud
+shadows and rain sheen. No extra cliff-top pass, texture sample or ray-marching loop
+is added. Height data is temporary preparation data; it does not displace terrain,
+change picking, create silhouette overhangs or cast per-stone geometry shadows.
 
 Materials are composed when terrain inputs change, cached by their source
 pixels and local footprint, and shared across matching tiles. Unused combinations
 are released after each terrain update. Camera and light changes reuse the
 unlit maps. Original images stay separate and editable; banks borrow the ground
 without its cliff-top decoration. The vertical cornice remains a separate mesh.
-A neutral mid gray in the rim mask keeps a tile's top layer untouched, so only the
-authored dark band shades a cliff top; brighter masks would lighten it by the same
-rule. Rim shading is a property of the material, so it keeps its ratio to the surface
-under any light.
+A neutral mid gray in the prepared rim color leaves the ground pigment unchanged.
+Highlights and shaded stone faces then follow the scene light through the composed
+normal map, while crevice shading remains in the material.
 
 Blender source, reproducible exporter, texture prompts, model counts, and
 Quaternius CC0 attribution are recorded in the asset directory's README and
@@ -1059,10 +1073,15 @@ cliff takes the rain film, without an
 atlas layout change. Its screenshots are named `terrain-skirt-*.png`, including the
 `terrain-skirt-dry`/`-wet` pair that shows the run-off close up.
 `BoardRimTest` checks the mask's lightness rule, mid-gray neutrality, alpha weighting,
+highlight saturation, raised-stone normals, outward bevels and the two/three-level split,
 all six edge rotations at three board scales, road openings, cache release and
 custom-texture fallbacks.
-`GpuRimMaterialSmokeTest` checks the rim mask's shading of an exposed top layer under
-both light directions in both camera views. Its screenshots are named `rim-lit-*`.
+`GpuRimMaterialSmokeTest` checks both drop types under opposing lights in both camera
+views, compares normals enabled/disabled and asserts equal terrain draw counts.
+Its screenshots are `rim-drop-{2,3}-{top,iso}-light-{0,1}.png`. The
+`cliff-edges-{top,iso}-light-{0,1}.png` captures use shipped grass artwork, with a
+two-level plateau on the left and a three-level plateau on the right. Draw-count
+equality is not a GPU-time benchmark.
 
 ## Scope and limits
 

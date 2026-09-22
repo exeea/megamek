@@ -26,6 +26,7 @@ import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.loader.G3dModelLoader;
+import com.badlogic.gdx.graphics.glutils.FileTextureData;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.JsonReader;
 import megamek.common.Configuration;
@@ -36,12 +37,16 @@ final class GpuAssets implements Disposable {
     private final Map<String, Model> models = new HashMap<>();
     private final Map<Interior, Model> interiors = new HashMap<>();
     private final Map<String, Texture> materials = new HashMap<>();
+    private final Map<String, Cliff> cliffs = new HashMap<>();
     private final Map<String, Color> materialTints = new HashMap<>();
     private final Map<BoardLiquid.Textures, Animation<Texture>> liquids = new HashMap<>();
     private BoardRim.Images incline;
     private BoardRim.Images highIncline;
 
     private record Interior(String asset, int levels) { }
+
+    /** Three aligned, repeating maps. Surface channels are height, roughness, occlusion and relief range. */
+    record Cliff(Texture color, Texture normal, Texture surface) { }
 
     record Animation<T>(List<T> frames, float[] ends, float duration) {
         T at(float time) {
@@ -83,15 +88,46 @@ final class GpuAssets implements Disposable {
         return texture(materialFile(name));
     }
 
+    Cliff cliff(String name) {
+        return cliffs.computeIfAbsent(name, key -> {
+            String family = key.substring(key.lastIndexOf('/') + 1);
+            FileHandle color = materialFile("cliffs/" + family);
+            FileHandle normal = materialFile("cliffs/" + family + "-normal");
+            FileHandle surface = materialFile("cliffs/" + family + "-surface");
+            // Older/custom data sets retain their original material until a complete set is supplied.
+            if (!color.exists() || !normal.exists() || !surface.exists()) {
+                return new Cliff(material(key), null, null);
+            }
+            return new Cliff(texture(color), texture(normal), texture(surface));
+        });
+    }
+
     /**
      * A skirt strip covers V from zero at the cliff top to one at its lower edge, so it tiles only along U.
      * Clamping there stops the sampler from wrapping the last row into the first one and ringing its edge.
-     * The art is uploaded as authored: straight alpha, as the skirt material blends it.
+     * Associate color with coverage before filtering and mip generation, so transparent black cannot make
+     * dark fringes. Keep file-backed texture data so context restoration performs the same conversion.
      */
     Texture cornice(String name) {
         FileHandle file = materialFile(name);
         return materials.computeIfAbsent("cornice:" + file.file().toPath().normalize(), key -> {
-            Texture texture = new Texture(file, true);
+            Texture texture = new Texture(new FileTextureData(file, null, Pixmap.Format.RGBA8888, true) {
+                @Override
+                public Pixmap consumePixmap() {
+                    Pixmap pixels = super.consumePixmap();
+                    pixels.setBlending(Pixmap.Blending.None);
+                    for (int y = 0; y < pixels.getHeight(); y++) {
+                        for (int x = 0; x < pixels.getWidth(); x++) {
+                            int rgba = pixels.getPixel(x, y), alpha = rgba & 255;
+                            int red = ((rgba >>> 24) * alpha + 127) / 255;
+                            int green = ((rgba >>> 16 & 255) * alpha + 127) / 255;
+                            int blue = ((rgba >>> 8 & 255) * alpha + 127) / 255;
+                            pixels.drawPixel(x, y, red << 24 | green << 16 | blue << 8 | alpha);
+                        }
+                    }
+                    return pixels;
+                }
+            });
             texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
             texture.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.ClampToEdge);
             return texture;
@@ -124,27 +160,27 @@ final class GpuAssets implements Disposable {
     }
 
     /**
-     * The rim masks serve every family: alpha is coverage and gray is lightness about mid gray, so a dark mask
-     * shades the exposed rim of any material. A drop of up to two levels wears this incline mask.
+     * Prepare color and relief once from each shared pattern. Alpha stays coverage; gray is recentered about
+     * 128 while the height-derived normals supply directional shading. Drops up to two levels use this pattern.
      */
     BoardRim.Images inclineMask() {
         if (incline == null) {
-            incline = loadRimMask("terrain/incline_dark");
+            incline = loadRimMask("terrain/incline_dark", false);
         }
         return incline;
     }
 
-    /** The coarser rim of a drop above two levels, the board's own high-incline split. Neither carries normals. */
+    /** The coarser, deeper relief of a drop above two levels, the board's own high-incline split. */
     BoardRim.Images highInclineMask() {
         if (highIncline == null) {
-            highIncline = loadRimMask("terrain/high_incline_dark");
+            highIncline = loadRimMask("terrain/high_incline_dark", true);
         }
         return highIncline;
     }
 
-    private BoardRim.Images loadRimMask(String asset) {
+    private BoardRim.Images loadRimMask(String asset, boolean high) {
         try {
-            return new BoardRim.Images(new BoardScene.Pixels(ImageIO.read(materialFile(asset).file())), null);
+            return BoardRim.relief(new BoardScene.Pixels(ImageIO.read(materialFile(asset).file())), high);
         } catch (IOException error) {
             throw new UncheckedIOException("Cannot load the cliff-top rim mask", error);
         }
@@ -158,7 +194,10 @@ final class GpuAssets implements Disposable {
                   .startsWith(new File(root, "textures").toPath().toAbsolutePath().normalize());
             Texture.TextureWrap wrap = repeating ? Texture.TextureWrap.Repeat : Texture.TextureWrap.ClampToEdge;
             texture.setWrap(wrap, wrap);
-            if (repeating) {
+            if (repeating && file.parent().name().equals("cliffs")) {
+                // Cliff relief needs its full resolution; mipmaps and supported anisotropy handle distance.
+                texture.setAnisotropicFilter(8);
+            } else if (repeating) {
                 int level = Math.max(0, (int) Math.ceil(Math.log(Math.max(texture.getWidth(), texture.getHeight()) / 128.0) / Math.log(2)));
                 texture.bind();
                 // Match the board artwork's texel density while retaining editable source images.
@@ -343,6 +382,7 @@ final class GpuAssets implements Disposable {
         liquids.values().forEach(animation -> animation.frames().forEach(Texture::dispose));
         models.clear();
         materials.clear();
+        cliffs.clear();
         materialTints.clear();
         liquids.clear();
         incline = null;

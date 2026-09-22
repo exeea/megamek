@@ -187,8 +187,11 @@ class GpuAtmosphericTaintSmokeTest {
             }
             TextButton defaults = tuning.panel().findActor("tuning-defaults");
             defaults.fire(new ChangeEvent());
-            assertEquals(original, tuning.atmosphere());
+            assertEquals(settings(12, 0, AtmosphericTaint.TOXIC_POISON, Atmosphere.VACUUM), tuning.atmosphere(),
+                  "Defaults restores the latest scenario, including its unavailable atmosphere controls");
             assertEquals(BoardAtmosphere.DEFAULT_TAINT_STRENGTH, tuning.atmosphereOptions().taintStrength());
+            assertTrue(strength.isDisabled());
+            tuning.useScenario(original, false);
             assertFalse(strength.isDisabled());
             stage.addActor(tuning.panel());
             tuning.panel().setBounds(20, 20, 340, Gdx.graphics.getHeight() - 40);

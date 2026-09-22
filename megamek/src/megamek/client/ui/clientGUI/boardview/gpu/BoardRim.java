@@ -27,7 +27,7 @@ final class BoardRim {
         }
     }
     private record Patch(int edge, float from, float to, boolean high) { }
-    private record Key(Images ground, BoardScene.Surface surface, List<Triangle> faces, List<Patch> patches) { }
+    private record Key(Images ground, List<Triangle> faces, List<Patch> patches) { }
 
     private final Map<Key, Images> cache = new HashMap<>();
     private final Set<Key> used = new HashSet<>();
@@ -59,7 +59,7 @@ final class BoardRim {
                   : quantize(new Vector3(side.b()).sub(a).dot(along) / BoardGeometry.HEX_SCALE);
             patches.add(new Patch(side.edge(), from, to, highDrop(scene, tile, side)));
         }
-        Key key = new Key(ground, tile.surface(), List.copyOf(faces), List.copyOf(patches));
+        Key key = new Key(ground, List.copyOf(faces), List.copyOf(patches));
         used.add(key);
         return cache.computeIfAbsent(key,
               ignored -> compose(key, assets.inclineMask(), assets.highInclineMask()));
@@ -99,6 +99,73 @@ final class BoardRim {
 
     private static float cross(float ax, float ay, float bx, float by) {
         return ax * by - ay * bx;
+    }
+
+    /**
+     * Prepare each authored south-edge pattern once. Paint brightness supplies approximate stone height, not
+     * baked sunlight; an outward bevel gives the cliff lip its broad shape. Both maps are subsequently composed
+     * into the existing ground atlases, so relief adds no draw calls or texture lookups to the ground shader.
+     */
+    static Images relief(BoardScene.Pixels source, boolean high) {
+        int width = source.width(), height = source.height();
+        float[] light = new float[width * height], coverage = new float[width * height];
+        float total = 0, weight = 0;
+        int firstRow = height;
+        for (int i = 0; i < light.length; i++) {
+            int rgba = source.rgba(i);
+            light[i] = ((rgba >>> 24) * 0.2126f + (rgba >>> 16 & 255) * 0.7152f
+                  + (rgba >>> 8 & 255) * 0.0722f) / 255;
+            coverage[i] = (rgba & 255) / 255f;
+            total += light[i] * coverage[i];
+            weight += coverage[i];
+            if (coverage[i] > 0) { firstRow = Math.min(firstRow, i / width); }
+        }
+        float mean = weight > 0 ? total / weight : 0.5f;
+        float[] heights = new float[light.length], smooth = new float[light.length];
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int i = y * width + x;
+                // Alpha-weighted filtering keeps transparent black out of the height estimate.
+                float sum = 0, mass = 0;
+                for (int dy = -1; dy <= 1; dy++) {
+                    for (int dx = -1; dx <= 1; dx++) {
+                        int j = Math.clamp(y + dy, 0, height - 1) * width + Math.clamp(x + dx, 0, width - 1);
+                        sum += light[j] * coverage[j];
+                        mass += coverage[j];
+                    }
+                }
+                smooth[i] = mass > 0 ? sum / mass : mean;
+                float outward = Math.max(0, (y - firstRow + 0.5f) / Math.max(1, height - firstRow));
+                float stone = smooth[i] * 0.3f + light[i] * 0.7f;
+                heights[i] = coverage[i] * ((stone - mean) * (high ? 22 : 14)
+                      - (high ? 6 : 2.5f) * outward * outward);
+            }
+        }
+        BufferedImage color = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        BufferedImage normal = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        Vector3 direction = new Vector3();
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int i = y * width + x;
+                // Retain restrained pigment variation and crevices; moving light supplies the strong contrast.
+                float cavity = Math.min(0.22f, Math.max(0, smooth[i] - light[i]) * 1.2f);
+                int gray = channel((128 + (light[i] - mean) * 192) * (1 - cavity));
+                int alpha = source.rgba(i) & 255;
+                color.setRGB(x, y, (alpha << 24) | (gray << 16) | (gray << 8) | gray);
+                if (alpha == 0) {
+                    normal.setRGB(x, y, 0xff8080ff);
+                    continue;
+                }
+                float dx = (heights[y * width + Math.max(0, x - 1)]
+                      - heights[y * width + Math.min(width - 1, x + 1)]) * width / BoardGeometry.TILE_WIDTH * 0.5f;
+                float dy = (heights[Math.max(0, y - 1) * width + x]
+                      - heights[Math.min(height - 1, y + 1) * width + x]) * height / BoardGeometry.TILE_HEIGHT * 0.5f;
+                direction.set(dx, dy, 1).nor();
+                normal.setRGB(x, y, 0xff000000 | (encode(direction.x) << 16)
+                      | (encode(direction.y) << 8) | encode(direction.z));
+            }
+        }
+        return new Images(new BoardScene.Pixels(color), new BoardScene.Pixels(normal));
     }
 
     private static Images compose(Key key, Images incline, Images high) {
@@ -169,7 +236,7 @@ final class BoardRim {
                         }
                     }
                 }
-                color.setRGB(x, y, ((rgba & 255) << 24) | (Math.round(red) << 16) | (Math.round(green) << 8) | Math.round(blue));
+                color.setRGB(x, y, ((rgba & 255) << 24) | (channel(red) << 16) | (channel(green) << 8) | channel(blue));
                 normal.setRGB(x, y, changed ? 0xff000000 | (encode(base.x) << 16) | (encode(base.y) << 8) | encode(base.z)
                       : (packedNormal >>> 8) | 0xff000000);
             }
@@ -189,7 +256,11 @@ final class BoardRim {
     }
 
     private static int encode(float value) {
-        return Math.clamp(Math.round(128 + 127 * value), 0, 255);
+        return channel(128 + 127 * value);
+    }
+
+    private static int channel(float value) {
+        return Math.clamp(Math.round(value), 0, 255);
     }
 
     private static int texel(BoardScene.Pixels pixels, int x, int y, int width, int height, float[] scratch) {

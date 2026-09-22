@@ -330,8 +330,10 @@ public abstract class AbstractUnitSelectorDialog extends JDialog implements Runn
         tableUnits.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent event) {
-                if ((event.getClickCount() == 2) && (event.getButton() == MouseEvent.BUTTON1) && hasSelectedRows()) {
-                    select(true);
+                if ((event.getClickCount() == 2) && (event.getButton() == MouseEvent.BUTTON1)
+                      && (tableUnits.rowAtPoint(event.getPoint()) >= 0) && hasSelectedRows()
+                      && (buttonSelectClose != null) && buttonSelectClose.isEnabled()) {
+                    buttonSelectClose.doClick();
                 }
             }
         });

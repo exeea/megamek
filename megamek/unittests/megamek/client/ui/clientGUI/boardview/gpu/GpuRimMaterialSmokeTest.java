@@ -9,6 +9,7 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
@@ -16,23 +17,80 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.profiling.GLProfiler;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.ScreenUtils;
+import megamek.common.Hex;
+import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** The rim mask shades an exposed top layer, and that shading belongs to the material, not to the light. */
+/** Both cliff-edge patterns respond to moving light through the existing ground normal atlas. */
 @Tag("on-demand")
 class GpuRimMaterialSmokeTest {
     @Test
-    void rimMaskShadesExposedEdgesUnderEitherLight() {
+    void rendersTwoAndThreeLevelCliffsWithTheShippedGroundArtwork() throws Exception {
+        Hex[] hexes = new Hex[7 * 3];
+        for (int y = 0; y < 3; y++) {
+            for (int x = 0; x < 7; x++) {
+                Hex hex = new Hex(y == 1 && x == 2 ? 2 : y == 1 && x == 4 ? 3 : 0);
+                hex.setTheme("grass");
+                hexes[y * 7 + x] = hex;
+            }
+        }
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        try (GpuBoardFixture fixture = GpuBoardFixture.create(new Board(7, 3, hexes))) {
+            SwingUtilities.invokeAndWait(fixture.source::refresh);
+            BoardScene scene = fixture.source.takeFrame().scene();
+            new Lwjgl3Application(new ApplicationAdapter() {
+                @Override
+                public void create() {
+                    GpuTerrain terrain = new GpuTerrain();
+                    try {
+                        terrain.update(scene);
+                        BoardCamera camera = new BoardCamera();
+                        camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                        camera.fit(scene);
+                        camera.camera.zoom *= 0.85f;
+                        camera.center(BoardGeometry.center(new Coords(3, 1), 1));
+                        File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
+                        assertTrue(output.isDirectory() || output.mkdirs());
+                        for (boolean isometric : new boolean[] { false, true }) {
+                            camera.setIsometric(isometric);
+                            for (int direction = 0; direction < 2; direction++) {
+                                terrain.setAtmosphere(new BoardAtmosphere.Lighting(
+                                      new Vector3(direction == 0 ? -1 : 1, -0.4f, -0.7f).nor(),
+                                      new Color(0.75f, 0.71f, 0.65f, 1), new Color(0.3f, 0.32f, 0.36f, 1),
+                                      Color.BLACK, Color.BLACK, Color.BLACK, Color.WHITE, 1, 1, true));
+                                terrain.renderShadows(camera.camera, List.of());
+                                samples(terrain, camera, List.of());
+                                GpuBoardTestUi.capture(new File(output, "cliff-edges-" + (isometric ? "iso" : "top")
+                                      + "-light-" + direction + ".png"));
+                            }
+                        }
+                        assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                    } catch (Throwable error) {
+                        failure.set(error);
+                    } finally {
+                        terrain.dispose();
+                        Gdx.app.exit();
+                    }
+                }
+            }, GpuBoardWindow.configuration(false));
+        }
+        if (failure.get() != null) { throw new AssertionError("Cliff-edge artwork rendering", failure.get()); }
+    }
+
+    @Test
+    void bothCliffPatternsHaveReliefUnderOpposingLightsWithoutExtraDraws() {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
             public void create() {
                 try {
-                    checkRendering();
+                    checkRendering(2);
+                    checkRendering(3);
                 } catch (Throwable error) {
                     failure.set(error);
                 } finally {
@@ -43,7 +101,7 @@ class GpuRimMaterialSmokeTest {
         if (failure.get() != null) { throw new AssertionError("Rim material rendering", failure.get()); }
     }
 
-    private static void checkRendering() throws Exception {
+    private static void checkRendering(int drop) throws Exception {
         Coords raised = new Coords(3, 3);
         BufferedImage image = new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB);
         BufferedImage flat = new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB);
@@ -58,7 +116,7 @@ class GpuRimMaterialSmokeTest {
         for (int x = 0; x < 7; x++) {
             for (int y = 0; y < 7; y++) {
                 Coords coords = new Coords(x, y);
-                tiles.add(new BoardScene.Tile(coords, coords.equals(raised) ? 3 : 0, -1, false, 0,
+                tiles.add(new BoardScene.Tile(coords, coords.equals(raised) ? drop : 0, -1, false, 0,
                       BoardScene.Surface.GRASS, pixels, normals, null, null, List.of(), List.of()));
             }
         }
@@ -69,10 +127,10 @@ class GpuRimMaterialSmokeTest {
             BoardCamera camera = new BoardCamera();
             camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
             camera.camera.zoom = 0.18f;
-            camera.center(BoardGeometry.center(raised, 3));
+            camera.center(BoardGeometry.center(raised, drop));
             List<Vector3> probes = new ArrayList<>();
             for (int edge = 0; edge < 6; edge++) {
-                Vector3 a = BoardGeometry.corner(raised, 3, edge), b = BoardGeometry.corner(raised, 3, edge + 1);
+                Vector3 a = BoardGeometry.corner(raised, drop, edge), b = BoardGeometry.corner(raised, drop, edge + 1);
                 Vector3 along = b.cpy().sub(a).nor(), inward = new Vector3(-along.y, along.x, 0);
                 for (int u = 2; u <= 8; u++) {
                     for (int depth = 3; depth <= 21; depth += 2) {
@@ -80,33 +138,45 @@ class GpuRimMaterialSmokeTest {
                     }
                 }
             }
-            probes.add(BoardGeometry.center(raised, 3));
+            probes.add(BoardGeometry.center(raised, drop));
             File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
             assertTrue(output.isDirectory() || output.mkdirs());
             for (boolean isometric : new boolean[] { false, true }) {
                 camera.setIsometric(isometric);
                 int centreIndex = probes.size() - 1;
                 int[][] light = new int[2][];
+                int[][] flatLight = new int[2][];
                 for (int direction = 0; direction < 2; direction++) {
                     Vector3 direction3 = new Vector3(direction == 0 ? -1 : 1, 0, -0.5f).nor();
                     terrain.setAtmosphere(new BoardAtmosphere.Lighting(direction3, new Color(0.7f, 0.7f, 0.7f, 1),
                           new Color(0.25f, 0.25f, 0.25f, 1), Color.BLACK, Color.BLACK, Color.BLACK, Color.WHITE, 1, 1, true));
                     terrain.renderShadows(camera.camera, List.of());
-                    light[direction] = samples(terrain, camera, probes);
-                    GpuBoardTestUi.capture(new File(output, "rim-lit-" + isometric + "-" + direction + ".png"));
+                    GLProfiler profiler = new GLProfiler(Gdx.graphics);
+                    profiler.enable();
+                    try {
+                        terrain.setNormalMaps(false);
+                        flatLight[direction] = samples(terrain, camera, probes);
+                        int draws = profiler.getDrawCalls();
+                        profiler.reset();
+                        terrain.setNormalMaps(true);
+                        light[direction] = samples(terrain, camera, probes);
+                        assertEquals(draws, profiler.getDrawCalls(), "Relief uses the existing terrain draws");
+                    } finally {
+                        profiler.disable();
+                    }
+                    GpuBoardTestUi.capture(new File(output, "rim-drop-" + drop + "-" + (isometric ? "iso" : "top")
+                          + "-light-" + direction + ".png"));
                 }
-                // Ratios against the untouched centre cancel the lighting, so a shade can be compared across lights.
-                int darkest = 0;
-                int shaded = 0;
+                int relit = 0;
+                float reliefChange = 0, flatChange = 0;
                 for (int index = 0; index < centreIndex; index++) {
-                    if (ratio(light[0], index, centreIndex) < 0.98f) { shaded++; }
-                    if (ratio(light[0], index, centreIndex) < ratio(light[0], darkest, centreIndex)) { darkest = index; }
+                    float change = Math.abs(ratio(light[0], index, centreIndex) - ratio(light[1], index, centreIndex));
+                    reliefChange += change;
+                    flatChange += Math.abs(ratio(flatLight[0], index, centreIndex) - ratio(flatLight[1], index, centreIndex));
+                    if (change > 0.06f) { relit++; }
                 }
-                assertTrue(shaded > centreIndex / 4, "The rim must shade the exposed edges: " + shaded + " of " + centreIndex);
-                assertTrue(ratio(light[0], darkest, centreIndex) < 0.9f, "The rim must shade visibly");
-                // The mask multiplies the material's own colour, so its ratio survives any lighting.
-                assertEquals(ratio(light[0], darkest, centreIndex), ratio(light[1], darkest, centreIndex), 0.05f,
-                      "A rim shade belongs to the material, not to the light");
+                assertTrue(relit > 20, "Drop " + drop + " must visibly react to light: " + relit + " probes");
+                assertTrue(reliefChange > flatChange + 5, "Normals must relight the pattern beyond flat-face lighting");
             }
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
         } finally {

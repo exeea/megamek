@@ -98,6 +98,9 @@ final class GpuTerrain implements Disposable {
         private final DefaultShader.Config corniceShader = new DefaultShader.Config(config.vertexShader,
               rainFragment(GpuCloudShadow.fragment(Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-cornice.frag")
                     .readString(), true)));
+        private final DefaultShader.Config cliffShader = new DefaultShader.Config(config.vertexShader,
+              rainFragment(GpuCloudShadow.fragment(Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-cliff.frag")
+                    .readString(), true)));
         private final DefaultShader.Config waterShader = new DefaultShader.Config(config.vertexShader,
               rainFragment(GpuCloudShadow.fragment(Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/water-surface.frag")
                     .readString(), true)));
@@ -109,6 +112,7 @@ final class GpuTerrain implements Disposable {
         @Override
         protected Shader createShader(Renderable renderable) {
             DefaultShader.Config chosen = renderable.material.has(Cornice.TYPE) ? corniceShader
+                  : renderable.material.has(Cliff.TYPE) ? cliffShader
                   : renderable.material.has(Ground.TYPE) ? groundShader
                   : renderable.material.has(GpuLiquidShader.Frame.TYPE)
                         ? renderable.material.has(GpuWaterShader.TYPE) ? waterLiquidShader : liquidShader
@@ -166,6 +170,13 @@ final class GpuTerrain implements Disposable {
                 public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                     Cornice cornice = attributes.get(Cornice.class, Cornice.TYPE);
                     if (cornice != null) { target.set(id, cornice.value); }
+                }
+            });
+            result.register("u_cliffSurface", new BaseShader.LocalSetter() {
+                @Override
+                public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                    Cliff cliff = attributes.get(Cliff.class, Cliff.TYPE);
+                    if (cliff != null) { target.set(id, cliff.textureDescription); }
                 }
             });
             return result;
@@ -289,6 +300,22 @@ final class GpuTerrain implements Disposable {
 
     }
     private record LiquidSurface(Material material, BoardLiquid.Textures source, boolean falling, BoardFlow.Current current) { }
+
+    /** Packed cliff surface data; the asset cache owns the texture, including after material copies. */
+    private static final class Cliff extends TextureAttribute {
+        static final long TYPE = register("boardCliffSurface");
+
+        static { Mask |= TYPE; }
+
+        Cliff(Texture texture) {
+            super(TYPE, texture);
+        }
+
+        @Override
+        public Cliff copy() {
+            return new Cliff(textureDescription.texture);
+        }
+    }
 
     /** Marks exposed ground and carries its water-film response; negative excludes snow, ice and water. */
     private static final class Ground extends FloatAttribute {
@@ -640,8 +667,13 @@ final class GpuTerrain implements Disposable {
                           mesh -> grid(mesh, tile.coords(), BoardGeometry.groundZ(tile), top));
                 }
                 for (BoardSurface.Side side : surface.sides(scene, floor)) {
-                    Texture wall = assets.material(tile.surface().wall);
-                    solid.add(material(wall, false), mesh -> wall(mesh, side));
+                    GpuAssets.Cliff wall = assets.cliff(tile.surface().wall);
+                    Material cliff = material(wall.color(), false);
+                    if (wall.surface() != null) {
+                        cliff.set(new Cliff(wall.surface()), TextureAttribute.createNormal(wall.normal()),
+                              new Ground(groundResponse(tile)));
+                    }
+                    solid.add(cliff, mesh -> wall(mesh, side, wall.surface() != null));
                     chunk.bounds.ext(side.a().x, side.a().y, side.lowA()).ext(side.b().x, side.b().y, side.lowB());
                     if (hangsSkirt(surface, side)) {
                         Texture skirt = assets.cornice(tile.surface().cornice);
@@ -649,6 +681,7 @@ final class GpuTerrain implements Disposable {
                         float colorized = tile.surface().corniceColorized ? Cornice.COLORIZED : Cornice.MASK;
                         float aspect = (float) skirt.getWidth() / skirt.getHeight();
                         Material strip = material(skirt, true);
+                        strip.set(new BlendingAttribute(GL20.GL_ONE, GL20.GL_ONE_MINUS_SRC_ALPHA));
                         // A skirt faces outward, and the wall it hangs on is double-sided and nearer from behind,
                         // so its own back faces are only rasterised to fail the depth test: cull them instead.
                         strip.set(new Cornice(colorized), new Ground(groundResponse(tile)),
@@ -932,7 +965,7 @@ final class GpuTerrain implements Disposable {
         return vertex(raised, normal, u, v, Color.WHITE);
     }
 
-    private static void wall(MeshPartBuilder mesh, BoardSurface.Side side) {
+    private static void wall(MeshPartBuilder mesh, BoardSurface.Side side, boolean relief) {
         Vector3 a = side.a(), b = side.b();
         Vector3 normal = new Vector3(b.x - a.x, b.y - a.y, 0).crs(Vector3.Z).nor();
         Vector3 lowerA = new Vector3(a.x, a.y, side.lowA());
@@ -941,10 +974,12 @@ final class GpuTerrain implements Disposable {
         float length = (float) Math.hypot(a.x - b.x, a.y - b.y);
         float u = (a.x * (b.x - a.x) + a.y * (b.y - a.y)) / length / repeat;
         float endU = u + length / repeat;
-        mesh.rect(vertex(a, normal, u, -a.z / repeat, Color.WHITE),
-              vertex(lowerA, normal, u, -side.lowA() / repeat, Color.WHITE),
-              vertex(lowerB, normal, endU, -side.lowB() / repeat, Color.WHITE),
-              vertex(b, normal, endU, -b.z / repeat, Color.WHITE));
+        // Relief fades at the actual quad boundary so parallax cannot tear a hex corner or its top seam.
+        // Only the cliff shader interprets RG as quad coordinates; legacy materials keep white tint.
+        mesh.rect(vertex(a, normal, u, -a.z / repeat, relief ? Color.BLACK : Color.WHITE),
+              vertex(lowerA, normal, u, -side.lowA() / repeat, relief ? Color.GREEN : Color.WHITE),
+              vertex(lowerB, normal, endU, -side.lowB() / repeat, relief ? Color.YELLOW : Color.WHITE),
+              vertex(b, normal, endU, -b.z / repeat, relief ? Color.RED : Color.WHITE));
     }
 
     /**

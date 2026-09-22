@@ -150,10 +150,18 @@ class BoardFeaturesTest {
         assertEquals(BoardScene.Surface.SAND, BoardFeatures.surface(hex));
         hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1));
         assertEquals(BoardScene.Surface.CONCRETE, BoardFeatures.surface(hex));
+        for (int scatter : new int[] { Terrains.ROUGH, Terrains.RUBBLE }) {
+            hex.removeAllTerrains();
+            hex.setTheme("");
+            hex.addTerrain(new Terrain(scatter, 1));
+            assertEquals(BoardScene.Surface.GRASS, BoardFeatures.surface(hex), "Scatter keeps the underlying geology");
+            hex.setTheme("rock");
+            assertEquals(BoardScene.Surface.ROCK, BoardFeatures.surface(hex));
+            hex.addTerrain(new Terrain(Terrains.SAND, 1));
+            assertEquals(BoardScene.Surface.SAND, BoardFeatures.surface(hex));
+        }
         hex.removeAllTerrains();
-        hex.addTerrain(new Terrain(Terrains.ROUGH, 1));
-        assertEquals(BoardScene.Surface.ROCK, BoardFeatures.surface(hex));
-        hex.removeAllTerrains();
+        hex.setTheme("");
         hex.addTerrain(new Terrain(Terrains.FIELDS, 1));
         assertTrue(BoardFeatures.capture(hex, new Coords(0, 0), Map.of()).stream()
               .anyMatch(feature -> feature.asset().equals("field") && feature.height() == 1));

@@ -78,6 +78,43 @@ class BoardRimTest {
               "Half coverage takes half the shade");
     }
 
+    @Test
+    void brightRimsSaturateEachChannelWithoutCorruptingColorOrCoverage() {
+        BoardScene scene = scene(0, false, false, pixels(0x80f08020), neutral);
+        BoardRim.Images material = new BoardRim().material(scene, scene.tile(CENTER), BoardGeometry.floor(scene),
+              assets(pixels(0xffffffff), null));
+        int pixel = material.color().rgba(probe(0, 0.5f, 9));
+        assertEquals(255, pixel >>> 24, "A highlight saturates red instead of wrapping to a dark value");
+        assertEquals(Math.round(128 * shade(255, 1)), pixel >>> 16 & 255);
+        assertEquals(Math.round(32 * shade(255, 1)), pixel >>> 8 & 255);
+        assertEquals(128, pixel & 255, "RGB overflow must never set alpha bits");
+    }
+
+    @Test
+    void heightReliefRaisesStonesAndBevelsTheLipWithoutChangingCoverage() {
+        BufferedImage art = new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 52; y < 72; y++) {
+            for (int x = 0; x < 84; x++) {
+                int gray = 60 + Math.max(0, 70 - Math.abs(x - 42) * 14);
+                art.setRGB(x, y, 0xff000000 | gray << 16 | gray << 8 | gray);
+            }
+        }
+        BoardScene.Pixels source = new BoardScene.Pixels(art);
+        BoardRim.Images low = BoardRim.relief(source, false), high = BoardRim.relief(source, true);
+        for (int i = 0; i < 84 * 72; i++) {
+            assertEquals(source.rgba(i) & 255, high.color().rgba(i) & 255);
+            if ((source.rgba(i) & 255) == 0) { assertEquals(0x8080ffff, high.normal().rgba(i)); }
+        }
+        assertTrue((high.normal().rgba(60 * 84 + 39) >>> 24) < 128, "Left side of a raised stone faces left");
+        assertTrue((high.normal().rgba(60 * 84 + 45) >>> 24) > 128, "Right side of a raised stone faces right");
+        int outer = 68 * 84 + 20;
+        assertTrue((low.normal().rgba(outer) >>> 16 & 255) > 128, "The lip slopes outward");
+        assertTrue((high.normal().rgba(outer) >>> 16 & 255) > (low.normal().rgba(outer) >>> 16 & 255),
+              "High cliffs have deeper relief than ordinary inclines");
+        BoardRim.Images flat = BoardRim.relief(pixels(0xff404040), false);
+        assertEquals(128, flat.color().rgba(36 * 84 + 42) >>> 24, "Flat paint is normalized to neutral mid gray");
+    }
+
     /** What one rim sample does to a top-layer channel: gray about mid gray, weighted by coverage and opacity. */
     private static float shade(int gray, float coverage) {
         return 1 + coverage * BoardRim.BLEND_OPACITY * (gray / 128f - 1);

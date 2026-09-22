@@ -405,9 +405,9 @@ final class BoardAtmosphere {
                   * MathUtils.clamp(taintStrength, 0, 10) * scattering
                   * MathUtils.lerp(0.4f, 1, daylight) * (1 - warmth * 0.75f);
             // Existing gradients/volumes provide depth. Weather alone decides whether scattering is rendered.
-            tintAtmosphere(sky, palette, strength); // upper skybox
-            tintAtmosphere(horizon, palette, Math.max(strength, toxicityStrength)); // lower skybox
-            tintAtmosphere(fog, palette, toxicityStrength);
+            tintAtmosphere(sky, palette, strength * 0.55f);
+            tintAtmosphere(horizon, palette, strength);
+            tintAtmosphere(fog, palette, strength);
             // The composite grades every drawn surface, so the air reaches the board and not only the sky.
             tintAtmosphere(tint, palette, strength * TAINT_GRADE_SHARE);
         }
@@ -425,7 +425,11 @@ final class BoardAtmosphere {
         float blend = MathUtils.clamp(strength, 0, 1);
         if (blend <= 0) { return; }
         float energy = luminance(color) / luminance(palette);
-        color.lerp(new Color(palette).mul(energy, energy, energy, 1), blend);
+        // Color.mul/lerp clamp to LDR. A multiplicative display grade can legitimately exceed one; clamping
+        // its luminance-matched target darkened the whole board when increasing taint (especially white daylight).
+        color.r += (palette.r * energy - color.r) * blend;
+        color.g += (palette.g * energy - color.g) * blend;
+        color.b += (palette.b * energy - color.b) * blend;
     }
 
     private static float smooth(float low, float high, float value) {

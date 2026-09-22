@@ -25,7 +25,7 @@ class BoardAtmosphericTaintTest {
                 var clear = settings(hour, clouds, Atmosphere.STANDARD, AtmosphericTaint.BREATHABLE);
                 var tinted = settings(hour, clouds, Atmosphere.STANDARD, taint);
                 var before = BoardAtmosphere.lighting(clear);
-                for (float strength : new float[] { 0, 1, 2 }) {
+                for (float strength : new float[] { 0, 0.001f, 1, 2, 10 }) {
                     var after = BoardAtmosphere.lighting(tinted, BoardAtmosphere.MOONLIGHT_SHADOW_CONTRAST, strength);
                     assertEquals(before.direction(), after.direction());
                     assertEquals(before.direct(), after.direct());
@@ -35,9 +35,8 @@ class BoardAtmosphericTaintTest {
                     assertBrightness(before.sky(), after.sky());
                     assertBrightness(before.horizon(), after.horizon());
                     assertBrightness(before.fog(), after.fog());
-                    // The display grade carries the same air onto every drawn surface. Its luminance is the exposure
-                    // reference, so it may only drift where a palette channel meets the LDR ceiling, as at night.
-                    assertEquals(luminance(before.tint()), luminance(after.tint()), 0.01f);
+                    // The multiplicative grade may exceed one; its luminance must not change exposure.
+                    assertEquals(luminance(before.tint()), luminance(after.tint()), 0.000001f);
                     float gradeShift = distance(before.tint(), after.tint());
                     if (strength == 0 || taint.isBreathable()) {
                         assertEquals(0, gradeShift, "Clear or untinted air must leave the grade alone");
@@ -48,6 +47,16 @@ class BoardAtmosphericTaintTest {
                 }
             }
         }
+    }
+
+    @Test
+    void reducingStrengthContinuouslyRemovesHorizonAndFogTint() {
+        var clear = BoardAtmosphere.lighting(settings(12, 0, Atmosphere.STANDARD, AtmosphericTaint.BREATHABLE));
+        var tainted = settings(12, 0, Atmosphere.STANDARD, AtmosphericTaint.TOXIC_CAUSTIC);
+        var full = BoardAtmosphere.lighting(tainted);
+        var almostOff = BoardAtmosphere.lighting(tainted, BoardAtmosphere.MOONLIGHT_SHADOW_CONTRAST, 0.001f);
+        assertTrue(distance(clear.horizon(), almostOff.horizon()) < distance(clear.horizon(), full.horizon()) * 0.002f);
+        assertTrue(distance(clear.fog(), almostOff.fog()) < distance(clear.fog(), full.fog()) * 0.002f);
     }
 
     @Test

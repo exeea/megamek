@@ -21,12 +21,26 @@ float shadowSample(vec2 offset) {
 }
 #endif
 
-void surfaceLighting(vec3 normal, float film, out vec3 ambient, out vec3 direct, out vec3 sheen) {
+vec3 surfaceAmbient(vec3 normal) {
     vec3 squared = normal * normal;
     vec3 positive = step(vec3(0.0), normal);
-    ambient = squared.x * mix(u_ambientCubemap[0], u_ambientCubemap[1], positive.x)
+    return squared.x * mix(u_ambientCubemap[0], u_ambientCubemap[1], positive.x)
           + squared.y * mix(u_ambientCubemap[2], u_ambientCubemap[3], positive.y)
           + squared.z * mix(u_ambientCubemap[4], u_ambientCubemap[5], positive.z);
+}
+
+float surfaceVisibility() {
+#ifdef shadowMapFlag
+    float offset = u_shadowPCFOffset;
+    return 0.25 * (shadowSample(vec2(offset, offset)) + shadowSample(vec2(-offset, offset))
+          + shadowSample(vec2(offset, -offset)) + shadowSample(vec2(-offset, -offset)));
+#else
+    return 1.0;
+#endif
+}
+
+void surfaceLighting(vec3 normal, float film, out vec3 ambient, out vec3 direct, out vec3 sheen) {
+    ambient = surfaceAmbient(normal);
     direct = vec3(0.0);
     sheen = vec3(0.0);
 #if numDirectionalLights > 0
@@ -45,9 +59,7 @@ void surfaceLighting(vec3 normal, float film, out vec3 ambient, out vec3 direct,
     }
 #endif
 #ifdef shadowMapFlag
-    float offset = u_shadowPCFOffset;
-    float visibility = 0.25 * (shadowSample(vec2(offset, offset)) + shadowSample(vec2(-offset, offset))
-          + shadowSample(vec2(offset, -offset)) + shadowSample(vec2(-offset, -offset)));
+    float visibility = surfaceVisibility();
     direct *= visibility;
     sheen *= visibility;
 #endif
