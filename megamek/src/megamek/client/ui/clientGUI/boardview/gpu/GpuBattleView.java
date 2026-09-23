@@ -11,7 +11,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -21,9 +20,6 @@ import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.InputMultiplexer;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.graphics.g2d.BitmapFont;
-import com.badlogic.gdx.graphics.g2d.BitmapFontCache;
-import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
@@ -34,7 +30,6 @@ import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
@@ -129,10 +124,7 @@ class GpuBattleView extends ApplicationAdapter {
     private ShapeRenderer lines;
     private GpuBoardUi ui;
     private BoardScene scene;
-    private record HexTextChunk(BitmapFontCache glyphs, BoundingBox bounds) { }
-    private final Map<Integer, List<HexTextChunk>> hexTextByHeight = new TreeMap<>();
-    private List<BoardScene.Tile> textTiles;
-    private int textTuning = -1;
+    private GpuHexText hexText;
     private Coords hovered;
     private UnitMotion.Speed playbackSpeed = UnitMotion.Speed.NORMAL;
     private boolean fitted;
@@ -215,6 +207,7 @@ class GpuBattleView extends ApplicationAdapter {
         annotationTextures = new GpuTextures<>();
         unitBatch = new ModelBatch(GpuUnitShader.provider(), new GpuOpaqueSorter());
         annotationBatch = new SpriteBatch();
+        hexText = new GpuHexText();
         lines = new ShapeRenderer();
         ui = new GpuBoardUi(source, boardCamera, () -> playbackSpeed = playbackSpeed.next(), playback::togglePaused);
         Gdx.input.setInputProcessor(new InputMultiplexer(ui.stage, boardInput) {
@@ -401,6 +394,7 @@ class GpuBattleView extends ApplicationAdapter {
         renderStage("cutaways and light");
         atmosphere.updateLight(boardCamera.camera);
         terrain.setAtmosphere(atmosphere.lighting());
+        terrain.setExposure(atmosphere.exposure());
         terrain.animate(Gdx.graphics.getDeltaTime(), units, ui.buildingOpacity());
         renderStage("geometry shadows");
         terrain.renderShadows(boardCamera.camera, unitIcons.active() ? List.of() : units);
@@ -1028,73 +1022,9 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     private void renderHexText() {
-        if (textTiles != scene.tiles() || textTuning != BoardGeometry.revision()) {
-            cacheHexText();
-        }
-        Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
-        Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
-        annotationBatch.setProjectionMatrix(boardCamera.camera.combined);
-        annotationBatch.begin();
-        for (var group : hexTextByHeight.entrySet()) {
-            annotationBatch.setTransformMatrix(new Matrix4().setToTranslation(0, 0,
-                  group.getKey() * BoardGeometry.LEVEL + 0.6f));
-            for (HexTextChunk chunk : group.getValue()) {
-                if (boardCamera.camera.frustum.boundsInFrustum(chunk.bounds())) {
-                    chunk.glyphs().draw(annotationBatch);
-                }
-            }
-        }
-        annotationBatch.end();
-        annotationBatch.setTransformMatrix(new Matrix4());
-    }
-
-    /** Immutable label vertices share the font atlas and are reused in both views until their source changes. */
-    private void cacheHexText() {
-        BitmapFont font = ui.font();
-        float scaleX = font.getData().scaleX;
-        float scaleY = font.getData().scaleY;
-        Color color = new Color(font.getColor());
-        Map<Integer, Map<Coords, HexTextChunk>> groups = new TreeMap<>();
-        try {
-            for (BoardScene.Tile tile : scene.tiles()) {
-                for (BoardView.HexText label : tile.text()) {
-                    int height = tile.elevation() + label.elevation();
-                    Coords cell = new Coords(tile.coords().getX() / GpuTerrain.CHUNK_SIZE,
-                          tile.coords().getY() / GpuTerrain.CHUNK_SIZE);
-                    HexTextChunk chunk = groups.computeIfAbsent(height, key -> new HashMap<>())
-                          .computeIfAbsent(cell, key -> new HexTextChunk(new BitmapFontCache(font, false), new BoundingBox().inf()));
-                    float centerX = BoardGeometry.centerX(tile.coords());
-                    float centerY = BoardGeometry.centerY(tile.coords());
-                    float z = height * BoardGeometry.LEVEL;
-                    chunk.bounds().ext(centerX - BoardGeometry.WIDTH, centerY - BoardGeometry.WIDTH, z - 1)
-                          .ext(centerX + BoardGeometry.WIDTH, centerY + BoardGeometry.WIDTH, z + 1);
-                    font.getData().setScale(label.font().getSize2D() / GpuBoardUi.FONT_RESOLUTION);
-                    int argb = label.argb();
-                    font.setColor(((argb >>> 16) & 255) / 255f, ((argb >>> 8) & 255) / 255f,
-                          (argb & 255) / 255f, ((argb >>> 24) & 255) / 255f);
-                    GlyphLayout layout = new GlyphLayout(font, label.text());
-                    float x = centerX;
-                    float baseline = centerY + BoardGeometry.HEIGHT / 2 - label.baseline() * BoardGeometry.HEX_SCALE;
-                    var roof = label.elevation() > 0 ? terrain.roofBounds(tile.coords()) : null;
-                    if (roof != null) {
-                        float fit = Math.min(1, Math.max(8, roof.getWidth() - 4 * BoardGeometry.HEX_SCALE) / layout.width);
-                        font.getData().setScale(font.getData().scaleX * fit);
-                        layout.setText(font, label.text());
-                        x = roof.getCenterX();
-                        baseline = roof.getCenterY() - layout.height / 2;
-                    }
-                    chunk.glyphs().addText(layout, x - layout.width / 2,
-                          label.fromTop() ? baseline : baseline + layout.height);
-                }
-            }
-        } finally {
-            font.getData().setScale(scaleX, scaleY);
-            font.setColor(color);
-        }
-        hexTextByHeight.clear();
-        groups.forEach((height, chunks) -> hexTextByHeight.put(height, List.copyOf(chunks.values())));
-        textTiles = scene.tiles();
-        textTuning = BoardGeometry.revision();
+        hexText.update(scene, ui.font(), terrain::roofBounds);
+        hexText.render(annotationBatch, boardCamera.camera, atmosphere.depthTexture(), unitVisibility.depthTexture(),
+              ui.bottomPixels());
     }
 
     static float annotationScale(float displayScale) {
@@ -1640,8 +1570,9 @@ class GpuBattleView extends ApplicationAdapter {
         unitFootprints.clear();
         hover.clear();
         unitPicking.clear();
-        hexTextByHeight.clear();
-        textTiles = null;
+        if (hexText != null) {
+            hexText.dispose();
+        }
         if (ui != null) {
             ui.dispose();
         }

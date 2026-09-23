@@ -607,7 +607,7 @@ final class GpuBoardSource implements AutoCloseable {
                 if (old.tactical() != null && !area.contains(old.coords().getX(), old.coords().getY())) {
                     painted.set(index, new BoardScene.Tile(old.coords(), old.elevation(), old.waterDepth(), old.frozen(),
                           old.roadExits(), old.surface(), old.ground(), old.normals(), old.decals(), old.decalsWithoutLimbs(),
-                          null, old.features(), old.text(), old.liquid(), old.foliage()));
+                          null, old.features(), old.text(), old.liquid(), old.foliage(), old.detailedGround()));
                 }
             }
             view.capturePlanarTactical(area, hex -> {
@@ -615,7 +615,8 @@ final class GpuBoardSource implements AutoCloseable {
                 BoardScene.Tile old = tiles.get(index);
                 BoardScene.Tile next = new BoardScene.Tile(old.coords(), old.elevation(), old.waterDepth(), old.frozen(),
                       old.roadExits(), old.surface(), old.ground(), old.normals(), old.decals(), old.decalsWithoutLimbs(),
-                      terrainImages.capture(hex.tactical(), old.tactical()), old.features(), hex.text(), old.liquid(), old.foliage());
+                      terrainImages.capture(hex.tactical(), old.tactical()), old.features(), hex.text(), old.liquid(),
+                      old.foliage(), old.detailedGround());
                 if (!next.equals(old)) {
                     painted.set(index, next);
                 }
@@ -824,7 +825,8 @@ final class GpuBoardSource implements AutoCloseable {
               terrainImages.capture(pixels.decalsWithoutLimbs(), previous == null ? null : previous.decalsWithoutLimbs()),
               terrainImages.capture(pixels.tactical(), previous == null ? null : previous.tactical()),
               BoardFeatures.capture(hex, pixels.coords(), pixels.structureModels()), pixels.text(), BoardLiquid.capture(hex),
-              terrainImages.captureOverlay(pixels.foliage(), previous == null ? null : previous.foliage()));
+              terrainImages.captureOverlay(pixels.foliage(), previous == null ? null : previous.foliage()),
+              BoardFeatures.detailedGround(hex));
     }
 
     private boolean sensorContact(Entity entity) {

@@ -103,7 +103,9 @@ class BoardSurfaceTest {
         BoardScene scene = scene(false, 1, false, false, 2);
         BoardSurface high = new BoardSurface(scene, scene.tile(FIRST));
         assertEquals(0, high.ramps, "Ground without an edge-reaching road retains the cliff");
-        assertEquals(6, high.faces.size(), "Ordinary flat hexes do not need road subdivisions");
+        Vector3 center = BoardGeometry.center(FIRST, 2);
+        assertEquals(center.z, high.height(center.x, center.y), .001f,
+              "An eroded cliff rim preserves the level interior and introduces no road ramp");
     }
 
     @ParameterizedTest
@@ -432,6 +434,97 @@ class BoardSurfaceTest {
         }
         BoardScene frozen = riverScene(Map.of(high, 3, high.translated(3), 0), true);
         assertTrue(new BoardSurface(frozen, frozen.tile(high)).waterfalls.isEmpty());
+    }
+
+    @Test
+    void sculptedBedsDescendWithoutFoldingAndMeetBedsOfTheirLevelWithoutAStep() {
+        var random = new java.util.Random(7);
+        var art = new BoardScene.Pixels(new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB));
+        for (int trial = 0; trial < 12; trial++) {
+            List<BoardScene.Tile> tiles = new ArrayList<>();
+            for (int x = 0; x < 7; x++) {
+                for (int y = 0; y < 7; y++) {
+                    tiles.add(new BoardScene.Tile(new Coords(x, y), random.nextInt(3) == 0 ? 1 : 0,
+                          random.nextInt(5) == 0 ? -1 : random.nextInt(4), false, 0, BoardScene.Surface.GRASS, art,
+                          null, null, List.of(), List.of()));
+                }
+            }
+            BoardScene scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
+            for (BoardScene.Tile tile : tiles) {
+                if (!tile.liquid().present()) { continue; }
+                BoardSurface surface = new BoardSurface(scene, tile);
+                for (BoardSurface.Face face : surface.faces) {
+                    if (face.finish() == BoardSurface.Finish.BED) {
+                        Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
+                        assertTrue(normal.z > 0, "A sculpted bed must never fold over at " + tile.coords());
+                    }
+                }
+                Vector3 center = BoardGeometry.center(tile.coords(), tile.elevation());
+                assertEquals(BoardGeometry.groundZ(tile), surface.height(center.x, center.y), 0.01f,
+                      "A unit at the centre stands on the full-depth bed");
+                for (int edge = 0; edge < 6; edge++) {
+                    BoardScene.Tile other = scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(edge)));
+                    if (other == null || !other.liquid().present() || other.elevation() != tile.elevation()) { continue; }
+                    BoardSurface neighbor = new BoardSurface(scene, other);
+                    Vector3 a = BoardGeometry.corner(tile.coords(), 0, edge);
+                    Vector3 b = BoardGeometry.corner(tile.coords(), 0, edge + 1);
+                    for (int sample = 1; sample < 60; sample++) {
+                        Vector3 point = new Vector3(a).lerp(b, sample / 60f);
+                        assertEquals(surface.height(point.x, point.y), neighbor.height(point.x, point.y), 0.01f,
+                              "Beds of one level meet without a step: " + tile.coords() + " edge " + edge);
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void fallsThatShareACornerTurnItTogetherWithoutAGap() {
+        Coords high = new Coords(3, 3);
+        // One pool falling over two neighbouring edges, then two pools side by side falling into one pool.
+        for (boolean twoPools : List.of(false, true)) {
+            Map<Coords, Integer> levels = new HashMap<>();
+            levels.put(high, 3);
+            if (twoPools) {
+                levels.put(high.translated(1), 3);
+                levels.put(high.translated(2), 1);
+            } else {
+                levels.put(high.translated(2), 1);
+                levels.put(high.translated(3), 1);
+            }
+            BoardScene scene = riverScene(levels, false);
+            List<BoardSurface> pools = new ArrayList<>(List.of(new BoardSurface(scene, scene.tile(high))));
+            if (twoPools) { pools.add(new BoardSurface(scene, scene.tile(high.translated(1)))); }
+            List<Vector3[][]> sheets = new ArrayList<>();
+            List<BoardSurface> owners = new ArrayList<>();
+            for (BoardSurface pool : pools) {
+                for (BoardSurface.Side fall : pool.waterfalls) {
+                    sheets.add(GpuWaterfall.grid(pool, fall));
+                    owners.add(pool);
+                }
+            }
+            assertEquals(2, sheets.size(), "Two falls meet at the corner");
+            Vector3[] first = null, second = null;
+            for (Vector3[] columnA : List.of(sheets.get(0)[0], sheets.get(0)[sheets.get(0).length - 1])) {
+                for (Vector3[] columnB : List.of(sheets.get(1)[0], sheets.get(1)[sheets.get(1).length - 1])) {
+                    if (columnA[columnA.length - 1].dst(columnB[columnB.length - 1]) < 1) {
+                        first = columnA;
+                        second = columnB;
+                    }
+                }
+            }
+            assertNotNull(first, "The sheets must end at the same corner");
+            for (int row = 0; row < first.length; row++) {
+                assertTrue(first[row].epsilonEquals(second[row], 0.01f),
+                      "Both sheets turn the corner on the same vertices, row " + row + ": " + first[row] + " " + second[row]);
+            }
+            // Where the water leaves the pool, the sheet starts on the pool's own pulled-back edge.
+            Vector3 crest = first[0];
+            for (BoardSurface pool : owners) {
+                assertTrue(pool.water.stream().anyMatch(point -> point.epsilonEquals(crest, 0.01f)),
+                      "Each pool's surface reaches the shared crest corner: " + crest);
+            }
+        }
     }
 
     private static BoardScene riverScene(Map<Coords, Integer> levels, boolean frozen) {

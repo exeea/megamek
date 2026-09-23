@@ -21,8 +21,10 @@ final class GpuScatter {
     }
 
     static void build(MeshPartBuilder mesh, BoardScene.Tile tile, BoardSurface surface, BoardScene.Feature feature) {
-        float x = BoardGeometry.centerX(tile.coords()) + feature.x() * BoardGeometry.HEX_SCALE;
-        float y = BoardGeometry.centerY(tile.coords()) + feature.y() * BoardGeometry.HEX_SCALE;
+        // On the hex's own ground, never over a receding rim or a transition's slope.
+        float[] spot = surface.relief.settle(BoardGeometry.centerX(tile.coords()) + feature.x() * BoardGeometry.HEX_SCALE,
+              BoardGeometry.centerY(tile.coords()) + feature.y() * BoardGeometry.HEX_SCALE, BoardRelief.metres(.3f));
+        float x = spot[0], y = spot[1];
         Matrix4 transform = new Matrix4().setToTranslation(x, y, surface.height(x, y))
               .rotate(Vector3.Z, feature.rotation())
               .scale(feature.scale() * BoardGeometry.HEX_SCALE, feature.scale() * BoardGeometry.HEX_SCALE,
@@ -70,11 +72,11 @@ final class GpuScatter {
 
     private static Color color(BoardScene.Surface surface, String asset) {
         if (asset.equals("scatter-dry-grass")) {
-            return new Color(.51f, .43f, .26f, 1);
+            return new Color(.76f, .60f, .18f, 1);
         }
         if (asset.equals("scatter-grass") || asset.equals("scatter-plant")) {
-            return surface == BoardScene.Surface.SAND ? new Color(.37f, .44f, .26f, 1)
-                  : asset.equals("scatter-grass") ? new Color(.33f, .4f, .17f, 1) : new Color(.25f, .36f, .16f, 1);
+            return surface == BoardScene.Surface.SAND ? new Color(.23f, .51f, .16f, 1)
+                  : asset.equals("scatter-grass") ? new Color(.32f, .47f, .16f, 1) : new Color(.12f, .32f, .10f, 1);
         }
         return switch (surface) {
             case SAND -> new Color(.61f, .49f, .33f, 1);

@@ -11,11 +11,22 @@ import megamek.common.board.Coords;
 final class BoardGeometry {
     /** Independent default for a whole unit occupying more than one game hex. */
     static final float DEFAULT_MULTI_HEX_UNIT_SCALE = 0.85f;
+    /** Whether steps between hexes take room on both sides of their edge; see {@link Tuning#transitions()}. */
+    static final boolean DEFAULT_TRANSITIONS = false;
 
+    /**
+     * Board presentation settings. {@code transitions}: each step between hexes of different levels takes room on
+     * both sides of the shared edge, a slope up to two levels and a deep cliff from three (see {@link BoardRelief}).
+     */
     record Tuning(float hexScale, float unitScale, float unitHeightScale, int levelHeight, float gridShade,
-          float multiHexUnitScale) {
+          float multiHexUnitScale, boolean transitions) {
         Tuning(float hexScale, float unitScale, float unitHeightScale, int levelHeight, float gridShade) {
             this(hexScale, unitScale, unitHeightScale, levelHeight, gridShade, DEFAULT_MULTI_HEX_UNIT_SCALE);
+        }
+
+        Tuning(float hexScale, float unitScale, float unitHeightScale, int levelHeight, float gridShade,
+              float multiHexUnitScale) {
+            this(hexScale, unitScale, unitHeightScale, levelHeight, gridShade, multiHexUnitScale, DEFAULT_TRANSITIONS);
         }
 
         Tuning {
@@ -91,16 +102,17 @@ final class BoardGeometry {
         return corner(new Vector3(), coords, elevation, corner);
     }
 
+    private static final int[] CORNER_DX = { 2, 1, -1, -2, -1, 1 };
+    private static final int[] CORNER_DY = { 0, 1, 1, 0, -1, -1 };
+
+    /**
+     * Corners lie on a lattice of quarter widths and half heights. Computing them from lattice indices gives every
+     * hex that shares a corner bit-identical coordinates, independently of the hex scale.
+     */
     static Vector3 corner(Vector3 out, Coords coords, float elevation, int corner) {
-        out.set(centerX(coords), centerY(coords), elevation * LEVEL);
-        return switch (Math.floorMod(corner, 6)) {
-            case 0 -> out.add(WIDTH / 2, 0, 0);
-            case 1 -> out.add(WIDTH / 4, HEIGHT / 2, 0);
-            case 2 -> out.add(-WIDTH / 4, HEIGHT / 2, 0);
-            case 3 -> out.add(-WIDTH / 2, 0, 0);
-            case 4 -> out.add(-WIDTH / 4, -HEIGHT / 2, 0);
-            default -> out.add(WIDTH / 4, -HEIGHT / 2, 0);
-        };
+        int k = Math.floorMod(corner, 6);
+        return out.set((3 * coords.getX() + 2 + CORNER_DX[k]) * (WIDTH / 4),
+              (-(2 * coords.getY() + (coords.getX() & 1) + 1) + CORNER_DY[k]) * (HEIGHT / 2), elevation * LEVEL);
     }
 
     static int edgeDirection(int edge) {
@@ -136,10 +148,13 @@ final class BoardGeometry {
 
     static float floor(BoardScene scene) {
         float lowest = Float.POSITIVE_INFINITY;
+        float depth = LEVEL;
         for (BoardScene.Tile tile : scene.tiles()) {
             lowest = Math.min(lowest, groundZ(tile));
+            // At small elevation-height settings, sculpted hollows can extend below a single game level.
+            depth = Math.max(depth, BoardRelief.headroom(tile));
         }
-        return lowest - LEVEL;
+        return lowest - depth;
     }
 
     /** Shared atmosphere baseline: hex LEVEL, never a riverbed, water DEPTH, or model height. */
@@ -166,6 +181,41 @@ final class BoardGeometry {
     }
 
     static Hit hit(BoardScene scene, Ray ray, Iterable<BoardScene.Tile> candidates, float floor) {
+        return hit(scene, ray, candidates, floor, null);
+    }
+
+    static Hit hit(BoardScene scene, Ray ray, Iterable<BoardScene.Tile> candidates, float floor, BoardSurface.Cache cache) {
+        Hit hit = nearest(scene, ray, candidates, floor, cache);
+        if (hit == null) {
+            // A ray exactly along a shared triangle edge can miss both triangles in float arithmetic. Symmetry lines
+            // through hex centres make that reproducible for axis-aligned pointer rays, so retry once, nudged.
+            Ray nudged = new Ray(new Vector3(ray.origin).add(.0013f * HEX_SCALE, .0007f * HEX_SCALE, 0), ray.direction);
+            hit = nearest(scene, nudged, candidates, floor, cache);
+        }
+        return hit;
+    }
+
+    /**
+     * The lower neighbour for a hit on the talus inside its footprint; otherwise the cliff's owner. With transitions a
+     * step's lower half lies in the lower hex's footprint, and a hit there belongs to it.
+     */
+    private static Coords foot(BoardScene scene, Coords owner, Vector3 hit) {
+        if (contains(owner, hit.x, hit.y)) { return owner; }
+        BoardScene.Tile high = scene.tile(owner);
+        for (int direction = 0; direction < 6; direction++) {
+            BoardScene.Tile neighbor = scene.tile(owner.translated(direction));
+            if (neighbor == null || !contains(neighbor.coords(), hit.x, hit.y)) { continue; }
+            float talus = LEVEL * .3f;
+            if (tuning.transitions() && high != null) {
+                talus = Math.max(talus, (high.elevation() * LEVEL - surfaceZ(neighbor)) * .5f);
+            }
+            if (hit.z < surfaceZ(neighbor) + talus) { return neighbor.coords(); }
+        }
+        return owner;
+    }
+
+    private static Hit nearest(BoardScene scene, Ray ray, Iterable<BoardScene.Tile> candidates, float floor,
+          BoardSurface.Cache cache) {
         Coords result = null;
         float nearest = Float.POSITIVE_INFINITY;
         Vector3 hit = new Vector3();
@@ -175,12 +225,15 @@ final class BoardGeometry {
                 BoardScene.Tile neighbor = scene.tile(tile.coords().translated(direction));
                 high = Math.max(high, BoardSurface.roadEdgeElevation(tile, neighbor, direction) * LEVEL);
             }
+            high += BoardRelief.headroom(tile);
+            // Sculpted cliffs, talus and rim lips can reach slightly beyond the logical footprint.
+            float reach = 2 * BoardRelief.overhang();
             if (!Intersector.intersectRayBoundsFast(ray,
                   new Vector3(centerX(tile.coords()), centerY(tile.coords()), (floor + high) / 2),
-                  new Vector3(WIDTH, HEIGHT, high - floor + 0.01f))) {
+                  new Vector3(WIDTH + reach, HEIGHT + reach, high - floor + 0.01f))) {
                 continue;
             }
-            BoardSurface surface = new BoardSurface(scene, tile);
+            BoardSurface surface = cache == null ? new BoardSurface(scene, tile) : cache.get(scene, tile);
             for (BoardSurface.Face face : surface.faces) {
                 if (Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit)
                       && ray.origin.dst2(hit) < nearest) {
@@ -194,9 +247,16 @@ final class BoardGeometry {
                     result = tile.coords();
                 }
             }
-            var sides = surface.sides(scene, floor);
-            sides.addAll(surface.waterfalls);
-            for (BoardSurface.Side side : sides) {
+            for (BoardSurface.Face face : surface.walls(scene, floor)) {
+                if (Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit)
+                      && ray.origin.dst2(hit) < nearest) {
+                    nearest = ray.origin.dst2(hit);
+                    // A rock face belongs to the higher hex that owns it; the scree at its foot, which spreads
+                    // past the logical edge, lies on the lower hex whose footprint contains it.
+                    result = foot(scene, tile.coords(), hit);
+                }
+            }
+            for (BoardSurface.Side side : surface.waterfalls) {
                 Vector3 lowerA = new Vector3(side.a().x, side.a().y, side.lowA());
                 Vector3 lowerB = new Vector3(side.b().x, side.b().y, side.lowB());
                 float distance = Float.POSITIVE_INFINITY;

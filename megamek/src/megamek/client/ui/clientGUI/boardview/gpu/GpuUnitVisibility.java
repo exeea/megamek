@@ -36,6 +36,7 @@ final class GpuUnitVisibility implements Disposable {
     private final Vector3 corner = new Vector3();
     private Texture unitDepth;
     private FrameBuffer unitColors;
+    private boolean depthCurrent;
 
     GpuUnitVisibility() {
         shader = GpuAtmosphere.shader("unit-visibility.frag");
@@ -66,6 +67,7 @@ final class GpuUnitVisibility implements Disposable {
 
     void render(Camera camera, List<ModelInstance> units, Texture sceneDepth, int bottom, float intensity, float scale,
           UnitBounds.Frame bounds) {
+        depthCurrent = false;
         if (intensity <= 0 || units.isEmpty()) {
             return;
         }
@@ -90,6 +92,7 @@ final class GpuUnitVisibility implements Disposable {
         units.forEach(unit -> GpuUnitInstance.renderDepth(colorBatch, unit));
         colorBatch.end();
         unitColors.end();
+        depthCurrent = true;
 
         HdpiUtils.glViewport(0, bottom, (int) camera.viewportWidth, (int) camera.viewportHeight);
         Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
@@ -123,6 +126,11 @@ final class GpuUnitVisibility implements Disposable {
         }
     }
 
+    /** Borrow this frame's existing unit capture; disabled/empty outlines must never expose stale camera depth. */
+    Texture depthTexture() {
+        return depthCurrent ? unitDepth : null;
+    }
+
     /** Project a conservative union, including the two-sample halo and rounding on HiDPI displays. */
     private void screenBounds(Camera camera, List<ModelInstance> units, float scale, UnitBounds.Frame bounds) {
         screenBounds.set(0, 0, camera.viewportWidth, camera.viewportHeight);
@@ -149,6 +157,7 @@ final class GpuUnitVisibility implements Disposable {
     }
 
     private void disposeBuffers() {
+        depthCurrent = false;
         if (unitDepth != null) { unitDepth.dispose(); unitDepth = null; }
         if (unitColors != null) { unitColors.dispose(); unitColors = null; }
     }

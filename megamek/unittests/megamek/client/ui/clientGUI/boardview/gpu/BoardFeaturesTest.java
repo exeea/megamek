@@ -79,7 +79,7 @@ class BoardFeaturesTest {
     }
 
     @Test
-    void desertAndSandyWoodsUseOnlyPalmsAtEveryDensity() {
+    void desertAndSandyWoodsGrowDesertSpeciesAtEveryDensity() {
         Coords coords = new Coords(3, 2);
         for (int density = 1; density <= 3; density++) {
             Hex hex = new Hex(0);
@@ -88,8 +88,9 @@ class BoardFeaturesTest {
             hex.setTheme("Desert");
             var themed = BoardFeatures.capture(hex, coords, Map.of());
             assertFalse(themed.isEmpty());
-            assertTrue(themed.stream().allMatch(feature -> feature.asset().equals("palm")
-                  || feature.asset().equals("palm-bent")), "Desert woodland must retain palm silhouettes");
+            assertTrue(themed.stream().allMatch(feature -> feature.asset().startsWith("palm")
+                  || feature.asset().startsWith("cactus") || feature.asset().equals("tree-dead")),
+                  "Desert woodland grows cacti, palms and dead trees");
             hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1));
             assertEquals(themed, BoardFeatures.capture(hex, coords, Map.of()), "Ground paving must not change the biome's trees");
             hex.removeTerrain(Terrains.PAVEMENT);
@@ -100,6 +101,36 @@ class BoardFeaturesTest {
             assertTrue(BoardFeatures.capture(hex, coords, Map.of()).stream().allMatch(feature -> feature.asset().endsWith("-snow")),
                   "Snow retains the existing winter variants");
         }
+    }
+
+    @Test
+    void woodsStandAtLeastTheirFoliageHeightAndTheirTreesFitTheGround() {
+        Coords coords = new Coords(4, 4);
+        for (int density = 1; density <= 3; density++) {
+            Hex hex = new Hex(0);
+            hex.addTerrain(new Terrain(Terrains.WOODS, density));
+            hex.addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, density == 3 ? 3 : 2));
+            for (var tree : BoardFeatures.capture(hex, coords, Map.of())) {
+                assertTrue(tree.height() >= (density == 3 ? 3 : 2), "Trees are as tall as the woods block sight");
+                assertTrue(tree.scale() >= 1.2f, "Woods are drawn oversized, so their cover reads at a glance");
+            }
+        }
+        Hex highland = new Hex(3);
+        highland.addTerrain(new Terrain(Terrains.WOODS, 2));
+        highland.addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, 2));
+        long conifers = BoardFeatures.capture(highland, coords, Map.of()).stream()
+              .filter(tree -> tree.asset().startsWith("pine")).count();
+        assertTrue(conifers > 9 / 2, "Highland woods are mostly conifers");
+        Hex snowfield = new Hex(0);
+        snowfield.addTerrain(new Terrain(Terrains.WOODS, 2));
+        snowfield.addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, 2));
+        snowfield.addTerrain(new Terrain(Terrains.SNOW, 1));
+        assertTrue(BoardFeatures.capture(snowfield, coords, Map.of()).stream()
+              .filter(tree -> tree.asset().startsWith("pine")).count() > 9 / 2, "Snowfields grow snow-laden conifers");
+        highland.setTheme("rock");
+        assertTrue(BoardFeatures.capture(highland, coords, Map.of()).stream()
+              .allMatch(tree -> tree.asset().startsWith("pine") || tree.asset().equals("tree-dead")),
+              "Rocky ground grows hardy conifers and dead trees");
     }
 
     @Test

@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Proxy;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -44,6 +43,7 @@ class GpuUnitLifecycleSmokeTest {
                 new Lwjgl3Application(new GpuBattleView(fixture.source) {
                     final AtomicInteger uploads = new AtomicInteger();
                     GL20 real;
+                    GpuGlWatch watch;
                     final java.util.Set<Integer> textures = new java.util.HashSet<>();
                     final java.util.Set<Integer> buffers = new java.util.HashSet<>();
                     int peakTextures, peakBuffers;
@@ -53,8 +53,7 @@ class GpuUnitLifecycleSmokeTest {
                     @Override
                     public void create() {
                         real = Gdx.gl;
-                        GL20 watched = (GL20) Proxy.newProxyInstance(GL20.class.getClassLoader(), new Class<?>[] { GL20.class },
-                              (proxy, method, args) -> {
+                        watch = new GpuGlWatch((proxy, method, args) -> {
                                   if (method.getName().contains("TexImage") || method.getName().contains("TexSubImage")) { uploads.incrementAndGet(); }
                                   try {
                                       Object value = method.invoke(real, args);
@@ -71,8 +70,6 @@ class GpuUnitLifecycleSmokeTest {
                                   }
                                   catch (InvocationTargetException error) { throw error.getCause(); }
                               });
-                        Gdx.graphics.setGL20(watched);
-                        Gdx.gl = Gdx.gl20 = watched;
                         super.create();
                     }
 
@@ -150,8 +147,7 @@ class GpuUnitLifecycleSmokeTest {
                     @Override
                     public void dispose() {
                         super.dispose();
-                        Gdx.graphics.setGL20(real);
-                        Gdx.gl = Gdx.gl20 = real;
+                        watch.close();
                         try {
                             assertTrue(peakTextures > 0 && peakBuffers > 0, "The GL resource audit must observe native allocations");
                             assertTrue(textures.isEmpty(), "Undisposed textures: " + textures);

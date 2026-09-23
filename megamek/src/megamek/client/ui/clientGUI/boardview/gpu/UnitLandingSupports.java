@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.WeakHashMap;
 
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.model.Node;
@@ -127,6 +128,41 @@ final class UnitLandingSupports {
         return surface(scene, x, y, surfaces, false);
     }
 
+    private static BoardScene floorScene;
+    private static int floorRevision;
+    private static float floor;
+    /** The lying faces of each hex's walls, kept while its surface is. */
+    private static final Map<BoardSurface, List<BoardSurface.Face>> SLOPES = new WeakHashMap<>();
+
+    /**
+     * A hex's own ground at (x, y). With hex transitions the slope or talus of a step can lie over the hex's footprint
+     * instead of its top; it belongs to the walls of the higher hex, this one or a neighbour.
+     */
+    private static float ground(BoardScene scene, BoardScene.Tile tile, float x, float y, BoardSurface.Cache surfaces) {
+        BoardSurface surface = surfaces == null ? new BoardSurface(scene, tile) : surfaces.get(scene, tile);
+        float top = BoardSurface.sampleHeight(surface.faces, x, y, Float.NaN);
+        if (!Float.isNaN(top) || !BoardGeometry.tuning().transitions()) {
+            return Float.isNaN(top) ? BoardGeometry.groundZ(tile) : top;
+        }
+        if (floorScene != scene || floorRevision != BoardGeometry.revision()) {
+            floor = BoardGeometry.floor(scene);
+            floorScene = scene;
+            floorRevision = BoardGeometry.revision();
+        }
+        float slope = Float.NEGATIVE_INFINITY;
+        for (int direction = -1; direction < 6; direction++) {
+            BoardScene.Tile owner = direction < 0 ? tile : scene.tile(tile.coords().translated(direction));
+            if (owner == null) { continue; }
+            BoardSurface walls = owner == tile ? surface
+                  : surfaces == null ? new BoardSurface(scene, owner) : surfaces.get(scene, owner);
+            for (BoardSurface.Face face : SLOPES.computeIfAbsent(walls,
+                  key -> BoardTacticalGeometry.lying(key.walls(scene, floor)))) {
+                slope = Math.max(slope, face.height(x, y));
+            }
+        }
+        return Float.isFinite(slope) ? slope : BoardGeometry.groundZ(tile);
+    }
+
     /** The visible hex surface, including liquid, for flat tactical artwork. */
     static float surface(BoardScene scene, float x, float y, BoardSurface.Cache surfaces) {
         return surface(scene, x, y, surfaces, true);
@@ -145,8 +181,7 @@ final class UnitLandingSupports {
                 if (tile == null || !BoardGeometry.contains(tile.coords(), x, y)) {
                     continue;
                 }
-                float sample = tile.frozen() ? BoardGeometry.surfaceZ(tile)
-                      : (surfaces == null ? new BoardSurface(scene, tile) : surfaces.get(scene, tile)).height(x, y);
+                float sample = tile.frozen() ? BoardGeometry.surfaceZ(tile) : ground(scene, tile, x, y, surfaces);
                 if (includeLiquid && tile.liquid().present()) { sample = Math.max(sample, BoardGeometry.waterZ(tile)); }
                 if (!tile.liquid().present() || tile.frozen() || sample >= BoardGeometry.waterZ(tile)) {
                     height = Math.max(height, sample);

@@ -100,7 +100,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
 
     /** A material family determines the exposed geology and the overhanging surface cover. */
     enum Surface {
-        GRASS("terrain/dirt", "terrain/cornice_grass", 0, false),
+        GRASS("terrain/rock", "terrain/cornice_grass", 0, false),
         DIRT("terrain/dirt", "terrain/cornice_dirt", 0, false),
         SAND("terrain/sand", "terrain/cornice_sand", 0, false),
         ROCK("terrain/rock", "terrain/cornice_rock", 0, false),
@@ -143,7 +143,14 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
     /** Water depth -1 means dry. Ground and decals are independent from solid feature geometry. */
     record Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
           Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-          Pixels tactical, List<Feature> features, List<BoardView.HexText> text, BoardLiquid liquid, Pixels foliage) {
+          Pixels tactical, List<Feature> features, List<BoardView.HexText> text, BoardLiquid liquid, Pixels foliage,
+          boolean detailedGround) {
+        Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
+              Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
+              Pixels tactical, List<Feature> features, List<BoardView.HexText> text, BoardLiquid liquid, Pixels foliage) {
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
+                  tactical, features, text, liquid, foliage, false);
+        }
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
               Pixels tactical, List<Feature> features, List<BoardView.HexText> text, BoardLiquid liquid) {

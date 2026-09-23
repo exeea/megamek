@@ -29,6 +29,7 @@ import com.badlogic.gdx.graphics.g3d.loader.G3dModelLoader;
 import com.badlogic.gdx.graphics.glutils.FileTextureData;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.JsonReader;
+import com.badlogic.gdx.utils.JsonValue;
 import megamek.common.Configuration;
 
 /** GL-thread ownership of shared models, repeating terrain materials, and animated liquid frames. */
@@ -38,6 +39,10 @@ final class GpuAssets implements Disposable {
     private final Map<Interior, Model> interiors = new HashMap<>();
     private final Map<String, Texture> materials = new HashMap<>();
     private final Map<String, Cliff> cliffs = new HashMap<>();
+    private final Map<String, Sculpt> sculpts = new HashMap<>();
+    private JsonValue sculptManifest;
+    private Texture flatColor;
+    private Texture flatNormal;
     private final Map<String, Color> materialTints = new HashMap<>();
     private final Map<BoardLiquid.Textures, Animation<Texture>> liquids = new HashMap<>();
     private BoardRim.Images incline;
@@ -47,6 +52,12 @@ final class GpuAssets implements Disposable {
 
     /** Three aligned, repeating maps. Surface channels are height, roughness, occlusion and relief range. */
     record Cliff(Texture color, Texture normal, Texture surface) { }
+
+    /**
+     * A sculpted-terrain material from {@code textures/sculpt}: albedo with height in alpha, a tangent-space normal
+     * with occlusion in alpha, and the metres one repeat spans (from the set's manifest).
+     */
+    record Sculpt(Texture color, Texture normal, float tile) { }
 
     record Animation<T>(List<T> frames, float[] ends, float duration) {
         T at(float time) {
@@ -89,17 +100,58 @@ final class GpuAssets implements Disposable {
     }
 
     Cliff cliff(String name) {
-        return cliffs.computeIfAbsent(name, key -> {
-            String family = key.substring(key.lastIndexOf('/') + 1);
-            FileHandle color = materialFile("cliffs/" + family);
-            FileHandle normal = materialFile("cliffs/" + family + "-normal");
-            FileHandle surface = materialFile("cliffs/" + family + "-surface");
+        return relief("cliffs", name.substring(name.lastIndexOf('/') + 1), name);
+    }
+
+    Cliff ground(String family) {
+        return relief("ground", family, "terrain/" + (family.equals("grass") ? "dirt" : family));
+    }
+
+    private Cliff relief(String folder, String family, String fallback) {
+        return cliffs.computeIfAbsent(folder + "/" + family, key -> {
+            FileHandle color = materialFile(key);
+            FileHandle normal = materialFile(key + "-normal");
+            FileHandle surface = materialFile(key + "-surface");
             // Older/custom data sets retain their original material until a complete set is supplied.
             if (!color.exists() || !normal.exists() || !surface.exists()) {
-                return new Cliff(material(key), null, null);
+                return new Cliff(material(fallback), null, null);
             }
             return new Cliff(texture(color), texture(normal), texture(surface));
         });
+    }
+
+    /**
+     * One sculpt material. A data pack without the set still renders: a neutral albedo and a flat normal stand in,
+     * so geometry, light and the per-level grade remain.
+     */
+    Sculpt sculpt(String name) {
+        return sculpts.computeIfAbsent(name, key -> {
+            FileHandle color = materialFile("sculpt/" + key), normal = materialFile("sculpt/" + key + "-normal");
+            FileHandle manifest = new FileHandle(new File(root, "textures/sculpt/manifest.json"));
+            if (sculptManifest == null && manifest.exists()) { sculptManifest = new JsonReader().parse(manifest); }
+            JsonValue entry = sculptManifest == null ? null : sculptManifest.get("materials").get(key);
+            if (!color.exists() || !normal.exists() || entry == null) {
+                if (flatColor == null) {
+                    flatColor = solid(0xa0a0a0ff);
+                    flatNormal = solid(0x8080ffff);
+                }
+                return new Sculpt(flatColor, flatNormal, 4);
+            }
+            return new Sculpt(texture(color), texture(normal), entry.getFloat("tile"));
+        });
+    }
+
+    private static Texture solid(int rgba) {
+        Pixmap pixels = new Pixmap(2, 2, Pixmap.Format.RGBA8888);
+        try {
+            pixels.setColor(rgba);
+            pixels.fill();
+            Texture texture = new Texture(pixels);
+            texture.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
+            return texture;
+        } finally {
+            pixels.dispose();
+        }
     }
 
     /**
@@ -194,7 +246,8 @@ final class GpuAssets implements Disposable {
                   .startsWith(new File(root, "textures").toPath().toAbsolutePath().normalize());
             Texture.TextureWrap wrap = repeating ? Texture.TextureWrap.Repeat : Texture.TextureWrap.ClampToEdge;
             texture.setWrap(wrap, wrap);
-            if (repeating && file.parent().name().equals("cliffs")) {
+            if (repeating && (file.parent().name().equals("cliffs") || file.parent().name().equals("ground")
+                  || file.parent().name().equals("sculpt"))) {
                 // Cliff relief needs its full resolution; mipmaps and supported anisotropy handle distance.
                 texture.setAnisotropicFilter(8);
             } else if (repeating) {
@@ -383,6 +436,14 @@ final class GpuAssets implements Disposable {
         models.clear();
         materials.clear();
         cliffs.clear();
+        sculpts.clear();
+        sculptManifest = null;
+        if (flatColor != null) {
+            flatColor.dispose();
+            flatNormal.dispose();
+            flatColor = null;
+            flatNormal = null;
+        }
         materialTints.clear();
         liquids.clear();
         incline = null;

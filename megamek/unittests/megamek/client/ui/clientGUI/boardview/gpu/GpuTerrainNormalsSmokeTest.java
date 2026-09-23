@@ -65,7 +65,12 @@ class GpuTerrainNormalsSmokeTest {
         try (GpuBoardFixture fixture = GpuBoardFixture.create(new Board(15, 9, hexes))) {
             SwingUtilities.invokeAndWait(fixture.source::refresh);
             BoardScene captured = fixture.source.takeFrame().scene();
-            BoardScene scene = new BoardScene(0, 15, 9, captured.tiles(), List.of(), List.of(), -1, "", List.of(),
+            // Exercise the retained artwork-atlas path. Physical base maps and living cover have their own native test.
+            List<BoardScene.Tile> atlasTiles = captured.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(),
+                  tile.elevation(), tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(), tile.ground(),
+                  tile.normals(), tile.decals(), tile.decalsWithoutLimbs(), tile.tactical(), tile.features(), tile.text(),
+                  tile.liquid(), tile.foliage(), false)).toList();
+            BoardScene scene = new BoardScene(0, 15, 9, atlasTiles, List.of(), List.of(), -1, "", List.of(),
                   new BoardScene.Light(30, -20));
             for (BoardScene.Tile tile : scene.tiles()) {
                 assertNotNull(tile.normals(), "Every captured ground image carries its pre-generated normal layer");

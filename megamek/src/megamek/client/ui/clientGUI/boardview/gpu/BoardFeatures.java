@@ -15,8 +15,35 @@ import megamek.common.units.Terrains;
 final class BoardFeatures {
     /** Global scatter density: 0 disables it, 1 is the baseline, 3 triples each biome's placement chance. */
     static final float SCATTER_DENSITY_MULTIPLIER = 3.0f;
-    private static final List<String> TREES = List.of("tree", "pine", "tree-broad", "birch", "tree-slender", "pine-tall", "willow");
+    /** Tree species by where they grow; repeated names are the common ones. */
+    private static final List<String> TEMPERATE = List.of("tree", "pine", "tree-broad", "birch", "tree-slender",
+          "pine-tall", "pine-broad");
+    private static final List<String> HIGHLAND = List.of("pine", "pine-tall", "pine-broad", "tree-slender", "pine-tall",
+          "birch");
+    private static final List<String> ROCKY = List.of("pine", "tree-dead", "pine-tall", "pine-broad");
+    private static final List<String> WETLAND = List.of("willow", "tree-slender", "tree-dead", "willow", "tree");
+    private static final List<String> BARREN = List.of("tree-dead");
+    private static final List<String> PARK = List.of("tree-broad", "tree", "birch");
+    private static final List<String> DESERT = List.of("cactus", "palm", "tree-dead", "cactus-flowers", "palm-bent",
+          "cactus");
+    private static final List<String> PALMS = List.of("palm", "palm-bent");
     private BoardFeatures() { }
+
+    /** Preserve authored symbols for special terrain; only known base surfaces receive photographic replacement. */
+    static boolean detailedGround(Hex hex) {
+        for (int terrain : hex.getTerrainTypes()) {
+            boolean base = switch (terrain) {
+                case Terrains.WOODS, Terrains.JUNGLE, Terrains.FOLIAGE_ELEV, Terrains.SAND, Terrains.TUNDRA,
+                      Terrains.PAVEMENT, Terrains.SNOW, Terrains.WATER, Terrains.RAPIDS,
+                      Terrains.CLIFF_TOP, Terrains.CLIFF_BOTTOM, Terrains.INCLINE_TOP, Terrains.INCLINE_BOTTOM,
+                      Terrains.INCLINE_HIGH_TOP, Terrains.INCLINE_HIGH_BOTTOM, Terrains.METAL_CONTENT,
+                      Terrains.DEPLOYMENT_ZONE -> true;
+                default -> false;
+            };
+            if (!base) { return false; }
+        }
+        return true;
+    }
 
     static BoardScene.Surface surface(Hex hex) {
         String theme = hex.getTheme() == null ? "" : hex.getTheme().toLowerCase(Locale.ROOT);
@@ -83,31 +110,29 @@ final class BoardFeatures {
         }
         boolean jungle = hex.containsTerrain(Terrains.JUNGLE);
         if (jungle || hex.containsTerrain(Terrains.WOODS)) {
-            boolean snow = surface(hex) == BoardScene.Surface.SNOW;
-            boolean palms = !snow && (jungle || desert(hex));
             int density = hex.terrainLevel(jungle ? Terrains.JUNGLE : Terrains.WOODS);
             int count = density >= 3 ? 16 : density == 2 ? 9 : 3;
+            // Woods block sight up to their foliage height, so every tree stands at least that tall and far wider
+            // than life: the canopy reads as the obstacle the rules make it. Light woods have the broadest crowns.
             float height = Math.max(1, hex.terrainLevel(Terrains.FOLIAGE_ELEV));
+            float crown = density >= 3 ? 1.35f : density == 2 ? 1.45f : 1.7f;
+            List<String> species = species(hex, jungle);
             for (int index = 0; index < count; index++) {
                 double angle = index * (density >= 2 ? 2.399963 : 2 * Math.PI / count) + variant;
                 // Space light foliage around the centre; dense foliage fills an equal-area spiral.
                 float radius = density >= 2 ? 28 * (float) Math.sqrt(index / (count - 1f))
                       : 20 + index * 2;
-                String tree = palms ? (index % 2 == 0 ? "palm" : "palm-bent")
-                      : TREES.get(Math.floorMod(coords.getX() * 31 + coords.getY() * 17 + index, TREES.size()));
-                if (snow) {
-                    tree += "-snow";
-                }
+                String tree = species.get(Math.floorMod(coords.getX() * 31 + coords.getY() * 17 + index, species.size()));
                 result.add(new BoardScene.Feature(tree, (float) Math.cos(angle) * radius,
-                      (float) Math.sin(angle) * radius, index * 137.5f, 0.8f + (index % 3) * 0.1f,
-                      height * (0.8f + (index % 3) * 0.1f), 0, BoardScene.FeatureKind.TREE));
+                      (float) Math.sin(angle) * radius, index * 137.5f, crown * (0.9f + (index % 3) * 0.1f),
+                      height * (1f + (index % 3) * 0.05f), 0, BoardScene.FeatureKind.TREE));
             }
         }
         scatter(hex, coords, result);
         return List.copyOf(result);
     }
 
-    /** Cosmetic only: most hexes stay empty, and terrain updates never reshuffle neighboring details. */
+    /** Cosmetic clusters leave the unit centre clear; terrain updates never reshuffle neighboring details. */
     private static void scatter(Hex hex, Coords coords, List<BoardScene.Feature> result) {
         if (hex.containsAnyTerrainOf(Terrains.WATER, Terrains.ICE, Terrains.ROAD, Terrains.PAVEMENT,
               Terrains.BRIDGE, Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL, Terrains.FIELDS,
@@ -129,7 +154,7 @@ final class BoardFeatures {
         if (random.nextFloat() >= density * SCATTER_DENSITY_MULTIPLIER) {
             return;
         }
-        int count = random.nextFloat() < .2f ? 2 : 1;
+        int count = 3 + random.nextInt(4);
         String theme = hex.getTheme() == null ? "" : hex.getTheme().toLowerCase(Locale.ROOT);
         boolean plants = !theme.contains("lunar") && !theme.contains("mars") && !theme.contains("volcan");
         for (int index = 0; index < count; index++) {
@@ -147,11 +172,33 @@ final class BoardFeatures {
                 asset = "scatter-plant";
             }
             double angle = random.nextDouble() * Math.PI * 2;
-            float radius = 24 * (float) Math.sqrt(random.nextFloat());
+            float radius = 16 + 12 * (float) Math.sqrt(random.nextFloat());
             result.add(new BoardScene.Feature(asset, (float) Math.cos(angle) * radius,
                   (float) Math.sin(angle) * radius, random.nextFloat() * 360, .7f + random.nextFloat() * .5f,
-                  .09f + random.nextFloat() * .09f, 0, BoardScene.FeatureKind.SCATTER));
+                  .10f + random.nextFloat() * .13f, 0, BoardScene.FeatureKind.SCATTER));
         }
+    }
+
+    /**
+     * The trees that grow on this hex's ground: palms in jungle; cacti, palms and dead trees in the desert; conifers
+     * on rock and on highland meadows two levels up or more; willows on wet dirt; dead trees on Mars and the Moon;
+     * park trees on pavement. Snowfields grow the highland's conifers and birches, and snow keeps every species in its
+     * winter form.
+     */
+    private static List<String> species(Hex hex, boolean jungle) {
+        BoardScene.Surface surface = surface(hex);
+        String theme = hex.getTheme() == null ? "" : hex.getTheme().toLowerCase(Locale.ROOT);
+        boolean snow = surface == BoardScene.Surface.SNOW;
+        if (!snow && jungle) { return PALMS; }
+        if (!snow && desert(hex)) { return DESERT; }
+        List<String> trees = theme.contains("mars") || theme.contains("lunar") ? BARREN : switch (surface) {
+            case ROCK -> ROCKY;
+            case DIRT -> WETLAND;
+            case CONCRETE -> PARK;
+            case SNOW -> HIGHLAND;
+            default -> hex.getLevel() >= 2 ? HIGHLAND : TEMPERATE;
+        };
+        return snow ? trees.stream().map(tree -> tree + "-snow").toList() : trees;
     }
 
     private static boolean desert(Hex hex) {

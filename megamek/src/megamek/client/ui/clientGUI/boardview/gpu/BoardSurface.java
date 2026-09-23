@@ -2,40 +2,145 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.TreeSet;
 
 import com.badlogic.gdx.math.EarClippingTriangulator;
 import com.badlogic.gdx.math.Vector3;
+import megamek.common.board.Coords;
 
 /** The actual topography of one hex. Rendering, road continuity, banks and picking share it. */
 final class BoardSurface {
-    /** GL-view-owned derived geometry. Pose snapshots share tiles; a board edit or tuning change invalidates it. */
+    /** GL-view-owned geometry. Artwork snapshots retain surfaces; shape changes are checked once per generation. */
     static final class Cache {
+        private static final int CAPACITY = 256;
+        private static final class Entry {
+            final List<Geometry> key;
+            final BoardSurface surface;
+            long generation;
+
+            Entry(List<Geometry> key, BoardSurface surface, long generation) {
+                this.key = key;
+                this.surface = surface;
+                this.generation = generation;
+            }
+        }
+
         private List<BoardScene.Tile> tiles;
         private int revision = -1;
-        private final java.util.Map<BoardScene.Tile, BoardSurface> surfaces = new java.util.IdentityHashMap<>();
+        private int boardId = -1;
+        private int width;
+        private int height;
+        private long generation;
+        private final Map<Coords, Entry> surfaces = new LinkedHashMap<>(32, .75f, true);
 
         BoardSurface get(BoardScene scene, BoardScene.Tile tile) {
-            if (tiles != scene.tiles() || revision != BoardGeometry.revision()) {
+            if (boardId != scene.boardId() || width != scene.width() || height != scene.height()
+                  || revision != BoardGeometry.revision()) {
                 clear();
-                tiles = scene.tiles();
+                boardId = scene.boardId();
+                width = scene.width();
+                height = scene.height();
                 revision = BoardGeometry.revision();
             }
-            return surfaces.computeIfAbsent(tile, key -> new BoardSurface(scene, key));
+            if (tiles != scene.tiles()) {
+                tiles = scene.tiles();
+                generation++;
+            }
+            Entry entry = surfaces.get(tile.coords());
+            if (entry == null || entry.generation != generation) {
+                List<Geometry> key = geometryKey(scene, tile);
+                if (entry == null || !entry.key.equals(key)) {
+                    entry = new Entry(key, new BoardSurface(scene, tile), generation);
+                    surfaces.put(tile.coords(), entry);
+                } else {
+                    entry.generation = generation;
+                }
+            }
+            if (surfaces.size() > CAPACITY) { surfaces.remove(surfaces.keySet().iterator().next()); }
+            return entry.surface;
         }
 
         void clear() { surfaces.clear(); tiles = null; }
     }
+
+    /** Only inputs that alter topology; the ramp mask also captures second-ring road/bridge approaches. */
+    record Geometry(int elevation, int waterDepth, boolean frozen, int roadExits, BoardScene.Surface surface,
+          BoardLiquid liquid, boolean detailedGround, List<BoardScene.Feature> features, int ramps) { }
+
+    /** Own shape followed by the six neighboring shapes; a missing board neighbor has a null entry. */
+    static List<Geometry> geometryKey(BoardScene scene, BoardScene.Tile tile) {
+        List<Geometry> key = new ArrayList<>(7);
+        key.add(geometry(scene, tile));
+        for (int direction = 0; direction < 6; direction++) {
+            key.add(geometry(scene, scene.tile(tile.coords().translated(direction))));
+        }
+        return Collections.unmodifiableList(key);
+    }
+
+    private static Geometry geometry(BoardScene scene, BoardScene.Tile tile) {
+        return tile == null ? null : new Geometry(tile.elevation(), tile.waterDepth(), tile.frozen(), tile.roadExits(),
+              tile.surface(), tile.liquid(), tile.detailedGround(), tile.features(), ramps(scene, tile));
+    }
+
+    static int ramps(BoardScene scene, BoardScene.Tile tile) {
+        int result = 0;
+        for (int direction = 0; direction < 6; direction++) {
+            if (roadEdgeElevation(tile, scene.tile(tile.coords().translated(direction)), direction) != tile.elevation()) {
+                result |= 1 << direction;
+            }
+        }
+        return result;
+    }
+
     private static final int SHORE_SEGMENTS = 6;
     /** A fall's lip: the water stops this far short of the mouth so the sheet can curve down to the shared edge. */
     private static final float FALL_LIP_WIDTH = .045f;
     private static final float FALL_LIP_DROP = .5f;
-    enum Finish { TOP, SHORE, BED, BANK, ICE }
+    /** Share of each ray from the waterline to the hex centre over which a bed descends; the rest is its plateau. */
+    private static final float PLATEAU = .75f;
+    /**
+     * Water depth over a fall's lip, in hex-scale units: the bed rises to a ledge the water pours over, so the wall
+     * beneath the fall closes up to just under the sheet. No pool is shallower, so both sides of a corner agree.
+     */
+    private static final float LIP_DEPTH = 1;
+    /** DRESSING is thin detail on the ground, such as tree pits: drawn and picked, never raising what stands there. */
+    enum Finish { TOP, RIM, CAP, WALL, OUTCROP, SHORE, BED, BANK, ICE, DRESSING }
     /** landEdge identifies the adjoining dry hex for bank artwork; other faces use -1. */
     record Face(Vector3 a, Vector3 b, Vector3 c, Finish finish, int landEdge) {
         Face(Vector3 a, Vector3 b, Vector3 c, Finish finish) {
             this(a, b, c, finish, -1);
+        }
+
+        /** Height of the face above a point, or negative infinity when the point lies outside it. */
+        float height(float x, float y) {
+            float tolerance = .001f * BoardGeometry.HEX_SCALE;
+            if (x < Math.min(a.x, Math.min(b.x, c.x)) - tolerance
+                  || x > Math.max(a.x, Math.max(b.x, c.x)) + tolerance
+                  || y < Math.min(a.y, Math.min(b.y, c.y)) - tolerance
+                  || y > Math.max(a.y, Math.max(b.y, c.y)) + tolerance) { return Float.NEGATIVE_INFINITY; }
+            float denominator = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
+            if (Math.abs(denominator) < 0.00001f) {
+                return Float.NEGATIVE_INFINITY;
+            }
+            float u = ((b.y - c.y) * (x - c.x) + (c.x - b.x) * (y - c.y)) / denominator;
+            float v = ((c.y - a.y) * (x - c.x) + (a.x - c.x) * (y - c.y)) / denominator;
+            float w = 1 - u - v;
+            // World-space tolerance keeps rounded edge samples on thin bank triangles even far from the origin.
+            // A fixed barycentric tolerance can miss the bank and drop the exposed wall to the riverbed.
+            float squared = tolerance * tolerance / (denominator * denominator);
+            if ((u >= 0 || u * u <= squared * (square(b.x - c.x) + square(b.y - c.y)))
+                  && (v >= 0 || v * v <= squared * (square(c.x - a.x) + square(c.y - a.y)))
+                  && (w >= 0 || w * w <= squared * (square(a.x - b.x) + square(a.y - b.y)))) {
+                u = Math.max(0, u);
+                v = Math.max(0, v);
+                w = Math.max(0, w);
+                return (u * a.z + v * b.z + w * c.z) / (u + v + w);
+            }
+            return Float.NEGATIVE_INFINITY;
         }
     }
     record Side(Vector3 a, Vector3 b, float lowA, float lowB, int edge) { }
@@ -43,31 +148,45 @@ final class BoardSurface {
     final BoardScene.Tile tile;
     final List<Face> faces = new ArrayList<>();
     final List<Vector3> water = new ArrayList<>();
+    /**
+     * The water's full outline, before a falling mouth pulls its surface back from the edge. Segments on open mouths
+     * continue into the next pool; every other segment is a bank.
+     */
+    final List<Vector3> outline = new ArrayList<>();
     final List<Face> waterFaces = new ArrayList<>();
     final List<Side> waterfalls = new ArrayList<>();
     final int ramps;
+    final BoardRelief relief;
+    private final List<Face> edgeTopography = new ArrayList<>();
+    private List<Face> wallFaces;
+    private float wallFloor = Float.NaN;
     /**
      * Open mouths by edge: connected liquid continues there, so no bank rises across that edge and a wall exposed
      * on it starts at the bed rather than at the hex's own top.
      */
     private int openMouths;
+    /** The faces of a sculpted bed that stay clear of the hex outline, as a range of {@link #faces}. */
+    private int interiorFrom, interiorTo;
+    /**
+     * Per falling edge, the miter its sheet turns on at its first and last corner where another fall of the same drop
+     * carries on, from this pool or from the neighbouring one; null where the end is free.
+     */
+    private final Vector3[] joinA = new Vector3[6];
+    private final Vector3[] joinB = new Vector3[6];
     private final Vector3 center;
     private final Vector3[] corners = new Vector3[6];
 
     BoardSurface(BoardScene scene, BoardScene.Tile tile) {
+        this(scene, tile, true);
+    }
+
+    private BoardSurface(BoardScene scene, BoardScene.Tile tile, boolean detailed) {
         this.tile = tile;
         center = BoardGeometry.center(tile.coords(), tile.elevation());
         for (int edge = 0; edge < 6; edge++) {
             corners[edge] = BoardGeometry.corner(tile.coords(), tile.elevation(), edge);
         }
-        int exits = 0;
-        for (int direction = 0; direction < 6; direction++) {
-            BoardScene.Tile neighbor = scene.tile(tile.coords().translated(direction));
-            if (roadEdgeElevation(tile, neighbor, direction) != tile.elevation()) {
-                exits |= 1 << direction;
-            }
-        }
-        ramps = exits;
+        ramps = ramps(scene, tile);
         if (tile.liquid().present()) {
             river(scene);
         } else if (ramps != 0) {
@@ -75,6 +194,12 @@ final class BoardSurface {
         } else {
             fan(corners, center.z, Finish.TOP);
         }
+        for (int i = 0; i < faces.size(); i++) {
+            // Only faces reaching the hex outline can meet a neighbour's: a bed's inner rings never do.
+            if (i < interiorFrom || i >= interiorTo) { edgeTopography.add(faces.get(i)); }
+        }
+        relief = new BoardRelief(scene, tile, ramps);
+        if (detailed) { relief.top(faces); }
     }
 
     /** A bridge approach reaches the deck at the edge; ordinary roads share their height change across both hexes. */
@@ -144,15 +269,7 @@ final class BoardSurface {
               && mouths.getLast() - mouths.getFirst() <= 4;
         List<Integer> channelMouths = channel ? mouths : List.of();
         Vector3[] waterline = curvedContour(shore, BoardGeometry.waterZ(tile), channelMouths);
-        float[] submerged = shore.clone();
-        for (int i = 0; i < 6; i++) {
-            if (submerged[i] > 0) {
-                // Narrow channels need steeper submerged banks to retain full depth beneath their hex centre.
-                submerged[i] += (channel ? 2 : 6) * BoardGeometry.HEX_SCALE;
-            }
-        }
-        Vector3[] bed = curvedContour(submerged, BoardGeometry.groundZ(tile), channelMouths);
-        polygon(bed, Finish.BED, faces);
+        basin(scene, waterline, shore);
         for (int edge = 0; edge < 6; edge++) {
             if (shore[edge] == 0) {
                 continue; // An open river mouth has no bank or wall across it.
@@ -166,14 +283,20 @@ final class BoardSurface {
                 Vector3 lipB = shoreLip(waterline[next], b);
                 quad(a, b, lipB, lipA, Finish.TOP, edge);
                 quad(lipA, lipB, waterline[next], waterline[index], Finish.SHORE, edge);
-                quad(waterline[index], waterline[next], bed[next], bed[index], Finish.BANK);
             }
         }
         if (tile.frozen()) {
             fan(corners, center.z, Finish.ICE);
         } else {
+            for (int edge = 0; edge < 6; edge++) {
+                if (lip[edge] > 0) {
+                    joinA[edge] = join(scene, shore, lip, edge, (edge + 5) % 6);
+                    joinB[edge] = join(scene, shore, lip, edge, (edge + 1) % 6);
+                }
+            }
             // The water recedes from a falling mouth; the sheet's lip curves back down to the shared edge.
             Vector3[] surface = pulledBack(waterline, lip);
+            outline.addAll(List.of(waterline));
             water.addAll(List.of(surface));
             polygon(surface, Finish.TOP, waterFaces);
             for (int edge = 0; edge < 6; edge++) {
@@ -185,6 +308,159 @@ final class BoardSurface {
                       waterline[((edge + 1) % 6) * SHORE_SEGMENTS], bottom, bottom, edge));
             }
         }
+    }
+
+    /**
+     * The bed as one sculpted basin. It descends from the waterline, or from an open mouth's profile, along rays toward
+     * the hex centre, where a plateau keeps the unit anchor at the game depth. Mouth profiles and corners are pure
+     * functions of the hexes sharing them, so neighbouring beds meet without a step; a basin whose rim already lies at
+     * its own depth all round, as inside a lake, stays a flat fan.
+     */
+    private void basin(BoardScene scene, Vector3[] waterline, float[] shore) {
+        int count = waterline.length;
+        float surface = BoardGeometry.waterZ(tile), full = depth(tile), ledge = LIP_DEPTH * BoardGeometry.HEX_SCALE;
+        boolean[] spills = new boolean[6];
+        for (int edge = 0; edge < 6; edge++) {
+            spills[edge] = shore[edge] == 0 && neighbor(scene, edge).elevation() < tile.elevation();
+        }
+        // Depth at each edge's first point: none where a bank meets it, the ledge beside a fall, else the depth shared
+        // by the corner's hexes.
+        float[] ends = new float[6];
+        for (int edge = 0; edge < 6; edge++) {
+            int previous = (edge + 5) % 6;
+            ends[edge] = shore[edge] > 0 || shore[previous] > 0 ? 0
+                  : spills[edge] || spills[previous] ? ledge : cornerDepth(scene, edge);
+        }
+        float[] rim = new float[count];
+        boolean level = true;
+        for (int i = 0; i < count; i++) {
+            int edge = i / SHORE_SEGMENTS;
+            if (i % SHORE_SEGMENTS == 0) {
+                rim[i] = ends[edge];
+            } else if (shore[edge] == 0) {
+                // Beds of one level meet at their mean depth; a fall pours over its ledge into the pool below, whose
+                // bed keeps its own depth.
+                BoardScene.Tile other = neighbor(scene, edge);
+                float middle = spills[edge] ? ledge
+                      : other.elevation() == tile.elevation() ? (full + depth(other)) / 2 : full;
+                int next = (edge + 1) % 6;
+                rim[i] = mouthDepth(waterline[i], waterline[edge * SHORE_SEGMENTS], ends[edge],
+                      waterline[next * SHORE_SEGMENTS], ends[next], middle);
+            }
+            level &= Math.abs(rim[i] - full) < .001f * BoardGeometry.HEX_SCALE;
+        }
+        Vector3[] ring = new Vector3[count];
+        for (int i = 0; i < count; i++) {
+            ring[i] = new Vector3(waterline[i].x, waterline[i].y, surface - rim[i]);
+        }
+        int hexes = scene.width() * scene.height();
+        int rings = level ? 0 : hexes <= BoardRelief.FULL_DETAIL_HEXES ? 4
+              : hexes <= BoardRelief.MEDIUM_DETAIL_HEXES ? 3 : 2;
+        for (int k = 1; k <= rings; k++) {
+            float x = k / (float) rings, scale = 1 - PLATEAU * x;
+            // Falling from the rim with some slope, steepest halfway, and easing into the plateau.
+            float descent = .25f * x + .75f * x * x * (3 - 2 * x);
+            Vector3[] inner = new Vector3[count];
+            for (int i = 0; i < count; i++) {
+                inner[i] = new Vector3(center.x + (waterline[i].x - center.x) * scale,
+                      center.y + (waterline[i].y - center.y) * scale, surface - rim[i] - (full - rim[i]) * descent);
+            }
+            for (int i = 0; i < count; i++) {
+                int j = (i + 1) % count;
+                quad(ring[i], ring[j], inner[j], inner[i], Finish.BED);
+            }
+            ring = inner;
+            if (k == 1) { interiorFrom = faces.size(); }
+        }
+        Vector3 anchor = new Vector3(center.x, center.y, surface - full);
+        for (int i = 0; i < count; i++) {
+            triangle(anchor, ring[i], ring[(i + 1) % count], Finish.BED);
+        }
+        if (rings > 0) { interiorTo = faces.size(); }
+    }
+
+    private BoardScene.Tile neighbor(BoardScene scene, int edge) {
+        return scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(edge)));
+    }
+
+    /** Water depth of a liquid tile, from its surface to its bed. */
+    private static float depth(BoardScene.Tile tile) {
+        return BoardGeometry.waterZ(tile) - BoardGeometry.groundZ(tile);
+    }
+
+    /** Mean depth of the connected water at this hex's level around the corner where edge {@code index} starts. */
+    private float cornerDepth(BoardScene scene, int index) {
+        List<Float> depths = new ArrayList<>(List.of(depth(tile)));
+        for (int edge : new int[] { (index + 5) % 6, index }) {
+            BoardScene.Tile other = neighbor(scene, edge);
+            if (other != null && tile.liquid().connects(other.liquid()) && other.elevation() == tile.elevation()) {
+                depths.add(depth(other));
+            }
+        }
+        // The same order in every hex around the corner, so all of them round the mean alike.
+        Collections.sort(depths);
+        float sum = 0;
+        for (float value : depths) { sum += value; }
+        return sum / depths.size();
+    }
+
+    /**
+     * An open mouth's bed at p: its middle depth, easing over a third of the mouth to the depth at either end. The
+     * profile is symmetric in its ends, so both hexes of the mouth evaluate the same points to the same heights.
+     */
+    private static float mouthDepth(Vector3 p, Vector3 a, float atA, Vector3 b, float atB, float middle) {
+        float reach = Math.max((float) Math.hypot(b.x - a.x, b.y - a.y) / 3, .001f);
+        return middle + (atA - middle) * ease((float) Math.hypot(p.x - a.x, p.y - a.y) / reach)
+              + (atB - middle) * ease((float) Math.hypot(p.x - b.x, p.y - b.y) / reach);
+    }
+
+    /** 1 at 0, easing smoothly down to 0 at 1 and beyond. */
+    private static float ease(float x) {
+        float t = Math.clamp(x, 0, 1);
+        return 1 - t * t * (3 - 2 * t);
+    }
+
+    /**
+     * The miter at the corner between falling edge {@code edge} and edge {@code side} when a fall of the same drop
+     * continues there: this pool's own fall over {@code side}, or the fall of the neighbouring pool across
+     * {@code side}, at this pool's level, into the same lower pool. Both sheets and both pools then turn that corner on
+     * one vector, whose projection on each fall's outward is one, so nothing opens between them. Null where the end is
+     * free.
+     */
+    private Vector3 join(BoardScene scene, float[] shore, float[] lip, int edge, int side) {
+        Vector3 other = null;
+        if (lip[side] > 0) {
+            other = edgeOutward(side);
+        } else if (shore[side] == 0) {
+            BoardScene.Tile beside = neighbor(scene, side), below = neighbor(scene, edge);
+            Coords at = beside.coords();
+            if (beside.elevation() == tile.elevation() && !beside.frozen() && beside.liquid().connects(below.liquid())) {
+                for (int k = 0; k < 6; k++) {
+                    if (at.translated(BoardGeometry.edgeDirection(k)).equals(below.coords())) {
+                        other = BoardGeometry.corner(at, 0, k + 1).sub(BoardGeometry.corner(at, 0, k)).crs(Vector3.Z).nor();
+                    }
+                }
+            }
+        }
+        if (other == null) { return null; }
+        Vector3 own = edgeOutward(edge);
+        return own.add(other).scl(1 / (1 + edgeOutward(edge).dot(other)));
+    }
+
+    /** Outward normal of one edge: away from this hex. */
+    private Vector3 edgeOutward(int edge) {
+        return edgeInward(edge).scl(-1);
+    }
+
+    /** The direction the end of a fall moves out along: its own outward, or the miter it shares with the next fall. */
+    Vector3 fallDirection(Side fall, boolean atA) {
+        Vector3 join = (atA ? joinA : joinB)[fall.edge()];
+        return join != null ? new Vector3(join) : edgeOutward(fall.edge());
+    }
+
+    /** Whether the end of a fall carries on into another fall's sheet, so that end is not a free side. */
+    boolean fallJoins(Side fall, boolean atA) {
+        return (atA ? joinA : joinB)[fall.edge()] != null;
     }
 
     /** Radius of the curve where a fall leaves the upper surface, bounded by half the drop and one hex width. */
@@ -208,13 +484,11 @@ final class BoardSurface {
             if (lip[edge] <= 0 && !(anchor && lip[previous] > 0)) {
                 continue;
             }
-            Vector3 inward = new Vector3();
-            if (lip[edge] > 0) {
-                inward.mulAdd(edgeInward(edge), lip[edge]);
-            }
-            if (anchor && lip[previous] > 0) {
-                inward.mulAdd(edgeInward(previous), lip[previous]);
-            }
+            // A corner where two falls meet recedes along their shared miter, which is where both pulled-back edges and
+            // both sheets meet, whether the other fall is this pool's or the neighbouring one's.
+            Vector3 join = !anchor ? null : lip[edge] > 0 ? joinA[edge] : joinB[previous];
+            Vector3 inward = join != null ? new Vector3(join).scl(-Math.max(lip[edge], lip[previous]))
+                  : edgeInward(lip[edge] > 0 ? edge : previous).scl(lip[edge] > 0 ? lip[edge] : lip[previous]);
             result[index] = new Vector3(waterline[index]).add(inward);
         }
         return result;
@@ -397,38 +671,39 @@ final class BoardSurface {
     }
 
     float height(float x, float y) {
+        return height(faces, x, y);
+    }
+
+    private float height(List<Face> geometry, float x, float y) {
+        return sampleHeight(geometry, x, y, BoardGeometry.groundZ(tile));
+    }
+
+    /** Shared triangle sampler for ground support and embedded rock placement. */
+    static float sampleHeight(List<Face> geometry, float x, float y, float fallback) {
         float height = Float.NEGATIVE_INFINITY;
-        for (Face face : faces) {
-            if (face.finish() == Finish.ICE) {
-                continue;
-            }
-            Vector3 a = face.a(), b = face.b(), c = face.c();
-            float denominator = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
-            if (Math.abs(denominator) < 0.00001f) {
-                continue;
-            }
-            float u = ((b.y - c.y) * (x - c.x) + (c.x - b.x) * (y - c.y)) / denominator;
-            float v = ((c.y - a.y) * (x - c.x) + (a.x - c.x) * (y - c.y)) / denominator;
-            float w = 1 - u - v;
-            // World-space tolerance keeps rounded edge samples on thin bank triangles even far from the origin.
-            // A fixed barycentric tolerance can miss the bank and drop the exposed wall to the riverbed.
-            float tolerance = 0.001f * BoardGeometry.HEX_SCALE / Math.abs(denominator);
-            if (u >= -tolerance * Math.hypot(b.x - c.x, b.y - c.y)
-                  && v >= -tolerance * Math.hypot(c.x - a.x, c.y - a.y)
-                  && w >= -tolerance * Math.hypot(a.x - b.x, a.y - b.y)) {
-                u = Math.max(0, u);
-                v = Math.max(0, v);
-                w = Math.max(0, w);
-                height = Math.max(height, (u * a.z + v * b.z + w * c.z) / (u + v + w));
+        for (Face face : geometry) {
+            if (face.finish() != Finish.ICE && face.finish() != Finish.DRESSING) {
+                height = Math.max(height, face.height(x, y));
             }
         }
-        return Float.isFinite(height) ? height : BoardGeometry.groundZ(tile);
+        return Float.isFinite(height) ? height : fallback;
+    }
+
+    private static float square(float value) { return value * value; }
+
+    /** Derived once per immutable terrain snapshot; repeated pointer rays reuse the rendered topology. */
+    List<Face> walls(BoardScene scene, float floor) {
+        if (wallFaces == null || wallFloor != floor) {
+            wallFaces = relief.walls(sides(scene, floor));
+            wallFloor = floor;
+        }
+        return wallFaces;
     }
 
     private void cuts(Vector3 a, Vector3 b, TreeSet<Float> cuts) {
         float dx = b.x - a.x, dy = b.y - a.y;
         float length2 = dx * dx + dy * dy;
-        for (Face face : faces) {
+        for (Face face : edgeTopography) {
             for (Vector3 point : List.of(face.a(), face.b(), face.c())) {
                 if (Math.abs(dx * (point.y - a.y) - dy * (point.x - a.x)) < 0.02f) {
                     float t = ((point.x - a.x) * dx + (point.y - a.y) * dy) / length2;
@@ -451,7 +726,10 @@ final class BoardSurface {
         for (int edge = 0; edge < 6; edge++) {
             Vector3 a = corners[edge], b = corners[(edge + 1) % 6];
             BoardScene.Tile neighbor = scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(edge)));
-            BoardSurface adjacent = neighbor == null ? null : new BoardSurface(scene, neighbor);
+            if (mouth(edge) && neighbor.elevation() == tile.elevation()) {
+                continue; // Beds of one level share their mouth's profile and their banks' top: nothing stands between.
+            }
+            BoardSurface adjacent = neighbor == null ? null : new BoardSurface(scene, neighbor, false);
             TreeSet<Float> cuts = new TreeSet<>(List.of(0f, 1f));
             cuts(a, b, cuts);
             if (adjacent != null) {
@@ -467,10 +745,10 @@ final class BoardSurface {
                 Vector3 end = new Vector3(a).lerp(b, to);
                 Vector3 sampleA = new Vector3(start).lerp(end, 0.001f);
                 Vector3 sampleB = new Vector3(end).lerp(start, 0.001f);
-                start.z = height(sampleA.x, sampleA.y);
-                end.z = height(sampleB.x, sampleB.y);
-                float lowA = adjacent == null ? floor : adjacent.height(sampleA.x, sampleA.y);
-                float lowB = adjacent == null ? floor : adjacent.height(sampleB.x, sampleB.y);
+                start.z = height(edgeTopography, sampleA.x, sampleA.y);
+                end.z = height(edgeTopography, sampleB.x, sampleB.y);
+                float lowA = adjacent == null ? floor : adjacent.height(adjacent.edgeTopography, sampleA.x, sampleA.y);
+                float lowB = adjacent == null ? floor : adjacent.height(adjacent.edgeTopography, sampleB.x, sampleB.y);
                 float dA = start.z - lowA, dB = end.z - lowB;
                 if (dA < -0.001f && dB > 0.001f) {
                     float t = -dA / (dB - dA);

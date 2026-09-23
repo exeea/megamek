@@ -29,7 +29,7 @@ import org.junit.jupiter.api.Test;
 @Tag("on-demand")
 class GpuWaterShaderSmokeTest {
     @Test
-    void proceduralWaterRetainsItsPaletteShowsRainAndSplashesAndMeasuresBothColorPaths() {
+    void proceduralWaterShowsRainAndSplashesAndMeasuresBothColorPaths() {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
@@ -64,12 +64,9 @@ class GpuWaterShaderSmokeTest {
                             save(authored, "water-color-gif-" + isometric);
                             save(dry, "water-color-procedural-" + isometric);
                             save(wet, "water-downpour-" + isometric);
-                            int[] original = sample(authored, camera, new Coords(5, 4), 60);
                             int[] replacement = sample(dry, camera, new Coords(5, 4), 60);
-                            for (int shift : new int[] { 8, 16, 24 }) {
-                                assertEquals(mean(original, shift), mean(replacement, shift), 24,
-                                      "Procedural water should retain the authored depth-two palette");
-                            }
+                            assertTrue(mean(replacement, 8) > mean(replacement, 24),
+                                  "Clear water keeps its cool absorption palette while reflecting the sky");
                             int[] drizzle = sample(light, camera, new Coords(5, 4), 60);
                             int[] downpour = sample(wet, camera, new Coords(5, 4), 60);
                             int lightPixels = differences(replacement, drizzle, 6);

@@ -66,23 +66,35 @@ sections; struts are sparse, untextured boxes inside that footprint. Interior
 models are shared by asset and story count. Fuel tanks and industrial terrain
 do not receive building interiors.
 
-The asset directory also contains bridge-arm, crop-row and sixteen authored tree
-models, plus three rendering detail levels for each tree. All are at or below 480 triangles.
+The asset directory also contains bridge-arm, crop-row and twenty-two authored tree
+models (thirteen species and nine snow-covered forms), plus three rendering detail
+levels for each tree. All are at or below 480 triangles.
 Runtime only loads models
 actually used by the board. Roof and wall picking uses their actual triangles.
 
 `BoardFeatures` copies model placement and each feature's own height from the
-hex on the Swing thread. Buildings, fuel tanks, industrial structures, foliage,
-and bridge decks retain their respective game heights. Forest density controls
-tree count: light uses three trees, heavy nine, and ultra-heavy sixteen. Light
-woods spread their trees around the centre with a small variation in radius. Dense
-woods and jungle use an equal-area spiral across the hex; deterministic positions
-do not change between snapshots. Snow
-terrain or a snow theme selects snow trees. Jungle and desert/sandy woods select
-palms unless snow is present; paving does not change the desert tree selection.
-Other woodland mixes broad/slender common trees, birch, willow and pine
-silhouettes; jungle uses two palm shapes. Props sit on the actual ground surface,
-including road approaches.
+hex on the Swing thread. Buildings, fuel tanks, industrial structures and bridge
+decks retain their respective game heights. Woods and jungle block sight up to
+their foliage height, so every tree stands at least that tall: by default two
+levels for light and heavy woods and three for ultra-heavy. Crowns are drawn 1.2
+to 1.9 times the model's width, far wider than life, so the cover reads at a
+glance; light woods get the broadest. Forest density controls tree count: light
+uses three trees, heavy nine, and ultra-heavy sixteen. Light woods spread their
+trees around the centre with a small variation in radius. Dense woods and jungle
+use an equal-area spiral across the hex; deterministic positions do not change
+between snapshots.
+
+Species follow the ground. Jungle grows two palm shapes. Desert and sandy woods
+grow saguaro cacti, some in flower, palms and dead trees; paving does not change
+that selection. Rock grows conifers and dead trees. Highland meadows two levels
+up or more and snowfields grow mostly conifers with a few slender trees and
+birches. Wet dirt grows willows among slender, common and dead trees. Pavement
+grows park trees: broad, common and birch. Mars and lunar ground keep only dead
+trees. Other woodland mixes broad, slender and common trees, birch and pines.
+Snow terrain or a snow theme selects every species' snow-covered form. On paved
+ground every tree stands in its own planting pit, a square of earth inside a low
+kerb, sized so that neighbouring pits never touch. Props sit on the actual ground
+surface, including road approaches.
 
 Natural open terrain also gets sparse cosmetic scatter from `BoardFeatures`:
 grass tufts and low leafy plants on grassland, dry grass on dirt/tundra, and two
@@ -93,15 +105,17 @@ tints. `BoardFeatures.SCATTER_DENSITY_MULTIPLIER` scales all biome placement
 chances: `0` disables scatter, `0.5` halves it, and `1` is the original baseline.
 It is currently set to `3.0f`: coordinate-seeded placement occupies about 48% of
 grass hexes, 54% of rock, 36% of dirt, 30% of sand and 18% of snow. Higher values
-cap at every eligible hex; one in five occupied hexes gets a
-second detail. Offsets, rotation, proportions and shade vary without reshuffling
+cap at every eligible hex; occupied hexes get three to six clustered details.
+Offsets, rotation, proportions and shade vary without reshuffling
 on scene updates. Water, roads and their sloped approaches, structures, fields,
 woods/jungle and special hazardous terrain stay clear.
 
-`GpuScatter` bakes these untextured, opaque details into one additional mesh part
-per nonempty 16-by-16 chunk: grass uses 6 triangles, leafy plants 16, and stones
+Physical base grass now uses the denser wind-driven cover described below; its
+legacy `scatter-grass` is omitted. `GpuScatter` still bakes the other untextured,
+opaque details into one additional mesh part
+per nonempty 8-by-8 chunk: grass uses 6 triangles, leafy plants 16, and stones
 9. This adds no per-object draw calls, textures, animation or picking geometry.
-The details stay below 0.2 elevation levels and away from hex edges. Color,
+The details stay below 0.23 elevation levels and away from hex edges. Color,
 camera depth and shadows share one visibility choice: hide a chunk's scatter
 when its largest detail projects below 2 framebuffer pixels, restoring it at
 3 pixels. This hysteresis avoids flicker, and zoom changes do not rebuild the
@@ -113,10 +127,9 @@ variety at normal board scale, while larger versions would compete with terrain
 and unit silhouettes. Short reeds in occasional shoreline patches are a useful
 future candidate, but need placement against the actual water contour.
 
-`BoardScatterTest` checks sparse, stable placement, biome choices and protected
-terrain. `GpuScatterSmokeTest` measures the actual submitted geometry: its
-256-hex, four-surface sample at `3.0f` has 144 details, 1,296 triangles and one additional draw
-per visible pass, dropping to zero below the distance cutoff. It also checks
+`BoardScatterTest` checks stable placement, biome choices and protected
+terrain. `GpuScatterSmokeTest` measures the actual submitted geometry and
+checks that it drops to zero below the distance cutoff. It also checks
 cutoff hysteresis, matching shadows/depth, unchanged picking and clear road
 approaches, and captures overview/close views using the shipped ground artwork.
 
@@ -126,8 +139,26 @@ measure. `TreeLod` uses 80- and 24-pixel thresholds with 10% hysteresis. Zooming
 switches below 72 and 21.6 pixels; zooming in restores detail above 88 and 26.4.
 Top and orbit views use the same selection, including display scaling and tree
 height/hex-size tuning. Color, camera depth and shadows use that selection;
-picking keeps the near mesh so zoom cannot move a board-space hit. Prop batches
-rebuild only when a tree crosses a threshold, and dispose their replaced meshes.
+picking keeps the near mesh so zoom cannot move a board-space hit. Trees are
+instanced (`GpuTreeInstances`): each model is held once at each detail level, and
+each tree is eight floats giving its place, turn and horizontal and vertical scale.
+Every pass gathers the trees of the chunks it draws and submits one draw per model
+part, so a detail change rebuilds nothing. The colour, camera depth and shadow
+passes each keep their own instance buffers and upload only when their trees
+change, so a frame that repeats the last one uploads nothing
+(`GpuDetailSmokeTest`); holding each model once per pass doubles the tree
+geometry to 1.6, 3.6 and 4.3 MB in the benchmark below. `GpuForestBenchmarkSmokeTest` builds a
+40 by 40 board with 5,499 trees and views it at far, middle and near zoom (Mesa
+llvmpipe, OpenGL 4.5 core). Against the earlier merged per-chunk tree meshes:
+
+- tree geometry held: 197, 456 and 571 MB before, 0.8, 1.8 and 2.2 MB after;
+- draws: 169, 151 and 57 before, 64, 64 and 45 after;
+- first frame after a zoom change: 1,585, 1,375 and 475 ms before, 1,154, 563 and
+  190 ms after;
+- median frame times: within run-to-run noise on the software renderer.
+
+The captures match the merged meshes except for a few pixels where overlapping
+trees tie in depth.
 
 The original trees contain 478–480 triangles. Near opaque trees omit only faces
 strictly enclosed by another closed component, retaining every remaining vertex,
@@ -153,22 +184,26 @@ hex boundaries. A 0.16-world-unit deck clearance at default scale
 separates zero-elevation bridges from the riverbank and its road decals, avoiding
 coplanar depth flicker without changing the game's bridge elevation.
 
-Exposed grassland faces use dirt; sand uses sandstone; rocky themes use rock;
-pavement uses concrete. Rough and rubble scatter retain the underlying surface
-family. Snow uses compacted snow and firn on exposed sides.
-World-scaled UVs repeat the wall material once per 96 world units, with a stable
-world-space phase instead of restarting each face. Vertical cliffs use the
-1024-pixel color, normal and packed height/roughness/occlusion sets under
-`textures/cliffs/`, with close-up parallax and material lighting. See
-[Cliff materials](gpu-cliff-materials.md) for their authoring, fallback, cost and
-limitations; these additional samples and texture storage belong to vertical
-walls, independently of the upper-rim atlas composition described below.
+Dry hexes use [sculpted terrain](gpu-terrain-materials.md): a continuous landform of
+tops, cliffs with filleted corners, rim formations, talus and a small generated rock kit,
+lit in linear space with per-level grading. Grassland shows earth banks on steps of up to
+two levels and granite from three; sand uses bedded sandstone; rocky themes use rock;
+snowfields bury low steps; concrete stands in cast slabs, and from three levels one slab
+rests on bedrock. Rough and rubble retain their semantic artwork on a sculpted outline.
+**Tuning > General > Hex transitions** (off by default) gives each step between two
+natural grounds 4 m of room on both sides of its edge: a slope up to two levels, a
+detailed cliff above a talus from three. Units, trees, the tactical overlay and
+picking follow the new outline.
+Water, road and ramp hexes keep the geometry
+described here, with the upper-rim atlas and cornice handling below; their shores and beds
+take the sculpted materials of the adjoining land. Those unsculpted edges still use the
+1024-pixel sets under `textures/cliffs/` (see [Cliff materials](gpu-cliff-materials.md)).
 A missing cliff set falls back to the original color material in
 `textures/terrain/`. Other repeating materials, including building facades,
 retain the 128-texel sampling limit. `tools/prepare_board_textures.py` rebuilds
 those legacy copies from any available `full-resolution/` originals, while
 `tools/prepare_cliff_materials.py` owns the new wall sets. Light-building window spacing is
-eight windows per 128 world units. Exposed sides carry a skirt: a
+eight windows per 128 world units. In the legacy treatment, exposed sides carry a skirt: a
 `textures/terrain/cornice_*` strip hangs from the upper edge. Its art is normally a
 mask rather than a palette: alpha is the strip's shape, including the fade at its lower
 end, and gray is lightness about mid gray, so the tint arrives unchanged at 128 and
@@ -205,7 +240,7 @@ deliberate restart of that phase, so a mask's silhouette must not carry a hard f
 at the very ends of a strip. Nothing else shapes it: the strip's own alpha ends the
 skirt, so no separate depth profile or concrete rule remains.
 
-The cliff-top rim uses one pair of masks for every family. An exposed edge whose
+The legacy cliff-top rim uses one pair of masks for every family. An exposed edge whose
 adjacent hex sits no more than two levels lower wears `textures/terrain/incline_dark`;
 anything deeper is a high incline and wears the coarser
 `textures/terrain/high_incline_dark`, exactly the board's own split, and a board-edge
@@ -255,17 +290,31 @@ their feet. Positive-depth water sits just below the hex's surface elevation.
 Water of every depth sits one world unit below the nominal surface so changing
 depth does not introduce a water-surface step. Rounded, slightly irregular
 shorelines follow the water-neighbor pattern, inspired by `Structured_Water`.
-Dry-facing edges have a land bank and sloping submerged shore; adjacent water
-hexes share exactly matching open mouths. Different bed depths retain their
-physical underwater steps. Each shore segment uses a bounded six-piece curve.
-A separate 128 by 128 bed map supplies silt, sand and small pebble detail at
-the same fixed material scale; it contains no baked water-surface reflections.
-A blended sandy band fades from the land into damp sand along the waterline.
-Each bank continues the adjoining dry hex's selected terrain artwork into that
-fade, so sand, snow and other terrain retain their own shoreline palette.
+Dry-facing edges have a land bank; adjacent water hexes share exactly matching
+open mouths. Each shore segment uses a bounded six-piece curve.
+Every bed is one sculpted basin. It falls from the waterline, gently at first,
+steepest halfway and easing into a level plateau around the hex centre, where
+grounded units stand at the game depth. An open mouth's bed follows a profile both
+hexes compute alike: the mean of their depths when they share a level (across a fall
+each side keeps its own), easing to the depth at either end, which is none where a
+bank meets the mouth and the mean of the connected water of that level around a
+corner where three water hexes meet. Different depths at one level therefore join by
+underwater slopes without a step; only a fall keeps a wall. A basin whose rim lies
+at its own depth all round, as inside a lake, stays a flat fan, and boards of more
+than 2,500 or 10,000 hexes use fewer rings, like the land's sculpting. The bed
+shades smoothly from shared vertices. Beds and banks take the sculpted materials of
+the land around them. Submerged ground, whether bed, bank or drowned wall, keeps
+only the hue its column of water passes and catches caustics, from the same optical
+model as the surface above it; its detail sways with the swell above, as the
+rippling surface bends the view of it, while rain wets only what stands above the
+water and the grid is drawn once, on the water itself. Steep submerged banks take
+their material from the side, as walls do, so it never stretches downhill, and a
+wall below the water line takes the palette and depth of the water it faces. A water
+hex's walls in the air, beside falls and at the board edge, take the sculpted bank
+or cliff look of land walls of the same height. Wet banks continue the adjoining dry
+hex's surface family into the waterline. Special terrain keeps its selected artwork
+and legacy sandy fade.
 Banks at the board boundary use the water hex's own ground artwork.
-An exposed side that drops hangs the skirt of the family the hex's terrain type
-detects, exactly as dry ground of that family does; an open mouth hangs none.
 River mouths use roughly 33 of the hex edge's 42 world units at default scale;
 their sandy fade starts at the edge corners. Connected channels retain this
 width through bends, while isolated basins keep their rounded land banks.
@@ -279,47 +328,116 @@ Concave channels are triangulated from their outline for both rendering and
 picking. Junctions, adjacent openings and isolated pools retain the bay contours.
 
 An open mouth leading to a lower, unfrozen water hex generates one waterfall from
-the upper surface to the lower surface. Its water stops a lip short of the shared
-edge and the sheet curves down over that gap to the edge's own plane, where it hangs
-just clear of the wall; its foot then spreads into the water it lands in. Nothing is
-left hanging beyond the mouth and both joins are tangent, so neither the silhouette
-nor the shading cuts. The lip radius stays inside half the drop and 0.045 hex widths,
-the foot uses half of it, and the sheet's spread is part of the chunk's cull bounds.
-It uses the upper hex's water palette, and the procedural pattern keeps the pool's own
-field, carried down the sheet by the height it has fallen, so it crosses the lip
-without a seam. Opacity is 80% on the outward face and 40% on the inward face, and
-vertically repeating coordinates drive the artwork fallback. Viewed from upstream,
-the back remains visible through the upper water surface with a softer tint.
-The waterfall carries the pool's color mixture over the lip: its animated liquid
-color is mixed with the actual bed material's average using the shared surface
-opacity. This avoids exposing raw blue water artwork when the pool itself appears
-green/brown through its bed. The bed average is calculated once per asset, with
-no per-frame readback or extra texture sample. Lighting follows the sheet's own
-normal, which turns from up at the water's edge, around to outward along the
-hanging sheet, and back to up where it lands.
-In the GIF fallback, water artwork extends into the transparent hex corners so
-scrolling changes only the flow pattern, never the waterfall's width. Its fixed
-edges match the river mouth. Equal surface levels and frozen connections do not generate falls.
+the upper surface to the lower surface (`GpuWaterfall`). The bed rises to a ledge
+one world unit under the water at a falling mouth, so the wall beneath the fall
+closes up to just under the sheet. The water stops a lip short of the shared edge;
+the sheet starts on that pulled-back edge, curves over the crest and follows the
+path of thrown water, level at first and ever steeper, landing a short way out in
+the receiving pool (0.16 of the drop, 1.5 to 7 world units at default scale), into
+which a short fillet spreads it. Across the mouth the curtain is divided into
+streams that bulge gently as they fall. Where two falls of the same drop share a
+corner, from one pool or from two pools side by side that fall into the same pool,
+both sheets and both pools turn that corner on one miter vector, with one normal,
+so the curtain wraps round the corner without a gap or a crease; only free ends
+fray. The sheet's reach is part of the chunk's cull bounds.
+A procedural fall pours over its crest as thin, glassy water in the pool's shallow
+colour, mirroring the sky, with a bright line along the rounded crest, and breaks
+into white water within a metre or two of falling. Its streaks are mapped by time of
+flight: water crosses the crest at about 1.5 m/s and then falls freely, so ribbons,
+tumbling clumps and fine threads speed up and stretch as they fall, with glassy gaps
+between them, and one steady clock scrolls them all without shearing the pattern.
+Toward the foot it breaks up into rounded billows and dissolves into the churned
+water it lands in. White water keeps a trace of its liquid's hue, so toxic falls stay
+green and Martian ones rust, and it is lit as a volume: faces turned to the sun
+glow, light passing through lifts the shaded side, and in shade it still passes on
+part of the sun's light, like the foam it lands in. The inward face draws at 40%
+opacity, so from upstream the back remains visible through the upper water surface.
+In the GIF fallback the fall's artwork draws at 80% opacity with vertically repeating
+coordinates; water artwork extends into the transparent hex corners so scrolling
+changes only the flow pattern, never the waterfall's width, and its fixed edges match
+the river mouth. Equal surface levels and frozen connections do not generate falls.
 These are lightweight animated surfaces, not a fluid simulation.
 
-`GpuWaterShader.USE_PROCEDURAL_WATER` selects procedural water color instead of
-uploaded GIF frames. It defaults to `false`: the native comparison found no
-consistent render-time improvement from replacing the artwork, so the authored appearance
-is retained. Set it to `true` to avoid water GIF storage and uploads. The shared
-64x64 RGB noise field then drives changing caustic
-patterns and surface normals, with palettes matched to Saxarba's shallow green,
-deep blue, Mars and volcanic water. Rapids and torrents add more foam. Animation
-deforms in place unless elevation identifies a downstream current. Water normals,
-rain impacts, specular lighting, sky reflection, foam and splash spray are shaded
-together, with geometry and cloud shadows. Sky reflection is approximate; there
-is no scene capture, refraction buffer or fluid simulation.
+`GpuWaterShader.USE_PROCEDURAL_WATER` selects procedural water instead of uploaded
+GIF frames and defaults to `true`. Each chunk with open water builds one small field
+texture on a world-aligned lattice every 4.5 world units (a sixteenth of a hex's
+height), so neighbouring chunks sample identical values along their borders. Red
+holds the signed distance to the nearest bank; green the water depth over the actual
+bed triangles, rasterized once per pool and softened across underwater steps by a
+1-2-1 tent; blue and alpha the `BoardFlow` current, blended between neighbouring
+hexes by a smooth kernel. Rapids, fast currents and a pool's approach to its lip ride
+on the vertices as agitation, blended the same way. Nothing in the surface's look is
+chosen per hex, so hexes of any depth or current share one seamless surface and, for
+one palette, one draw per chunk. The field is built with the chunk and never changes
+per frame. A shared 256-square detail texture, generated once and tiling in every
+channel, supplies fine ripple slopes, gradient-noise foam and a caustic network.
+
+Wind waves come from `GpuOcean`, an FFT ocean after Tessendorf simulated on the GPU
+in fragment passes, so it needs only OpenGL 3.3 and also runs on macOS. A Phillips
+spectrum for the wind (downwind waves favoured, some energy in every direction) is
+built on the CPU whenever the wind changes and scaled to a root-mean-square slope of
+0.07 in calm air up to 0.27 in a gale. Every frame the spectrum is evolved with the
+deep-water dispersion relation, so long swells outrun short chop and the surface
+keeps changing instead of sliding, and inverse-transformed at 128 by 128 over a
+64-metre patch. The result holds the wave slopes, how tightly the choppy horizontal
+motion squeezes each crest, and foam that forms where a crest folds over and fades
+over about 2.5 seconds; it is mipmapped with 8x anisotropic filtering, so distant
+water averages its waves instead of aliasing them into lines. The water reads it at
+four scales, each turned against the others, so the patch never shows. The
+simulation runs once per frame for every water surface, only on boards with
+procedural water; a driver that cannot run it leaves the water on the static
+ripples.
+
+One optical model in `water-optics.glsl` serves the surface and everything seen
+through it. Each palette absorbs red, green and blue at its own rate per level of
+depth: submerged ground keeps the hue its column passes, and the premultiplied
+surface removes what the column absorbs and adds its scattered light, so shallow
+water over pale ground turns turquoise and deep water saturated blue. Mars water
+carries rust silt, volcanic water iron-red and hazardous liquid chemical green.
+Caustics play on submerged ground, sharpest in the shallows and fading with depth.
+Clear water scatters a deep navy and glows turquoise over pale shallows. Gusts
+roughen the surface in patches that roll downwind, while shallows and the lee of a
+bank run calmer. Only the foam's grain and the rapids' fine chop follow the current:
+they are advected in two phases that restart only while unweighted, at any current,
+and still water reads the same texels in both, so nothing pulses. Reflection rises
+more gently than Fresnel's law toward grazing, so waves read from the steep board
+camera; the sky gradient carries the clouds overhead where the reflected ray meets
+the cloud layer. Sun glitter follows a GGX model whose roughness grows with the
+patch of waves a pixel covers, so close up each wave flashes and far off the glitter
+spreads into a broad path. Thin crests glow in the shallows' colour where the sun
+shines through them. Deep water varies a little in tone over a few hexes. Where open
+water lies beyond, surf rolls onto the banks as bands whose crests march shoreward
+and break into foam; narrow pools and channels stay without it. Banks draw a crisp
+contact line, never thinner than a pixel so it holds still from afar, and a band of
+foam that pulses with each wave and breaks into drifts. Whitecaps form where the
+simulated crests fold over in open water; rapids foam gathers in broken clusters
+that spread as the rapids strengthen, and churning water turns paler and more opaque
+before it breaks. Far off, foam blurs into its mean instead of vanishing, so rapids
+still read as white water. Below a fall the pool boils white along the landing line and the
+foam streams away in streaks that break into patches and lace, with rings pushed
+outward, a curtain of mist rising in front of the landing water, wider than the
+fall, and a low billow of it drifting out over the pool; mist glows when seen
+against the sun.
+Rain rings, cloud and geometry shadows and the hex grid shade together with the
+water. Every texture is read outside per-pixel branches, so mip selection is defined
+everywhere, and no pattern is turned by a direction that varies across the surface,
+which would shear it. Sky reflection is approximate; there is no scene capture,
+refraction buffer or fluid simulation.
 
 Set `USE_PROCEDURAL_WATER` to `false` and rebuild to restore Saxarba
 `anim_water_0.gif` through `anim_water_4.gif`, plus Mars/volcanic variants and
-authored transparent rapids/torrent foam. This preserves the same rain, flow and
-splash effects. Depths greater than four retain their actual bed depth and use
-the deepest palette/artwork. The procedural path does not load water GIF frames;
-it borrows the noise texture already owned by `GpuTerrain`.
+authored transparent rapids/torrent foam, drawn at 48% opacity under the same
+ripples, foam, rain and splashes. Depths greater than four retain their actual bed
+depth and use the deepest palette/artwork. The procedural path does not load water
+GIF frames; besides the field and detail textures it borrows the noise texture
+already owned by `GpuTerrain`.
+
+On Mesa llvmpipe, `GpuWaterShaderSmokeTest` frame medians with the first procedural
+water were 2-8% lower than with the water before it, dry and in rain in both cameras,
+while the GIF fallback, which shares its shading, cost 6-17% more. The sculpted beds
+and refinements that followed raised the `GpuWaterShaderSmokeTest` and
+`GpuRainSurfaceSmokeTest` medians by about 9-12% there, and one ocean update took
+about 4.8 ms. Hardware GPUs have not been measured.
 
 For magma and the optional water GIF path, `GpuLiquidShader.USE_SHADER_ANIMATION`
 defaults to `true`: retain all authored
@@ -341,19 +459,19 @@ surface animation in place, except immediately at a lower outlet. Rapids and
 torrents flow faster; molten material flows more slowly. The final three connected
 hexes before a waterfall accelerate toward the lip. Larger drops increase this
 boost, capped at four levels; unrelated nearby rivers are unaffected.
-Falls scroll downward. Receiving water adds animated boiling foam and outward
-wakes, plus a short transparent curtain of shader-animated spray droplets. The
-impact footprint grows with drop height and is restricted to the lower pool.
-It works without rain and disappears when the drop is removed or frozen. These
-small spray meshes share the receiving water material and transparent pass;
-there are no per-droplet CPU objects. Magma does not receive water splashes.
+Falls scroll downward. Receiving water boils and streams foam away from the landing
+line, with outward rings, a soft mist curtain and a billow. The impact footprint grows with
+drop height and is restricted to the lower pool. It works without rain and
+disappears when the drop is removed or frozen. The mist cards share the receiving
+water material and transparent pass; there are no per-droplet CPU objects. Magma
+does not receive water splashes.
 This is a channel/bay topology heuristic, not a fluid simulation or game-rule
 change. Ice and incompatible liquid types break connections. An outlet edit
 recomputes the field and rebuilds affected reaches even across chunk boundaries;
 ordinary animation and tactical updates do not recompute flow.
 
-Hazardous liquid uses the existing water geometry, depth, animation, and
-transparency with a green material tint. Its hazard level (0–3) describes game
+Hazardous liquid uses the water geometry, depth and animation with its own
+chemical-green palette and green-tinted foam. Its hazard level (0–3) describes game
 behavior, never water depth; an accompanying WATER terrain supplies the depth.
 Without WATER, it uses the shallow visual recess and changes no game depth.
 Static hazardous-liquid overlays are excluded from 3D decals. Ordinary, themed,
@@ -367,7 +485,11 @@ shore separates it from water. Emission keeps magma visible at night; it does
 not cast additional light onto nearby objects. MAGMA level 1 (crust), mud,
 swamp, and quicksand retain their existing solid surfaces and static artwork.
 
-Water renders after units with 48% opacity, depth testing, and no depth writes.
+Water renders after units with depth testing and no depth writes. Procedural water
+takes its opacity from the depth under each pixel, with a floor that keeps even
+ankle-deep water visible and a cap of one half, so units stay readable in deep water
+while submerged ground takes the rest of its column's absorption itself; the GIF
+fallback draws at 48%.
 The bed remains opaque, so underwater units are visible through water without
 showing objects through solid terrain. Ice preserves the underlying riverbed
 and draws an opaque captured ice surface at the game's surface elevation.
@@ -674,7 +796,7 @@ the real Camera toggle, artwork, switching, picking and shadow restoration, and 
 pixels outside the hex survive the native render.
 
 Tuning defaults are hex scale 1, unit scale 0.7, unit height scale 0.87, level
-height 18, grid shade 0.8, building opacity 50%, and see-through
+height 18, grid shade 0.8, hex transitions off, building opacity 50%, and see-through
 intensity 75%. Opacity is local to the GPU window and changes materials without
 rebuilding terrain. Defaults restores these values. A single geometry tuning record updates all derived
 dimensions on the render thread. No geometry tuning requires a second artwork
@@ -916,6 +1038,31 @@ the classic board keeps its ground labels.
 
 ## Ownership and rendering
 
+- `GpuGlsl` sets up the context. The board needs OpenGL 3.3 core, but some drivers
+  return exactly the version a program asks for: asked for 3.3, Intel's Windows
+  driver gave an Iris Xe OpenGL 3.3. So before the window opens, `GpuGlsl` tries
+  hidden windows for 4.6, 4.5, 4.3, 4.1, 4.0 and 3.3 core and asks for the newest
+  that opens. The same Iris Xe now runs OpenGL 4.6 (driver 32.0.101.7088); Macs
+  stop at 4.1. When the window's context exists,
+  `GpuGlsl.detect()` reads its version and every shader compiled afterwards is
+  GLSL of that version, from 3.30 up to 4.60; `-Dmegamek.gpu.glsl=330` caps it
+  for troubleshooting a driver. The log and the tuning panel's Geometry section
+  show the context and the GLSL in use. Tessellation shaders need 4.00 and
+  compute shaders 4.30. The shaders keep the GLSL 1.x spelling that libGDX's
+  built-in shaders use (`attribute`, `varying`, `texture2D`, `gl_FragColor`); a
+  prefix on every compiled shader maps it onto the chosen version. The explicit
+  `#version` makes every driver apply the same rules. With Mesa llvmpipe
+  (OpenGL 4.5 core, so GLSL 4.50) the 84 board smoke tests fail only as they do
+  on the OpenGL 2.0 baseline, for missing skin, building and unit art. On the
+  Iris Xe (OpenGL 4.6, GLSL 4.60) `GpuShadowSmokeTest`,
+  `GpuTerrainShowcaseSmokeTest`, `GpuForestBenchmarkSmokeTest` and
+  `GpuDetailSmokeTest` pass; the rest of the suite has not been run there yet.
+  `GpuShaderSourceTest` rejects names that newer GLSL reserves, such as `patch`,
+  which failed on a driver that enforces it even without a `#version` line. The
+  per-tree instance attributes are fixed at locations 14 and 15 in every program:
+  one vertex array object serves a tree mesh's colour and depth shaders, and a
+  location one of them makes per-instance must not carry another's per-vertex
+  data.
 - `GpuBoardSource` reads game objects, visibility, tile artwork, and existing
   commands on Swing's event thread and publishes immutable presentation frames.
 - `BoardView.capturePlanarHexes` separates ground, flat decals, and remaining
@@ -939,7 +1086,7 @@ the classic board keeps its ground labels.
 - `GpuAssets` owns shared feature meshes, repeating textures, and water frames.
   `BoardRim` owns cached cliff-top color/normal composition; `GpuTextures` owns
   its GPU atlas storage and the undecorated ground slots used by riverbanks.
-- `GpuTerrain` batches terrain and opaque features in 16 by 16 chunks. Changes to
+- `GpuTerrain` batches terrain and opaque features in 8 by 8 chunks. Changes to
   a tile's height/material/features rebuild its chunk and affected neighbors;
   atlas-layout, board-size, floor, and tuning changes rebuild the required
   scene. Pixel-only changes update texture slots; ground color changes also
@@ -961,10 +1108,12 @@ the classic board keeps its ground labels.
 - One 2048-pixel directional shadow map includes terrain, opaque features, and
   units. Its coverage follows the camera's visible receivers, keeping closeup
   detail independent of map size while including offscreen shadow casters.
-  Packed shadow depth uses each face's slope in shadow texels for its bias,
-  preventing self-shadow bands on cliffs at grazing angles. Camera depth stays
-  unbiased. `GpuShadowSmokeTest` checks sunlit walls across orbits, tilts and zooms,
-  and verifies that their cast shadows remain attached at the foot of the cliff.
+  Packed shadow depth uses each face's slope in shadow texels for its bias, and the
+  sculpted terrain moves its lookup out along the surface normal, preventing
+  self-shadow bands on cliffs at grazing angles. Camera depth stays unbiased.
+  `GpuShadowSmokeTest` checks the sunlit faces of a two-level concrete step across
+  orbits, tilts and zooms, and verifies that their cast shadows remain attached at
+  the foot of the cliff.
   The light grid aligns to texels to stabilize panning. Geometry, lighting,
   occupancy, unit transforms and camera changes invalidate the cached map.
 - GL resources are created and disposed on the render thread. Shared assets own
@@ -1050,8 +1199,9 @@ in both cameras and captures `ruler-los-top.png` and `ruler-los-isometric.png`.
 and clearing the observer. `GpuFieldOfViewSmokeTest` compares both native styles,
 checks mask reuse and visible/blocked pixel brightness, and captures matching
 `fov-dimmed-*` and `fov-fog_of_war-*` views.
-`GpuFieldOfViewCliffSmokeTest` compares cliff pixels against uniformly visible and
-blocked references across a full orbit, including small angle changes, and captures
+`GpuFieldOfViewCliffSmokeTest` compares the wall pixels of a two-level concrete step
+against uniformly visible and blocked references across a full orbit, including small
+angle changes, and captures
 `fov-cliff-visible.png` and `fov-cliff-blocked.png`.
 `GpuHexOverlayTest` covers sheet seams, embedded boards, terrain-following fills,
 ECM/ECCM mode/opacity/color updates, hidden and other-board emitters, snapshot
@@ -1066,12 +1216,10 @@ through the upper water surface.
 its upper-edge anchor, the top layer's tint on its vertices, cropping on
 sloping, short and deep walls at three board scales, and that a water hex hangs its
 skirt from its shore but not across an open mouth.
-`GpuTerrainMaterialsSmokeTest` renders the six skirt mask strips
-with the actual Saxarba themes and shallow/deep water. It also checks that a
-ground-pixel change retints the skirt that hangs from those pixels and that a wet
-cliff takes the rain film, without an
-atlas layout change. Its screenshots are named `terrain-skirt-*.png`, including the
-`terrain-skirt-dry`/`-wet` pair that shows the run-off close up.
+`GpuTerrainMaterialsSmokeTest` checks the sculpted materials in native OpenGL: a
+two-level grassland step renders as an earth bank and a three-level one as rock, rain
+darkens every family's cliffs except snow, and special ground art keeps its own colour on
+its sculpted top. `GpuTerrainShowcaseSmokeTest` renders the sculpted review scene.
 `BoardRimTest` checks the mask's lightness rule, mid-gray neutrality, alpha weighting,
 highlight saturation, raised-stone normals, outward bevels and the two/three-level split,
 all six edge rotations at three board scales, road openings, cache release and

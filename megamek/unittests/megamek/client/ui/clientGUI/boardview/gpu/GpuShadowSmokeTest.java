@@ -25,9 +25,16 @@ import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Sunlit cliff interiors must not acquire a shadow-map pattern as the board camera moves. */
+/**
+ * Sunlit cliff interiors must not acquire a shadow-map pattern as the board camera moves. The raised hex is a
+ * two-level concrete step, whose cast faces stand exactly on the hex outline without relief of their own, so any
+ * shadow on its sunlit faces is an artefact; natural cliffs shade themselves with their own relief.
+ */
 @Tag("on-demand")
 class GpuShadowSmokeTest {
+    /** Height of the raised hex, in levels. */
+    private static final int LEVELS = 2;
+
     @Test
     void sunlitCliffsStayUnshadowedAcrossCameraAnglesAndZooms() {
         AtomicReference<Throwable> failure = new AtomicReference<>();
@@ -49,19 +56,23 @@ class GpuShadowSmokeTest {
     }
 
     private static void checkCliffs() throws Exception {
+        // Mottled ground art: paved ground has no grass cover, and review captures need visible artwork.
         BufferedImage ground = new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB);
-        var graphics = ground.createGraphics();
-        graphics.setColor(new java.awt.Color(160, 160, 160));
-        graphics.fillRect(0, 0, 84, 72);
-        graphics.dispose();
+        java.util.Random mottle = new java.util.Random(7);
+        for (int y = 0; y < 72; y++) {
+            for (int x = 0; x < 84; x++) {
+                int grey = 140 + mottle.nextInt(40);
+                ground.setRGB(x, y, 0xff000000 | grey << 16 | grey << 8 | grey);
+            }
+        }
         BoardScene.Pixels pixels = new BoardScene.Pixels(ground);
         Coords raised = new Coords(4, 4);
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 9; x++) {
             for (int y = 0; y < 9; y++) {
                 Coords coords = new Coords(x, y);
-                tiles.add(new BoardScene.Tile(coords, coords.equals(raised) ? 4 : 0, -1, false, 0,
-                      BoardScene.Surface.GRASS, pixels, null, null, List.of(), List.of()));
+                tiles.add(new BoardScene.Tile(coords, coords.equals(raised) ? LEVELS : 0, -1, false, 0,
+                      BoardScene.Surface.CONCRETE, pixels, null, null, List.of(), List.of()));
             }
         }
         BoardScene scene = new BoardScene(0, 9, 9, tiles, List.of(), List.of(), -1, "", List.of());
@@ -74,7 +85,7 @@ class GpuShadowSmokeTest {
         BoardCamera camera = new BoardCamera();
         camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         camera.setIsometric(true);
-        camera.center(BoardGeometry.center(raised, 2));
+        camera.center(BoardGeometry.center(raised, LEVELS / 2f));
         terrain.update(scene);
         var lighting = BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS);
         var sides = new BoardSurface(scene, scene.tile(raised)).sides(scene, BoardGeometry.floor(scene));
@@ -99,7 +110,7 @@ class GpuShadowSmokeTest {
                             for (int along = 2; along <= 8; along++) {
                                 for (int height = 2; height <= 7; height++) {
                                     Vector3 point = new Vector3(side.a()).lerp(side.b(), along / 10f);
-                                    point.z = BoardGeometry.LEVEL * 4 * height / 10f;
+                                    point.z = BoardGeometry.LEVEL * LEVELS * height / 10f;
                                     samples.add(point);
                                 }
                             }
@@ -155,7 +166,7 @@ class GpuShadowSmokeTest {
               new Vector3(side.b()).sub(side.a()).crs(Vector3.Z).nor().dot(direction))).orElseThrow();
         Vector3 foot = new Vector3(downstream.a()).lerp(downstream.b(), 0.5f);
         foot.z = 0;
-        float length = BoardGeometry.LEVEL * 4 * (float) Math.hypot(lighting.direction().x, lighting.direction().y)
+        float length = BoardGeometry.LEVEL * LEVELS * (float) Math.hypot(lighting.direction().x, lighting.direction().y)
               / -lighting.direction().z;
         Pixmap actual = draw(terrain, camera);
         Pixmap reference = drawUnshadowed(terrain, camera, unshadowed);

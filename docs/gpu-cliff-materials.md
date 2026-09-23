@@ -1,9 +1,10 @@
 # Cliff materials
 
-Exposed hex sides use dedicated 1024 by 1024 rock, sandstone, compacted soil,
-concrete and snow materials. Grass exposes the soil family. These are independent
-of the top tiles, upper rim masks and hanging cornice art. Both board camera views
-use the same wall meshes and material shader.
+These 1024 by 1024 rock, sandstone, compacted soil, concrete and snow materials now
+serve only the exposed sides that are not sculpted: edges of water, road and ramp
+hexes. Dry terrain uses the sculpted landform and its own procedural materials; see
+[Sculpted terrain](gpu-terrain-materials.md). Both camera views and picking use the
+same wall mesh in either case.
 
 Each family has three aligned repeating textures under
 `mm-data/data/models/board/textures/cliffs/`:
@@ -15,7 +16,7 @@ Each family has three aligned repeating textures under
 | `NAME-surface.png` | R height; G perceptual roughness; B ambient occlusion; A relief range / 0.1 |
 
 Height is zero in recesses and one on protruding planes. The alpha channel gives
-the physical depth as a fraction of the existing 96-world-unit texture repeat;
+the detail depth as a fraction of an eight-visual-metre texture repeat;
 normal slopes are baked using that exact same, quantized range. Rock and sand have
 the deepest relief; concrete has shallow pores. Normals retain the renderer's
 existing 128-centered encoding.
@@ -26,20 +27,19 @@ other board assets. A family missing any of the three maps uses its original
 legacy 128-texel base-mip restriction. Trilinear mipmaps and up to 8x supported
 anisotropic filtering handle distant and oblique surfaces.
 
-`terrain-cliff.frag` transforms detail normals with the actual directed wall edge
-and downward V axis. Close-up parallax occlusion mapping traverses 12–24 height
-layers and interpolates the intersection. A six-sample light ray shades recesses.
-Relief fades out at small projected sizes, grazing views, and quad boundaries;
-this keeps the top seam and hex corners attached to the authoritative surface.
-On desktop drivers without `GL_ARB_shader_texture_lod`, a single height offset
-replaces traversal and height self-shadowing is omitted. That compatibility path
-does not require texture gradients inside divergent control flow.
+`terrain-cliff.frag` blends two continuous world-space wall projections, with
+normal perturbations transformed into the same frame. Their aligned color,
+normal and cavity samples cross hex edges without switching UV orientation.
+Real mesh relief replaces the previous 12–24-step parallax and six-step light
+traversal. Normal detail fades at small projected sizes; the larger sculpted
+relief remains in the shared terrain geometry. Broad, smooth wall normals avoid
+highlighting every tessellation diagonal.
 
-Roughness controls a dielectric GGX highlight. Ambient cavity shading, directional
+Ambient cavity shading, directional
 light, geometry shadows and cloud transmission share the existing board lighting.
-Rain darkens the exposed material and reduces roughness according to its existing
+Rain darkens the exposed material and adds a sheen according to its existing
 water-film response; snow does not receive liquid rain film. The existing Normal
-maps control also disables cliff parallax and cavity shading, without rebuilding
+maps control also disables mapped normals and cavity shading, without rebuilding
 meshes or texture allocations. No additional wall draw pass is added.
 
 The five material sets occupy approximately 67 MiB of uncompressed RGB8/RGBA8
@@ -71,8 +71,8 @@ For authored/scanned geometry, add `NAME-height.png` alongside the color source:
 an 8-bit or 16-bit linear grayscale height image replaces luminance estimation.
 The supplied maps are artistic estimates from generated color sources, not
 photogrammetric measurements. Pigment changes or residual baked lighting can
-therefore introduce approximate relief. Parallax changes shading and sampling,
-not silhouettes, collision, picking, terrain rules or cast-shadow geometry. The
+therefore introduce approximate normal relief. The sculpted mesh changes silhouettes, picking and
+cast shadows. Neither changes terrain rules. The
 board's existing display-space lighting is retained rather than changing the
 whole renderer's color-management pipeline.
 

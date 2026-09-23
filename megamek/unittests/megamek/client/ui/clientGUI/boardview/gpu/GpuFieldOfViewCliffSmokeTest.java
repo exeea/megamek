@@ -23,9 +23,16 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
-/** Cliff faces lie exactly on visibility boundaries; their shading must not alternate while orbiting. */
+/**
+ * Cliff faces lie exactly on visibility boundaries; their shading must not alternate while orbiting. The raised hex
+ * is a two-level concrete step, whose cast faces stand exactly on the hex outline; natural cliffs reach past it with
+ * lips and talus, which take the visibility of the hex whose ground they cover.
+ */
 @Tag("on-demand")
 class GpuFieldOfViewCliffSmokeTest {
+    /** Height of the raised hex, in levels. */
+    private static final int LEVELS = 2;
+
     @ParameterizedTest
     @EnumSource(value = GpuFieldOfView.Style.class, names = { "DIMMED", "GRAYSCALE" })
     void cliffSidesKeepTheirOwningHexVisibilityThroughoutAnOrbit(GpuFieldOfView.Style style) {
@@ -59,8 +66,8 @@ class GpuFieldOfViewCliffSmokeTest {
         for (int x = 0; x < 7; x++) {
             for (int y = 0; y < 7; y++) {
                 Coords coords = new Coords(x, y);
-                tiles.add(new BoardScene.Tile(coords, coords.equals(raised) ? 4 : 0, -1, false, 0,
-                      BoardScene.Surface.GRASS, pixels, null, null, List.of(), List.of()));
+                tiles.add(new BoardScene.Tile(coords, coords.equals(raised) ? LEVELS : 0, -1, false, 0,
+                      BoardScene.Surface.CONCRETE, pixels, null, null, List.of(), List.of()));
             }
         }
         BoardScene scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
@@ -72,7 +79,7 @@ class GpuFieldOfViewCliffSmokeTest {
         camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         camera.setIsometric(true);
         camera.fit(scene);
-        camera.center(BoardGeometry.center(raised, 2));
+        camera.center(BoardGeometry.center(raised, LEVELS / 2f));
         camera.zoom(0.32f);
         terrain.update(scene);
         atmosphere.configure(new BoardAtmosphere.Settings(12, 0, 0, 1.5f, 0, 0));
@@ -95,7 +102,7 @@ class GpuFieldOfViewCliffSmokeTest {
                         for (int along = 2; along <= 8; along++) {
                             for (int height = 2; height <= 8; height++) {
                                 Vector3 point = new Vector3(side.a()).lerp(side.b(), along / 10f);
-                                point.z = BoardGeometry.LEVEL * 4 * height / 10f;
+                                point.z = BoardGeometry.LEVEL * LEVELS * height / 10f;
                                 samples.add(camera.camera.project(point));
                             }
                         }

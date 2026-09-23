@@ -1,12 +1,8 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
-// Exposed vertical hex sides. Geometry, picking and shadow silhouettes remain BoardSurface's planes.
-#ifdef GL_ARB_shader_texture_lod
-#extension GL_ARB_shader_texture_lod : enable
-#endif
+// Macro relief is real geometry. Two aligned material samples supply grain without per-pixel ray marching.
 #ifdef GL_ES
 precision highp float;
 #endif
-
 varying vec2 v_diffuseUV;
 varying vec3 v_normal;
 varying vec4 v_color;
@@ -15,120 +11,173 @@ uniform sampler2D u_normalTexture;
 uniform sampler2D u_cliffSurface;
 uniform float u_normalMaps;
 uniform float u_groundResponse;
+uniform float u_materialFamily;
+uniform float u_waterEffects;
+uniform vec3 u_wind;
+vec2 materialA, materialB;
+float materialBlend;
+float materialBias;
 
-// Explicit gradients keep mip selection stable during the divergent relief traversal.
-vec4 cliffSample(sampler2D map, vec2 uv, vec2 dx, vec2 dy) {
-#ifdef GL_ARB_shader_texture_lod
-    return texture2DGradARB(map, uv, dx, dy);
-#else
-    return texture2D(map, uv);
-#endif
+vec2 materialOffset(float seed) {
+    return fract(sin(vec2(seed * 127.1 + 23.4, seed * 269.5 + 71.3)) * 43758.5453) * 7.0;
+}
+vec4 cliffSample(sampler2D map) {
+    return mix(texture2D(map, materialA, materialBias), texture2D(map, materialB, materialBias), materialBlend);
 }
 
-vec2 cliffRelief(vec2 uv, vec3 view, float depth, vec2 dx, vec2 dy) {
-    if (depth < 0.00001) return uv;
-#ifdef GL_ARB_shader_texture_lod
-    float layers = mix(24.0, 12.0, clamp(view.z, 0.0, 1.0));
-    float stepDepth = 1.0 / layers;
-    vec2 stepUV = view.xy / max(view.z, 0.22) * depth * stepDepth;
-    vec2 position = uv;
-    float ray = 0.0;
-    float surface = 1.0 - cliffSample(u_cliffSurface, position, dx, dy).r;
-    float previousSurface = surface;
-    for (int i = 0; i < 24; i++) {
-        if (ray >= surface) break;
-        previousSurface = surface;
-        position -= stepUV;
-        ray += stepDepth;
-        surface = 1.0 - cliffSample(u_cliffSurface, position, dx, dy).r;
+// The material's luminance retains its grain. Broad, saturated palettes read at strategy-camera distance.
+vec3 terrainPalette(vec3 source, float field, bool wall, float family) {
+    float grain = clamp(dot(source, vec3(.25, .60, .15)) * 1.6, 0.0, 1.0);
+    float tone = clamp(wall ? grain * .64 + field * .36 : .30 + grain * .08 + field * .48, 0.0, 1.0);
+    if (family > 8.5) {
+        // The silhouette and fault planes carry the outcrop. Keep its texture quiet at play distance.
+        vec3 low = family < 9.5 ? vec3(.30, .35, .33) : vec3(.56, .28, .105);
+        vec3 high = family < 9.5 ? vec3(.68, .69, .59) : vec3(.90, .61, .29);
+        if (family > 10.5) { low = vec3(.30, .39, .44); high = vec3(.66, .73, .75); }
+        return mix(low, high, .24 + field * .58 + grain * .08);
     }
-    // Interpolate the intersection between the last two samples instead of exposing depth stair steps.
-    float after = ray - surface;
-    float before = ray - stepDepth - previousSurface;
-    return position + stepUV * clamp(after / max(after - before, 0.0001), 0.0, 1.0);
-#else
-    // Compatibility path requires no shader texture-LOD extension and no divergent texture lookups.
-    return uv - view.xy / max(view.z, 0.22) * depth * (1.0 - texture2D(u_cliffSurface, uv).r);
-#endif
-}
-
-float cliffOcclusion(vec2 uv, float height, vec3 light, float depth, vec2 dx, vec2 dy) {
-#ifdef GL_ARB_shader_texture_lod
-    if (depth > 0.00001 && light.z > 0.08) {
-        float stepHeight = (1.0 - height) / 6.0;
-        vec2 stepUV = light.xy / max(light.z, 0.18) * depth * stepHeight;
-        float obstruction = 0.0;
-        for (int i = 1; i <= 6; i++) {
-            float rayHeight = height + stepHeight * float(i);
-            float blocker = cliffSample(u_cliffSurface, uv + stepUV * float(i), dx, dy).r;
-            obstruction = max(obstruction, (blocker - rayHeight - 0.035) / (0.12 + float(i) * 0.04));
-        }
-        return 1.0 - 0.8 * clamp(obstruction, 0.0, 1.0);
+    if (family < .5 && !wall) {
+        vec3 meadow = mix(vec3(.12, .27, .10), vec3(.58, .68, .32), .10 + field * .80 + grain * .06);
+        meadow = mix(meadow, vec3(.52, .45, .24), smoothstep(.68, .90, field) * .34);
+        return mix(meadow, vec3(.40, .30, .16) * (.9 + grain * .15), (1.0 - smoothstep(.15, .32, field)) * .8);
     }
-#endif
-    return 1.0;
+    if (family > 1.5 && family < 2.5) {
+        return wall ? mix(vec3(.52, .18, .045), vec3(.98, .61, .23), tone)
+              : mix(vec3(.77, .40, .10), vec3(1.0, .81, .43), tone);
+    }
+    if (family > .5 && family < 1.5) {
+        return mix(vec3(.43, .17, .055), vec3(.87, .52, .22), tone);
+    }
+    if (family > 4.5 && family < 5.5) {
+        return mix(vec3(.64, .79, .89), vec3(.92, .95, .96), .28 + field * .6 + grain * .03);
+    }
+    if (family > 3.5 && family < 4.5 && !wall) {
+        return mix(vec3(.38, .46, .54), vec3(.80, .82, .79), tone);
+    }
+    if (family > 7.5) return mix(vec3(.25, .22, .14), vec3(.63, .56, .37), tone);
+    if (family > 5.5) return source * vec3(1.17, 1.10, .9);
+    vec3 stone = mix(vec3(.25, .32, .39), vec3(.77, .76, .65), tone);
+    return mix(stone, stone * vec3(1.12, 1.08, .73), smoothstep(.65, .9, field) * .4);
 }
 
 void main() {
     vec3 face = normalize(v_normal);
-    // Matches wall(): U follows the directed hex edge, V points down, for all six orientations.
-    vec3 tangent = normalize(vec3(-face.y, face.x, 0.0));
-    vec3 bitangent = vec3(0.0, 0.0, -1.0);
-    vec3 view = normalize(-u_viewDirection);
-    vec3 localView = vec3(dot(view, tangent), dot(view, bitangent), dot(view, face));
-    vec2 dx = dFdx(v_diffuseUV), dy = dFdy(v_diffuseUV);
-    float footprint = max(length(dx), length(dy));
-    float detail = smoothstep(90.0, 360.0, 1.0 / max(footprint, 0.00001)) * u_normalMaps;
-    vec2 edge = min(v_color.rg, 1.0 - v_color.rg);
-    float boundary = smoothstep(0.0, 0.12, min(edge.x, edge.y));
-    vec4 properties = cliffSample(u_cliffSurface, v_diffuseUV, dx, dy);
-    // Alpha encodes the maximum relief in tenths of one world-space texture repeat.
-    float depth = properties.a * 0.1 * detail * boundary * smoothstep(0.08, 0.25, localView.z);
-    vec2 uv = cliffRelief(v_diffuseUV, localView, depth, dx, dy);
-    properties = cliffSample(u_cliffSurface, uv, dx, dy);
-    vec3 albedo = cliffSample(u_diffuseTexture, uv, dx, dy).rgb;
+    vec3 dp1 = dFdx(v_cloudPosition), dp2 = dFdy(v_cloudPosition);
+    vec2 duv1 = dFdx(v_diffuseUV), duv2 = dFdy(v_diffuseUV);
+    float orientation = duv1.x * duv2.y - duv1.y * duv2.x < 0.0 ? -1.0 : 1.0;
+    vec3 tangent = normalize((dp1 * duv2.y - dp2 * duv1.y) * orientation);
+    vec3 bitangent = normalize((dp2 * duv1.x - dp1 * duv2.x) * orientation);
+    float footprint = max(length(dFdx(v_diffuseUV)), length(dFdy(v_diffuseUV)));
+    vec2 world = v_cloudPosition.xy * u_rainScale * 5.0;
+    bool wall = u_materialFamily < -.5;
+    bool outcrop = u_materialFamily > 8.5;
+    // A steep bank below the water shows through it: projected like a wall, its gravel never stretches downhill.
+    bool steep = u_materialFamily > 5.5 && u_materialFamily < 6.5 && face.z < .6;
+    materialBias = wall ? 0.0 : steep ? 1.0 : outcrop ? 3.0 : 2.5;
+    if (wall || steep) {
+        // Continuous projections across every hex edge. Their blend never switches a face's UV orientation.
+        vec3 p = v_cloudPosition * u_rainScale * (wall ? 5.0 / 8.0 : 5.0 / 3.0);
+        p += sin(p.yzx * vec3(.67, .53, .71) + p.zxy * .31) * .08;
+        materialA = vec2(p.y, -p.z);
+        materialB = vec2(p.x, -p.z) + vec2(.37, .11);
+        materialBlend = abs(face.y) / max(abs(face.x) + abs(face.y), .001);
+        footprint = max(length(dFdx(p)), length(dFdy(p)));
+    } else {
+        float cell = texture2D(u_rainNoise, v_diffuseUV * .115).g * 8.0;
+        float index = floor(cell);
+        vec2 warp = vec2(sin(world.y * .37 + world.x * .19), cos(world.x * .27 - world.y * .23)) * .11;
+        materialA = v_diffuseUV + warp + materialOffset(index);
+        materialB = v_diffuseUV + warp + materialOffset(index + 1.0);
+        materialBlend = smoothstep(.18, .82, fract(cell));
+    }
+    float detail = smoothstep(55.0, 240.0, 1.0 / max(footprint, .00001)) * u_normalMaps;
+    vec4 properties = cliffSample(u_cliffSurface);
+    vec3 albedo = cliffSample(u_diffuseTexture).rgb;
+    float family = wall ? max(0.0, -u_materialFamily - 2.0) : u_materialFamily;
+    float field = meadowField(world);
+    albedo = terrainPalette(albedo, field, wall, family);
     vec3 normal = face;
-    if (u_normalMaps > 0.5) {
-        vec3 mapped = (cliffSample(u_normalTexture, uv, dx, dy).rgb * 255.0 - 128.0) / 127.0;
-        normal = normalize(tangent * mapped.x + bitangent * mapped.y + face * mapped.z);
+    if (u_normalMaps > .5 && !outcrop) {
+        if (wall || steep) {
+            vec3 xMap = (texture2D(u_normalTexture, materialA).rgb * 255.0 - 128.0) / 127.0;
+            vec3 yMap = (texture2D(u_normalTexture, materialB).rgb * 255.0 - 128.0) / 127.0;
+            vec3 perturb = mix(vec3(0.0, xMap.x, -xMap.y), vec3(yMap.x, 0.0, -yMap.y), materialBlend);
+            perturb -= face * dot(face, perturb);
+            normal = normalize(face + perturb * 1.4 * detail);
+        } else {
+            vec3 mapped = (cliffSample(u_normalTexture).rgb * 255.0 - 128.0) / 127.0;
+            mapped.xy *= outcrop ? .09 : family > 4.5 && family < 5.5 ? .07
+                  : family < .5 ? .10 : family > 1.5 && family < 2.5 ? .16 : .22;
+            normal = normalize(mix(face, normalize(tangent * mapped.x + bitangent * mapped.y + face * mapped.z), detail));
+        }
     }
-    float wet = u_wetness * step(0.0, u_groundResponse);
+    bool grass = !wall && family < .5;
+    if (grass) {
+        // Larger bare patches follow the actual rise of the ground, so color helps describe its landforms.
+        float slope = 1.0 - smoothstep(.84, .98, face.z);
+        albedo = mix(albedo, vec3(.43, .40, .25), slope * .48);
+    }
+    if (!wall && family > 7.5 && family < 8.5) {
+        float turf = smoothstep(.40, .70, field) * smoothstep(.68, .94, face.z);
+        albedo = mix(albedo, terrainPalette(vec3(.5), field, false, 0.0), turf * .72);
+    }
+    if (outcrop && family > 10.5) {
+        albedo = mix(albedo, vec3(.83, .90, .94), smoothstep(.48, .86, face.z) * .93);
+    }
+    bool bed = family > 5.5 && family < 6.5;
+    bool shore = family > 6.5 && family < 7.5;
+    if (grass) {
+        float sway = sin(world.x * 2.8 + world.y * 1.6 - u_rainTime * 1.9)
+              * sin(world.y * 3.7 - u_rainTime * 1.1);
+        normal = normalize(normal + vec3(u_wind.xy * .045 * sway * u_wind.z, 0.0) * detail);
+        albedo *= 1.0 + sway * .025 * u_wind.z;
+    }
+    if (!wall && family < 5.5 && face.z > .65) albedo *= terrainGrid(v_cloudPosition.xy * u_rainScale);
+    // Anything below the water line, bed or drowned wall, keeps only the hue its column of water passes; the
+    // surface above removes the rest. Caustics focus the sunlight that still reaches shallow ground. Rain wets only
+    // what stands above the water.
+    float submerged = shore ? 0.0 : (1.0 - v_color.b) * WATER_DEPTH_RANGE;
+    float wet = u_wetness * step(0.0, u_groundResponse) * (1.0 - smoothstep(0.0, 0.05, submerged));
+    if (shore) wet = max(wet, 1.0 - v_color.b);
     float film = wet * max(0.0, u_groundResponse);
-    albedo *= 1.0 - wet * mix(0.18, 0.11, max(0.0, u_groundResponse));
-    float roughness = clamp(mix(properties.g, 0.24, film * 0.8), 0.2, 0.98);
-
-#ifdef lightingFlag
-    vec3 ambient = surfaceAmbient(normal) * mix(1.0, properties.b, u_normalMaps);
-    vec3 direct = vec3(0.0), sheen = vec3(0.0);
-    float nv = max(dot(normal, view), 0.02);
-    float alpha = roughness * roughness;
-    float alpha2 = alpha * alpha;
-    float k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
-#if numDirectionalLights > 0
-    for (int i = 0; i < numDirectionalLights; i++) {
-        vec3 light = -u_dirLights[i].direction;
-        float nl = max(dot(normal, light), 0.0);
-        vec3 halfVector = light + view;
-        halfVector /= max(length(halfVector), 0.0001);
-        float nh = max(dot(normal, halfVector), 0.0);
-        float vh = max(dot(view, halfVector), 0.0);
-        float denominator = nh * nh * (alpha2 - 1.0) + 1.0;
-        float distribution = alpha2 / max(3.141593 * denominator * denominator, 0.0001);
-        float geometry = nv / (nv * (1.0 - k) + k) * nl / (nl * (1.0 - k) + k);
-        float fresnel = 0.04 + 0.96 * pow(1.0 - vh, 5.0);
-        vec3 localLight = vec3(dot(light, tangent), dot(light, bitangent), dot(light, face));
-        float visibility = smoothstep(0.0, 0.15, localLight.z);
-        visibility *= cliffOcclusion(uv, properties.r, localLight, depth, dx, dy);
-        vec3 irradiance = u_dirLights[i].color * nl * visibility;
-        direct += irradiance * (1.0 - fresnel);
-        sheen += irradiance * distribution * geometry * fresnel / max(4.0 * nv * nl, 0.001);
+    float puddle = 0.0;
+    if (wet * u_rainDetail > 0.0 && face.z > .97 && !bed && !shore) {
+        vec2 position = v_cloudPosition.xy * u_rainScale;
+        puddle = rainPuddle(position, wet, max(0.0, u_groundResponse))
+              * smoothstep(.97, .999, face.z) * u_rainDetail;
+        normal = normalize(mix(normal, normalize(vec3(rainRipples(position), 1.0)), puddle));
+        film = mix(film, 1.0, puddle);
     }
-#endif
-    float visibility = surfaceVisibility();
-    direct *= visibility;
-    sheen *= visibility;
+    albedo *= 1.0 - wet * mix(.18, .11, max(0.0, u_groundResponse));
+    float caustic = 0.0;
+    if (submerged > 0.0) {
+        albedo *= waterBedTint(floor(v_color.r * 4.0 + 0.5), submerged);
+        caustic = waterBedCaustics(v_cloudPosition.xy * u_rainScale, submerged) * u_rainDetail * u_waterEffects;
+    }
+#ifdef lightingFlag
+    vec3 ambient, direct, sheen;
+    surfaceLighting(normal, film, ambient, direct, sheen);
+    // Broad light bands retain shape and shadows; packed occlusion only accents material crevices.
+    direct = mix(direct, floor(direct * 4.0 + .5) / 4.0, .24);
+    direct *= 1.0 + caustic;
+    ambient *= mix(1.0, mix(wall ? .70 : .94, 1.0, properties.b), u_normalMaps);
+    vec3 pigment = albedo;
     albedo *= ambient + direct;
-    albedo += sheen;
+    if (submerged > 0.0) {
+        // Water scatters daylight in every direction: below the surface, orientation and shadows soften with depth.
+#if numDirectionalLights > 0
+        vec3 sun = u_dirLights[0].color * max(0.0, -u_dirLights[0].direction.z) * (1.0 + caustic);
+#ifdef cloudShadowFlag
+        sun *= cloudLight;
+#endif
+        vec3 scattered = surfaceAmbient(vec3(0.0, 0.0, 1.0)) + sun;
+#else
+        vec3 scattered = surfaceAmbient(vec3(0.0, 0.0, 1.0));
+#endif
+        albedo = mix(albedo, pigment * scattered, smoothstep(0.0, 0.8, submerged) * 0.75);
+    }
+    albedo += sheen * mix(.35, 1.0, film);
+    if (puddle > 0.0) albedo = rainReflection(albedo, normal, puddle);
 #endif
     gl_FragColor = vec4(albedo, 1.0);
 }

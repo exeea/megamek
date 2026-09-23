@@ -20,6 +20,7 @@ const float RUNOFF_DARKENING = 0.22;
 
 void main() {
     vec4 art = texture2D(u_diffuseTexture, v_diffuseUV);
+    if (art.a < .02) discard;
     // Alpha is the strip's shape, including the fade at its lower end. On a mask, gray is lightness about mid
     // gray, so the tint arrives unchanged at 128, darkens into the shadowed rows and lightens on the lit ones;
     // on colorized art the same channels already carry the strip's color, which is therefore left alone.

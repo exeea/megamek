@@ -18,19 +18,19 @@ import org.junit.jupiter.api.Test;
 
 class BoardScatterTest {
     @Test
-    void naturalSurfacesStaySparseVariedAndStableAcrossSnapshots() {
+    void naturalSurfacesKeepVariedClustersAndStayStableAcrossSnapshots() {
         for (String theme : List.of("grass", "lunar", "desert", "dirt", "snow", "mars", "volcanic")) {
             Hex hex = new Hex(0);
             hex.setTheme(theme);
             int occupied = 0;
-            int pairs = 0;
+            Set<Integer> sizes = new HashSet<>();
             Set<String> shapes = new HashSet<>();
             Set<Float> rotations = new HashSet<>();
             for (int x = 0; x < 64; x++) {
                 for (int y = 0; y < 64; y++) {
                     Coords coords = new Coords(x, y);
                     var features = scatter(hex, coords);
-                    assertTrue(features.size() <= 2);
+                    assertTrue(features.size() <= 6);
                     assertEquals(features, scatter(hex, coords));
                     // Collectable limbs must not change the cosmetic ground layout.
                     hex.addTerrain(new Terrain(Terrains.ARMS, 1));
@@ -38,16 +38,16 @@ class BoardScatterTest {
                     hex.removeTerrain(Terrains.ARMS);
                     if (!features.isEmpty()) {
                         occupied++;
-                    }
-                    if (features.size() == 2) {
-                        pairs++;
+                        sizes.add(features.size());
                     }
                     for (var feature : features) {
                         shapes.add(feature.asset());
                         rotations.add(feature.rotation());
-                        assertTrue(Math.hypot(feature.x(), feature.y()) + 4 * feature.scale() < 32,
+                        assertTrue(Math.hypot(feature.x(), feature.y()) + 4 * feature.scale() < 33,
                               "The entire detail stays clear of hex edges and cliffs");
-                        assertTrue(feature.height() < .2f, "Scatter cannot resemble gameplay-height obstacles");
+                        assertTrue(Math.hypot(feature.x(), feature.y()) - 4 * feature.scale() > 10,
+                              "Scatter leaves the unit standing area clear");
+                        assertTrue(feature.height() < .24f, "Scatter cannot resemble gameplay-height obstacles");
                     }
                 }
             }
@@ -63,7 +63,7 @@ class BoardScatterTest {
             if (occupied == 0) {
                 continue;
             }
-            assertTrue(pairs > 0 && pairs < occupied / 3, "Pairs remain occasional");
+            assertTrue(sizes.size() >= 3, "Clusters must vary in size");
             assertTrue(rotations.size() > occupied, "No small repeating rotation set");
             assertTrue(shapes.containsAll(List.of("scatter-rock", "scatter-slab")), theme);
             if (theme.equals("grass")) {

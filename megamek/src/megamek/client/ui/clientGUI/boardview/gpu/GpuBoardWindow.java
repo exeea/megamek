@@ -20,6 +20,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Graphics;
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Window;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3WindowAdapter;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
@@ -126,18 +127,11 @@ public final class GpuBoardWindow {
             // Fill the desktop work area while keeping the normal title bar and window controls.
             configuration.setDecorated(true);
             configuration.setMaximized(true);
-            configuration.setWindowListener(new Lwjgl3WindowAdapter() {
+            configuration.setWindowListener(new WindowListener() {
                 @Override
                 public boolean closeRequested() {
                     requestExit();
                     return false;
-                }
-
-                @Override
-                public void focusLost() {
-                    if (Gdx.app.getApplicationListener() instanceof GpuBattleView battle) {
-                        battle.pause();
-                    }
                 }
             });
             new Lwjgl3Application(new GpuBattleView(null) {
@@ -320,15 +314,24 @@ public final class GpuBoardWindow {
         configuration.useVsync(DEFAULT_VSYNC);
         configuration.setDepthBits(24);
         configuration.disableAudio(true);
-        configuration.setWindowListener(new Lwjgl3WindowAdapter() {
-            @Override
-            public void focusLost() {
-                if (Gdx.app != null && Gdx.app.getApplicationListener() instanceof GpuBattleView battle) {
-                    battle.pause();
-                }
-            }
-        });
+        GpuGlsl.configure(configuration);
+        configuration.setWindowListener(new WindowListener());
         return configuration;
+    }
+
+    /** Every board window's events: its context sets the shading language, and losing focus pauses the battle. */
+    private static class WindowListener extends Lwjgl3WindowAdapter {
+        @Override
+        public void created(Lwjgl3Window window) {
+            GpuGlsl.detect();
+        }
+
+        @Override
+        public void focusLost() {
+            if (Gdx.app != null && Gdx.app.getApplicationListener() instanceof GpuBattleView battle) {
+                battle.pause();
+            }
+        }
     }
 
     private void focus(boolean entering) {

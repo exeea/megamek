@@ -24,7 +24,7 @@ import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Render every tree family, including the independently textured snow-covered geometry. */
+/** Render every tree species, including the independently textured snow-covered geometry and the desert plants. */
 @Tag("on-demand")
 class GpuFoliageSmokeTest {
     @Test
@@ -43,6 +43,7 @@ class GpuFoliageSmokeTest {
                     for (boolean snow : new boolean[] { false, true }) {
                         BoardScene scene = treeScene(snow);
                         for (BoardScene.Tile tile : scene.tiles()) {
+                            if (tile.features().isEmpty()) { continue; }
                             String name = tile.features().getFirst().asset();
                             var model = assets.model(name);
                             assertEquals(snow, model.getMaterial("snow") != null, name);
@@ -79,20 +80,20 @@ class GpuFoliageSmokeTest {
     }
 
     private static BoardScene treeScene(boolean snow) throws Exception {
-        String[] names = { "tree", "tree-broad", "tree-slender", "birch", "pine", "pine-tall", "willow",
-              snow ? "tree" : "palm", snow ? "pine" : "palm-bent" };
+        List<String> names = new ArrayList<>(List.of("tree", "tree-broad", "tree-slender", "birch", "pine", "pine-tall",
+              "pine-broad", "willow", "tree-dead"));
+        if (!snow) { names.addAll(List.of("palm", "palm-bent", "cactus", "cactus-flowers")); }
         File ground = new File(Configuration.dataDir(), "models/board/tileset/saxarba/base/base_"
               + (snow ? "snow_light" : "default") + "_0.png");
         BoardScene.Pixels pixels = new BoardScene.Pixels(ImageIO.read(ground));
         List<BoardScene.Tile> tiles = new ArrayList<>();
-        for (int x = 0; x < 3; x++) {
-            for (int y = 0; y < 3; y++) {
-                String name = names[y * 3 + x] + (snow ? "-snow" : "");
-                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0,
-                      snow ? BoardScene.Surface.SNOW : BoardScene.Surface.GRASS, pixels, null, null,
-                      List.of(new BoardScene.Feature(name, 0, 0, 20, 1.1f, 2, 0)), List.of()));
-            }
+        for (int index = 0; index < 16; index++) {
+            List<BoardScene.Feature> tree = index < names.size()
+                  ? List.of(new BoardScene.Feature(names.get(index) + (snow ? "-snow" : ""), 0, 0, 20, 1.1f, 2, 0))
+                  : List.of();
+            tiles.add(new BoardScene.Tile(new Coords(index % 4, index / 4), 0, -1, false, 0,
+                  snow ? BoardScene.Surface.SNOW : BoardScene.Surface.GRASS, pixels, null, null, tree, List.of()));
         }
-        return new BoardScene(0, 3, 3, tiles, List.of(), List.of(), -1, "", List.of(), new BoardScene.Light(-24, -30));
+        return new BoardScene(0, 4, 4, tiles, List.of(), List.of(), -1, "", List.of(), new BoardScene.Light(-24, -30));
     }
 }

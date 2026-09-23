@@ -78,6 +78,10 @@ final class BoardTacticalGeometry {
 
     private static void drape(BoardScene scene, List<BoardTactical.Fill> fills, Consumer<Triangle> destination) {
         Map<Coords, BoardSurface> surfaces = new HashMap<>();
+        // With hex transitions a step's slope and talus lie between the tops; its walls carry them.
+        boolean transitions = BoardGeometry.tuning().transitions();
+        float floor = transitions ? BoardGeometry.floor(scene) : 0;
+        Map<Coords, List<BoardSurface.Face>> slopes = new HashMap<>();
         int layer = 0;
         for (BoardTactical.Fill fill : fills) {
             float lift = (0.35f + Math.min(layer++, 10000) * 0.0001f) * BoardGeometry.HEX_SCALE;
@@ -92,6 +96,12 @@ final class BoardTacticalGeometry {
                         Coords coords = new Coords(x, y);
                         BoardSurface surface = surfaces.computeIfAbsent(coords, key -> new BoardSurface(scene, scene.tile(key)));
                         clipSurface(world, surface, lift, destination);
+                        if (transitions) {
+                            for (BoardSurface.Face face : slopes.computeIfAbsent(coords,
+                                  key -> lying(surface.walls(scene, floor)))) {
+                                clip(world, face, lift, destination);
+                            }
+                        }
                     }
                 }
             }
@@ -175,7 +185,23 @@ final class BoardTacticalGeometry {
         return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
     }
 
+    /** The faces of a wall that lie back far enough to be walked and marked on: slopes and talus, not cliff faces. */
+    static List<BoardSurface.Face> lying(List<BoardSurface.Face> walls) {
+        List<BoardSurface.Face> result = new ArrayList<>();
+        for (BoardSurface.Face face : walls) {
+            Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
+            if (normal.z > .35f * normal.len()) { result.add(face); }
+        }
+        return result;
+    }
+
     private static void clip(Triangle triangle, BoardSurface.Face face, float lift, Consumer<Triangle> destination) {
+        if (maxX(triangle) < Math.min(face.a().x, Math.min(face.b().x, face.c().x))
+              || minX(triangle) > Math.max(face.a().x, Math.max(face.b().x, face.c().x))
+              || maxY(triangle) < Math.min(face.a().y, Math.min(face.b().y, face.c().y))
+              || minY(triangle) > Math.max(face.a().y, Math.max(face.b().y, face.c().y))) {
+            return;
+        }
         float area = cross(face.a(), face.b(), face.c());
         if (Math.abs(area) < 0.00001f) {
             return;

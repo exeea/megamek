@@ -84,6 +84,7 @@ final class GpuBoardTuning {
     private final CheckBox normalMaps;
     private final CheckBox vsync;
     private final List<Control> geometry;
+    private final CheckBox transitions;
     private final List<Control> familySizes;
     private final CheckBox overviewIcons;
     private final List<Control> overview;
@@ -124,6 +125,16 @@ final class GpuBoardTuning {
         rows.top().defaults().pad(0, 3, 0, 3);
         section(skin, "Geometry");
         geometry = controls(skin, KNOBS, this::applyGeometry, 0);
+        transitions = checkbox(skin, "Hex transitions", "tuning-transitions");
+        transitions.addListener(new TextTooltip("Steps between hexes take room on both sides of their edge: slopes up to "
+              + "two levels, deep cliffs above a talus from three. Visual only; the game's levels and hexes are unchanged.",
+              skin, "menu"));
+        transitions.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                if (!syncing) { applyGeometry(); }
+            }
+        });
         normalMaps = checkbox(skin, "Normal maps", "tuning-normal-maps");
         vsync = checkbox(skin, "VSync", "tuning-vsync");
         // The window's own preference, shown once here and then left to the user; Defaults never touches it.
@@ -138,6 +149,11 @@ final class GpuBoardTuning {
                 // Gdx.graphics.setForegroundFPS(vsync.isChecked() ? 0 : 60);
             }
         });
+        Label graphics = new Label("Graphics: " + GpuGlsl.description(), skin, "small");
+        graphics.setName("tuning-graphics");
+        graphics.addListener(new TextTooltip("Detected when the board opens: the board compiles its shaders for the newest "
+              + "shading language the graphics driver offers, from GLSL 3.30 up to 4.60.", skin, "menu"));
+        rows.add(graphics).colspan(3).left().height(18).row();
         section(skin, "Unit family sizes");
         familySizes = controls(skin, Arrays.stream(UnitFamilyScale.values())
               .map(family -> new Knob(family.label, 0.25f, 3, 0.05f, "%.2f")).toList(), this::applyFamilySizes, 0);
@@ -484,6 +500,9 @@ final class GpuBoardTuning {
         float[] values = { defaults.hexScale(), defaults.unitScale(), defaults.unitHeightScale(),
               defaults.levelHeight(), defaults.gridShade(), defaults.multiHexUnitScale() };
         setValues(geometry, values);
+        syncing = true;
+        transitions.setChecked(defaults.transitions());
+        syncing = false;
         applyGeometry();
         float[] familyDefaults = new float[familySizes.size()];
         for (int index = 0; index < familyDefaults.length; index++) {
@@ -657,8 +676,10 @@ final class GpuBoardTuning {
     }
 
     private void applyGeometry() {
+        // The sliders apply while the panel is still being built, before the transitions box exists.
+        boolean steps = transitions != null ? transitions.isChecked() : BoardGeometry.DEFAULT_TRANSITIONS;
         BoardGeometry.tune(new BoardGeometry.Tuning(value(geometry, 0), value(geometry, 1), value(geometry, 2),
-              Math.round(value(geometry, 3)), value(geometry, 4), value(geometry, 5)));
+              Math.round(value(geometry, 3)), value(geometry, 4), value(geometry, 5), steps));
         updateReadings(geometry);
     }
 

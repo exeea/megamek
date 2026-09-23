@@ -158,7 +158,7 @@ class GpuLiquidSmokeTest {
               "Hazardous liquid should be green: " + channel(pixels, 24) + "," + channel(pixels, 16) + "," + channel(pixels, 8));
     }
 
-    /** The vertical sheet must retain the upstream pool's hue, including the color seen through its transparent surface. */
+    /** A fall breaks into white water, yet keeps its liquid's hue: toxic falls stay green, Martian ones rust. */
     private static void assertWaterfallPalette(BoardCamera camera, BoardScene scene, List<int[]> pools) {
         Pixmap image = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
         try {
@@ -176,12 +176,20 @@ class GpuLiquidSmokeTest {
                 }
                 float poolSum = channel(pools.get(family), 24) + channel(pools.get(family), 16) + channel(pools.get(family), 8);
                 float fallSum = channel(pixels, 24) + channel(pixels, 16) + channel(pixels, 8);
-                for (int shift : new int[] { 8, 16, 24 }) {
-                    assertEquals(channel(pools.get(family), shift) / poolSum, channel(pixels, shift) / fallSum, 0.05,
-                          "Waterfall hue must follow the upstream pool, family " + family + ", channel " + shift);
-                }
+                assertEquals(strongest(pools.get(family)), strongest(pixels),
+                      "Waterfall must keep the upstream pool's dominant hue, family " + family);
+                assertTrue(fallSum > poolSum, "Falling water must read lighter than the pool it leaves, family "
+                      + family + ": " + poolSum + " -> " + fallSum);
             }
         } finally { image.dispose(); }
+    }
+
+    private static int strongest(int[] pixels) {
+        int result = 8;
+        for (int shift : new int[] { 16, 24 }) {
+            if (channel(pixels, shift) > channel(pixels, result)) { result = shift; }
+        }
+        return result;
     }
 
     private static int channel(int[] pixels, int shift) {

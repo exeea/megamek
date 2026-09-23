@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
@@ -251,8 +250,7 @@ class GpuUnitVisibilitySmokeTest {
         atmosphere.end(camera.camera, terrain, scene, 60);
         GL20 original = Gdx.gl;
         int[] capturesAndScissor = new int[2];
-        GL20 watched = (GL20) Proxy.newProxyInstance(GL20.class.getClassLoader(), new Class<?>[] { GL20.class },
-              (proxy, method, args) -> {
+        GpuGlWatch watch = new GpuGlWatch((proxy, method, args) -> {
                   if (method.getName().equals("glClear")) { capturesAndScissor[0]++; }
                   if (method.getName().equals("glScissor")) {
                       capturesAndScissor[1] = (int) args[2] * (int) args[3];
@@ -265,8 +263,6 @@ class GpuUnitVisibilitySmokeTest {
                   try { return method.invoke(original, args); }
                   catch (InvocationTargetException error) { throw error.getCause(); }
               });
-        Gdx.graphics.setGL20(watched);
-        Gdx.gl = Gdx.gl20 = watched;
         try {
             visibility.render(camera.camera, units, atmosphere.depthTexture(), 60, intensity, scale);
             if (capturesAndScissor[1] > 0) {
@@ -277,8 +273,7 @@ class GpuUnitVisibilitySmokeTest {
                 }
             }
         } finally {
-            Gdx.graphics.setGL20(original);
-            Gdx.gl = Gdx.gl20 = original;
+            watch.close();
         }
         Pixmap result = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
         captures.add(result);

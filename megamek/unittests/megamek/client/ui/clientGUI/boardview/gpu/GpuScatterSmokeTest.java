@@ -2,7 +2,6 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -16,7 +15,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
-import com.badlogic.gdx.graphics.g3d.utils.DepthShaderProvider;
+import com.badlogic.gdx.graphics.g3d.shaders.DepthShader;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
@@ -46,7 +45,12 @@ class GpuScatterSmokeTest {
         try (GpuBoardFixture fixture = GpuBoardFixture.create(new Board(16, 16, hexes))) {
             SwingUtilities.invokeAndWait(fixture.source::refresh);
             BoardScene captured = fixture.source.takeFrame().scene();
-            BoardScene scene = new BoardScene(0, 16, 16, captured.tiles(), List.of(), List.of(), -1, "", List.of(),
+            // Isolate the baked scatter layer from the separate living grass and sculpted-ground systems.
+            var tiles = captured.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(), tile.elevation(),
+                  tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(), tile.ground(), tile.normals(),
+                  tile.decals(), tile.decalsWithoutLimbs(), tile.tactical(), tile.features(), tile.text(), tile.liquid(),
+                  tile.foliage(), false)).toList();
+            BoardScene scene = new BoardScene(0, 16, 16, tiles, List.of(), List.of(), -1, "", List.of(),
                   new BoardScene.Light(-24, -30));
             BoardScene bare = new BoardScene(0, 16, 16, scene.tiles().stream().map(tile -> new BoardScene.Tile(
                   tile.coords(), tile.elevation(), tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(),
@@ -59,14 +63,14 @@ class GpuScatterSmokeTest {
                 public void create() {
                     GpuTerrain terrain = new GpuTerrain();
                     GpuTerrain plain = new GpuTerrain();
-                    ModelBatch depth = new ModelBatch(new DepthShaderProvider());
+                    ModelBatch depth = new ModelBatch(GpuTreeInstances.depthProvider(new DepthShader.Config()));
                     GLProfiler profiler = new GLProfiler(Gdx.graphics);
                     try {
                         terrain.update(scene);
                         plain.update(bare);
                         var features = scene.tiles().stream().flatMap(tile -> tile.features().stream()).toList();
-                        assertTrue(!features.isEmpty() && features.size() <= 512,
-                              "At most two details per eligible hex, regardless of the density multiplier");
+                        assertTrue(!features.isEmpty() && features.size() <= 1536,
+                              "Clusters stay bounded regardless of the density multiplier");
                         int triangles = features.stream().mapToInt(feature -> switch (feature.asset()) {
                             case "scatter-grass", "scatter-dry-grass" -> 6;
                             case "scatter-plant" -> 16;
@@ -83,19 +87,26 @@ class GpuScatterSmokeTest {
                             camera.camera.zoom = diameter / pixels[step] * Gdx.graphics.getBackBufferHeight()
                                   / Gdx.graphics.getHeight();
                             camera.update();
+                            // Change the sun so both scenes submit a fresh shadow map; camera-only changes can
+                            // reuse the fitted texel grid, and LoD dirties only the scene containing scatter.
+                            var lighting = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(12 + step * .2f,
+                                  0, 0, 2, 0, 0));
+                            terrain.setAtmosphere(lighting);
+                            plain.setAtmosphere(lighting);
                             boolean visible = step < 2 || step == 4;
                             int vertices = visible ? triangles * 3 : 0;
                             int[] background = count(profiler, () -> plain.render(camera.camera, false));
                             int[] decorated = count(profiler, () -> terrain.render(camera.camera, false));
-                            assertEquals(vertices, decorated[0] - background[0]);
-                            assertEquals(visible ? 1 : 0, decorated[1] - background[1],
-                                  "All scatter shares one draw call in this chunk");
+                            assertEquals(vertices, decorated[0] - background[0], "Color pass at LoD step " + step);
+                            assertEquals(visible ? 4 : 0, decorated[1] - background[1],
+                                  "All scatter shares one draw call per visible chunk");
                             assertEquals(vertices,
                                   count(profiler, () -> terrain.renderDepth(camera.camera, List.of(), depth))[0]
-                                        - count(profiler, () -> plain.renderDepth(camera.camera, List.of(), depth))[0]);
-                            assertEquals(vertices,
-                                  count(profiler, () -> terrain.renderShadows(camera.camera, List.of()))[0]
-                                        - count(profiler, () -> plain.renderShadows(camera.camera, List.of()))[0]);
+                                        - count(profiler, () -> plain.renderDepth(camera.camera, List.of(), depth))[0],
+                                  "Depth pass at LoD step " + step);
+                            int shadowVertices = count(profiler, () -> terrain.renderShadows(camera.camera, List.of()))[0]
+                                  - count(profiler, () -> plain.renderShadows(camera.camera, List.of()))[0];
+                            assertEquals(vertices, shadowVertices, "Shadow pass at LoD step " + step);
                             assertEquals(0, count(profiler, () -> terrain.renderShadows(camera.camera, List.of()))[0],
                                   "An unchanged camera reuses the shadow map");
                             for (var tile : scene.tiles()) {
@@ -129,7 +140,7 @@ class GpuScatterSmokeTest {
                             preview(terrain, camera, "scatter-" + surface.name().toLowerCase(java.util.Locale.ROOT));
                         }
                         System.out.println("Scatter: " + features.size() + " objects, " + triangles
-                              + " triangles, 1 additional draw per visible pass on 256 hexes; 0 at overview cull.");
+                              + " triangles, 4 additional draws per visible pass on 256 hexes; 0 at overview cull.");
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                     } catch (Throwable error) {
                         failure.set(error);
@@ -143,7 +154,7 @@ class GpuScatterSmokeTest {
                 }
             }, configuration);
         }
-        assertNull(failure.get(), () -> String.valueOf(failure.get()));
+        if (failure.get() != null) { throw new AssertionError("Scatter rendering", failure.get()); }
     }
 
     private static int[] count(GLProfiler profiler, Runnable draw) {

@@ -243,6 +243,11 @@ final class GpuAtmosphere implements Disposable {
         return lighting;
     }
 
+    /** The composite's exposure: linear scene values above its inverse clip to white. */
+    float exposure() {
+        return lighting.exposureScale(settings.exposure());
+    }
+
     /** Apply after the camera's final pose, before either geometry shadows or cloud transmission. */
     void updateLight(Camera camera) {
         lighting = options.fixedSun() ? worldLighting.relativeTo(camera) : worldLighting;
@@ -260,6 +265,7 @@ final class GpuAtmosphere implements Disposable {
     /** Prepare clouds and surface weather before scene capture; cameras share their field and wind timeline. */
     void prepareClouds(GpuTerrain terrain, BoardScene board, float delta) {
         terrain.setWetness(BoardAtmosphere.wetness(settings));
+        terrain.setWind(settings.effects());
         cloudsActive = settings.clouds() > 0 && lighting.hasDirectLight();
         if (cloudsActive) {
             if (clouds == null) { clouds = new GpuClouds(quad); }
@@ -367,7 +373,7 @@ final class GpuAtmosphere implements Disposable {
         compositeShader.setUniformf("u_fogSize", hasScattering() ? fog.getWidth() : 1, hasScattering() ? fog.getHeight() : 1);
         compositeShader.setUniformf("u_depthRange", camera.far - camera.near);
         compositeShader.setUniformf("u_edgeScale", BoardGeometry.LEVEL);
-        compositeShader.setUniformf("u_exposure", lighting.exposureScale(settings.exposure()));
+        compositeShader.setUniformf("u_exposure", exposure());
         compositeShader.setUniformf("u_tint", lighting.tint().r, lighting.tint().g, lighting.tint().b);
         compositeShader.setUniformf("u_saturation", lighting.saturation());
         compositeShader.setUniformf("u_sky", lighting.sky().r, lighting.sky().g, lighting.sky().b);
