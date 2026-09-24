@@ -40,7 +40,8 @@ final class GpuHexText implements Disposable {
         String path = "megamek/client/ui/clientGUI/boardview/gpu/";
         String vertex = Gdx.files.classpath(path + "hex-text.vert").readString("UTF-8");
         String fragment = Gdx.files.classpath(path + "hex-text.frag").readString("UTF-8")
-              .replace("// GROUND_LAYER", Gdx.files.classpath(path + "ground-layer.glsl").readString("UTF-8"));
+              .replace("// GROUND_LAYER", Gdx.files.classpath(path + "ground-layer.glsl").readString("UTF-8"))
+              .replace("// CAMERA_DEPTH", Gdx.files.classpath(path + "camera-depth.glsl").readString("UTF-8"));
         shader = new ShaderProgram(vertex, fragment);
         if (!shader.isCompiled()) {
             String log = shader.getLog();
@@ -98,15 +99,8 @@ final class GpuHexText implements Disposable {
 
     private static float headroom(BoardScene.Tile tile, BoardView.HexText label) {
         if (label.elevation() > 0 || tile.liquid().present()) { return 0; }
-        float relief = BoardRelief.headroom(tile);
-        float scatter = 0;
-        for (BoardScene.Feature feature : tile.features()) {
-            if (feature.kind() == BoardScene.FeatureKind.SCATTER) {
-                scatter = Math.max(scatter, feature.height() * BoardGeometry.LEVEL);
-            }
-        }
         // Whole world units keep differently sized scatter in a small number of font batches.
-        return (float) Math.ceil((relief + scatter) / BoardGeometry.HEX_SCALE) * BoardGeometry.HEX_SCALE;
+        return (float) Math.ceil(BoardRelief.decoration(tile) / BoardGeometry.HEX_SCALE) * BoardGeometry.HEX_SCALE;
     }
 
     void render(SpriteBatch batch, Camera camera, Texture depth, int bottom) {
@@ -128,7 +122,9 @@ final class GpuHexText implements Disposable {
             shader.setUniformi("u_depth", 1);
             shader.setUniformi("u_units", unitDepth == null ? 1 : 2);
             shader.setUniformf("u_unitOptions", unitDepth == null ? 0 : 1,
-                  Math.max(.0000005f, .05f * BoardGeometry.HEX_SCALE / (camera.far - camera.near)));
+                  .05f * BoardGeometry.HEX_SCALE);
+            shader.setUniformf("u_projectionDepth", camera.projection.val[Matrix4.M22], camera.projection.val[Matrix4.M23],
+                  camera.projection.val[Matrix4.M32], camera.projection.val[Matrix4.M33]);
             shader.setUniformMatrix("u_inverseView", camera.invProjectionView);
             shader.setUniformf("u_viewport", 0, HdpiUtils.toBackBufferY(bottom), depth.getWidth(), depth.getHeight());
             shader.setUniformf("u_groundBoard", 0, 0, BoardGeometry.WIDTH, BoardGeometry.HEIGHT);

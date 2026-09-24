@@ -10,7 +10,7 @@ import megamek.common.board.Coords;
 /** Z-up, tightly tiled hex columns. Rendering and picking use these same surfaces. */
 final class BoardGeometry {
     /** Independent default for a whole unit occupying more than one game hex. */
-    static final float DEFAULT_MULTI_HEX_UNIT_SCALE = 0.85f;
+    static final float DEFAULT_MULTI_HEX_UNIT_SCALE = 0.9f;
     /** Whether steps between hexes take room on both sides of their edge; see {@link Tuning#transitions()}. */
     static final boolean DEFAULT_TRANSITIONS = true;
     /** Metres of gap between neighbouring hex tiles; 0 keeps them joined. See {@link Tuning#padding()}. */
@@ -63,7 +63,7 @@ final class BoardGeometry {
         }
     }
 
-    static final Tuning DEFAULTS = new Tuning(1, 0.7f, 1.0f, 18, 0.8f);
+    static final Tuning DEFAULTS = new Tuning(1, 0.9f, 1.0f, 18, 0.8f);
     /**
      * Native tactical markers keep this fraction of the hex radius clear of the shared hex edges. Exactly on
      * an edge a marker is coplanar with the terrain there and flickers against it while the camera rotates.
@@ -192,6 +192,19 @@ final class BoardGeometry {
         return dy <= HEIGHT / 2 + 0.001f && (HEIGHT / 2) * dx + (WIDTH / 4) * dy <= WIDTH * HEIGHT / 4 + 0.001f;
     }
 
+    /** The hex whose footprint holds (x, y), or null off the board. */
+    static BoardScene.Tile tile(BoardScene scene, float x, float y) {
+        int column = (int) Math.floor(x / (WIDTH * .75f));
+        int row = (int) Math.floor(-y / HEIGHT);
+        for (int cx = column - 1; cx <= column + 1; cx++) {
+            for (int cy = row - 1; cy <= row + 1; cy++) {
+                BoardScene.Tile tile = scene.tile(new Coords(cx, cy));
+                if (tile != null && contains(tile.coords(), x, y)) { return tile; }
+            }
+        }
+        return null;
+    }
+
     record Hit(Coords coords, float distance) { }
 
     static Coords pick(BoardScene scene, Ray ray) {
@@ -238,6 +251,19 @@ final class BoardGeometry {
         return owner;
     }
 
+    /**
+     * The hex whose footprint holds a hit on a top, bank, bed or water: its owner, or the neighbour whose footprint
+     * holds it where the owner's faces reach past its own, as a water hex's shore does over a land corner.
+     */
+    private static Coords footprint(BoardScene scene, Coords owner, Vector3 hit) {
+        if (contains(owner, hit.x, hit.y)) { return owner; }
+        for (int direction = 0; direction < 6; direction++) {
+            Coords other = owner.translated(direction);
+            if (scene.tile(other) != null && contains(other, hit.x, hit.y)) { return other; }
+        }
+        return owner;
+    }
+
     private static Hit nearest(BoardScene scene, Ray ray, Iterable<BoardScene.Tile> candidates, float floor,
           BoardSurface.Cache cache) {
         Coords result = null;
@@ -262,13 +288,13 @@ final class BoardGeometry {
                 if (Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit)
                       && ray.origin.dst2(hit) < nearest) {
                     nearest = ray.origin.dst2(hit);
-                    result = tile.coords();
+                    result = footprint(scene, tile.coords(), hit);
                 }
             }
             for (BoardSurface.Face face : surface.waterFaces) {
                 if (Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit) && ray.origin.dst2(hit) < nearest) {
                     nearest = ray.origin.dst2(hit);
-                    result = tile.coords();
+                    result = footprint(scene, tile.coords(), hit);
                 }
             }
             for (BoardSurface.Face face : surface.walls(scene, floor)) {

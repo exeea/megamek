@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static megamek.client.ui.clientGUI.boardview.gpu.BoardAtmosphereTest.assertSameColor;
+import static megamek.client.ui.clientGUI.boardview.gpu.BoardAtmosphereTest.assertSameLighting;
 
 import java.util.HashSet;
 
@@ -28,19 +30,18 @@ class BoardAtmosphericTaintTest {
                 for (float strength : new float[] { 0, 0.001f, 1, 2, 10 }) {
                     var after = BoardAtmosphere.lighting(tinted, BoardAtmosphere.MOONLIGHT_SHADOW_CONTRAST, strength);
                     assertEquals(before.direction(), after.direction());
-                    assertEquals(before.direct(), after.direct());
-                    assertEquals(before.ambient(), after.ambient());
+                    assertSameColor(before.direct(), after.direct(), "Taint never changes the light");
+                    assertSameColor(before.ambient(), after.ambient(), "Taint never changes the light");
                     assertEquals(before.saturation(), after.saturation());
-                    assertEquals(before.exposureScale(0), after.exposureScale(0));
                     assertBrightness(before.sky(), after.sky());
                     assertBrightness(before.horizon(), after.horizon());
-                    assertBrightness(before.fog(), after.fog());
+                    assertLight(before.fog(), after.fog());
                     // The multiplicative grade may exceed one; its luminance must not change exposure.
                     assertEquals(luminance(before.tint()), luminance(after.tint()), 0.000001f);
                     float gradeShift = distance(before.tint(), after.tint());
                     if (strength == 0 || taint.isBreathable()) {
                         assertEquals(0, gradeShift, "Clear or untinted air must leave the grade alone");
-                        assertEquals(before, after);
+                        assertSameLighting(before, after, "Clear or untinted air changes nothing");
                     } else {
                         assertTrue(gradeShift > 0, "Taint must grade the board, not only the sky and fog: " + taint);
                     }
@@ -113,12 +114,15 @@ class BoardAtmosphericTaintTest {
             float change = distance(BoardAtmosphere.lighting(clear).horizon(), BoardAtmosphere.lighting(tainted).horizon());
             assertTrue(change > previous);
             previous = change;
-            if (pressure.isVacuum()) { assertEquals(BoardAtmosphere.lighting(clear), BoardAtmosphere.lighting(tainted)); }
+            if (pressure.isVacuum()) {
+                assertSameLighting(BoardAtmosphere.lighting(clear), BoardAtmosphere.lighting(tainted),
+                      "Airless worlds have no air to taint");
+            }
         }
         var taintedSpace = BoardAtmosphere.fromScenario(conditions, true, 0.5);
         conditions.setAtmosphericTaint(AtmosphericTaint.BREATHABLE);
-        assertEquals(BoardAtmosphere.lighting(BoardAtmosphere.fromScenario(conditions, true, 0.5)),
-              BoardAtmosphere.lighting(taintedSpace));
+        assertSameLighting(BoardAtmosphere.lighting(BoardAtmosphere.fromScenario(conditions, true, 0.5)),
+              BoardAtmosphere.lighting(taintedSpace), "Space has no air to taint");
     }
 
     @Test
@@ -156,9 +160,17 @@ class BoardAtmosphericTaintTest {
     }
 
     private static void assertBrightness(Color before, Color after) {
+        assertLight(before, after);
+        for (float channel : new float[] { after.r, after.g, after.b }) {
+            assertTrue(channel <= 1, "Display colors stay within the display range");
+        }
+    }
+
+    /** Fog is linear light and may exceed one; the palette only keeps its luminance. */
+    private static void assertLight(Color before, Color after) {
         assertEquals(luminance(before), luminance(after), 0.000001f);
         for (float channel : new float[] { after.r, after.g, after.b }) {
-            assertTrue(Float.isFinite(channel) && channel >= 0 && channel <= 1);
+            assertTrue(Float.isFinite(channel) && channel >= 0);
         }
     }
 

@@ -277,7 +277,8 @@ final class GpuUnitModels implements Disposable {
                       + " triangles: " + bodyTriangles);
             }
             assembled.calculateTransforms();
-            return new GpuUnitModel(assembled, null, true, List.of(), 1f / 54, null, rigs, familyScale);
+            // Troops and transports are authored at canonical size in the Mek standard, like every other body.
+            return new GpuUnitModel(assembled, null, true, List.of(), 1f / 27, null, rigs, familyScale);
         } catch (RuntimeException error) {
             assembled.dispose();
             throw error;

@@ -1,7 +1,8 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Sculpted tops, cliffs and the rock kit. Geometry supplies the landforms; this shader layers each surface family's
-// four materials (ground, debris, wall, mantle), mapped in world space, and lights them in linear space. It writes
-// display space like every other scene shader, so the atmosphere composite converts, exposes and encodes the frame once.
+// four materials (ground, debris, wall, mantle), mapped in world space, and lights them with the board's one light
+// model (light-model.glsl, surface-lighting.glsl): linear albedo times linear light, encoded for display like every
+// other lit surface, so the atmosphere composite grades and tones the whole frame once.
 #ifdef GL_ES
 precision highp float;
 #endif
@@ -36,22 +37,22 @@ uniform float u_waterLine;  // world units the water surface lies below its hex'
 const mat2 TURN = mat2(.8253, .5646, -.5646, .8253);
 
 
-// Per-level identity, in image-editor units: hue degrees, saturation/lightness/contrast percent per level.
+// Per-level identity, so every level reads from straight above; saturation, lightness and contrast in percent per
+// level. Higher ground turns lighter and paler toward cream, as drier, sun-bleached ground; lower ground darker and a
+// little warmer. Neither turns any family's hue toward red or pink.
 vec3 levelGrade(vec3 c, float level) {
-    float up = max(level, 0.0), down = max(-level, 0.0);
-    float hue = -1.0 * up + 6.0 * down;
-    float saturation = 2.0 * up;
-    float lightness = 3.0 * up - 6.0 * down;
-    float contrast = 3.0 * up;
-    // Hue rotation in YIQ keeps luminance.
-    float angle = radians(hue);
-    vec3 yiq = vec3(dot(c, vec3(.299, .587, .114)), dot(c, vec3(.596, -.274, -.322)), dot(c, vec3(.211, -.523, .312)));
-    float s = sin(angle), k = cos(angle);
-    yiq.yz = vec2(yiq.y * k - yiq.z * s, yiq.y * s + yiq.z * k);
-    c = vec3(dot(yiq, vec3(1.0, .956, .621)), dot(yiq, vec3(1.0, -.272, -.647)), dot(yiq, vec3(1.0, -1.106, 1.703)));
+    // Levels count almost fully near the ground and ease off further away, so no height grades to white or black.
+    float up = 6.0 * (1.0 - exp(-max(level, 0.0) / 6.0)), down = 6.0 * (1.0 - exp(-max(-level, 0.0) / 6.0));
+    float saturation = -3.0 * up + 4.0 * down;
+    float lightness = 14.0 * up - 18.0 * down;
+    float contrast = 2.0 * up;
+    // Warmer below: less blue, a little less green.
+    c *= vec3(1.0, 1.0 - .01 * down, 1.0 - .04 * down);
     float luma = dot(c, vec3(.299, .587, .114));
     c = mix(vec3(luma), c, 1.0 + saturation / 100.0);
-    c = lightness >= 0.0 ? c + (1.0 - c) * lightness / 100.0 : c * (1.0 + lightness / 100.0);
+    // Dark ground lifts less, so a meadow's upper levels keep their green and their texture instead of bleaching.
+    c = lightness >= 0.0 ? mix(c, vec3(1.0, .97, .9), lightness / 100.0 * min(1.0, luma / .55))
+          : c * (1.0 + lightness / 100.0);
     c = (c - .5) * (1.0 + contrast / 100.0) + .5;
     return clamp(c, 0.0, 1.0);
 }
@@ -149,7 +150,7 @@ vec3 plantColor(float variation) {
 
 // Sunlit ground around a family reflects its own colour into shaded walls and undersides.
 vec3 groundBounce() {
-    if (family(0.0)) return vec3(.10, .16, .06);
+    if (family(0.0)) return vec3(.15, .145, .06);
     if (family(1.0)) return vec3(.22, .15, .10);
     if (family(2.0)) return vec3(.42, .28, .16);
     if (family(3.0)) return vec3(.22, .21, .19);
@@ -478,21 +479,19 @@ void main() {
     albedo *= 1.0 - wet * mix(.18, .11, max(0.0, u_groundResponse));
     albedo = toLinear(albedo);
 #ifdef lightingFlag
-    vec3 ambient = skyLight(normal) * occlusion * cavity;
+    // Sky from above; from below, light reflected by the sunlit ground: warm in the desert, white on snow.
+    vec3 ambient = skyLight(normal, groundBounce()) * occlusion * cavity;
     vec3 direct = vec3(0.0), sheen = vec3(0.0);
 #if numDirectionalLights > 0
     vec3 light = -u_dirLights[0].direction;
     // Foliage scatters light around its masses: a wrapped response instead of a hard terminator.
     float incidence = plant ? max(0.0, dot(normal, light) * .6 + .4) : max(0.0, dot(normal, light));
-    vec3 sunColor = sunLight();
-    // Light reflected from the sunlit ground below reaches walls and overhangs, warm in the desert, white on snow.
-    ambient += sunColor * max(0.0, light.z) * groundBounce() * (.5 - .5 * normal.z) * occlusion;
-    vec3 sun = sunColor * sculptShadow(face, light);
+    vec3 sun = u_dirLights[0].color * sculptShadow(face, light);
     direct = sun * incidence * mix(1.0, cavity, .5) * (1.0 + caustic);
     if (film > 0.0 && incidence > 0.0) {
-        vec3 halfVector = normalize(light - u_viewDirection);
+        vec3 halfVector = normalize(light - viewDirection());
         float exponent = mix(12.0, 96.0, film);
-        float fresnel = .02 + .98 * pow(1.0 - max(0.0, dot(-u_viewDirection, halfVector)), 5.0);
+        float fresnel = .02 + .98 * pow(1.0 - max(0.0, dot(-viewDirection(), halfVector)), 5.0);
         sheen = sun * incidence * film * fresnel * pow(max(0.0, dot(normal, halfVector)), exponent) * (exponent + 2.0) / 8.0;
     }
 #endif
@@ -501,14 +500,9 @@ void main() {
     albedo *= ambient + direct;
     albedo += sheen;
     if (submerged > 0.0) {
-#if numDirectionalLights > 0
-        vec3 scattered = skyLight(vec3(0.0, 0.0, 1.0)) * occlusion + sunColor * max(0.0, light.z) * (1.0 + caustic);
-#else
-        vec3 scattered = skyLight(vec3(0.0, 0.0, 1.0)) * occlusion;
-#endif
+        vec3 scattered = surfaceAmbient(vec3(0.0, 0.0, 1.0)) * occlusion + sunOnGround() * (1.0 + caustic);
         albedo = submergedLight(albedo, pigment, scattered, submerged);
     }
-    albedo = shoulder(albedo);
 #endif
     vec3 result = toDisplay(albedo);
     if (puddle > 0.0) result = rainReflection(result, normal, puddle);

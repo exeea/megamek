@@ -9,22 +9,37 @@ uniform sampler2D u_unitColors;
 uniform vec2 u_step;
 uniform float u_bias;
 uniform float u_intensity;
+uniform float u_levelHeight;
+// GROUND_LAYER
 
 float depthAt(sampler2D map, vec2 uv) {
     return texture2D(map, uv).r;
 }
 
+vec3 worldAt(vec2 uv, float depth) {
+    vec4 p = u_inverseView * vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+    return p.xyz / p.w;
+}
+
+// 1 where the scene hides the unit. The ground's own relief, grass and scatter in the hex the unit stands in never do:
+// the capture's alpha holds the height below which that hex's decoration stays, in quarter levels offset by 128 (0 for
+// markers, which have no such exemption), so only what stands in another hex, or rises above it, hides a unit.
 float hiddenAt(vec2 uv) {
     if (min(uv.x, uv.y) < 0.0 || max(uv.x, uv.y) > 1.0) return 0.0;
-    float unit = depthAt(u_unitDepth, uv);
-    return (1.0 - step(0.99999, unit)) * step(texture2D(u_sceneDepth, uv).r + u_bias, unit);
+    float unit = depthAt(u_unitDepth, uv), scene = depthAt(u_sceneDepth, uv);
+    if (unit >= 1.0 || behind(scene, unit, u_bias) < 0.5) return 0.0;
+    vec3 occluder = worldAt(uv, scene), surface = worldAt(uv, unit);
+    float groundTop = (texture2D(u_unitColors, uv).a * 255.0 - 128.0) * 0.25 * u_levelHeight;
+    bool own = boardHex(occluder.xy * vec2(1.0, -1.0) / u_groundBoard.zw)
+          == boardHex(surface.xy * vec2(1.0, -1.0) / u_groundBoard.zw);
+    return own && occluder.z <= groundTop ? 0.0 : 1.0;
 }
 
 void main() {
     float unit = depthAt(u_unitDepth, v_uv);
     float hidden = hiddenAt(v_uv);
     // Neither fill nor halo may repaint the normally visible part of a unit.
-    if (unit < 0.99999 && hidden < 0.5) discard;
+    if (unit < 1.0 && hidden < 0.5) discard;
 
     float nearMax = hidden;
     float nearMin = hidden;

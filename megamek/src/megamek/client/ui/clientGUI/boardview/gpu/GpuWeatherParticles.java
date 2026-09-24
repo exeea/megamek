@@ -13,6 +13,7 @@ import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.utils.Disposable;
 
 /** A bounded, GPU-animated particle pool. Shares the world's depth buffer and never covers the tactical UI. */
@@ -81,8 +82,7 @@ final class GpuWeatherParticles implements Disposable {
             shader.setUniformf("u_up", camera.up);
             shader.setUniformf("u_clock", clock);
             shader.setUniformf("u_level", BoardGeometry.LEVEL);
-            shader.setUniformf("u_light", Math.min(1, light.r + 0.25f), Math.min(1, light.g + 0.25f),
-                  Math.min(1, light.b + 0.25f));
+            shader.setUniformf("u_light", light.r, light.g, light.b);
             float windX = MathUtils.sinDeg(effects.windDirection());
             float windY = MathUtils.cosDeg(effects.windDirection());
             mesh.bind(shader);
@@ -123,30 +123,14 @@ final class GpuWeatherParticles implements Disposable {
                 top = Math.max(top, (roof + 12) * level);
             }
         }
-        float minX = Float.POSITIVE_INFINITY, minY = Float.POSITIVE_INFINITY;
-        float maxX = Float.NEGATIVE_INFINITY, maxY = Float.NEGATIVE_INFINITY;
-        for (int corner = 0; corner < 4; corner++) {
-            Vector3 near = camera.frustum.planePoints[corner];
-            for (int end = 0; end < 2; end++) {
-                float height = end == 0 ? bottom : top;
-                float distance = (height - near.z) / camera.direction.z;
-                float x = near.x + distance * camera.direction.x;
-                float y = near.y + distance * camera.direction.y;
-                minX = Math.min(minX, x);
-                minY = Math.min(minY, y);
-                maxX = Math.max(maxX, x);
-                maxY = Math.max(maxY, y);
-            }
-        }
-        minX = Math.max(-BoardGeometry.WIDTH, minX);
-        minY = Math.max(-(scene.height() + 1) * BoardGeometry.HEIGHT, minY);
-        maxX = Math.min((scene.width() + 1) * BoardGeometry.WIDTH * 0.75f, maxX);
-        maxY = Math.min(BoardGeometry.HEIGHT, maxY);
-        if (maxX <= minX || maxY <= minY) {
+        BoundingBox visible = BoardCamera.viewportBounds(camera, new BoundingBox(
+              new Vector3(-BoardGeometry.WIDTH, -(scene.height() + 1) * BoardGeometry.HEIGHT, bottom),
+              new Vector3((scene.width() + 1) * BoardGeometry.WIDTH * .75f, BoardGeometry.HEIGHT, top)));
+        if (visible.getWidth() <= 0 || visible.getHeight() <= 0) {
             return false;
         }
-        origin.set(minX, minY, bottom);
-        extent.set(maxX - minX, maxY - minY, top - bottom);
+        origin.set(visible.min);
+        visible.getDimensions(extent);
         return true;
     }
 

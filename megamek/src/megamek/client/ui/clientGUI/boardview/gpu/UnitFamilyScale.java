@@ -12,12 +12,15 @@ enum UnitFamilyScale {
     MEK_HEAVY("Heavy Meks", MEK, 1.0f, 1.0f),
     MEK_ASSAULT("Assault Meks", MEK, 1.0f, 1.0f),
     MEK_SUPER_HEAVY("Superheavy Meks", MEK, 1.0f, 1.0f),
-    INFANTRY("Infantry", 1.0f, 1.0f),
-    BATTLE_ARMOR("Battle armor", 1.0f, 1.0f),
+    // Troops are authored at canonical size (a 1.8 m soldier, 2.7 m battle armor) and drawn larger to read on the
+    // board, as tall as they stood before; their transports and spacing grow with them.
+    INFANTRY("Infantry", 2.0f, 1.0f),
+    BATTLE_ARMOR("Battle armor", 1.8f, 1.0f),
     VEHICLE("Vehicles", 1.0f, 1.0f),
     AIRCRAFT("Aircraft", 1.0f, 1.0f),
     NAVAL("Naval", 1.0f, 1.0f),
-    PROTOMEK("ProtoMeks", 1.0f, 1.0f),
+    // Same as infantry, authored at 6m but raised for visibility and separate them from BA
+    PROTOMEK("ProtoMeks", 1.3f, 1.0f),
     STATIC("Static units", 1.0f, 1.0f),
     DEFAULT("Other models", 1.0f, 1.0f);
 

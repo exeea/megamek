@@ -93,8 +93,8 @@ final class GpuTerrain implements Disposable {
     private final GpuTextures<Coords> tactical = new GpuTextures<>();
     private final GpuTextures<Coords> foliage = new GpuTextures<>(true);
     private final ModelBatch batch = new ModelBatch(new DefaultShaderProvider(
-          GpuCloudShadow.vertex(DefaultShader.getDefaultVertexShader()),
-          GpuCloudShadow.fragment(DefaultShader.getDefaultFragmentShader(), false)) {
+          GpuCloudShadow.vertex(GpuUnitShader.linearVertex(DefaultShader.getDefaultVertexShader())),
+          GpuCloudShadow.fragment(GpuUnitShader.linearFragment(DefaultShader.getDefaultFragmentShader()), false)) {
         private final DefaultShader.Config groundShader = new DefaultShader.Config(config.vertexShader,
               rainFragment(GpuCloudShadow.fragment(Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-normal.frag")
                     .readString(), true)));
@@ -105,9 +105,9 @@ final class GpuTerrain implements Disposable {
               rainFragment(GpuCloudShadow.fragment(Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-cliff.frag")
                     .readString(), true)));
         private final DefaultShader.Config sculptShader = new DefaultShader.Config(config.vertexShader,
-              sculptFragment("terrain-sculpt.frag"));
+              litFragment("terrain-sculpt.frag"));
         private final DefaultShader.Config foliageShader = new DefaultShader.Config(config.vertexShader,
-              sculptFragment("terrain-foliage.frag"));
+              litFragment("terrain-foliage.frag"));
         private final DefaultShader.Config instancedFoliageShader = new DefaultShader.Config(
               GpuTreeInstances.vertex(config.vertexShader), foliageShader.fragmentShader);
         private final DefaultShader.Config vegetationShader = new DefaultShader.Config(GpuGroundCover.vertex(config.vertexShader),
@@ -137,6 +137,8 @@ final class GpuTerrain implements Disposable {
                 private final int normalMapsUniform = register("u_normalMaps");
                 private final int wetnessUniform = register("u_wetness");
                 private final int viewDirectionUniform = register("u_viewDirection");
+                private final int viewPositionUniform = register("u_viewPosition");
+                private final int perspectiveUniform = register("u_perspective");
                 private final int rainNoiseUniform = register("u_rainNoise");
                 private final int rainScaleUniform = register("u_rainScale");
                 private final int rainTimeUniform = register("u_rainTime");
@@ -159,7 +161,7 @@ final class GpuTerrain implements Disposable {
                 private final int clayUniform = register("u_clay");
                 private final int sculptMetreUniform = register("u_metre");
                 private final int waterLineUniform = register("u_waterLine");
-                private final int exposureUniform = register("u_sceneExposure");
+                private final Vector3 detailPosition = new Vector3();
 
                 @Override
                 public void begin(Camera camera, RenderContext context) {
@@ -167,16 +169,16 @@ final class GpuTerrain implements Disposable {
                     set(normalMapsUniform, normalMaps ? 1f : 0f);
                     set(wetnessUniform, wetness);
                     set(viewDirectionUniform, camera.direction);
+                    set(viewPositionUniform, camera.position);
+                    set(perspectiveUniform, camera.projection.val[Matrix4.M33] == 0 ? 1f : 0f);
                     set(waterEffectsUniform, waterEffects ? 1f : 0f);
                     set(windUniform, wind);
                     set(metreUniform, BoardRelief.detailMetres(1));
-                    set(coverFadeUniform, GpuGroundCover.fade(camera));
                     set(gridShadeUniform, BoardGeometry.tuning().gridShade());
                     set(levelUniform, BoardGeometry.LEVEL);
                     set(clayUniform, clay ? 1f : 0f);
                     set(sculptMetreUniform, BoardRelief.metres(1));
                     set(waterLineUniform, BoardGeometry.HEX_SCALE);
-                    set(exposureUniform, exposure);
                     if (chosen == groundShader || chosen == waterShader || chosen == waterLiquidShader
                           || chosen == corniceShader || chosen == cliffShader || chosen == vegetationShader
                           || chosen == sculptShader) {
@@ -184,11 +186,6 @@ final class GpuTerrain implements Disposable {
                         set(rainNoiseUniform, rainNoise);
                         set(rainScaleUniform, 1f / BoardGeometry.WIDTH);
                         set(rainTimeUniform, clock);
-                        float zoom = camera instanceof OrthographicCamera ortho ? ortho.zoom : 1;
-                        float hexPixels = BoardGeometry.WIDTH * Gdx.graphics.getBackBufferWidth()
-                              / (camera.viewportWidth * zoom);
-                        set(rippleDetailUniform, MathUtils.clamp((hexPixels * Math.abs(camera.direction.z) - 28) / 60, 0, 1));
-                        set(rainDetailUniform, MathUtils.clamp((hexPixels - 12) / 28, 0, 1));
                         Color sky = atmosphere == null ? Color.GRAY : atmosphere.sky();
                         Color horizon = atmosphere == null ? Color.LIGHT_GRAY : atmosphere.horizon();
                         set(skyUniform, sky.r, sky.g, sky.b);
@@ -210,6 +207,16 @@ final class GpuTerrain implements Disposable {
                             program.setUniform4fv(loc(waderMotionUniform), waders.motion, 0, waders.count * 4);
                         }
                     }
+                }
+
+                @Override
+                public void render(Renderable part, Attributes attributes) {
+                    detailPosition.set(part.meshPart.center).mul(part.worldTransform);
+                    float hexPixels = BoardGeometry.WIDTH * BoardCamera.pixelsPerUnit(camera, detailPosition);
+                    set(coverFadeUniform, GpuGroundCover.fade(camera, detailPosition));
+                    set(rippleDetailUniform, MathUtils.clamp((hexPixels * Math.abs(camera.direction.z) - 28) / 60, 0, 1));
+                    set(rainDetailUniform, MathUtils.clamp((hexPixels - 12) / 28, 0, 1));
+                    super.render(part, attributes);
                 }
             };
             GpuCloudShadow.register(result);
@@ -311,8 +318,6 @@ final class GpuTerrain implements Disposable {
     private boolean normalMaps = true;
     /** Neutral material view: sculpted terrain drops its textures so only geometry, light and occlusion remain. */
     private boolean clay;
-    /** The composite's exposure, so bright sculpted materials roll off below its white point instead of clipping. */
-    private float exposure = 1;
     private boolean waterEffects = true;
     private float wetness;
     private float detailPixelsPerUnit = Float.NaN;
@@ -341,17 +346,17 @@ final class GpuTerrain implements Disposable {
         }
     }
 
-    /** A fragment shader lit like the sculpted terrain: the ground shaders' declarations, then sculpt-light.glsl. */
-    private static String sculptFragment(String file) {
-        String path = "megamek/client/ui/clientGUI/boardview/gpu/";
-        String source = rainFragment(GpuCloudShadow.fragment(Gdx.files.classpath(path + file).readString(), true));
-        return source.replace("void main() {", Gdx.files.classpath(path + "sculpt-light.glsl").readString()
-              + "\nvoid main() {");
+    /** A custom lit surface's fragment shader: its source with cloud shadows and the shared functions. */
+    private static String litFragment(String file) {
+        String source = Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/" + file).readString();
+        return rainFragment(GpuCloudShadow.fragment(source, true));
     }
 
-    /** Ground and water use the same rain field, lighting, geometry-shadow response and water optics. */
+    /** Every custom surface shares the light model, rain field, lighting, geometry shadows and water optics. */
     private static String rainFragment(String source) {
-        String functions = Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/rain-surface.glsl").readString();
+        String functions = Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/light-model.glsl")
+              .readString();
+        functions += Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/rain-surface.glsl").readString();
         functions += Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/surface-lighting.glsl").readString();
         functions += Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-patterns.glsl").readString();
         functions += Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/water-optics.glsl").readString();
@@ -1872,7 +1877,7 @@ final class GpuTerrain implements Disposable {
             updateDetail(camera);
         }
         batch.begin(camera);
-        if (!drawTactical && coverScene != null && GpuGroundCover.fade(camera) > 0) {
+        if (!drawTactical && coverScene != null) {
             List<BoardScene.Tile> candidates = new ArrayList<>();
             BoundingBox guard = new BoundingBox();
             float margin = BoardGeometry.WIDTH * 2;
@@ -1948,18 +1953,12 @@ final class GpuTerrain implements Disposable {
         applyLight();
     }
 
-    /** The exposure the atmosphere composite applies to this frame; see {@link GpuAtmosphere#exposure()}. */
-    void setExposure(float value) {
-        exposure = value;
-    }
-
     void setAtmosphere(BoardAtmosphere.Lighting next) {
-        if (!Objects.equals(atmosphere, next)) {
-            // Color, exposure and fog cannot change a shadow's geometry.
-            shadowDirty |= atmosphere == null || next == null || !atmosphere.direction().equals(next.direction());
-            atmosphere = next;
-            applyLight();
-        }
+        // Color and fog cannot change a shadow's geometry. The light is applied every time: it is cheap, and Color
+        // equality rounds to 8 bits, too coarse for night light and wrong above 1.
+        shadowDirty |= atmosphere == null || next == null || !atmosphere.direction().equals(next.direction());
+        atmosphere = next;
+        applyLight();
     }
 
     /** Live shading preview; changing it needs no geometry, atlas or shadow rebuild. */
@@ -2002,14 +2001,18 @@ final class GpuTerrain implements Disposable {
                 shadow = null;
             }
             environment.shadowMap = null;
-            environment.set(ColorAttribute.createAmbientLight(0.85f, 0.85f, 0.85f, 1));
+            // Linear light: 0.7 shows albedo as 0.85 would in display space.
+            environment.set(ColorAttribute.createAmbientLight(0.7f, 0.7f, 0.7f, 1));
             return;
         }
-        if (atmosphere != null && !atmosphere.hasDirectLight()) {
+        // Without an atmosphere, the scene's light direction takes the default atmosphere's light.
+        BoardAtmosphere.Lighting lighting = atmosphere != null ? atmosphere
+              : BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS);
+        if (!lighting.hasDirectLight()) {
             // Moonless and pitch-black nights retain ambient readability, but have no directional source.
             if (shadow != null) { environment.remove(shadow); }
             environment.shadowMap = null;
-            environment.set(ColorAttribute.createAmbientLight(atmosphere.ambient()));
+            environment.set(ColorAttribute.createAmbientLight(lighting.ambient()));
             return;
         }
         if (shadow == null) {
@@ -2020,13 +2023,12 @@ final class GpuTerrain implements Disposable {
             environment.shadowMap = shadow;
         }
         if (atmosphere == null) {
-            shadow.set(0.55f, 0.53f, 0.48f, light.x() * BoardGeometry.HEX_SCALE,
-                  light.y() * BoardGeometry.HEX_SCALE, -BoardGeometry.LEVEL);
-            environment.set(ColorAttribute.createAmbientLight(0.55f, 0.58f, 0.62f, 1));
+            shadow.set(lighting.direct(), light.x() * BoardGeometry.HEX_SCALE, light.y() * BoardGeometry.HEX_SCALE,
+                  -BoardGeometry.LEVEL);
         } else {
             shadow.set(atmosphere.direct(), atmosphere.direction());
-            environment.set(ColorAttribute.createAmbientLight(atmosphere.ambient()));
         }
+        environment.set(ColorAttribute.createAmbientLight(lighting.ambient()));
     }
 
     /** Camera depth retains the cutaway so atmosphere effects do not hide units behind faded surfaces. */
@@ -2059,7 +2061,7 @@ final class GpuTerrain implements Disposable {
         renderShadows(null, units);
     }
 
-    void renderShadows(OrthographicCamera view, List<ModelInstance> units) {
+    void renderShadows(Camera view, List<ModelInstance> units) {
         if (view != null) {
             updateDetail(view);
         }
@@ -2112,15 +2114,21 @@ final class GpuTerrain implements Disposable {
 
     /** All passes use the viewing camera's detail selection; scatter culling never rebuilds a mesh. */
     private void updateDetail(Camera camera) {
-        if (!(camera instanceof OrthographicCamera orthographic)) {
-            return;
-        }
-        float pixelsPerUnit = BoardCamera.pixelsPerUnit(orthographic);
+        boolean perspective = camera.projection.val[Matrix4.M33] == 0;
+        float pixelsPerUnit = perspective ? Float.NaN : BoardCamera.pixelsPerUnit(camera);
         if (pixelsPerUnit == detailPixelsPerUnit) {
             return;
         }
         detailPixelsPerUnit = pixelsPerUnit;
+        Vector3 nearest = new Vector3();
         for (Chunk chunk : chunks) {
+            if (perspective) {
+                // A chunk uses its nearest possible depth, preserving detail for all of its trees and scatter.
+                nearest.set(camera.direction.x >= 0 ? chunk.bounds.min.x : chunk.bounds.max.x,
+                      camera.direction.y >= 0 ? chunk.bounds.min.y : chunk.bounds.max.y,
+                      camera.direction.z >= 0 ? chunk.bounds.min.z : chunk.bounds.max.z);
+                pixelsPerUnit = BoardCamera.pixelsPerUnit(camera, nearest);
+            }
             float scatterPixels = chunk.scatterDiameter * pixelsPerUnit;
             boolean visible = scatterPixels >= (chunk.scatterVisible ? 2 : 3);
             if (visible != chunk.scatterVisible) {
@@ -2154,29 +2162,8 @@ final class GpuTerrain implements Disposable {
     }
 
     /** Focus texels on visible receivers, retaining the full light depth for offscreen shadow casters. */
-    static void fitShadowCamera(OrthographicCamera view, Camera target, BoundingBox bounds, Vector3 direction) {
-        BoundingBox receivers = new BoundingBox(bounds);
-        if (view != null) {
-            receivers.inf();
-            Vector3 right = new Vector3(view.direction).crs(view.up).nor();
-            for (int x : new int[] { -1, 1 }) {
-                for (int y : new int[] { -1, 1 }) {
-                    Vector3 origin = new Vector3(view.position)
-                          .mulAdd(right, x * view.viewportWidth * view.zoom / 2)
-                          .mulAdd(view.up, y * view.viewportHeight * view.zoom / 2);
-                    for (float z : new float[] { bounds.min.z, bounds.max.z }) {
-                        receivers.ext(new Vector3(origin).mulAdd(view.direction, (z - origin.z) / view.direction.z));
-                    }
-                }
-            }
-            receivers.min.x = MathUtils.clamp(receivers.min.x, bounds.min.x, bounds.max.x);
-            receivers.min.y = MathUtils.clamp(receivers.min.y, bounds.min.y, bounds.max.y);
-            receivers.max.x = MathUtils.clamp(receivers.max.x, bounds.min.x, bounds.max.x);
-            receivers.max.y = MathUtils.clamp(receivers.max.y, bounds.min.y, bounds.max.y);
-            receivers.min.z = bounds.min.z;
-            receivers.max.z = bounds.max.z;
-            receivers.update();
-        }
+    static void fitShadowCamera(Camera view, Camera target, BoundingBox bounds, Vector3 direction) {
+        BoundingBox receivers = view == null ? bounds : BoardCamera.viewportBounds(view, bounds);
         target.direction.set(direction).nor();
         Vector3 right = new Vector3(target.direction)
               .crs(Math.abs(target.direction.z) > 0.99f ? Vector3.Y : Vector3.Z).nor();

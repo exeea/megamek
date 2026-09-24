@@ -29,8 +29,8 @@ void main() {
     vec2 occluder = boardHex(inside * vec2(1.0, -1.0) / u_groundBoard.zw);
     vec2 owner = boardHex(v_board * vec2(1.0, -1.0) / u_groundBoard.zw);
     float unit = u_unitOptions.x > 0.5 ? texture2D(u_units, screen).r : 1.0;
-    bool onUnit = unit < 0.99999 && unit <= depth + u_unitOptions.y;
-    bool decoration = !onUnit && u_surface.y > 0.0 && depth < 0.99999 && distance(owner, occluder) < 0.1
+    bool onUnit = unit < 1.0 && behind(depth, unit, u_unitOptions.y) < 0.5;
+    bool decoration = !onUnit && u_surface.y > 0.0 && depth < 1.0 && distance(owner, occluder) < 0.1
           && position.z >= u_surface.x - u_groundBoard.z * 0.001
           && position.z <= u_surface.x + u_surface.y;
     // Only the local relief exception changes depth. Foreground cliffs and taller objects retain normal occlusion.

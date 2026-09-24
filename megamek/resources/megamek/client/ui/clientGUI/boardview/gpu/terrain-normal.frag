@@ -43,10 +43,12 @@ void main() {
     }
 
 #ifdef lightingFlag
+    albedo = toLinear(albedo);
     vec3 ambient, direct, sheen;
     surfaceLighting(normal, wet * mix(response, 1.0, puddle), ambient, direct, sheen);
     albedo *= ambient + direct;
     albedo += sheen;
+    albedo = toDisplay(albedo);
     if (puddle > 0.0) { albedo = rainReflection(albedo, normal, puddle); }
 #endif
     gl_FragColor = vec4(albedo, 1.0);

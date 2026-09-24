@@ -6,6 +6,7 @@ import java.util.Random;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.GL30;
 import com.badlogic.gdx.graphics.Mesh;
@@ -18,6 +19,7 @@ import com.badlogic.gdx.graphics.glutils.GLOnlyTextureData;
 import com.badlogic.gdx.graphics.glutils.HdpiUtils;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.BufferUtils;
@@ -35,6 +37,8 @@ final class GpuAtmosphere implements Disposable {
     /** Fog travel at full wind strength, in hex widths per second: the whole layer's speed ceiling. */
     static final float FOG_WIND_DRIFT = 0.6f;
     static final float MAX_SAND_OPACITY = 0.25f;
+    /** Particle colors are authored bright, so they take this share of the light on level ground. */
+    private static final float PARTICLE_ALBEDO = 0.4f;
 
     /** Local visual controls; weather and pressure still come from the scenario snapshot. */
     record Options(float rays, boolean fixedSun, float minCloudShadow, float maxCloudShadow, float sunGlare,
@@ -178,6 +182,9 @@ final class GpuAtmosphere implements Disposable {
         if (source.contains("// GROUND_LAYER")) {
             source = source.replace("// GROUND_LAYER", Gdx.files.classpath(SHADERS + "ground-layer.glsl").readString("UTF-8"));
         }
+        if (source.contains("// CAMERA_DEPTH")) {
+            source = source.replace("// CAMERA_DEPTH", Gdx.files.classpath(SHADERS + "camera-depth.glsl").readString("UTF-8"));
+        }
         String vertex = Gdx.files.classpath(SHADERS + "atmosphere.vert").readString("UTF-8");
         String prefix = "";
         if (source.contains("// SUN_VISIBILITY")) {
@@ -243,9 +250,19 @@ final class GpuAtmosphere implements Disposable {
         return lighting;
     }
 
-    /** The composite's exposure: linear scene values above its inverse clip to white. */
+    /** The composite's exposure: the scenario or tuning compensation alone, since the light arrives pre-exposed. */
     float exposure() {
-        return lighting.exposureScale(settings.exposure());
+        return (float) Math.pow(2, settings.exposure());
+    }
+
+    /** Display-encoded light for unlit particles: rain, snow and hail over the composite, smoke in the scene. */
+    Color particleLight() {
+        Color ground = lighting.groundLight();
+        return new Color(particle(ground.r), particle(ground.g), particle(ground.b), 1);
+    }
+
+    private static float particle(float ground) {
+        return (float) Math.pow(Math.min(1, PARTICLE_ALBEDO * ground), 1 / 2.2);
     }
 
     /** Apply after the camera's final pose, before either geometry shadows or cloud transmission. */
@@ -371,7 +388,8 @@ final class GpuAtmosphere implements Disposable {
             compositeShader.setUniform4fv("u_scatteringBounds", layerScreenBounds, 0, 4);
         }
         compositeShader.setUniformf("u_fogSize", hasScattering() ? fog.getWidth() : 1, hasScattering() ? fog.getHeight() : 1);
-        compositeShader.setUniformf("u_depthRange", camera.far - camera.near);
+        compositeShader.setUniformf("u_projectionDepth", camera.projection.val[Matrix4.M22],
+              camera.projection.val[Matrix4.M23], camera.projection.val[Matrix4.M32], camera.projection.val[Matrix4.M33]);
         compositeShader.setUniformf("u_edgeScale", BoardGeometry.LEVEL);
         compositeShader.setUniformf("u_exposure", exposure());
         compositeShader.setUniformf("u_tint", lighting.tint().r, lighting.tint().g, lighting.tint().b);
@@ -391,18 +409,20 @@ final class GpuAtmosphere implements Disposable {
         Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
     }
 
-    /** Angular projection for the orthographic board: panning/zooming cannot move a distant light source. */
+    /** A distant light follows the viewing angle and perspective FOV, independently of camera position. */
     private void bindSunGlare(Camera camera) {
         float aspect = camera.viewportWidth / Math.max(1, camera.viewportHeight);
         float forward = -camera.direction.dot(lighting.direction());
-        float energy = Math.max(worldLighting.direct().r, Math.max(worldLighting.direct().g, worldLighting.direct().b));
-        if (options.sunGlare() == 0 || !lighting.sunlight() || energy <= 0 || forward <= 0.15f) {
+        // The glare takes the sun's normalized color, and its brightness up to that of a full-strength sun.
+        float peak = Math.max(worldLighting.direct().r, Math.max(worldLighting.direct().g, worldLighting.direct().b));
+        if (options.sunGlare() == 0 || !lighting.sunlight() || peak <= 0 || forward <= 0.15f) {
             compositeShader.setUniformf("u_sunGlare", 0, 0, 0, aspect);
             return;
         }
         glareRight.set(camera.direction).crs(camera.up).nor();
-        // An approximately 80-degree vertical angular field keeps a low sun near the tilted board's upper edge.
-        float projection = 1.7f * forward;
+        // Orthographic views retain the approximately 80-degree angular field used for their distant sky.
+        float projection = (camera.projection.val[Matrix4.M33] == 0
+              ? 2 / camera.projection.val[Matrix4.M11] : 1.7f) * forward;
         float x = 0.5f - glareRight.dot(lighting.direction()) / (projection * aspect);
         float y = 0.5f - camera.up.dot(lighting.direction()) / projection;
         float facing = MathUtils.clamp((forward - 0.15f) / 0.6f, 0, 1);
@@ -415,9 +435,9 @@ final class GpuAtmosphere implements Disposable {
         float clear = 1 - settings.clouds() * (settings.pressure().isThin() ? 0.35f : 0.95f);
         float visibility = clear * clear * (1 - settings.fog() * 0.8f) * (1 - settings.haze() * 0.4f);
         compositeShader.setUniformf("u_sunGlare", x, y,
-              options.sunGlare() * energy * horizon * facing * edge * visibility, aspect);
-        compositeShader.setUniformf("u_glareColor", worldLighting.direct().r / energy,
-              worldLighting.direct().g / energy, worldLighting.direct().b / energy);
+              options.sunGlare() * Math.min(1, peak) * horizon * facing * edge * visibility, aspect);
+        compositeShader.setUniformf("u_glareColor", worldLighting.direct().r / peak,
+              worldLighting.direct().g / peak, worldLighting.direct().b / peak);
     }
 
     /** Borrowed hardware camera depth in the red channel, valid after end(). */
@@ -448,7 +468,6 @@ final class GpuAtmosphere implements Disposable {
     private void bindGroundLayer(ShaderProgram shader, Camera camera, BoardScene board, float top, int noiseUnit) {
         shader.setUniformMatrix("u_inverseView", camera.invProjectionView);
         shader.setUniformf("u_groundBoard", board.width(), board.height(), BoardGeometry.WIDTH, BoardGeometry.HEIGHT);
-        shader.setUniformf("u_direction", camera.direction);
         shader.setUniformf("u_boundsMin", -BoardGeometry.WIDTH, -(board.height() + 1) * BoardGeometry.HEIGHT,
               groundBase);
         shader.setUniformf("u_boundsMax", (board.width() + 1) * BoardGeometry.WIDTH * 0.75f, BoardGeometry.HEIGHT, top);
@@ -456,11 +475,22 @@ final class GpuAtmosphere implements Disposable {
         layerScreenBounds[1] = Float.POSITIVE_INFINITY;
         layerScreenBounds[2] = Float.NEGATIVE_INFINITY;
         layerScreenBounds[3] = Float.NEGATIVE_INFINITY;
-        // Orthographic projection preserves the convex box: outside these bounds the air column is empty.
+        // Projected corners bound a convex volume while it lies entirely in front of the near plane.
         for (int corner = 0; corner < 8; corner++) {
             groundProjection.set((corner & 1) == 0 ? -BoardGeometry.WIDTH : (board.width() + 1) * BoardGeometry.WIDTH * 0.75f,
                   (corner & 2) == 0 ? -(board.height() + 1) * BoardGeometry.HEIGHT : BoardGeometry.HEIGHT,
                   (corner & 4) == 0 ? groundBase : top);
+            if (camera.projection.val[Matrix4.M33] == 0
+                  && (groundProjection.x - camera.position.x) * camera.direction.x
+                        + (groundProjection.y - camera.position.y) * camera.direction.y
+                        + (groundProjection.z - camera.position.z) * camera.direction.z <= camera.near) {
+                // A volume crossing the near plane can cover the whole screen; the per-pixel ray still clips it.
+                layerScreenBounds[0] = 0;
+                layerScreenBounds[1] = 0;
+                layerScreenBounds[2] = 1;
+                layerScreenBounds[3] = 1;
+                break;
+            }
             camera.project(groundProjection, 0, 0, 1, 1);
             layerScreenBounds[0] = Math.min(layerScreenBounds[0], groundProjection.x);
             layerScreenBounds[1] = Math.min(layerScreenBounds[1], groundProjection.y);
@@ -494,9 +524,10 @@ final class GpuAtmosphere implements Disposable {
         compositeShader.setUniformf("u_sandWind", MathUtils.sinDeg(settings.effects().windDirection()),
               MathUtils.cosDeg(settings.effects().windDirection()), groundMotion.grains, 1 / BoardGeometry.WIDTH);
         compositeShader.setUniformf("u_sandOffset", groundMotion.sand);
-        // Borrow scene illumination so dust does not glow on moonless maps.
-        compositeShader.setUniformf("u_sandLight", lighting.ambient().r + lighting.direct().r * 0.35f,
-              lighting.ambient().g + lighting.direct().g * 0.35f, lighting.ambient().b + lighting.direct().b * 0.35f);
+        // Dust scatters the light that reaches the ground, so it does not glow on moonless maps.
+        Color ground = lighting.groundLight();
+        Color dust = BoardAtmosphere.SAND_DUST;
+        compositeShader.setUniformf("u_sandLight", ground.r * dust.r, ground.g * dust.g, ground.b * dust.b);
     }
 
     /** Draw after restoring opaque depth, before tactical markings and screen annotations. */
@@ -505,7 +536,7 @@ final class GpuAtmosphere implements Disposable {
             if (particles == null) {
                 particles = new GpuWeatherParticles();
             }
-            particles.render(camera, board, settings.effects(), lighting.ambient(), clock);
+            particles.render(camera, board, settings.effects(), particleLight(), clock);
         }
     }
 

@@ -43,12 +43,15 @@ void main() {
     }
     albedo *= 1.0 - wet * mix(0.175, 0.10, response) - runOff * RUNOFF_DARKENING;
 #ifdef lightingFlag
+    // The strip's own colour is lit: the premultiplied art is divided out here and multiplied back after the encode.
+    albedo = toLinear(albedo / art.a);
     vec3 ambient, direct, sheen;
     // The ground scales its film by the material's response, so a skirt does too: a wall wets as much as the
     // material it faces. A rivulet is standing water, so it takes the whole film where it runs (mix to one).
     surfaceLighting(normal, wet * mix(response, 1.0, runOff), ambient, direct, sheen);
     albedo *= ambient + direct;
-    albedo += sheen * art.a;
+    albedo += sheen;
+    albedo = toDisplay(albedo) * art.a;
 #endif
     gl_FragColor = vec4(albedo * v_color.a, alpha);
 }

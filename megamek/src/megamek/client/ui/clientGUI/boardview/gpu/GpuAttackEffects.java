@@ -219,6 +219,11 @@ final class GpuAttackEffects implements Disposable {
     List<Trace> emissions(UnitAttack shot) { return List.copyOf(traces.getOrDefault(shot, Map.of()).values()); }
     int flameParticleCount() { return flames.size(); }
 
+    void setSmokeLight(Color light) {
+        flames.setSmokeLight(light);
+        missiles.setSmokeLight(light);
+    }
+
     float flameSize() {
         float size = 0;
         for (int index = 0; index < muzzleCount; index++) {

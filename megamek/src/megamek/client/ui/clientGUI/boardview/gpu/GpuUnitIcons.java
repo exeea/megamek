@@ -8,7 +8,6 @@ import java.util.stream.Collectors;
 
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.DepthTestAttribute;
 import com.badlogic.gdx.math.Vector3;
@@ -37,9 +36,9 @@ final class GpuUnitIcons implements Disposable {
     Collection<ModelInstance> instances() { return instances.values(); }
 
     /** Returns true when cached picking meshes must be released along with an obsolete atlas layout. */
-    boolean update(boolean enabled, float threshold, OrthographicCamera camera, BoardScene scene,
+    boolean update(boolean enabled, float threshold, Camera camera, BoardScene scene,
           Map<BoardScene.Unit, UnitFootprint.Pose> poses, Map<BoardScene.Unit, Vector3> anchors, BoardSurface.Cache surfaces) {
-        active = useIcons(enabled, camera, BoardGeometry.WIDTH / camera.zoom, threshold, active);
+        active = useIcons(enabled, camera, BoardGeometry.WIDTH / BoardCamera.worldUnitsPerPixel(camera), threshold, active);
         if (!active) { return false; }
         var images = scene.units().stream().map(BoardScene.Unit::image).distinct()
               .collect(Collectors.toMap(image -> image, image -> image));

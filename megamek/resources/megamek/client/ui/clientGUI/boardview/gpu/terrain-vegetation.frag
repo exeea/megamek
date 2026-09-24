@@ -16,12 +16,13 @@ void main() {
     vec3 albedo = v_color.rgb * (1.0 - u_wetness * .16);
     albedo *= mix(.80, 1.06, v_coverData.y);
 #ifdef lightingFlag
+    albedo = toLinear(albedo);
     vec3 ambient, direct, sheen;
     surfaceLighting(normal, .05, ambient, direct, sheen);
     // Thin leaves transmit a little back light, while still receiving the world's shadows and cloud cover.
-    ambient += surfaceAmbient(-normal) * .15;
-    direct = mix(direct, floor(direct * 4.0 + .5) / 4.0, .22);
+    ambient += skyLight(-normal, GROUND_ALBEDO) * .15;
     albedo *= ambient + direct;
+    albedo = toDisplay(albedo);
 #endif
     gl_FragColor = vec4(albedo * terrainGrid(v_coverRoot * .2), 1.0);
 }

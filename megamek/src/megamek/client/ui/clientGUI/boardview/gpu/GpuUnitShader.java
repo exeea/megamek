@@ -31,8 +31,8 @@ final class GpuUnitShader extends DefaultShader {
     }
 
     static DefaultShaderProvider provider() {
-        return new DefaultShaderProvider(GpuCloudShadow.vertex(vertexSource(getDefaultVertexShader())),
-              GpuCloudShadow.fragment(fragmentSource(getDefaultFragmentShader()), false)) {
+        return new DefaultShaderProvider(GpuCloudShadow.vertex(vertexSource(linearVertex(getDefaultVertexShader()))),
+              GpuCloudShadow.fragment(fragmentSource(linearFragment(getDefaultFragmentShader())), false)) {
             @Override
             protected Shader createShader(Renderable renderable) {
                 return new GpuUnitShader(renderable, config);
@@ -54,6 +54,39 @@ final class GpuUnitShader extends DefaultShader {
         source = replaceOnce(source, MAIN, declarations + "\n" + MAIN, "fragment");
         String emissive = "#if defined(emissiveTextureFlag) && defined(emissiveColorFlag)";
         return replaceOnce(source, emissive, "diffuse.rgb = unitOverlays(diffuse.rgb);\n" + emissive, "fragment");
+    }
+
+    /**
+     * libGDX's vertex lighting on the board's one light model (light-model.glsl): the ambient term becomes the sky
+     * above and the sunlit ground below, as on the terrain. Units, props, buildings and liquids share it. The sunlit
+     * ground's share also goes to v_groundBounce, so a cloud's shadow can dim it (GpuCloudShadow.fragment).
+     */
+    static String linearVertex(String source) {
+        source = replaceOnce(source, MAIN, lightModel() + "\nvarying vec3 v_groundBounce;\n" + MAIN, "vertex");
+        String ambient = "#endif // sphericalHarmonicsFlag";
+        return replaceOnce(source, ambient, ambient + "\n#if defined(ambientFlag) && defined(normalFlag)\n"
+              + "vec3 sunOnGround = vec3(0.0);\n#if numDirectionalLights > 0\n"
+              + "sunOnGround = u_dirLights[0].color * max(0.0, -u_dirLights[0].direction.z);\n#endif\n"
+              + "v_groundBounce = hemisphere(vec3(0.0), sunOnGround, GROUND_ALBEDO, normal.z);\n"
+              + "ambientLight = hemisphere(ambientLight, sunOnGround, GROUND_ALBEDO, normal.z);\n#endif\n", "vertex");
+    }
+
+    /**
+     * libGDX's lit fragment on the one light model: linear albedo times the linear light, encoded for display.
+     * Emission stays display-encoded and is added after the encode, as authored; unlit draws are untouched.
+     */
+    static String linearFragment(String source) {
+        source = replaceOnce(source, MAIN, lightModel() + "\n" + MAIN, "fragment");
+        String lit = "#if (!defined(lightingFlag))";
+        source = replaceOnce(source, lit, "#ifdef lightingFlag\nvec3 displayEmissive = emissive.rgb;\n"
+              + "emissive.rgb = vec3(0.0);\ndiffuse.rgb = toLinear(diffuse.rgb);\n#endif\n" + lit, "fragment");
+        String fog = "#endif // end fogFlag";
+        return replaceOnce(source, fog, fog + "\n#ifdef lightingFlag\n"
+              + "gl_FragColor.rgb = toDisplay(gl_FragColor.rgb) + displayEmissive;\n#endif\n", "fragment");
+    }
+
+    private static String lightModel() {
+        return Gdx.files.classpath(SHADERS + "light-model.glsl").readString("UTF-8");
     }
 
     private static String replaceOnce(String source, String anchor, String replacement, String stage) {

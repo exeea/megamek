@@ -261,15 +261,20 @@ final class GpuUnitModel implements Disposable {
     }
 
     private float verticalScale(float horizontalScale, UnitFamilyScale scaleTuning) {
-        return levelsPerModelUnit * BoardGeometry.LEVEL * BoardGeometry.UNIT_HEIGHT_SCALE
-              * horizontalScale / (BoardGeometry.HEX_SCALE * BoardGeometry.DEFAULTS.unitScale()) * scaleTuning.heightScale();
+        // The default level height, not the current one: that reaches the model through its horizontal scale.
+        return levelsPerModelUnit * BoardGeometry.DEFAULTS.levelHeight() * BoardGeometry.UNIT_HEIGHT_SCALE
+              * horizontalScale / BoardGeometry.DEFAULTS.unitScale() * scaleTuning.heightScale();
     }
 
     private float horizontalScale(UnitFootprint.Layout footprint, UnitFamilyScale scaleTuning) {
+        // The level height resizes units on every axis: they keep their authored proportions and their height in
+        // levels instead of being stretched or squashed.
+        float scale = scaleTuning.unitScale() * BoardGeometry.tuning().levelHeight()
+              / BoardGeometry.DEFAULTS.levelHeight();
         if (footprint == null) {
-            return BoardGeometry.UNIT_SCALE * BoardGeometry.HEX_SCALE * scaleTuning.unitScale();
+            return BoardGeometry.UNIT_SCALE * BoardGeometry.HEX_SCALE * scale;
         }
-        return BoardGeometry.MULTI_HEX_UNIT_SCALE * scaleTuning.unitScale() * Math.min(footprint.width() / Math.max(1, restDimensions.x),
+        return BoardGeometry.MULTI_HEX_UNIT_SCALE * scale * Math.min(footprint.width() / Math.max(1, restDimensions.x),
               footprint.depth() / Math.max(1, restDimensions.y));
     }
 

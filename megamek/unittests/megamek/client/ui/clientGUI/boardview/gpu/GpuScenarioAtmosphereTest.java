@@ -20,7 +20,7 @@ class GpuScenarioAtmosphereTest {
     void sourcePublishesImmutableEffectiveConditionsWithoutChangingTheScenario() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             float dayHour = fixture.source.takeFrame().scenarioAtmosphere().hour();
-            assertTrue(dayHour >= 8 && dayHour <= 17);
+            assertTrue(dayHour >= 9 && dayHour <= 15.5f, "The DAY scenario samples 09:00 to 15:30: " + dayHour);
             SwingUtilities.invokeAndWait(() -> {
                 var conditions = fixture.game.getPlanetaryConditions();
                 conditions.setLight(Light.FULL_MOON);

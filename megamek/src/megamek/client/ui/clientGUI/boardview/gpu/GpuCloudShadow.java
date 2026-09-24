@@ -54,7 +54,8 @@ final class GpuCloudShadow extends Attribute {
     static String fragment(String source, boolean ground) {
         String declarations = Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/cloud-shadow.glsl")
               .readString("UTF-8");
-        source = insert(source, MAIN, declarations + "\n" + MAIN);
+        // The libGDX shaders also dim the sunlit ground's share of their ambient (GpuUnitShader.linearVertex).
+        source = insert(source, MAIN, declarations + "\n" + (ground ? "" : "varying vec3 v_groundBounce;\n") + MAIN);
         if (ground) {
             return insert(source, "albedo *= ambient + direct;",
                   "#ifdef cloudShadowFlag\nfloat cloudLight = cloudTransmission(v_cloudPosition);\n"
@@ -63,13 +64,16 @@ final class GpuCloudShadow extends Attribute {
         }
         int start = source.indexOf(MAIN) + MAIN.length();
         String body = source.substring(start).replace("v_lightDiffuse", "cloudDiffuse")
-              .replace("v_lightSpecular", "cloudSpecular");
+              .replace("v_lightSpecular", "cloudSpecular").replace("v_ambientLight", "cloudAmbient");
         // Ambient remains separate in libGDX's shadow-enabled scene shaders. Emissive materials are unaffected.
         return source.substring(0, start) + "\n#ifdef lightingFlag\n"
               + "float cloudLight = 1.0;\n#ifdef cloudShadowFlag\n"
               + "cloudLight = cloudTransmission(v_cloudPosition);\n#endif\n"
               + "vec3 cloudDiffuse = v_lightDiffuse * cloudLight;\n#ifdef specularFlag\n"
-              + "vec3 cloudSpecular = v_lightSpecular * cloudLight;\n#endif\n#endif\n" + body;
+              + "vec3 cloudSpecular = v_lightSpecular * cloudLight;\n#endif\n"
+              + "#if defined(ambientFlag) && defined(separateAmbientFlag)\nvec3 cloudAmbient = v_ambientLight;\n"
+              + "#ifdef normalFlag\ncloudAmbient -= (1.0 - cloudLight) * v_groundBounce;\n#endif\n#endif\n"
+              + "#endif\n" + body;
     }
 
     private static String insert(String source, String anchor, String replacement) {

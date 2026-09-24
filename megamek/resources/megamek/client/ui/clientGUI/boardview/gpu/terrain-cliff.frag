@@ -155,28 +155,26 @@ void main() {
         caustic = waterBedCaustics(v_cloudPosition.xy * u_rainScale, submerged) * u_rainDetail * u_waterEffects;
     }
 #ifdef lightingFlag
+    // Linear light, as on every lit surface. The bed tint above linearises with the colour it tints.
+    albedo = toLinear(albedo);
     vec3 ambient, direct, sheen;
     surfaceLighting(normal, film, ambient, direct, sheen);
-    // Broad light bands retain shape and shadows; packed occlusion only accents material crevices.
-    direct = mix(direct, floor(direct * 4.0 + .5) / 4.0, .24);
     direct *= 1.0 + caustic;
+    // Packed occlusion only accents material crevices.
     ambient *= mix(1.0, mix(wall ? .70 : .94, 1.0, properties.b), u_normalMaps);
     vec3 pigment = albedo;
     albedo *= ambient + direct;
     if (submerged > 0.0) {
         // Water scatters daylight in every direction: below the surface, orientation and shadows soften with depth.
-#if numDirectionalLights > 0
-        vec3 sun = u_dirLights[0].color * max(0.0, -u_dirLights[0].direction.z) * (1.0 + caustic);
+        vec3 sun = sunOnGround() * (1.0 + caustic);
 #ifdef cloudShadowFlag
         sun *= cloudLight;
 #endif
         vec3 scattered = surfaceAmbient(vec3(0.0, 0.0, 1.0)) + sun;
-#else
-        vec3 scattered = surfaceAmbient(vec3(0.0, 0.0, 1.0));
-#endif
         albedo = submergedLight(albedo, pigment, scattered, submerged);
     }
     albedo += sheen * mix(.35, 1.0, film);
+    albedo = toDisplay(albedo);
     if (puddle > 0.0) albedo = rainReflection(albedo, normal, puddle);
 #endif
     gl_FragColor = vec4(albedo, 1.0);

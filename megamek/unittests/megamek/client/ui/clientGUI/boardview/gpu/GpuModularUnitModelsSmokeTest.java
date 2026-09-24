@@ -239,7 +239,7 @@ class GpuModularUnitModelsSmokeTest {
             // Same placement adaptation as the board; each composite keeps child and limb transforms independent.
             instances.get(index).transform.setToTranslation((1.5f - index % 4) * 78, (index / 4 == 0 ? -1 : 1) * 40, 0)
                   .scale(BoardGeometry.UNIT_SCALE, BoardGeometry.UNIT_SCALE,
-                        BoardGeometry.LEVEL * BoardGeometry.UNIT_HEIGHT_SCALE / 54);
+                        BoardGeometry.LEVEL * BoardGeometry.UNIT_HEIGHT_SCALE / 27);
         }
         library.retainAssemblies(Set.of());
         // Dropping assemblies must not dispose the borrowed meshes used by other instances or future units.

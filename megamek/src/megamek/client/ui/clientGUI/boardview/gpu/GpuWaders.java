@@ -6,7 +6,6 @@ import java.util.List;
 import java.util.Map;
 
 import com.badlogic.gdx.math.collision.BoundingBox;
-import megamek.common.board.Coords;
 
 /**
  * Units standing partly in open water, as the water shader sees them each frame: where each crosses the surface, how
@@ -39,7 +38,7 @@ final class GpuWaders {
         for (int i = 0; i < keys.size() && scene != null; i++) {
             BoundingBox box = bounds.get(i);
             float x = box.getCenterX(), y = box.getCenterY();
-            BoardScene.Tile tile = tileAt(scene, x, y);
+            BoardScene.Tile tile = BoardGeometry.tile(scene, x, y);
             if (tile == null || !tile.liquid().present() || tile.liquid().molten() || tile.frozen()) { continue; }
             float level = BoardGeometry.waterZ(tile);
             if (box.min.z >= level || box.max.z <= level) { continue; }
@@ -66,18 +65,5 @@ final class GpuWaders {
         }
         previous.clear();
         previous.putAll(next);
-    }
-
-    /** The hex whose footprint holds (x, y), or null off the board. */
-    private static BoardScene.Tile tileAt(BoardScene scene, float x, float y) {
-        int column = (int) Math.floor(x / (BoardGeometry.WIDTH * .75f));
-        int row = (int) Math.floor(-y / BoardGeometry.HEIGHT);
-        for (int cx = column - 1; cx <= column + 1; cx++) {
-            for (int cy = row - 1; cy <= row + 1; cy++) {
-                BoardScene.Tile tile = scene.tile(new Coords(cx, cy));
-                if (tile != null && BoardGeometry.contains(tile.coords(), x, y)) { return tile; }
-            }
-        }
-        return null;
     }
 }

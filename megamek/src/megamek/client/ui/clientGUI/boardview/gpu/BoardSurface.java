@@ -67,9 +67,12 @@ final class BoardSurface {
         void clear() { surfaces.clear(); tiles = null; }
     }
 
-    /** Only inputs that alter topology; the ramp mask also captures second-ring road/bridge approaches. */
+    /**
+     * Only inputs that alter topology; the ramp mask also captures second-ring road/bridge approaches, and the shore
+     * mask, the neighbours that are liquid at the hex's level, the second-ring water that makes land a point.
+     */
     record Geometry(int elevation, int waterDepth, boolean frozen, int roadExits, BoardScene.Surface surface,
-          BoardLiquid liquid, boolean detailedGround, List<BoardScene.Feature> features, int ramps) { }
+          BoardLiquid liquid, boolean detailedGround, List<BoardScene.Feature> features, int ramps, int shores) { }
 
     /** Own shape followed by the six neighboring shapes; a missing board neighbor has a null entry. */
     static List<Geometry> geometryKey(BoardScene scene, BoardScene.Tile tile) {
@@ -83,7 +86,20 @@ final class BoardSurface {
 
     private static Geometry geometry(BoardScene scene, BoardScene.Tile tile) {
         return tile == null ? null : new Geometry(tile.elevation(), tile.waterDepth(), tile.frozen(), tile.roadExits(),
-              tile.surface(), tile.liquid(), tile.detailedGround(), tile.features(), ramps(scene, tile));
+              tile.surface(), tile.liquid(), tile.detailedGround(), tile.features(), ramps(scene, tile),
+              shores(scene, tile));
+    }
+
+    /** The neighbours of a hex that are liquid at its level, as a bit mask by direction. */
+    private static int shores(BoardScene scene, BoardScene.Tile tile) {
+        int result = 0;
+        for (int direction = 0; direction < 6; direction++) {
+            BoardScene.Tile other = scene.tile(tile.coords().translated(direction));
+            if (other != null && other.liquid().present() && other.elevation() == tile.elevation()) {
+                result |= 1 << direction;
+            }
+        }
+        return result;
     }
 
     static int ramps(BoardScene scene, BoardScene.Tile tile) {
@@ -106,10 +122,46 @@ final class BoardSurface {
     /** Waterline points per edge; crests, the walls beneath them and the sheets poured over them share them. */
     static final int SHORE_SEGMENTS = 12;
     /**
-     * The wet margin, in hex-scale units, left between the water and the foot of a slope that reaches into a water hex:
-     * the river hugs the slopes it runs between.
+     * The wet margin, in hex-scale units, the water keeps beyond any land that reaches into its hex: the foot of a
+     * slope, the steps and fillet through a corner, and a mouth's ends. The river hugs the slopes it runs between.
      */
     private static final float HUG = 1.5f;
+    /** How far, in hex-scale units, a bank keeps the water in from its edge where no slope runs up from the water. */
+    private static final float BEACH = 8;
+    /**
+     * Reach, in hex-scale units, of each hex centre's pull on the shore field (see {@link #shore}): seven quarters of
+     * an edge, where a straight row of hexes pulls without ripple at the hex period, so a straight bank runs straight.
+     */
+    private static final float SHORE_RADIUS = 73.5f;
+    /** How far, in hex-scale units, the bank stands in from the midline between the water and the land. */
+    private static final float SHORE_BIAS = 3;
+    /**
+     * How far, in hex-scale units, the bank wanders to either side of that, and the noise cell it wanders over: bends
+     * one and a half to three hexes long, as on the printed maps, so a long bank curves gently instead of running like
+     * a ruler, while the hex's own period stays free of ripple.
+     */
+    private static final float SHORE_WANDER = 8;
+    private static final float WANDER_CELL = 140;
+    /** How far, in hex-scale units, a pool swells out round the foot of a fall that pours into it. */
+    private static final float PLUNGE_POOL = 6;
+    /** The bank, in hex-scale units, the water keeps inside its outline beside land at its own level. */
+    private static final float SHORE_BANK = 4.5f;
+    /** Width, in hex-scale units, over which the shore rounds the corners between the banks it keeps. */
+    private static final float SHORE_ROUND = 6;
+    /**
+     * How hard land at the water's level whose corners stay put (paving, special artwork, roads) pushes the shore
+     * away: back to about a beach short of its corners, where the mouths beside it end.
+     */
+    private static final float SHORE_HARD = 2.5f;
+    /** The shore's search along a ray: even steps to the first dry one, then halvings of that step. */
+    private static final int SHORE_STEPS = 8;
+    private static final int SHORE_HALVINGS = 12;
+    /**
+     * How much of a beach, in hex-scale units, an open mouth gives up beside a bank where no shore moves the corner,
+     * and below a fall, where the pool reaches nearly to the corners so the whole sheet lands in water.
+     */
+    private static final float MOUTH_OPENING = 4;
+    private static final float PLUNGE_OPENING = 6.5f;
     /** How far a fall's lip juts out unevenly over the pool below, at most, in hex-scale units. */
     private static final float LIP_JUT = 3.5f;
     /** A fall's lip: the water stops this far short of its crest so the sheet can curve down over it. */
@@ -263,6 +315,12 @@ final class BoardSurface {
     private Vector3[] crestLine;
     private final Vector3 center;
     private final Vector3[] corners = new Vector3[6];
+    /** A water hex's outline corners at its level: its corners as the shore moves them; null on land. */
+    private Vector3[] shoreCorners;
+    /** Centres and weights of this water hex and its neighbours for {@link #shore}, in a fixed order. */
+    private float[] shoreHexes;
+    /** The lines a water hex's shore keeps inside, as {origin x, origin y, inward x, inward y, width}. */
+    private float[][] banks;
 
     BoardSurface(BoardScene scene, BoardScene.Tile tile) {
         this(scene, tile, true);
@@ -352,7 +410,6 @@ final class BoardSurface {
         // Water runs on into the board's edge: a river that runs out there pours off it, ahead of where it comes from;
         // other water is cut off with the board.
         int source = FALLS_OFF_THE_BOARD && !tile.frozen() ? riverEnd(scene) : -1;
-        List<Integer> mouths = new ArrayList<>();
         for (int edge = 0; edge < 6; edge++) {
             BoardScene.Tile neighbor = scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(edge)));
             boolean bank = neighbor != null && !tile.liquid().connects(neighbor.liquid());
@@ -362,7 +419,6 @@ final class BoardSurface {
             rise[edge] = shore[edge] > 0 ? neighbor.elevation() - tile.elevation() : 0;
             if (shore[edge] == 0) {
                 openMouths |= 1 << edge;
-                mouths.add(edge);
                 // A fall owns the last stretch of its mouth: the water stops short so the sheet can curve down.
                 if (neighbor == null) {
                     if (source >= 0 && Math.abs(Math.floorMod(edge - source, 6) - 3) <= 1) {
@@ -377,10 +433,7 @@ final class BoardSurface {
                       && neighbor.elevation() > tile.elevation();
             }
         }
-        boolean channel = mouths.size() == 2 && mouths.getLast() - mouths.getFirst() >= 2
-              && mouths.getLast() - mouths.getFirst() <= 4;
-        List<Integer> channelMouths = channel ? mouths : List.of();
-        waterline = curvedContour(shore, rise, plunge, BoardGeometry.waterZ(tile), channelMouths);
+        waterline = shoreline(scene, shore, rise, plunge, BoardGeometry.waterZ(tile));
         for (int edge = 0; edge < 6; edge++) {
             if (lip[edge] > 0) {
                 joinA[edge] = join(scene, shore, lip, edge, (edge + 5) % 6);
@@ -415,7 +468,8 @@ final class BoardSurface {
             }
         }
         if (tile.frozen()) {
-            fan(corners, center.z, Finish.ICE);
+            // The ice covers the hex as the shore moves its corners.
+            fan(shoreCorners, center.z, Finish.ICE);
         } else {
             // The water recedes from each crest; the sheet's lip curves back down over it.
             Vector3[] surface = pulledBack(crestLine, lip);
@@ -527,7 +581,7 @@ final class BoardSurface {
             scour[edge] = plunge[edge] ? 1 : 0;
             float land = shore[edge] == 0 ? 0 : rise[edge] > 0 ? .4f + .3f * rise[edge] : rise[edge] == 0 ? -.6f : 0;
             // Under a slope that runs on down to the bed the bed takes its full depth near the slope's foot.
-            steep[edge] = shore[edge] > 0 && relief.slope(edge) ? 2
+            steep[edge] = relief.slope(edge) ? 2
                   : Math.clamp(land + .25f * (tile.waterDepth() - 1), -.7f, 1);
         }
         float[] rim = new float[count];
@@ -727,158 +781,257 @@ final class BoardSurface {
     }
 
     /**
-     * Rounded bays and banks that follow the land beside them, with fixed mouths that meet the next hex exactly: close
-     * under higher ground, which the water cuts into, and wide beside land at the water's own level, where beaches and
-     * shallows spread; everywhere wandering with the ground's noise. rise: see {@link #basin}.
+     * The waterline: where this hex's shore (see {@link #wet}) turns from water to land, inside its outline as the
+     * shore moves its corners. Open mouths run straight between their ends, which both hexes of a mouth place alike
+     * (see {@link #mouthEnd}); along the banks the line lies where the shore turns on the way out from the hex centre
+     * toward the outline, so it stays star-shaped round the centre and the bed's rings never fold.
      */
-    private Vector3[] curvedContour(float[] inset, float[] rise, boolean[] plunge, float z,
-          List<Integer> channelMouths) {
-        Vector3[] anchors = contour(inset, plunge, z);
+    private Vector3[] shoreline(BoardScene scene, float[] inset, float[] rise, boolean[] plunge, float z) {
+        shoreHexes(scene);
+        float scale = BoardGeometry.HEX_SCALE;
+        shoreCorners = new Vector3[6];
+        for (int k = 0; k < 6; k++) {
+            float[] shift = relief.shoreShift(k);
+            shoreCorners[k] = new Vector3(corners[k]).add(shift[0], shift[1], 0);
+        }
+        // The banks the water keeps, as lines it stays inside: along each bank edge the shore's bank beside land at the
+        // water's level, a beach beside walls and lower land, the slope's reach and a wet margin beside a slope up from
+        // the water, which runs on under it to the bed; and clear of the corners the land rounds into the hex.
+        List<float[]> keep = new ArrayList<>(12);
+        float[] widths = new float[6];
+        for (int k = 0; k < 6; k++) {
+            Vector3 a = shoreCorners[k], b = shoreCorners[(k + 1) % 6];
+            if (inset[k] > 0) {
+                widths[k] = relief.slope(k) || rise[k] != 0 ? inset[k] : SHORE_BANK * scale;
+                Vector3 inward = new Vector3(b).sub(a).crs(Vector3.Z).nor().scl(-1);
+                keep.add(new float[] { a.x, a.y, inward.x, inward.y, widths[k] });
+            }
+            float in = relief.cornerInset(k);
+            if (in > 0) {
+                Vector3 inward = new Vector3(center.x - corners[k].x, center.y - corners[k].y, 0).nor();
+                keep.add(new float[] { corners[k].x, corners[k].y, inward.x, inward.y, in + HUG * scale });
+            }
+        }
+        banks = keep.toArray(new float[0][]);
+        // Each bank's line, moved in by its width, from end to end: the bank points are sought on the way out to it,
+        // so they leave a mouth's end into the hex, whatever steps through its corner reach into the mouth.
+        Vector3[] envelope = contour(widths, plunge, z);
+        Vector3[] anchors = new Vector3[6];
+        for (int k = 0; k < 6; k++) {
+            int before = (k + 5) % 6, next = (k + 1) % 6;
+            boolean in = inset[before] == 0, out = inset[k] == 0;
+            if (in && out) {
+                anchors[k] = new Vector3(corners[k]);
+            } else if (in || out) {
+                Vector3 other = in ? corners[before] : corners[next];
+                int mouth = in ? before : k;
+                float end = mouthEnd(k, other, plunge[mouth]);
+                anchors[k] = new Vector3(corners[k]).lerp(other, end / corners[k].dst(other));
+                // Across the mouth, onto the seam the relief lays there, which bends where steps through the corner
+                // move it; along it, where the mouth ends.
+                Vector3 across = edgeInward(mouth);
+                anchors[k].mulAdd(across, new Vector3(relief.seam(mouth, k, end)).sub(anchors[k]).dot(across));
+            } else {
+                anchors[k] = along(envelope[k], plunge);
+            }
+            anchors[k].z = z;
+        }
         Vector3[] result = new Vector3[6 * SHORE_SEGMENTS];
         for (int edge = 0; edge < 6; edge++) {
-            int previous = (edge + 5) % 6, next = (edge + 1) % 6;
-            Vector3 a = anchors[edge], b = anchors[next];
-            Vector3 c1 = new Vector3(a).mulAdd(new Vector3(b).sub(anchors[previous]), 1f / 6);
-            Vector3 c2 = new Vector3(b).mulAdd(new Vector3(anchors[(edge + 2) % 6]).sub(a), -1f / 6);
-            if (inset[previous] == 0) {
-                Vector3 inward = new Vector3(corners[edge]).sub(corners[previous]).crs(Vector3.Z).nor().scl(-1);
-                c1.set(a).mulAdd(inward, a.dst(b) / 3);
-            }
-            if (inset[next] == 0) {
-                Vector3 outward = new Vector3(corners[(edge + 2) % 6]).sub(corners[next]).crs(Vector3.Z).nor();
-                c2.set(b).mulAdd(outward, -a.dst(b) / 3);
-            }
-            float character = rise[edge] > 0 ? -.35f : rise[edge] == 0 ? .3f : 0;
-            boolean poolBefore = plunge[previous], poolAfter = plunge[next];
+            int next = (edge + 1) % 6;
             for (int segment = 0; segment < SHORE_SEGMENTS; segment++) {
-                float t = segment / (float) SHORE_SEGMENTS, s = 1 - t;
-                Vector3 point;
-                if (inset[edge] == 0) {
-                    point = new Vector3(a).lerp(b, t);
-                } else {
-                    point = new Vector3(a).scl(s * s * s).mulAdd(c1, 3 * s * s * t)
-                          .mulAdd(c2, 3 * s * t * t).mulAdd(b, t * t * t);
-                    Vector3 inward = new Vector3(center.x - point.x, center.y - point.y, 0).nor();
-                    float wander = (character * 8 + 6 * meander(point.x, point.y, 3.7f)) * BoardGeometry.HEX_SCALE;
-                    point.mulAdd(inward, wander * 16 * t * t * s * s);
-                    // A pool opens out round the foot of a fall that pours in beside this bank.
-                    float pool = (poolBefore ? swell(t) : 0) + (poolAfter ? swell(s) : 0);
-                    point.mulAdd(inward, -6 * BoardGeometry.HEX_SCALE * pool);
-                }
+                float t = segment / (float) SHORE_SEGMENTS;
+                Vector3 point = inset[edge] == 0 ? mouthPoint(anchors[edge], anchors[next], segment)
+                      : segment == 0 ? new Vector3(anchors[edge])
+                      : along(new Vector3(envelope[edge]).lerp(envelope[next], t), plunge);
                 point.z = z;
                 result[edge * SHORE_SEGMENTS + segment] = point;
             }
-        }
-        if (!channelMouths.isEmpty()) {
-            channelBank(result, anchors, rise, plunge, channelMouths.getFirst(), channelMouths.getLast());
-            channelBank(result, anchors, rise, plunge, channelMouths.getLast(), channelMouths.getFirst());
-        }
-        // Every bank point keeps some bank inside the edges it faces, so the ground there never folds. The push eases
-        // in, so the waterline bends away from an edge instead of creasing, and runs toward the hex centre, so the
-        // waterline keeps its order round it and the bed's rings never fold; the anchors on open mouths are the
-        // neighbours' too. The water hugs a slope, and keeps clear of the corners where the land rounds into the hex.
-        float bank = 4.5f * BoardGeometry.HEX_SCALE, soft = 2 * BoardGeometry.HEX_SCALE;
-        float hug = HUG * BoardGeometry.HEX_SCALE;
-        float[] cornerLeast = new float[6];
-        for (int k = 0; k < 6; k++) { cornerLeast[k] = relief.cornerInset(k) + hug; }
-        for (int index = 0; index < result.length; index++) {
-            int edge = index / SHORE_SEGMENTS;
-            if (inset[edge] == 0 || index % SHORE_SEGMENTS == 0 && inset[(edge + 5) % 6] == 0) { continue; }
-            Vector3 toward = new Vector3(center.x - result[index].x, center.y - result[index].y, 0).nor();
-            float push = 0;
-            for (int k = 0; k < 6; k++) {
-                Vector3 inward = new Vector3(center.x - corners[k].x, center.y - corners[k].y, 0).nor();
-                push = Math.max(push, deficit(result[index], corners[k], inward, cornerLeast[k], soft, toward));
-                if (inset[k] == 0) { continue; }
-                float least = relief.slope(k) || relief.reach(k) > 0 ? least(k) : bank;
-                push = Math.max(push, deficit(result[index], corners[k], edgeInward(k), least, soft, toward));
-            }
-            result[index].mulAdd(toward, push);
         }
         return result;
     }
 
     /**
-     * How much of the bank at waterline point {@code index} follows the hex's own banks rather than a channel: all of it
-     * beside a slope up from the water, which the water runs up to, easing out over the first half of the edges beyond.
+     * Point {@code segment} of an open mouth from {@code a} to {@code b}, laid out from the end both hexes of the mouth
+     * order first, so they compute the bit-identical point.
      */
-    private float hug(int index) {
-        int edge = index / SHORE_SEGMENTS;
-        float t = index % SHORE_SEGMENTS / (float) SHORE_SEGMENTS;
-        return relief.slope(edge) ? 1 : Math.max(relief.slope((edge + 5) % 6) ? 1 - BoardRelief.smooth(t / .5f) : 0,
-              relief.slope((edge + 1) % 6) ? 1 - BoardRelief.smooth((1 - t) / .5f) : 0);
+    private static Vector3 mouthPoint(Vector3 a, Vector3 b, int segment) {
+        boolean forward = a.x < b.x || a.x == b.x && a.y < b.y;
+        return forward ? new Vector3(a).lerp(b, segment / (float) SHORE_SEGMENTS)
+              : new Vector3(b).lerp(a, (SHORE_SEGMENTS - segment) / (float) SHORE_SEGMENTS);
     }
 
     /**
-     * How far a bank on {@code edge} keeps the water in from the edge: a wet margin beyond whatever slope beside it
-     * reaches into the hex, which a slope up from the water, running on under it to the bed, may not; elsewhere a beach.
+     * How far from corner k toward {@code other} an open mouth beside a bank ends, negative past the corner. Past a
+     * land corner the shore moves it ends where the shore field turns, but a bank short of where the land's corner now
+     * stands; elsewhere as {@link #mouthLimit} says. Both hexes of the mouth compute it from the same corners and the
+     * same field, so they end the mouth at the same point.
+     */
+    private float mouthEnd(int k, Vector3 other, boolean plunge) {
+        float least = mouthLimit(k, plunge), shift = shoreCorners[k].dst(corners[k]);
+        if (shift == 0) { return least; }
+        Vector3 c = corners[k];
+        float length = c.dst(other), dx = (c.x - other.x) / length, dy = (c.y - other.y) / length;
+        float mx = (c.x + other.x) / 2, my = (c.y + other.y) / 2, span = length / 2 + shift;
+        float dry = firstDry(mx, my, mx + dx * span, my + dy * span, null);
+        return dry < 0 ? least : Math.max(least, length / 2 - dry * span);
+    }
+
+    /**
+     * The nearest corner k an open mouth beside a bank may end: past a land corner the shore moves, a bank and a unit
+     * short of where that corner now stands; elsewhere four units less land than a beach (below a fall, nearly at the
+     * corner, so the whole sheet lands in water), measured along the mouth, and beyond whatever steps through the
+     * corner reach into the mouth.
+     */
+    private float mouthLimit(int k, boolean plunge) {
+        float scale = BoardGeometry.HEX_SCALE, shift = shoreCorners[k].dst(corners[k]);
+        return shift > 0 ? (SHORE_BANK + 1) * scale - shift
+              : Math.max((BEACH - (plunge ? PLUNGE_OPENING : MOUTH_OPENING)) * scale * 1.1547005f,
+                    relief.cornerReach(k) + HUG * scale);
+    }
+
+    /**
+     * The envelope the bank points are sought toward: each bank edge's line moved in by {@code widths}, from where it
+     * meets the next bank's to where it meets the next, or from the end of an open mouth beside it.
+     */
+    private Vector3[] contour(float[] widths, boolean[] plunge, float z) {
+        Vector3[] result = new Vector3[6];
+        for (int vertex = 0; vertex < 6; vertex++) {
+            int before = (vertex + 5) % 6;
+            Vector3 a = shoreCorners[before], b = shoreCorners[vertex], c = shoreCorners[(vertex + 1) % 6];
+            Vector3 n1 = new Vector3(b).sub(a).crs(Vector3.Z).nor();
+            Vector3 n2 = new Vector3(c).sub(b).crs(Vector3.Z).nor();
+            float d1 = n1.dot(a) - widths[before], d2 = n2.dot(b) - widths[vertex];
+            float determinant = n1.x * n2.y - n1.y * n2.x;
+            result[vertex] = new Vector3((d1 * n2.y - n1.y * d2) / determinant, (n1.x * d2 - d1 * n2.x) / determinant,
+                  z);
+        }
+        for (int edge = 0; edge < 6; edge++) {
+            if (widths[edge] > 0) { continue; }
+            int next = (edge + 1) % 6;
+            float length = corners[edge].dst(corners[next]);
+            if (widths[(edge + 5) % 6] > 0) {
+                result[edge].set(corners[edge]).lerp(corners[next], mouthLimit(edge, plunge[edge]) / length).z = z;
+            }
+            if (widths[next] > 0) {
+                result[next].set(corners[next]).lerp(corners[edge], mouthLimit(next, plunge[edge]) / length).z = z;
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Where the water ends on the way from the hex centre out to {@code target} on the outline: the first point where
+     * this hex's shore turns to land; the target itself if it never does.
+     */
+    private Vector3 along(Vector3 target, boolean[] plunge) {
+        float dry = firstDry(center.x, center.y, target.x, target.y, plunge);
+        return dry < 0 ? new Vector3(target) : new Vector3(center).lerp(target, dry);
+    }
+
+    /**
+     * Where the way from (ax, ay) to (bx, by) first turns to land, as a fraction of it, or -1 if it never does: by the
+     * shore field alone without {@code plunge}, else by this hex's shore ({@link #wet}). Even steps find the first dry
+     * one, and halvings the turn within it.
+     */
+    private float firstDry(float ax, float ay, float bx, float by, boolean[] plunge) {
+        float dx = bx - ax, dy = by - ay, lo = 0, hi = -1;
+        for (int i = 1; i <= SHORE_STEPS && hi < 0; i++) {
+            float s = i / (float) SHORE_STEPS;
+            if (plunge == null ? shore(ax + dx * s, ay + dy * s) <= 0 : wet(ax + dx * s, ay + dy * s, plunge) <= 0) {
+                lo = (i - 1) / (float) SHORE_STEPS;
+                hi = s;
+            }
+        }
+        if (hi < 0) { return -1; }
+        for (int i = 0; i < SHORE_HALVINGS; i++) {
+            float s = (lo + hi) / 2;
+            if (plunge == null ? shore(ax + dx * s, ay + dy * s) > 0 : wet(ax + dx * s, ay + dy * s, plunge) > 0) {
+                lo = s;
+            } else {
+                hi = s;
+            }
+        }
+        return (lo + hi) / 2;
+    }
+
+    /**
+     * This hex's shore at (x, y), positive in the water: the shore field, swollen round the foot of each fall that
+     * pours into this hex, and inside the banks it keeps, the corners between them rounded over {@link #SHORE_ROUND}.
+     */
+    private float wet(float x, float y, boolean[] plunge) {
+        float scale = BoardGeometry.HEX_SCALE, value = shore(x, y);
+        for (int edge = 0; edge < 6; edge++) {
+            if (!plunge[edge]) { continue; }
+            Vector3 middle = new Vector3(corners[edge]).lerp(corners[(edge + 1) % 6], .5f);
+            float d = (float) Math.hypot(x - middle.x, y - middle.y) / (BoardGeometry.WIDTH / 2);
+            value += PLUNGE_POOL * scale * (1 - BoardRelief.smooth(d));
+        }
+        for (float[] bank : banks) {
+            value = BoardRelief.smoothMin(value, (x - bank[0]) * bank[2] + (y - bank[1]) * bank[3] - bank[4],
+                  SHORE_ROUND * scale);
+        }
+        return value;
+    }
+
+    /**
+     * This hex's and its neighbours' centres and weights for {@link #shore}, in a fixed order: water this hex's water
+     * joins pulls the shore toward itself (1), and so does land at another level, whose banks this hex keeps by the
+     * relief's rules instead ({@link #wet}); land at the water's level pushes it away, natural ground (-1) to the
+     * midline between them, other ground ({@link #SHORE_HARD}) back short of the land's corners, which stay put. Beyond
+     * the board's edge a hex counts as the nearest board hex does, so a river runs straight on into the edge.
+     */
+    private void shoreHexes(BoardScene scene) {
+        List<Coords> around = new ArrayList<>(7);
+        around.add(tile.coords());
+        for (int direction = 0; direction < 6; direction++) { around.add(tile.coords().translated(direction)); }
+        around.sort((a, b) -> a.getX() != b.getX() ? Integer.compare(a.getX(), b.getX())
+              : Integer.compare(a.getY(), b.getY()));
+        shoreHexes = new float[3 * around.size()];
+        for (int i = 0; i < around.size(); i++) {
+            Coords coords = around.get(i);
+            BoardScene.Tile other = scene.tile(coords);
+            if (other == null) {
+                other = scene.tile(new Coords(Math.clamp(coords.getX(), 0, scene.width() - 1),
+                      Math.clamp(coords.getY(), 0, scene.height() - 1)));
+            }
+            shoreHexes[3 * i] = BoardGeometry.centerX(coords);
+            shoreHexes[3 * i + 1] = BoardGeometry.centerY(coords);
+            shoreHexes[3 * i + 2] = other == null || tile.liquid().connects(other.liquid())
+                  || other.elevation() != tile.elevation() ? 1 : relief.shoreGround(other.coords()) ? -1 : -SHORE_HARD;
+        }
+    }
+
+    /**
+     * The shore field at (x, y), in world units: roughly how far the point lies on the water's side of the midline
+     * between this hex's water and the land at its level around it, less the bank's bias and plus its slow wander. Each
+     * hex centre within {@link #SHORE_RADIUS} pulls it by its weight times (1 - d^2 / r^2)^2; the field divided by its
+     * slope measures distance. Only this hex's neighbours come within that reach of any point this hex evaluates, even
+     * a mouth's end past a corner the shore moves, and they are summed in a fixed order, so every hex that evaluates a
+     * point gets the same value.
+     */
+    private float shore(float x, float y) {
+        float scale = BoardGeometry.HEX_SCALE, r2 = square(SHORE_RADIUS * scale), f = 0, gx = 0, gy = 0;
+        for (int i = 0; i < shoreHexes.length; i += 3) {
+            float dx = x - shoreHexes[i], dy = y - shoreHexes[i + 1], t = 1 - (dx * dx + dy * dy) / r2;
+            if (t <= 0) { continue; }
+            f += shoreHexes[i + 2] * t * t;
+            gx += shoreHexes[i + 2] * t * dx;
+            gy += shoreHexes[i + 2] * t * dy;
+        }
+        float slope = 4 / r2 * (float) Math.hypot(gx, gy);
+        float wander = Math.clamp(BoardRelief.gradient(x / (WANDER_CELL * scale) + 3.1f,
+              y / (WANDER_CELL * scale) - 1.7f), -1, 1);
+        return f / Math.max(slope, 1e-4f / scale) - (SHORE_BIAS - SHORE_WANDER * wander) * scale;
+    }
+
+    /**
+     * How far a bank on {@code edge} keeps the water in from the edge: beside a slope up from the water, which runs on
+     * under it to the bed, a wet margin beyond how far the slope's foot reaches into the hex; elsewhere a beach.
      */
     private float least(int edge) {
-        float reach = relief.reach(edge);
-        return relief.slope(edge) || reach > 0 ? reach + HUG * BoardGeometry.HEX_SCALE : 8 * BoardGeometry.HEX_SCALE;
-    }
-
-    /**
-     * How far a waterline point must move toward the hex centre to lie at least {@code least} inside the line through
-     * {@code origin} across {@code inward}; the push eases in over {@code soft} so the waterline bends instead of
-     * creasing.
-     */
-    private static float deficit(Vector3 point, Vector3 origin, Vector3 inward, float least, float soft,
-          Vector3 toward) {
-        float gap = new Vector3(point).sub(origin).dot(inward);
-        float deficit = gap <= least - soft ? least - gap
-              : gap < least + soft ? (least + soft - gap) * (least + soft - gap) / (4 * soft) : 0;
-        return deficit / Math.max(.5f, toward.dot(inward));
-    }
-
-    /** 0 at x = 0, rising to 1 at a third and back to 0 at 1: a swell just past one end of a stretch. */
-    private static float swell(float x) {
-        return 6.75f * x * (1 - x) * (1 - x);
-    }
-
-    /**
-     * One continuous bank between river mouths, without a separate bay at each hex centre. The channel meanders within
-     * the hex, and each bank widens and narrows on its own into bays and points: narrow between high ground, as in a
-     * gorge, wide across land at the water's own level, and with the ground's noise. Below a fall it opens into a pool.
-     * Its mouths stay fixed.
-     */
-    private void channelBank(Vector3[] contour, Vector3[] anchors, float[] rise, boolean[] plunge, int from, int to) {
-        Vector3 a = new Vector3(corners[from]).lerp(corners[(from + 1) % 6], 0.5f);
-        Vector3 b = new Vector3(corners[to]).lerp(corners[(to + 1) % 6], 0.5f);
-        a.z = b.z = anchors[from].z;
-        Vector3 inA = edgeInward(from);
-        Vector3 inB = edgeInward(to);
-        float[] character = new float[6];
-        for (int edge = 0; edge < 6; edge++) { character[edge] = rise[edge] > 0 ? -.15f : rise[edge] == 0 ? .2f : 0; }
-        // A gentle bend keeps the inner bank from folding back across itself.
-        float handle = a.dst(b) * 0.4f;
-        Vector3 c1 = new Vector3(a).mulAdd(inA, handle);
-        Vector3 c2 = new Vector3(b).mulAdd(inB, handle);
-        float widthA = a.dst(anchors[(from + 1) % 6]), widthB = b.dst(anchors[to]);
-        int segments = Math.floorMod(to - from - 1, 6) * SHORE_SEGMENTS;
-        for (int index = 0; index < segments; index++) {
-            float t = index / (float) segments, s = 1 - t;
-            Vector3 tangent = new Vector3(c1).sub(a).scl(3 * s * s)
-                  .mulAdd(new Vector3(c2).sub(c1), 6 * s * t).mulAdd(new Vector3(b).sub(c2), 3 * t * t);
-            Vector3 point = new Vector3(a).scl(s * s * s).mulAdd(c1, 3 * s * s * t)
-                  .mulAdd(c2, 3 * s * t * t).mulAdd(b, t * t * t);
-            int slot = ((from + 1) * SHORE_SEGMENTS + index) % contour.length;
-            // The inner bank of a bend keeps its width: wider, it would loop back on itself round the bend.
-            boolean inner = segments <= SHORE_SEGMENTS;
-            float envelope = 16 * t * t * s * s, nominal = (widthA + (widthB - widthA) * t)
-                  * (inner ? 1 : 1 + .8f * ((plunge[from] ? swell(t) : 0) + (plunge[to] ? swell(s) : 0)));
-            Vector3 normal = tangent.crs(Vector3.Z).nor();
-            // Both banks shift one way as the channel meanders: the bank from the other mouth runs the centreline
-            // backwards, so its sideways sign flips.
-            float sideways = (from < to ? 1 : -1) * 9 * BoardGeometry.HEX_SCALE * meander(point.x, point.y, 11.9f);
-            Vector3 bank = new Vector3(point).mulAdd(normal, nominal);
-            float breadth = alongBanks(character, slot) + .4f * meander(bank.x, bank.y, 8.3f);
-            if (inner) { breadth = Math.min(0, breadth); }
-            float width = Math.max(.3f * nominal,
-                  nominal * Math.max(.45f, 1 + breadth * envelope) + sideways * envelope);
-            // Beside a slope the water runs up to it along the hex's own banks instead.
-            contour[slot] = point.mulAdd(normal, width).lerp(contour[slot], hug(slot));
-        }
+        float scale = BoardGeometry.HEX_SCALE;
+        return relief.slope(edge) ? relief.reach(edge) + HUG * scale : BEACH * scale;
     }
 
     /** Curved channels can be concave; a centre fan would fill parts of their banks with water. */
@@ -893,47 +1046,6 @@ final class BoardSurface {
             destination.add(new Face(contour[indices.get(i)], contour[indices.get(i + 2)],
                   contour[indices.get(i + 1)], finish));
         }
-    }
-
-    /** Intersections of independently offset edge planes preserve matching river mouths between neighbors. */
-    private Vector3[] contour(float[] inset, boolean[] plunge, float z) {
-        float[] reach = new float[6];
-        for (int k = 0; k < 6; k++) { reach[k] = relief.cornerReach(k); }
-        Vector3[] result = new Vector3[6];
-        for (int vertex = 0; vertex < 6; vertex++) {
-            int before = (vertex + 5) % 6;
-            Vector3 a = corners[before];
-            Vector3 b = corners[vertex];
-            Vector3 c = corners[(vertex + 1) % 6];
-            Vector3 n1 = new Vector3(b).sub(a).crs(Vector3.Z).nor();
-            Vector3 n2 = new Vector3(c).sub(b).crs(Vector3.Z).nor();
-            float d1 = n1.dot(a) - inset[before];
-            float d2 = n2.dot(b) - inset[vertex];
-            float determinant = n1.x * n2.y - n1.y * n2.x;
-            result[vertex] = new Vector3((d1 * n2.y - n1.y * d2) / determinant,
-                  (n1.x * d2 - d1 * n2.x) / determinant, z);
-        }
-        // The 84x72 artwork is not a mathematically regular hex. Use the same
-        // distance along both sides of a shared mouth instead of intersecting
-        // two slightly different corner angles independently.
-        for (int edge = 0; edge < 6; edge++) {
-            if (inset[edge] == 0) {
-                int next = (edge + 1) % 6;
-                float length = corners[edge].dst(corners[next]);
-                // Open mouths use four units less land on each side than a rounded basin bank.
-                // The wider channel occupies the old water-and-shore width; its sand fade reaches the corners.
-                // Below a fall the pool reaches nearly to both corners, so the whole sheet lands in water. Where the
-                // steps through a corner move it along the mouth, the mouth ends beyond it; both hexes of the mouth
-                // compute that from the corner alike.
-                float bank = (8 - (plunge[edge] ? 6.5f : 4)) * BoardGeometry.HEX_SCALE * 1.1547005f;
-                float margin = HUG * BoardGeometry.HEX_SCALE;
-                float from = (inset[(edge + 5) % 6] > 0 ? Math.max(bank, reach[edge] + margin) : 0) / length;
-                float to = (inset[next] > 0 ? Math.max(bank, reach[next] + margin) : 0) / length;
-                result[edge].set(corners[edge]).lerp(corners[next], from).z = z;
-                result[next].set(corners[next]).lerp(corners[edge], to).z = z;
-            }
-        }
-        return result;
     }
 
     private void road(BoardScene scene) {

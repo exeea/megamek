@@ -14,7 +14,6 @@ uniform sampler2D u_fog;
 uniform float u_fogEnabled;
 uniform vec4 u_scatteringBounds;
 uniform vec2 u_fogSize;
-uniform float u_depthRange;
 uniform float u_edgeScale;
 uniform float u_exposure;
 uniform float u_lightning;
@@ -43,28 +42,30 @@ uniform float u_fovEdge;
 uniform vec4 u_sand; // Strength, height, board baseline, inverse terrain-level height.
 uniform vec4 u_sandWind; // Unit direction, integrated fine-grain travel, inverse hex width.
 uniform vec2 u_sandOffset;
-uniform vec3 u_sandLight;
+uniform vec3 u_sandLight; // The ground light times the dust albedo (BoardAtmosphere.SAND_DUST).
 uniform float u_sandMaxOpacity;
 // GROUND_LAYER
 
 vec4 sandLayer(float depth) {
     if (u_sand.x <= 0.0 || outsideGroundLayer()) return vec4(0.0, 0.0, 0.0, 1.0);
     vec3 origin = world(0.0), surface = world(depth);
+    vec3 direction = normalize(world(1.0) - origin);
     if (groundBaseSide(surface, depth, u_sand.z, 0.01 / u_sand.w)) return vec4(0.0, 0.0, 0.0, 1.0);
-    vec2 segment = groundSegment(origin, surface);
+    vec2 segment = groundSegment(origin, surface, direction);
     if (segment.y <= segment.x) return vec4(0.0, 0.0, 0.0, 1.0);
-    vec3 first = origin + u_direction * segment.x;
-    vec3 last = origin + u_direction * segment.y;
+    vec3 first = origin + direction * segment.x;
+    vec3 last = origin + direction * segment.y;
     float z0 = max(0.0, first.z - u_sand.z), z1 = max(0.0, last.z - u_sand.z);
     float nearDensity = exp(-z0 / u_sand.y), farDensity = exp(-z1 / u_sand.y);
     float difference = farDensity - nearDensity;
-    float integral = u_sand.y * difference / max(abs(u_direction.z), 0.001);
+    float integral = heightIntegral(first.z - u_sand.z, last.z - u_sand.z, segment.y - segment.x, u_sand.y);
     // Sample the density-weighted centre of the actual air column, rather than projecting noise onto the ground.
     float meanHeight = abs(difference) > 0.00001
           ? ((z1 + u_sand.y) * farDensity - (z0 + u_sand.y) * nearDensity) / difference : (z0 + z1) * 0.5;
-    float distance = clamp((u_sand.z + clamp(meanHeight, z1, z0) - origin.z) / min(u_direction.z, -0.000001),
-          segment.x, segment.y);
-    vec3 position = origin + u_direction * distance;
+    float distance = abs(direction.z) < 0.000001 ? (segment.x + segment.y) * 0.5
+          : clamp((u_sand.z + clamp(meanHeight, min(z0, z1), max(z0, z1)) - origin.z) / direction.z,
+                segment.x, segment.y);
+    vec3 position = origin + direction * distance;
     float altitude = max(0.0, position.z - u_sand.z);
     vec3 field = vec3(position.xy * (u_sandWind.w * 0.5) - u_sandOffset, altitude / u_sand.y);
     float gust = smoothstep(0.2, 0.8, groundNoise(field));
@@ -78,7 +79,8 @@ vec4 sandLayer(float depth) {
     density *= 1.0 - smoothstep(u_sand.y * 1.5, u_sand.y * 3.0, altitude);
     density *= groundEdge(position, 1.0 / u_sandWind.w);
     float opacity = min(u_sandMaxOpacity, 1.0 - exp(-u_sand.x * integral * u_sand.w * density * 0.12));
-    vec3 dust = mix(vec3(0.46, 0.29, 0.12), vec3(0.68, 0.47, 0.22), grain) * u_sandLight;
+    // Darker, redder and lighter, paler grains around the mean albedo.
+    vec3 dust = mix(vec3(0.807, 0.763, 0.706), vec3(1.193, 1.237, 1.294), grain) * u_sandLight;
     return vec4(dust * opacity, 1.0 - opacity);
 }
 
@@ -113,7 +115,7 @@ vec3 fieldOfView(vec3 color, float depth) {
     vec3 normal = cross(dFdx(position), dFdy(position));
     normal /= max(length(normal), 0.000001);
     // Derivatives need the whole pixel quad, including background lanes at silhouettes.
-    if (depth >= 0.99999) return color;
+    if (depth >= 1.0) return color;
     float horizontal = smoothstep(0.35, 0.80, abs(normal.z));
     vec2 point = vec2(position.x, -position.y) / u_fovHexSize;
     // A cliff sits exactly on a shared edge. Reconstructed depth can round to either
@@ -162,6 +164,17 @@ vec3 fieldOfView(vec3 color, float depth) {
     return color;
 }
 
+
+// One highlight shoulder for every surface and the sky, replacing the plain clip (the user's decision of 2026-09-24):
+// the identity up to KNEE (display 202), so mid-tones and the tileset palette keep their authored values, then a
+// smooth roll-off towards white per channel, so bright orange sand turns cream instead of clipping flat. The RGBA8
+// scene target clips at 1 before exposure. The light arrives pre-exposed (BoardAtmosphere), so at the default exposure
+// of one the curve's input tops out at 1 (display 237); only a positive exposure compensation reaches further up.
+const float KNEE = 0.6;
+vec3 shoulder(vec3 c) {
+    c = max(c, vec3(0.0));
+    return min(c, vec3(KNEE)) + (1.0 - KNEE) * (1.0 - exp(-max(c - KNEE, vec3(0.0)) / (1.0 - KNEE)));
+}
 
 float depthAt(vec2 uv) {
     return texture2D(u_depth, uv).r;
@@ -226,7 +239,7 @@ void main() {
                 vec2 offset = vec2(float(x), float(y));
                 vec2 uv = (base + offset + 0.5) / u_fogSize;
                 vec2 bilinear = mix(1.0 - f, f, offset);
-                float difference = abs(depth - depthAt(uv)) * u_depthRange;
+                float difference = abs(cameraDepth(depth) - cameraDepth(depthAt(uv)));
                 float weight = bilinear.x * bilinear.y / (1.0 + difference * difference / (u_edgeScale * u_edgeScale));
                 atmosphere += texture2D(u_fog, uv) * weight;
                 weights += weight;
@@ -250,10 +263,7 @@ void main() {
     }
     // Lens glare borrows the active sun's color, after terrain grading and before display conversion/FoV.
     linear += sunGlare() * u_exposure;
-    // The source artwork and scene target are LDR. An extra filmic curve would
-    // amplify their baked contrast and destroy the tileset's original palette.
-    linear = clamp(linear, 0.0, 1.0);
-    color = pow(linear, vec3(1.0 / 2.2));
+    color = pow(shoulder(linear), vec3(1.0 / 2.2));
     vec2 edge = (v_uv - 0.5) * 2.0;
     color *= 1.0 - 0.09 * dot(edge, edge) * 0.5;
     if (u_fovEnabled > 0.5) color = fieldOfView(color, depth);

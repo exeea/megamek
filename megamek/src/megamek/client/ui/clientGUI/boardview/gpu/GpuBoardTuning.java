@@ -53,7 +53,8 @@ final class GpuBoardTuning {
           new Knob("Hex padding (m)", 0, BoardGeometry.MAX_PADDING, 0.5f, "%.1f"));
 
     private static final List<Knob> LIGHTING_KNOBS = List.of(
-          new Knob("Time of day", 0, 24, 0.25f, "clock"),
+          // One-minute steps, the same grid scenario times are chosen on (BoardAtmosphere.hourInWindow).
+          new Knob("Time of day", 0, 24, 1f / 60, "clock"),
           new Knob("Exposure (EV)", -2, 2, 0.1f, "%+.1f"));
 
     private static final List<Knob> ATMOSPHERE_KNOBS = List.of(
@@ -84,6 +85,9 @@ final class GpuBoardTuning {
     private final Table panel = new Table();
     /** Construction cursor only; each tab owns its own rows and scroll position. */
     private Table rows = new Table();
+    private final BoardCamera camera;
+    private final CheckBox perspective;
+    private final List<Control> cameraFieldOfView;
     private final CheckBox normalMaps;
     private final CheckBox vsync;
     /** The graphics card rows; null on computers without two cards to choose from. */
@@ -123,6 +127,11 @@ final class GpuBoardTuning {
     }
 
     GpuBoardTuning(Skin skin, GpuBoardSource source) {
+        this(skin, source, new BoardCamera());
+    }
+
+    GpuBoardTuning(Skin skin, GpuBoardSource source, BoardCamera camera) {
+        this.camera = camera;
         panel.setBackground(skin.getDrawable("menu-panel"));
         panel.setTouchable(Touchable.enabled);
         panel.setName("board-tuning");
@@ -130,6 +139,21 @@ final class GpuBoardTuning {
         panel.add(new Label("Board tuning", skin)).left().padBottom(6).row();
         Table general = rows;
         rows.top().defaults().pad(0, 3, 0, 3);
+        section(skin, "Camera");
+        perspective = checkbox(skin, "Perspective", "tuning-perspective");
+        perspective.addListener(new TextTooltip("Enable perspective: nearby objects appear larger than distant ones. "
+              + "Turn off to return to the orthographic board view.", skin, "menu"));
+        cameraFieldOfView = controls(skin, List.of(new Knob("Camera FOV", BoardCamera.MIN_FIELD_OF_VIEW,
+              BoardCamera.MAX_FIELD_OF_VIEW, 1, "%.0f\u00b0")), this::applyCamera, 0);
+        cameraFieldOfView.getFirst().slider().setName("tuning-camera-fov");
+        cameraFieldOfView.getFirst().slider().addListener(new TextTooltip(
+              "Vertical field of view in degrees. Larger angles show more of the board. Requires Perspective.", skin, "menu"));
+        perspective.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                if (!syncing) { applyCamera(); }
+            }
+        });
         section(skin, "Geometry");
         geometry = controls(skin, KNOBS, this::applyGeometry, 0);
         geometry.get(6).slider().addListener(new TextTooltip("Gap the board opens between neighbouring hexes, in metres; "
@@ -188,8 +212,10 @@ final class GpuBoardTuning {
         for (int index = 0; index < familySizes.size(); index++) {
             var slider = familySizes.get(index).slider();
             slider.setName("tuning-size-" + UnitFamilyScale.values()[index].name());
-            slider.addListener(new TextTooltip("Uniform size multiplier; 1.00 is neutral. Stacks with Unit scale. "
-                  + "Mek weight classes also multiply All Meks; ultralight Meks use Light Meks.", skin, "menu"));
+            slider.addListener(new TextTooltip("Uniform size multiplier; 1.00 draws the authored size. "
+                  + "Infantry and battle armor start at 1.80: their canonical figures, drawn larger to read "
+                  + "on the board. Stacks with Unit scale. Mek weight classes also multiply All Meks; "
+                  + "ultralight Meks use Light Meks.", skin, "menu"));
         }
         section(skin, "Overview icons");
         overviewIcons = checkbox(skin, "Tactical View (Top-View only)", "tuning-overview-icons");
@@ -264,7 +290,7 @@ final class GpuBoardTuning {
         fixedSun.addListener(new TextTooltip("Keep the light at the same position on screen when rotating or tilting the board. "
               + "Time of day still sets its color and strength; Moonless and Pitch Black have no moonlight.", skin, "menu"));
         daylight.getFirst().slider().addListener(new TextTooltip(
-              "Starts at a random quarter-hour within the scenario's daylight, dawn/dusk or night window. "
+              "Starts at a random minute within the scenario's daylight, dawn/dusk or night window. "
                     + "It stays fixed during combat; adjust here to override. Defaults restores the scenario's choice.", skin, "menu"));
         daylight.get(1).slider().addListener(new TextTooltip(
               "Visual brightness offset. The Moonless preset uses -0.6 EV; Pitch Black uses -1 EV, both without moonlight. "
@@ -369,7 +395,7 @@ final class GpuBoardTuning {
         panel.add(new Image(skin.getDrawable("rule"))).height(1).growX().padTop(6).row();
         TextButton reset = new TextButton("Defaults", skin, "menu-control");
         reset.setName("tuning-defaults");
-        reset.addListener(new TextTooltip("Restore both tabs: geometry, family sizes, visibility, light/fog effects, "
+        reset.addListener(new TextTooltip("Restore both tabs: camera projection, geometry, family sizes, visibility, light/fog effects, "
               + "the game's current planetary conditions, and disable damage preview.",
               skin, "menu"));
         reset.setProgrammaticChangeEvents(false);
@@ -523,6 +549,11 @@ final class GpuBoardTuning {
      * so a reset leaves them alone.
      */
     private void restoreDefaults() {
+        syncing = true;
+        perspective.setChecked(false);
+        syncing = false;
+        setValues(cameraFieldOfView, new float[] { BoardCamera.DEFAULT_FIELD_OF_VIEW });
+        applyCamera();
         normalMaps.setChecked(true);
         boolean fixedSunKept = fixedSun.isChecked();
         BoardGeometry.Tuning defaults = BoardGeometry.DEFAULTS;
@@ -716,6 +747,13 @@ final class GpuBoardTuning {
         String renderer = GpuGlsl.renderer().split("/")[0];
         cardInUse.setText(renderer.isEmpty() ? "" : "In use: " + renderer);
         cardPending.setVisible(graphicsCard.getSelected() != GpuGraphicsCard.applied());
+    }
+
+    private void applyCamera() {
+        camera.setFieldOfView(value(cameraFieldOfView, 0));
+        camera.setPerspective(perspective.isChecked());
+        cameraFieldOfView.getFirst().slider().setDisabled(!perspective.isChecked());
+        updateReadings(cameraFieldOfView);
     }
 
     private void applyGeometry() {

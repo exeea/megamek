@@ -10,11 +10,9 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 
-import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
@@ -67,9 +65,8 @@ final class GpuGroundCover implements Disposable {
                     + "gl_Position = u_projViewTrans * pos;");
     }
 
-    static float fade(Camera camera) {
-        float zoom = camera instanceof OrthographicCamera ortho ? ortho.zoom : 1;
-        float pixels = BoardGeometry.WIDTH * Gdx.graphics.getBackBufferWidth() / (camera.viewportWidth * zoom);
+    static float fade(Camera camera, Vector3 position) {
+        float pixels = BoardGeometry.WIDTH * BoardCamera.pixelsPerUnit(camera, position);
         float t = Math.clamp((pixels - 95) / 105, 0, 1);
         return t * t * (3 - 2 * t);
     }
@@ -80,7 +77,6 @@ final class GpuGroundCover implements Disposable {
             revision = BoardGeometry.revision();
             boardId = scene.boardId();
         }
-        if (fade(camera) <= 0) { return List.of(); }
         if (tiles != scene.tiles()) {
             tiles = scene.tiles();
             floor = BoardGeometry.floor(scene);
@@ -93,6 +89,7 @@ final class GpuGroundCover implements Disposable {
             if (tile.surface() != BoardScene.Surface.GRASS || !tile.detailedGround() || tile.liquid().present()
                   || tile.roadExits() != 0) { continue; }
             Vector3 center = BoardGeometry.center(tile.coords(), tile.elevation());
+            if (fade(camera, center) <= 0) { continue; }
             if (camera.frustum.sphereInFrustum(center, BoardGeometry.WIDTH * .75f)) {
                 Cover cover = cover(scene, tile);
                 if (cover != null) { result.add(cover.instance); visible.add(tile.coords()); }

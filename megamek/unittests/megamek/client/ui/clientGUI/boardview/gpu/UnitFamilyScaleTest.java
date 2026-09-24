@@ -26,13 +26,7 @@ class UnitFamilyScaleTest {
         float originalSize = family.UNIT_SCALE, originalHeight = family.HEIGHT_SCALE;
         var model = model(family);
         var other = model(UnitFamilyScale.BATTLE_ARMOR);
-        var coords = new Coords(2, 2);
-        var footprint = new ArrayList<>(List.of(coords));
-        if (multiHex) {
-            for (int direction = 0; direction < 6; direction++) { footprint.add(coords.translated(direction)); }
-        }
-        var unit = new BoardScene.Unit(1, -1, "Scale review", new BoardScene.Waypoint(coords, 2, 0),
-              null, false, null, 1, false, null, 0, footprint);
+        var unit = unit(multiHex);
         try {
             BoardGeometry.tune(new BoardGeometry.Tuning(1.3f, .55f, 1.2f, 20, .8f, .81f));
             Vector3 baseline = place(model, unit);
@@ -60,6 +54,29 @@ class UnitFamilyScaleTest {
             BoardGeometry.tune(original);
             model.dispose();
             other.dispose();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    void levelHeightResizesUnitsEvenlySoTheyStayAsManyLevelsTall(boolean multiHex) {
+        GdxNativesLoader.load();
+        var original = BoardGeometry.tuning();
+        var model = model(UnitFamilyScale.MEK);
+        var unit = unit(multiHex);
+        try {
+            BoardGeometry.tune(new BoardGeometry.Tuning(1.3f, .55f, 1.2f, 20, .8f, .81f));
+            Vector3 baseline = place(model, unit);
+            float levels = baseline.z / BoardGeometry.LEVEL;
+            var board = BoardGeometry.tuning();
+            BoardGeometry.tune(new BoardGeometry.Tuning(board.hexScale(), board.unitScale(), board.unitHeightScale(),
+                  30, board.gridShade(), board.multiHexUnitScale()));
+            // Half as high again per level: the whole unit grows by half, not only its height.
+            assertScale(new Vector3(baseline).scl(1.5f), place(model, unit));
+            assertEquals(levels, model.instance.transform.getScaleZ() / BoardGeometry.LEVEL, .0001f);
+        } finally {
+            BoardGeometry.tune(original);
+            model.dispose();
         }
     }
 
@@ -111,6 +128,16 @@ class UnitFamilyScaleTest {
         } finally {
             BoardGeometry.tune(original);
         }
+    }
+
+    private static BoardScene.Unit unit(boolean multiHex) {
+        var coords = new Coords(2, 2);
+        var footprint = new ArrayList<>(List.of(coords));
+        if (multiHex) {
+            for (int direction = 0; direction < 6; direction++) { footprint.add(coords.translated(direction)); }
+        }
+        return new BoardScene.Unit(1, -1, "Scale review", new BoardScene.Waypoint(coords, 2, 0),
+              null, false, null, 1, false, null, 0, footprint);
     }
 
     private static BoardScene.Unit mek(double weight) {

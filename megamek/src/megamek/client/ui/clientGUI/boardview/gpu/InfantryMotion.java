@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -10,6 +11,7 @@ import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.model.Node;
 import com.badlogic.gdx.graphics.g3d.model.NodePart;
 import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Polygon;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 
@@ -20,12 +22,16 @@ final class InfantryMotion {
     private static final float PARK_START = .72f;
     private final Map<String, Member> members = new LinkedHashMap<>();
     private float layoutScale = Float.NaN;
+    /** The standing formation's scale towards the hex centre, and the unit scale and step room it was worked out for. */
+    private float restLayout = 1, restLayoutScale = Float.NaN;
+    private float[] restLayoutRoom = InfantryFootprint.NO_STEPS;
 
     private static final class Member {
         final UnitRig rig;
         final Node node;
         final Vector3 rest, scale, door;
         final BoundingBox footprint;
+        final float restHeading;
         final List<NodePart> visibleParts = new ArrayList<>();
         final Vector3 start = new Vector3();
         final Vector3 goal = new Vector3();
@@ -48,6 +54,7 @@ final class InfantryMotion {
             shape.calculateTransforms(true);
             footprint = UnitBounds.subtree(shape);
             heading = -rest.rotation.getAngleAround(Vector3.Z);
+            restHeading = heading;
             Node marker = rig.joints().containsKey("boarding")
                   ? UnitAnimator.find(rest.getChildren(), rig.joints().get("boarding")) : null;
             door = marker == null ? new Vector3(0, -15, 0)
@@ -87,14 +94,21 @@ final class InfantryMotion {
             return new Vector3(door).scl(scale).rotate(Vector3.Z, -heading).add(node.translation);
         }
 
-        void fit(Vector3 position, float facing, float scale) {
-            InfantryFootprint.fit(position, footprint, facing, scale);
+        /** The authored position with the formation drawn in to fit its hex; see InfantryFootprint.compress. */
+        Vector3 layout(float layout) {
+            return new Vector3(rest).scl(layout, layout, 1);
+        }
+
+        /** The outline this member is fitted by: troopers turn as they watch, vehicles keep their heading. */
+        Polygon outline(float heading) {
+            return InfantryFootprint.outline(footprint, heading, rig.trooper());
         }
     }
 
     void bind(GpuUnitModel model, ModelInstance placed) {
         Map<String, Member> previous = new LinkedHashMap<>(members);
         members.clear();
+        restLayoutScale = Float.NaN;
         for (var rig : model.rigs()) {
             if (rig.container() != null && (rig.trooper() || rig.transport())) {
                 var rest = model.instance.getNode(rig.container());
@@ -123,7 +137,15 @@ final class InfantryMotion {
         return pose == null ? 0 : pose.verticalOffset;
     }
 
-    void apply(GpuUnitModel model, BoardScene.Unit unit, UnitMotion.Sample motion) {
+    boolean isEmpty() {
+        return members.isEmpty();
+    }
+
+    /**
+     * @param room the world units that the steps on each edge of the unit's hex take from its level ground, which the
+     *             formation keeps clear of; {@link InfantryFootprint#NO_STEPS} for a hex level to its edges
+     */
+    void apply(GpuUnitModel model, BoardScene.Unit unit, UnitMotion.Sample motion, float[] room) {
         var travel = motion.boarding();
         float scale = model.horizontalScale(unit);
         var vehicles = members.values().stream().filter(member -> member.rig.transport()).toList();
@@ -131,7 +153,9 @@ final class InfantryMotion {
               || members.values().stream().anyMatch(member -> member.sequence != travel.sequence()));
         layoutScale = scale;
         if (travel != null && members.values().stream().allMatch(member -> member.sequence < 0)) {
-            fitFormation(vehicles, false, scale);
+            float layout = restLayout(scale, room);
+            members.values().forEach(member -> member.node.translation.set(member.layout(layout)));
+            avoidVehicles(vehicles, false, scale, room);
         }
         for (Member member : members.values()) {
             if (travel != null && member.sequence != travel.sequence()) {
@@ -154,7 +178,9 @@ final class InfantryMotion {
         }
         if (fitGoals) {
             // Keep the captured parking positions through unloading and casualty/material rebinds.
-            fitFormation(vehicles, true, scale);
+            float layout = compress(true, scale, room);
+            members.values().forEach(member -> member.goal.scl(layout, layout, 1));
+            avoidVehicles(vehicles, true, scale, room);
         }
         for (Member member : members.values()) {
             member.node.scale.set(member.scale);
@@ -163,6 +189,7 @@ final class InfantryMotion {
             member.verticalOffset = 0;
         }
         if (travel == null || vehicles.isEmpty()) {
+            float layout = restLayout(scale, room);
             for (Member member : members.values()) {
                 if (member.rig.trooper()) {
                     var individual = motion.member(unit.id(), member.rig.container());
@@ -172,8 +199,7 @@ final class InfantryMotion {
                         member.orient(individual.moving() ? individual.heading() : MathUtils.lerpAngleDeg(individual.heading(), target,
                               Math.min(1, individual.settledSeconds() / UnitMotion.FORMATION_SETTLE_SECONDS)));
                     }
-                    member.node.translation.set(member.rest);
-                    member.fit(member.node.translation, member.heading, scale);
+                    member.node.translation.set(member.layout(layout));
                     if (motion.group() != null) {
                         var offset = motion.group().offset(unit.id(), member.rig.container());
                         member.verticalOffset = offset.z / model.verticalScale(scale, unit);
@@ -182,15 +208,14 @@ final class InfantryMotion {
                 } else if (motion.moving()) {
                     member.orient(motion.heading());
                 } else {
-                    member.node.translation.set(member.rest);
+                    member.node.translation.set(member.layout(layout));
                 }
             }
-            fitVehicles(vehicles, false, scale);
-            avoidVehicles(vehicles, false, scale);
+            avoidVehicles(vehicles, false, scale, room);
             return;
         }
         for (Member vehicle : vehicles) {
-            vehicle(vehicle, travel, scale);
+            vehicle(vehicle, travel, scale, restLayout(scale, room));
         }
         int index = 0;
         for (Member member : members.values()) {
@@ -203,46 +228,47 @@ final class InfantryMotion {
         }
     }
 
-    private void fitFormation(List<Member> vehicles, boolean goal, float scale) {
+    /**
+     * The standing formation's layout scale, worked out again only when the unit scale, the members or the steps
+     * around the hex change.
+     */
+    private float restLayout(float scale, float[] room) {
+        if (scale != restLayoutScale || !Arrays.equals(room, restLayoutRoom)) {
+            restLayoutScale = scale;
+            restLayoutRoom = room.clone();
+            restLayout = compress(false, scale, room);
+        }
+        return restLayout;
+    }
+
+    /** How far the authored layout, or the parking goals, must be drawn in as one shape to fit the hex. */
+    private float compress(boolean goal, float scale, float[] room) {
+        List<Vector3> positions = new ArrayList<>();
+        List<Polygon> outlines = new ArrayList<>();
         for (var member : members.values()) {
-            if (member.rig.trooper()) {
-                member.fit(goal ? member.goal : member.node.translation, goal ? member.goalHeading : member.heading, scale);
-            }
+            positions.add(goal ? member.goal : member.rest);
+            outlines.add(member.outline(goal ? member.goalHeading : member.restHeading));
         }
-        fitVehicles(vehicles, goal, scale);
-        avoidVehicles(vehicles, goal, scale);
+        return InfantryFootprint.compress(positions, outlines, scale, room);
     }
 
-    private static void fitVehicles(List<Member> vehicles, boolean goal, float scale) {
-        if (vehicles.size() == 2) {
-            var a = vehicles.get(0);
-            var b = vehicles.get(1);
-            InfantryFootprint.fitPair(goal ? a.goal : a.node.translation, a.footprint, goal ? a.goalHeading : a.heading,
-                  goal ? b.goal : b.node.translation, b.footprint, goal ? b.goalHeading : b.heading, scale);
-        } else if (!vehicles.isEmpty()) {
-            var vehicle = vehicles.getFirst();
-            InfantryFootprint.fit(goal ? vehicle.goal : vehicle.node.translation, vehicle.footprint,
-                  goal ? vehicle.goalHeading : vehicle.heading, scale);
-        }
-    }
-
-    private void avoidVehicles(List<Member> vehicles, boolean goal, float scale) {
+    private void avoidVehicles(List<Member> vehicles, boolean goal, float scale, float[] room) {
         if (vehicles.isEmpty()) { return; }
         var obstacles = vehicles.stream().map(vehicle -> {
-            var shape = InfantryFootprint.polygon(vehicle.footprint, goal ? vehicle.goalHeading : vehicle.heading);
+            var shape = vehicle.outline(goal ? vehicle.goalHeading : vehicle.heading);
             var position = goal ? vehicle.goal : vehicle.node.translation;
             shape.setPosition(position.x, position.y);
             return shape;
         }).toList();
         for (var member : members.values()) {
             if (member.rig.trooper()) {
-                InfantryFootprint.avoid(goal ? member.goal : member.node.translation, member.footprint,
-                      goal ? member.goalHeading : member.heading, obstacles, scale);
+                InfantryFootprint.avoid(goal ? member.goal : member.node.translation,
+                      member.outline(goal ? member.goalHeading : member.heading), obstacles, scale, room);
             }
         }
     }
 
-    private static void vehicle(Member member, UnitMotion.Boarding travel, float scale) {
+    private static void vehicle(Member member, UnitMotion.Boarding travel, float scale, float layout) {
         if (travel.stage() == UnitMotion.Stage.BOARD) {
             member.node.translation.set(member.start);
             member.orient(member.startHeading);
@@ -261,16 +287,16 @@ final class InfantryMotion {
         Vector3 point;
         if (t < DEPART_END) {
             Vector3 start = travel.position(0).scl(1 / scale).add(member.start);
-            Vector3 end = travel.position(DEPART_END).scl(1 / scale).add(member.rest);
+            Vector3 end = travel.position(DEPART_END).scl(1 / scale).add(member.layout(layout));
             point = steer(member, start, end, member.startHeading + (member.reversing ? 180 : 0),
                   travel.heading(DEPART_END), t / DEPART_END);
         } else if (t > PARK_START) {
-            Vector3 start = travel.position(PARK_START).scl(1 / scale).add(member.rest);
+            Vector3 start = travel.position(PARK_START).scl(1 / scale).add(member.layout(layout));
             Vector3 end = travel.position(1).scl(1 / scale).add(member.goal);
             point = steer(member, start, end, travel.heading(PARK_START), member.goalHeading - (member.reversing ? 180 : 0),
                   (t - PARK_START) / (1 - PARK_START));
         } else {
-            point = new Vector3(root).add(member.rest);
+            point = new Vector3(root).add(member.layout(layout));
             member.orient(travel.heading(t) + (member.reversing ? 180 : 0));
         }
         member.drivenDistance += point.dst(member.lastDrivePosition);

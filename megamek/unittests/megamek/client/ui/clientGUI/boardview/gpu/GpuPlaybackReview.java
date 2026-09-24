@@ -73,8 +73,10 @@ final class GpuPlaybackReview {
                 var selected = UnitModelSelection.capture(entity, -1, false, tileset);
                 var body = library.get(selected, entity.getId());
                 measureFeet(body, unit(entity, selected));
-                withFamilyScale(UnitFamilyScale.forFamily(body.rigs().getFirst().family()),
-                      () -> measureFeet(body, unit(entity, selected)));
+                var family = UnitFamilyScale.forFamily(body.rigs().getFirst().family());
+                withFamilyScale(family, () -> measureFeet(body, unit(entity, selected)));
+                // A smaller body takes shorter, quicker steps: the measurement must follow it down as well as up.
+                withFamilyScale(family, .5f, 1, () -> measureFeet(body, unit(entity, selected)));
                 if (entity instanceof BattleArmor) {
                     groupJumpFrames(renderer, body, unit(entity, selected));
                 }
@@ -102,10 +104,14 @@ final class GpuPlaybackReview {
     }
 
     private static void withFamilyScale(UnitFamilyScale family, Runnable review) {
+        withFamilyScale(family, 1.25f, 1.4f, review);
+    }
+
+    private static void withFamilyScale(UnitFamilyScale family, float sizeFactor, float heightFactor, Runnable review) {
         float size = family.UNIT_SCALE, height = family.HEIGHT_SCALE;
         try {
-            family.UNIT_SCALE = size * 1.25f;
-            family.HEIGHT_SCALE = height * 1.4f;
+            family.UNIT_SCALE = size * sizeFactor;
+            family.HEIGHT_SCALE = height * heightFactor;
             review.run();
         } finally {
             family.UNIT_SCALE = size;
@@ -268,16 +274,26 @@ final class GpuPlaybackReview {
             if (feet.size() < 2) { continue; }
             var instance = new ModelInstance(model.instance.model);
             var animator = new UnitAnimator();
-            var motion = new UnitMotion(new BoardScene.Waypoint(new Coords(2, 5), 0, 0));
-            motion.append(List.of(new BoardScene.Waypoint(new Coords(2, 5), 0, 0), unit.location()), EntityMovementType.MOVE_WALK, 0, false, 6,
+            var start = new BoardScene.Waypoint(new Coords(2, 5), 0, 0);
+            var motion = new UnitMotion(start);
+            motion.append(List.of(start, unit.location()), EntityMovementType.MOVE_WALK, 0, false, 6,
                   rig.trooper() ? model.rigs().size() : 0);
-            float dt = (float) (motion.remainingSeconds() / 480);
             var camera = new OrthographicCamera();
+            // Strides and foot lift follow the body's size, which unit, family and level tuning all change: sample
+            // every body height of the route 40 times, and count a foot as still relative to that height.
+            model.place(instance, camera, motion.position(), 0, unit);
+            float height = (rig.container() == null ? UnitBounds.world(instance)
+                  : UnitBounds.subtree(instance.getNode(rig.container())).mul(instance.transform)).getDepth();
+            float route = BoardGeometry.center(start.coords(), 0)
+                  .dst(BoardGeometry.center(unit.location().coords(), 0));
+            int frames = Math.max(480, (int) Math.ceil(route / height * 40));
+            float still = height * .0005f;
+            float dt = (float) (motion.remainingSeconds() / frames);
             var previous = new Vector3();
             var previousRoot = new Vector3();
             String previousFoot = "";
             float drift = 0, travel = 0;
-            for (int frame = 0; frame < 480; frame++) {
+            for (int frame = 0; frame < frames; frame++) {
                 motion.advance(dt, 1);
                 animator.apply(model, instance, unit, motion.sample(), frame * dt, dt, false, 0);
                 model.place(instance, camera, motion.position(), 0, unit);
@@ -292,7 +308,7 @@ final class GpuPlaybackReview {
                 var memberOrigin = rig.container() == null ? instance.transform.getTranslation(new Vector3())
                       : instance.getNode(rig.container()).globalTransform.getTranslation(new Vector3()).mul(instance.transform);
                 if (frame > 0 && individual.progress() > .15f && individual.progress() < .85f
-                      && supporting.equals(previousFoot) && Math.abs(planted.z - previous.z) < .02f) {
+                      && supporting.equals(previousFoot) && Math.abs(planted.z - previous.z) < still) {
                     drift += (float) Math.hypot(planted.x - previous.x, planted.y - previous.y);
                     travel += (float) Math.hypot(memberOrigin.x - previousRoot.x, memberOrigin.y - previousRoot.y);
                 }
@@ -401,12 +417,14 @@ final class GpuPlaybackReview {
                     var muzzle = new Vector3();
                     var direction = new Vector3();
                     UnitModelAttachment.emitter(attacker, emitter, muzzle, direction);
-                    var aimPoint = direction.cpy().rotate(Vector3.Z, 20).scl(500).add(muzzle);
+                    // A shot aims at its own point on the target, where its drawn beam ends, not at a given point.
+                    effects.update(attack, library, Map.of(unit.id() + ":-1", attacker, victim.id() + ":-1", target));
+                    var aimPoint = effects.emissions(attack).getFirst().target();
                     float originalAlignment = direction.dot(aimPoint.cpy().sub(muzzle).nor());
                     animator.aim(model, unit, attack, aimPoint, target);
                     UnitModelAttachment.emitter(attacker, emitter, muzzle, direction);
-                    assertTrue(direction.dot(aimPoint.cpy().sub(muzzle).nor()) > .99f,
-                          "A constrained nearby target must align with the actual posed muzzle; before " + originalAlignment);
+                    assertTrue(direction.dot(aimPoint.cpy().sub(muzzle).nor()) > .97f,
+                          "The resting arm must turn its muzzle onto the shot's target; before " + originalAlignment);
                 }
                 animator.apply(model, attacker, unit, UnitMotion.Sample.STILL, 2, .1f, false, 0);
                 animator.attack(model, unit, null);

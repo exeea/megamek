@@ -8,6 +8,7 @@ import java.util.List;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.VertexAttribute;
@@ -67,6 +68,7 @@ final class GpuMissileEffects implements Disposable {
 
     void begin() { launches.clear(); smokeCount = 0; missileCount = 0; }
     void add(Launch launch) { launches.add(launch); }
+    void setSmokeLight(Color light) { exhaust.setSmokeLight(light); }
     int missileCount() { return missileCount; }
     int smokeCount() { return smokeCount; }
 

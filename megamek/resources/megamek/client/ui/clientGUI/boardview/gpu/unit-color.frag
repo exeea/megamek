@@ -14,5 +14,6 @@ void main() {
     #if defined(diffuseTextureFlag) && defined(blendedFlag)
     if (texture2D(u_diffuseTexture, v_texCoords0).a < u_alphaTest) discard;
     #endif
-    gl_FragColor = vec4(u_outlineColor.rgb, 1.0);
+    // The alpha carries the unit's own-hex decoration height for the see-through pass (GpuUnitVisibility.ownHex).
+    gl_FragColor = u_outlineColor;
 }

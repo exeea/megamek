@@ -94,7 +94,8 @@ class GpuUnitVisibilitySmokeTest {
             entity.setCamouflage(new megamek.common.icons.Camouflage("Word of Blake/", "TerraSec (Camo).png"));
             var paint = camoSource.resolve(UnitCamouflageTest.selection(entity)).state().appearance();
             camouflage.apply(unit, atlas.instance, paint);
-            unit.userData = new Color(0.1f, 0.45f, 1, 1);
+            // Alpha 0: no own-hex exemption, as for markers; the own-hex cases below set it as the board does.
+            unit.userData = new Color(0.1f, 0.45f, 1, 0);
             atlas.place(unit, camera.camera, BoardGeometry.center(new Coords(3, 2), 1), 0, 2, false);
             List<ModelInstance> units = List.of(unit);
 
@@ -114,7 +115,7 @@ class GpuUnitVisibilitySmokeTest {
 
             ModelInstance opponent = new ModelInstance(atlas.instance.model);
             camouflage.apply(opponent, atlas.instance, paint);
-            opponent.userData = new Color(0.9f, 0.15f, 0.1f, 1);
+            opponent.userData = new Color(0.9f, 0.15f, 0.1f, 0);
             atlas.place(opponent, camera.camera, BoardGeometry.center(new Coords(1, 2), 1), 0, 2, false);
             List<ModelInstance> teams = List.of(unit, opponent);
             Pixmap teamsOff = draw(terrain, atmosphere, visibility, batch, camera, scene, teams, 0, captures);
@@ -205,6 +206,8 @@ class GpuUnitVisibilitySmokeTest {
             BoardScene grove = new BoardScene(0, scene.width(), scene.height(), groveTiles,
                   List.of(), List.of(), -1, "", List.of());
             terrain.update(grove);
+            // A tree of the unit's own hex rises above that hex's ground decoration, so it still counts as cover.
+            ((Color) unit.userData).a = GpuUnitVisibility.ownHex(grove.tile(wooded));
             for (boolean top : new boolean[] { false, true }) {
                 camera.setIsometric(!top);
                 camera.fit(grove);
@@ -214,6 +217,28 @@ class GpuUnitVisibilitySmokeTest {
                 assertTrue(difference(opaque, outlined) > 1000, "Opaque canopies must allow unit outlines in both views");
                 capture("see-through-trees-" + (top ? "top" : "iso") + ".png");
             }
+            // The unit's own hex: its uneven ground, grass and scatter never count as hiding it. The soles stand a little
+            // into the relief, so without that exemption the ground itself would outline them.
+            Coords meadowHex = new Coords(3, 2);
+            List<BoardScene.Tile> meadowTiles = scene.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(), 0,
+                  -1, false, 0, BoardScene.Surface.GRASS, tile.ground(), null, null, null, null, List.of(), List.of(),
+                  BoardLiquid.NONE, null, true)).toList();
+            BoardScene meadow = new BoardScene(0, scene.width(), scene.height(), meadowTiles,
+                  List.of(), List.of(), -1, "", List.of());
+            terrain.update(meadow);
+            camera.setIsometric(true);
+            camera.camera.zoom = .1f;
+            camera.center(BoardGeometry.center(meadowHex, 0));
+            atlas.place(unit, camera.camera, BoardGeometry.center(meadowHex, 0).sub(0, 0, BoardGeometry.LEVEL * .05f), 0, 2,
+                  false);
+            unit.userData = new Color(0.1f, 0.45f, 1, GpuUnitVisibility.ownHex(meadow.tile(meadowHex)));
+            Pixmap standing = draw(terrain, atmosphere, visibility, batch, camera, meadow, units, 0, captures);
+            assertEquals(0, difference(standing, draw(terrain, atmosphere, visibility, batch, camera, meadow, units, 1,
+                  captures)), "Uneven ground, grass and scatter of the unit's own hex must not outline it");
+            capture("see-through-own-hex.png");
+            unit.userData = new Color(0.1f, 0.45f, 1, 0);
+            assertTrue(difference(standing, draw(terrain, atmosphere, visibility, batch, camera, meadow, units, 1,
+                  captures)) > 0, "Without the exemption the same ground hides the soles");
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
         } finally {
             captures.forEach(Pixmap::dispose);

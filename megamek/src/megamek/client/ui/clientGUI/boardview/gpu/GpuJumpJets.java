@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.badlogic.gdx.graphics.Camera;
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.model.Node;
 import com.badlogic.gdx.math.MathUtils;
@@ -183,6 +184,8 @@ final class GpuJumpJets implements Disposable {
         jets.clear();
         sortedSmoke.clear();
     }
+
+    void setSmokeLight(Color light) { batch.setSmokeLight(light); }
 
     void render(Camera camera) {
         if (jets.isEmpty()) {

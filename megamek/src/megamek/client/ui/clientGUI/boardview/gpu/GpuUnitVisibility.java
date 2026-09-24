@@ -8,7 +8,6 @@ import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Mesh;
-import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
@@ -21,6 +20,7 @@ import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.graphics.glutils.HdpiUtils;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
@@ -112,7 +112,13 @@ final class GpuUnitVisibility implements Disposable {
             shader.setUniformi("u_unitDepth", 1);
             shader.setUniformi("u_unitColors", 2);
             // A small world-space tolerance avoids highlighting an exposed surface due to depth rounding.
-            shader.setUniformf("u_bias", Math.max(0.0000005f, 0.05f * BoardGeometry.HEX_SCALE / (camera.far - camera.near)));
+            shader.setUniformf("u_bias", 0.05f * BoardGeometry.HEX_SCALE);
+            shader.setUniformf("u_projectionDepth", camera.projection.val[Matrix4.M22], camera.projection.val[Matrix4.M23],
+                  camera.projection.val[Matrix4.M32], camera.projection.val[Matrix4.M33]);
+            // World positions and hexes of both the unit and what stands before it, for the own-hex exemption.
+            shader.setUniformMatrix("u_inverseView", camera.invProjectionView);
+            shader.setUniformf("u_groundBoard", 0, 0, BoardGeometry.WIDTH, BoardGeometry.HEIGHT);
+            shader.setUniformf("u_levelHeight", BoardGeometry.LEVEL);
             shader.setUniformf("u_step", 1.5f * scale / camera.viewportWidth, 1.5f * scale / camera.viewportHeight);
             shader.setUniformf("u_intensity", MathUtils.clamp(intensity, 0, 1));
             quad.render(shader, GL20.GL_TRIANGLES);
@@ -126,6 +132,15 @@ final class GpuUnitVisibility implements Disposable {
         }
     }
 
+    /**
+     * The see-through colour's alpha for a unit standing in tile: the height, in quarter levels offset by 128, below
+     * which that hex's own relief, grass and scatter stay. The pass never counts them as hiding the unit.
+     */
+    static float ownHex(BoardScene.Tile tile) {
+        float top = tile.elevation() + BoardRelief.decoration(tile) / BoardGeometry.LEVEL;
+        return MathUtils.clamp((float) Math.ceil(top * 4) + 128, 1, 255) / 255;
+    }
+
     /** Borrow this frame's existing unit capture; disabled/empty outlines must never expose stale camera depth. */
     Texture depthTexture() {
         return depthCurrent ? unitDepth : null;
@@ -134,14 +149,18 @@ final class GpuUnitVisibility implements Disposable {
     /** Project a conservative union, including the two-sample halo and rounding on HiDPI displays. */
     private void screenBounds(Camera camera, List<ModelInstance> units, float scale, UnitBounds.Frame bounds) {
         screenBounds.set(0, 0, camera.viewportWidth, camera.viewportHeight);
-        if (!(camera instanceof OrthographicCamera)) { return; }
         float minX = Float.POSITIVE_INFINITY, minY = Float.POSITIVE_INFINITY;
         float maxX = Float.NEGATIVE_INFINITY, maxY = Float.NEGATIVE_INFINITY;
         for (ModelInstance unit : units) {
             var box = bounds == null ? UnitBounds.world(unit) : bounds.get(unit);
             for (int i = 0; i < 8; i++) {
                 corner.set((i & 1) == 0 ? box.min.x : box.max.x, (i & 2) == 0 ? box.min.y : box.max.y,
-                      (i & 4) == 0 ? box.min.z : box.max.z).prj(camera.combined);
+                      (i & 4) == 0 ? box.min.z : box.max.z);
+                // A perspective projection mirrors points behind the eye: keep the whole viewport for such a unit.
+                if ((corner.x - camera.position.x) * camera.direction.x
+                      + (corner.y - camera.position.y) * camera.direction.y
+                      + (corner.z - camera.position.z) * camera.direction.z <= camera.near) { return; }
+                corner.prj(camera.combined);
                 float x = (corner.x + 1) * camera.viewportWidth / 2;
                 float y = (corner.y + 1) * camera.viewportHeight / 2;
                 minX = Math.min(minX, x); minY = Math.min(minY, y);

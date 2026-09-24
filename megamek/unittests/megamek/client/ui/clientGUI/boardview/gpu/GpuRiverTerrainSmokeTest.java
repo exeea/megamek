@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.awt.image.BufferedImage;
 import java.io.File;
-import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
@@ -15,12 +14,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
-import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.graphics.Pixmap;
-import com.badlogic.gdx.graphics.PixmapIO;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
-import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -29,8 +24,8 @@ import org.junit.jupiter.api.Test;
  * Review scene for water hexes inside sculpted land, after a user's desert map: a depth-1 river at level 2 winds
  * between land at levels 1 to 4, beside higher ground and above lower ground, and falls into a lake of depth-1 and
  * depth-2 hexes at level 1. Views: straight down with and without the grid, an oblique overview, a bank beside the
- * channel, a water hex's edge against higher land, the fall and a clay overview. Captures pass through the production
- * composite's clear-daylight exposure; a report lists the renderer, build time, draws and vertices.
+ * channel, a water hex's edge against higher land, the fall and a clay overview. Captures are drawn as on the board,
+ * through the atmosphere composite ({@link GpuReviewFrame}); a report lists the renderer, build time, draws and vertices.
  */
 @Tag("on-demand")
 class GpuRiverTerrainSmokeTest {
@@ -88,15 +83,11 @@ class GpuRiverTerrainSmokeTest {
             public void create() {
                 GpuTerrain terrain = new GpuTerrain();
                 GLProfiler profiler = new GLProfiler(Gdx.graphics);
+                GpuReviewFrame frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
+                      BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                 try {
                     report.append(Gdx.gl.glGetString(GL20.GL_RENDERER)).append(" / ")
                           .append(Gdx.gl.glGetString(GL20.GL_VERSION)).append('\n');
-                    BoardAtmosphere.Settings settings = new BoardAtmosphere.Settings(13, 0, 0,
-                          BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0);
-                    BoardAtmosphere.Lighting lighting = BoardAtmosphere.lighting(settings);
-                    float exposure = lighting.exposureScale(settings.exposure());
-                    terrain.setAtmosphere(lighting);
-                    terrain.setExposure(exposure);
                     BoardCamera camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                     for (String name : families.split(",")) {
@@ -118,15 +109,14 @@ class GpuRiverTerrainSmokeTest {
                             camera.orbit(view.rotation(), view.tilt());
                             camera.camera.zoom = view.zoom();
                             camera.center(BoardGeometry.center(view.focus(), view.level()));
-                            terrain.renderShadows(camera.camera, List.of());
                             profiler.reset();
                             profiler.enable();
-                            frame(terrain, camera);
+                            frame.render(terrain, camera, scene);
                             profiler.disable();
                             report.append(String.format(Locale.ROOT, "  %s: draws=%d vertices=%.0f%n", view.name(),
                                   profiler.getDrawCalls(), profiler.getVertexCount().total));
-                            capture(new File(output, family.name().toLowerCase(Locale.ROOT) + "-" + view.name()
-                                  + suffix + ".png"), exposure, lighting);
+                            GpuReviewFrame.save(new File(output, family.name().toLowerCase(Locale.ROOT) + "-"
+                                  + view.name() + suffix + ".png"));
                         }
                     }
                     terrain.setClay(false);
@@ -136,6 +126,7 @@ class GpuRiverTerrainSmokeTest {
                     failure.set(error);
                 } finally {
                     BoardGeometry.tune(BoardGeometry.DEFAULTS);
+                    frame.dispose();
                     terrain.dispose();
                     Gdx.app.exit();
                 }
@@ -145,50 +136,9 @@ class GpuRiverTerrainSmokeTest {
         System.out.print(report);
     }
 
-    private static void tune(float grid, boolean transitions) {
+    static void tune(float grid, boolean transitions) {
         BoardGeometry.tune(new BoardGeometry.Tuning(1, .7f, 1, 18, grid, BoardGeometry.DEFAULT_MULTI_HEX_UNIT_SCALE,
               transitions, BoardGeometry.DEFAULT_PADDING));
-    }
-
-    private static void frame(GpuTerrain terrain, BoardCamera camera) {
-        // Sky tone behind the plinth; transparent alpha lets the composite treat it as sky, as in production.
-        ScreenUtils.clear(.42f, .56f, .69f, 1, true);
-        terrain.render(camera.camera, false);
-        terrain.renderTransparent(camera.camera);
-    }
-
-    /** The production composite's clear-air daylight path, as in {@link GpuTerrainShowcaseSmokeTest}. */
-    private static void capture(File file, float exposure, BoardAtmosphere.Lighting lighting) {
-        int width = Gdx.graphics.getBackBufferWidth(), height = Gdx.graphics.getBackBufferHeight();
-        Pixmap image = Pixmap.createFromFrameBuffer(0, 0, width, height);
-        try {
-            ByteBuffer pixels = image.getPixels();
-            float saturation = lighting.saturation();
-            for (int y = 0; y < height; y++) {
-                for (int x = 0; x < width; x++) {
-                    int index = (y * width + x) * 4;
-                    float[] c = new float[3];
-                    for (int i = 0; i < 3; i++) {
-                        c[i] = (float) Math.pow((pixels.get(index + i) & 255) / 255f, 2.2) * exposure;
-                    }
-                    c[0] *= lighting.tint().r;
-                    c[1] *= lighting.tint().g;
-                    c[2] *= lighting.tint().b;
-                    float luminance = .2126f * c[0] + .7152f * c[1] + .0722f * c[2];
-                    float ex = (x / (float) width - .5f) * 2, ey = (y / (float) height - .5f) * 2;
-                    float vignette = 1 - .09f * (ex * ex + ey * ey) * .5f;
-                    for (int i = 0; i < 3; i++) {
-                        float value = Math.clamp(luminance + (c[i] - luminance) * saturation, 0, 1);
-                        value = (float) Math.pow(value, 1 / 2.2) * vignette;
-                        pixels.put(index + i, (byte) Math.round(Math.clamp(value, 0, 1) * 255));
-                    }
-                    pixels.put(index + 3, (byte) 255);
-                }
-            }
-            PixmapIO.writePNG(new FileHandle(file), image, -1, true);
-        } finally {
-            image.dispose();
-        }
     }
 
     /** Every hex, water included, carries the family, as the game gives a desert map's water hexes its theme. */

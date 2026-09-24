@@ -56,6 +56,8 @@ import org.junit.jupiter.api.Test;
 /** Actual GL shaders, depth reconstruction, live Scene2D controls, and framebuffer resizing. */
 @Tag("on-demand")
 class GpuAtmosphereSmokeTest {
+    /** Times on the one-minute grid match within this many hours: k / 60 is not an exact binary fraction. */
+    private static final float MINUTE_TOLERANCE = .001f;
     private final File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
 
     @Test
@@ -134,6 +136,9 @@ class GpuAtmosphereSmokeTest {
             Vector3 roof = new Vector3(center).add(0, 0, 108);
             Color clearGround = sample(camera, ground);
             Color clearRoof = sample(camera, roof);
+            // At noon, the light unit, display and linear encodings of the light agree: this compares the light levels
+            // of the two paths, and the full-moon comparison below also catches an encoding mismatch.
+            assertOneLightModel(clearRoof, clearGround, "noon");
             float shadowShare = luminance(sample(camera, new Vector3(center).add(0, -32, 0))) / luminance(clearGround);
             assertTrue(shadowShare > 0.4f && shadowShare < 0.6f,
                   "Native daylight shadows retain sky fill while showing clear contrast: " + shadowShare);
@@ -164,6 +169,7 @@ class GpuAtmosphereSmokeTest {
             atmosphere.setOptions(GpuAtmosphere.Options.DEFAULTS);
             draw(atmosphere, terrain, batch, tower, camera, scene, fullMoon);
             Color night = sample(camera, ground);
+            assertOneLightModel(sample(camera, roof), night, "full moon");
             assertTrue(difference(originalMoonGround, night) < 0.015f, "Moon contrast must preserve lit ground brightness");
             assertTrue(luminance(sample(camera, moonShadow)) < luminance(originalMoonShade) * 0.95f,
                   "The Full Moon contrast control must visibly deepen native cast shadows without a settings change");
@@ -177,13 +183,21 @@ class GpuAtmosphereSmokeTest {
             GpuBoardTestUi.capture(new File(output, "atmosphere-night.png"));
             // Twilight is the sun's lowest lit window: 6:00-6:45 at dawn, 17:15-18:00 at dusk. Earlier and later
             // hours are night, which is darker by design, so only the twilight hours have to stay readable.
+            StringBuilder floor = new StringBuilder(String.format(Locale.ROOT,
+                  "Display luminance of lit gray-155 ground. Full moon: %.3f; overcast twilight:%n", luminance(night)));
+            float darkestTwilight = 1;
             for (float hour : new float[] { 6, 6.25f, 6.5f, 6.75f, 17.25f, 17.5f, 17.75f, 18 }) {
                 draw(atmosphere, terrain, batch, tower, camera, scene,
                       new BoardAtmosphere.Settings(hour, 1, 0, 1.5f, 0, 0));
-                Color twilight = sample(camera, ground);
-                assertTrue(luminance(twilight) > nightBrightnessFloor,
-                      "The rendered board must not go dark during twilight at " + hour + ": " + twilight);
+                float twilight = luminance(sample(camera, ground));
+                floor.append(String.format(Locale.ROOT, "%s: %.3f%n", hour, twilight));
+                darkestTwilight = Math.min(darkestTwilight, twilight);
             }
+            Files.writeString(new File(output, "twilight-floor.txt").toPath(), floor);
+            // Overcast twilight, whose cloud shadows take most of the low sun's light, stays as readable as a clear
+            // full-moon night.
+            assertTrue(darkestTwilight > nightBrightnessFloor,
+                  "The rendered board must not go dark during twilight:\n" + floor);
             checkTwilightShadows(atmosphere, terrain, batch, tower, camera, scene);
             checkTwilightAndCloudPalette(atmosphere, terrain, batch, tower, camera, scene);
             checkCloudOpacity(scene);
@@ -606,12 +620,30 @@ class GpuAtmosphereSmokeTest {
             pixels.fill();
             texture.draw(pixels, 0, 0);
             draw(atmosphere, terrain, batch, tower, camera, scene, clear, cloud);
-            float expected = atmosphere.lighting().ambient().r / (atmosphere.lighting().ambient().r
-                  - atmosphere.lighting().direct().r * atmosphere.lighting().direction().z);
+            // Every surface lights linearly, so the rendered share is the light's own share in linear luminance.
+            var lighting = atmosphere.lighting();
+            float expected = luminance(lighting.ambient()) / luminance(lighting.groundLight());
             for (int i = 0; i < probes.size(); i++) {
-                assertEquals(expected, sample(camera, probes.get(i)).r / lit.get(i).r, 0.025f,
+                float share = linearLuminance(sample(camera, probes.get(i))) / linearLuminance(lit.get(i));
+                assertEquals(expected, share, 0.01f,
                       "An opaque cloud must remove direct light and retain ambient light on all surface shaders");
             }
+            // The shade covers the ground before a wall too, so the tower's gray side facing the isometric camera keeps
+            // only the sky: half of it from above and the sky light the ground reflects (light-model.glsl, ground
+            // albedo 0.2), none of the sun's.
+            boolean isometric = camera.isIsometric();
+            camera.setIsometric(true);
+            camera.fit(scene);
+            draw(atmosphere, terrain, batch, tower, camera, scene, clear, cloud);
+            Vector3 view = camera.camera.direction;
+            Vector3 side = Math.abs(view.x) > Math.abs(view.y) ? new Vector3(-Math.signum(view.x), 0, 0)
+                  : new Vector3(0, -Math.signum(view.y), 0);
+            Vector3 wall = BoardGeometry.center(new Coords(3, 3), 0).mulAdd(side, 18.5f).add(0, 0, 54);
+            float sky = luminance(lighting.ambient()) * (1 + 0.2f) / 2;
+            assertEquals(1, linearLuminance(sample(camera, wall)) / ((float) Math.pow(0.61, 2.2) * sky), 0.05f,
+                  "An opaque cloud must also shade the sunlit ground's light on walls: " + sample(camera, wall));
+            camera.setIsometric(isometric);
+            camera.fit(scene);
         } finally {
             atmosphere.setOptions(GpuAtmosphere.Options.DEFAULTS);
             terrain.environment().remove(GpuCloudShadow.TYPE);
@@ -633,7 +665,11 @@ class GpuAtmosphereSmokeTest {
         var rain = new BoardAtmosphere.Settings(13, 0, 0, 2.5f, 0, 0,
               new BoardAtmosphere.Effects(1, 0, 0, 0, 0, 0, 0));
         drawScene(atmosphere, terrain, batch, List.of(tower), camera, scene, rain, null, 0);
-        assertTrue(luminance(sample(camera, plain)) < luminance(dryPlain) * 0.85f, "Wet ground darkens its albedo");
+        Color wetPlain = sample(camera, plain);
+        // The tileset material darkens wet albedo by 10 to 17.5% (terrain-normal.frag); the wet film's sheen gives a
+        // little light back.
+        assertTrue(luminance(wetPlain) < luminance(dryPlain) * 0.9f,
+              "Wet ground darkens its albedo: " + dryPlain + " -> " + wetPlain);
         assertTrue(luminance(sample(camera, normal)) < luminance(dryNormal) * 0.97f,
               "Wetness also reaches normal-mapped ground with its independently tuned material response");
         assertEquals(dryRoof, sample(camera, roof), "Ground wetness must not tint unrelated unit materials");
@@ -763,7 +799,6 @@ class GpuAtmosphereSmokeTest {
             var inverse = new Matrix4();
             inverse.val[Matrix4.M22] = -100;
             shader.setUniformMatrix("u_inverseView", inverse);
-            shader.setUniformf("u_direction", 0, 0, -1);
             shader.setUniformf("u_boundsMin", -50, -50, -1);
             shader.setUniformf("u_fog", 0, 2, 0);
             shader.setUniformf("u_haze", 0.01f);
@@ -918,6 +953,13 @@ class GpuAtmosphereSmokeTest {
         return 0.2126f * color.r + 0.7152f * color.g + 0.0722f * color.b;
     }
 
+    /** Units and tileset ground share one light model: the same gray under the same light renders alike. */
+    private static void assertOneLightModel(Color roof, Color ground, String when) {
+        assertEquals(1, linearLuminance(roof) / linearLuminance(ground), 0.04f,
+              "The unit shader and the tileset ground must light alike at " + when + ": roof " + roof + ", ground "
+                    + ground);
+    }
+
     private static float linearLuminance(Color color) {
         return (float) (0.2126 * Math.pow(color.r, 2.2) + 0.7152 * Math.pow(color.g, 2.2)
               + 0.0722 * Math.pow(color.b, 2.2));
@@ -943,7 +985,7 @@ class GpuAtmosphereSmokeTest {
                     try {
                         super.render();
                         if (frames() == 3) {
-                            assertEquals(initial.hour(), value("Time of day"));
+                            assertEquals(initial.hour(), value("Time of day"), MINUTE_TOLERANCE);
                             assertEquals(1, value("Snow"));
                             assertEquals(0, value("Rain"));
                             assertEquals(1, value("Ground fog"));
@@ -1009,7 +1051,8 @@ class GpuAtmosphereSmokeTest {
                             GpuBoardTestUi.click("tuning-fixed-sun");
                             boardCamera.orbit(60, 10);
                         } else if (frames() == 10) {
-                            assertEquals(13, value("Time of day"), "Frame updates must preserve tuning overrides");
+                            assertEquals(13, value("Time of day"), MINUTE_TOLERANCE,
+                                  "Frame updates must preserve tuning overrides");
                             assertEquals(0, value("Snow"));
                             assertTrue(value("Rain") > 0);
                             assertEquals(0, value("God rays"));
@@ -1041,7 +1084,8 @@ class GpuAtmosphereSmokeTest {
                             assertTrue(fixed.isChecked(), "Defaults keeps the fixed sun/moon frame the user chose");
                             assertNotEquals(BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS).direction(),
                                   renderedAtmosphere(this).lighting().direction());
-                            assertEquals(initial.hour(), value("Time of day"), "Defaults restores the original moonlit time");
+                            assertEquals(initial.hour(), value("Time of day"), MINUTE_TOLERANCE,
+                                  "Defaults restores the original moonlit time");
                             assertEquals(1, value("Snow"), "Defaults restores scenario snowfall");
                             assertEquals(0, value("Rain"));
                             assertEquals(1, value("Ground fog"), "Defaults restores scenario fog");
@@ -1124,7 +1168,8 @@ class GpuAtmosphereSmokeTest {
                             GpuBoardTestUi.click("atmosphere-LIGHT_FOG");
                             slider("Time of day").setValue(17.5f);
                         } else if (frames() == 8) {
-                            assertEquals(17.5f, slider("Time of day").getValue(), "The clock can override a complete preset");
+                            assertEquals(17.5f, slider("Time of day").getValue(), MINUTE_TOLERANCE,
+                                  "The clock can override a complete preset");
                             assertEquals(AtmospherePreset.LIGHT_FOG.settings(0.5).fog(),
                                   slider("Ground fog").getValue(), 0.001f);
                             assertNotEquals(daylight, GpuBoardTestUi.capture(new File(output, "atmosphere-controls.png")));
@@ -1156,9 +1201,10 @@ class GpuAtmosphereSmokeTest {
                             assertEquals(0, slider("Ground fog").getValue());
                             assertEquals(0, slider("Haze").getValue());
                             assertEquals(fixture.source.atmosphereFor(AtmospherePreset.CLEAR).hour(),
-                                  slider("Time of day").getValue(), "Clear day restores scenario-derived daylight");
+                                  slider("Time of day").getValue(), MINUTE_TOLERANCE,
+                                  "Clear day restores scenario-derived daylight");
                             GpuBoardTestUi.click("tuning-defaults");
-                            assertEquals(initialHour, slider("Time of day").getValue());
+                            assertEquals(initialHour, slider("Time of day").getValue(), MINUTE_TOLERANCE);
                             assertEquals(0, slider("Cloud cover").getValue());
                             Gdx.graphics.setWindowedMode(900, 600);
                         } else if (frames() == 24) {

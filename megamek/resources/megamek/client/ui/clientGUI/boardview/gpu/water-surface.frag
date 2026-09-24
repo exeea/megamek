@@ -62,23 +62,27 @@ void main() {
     // whole volume, so a fall's foam reads exactly like the foam it lands in.
     vec3 lightNormal = vec3(0.0, 0.0, 1.0);
     vec3 albedo = vec3(1.0);
-    vec3 sunlight = vec3(0.0);
+    vec3 sunlight = vec3(0.0), sunLinear = vec3(0.0);
 #ifdef lightingFlag
     vec3 ambient, direct, sheen;
     surfaceLighting(lightNormal, 0.0, ambient, direct, sheen);
     albedo *= ambient + direct;
+    // The light arrives linear (light-model.glsl). Water's colours are authored display-encoded and multiply or add
+    // display-equivalent light: toDisplay(toLinear(colour) * light) is exactly colour * toDisplay(light).
+    albedo = toDisplay(albedo);
 #if numDirectionalLights > 0
     // Shadowed, cloud-filtered sunlight arriving along the sun direction, for the reflected glints.
-    sunlight = direct / max(dot(lightNormal, -u_dirLights[0].direction), 0.05);
+    sunLinear = direct / max(dot(lightNormal, -u_dirLights[0].direction), 0.05);
+    sunlight = toDisplay(sunLinear);
 #endif
 #endif
     vec3 light = albedo;
     // White water scatters light through its whole volume: even in shade it passes on some of the sun's light.
     vec3 whiteLight = light;
 #if defined(lightingFlag) && numDirectionalLights > 0
-    whiteLight = max(light, ambient + u_dirLights[0].color * (max(-u_dirLights[0].direction.z, 0.0) * 0.4));
+    whiteLight = max(light, toDisplay(ambient + sunOnGround() * 0.4));
 #endif
-    vec3 view = -u_viewDirection;
+    vec3 view = -viewDirection();
     vec3 color;
     float alpha;
 
@@ -104,7 +108,7 @@ void main() {
         // Spray scatters sunlight forward: it glows when seen against the sun.
         vec3 mistLight = whiteLight * 1.15;
 #if defined(lightingFlag) && numDirectionalLights > 0
-        float against = max(dot(normalize(u_viewDirection), -u_dirLights[0].direction), 0.0);
+        float against = max(dot(normalize(viewDirection()), -u_dirLights[0].direction), 0.0);
         mistLight += sunlight * (against * against * 0.5);
 #endif
         color = froth * mistLight * alpha * mix(mix(1.1, 1.25, droplet), 1.0, mist);
@@ -300,7 +304,7 @@ void main() {
         // Reflection rises more gently than Fresnel's law toward grazing: waves tilted away from the steep board
         // camera catch the sky while those facing it show the water, which is what makes waves read from above.
         float fresnel = 0.03 + 0.97 * pow(1.0 - facing, 3.0);
-        vec3 reflected = reflect(u_viewDirection, normal);
+        vec3 reflected = reflect(viewDirection(), normal);
         // A brighter band low in the sky, so waves reflecting lower show lighter.
         vec3 sky = mix(u_rainHorizon * 1.15, u_rainSky, smoothstep(0.0, 1.0, reflected.z));
 #ifdef cloudShadowFlag
@@ -333,7 +337,7 @@ void main() {
         glint = sunlight * schlick * a2 / (3.14159 * spread * spread) * step(0.0, dot(normal, toSun))
               / (4.0 * max(facing, 0.1)) * 0.6 * effects;
         // Thin crests let the sun through, brightest when the viewer looks toward it: they glow like the shallows.
-        float behind = max(dot(normalize(u_viewDirection.xy + 1e-5), normalize(toSun.xy + 1e-5)), 0.0);
+        float behind = max(dot(normalize(viewDirection().xy + 1e-5), normalize(toSun.xy + 1e-5)), 0.0);
         glow = waterShallows(palette) * sunlight * (smoothstep(0.02, 0.35, swell.z) * (0.35 + 0.65 * behind)
               * 0.5 * effects);
 #endif
@@ -412,7 +416,7 @@ void main() {
             float dissolve = smoothstep(0.0, 0.6, metres - fallen - 0.8 * (1.0 - billows));
             float sheetFresnel = 0.03 + 0.97 * pow(1.0 - clamp(dot(surfaceNormal, view), 0.0, 1.0), 5.0);
             vec3 sheetSky = mix(u_rainHorizon, u_rainSky,
-                  smoothstep(-0.1, 0.7, reflect(u_viewDirection, surfaceNormal).z));
+                  smoothstep(-0.1, 0.7, reflect(viewDirection(), surfaceNormal).z));
             // Clear water pouring over the crest shows the pool's blue, lit through and mirroring the sky.
             vec3 glass = procedural ? mix(waterShallows(palette), scatter, 0.35) * light * 1.1
                   : texture2D(u_diffuseTexture, v_diffuseUV).rgb * tint * light;
@@ -424,8 +428,8 @@ void main() {
             float facingSun = dot(surfaceNormal, sun);
             // White water scatters light through its thickness: faces turned to the sun glow, and light passing through
             // lifts the shaded side. The glassy crest mirrors the sun in a bright line.
-            fallLight = max(whiteLight, ambient + sunlight * (0.3 * max(sun.z, 0.0) + 0.7 * max(facingSun, 0.0)
-                  + 0.3 * max(-facingSun, 0.0)));
+            fallLight = max(whiteLight, toDisplay(ambient + sunLinear * (0.3 * max(sun.z, 0.0)
+                  + 0.7 * max(facingSun, 0.0) + 0.3 * max(-facingSun, 0.0))));
             // Only water still smooth mirrors the sun: bubbles scatter the glint away as the sheet aerates.
             vec3 halfSun = normalize(view + sun);
             float glassy = (1.0 - aerate) * (1.0 - aerate);

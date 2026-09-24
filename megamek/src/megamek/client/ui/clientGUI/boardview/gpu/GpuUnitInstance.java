@@ -4,8 +4,8 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.util.IdentityHashMap;
 import java.util.Map;
 
+import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
@@ -33,6 +33,7 @@ final class GpuUnitInstance extends ModelInstance {
     }
     private final RenderableProvider depth = this::depthParts;
     private final Map<Node, Attachment> attachments = new IdentityHashMap<>();
+    private final Vector3 detailPosition = new Vector3();
     private float detailPixels = Float.NaN;
     private boolean forcedDetail;
     private int detailRevision;
@@ -50,9 +51,9 @@ final class GpuUnitInstance extends ModelInstance {
     }
 
     /** Render selection only: rigs, emitters, picking, damage flags and shared mesh buffers stay intact. */
-    void equipmentDetail(OrthographicCamera camera, boolean forceFull) {
+    void equipmentDetail(Camera camera, boolean forceFull) {
         if (attachments.isEmpty()) { return; }
-        float pixels = BoardCamera.pixelsPerUnit(camera)
+        float pixels = BoardCamera.pixelsPerUnit(camera, transform.getTranslation(detailPosition))
               * Math.max(transform.getScaleX(), Math.max(transform.getScaleY(), transform.getScaleZ()));
         if (pixels == detailPixels && forceFull == forcedDetail) { return; }
         detailPixels = pixels;

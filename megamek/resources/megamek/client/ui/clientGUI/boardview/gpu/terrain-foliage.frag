@@ -1,7 +1,8 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
-// Trees: their models' own colours and detail maps, lit like the sculpted terrain they stand on (sculpt-light.glsl):
-// linear light, sky and ground bounce, soft shadows and the same highlight roll-off. A canopy scatters light through
-// its leaves, so the sun wraps around it instead of stopping at a hard terminator.
+// Trees: their models' own colours and detail maps, lit like the sculpted terrain they stand on (light-model.glsl,
+// surface-lighting.glsl): linear light, sky and ground bounce and soft shadows; the composite rolls off their
+// highlights. A canopy scatters light through its leaves, so the sun wraps around it instead of stopping at a hard
+// terminator.
 #ifdef GL_ES
 precision highp float;
 #endif
@@ -46,18 +47,17 @@ void main() {
     albedo = toLinear(albedo);
 #ifdef lightingFlag
     // Inside and under a canopy the sky is hidden by the leaves above.
-    vec3 ambient = skyLight(face) * (canopy ? mix(.7, 1.0, face.z * .5 + .5) : .85);
+    vec3 ambient = skyLight(face, GROUND_ALBEDO) * (canopy ? mix(.7, 1.0, face.z * .5 + .5) : .85);
     vec3 direct = vec3(0.0);
 #if numDirectionalLights > 0
     vec3 light = -u_dirLights[0].direction;
     float incidence = canopy ? max(0.0, dot(face, light) * .6 + .4) : max(0.0, dot(face, light));
-    direct = sunLight() * sculptShadow(face, light) * incidence;
+    direct = u_dirLights[0].color * sculptShadow(face, light) * incidence;
 #endif
     // Cloud shadows attenuate direct light here (inserted by GpuCloudShadow).
     vec3 sheen = vec3(0.0);
     albedo *= ambient + direct;
     albedo += sheen;
-    albedo = shoulder(albedo);
 #endif
     gl_FragColor.rgb = toDisplay(albedo);
 #ifdef blendedFlag

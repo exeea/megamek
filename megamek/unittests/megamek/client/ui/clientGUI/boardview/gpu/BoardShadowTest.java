@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.badlogic.gdx.graphics.OrthographicCamera;
+import com.badlogic.gdx.graphics.PerspectiveCamera;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.utils.GdxNativesLoader;
@@ -68,6 +69,59 @@ class BoardShadowTest {
                 assertEquals(1, target.up.len(), 0.0001f);
                 assertEquals(0, target.up.dot(target.direction), 0.0001f);
             }
+        }
+    }
+
+    @Test
+    void perspectiveFrustumFitsReceiversAtBothHeightsAndRetainsOffscreenCasters() {
+        PerspectiveCamera view = new PerspectiveCamera(45, 1000, 700);
+        view.position.set(0, 0, 700);
+        view.direction.set(0, 0, -1);
+        view.up.set(0, 1, 0);
+        view.near = 1;
+        view.far = 10000;
+        view.update();
+        Vector3 direction = new Vector3(2, 1, -1).nor();
+        BoundingBox bounds = new BoundingBox(new Vector3(-20000, -20000, 0), new Vector3(20000, 20000, 120));
+        OrthographicCamera target = new OrthographicCamera();
+        GpuTerrain.fitShadowCamera(view, target, bounds, direction);
+        assertTrue(target.viewportWidth < 1500 && target.viewportHeight < 1500,
+              "A perspective closeup must not spread shadow texels over the whole board");
+        for (float height : new float[] { 0, 120 }) {
+            float halfHeight = (700 - height) * (float) Math.tan(Math.toRadians(45 / 2f));
+            for (float x : new float[] { -.98f, 0, .98f }) {
+                for (float y : new float[] { -.98f, 0, .98f }) {
+                    Vector3 receiver = new Vector3(x * halfHeight * 1000 / 700, y * halfHeight, height);
+                    assertInside(target, receiver);
+                    if (height == 0) {
+                        assertInside(target, new Vector3(receiver).mulAdd(direction, -100 / Math.abs(direction.z)));
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void perspectiveHorizonUsesConservativeBoardBounds() {
+        PerspectiveCamera view = new PerspectiveCamera(80, 1000, 700);
+        view.position.set(0, -400, 400);
+        view.direction.set(0, 1, -.1f).nor();
+        view.up.set(0, 0, 1);
+        view.normalizeUp();
+        view.near = 1;
+        view.far = 10000;
+        view.update();
+        BoundingBox bounds = new BoundingBox(new Vector3(-1000, -1000, 0), new Vector3(1000, 1000, 120));
+        Vector3 direction = new Vector3(2, 1, -1).nor();
+        OrthographicCamera target = new OrthographicCamera();
+        OrthographicCamera wholeBoard = new OrthographicCamera();
+        GpuTerrain.fitShadowCamera(null, wholeBoard, bounds, direction);
+        GpuTerrain.fitShadowCamera(view, target, bounds, direction);
+        assertEquals(wholeBoard.viewportWidth, target.viewportWidth, .001f);
+        assertEquals(wholeBoard.viewportHeight, target.viewportHeight, .001f);
+        for (int corner = 0; corner < 8; corner++) {
+            assertInside(target, new Vector3((corner & 1) == 0 ? bounds.min.x : bounds.max.x,
+                  (corner & 2) == 0 ? bounds.min.y : bounds.max.y, (corner & 4) == 0 ? bounds.min.z : bounds.max.z));
         }
     }
 

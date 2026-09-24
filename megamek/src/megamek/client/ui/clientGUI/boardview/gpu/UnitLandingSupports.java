@@ -138,18 +138,23 @@ final class UnitLandingSupports {
      * A hex's own ground at (x, y). With hex transitions or padding the slope or talus of a step can lie over the
      * hex's footprint instead of its top; it belongs to the walls of the higher hex, this one or a neighbour.
      */
-    private static float ground(BoardScene scene, BoardScene.Tile tile, float x, float y, BoardSurface.Cache surfaces) {
+    private static float ground(BoardScene scene, BoardScene.Tile tile, float x, float y, BoardSurface.Cache surfaces,
+          boolean liquid) {
         BoardSurface surface = surfaces == null ? new BoardSurface(scene, tile) : surfaces.get(scene, tile);
         float top = BoardSurface.sampleHeight(surface.faces, x, y, Float.NaN);
-        if (!Float.isNaN(top) || !BoardGeometry.tuning().stepsBetweenTops()) {
-            return Float.isNaN(top) ? BoardGeometry.groundZ(tile) : top;
+        if (!Float.isNaN(top)) { return top; }
+        // A neighbour's faces can reach over this footprint, as a water hex's shore does over a corner this land gives
+        // up; a step's slope lying over it counts too, and the higher of them is what is drawn.
+        float beside = beside(scene, tile, x, y, surfaces, liquid);
+        if (!BoardGeometry.tuning().stepsBetweenTops()) {
+            return Float.isNaN(beside) ? BoardGeometry.groundZ(tile) : beside;
         }
         if (floorScene != scene || floorRevision != BoardGeometry.revision()) {
             floor = BoardGeometry.floor(scene);
             floorScene = scene;
             floorRevision = BoardGeometry.revision();
         }
-        float slope = Float.NEGATIVE_INFINITY;
+        float slope = Float.isNaN(beside) ? Float.NEGATIVE_INFINITY : beside;
         for (int direction = -1; direction < 6; direction++) {
             BoardScene.Tile owner = direction < 0 ? tile : scene.tile(tile.coords().translated(direction));
             if (owner == null) { continue; }
@@ -161,6 +166,29 @@ final class UnitLandingSupports {
             }
         }
         return Float.isFinite(slope) ? slope : BoardGeometry.groundZ(tile);
+    }
+
+    /**
+     * Over a land hex's footprint where its own faces miss, the highest of its neighbours' faces there: a water hex's
+     * bank or bed where its shore takes in a corner this hex gives up, or with {@code liquid} its water, or the ice
+     * that covers it. NaN where no neighbour's face lies over the point, and on water hexes.
+     */
+    private static float beside(BoardScene scene, BoardScene.Tile tile, float x, float y, BoardSurface.Cache surfaces,
+          boolean liquid) {
+        float height = Float.NaN;
+        for (int direction = 0; direction < 6 && !tile.liquid().present(); direction++) {
+            BoardScene.Tile other = scene.tile(tile.coords().translated(direction));
+            if (other == null) { continue; }
+            BoardSurface surface = surfaces == null ? new BoardSurface(scene, other) : surfaces.get(scene, other);
+            float ground = BoardSurface.sampleHeight(surface.faces, x, y, Float.NaN);
+            if (Float.isNaN(ground)) { continue; }
+            // Ice lies level over the hex as the shore moves its corners (BoardSurface's ICE fan).
+            float wet = !other.liquid().present() ? Float.NaN : other.frozen() ? BoardGeometry.surfaceZ(other)
+                  : liquid ? BoardSurface.sampleHeight(surface.waterFaces, x, y, Float.NaN) : Float.NaN;
+            height = Float.isNaN(height) ? ground : Math.max(height, ground);
+            if (!Float.isNaN(wet)) { height = Math.max(height, wet); }
+        }
+        return height;
     }
 
     /** The visible hex surface, including liquid, for flat tactical artwork. */
@@ -181,7 +209,8 @@ final class UnitLandingSupports {
                 if (tile == null || !BoardGeometry.contains(tile.coords(), x, y)) {
                     continue;
                 }
-                float sample = tile.frozen() ? BoardGeometry.surfaceZ(tile) : ground(scene, tile, x, y, surfaces);
+                float sample = tile.frozen() ? BoardGeometry.surfaceZ(tile)
+                      : ground(scene, tile, x, y, surfaces, includeLiquid);
                 if (includeLiquid && tile.liquid().present()) { sample = Math.max(sample, BoardGeometry.waterZ(tile)); }
                 if (!tile.liquid().present() || tile.frozen() || sample >= BoardGeometry.waterZ(tile)) {
                     height = Math.max(height, sample);

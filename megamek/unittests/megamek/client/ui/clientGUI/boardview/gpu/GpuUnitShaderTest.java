@@ -35,8 +35,8 @@ class GpuUnitShaderTest {
 
     @Test
     void composesTheBundledLibGdxShadersWithTheShippedResources() {
-        assertDoesNotThrow(() -> GpuUnitShader.vertexSource(DefaultShader.getDefaultVertexShader()));
-        assertDoesNotThrow(() -> GpuUnitShader.fragmentSource(DefaultShader.getDefaultFragmentShader()));
+        assertDoesNotThrow(() -> unitVertex(DefaultShader.getDefaultVertexShader()));
+        assertDoesNotThrow(() -> unitFragment(DefaultShader.getDefaultFragmentShader()));
     }
 
     @ParameterizedTest
@@ -45,16 +45,28 @@ class GpuUnitShaderTest {
           vertex, v_diffuseUV = u_diffuseUVTransform.xy + a_texCoord0 * u_diffuseUVTransform.zw;
           fragment, void main() {
           fragment, #if defined(emissiveTextureFlag) && defined(emissiveColorFlag)
+          vertex, #endif // sphericalHarmonicsFlag
+          fragment, #if (!defined(lightingFlag))
+          fragment, #endif // end fogFlag
           """)
     void rejectsMissingOrAmbiguousUpstreamInsertionPoints(String stage, String anchor) {
         boolean vertex = "vertex".equals(stage);
         String source = vertex ? DefaultShader.getDefaultVertexShader() : DefaultShader.getDefaultFragmentShader();
-        UnaryOperator<String> compose = vertex ? GpuUnitShader::vertexSource : GpuUnitShader::fragmentSource;
+        UnaryOperator<String> compose = vertex ? GpuUnitShaderTest::unitVertex : GpuUnitShaderTest::unitFragment;
         // Whitespace alone must not silently drop an effect; a second match must not inject it twice.
         for (String incompatible : List.of(source.replace(anchor, anchor.replace(" ", "  ")), source + "\n" + anchor)) {
             var error = assertThrows(IllegalStateException.class, () -> compose.apply(incompatible));
             assertTrue(error.getMessage().contains(stage));
             assertTrue(error.getMessage().contains(anchor));
         }
+    }
+
+    /** The unit shaders as GpuUnitShader.provider() composes them, on the board's one light model. */
+    private static String unitVertex(String source) {
+        return GpuUnitShader.vertexSource(GpuUnitShader.linearVertex(source));
+    }
+
+    private static String unitFragment(String source) {
+        return GpuUnitShader.fragmentSource(GpuUnitShader.linearFragment(source));
     }
 }

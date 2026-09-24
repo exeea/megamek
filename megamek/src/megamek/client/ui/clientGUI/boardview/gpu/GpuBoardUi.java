@@ -309,7 +309,7 @@ final class GpuBoardUi implements Disposable {
         reportPanel = new GpuReportPanel(skin, this::toggleReport, source::reportUnit);
         stage.addActor(reportPanel.panel());
         stage.addActor(popup);
-        tuning = new GpuBoardTuning(skin, source);
+        tuning = new GpuBoardTuning(skin, source, camera);
         stage.addActor(tuning.panel());
         dock = new GpuPanelDock(skin, reportPanel::layout, reportPanel.panel(),
               attackPanel.panel(), reportPanel.panel(), tuning.panel());

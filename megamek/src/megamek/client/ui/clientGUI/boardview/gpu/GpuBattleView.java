@@ -394,7 +394,6 @@ class GpuBattleView extends ApplicationAdapter {
         renderStage("cutaways and light");
         atmosphere.updateLight(boardCamera.camera);
         terrain.setAtmosphere(atmosphere.lighting());
-        terrain.setExposure(atmosphere.exposure());
         terrain.animate(Gdx.graphics.getDeltaTime(), units, ui.buildingOpacity());
         renderStage("geometry shadows");
         terrain.renderShadows(boardCamera.camera, unitIcons.active() ? List.of() : units);
@@ -410,6 +409,9 @@ class GpuBattleView extends ApplicationAdapter {
         renderStage("transparent effects");
         if (!unitIcons.active()) { renderTethers(); }
         terrain.renderTransparent(boardCamera.camera);
+        Color smokeLight = atmosphere.particleLight();
+        jumpJets.setSmokeLight(smokeLight);
+        attackEffects.setSmokeLight(smokeLight);
         if (!unitIcons.active()) { jumpJets.render(boardCamera.camera); }
         attackEffects.render(boardCamera.camera);
         renderStage("atmosphere composite");
@@ -560,6 +562,9 @@ class GpuBattleView extends ApplicationAdapter {
                 instance.userData = new Color();
             }
             Color.rgb888ToColor((Color) instance.userData, unit.outlineRgb());
+            // The hex the unit stands in right now, also while it walks through other hexes.
+            BoardScene.Tile standing = BoardGeometry.tile(scene, position.x, position.y);
+            ((Color) instance.userData).a = standing == null ? 0 : GpuUnitVisibility.ownHex(standing);
             if (authored && appearance == null && !unit.image().equals(unitTints.get(key))) {
                 Color tint = GpuCutout.averageColor(unit.image());
                 float brightest = Math.max(tint.r, Math.max(tint.g, tint.b));

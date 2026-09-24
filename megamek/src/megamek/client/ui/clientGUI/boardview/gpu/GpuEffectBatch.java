@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.VertexAttribute;
@@ -15,6 +16,7 @@ final class GpuEffectBatch implements Disposable {
     private static final int STRIDE = 7;
     private final int capacity;
     private final String fragment;
+    private final Color smokeLight = new Color(Color.WHITE);
     private float[] vertices;
     private Mesh mesh;
     private ShaderProgram shader;
@@ -48,6 +50,9 @@ final class GpuEffectBatch implements Disposable {
 
     int size() { return offset / (4 * STRIDE); }
 
+    /** Display-encoded light on smoke; flames and jets stay emissive. White draws smoke as authored. */
+    void setSmokeLight(Color light) { smokeLight.set(light); }
+
     void render(Camera camera, int smokeCount) {
         if (offset == 0) { return; }
         mesh.setVertices(vertices, 0, offset);
@@ -59,6 +64,9 @@ final class GpuEffectBatch implements Disposable {
         try {
             shader.bind();
             shader.setUniformMatrix("u_projView", camera.combined);
+            if (shader.hasUniform("u_light")) {
+                shader.setUniformf("u_light", smokeLight.r, smokeLight.g, smokeLight.b);
+            }
             int smoke = Math.min(smokeCount, size());
             Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
             if (smoke > 0) { mesh.render(shader, GL20.GL_TRIANGLES, 0, smoke * 6); }

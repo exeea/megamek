@@ -7,6 +7,12 @@ uniform float u_rainTime;
 uniform float u_rippleDetail;
 uniform float u_rainDetail;
 uniform vec3 u_viewDirection;
+uniform vec3 u_viewPosition;
+uniform float u_perspective;
+
+vec3 viewDirection() {
+    return u_perspective > 0.5 ? normalize(v_cloudPosition - u_viewPosition) : u_viewDirection;
+}
 uniform vec3 u_rainSky;
 uniform vec3 u_rainHorizon;
 const int RAIN_IMPACT_LAYERS = 6;
@@ -52,12 +58,12 @@ float rainPuddle(vec2 position, float wet, float response) {
 }
 
 vec3 rainReflection(vec3 ground, vec3 normal, float coverage) {
-    vec3 reflected = reflect(u_viewDirection, normal);
+    vec3 reflected = reflect(viewDirection(), normal);
     float skyHeight = clamp(reflected.z, 0.0, 1.0);
     // Broad, blurred sky variation. Uses the current atmosphere palette, not a second scene render.
     float cloud = texture2D(u_rainNoise, reflected.xy * 0.11 + vec2(0.31, 0.57)).r;
     vec3 sky = mix(u_rainHorizon, u_rainSky, sqrt(skyHeight)) * mix(0.8, 1.12, cloud);
-    float grazing = 1.0 - clamp(dot(-u_viewDirection, normal), 0.0, 1.0);
+    float grazing = 1.0 - clamp(dot(-viewDirection(), normal), 0.0, 1.0);
     // A small artistic floor keeps the soft reflection readable in the overhead board camera.
     float fresnel = 0.12 + 0.55 * grazing * grazing * grazing * grazing * grazing;
     return mix(ground, sky, coverage * fresnel);

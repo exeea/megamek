@@ -17,6 +17,7 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.PixmapIO;
+import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
@@ -61,7 +62,9 @@ class GpuBoardTuningSmokeTest {
         var skin = new GpuBoardSkin();
         var stage = new Stage(new ScreenViewport());
         try {
-            var tuning = new GpuBoardTuning(skin.skin, source);
+            var camera = new BoardCamera();
+            camera.resize(1280, 800);
+            var tuning = new GpuBoardTuning(skin.skin, source, camera);
             tuning.useScenario(initial, true);
             stage.addActor(tuning.panel());
             Gdx.input.setInputProcessor(new InputMultiplexer(stage));
@@ -72,9 +75,22 @@ class GpuBoardTuningSmokeTest {
             stage.draw();
             assertTrue(tuning.panel().findActor("tuning-general-scroll").isVisible());
             assertFalse(tuning.panel().findActor("tuning-scroll").isVisible());
+            Slider cameraFov = tuning.panel().findActor("tuning-camera-fov");
+            assertTrue(cameraFov.isDisabled());
+            GpuBoardTestUi.click("tuning-perspective");
+            assertTrue(camera.perspective());
+            assertFalse(cameraFov.isDisabled());
+            assertEquals(0, camera.camera.projection.val[Matrix4.M33], .0001f,
+                  "Perspective must use a projective camera matrix");
+            float projectionScale = camera.camera.projection.val[Matrix4.M00];
+            cameraFov.setValue(70);
+            assertEquals(70, camera.fieldOfView());
+            assertTrue(camera.camera.projection.val[Matrix4.M00] < projectionScale,
+                  "Increasing FOV widens the live camera projection");
             for (var family : UnitFamilyScale.values()) {
                 Slider slider = tuning.panel().findActor("tuning-size-" + family.name());
-                assertEquals(1, slider.getValue(), "Family sizes start neutral");
+                assertEquals(family.defaultUnitScale, slider.getValue(), .0001f,
+                      "Family sizes start at their defaults");
                 slider.setValue(1.5f);
                 assertEquals(1.5f, family.UNIT_SCALE);
                 assertEquals(family.heightScale(), family.HEIGHT_SCALE, "Uniform size does not change height proportions");
@@ -90,7 +106,13 @@ class GpuBoardTuningSmokeTest {
                 stage.act(0.3f);
             }
             GpuBoardTestUi.click("tuning-defaults");
-            for (var family : UnitFamilyScale.values()) { assertEquals(1, family.UNIT_SCALE); }
+            assertFalse(camera.perspective());
+            assertTrue(cameraFov.isDisabled());
+            assertEquals(BoardCamera.DEFAULT_FIELD_OF_VIEW, camera.fieldOfView());
+            assertEquals(BoardCamera.DEFAULT_FIELD_OF_VIEW, cameraFov.getValue());
+            for (var family : UnitFamilyScale.values()) {
+                assertEquals(family.defaultUnitScale, family.UNIT_SCALE, .0001f);
+            }
             ScrollPane generalScroll = tuning.panel().findActor("tuning-general-scroll");
             generalScroll.setScrollPercentY(0.6f);
             generalScroll.updateVisualScroll();

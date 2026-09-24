@@ -2,7 +2,6 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import com.badlogic.gdx.graphics.Camera;
-import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
@@ -108,7 +107,7 @@ final class GpuFieldOfView implements Disposable {
         shader.setUniformf("u_dimmedDesaturation", DIMMED_DESATURATION);
         bindEffect(shader, "u_fovEffect", fovStyle, fovDarkness);
         bindEffect(shader, "u_sensorEffect", sensorStyle, sensorDarkness);
-        float pixel = camera instanceof OrthographicCamera ortho ? ortho.zoom / BoardGeometry.HEIGHT : 0.01f;
+        float pixel = BoardCamera.worldUnitsPerPixel(camera) / BoardGeometry.HEIGHT;
         shader.setUniformf("u_fovEdge", Math.max(0.004f, Math.min(0.04f, pixel * 1.5f)));
     }
 
