@@ -174,7 +174,7 @@ void main() {
 #else
         vec3 scattered = surfaceAmbient(vec3(0.0, 0.0, 1.0));
 #endif
-        albedo = mix(albedo, pigment * scattered, smoothstep(0.0, 0.8, submerged) * 0.75);
+        albedo = submergedLight(albedo, pigment, scattered, submerged);
     }
     albedo += sheen * mix(.35, 1.0, film);
     if (puddle > 0.0) albedo = rainReflection(albedo, normal, puddle);

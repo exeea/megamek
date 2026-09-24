@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Random;
+import java.util.function.Function;
 
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
@@ -44,12 +45,19 @@ final class GpuWaterShader extends Attribute {
     private static final float BLEND_RADIUS = 0.9f;
     private static final int DETAIL_SIZE = 256;
 
-    /** Where a fall lands: the middle of its mouth, into the pool, half the mouth's width, reach and drop height. */
-    record Impact(Vector3 center, Vector3 inward, float halfWidth, float radius, float drop) { }
+    /**
+     * A stretch of the line where a fall lands, the water it spreads into lying to the right of {@code from} to
+     * {@code to}, and the radius of the boil it churns up.
+     */
+    record Impact(Vector3 from, Vector3 to, float radius) { }
+    /** Most landing stretches one pool churns with; the shader's arrays hold this many. */
+    static final int MAX_IMPACTS = 12;
 
     private final int palette;
     private final boolean falling;
     private final boolean procedural;
+    /** Spray thrown up where falls land: particles the vertex shader launches, not a surface (GpuWaterfall). */
+    private final boolean spray;
     private final Field field;
     final List<Impact> impacts;
 
@@ -59,35 +67,76 @@ final class GpuWaterShader extends Attribute {
         palette = palette(tile.liquid());
         this.falling = falling;
         this.procedural = procedural;
+        spray = false;
         this.field = field;
-        List<Impact> hits = new ArrayList<>();
-        if (!falling) {
-            int segments = surface.water.size() / 6;
-            for (int edge = 0; edge < 6; edge++) {
-                BoardScene.Tile upstream = scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(edge)));
-                if (upstream == null || upstream.frozen() || !tile.liquid().connects(upstream.liquid())
-                      || upstream.elevation() <= tile.elevation()) { continue; }
-                Vector3 a = surface.water.get(edge * segments), b = surface.water.get(((edge + 1) % 6) * segments);
-                Vector3 center = new Vector3(a).lerp(b, 0.5f);
-                Vector3 inward = new Vector3(a).sub(b).crs(Vector3.Z).nor();
-                float radius = (0.12f + 0.05f * (float) Math.sqrt(Math.min(4, upstream.elevation() - tile.elevation())))
-                      * BoardGeometry.WIDTH;
-                hits.add(new Impact(center, inward, a.dst(b) / 2, radius,
-                      BoardGeometry.waterZ(upstream) - BoardGeometry.waterZ(tile)));
-            }
-        }
-        impacts = List.copyOf(hits);
+        impacts = falling || field == null ? List.of() : impacts(scene, tile, field::surface);
     }
 
-    private GpuWaterShader(GpuWaterShader original) {
+    /**
+     * Where falls land near this pool: into it and into its neighbours at its level, so the boil of a fall that lands
+     * by a corner spreads on across every hex around it without a seam. Each landing follows its crest in two
+     * stretches; the nearest are kept. {@code surfaces} gives the surface of the open water at a hex, or null.
+     */
+    static List<Impact> impacts(BoardScene scene, BoardScene.Tile tile, Function<Coords, BoardSurface> surfaces) {
+        List<Coords> pools = new ArrayList<>(List.of(tile.coords()));
+        for (int direction = 0; direction < 6; direction++) {
+            BoardScene.Tile beside = scene.tile(tile.coords().translated(direction));
+            if (beside != null && beside.elevation() == tile.elevation() && !beside.frozen()
+                  && tile.liquid().connects(beside.liquid())) {
+                pools.add(beside.coords());
+            }
+        }
+        Vector3 middle = BoardGeometry.center(tile.coords(), 0);
+        List<Impact> hits = new ArrayList<>();
+        for (Coords pool : pools) {
+            for (int direction = 0; direction < 6; direction++) {
+                BoardSurface upper = surfaces.apply(pool.translated(direction));
+                if (upper == null) { continue; }
+                for (BoardSurface.Side fall : upper.waterfalls) {
+                    Coords below = upper.tile.coords().translated(BoardGeometry.edgeDirection(fall.edge()));
+                    if (!below.equals(pool)) { continue; }
+                    float levels = (fall.a().z - fall.lowA()) / BoardGeometry.LEVEL;
+                    float radius = (0.12f + 0.05f * (float) Math.sqrt(Math.min(4, levels))) * BoardGeometry.WIDTH;
+                    Vector3 from = GpuWaterfall.landing(upper, fall, 0);
+                    for (int k = 1; k <= 2; k++) {
+                        Vector3 to = GpuWaterfall.landing(upper, fall, k / 2f);
+                        // The boil reaches out a little over twice its radius, and behind the curtain to the wall.
+                        if (distance(middle, from, to) < BoardGeometry.WIDTH * .6f + 2.2f * radius) {
+                            hits.add(new Impact(from, to, radius));
+                        }
+                        from = to;
+                    }
+                }
+            }
+        }
+        hits.sort((a, b) -> {
+            int order = Float.compare(distance(middle, a.from(), a.to()), distance(middle, b.from(), b.to()));
+            if (order == 0) { order = Float.compare(a.from().x, b.from().x); }
+            return order != 0 ? order : Float.compare(a.from().y, b.from().y);
+        });
+        return List.copyOf(hits.subList(0, Math.min(MAX_IMPACTS, hits.size())));
+    }
+
+    /** Level distance from p to the segment from a to b. */
+    private static float distance(Vector3 p, Vector3 a, Vector3 b) {
+        float dx = b.x - a.x, dy = b.y - a.y, length2 = dx * dx + dy * dy;
+        float t = length2 == 0 ? 0 : Math.clamp(((p.x - a.x) * dx + (p.y - a.y) * dy) / length2, 0, 1);
+        return (float) Math.hypot(a.x + dx * t - p.x, a.y + dy * t - p.y);
+    }
+
+    private GpuWaterShader(GpuWaterShader original, boolean spray) {
         super(TYPE);
         // The impacts are immutable and the chunk owns the field; copied materials share both.
         palette = original.palette;
         falling = original.falling;
         procedural = original.procedural;
+        this.spray = spray;
         field = original.field;
         impacts = original.impacts;
     }
+
+    /** The same water's spray, thrown up where its falls land. */
+    GpuWaterShader spray() { return new GpuWaterShader(this, true); }
 
     static int palette(BoardLiquid liquid) {
         if (liquid.kind() == BoardLiquid.Kind.HAZARDOUS) { return HAZARDOUS; }
@@ -104,7 +153,8 @@ final class GpuWaterShader extends Attribute {
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                 var water = attributes.get(GpuWaterShader.class, TYPE);
                 if (water != null) {
-                    target.set(id, (float) water.palette, water.falling ? 1f : 0f, water.procedural ? 1f : 0f, 0f);
+                    target.set(id, (float) water.palette, water.falling ? 1f : 0f, water.procedural ? 1f : 0f,
+                          water.spray ? 1f : 0f);
                 }
             }
         });
@@ -132,17 +182,26 @@ final class GpuWaterShader extends Attribute {
                 if (water != null) { target.set(id, water.impacts.size()); }
             }
         });
-        for (int index = 0; index < 6; index++) {
+        for (int index = 0; index < MAX_IMPACTS; index++) {
             final int impactIndex = index;
-            shader.register("u_splashEdges[" + index + "]", new BaseShader.LocalSetter() {
+            shader.register("u_splashLines[" + index + "]", new BaseShader.LocalSetter() {
                 @Override
                 public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                     var water = attributes.get(GpuWaterShader.class, TYPE);
                     if (water != null && impactIndex < water.impacts.size()) {
                         Impact impact = water.impacts.get(impactIndex);
                         float scale = 1 / BoardGeometry.WIDTH;
-                        target.set(id, impact.center().x * scale, impact.center().y * scale,
-                              impact.inward().x * impact.radius() * scale, impact.inward().y * impact.radius() * scale);
+                        target.set(id, impact.from().x * scale, impact.from().y * scale,
+                              impact.to().x * scale, impact.to().y * scale);
+                    }
+                }
+            });
+            shader.register("u_splashRadii[" + index + "]", new BaseShader.LocalSetter() {
+                @Override
+                public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                    var water = attributes.get(GpuWaterShader.class, TYPE);
+                    if (water != null && impactIndex < water.impacts.size()) {
+                        target.set(id, water.impacts.get(impactIndex).radius() / BoardGeometry.WIDTH);
                     }
                 }
             });
@@ -150,12 +209,12 @@ final class GpuWaterShader extends Attribute {
     }
 
     @Override
-    public GpuWaterShader copy() { return new GpuWaterShader(this); }
+    public GpuWaterShader copy() { return new GpuWaterShader(this, spray); }
 
     @Override
     public int hashCode() {
         int result = 31 * super.hashCode() + palette;
-        result = 31 * result + (falling ? 1 : 0) + (procedural ? 2 : 0);
+        result = 31 * result + (falling ? 1 : 0) + (procedural ? 2 : 0) + (spray ? 4 : 0);
         result = 31 * result + System.identityHashCode(field);
         return 31 * result + impacts.hashCode();
     }
@@ -167,17 +226,17 @@ final class GpuWaterShader extends Attribute {
         int comparison = Integer.compare(palette, water.palette);
         if (comparison == 0) { comparison = Boolean.compare(falling, water.falling); }
         if (comparison == 0) { comparison = Boolean.compare(procedural, water.procedural); }
+        if (comparison == 0) { comparison = Boolean.compare(spray, water.spray); }
         if (comparison == 0) {
             comparison = Integer.compare(System.identityHashCode(field), System.identityHashCode(water.field));
         }
         if (comparison == 0) { comparison = Integer.compare(impacts.size(), water.impacts.size()); }
         for (int i = 0; comparison == 0 && i < impacts.size(); i++) {
             Impact a = impacts.get(i), b = water.impacts.get(i);
-            comparison = Float.compare(a.center().x, b.center().x);
-            if (comparison == 0) { comparison = Float.compare(a.center().y, b.center().y); }
-            if (comparison == 0) { comparison = Float.compare(a.inward().x, b.inward().x); }
-            if (comparison == 0) { comparison = Float.compare(a.inward().y, b.inward().y); }
-            if (comparison == 0) { comparison = Float.compare(a.halfWidth(), b.halfWidth()); }
+            comparison = Float.compare(a.from().x, b.from().x);
+            if (comparison == 0) { comparison = Float.compare(a.from().y, b.from().y); }
+            if (comparison == 0) { comparison = Float.compare(a.to().x, b.to().x); }
+            if (comparison == 0) { comparison = Float.compare(a.to().y, b.to().y); }
             if (comparison == 0) { comparison = Float.compare(a.radius(), b.radius()); }
         }
         return comparison;
@@ -458,6 +517,12 @@ final class GpuWaterShader extends Attribute {
         /** Rapids and a pool's approach to its lip, blended across hexes exactly like the current. */
         float agitation(Vector3 point) {
             return pools.agitation(point.x, point.y);
+        }
+
+        /** The surface of the open water at {@code coords}, or null where there is none. */
+        BoardSurface surface(Coords coords) {
+            Pool pool = pools.get(coords);
+            return pool == null ? null : pool.surface;
         }
 
         @Override

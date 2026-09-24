@@ -55,10 +55,13 @@ class BoardReliefTest {
 
     @Test
     void deepDropsCarryMoreProminentRimFormationsThanShallowOnes() {
-        float shallow = Math.max(rimReach(1), rimReach(2));
-        float deep = Math.min(rimReach(3), rimReach(4));
-        assertTrue(deep > shallow * 1.2f, "Caprock reach: shallow " + shallow + ", deep " + deep);
-        assertTrue(shallow > 0, "Even shallow drops have a readable lip");
+        // Without hex transitions, whose room sets every rim back from its edge.
+        BoardSculptTest.withTransitions(false, () -> {
+            float shallow = Math.max(rimReach(1), rimReach(2));
+            float deep = Math.min(rimReach(3), rimReach(4));
+            assertTrue(deep > shallow * 1.2f, "Caprock reach: shallow " + shallow + ", deep " + deep);
+            assertTrue(shallow > 0, "Even shallow drops have a readable lip");
+        });
     }
 
     @Test

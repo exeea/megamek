@@ -78,8 +78,8 @@ final class BoardTacticalGeometry {
 
     private static void drape(BoardScene scene, List<BoardTactical.Fill> fills, Consumer<Triangle> destination) {
         Map<Coords, BoardSurface> surfaces = new HashMap<>();
-        // With hex transitions a step's slope and talus lie between the tops; its walls carry them.
-        boolean transitions = BoardGeometry.tuning().transitions();
+        // With hex transitions or padding a step's slope and talus lie between the tops; its walls carry them.
+        boolean transitions = BoardGeometry.tuning().stepsBetweenTops();
         float floor = transitions ? BoardGeometry.floor(scene) : 0;
         Map<Coords, List<BoardSurface.Face>> slopes = new HashMap<>();
         int layer = 0;

@@ -62,6 +62,25 @@ class BoardTransitionsTest {
     }
 
     @Test
+    void paddingSetsTheRoomEveryStepTakes() {
+        for (BoardScene.Surface family : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.SAND)) {
+            for (int step : new int[] { 1, 3 }) {
+                BoardScene scene = scene(step, family, true);
+                for (float padding : new float[] { 4, BoardGeometry.MAX_PADDING }) {
+                    String name = family + " " + step + " levels, padding " + padding;
+                    BoardSculptTest.withPadding(padding, () -> {
+                        float rim = reach(scene, HIGH, true), foot = reach(scene, LOW, false), room = padding / 2;
+                        assertTrue(rim < -room + 1.5f && rim > -room - 1.5f,
+                              name + ": the rim stands back by half the padding, " + rim);
+                        assertTrue(foot > room - 1 && foot < room + 1.5f,
+                              name + ": the foot spreads out by half the padding, " + foot);
+                    });
+                }
+            }
+        }
+    }
+
+    @Test
     void stepsTakeRoomOnBothSidesOfTheirEdgeOnlyWhenTransitionsAreOn() {
         for (BoardScene.Surface family : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.ROCK,
               BoardScene.Surface.SAND)) {

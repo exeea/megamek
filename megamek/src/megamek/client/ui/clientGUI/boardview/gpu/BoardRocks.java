@@ -10,12 +10,15 @@ import com.badlogic.gdx.math.Vector3;
 
 /**
  * The rock kit: a small, fixed library of faceted convex rocks, generated once from fixed seeds. Jointed blocks are a
- * box whose faces and corners are cut by near-axial fault planes; boulders are cut from every side. Every rock is a
- * closed solid of flat, outward-wound convex polygons, normalized to a unit horizontal extent with its base at z = 0.
+ * box whose faces and corners are cut by near-axial fault planes; boulders are cut from every side; a shrub's masses
+ * are boxes with every corner cut away. Every rock is a closed solid of flat, outward-wound convex polygons,
+ * normalized to a unit horizontal extent with its base at z = 0.
  */
 final class BoardRocks {
     static final int BLOCKS = 8;
     static final int BOULDERS = 8;
+    /** Rounded masses for shrubs, at about two thirds of a boulder's triangles. */
+    static final int BUSHES = 8;
 
     /** One flat face, counter-clockwise seen from outside. */
     record Polygon(Vector3[] points, Vector3 normal) { }
@@ -32,21 +35,32 @@ final class BoardRocks {
         return LIBRARY.get((block ? 0 : BLOCKS) + Math.floorMod(variant, block ? BLOCKS : BOULDERS));
     }
 
+    /** One mass of a shrub; the variant wraps. */
+    static Rock bush(int variant) {
+        return LIBRARY.get(BLOCKS + BOULDERS + Math.floorMod(variant, BUSHES));
+    }
+
     private static List<Rock> library() {
         List<Rock> result = new ArrayList<>();
-        for (int i = 0; i < BLOCKS; i++) { result.add(build(0x5eed00L + i, true)); }
-        for (int i = 0; i < BOULDERS; i++) { result.add(build(0xb01d00L + i, false)); }
+        for (int i = 0; i < BLOCKS; i++) { result.add(build(0x5eed00L + i, true, false)); }
+        for (int i = 0; i < BOULDERS; i++) { result.add(build(0xb01d00L + i, false, false)); }
+        for (int i = 0; i < BUSHES; i++) { result.add(build(0xb05400L + i, false, true)); }
         return List.copyOf(result);
     }
 
-    private static Rock build(long seed, boolean block) {
+    /** A jointed block, a boulder cut from every side, or a shrub's mass: a box with every corner cut away. */
+    private static Rock build(long seed, boolean block, boolean bush) {
         Random random = new Random(seed);
         float ex = 1, ey = .62f + .3f * random.nextFloat(), ez = block ? .45f + .4f * random.nextFloat() : .6f + .3f * random.nextFloat();
         List<List<Vector3>> faces = box(ex, ey, ez);
-        int cuts = block ? 5 + random.nextInt(4) : 12 + random.nextInt(6);
+        int cuts = block ? 5 + random.nextInt(4) : bush ? 8 + random.nextInt(3) : 12 + random.nextInt(6);
         for (int i = 0; i < cuts; i++) {
             Vector3 n;
-            if (block && i < 4) {
+            if (bush && i < 8) {
+                // A rounded mass at few triangles: every corner of the box cut away, a little askew.
+                n = new Vector3((i & 1) == 0 ? 1 : -1, (i & 2) == 0 ? 1 : -1, (i & 4) == 0 ? 1 : -1)
+                      .add(gaussian(random, .2f), gaussian(random, .2f), gaussian(random, .2f)).nor();
+            } else if (block && i < 4) {
                 // Fault planes near the box axes: tilted sides and a sloping top, never a perfect box.
                 int axis = random.nextInt(3);
                 n = new Vector3(axis == 0 ? 1 : 0, axis == 1 ? 1 : 0, axis == 2 ? 1 : 0).scl(random.nextBoolean() ? 1 : -1);
@@ -60,7 +74,8 @@ final class BoardRocks {
                 n = new Vector3(gaussian(random, 1), gaussian(random, 1), gaussian(random, 1)).nor();
             }
             float support = (float) Math.sqrt(square(ex * n.x) + square(ey * n.y) + square(ez * n.z));
-            float depth = support * (block ? (i < 4 ? .9f : .78f) + .1f * random.nextFloat() : .8f + .14f * random.nextFloat());
+            float depth = support * (block ? (i < 4 ? .9f : .78f) + .1f * random.nextFloat()
+                  : bush && i < 8 ? .7f + .1f * random.nextFloat() : .8f + .14f * random.nextFloat());
             faces = clip(faces, n, depth);
         }
         // Normalize: largest horizontal extent one, centred, base at zero.

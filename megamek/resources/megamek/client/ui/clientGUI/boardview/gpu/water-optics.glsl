@@ -55,6 +55,12 @@ vec3 waterBedTint(float palette, float levels) {
     return kept / max(max(max(kept.r, kept.g), kept.b), 1.0 - WATER_MAX_OPACITY);
 }
 
+// Light on a submerged surface: the water scatters daylight in every direction, so below the surface orientation and
+// shadows soften with depth toward the surface's own colour under that scattered light.
+vec3 submergedLight(vec3 lit, vec3 pigment, vec3 scattered, float levels) {
+    return mix(lit, pigment * scattered, smoothstep(0.0, 0.8, levels) * 0.75);
+}
+
 // Extra direct light focused onto submerged ground: none at the water line, strongest in the shallows.
 float waterBedCaustics(vec2 position, float levels) {
     return waterCaustics(position) * 2.6 * exp(-levels * 1.4) * smoothstep(0.0, 0.05, levels);

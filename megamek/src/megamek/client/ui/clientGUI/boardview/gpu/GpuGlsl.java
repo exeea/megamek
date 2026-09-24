@@ -48,6 +48,8 @@ final class GpuGlsl {
     private static final int[][] CONTEXTS = { { 4, 6 }, { 4, 5 }, { 4, 3 }, { 4, 1 }, { 4, 0 }, { 3, 3 } };
     private static int version = MINIMUM;
     private static String context = "OpenGL 3.3";
+    /** The graphics card of the board's context, as its driver names it; empty until the context exists. */
+    private static String renderer = "";
     /** The newest context this computer creates, found once per run. */
     private static int[] newest;
 
@@ -69,6 +71,8 @@ final class GpuGlsl {
      */
     private static int[] newestContext() {
         Lwjgl3NativesLoader.load();
+        // These windows are the run's first OpenGL contexts, which fix the graphics card it draws with.
+        GpuGraphicsCard.apply();
         if (!GLFW.glfwInit()) { return CONTEXTS[CONTEXTS.length - 1]; }
         try {
             for (int[] candidate : CONTEXTS) {
@@ -101,8 +105,9 @@ final class GpuGlsl {
         int chosen = select(major, minor, Integer.getInteger(CAP_PROPERTY, MAXIMUM));
         use(chosen);
         context = String.format(Locale.ROOT, "OpenGL %d.%d", major, minor);
-        LOGGER.info("3D board: {} on {}, shaders compiled as GLSL {}", GL11.glGetString(GL11.GL_VERSION),
-              GL11.glGetString(GL11.GL_RENDERER), chosen);
+        renderer = GL11.glGetString(GL11.GL_RENDERER);
+        LOGGER.info("3D board: {} on {}, shaders compiled as GLSL {}", GL11.glGetString(GL11.GL_VERSION), renderer,
+              chosen);
     }
 
     /** The GLSL version for an OpenGL context version: the same version, capped, never below {@link #MINIMUM}. */
@@ -113,6 +118,11 @@ final class GpuGlsl {
     /** The GLSL version shaders are compiled as, such as 460; tessellation needs 400, compute shaders 430. */
     static int version() {
         return version;
+    }
+
+    /** The graphics card the board draws with, as its driver names it; empty before the board's context exists. */
+    static String renderer() {
+        return renderer == null ? "" : renderer;
     }
 
     /** The context and shading language in use, as the tuning panel shows them. */

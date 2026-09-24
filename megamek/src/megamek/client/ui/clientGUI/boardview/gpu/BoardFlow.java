@@ -71,8 +71,7 @@ final class BoardFlow {
                     distance.put(tile.coords(), 0);
                     pending.add(tile);
                 }
-                if (tile.coords().getX() == 0 || tile.coords().getX() == scene.width() - 1
-                      || tile.coords().getY() == 0 || tile.coords().getY() == scene.height() - 1) { boundary.add(tile); }
+                if (edge(scene, tile.coords())) { boundary.add(tile); }
             }
             // A higher inlet can identify a single boundary outlet or the lake into which a flat reach empties.
             // With no elevation evidence, even a narrow edge-to-edge river has no assumed direction.
@@ -114,6 +113,9 @@ final class BoardFlow {
             if (!incoming.isZero()) { direction.add(incoming.nor()).nor(); }
             float speed = tile.liquid().molten() ? 0.025f : 0.10f + 0.04f * tile.liquid().rapids();
             speed *= waterfallSpeed(scene, tile, downstream, lakes);
+            // A river's head, where it ends against its own banks inside the board, runs slow. At the board's edge the
+            // water runs on as if into the hex beyond.
+            if (neighbors.get(tile.coords()).size() <= 1 && !edge(scene, tile.coords())) { speed *= .4f; }
             // UV V points toward world -Y. Offsetting against the velocity moves the painted features downstream.
             result.put(tile.coords(), new Current(-direction.x * speed, direction.y * speed * BoardGeometry.WIDTH / BoardGeometry.HEIGHT));
         }
@@ -125,7 +127,13 @@ final class BoardFlow {
         for (int distance = 0; distance < WATERFALL_APPROACH_HEXES; distance++) {
             Coords next = downstream.get(tile.coords());
             BoardScene.Tile target = next == null ? null : scene.tile(next);
-            if (target == null) { break; }
+            if (target == null) {
+                // A river that runs out at the board's edge pours off it (BoardSurface.FALLS_OFF_THE_BOARD).
+                if (next != null && BoardSurface.FALLS_OFF_THE_BOARD) {
+                    return 1 + 1.25f * (float) Math.sqrt(2) * (1 - distance / (float) WATERFALL_APPROACH_HEXES);
+                }
+                break;
+            }
             int drop = tile.elevation() - target.elevation();
             if (drop > 0) {
                 // Bounded artistic acceleration, fading upstream over three hexes; no change to GIF timing.
@@ -136,6 +144,11 @@ final class BoardFlow {
             tile = target;
         }
         return 1;
+    }
+
+    private static boolean edge(BoardScene scene, Coords coords) {
+        return coords.getX() == 0 || coords.getX() == scene.width() - 1 || coords.getY() == 0
+              || coords.getY() == scene.height() - 1;
     }
 
     private static Vector2 direction(Coords from, Coords to) {

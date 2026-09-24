@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.scenes.scene2d.Actor;
@@ -26,6 +27,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.Scaling;
+import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.common.planetaryConditions.Atmosphere;
 import megamek.common.planetaryConditions.AtmosphericTaint;
 
@@ -47,7 +49,8 @@ final class GpuBoardTuning {
           new Knob("Base level height", 4, 40, 1, "%.0f"),
           // A value of one hides the grid.
           new Knob("Hex frame shade", 0f, 1f, 0.05f, "%.2f"),
-          new Knob("Multi-hex unit scale", 0.25f, 1.5f, 0.05f, "%.2f"));
+          new Knob("Multi-hex unit scale", 0.25f, 1.5f, 0.05f, "%.2f"),
+          new Knob("Hex padding (m)", 0, BoardGeometry.MAX_PADDING, 0.5f, "%.1f"));
 
     private static final List<Knob> LIGHTING_KNOBS = List.of(
           new Knob("Time of day", 0, 24, 0.25f, "clock"),
@@ -83,6 +86,10 @@ final class GpuBoardTuning {
     private Table rows = new Table();
     private final CheckBox normalMaps;
     private final CheckBox vsync;
+    /** The graphics card rows; null on computers without two cards to choose from. */
+    private SelectBox<GpuGraphicsCard> graphicsCard;
+    private Label cardInUse;
+    private Label cardPending;
     private final List<Control> geometry;
     private final CheckBox transitions;
     private final List<Control> familySizes;
@@ -125,6 +132,10 @@ final class GpuBoardTuning {
         rows.top().defaults().pad(0, 3, 0, 3);
         section(skin, "Geometry");
         geometry = controls(skin, KNOBS, this::applyGeometry, 0);
+        geometry.get(6).slider().addListener(new TextTooltip("Gap the board opens between neighbouring hexes, in metres; "
+              + "each hex keeps its size. Where levels match the ground runs on through the gap; where they differ the gap "
+              + "holds a slope up to two levels and a cliff above its talus from three. Replaces hex transitions while on. "
+              + "Visual only; the game's levels and hexes are unchanged.", skin, "menu"));
         transitions = checkbox(skin, "Hex transitions", "tuning-transitions");
         transitions.addListener(new TextTooltip("Steps between hexes take room on both sides of their edge: slopes up to "
               + "two levels, deep cliffs above a talus from three. Visual only; the game's levels and hexes are unchanged.",
@@ -154,6 +165,23 @@ final class GpuBoardTuning {
         graphics.addListener(new TextTooltip("Detected when the board opens: the board compiles its shaders for the newest "
               + "shading language the graphics driver offers, from GLSL 3.30 up to 4.60.", skin, "menu"));
         rows.add(graphics).colspan(3).left().height(18).row();
+        if (!GpuGraphicsCard.cards().isEmpty()) {
+            graphicsCard = choice(skin, "Graphics card", "tuning-graphics-card", GpuGraphicsCard.values(),
+                  this::applyGraphicsCard);
+            syncing = true;
+            graphicsCard.setSelected(GpuGraphicsCard.preferred());
+            syncing = false;
+            graphicsCard.addListener(new TextTooltip("The card the board draws with. Windows keeps a program on the "
+                  + "card it started with, so a change applies the next time MegaMek starts.", skin, "menu"));
+            cardInUse = new Label("", skin, "small");
+            cardInUse.setName("tuning-graphics-card-in-use");
+            cardInUse.setEllipsis(true);
+            rows.add(cardInUse).colspan(3).left().minWidth(0).growX().height(18).row();
+            cardPending = new Label("Applies when MegaMek next starts", skin, "small");
+            cardPending.setName("tuning-graphics-card-pending");
+            rows.add(cardPending).colspan(3).left().height(18).row();
+            updateGraphicsCard();
+        }
         section(skin, "Unit family sizes");
         familySizes = controls(skin, Arrays.stream(UnitFamilyScale.values())
               .map(family -> new Knob(family.label, 0.25f, 3, 0.05f, "%.2f")).toList(), this::applyFamilySizes, 0);
@@ -491,14 +519,15 @@ final class GpuBoardTuning {
 
     /**
      * Writes the current board values into the sliders, as the initial state and after a reset. VSync and the
-     * fixed sun/moon frame are the user's window preferences, not board values, so a reset leaves them alone.
+     * fixed sun/moon frame are the user's window preferences, and the graphics card the computer's, not board values,
+     * so a reset leaves them alone.
      */
     private void restoreDefaults() {
         normalMaps.setChecked(true);
         boolean fixedSunKept = fixedSun.isChecked();
         BoardGeometry.Tuning defaults = BoardGeometry.DEFAULTS;
         float[] values = { defaults.hexScale(), defaults.unitScale(), defaults.unitHeightScale(),
-              defaults.levelHeight(), defaults.gridShade(), defaults.multiHexUnitScale() };
+              defaults.levelHeight(), defaults.gridShade(), defaults.multiHexUnitScale(), defaults.padding() };
         setValues(geometry, values);
         syncing = true;
         transitions.setChecked(defaults.transitions());
@@ -675,11 +704,28 @@ final class GpuBoardTuning {
         updateReadings(rendering);
     }
 
+    /** Saves the card for MegaMek's next start; this run keeps the card it opened the board with. */
+    private void applyGraphicsCard() {
+        String card = graphicsCard.getSelected().name();
+        SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardGraphicsCard(card));
+        updateGraphicsCard();
+    }
+
+    private void updateGraphicsCard() {
+        // Drivers append their bus and instruction set: "NVIDIA GeForce RTX 4070 Laptop GPU/PCIe/SSE2".
+        String renderer = GpuGlsl.renderer().split("/")[0];
+        cardInUse.setText(renderer.isEmpty() ? "" : "In use: " + renderer);
+        cardPending.setVisible(graphicsCard.getSelected() != GpuGraphicsCard.applied());
+    }
+
     private void applyGeometry() {
         // The sliders apply while the panel is still being built, before the transitions box exists.
         boolean steps = transitions != null ? transitions.isChecked() : BoardGeometry.DEFAULT_TRANSITIONS;
+        float padding = value(geometry, 6);
         BoardGeometry.tune(new BoardGeometry.Tuning(value(geometry, 0), value(geometry, 1), value(geometry, 2),
-              Math.round(value(geometry, 3)), value(geometry, 4), value(geometry, 5), steps));
+              Math.round(value(geometry, 3)), value(geometry, 4), value(geometry, 5), steps, padding));
+        // Padding replaces transitions while it is on.
+        if (transitions != null) { transitions.setDisabled(padding > 0); }
         updateReadings(geometry);
     }
 

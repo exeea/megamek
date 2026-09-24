@@ -46,9 +46,11 @@ class BoardRocksTest {
 
     @Test
     void libraryRocksAreClosedOutwardSolids() {
-        for (boolean block : List.of(true, false)) {
-            for (int variant = 0; variant < (block ? BoardRocks.BLOCKS : BoardRocks.BOULDERS); variant++) {
-                BoardRocks.Rock rock = BoardRocks.rock(block, variant);
+        // Blocks, boulders and the masses of shrubs.
+        for (int kind = 0; kind < 3; kind++) {
+            int count = kind == 0 ? BoardRocks.BLOCKS : kind == 1 ? BoardRocks.BOULDERS : BoardRocks.BUSHES;
+            for (int variant = 0; variant < count; variant++) {
+                BoardRocks.Rock rock = kind == 2 ? BoardRocks.bush(variant) : BoardRocks.rock(kind == 0, variant);
                 Map<List<Key>, Integer> edges = new HashMap<>();
                 double volume = 0;
                 int triangles = 0;
@@ -70,6 +72,7 @@ class BoardRocksTest {
                 }
                 assertTrue(volume > .02, "Faces wind outward and enclose a real volume");
                 assertTrue(triangles <= 120, "A rock keeps a small triangle budget");
+                assertTrue(kind != 2 || triangles <= 48, "A shrub's many masses each cost well under a boulder");
                 assertTrue(rock.height() > .2f && rock.height() < 1.2f);
             }
         }
@@ -90,6 +93,11 @@ class BoardRocksTest {
 
     @Test
     void deepRimsCarryMoreProminentFormationsThanShallowSteps() {
+        // Without hex transitions, whose slopes shed fewer rim formations.
+        BoardSculptTest.withTransitions(false, this::compareRims);
+    }
+
+    private void compareRims() {
         BoardScene scene = scene(BoardScene.Surface.SAND);
         float deep = 0, shallow = 0;
         int deepRocks = 0, shallowRocks = 0;

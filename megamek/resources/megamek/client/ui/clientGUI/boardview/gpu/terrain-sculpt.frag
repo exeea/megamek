@@ -11,8 +11,8 @@ varying vec3 v_normal;
 varying vec4 v_color;       // r: occlusion. g: game level (+64)/255, or for cliffs how much rock the face is (0
                             // bank, 1 cliff). b: kind (0 ground, .25 plant, .5 cliff, .75 tree pit, 1 rock). a: bed
                             // hardness (cliff), variation (rock, plant, a pit's earth below .5; its kerb is 1),
-                            // nearest step height (.3 + .1 per level, dry ground) or the water palette / 16 on a water
-                            // hex's shore and bed
+                            // nearest step height (.3 + .1 per level, dry ground), or below .25 on a water hex's banks
+                            // and bed its water's palette and that height packed (GpuTerrain.shoreTint)
 uniform sampler2D u_groundColor;
 uniform sampler2D u_groundNormal;
 uniform sampler2D u_debrisColor;
@@ -143,7 +143,7 @@ vec4 debrisWeights() {
 vec3 plantColor(float variation) {
     if (family(0.0)) return mix(vec3(.15, .25, .08), vec3(.27, .35, .12), variation);
     if (family(1.0)) return mix(vec3(.30, .33, .18), vec3(.44, .37, .24), variation);
-    if (family(2.0)) return mix(vec3(.46, .48, .34), vec3(.58, .50, .36), variation);
+    if (family(2.0)) return mix(vec3(.30, .36, .16), vec3(.46, .45, .25), variation);
     return mix(vec3(.26, .31, .20), vec3(.38, .37, .26), variation);
 }
 
@@ -164,6 +164,32 @@ vec3 bedTint(float hardness) {
     // The bedrock under a concrete slab: darker than the pale concrete it carries.
     if (family(4.0)) return mix(vec3(.62, .61, .59), vec3(.80, .78, .75), hardness);
     return mix(vec3(.90, .91, .93), vec3(1.06, 1.04, 1.01), hardness);
+}
+
+// Broad variations in the ground's tone, so a large field reads neither as one flat colour nor as tiles: patches, the
+// desert's iron-red thin sand, pale washes and flats and its dunes, a meadow's dry and lush turf. rim and foot weigh the
+// nearness of a drop and of a rise. The ground and the cover drifted onto slopes and ledges share it, so they match.
+vec3 groundTone(vec3 albedo, vec3 world, float broad, float fine, float region, float rim, float foot) {
+    albedo *= mix(.94, 1.06, broad) * mix(.95, 1.05, region) * mix(.96, 1.04, fine);
+    if (family(2.0)) {
+        // Desert ground: iron-red where the sand lies thin over its bedrock, paler washes where fines settle.
+        albedo = mix(albedo, albedo * vec3(1.04, .86, .76), smoothstep(.5, .75, broad * .7 + region * .3) * .7);
+        albedo = mix(albedo, albedo * vec3(1.06, 1.08, 1.1), smoothstep(.62, .85, fine * .5 + region * .5) * .5);
+        // Broad flats of fine, pale sand between the orange drifts: lighter and less saturated.
+        float luma = dot(albedo, vec3(.299, .587, .114));
+        albedo = mix(albedo, mix(vec3(luma), albedo, .55) * 1.12, smoothstep(.4, .7, region * .6 + broad * .4) * .6);
+        // Dunes: long, gentle swells of light and shade that run across the flats regardless of the hexes, bent and
+        // broken up by the broad fields.
+        float dune = sin(dot(world.xy, vec2(.8, .6)) / 19.0 + broad * 5.0 + region * 3.0);
+        albedo *= 1.0 + .07 * dune * smoothstep(.2, .6, region + .3 * fine);
+    }
+    if (family(0.0)) {
+        // Thin, dry turf on convex rims and in sunny patches; lush, dark grass where water gathers below cliffs.
+        float dry = max(smoothstep(.55, .85, broad * .7 + fine * .3) * .5, rim * .6);
+        albedo = mix(albedo, albedo * vec3(1.25, 1.12, .7), dry);
+        albedo = mix(albedo, albedo * vec3(.78, .95, .82), max(foot * .6, (1.0 - smoothstep(.2, .45, broad)) * .4));
+    }
+    return albedo;
 }
 
 // The surface length one pixel covers, in metres. Set once per fragment in main().
@@ -188,13 +214,18 @@ void main() {
     bool ground = kind < .125, plant = kind >= .125 && kind < .375, cliff = kind >= .375 && kind < .625;
     bool pit = kind >= .625 && kind < .875;
     bool shore = ground && v_color.a < .25;
+    // A water hex's ground packs its water's palette with the nearest step's height, which dry ground carries alone.
+    float tintByte = v_color.a * 255.0;
+    float palette = floor(tintByte / 16.0 + .03);
+    float steps = shore ? (tintByte - 16.0 * palette) / 2.0 : (v_color.a - .3) / .1;
     vec3 world = v_cloudPosition / u_metre;
     // The area a pixel covers, as a length: a tilted view's foreshortening alone does not remove the detail.
     float footprint = sqrt(length(dFdx(world.xy)) * length(dFdy(world.xy)));
     farDetail = .8 * smoothstep(.18, .6, footprint);
     pixelMetres = max(max(length(dFdx(world)), length(dFdy(world))), 1e-4);
-    // Depth below this water hex's surface, in metres (the surface lies at the hex's own level).
+    // Depth below this water hex's level, in metres, and height above its water, which lies u_waterLine lower.
     float depth = shore ? (level * u_levelHeight - v_cloudPosition.z) / u_metre : -1.0;
+    float above = shore ? u_waterLine / u_metre - depth : 99.0;
     vec2 p = vec2(world.x, -world.y);
     if (shore) {
         // The rippling surface bends the view of a submerged bed, so its detail sways with the swell above
@@ -214,6 +245,8 @@ void main() {
     vec3 normal = face;
     float cavity = 1.0;
     float caustic = 0.0;
+    // Levels of water over a submerged bed; none elsewhere.
+    float submerged = 0.0;
     // Cliffs grade continuously with height; the board's plinth stops darkening a little below ground.
     if (cliff) level = max(v_cloudPosition.z / u_levelHeight, -1.5);
     if (u_clay < .5) {
@@ -232,11 +265,12 @@ void main() {
             float patches = smoothstep(.56, .78, fine * .7 + broad * .3);
             // Mantled ground shows scree only beside rock cliffs; beside the earth banks of lower steps a meadow wears
             // through to its soil, and snow stays whole. The vertex tint carries the nearest step's height.
-            float rock = mantled() && !shore ? rockiness((v_color.a - .3) / .1) : 1.0;
+            float rock = mantled() ? rockiness(steps) : 1.0;
             float edges = max(rim * weights.x, foot * weights.y);
             float want = clamp(max(edges * rock, slope * weights.z) + patches * weights.w, 0.0, 1.0);
-            // A water hex's bed and banks are stony below the waterline, whatever grows on the land around.
-            if (shore) want = max(want, smoothstep(.05, .4, depth));
+            // A water hex's bed is stony from just above the waterline down, whatever grows on the land around; its
+            // dry bank stays the land's own ground.
+            if (shore) want = max(want, 1.0 - smoothstep(-.25, .05, above));
             float w = heightBlend(top.a, rubble.a, want);
             albedo = mix(top.rgb, rubble.rgb, w);
             // In patches only: most of a bank's lip keeps its turf.
@@ -248,20 +282,7 @@ void main() {
                 detail = mix(planarNormal(u_groundNormal, p, u_sculptTiles.x, broad),
                       planarNormal(u_debrisNormal, p, u_sculptTiles.y, fine), w);
             }
-            // Broad variation in tone keeps a large field from reading as one flat colour; meadows also dry out
-            // and grow lush in patches.
-            albedo *= mix(.94, 1.06, broad) * mix(.95, 1.05, region) * mix(.96, 1.04, fine);
-            if (family(2.0)) {
-                // Desert ground: iron-red where the sand lies thin over its bedrock, paler washes where fines settle.
-                albedo = mix(albedo, albedo * vec3(1.04, .86, .76), smoothstep(.5, .75, broad * .7 + region * .3) * .7);
-                albedo = mix(albedo, albedo * vec3(1.06, 1.08, 1.1), smoothstep(.62, .85, fine * .5 + region * .5) * .5);
-            }
-            if (family(0.0)) {
-                // Thin, dry turf on convex rims and in sunny patches; lush, dark grass where water gathers below cliffs.
-                float dry = max(smoothstep(.55, .85, broad * .7 + fine * .3) * .5, rim * .6);
-                albedo = mix(albedo, albedo * vec3(1.25, 1.12, .7), dry);
-                albedo = mix(albedo, albedo * vec3(.78, .95, .82), max(foot * .6, (1.0 - smoothstep(.2, .45, broad)) * .4));
-            }
+            albedo = groundTone(albedo, world, broad, fine, region, rim, foot);
         } else if (plant) {
             // Leafy mottling on each mass, browner and darker toward the root.
             float leaf = texture2D(u_rainNoise, world.xy / 7.0 + world.z * .13).r;
@@ -353,18 +374,24 @@ void main() {
                     albedo = mix(albedo, rubble.rgb, w);
                     if (u_normalMaps > .5) normal = normalize(mix(normal, rubbleNormal, w));
                 }
-                // Hex transitions lay steps of up to two levels back into slopes. Where a bank lies back far enough,
-                // the ground's own cover grows or drifts over it (turf, sand, snow, soil); its steepest parts stay bare.
-                float lie = smoothstep(.45, .75, face.z) * (1.0 - rock);
+                // Hex transitions and padding lay steps of up to two levels back into slopes. Only where a slope lies
+                // almost flat does the ground's own cover grow or drift over it (turf, sand, snow, soil); the face and
+                // its crest stay bare, so a step reads against the ground above and below it.
+                // At its foot a slope becomes the ground it meets: wholly covered, mapped from above, toned and
+                // relieved like that ground, so no seam shows there.
+                float toe = (1.0 - smoothstep(0.0, .8, h)) * (1.0 - rock);
+                float lie = max(smoothstep(.62, .9, face.z) * (1.0 - rock) * smoothstep(.4, 1.6, d), toe);
                 if (lie > 0.0) {
-                    float lying = smoothstep(.45, .8, face.z);
+                    float lying = max(smoothstep(.45, .8, face.z), toe);
                     vec2 dx = vec2(world.y * sign(face.x), -world.z), dy = vec2(-world.x * sign(face.y), -world.z) + 3.1;
                     vec4 cover = draped(u_groundColor, p, dx, dy, side, u_sculptTiles.x, broad, lying);
-                    float w = heightBlend(wall.a, cover.a, lie);
-                    albedo = mix(albedo, cover.rgb, w);
+                    float w = max(heightBlend(wall.a, cover.a, lie), toe);
+                    albedo = mix(albedo, groundTone(cover.rgb, world, broad, fine, region, 0.0, 0.0), w);
                     if (u_normalMaps > .5) {
                         normal = normalize(mix(normal, drapedNormal(u_groundNormal, p, dx, dy, face, side,
                               u_sculptTiles.x, broad, lying), w));
+                        float relief = planarNormal(u_groundNormal, p, u_sculptTiles.x, broad).a;
+                        cavity = mix(cavity, relief * .6 + .4, w * lying);
                     }
                 }
                 if (family(4.0)) {
@@ -396,7 +423,7 @@ void main() {
             if (ledge > 0.0 && !family(4.0)) {
                 vec4 top = planar(u_groundColor, p, u_sculptTiles.x, broad);
                 float w = heightBlend(wall.a, top.a, ledge);
-                albedo = mix(albedo, top.rgb, w);
+                albedo = mix(albedo, groundTone(top.rgb, world, broad, fine, region, 0.0, 0.0), w);
                 if (u_normalMaps > .5) {
                     normal = normalize(mix(normal, upNormal(planarNormal(u_groundNormal, p, u_sculptTiles.x, broad).rgb, face), w));
                 }
@@ -426,12 +453,13 @@ void main() {
         }
         albedo = levelGrade(albedo, level);
         if (shore) {
-            // Wet at the waterline; beneath it the bed keeps the hue its column of water passes and catches caustics
-            // (water-optics.glsl), while the surface above removes the brightness the column absorbs.
-            albedo *= mix(1.0, .72, 1.0 - smoothstep(-.05, .4, depth));
-            float levels = max(0.0, depth * u_metre - u_waterLine) / u_levelHeight;
-            albedo *= waterBedTint(floor(v_color.a * 16.0 + .5), levels);
-            caustic = waterBedCaustics(v_cloudPosition.xy * u_rainScale, levels) * u_rainDetail * u_waterEffects;
+            // Wet in a band just above the waterline and below it; beneath it the bed keeps the hue its column of
+            // water passes and catches caustics (water-optics.glsl), while the surface above removes the brightness
+            // the column absorbs.
+            albedo *= mix(1.0, .75, 1.0 - smoothstep(0.0, .12, above));
+            submerged = max(0.0, depth * u_metre - u_waterLine) / u_levelHeight;
+            albedo *= waterBedTint(palette, submerged);
+            caustic = waterBedCaustics(v_cloudPosition.xy * u_rainScale, submerged) * u_rainDetail * u_waterEffects;
         }
     }
     // 1 above the water, 0 on a submerged bed: the water surface draws the grid and takes the rain for it.
@@ -469,8 +497,17 @@ void main() {
     }
 #endif
     // Cloud shadows attenuate direct light and sheen here (inserted by GpuCloudShadow).
+    vec3 pigment = albedo;
     albedo *= ambient + direct;
     albedo += sheen;
+    if (submerged > 0.0) {
+#if numDirectionalLights > 0
+        vec3 scattered = skyLight(vec3(0.0, 0.0, 1.0)) * occlusion + sunColor * max(0.0, light.z) * (1.0 + caustic);
+#else
+        vec3 scattered = skyLight(vec3(0.0, 0.0, 1.0)) * occlusion;
+#endif
+        albedo = submergedLight(albedo, pigment, scattered, submerged);
+    }
     albedo = shoulder(albedo);
 #endif
     vec3 result = toDisplay(albedo);

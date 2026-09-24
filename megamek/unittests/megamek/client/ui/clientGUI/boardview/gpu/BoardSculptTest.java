@@ -13,6 +13,7 @@ import java.util.Map;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.board.Coords;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -55,6 +56,18 @@ class BoardSculptTest {
         BoardGeometry.Tuning previous = BoardGeometry.tuning();
         BoardGeometry.tune(new BoardGeometry.Tuning(previous.hexScale(), previous.unitScale(), previous.unitHeightScale(),
               previous.levelHeight(), previous.gridShade(), previous.multiHexUnitScale(), transitions));
+        try {
+            check.run();
+        } finally {
+            BoardGeometry.tune(previous);
+        }
+    }
+
+    /** Runs a check with the tiles padded this many metres apart, restoring the tuning afterwards. */
+    static void withPadding(float padding, Runnable check) {
+        BoardGeometry.Tuning previous = BoardGeometry.tuning();
+        BoardGeometry.tune(new BoardGeometry.Tuning(previous.hexScale(), previous.unitScale(), previous.unitHeightScale(),
+              previous.levelHeight(), previous.gridShade(), previous.multiHexUnitScale(), false, padding));
         try {
             check.run();
         } finally {
@@ -243,9 +256,9 @@ class BoardSculptTest {
     private static void wallsStayBetweenTheirLevelsAndFaceOutwardChecks() {
         BoardScene scene = scene(DRY, BoardScene.Surface.ROCK);
         float floor = BoardGeometry.floor(scene);
-        // A transition bends a wall toward the corner of a middle hex where three levels meet, so it may turn further
-        // from its owner's centre there.
-        float limit = BoardGeometry.tuning().transitions() ? -.65f : -.35f;
+        // A transition or padding bends a wall toward the corner of a middle hex where three levels meet, so it may
+        // turn further from its owner's centre there.
+        float limit = BoardGeometry.tuning().stepsBetweenTops() ? -.65f : -.35f;
         for (BoardScene.Tile tile : scene.tiles()) {
             BoardSurface surface = new BoardSurface(scene, tile);
             Vector3 center = BoardGeometry.center(tile.coords(), tile.elevation());
@@ -294,5 +307,15 @@ class BoardSculptTest {
             }
         }
         assertTrue(picked > 0);
+    }
+
+    @Test
+    void paddedTilesStayWatertightLevelBoundedAndPickable() {
+        withPadding(BoardGeometry.MAX_PADDING, () -> {
+            sculptedTerrainIsWatertightAcrossHexesCornersAndJunctionsChecks();
+            topsKeepGameLevelsAtAnchorsAndStayWithinBoundsChecks();
+            wallsStayBetweenTheirLevelsAndFaceOutwardChecks();
+            rayPickingResolvesLogicalHexesOnTopsAndCliffsChecks();
+        });
     }
 }

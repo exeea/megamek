@@ -80,6 +80,15 @@ class GpuBoardTuningSmokeTest {
                 assertEquals(family.heightScale(), family.HEIGHT_SCALE, "Uniform size does not change height proportions");
             }
             capture(stage, "tuning-general.png");
+            SelectBox<GpuGraphicsCard> card = tuning.panel().findActor("tuning-graphics-card");
+            assertEquals(GpuGraphicsCard.cards().isEmpty(), card == null, "A card choice needs two cards to pick");
+            if (card != null) {
+                card.showList();
+                stage.act(0.3f);
+                capture(stage, "tuning-graphics-card.png");
+                card.hideList();
+                stage.act(0.3f);
+            }
             GpuBoardTestUi.click("tuning-defaults");
             for (var family : UnitFamilyScale.values()) { assertEquals(1, family.UNIT_SCALE); }
             ScrollPane generalScroll = tuning.panel().findActor("tuning-general-scroll");

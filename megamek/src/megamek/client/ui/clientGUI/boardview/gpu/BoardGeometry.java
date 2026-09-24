@@ -12,14 +12,22 @@ final class BoardGeometry {
     /** Independent default for a whole unit occupying more than one game hex. */
     static final float DEFAULT_MULTI_HEX_UNIT_SCALE = 0.85f;
     /** Whether steps between hexes take room on both sides of their edge; see {@link Tuning#transitions()}. */
-    static final boolean DEFAULT_TRANSITIONS = false;
+    static final boolean DEFAULT_TRANSITIONS = true;
+    /** Metres of gap between neighbouring hex tiles; 0 keeps them joined. See {@link Tuning#padding()}. */
+    static final float DEFAULT_PADDING = 0;
+    /** Beyond this the room of a step eats so far into its hexes that their tops fold (measured with FoldProbe). */
+    static final float MAX_PADDING = 8;
 
     /**
      * Board presentation settings. {@code transitions}: each step between hexes of different levels takes room on
      * both sides of the shared edge, a slope up to two levels and a deep cliff from three (see {@link BoardRelief}).
+     * {@code padding}: metres of gap the board opens between neighbouring hexes. The lattice spreads apart while every
+     * hex keeps its own size; where levels match the ground runs on through the gap, and where they differ the gap holds
+     * the step, a slope up to two levels and a cliff above its talus from three. Padding and transitions both lay steps
+     * out in the room beside an edge, so padding turns transitions off.
      */
     record Tuning(float hexScale, float unitScale, float unitHeightScale, int levelHeight, float gridShade,
-          float multiHexUnitScale, boolean transitions) {
+          float multiHexUnitScale, boolean transitions, float padding) {
         Tuning(float hexScale, float unitScale, float unitHeightScale, int levelHeight, float gridShade) {
             this(hexScale, unitScale, unitHeightScale, levelHeight, gridShade, DEFAULT_MULTI_HEX_UNIT_SCALE);
         }
@@ -29,13 +37,29 @@ final class BoardGeometry {
             this(hexScale, unitScale, unitHeightScale, levelHeight, gridShade, multiHexUnitScale, DEFAULT_TRANSITIONS);
         }
 
+        Tuning(float hexScale, float unitScale, float unitHeightScale, int levelHeight, float gridShade,
+              float multiHexUnitScale, boolean transitions) {
+            this(hexScale, unitScale, unitHeightScale, levelHeight, gridShade, multiHexUnitScale, transitions,
+                  DEFAULT_PADDING);
+        }
+
         Tuning {
             if (!Float.isFinite(hexScale) || hexScale <= 0 || !Float.isFinite(unitScale) || unitScale <= 0
                   || !Float.isFinite(unitHeightScale) || unitHeightScale <= 0 || levelHeight < 1
                   || !Float.isFinite(gridShade) || gridShade < 0 || gridShade > 1
-                  || !Float.isFinite(multiHexUnitScale) || multiHexUnitScale <= 0) {
+                  || !Float.isFinite(multiHexUnitScale) || multiHexUnitScale <= 0
+                  || !Float.isFinite(padding) || padding < 0 || padding > MAX_PADDING) {
                 throw new IllegalArgumentException("Invalid board dimensions");
             }
+            transitions &= padding == 0;
+        }
+
+        /**
+         * Whether a step's face can lie back into the room beside its edge, so the ground at a point may be that face
+         * rather than a hex's top: with hex transitions or padding.
+         */
+        boolean stepsBetweenTops() {
+            return transitions || padding > 0;
         }
     }
 
@@ -196,8 +220,8 @@ final class BoardGeometry {
     }
 
     /**
-     * The lower neighbour for a hit on the talus inside its footprint; otherwise the cliff's owner. With transitions a
-     * step's lower half lies in the lower hex's footprint, and a hit there belongs to it.
+     * The lower neighbour for a hit on the talus inside its footprint; otherwise the cliff's owner. With transitions or
+     * padding a step's lower half lies in the lower hex's footprint, and a hit there belongs to it.
      */
     private static Coords foot(BoardScene scene, Coords owner, Vector3 hit) {
         if (contains(owner, hit.x, hit.y)) { return owner; }
@@ -206,7 +230,7 @@ final class BoardGeometry {
             BoardScene.Tile neighbor = scene.tile(owner.translated(direction));
             if (neighbor == null || !contains(neighbor.coords(), hit.x, hit.y)) { continue; }
             float talus = LEVEL * .3f;
-            if (tuning.transitions() && high != null) {
+            if (tuning.stepsBetweenTops() && high != null) {
                 talus = Math.max(talus, (high.elevation() * LEVEL - surfaceZ(neighbor)) * .5f);
             }
             if (hit.z < surfaceZ(neighbor) + talus) { return neighbor.coords(); }

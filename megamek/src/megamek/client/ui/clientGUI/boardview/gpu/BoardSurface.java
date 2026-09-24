@@ -96,8 +96,18 @@ final class BoardSurface {
         return result;
     }
 
-    private static final int SHORE_SEGMENTS = 6;
-    /** A fall's lip: the water stops this far short of the mouth so the sheet can curve down to the shared edge. */
+    /**
+     * Whether a river that runs out at the board's edge pours off it as a fall. Otherwise it runs on into the edge and
+     * is cut off there with the board, like a slice of cake, as all other water at the board's edge is.
+     */
+    static final boolean FALLS_OFF_THE_BOARD = false;
+    /** Levels a fall off the board's edge drops through as it fades out: nothing lies below the board to catch it. */
+    private static final float BOTTOMLESS_LEVELS = 3;
+    /** Waterline points per edge; crests, the walls beneath them and the sheets poured over them share them. */
+    static final int SHORE_SEGMENTS = 12;
+    /** How far a fall's lip juts out unevenly over the pool below, at most, in hex-scale units. */
+    private static final float LIP_JUT = 3.5f;
+    /** A fall's lip: the water stops this far short of its crest so the sheet can curve down over it. */
     private static final float FALL_LIP_WIDTH = .045f;
     private static final float FALL_LIP_DROP = .5f;
     /** Share of each ray from the waterline to the hex centre over which a bed descends; the rest is its plateau. */
@@ -107,9 +117,15 @@ final class BoardSurface {
      * beneath the fall closes up to just under the sheet. No pool is shallower, so both sides of a corner agree.
      */
     private static final float LIP_DEPTH = 1;
+    /**
+     * How far out over the pool below the crest bows where the falls of two neighbouring pools meet around it, along
+     * the edge the pools share, in hex-scale units: the crest rounds the corner instead of folding into a V. Far enough
+     * that the crests beside it never pass inside their hexes; no crest reaches further out.
+     */
+    static final float VALLEY = 7;
     /** DRESSING is thin detail on the ground, such as tree pits: drawn and picked, never raising what stands there. */
     enum Finish { TOP, RIM, CAP, WALL, OUTCROP, SHORE, BED, BANK, ICE, DRESSING }
-    /** landEdge identifies the adjoining dry hex for bank artwork; other faces use -1. */
+    /** landEdge is the edge a bank or wall face stands on (bank artwork takes the hex across it); else -1. */
     record Face(Vector3 a, Vector3 b, Vector3 c, Finish finish, int landEdge) {
         Face(Vector3 a, Vector3 b, Vector3 c, Finish finish) {
             this(a, b, c, finish, -1);
@@ -145,15 +161,72 @@ final class BoardSurface {
     }
     record Side(Vector3 a, Vector3 b, float lowA, float lowB, int edge) { }
 
+    /**
+     * The crest a fall pours over, at the pool's surface: a smooth curve across its mouth from {@code a} to {@code b}.
+     * A free end meets its bank on the edge and leaves along it. Where the next fall carries on, both crests pass one
+     * point with one tangent (see {@link #join}): the hex's own corner at a prow, and {@link #VALLEY} out over the pool
+     * below where two pools' falls meet around it. A fall that runs on over several edges so curves round them without
+     * a corner, and the curve never passes inside its hex: it only ever bows out over the pool it falls into, whose hex
+     * it stays in. {@code corner} and {@code outward} are the edge's start and outward normal; {@code jut} how far a
+     * free-standing fall's lip may jut out unevenly over the pool below, in world units.
+     */
+    record Crest(Vector3 a, Vector3 b, Vector3 startTangent, Vector3 endTangent, Vector3 corner, Vector3 outward,
+          float jut) {
+        /** The point at {@code s}, from 0 at {@code a} to 1 at {@code b}. */
+        Vector3 point(float s) {
+            if (s <= 0) { return new Vector3(a); }
+            if (s >= 1) { return new Vector3(b); }
+            float chord = chord(), s2 = s * s, s3 = s2 * s;
+            Vector3 p = new Vector3(a).scl(2 * s3 - 3 * s2 + 1).mulAdd(startTangent, chord * (s3 - 2 * s2 + s))
+                  .mulAdd(b, 3 * s2 - 2 * s3).mulAdd(endTangent, chord * (s3 - s2));
+            p.z = a.z;
+            if (jut > 0) {
+                // The lip juts out unevenly over the pool below, as ledges break away from a real one; its ends, on
+                // the banks, stay put.
+                float m = BoardRelief.metres(1);
+                float broken = .6f * BoardRelief.gradient(p.x / (3 * m) + 7.1f, p.y / (3 * m) - 2.3f)
+                      + .4f * BoardRelief.gradient(p.x / (1.2f * m) - 4.4f, p.y / (1.2f * m) + 1.9f);
+                p.mulAdd(normal(s), jut * Math.clamp(.5f + .6f * broken, 0, 1) * 16 * s2 * (1 - s) * (1 - s));
+            }
+            float inside = new Vector3(corner.x - p.x, corner.y - p.y, 0).dot(outward);
+            return inside > 0 ? p.mulAdd(outward, inside) : p;
+        }
+
+        /** The unit direction of the crest at {@code s}, from {@code a} toward {@code b}. */
+        Vector3 tangent(float s) {
+            if (s <= 0) { return new Vector3(startTangent); }
+            if (s >= 1) { return new Vector3(endTangent); }
+            float chord = chord(), s2 = s * s;
+            Vector3 t = new Vector3(a).scl(6 * s2 - 6 * s).mulAdd(startTangent, chord * (3 * s2 - 4 * s + 1))
+                  .mulAdd(b, 6 * s - 6 * s2).mulAdd(endTangent, chord * (3 * s2 - 2 * s));
+            t.z = 0;
+            return t.nor();
+        }
+
+        /** The unit normal of the crest at {@code s}, level and away from the pool: the way the water falls. */
+        Vector3 normal(float s) {
+            Vector3 t = tangent(s);
+            return new Vector3(t.y, -t.x, 0);
+        }
+
+        private float chord() {
+            return (float) Math.hypot(b.x - a.x, b.y - a.y);
+        }
+    }
+
     final BoardScene.Tile tile;
     final List<Face> faces = new ArrayList<>();
     final List<Vector3> water = new ArrayList<>();
     /**
-     * The water's full outline, before a falling mouth pulls its surface back from the edge. Segments on open mouths
-     * continue into the next pool; every other segment is a bank.
+     * The water's full outline within its hex, before a falling mouth pulls its surface back to the crest. Segments on
+     * open mouths continue into the next pool; every other segment is a bank.
      */
     final List<Vector3> outline = new ArrayList<>();
     final List<Face> waterFaces = new ArrayList<>();
+    /** The water's cut face where the board's edge cuts it off, facing out; drawn like its surface. */
+    final List<Face> cutFaces = new ArrayList<>();
+    /** Edges a fall pours over off the board's edge, as a bit mask; see {@link #bottomless}. */
+    private int offBoard;
     final List<Side> waterfalls = new ArrayList<>();
     final int ramps;
     final BoardRelief relief;
@@ -168,11 +241,21 @@ final class BoardSurface {
     /** The faces of a sculpted bed that stay clear of the hex outline, as a range of {@link #faces}. */
     private int interiorFrom, interiorTo;
     /**
-     * Per falling edge, the miter its sheet turns on at its first and last corner where another fall of the same drop
-     * carries on, from this pool or from the neighbouring one; null where the end is free.
+     * Per falling edge, the crest's normal at its first and last corner where another fall of the same drop carries
+     * on, from this pool or from the neighbouring one; null where the end is free. See {@link #join}.
      */
     private final Vector3[] joinA = new Vector3[6];
     private final Vector3[] joinB = new Vector3[6];
+    /** Per falling edge, the crest its water pours over; null elsewhere. */
+    private final Crest[] crests = new Crest[6];
+    /**
+     * The bed's outer ring, along the waterline and out along the crests: the top of the walls that stand under falls.
+     */
+    private Vector3[] bedOutline;
+    /** A water hex's waterline, frozen or not, which its sculpted banks run down to; null on land. */
+    private Vector3[] waterline;
+    /** The waterline with each falling mouth moved out to its crest; null on land. */
+    private Vector3[] crestLine;
     private final Vector3 center;
     private final Vector3[] corners = new Vector3[6];
 
@@ -199,7 +282,11 @@ final class BoardSurface {
             if (i < interiorFrom || i >= interiorTo) { edgeTopography.add(faces.get(i)); }
         }
         relief = new BoardRelief(scene, tile, ramps);
-        if (detailed) { relief.top(faces); }
+        if (detailed) {
+            int falls = 0;
+            for (int edge = 0; edge < 6; edge++) { falls |= crests[edge] == null ? 0 : 1 << edge; }
+            relief.top(faces, waterline, openMouths, crestLine, falls);
+        }
     }
 
     /** A bridge approach reaches the deck at the edge; ordinary roads share their height change across both hexes. */
@@ -252,24 +339,58 @@ final class BoardSurface {
     private void river(BoardScene scene) {
         float[] shore = new float[6];
         float[] lip = new float[6];
+        // Levels the land beside each bank rises above this hex; none at a mouth or the board's edge.
+        float[] rise = new float[6];
+        // Mouths a fall pours in over: the pool below opens wide and deep round its foot.
+        boolean[] plunge = new boolean[6];
+        // Water runs on into the board's edge: a river that runs out there pours off it, ahead of where it comes from;
+        // other water is cut off with the board.
+        int source = FALLS_OFF_THE_BOARD && !tile.frozen() ? riverEnd(scene) : -1;
         List<Integer> mouths = new ArrayList<>();
         for (int edge = 0; edge < 6; edge++) {
             BoardScene.Tile neighbor = scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(edge)));
-            shore[edge] = neighbor == null || !tile.liquid().connects(neighbor.liquid()) ? 8 * BoardGeometry.HEX_SCALE : 0;
+            boolean bank = neighbor != null && !tile.liquid().connects(neighbor.liquid());
+            shore[edge] = bank ? 8 * BoardGeometry.HEX_SCALE : 0;
+            rise[edge] = shore[edge] > 0 ? neighbor.elevation() - tile.elevation() : 0;
             if (shore[edge] == 0) {
                 openMouths |= 1 << edge;
                 mouths.add(edge);
                 // A fall owns the last stretch of its mouth: the water stops short so the sheet can curve down.
-                if (!tile.frozen() && !neighbor.frozen() && tile.elevation() > neighbor.elevation()) {
+                if (neighbor == null) {
+                    if (source >= 0 && Math.abs(Math.floorMod(edge - source, 6) - 3) <= 1) {
+                        offBoard |= 1 << edge;
+                        lip[edge] = fallLip(BoardGeometry.waterZ(tile),
+                              BoardGeometry.waterZ(tile) - BOTTOMLESS_LEVELS * BoardGeometry.LEVEL);
+                    }
+                } else if (!tile.frozen() && !neighbor.frozen() && tile.elevation() > neighbor.elevation()) {
                     lip[edge] = fallLip(BoardGeometry.waterZ(tile), BoardGeometry.waterZ(neighbor));
                 }
+                plunge[edge] = neighbor != null && !tile.frozen() && !neighbor.frozen()
+                      && neighbor.elevation() > tile.elevation();
             }
         }
         boolean channel = mouths.size() == 2 && mouths.getLast() - mouths.getFirst() >= 2
               && mouths.getLast() - mouths.getFirst() <= 4;
         List<Integer> channelMouths = channel ? mouths : List.of();
-        Vector3[] waterline = curvedContour(shore, BoardGeometry.waterZ(tile), channelMouths);
-        basin(scene, waterline, shore);
+        waterline = curvedContour(shore, rise, plunge, BoardGeometry.waterZ(tile), channelMouths);
+        for (int edge = 0; edge < 6; edge++) {
+            if (lip[edge] > 0) {
+                joinA[edge] = join(scene, shore, lip, edge, (edge + 5) % 6);
+                joinB[edge] = join(scene, shore, lip, edge, (edge + 1) % 6);
+            }
+        }
+        // The pool reaches out to the crests its falls pour over, which curve round the corners the falls share.
+        crestLine = waterline.clone();
+        for (int edge = 0; edge < 6; edge++) {
+            if (lip[edge] > 0) {
+                crests[edge] = crest(waterline, lip, edge);
+                for (int i = 0; i <= SHORE_SEGMENTS; i++) {
+                    crestLine[(edge * SHORE_SEGMENTS + i) % crestLine.length] =
+                          crests[edge].point(i / (float) SHORE_SEGMENTS);
+                }
+            }
+        }
+        basin(scene, waterline, crestLine, shore, rise, plunge);
         for (int edge = 0; edge < 6; edge++) {
             if (shore[edge] == 0) {
                 continue; // An open river mouth has no bank or wall across it.
@@ -288,40 +409,102 @@ final class BoardSurface {
         if (tile.frozen()) {
             fan(corners, center.z, Finish.ICE);
         } else {
-            for (int edge = 0; edge < 6; edge++) {
-                if (lip[edge] > 0) {
-                    joinA[edge] = join(scene, shore, lip, edge, (edge + 5) % 6);
-                    joinB[edge] = join(scene, shore, lip, edge, (edge + 1) % 6);
-                }
-            }
-            // The water recedes from a falling mouth; the sheet's lip curves back down to the shared edge.
-            Vector3[] surface = pulledBack(waterline, lip);
+            // The water recedes from each crest; the sheet's lip curves back down over it.
+            Vector3[] surface = pulledBack(crestLine, lip);
             outline.addAll(List.of(waterline));
             water.addAll(List.of(surface));
             polygon(surface, Finish.TOP, waterFaces);
             for (int edge = 0; edge < 6; edge++) {
-                if (lip[edge] <= 0) {
-                    continue;
+                BoardScene.Tile other = neighbor(scene, edge);
+                if (crests[edge] != null) {
+                    // Off the board's edge a fall drops into nothing and fades out on its way down.
+                    float bottom = other == null ? BoardGeometry.waterZ(tile) - BOTTOMLESS_LEVELS * BoardGeometry.LEVEL
+                          : BoardGeometry.waterZ(other);
+                    waterfalls.add(new Side(new Vector3(crests[edge].a()), new Vector3(crests[edge].b()), bottom,
+                          bottom, edge));
+                } else if (other == null) {
+                    cut(edge);
                 }
-                float bottom = BoardGeometry.waterZ(scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(edge))));
-                waterfalls.add(new Side(waterline[edge * SHORE_SEGMENTS],
-                      waterline[((edge + 1) % 6) * SHORE_SEGMENTS], bottom, bottom, edge));
             }
         }
     }
 
     /**
+     * Where this water hex is where a river runs out at the board's edge, the edge its water comes from: on the board's
+     * edge, with water joining it from a single neighbour at its level or above. -1 elsewhere.
+     */
+    private int riverEnd(BoardScene scene) {
+        int joined = 0, source = -1;
+        boolean edge = false, above = true;
+        for (int direction = 0; direction < 6; direction++) {
+            BoardScene.Tile other = neighbor(scene, direction);
+            edge |= other == null;
+            if (other != null && tile.liquid().connects(other.liquid())) {
+                joined++;
+                source = direction;
+                above &= other.elevation() >= tile.elevation() && !other.frozen();
+            }
+        }
+        return edge && joined == 1 && above ? source : -1;
+    }
+
+    /** The water's cut face along an edge that the board's edge cuts through: from its bed up to its surface. */
+    private void cut(int edge) {
+        float surface = BoardGeometry.waterZ(tile);
+        for (int i = 0; i < SHORE_SEGMENTS; i++) {
+            Vector3 a = bedOutline[edge * SHORE_SEGMENTS + i];
+            Vector3 b = bedOutline[(edge * SHORE_SEGMENTS + i + 1) % bedOutline.length];
+            if (Math.min(a.z, b.z) >= surface - .001f * BoardGeometry.HEX_SCALE) { continue; }
+            Vector3 topA = new Vector3(a.x, a.y, surface), topB = new Vector3(b.x, b.y, surface);
+            cutFaces.add(new Face(new Vector3(a), new Vector3(b), topB, Finish.TOP, edge));
+            if (a.z < surface - .001f * BoardGeometry.HEX_SCALE) {
+                cutFaces.add(new Face(new Vector3(a), topB, topA, Finish.TOP, edge));
+            }
+        }
+    }
+
+    /** The crest of the fall over {@code edge}, from where its mouth's water starts to where it stops. */
+    private Crest crest(Vector3[] waterline, float[] lip, int edge) {
+        int previous = (edge + 5) % 6, next = (edge + 1) % 6;
+        Vector3 along = new Vector3(corners[next]).sub(corners[edge]).nor();
+        Vector3 a = new Vector3(waterline[edge * SHORE_SEGMENTS]), b = new Vector3(waterline[next * SHORE_SEGMENTS]);
+        Vector3 startTangent = new Vector3(along), endTangent = new Vector3(along);
+        if (joinA[edge] != null) { turn(a, startTangent, corners[edge], joinA[edge], lip[previous] > 0); }
+        if (joinB[edge] != null) { turn(b, endTangent, corners[next], joinB[edge], lip[next] > 0); }
+        a.z = b.z = waterline[0].z;
+        // Only a fall standing free between two banks breaks unevenly; falls that run on round a corner stay smooth.
+        float jut = joinA[edge] == null && joinB[edge] == null ? LIP_JUT * BoardGeometry.HEX_SCALE : 0;
+        return new Crest(a, b, startTangent, endTangent, new Vector3(corners[edge]), edgeOutward(edge), jut);
+    }
+
+    /**
+     * Where a crest turns a corner into the next fall, given its normal there: at the corner itself on a prow and out
+     * over the pool below in a valley, running square to the normal.
+     */
+    private static void turn(Vector3 point, Vector3 tangent, Vector3 corner, Vector3 normal, boolean prow) {
+        point.set(corner).mulAdd(normal, prow ? 0 : VALLEY * BoardGeometry.HEX_SCALE);
+        tangent.set(-normal.y, normal.x, 0);
+    }
+
+    /**
      * The bed as one sculpted basin. It descends from the waterline, or from an open mouth's profile, along rays toward
      * the hex centre, where a plateau keeps the unit anchor at the game depth. Mouth profiles and corners are pure
-     * functions of the hexes sharing them, so neighbouring beds meet without a step; a basin whose rim already lies at
-     * its own depth all round, as inside a lake, stays a flat fan.
+     * functions of the hexes sharing them, so neighbouring beds meet without a step. Under each bank the bed drops as
+     * the land beside it and the water's depth suggest: steeply under higher ground and in deep water, gently off land
+     * at the water's own level, where shallows reach out. Between rim and plateau it undulates into bars and pools.
+     * {@code outer} is the waterline with each falling mouth moved out to its crest, which the ledge beneath the fall
+     * reaches; rise, per edge, the levels the land beside a bank rises above this hex; plunge, the mouths a fall pours
+     * in over, where the water scours a deeper pool.
      */
-    private void basin(BoardScene scene, Vector3[] waterline, float[] shore) {
+    private void basin(BoardScene scene, Vector3[] waterline, Vector3[] outer, float[] shore, float[] rise,
+          boolean[] plunge) {
         int count = waterline.length;
         float surface = BoardGeometry.waterZ(tile), full = depth(tile), ledge = LIP_DEPTH * BoardGeometry.HEX_SCALE;
         boolean[] spills = new boolean[6];
         for (int edge = 0; edge < 6; edge++) {
-            spills[edge] = shore[edge] == 0 && neighbor(scene, edge).elevation() < tile.elevation();
+            BoardScene.Tile other = neighbor(scene, edge);
+            spills[edge] = shore[edge] == 0
+                  && (other == null ? crests[edge] != null : other.elevation() < tile.elevation());
         }
         // Depth at each edge's first point: none where a bank meets it, the ledge beside a fall, else the depth shared
         // by the corner's hexes.
@@ -331,8 +514,13 @@ final class BoardSurface {
             ends[edge] = shore[edge] > 0 || shore[previous] > 0 ? 0
                   : spills[edge] || spills[previous] ? ledge : cornerDepth(scene, edge);
         }
+        float[] steep = new float[6], scour = new float[6];
+        for (int edge = 0; edge < 6; edge++) {
+            scour[edge] = plunge[edge] ? 1 : 0;
+            float land = shore[edge] == 0 ? 0 : rise[edge] > 0 ? .4f + .3f * rise[edge] : rise[edge] == 0 ? -.6f : 0;
+            steep[edge] = Math.clamp(land + .25f * (tile.waterDepth() - 1), -.7f, 1);
+        }
         float[] rim = new float[count];
-        boolean level = true;
         for (int i = 0; i < count; i++) {
             int edge = i / SHORE_SEGMENTS;
             if (i % SHORE_SEGMENTS == 0) {
@@ -342,28 +530,34 @@ final class BoardSurface {
                 // bed keeps its own depth.
                 BoardScene.Tile other = neighbor(scene, edge);
                 float middle = spills[edge] ? ledge
-                      : other.elevation() == tile.elevation() ? (full + depth(other)) / 2 : full;
+                      : other != null && other.elevation() == tile.elevation() ? (full + depth(other)) / 2 : full;
                 int next = (edge + 1) % 6;
                 rim[i] = mouthDepth(waterline[i], waterline[edge * SHORE_SEGMENTS], ends[edge],
                       waterline[next * SHORE_SEGMENTS], ends[next], middle);
             }
-            level &= Math.abs(rim[i] - full) < .001f * BoardGeometry.HEX_SCALE;
         }
         Vector3[] ring = new Vector3[count];
         for (int i = 0; i < count; i++) {
-            ring[i] = new Vector3(waterline[i].x, waterline[i].y, surface - rim[i]);
+            ring[i] = new Vector3(outer[i].x, outer[i].y, surface - rim[i]);
         }
+        bedOutline = ring;
         int hexes = scene.width() * scene.height();
-        int rings = level ? 0 : hexes <= BoardRelief.FULL_DETAIL_HEXES ? 4
-              : hexes <= BoardRelief.MEDIUM_DETAIL_HEXES ? 3 : 2;
+        int rings = hexes <= BoardRelief.FULL_DETAIL_HEXES ? 4 : hexes <= BoardRelief.MEDIUM_DETAIL_HEXES ? 3 : 2;
         for (int k = 1; k <= rings; k++) {
             float x = k / (float) rings, scale = 1 - PLATEAU * x;
             // Falling from the rim with some slope, steepest halfway, and easing into the plateau.
             float descent = .25f * x + .75f * x * x * (3 - 2 * x);
             Vector3[] inner = new Vector3[count];
             for (int i = 0; i < count; i++) {
-                inner[i] = new Vector3(center.x + (waterline[i].x - center.x) * scale,
-                      center.y + (waterline[i].y - center.y) * scale, surface - rim[i] - (full - rim[i]) * descent);
+                // Each ray drops as the banks beside it do.
+                float s = alongBanks(steep, i);
+                float d = s >= 0 ? 1 - (float) Math.pow(1 - descent, 1 + 2 * s)
+                      : (float) Math.pow(descent, 1 - 1.5f * s);
+                float px = center.x + (outer[i].x - center.x) * scale, py = center.y + (outer[i].y - center.y) * scale;
+                // Bars and pools between the rim and the plateau, which stays at the game depth.
+                float bed = (rim[i] + (full - rim[i]) * d)
+                      * (1 + (.25f * meander(px, py, 5.1f) + .45f * alongBanks(scour, i)) * 4 * x * (1 - x));
+                inner[i] = new Vector3(px, py, surface - bed);
             }
             for (int i = 0; i < count; i++) {
                 int j = (i + 1) % count;
@@ -376,7 +570,22 @@ final class BoardSurface {
         for (int i = 0; i < count; i++) {
             triangle(anchor, ring[i], ring[(i + 1) % count], Finish.BED);
         }
-        if (rings > 0) { interiorTo = faces.size(); }
+        interiorTo = faces.size();
+    }
+
+    /** A value given per edge at waterline point {@code index}, blended over each corner so no crease shows there. */
+    private static float alongBanks(float[] perEdge, int index) {
+        int edge = index / SHORE_SEGMENTS;
+        float f = index % SHORE_SEGMENTS / (float) SHORE_SEGMENTS, own = perEdge[edge];
+        return f < .5f ? BoardRelief.lerp((perEdge[(edge + 5) % 6] + own) / 2, own, 2 * f)
+              : BoardRelief.lerp(own, (own + perEdge[(edge + 1) % 6]) / 2, 2 * f - 1);
+    }
+
+    /** Smooth world noise, roughly in [-1, 1], for banks and beds: swells of about 12 m with 4 m detail. */
+    private static float meander(float x, float y, float seed) {
+        float m = BoardRelief.metres(1);
+        return .7f * BoardRelief.gradient(x / (12 * m) + seed, y / (12 * m) - seed)
+              + .3f * BoardRelief.gradient(x / (4 * m) - seed, y / (4 * m) + seed);
     }
 
     private BoardScene.Tile neighbor(BoardScene scene, int edge) {
@@ -421,30 +630,28 @@ final class BoardSurface {
     }
 
     /**
-     * The miter at the corner between falling edge {@code edge} and edge {@code side} when a fall of the same drop
-     * continues there: this pool's own fall over {@code side}, or the fall of the neighbouring pool across
-     * {@code side}, at this pool's level, into the same lower pool. Both sheets and both pools then turn that corner on
-     * one vector, whose projection on each fall's outward is one, so nothing opens between them. Null where the end is
-     * free.
+     * The crest's normal where falling edge {@code edge} meets edge {@code side}, when a fall of the same drop carries
+     * on there; null where the end is free. On a prow, where this pool falls on over {@code side} into connected water
+     * at the same level, it bisects the two edges. In a valley, where the neighbouring pool across {@code side}, at
+     * this pool's level, falls into the same lower pool, it runs on along the edge the two pools share: both pools see
+     * that edge alike, so their crests meet exactly on it and neither passes inside the other's hex.
      */
     private Vector3 join(BoardScene scene, float[] shore, float[] lip, int edge, int side) {
-        Vector3 other = null;
-        if (lip[side] > 0) {
-            other = edgeOutward(side);
-        } else if (shore[side] == 0) {
-            BoardScene.Tile beside = neighbor(scene, side), below = neighbor(scene, edge);
-            Coords at = beside.coords();
-            if (beside.elevation() == tile.elevation() && !beside.frozen() && beside.liquid().connects(below.liquid())) {
-                for (int k = 0; k < 6; k++) {
-                    if (at.translated(BoardGeometry.edgeDirection(k)).equals(below.coords())) {
-                        other = BoardGeometry.corner(at, 0, k + 1).sub(BoardGeometry.corner(at, 0, k)).crs(Vector3.Z).nor();
-                    }
-                }
-            }
+        BoardScene.Tile below = neighbor(scene, edge), beside = neighbor(scene, side);
+        // Falls off the board's edge over two edges of this pool run on round the corner between them, as a prow.
+        if (below == null || beside == null) {
+            return below == null && beside == null && lip[side] > 0 ? edgeOutward(edge).add(edgeOutward(side)).nor()
+                  : null;
         }
-        if (other == null) { return null; }
-        Vector3 own = edgeOutward(edge);
-        return own.add(other).scl(1 / (1 + edgeOutward(edge).dot(other)));
+        if (lip[side] > 0) {
+            return beside.elevation() == below.elevation() && beside.liquid().connects(below.liquid())
+                  ? edgeOutward(edge).add(edgeOutward(side)).nor() : null;
+        }
+        if (shore[side] != 0 || beside.elevation() != tile.elevation() || beside.frozen()
+              || !beside.liquid().connects(below.liquid())) { return null; }
+        boolean before = side == (edge + 5) % 6;
+        Vector3 corner = before ? corners[edge] : corners[side];
+        return new Vector3(corner).sub(before ? corners[side] : corners[(side + 1) % 6]).nor();
     }
 
     /** Outward normal of one edge: away from this hex. */
@@ -452,10 +659,14 @@ final class BoardSurface {
         return edgeInward(edge).scl(-1);
     }
 
-    /** The direction the end of a fall moves out along: its own outward, or the miter it shares with the next fall. */
-    Vector3 fallDirection(Side fall, boolean atA) {
-        Vector3 join = (atA ? joinA : joinB)[fall.edge()];
-        return join != null ? new Vector3(join) : edgeOutward(fall.edge());
+    /** The crest a fall of this pool pours over. */
+    Crest crest(Side fall) {
+        return crests[fall.edge()];
+    }
+
+    /** Whether a fall pours off the board's edge, where nothing catches it: it fades out and throws up no spray. */
+    boolean bottomless(Side fall) {
+        return (offBoard & 1 << fall.edge()) != 0;
     }
 
     /** Whether the end of a fall carries on into another fall's sheet, so that end is not a free side. */
@@ -473,23 +684,27 @@ final class BoardSurface {
         return new Vector3(corners[(edge + 1) % 6]).sub(corners[edge]).crs(Vector3.Z).nor().scl(-1);
     }
 
-    /** Pull the water surface back from each falling mouth, leaving the lip's room for the sheet to fill. */
-    private Vector3[] pulledBack(Vector3[] waterline, float[] lip) {
-        Vector3[] result = waterline.clone();
-        for (int index = 0; index < waterline.length; index++) {
-            int edge = index / SHORE_SEGMENTS;
-            // An anchor also ends the previous edge, whose fall pulls the shared corner by its own inward.
-            int previous = (edge + 5) % 6;
+    /**
+     * Pull the water surface back from each crest along its normal, leaving the lip's room for the sheet to fill. A
+     * corner where two falls meet recedes along the normal both crests share there, which is where both pulled-back
+     * edges and both sheets meet, whether the other fall is this pool's or the neighbouring one's.
+     */
+    private Vector3[] pulledBack(Vector3[] crestLine, float[] lip) {
+        Vector3[] result = crestLine.clone();
+        for (int index = 0; index < crestLine.length; index++) {
+            int edge = index / SHORE_SEGMENTS, previous = (edge + 5) % 6;
+            // An anchor also ends the previous edge, whose crest ends there too.
             boolean anchor = index % SHORE_SEGMENTS == 0;
-            if (lip[edge] <= 0 && !(anchor && lip[previous] > 0)) {
-                continue;
+            Crest crest = crests[edge];
+            float s = index % SHORE_SEGMENTS / (float) SHORE_SEGMENTS;
+            if (crest == null && anchor && crests[previous] != null) {
+                crest = crests[previous];
+                s = 1;
             }
-            // A corner where two falls meet recedes along their shared miter, which is where both pulled-back edges and
-            // both sheets meet, whether the other fall is this pool's or the neighbouring one's.
-            Vector3 join = !anchor ? null : lip[edge] > 0 ? joinA[edge] : joinB[previous];
-            Vector3 inward = join != null ? new Vector3(join).scl(-Math.max(lip[edge], lip[previous]))
-                  : edgeInward(lip[edge] > 0 ? edge : previous).scl(lip[edge] > 0 ? lip[edge] : lip[previous]);
-            result[index] = new Vector3(waterline[index]).add(inward);
+            if (crest != null) {
+                result[index] = new Vector3(crestLine[index])
+                      .mulAdd(crest.normal(s), anchor ? -Math.max(lip[edge], lip[previous]) : -lip[edge]);
+            }
         }
         return result;
     }
@@ -501,9 +716,14 @@ final class BoardSurface {
         return lip;
     }
 
-    /** Rounded bays and irregular banks, with fixed mouths that meet the next hex exactly. */
-    private Vector3[] curvedContour(float[] inset, float z, List<Integer> channelMouths) {
-        Vector3[] anchors = contour(inset, z);
+    /**
+     * Rounded bays and banks that follow the land beside them, with fixed mouths that meet the next hex exactly: close
+     * under higher ground, which the water cuts into, and wide beside land at the water's own level, where beaches and
+     * shallows spread; everywhere wandering with the ground's noise. rise: see {@link #basin}.
+     */
+    private Vector3[] curvedContour(float[] inset, float[] rise, boolean[] plunge, float z,
+          List<Integer> channelMouths) {
+        Vector3[] anchors = contour(inset, plunge, z);
         Vector3[] result = new Vector3[6 * SHORE_SEGMENTS];
         for (int edge = 0; edge < 6; edge++) {
             int previous = (edge + 5) % 6, next = (edge + 1) % 6;
@@ -518,7 +738,8 @@ final class BoardSurface {
                 Vector3 outward = new Vector3(corners[(edge + 2) % 6]).sub(corners[next]).crs(Vector3.Z).nor();
                 c2.set(b).mulAdd(outward, -a.dst(b) / 3);
             }
-            float phase = tile.coords().getX() * 1.73f + tile.coords().getY() * 2.41f + edge;
+            float character = rise[edge] > 0 ? -.35f : rise[edge] == 0 ? .3f : 0;
+            boolean poolBefore = plunge[previous], poolAfter = plunge[next];
             for (int segment = 0; segment < SHORE_SEGMENTS; segment++) {
                 float t = segment / (float) SHORE_SEGMENTS, s = 1 - t;
                 Vector3 point;
@@ -528,27 +749,62 @@ final class BoardSurface {
                     point = new Vector3(a).scl(s * s * s).mulAdd(c1, 3 * s * s * t)
                           .mulAdd(c2, 3 * s * t * t).mulAdd(b, t * t * t);
                     Vector3 inward = new Vector3(center.x - point.x, center.y - point.y, 0).nor();
-                    float ripple = (float) Math.sin(phase + t * Math.PI * 3) * 16 * t * t * s * s;
-                    point.mulAdd(inward, ripple * 1.4f * BoardGeometry.HEX_SCALE);
+                    float wander = (character * 8 + 6 * meander(point.x, point.y, 3.7f)) * BoardGeometry.HEX_SCALE;
+                    point.mulAdd(inward, wander * 16 * t * t * s * s);
+                    // A pool opens out round the foot of a fall that pours in beside this bank.
+                    float pool = (poolBefore ? swell(t) : 0) + (poolAfter ? swell(s) : 0);
+                    point.mulAdd(inward, -6 * BoardGeometry.HEX_SCALE * pool);
                 }
                 point.z = z;
                 result[edge * SHORE_SEGMENTS + segment] = point;
             }
         }
         if (!channelMouths.isEmpty()) {
-            channelBank(result, anchors, channelMouths.getFirst(), channelMouths.getLast());
-            channelBank(result, anchors, channelMouths.getLast(), channelMouths.getFirst());
+            channelBank(result, anchors, rise, plunge, channelMouths.getFirst(), channelMouths.getLast());
+            channelBank(result, anchors, rise, plunge, channelMouths.getLast(), channelMouths.getFirst());
+        }
+        // Every bank point keeps some bank inside the edges it faces, so the ground there never folds. The push eases
+        // in, so the waterline bends away from an edge instead of creasing, and runs toward the hex centre, so the
+        // waterline keeps its order round it and the bed's rings never fold; the anchors on open mouths are the
+        // neighbours' too.
+        float least = 4.5f * BoardGeometry.HEX_SCALE, soft = 2 * BoardGeometry.HEX_SCALE;
+        for (int index = 0; index < result.length; index++) {
+            int edge = index / SHORE_SEGMENTS;
+            if (inset[edge] == 0 || index % SHORE_SEGMENTS == 0 && inset[(edge + 5) % 6] == 0) { continue; }
+            Vector3 toward = new Vector3(center.x - result[index].x, center.y - result[index].y, 0).nor();
+            float push = 0;
+            for (int k = 0; k < 6; k++) {
+                if (inset[k] == 0) { continue; }
+                Vector3 inward = edgeInward(k);
+                float gap = new Vector3(result[index]).sub(corners[k]).dot(inward);
+                float deficit = gap <= least - soft ? least - gap
+                      : gap < least + soft ? (least + soft - gap) * (least + soft - gap) / (4 * soft) : 0;
+                push = Math.max(push, deficit / Math.max(.5f, toward.dot(inward)));
+            }
+            result[index].mulAdd(toward, push);
         }
         return result;
     }
 
-    /** One continuous bank between river mouths, without a separate bay at each hex centre. */
-    private void channelBank(Vector3[] contour, Vector3[] anchors, int from, int to) {
+    /** 0 at x = 0, rising to 1 at a third and back to 0 at 1: a swell just past one end of a stretch. */
+    private static float swell(float x) {
+        return 6.75f * x * (1 - x) * (1 - x);
+    }
+
+    /**
+     * One continuous bank between river mouths, without a separate bay at each hex centre. The channel meanders within
+     * the hex, and each bank widens and narrows on its own into bays and points: narrow between high ground, as in a
+     * gorge, wide across land at the water's own level, and with the ground's noise. Below a fall it opens into a pool.
+     * Its mouths stay fixed.
+     */
+    private void channelBank(Vector3[] contour, Vector3[] anchors, float[] rise, boolean[] plunge, int from, int to) {
         Vector3 a = new Vector3(corners[from]).lerp(corners[(from + 1) % 6], 0.5f);
         Vector3 b = new Vector3(corners[to]).lerp(corners[(to + 1) % 6], 0.5f);
         a.z = b.z = anchors[from].z;
         Vector3 inA = edgeInward(from);
         Vector3 inB = edgeInward(to);
+        float[] character = new float[6];
+        for (int edge = 0; edge < 6; edge++) { character[edge] = rise[edge] > 0 ? -.15f : rise[edge] == 0 ? .2f : 0; }
         // A gentle bend keeps the inner bank from folding back across itself.
         float handle = a.dst(b) * 0.4f;
         Vector3 c1 = new Vector3(a).mulAdd(inA, handle);
@@ -561,8 +817,21 @@ final class BoardSurface {
                   .mulAdd(new Vector3(c2).sub(c1), 6 * s * t).mulAdd(new Vector3(b).sub(c2), 3 * t * t);
             Vector3 point = new Vector3(a).scl(s * s * s).mulAdd(c1, 3 * s * s * t)
                   .mulAdd(c2, 3 * s * t * t).mulAdd(b, t * t * t);
-            contour[((from + 1) * SHORE_SEGMENTS + index) % contour.length] = point
-                  .mulAdd(tangent.crs(Vector3.Z).nor(), widthA + (widthB - widthA) * t);
+            int slot = ((from + 1) * SHORE_SEGMENTS + index) % contour.length;
+            // The inner bank of a bend keeps its width: wider, it would loop back on itself round the bend.
+            boolean inner = segments <= SHORE_SEGMENTS;
+            float envelope = 16 * t * t * s * s, nominal = (widthA + (widthB - widthA) * t)
+                  * (inner ? 1 : 1 + .8f * ((plunge[from] ? swell(t) : 0) + (plunge[to] ? swell(s) : 0)));
+            Vector3 normal = tangent.crs(Vector3.Z).nor();
+            // Both banks shift one way as the channel meanders: the bank from the other mouth runs the centreline
+            // backwards, so its sideways sign flips.
+            float sideways = (from < to ? 1 : -1) * 9 * BoardGeometry.HEX_SCALE * meander(point.x, point.y, 11.9f);
+            Vector3 bank = new Vector3(point).mulAdd(normal, nominal);
+            float breadth = alongBanks(character, slot) + .4f * meander(bank.x, bank.y, 8.3f);
+            if (inner) { breadth = Math.min(0, breadth); }
+            float width = Math.max(.3f * nominal,
+                  nominal * Math.max(.45f, 1 + breadth * envelope) + sideways * envelope);
+            contour[slot] = point.mulAdd(normal, width);
         }
     }
 
@@ -581,7 +850,7 @@ final class BoardSurface {
     }
 
     /** Intersections of independently offset edge planes preserve matching river mouths between neighbors. */
-    private Vector3[] contour(float[] inset, float z) {
+    private Vector3[] contour(float[] inset, boolean[] plunge, float z) {
         Vector3[] result = new Vector3[6];
         for (int vertex = 0; vertex < 6; vertex++) {
             int before = (vertex + 5) % 6;
@@ -605,8 +874,10 @@ final class BoardSurface {
                 float length = corners[edge].dst(corners[next]);
                 // Open mouths use four units less land on each side than a rounded basin bank.
                 // The wider channel occupies the old water-and-shore width; its sand fade reaches the corners.
-                float from = Math.max(0, inset[(edge + 5) % 6] - 4 * BoardGeometry.HEX_SCALE) * 1.1547005f / length;
-                float to = Math.max(0, inset[next] - 4 * BoardGeometry.HEX_SCALE) * 1.1547005f / length;
+                // Below a fall the pool reaches nearly to both corners, so the whole sheet lands in water.
+                float keep = (plunge[edge] ? 6.5f : 4) * BoardGeometry.HEX_SCALE;
+                float from = Math.max(0, inset[(edge + 5) % 6] - keep) * 1.1547005f / length;
+                float to = Math.max(0, inset[next] - keep) * 1.1547005f / length;
                 result[edge].set(corners[edge]).lerp(corners[next], from).z = z;
                 result[next].set(corners[next]).lerp(corners[edge], to).z = z;
             }
@@ -720,13 +991,16 @@ final class BoardSurface {
         return (openMouths & 1 << edge) != 0;
     }
 
-    /** Only the higher column contributes a shared wall; road gates meet at the same height. */
+    /**
+     * Only the higher column contributes a shared wall; road gates meet at the same height. Under a fall the wall
+     * stands beneath its crest, from the ledge the water pours over down to the pool below.
+     */
     List<Side> sides(BoardScene scene, float floor) {
         List<Side> result = new ArrayList<>();
         for (int edge = 0; edge < 6; edge++) {
             Vector3 a = corners[edge], b = corners[(edge + 1) % 6];
             BoardScene.Tile neighbor = scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(edge)));
-            if (mouth(edge) && neighbor.elevation() == tile.elevation()) {
+            if (mouth(edge) && neighbor != null && neighbor.elevation() == tile.elevation()) {
                 continue; // Beds of one level share their mouth's profile and their banks' top: nothing stands between.
             }
             BoardSurface adjacent = neighbor == null ? null : new BoardSurface(scene, neighbor, false);
@@ -735,10 +1009,14 @@ final class BoardSurface {
             if (adjacent != null) {
                 adjacent.cuts(a, b, cuts);
             }
+            // The stretch of the edge a crest spans, where its own wall replaces the straight one.
+            Crest crest = crests[edge];
+            float spanA = crest == null ? 2 : joinA[edge] != null ? 0 : along(a, b, crest.a());
+            float spanB = crest == null ? 2 : joinB[edge] != null ? 1 : along(a, b, crest.b());
             List<Float> points = new ArrayList<>(cuts);
             for (int i = 1; i < points.size(); i++) {
                 float from = points.get(i - 1), to = points.get(i);
-                if (to - from < 0.0001f) {
+                if (to - from < 0.0001f || from > spanA - 0.0001f && to < spanB + 0.0001f) {
                     continue;
                 }
                 Vector3 start = new Vector3(a).lerp(b, from);
@@ -763,7 +1041,24 @@ final class BoardSurface {
                     result.add(new Side(start, end, Math.min(start.z, lowA), Math.min(end.z, lowB), edge));
                 }
             }
+            if (crest != null) {
+                for (int i = 0; i < SHORE_SEGMENTS; i++) {
+                    Vector3 start = new Vector3(bedOutline[edge * SHORE_SEGMENTS + i]);
+                    Vector3 end = new Vector3(bedOutline[(edge * SHORE_SEGMENTS + i + 1) % bedOutline.length]);
+                    float lowA = adjacent == null ? floor : adjacent.height(adjacent.edgeTopography, start.x, start.y);
+                    float lowB = adjacent == null ? floor : adjacent.height(adjacent.edgeTopography, end.x, end.y);
+                    if (Math.max(start.z - lowA, end.z - lowB) > 0.01f) {
+                        result.add(new Side(start, end, Math.min(start.z, lowA), Math.min(end.z, lowB), edge));
+                    }
+                }
+            }
         }
         return result;
+    }
+
+    /** Where p lies along the edge from a to b, 0 at a and 1 at b. */
+    private static float along(Vector3 a, Vector3 b, Vector3 p) {
+        float dx = b.x - a.x, dy = b.y - a.y;
+        return ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy);
     }
 }

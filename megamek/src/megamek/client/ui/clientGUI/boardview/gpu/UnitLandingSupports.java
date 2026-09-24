@@ -135,13 +135,13 @@ final class UnitLandingSupports {
     private static final Map<BoardSurface, List<BoardSurface.Face>> SLOPES = new WeakHashMap<>();
 
     /**
-     * A hex's own ground at (x, y). With hex transitions the slope or talus of a step can lie over the hex's footprint
-     * instead of its top; it belongs to the walls of the higher hex, this one or a neighbour.
+     * A hex's own ground at (x, y). With hex transitions or padding the slope or talus of a step can lie over the
+     * hex's footprint instead of its top; it belongs to the walls of the higher hex, this one or a neighbour.
      */
     private static float ground(BoardScene scene, BoardScene.Tile tile, float x, float y, BoardSurface.Cache surfaces) {
         BoardSurface surface = surfaces == null ? new BoardSurface(scene, tile) : surfaces.get(scene, tile);
         float top = BoardSurface.sampleHeight(surface.faces, x, y, Float.NaN);
-        if (!Float.isNaN(top) || !BoardGeometry.tuning().transitions()) {
+        if (!Float.isNaN(top) || !BoardGeometry.tuning().stepsBetweenTops()) {
             return Float.isNaN(top) ? BoardGeometry.groundZ(tile) : top;
         }
         if (floorScene != scene || floorRevision != BoardGeometry.revision()) {

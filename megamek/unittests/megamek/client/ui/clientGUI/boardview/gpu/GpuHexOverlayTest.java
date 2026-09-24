@@ -80,7 +80,8 @@ class GpuHexOverlayTest {
                       "Interior hexes must not acquire sheet borders");
                 assertTrue(covers(marked.tactical(), new Color(0, 140, 0, 120), embedded, 42, 36));
                 List<BoardTacticalGeometry.Triangle> triangles = new ArrayList<>();
-                BoardTacticalGeometry.drape(marked, triangles::add);
+                // On the column top itself: with hex transitions its edges would drape down its slopes.
+                BoardSculptTest.withTransitions(false, () -> BoardTacticalGeometry.drape(marked, triangles::add));
                 assertTrue(triangles.stream().filter(t -> t.argb() == new Color(0, 140, 0, 120).getRGB())
                       .allMatch(t -> t.a().z > 3 * BoardGeometry.LEVEL && t.b().z > 3 * BoardGeometry.LEVEL
                             && t.c().z > 3 * BoardGeometry.LEVEL));

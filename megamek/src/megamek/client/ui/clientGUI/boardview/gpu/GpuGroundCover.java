@@ -132,8 +132,8 @@ final class GpuGroundCover implements Disposable {
         BoardSurface surface = new BoardSurface(scene, tile);
         List<BoardSurface.Face> ground = new ArrayList<>(surface.faces.stream()
               .filter(face -> face.finish() == BoardSurface.Finish.TOP).toList());
-        if (BoardGeometry.tuning().transitions()) {
-            // A transition's slope is meadow too where it lies back far enough; the hex above it owns it.
+        if (BoardGeometry.tuning().stepsBetweenTops()) {
+            // A step's slope is meadow too where it lies back far enough; the hex above it owns it.
             for (BoardSurface.Face face : BoardTacticalGeometry.lying(surface.walls(scene, floor))) {
                 Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
                 if (normal.z > .7f) { ground.add(face); }

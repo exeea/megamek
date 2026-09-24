@@ -307,6 +307,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String SHOW_OBJECTIVE_OVERLAYS = "ShowObjectiveOverlays";
     public static final String GUI_SCALE = "GUIScale";
     public static final String BOARD_VIEW_3D = "BoardView3D";
+    public static final String BOARD_VIEW_3D_GRAPHICS_CARD = "BoardView3DGraphicsCard";
     public static final String LOBBY_MEK_TABLE_UNIT_WIDTH = "LobbyMekTableUnitWidth";
     public static final String LOBBY_MEK_TABLE_PILOT_WIDTH = "LobbyMekTablePilotWidth";
     public static final String LOBBY_MEK_TABLE_PLAYER_WIDTH = "LobbyMekTablePlayerWidth";
@@ -829,6 +830,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(CONSTRUCTOR_FACTOR_WARNING, true);
         store.setDefault(GUI_SCALE, 1);
         store.setDefault(BOARD_VIEW_3D, true);
+        store.setDefault(BOARD_VIEW_3D_GRAPHICS_CARD, "SYSTEM");
         store.setDefault(LOBBY_MEK_TABLE_UNIT_WIDTH, 170);
         store.setDefault(LOBBY_MEK_TABLE_PILOT_WIDTH, 80);
         store.setDefault(LOBBY_MEK_TABLE_PLAYER_WIDTH, 50);
@@ -1837,6 +1839,15 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setUse3DBoard(boolean use3D) {
         store.setValue(BOARD_VIEW_3D, use3D);
+    }
+
+    /** The graphics card the 3D board asks for on computers with two: SYSTEM, INTEGRATED or DISCRETE. */
+    public String getBoardGraphicsCard() {
+        return store.getString(BOARD_VIEW_3D_GRAPHICS_CARD);
+    }
+
+    public void setBoardGraphicsCard(String card) {
+        store.setValue(BOARD_VIEW_3D_GRAPHICS_CARD, card);
     }
 
     public int getWindowPosX() {
