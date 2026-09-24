@@ -578,6 +578,19 @@ final class GpuWaterShader extends Attribute {
                 if (inside == null && pool.contains(x, y)) { inside = pool; }
                 nearest = pool.shoreDistance2(x, y, nearest);
             }
+            // Beyond the board's edge the water runs on as if into the missing hex (BoardSurface.cut): a point there
+            // belongs to the nearest open water around it, at that water's full depth, not to land.
+            if (inside == null && count > 0 && scene.tile(new Coords(nearColumn, nearRow)) == null) {
+                float closest = Float.POSITIVE_INFINITY;
+                for (int i = 0; i < count; i++) {
+                    Pool pool = candidates[i];
+                    float dx = x - pool.centerX, dy = y - pool.centerY;
+                    if (dx * dx + dy * dy < closest) {
+                        closest = dx * dx + dy * dy;
+                        inside = pool;
+                    }
+                }
+            }
             float distance = (float) Math.sqrt(nearest) / BoardGeometry.WIDTH;
             result[0] = inside == null ? -distance : distance;
             blend(x, y, result);

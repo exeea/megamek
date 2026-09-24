@@ -41,6 +41,9 @@ void main() {
     bool falling = u_waterMaterial.y > 0.5;
     bool procedural = u_waterMaterial.z > 0.5;
     bool spray = u_waterMaterial.w > 0.5;
+    // The water's cut face where the board's edge cuts it off (GpuTerrain.waterCut): blue marks it, green is its depth
+    // below the surface over WATER_DEPTH_RANGE. A fall's vertex colour means other things.
+    bool cut = !falling && v_color.b > 0.5;
     vec2 position = v_cloudPosition.xy * u_rainScale;
     float effects = u_waterEffects;
     float detail = u_rainDetail * effects;
@@ -105,6 +108,14 @@ void main() {
         mistLight += sunlight * (against * against * 0.5);
 #endif
         color = froth * mistLight * alpha * mix(mix(1.1, 1.25, droplet), 1.0, mist);
+    } else if (cut) {
+        // A clean section through the water body: the light it scatters at each depth, dimmed as the daylight is
+        // absorbed on its way down, hiding more of what lies behind it the deeper it runs. Waves, foam, glints, rain
+        // and the grid belong to the surface. Seen from inside, through the surface, it is not drawn.
+        if (!gl_FrontFacing) discard;
+        vec3 kept = waterTransmission(palette, v_color.g * WATER_DEPTH_RANGE);
+        alpha = 1.0 - (1.0 - WATER_MAX_OPACITY) * max(max(kept.r, kept.g), kept.b);
+        color = scatter * light * kept * alpha;
     } else {
         // The pool's own surface. A fall starts with exactly this look where it leaves its pool, from the same field,
         // ripples, foam and agitation at the same place, so the two join without a seam; only its curving lip then

@@ -241,6 +241,51 @@ final class BoardRelief {
 
     boolean sculpted() { return sculpted; }
 
+    /**
+     * How far the step on edge e reaches into this hex at its own level, in world units: the foot of a slope down to it
+     * or the rim of a slope down from it, laid out in the step's room. A slope down to a water hex's bed meets the water
+     * on the edge. A water hex keeps its waterline beyond it.
+     */
+    float reach(int e) {
+        Edge edge = edge(e);
+        if (edge.room <= 0) { return 0; }
+        float z = self.level() * BoardGeometry.LEVEL;
+        return Math.max(0, edge.lower == self ? band(edge.upper, edge.lower, z) : -band(edge.upper, edge.lower, z));
+    }
+
+    /**
+     * Whether the step on edge e is a slope with room up from this hex, not a wall: in a water hex it runs on under the
+     * water to the bed, and the waterline hugs it.
+     */
+    boolean slope(int e) {
+        Edge edge = edge(e);
+        return edge.room > 0 && edge.lower == self && !wall(edge.upper, edge.lower);
+    }
+
+    /**
+     * How far the steps through corner k move its line at this hex's level, in world units. Water hexes that share an
+     * open mouth both compute it from the corner's three hexes, so they place the mouth's ends alike.
+     */
+    float cornerReach(int k) {
+        float[] band = new float[2];
+        bandOffset(corner(self, k), self.level() * BoardGeometry.LEVEL, band);
+        return (float) Math.hypot(band[0], band[1]);
+    }
+
+    /**
+     * How far this hex's outline at its own level stands in from corner k toward the hex's centre, in world units: the
+     * steps through the corner and its fillet move it. A water hex keeps its waterline beyond it.
+     */
+    float cornerInset(int k) {
+        Corner corner = corner(self, k);
+        float z = self.level() * BoardGeometry.LEVEL;
+        float[] band = new float[2], fillet = new float[2];
+        bandOffset(corner, z, band);
+        filletOffset(corner, z, fillet);
+        float ix = self.x() - corner.x, iy = self.y() - corner.y, length = (float) Math.hypot(ix, iy);
+        return Math.max(0, ((band[0] + fillet[0]) * ix + (band[1] + fillet[1]) * iy) / length);
+    }
+
     /** The surface family this hex's sculpted ground takes, as a {@link BoardScene.Surface} ordinal. */
     int family() { return self.family(); }
 
@@ -421,17 +466,19 @@ final class BoardRelief {
               * (span[2] == 2 ? smooth((top - z) / (.2f * level)) : 1);
         // Water keeps its outline at its own level, as along the edges (see Edge).
         boolean footPinned = false, rimPinned = false;
-        int depth = 0;
+        float drop = (to - from) * level;
         for (Site site : corner.around) {
             footPinned |= site.liquid() && site.level() == from;
             rimPinned |= site.liquid() && site.level() == to;
-            if (site.level() == from) { depth = Math.max(depth, site.depth()); }
+            for (Site other : corner.around) {
+                if (site.level() == to && other.level() == from) { drop = Math.max(drop, drop(site, other)); }
+            }
         }
         // Where the band moves the corner line, its relief is that of the place it stands.
         float[] band = new float[2];
         bandOffset(corner, z, band);
-        float d = profile(corner.x + band[0], corner.y + band[1], z, bottom, top, top - bottom + depth * level, geology,
-              footPinned, rimPinned, corner.banded) * pin;
+        float d = profile(corner.x + band[0], corner.y + band[1], z, bottom, top, drop, geology, footPinned, rimPinned,
+              corner.banded) * pin;
         return new float[] { direction[0] * d, direction[1] * d };
     }
 
@@ -713,11 +760,12 @@ final class BoardRelief {
     // ---- Wall profile ----------------------------------------------------------------------------------------
 
     /**
-     * The height of a step for its landforms, in world units: from the upper hex's level down to the lower hex's, or on
-     * down to the bed of the water there. Land two levels above water one level deep stands over a three-level cliff.
+     * The height of a step for its landforms, in world units: between the grounds units stand on either side, which in
+     * a water hex is its bed, since tanks and meks do not walk on water. Land two levels above water one level deep
+     * stands over a three-level cliff; a step whose beds lie within a level of each other is a one-level bank.
      */
     private static float drop(Site upper, Site lower) {
-        return (upper.level() - lower.level() + (lower.liquid() ? lower.depth() : 0)) * BoardGeometry.LEVEL;
+        return Math.max(1, upper.level() - upper.depth() - lower.level() + lower.depth()) * BoardGeometry.LEVEL;
     }
 
     /** 0 for drops up to two levels, 1 from three levels: the user-visible prominence of rim formations. */
@@ -738,16 +786,28 @@ final class BoardRelief {
     }
 
     /**
+     * Whether a step is a wall of three levels or more between the grounds units stand on, rather than a slope a tank
+     * (one level) or a mek (two) can climb.
+     */
+    private static boolean wall(Site upper, Site lower) {
+        return drop(upper, lower) > 2.5f * BoardGeometry.LEVEL;
+    }
+
+    /**
      * How far a step's face at height z stands out from its edge into the lower hex (negative: back in the upper one):
-     * its room at the foot, following {@link #transition} up to its room back at the rim. A water hex keeps its
-     * outline on the edge, so beside water the land takes a step half as wide, all on its own side: a cut bank.
+     * its room at the foot, following {@link #transition} up to its room back at the rim. A slope down to water runs on
+     * under it to the bed: land a level above water a level deep takes a two-level slope, which meets the water on the
+     * edge. Where a wall of three levels or more meets water, the water keeps its outline on the edge, so the land takes
+     * a step half as wide, all on its own side.
      */
     private static float band(Site upper, Site lower, float z) {
         float room = room(upper, lower);
         if (room <= 0) { return 0; }
-        float bottom = lower.level() * BoardGeometry.LEVEL, top = upper.level() * BoardGeometry.LEVEL;
+        boolean wall = wall(upper, lower);
+        float bottom = (lower.level() - (wall ? 0 : lower.depth())) * BoardGeometry.LEVEL;
+        float top = upper.level() * BoardGeometry.LEVEL;
         float t = transition(Math.clamp(z, bottom, top), bottom, top, drop(upper, lower));
-        return lower.liquid() ? room / 2 * (t - 1) : upper.liquid() ? room / 2 * (t + 1) : room * t;
+        return wall && lower.liquid() ? room / 2 * (t - 1) : wall && upper.liquid() ? room / 2 * (t + 1) : room * t;
     }
 
     /**

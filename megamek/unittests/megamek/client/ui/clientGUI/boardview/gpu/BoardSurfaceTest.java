@@ -314,6 +314,51 @@ class BoardSurfaceTest {
     }
 
     @Test
+    void aRiverRunsUpToTheSlopesBesideItWhichCarryOnUnderItToTheBed() {
+        // A river a level deep between banks a level above its surface: two levels between the grounds units stand on,
+        // a slope that meets the water on the edge and carries on down to the bed.
+        BoardSculptTest.withTransitions(true, () -> {
+            Coords center = new Coords(3, 3);
+            for (int direction = 0; direction < 6; direction++) {
+                List<Coords> river = List.of(center, center.translated(direction), center.translated((direction + 3) % 6));
+                List<BoardScene.Tile> tiles = new ArrayList<>();
+                for (int x = 0; x < 7; x++) {
+                    for (int y = 0; y < 7; y++) {
+                        Coords coords = new Coords(x, y);
+                        boolean wet = river.contains(coords);
+                        tiles.add(new BoardScene.Tile(coords, wet ? 0 : 1, wet ? 1 : -1, false, 0,
+                              BoardScene.Surface.SAND, null, null, null, null, null, List.of(), List.of(),
+                              wet ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
+                    }
+                }
+                BoardScene scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
+                BoardSurface surface = new BoardSurface(scene, scene.tile(center));
+                List<Integer> mouths = List.of(Math.floorMod(1 - direction, 6), Math.floorMod(-2 - direction, 6));
+                for (int edge = 0; edge < 6; edge++) {
+                    if (mouths.contains(edge)) { continue; }
+                    Vector3 a = BoardGeometry.corner(center, 0, edge), b = BoardGeometry.corner(center, 0, edge + 1);
+                    Vector3 inward = BoardGeometry.center(center, 0).sub(new Vector3(a).lerp(b, .5f)).nor();
+                    for (int sample = 20; sample <= 80; sample += 5) {
+                        Vector3 point = new Vector3(a).lerp(b, sample / 100f);
+                        float nearest = Float.MAX_VALUE;
+                        for (int i = 0; i < surface.water.size(); i++) {
+                            nearest = Math.min(nearest, distance(point, surface.water.get(i),
+                                  surface.water.get((i + 1) % surface.water.size())));
+                        }
+                        assertTrue(nearest < .08f * BoardGeometry.WIDTH, "Direction " + direction + ", edge " + edge
+                              + ", sample " + sample + ": the water keeps " + nearest + " from the slope");
+                    }
+                    // Where a slope a level high would stop at the water's own level, it is already deep under it.
+                    Vector3 foot = new Vector3(a).lerp(b, .5f).mulAdd(inward, BoardRelief.stepRoom());
+                    assertTrue(surface.height(foot.x, foot.y) < -.6f * BoardGeometry.LEVEL,
+                          "Direction " + direction + ", edge " + edge + ": the bed at the slope's foot lies at "
+                                + surface.height(foot.x, foot.y));
+                }
+            }
+        });
+    }
+
+    @Test
     void bentChannelsTriangulateTheirActualOutlineAndMeetTheNeighboringMouths() {
         Coords center = new Coords(2, 2);
         for (int from = 0; from < 6; from++) {

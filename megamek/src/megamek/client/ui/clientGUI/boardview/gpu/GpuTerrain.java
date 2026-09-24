@@ -1005,8 +1005,12 @@ final class GpuTerrain implements Disposable {
                         chunk.bounds.ext(face.a()).ext(face.b()).ext(face.c());
                     }
                     for (BoardSurface.Face face : surface.cutFaces) {
-                        destination.add(water, mesh -> waterSurface(mesh, chunk.waterField, tile.coords(), face,
-                              proceduralWater ? null : waterArt));
+                        if (tile.liquid().molten()) {
+                            // A wall of lava, mapped like other walls instead of smeared down from its top.
+                            destination.add(water, mesh -> surface(mesh, tile.coords(), face, null, 0));
+                        } else {
+                            destination.add(water, mesh -> waterCut(mesh, BoardGeometry.waterZ(tile), face));
+                        }
                         chunk.bounds.ext(face.a()).ext(face.b()).ext(face.c());
                     }
                     if (!surface.waterfalls.isEmpty()) {
@@ -1415,6 +1419,20 @@ final class GpuTerrain implements Disposable {
           BoardSurface.Face face, TextureRegion art) {
         mesh.triangle(waterVertex(field, coords, face.a(), art), waterVertex(field, coords, face.b(), art),
               waterVertex(field, coords, face.c(), art));
+    }
+
+    /**
+     * The water's cut face where the board's edge cuts it off: a section through the water, not its surface. Blue
+     * marks it for water-surface.frag; green is its depth below the surface over {@link GpuWaterShader#DEPTH_RANGE}
+     * levels.
+     */
+    private static void waterCut(MeshPartBuilder mesh, float top, BoardSurface.Face face) {
+        mesh.triangle(cutVertex(face.a(), top), cutVertex(face.b(), top), cutVertex(face.c(), top));
+    }
+
+    private static MeshPartBuilder.VertexInfo cutVertex(Vector3 p, float top) {
+        float below = Math.clamp((top - p.z) / (GpuWaterShader.DEPTH_RANGE * BoardGeometry.LEVEL), 0, 1);
+        return vertex(p, Vector3.Z, p.x / BoardGeometry.WIDTH, -p.y / BoardGeometry.WIDTH, new Color(0, below, 1, 1));
     }
 
     private static MeshPartBuilder.VertexInfo waterVertex(GpuWaterShader.Field field, Coords coords, Vector3 p,
