@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.TreeSet;
 
 import com.badlogic.gdx.math.EarClippingTriangulator;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
 
@@ -640,19 +641,37 @@ final class BoardSurface {
      * entire slope's effect, sampled at the drawn water height, so neither hex spreads foam over its level approach.
      */
     float slopeAgitation(Vector3 point) {
+        return slopeEffects(point, null);
+    }
+
+    /** The upper surface owns each descent's whitewater and added downhill velocity, in hex widths per second. */
+    float slopeEffects(Vector3 point, Vector2 acceleration) {
         if (!gradedWater) { return 0; }
         float top = BoardGeometry.waterZ(tile), agitation = 0;
-        if (point.z >= top || point.z <= top - 2 * BoardGeometry.LEVEL) { return 0; }
+        if (point.z >= top) { return 0; }
         boolean inside = BoardGeometry.contains(tile.coords(), point.x, point.y);
         for (int edge = 0; edge < 6; edge++) {
             BoardScene.Tile other = neighbor(scene, edge);
-            if (!waterSlope(tile, other) || other.elevation() >= tile.elevation()
-                  || (!inside && !BoardGeometry.contains(other.coords(), point.x, point.y))) { continue; }
+            if (!waterSlope(tile, other) || other.elevation() >= tile.elevation()) { continue; }
             float dx = BoardGeometry.centerX(other.coords()) - center.x;
             float dy = BoardGeometry.centerY(other.coords()) - center.y;
-            float along = ((point.x - center.x) * dx + (point.y - center.y) * dy) / (dx * dx + dy * dy);
+            float length2 = dx * dx + dy * dy;
+            float along = ((point.x - center.x) * dx + (point.y - center.y) * dy) / length2;
             float drop = tile.elevation() - other.elevation();
             float descended = (top - point.z) / (drop * BoardGeometry.LEVEL);
+            if (acceleration != null && along > 0) {
+                // Gain speed from the actual lost surface height, never the riverbed depth. Carry that momentum
+                // through the foot, then ease it away inside the receiving hex. The rounded corridor also keeps
+                // unrelated nearby streams out of this descent and slows the current toward the banks.
+                float across = ((point.x - center.x) * dy - (point.y - center.y) * dx) / length2;
+                float distance = (float) Math.hypot(Math.max(0, along - 1), across);
+                float wake = 1 - BoardRelief.smooth((distance - .15f) / .25f);
+                float fallen = Math.clamp(descended, 0, 1) * drop;
+                float gain = ((float) Math.sqrt(.01f + .08f * fallen) - .1f) * wake;
+                float length = (float) Math.sqrt(length2);
+                acceleration.add(dx / length * gain, dy / length * gain);
+            }
+            if (!inside && !BoardGeometry.contains(other.coords(), point.x, point.y)) { continue; }
             float churn = BoardRelief.smooth((descended - .15f) / .5f)
                   * (1 - BoardRelief.smooth((descended - .85f) / .15f)) * BoardRelief.smooth(along * 4);
             agitation = Math.max(agitation, (drop == 2 ? .85f : .3f) * churn);

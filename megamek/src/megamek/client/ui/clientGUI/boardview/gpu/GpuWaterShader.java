@@ -18,6 +18,7 @@ import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
 import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
 import megamek.common.board.Coords;
@@ -542,7 +543,7 @@ final class GpuWaterShader extends Attribute {
     }
 
     /** Open water around one chunk, derived lazily from the shared topology; frozen and molten hexes are banks. */
-    private static final class Pools {
+    static final class Pools {
         private final BoardScene scene;
         private final Map<Coords, BoardFlow.Current> currents;
         private final Map<Coords, BoardSurface> surfaces;
@@ -551,6 +552,8 @@ final class GpuWaterShader extends Attribute {
         private final Pool[] candidates = new Pool[7];
         private int count, nearColumn, nearRow = Integer.MIN_VALUE;
         private final float[] scratch = new float[4];
+        private final Vector3 point = new Vector3();
+        private final Vector2 acceleration = new Vector2();
 
         Pools(BoardScene scene, Map<Coords, BoardFlow.Current> currents, Map<Coords, BoardSurface> surfaces) {
             this.scene = scene;
@@ -606,6 +609,19 @@ final class GpuWaterShader extends Attribute {
             float distance = (float) Math.sqrt(nearest) / BoardGeometry.WIDTH;
             result[0] = inside == null ? -distance : distance;
             blend(x, y, result);
+            if (inside != null) {
+                point.set(x, y, inside.surface.waterHeight(x, y));
+                acceleration.setZero();
+                for (int i = 0; i < count; i++) {
+                    candidates[i].surface.slopeEffects(point, acceleration);
+                }
+                // Several descents can meet at a junction. Keep their combined visual current inside the field's
+                // encoding range, while the ordinary flat-reach current and agitation remain independently blended.
+                acceleration.limit(.5f);
+                acceleration.add(result[1], result[2]).limit(CURRENT_RANGE);
+                result[1] = acceleration.x;
+                result[2] = acceleration.y;
+            }
             return inside;
         }
 
