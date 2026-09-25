@@ -51,6 +51,8 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import javax.imageio.ImageIO;
 import javax.swing.UIManager;
 
@@ -506,22 +508,10 @@ public final class ImageUtil {
      * @return if the image is animated
      */
     private static boolean waitUntilLoaded(Image result) {
-        FinishedLoadingObserver observer = new FinishedLoadingObserver(Thread.currentThread());
+        FinishedLoadingObserver observer = new FinishedLoadingObserver();
         // Check to see if the image is loaded
         if (!Toolkit.getDefaultToolkit().prepareImage(result, -1, -1, observer)) {
-            long startTime = java.lang.System.currentTimeMillis();
-            long maxRuntime = 10000;
-            long runTime = 0;
-            while (!observer.isLoaded() && runTime < maxRuntime) {
-
-                try {
-                    Thread.sleep(10);
-                } catch (InterruptedException ignored) {
-                    // Do nothing
-                }
-
-                runTime = java.lang.System.currentTimeMillis() - startTime;
-            }
+            observer.await();
         }
         return observer.isAnimated();
     }
@@ -532,27 +522,27 @@ public final class ImageUtil {
               ImageObserver.FRAMEBITS |
               ImageObserver.ALLBITS;
 
-        private final Thread mainThread;
-        private volatile boolean loaded = false;
+        private final CountDownLatch loaded = new CountDownLatch(1);
         private volatile boolean animated = false;
 
-        public FinishedLoadingObserver(Thread mainThread) {
-            this.mainThread = mainThread;
+        void await() {
+            try {
+                loaded.await(10, TimeUnit.SECONDS);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
 
         @Override
         public boolean imageUpdate(Image img, int informationFlags, int x, int y, int width, int height) {
             if ((informationFlags & DONE) > 0) {
-                loaded = true;
                 animated = ((informationFlags & ImageObserver.FRAMEBITS) > 0);
-                mainThread.interrupt();
+                // Loading can finish after the waiter returns. Never interrupt its thread: on Swing that
+                // would also unwind any modal dialog's event loop that happens to be running there.
+                loaded.countDown();
                 return false;
             }
             return true;
-        }
-
-        public boolean isLoaded() {
-            return loaded;
         }
 
         public boolean isAnimated() {

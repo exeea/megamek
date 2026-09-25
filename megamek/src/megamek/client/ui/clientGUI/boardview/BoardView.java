@@ -5514,11 +5514,18 @@ public final class BoardView extends AbstractBoardView
     @Override
     public void select(Coords coords) {
         if ((coords == null) || game.getBoard(boardId).contains(coords)) {
+            selectForInspection(coords);
+            processBoardViewEvent(new BoardViewEvent(this, coords, BoardViewEvent.BOARD_HEX_SELECTED, 0));
+        }
+    }
+
+    /** Select a hex for inspection without invoking a phase's target, deployment or movement tool. */
+    public void selectForInspection(Coords coords) {
+        if ((coords == null) || game.getBoard(boardId).contains(coords)) {
             setSelected(coords);
             moveCursor(selectedSprite, coords);
             moveCursor(firstLOSSprite, null);
             moveCursor(secondLOSSprite, null);
-            processBoardViewEvent(new BoardViewEvent(this, coords, BoardViewEvent.BOARD_HEX_SELECTED, 0));
         }
     }
 

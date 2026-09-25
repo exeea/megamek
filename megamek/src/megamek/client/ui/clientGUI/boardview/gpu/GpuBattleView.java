@@ -278,6 +278,12 @@ class GpuBattleView extends ApplicationAdapter {
         if (frame.scene() == null) {
             return;
         }
+        // Wait for Swing's measured tools inset before the editor's first camera fit.
+        if (source.isEditor() && frame.hud().width() <= 1) {
+            ScreenUtils.clear(.045f, .065f, .075f, 1, true);
+            ui.draw();
+            return;
+        }
         renderStage("scene update");
         if (scene != null && (boardGeneration != frame.boardGeneration() || scene.boardId() != frame.scene().boardId() || scene.width() != frame.scene().width()
               || scene.height() != frame.scene().height())) {
@@ -1151,6 +1157,7 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     private final class BoardInput extends InputAdapter {
+        private long editorGestureGeneration;
         private int dragX;
         private int dragY;
         private boolean panning;
@@ -1210,15 +1217,21 @@ class GpuBattleView extends ApplicationAdapter {
             startY = y;
             boardGesture = true;
             gestureButton = button;
+            editorGestureGeneration = boardGeneration;
             dragged = false;
             panning = button == Input.Buttons.RIGHT || button == Input.Buttons.MIDDLE;
-            orbiting = panning && (modifiers() & InputEvent.SHIFT_DOWN_MASK) != 0;
+            boolean shiftDown = (modifiers() & InputEvent.SHIFT_DOWN_MASK) != 0;
+            orbiting = panning && ((button == Input.Buttons.MIDDLE) != shiftDown);
             if (panning) {
                 ui.closeMenu();
             }
             if (button == Input.Buttons.LEFT) {
                 Coords coords = pick(x, y);
                 int mods = modifiers();
+                if (source.isEditor()) {
+                    source.paintEditor(coords, mods, editorGestureGeneration);
+                    return true;
+                }
                 boolean plotting = ui.plotting() && !GpuBoardSource.isMeasurement(mods);
                 overlayInput(MouseEvent.MOUSE_PRESSED, x, y, () -> {
                     if (plotting) {
@@ -1247,6 +1260,12 @@ class GpuBattleView extends ApplicationAdapter {
             } else if (!ui.hit(x, y)) {
                 Coords coords = pick(x, y);
                 int mods = modifiers();
+                if (source.isEditor()) {
+                    if (gestureButton == Input.Buttons.LEFT) {
+                        source.paintEditor(coords, mods, editorGestureGeneration);
+                    }
+                    return true;
+                }
                 boolean plotting = ui.plotting() && !GpuBoardSource.isMeasurement(mods);
                 overlayInput(MouseEvent.MOUSE_DRAGGED, x, y, () -> {
                     if (plotting) {
@@ -1263,6 +1282,13 @@ class GpuBattleView extends ApplicationAdapter {
         public boolean touchUp(int x, int y, int pointer, int button) {
             if (!boardGesture || button != gestureButton) {
                 return false;
+            }
+            if (source.isEditor()) {
+                if (button == Input.Buttons.LEFT) {
+                    source.endEditorStroke();
+                }
+                reset();
+                return true;
             }
             if (button == Input.Buttons.RIGHT && !orbiting && !dragged && !ui.hit(x, y)) {
                 ui.inspect(pick(x, y), x, y);

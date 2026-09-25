@@ -169,10 +169,19 @@ final class GpuBoardUi implements Disposable {
         cameraControls.addListener(new TextTooltip(Messages.getString("GpuBoard.cameraHelp"), skin));
         toolbar.add(cameraControls).width(70).padRight(12);
         toolbar.add(new Image(skin.getDrawable("rule"))).width(1).height(20).padRight(12);
-        toolbar.add(namedButton("speed", "", changeSpeed)).width(88);
-        toolbar.add(namedButton("playback", Messages.getString("GpuBoard.pausePlayback"), togglePlayback)).width(76);
+        if (source.isEditor()) {
+            toolbar.add(namedButton("editor-tools", Messages.getString("BoardEditor.tools"),
+                  source::showEditorTools)).width(78);
+            toolbar.add(namedButton("editor-2d", Messages.getString("BoardEditor.edit2D"),
+                  source::showClassicEditor)).width(100);
+        } else {
+            toolbar.add(namedButton("speed", "", changeSpeed)).width(88);
+            toolbar.add(namedButton("playback", Messages.getString("GpuBoard.pausePlayback"), togglePlayback)).width(76);
+        }
         toolbar.add(namedButton("tuning", "Tuning", this::toggleTuning)).width(70);
-        toolbar.add(namedButton("battle-report-toggle", "Report", this::toggleReport)).width(70);
+        if (!source.isEditor()) {
+            toolbar.add(namedButton("battle-report-toggle", "Report", this::toggleReport)).width(70);
+        }
         toolbar.add().expandX();
         status = new Label("", skin, "muted");
         status.setEllipsis(true);
@@ -222,8 +231,12 @@ final class GpuBoardUi implements Disposable {
         fps.setAlignment(Align.right);
         fps.setTouchable(Touchable.disabled);
         footer.add(fps).width(76).padLeft(8).right();
-        turn.add(footer).colspan(5).minWidth(0).growX().height(16).padTop(4);
-        root.add(turn).height(TURN_HEIGHT).growX();
+        if (source.isEditor()) {
+            turn.clearChildren();
+            turn.pad(5, 14, 5, 14);
+        }
+        turn.add(footer).colspan(source.isEditor() ? 1 : 5).minWidth(0).growX().height(16).padTop(4);
+        root.add(turn).height(bottomHeight()).growX();
 
         phaseMessage = new Label("", skin);
         phaseMessage.setName("board-phase-message");
@@ -408,9 +421,9 @@ final class GpuBoardUi implements Disposable {
     }
 
     private void resizePanels() {
-        dock.resize(stage.getWidth(), stage.getHeight(), TOP_HEIGHT, TURN_HEIGHT, leftSidebarInset(), sidebarInset());
-        phaseNotice.setBounds(0, TURN_HEIGHT, stage.getWidth(),
-              Math.max(0, stage.getHeight() - TOP_HEIGHT - TURN_HEIGHT));
+        dock.resize(stage.getWidth(), stage.getHeight(), TOP_HEIGHT, bottomHeight(), leftSidebarInset(), sidebarInset());
+        phaseNotice.setBounds(0, bottomHeight(), stage.getWidth(),
+              Math.max(0, stage.getHeight() - TOP_HEIGHT - bottomHeight()));
     }
 
     private void toggleReport() {
@@ -489,7 +502,11 @@ final class GpuBoardUi implements Disposable {
     }
 
     int bottomPixels() {
-        return Math.round(TURN_HEIGHT * scale);
+        return Math.round(bottomHeight() * scale);
+    }
+
+    private int bottomHeight() {
+        return source.isEditor() ? 34 : TURN_HEIGHT;
     }
 
     /** Unobstructed board area in window pixels, derived from the shared dock and captured unit strips. */
@@ -540,8 +557,10 @@ final class GpuBoardUi implements Disposable {
     }
 
     void setPlaybackPaused(boolean paused) {
-        ((TextButton) stage.getRoot().findActor("playback")).setText(Messages.getString(
-              paused ? "GpuBoard.resumePlayback" : "GpuBoard.pausePlayback"));
+        if (!source.isEditor()) {
+            ((TextButton) stage.getRoot().findActor("playback")).setText(Messages.getString(
+                  paused ? "GpuBoard.resumePlayback" : "GpuBoard.pausePlayback"));
+        }
     }
 
     void update(GpuBoardSource.Frame next, String speed) {
@@ -569,19 +588,29 @@ final class GpuBoardUi implements Disposable {
         reportPanel.updateKeywords(source.uiPreferences);
         phaseMessage.setText(source.phaseStatus.text());
         phaseNotice.setVisible(source.phaseStatus.blocking());
-        ((TextButton) stage.getRoot().findActor("battle-report-toggle")).setChecked(reportPanel.panel().isVisible());
+        if (!source.isEditor()) {
+            ((TextButton) stage.getRoot().findActor("battle-report-toggle")).setChecked(reportPanel.panel().isVisible());
+        }
         ((TextButton) stage.getRoot().findActor("tuning")).setChecked(tuning.panel().isVisible());
         updateMenuBar();
         updateHud(frame.hud(), System.nanoTime());
-        phase.setText(frame.scene().phase().toUpperCase(Locale.ROOT) + "  /  PHASE");
+        phase.setText(source.isEditor() ? source.phaseStatus.text()
+              : frame.scene().phase().toUpperCase(Locale.ROOT) + "  /  PHASE");
         status.setText("MAP " + (frame.scene().boardId() + 1) + "  /  " + frame.scene().width() + " \u00d7 " + frame.scene().height());
         ((TextButton) stage.getRoot().findActor("top")).setChecked(camera.isTopDown());
         ((TextButton) stage.getRoot().findActor("iso")).setChecked(camera.isIsometric());
+        if (source.isEditor()) {
+            help.setText(Messages.getString("BoardEditor.edit3DHelp"));
+            if (popup.isVisible()) {
+                updateMenu();
+            }
+            return;
+        }
         ((TextButton) stage.getRoot().findActor("speed")).setText(speed);
         actor.setText(frame.actorName().isEmpty() ? "No unit selected" : frame.actorName());
         updateActor();
         help.setText(plotting ? "BOARD TOOL ACTIVE   /   Click to plot or select   \u00b7   Right-click: commands   \u00b7   Esc: exit tool"
-              : "Click: commands   \u00b7   Right-drag: pan   \u00b7   Shift + right-drag: orbit   \u00b7   Wheel: zoom");
+              : "Click: commands   \u00b7   Right-drag: pan   \u00b7   Middle-drag: orbit   \u00b7   Shift: swap   \u00b7   Wheel: zoom");
         help.setColor(plotting ? GpuBoardSkin.ACCENT : Color.WHITE);
         if (!plotting && !source.phaseStatus.text().isBlank() && !source.phaseStatus.blocking()) {
             help.setText(source.phaseStatus.text());
@@ -1076,11 +1105,11 @@ final class GpuBoardUi implements Disposable {
             y = MathUtils.clamp(y, 4, Math.max(4, stage.getHeight() - height - 4));
         } else {
             float upperEdge = stage.getHeight() - TOP_HEIGHT - 8;
-            height = Math.min(height, Math.max(1, upperEdge - TURN_HEIGHT - 8));
+            height = Math.min(height, Math.max(1, upperEdge - bottomHeight() - 8));
             float left = Math.max(8, leftSidebarInset());
             float right = dock.cameraRight(stage.getWidth(), sidebarInset());
             x = MathUtils.clamp(anchorX, left, Math.max(left, right - menuWidth() - 8));
-            y = MathUtils.clamp(anchorTop - height, TURN_HEIGHT + 8, upperEdge - height);
+            y = MathUtils.clamp(anchorTop - height, bottomHeight() + 8, upperEdge - height);
         }
         popup.setBounds(x, y, menuWidth(), height);
         popup.validate();
@@ -1141,14 +1170,14 @@ final class GpuBoardUi implements Disposable {
         if (down && bindings.contains(KeyCommandBind.CANCEL)) {
             plotting = false;
         }
-        if (down && bindings.contains(KeyCommandBind.ROUND_REPORT)) {
+        if (!source.isEditor() && down && bindings.contains(KeyCommandBind.ROUND_REPORT)) {
             toggleReport();
             return true;
         }
-        if (down && !popup.isVisible() && reportPanel.key(bindings)) {
+        if (!source.isEditor() && down && !popup.isVisible() && reportPanel.key(bindings)) {
             return true;
         }
-        if (down && unbound && modifiers == 0 && key == Input.Keys.F10) {
+        if (!source.isEditor() && down && unbound && modifiers == 0 && key == Input.Keys.F10) {
             open("all", "All actions", "all-actions");
             return true;
         }

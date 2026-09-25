@@ -27,6 +27,7 @@ import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 
 import megamek.client.ui.Messages;
+import megamek.client.ui.boardeditor.BoardEditorPanel;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardFieldOfView;
 import megamek.client.ui.clientGUI.boardview.BoardView;
@@ -128,6 +129,9 @@ final class GpuBoardSource implements AutoCloseable {
 
     private volatile BoardView view;
     private final Supplier<JComponent> phasePanel;
+    private final BoardEditorPanel editor;
+    /** Only Swing owns the active brush stroke; render input carries the board generation it picked. */
+    private Board editorStrokeBoard;
     private GpuBoardActions actions;
     volatile UiPreferences uiPreferences;
     volatile GpuBoardActions.PhaseStatus phaseStatus = new GpuBoardActions.PhaseStatus("", false);
@@ -200,9 +204,14 @@ final class GpuBoardSource implements AutoCloseable {
     }
 
     public GpuBoardSource(BoardView view, Supplier<JComponent> phasePanel) {
+        this(view, phasePanel, null);
+    }
+
+    GpuBoardSource(BoardView view, Supplier<JComponent> phasePanel, BoardEditorPanel editor) {
         requireSwingThread();
         this.view = view;
         this.phasePanel = phasePanel;
+        this.editor = editor;
         GUIPreferences preferences = GUIPreferences.getInstance();
         uiPreferences = UiPreferences.capture();
         actions = new GpuBoardActions(view, phasePanel, () -> closed || this.view != view, this::refresh);
@@ -543,7 +552,8 @@ final class GpuBoardSource implements AutoCloseable {
     }
 
     private Frame capture() {
-        phaseStatus = GpuBoardActions.phaseStatus(phasePanel.get());
+        phaseStatus = editor == null ? GpuBoardActions.phaseStatus(phasePanel.get())
+              : new GpuBoardActions.PhaseStatus(editor.getFrame().getTitle(), false);
         if (view.getClientgui() != null) {
             BoardView selectedView = view.getClientgui().getCurrentBoardView()
                   .filter(BoardView.class::isInstance).map(BoardView.class::cast).orElse(view);
@@ -661,7 +671,8 @@ final class GpuBoardSource implements AutoCloseable {
         List<BoardScene.Command> commands = actions.phaseCommands();
         BoardScene.Context nextContext = contextCoords == null ? null : new BoardScene.Context(contextCoords,
               actions.contextCommands(contextCoords));
-        List<BoardScene.Command> nextGlobal = new ArrayList<>(actions.globalCommands());
+        List<BoardScene.Command> nextGlobal = new ArrayList<>(editor == null ? actions.globalCommands()
+              : actions.editorCommands(editor.getMenuBar()));
         if (view.getClientgui() != null) {
             var gui = view.getClientgui();
             List<BoardScene.Command> boards = gui.boardViews().stream().map(boardView -> new BoardScene.Command(
@@ -763,7 +774,8 @@ final class GpuBoardSource implements AutoCloseable {
         overlayImages.clear();
         overlayImages.putAll(retained);
         return new Hud(layout.pixels().width, layout.pixels().height, List.copyOf(layers),
-              view.sidePanelInset() * layout.pixels().width / (float) Math.max(1, layout.size().width),
+              (editor == null ? view.sidePanelInset() : editor.tools3DWidth())
+                    * layout.pixels().width / (float) Math.max(1, layout.size().width),
               view.leftPanelInset() * layout.pixels().width / (float) Math.max(1, layout.size().width));
     }
 
@@ -1046,6 +1058,15 @@ final class GpuBoardSource implements AutoCloseable {
 
     public void key(int keyCode, boolean down, int modifiers) {
         SwingUtilities.invokeLater(() -> {
+            if (!closed && editor != null && down && !editor.shouldIgnoreHotKeys()) {
+                if (keyCode != KeyEvent.VK_SHIFT && keyCode != KeyEvent.VK_CONTROL && keyCode != KeyEvent.VK_ALT
+                      && keyCode != KeyEvent.VK_META) {
+                    finishEditorStroke();
+                    GpuBoardActions.menuShortcut(editor.getMenuBar(), KeyStroke.getKeyStroke(keyCode, modifiers));
+                    refresh();
+                }
+                return;
+            }
             if (!closed && view.getClientgui() != null && !view.getClientgui().shouldIgnoreHotKeys()) {
                 KeyEvent event = new KeyEvent(view.getPanel(),
                       down ? KeyEvent.KEY_PRESSED : KeyEvent.KEY_RELEASED, System.currentTimeMillis(), modifiers,
@@ -1095,6 +1116,7 @@ final class GpuBoardSource implements AutoCloseable {
 
     public void stopKeys() {
         SwingUtilities.invokeLater(() -> {
+            finishEditorStroke();
             var gui = view.getClientgui();
             if (gui != null && gui.controller != null) {
                 gui.controller.stopAllRepeating();
@@ -1105,6 +1127,55 @@ final class GpuBoardSource implements AutoCloseable {
     /** Both measurement gestures belong to the shared ruler, independently of the active phase tool. */
     static boolean isMeasurement(int modifiers) {
         return (modifiers & (InputEvent.CTRL_DOWN_MASK | InputEvent.ALT_DOWN_MASK)) != 0;
+    }
+
+    boolean isEditor() {
+        return editor != null;
+    }
+
+    void showEditorTools() {
+        SwingUtilities.invokeLater(() -> {
+            if (!closed && editor != null) {
+                editor.show3DTools();
+            }
+        });
+    }
+
+    void showClassicEditor() {
+        SwingUtilities.invokeLater(() -> {
+            if (!closed && editor != null) {
+                GpuBoardWindow.toggleEditor(editor);
+            }
+        });
+    }
+
+    /** Route picked hexes to the existing editor listener, rejecting input from a replaced board. */
+    void paintEditor(Coords coords, int modifiers, long generation) {
+        SwingUtilities.invokeLater(() -> {
+            if (!closed && editor != null && generation == boardGeneration && board == view.game.getBoard()
+                  && coords != null && board.contains(coords) && !editor.shouldIgnoreHotKeys()) {
+                editorStrokeBoard = board;
+                editor.paintIn3D(coords, modifiers);
+            }
+        });
+    }
+
+    void endEditorStroke() {
+        SwingUtilities.invokeLater(() -> {
+            finishEditorStroke();
+            if (!closed) {
+                refresh();
+            }
+        });
+    }
+
+    private void finishEditorStroke() {
+        if (editorStrokeBoard != null) {
+            if (editorStrokeBoard == view.game.getBoard()) {
+                editor.finishBrushStroke();
+            }
+            editorStrokeBoard = null;
+        }
     }
 
     public void click(Coords coords, boolean doubleClick, int modifiers) {
@@ -1137,6 +1208,7 @@ final class GpuBoardSource implements AutoCloseable {
             return;
         }
         closed = true;
+        finishEditorStroke();
         if (conditionsDialog != null) { conditionsDialog.dispose(); }
         timer.stop();
         view.game.removeGameListener(gameListener);

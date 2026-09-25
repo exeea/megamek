@@ -75,6 +75,7 @@ import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.IMapSettingsObserver;
 import megamek.client.ui.clientGUI.RecentBoardList;
 import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.clientGUI.boardview.overlay.KeyBindingsOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.TraceOverlay;
 import megamek.client.ui.clientGUI.boardview.toolTip.BoardEditorTooltip;
@@ -142,6 +143,8 @@ public class BoardEditorPanel extends JPanel
     private AbstractHelpDialog help;
     private CommonSettingsDialog settingsDialog;
     private MinimapDialog minimapW;
+    private JDialog tools3D;
+    private final JButton editorViewButton = new JButton(Messages.getString("BoardEditor.edit3D"));
     private final MegaMekController controller;
 
     // The current files
@@ -287,27 +290,7 @@ public class BoardEditorPanel extends JPanel
             @Override
             public void mouseReleased(MouseEvent e) {
                 if (e.getButton() == MouseEvent.BUTTON1) {
-                    // Act only if the user actually drew something
-                    if ((currentUndoSet != null) && !currentUndoSet.isEmpty()) {
-                        // Since this draw action is finished, push the
-                        // drawn hexes onto the Undo Stack and get ready
-                        // for a new draw action
-                        undoStack.push(currentUndoSet);
-                        currentUndoSet = null;
-                        buttonUndo.setEnabled(true);
-                        // Drawing something disables any redo actions
-                        redoStack.clear();
-                        buttonRedo.setEnabled(false);
-                        // When Undo (without Redo) has been used after saving and the user draws on the board, then
-                        // it can no longer know if it's been returned to the saved state, and it will always be
-                        // treated as changed.
-                        if (savedUndoStackSize > undoStack.size()) {
-                            canReturnToSaved = false;
-                        }
-                        hasChanges = !canReturnToSaved || (undoStack.size() != savedUndoStackSize);
-                    }
-                    // Mark the title when the board has changes
-                    setFrameTitle();
+                    finishBrushStroke();
                 }
             }
         });
@@ -479,7 +462,7 @@ public class BoardEditorPanel extends JPanel
      */
     private DialogResult showSavePrompt() {
         ignoreHotKeys = true;
-        int savePrompt = JOptionPane.showConfirmDialog(null,
+        int savePrompt = JOptionPane.showConfirmDialog(frame,
               Messages.getString("BoardEditor.exitprompt"),
               Messages.getString("BoardEditor.exittitle"),
               JOptionPane.YES_NO_CANCEL_OPTION,
@@ -1035,6 +1018,9 @@ public class BoardEditorPanel extends JPanel
         butSourceFile = new JButton(Messages.getString("BoardEditor.butSourceFile"));
         butSourceFile.setActionCommand(ClientGUI.BOARD_SOURCE_FILE);
 
+        editorViewButton.setToolTipText(Messages.getString("BoardEditor.switchView.tooltip"));
+        editorViewButton.addActionListener(e -> GpuBoardWindow.toggleEditor(this));
+
         addManyActionListeners(butBoardValidate, butBoardSaveAsImage, butBoardSaveAs, butBoardSave);
         addManyActionListeners(butBoardOpen, butExpandMap, butBoardNew);
         addManyActionListeners(butDelTerrain, butAddTerrain, butSourceFile);
@@ -1050,7 +1036,10 @@ public class BoardEditorPanel extends JPanel
                     butBoardValidate));
         if (Desktop.isDesktopSupported()) {
             panButtons.add(butSourceFile);
+        } else {
+            panButtons.add(Box.createHorizontalGlue());
         }
+        panButtons.add(editorViewButton);
 
         var deploymentZoneChooserPanel = new FixedYPanel();
         deploymentZoneChooserPanel.add(new JLabel("Deployment Zone: "));
@@ -1137,6 +1126,9 @@ public class BoardEditorPanel extends JPanel
     }
 
     private void resetUndo() {
+        lastClicked = null;
+        hexLevelToDraw = -1000;
+        isDragging = false;
         currentUndoSet = null;
         currentUndoCoords = null;
         undoStack.clear();
@@ -2414,6 +2406,70 @@ public class BoardEditorPanel extends JPanel
      */
     public JFrame getFrame() {
         return frame;
+    }
+
+    public BoardView getBoardView() {
+        return bv;
+    }
+
+    public JMenuBar getMenuBar() {
+        return menuBar;
+    }
+
+    /** The native viewport feeds the same brush listener as a drag in the classic viewport. Runs on Swing. */
+    public void paintIn3D(Coords coords, int modifiers) {
+        if (coords != null && board.contains(coords) && !shouldIgnoreHotKeys()) {
+            bv.mouseAction(coords, BoardView.BOARD_HEX_DRAG, modifiers | InputEvent.BUTTON1_DOWN_MASK,
+                  MouseEvent.BUTTON1);
+        }
+    }
+
+    /** One mouse gesture is one undo entry, including release outside the board or a view/focus change. */
+    public void finishBrushStroke() {
+        endCurrentUndoSet();
+        lastClicked = null;
+        hexLevelToDraw = -1000;
+        isDragging = false;
+        setFrameTitle();
+    }
+
+    /** Move the existing tools to a palette; both view modes retain their controls and the same editor model. */
+    public void enter3DEditor() {
+        finishBrushStroke();
+        tools3D = new JDialog(frame, Messages.getString("BoardEditor.tools"), false);
+        tools3D.setDefaultCloseOperation(WindowConstants.HIDE_ON_CLOSE);
+        tools3D.setAlwaysOnTop(true);
+        tools3D.add(this);
+        Rectangle bounds = frame.getGraphicsConfiguration().getBounds();
+        Insets insets = Toolkit.getDefaultToolkit().getScreenInsets(frame.getGraphicsConfiguration());
+        int height = bounds.height - insets.top - insets.bottom;
+        tools3D.setSize(Math.min(getPreferredSize().width + 24, bounds.width / 2), height - 80);
+        tools3D.setLocation(bounds.x + bounds.width - insets.right - tools3D.getWidth(), bounds.y + insets.top + 40);
+        editorViewButton.setText(Messages.getString("BoardEditor.edit2D"));
+        show3DTools();
+    }
+
+    public void show3DTools() {
+        if (tools3D != null) {
+            tools3D.setVisible(true);
+            tools3D.toFront();
+        }
+    }
+
+    public int tools3DWidth() {
+        return tools3D != null && tools3D.isShowing() ? tools3D.getWidth() : 0;
+    }
+
+    /** Called after native rendering stops; the editor still owns its board view and undo history. */
+    public void leave3DEditor() {
+        finishBrushStroke();
+        if (tools3D != null) {
+            frame.add(this, BorderLayout.EAST);
+            tools3D.dispose();
+            tools3D = null;
+            frame.revalidate();
+        }
+        editorViewButton.setText(Messages.getString("BoardEditor.edit3D"));
     }
 
     /**

@@ -298,6 +298,10 @@ final class GpuBoardActions {
         return result;
     }
 
+    List<BoardScene.Command> editorCommands(Container menu) {
+        return menuCommands(menu, () -> menu, null, List.of());
+    }
+
     /** The native window cannot trigger Swing accelerators, so invoke the current menu item on the EDT. */
     boolean menuShortcut(KeyStroke key) {
         var gui = view.getClientgui();
@@ -305,7 +309,7 @@ final class GpuBoardActions {
               && menuShortcut(gui.getMenuBar(), key);
     }
 
-    private static boolean menuShortcut(Container menu, KeyStroke key) {
+    static boolean menuShortcut(Container menu, KeyStroke key) {
         for (Component component : menu.getComponents()) {
             if (!(component instanceof JMenuItem item) || !item.isVisible() || !item.isEnabled()
                   || ClientGUI.VIEW_UNIT_OVERVIEW.equals(item.getActionCommand())) {

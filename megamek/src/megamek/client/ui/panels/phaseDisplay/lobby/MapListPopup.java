@@ -38,9 +38,13 @@ import java.util.List;
 import javax.swing.JMenu;
 import javax.swing.JMenuItem;
 
+import megamek.MMConstants;
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.util.ScalingPopup;
 import megamek.client.ui.util.UIUtil;
+import megamek.common.Configuration;
+import megamek.common.util.fileUtils.MegaMekFile;
 
 class MapListPopup {
 
@@ -57,6 +61,13 @@ class MapListPopup {
         boolean oneSelected = boards.size() == 1;
 
         ScalingPopup popup = new ScalingPopup();
+        File boardFile = new MegaMekFile(Configuration.boardsDir(),
+              boards.getFirst() + MMConstants.CL_KEY_FILE_EXTENSION_BOARD).getFile();
+        JMenuItem preview = new JMenuItem(Messages.getString("GpuBoard.preview"));
+        preview.setEnabled(oneSelected && boardFile.isFile());
+        preview.addActionListener(event -> GpuBoardWindow.openPreview(lobby.getClientGUI().getFrame(), boardFile));
+        popup.add(preview);
+        popup.addSeparator();
         if (numButtons == 1) {
             String name = mapShortName(boards.getFirst());
             JMenuItem mi = menuItem("Set \"" + name + "\" as Board 0",

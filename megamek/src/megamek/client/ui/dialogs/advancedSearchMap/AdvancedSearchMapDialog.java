@@ -41,6 +41,8 @@ import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.awt.event.ActionEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -53,9 +55,12 @@ import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.TableRowSorter;
 
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.dialogs.buttonDialogs.AbstractButtonDialog;
 import megamek.client.ui.util.UIUtil;
+import megamek.common.Configuration;
 import megamek.common.util.StringUtil;
+import megamek.common.util.fileUtils.MegaMekFile;
 import megamek.utilities.BoardClassifier;
 import megamek.utilities.BoardsTagger;
 
@@ -77,6 +82,7 @@ public class AdvancedSearchMapDialog extends AbstractButtonDialog {
     private final JList<String> listBoardPaths = new JList<>();
     private JLabel boardImage;
     private JLabel boardInfo;
+    private final JButton previewButton = new JButton(Messages.getString("GpuBoard.preview"));
     private final TableRowSorter<BoardTableModel> boardSorter = new TableRowSorter<>();
     private final BoardTableModel boardModel = new BoardTableModel();
     private final JLabel boardCountLabel = new JLabel("");
@@ -129,7 +135,17 @@ public class AdvancedSearchMapDialog extends AbstractButtonDialog {
         infoPanel.add(boardImage);
         boardInfo = new JLabel();
         infoPanel.add(boardInfo);
+        previewButton.setEnabled(false);
+        previewButton.addActionListener(e -> previewSelectedBoard());
+        infoPanel.add(previewButton);
         return infoPanel;
+    }
+
+    private void previewSelectedBoard() {
+        String path = getPath();
+        if (path != null) {
+            GpuBoardWindow.openPreview(this, new MegaMekFile(Configuration.boardsDir(), path).getFile());
+        }
     }
 
     private JPanel createFilter() {
@@ -303,10 +319,23 @@ public class AdvancedSearchMapDialog extends AbstractButtonDialog {
         ListSelectionModel boardSelModel = boardTable.getSelectionModel();
         boardSelModel.addListSelectionListener(e -> {
             int index = boardTable.getSelectedRow();
+            previewButton.setEnabled(index >= 0);
             if (index >= 0) {
                 index = boardTable.convertRowIndexToModel(index);
                 boardImage.setIcon(boardModel.getIconAt(index, UIUtil.scaleForGUI(200)));
                 boardInfo.setText(boardModel.getInfoAt(index));
+            } else {
+                boardImage.setIcon(null);
+                boardInfo.setText("");
+            }
+        });
+        boardTable.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (SwingUtilities.isLeftMouseButton(e) && e.getClickCount() == 2
+                      && boardTable.rowAtPoint(e.getPoint()) >= 0) {
+                    previewSelectedBoard();
+                }
             }
         });
         boardTable.setModel(boardModel);
@@ -318,7 +347,9 @@ public class AdvancedSearchMapDialog extends AbstractButtonDialog {
         for (int i = 0; i < boardModel.getColumnCount(); i++) {
             boardTable.getColumnModel().getColumn(i).setPreferredWidth(boardModel.getPreferredWidth(i));
         }
-        boardTable.setRowSelectionInterval(0, 0);
+        if (boardTable.getRowCount() > 0) {
+            boardTable.setRowSelectionInterval(0, 0);
+        }
         DefaultTableCellRenderer rightRenderer = new DefaultTableCellRenderer();
         rightRenderer.setHorizontalAlignment(JLabel.RIGHT);
         boardTable.setFillsViewportHeight(true);

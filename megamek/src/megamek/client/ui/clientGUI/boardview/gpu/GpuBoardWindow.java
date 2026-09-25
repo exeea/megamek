@@ -8,8 +8,14 @@ import java.awt.Toolkit;
 import java.awt.Window;
 import java.awt.event.AWTEventListener;
 import java.awt.event.ComponentEvent;
+import java.awt.event.WindowEvent;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Supplier;
 import javax.swing.JComponent;
 import javax.swing.JOptionPane;
@@ -23,9 +29,13 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Graphics;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Window;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3WindowAdapter;
 import megamek.client.ui.Messages;
+import megamek.client.ui.boardeditor.BoardEditorPanel;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.common.board.Board;
+import megamek.common.enums.GamePhase;
+import megamek.common.game.Game;
 import megamek.logging.MMLogger;
 
 /** Owns the default battle window. A single libGDX application avoids competing global Gdx contexts. */
@@ -42,6 +52,9 @@ public final class GpuBoardWindow {
     private volatile GpuBoardSource source;
     private volatile String loadingMessage = Messages.getString("ClientGUI.waitingOnTheServer");
     private final Window classicWindow;
+    /** Preview windows own their temporary BoardView and leave the browser's modal session intact. */
+    private final boolean preview;
+    private final BoardEditorPanel editor;
     private final Map<Dialog, Boolean> dialogOnTop = new IdentityHashMap<>();
     /**
      * The classic window hides while the GPU view runs, so a Swing dialog owned by it (deployment elevation choices,
@@ -49,6 +62,9 @@ public final class GpuBoardWindow {
      * presented is raised above it instead.
      */
     private final AWTEventListener dialogListener = event -> {
+        if (closeWithPreviewOwner(event)) {
+            return;
+        }
         if (event.getID() == ComponentEvent.COMPONENT_SHOWN
               && event.getSource() instanceof Dialog dialog && belongsToClassicWindow(dialog)) {
             dialogOnTop.putIfAbsent(dialog, dialog.isAlwaysOnTop());
@@ -65,15 +81,108 @@ public final class GpuBoardWindow {
     private Runnable afterClose;
 
     private GpuBoardWindow(ClientGUI gui, BoardView view, Supplier<JComponent> panel) {
+        this(gui, view, panel, null);
+    }
+
+    private GpuBoardWindow(ClientGUI gui, BoardView view, Supplier<JComponent> panel, Window previewOwner) {
+        this(gui, view, panel, previewOwner, null);
+    }
+
+    private GpuBoardWindow(ClientGUI gui, BoardView view, Supplier<JComponent> panel, Window previewOwner,
+          BoardEditorPanel editor) {
         this.gui = gui;
+        this.editor = editor;
         initialView = view;
         this.panel = panel;
-        classicWindow = gui == null ? SwingUtilities.getWindowAncestor(view.getPanel()) : gui.getFrame();
+        preview = previewOwner != null;
+        classicWindow = preview ? previewOwner
+              : gui == null ? SwingUtilities.getWindowAncestor(view.getPanel()) : gui.getFrame();
+        if (editor != null) {
+            loadingMessage = Messages.getString("BoardEditor.edit3DLoading");
+        } else if (preview) {
+            loadingMessage = Messages.getString("GpuBoard.previewLoading");
+        }
         startupTimer = new Timer(100, event -> initializeSource());
+    }
+
+    /** Load a browser entry without changing the lobby's selected boards. */
+    public static void openPreview(Window owner, File boardFile) {
+        Board board = new Board();
+        try (var input = new FileInputStream(boardFile)) {
+            var errors = new ArrayList<String>();
+            board.load(input, errors, false);
+            if (!errors.isEmpty() || board.getWidth() <= 0 || board.getHeight() <= 0) {
+                throw new IOException("Could not load board " + boardFile + ": " + errors);
+            }
+            board.setMapName(boardFile.getName());
+        } catch (IOException | RuntimeException failure) {
+            reportPreviewFailure(owner, failure);
+            return;
+        }
+        openPreview(owner, board);
+    }
+
+    /** The preview owns a temporary game and view; the shared renderer supplies all terrain and camera controls. */
+    public static synchronized void openPreview(Window owner, Board board) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            throw new IllegalStateException("Open the GPU preview on the Swing event thread");
+        }
+        Objects.requireNonNull(owner);
+        if (active != null) {
+            if (active.preview || active.closing) {
+                active.close(false);
+                active.afterClose = () -> {
+                    if (owner.isShowing()) {
+                        openPreview(owner, board);
+                    }
+                };
+            } else {
+                JOptionPane.showMessageDialog(owner, Messages.getString("GpuBoard.alreadyOpen"));
+            }
+            return;
+        }
+        try {
+            Game game = new Game();
+            game.setBoard(board);
+            game.setPhase(GamePhase.LOUNGE);
+            BoardView view = new BoardView(game, null, null, 0);
+            view.setDisplayInvalidFields(false);
+            view.setUseLosTool(false);
+            start(new GpuBoardWindow(null, view, () -> null, owner));
+        } catch (IOException | RuntimeException | LinkageError failure) {
+            reportPreviewFailure(owner, failure);
+        }
     }
 
     public static synchronized void open(BoardView view, Supplier<JComponent> panel) {
         open(view.getClientgui(), view, panel);
+    }
+
+    /** Switch the existing editor's view; its board, tools and undo history remain owned by Swing. */
+    public static synchronized void toggleEditor(BoardEditorPanel editor) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(() -> toggleEditor(editor));
+            return;
+        }
+        if (active != null) {
+            if (active.editor == editor) {
+                if (!active.closing) {
+                    active.close(true);
+                }
+            } else if (active.preview) {
+                active.close(false);
+                active.afterClose = () -> {
+                    if (editor.getFrame().isShowing()) {
+                        toggleEditor(editor);
+                    }
+                };
+            } else {
+                JOptionPane.showMessageDialog(editor.getFrame(), Messages.getString("GpuBoard.alreadyOpen"));
+            }
+            return;
+        }
+        editor.finishBrushStroke();
+        start(new GpuBoardWindow(null, editor.getBoardView(), () -> null, null, editor));
     }
 
     /** Start the chosen board window even before a scenario or server has delivered its first map. */
@@ -86,7 +195,14 @@ public final class GpuBoardWindow {
             throw new IllegalStateException("Open the GPU board on the Swing event thread");
         }
         if (active != null) {
-            if (active.gui != gui || (gui == null && active.initialView != view)) {
+            if (active.preview) {
+                active.close(false);
+                active.afterClose = () -> {
+                    if (gui == null || gui.getFrame().isDisplayable()) {
+                        open(gui, view, panel);
+                    }
+                };
+            } else if (active.gui != gui || (gui == null && active.initialView != view)) {
                 JOptionPane.showMessageDialog(gui == null ? view.getPanel() : gui.getFrame(),
                       Messages.getString("GpuBoard.alreadyOpen"));
             } else if (!active.closing) {
@@ -98,24 +214,26 @@ public final class GpuBoardWindow {
             }
             return;
         }
-        GpuBoardWindow window = new GpuBoardWindow(gui, view, panel);
+        start(new GpuBoardWindow(gui, view, panel));
+    }
+
+    private static void start(GpuBoardWindow window) {
         try {
             active = window;
+            ClientGUI gui = window.gui;
             if (gui != null) {
                 GUIPreferences.getInstance().setUse3DBoard(true);
                 gui.getMenuBar().setBoardView3D(true);
                 gui.setMiniReportLocation(false);
             }
-            Toolkit.getDefaultToolkit().addAWTEventListener(window.dialogListener, AWTEvent.COMPONENT_EVENT_MASK);
+            Toolkit.getDefaultToolkit().addAWTEventListener(window.dialogListener,
+                  AWTEvent.COMPONENT_EVENT_MASK | AWTEvent.WINDOW_EVENT_MASK);
             Thread thread = new Thread(window::run, "MegaMek-GPU-board");
             thread.setDaemon(true);
             thread.start();
         } catch (RuntimeException | LinkageError failure) {
-            if (active != null) {
-                active.restoreDialogPresentation();
-            }
-            active = null;
-            window.reportFailure(failure);
+            window.closing = true;
+            window.finish(failure);
         }
     }
 
@@ -124,6 +242,12 @@ public final class GpuBoardWindow {
         try {
             // The native window owns startup; its first visible frame begins the entrance animation.
             Lwjgl3ApplicationConfiguration configuration = configuration(false);
+            if (preview) {
+                configuration.setTitle(Messages.getString("GpuBoard.previewTitle") + " - "
+                      + initialView.game.getBoard().getBoardName());
+            } else if (editor != null) {
+                configuration.setTitle(Messages.getString("BoardEditor.edit3D"));
+            }
             // Fill the desktop work area while keeping the normal title bar and window controls.
             configuration.setDecorated(true);
             configuration.setMaximized(true);
@@ -176,8 +300,11 @@ public final class GpuBoardWindow {
         }
         presented = true;
         focus(true);
-        if (classicWindow != null) {
+        if (!preview && classicWindow != null) {
             classicWindow.setVisible(false);
+        }
+        if (editor != null) {
+            editor.enter3DEditor();
         }
         if (gui != null) {
             gui.setClassicBoardViewEnabled(false);
@@ -191,15 +318,17 @@ public final class GpuBoardWindow {
             startupTimer.stop();
             return;
         }
-        String status = GpuBoardActions.phaseStatus(panel.get()).text();
-        loadingMessage = status.isBlank() ? Messages.getString("ClientGUI.waitingOnTheServer") : status;
+        if (!preview && editor == null) {
+            String status = GpuBoardActions.phaseStatus(panel.get()).text();
+            loadingMessage = status.isBlank() ? Messages.getString("ClientGUI.waitingOnTheServer") : status;
+        }
         BoardView view = gui == null ? initialView : gui.getCurrentBoardView()
               .filter(BoardView.class::isInstance).map(BoardView.class::cast).orElse(null);
         if (view == null) {
             return;
         }
         try {
-            source = new GpuBoardSource(view, panel);
+            source = new GpuBoardSource(view, panel, editor);
             startupTimer.stop();
             application.postRunnable(() -> {
                 if (!closing) {
@@ -221,7 +350,7 @@ public final class GpuBoardWindow {
         SwingUtilities.invokeLater(() -> {
             try {
                 if (gui == null) {
-                    close(false);
+                    close(editor != null);
                 } else {
                     gui.handleExit();
                 }
@@ -241,6 +370,15 @@ public final class GpuBoardWindow {
         return false;
     }
 
+    private boolean closeWithPreviewOwner(AWTEvent event) {
+        if (preview && !closing && event.getSource() == classicWindow
+              && (event.getID() == ComponentEvent.COMPONENT_HIDDEN || event.getID() == WindowEvent.WINDOW_CLOSED)) {
+            close(false);
+            return true;
+        }
+        return false;
+    }
+
     private void finish(Throwable failure) {
         startupTimer.stop();
         restoreDialogPresentation();
@@ -249,6 +387,17 @@ public final class GpuBoardWindow {
                 return;
             }
             active = null;
+        }
+        if (preview) {
+            initialView.dispose();
+            if (classicWindow.isShowing() && afterClose == null) {
+                classicWindow.toFront();
+                classicWindow.requestFocus();
+            }
+        }
+        if (editor != null) {
+            editor.leave3DEditor();
+            restoreClassic = (restoreClassic || failure != null) && classicWindow.isDisplayable();
         }
         // The native window is already destroyed. Never resurrect a client that is shutting down.
         if (afterClose != null) {
@@ -377,6 +526,16 @@ public final class GpuBoardWindow {
     }
 
     private void reportFailure(Throwable failure) {
+        if (editor != null) {
+            LOGGER.error("GPU map editor failed", failure);
+            JOptionPane.showMessageDialog(classicWindow, Messages.getString("BoardEditor.edit3DUnavailable"),
+                  Messages.getString("BoardEditor.edit3D"), JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        if (preview) {
+            reportPreviewFailure(classicWindow, failure);
+            return;
+        }
         LOGGER.error("GPU battle view failed", failure);
         Object[] choices = { Messages.getString("CommonMenuBar.viewGpuBoard"),
               Messages.getString("CommonMenuBar.viewClassicBoard"), Messages.getString("MegaMek.Quit.label") };
@@ -391,5 +550,11 @@ public final class GpuBoardWindow {
         } else if (gui != null) {
             gui.handleExit();
         }
+    }
+
+    private static void reportPreviewFailure(Window owner, Throwable failure) {
+        LOGGER.error("GPU map preview failed", failure);
+        JOptionPane.showMessageDialog(owner, Messages.getString("GpuBoard.previewUnavailable"),
+              Messages.getString("GpuBoard.preview"), JOptionPane.ERROR_MESSAGE);
     }
 }
