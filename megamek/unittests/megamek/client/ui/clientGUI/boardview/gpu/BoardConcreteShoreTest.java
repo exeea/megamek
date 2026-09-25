@@ -368,6 +368,28 @@ class BoardConcreteShoreTest {
     }
 
     @Test
+    void fittedAeroBasesKeepTerrainCentresAndUnfoldedMeshes() {
+        BoardConcrete.Mode original = BoardConcrete.mode();
+        try {
+            BoardConcrete.tune(BoardConcrete.Mode.EVERYWHERE);
+            for (int number : new int[] { 1, 2 }) {
+                BoardScene scene = GpuRiverTerrainSmokeTest.pavedMapScene(number);
+                for (BoardScene.Tile tile : scene.tiles()) {
+                    BoardSurface surface = new BoardSurface(scene, tile);
+                    assertUnfolded(surface, "AeroBase " + number + " " + tile.coords());
+                    Vector3 center = BoardGeometry.center(tile.coords(), 0);
+                    for (int direction = 0; direction < 12; direction++) {
+                        float x = center.x + 12 * BoardGeometry.HEX_SCALE * (float) Math.cos(direction * Math.PI / 6);
+                        float y = center.y + 12 * BoardGeometry.HEX_SCALE * (float) Math.sin(direction * Math.PI / 6);
+                        assertTrue(Float.isFinite(BoardSurface.sampleHeight(surface.faces, x, y, Float.NaN)),
+                              "Each original terrain keeps room at its centre: " + tile.coords());
+                    }
+                }
+            }
+        } finally { BoardConcrete.tune(original); }
+    }
+
+    @Test
     void angledConnectionsKeepTheParallelSidesOfBothArms() {
         for (int first = 0; first < 6; first++) {
             for (int gap : new int[] { 1, 2 }) {

@@ -361,7 +361,7 @@ final class BoardConcrete {
         for (int i = 0; i + 2 < runs.size();) {
             Run a = runs.get(i), middle = runs.get(i + 1), b = runs.get(i + 2);
             Vector3 joint = a.line.intersection(b.line);
-            if (middle.rectangle || middle.last - middle.first > 4 || joint == null) { i++; continue; }
+            if (middle.rectangle || joint == null) { i++; continue; }
             int split = nearest(chain, joint, middle.first, middle.last);
             List<Run> candidate = new ArrayList<>(runs);
             candidate.set(i, new Run(a.first, split, a.line, a.rectangle));
