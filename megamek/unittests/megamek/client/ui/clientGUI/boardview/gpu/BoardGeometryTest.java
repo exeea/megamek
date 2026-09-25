@@ -49,6 +49,26 @@ class BoardGeometryTest {
     }
 
     @Test
+    void theTileUnderAPointIsTheHexWhoseFootprintHoldsIt() {
+        BoardScene scene = scene(0);
+        for (BoardScene.Tile tile : scene.tiles()) {
+            Coords coords = tile.coords();
+            // Just inside each of the six edges' midpoints, and just beyond it in the neighbour or off the board.
+            for (int corner = 0; corner < 6; corner++) {
+                Vector3 edge = BoardGeometry.corner(coords, 0, corner)
+                      .add(BoardGeometry.corner(coords, 0, (corner + 1) % 6)).scl(.5f);
+                Vector3 center = BoardGeometry.center(coords, 0);
+                Vector3 inside = new Vector3(edge).lerp(center, .02f);
+                Vector3 outside = new Vector3(edge).lerp(center, -.02f);
+                assertEquals(tile, BoardGeometry.tile(scene, inside.x, inside.y));
+                BoardScene.Tile beyond = BoardGeometry.tile(scene, outside.x, outside.y);
+                assertTrue(beyond == null || !beyond.coords().equals(coords), "A point beyond an edge is elsewhere");
+            }
+        }
+        assertNull(BoardGeometry.tile(scene, -BoardGeometry.WIDTH, BoardGeometry.HEIGHT));
+    }
+
+    @Test
     void weatherStartsAtTheLowestHexLevelRegardlessOfDepthOrBoardElevation() {
         for (int base : new int[] { -3, 0, 4 }) {
             for (int wetLevel : new int[] { base, base + 2 }) {

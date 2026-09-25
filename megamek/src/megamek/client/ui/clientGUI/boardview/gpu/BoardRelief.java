@@ -61,17 +61,57 @@ final class BoardRelief {
      */
     private static final float LEAD = 1 / 3f;
     /**
-     * How far, in hex-scale units, the corner a land hex pokes in between two water hexes of its own level stands back
-     * toward the land's centre at that level: past where the shore field ends the water beyond the corner (10.5 on a
-     * straight bank, less the bank's bias, plus its wander: 12.5 at most) by the bank the water keeps (4.5). See
-     * BoardSurface's shore field.
+     * The farthest, in hex-scale units, the water's shore moves a corner (see {@link Corner#move}): far enough for the
+     * water to run on past a land hex's corner to where the land's islet turns it, {@link #SHORE_ISLE} from the land's
+     * centre, with the room beyond.
      */
-    private static final float SHORE_SHIFT = 17;
+    private static final float SHORE_SHIFT = 28;
     /**
-     * The same where the land juts out into the water as a point (see {@link #point}): the 3 units the water may run
-     * past its corner, as the printed maps keep such corners, and the bank the water keeps.
+     * The room, in hex-scale units, a corner the shore moves keeps beyond the water where land lies at the water's
+     * level: BoardSurface's bank of 4.5, a unit, and most of the reach of the bank's rounding, so the shore runs on
+     * past the corner as its field lies instead of bending short of it.
      */
-    private static final float SHORE_POINT = 7.5f;
+    private static final float SHORE_ROOM = 8;
+    /**
+     * Reach, in hex-scale units, of each hex centre's pull on the shore field (see {@link #shore}). The pull falls off
+     * as (1 - d^2 / r^2)^3, about as a Gaussian 40 units wide does: the shore runs smooth over about a hex, so a bank
+     * along a row of hexes runs straight, a river bends round its turns and a lake is one rounded body of water.
+     */
+    private static final float SHORE_REACH = 128;
+    /**
+     * How much harder a hex pulls for each of its six neighbours of the other kind, water or land: a river a hex wide
+     * keeps its width and a spit of land its tip, where a plain sum would narrow both toward their middles.
+     */
+    private static final float SHORE_NARROW = .75f;
+    /** The pull of land whose corners stay put (paving, special artwork, roads): it keeps the shore back from them. */
+    private static final float SHORE_HARD = 2.5f;
+    /**
+     * Radii, in hex-scale units, of the water every water hex keeps round its centre and of the land every land hex
+     * keeps round its own, blended in over {@link #SHORE_BLEND}: a lone water hex is a round pond, a lone land hex in a
+     * lake an islet, and a unit always stands in its own hex's water or on its own hex's land.
+     */
+    private static final float SHORE_POOL = 28;
+    private static final float SHORE_ISLE = 22;
+    private static final float SHORE_BLEND = 10;
+    /**
+     * How far, in hex-scale units, the bank wanders to either side of the field's own line, and the noise cell it
+     * wanders over: bends one and a half to three hexes long, as on the printed maps, so a long bank curves gently
+     * instead of running like a ruler.
+     */
+    private static final float SHORE_WANDER = 8;
+    private static final float WANDER_CELL = 140;
+    /**
+     * How far, in hex-scale units, every bank stands out past the shore field's own line into the land: how fat the
+     * water is. A river a hex wide grows by twice this and a lake's shore moves out by it; negative slims both.
+     */
+    static final float SHORE_SPREAD = -3;
+    /**
+     * The share of itself every land hex keeps however far the water's shore would run into it: the shore moves the
+     * land's corners no further than leaves it that much (see {@link #keep}).
+     */
+    static final float LAND_KEEP = .75f;
+    /** Hexes on each side of this one whose pulls on the water's shore field are kept (see {@link #shoreWeight}). */
+    private static final int SHORE_WINDOW = 6;
     /** Width, in hex-scale units, of a water hex's bank from its level lip down to the water. */
     private static final float SHORE_LIP = 5;
 
@@ -185,6 +225,10 @@ final class BoardRelief {
     /** The relief amplitude when all joined hexes around share one family; NaN until computed, negative if mixed. */
     private float uniformRelief = Float.NaN;
     private float[] seams;
+    /** Pulls on the water's shore field of the hexes within {@link #SHORE_WINDOW} of this one, NaN until computed. */
+    private float[] shoreWeights;
+    /** Shares of the shore's moves the land hexes allow, by coordinates; see {@link #keep}. */
+    private final Map<Coords, Float> keeps = new HashMap<>();
     private float[] drops;
     private float[] rises;
     private final float[] scratchA = new float[2];
@@ -317,45 +361,155 @@ final class BoardRelief {
     }
 
     /**
-     * Whether a hex is land of natural ground, which the shore of water at its level may run past the corners of
-     * (see {@link Corner#shore}); paving, special artwork and roads keep their corners.
+     * Whether a hex is land of natural ground, whose corners the water's shore may move (see {@link Corner#move});
+     * paving, special artwork and roads keep their corners.
      */
-    boolean shoreGround(Coords coords) {
-        Site site = site(coords);
-        return site != null && shoreGround(site);
-    }
-
     private static boolean shoreGround(Site site) {
         return !site.liquid() && site.detailed() && site.family() != CONCRETE;
     }
 
+    // ---- Shore field -----------------------------------------------------------------------------------------
+
     /**
-     * Whether land juts out into water at its own level, as the tip of a spit or an island: three or more of its
-     * neighbours in a row are water at its level.
+     * The shore field at (x, y) of water, or of lava when {@code molten}, in world units: roughly how far the point
+     * lies inside that liquid's banks, negative on land. Each hex centre within {@link #SHORE_REACH} pulls the field by
+     * its {@link #shoreWeight}, the sum divided by its slope measures distance, the bank wanders a little, and every
+     * hex keeps its own pond or islet round its centre. The field is the board's, whichever hex asks: the hexes that
+     * reach a point follow from the point alone and are summed in the order of their coordinates, so every hex
+     * evaluating a point gets the same value.
      */
-    private boolean point(Site land) {
-        int run = 0, longest = 0;
-        for (int i = 0; i < 12 && longest < 3; i++) {
-            Site other = neighbor(land, i % 6);
-            run = other != null && other.liquid() && other.sculpted() && other.level() == land.level() ? run + 1 : 0;
-            longest = Math.max(longest, run);
+    float shore(float x, float y, boolean molten) {
+        float scale = BoardGeometry.HEX_SCALE, r2 = square(SHORE_REACH * scale), f = 0, gx = 0, gy = 0;
+        float wet = Float.POSITIVE_INFINITY, dry = Float.POSITIVE_INFINITY;
+        float width = BoardGeometry.WIDTH, height = BoardGeometry.HEIGHT, step = .75f * width;
+        int column = Math.round((x - width / 2) / step);
+        for (int cx = column - 2; cx <= column + 2; cx++) {
+            float dx = x - (cx * step + width / 2);
+            int row = Math.round((-y - height / 2 - (cx & 1) * height / 2) / height);
+            for (int cy = row - 2; cy <= row + 2; cy++) {
+                float dy = y + cy * height + (cx & 1) * height / 2 + height / 2, d2 = dx * dx + dy * dy;
+                float weight = shoreWeight(cx, cy, molten);
+                if (weight > 0) {
+                    wet = Math.min(wet, d2);
+                } else {
+                    dry = Math.min(dry, d2);
+                }
+                float t = 1 - d2 / r2;
+                if (t <= 0) { continue; }
+                f += weight * t * t * t;
+                gx += weight * t * t * dx;
+                gy += weight * t * t * dy;
+            }
         }
-        return longest >= 3;
+        float slope = 6 / r2 * (float) Math.hypot(gx, gy);
+        float wander = Math.clamp(gradient(x / (WANDER_CELL * scale) + 3.1f, y / (WANDER_CELL * scale) - 1.7f), -1, 1);
+        float value = f / Math.max(slope, 1e-4f / scale) + (SHORE_SPREAD + SHORE_WANDER * wander) * scale;
+        value = -smoothMin(-value, (float) Math.sqrt(wet) - SHORE_POOL * scale, SHORE_BLEND * scale);
+        return smoothMin(value, (float) Math.sqrt(dry) - SHORE_ISLE * scale, SHORE_BLEND * scale);
     }
 
     /**
-     * The seam of edge e at this hex's level, {@code distance} along it from corner k, one of its ends: the outline the
+     * How far from (x, y) along (ux, uy) the water's shore field turns to land, in world units, negative where it
+     * turns before the point: within {@link #SHORE_SHIFT} either way, where even steps find the first dry one and
+     * halvings the turn within it.
+     */
+    private float shoreReach(float x, float y, float ux, float uy) {
+        float span = SHORE_SHIFT * BoardGeometry.HEX_SCALE, lo = -span, hi = Float.NaN;
+        if (shore(x + ux * lo, y + uy * lo, false) <= 0) { return lo; }
+        for (int i = 1; i <= 8 && Float.isNaN(hi); i++) {
+            float s = -span + 2 * span * i / 8;
+            if (shore(x + ux * s, y + uy * s, false) <= 0) {
+                hi = s;
+            } else {
+                lo = s;
+            }
+        }
+        if (Float.isNaN(hi)) { return span; }
+        for (int i = 0; i < 12; i++) {
+            float s = (lo + hi) / 2;
+            if (shore(x + ux * s, y + uy * s, false) > 0) {
+                lo = s;
+            } else {
+                hi = s;
+            }
+        }
+        return (lo + hi) / 2;
+    }
+
+    /**
+     * The pull of the hex at column cx and row cy on the shore field of water, or of lava when {@code molten}: toward
+     * that liquid for its own hexes, away from it for land, {@link #SHORE_HARD} times as hard for land whose corners
+     * stay put, and harder by {@link #SHORE_NARROW} the more of its neighbours are of the other kind. Beyond the
+     * board's edge a hex pulls as the nearest board hex does, so a river runs straight on into the edge.
+     */
+    private float shoreWeight(int cx, int cy, boolean molten) {
+        int size = 2 * SHORE_WINDOW + 1;
+        int ix = cx - tile.coords().getX() + SHORE_WINDOW, iy = cy - tile.coords().getY() + SHORE_WINDOW;
+        int index = !molten && ix >= 0 && iy >= 0 && ix < size && iy < size ? ix * size + iy : -1;
+        if (index >= 0 && shoreWeights == null) {
+            shoreWeights = new float[size * size];
+            Arrays.fill(shoreWeights, Float.NaN);
+        }
+        if (index >= 0 && !Float.isNaN(shoreWeights[index])) { return shoreWeights[index]; }
+        Coords coords = new Coords(cx, cy);
+        Site site = boardSite(coords);
+        boolean wet = wet(site, molten);
+        int other = 0;
+        for (int direction = 0; direction < 6; direction++) {
+            if (wet(boardSite(coords.translated(direction)), molten) != wet) { other++; }
+        }
+        float pull = wet ? 1 : site.sculpted() && shoreGround(site) ? -1 : -SHORE_HARD;
+        float weight = pull * (1 + SHORE_NARROW * other / 6);
+        if (index >= 0) { shoreWeights[index] = weight; }
+        return weight;
+    }
+
+    /**
+     * How much of the moves the water's shore wants of a land hex's corners the hex allows, from 0 to 1: all of them,
+     * unless together they would take more than 1 - {@link #LAND_KEEP} of the hex, when each is cut back alike. A unit
+     * of move toward the hex's centre takes about half the hex's height of its area, one along the edge between it and
+     * another land hex half that.
+     */
+    private float keep(Site land) {
+        Float known = keeps.get(land.coords());
+        if (known != null) { return known; }
+        float loss = 0, height = BoardGeometry.HEIGHT;
+        for (int k = 0; k < 6; k++) {
+            Corner corner = corner(land, k);
+            if (corner.want <= 0) { continue; }
+            int lands = 0;
+            for (Site site : corner.around) { lands += site.liquid() ? 0 : 1; }
+            loss += corner.want * (lands == 1 ? height / 2 : height / 4);
+        }
+        float budget = (1 - LAND_KEEP) * .75f * BoardGeometry.WIDTH * height;
+        float result = loss > budget ? budget / loss : 1;
+        keeps.put(land.coords(), result);
+        return result;
+    }
+
+    /** The site at these coordinates, or beyond the board's edge the nearest board hex's. */
+    private Site boardSite(Coords coords) {
+        return site(new Coords(Math.clamp(coords.getX(), 0, scene.width() - 1),
+              Math.clamp(coords.getY(), 0, scene.height() - 1)));
+    }
+
+    /** Whether a hex holds water, or lava when {@code molten}: molten lava is the one liquid the sculpt leaves flat. */
+    private static boolean wet(Site site, boolean molten) {
+        return site.liquid() && site.sculpted() != molten;
+    }
+
+    /**
+     * The seam of edge e at this hex's level, the fraction t along it from corner k, one of its ends: the outline the
      * relief lays there, which both hexes of the edge share.
      */
-    Vector3 seam(int e, int k, float distance) {
+    Vector3 seam(int e, int k, float t) {
         Edge edge = edge(e);
-        float t = distance / edge.length;
         return edgePoint(edge, edge.a == corner(self, k) ? t : 1 - t, self.level() * BoardGeometry.LEVEL);
     }
 
-    /** How far the shore moves this hex's corner k at its own level, in world units (x, y): {@link Corner#shore}. */
+    /** How far the shore moves this hex's corner k, in world units (x, y): see {@link Corner#move}. */
     float[] shoreShift(int k) {
-        return corner(self, k).shore.clone();
+        return corner(self, k).move().clone();
     }
 
     /** The surface family this hex's sculpted ground takes, as a {@link BoardScene.Surface} ordinal. */
@@ -434,12 +588,21 @@ final class BoardRelief {
         final float[] towardMid = new float[2];
         final float[] towardLow = new float[2];
         /**
-         * Where two water hexes and one land hex of natural ground meet at one level, the move of the corner at that
-         * level toward the land's centre, {@link #SHORE_SHIFT} long ({@link #SHORE_POINT} at a point), in world units:
-         * the water's shore runs past the land's corner, so the water hexes' tops take in the tip of the land's. Zero
-         * elsewhere.
+         * Where water meets land of natural ground at or above its level, the way away from the water, as a unit
+         * vector: toward the land's centre between two water hexes, out along the edge between two land hexes past a
+         * water hex's corner. Zero elsewhere.
          */
-        final float[] shore = new float[2];
+        private final float[] away = new float[2];
+        /**
+         * How far along {@link #away} the water's shore would move the corner, in world units, at every height of the
+         * steps there, so the slopes and walls round the water follow its shore too: to where the shore field turns to
+         * land, with room for the water's bank beyond where land lies at the water's level, at most
+         * {@link #SHORE_SHIFT} either way, and at one level never toward the water. A step up from the water keeps its
+         * own room: its foot reaches on into the water, which follows it there.
+         */
+        private float want;
+        /** The move itself, once every land hex round the corner has kept its share; see {@link #move}. */
+        private float[] move;
 
         Corner(int ix, int iy, Site[] around) {
             key = ((long) ix << 32) ^ (iy & 0xffffffffL);
@@ -469,26 +632,6 @@ final class BoardRelief {
             low = Math.min(a, Math.min(b, c));
             high = Math.max(a, Math.max(b, c));
             mid = a + b + c - low - high;
-            if (low == high) {
-                Site dry = null;
-                int wet = 0;
-                boolean ground = true;
-                for (Site site : around) {
-                    if (site.liquid()) {
-                        wet++;
-                    } else {
-                        dry = site;
-                        ground &= shoreGround(site);
-                    }
-                }
-                if (wet == 2 && ground) {
-                    float dx = dry.x() - x, dy = dry.y() - y;
-                    float scale = (point(dry) ? SHORE_POINT : SHORE_SHIFT) * BoardGeometry.HEX_SCALE
-                          / (float) Math.hypot(dx, dy);
-                    shore[0] = dx * scale;
-                    shore[1] = dy * scale;
-                }
-            }
             float round = 0;
             for (Site site : around) { round += GEOLOGY[site.family()].round(); }
             fillet = low == high ? 0 : Math.min(.5f, round / 3 * (.8f + .4f * variation)) * BoardGeometry.WIDTH / 2;
@@ -502,6 +645,59 @@ final class BoardRelief {
             float[] lone = mid == low ? towardHigh : towardLow;
             odd[0] = lone[0];
             odd[1] = lone[1];
+            wantShore();
+        }
+
+        /** Sets {@link #away} and {@link #want}. */
+        private void wantShore() {
+            Site water = null, dry = null;
+            int wet = 0;
+            boolean flat = false;
+            for (Site site : around) {
+                if (site.liquid()) {
+                    wet++;
+                    water = site;
+                } else {
+                    dry = site;
+                }
+            }
+            if (wet == 0 || wet == 3) { return; }
+            for (Site site : around) {
+                if (site.liquid()) { continue; }
+                if (!shoreGround(site) || site.level() < water.level()) { return; }
+                flat |= site.level() == water.level();
+            }
+            float dx = wet == 2 ? dry.x() - x : x - water.x(), dy = wet == 2 ? dry.y() - y : y - water.y();
+            float length = (float) Math.hypot(dx, dy), span = SHORE_SHIFT * BoardGeometry.HEX_SCALE;
+            away[0] = dx / length;
+            away[1] = dy / length;
+            float reach = shoreReach(x, y, away[0], away[1]) + (flat ? SHORE_ROOM * BoardGeometry.HEX_SCALE : 0);
+            float most = span;
+            if (wet == 2) {
+                // A land's tip moves no nearer its centre than leaves its top, inside the steps' rim, its islet.
+                float z = dry.level() * BoardGeometry.LEVEL;
+                float[] band = new float[2], rounding = new float[2];
+                bandOffset(this, z, band);
+                filletOffset(this, z, rounding);
+                float rim = (band[0] + rounding[0]) * away[0] + (band[1] + rounding[1]) * away[1];
+                most = Math.clamp(length - rim - SHORE_ISLE * BoardGeometry.HEX_SCALE, 0, span);
+            }
+            want = Math.clamp(reach, low == high ? 0 : -span, most);
+        }
+
+        /**
+         * How far the shore moves this corner, in world units (x, y): {@link #want} along {@link #away}, but into land
+         * no further than every land hex round it allows (see {@link #keep}).
+         */
+        float[] move() {
+            if (move == null) {
+                float length = want;
+                for (Site site : around) {
+                    if (length > 0 && !site.liquid()) { length = Math.min(length, want * keep(site)); }
+                }
+                move = new float[] { away[0] * length, away[1] * length };
+            }
+            return move;
         }
 
         boolean seamless() {
@@ -851,19 +1047,13 @@ final class BoardRelief {
         float sa = 1 - smooth(along / Math.max(blend, 1.6f * Math.abs(ta)));
         float sb = 1 - smooth((edge.length - along) / Math.max(blend, 1.6f * Math.abs(tb)));
         // A shore's move of a corner runs out evenly along each edge through it, so those edges stay straight.
-        float ha = shoreWeight(edge.a, z), hb = shoreWeight(edge.b, z);
-        float qx = edge.a.shore[0] * ha * (1 - t) + edge.b.shore[0] * hb * t;
-        float qy = edge.a.shore[1] * ha * (1 - t) + edge.b.shore[1] * hb * t;
+        float[] ma = edge.a.move(), mb = edge.b.move();
+        float qx = ma[0] * (1 - t) + mb[0] * t, qy = ma[1] * (1 - t) + mb[1] * t;
         // Written so that at a corner (weights exactly one) every edge through it adds the identical offset.
         return new Vector3(px + rx + bx + qx + dx * d * rest + scratchA[0] * wa + ta * ex * (sa - wa)
                     + scratchB[0] * wb + tb * ex * (sb - wb),
               py + ry + by + qy + dy * d * rest + scratchA[1] * wa + ta * ey * (sa - wa)
                     + scratchB[1] * wb + tb * ey * (sb - wb), z);
-    }
-
-    /** 1 at a corner's own level, where its shore move applies; 0 elsewhere. */
-    private static float shoreWeight(Corner corner, float z) {
-        return Math.abs(z - corner.low * BoardGeometry.LEVEL) <= EPSILON * BoardGeometry.LEVEL ? 1 : 0;
     }
 
     // ---- Wall profile ----------------------------------------------------------------------------------------
@@ -1210,8 +1400,8 @@ final class BoardRelief {
                 float foot = other == null ? 0 : band(upper, lower, lower.level() * BoardGeometry.LEVEL) * big;
                 // Seams at this level run between the corners as the shore moves them.
                 Corner ca = corner(site, e), cb = corner(site, n);
-                float x0 = ca.x + ca.shore[0], y0 = ca.y + ca.shore[1];
-                float x1 = cb.x + cb.shore[0], y1 = cb.y + cb.shore[1];
+                float x0 = ca.x + ca.move()[0], y0 = ca.y + ca.move()[1];
+                float x1 = cb.x + cb.move()[0], y1 = cb.y + cb.move()[1];
                 if (seen.add(Math.min(keyA, keyB) * 31 + Math.max(keyA, keyB)) && !joined(site, other)) {
                     // Hexes at one level see one side of every step alike, so joined tops fade their relief alike.
                     seam.add(new float[] { x0, y0, x1, y1, levels, self.level() >= upper.level() ? rim : foot });
@@ -1520,7 +1710,7 @@ final class BoardRelief {
         int edge = Math.floorMod(e, 6), samples = starts[edge + 1] - starts[edge];
         float base = self.level() * BoardGeometry.LEVEL, water = waterline[0].z, margin = .02f;
         Corner a = corner(self, edge), b = corner(self, edge + 1);
-        float length = (float) Math.hypot(b.x + b.shore[0] - a.x - a.shore[0], b.y + b.shore[1] - a.y - a.shore[1]);
+        float length = (float) Math.hypot(b.x + b.move()[0] - a.x - a.move()[0], b.y + b.move()[1] - a.y - a.move()[1]);
         float ramp = Math.min(SHORE_LIP * BoardGeometry.HEX_SCALE, (before ? 1 - t : t) * length);
         for (int i = 1; i < samples; i++) {
             // Where the steps through a corner slide the samples along the mouth, each counts where it lies.
@@ -1536,8 +1726,8 @@ final class BoardRelief {
     /** Where p lies along this hex's edge e at its level, as its fraction from the edge's first corner. */
     private float along(int e, Vector3 p) {
         Corner a = corner(self, e), b = corner(self, e + 1);
-        float ax = a.x + a.shore[0], ay = a.y + a.shore[1];
-        float dx = b.x + b.shore[0] - ax, dy = b.y + b.shore[1] - ay;
+        float ax = a.x + a.move()[0], ay = a.y + a.move()[1];
+        float dx = b.x + b.move()[0] - ax, dy = b.y + b.move()[1] - ay;
         return Math.clamp(((p.x - ax) * dx + (p.y - ay) * dy) / (dx * dx + dy * dy), 0, 1);
     }
 
@@ -2101,14 +2291,17 @@ final class BoardRelief {
         return result;
     }
 
-    /** Whether the sides of one edge cover it completely at one foot height. */
+    /** Whether the sides of one edge, as the shore moves its corners, cover it completely at one foot height. */
     private boolean spans(List<BoardSurface.Side> group, int e, float bottom) {
         float covered = 0;
         for (BoardSurface.Side side : group) {
             if (Math.abs(side.lowA() - bottom) > .01f || Math.abs(side.lowB() - bottom) > .01f) { return false; }
             covered += (float) Math.hypot(side.b().x - side.a().x, side.b().y - side.a().y);
         }
-        return Math.abs(covered - edge(e).length) < .01f * edge(e).length;
+        Edge edge = edge(e);
+        float length = (float) Math.hypot(edge.b.x + edge.b.move()[0] - edge.a.x - edge.a.move()[0],
+              edge.b.y + edge.b.move()[1] - edge.a.y - edge.a.move()[1]);
+        return Math.abs(covered - length) < .01f * length;
     }
 
     private void straightWall(BoardSurface.Side side, List<BoardSurface.Face> result) {
@@ -2385,6 +2578,8 @@ final class BoardRelief {
     }
 
     static float lerp(float a, float b, float t) { return a + (b - a) * t; }
+
+    private static float square(float value) { return value * value; }
 
     private static float distance(float x, float y, float ax, float ay, float bx, float by) {
         float dx = bx - ax, dy = by - ay;

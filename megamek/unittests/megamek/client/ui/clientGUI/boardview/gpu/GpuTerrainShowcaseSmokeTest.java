@@ -32,7 +32,8 @@ import org.junit.jupiter.api.Test;
  * Each surface family is captured from a tactical overview, a medium oblique angle, close rim/base views, the woods and
  * one light wood up close, with a neutral clay variant and a grid-free variant. Captures are drawn as on the board, through
  * the atmosphere composite ({@link GpuReviewFrame}), at the hour megamek.gpu.showcase.hour, or at each of the
- * comma-separated megamek.gpu.showcase.hours, whose captures are named with a "-h<hour>" suffix.
+ * comma-separated megamek.gpu.showcase.hours, whose captures are named with a "-h<hour>" suffix, under the cloud cover
+ * megamek.gpu.showcase.clouds (0 to 1, default clear).
  */
 @Tag("on-demand")
 class GpuTerrainShowcaseSmokeTest {
@@ -172,7 +173,8 @@ class GpuTerrainShowcaseSmokeTest {
     }
 
     private static BoardAtmosphere.Settings settings(String hour) {
-        return new BoardAtmosphere.Settings(Float.parseFloat(hour.trim()), 0, 0,
+        float clouds = Float.parseFloat(System.getProperty("megamek.gpu.showcase.clouds", "0"));
+        return new BoardAtmosphere.Settings(Float.parseFloat(hour.trim()), clouds, 0,
               BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0);
     }
 

@@ -36,10 +36,10 @@ final class GpuGroundCover implements Disposable {
 
     private static final int CACHE_SIZE = 384;
     private static final class Cover {
-        final List<BoardSurface.Geometry> key;
+        final BoardSurface.Key key;
         final ModelInstance instance;
         long generation;
-        Cover(List<BoardSurface.Geometry> key, ModelInstance instance, long generation) {
+        Cover(BoardSurface.Key key, ModelInstance instance, long generation) {
             this.key = key;
             this.instance = instance;
             this.generation = generation;
@@ -114,8 +114,8 @@ final class GpuGroundCover implements Disposable {
     private Cover cover(BoardScene scene, BoardScene.Tile tile) {
         Cover cover = models.get(tile.coords());
         if (cover != null && cover.generation == generation) { return cover; }
-        List<BoardSurface.Geometry> key = BoardSurface.geometryKey(scene, tile);
-        if (key.getFirst().ramps() != 0) { return null; }
+        BoardSurface.Key key = BoardSurface.geometryKey(scene, tile);
+        if (key.near().getFirst().ramps() != 0) { return null; }
         if (cover == null || !cover.key.equals(key)) {
             if (cover != null) { cover.instance.model.dispose(); }
             cover = new Cover(key, build(scene, tile, floor), generation);

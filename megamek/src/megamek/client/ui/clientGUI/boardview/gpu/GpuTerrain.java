@@ -765,22 +765,20 @@ final class GpuTerrain implements Disposable {
                 }
                 if (!before.coords().equals(tile.coords())) {
                     rebuildAll = true;
-                } else if (before.elevation() != tile.elevation()
-                      || before.waterDepth() != tile.waterDepth() || before.frozen() != tile.frozen()
-                      || !before.liquid().equals(tile.liquid())
-                      || before.roadExits() != tile.roadExits()
-                      || before.surface() != tile.surface()
-                      || before.detailedGround() != tile.detailedGround()
-                      || !before.features().equals(tile.features())) {
-                    dirtyChunk(changedChunks, tile.coords());
-                    for (int direction = 0; direction < 6; direction++) {
-                        Coords neighbor = tile.coords().translated(direction);
-                        if (scene.tile(neighbor) != null) {
-                            dirtyChunk(changedChunks, neighbor);
-                            // Joined landforms also depend on the neighbor's road approaches.
-                            for (int around = 0; around < 6; around++) {
-                                Coords second = neighbor.translated(around);
-                                if (scene.tile(second) != null) { dirtyChunk(changedChunks, second); }
+                } else {
+                    // A water shore reaches the banks and corners it shapes from further out (BoardSurface.Key);
+                    // joined landforms also depend on the neighbours' road approaches, two hexes out.
+                    boolean shore = before.elevation() != tile.elevation() || before.waterDepth() != tile.waterDepth()
+                          || !before.liquid().equals(tile.liquid()) || before.roadExits() != tile.roadExits()
+                          || before.surface() != tile.surface() || before.detailedGround() != tile.detailedGround();
+                    if (shore || before.frozen() != tile.frozen() || !before.features().equals(tile.features())) {
+                        Coords at = tile.coords();
+                        int reach = shore ? BoardSurface.SHORE_RINGS : 2;
+                        for (int x = at.getX() - reach; x <= at.getX() + reach; x++) {
+                            for (int y = at.getY() - reach - 1; y <= at.getY() + reach + 1; y++) {
+                                if (at.distance(x, y) <= reach && scene.tile(new Coords(x, y)) != null) {
+                                    dirtyChunk(changedChunks, new Coords(x, y));
+                                }
                             }
                         }
                     }
