@@ -81,8 +81,8 @@ class InfantryFootprintTest {
         var original = BoardGeometry.tuning();
         float previous = 1;
         try {
-            // From 0.7 times the authored size, a troop at an outer slot could turn past the edge: the layout draws in.
-            for (float size : new float[] { .6f, 1, 2, 3 }) {
+            // Exercise both fitting and overcrowding after conversion from the shared Atlas model scale.
+            for (float size : new float[] { .6f, 1, 2, 3, 5 }) {
                 float scale = formation.scale(original, size);
                 float layout = InfantryFootprint.compress(formation.positions, formation.outlines(), scale,
                       InfantryFootprint.NO_STEPS);
@@ -92,7 +92,7 @@ class InfantryFootprintTest {
                 boolean inside = formation.inside(layout, scale, InfantryFootprint.NO_STEPS);
                 if (size < 1) {
                     assertEquals(1, layout, "The authored layout already fits");
-                } else if (size <= 2) {
+                } else if (size <= 3) {
                     assertTrue(inside, "The whole formation, drawn in, fits at size " + size);
                 } else {
                     assertFalse(inside, "Too crowded to fit the hex at size " + size);
@@ -178,7 +178,7 @@ class InfantryFootprintTest {
             var family = UnitFamilyScale.INFANTRY;
             BoardGeometry.tune(new BoardGeometry.Tuning(tuning.hexScale(), size / family.unitScale(),
                   tuning.unitHeightScale(), tuning.levelHeight(), tuning.gridShade()));
-            var model = new GpuUnitModel(new Model(), null, true, List.of(), 1f / 27, null, List.of(), family);
+            var model = new GpuUnitModel(new Model(), null, true, List.of(), null, List.of(), family);
             var unit = new BoardScene.Unit(1, -1, "Formation fit", new BoardScene.Waypoint(new Coords(2, 2), 0, 0),
                   null, false, null, 1, false, null, 0);
             return model.horizontalScale(unit);

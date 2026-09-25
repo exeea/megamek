@@ -40,9 +40,12 @@ class UnitAnimatorTest {
             raw.nodes.add(root);
             raw.calculateTransforms();
             var emitter = new UnitModelDescriptor.Emitter("jet", "pack", List.of(0f, 0f, 0f), List.of(0f, 0f, -1f), "exhaust", "exhaust");
-            var model = new GpuUnitModel(raw, null, true, List.of(), heightScale, new Vector3(1, 1, 1),
+            var model = new GpuUnitModel(raw, null, true, List.of(), new Vector3(1, 1, 1),
                   List.of(new UnitRig("mek", "biped-v1", null, Map.of("root", "root"), List.of(), List.of())));
+            var tuning = BoardGeometry.tuning();
             try {
+                BoardGeometry.tune(new BoardGeometry.Tuning(tuning.hexScale(), tuning.unitScale(), heightScale,
+                      tuning.levelHeight(), tuning.gridShade(), tuning.multiHexUnitScale()));
                 for (int facing : new int[] { 0, 1, 3, 5 }) {
                     var start = new BoardScene.Waypoint(new Coords(2, 5), 0, facing);
                     var end = new BoardScene.Waypoint(new Coords(4, 3), 0, (facing + 1) % 6);
@@ -77,6 +80,7 @@ class UnitAnimatorTest {
                     assertTrue(instance.getNode("root").rotation.isIdentity(.001f), "Skip removes the flight pose");
                 }
             } finally {
+                BoardGeometry.tune(tuning);
                 model.dispose();
             }
         }
@@ -103,7 +107,7 @@ class UnitAnimatorTest {
             root.id = "root";
             raw.nodes.add(root);
             raw.calculateTransforms();
-            var model = new GpuUnitModel(raw, null, true, List.of(), 1, new Vector3(1, 1, 1),
+            var model = new GpuUnitModel(raw, null, true, List.of(), new Vector3(1, 1, 1),
                   List.of(new UnitRig("mek", "biped-v1", null, Map.of("root", "root"), List.of(), List.of())));
             try {
                 var placed = new ModelInstance(raw);

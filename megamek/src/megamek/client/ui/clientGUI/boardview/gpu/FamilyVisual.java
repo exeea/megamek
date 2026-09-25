@@ -44,7 +44,7 @@ final class FamilyVisual {
             assembled.calculateTransforms();
             var bounds = body.descriptor().bounds();
             Vector3 dimensions = UnitModelDescriptor.vector(bounds.max()).sub(UnitModelDescriptor.vector(bounds.min())).scl(scale);
-            return new GpuUnitModel(assembled, null, true, bindings, 1f / 27, dimensions,
+            return new GpuUnitModel(assembled, null, true, bindings, dimensions,
                   java.util.List.of(new UnitRig(body.descriptor())), UnitFamilyScale.forFamily(descriptor.getString("family")));
         } catch (RuntimeException error) {
             assembled.dispose();

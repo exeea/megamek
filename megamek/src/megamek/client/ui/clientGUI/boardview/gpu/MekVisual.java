@@ -27,7 +27,7 @@ final class MekVisual {
             assembled.calculateTransforms();
             var bindings = UnitEquipmentAssembly.attachAll(library, descriptor, body, structure, assembled);
             assembled.calculateTransforms();
-            return new GpuUnitModel(assembled, body.descriptor().joints().get("torso"), true, bindings, 1f / 27, null,
+            return new GpuUnitModel(assembled, body.descriptor().joints().get("torso"), true, bindings, null,
                   java.util.List.of(new UnitRig(body.descriptor())), UnitFamilyScale.forFamily(body.descriptor().family()));
         } catch (RuntimeException error) {
             assembled.dispose();

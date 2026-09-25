@@ -236,10 +236,8 @@ class GpuModularUnitModelsSmokeTest {
         new ObjectMapper().writerWithDefaultPrettyPrinter().writeValue(new File(System.getProperty("megamek.gpu.screenshots"),
               "runtime-formation-placements.json"), review);
         for (int index = 0; index < instances.size(); index++) {
-            // Same placement adaptation as the board; each composite keeps child and limb transforms independent.
-            instances.get(index).transform.setToTranslation((1.5f - index % 4) * 78, (index / 4 == 0 ? -1 : 1) * 40, 0)
-                  .scale(BoardGeometry.UNIT_SCALE, BoardGeometry.UNIT_SCALE,
-                        BoardGeometry.LEVEL * BoardGeometry.UNIT_HEIGHT_SCALE / 27);
+            // Arrange the review without replacing the runtime's uniform scale or its independent limb transforms.
+            instances.get(index).transform.setTranslation((1.5f - index % 4) * 78, (index / 4 == 0 ? -1 : 1) * 40, .5f);
         }
         library.retainAssemblies(Set.of());
         // Dropping assemblies must not dispose the borrowed meshes used by other instances or future units.
@@ -269,6 +267,7 @@ class GpuModularUnitModelsSmokeTest {
             BoardGeometry.tune(original);
         }
         animator.apply(model, instance, unit, UnitMotion.Sample.STILL, 0, 0, true, 0);
+        model.place(instance, new OrthographicCamera(), Vector3.Zero, 0, unit);
         return instance;
     }
 

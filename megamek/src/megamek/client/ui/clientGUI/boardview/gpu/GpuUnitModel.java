@@ -26,6 +26,13 @@ import megamek.common.annotations.Nullable;
 
 /** One owned unit model with shared placement and annotation geometry. */
 final class GpuUnitModel implements Disposable {
+    /**
+     * The Atlas bare body spans two terrain levels at unit scale 1. Every modular family uses this same
+     * conversion, retaining the library's proportions and relative sizes around the Atlas and Mackie.
+     * Antennas on other bodies may extend higher; never normalize each model by its own bounding box.
+     */
+    private static final float REFERENCE_ASSAULT_HEIGHT = 54.858f;
+
     private final Model model;
     final ModelInstance instance;
     private final BoundingBox bounds;
@@ -36,7 +43,6 @@ final class GpuUnitModel implements Disposable {
     private final boolean modularCoordinates;
     private final List<UnitEquipmentAssembly.Binding> equipment;
     private final List<UnitRig> rigs;
-    private final float levelsPerModelUnit;
     private final Vector3 restDimensions;
     private final UnitFamilyScale familyScale;
     private final boolean damageLocations;
@@ -54,7 +60,7 @@ final class GpuUnitModel implements Disposable {
     }
 
     GpuUnitModel(Model model, @Nullable String upperBodyNode, UnitFamilyScale familyScale) {
-        this(model, upperBodyNode, false, List.of(), upperBodyNode == null ? 1f / 54 : 1f / 27, null, List.of(), familyScale);
+        this(model, upperBodyNode, false, List.of(), null, List.of(), familyScale);
     }
 
     GpuUnitModel(Model model, @Nullable String upperBodyNode, boolean modularCoordinates) {
@@ -62,23 +68,22 @@ final class GpuUnitModel implements Disposable {
     }
 
     GpuUnitModel(Model model, @Nullable String upperBodyNode, boolean modularCoordinates, List<UnitEquipmentAssembly.Binding> equipment) {
-        this(model, upperBodyNode, modularCoordinates, equipment, upperBodyNode == null ? 1f / 54 : 1f / 27, null, List.of());
+        this(model, upperBodyNode, modularCoordinates, equipment, null, List.of());
     }
 
     GpuUnitModel(Model model, @Nullable String upperBodyNode, boolean modularCoordinates,
-          List<UnitEquipmentAssembly.Binding> equipment, float levelsPerModelUnit, @Nullable Vector3 restDimensions,
+          List<UnitEquipmentAssembly.Binding> equipment, @Nullable Vector3 restDimensions,
           List<UnitRig> rigs) {
-        this(model, upperBodyNode, modularCoordinates, equipment, levelsPerModelUnit, restDimensions, rigs, UnitFamilyScale.DEFAULT);
+        this(model, upperBodyNode, modularCoordinates, equipment, restDimensions, rigs, UnitFamilyScale.DEFAULT);
     }
 
     GpuUnitModel(Model model, @Nullable String upperBodyNode, boolean modularCoordinates,
-          List<UnitEquipmentAssembly.Binding> equipment, float levelsPerModelUnit, @Nullable Vector3 restDimensions,
+          List<UnitEquipmentAssembly.Binding> equipment, @Nullable Vector3 restDimensions,
           List<UnitRig> rigs, UnitFamilyScale familyScale) {
         this.modularCoordinates = modularCoordinates;
         this.familyScale = familyScale;
         this.equipment = List.copyOf(equipment);
         this.rigs = List.copyOf(rigs);
-        this.levelsPerModelUnit = levelsPerModelUnit;
         this.upperBodyNode = ((upperBodyNode != null) && (model.getNode(upperBodyNode) != null))
               ? upperBodyNode : null;
         this.model = model;
@@ -227,10 +232,14 @@ final class GpuUnitModel implements Disposable {
 
     private Vector3 place(ModelInstance placed, Camera camera, Vector3 ground, float facing, int height, boolean multiHex,
           UnitFamilyScale scaleTuning) {
+        if (modularCoordinates) {
+            float scale = horizontalScale(null, scaleTuning);
+            return placeScaled(placed, camera, ground, facing, scale, verticalScale(scale, scaleTuning));
+        }
         // Schema-1 sprite sections retain their original placement while external compatibility is supported.
         float scale = (multiHex ? 1 : BoardGeometry.UNIT_SCALE) * scaleTuning.unitScale();
-        float thickness = (modularCoordinates ? levelsPerModelUnit : height)
-              * BoardGeometry.LEVEL * BoardGeometry.UNIT_HEIGHT_SCALE * scaleTuning.unitScale() * scaleTuning.heightScale();
+        float thickness = height * BoardGeometry.LEVEL * BoardGeometry.UNIT_HEIGHT_SCALE
+              * scaleTuning.unitScale() * scaleTuning.heightScale();
         return placeScaled(placed, camera, ground, facing, scale, thickness);
     }
 
@@ -261,26 +270,24 @@ final class GpuUnitModel implements Disposable {
     }
 
     private float verticalScale(float horizontalScale, UnitFamilyScale scaleTuning) {
-        // The default level height, not the current one: that reaches the model through its horizontal scale.
-        return levelsPerModelUnit * BoardGeometry.DEFAULTS.levelHeight() * BoardGeometry.UNIT_HEIGHT_SCALE
-              * horizontalScale / BoardGeometry.DEFAULTS.unitScale() * scaleTuning.heightScale();
+        // Model coordinates have the same units on every axis. Only explicit height controls alter proportions.
+        return horizontalScale * BoardGeometry.UNIT_HEIGHT_SCALE * scaleTuning.heightScale();
     }
 
     private float horizontalScale(UnitFootprint.Layout footprint, UnitFamilyScale scaleTuning) {
-        // The level height resizes units on every axis: they keep their authored proportions and their height in
-        // levels instead of being stretched or squashed.
+        if (footprint == null) {
+            return 2 * BoardGeometry.LEVEL / REFERENCE_ASSAULT_HEIGHT * BoardGeometry.UNIT_SCALE * scaleTuning.unitScale();
+        }
+        // Large units retain their occupied-footprint fitting, uniformly on all axes including height.
         float scale = scaleTuning.unitScale() * BoardGeometry.tuning().levelHeight()
               / BoardGeometry.DEFAULTS.levelHeight();
-        if (footprint == null) {
-            return BoardGeometry.UNIT_SCALE * BoardGeometry.HEX_SCALE * scale;
-        }
         return BoardGeometry.MULTI_HEX_UNIT_SCALE * scale * Math.min(footprint.width() / Math.max(1, restDimensions.x),
               footprint.depth() / Math.max(1, restDimensions.y));
     }
 
     private Vector3 placeScaled(ModelInstance placed, Camera camera, Vector3 ground, float facing, float scale,
           float thickness) {
-        // Authored Z is in nominal occupied-height units. Keep feet half a world unit above the ground.
+        // Keep feet half a world unit above the ground.
         placed.transform.set(ground, new Quaternion(Vector3.Z, -facing))
               .translate(0, 0, 0.5f)
               .scale(scale, scale, thickness);

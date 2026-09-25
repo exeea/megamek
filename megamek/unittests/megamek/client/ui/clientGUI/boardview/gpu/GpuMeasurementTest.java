@@ -95,7 +95,7 @@ class GpuMeasurementTest {
             long generation = fixture.source.takeFrame().boardGeneration();
             fixture.source.primaryClick(start, Entity.NONE, InputEvent.CTRL_DOWN_MASK, generation);
             SwingUtilities.invokeAndWait(() -> assertEquals(start, fixture.view.getFirstLOS()));
-            fixture.source.primaryClick(end, Entity.NONE, InputEvent.CTRL_DOWN_MASK, generation);
+            fixture.source.primaryClick(end, Entity.NONE, 0, generation);
             SwingUtilities.invokeAndWait(() -> assertNull(fixture.view.getFirstLOS()));
             fixture.source.primaryClick(start, Entity.NONE, InputEvent.ALT_DOWN_MASK, generation);
             fixture.source.primaryClick(end, Entity.NONE, InputEvent.ALT_DOWN_MASK, generation);

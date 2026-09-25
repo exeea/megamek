@@ -213,7 +213,7 @@ class UnitLegBendTest {
             raw.calculateTransforms();
             String bend = reverse ? "reverse" : "forward";
             var rig = new UnitRig(descriptor(Map.of("leftLeg", bend, "rightLeg", bend)));
-            model = new GpuUnitModel(raw, "CT", true, List.of(), 1f / 27, new Vector3(40, 30, 48), List.of(rig));
+            model = new GpuUnitModel(raw, "CT", true, List.of(), new Vector3(40, 30, 48), List.of(rig));
             instance = new ModelInstance(raw);
             var structure = new UnitModelState.Structure(EntityMovementMode.BIPED, List.of(), List.of(), 0, false,
                   new UnitModelState.MekAnatomy("biped", List.of(), List.of()));
