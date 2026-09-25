@@ -26,6 +26,7 @@ import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 
+import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.Messages;
 import megamek.client.ui.boardeditor.BoardEditorPanel;
 import megamek.client.ui.clientGUI.GUIPreferences;
@@ -1020,6 +1021,23 @@ final class GpuBoardSource implements AutoCloseable {
             if (closed) { return; }
             previewConditions = null;
             previewTimeSample = atmosphereTimeSample;
+        });
+    }
+
+    /** Selection uses the same unit event as the overview; phase controllers retain selection legality. */
+    void select(Coords coords, int entityId, long generation) {
+        SwingUtilities.invokeLater(() -> {
+            if (closed || editor != null || generation != boardGeneration || board != view.game.getBoard(view.getBoardId())
+                  || coords != null && !board.contains(coords)
+                  || view.getClientgui() != null && view.getClientgui().shouldIgnoreHotKeys()) {
+                return;
+            }
+            Entity entity = view.game.getEntity(entityId);
+            if (entity != null && visible(entity) && !sensorContact(entity)) {
+                view.processBoardViewEvent(new BoardViewEvent(view, BoardViewEvent.SELECT_UNIT, entityId));
+            }
+            view.selectForInspection(coords);
+            refresh();
         });
     }
 
