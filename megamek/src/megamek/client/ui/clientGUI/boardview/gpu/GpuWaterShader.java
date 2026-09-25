@@ -95,11 +95,15 @@ final class GpuWaterShader extends Attribute {
                 for (BoardSurface.Side fall : upper.waterfalls) {
                     Coords below = upper.tile.coords().translated(BoardGeometry.edgeDirection(fall.edge()));
                     if (!below.equals(pool)) { continue; }
-                    float levels = (fall.a().z - fall.lowA()) / BoardGeometry.LEVEL;
+                    float levels = (BoardGeometry.waterZ(upper.tile) - fall.lowA()) / BoardGeometry.LEVEL;
                     float radius = (0.12f + 0.05f * (float) Math.sqrt(Math.min(4, levels))) * BoardGeometry.WIDTH;
-                    Vector3 from = GpuWaterfall.landing(upper, fall, 0);
+                    // A narrow stream cannot churn a lake-sized disk. Leave quieter water beside its impact.
+                    radius = Math.min(radius, Math.max(2 * BoardGeometry.HEX_SCALE, .3f * fall.a().dst(fall.b())));
+                    float start = upper.fallJoins(fall, true) ? 0 : .08f;
+                    float end = upper.fallJoins(fall, false) ? 1 : .92f;
+                    Vector3 from = GpuWaterfall.landing(upper, fall, start);
                     for (int k = 1; k <= 2; k++) {
-                        Vector3 to = GpuWaterfall.landing(upper, fall, k / 2f);
+                        Vector3 to = GpuWaterfall.landing(upper, fall, start + (end - start) * k / 2f);
                         // The boil reaches out a little over twice its radius, and behind the curtain to the wall.
                         if (distance(middle, from, to) < BoardGeometry.WIDTH * .6f + 2.2f * radius) {
                             hits.add(new Impact(from, to, radius));
@@ -456,10 +460,17 @@ final class GpuWaterShader extends Attribute {
                 for (int row = 0; row < height; row++) {
                     for (int column = 0; column < width; column++) {
                         int center = (row + 1) * span + column + 1;
+                        // A sand bar or rooted rock can stand above the surface inside the original outline.
+                        // Its contour is a bank too, and its dry side must carry a negative shore distance.
+                        if (depth[center] < 0) {
+                            int red = Byte.toUnsignedInt(buffer.get((row * width + column) * 4));
+                            buffer.put((row * width + column) * 4, (byte) Math.min(red, 255 - red));
+                        }
                         float blurred = 0;
                         for (int dy = -1; dy <= 1; dy++) {
                             int line = center + dy * span;
-                            float across = depth[line - 1] + 2 * depth[line] + depth[line + 1];
+                            float across = Math.max(0, depth[line - 1]) + 2 * Math.max(0, depth[line])
+                                  + Math.max(0, depth[line + 1]);
                             blurred += dy == 0 ? 2 * across : across;
                         }
                         buffer.put((row * width + column) * 4 + 1, unit(blurred / 16 / DEPTH_RANGE));
@@ -509,14 +520,15 @@ final class GpuWaterShader extends Attribute {
                 if (owner == null) { continue; }
                 BoardScene.Tile tile = owner.surface.tile;
                 float floor = Float.isFinite(bed[i]) ? bed[i] : BoardGeometry.groundZ(tile);
-                depth[i] = Math.max(0, BoardGeometry.waterZ(tile) - floor) / BoardGeometry.LEVEL;
+                float x = (firstX + i % span + .5f) * spacing, y = (firstY + i / span + .5f) * spacing;
+                depth[i] = (owner.surface.waterHeight(x, y) - floor) / BoardGeometry.LEVEL;
             }
             return depth;
         }
 
-        /** Rapids and a pool's approach to its lip, blended across hexes exactly like the current. */
+        /** Shared rapids and approach currents, plus whitewater confined to the actual descending surface. */
         float agitation(Vector3 point) {
-            return pools.agitation(point.x, point.y);
+            return pools.agitation(point);
         }
 
         /** The surface of the open water at {@code coords}, or null where there is none. */
@@ -597,10 +609,14 @@ final class GpuWaterShader extends Attribute {
             return inside;
         }
 
-        float agitation(float x, float y) {
-            gather(x, y);
-            blend(x, y, scratch);
-            return scratch[3];
+        float agitation(Vector3 point) {
+            gather(point.x, point.y);
+            blend(point.x, point.y, scratch);
+            float agitation = scratch[3];
+            for (int i = 0; i < count; i++) {
+                agitation = Math.max(agitation, candidates[i].surface.slopeAgitation(point));
+            }
+            return agitation;
         }
 
         /** Finds the hex whose centre is nearest, then its open water and its neighbours'. */
@@ -681,6 +697,10 @@ final class GpuWaterShader extends Attribute {
                     segments.addAll(List.of(a.x, a.y, b.x, b.y));
                 }
             }
+            for (BoardSurface.Face face : surface.faces) {
+                if (face.finish() == BoardSurface.Finish.ICE || face.finish() == BoardSurface.Finish.DRESSING) { continue; }
+                waterline(segments, surface, face);
+            }
             banks = new float[segments.size()];
             for (int i = 0; i < banks.length; i++) { banks[i] = segments.get(i); }
             minX = lowX;
@@ -725,6 +745,23 @@ final class GpuWaterShader extends Attribute {
                 result = Math.min(result, ex * ex + ey * ey);
             }
             return result;
+        }
+    }
+
+    /** The actual intersection of a ground triangle and the drawn water, including exposed bars and boulders. */
+    static void waterline(List<Float> segments, BoardSurface surface, BoardSurface.Face face) {
+        Vector3[] points = { face.a(), face.b(), face.c() };
+        float[] depths = new float[3];
+        for (int i = 0; i < 3; i++) { depths[i] = surface.waterHeight(points[i].x, points[i].y) - points[i].z; }
+        // Fully submerged triangles do not create foam lines along the bed's mesh.
+        if (Math.min(depths[0], Math.min(depths[1], depths[2])) >= 0
+              || Math.max(depths[0], Math.max(depths[1], depths[2])) <= 0) { return; }
+        for (int i = 0; i < 3; i++) {
+            int j = (i + 1) % 3;
+            if ((depths[i] > 0) == (depths[j] > 0)) { continue; }
+            float t = depths[i] / (depths[i] - depths[j]);
+            segments.add(BoardRelief.lerp(points[i].x, points[j].x, t));
+            segments.add(BoardRelief.lerp(points[i].y, points[j].y, t));
         }
     }
 }

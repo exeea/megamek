@@ -215,6 +215,8 @@ void main() {
     bool ground = kind < .125, plant = kind >= .125 && kind < .375, cliff = kind >= .375 && kind < .625;
     bool pit = kind >= .625 && kind < .875;
     bool shore = ground && v_color.a < .25;
+    // Wet ground uses the spare ground-kind range for the fractional surface level of a descending stream.
+    if (shore) level = v_color.g * 255.0 - 64.0 + kind * 8.0;
     // A water hex's ground packs its water's palette with the nearest step's height, which dry ground carries alone.
     float tintByte = v_color.a * 255.0;
     float palette = floor(tintByte / 16.0 + .03);

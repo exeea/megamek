@@ -51,8 +51,9 @@ final class GpuWaterfall {
     static Vector3 landing(BoardSurface surface, BoardSurface.Side drop, float s) {
         BoardSurface.Crest crest = surface.crest(drop);
         Vector3 point = crest.point(s);
-        point.z = drop.lowA();
-        return point.mulAdd(crest.normal(s), thrown(drop.a().z - drop.lowA()));
+        point.mulAdd(crest.normal(s), thrown(BoardGeometry.waterZ(surface.tile) - drop.lowA()));
+        point.z = surface.receivingHeight(drop, point.x, point.y);
+        return point;
     }
 
     /**
@@ -61,30 +62,24 @@ final class GpuWaterfall {
      */
     static Vector3[][] grid(BoardSurface surface, BoardSurface.Side drop) {
         BoardSurface.Crest crest = surface.crest(drop);
-        float top = drop.a().z, bottom = drop.lowA(), height = Math.max(.001f, top - bottom);
-        float lip = BoardSurface.fallLip(top, bottom), crestLine = -CREST * lip, thrown = thrown(height);
+        float top = BoardGeometry.waterZ(surface.tile), bottom = drop.lowA(), height = Math.max(.001f, top - bottom);
+        float lip = BoardSurface.fallLip(top, bottom), thrown = thrown(height);
         float fillet = fillet(top, bottom);
         // The path: level from the pool's edge to the crest, then z = top - height u², x growing with u, down to where
         // a quadratic fillet takes it tangentially onto the receiving surface.
         float end = (float) Math.sqrt((height - fillet) / height);
         int rows = ROWS + 5;
-        float[] x = new float[rows], z = new float[rows], fall = new float[rows];
-        x[0] = -lip;
+        float[] z = new float[rows], fall = new float[rows];
         z[0] = top;
-        x[1] = crestLine;
         z[1] = top;
         for (int k = 1; k <= ROWS; k++) {
             float u = end * k / ROWS;
-            x[k + 1] = crestLine + (thrown - crestLine) * u;
             z[k + 1] = top - height * u * u;
             fall[k + 1] = u * u;
         }
-        float px = x[ROWS + 1], pz = z[ROWS + 1];
-        float control = px + fillet * (thrown - crestLine) / (2 * height * end);
-        float spread = control + .8f * fillet;
+        float pz = z[ROWS + 1];
         for (int k = 1; k <= 3; k++) {
             float v = k / 3f, w = 1 - v;
-            x[ROWS + 1 + k] = w * w * px + 2 * w * v * control + v * v * spread;
             z[ROWS + 1 + k] = w * w * pz + v * v * bottom + 2 * w * v * bottom;
             fall[ROWS + 1 + k] = 1;
         }
@@ -98,9 +93,15 @@ final class GpuWaterfall {
             float stream = envelope * envelope * (.6f * MathUtils.sin(MathUtils.PI2 * (s * 1.7f + phase))
                   + .4f * MathUtils.sin(MathUtils.PI2 * (s * 3.9f + phase * 1.9f)));
             Vector3 base = crest.point(s), direction = crest.normal(s);
+            float localLip = surface.lipWidth(drop.edge(), s, lip);
+            float landing = offset(localLip, height, fillet, thrown, rows - 1);
+            float landingX = base.x + direction.x * landing, landingY = base.y + direction.y * landing;
+            float landingZ = surface.receivingHeight(drop, landingX, landingY);
             for (int r = 0; r < rows; r++) {
-                float offset = x[r] + stream * BULGE * BoardGeometry.HEX_SCALE * (float) Math.pow(fall[r], .65f);
-                result[i][r] = new Vector3(base.x, base.y, z[r]).mulAdd(direction, offset);
+                float offset = offset(localLip, height, fillet, thrown, r)
+                      + stream * BULGE * BoardGeometry.HEX_SCALE * (float) Math.pow(fall[r], .65f);
+                float descent = (top - z[r]) / height;
+                result[i][r] = new Vector3(base.x, base.y, base.z + (landingZ - base.z) * descent).mulAdd(direction, offset);
             }
         }
         // Where the water leaves the pool the sheet starts exactly on the pool's pulled-back edge, straight between the
@@ -109,6 +110,17 @@ final class GpuWaterfall {
             result[i][0].set(result[i - 1][0]).lerp(result[i + 1][0], .5f);
         }
         return result;
+    }
+
+    /** Horizontal distance down the same thrown path, with a lip that can taper into a free bank. */
+    private static float offset(float lip, float height, float fillet, float thrown, int row) {
+        if (row == 0) { return -lip; }
+        float crest = -CREST * lip, end = (float) Math.sqrt((height - fillet) / height);
+        if (row <= ROWS + 1) { return crest + (thrown - crest) * end * (row - 1) / ROWS; }
+        float px = crest + (thrown - crest) * end;
+        float control = px + fillet * (thrown - crest) / (2 * height * end);
+        float v = (row - ROWS - 1) / 3f, w = 1 - v;
+        return w * w * px + 2 * w * v * control + v * v * (control + .8f * fillet);
     }
 
     /**
@@ -122,7 +134,7 @@ final class GpuWaterfall {
         Vector3[][] grid = grid(surface, drop);
         BoardSurface.Crest crest = surface.crest(drop);
         int columns = grid.length - 1, rows = grid[0].length;
-        float top = drop.a().z, height = Math.max(.001f, top - drop.lowA());
+        float top = BoardGeometry.waterZ(surface.tile), height = Math.max(.001f, top - drop.lowA());
         float repeat = 48 * BoardGeometry.HEX_SCALE;
         boolean freeA = !surface.fallJoins(drop, true), freeB = !surface.fallJoins(drop, false);
         float[] across = across(grid, crest, freeA, freeB);
@@ -213,7 +225,7 @@ final class GpuWaterfall {
      */
     static void spray(MeshPartBuilder mesh, BoardSurface surface, BoardSurface.Side drop) {
         BoardSurface.Crest crest = surface.crest(drop);
-        float metre = BoardRelief.metres(1), height = drop.a().z - drop.lowA();
+        float metre = BoardRelief.metres(1), height = BoardGeometry.waterZ(surface.tile) - drop.lowA();
         float fall = Math.max(height, metre) / metre;
         float length = 0;
         Vector3 previous = landing(surface, drop, 0);

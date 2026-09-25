@@ -136,6 +136,8 @@ final class BoardFlow {
             }
             int drop = tile.elevation() - target.elevation();
             if (drop > 0) {
+                // Sloping streams gather whitewater on their descent, not over the level approach (BoardSurface).
+                if (BoardSurface.waterSlope(tile, target)) { return 1; }
                 // Bounded artistic acceleration, fading upstream over three hexes; no change to GIF timing.
                 float proximity = 1 - distance / (float) WATERFALL_APPROACH_HEXES;
                 return 1 + 1.25f * (float) Math.sqrt(Math.min(drop, 4)) * proximity;

@@ -16,7 +16,9 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
+import megamek.common.board.Board;
 import megamek.common.board.Coords;
+import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -63,6 +65,23 @@ class GpuRiverTerrainSmokeTest {
           new View("cut", true, -10, 0, .14f, new Coords(10, 11), 1, false, .8f),
           new View("clay", true, 0, 0, .62f, new Coords(6, 5), 2, true, 1f));
 
+    private static final List<View> MAP_VIEWS = List.of(
+          new View("junction", false, 0, 0, .24f, new Coords(6, 8), 2, false, .8f),
+          new View("peninsulas", false, 0, 0, .40f, new Coords(8, 9), 1, false, .8f),
+          new View("shallow", false, 0, 0, .20f, new Coords(10, 12), 0, false, .8f),
+          new View("shallow-oblique", true, -25, 180, .13f, new Coords(10, 12), 0, false, .8f),
+          new View("slope-banks", true, -20, 150, .13f, new Coords(8, 6), 0, false, .8f),
+          new View("ridge", true, -10, 0, .20f, new Coords(6, 9), 2, false, .8f));
+
+    private static final List<View> DROP_VIEWS = List.of(
+          new View("drops", true, -10, 0, .48f, new Coords(4, 3), 1, false, .8f),
+          new View("drops-top", false, 0, 0, .50f, new Coords(4, 3), 1, false, .8f),
+          new View("fall-front", true, -18, 0, .13f, new Coords(7, 3), 1, false, .8f),
+          new View("fall-left", true, -18, 60, .13f, new Coords(7, 3), 1, false, .8f),
+          new View("fall-right", true, -18, -60, .13f, new Coords(7, 3), 1, false, .8f),
+          new View("fall-back", true, -18, 180, .13f, new Coords(7, 3), 1, false, .8f),
+          new View("fall-top", false, 0, 0, .13f, new Coords(7, 3), 1, false, .8f));
+
     @Test
     void capturesWaterHexesInSculptedLand() throws Exception {
         String families = System.getProperty("megamek.gpu.river.families", "SAND");
@@ -71,6 +90,9 @@ class GpuRiverTerrainSmokeTest {
         boolean transitions = Boolean.parseBoolean(System.getProperty("megamek.gpu.river.transitions",
               String.valueOf(BoardGeometry.DEFAULT_TRANSITIONS)));
         String suffix = transitions ? "-transitions" : "";
+        boolean map = Boolean.getBoolean("megamek.gpu.river.map");
+        boolean drops = Boolean.getBoolean("megamek.gpu.river.drops");
+        float width = Float.parseFloat(System.getProperty("megamek.gpu.river.width", "1"));
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"),
               "river-terrain");
         Files.createDirectories(output.toPath());
@@ -92,13 +114,14 @@ class GpuRiverTerrainSmokeTest {
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                     for (String name : families.split(",")) {
                         BoardScene.Surface family = BoardScene.Surface.valueOf(name.trim().toUpperCase(Locale.ROOT));
-                        BoardScene scene = scene(family);
+                        BoardScene scene = drops ? dropScene(family) : map ? mapScene(family) : scene(family);
+                        setWidth(width);
                         long start = System.nanoTime();
                         tune(.8f, transitions);
                         terrain.update(scene);
                         report.append(String.format(Locale.ROOT, "%s: build %.1f ms%n", family,
                               (System.nanoTime() - start) / 1e6));
-                        for (View view : VIEWS) {
+                        for (View view : drops ? DROP_VIEWS : map ? MAP_VIEWS : VIEWS) {
                             if (!views.get(0).isBlank() && !views.contains(view.name())) { continue; }
                             tune(view.grid(), transitions);
                             terrain.update(scene);
@@ -116,7 +139,7 @@ class GpuRiverTerrainSmokeTest {
                             report.append(String.format(Locale.ROOT, "  %s: draws=%d vertices=%.0f%n", view.name(),
                                   profiler.getDrawCalls(), profiler.getVertexCount().total));
                             GpuReviewFrame.save(new File(output, family.name().toLowerCase(Locale.ROOT) + "-"
-                                  + view.name() + suffix + ".png"));
+                                  + view.name() + suffix + "-width" + Math.round(100 * width) + ".png"));
                         }
                     }
                     terrain.setClay(false);
@@ -126,6 +149,7 @@ class GpuRiverTerrainSmokeTest {
                     failure.set(error);
                 } finally {
                     BoardGeometry.tune(BoardGeometry.DEFAULTS);
+                    BoardRelief.tune(BoardRelief.DEFAULTS);
                     frame.dispose();
                     terrain.dispose();
                     Gdx.app.exit();
@@ -141,13 +165,50 @@ class GpuRiverTerrainSmokeTest {
               transitions, BoardGeometry.DEFAULT_PADDING));
     }
 
+    static void setWidth(float width) {
+        var t = BoardRelief.tuning();
+        BoardRelief.tune(new BoardRelief.Tuning(t.shoreShift(), t.shoreRoom(), t.shoreReach(), t.shoreNarrow(),
+              t.shoreHard(), t.shorePool(), t.shoreIsle(), t.shoreBlend(), t.shoreWander(), t.wanderCell(),
+              t.shoreSpread(), t.landKeep(), t.shoreLip(), t.transition(), t.fullDetailHexes(), t.mediumDetailHexes(), width));
+    }
+
+    /** Parallel streams drop one, two and three surface levels, from left to right. */
+    static BoardScene dropScene(BoardScene.Surface family) {
+        List<BoardScene.Tile> tiles = new ArrayList<>();
+        BoardScene.Pixels pixels = groundPixels();
+        for (int x = 0; x < 9; x++) {
+            for (int y = 0; y < 7; y++) {
+                int level = y < 3 ? x / 3 + 1 : 0;
+                int depth = x % 3 == 1 ? 1 : -1;
+                tiles.add(new BoardScene.Tile(new Coords(x, y), level, depth, false, 0, family, pixels,
+                      null, null, null, null, List.of(), List.of(), depth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE,
+                      null, true));
+            }
+        }
+        return new BoardScene(0, 9, 7, tiles, List.of(), List.of(), -1, "", List.of());
+    }
+
+    /** The printed reference's wrapped peninsulas, raised banks and depth-zero shallows. */
+    static BoardScene mapScene(BoardScene.Surface family) {
+        BoardScene.Pixels pixels = groundPixels();
+        Board board = new Board();
+        board.load(new File("data/boards/Map Pack Savannahs/16x17 Mountain Lake (Savannah).board"));
+        List<BoardScene.Tile> tiles = new ArrayList<>();
+        for (int x = 0; x < board.getWidth(); x++) {
+            for (int y = 0; y < board.getHeight(); y++) {
+                var hex = board.getHex(x, y);
+                int depth = hex.containsTerrain(Terrains.WATER) ? hex.terrainLevel(Terrains.WATER) : -1;
+                tiles.add(new BoardScene.Tile(new Coords(x, y), hex.getLevel(), depth, false, 0, family, pixels,
+                      null, null, null, null, List.of(), List.of(), depth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE,
+                      null, true));
+            }
+        }
+        return new BoardScene(0, board.getWidth(), board.getHeight(), tiles, List.of(), List.of(), -1, "", List.of());
+    }
+
     /** Every hex, water included, carries the family, as the game gives a desert map's water hexes its theme. */
     static BoardScene scene(BoardScene.Surface family) {
-        BufferedImage image = new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB);
-        for (int y = 0; y < 72; y++) {
-            for (int x = 0; x < 84; x++) { image.setRGB(x, y, 0xff8a8a70); }
-        }
-        BoardScene.Pixels pixels = new BoardScene.Pixels(image);
+        BoardScene.Pixels pixels = groundPixels();
         int width = LAYOUT[0].length(), height = LAYOUT.length;
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < width; x++) {
@@ -169,5 +230,13 @@ class GpuRiverTerrainSmokeTest {
             }
         }
         return new BoardScene(0, width, height, tiles, List.of(), List.of(), -1, "", List.of());
+    }
+
+    private static BoardScene.Pixels groundPixels() {
+        BufferedImage image = new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < 72; y++) {
+            for (int x = 0; x < 84; x++) { image.setRGB(x, y, 0xff8a8a70); }
+        }
+        return new BoardScene.Pixels(image);
     }
 }

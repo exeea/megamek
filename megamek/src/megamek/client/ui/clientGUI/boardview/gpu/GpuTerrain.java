@@ -906,7 +906,7 @@ final class GpuTerrain implements Disposable {
                               : face.finish() == BoardSurface.Finish.SHORE ? 7
                                     : BoardScene.Surface.valueOf(family.toUpperCase(java.util.Locale.ROOT)).ordinal());
                         solid.add(detail, mesh -> physicalSurface(mesh, face, family, tile, openWater(tile), false,
-                              maps.surface() != null, null));
+                              maps.surface() != null, null, surface));
                     } else if (land != null && !land.liquid().present()) {
                         TextureRegion bankArt = ground.region(new GroundSlot(land.coords(), false));
                         solid.add(groundMaterial(bankArt.getTexture(), land),
@@ -970,7 +970,8 @@ final class GpuTerrain implements Disposable {
                         boolean crown = face.finish() == BoardSurface.Finish.CAP;
                         solid.add(crown ? cap : cliff,
                               mesh -> physicalSurface(mesh, face, crown ? family : "cliff", tile, facing, true,
-                                    (crown ? cap : cliff).has(Cliff.TYPE), crown ? null : wallNormals::get));
+                                    (crown ? cap : cliff).has(Cliff.TYPE), crown ? null : wallNormals::get,
+                                    facing == null || chunk.waterField == null ? null : chunk.waterField.surface(facing.coords())));
                     }
                     if (hangsSkirt(surface, side)) {
                         boolean ivy = tile.detailedGround() && tile.surface() == BoardScene.Surface.GRASS;
@@ -1001,12 +1002,13 @@ final class GpuTerrain implements Disposable {
                     TextureRegion waterArt = new TextureRegion(water.get(TextureAttribute.class, TextureAttribute.Diffuse).textureDescription.texture);
                     // Molten material writes opaque depth; water and hazardous pools reveal their beds and units.
                     Layer destination = tile.liquid().molten() ? solid : liquid;
+                    Map<Vector3, Vector3> waterNormals = wallNormals(surface.waterFaces);
                     for (BoardSurface.Face face : surface.waterFaces) {
                         if (tile.liquid().molten()) {
                             destination.add(water, mesh -> surface(mesh, tile.coords(), face, waterArt, 0));
                         } else {
                             destination.add(water, mesh -> waterSurface(mesh, chunk.waterField, tile.coords(), face,
-                                  proceduralWater ? null : waterArt));
+                                  proceduralWater ? null : waterArt, waterNormals));
                         }
                         chunk.bounds.ext(face.a()).ext(face.b()).ext(face.c());
                     }
@@ -1051,7 +1053,7 @@ final class GpuTerrain implements Disposable {
                             // The fall lands out in the receiving hex and throws its spray up around there.
                             Vector3[][] grid = GpuWaterfall.grid(surface, drop);
                             float around = spray == null ? 0 : GpuWaterfall.sprayReach();
-                            float above = spray == null ? 0 : GpuWaterfall.sprayHeight(drop.a().z - drop.lowA());
+                            float above = spray == null ? 0 : GpuWaterfall.sprayHeight(BoardGeometry.waterZ(tile) - drop.lowA());
                             for (Vector3[] column : grid) {
                                 for (Vector3 p : column) { chunk.bounds.ext(p); }
                                 Vector3 landing = column[column.length - 1];
@@ -1204,8 +1206,8 @@ final class GpuTerrain implements Disposable {
         }
         // A water hex's ground carries its water's palette, so the shader wets it and tints it below the waterline.
         float shore = liquid ? GpuWaterShader.palette(tile.liquid()) : Float.NaN;
-        solid.add(material, mesh -> sculptedFaces(mesh, surface.relief, formed, shore));
-        if (!bed.isEmpty()) { solid.add(material, mesh -> bedFaces(mesh, tile, bed, shore)); }
+        solid.add(material, mesh -> sculptedFaces(mesh, surface, formed, shore));
+        if (!bed.isEmpty()) { solid.add(material, mesh -> bedFaces(mesh, surface, bed, shore)); }
         if (!submerged.isEmpty()) {
             // Below the water it faces, a wall takes that water's tint (terrain-cliff.frag).
             String geology = family == BoardScene.Surface.CONCRETE ? "terrain/rock" : family.wall;
@@ -1214,7 +1216,7 @@ final class GpuTerrain implements Disposable {
             for (BoardSurface.Face face : submerged) {
                 BoardScene.Tile facing = submerged(scene, tile, face);
                 solid.add(cliff, mesh -> physicalSurface(mesh, face, "cliff", tile, facing, true, cliff.has(Cliff.TYPE),
-                      normals::get));
+                      normals::get, chunk.waterField == null ? null : chunk.waterField.surface(facing.coords())));
             }
         }
         if (!ground.isEmpty()) {
@@ -1236,12 +1238,16 @@ final class GpuTerrain implements Disposable {
     }
 
     /** A water hex's bed, smoothly shaded over shared vertices; shore is its water's palette. */
-    private static void bedFaces(MeshPartBuilder mesh, BoardScene.Tile tile, List<BoardSurface.Face> bed, float shore) {
-        Color data = new Color(1, Math.clamp((tile.elevation() + 64) / 255f, 0, 1), 0, shoreTint(shore, 0));
+    private static void bedFaces(MeshPartBuilder mesh, BoardSurface surface, List<BoardSurface.Face> bed, float shore) {
         Map<Vector3, Vector3> normals = wallNormals(bed);
         Map<Vector3, Short> indices = new HashMap<>();
-        Function<Vector3, Short> shared = p -> indices.computeIfAbsent(p,
-              key -> mesh.vertex(vertex(key, normals.get(key), 99, 99, data)));
+        Function<Vector3, Short> shared = p -> indices.computeIfAbsent(p, key -> {
+            BoardRelief.Shade bank = surface.relief.shade(key);
+            return mesh.vertex(bank == null
+                  ? vertex(key, normals.get(key), 99, 99,
+                        waterColor(1, surface.waterHeight(key.x, key.y), shoreTint(shore, 0)))
+                  : sculptVertex(key, bank, shore, surface));
+        });
         for (BoardSurface.Face face : bed) {
             mesh.triangle(shared.apply(face.a()), shared.apply(face.b()), shared.apply(face.c()));
         }
@@ -1277,17 +1283,17 @@ final class GpuTerrain implements Disposable {
     }
 
     /** Sculpted faces over shared vertices; shore, unless NaN, is the palette of the water hex they belong to. */
-    private static void sculptedFaces(MeshPartBuilder mesh, BoardRelief relief, List<BoardSurface.Face> faces,
+    private static void sculptedFaces(MeshPartBuilder mesh, BoardSurface surface, List<BoardSurface.Face> faces,
           float shore) {
         Map<Vector3, Short> indices = new java.util.IdentityHashMap<>();
         Function<Vector3, Short> vertex = p -> indices.computeIfAbsent(p,
-              key -> mesh.vertex(sculptVertex(key, relief.shade(key), shore)));
+              key -> mesh.vertex(sculptVertex(key, surface.relief.shade(key), shore, surface)));
         for (BoardSurface.Face face : faces) {
             mesh.triangle(vertex.apply(face.a()), vertex.apply(face.b()), vertex.apply(face.c()));
         }
     }
 
-    private static MeshPartBuilder.VertexInfo sculptVertex(Vector3 p, BoardRelief.Shade shade, float shore) {
+    private static MeshPartBuilder.VertexInfo sculptVertex(Vector3 p, BoardRelief.Shade shade, float shore, BoardSurface surface) {
         if (shade == null) {
             return vertex(p, Vector3.Z, 0, 0, new Color(1, 64 / 255f, 1, 1));
         }
@@ -1302,8 +1308,18 @@ final class GpuTerrain implements Disposable {
         float level = shade.kind() == BoardRelief.Kind.CLIFF ? Math.clamp(shade.level(), 0, 1)
               : Math.clamp((Math.round(shade.level()) + 64) / 255f, 0, 1);
         boolean wet = !Float.isNaN(shore) && shade.kind() == BoardRelief.Kind.GROUND;
-        return vertex(p, shade.normal(), shade.rim(), shade.foot(), new Color(shade.occlusion(), level, kind,
-              wet ? shoreTint(shore, (shade.tint() - .3f) / .1f) : shade.tint()));
+        // This ground is the bank outside the water mesh. A raised stream beside it cannot submerge it merely by
+        // being higher; keep the bank exposed. The bed inside the channel receives its full optical depth separately.
+        Color data = wet ? waterColor(shade.occlusion(), Math.min(p.z, surface.waterHeight(p.x, p.y)),
+              shoreTint(shore, (shade.tint() - .3f) / .1f)) : new Color(shade.occlusion(), level, kind, shade.tint());
+        return vertex(p, shade.normal(), shade.rim(), shade.foot(), data);
+    }
+
+    /** Ground's otherwise unused blue range holds the fractional water level, preserving sloped-bed optics. */
+    private static Color waterColor(float occlusion, float waterHeight, float tint) {
+        float level = (waterHeight + BoardGeometry.HEX_SCALE) / BoardGeometry.LEVEL;
+        float whole = (float) Math.floor(level);
+        return new Color(occlusion, Math.clamp((whole + 64) / 255f, 0, 1), (level - whole) / 8, tint);
     }
 
     /**
@@ -1349,7 +1365,7 @@ final class GpuTerrain implements Disposable {
         float repeat = materialRepeat(family);
         Map<Vector3, Short> indices = new HashMap<>();
         Function<Vector3, Short> vertex = p -> indices.computeIfAbsent(p, key -> mesh.vertex(
-              physicalVertex(key, relief.groundNormal(key), Vector3.X, repeat, tile, null, false, false, packed)));
+              physicalVertex(key, relief.groundNormal(key), Vector3.X, repeat, tile, null, false, false, packed, null)));
         for (BoardSurface.Face face : faces) {
             mesh.triangle(vertex.apply(face.a()), vertex.apply(face.b()), vertex.apply(face.c()));
         }
@@ -1357,7 +1373,7 @@ final class GpuTerrain implements Disposable {
 
     private static void physicalSurface(MeshPartBuilder mesh, BoardSurface.Face face, String family,
           BoardScene.Tile tile, BoardScene.Tile water, boolean vertical, boolean packed,
-          Function<Vector3, Vector3> normals) {
+          Function<Vector3, Vector3> normals, BoardSurface waterShape) {
         Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
         float repeat = materialRepeat(family);
         Vector3 tangent = vertical ? new Vector3(-normal.y, normal.x, 0).nor() : Vector3.X;
@@ -1383,7 +1399,7 @@ final class GpuTerrain implements Disposable {
         for (int i = 0; i < 3; i++) {
             Vector3 vertexNormal = normals == null ? normal : normals.apply(corners[i]);
             vertices[i] = physicalVertex(corners[i], vertexNormal, tangent, repeat, tile, water, vertical, shore,
-                  packed);
+                  packed, waterShape);
         }
         mesh.triangle(vertices[0], vertices[1], vertices[2]);
     }
@@ -1407,10 +1423,13 @@ final class GpuTerrain implements Disposable {
 
     /** Anything below the water that covers it, bed or drowned wall, carries its depth in levels and that palette. */
     private static MeshPartBuilder.VertexInfo physicalVertex(Vector3 p, Vector3 normal, Vector3 tangent,
-          float repeat, BoardScene.Tile tile, BoardScene.Tile water, boolean vertical, boolean shore, boolean packed) {
-        float depth = water == null ? 0 : Math.max(0, BoardGeometry.waterZ(water) - p.z)
+          float repeat, BoardScene.Tile tile, BoardScene.Tile water, boolean vertical, boolean shore, boolean packed,
+          BoardSurface waterShape) {
+        float waterHeight = waterShape == null ? water == null ? BoardGeometry.waterZ(tile) : BoardGeometry.waterZ(water)
+              : waterShape.waterHeight(p.x, p.y);
+        float depth = water == null ? 0 : Math.max(0, waterHeight - p.z)
               / (GpuWaterShader.DEPTH_RANGE * BoardGeometry.LEVEL);
-        float blue = shore ? Math.clamp((p.z - BoardGeometry.waterZ(tile)) / BoardGeometry.HEX_SCALE, 0, 1)
+        float blue = shore ? Math.clamp((p.z - waterHeight) / BoardGeometry.HEX_SCALE, 0, 1)
               : 1 - Math.min(1, depth);
         float palette = water == null ? .5f : GpuWaterShader.palette(water.liquid()) / 4f;
         return vertex(p, normal, p.dot(tangent) / repeat, (vertical ? -p.z : -p.y) / repeat,
@@ -1422,9 +1441,10 @@ final class GpuTerrain implements Disposable {
      * pixel, so only the blended rapids ride on the vertices. Authored GIF water maps its artwork as before.
      */
     private static void waterSurface(MeshPartBuilder mesh, GpuWaterShader.Field field, Coords coords,
-          BoardSurface.Face face, TextureRegion art) {
-        mesh.triangle(waterVertex(field, coords, face.a(), art), waterVertex(field, coords, face.b(), art),
-              waterVertex(field, coords, face.c(), art));
+          BoardSurface.Face face, TextureRegion art, Map<Vector3, Vector3> normals) {
+        mesh.triangle(waterVertex(field, coords, face.a(), normals.get(face.a()), art),
+              waterVertex(field, coords, face.b(), normals.get(face.b()), art),
+              waterVertex(field, coords, face.c(), normals.get(face.c()), art));
     }
 
     /**
@@ -1441,11 +1461,11 @@ final class GpuTerrain implements Disposable {
         return vertex(p, Vector3.Z, p.x / BoardGeometry.WIDTH, -p.y / BoardGeometry.WIDTH, new Color(0, below, 1, 1));
     }
 
-    private static MeshPartBuilder.VertexInfo waterVertex(GpuWaterShader.Field field, Coords coords, Vector3 p,
+    private static MeshPartBuilder.VertexInfo waterVertex(GpuWaterShader.Field field, Coords coords, Vector3 p, Vector3 normal,
           TextureRegion art) {
         Color agitation = new Color(field.agitation(p), 0, 0, 1);
-        return art == null ? vertex(p, Vector3.Z, p.x / BoardGeometry.WIDTH, -p.y / BoardGeometry.WIDTH, agitation)
-              : topVertex(p, coords, art, agitation);
+        return art == null ? vertex(p, normal, p.x / BoardGeometry.WIDTH, -p.y / BoardGeometry.WIDTH, agitation)
+              : topVertex(p, coords, art, agitation).setNor(normal);
     }
 
     /** How much water film a tile's own exposed material takes; negative excludes snow, ice and water. */

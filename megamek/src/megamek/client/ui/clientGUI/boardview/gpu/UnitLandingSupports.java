@@ -211,8 +211,13 @@ final class UnitLandingSupports {
                 }
                 float sample = tile.frozen() ? BoardGeometry.surfaceZ(tile)
                       : ground(scene, tile, x, y, surfaces, includeLiquid);
-                if (includeLiquid && tile.liquid().present()) { sample = Math.max(sample, BoardGeometry.waterZ(tile)); }
-                if (!tile.liquid().present() || tile.frozen() || sample >= BoardGeometry.waterZ(tile)) {
+                float water = BoardGeometry.waterZ(tile);
+                if (includeLiquid && tile.liquid().present() && !tile.frozen()) {
+                    BoardSurface shape = surfaces == null ? new BoardSurface(scene, tile) : surfaces.get(scene, tile);
+                    water = shape.waterHeight(x, y);
+                    sample = Math.max(sample, water);
+                }
+                if (!tile.liquid().present() || tile.frozen() || sample >= water) {
                     height = Math.max(height, sample);
                 }
             }

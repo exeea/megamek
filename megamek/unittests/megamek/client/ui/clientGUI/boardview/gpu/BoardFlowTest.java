@@ -81,7 +81,7 @@ class BoardFlowTest {
         Map<Coords, Integer> water = new HashMap<>();
         for (int y = 1; y <= 8; y++) { water.put(new Coords(3, y), 2); }
         Coords outlet = new Coords(3, 8), lip = new Coords(3, 7);
-        water.put(outlet, 1);
+        water.put(outlet, -1);
         var currents = BoardFlow.calculate(scene(8, 10, water, Map.of(), Set.of()));
         // The river's head at (3, 1) runs slow of its own accord.
         assertEquals(speed(currents.get(new Coords(3, 2))), speed(currents.get(new Coords(3, 4))), 0.0001f,
@@ -98,6 +98,21 @@ class BoardFlowTest {
         assertEquals(speed(largerDrop.get(lip)), speed(extremeDrop.get(lip)), 0.0001f,
               "Extreme map elevations must not create unbounded animation speeds");
         assertFalse(extremeDrop.containsKey(outlet), "The closed receiving pool remains in place");
+    }
+
+    @Test
+    void slopingOutletsKeepTheirLevelApproachAtOrdinaryStreamSpeed() {
+        for (int drop : new int[] { 1, 2 }) {
+            Map<Coords, Integer> water = new HashMap<>();
+            for (int y = 1; y <= 8; y++) { water.put(new Coords(3, y), drop); }
+            water.put(new Coords(3, 8), 0);
+            var currents = BoardFlow.calculate(scene(8, 10, water, Map.of(), Set.of()));
+            for (int y = 4; y <= 7; y++) {
+                assertEquals(speed(currents.get(new Coords(3, 2))), speed(currents.get(new Coords(3, y))), .0001f,
+                      "A sloping outlet must not churn the flat reach before it");
+                assertDownstream(currents.get(new Coords(3, y)), new Coords(3, y), new Coords(3, y + 1));
+            }
+        }
     }
 
     private static float speed(BoardFlow.Current current) {

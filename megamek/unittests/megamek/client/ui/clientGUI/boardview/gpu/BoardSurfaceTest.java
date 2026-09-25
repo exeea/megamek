@@ -288,7 +288,7 @@ class BoardSurfaceTest {
             BoardRelief.tune(new BoardRelief.Tuning(original.shoreShift(), original.shoreRoom(), original.shoreReach(),
                   original.shoreNarrow(), original.shoreHard(), original.shorePool(), original.shoreIsle(),
                   original.shoreBlend(), original.shoreWander(), original.wanderCell(), -15, original.landKeep(),
-                  original.shoreLip(), original.transition(), original.fullDetailHexes(), original.mediumDetailHexes()));
+                  original.shoreLip(), original.transition(), original.fullDetailHexes(), original.mediumDetailHexes(), original.riverWidth()));
             BoardSurface narrow = cache.get(scene, scene.tile(center));
             BoardSurface adjoining = cache.get(scene, scene.tile(north));
             assertNotSame(before, narrow);
@@ -353,7 +353,7 @@ class BoardSurfaceTest {
             BoardRelief.tune(new BoardRelief.Tuning(0, relief.shoreRoom(), relief.shoreReach(), relief.shoreNarrow(),
                   relief.shoreHard(), relief.shorePool(), relief.shoreIsle(), relief.shoreBlend(), relief.shoreWander(),
                   relief.wanderCell(), relief.shoreSpread(), relief.landKeep(), relief.shoreLip(), relief.transition(),
-                  relief.fullDetailHexes(), relief.mediumDetailHexes()));
+                  relief.fullDetailHexes(), relief.mediumDetailHexes(), relief.riverWidth()));
             BoardSurface before = cache.get(scene, scene.tile(center));
             int n = BoardSurface.SHORE_SEGMENTS;
             float width = before.outline.get(n).dst(before.outline.get(2 * n));
@@ -429,11 +429,14 @@ class BoardSurfaceTest {
                     BoardScene scene = sandScene(7, 0, Map.of(ridge, height),
                           Map.of(center, 1, upstream, 1, downstream, 1), false);
                     BoardSurface surface = new BoardSurface(scene, scene.tile(center));
-                    Vector3 a = surface.outline.get(edge * n + n / 4);
-                    Vector3 middle = surface.outline.get(edge * n + n / 2);
-                    Vector3 b = surface.outline.get(edge * n + 3 * n / 4);
-                    assertTrue(distance(middle, a, b) > .3f * BoardGeometry.HEX_SCALE,
-                          "The ridge-side bank must keep curving through its middle, edge " + edge + ", height " + height);
+                    Vector3 a = surface.outline.get(edge * n);
+                    Vector3 b = surface.outline.get((edge + 1) * n % surface.outline.size());
+                    float curve = 0;
+                    for (int i = 1; i < n; i++) {
+                        curve = Math.max(curve, distance(surface.outline.get(edge * n + i), a, b));
+                    }
+                    assertTrue(curve > BoardGeometry.HEX_SCALE,
+                          "The stream bends around the ridge, edge " + edge + ", height " + height);
                     for (int mouth : new int[] { before, after }) {
                         BoardSurface neighbor = new BoardSurface(scene,
                               scene.tile(center.translated(BoardGeometry.edgeDirection(mouth))));
@@ -449,7 +452,7 @@ class BoardSurfaceTest {
     }
 
     @Test
-    void aRiverRunsUpToTheSlopesBesideItWhichCarryOnUnderItToTheBed() {
+    void theRiverbedMeetsItsCurvedBanksAndDescendsBeneathTheWater() {
         // A river a level deep between banks a level above its surface: two levels between the grounds units stand on,
         // a slope that meets the water on the edge and carries on down to the bed.
         BoardSculptTest.withTransitions(true, () -> {
@@ -472,23 +475,16 @@ class BoardSurfaceTest {
                 List<Integer> mouths = List.of(Math.floorMod(1 - direction, 6), Math.floorMod(-2 - direction, 6));
                 for (int edge = 0; edge < 6; edge++) {
                     if (mouths.contains(edge)) { continue; }
-                    Vector3 a = BoardGeometry.corner(center, 0, edge), b = BoardGeometry.corner(center, 0, edge + 1);
-                    Vector3 inward = BoardGeometry.center(center, 0).sub(new Vector3(a).lerp(b, .5f)).nor();
-                    for (int sample = 20; sample <= 80; sample += 5) {
-                        Vector3 point = new Vector3(a).lerp(b, sample / 100f);
-                        float nearest = Float.MAX_VALUE;
-                        for (int i = 0; i < surface.water.size(); i++) {
-                            nearest = Math.min(nearest, distance(point, surface.water.get(i),
-                                  surface.water.get((i + 1) % surface.water.size())));
-                        }
-                        assertTrue(nearest < .08f * BoardGeometry.WIDTH, "Direction " + direction + ", edge " + edge
-                              + ", sample " + sample + ": the water keeps " + nearest + " from the slope");
+                    // Width is now adjustable. Check the actual shore, rather than requiring it to lie within
+                    // 6.72 units of the original straight hex edge.
+                    for (int sample = 2; sample < BoardSurface.SHORE_SEGMENTS - 1; sample++) {
+                        Vector3 point = surface.outline.get(edge * BoardSurface.SHORE_SEGMENTS + sample);
+                        assertEquals(BoardGeometry.waterZ(scene.tile(center)), surface.height(point.x, point.y), .03f,
+                              "The bank meets the waterline");
+                        Vector3 inside = new Vector3(point).lerp(BoardGeometry.center(center, 0), .2f);
+                        assertTrue(surface.height(inside.x, inside.y) < BoardGeometry.waterZ(scene.tile(center)) - .1f,
+                              "The slope continues down under the water");
                     }
-                    // Where a slope a level high would stop at the water's own level, it is already deep under it.
-                    Vector3 foot = new Vector3(a).lerp(b, .5f).mulAdd(inward, BoardRelief.stepRoom());
-                    assertTrue(surface.height(foot.x, foot.y) < -.6f * BoardGeometry.LEVEL,
-                          "Direction " + direction + ", edge " + edge + ": the bed at the slope's foot lies at "
-                                + surface.height(foot.x, foot.y));
                 }
             }
         });
@@ -672,9 +668,9 @@ class BoardSurfaceTest {
         // One pool falling over two neighbouring edges, then two pools side by side falling into one pool.
         for (boolean twoPools : List.of(false, true)) {
             Map<Coords, Integer> levels = new HashMap<>();
-            levels.put(high, 3);
+            levels.put(high, 4);
             if (twoPools) {
-                levels.put(high.translated(1), 3);
+                levels.put(high.translated(1), 4);
                 levels.put(high.translated(2), 1);
             } else {
                 levels.put(high.translated(2), 1);

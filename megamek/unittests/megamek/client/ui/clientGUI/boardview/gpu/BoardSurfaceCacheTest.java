@@ -104,10 +104,11 @@ class BoardSurfaceCacheTest {
 
     @Test
     void ownElevationChangesSupportWhileDistantEditsKeepItCached() {
-        BoardScene scene = scene(0, 7, 7, true);
+        BoardScene scene = scene(0, 15, 15, true);
         BoardSurface.Cache cache = new BoardSurface.Cache();
         BoardSurface first = cache.get(scene, scene.tile(CENTER));
-        Coords distant = new Coords(6, 6);
+        Coords distant = new Coords(14, 14);
+        assertTrue(CENTER.distance(distant) > BoardSurface.SHORE_RINGS);
         BoardScene remoteEdit = replace(scene, shape(scene.tile(distant), 4, 0, BoardScene.Surface.SAND));
         assertSame(first, cache.get(remoteEdit, remoteEdit.tile(CENTER)));
 

@@ -124,7 +124,7 @@ void main() {
         // The pool's own surface. A fall starts with exactly this look where it leaves its pool, from the same field,
         // ripples, foam and agitation at the same place, so the two join without a seam; only its curving lip then
         // turns into falling water.
-        vec3 surfaceNormal = falling ? normalize(v_normal) : vec3(0.0, 0.0, 1.0);
+        vec3 surfaceNormal = normalize(v_normal);
         vec4 field = texture2D(u_waterField, v_cloudPosition.xy * u_waterFieldMap.xy + u_waterFieldMap.zw);
         float shore = (field.r * 2.0 - 1.0) * SHORE_RANGE;
         float depth = field.g * WATER_DEPTH_RANGE;
@@ -260,7 +260,8 @@ void main() {
             boil = max(boil, reach);
             push += outward * reach;
         }
-        boil *= effects;
+        // The impact breaks up before reaching a bank; shoreline foam still follows the actual waterline.
+        boil *= effects * smoothstep(0.004, 0.06, shore);
         // Foam patches ride the churned water outward: advected in two phases like the current, each restarting only
         // while unseen, so the foam keeps moving away from the falls without ever shearing or pulsing.
         vec2 drift = push * (0.06 / max(length(push), 1.0));
@@ -298,6 +299,11 @@ void main() {
         float stirred = smoothstep(1.0 - 1.25 * wading, 1.15 - 1.25 * wading, grainy);
         float foam = clamp(max(max(max(contact, surf * 0.9), max(whitecap, stirred)), max(rapids, impact)) * churn,
               0.0, 1.0);
+        // A thin wash over sand is mostly clear, with only a trace of foam. Use the actual water column so the
+        // effect fades around emerging bars and rocks instead of painting the old hex-shaped shoreline white.
+        float foamWater = falling ? 1.0 : mix(0.035, 1.0, smoothstep(0.06, 0.45, depth))
+              * smoothstep(0.0, 0.006, shore);
+        foam *= foamWater;
 
         vec3 kept = waterTransmission(palette, depth);
         float facing = clamp(dot(normal, view), 0.0, 1.0);
@@ -364,7 +370,7 @@ void main() {
         body *= 1.0 + clamp(ripples.z, -1.0, 1.0) * 0.35;
         // Churning water carries air: paler and more opaque long before it breaks into foam; spray thrown up by a
         // fall lights the water around it.
-        float aerated = max(agitation * 0.4, boil * boil * 0.5) * churn;
+        float aerated = max(agitation * 0.4, boil * boil * 0.5) * churn * foamWater;
         body = mix(body, froth * mix(facets, whiteLight, 0.5) * 0.85, aerated);
         bodyAlpha = mix(bodyAlpha, 0.85, aerated);
         // The column thins to nothing at the bank, so water meets its shore without a drawn edge.

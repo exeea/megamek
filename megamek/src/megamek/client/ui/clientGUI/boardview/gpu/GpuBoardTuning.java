@@ -38,7 +38,11 @@ final class GpuBoardTuning {
     private static final float SLIDER_WIDTH = 120;
     private static final float LABEL_WIDTH = 120;
 
-    private record Knob(String name, float min, float max, float step, String format) { }
+    private record Knob(String name, float min, float max, float step, String format, String help) {
+        Knob(String name, float min, float max, float step, String format) {
+            this(name, min, max, step, format, "");
+        }
+    }
     private record Control(Knob knob, Slider slider, Label reading, TextButton toggle) { }
 
     /** One row of the panel: the board value it drives, its range and how its reading is written. */
@@ -394,72 +398,70 @@ final class GpuBoardTuning {
         rows.top().defaults().pad(0, 3, 0, 3);
         section(skin, "River shape and land");
         relief = controls(skin, List.of(
-              new Knob("Shore spread", -20, 12, .5f, "%+.1f"),
-              new Knob("Land retained", .5f, 1, .01f, "%.2f"),
-              new Knob("Corner shift limit", 0, 28, .5f, "%.1f"),
-              new Knob("Shore room", 0, 16, .5f, "%.1f"),
-              new Knob("Shore reach", 64, 128, 1, "%.0f"),
-              new Knob("Narrow channel pull", 0, 2, .05f, "%.2f"),
-              new Knob("Hard ground pull", 1, 4, .1f, "%.1f"),
-              new Knob("Pool radius", 8, 32, .5f, "%.1f"),
-              new Knob("Island radius", 8, 32, .5f, "%.1f"),
-              new Knob("Shore blend", 1, 20, .5f, "%.1f"),
-              new Knob("Shore wander", 0, 16, .5f, "%.1f"),
-              new Knob("Wander length", 70, 280, 5, "%.0f"),
-              new Knob("Shore lip", .5f, 10, .5f, "%.1f"),
-              new Knob("Transition room (m)", 0, 8, .1f, "%.1f")), this::applyRelief, 0);
-        hints(skin, relief,
-              "SHORE_SPREAD: moves both banks outward; larger values widen rivers and lakes. Distances here are in hex-scale units.",
-              "LAND_KEEP: minimum share of a land hex retained when water moves its corners. Larger values limit river expansion.",
-              "SHORE_SHIFT: maximum distance a shoreline can move a hex corner into adjoining land.",
-              "SHORE_ROOM: extra room beyond the waterline for banks beside land at the water's level.",
-              "SHORE_REACH: reach of nearby hexes when shaping a continuous shoreline. Larger values smooth over more neighbours.",
-              "SHORE_NARROW: extra pull along water/land boundaries, preserving narrow rivers and spits of land.",
-              "SHORE_HARD: how strongly roads, paving and other fixed ground push water away.",
-              "SHORE_POOL: water radius retained around each water hex's centre; also shapes isolated ponds.",
-              "SHORE_ISLE: land radius retained around each land hex's centre; also shapes isolated islands.",
-              "SHORE_BLEND: distance over which pond and island protection blend into the shoreline.",
-              "SHORE_WANDER: how far banks vary sideways along their course; 0 removes this variation.",
-              "WANDER_CELL: length of the broad bends along a shoreline.",
-              "SHORE_LIP: width of the bank from its level lip toward the water.",
-              "TRANSITION: room on each side of a height step, in metres. Requires Hex transitions and no Hex padding.");
+              new Knob("River width (%)", 5, 100, 1, "%.0f%%",
+                    "Sets the width of the whole river. Deep water leaves room for units; depth-0 water can shrink to a tiny stream."),
+              new Knob("Shore spread", -20, 12, .5f, "%+.1f",
+                    "Moves the banks outward. Higher values make rivers and lakes wider; lower values leave more dry land."),
+              new Knob("Land retained", .5f, 1, .01f, "%.2f",
+                    "How much of each land hex stays dry. Higher values stop water from cutting as far into the land."),
+              new Knob("Corner shift limit", 0, 28, .5f, "%.1f",
+                    "How far water may reshape a land corner. Raise this to let the shoreline cross the hex outline more freely."),
+              new Knob("Shore room", 0, 16, .5f, "%.1f",
+                    "Extra dry space behind the bank on level ground. Raise this to give curved banks more room."),
+              new Knob("Shore reach", 64, 128, 1, "%.0f",
+                    "How much nearby terrain affects each stretch of shore. Higher values make broader, gentler curves."),
+              new Knob("Narrow channel pull", 0, 2, .05f, "%.2f",
+                    "Helps thin channels stay open and thin strips of land stay dry. Higher values protect both more strongly."),
+              new Knob("Hard ground pull", 1, 4, .1f, "%.1f",
+                    "How strongly roads and paving push water away. Higher values leave a wider gap beside fixed ground."),
+              new Knob("Pool radius", 8, 32, .5f, "%.1f",
+                    "Size of the pool around a water hex centre. Higher values widen ponds and the middle of rivers."),
+              new Knob("Island radius", 8, 32, .5f, "%.1f",
+                    "Dry space kept around a land hex centre. Higher values make islands and peninsulas broader."),
+              new Knob("Shore blend", 1, 20, .5f, "%.1f",
+                    "How gently ponds and islands join the rest of the shore. Higher values soften the joins."),
+              new Knob("Shore wander", 0, 16, .5f, "%.1f",
+                    "How much rivers wind from side to side and banks wander. Raise this for wavier streams; zero removes the extra wandering."),
+              new Knob("Wander length", 70, 280, 5, "%.0f",
+                    "Length of the bends along the shore. Higher values give longer, slower bends."),
+              new Knob("Shore lip", .5f, 10, .5f, "%.1f",
+                    "Width of the small slope from the dry bank down to the water. Higher values make that strip wider."),
+              new Knob("Transition room (m)", 0, 8, .1f, "%.1f",
+                    "Space used to join different ground heights. Higher values spread slopes out. Needs Hex transitions on and Hex padding off.")), this::applyRelief, 0);
         section(skin, "Banks and river openings");
         water = new ArrayList<>(controls(skin, List.of(
-              new Knob("Wet margin", .1f, 4, .1f, "%.1f"),
-              new Knob("Beach width", 1, 12, .5f, "%.1f"),
-              new Knob("Bank width", 1, 10, .5f, "%.1f"),
-              new Knob("Bank rounding", 1, 12, .5f, "%.1f"),
-              new Knob("Mouth opening", 0, 12, .5f, "%.1f"),
-              new Knob("Plunge opening", 0, 12, .5f, "%.1f"),
-              new Knob("Bed slope share", .1f, .95f, .05f, "%.2f")), this::applyWater, 0));
+              new Knob("Wet margin", .1f, 4, .1f, "%.1f",
+                    "Small gap between the water and a raised bank. Higher values pull the water farther from slopes and corners."),
+              new Knob("Beach width", 1, 12, .5f, "%.1f",
+                    "Dry strip beside cliffs or land below the river. Higher values make that strip wider."),
+              new Knob("Bank width", 1, 10, .5f, "%.1f",
+                    "Dry strip beside land at the same height as the water. Higher values make the river narrower there."),
+              new Knob("Bank rounding", 1, 12, .5f, "%.1f",
+                    "How much banks curve instead of following straight hex edges. Higher values make the curves rounder."),
+              new Knob("Mouth opening", 0, 12, .5f, "%.1f",
+                    "Extra river width where two water hexes meet. Higher values widen these joins, up to the available beach width."),
+              new Knob("Plunge opening", 0, 12, .5f, "%.1f",
+                    "Extra room for water entering a hex below a waterfall. Higher values widen that opening."),
+              new Knob("Bed slope share", .1f, .95f, .05f, "%.2f",
+                    "How far slopes reach into a river hex. Higher values leave less flat riverbed and make water descend more gradually between levels.")), this::applyWater, 0));
         section(skin, "Waterfalls");
         fallsOffBoard = checkbox(skin, "Waterfalls off board", "tuning-falls-off-board");
-        fallsOffBoard.addListener(new TextTooltip("FALLS_OFF_THE_BOARD: let rivers pour over the board's edge. "
-              + "Also updates the visible current direction.", skin, "menu"));
+        fallsOffBoard.addListener(new TextTooltip("Let rivers pour over the edge of the board instead of ending there.", skin, "menu"));
         water.addAll(controls(skin, List.of(
-              new Knob("Off-board drop", 1, 8, .5f, "%.1f"),
-              new Knob("Plunge pool swell", 0, 12, .5f, "%.1f"),
-              new Knob("Lip variation", 0, 7, .5f, "%.1f"),
-              new Knob("Fall lip width", .005f, .1f, .005f, "%.3f"),
-              new Knob("Fall lip drop", .1f, 1, .05f, "%.2f"),
-              new Knob("Underwater ledge", 0, 4, .25f, "%.2f"),
-              new Knob("Valley extension", 0, 14, .5f, "%.1f")), this::applyWater, 0));
-        hints(skin, water,
-              "HUG: wet clearance beside slopes and corners that extend into the water, in hex-scale units.",
-              "BEACH: bank inset beside walls and lower land, in hex-scale units.",
-              "SHORE_BANK: bank inset beside land at water level. Moved river-mouth corners keep this width plus one unit.",
-              "SHORE_ROUND: distance over which adjoining banks round into each other.",
-              "MOUTH_OPENING: beach width given back to the river at fixed hex corners. Larger values widen the opening; "
-                    + "limited by Beach width and the shoreline.",
-              "PLUNGE_OPENING: extra opening below waterfalls, limited by Beach width.",
-              "PLATEAU: share of each radius used by the underwater slope. Larger values leave a smaller flat bed.",
-              "BOTTOMLESS_LEVELS: how many terrain levels an off-board waterfall drops before fading.",
-              "PLUNGE_POOL: how far the pool swells outward below a waterfall, in hex-scale units.",
-              "LIP_JUT: maximum uneven projection of a waterfall lip over its pool.",
-              "FALL_LIP_WIDTH: maximum lip curvature radius as a fraction of hex width.",
-              "FALL_LIP_DROP: lip curvature radius as a fraction of the fall's height, capped by Fall lip width.",
-              "LIP_DEPTH: depth of the underwater ledge where a pool spills over a fall.",
-              "VALLEY: distance a joined waterfall corner extends over the pool below.");
+              new Knob("Off-board drop", 1, 8, .5f, "%.1f",
+                    "How many ground levels a waterfall falls past the board edge before fading away."),
+              new Knob("Plunge pool swell", 0, 12, .5f, "%.1f",
+                    "How much a pool widens below a waterfall. Zero removes the extra widening."),
+              new Knob("Lip variation", 0, 7, .5f, "%.1f",
+                    "How uneven the top edge of a waterfall looks. Zero gives an even edge."),
+              new Knob("Fall lip width", .005f, .1f, .005f, "%.3f",
+                    "How far the water bends out before falling. Higher values make a broader turn over the edge."),
+              new Knob("Fall lip drop", .1f, 1, .05f, "%.2f",
+                    "How much of the waterfall height is used for the bend at its top. Fall lip width limits its size."),
+              new Knob("Underwater ledge", 0, 4, .25f, "%.2f",
+                    "Water depth over the ledge at the top of a waterfall. Higher values make that ledge more deeply submerged."),
+              new Knob("Valley extension", 0, 14, .5f, "%.1f",
+                    "How far joined waterfalls reach out where they meet around an inside corner.")), this::applyWater, 0));
         fallsOffBoard.addListener(new ChangeListener() {
             @Override
             public void changed(ChangeEvent event, Actor actor) {
@@ -468,50 +470,48 @@ final class GpuBoardTuning {
         });
         section(skin, "Terrain detail");
         terrainDetail = controls(skin, List.of(
-              new Knob("Full detail hexes", 100, 10000, 100, "%.0f"),
-              new Knob("Medium detail hexes", 100, 40000, 100, "%.0f")), this::applyRelief, 0);
-        hints(skin, terrainDetail,
-              "FULL_DETAIL_HEXES: maximum board size using full terrain detail. Larger limits increase geometry cost.",
-              "MEDIUM_DETAIL_HEXES: maximum board size using medium detail. Larger boards use coarse detail without loose rocks.");
+              new Knob("Full detail hexes", 100, 10000, 100, "%.0f",
+                    "Largest board that uses the finest terrain detail. Raising this keeps more detail on large boards, but costs more to draw."),
+              new Knob("Medium detail hexes", 100, 40000, 100, "%.0f",
+                    "Largest board that keeps medium detail and loose rocks. Larger boards use simpler ground.")), this::applyRelief, 0);
         section(skin, "Material geology");
         geologyFamily = choice(skin, "Material", "tuning-geology-family",
               new String[] { "Grass", "Dirt", "Sand", "Rock", "Concrete", "Snow", "Bedrock under slabs" }, this::syncGeology);
         geology = controls(skin, List.of(
-              new Knob("Joint width (m)", .25f, 20, .05f, "%.2f"),
-              new Knob("Joint height (m)", .25f, 20, .05f, "%.2f"),
-              new Knob("Joint relief (m)", 0, 3, .05f, "%.2f"),
-              new Knob("Fractures (m)", 0, 3, .05f, "%.2f"),
-              new Knob("Strata relief (m)", 0, 2, .05f, "%.2f"),
-              new Knob("Bedding (m)", .25f, 10, .05f, "%.2f"),
-              new Knob("Buttresses (m)", 0, 3, .05f, "%.2f"),
-              new Knob("Recess (m)", 0, 3, .05f, "%.2f"),
-              new Knob("Ground relief (m)", 0, 2, .05f, "%.2f"),
-              new Knob("Caprock scale", 0, 2, .05f, "%.2f"),
-              new Knob("Talus scale", 0, 2, .05f, "%.2f"),
-              new Knob("Corner rounding", 0, .5f, .01f, "%.2f"),
-              new Knob("Soil jointing", 0, 1, .05f, "%.2f"),
-              new Knob("Bank lean", 0, 1, .01f, "%.2f"),
-              new Knob("Cast slab share", 0, 1, .05f, "%.2f"),
-              new Knob("Loose stones / hex", 0, 6, .1f, "%.1f"),
-              new Knob("Low shrubs / hex", 0, 6, .1f, "%.1f")), this::applyGeology, 0);
-        hints(skin, geology,
-              "Geology.cellWidth: horizontal size of the jointed rock masses.",
-              "Geology.cellHeight: vertical size of the jointed rock masses.",
-              "Geology.cells: relief of the jointed rock masses.",
-              "Geology.fractures: depth of the fractures between rock masses.",
-              "Geology.strata: relief of the geological layers.",
-              "Geology.bedding: spacing of the geological layers.",
-              "Geology.buttress: strength of broad supports along cliff faces.",
-              "Geology.recess: how far cliff faces retreat behind their edges.",
-              "Geology.relief: variation in the ground above the cliffs.",
-              "Geology.cap: scale of the caprock lip.",
-              "Geology.talus: scale of the debris apron at a cliff's foot.",
-              "Geology.round: corner fillet as a fraction of the hex edge.",
-              "Geology.bank: fraction of rock jointing retained by low soil banks.",
-              "Geology.lean: metres a soil bank leans back per metre of depth.",
-              "Geology.cast: contribution of a poured slab above bedrock on tall cliffs.",
-              "Average loose stones per open hex of this material, before placement clearances. Requires full or medium detail.",
-              "Average low shrubs per open hex of this material, before placement clearances. Requires full or medium detail.");
+              new Knob("Joint width (m)", .25f, 20, .05f, "%.2f",
+                    "Width of the large rock blocks in a cliff. Higher values make broader blocks."),
+              new Knob("Joint height (m)", .25f, 20, .05f, "%.2f",
+                    "Height of the large rock blocks in a cliff. Higher values make taller blocks."),
+              new Knob("Joint relief (m)", 0, 3, .05f, "%.2f",
+                    "How far rock blocks stick out from the cliff. Zero makes the blocks flat."),
+              new Knob("Fractures (m)", 0, 3, .05f, "%.2f",
+                    "Depth of the cracks between rock blocks. Higher values make deeper cracks."),
+              new Knob("Strata relief (m)", 0, 2, .05f, "%.2f",
+                    "How far horizontal rock layers stick out. Higher values make the layers more pronounced."),
+              new Knob("Bedding (m)", .25f, 10, .05f, "%.2f",
+                    "Vertical distance between rock layers. Higher values make thicker layers."),
+              new Knob("Buttresses (m)", 0, 3, .05f, "%.2f",
+                    "Size of broad bulges along a cliff face. Higher values make those bulges larger."),
+              new Knob("Recess (m)", 0, 3, .05f, "%.2f",
+                    "How far the cliff face sits back beneath its top edge. Higher values make a deeper recess."),
+              new Knob("Ground relief (m)", 0, 2, .05f, "%.2f",
+                    "Unevenness of the ground above the cliffs. Zero makes that ground flat."),
+              new Knob("Caprock scale", 0, 2, .05f, "%.2f",
+                    "Size of the hard rock ledge at the top of a cliff. Zero removes the ledge."),
+              new Knob("Talus scale", 0, 2, .05f, "%.2f",
+                    "Size of the rubble slope at the foot of a cliff. Higher values spread it farther out."),
+              new Knob("Corner rounding", 0, .5f, .01f, "%.2f",
+                    "How rounded cliff corners look. Higher values soften sharp corners."),
+              new Knob("Soil jointing", 0, 1, .05f, "%.2f",
+                    "How much rock texture shows through low soil banks. Zero makes those banks smoother."),
+              new Knob("Bank lean", 0, 1, .01f, "%.2f",
+                    "How far a soil bank leans back as it rises. Higher values make a gentler slope."),
+              new Knob("Cast slab share", 0, 1, .05f, "%.2f",
+                    "How much a tall cliff looks like a concrete slab over rock. Zero removes the slab effect."),
+              new Knob("Loose stones / hex", 0, 6, .1f, "%.1f",
+                    "Average number of loose stones per open hex of this material. Stones need room and full or medium detail."),
+              new Knob("Low shrubs / hex", 0, 6, .1f, "%.1f",
+                    "Average number of small shrubs per open hex of this material. Shrubs need room and full or medium detail.")), this::applyGeology, 0);
         ScrollPane generalScroll = scroll(skin, general, "tuning-general-scroll");
         ScrollPane atmosphereScroll = scroll(skin, atmospheric, "tuning-scroll");
         ScrollPane terrainScroll = scroll(skin, terrain, "tuning-terrain-scroll");
@@ -597,12 +597,6 @@ final class GpuBoardTuning {
         return heading;
     }
 
-    private static void hints(Skin skin, List<Control> controls, String... hints) {
-        for (int i = 0; i < controls.size(); i++) {
-            controls.get(i).slider().addListener(new TextTooltip(hints[i], skin, "menu"));
-        }
-    }
-
     private CheckBox checkbox(Skin skin, String label, String name) {
         CheckBox checkbox = new CheckBox(label, skin, "menu");
         checkbox.setName(name);
@@ -675,6 +669,13 @@ final class GpuBoardTuning {
             rows.add(toggle == null ? new Label(knob.name(), skin, "menu") : toggle).left().width(LABEL_WIDTH);
             rows.add(slider).minWidth(60).prefWidth(SLIDER_WIDTH).growX().height(20);
             rows.add(reading).width(38).right().row();
+            if (!knob.help().isEmpty()) {
+                Label help = new Label(knob.help(), skin, "small");
+                help.setName("tuning-help-" + knob.name());
+                help.setWrap(true);
+                rows.add(help).colspan(3).minWidth(0).growX().padBottom(9).row();
+                slider.addListener(new TextTooltip(knob.help(), skin, "menu"));
+            }
         }
         return result;
     }
@@ -915,16 +916,16 @@ final class GpuBoardTuning {
 
     private void applyRelief() {
         int full = Math.round(value(terrainDetail, 0));
-        BoardRelief.tune(new BoardRelief.Tuning(value(relief, 2), value(relief, 3), value(relief, 4), value(relief, 5),
-              value(relief, 6), value(relief, 7), value(relief, 8), value(relief, 9), value(relief, 10), value(relief, 11),
-              value(relief, 0), value(relief, 1), value(relief, 12), value(relief, 13), full,
-              Math.max(full, Math.round(value(terrainDetail, 1)))));
+        BoardRelief.tune(new BoardRelief.Tuning(value(relief, 3), value(relief, 4), value(relief, 5), value(relief, 6),
+              value(relief, 7), value(relief, 8), value(relief, 9), value(relief, 10), value(relief, 11), value(relief, 12),
+              value(relief, 1), value(relief, 2), value(relief, 13), value(relief, 14), full,
+              Math.max(full, Math.round(value(terrainDetail, 1))), value(relief, 0) / 100));
         syncRelief();
     }
 
     private void syncRelief() {
         BoardRelief.Tuning t = BoardRelief.tuning();
-        setValues(relief, new float[] { t.shoreSpread(), t.landKeep(), t.shoreShift(), t.shoreRoom(), t.shoreReach(),
+        setValues(relief, new float[] { 100 * t.riverWidth(), t.shoreSpread(), t.landKeep(), t.shoreShift(), t.shoreRoom(), t.shoreReach(),
               t.shoreNarrow(), t.shoreHard(), t.shorePool(), t.shoreIsle(), t.shoreBlend(), t.shoreWander(),
               t.wanderCell(), t.shoreLip(), t.transition() });
         setValues(terrainDetail, new float[] { t.fullDetailHexes(), t.mediumDetailHexes() });

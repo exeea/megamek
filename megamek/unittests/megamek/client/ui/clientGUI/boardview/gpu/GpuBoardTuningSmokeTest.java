@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -21,7 +22,9 @@ import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.PixmapIO;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.scenes.scene2d.Stage;
+import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
+import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.SelectBox;
 import com.badlogic.gdx.scenes.scene2d.ui.Slider;
@@ -237,6 +240,9 @@ class GpuBoardTuningSmokeTest {
         assertFalse(tuning.panel().findActor("tuning-general-scroll").isVisible());
         assertFalse(tuning.panel().findActor("tuning-scroll").isVisible());
         int revision = BoardGeometry.revision();
+        assertTerrainHelp(tuning, scroll);
+        set(tuning, "River width (%)", 5);
+        assertEquals(.05f, BoardRelief.tuning().riverWidth(), .0001f);
         set(tuning, "Shore spread", -12);
         set(tuning, "Land retained", .85f);
         assertEquals(-12, BoardRelief.tuning().shoreSpread());
@@ -306,6 +312,17 @@ class GpuBoardTuningSmokeTest {
             assertEquals(original, terrainPixels(terrain, camera, scene), "Defaults restores the original terrain mesh");
         } finally {
             terrain.dispose();
+        }
+    }
+
+    private static void assertTerrainHelp(GpuBoardTuning tuning, Group group) {
+        for (var actor : group.getChildren()) {
+            if (actor instanceof Slider slider) {
+                Label help = tuning.panel().findActor("tuning-help-" + slider.getName());
+                assertNotNull(help, "Visible explanation for " + slider.getName());
+                assertFalse(help.getText().isEmpty());
+            }
+            if (actor instanceof Group nested) { assertTerrainHelp(tuning, nested); }
         }
     }
 
