@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -16,8 +17,10 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
+import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
+import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -66,6 +69,7 @@ class GpuRiverTerrainSmokeTest {
           new View("clay", true, 0, 0, .62f, new Coords(6, 5), 2, true, 1f));
 
     private static final List<View> MAP_VIEWS = List.of(
+          new View("lake", false, 0, 0, .34f, new Coords(4, 12), 2, false, .8f),
           new View("junction", false, 0, 0, .24f, new Coords(6, 8), 2, false, .8f),
           new View("peninsulas", false, 0, 0, .40f, new Coords(8, 9), 1, false, .8f),
           new View("shallow", false, 0, 0, .20f, new Coords(10, 12), 0, false, .8f),
@@ -82,6 +86,10 @@ class GpuRiverTerrainSmokeTest {
           new View("fall-back", true, -18, 180, .13f, new Coords(7, 3), 1, false, .8f),
           new View("fall-top", false, 0, 0, .13f, new Coords(7, 3), 1, false, .8f));
 
+    private static final List<View> QUAY_VIEWS = List.of(
+          new View("quay", false, 0, 0, .56f, new Coords(4, 5), 0, false, .8f),
+          new View("quay-oblique", true, -15, 0, .40f, new Coords(4, 5), 0, false, .8f));
+
     @Test
     void capturesWaterHexesInSculptedLand() throws Exception {
         String families = System.getProperty("megamek.gpu.river.families", "SAND");
@@ -92,6 +100,7 @@ class GpuRiverTerrainSmokeTest {
         String suffix = transitions ? "-transitions" : "";
         boolean map = Boolean.getBoolean("megamek.gpu.river.map");
         boolean drops = Boolean.getBoolean("megamek.gpu.river.drops");
+        boolean quay = Boolean.getBoolean("megamek.gpu.river.quay");
         float width = Float.parseFloat(System.getProperty("megamek.gpu.river.width", "1"));
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"),
               "river-terrain");
@@ -114,14 +123,15 @@ class GpuRiverTerrainSmokeTest {
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                     for (String name : families.split(",")) {
                         BoardScene.Surface family = BoardScene.Surface.valueOf(name.trim().toUpperCase(Locale.ROOT));
-                        BoardScene scene = drops ? dropScene(family) : map ? mapScene(family) : scene(family);
+                        BoardScene scene = quay ? quayScene(family) : drops ? dropScene(family)
+                              : map ? mapScene(family) : scene(family);
                         setWidth(width);
                         long start = System.nanoTime();
                         tune(.8f, transitions);
                         terrain.update(scene);
                         report.append(String.format(Locale.ROOT, "%s: build %.1f ms%n", family,
                               (System.nanoTime() - start) / 1e6));
-                        for (View view : drops ? DROP_VIEWS : map ? MAP_VIEWS : VIEWS) {
+                        for (View view : quay ? QUAY_VIEWS : drops ? DROP_VIEWS : map ? MAP_VIEWS : VIEWS) {
                             if (!views.get(0).isBlank() && !views.contains(view.name())) { continue; }
                             tune(view.grid(), transitions);
                             terrain.update(scene);
@@ -170,6 +180,31 @@ class GpuRiverTerrainSmokeTest {
         BoardRelief.tune(new BoardRelief.Tuning(t.shoreShift(), t.shoreRoom(), t.shoreReach(), t.shoreNarrow(),
               t.shoreHard(), t.shorePool(), t.shoreIsle(), t.shoreBlend(), t.shoreWander(), t.wanderCell(),
               t.shoreSpread(), t.landKeep(), t.shoreLip(), t.transition(), t.fullDetailHexes(), t.mediumDetailHexes(), width));
+    }
+
+    /** A paved waterfront, including an inlet that must stay open and buildings whose foundations stay intact. */
+    static BoardScene quayScene(BoardScene.Surface family) {
+        List<BoardScene.Tile> tiles = new ArrayList<>();
+        BoardScene.Pixels pixels = groundPixels();
+        for (int x = 0; x < 9; x++) {
+            for (int y = 0; y < 11; y++) {
+                boolean land = x >= 4 && y >= 2 && y <= 8 || x >= 6 && y >= 1 && y <= 9;
+                land &= !(x == 4 && y == 3);
+                boolean building = land && (x == 4 && y == 5 || x == 5 && y == 7);
+                List<BoardScene.Feature> features = building
+                      ? List.of(new BoardScene.Feature("buildings/saxarba/building_hard/building_hard_00",
+                            0, 0, 0, 1, 3, 0, BoardScene.FeatureKind.BUILDING)) : List.of();
+                Hex hex = new Hex(0);
+                if (family == BoardScene.Surface.CONCRETE) { hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1)); }
+                if (building) { hex.addTerrain(new Terrain(Terrains.BUILDING, 4)); }
+                boolean detailed = BoardFeatures.detailedGround(hex, building
+                      ? Map.of(Terrains.BUILDING, features.getFirst().asset()) : Map.of());
+                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, land ? -1 : 2, false, 0,
+                      land ? family : BoardScene.Surface.GRASS, pixels, null, null, null, null, features, List.of(),
+                      land ? BoardLiquid.NONE : BoardLiquid.WATER, null, detailed));
+            }
+        }
+        return new BoardScene(0, 9, 11, tiles, List.of(), List.of(), -1, "", List.of());
     }
 
     /** Parallel streams drop one, two and three surface levels, from left to right. */

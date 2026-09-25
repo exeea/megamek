@@ -331,7 +331,10 @@ final class BoardRelief {
         BoardScene.Surface best = null;
         for (int direction = 0; direction < 6; direction++) {
             BoardScene.Tile land = scene.tile(tile.coords().translated(direction));
-            if (land == null || land.liquid().present() || !land.detailedGround()) { continue; }
+            // Buildings and roads can keep authored artwork while still standing on a concrete slab. Their banks
+            // continue that material without changing the original land or its foundations.
+            if (land == null || land.liquid().present()
+                  || !land.detailedGround() && land.surface() != BoardScene.Surface.CONCRETE) { continue; }
             int count = ++counts[land.surface().ordinal()];
             if (best == null || count > counts[best.ordinal()]) { best = land.surface(); }
         }
@@ -531,6 +534,9 @@ final class BoardRelief {
             if (wet(boardSite(coords.translated(direction)), molten) != wet) { other++; }
         }
         float pull = wet ? 1 : site.sculpted() && shoreGround(site) ? -1 : -tuning.shoreHard();
+        // A broad body of water fills out its banks; a one-hex stream keeps its existing pull. Interior water
+        // contributes gradually through the same shared field, so the shore bows across several hexes.
+        if (wet && !molten) { pull += Math.max(0, 3 - other) / 3f; }
         float weight = pull * (1 + tuning.shoreNarrow() * other / 6);
         if (index >= 0) { shoreWeights[index] = weight; }
         return weight;

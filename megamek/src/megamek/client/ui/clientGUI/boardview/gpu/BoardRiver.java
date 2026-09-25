@@ -25,7 +25,7 @@ final class BoardRiver {
     }
 
     private record Span(float ax, float ay, float bx, float by, float depthA, float depthB, float start, float end,
-          boolean broad, boolean detailedA, boolean detailedB) {
+          boolean broadA, boolean broadB, boolean detailedA, boolean detailedB) {
         float field(float x, float y, BoardRelief.Tuning tuning, float wander) {
             float dx = bx - ax, dy = by - ay, length = dx * dx + dy * dy;
             float t = length == 0 ? 0 : Math.clamp(((x - ax) * dx + (y - ay) * dy) / length, 0, 1);
@@ -38,7 +38,10 @@ final class BoardRiver {
             float full = Math.max(minimum, tuning.shorePool() * (.55f + .45f * deep) + tuning.shoreSpread());
             float radius = BoardRelief.lerp(minimum, full, (tuning.riverWidth() - .05f) / .95f);
             radius = Math.max(minimum, radius + wander * tuning.riverWidth());
-            if (broad) { radius = Math.max(radius, 12); }
+            // Open water leaves room for the shared shore field to shape the lake's bank. Widen the approaching
+            // stream gradually too: a large round cap at the lake's first centre would make a sharp inlet corner.
+            float open = BoardRelief.lerp(broadA ? 1 : 0, broadB ? 1 : 0, BoardRelief.smooth(s));
+            radius = BoardRelief.lerp(radius, Math.max(radius, BoardGeometry.WIDTH / (2 * BoardGeometry.HEX_SCALE)), open);
             // Special artwork (including bridges) keeps its original water footprint. The approach widens smoothly,
             // and both kinds of hex still ask the same world field at their shared opening.
             float natural = (detailedA ? 1 - s : 0) + (detailedB ? s : 0);
@@ -110,7 +113,8 @@ final class BoardRiver {
         List<Channel> result = new ArrayList<>();
         BoardScene.Tile tile = tile(coords);
         float ax = BoardGeometry.centerX(coords), ay = BoardGeometry.centerY(coords);
-        result.add(new Channel(List.of(new Span(ax, ay, ax, ay, tile.waterDepth(), tile.waterDepth(), 0, 0, false,
+        boolean broadA = broad(coords);
+        result.add(new Channel(List.of(new Span(ax, ay, ax, ay, tile.waterDepth(), tile.waterDepth(), 0, 0, broadA, broadA,
               tile.detailedGround(), tile.detailedGround()))));
         for (int d = 0; d < 6; d++) {
             Coords other = coords.translated(d);
@@ -118,6 +122,7 @@ final class BoardRiver {
             if (!water(next)) { continue; }
             // Each link has one owner and one ordering, including when queried by the other hex.
             if (other.getX() < coords.getX() || other.getX() == coords.getX() && other.getY() < coords.getY()) { continue; }
+            boolean broadB = broad(other);
             Coords before = continuation(coords, other), after = continuation(other, coords);
             float bx = BoardGeometry.centerX(other), by = BoardGeometry.centerY(other);
             float tx = before == null ? bx - ax : (bx - BoardGeometry.centerX(before)) / 2;
@@ -153,7 +158,7 @@ final class BoardRiver {
                       + (-2 * t3 + 3 * t2) * bx + (t3 - t2) * ux;
                 float qy = (2 * t3 - 3 * t2 + 1) * ay + (t3 - 2 * t2 + t) * ty
                       + (-2 * t3 + 3 * t2) * by + (t3 - t2) * uy;
-                spans.add(new Span(px, py, qx, qy, tile.waterDepth(), next.waterDepth(), (i - 1f) / STEPS, t, broad,
+                spans.add(new Span(px, py, qx, qy, tile.waterDepth(), next.waterDepth(), (i - 1f) / STEPS, t, broadA, broadB,
                       tile.detailedGround(), next.detailedGround()));
                 px = qx;
                 py = qy;
@@ -201,6 +206,12 @@ final class BoardRiver {
             if (water(tile(coords.translated(d)))) { result |= 1 << d; }
         }
         return result;
+    }
+
+    /** A triangle of mutually adjacent water centres contains open water, rather than separate stream branches. */
+    private boolean broad(Coords coords) {
+        int mask = masks.computeIfAbsent(coords, this::mask);
+        return mask >= 0 && (mask & (mask << 1 | mask >> 5) & 63) != 0;
     }
 
 }

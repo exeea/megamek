@@ -15,6 +15,28 @@ import org.junit.jupiter.api.Test;
 
 class BoardFeaturesTest {
     @Test
+    void modeledBuildingsUseTheConcreteEngineWithoutErasingOtherTerrainMarkings() {
+        Hex hex = new Hex(0);
+        hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1));
+        assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
+        for (int terrain : new int[] { Terrains.BUILDING, Terrains.BLDG_CF, Terrains.BLDG_ELEV,
+              Terrains.BLDG_CLASS, Terrains.BLDG_ARMOR, Terrains.BLDG_BASEMENT_TYPE, Terrains.BLDG_FLUFF }) {
+            hex.addTerrain(new Terrain(terrain, 1));
+        }
+        var models = Map.of(Terrains.BUILDING, "building");
+        assertFalse(BoardFeatures.detailedGround(hex, Map.of()), "An unmodeled building still needs its artwork");
+        assertTrue(BoardFeatures.detailedGround(hex, models), "The model stands on the normal concrete material");
+        for (int terrain : new int[] { Terrains.ROAD, Terrains.RUBBLE, Terrains.BLDG_BASE_COLLAPSED,
+              Terrains.FORTIFIED }) {
+            hex.addTerrain(new Terrain(terrain, 1));
+            assertFalse(BoardFeatures.detailedGround(hex, models), "Keep separate terrain markings: " + terrain);
+            hex.removeTerrain(terrain);
+        }
+        hex.removeTerrain(Terrains.PAVEMENT);
+        assertFalse(BoardFeatures.detailedGround(hex, models), "This change is specific to concrete ground");
+    }
+
+    @Test
     void treeCountsFollowAuthoritativeCoverReductionUntilTheHexIsClear() {
         Coords coords = new Coords(2, 3);
         for (int type : new int[] { Terrains.WOODS, Terrains.JUNGLE }) {

@@ -1082,7 +1082,55 @@ final class BoardSurface {
                 result[edge * SHORE_SEGMENTS + segment] = point;
             }
         }
+        concreteBanks(result);
         return result;
+    }
+
+    /**
+     * Paved waterfronts join across the water-side notches of the hex outline. Only the bank inside this water hex
+     * changes: the concrete hexes, including the complete foundations of their buildings, keep their geometry.
+     * Mouth ends stay canonical, so adjacent water and ground meshes still meet at exactly the same points.
+     */
+    private void concreteBanks(Vector3[] shore) {
+        if (tile.liquid().molten()) { return; }
+        int paved = 0;
+        for (int e = 0; e < 6; e++) {
+            if (concreteBank(e)) { paved |= 1 << e; }
+        }
+        if (paved == 63) {
+            // A paved basin must retain its water centre; do not join all the way across it.
+            for (int e = 0; e < 6; e++) { concreteBank(shore, e, 1); }
+        } else {
+            for (int e = 0; e < 6; e++) {
+                if ((paved & 1 << e) == 0 || (paved & 1 << (e + 5) % 6) != 0) { continue; }
+                int count = 1;
+                while ((paved & 1 << (e + count) % 6) != 0) { count++; }
+                if (!concreteBank(shore, e, count)) {
+                    // The long chord would cut through the water's unit footprint. Keep the inlet, with separate
+                    // straight sections following its banks instead of filling it in.
+                    for (int k = 0; k < count; k++) { concreteBank(shore, (e + k) % 6, 1); }
+                }
+            }
+        }
+    }
+
+    private boolean concreteBank(int edge) {
+        BoardScene.Tile land = neighbor(scene, edge);
+        return !mouth(edge) && land != null && land.surface() == BoardScene.Surface.CONCRETE
+              && !land.liquid().present() && land.elevation() >= tile.elevation();
+    }
+
+    /** Replace a bank run with its chord only when the water centre remains safely on the wet side. */
+    private boolean concreteBank(Vector3[] shore, int first, int count) {
+        Vector3 a = shore[first * SHORE_SEGMENTS], b = shore[(first + count) % 6 * SHORE_SEGMENTS];
+        float dx = b.x - a.x, dy = b.y - a.y;
+        float clearance = (dx * (center.y - a.y) - dy * (center.x - a.x)) / (float) Math.hypot(dx, dy);
+        if (!(clearance >= (tile.waterDepth() > 0 ? 12 : 4) * BoardGeometry.HEX_SCALE)) { return false; }
+        int samples = count * SHORE_SEGMENTS;
+        for (int i = 1; i < samples; i++) {
+            shore[(first * SHORE_SEGMENTS + i) % shore.length] = new Vector3(a).lerp(b, i / (float) samples);
+        }
+        return true;
     }
 
     /**
@@ -1189,6 +1237,9 @@ final class BoardSurface {
     private float mouthEnd(int k, int other, boolean plunge) {
         Vector3 c = shoreCorners[k], o = shoreCorners[other];
         float least = mouthLimit(k, plunge) / c.dst(o);
+        // A constructed bank has a fixed setback. The natural shore field must not move its joins independently
+        // from hex to hex, which would turn a straight quay back into a series of dents.
+        if (!tile.liquid().molten() && (concreteBank(k) || concreteBank((k + 5) % 6))) { return least; }
         float mx = (c.x + o.x) / 2, my = (c.y + o.y) / 2;
         float seed = .5f;
         if (shore(mx, my) <= 0 && !tile.liquid().molten()) {

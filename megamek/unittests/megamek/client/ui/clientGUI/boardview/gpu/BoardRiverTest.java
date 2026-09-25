@@ -248,7 +248,6 @@ class BoardRiverTest {
             GpuRiverTerrainSmokeTest.tune(.8f, true);
             BoardScene scene = GpuRiverTerrainSmokeTest.mapScene(BoardScene.Surface.SAND);
             Coords center = new Coords(6, 8);
-            int n = BoardSurface.SHORE_SEGMENTS, count = 6 * n;
             for (float width : new float[] { .05f, .25f, .5f, .75f, 1 }) {
                 GpuRiverTerrainSmokeTest.setWidth(width);
                 BoardSurface a = new BoardSurface(scene, scene.tile(center));
@@ -256,35 +255,87 @@ class BoardRiverTest {
                 for (int direction : new int[] { 0, 4 }) {
                     Coords next = center.translated(direction);
                     BoardSurface b = new BoardSurface(scene, scene.tile(next));
-                    int edge = Math.floorMod(1 - direction, 6), opposite = (edge + 3) % 6;
+                    int edge = Math.floorMod(1 - direction, 6);
                     for (int side = 0; side < 2; side++) {
-                        int i = (edge + side) % 6 * n, j = (opposite + 1 - side) % 6 * n;
-                        Vector3 join = a.outline.get(i);
-                        String label = "width=" + width + ", neighbor=" + next + ", bank=" + side;
-                        assertTrue(join.epsilonEquals(b.outline.get(j), .002f), "Shared crossing: " + label);
-                        List<Vector3> bank = new ArrayList<>();
-                        for (int offset = 3; offset > 0; offset--) {
-                            bank.add(side == 0 ? a.outline.get((i + count - offset) % count)
-                                  : b.outline.get((j + count - offset) % count));
-                        }
-                        bank.add(join);
-                        for (int offset = 1; offset <= 3; offset++) {
-                            bank.add(side == 0 ? b.outline.get((j + offset) % count) : a.outline.get((i + offset) % count));
-                        }
-                        for (int p = 1; p < bank.size() - 1; p++) {
-                            Vector3 in = new Vector3(bank.get(p)).sub(bank.get(p - 1));
-                            Vector3 out = new Vector3(bank.get(p + 1)).sub(bank.get(p));
-                            double turn = Math.atan2(in.x * out.y - in.y * out.x, in.x * out.x + in.y * out.y);
-                            assertTrue(Math.abs(turn) < Math.PI / 6,
-                                  "No pointed bank around the hex join: " + label + ", sample=" + p
-                                        + ", turn=" + Math.toDegrees(turn));
-                        }
+                        assertSmoothBankJoin(a, b, edge, side, "width=" + width + ", neighbor=" + next + ", bank=" + side);
                     }
                 }
             }
         } finally {
             BoardRelief.tune(original);
             BoardGeometry.tune(geometry);
+        }
+    }
+
+    @Test
+    void theReferenceLakeFillsOutItsFlatBankWithoutFollowingTheRiverWidth() {
+        var original = BoardRelief.tuning();
+        var geometry = BoardGeometry.tuning();
+        try {
+            GpuRiverTerrainSmokeTest.tune(.8f, true);
+            BoardScene scene = GpuRiverTerrainSmokeTest.mapScene(BoardScene.Surface.SAND);
+            List<Coords> bank = List.of(new Coords(3, 11), new Coords(3, 12), new Coords(3, 13));
+            float[] previous = null;
+            for (float width : new float[] { .05f, .5f, 1 }) {
+                GpuRiverTerrainSmokeTest.setWidth(width);
+                List<BoardSurface> surfaces = bank.stream().map(c -> new BoardSurface(scene, scene.tile(c))).toList();
+                float[] west = new float[bank.size()];
+                for (int i = 0; i < bank.size(); i++) {
+                    west[i] = section(surfaces, BoardGeometry.centerY(bank.get(i)))[0];
+                }
+                float scale = BoardGeometry.HEX_SCALE;
+                assertTrue((west[0] + west[2]) / 2 - west[1] > 3 * scale,
+                      "The lake bows outward across its three bank hexes, width=" + width);
+                float midline = (BoardGeometry.centerX(bank.get(1)) + BoardGeometry.centerX(new Coords(2, 12))) / 2;
+                assertTrue(west[1] < midline - 2 * scale, "Open water fills the flat margin, width=" + width);
+                if (previous != null) {
+                    assertArrayEquals(previous, west, .002f, "River width must not trim the lake into straight strips");
+                }
+                previous = west;
+                BoardSurface inlet = new BoardSurface(scene, scene.tile(new Coords(4, 10)));
+                BoardSurface pool = new BoardSurface(scene, scene.tile(new Coords(4, 11)));
+                assertSmoothBankJoin(inlet, pool, 4, 0, "The stream opens smoothly into the lake, width=" + width);
+                int n = BoardSurface.SHORE_SEGMENTS;
+                for (int i = 1; i < surfaces.size(); i++) {
+                    BoardSurface north = surfaces.get(i - 1), south = surfaces.get(i);
+                    for (int j = 0; j <= n; j++) {
+                        assertTrue(north.outline.get(4 * n + j).epsilonEquals(south.outline.get(2 * n - j), .002f),
+                              "The expanded lake still shares each water crossing");
+                    }
+                }
+            }
+            for (int y = 11; y <= 14; y++) {
+                Coords coords = new Coords(2, y);
+                BoardSurface land = new BoardSurface(scene, scene.tile(coords));
+                Vector3 center = BoardGeometry.center(coords, scene.tile(coords).elevation());
+                assertEquals(center.z, land.height(center.x, center.y), .001f, "Land units keep dry ground");
+                assertTrue(land.relief.shore(center.x, center.y, false) < 0, "The lake respects land centres");
+            }
+        } finally {
+            BoardRelief.tune(original);
+            BoardGeometry.tune(geometry);
+        }
+    }
+
+    private static void assertSmoothBankJoin(BoardSurface a, BoardSurface b, int edge, int side, String label) {
+        int n = BoardSurface.SHORE_SEGMENTS, count = 6 * n, opposite = (edge + 3) % 6;
+        int i = (edge + side) % 6 * n, j = (opposite + 1 - side) % 6 * n;
+        Vector3 join = a.outline.get(i);
+        assertTrue(join.epsilonEquals(b.outline.get(j), .002f), "Shared crossing: " + label);
+        List<Vector3> bank = new ArrayList<>();
+        for (int offset = 3; offset > 0; offset--) {
+            bank.add(side == 0 ? a.outline.get((i + count - offset) % count) : b.outline.get((j + count - offset) % count));
+        }
+        bank.add(join);
+        for (int offset = 1; offset <= 3; offset++) {
+            bank.add(side == 0 ? b.outline.get((j + offset) % count) : a.outline.get((i + offset) % count));
+        }
+        for (int p = 1; p < bank.size() - 1; p++) {
+            Vector3 in = new Vector3(bank.get(p)).sub(bank.get(p - 1));
+            Vector3 out = new Vector3(bank.get(p + 1)).sub(bank.get(p));
+            double turn = Math.atan2(in.x * out.y - in.y * out.x, in.x * out.x + in.y * out.y);
+            assertTrue(Math.abs(turn) < Math.PI / 6, "No pointed bank around the hex join: " + label
+                  + ", sample=" + p + ", turn=" + Math.toDegrees(turn));
         }
     }
 

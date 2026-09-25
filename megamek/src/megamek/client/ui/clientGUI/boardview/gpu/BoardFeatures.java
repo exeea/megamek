@@ -29,8 +29,10 @@ final class BoardFeatures {
     private static final List<String> PALMS = List.of("palm", "palm-bent");
     private BoardFeatures() { }
 
-    /** Preserve authored symbols for special terrain; only known base surfaces receive photographic replacement. */
-    static boolean detailedGround(Hex hex) {
+    /** Use the terrain material where every marking is either base ground or represented by a captured model. */
+    static boolean detailedGround(Hex hex, Map<Integer, String> structureModels) {
+        boolean concreteBuilding = surface(hex) == BoardScene.Surface.CONCRETE
+              && structureModels.containsKey(Terrains.BUILDING);
         for (int terrain : hex.getTerrainTypes()) {
             boolean base = switch (terrain) {
                 case Terrains.WOODS, Terrains.JUNGLE, Terrains.FOLIAGE_ELEV, Terrains.SAND, Terrains.TUNDRA,
@@ -38,6 +40,8 @@ final class BoardFeatures {
                       Terrains.CLIFF_TOP, Terrains.CLIFF_BOTTOM, Terrains.INCLINE_TOP, Terrains.INCLINE_BOTTOM,
                       Terrains.INCLINE_HIGH_TOP, Terrains.INCLINE_HIGH_BOTTOM, Terrains.METAL_CONTENT,
                       Terrains.DEPLOYMENT_ZONE -> true;
+                case Terrains.BUILDING, Terrains.BLDG_CF, Terrains.BLDG_ELEV, Terrains.BLDG_CLASS,
+                      Terrains.BLDG_ARMOR, Terrains.BLDG_BASEMENT_TYPE, Terrains.BLDG_FLUFF -> concreteBuilding;
                 default -> false;
             };
             if (!base) { return false; }

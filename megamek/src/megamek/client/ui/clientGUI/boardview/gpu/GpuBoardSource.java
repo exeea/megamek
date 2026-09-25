@@ -826,7 +826,7 @@ final class GpuBoardSource implements AutoCloseable {
               terrainImages.capture(pixels.tactical(), previous == null ? null : previous.tactical()),
               BoardFeatures.capture(hex, pixels.coords(), pixels.structureModels()), pixels.text(), BoardLiquid.capture(hex),
               terrainImages.captureOverlay(pixels.foliage(), previous == null ? null : previous.foliage()),
-              BoardFeatures.detailedGround(hex));
+              BoardFeatures.detailedGround(hex, pixels.structureModels()));
     }
 
     private boolean sensorContact(Entity entity) {
