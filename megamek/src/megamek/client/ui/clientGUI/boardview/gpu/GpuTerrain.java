@@ -306,6 +306,7 @@ final class GpuTerrain implements Disposable {
     private boolean shadowViewPresent;
     private List<BoardScene.Tile> tiles;
     private Map<Coords, BoardFlow.Current> currents = Map.of();
+    private BoardConcrete coast;
     private BoardScene.Light light;
     private BoardAtmosphere.Lighting atmosphere;
     private DirectionalShadowLight shadow;
@@ -725,6 +726,7 @@ final class GpuTerrain implements Disposable {
         float nextFloor = BoardGeometry.floor(scene);
         boolean rebuildAll = changedTuning || tiles == null || tiles.size() != scene.tiles().size() || nextFloor != floor;
         boolean changedFlow = rebuildAll;
+        BoardConcrete nextCoast = BoardConcrete.of(scene);
         Set<Coords> changedChunks = new HashSet<>();
         for (int index = 0; index < scene.tiles().size(); index++) {
             BoardScene.Tile tile = scene.tiles().get(index);
@@ -772,7 +774,8 @@ final class GpuTerrain implements Disposable {
                     // joined landforms also depend on the neighbours' road approaches, two hexes out.
                     boolean shore = before.elevation() != tile.elevation() || before.waterDepth() != tile.waterDepth()
                           || !before.liquid().equals(tile.liquid()) || before.roadExits() != tile.roadExits()
-                          || before.surface() != tile.surface() || before.detailedGround() != tile.detailedGround();
+                          || before.surface() != tile.surface() || before.detailedGround() != tile.detailedGround()
+                          || !nextCoast.sameCorners(coast, tile.coords());
                     if (shore || before.frozen() != tile.frozen() || !before.features().equals(tile.features())) {
                         Coords at = tile.coords();
                         int reach = shore ? BoardSurface.SHORE_RINGS : 2;
@@ -810,6 +813,7 @@ final class GpuTerrain implements Disposable {
         rebuildAll |= foliage.update(foliagePixels);
         boolean markingsChanged = tactical.update(tacticalPixels);
         tiles = scene.tiles();
+        coast = nextCoast;
         tuning = nextTuning;
         floor = nextFloor;
         terrainRevision = BoardGeometry.terrainRevision();

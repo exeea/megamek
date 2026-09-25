@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
@@ -24,6 +25,7 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
+import megamek.common.units.Entity;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -31,7 +33,7 @@ import org.junit.jupiter.api.Test;
 @Tag("on-demand")
 class GpuMeasurementSmokeTest {
     @Test
-    void rulerAndLosGesturesBypassInspectionInBothCameras() throws Exception {
+    void leftClicksPreserveMeasurementModifiersInBothCameras() throws Exception {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             Coords start = new Coords(4, 4), end = new Coords(8, 6);
@@ -64,11 +66,11 @@ class GpuMeasurementSmokeTest {
                         } else if (tick == 3 || tick == 7) {
                             gesture(InputEvent.ALT_DOWN_MASK);
                         } else if (tick == 4 || tick == 8) {
-                            verify(source).click(start, false, InputEvent.ALT_DOWN_MASK);
+                            verifyModifiers(InputEvent.ALT_DOWN_MASK);
                             verify(source, never()).hover(any(), anyInt());
                             gesture(InputEvent.CTRL_DOWN_MASK);
                         } else if (tick == 5 || tick == 9) {
-                            verify(source).click(start, false, InputEvent.CTRL_DOWN_MASK);
+                            verifyModifiers(InputEvent.CTRL_DOWN_MASK);
                             verify(source, never()).hover(any(), anyInt());
                             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                             File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
@@ -84,6 +86,11 @@ class GpuMeasurementSmokeTest {
                         failure.set(error);
                         Gdx.app.exit();
                     }
+                }
+
+                private void verifyModifiers(int modifiers) {
+                    verify(source).primaryClick(start, Entity.NONE, modifiers, fixture.source.takeFrame().boardGeneration());
+                    verify(source, never()).click(any(), anyBoolean(), anyInt());
                 }
 
                 private void gesture(int modifiers) {

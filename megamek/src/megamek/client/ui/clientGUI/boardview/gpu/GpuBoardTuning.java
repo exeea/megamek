@@ -103,6 +103,7 @@ final class GpuBoardTuning {
     private final List<Control> relief;
     private final List<Control> water;
     private final List<Control> terrainDetail;
+    private final SelectBox<String> concreteShapes;
     private final CheckBox fallsOffBoard;
     private final SelectBox<String> geologyFamily;
     private final List<Control> geology;
@@ -396,6 +397,13 @@ final class GpuBoardTuning {
         Table terrain = new Table();
         rows = terrain;
         rows.top().defaults().pad(0, 3, 0, 3);
+        section(skin, "Concrete shapes");
+        concreteShapes = choice(skin, "Rectangle fitting", "tuning-concrete-shapes",
+              new String[] { "None", "Water only", "Everywhere" }, this::applyConcreteShapes);
+        Label concreteHelp = new Label("None keeps sharp hex edges, including beside water. Water only makes docks and quays. "
+              + "Everywhere also fits concrete beside grass and other ground. Buildings keep their support.", skin, "small");
+        concreteHelp.setWrap(true);
+        rows.add(concreteHelp).colspan(3).minWidth(0).growX().padBottom(9).row();
         section(skin, "River shape and land");
         relief = controls(skin, List.of(
               new Knob("River width (%)", 5, 100, 1, "%.0f%%",
@@ -706,6 +714,10 @@ final class GpuBoardTuning {
         syncing = false;
         applyGeometry();
         BoardRelief.tune(BoardRelief.DEFAULTS);
+        BoardConcrete.tune(BoardConcrete.DEFAULT_MODE);
+        syncing = true;
+        concreteShapes.setSelectedIndex(BoardConcrete.mode().ordinal());
+        syncing = false;
         BoardSurface.tune(BoardSurface.DEFAULTS);
         BoardRelief.tuneGeology(BoardRelief.defaultGeology());
         syncRelief();
@@ -744,6 +756,10 @@ final class GpuBoardTuning {
             controls.get(index).slider().setValue(values[index]);
         }
         syncing = false;
+    }
+
+    private void applyConcreteShapes() {
+        BoardConcrete.tune(BoardConcrete.Mode.values()[concreteShapes.getSelectedIndex()]);
     }
 
     BoardAtmosphere.Settings atmosphere() {

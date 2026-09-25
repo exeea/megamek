@@ -138,12 +138,11 @@ class GpuBoardUiSmokeTest {
                             assertTrue(actor.getWidth() > 0, "The unit card retains space beside completion controls");
                             GpuBoardTestUi.capture(new File(output, "tactical-context-small.png"));
                             GpuBoardTestUi.click("board.useHex");
-                            assertTrue(controls.plotting());
+                            assertFalse(controls.stage.getRoot().findActor("tactical-menu").isVisible());
                             assertTrue(controls.acceptsCameraKeys());
                             assertEquals(2, chosen.get());
                             assertEquals(0, committed.get());
                             controls.key(Input.Keys.ESCAPE, true);
-                            assertFalse(controls.plotting());
                             controls.key(Input.Keys.F10, true);
                         } else if (tick == 90) {
                             assertBounds();
@@ -208,6 +207,28 @@ class GpuBoardUiSmokeTest {
                             assertFalse(menu.isVisible());
                             assertFalse(boardCamera.isIsometric());
                             assertEquals(0, leaked.get(), "Outside UI clicks execute without leaking through to the board");
+                            controls.inspect(new Coords(5, 5), 600, 250);
+                            assertTrue(menu.isVisible());
+                            GpuBoardTestUi.click("playback");
+                            assertFalse(menu.isVisible());
+                            assertEquals(3, playbackToggles.get(), "Dismissing a context menu consumes the toolbar click");
+                            GpuBoardTestUi.click("playback");
+                            assertEquals(4, playbackToggles.get(), "The next click operates the toolbar normally");
+                            controls.inspect(new Coords(5, 5), 600, 250);
+                            var processor = Gdx.input.getInputProcessor();
+                            processor.touchDown(100, 300, 0, Input.Buttons.LEFT);
+                            processor.touchUp(100, 300, 0, Input.Buttons.LEFT);
+                            assertFalse(menu.isVisible());
+                            assertEquals(0, leaked.get(), "Dismissing a context menu must not select the board beneath it");
+                            controls.inspect(new Coords(5, 5), 600, 250);
+                            GpuBoardTestUi.click("Details");
+                            assertTrue(menu.isVisible(), "Details must remain readable in the menu");
+                            GpuBoardTestUi.click("weapons");
+                            controls.update(snapshot, "Speed: 1x");
+                            assertTrue(menu.isVisible(), "Submenus stay open until an action is chosen");
+                            GpuBoardTestUi.click("weapon:0");
+                            assertEquals(3, chosen.get());
+                            assertFalse(menu.isVisible(), "Executing a context-menu action closes the menu");
                             Gdx.app.exit();
                         }
                     } catch (Throwable error) {

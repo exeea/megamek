@@ -280,8 +280,8 @@ class GpuBoardSmokeTest {
                     Vector3 point = screenPosition(coords);
                     int x = (int) point.x;
                     int y = (int) point.y;
-                    Gdx.input.getInputProcessor().touchDown(x, y, 0, Input.Buttons.LEFT);
-                    Gdx.input.getInputProcessor().touchUp(x, y, 0, Input.Buttons.LEFT);
+                    Gdx.input.getInputProcessor().touchDown(x, y, 0, Input.Buttons.RIGHT);
+                    Gdx.input.getInputProcessor().touchUp(x, y, 0, Input.Buttons.RIGHT);
                     SwingUtilities.invokeAndWait(() -> { });
                 }
 

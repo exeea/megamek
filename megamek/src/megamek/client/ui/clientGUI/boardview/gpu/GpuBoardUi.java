@@ -40,6 +40,7 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.board.Coords;
+import megamek.common.units.Entity;
 
 /** Target-anchored Scene2D menus; all game actions come from the Swing command adapter. */
 final class GpuBoardUi implements Disposable {
@@ -96,7 +97,6 @@ final class GpuBoardUi implements Disposable {
     private String popupTitle = "";
     private String pendingSearch = "";
     private int keyboardRow = -1;
-    private boolean plotting;
     private boolean showingDetails;
     private float scale = 1;
     private float hudScale = 1;
@@ -116,7 +116,13 @@ final class GpuBoardUi implements Disposable {
             @Override
             public boolean touchDown(int x, int y, int pointer, int button) {
                 Vector2 point = screenToStageCoordinates(new Vector2(x, y));
-                dismissMenuOutside(hit(point.x, point.y, true));
+                Actor target = hit(point.x, point.y, true);
+                boolean dismissContext = popup.isVisible() && menu.equals("context")
+                      && (target == null || !target.isDescendantOf(popup));
+                dismissMenuOutside(target);
+                if (button == Input.Buttons.LEFT && dismissContext) {
+                    return true;
+                }
                 return super.touchDown(x, y, pointer, button);
             }
 
@@ -570,7 +576,6 @@ final class GpuBoardUi implements Disposable {
               || frame.boardGeneration() != next.boardGeneration()
               || !frame.scene().phase().equals(next.scene().phase()))) {
             closeMenu();
-            plotting = false;
         }
         boolean changedPhase = frame == null || frame.reports().phase() != next.reports().phase()
               || frame.reports().round() != next.reports().round();
@@ -609,10 +614,16 @@ final class GpuBoardUi implements Disposable {
         ((TextButton) stage.getRoot().findActor("speed")).setText(speed);
         actor.setText(frame.actorName().isEmpty() ? "No unit selected" : frame.actorName());
         updateActor();
-        help.setText(plotting ? "BOARD TOOL ACTIVE   /   Click to plot or select   \u00b7   Right-click: commands   \u00b7   Esc: exit tool"
-              : "Click: commands   \u00b7   Right-drag: pan   \u00b7   Middle-drag: orbit   \u00b7   Shift: swap   \u00b7   Wheel: zoom");
-        help.setColor(plotting ? GpuBoardSkin.ACCENT : Color.WHITE);
-        if (!plotting && !source.phaseStatus.text().isBlank() && !source.phaseStatus.blocking()) {
+        String clickAction = frame.scene().selectedId() == Entity.NONE ? "select" : switch (frame.reports().phase()) {
+            case DEPLOYMENT -> "select / deploy";
+            case MOVEMENT -> "select / plot movement";
+            case FIRING, PHYSICAL, TARGETING, OFFBOARD -> "select / target";
+            default -> "select";
+        };
+        help.setText("Left-click: " + clickAction + "   \u00b7   Shift-click: facing   \u00b7   Right-click: menu"
+              + "   \u00b7   Right-drag: pan   \u00b7   Middle-drag: orbit   \u00b7   Shift-drag: swap");
+        help.setColor(Color.WHITE);
+        if (!source.phaseStatus.text().isBlank() && !source.phaseStatus.blocking()) {
             help.setText(source.phaseStatus.text());
         }
         List<BoardScene.Command> commits = frame.scene().commands().stream().filter(BoardScene.Command::commit).toList();
@@ -845,7 +856,7 @@ final class GpuBoardUi implements Disposable {
             row.addListener(new TextTooltip(Messages.getString(help), skin, "menu"));
         }
         String symbol = command.boardTool() ? "move" : null;
-        if (command.id().equals("board.los") || command.id().startsWith("weapon")) {
+        if (command.id().equals("board.los") || command.id().equals("board.ruler") || command.id().startsWith("weapon")) {
             symbol = "target";
         } else if (command.id().equals("Details")) {
             symbol = "info";
@@ -985,7 +996,7 @@ final class GpuBoardUi implements Disposable {
             return;
         }
         executeCommand(command);
-        // Weapon choices can stay open for salvos. Board plotting remains an explicit tool choice.
+        // The All Actions palette can stay open for salvos; contextual actions behave like menu items.
     }
 
     private void executeCommand(BoardScene.Command command) {
@@ -995,10 +1006,7 @@ final class GpuBoardUi implements Disposable {
             return;
         }
         command.action().run();
-        if (command.boardTool()) {
-            plotting = true;
-        }
-        if (command.boardTool() || command.id().equals("board.useHex")) {
+        if (menu.equals("context") && !command.id().equals("Details") || command.boardTool() || command.id().equals("board.useHex")) {
             closeMenu();
         }
     }
@@ -1167,9 +1175,6 @@ final class GpuBoardUi implements Disposable {
         int modifiers = GpuBattleView.modifiers();
         List<KeyCommandBind> bindings = KeyCommandBind.getAllBindsByKey(GpuBattleView.awtKey(key), modifiers);
         boolean unbound = bindings.isEmpty();
-        if (down && bindings.contains(KeyCommandBind.CANCEL)) {
-            plotting = false;
-        }
         if (!source.isEditor() && down && bindings.contains(KeyCommandBind.ROUND_REPORT)) {
             toggleReport();
             return true;
@@ -1186,7 +1191,6 @@ final class GpuBoardUi implements Disposable {
             return true;
         }
         if (down && key == Input.Keys.ESCAPE && modifiers == 0) {
-            plotting = false;
             if (popup.isVisible()) {
                 closeMenu();
                 return true;
@@ -1201,10 +1205,6 @@ final class GpuBoardUi implements Disposable {
             }
         }
         return false;
-    }
-
-    boolean plotting() {
-        return plotting;
     }
 
     boolean acceptsCameraKeys() {

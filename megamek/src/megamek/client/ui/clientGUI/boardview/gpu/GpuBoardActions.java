@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.event.InputEvent;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -31,6 +32,7 @@ import megamek.client.ui.panels.phaseDisplay.ActionPhaseDisplay;
 import megamek.client.ui.panels.phaseDisplay.AttackPhaseDisplay;
 import megamek.client.ui.panels.phaseDisplay.DeploymentDisplay;
 import megamek.client.ui.panels.phaseDisplay.FiringDisplay;
+import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
 import megamek.client.ui.panels.phaseDisplay.PhysicalDisplay;
 import megamek.client.ui.panels.phaseDisplay.StatusBarPhaseDisplay;
 import megamek.client.ui.panels.phaseDisplay.TargetingPhaseDisplay;
@@ -249,8 +251,6 @@ final class GpuBoardActions {
         }
         Turn owner = turn();
         List<BoardScene.Command> result = new ArrayList<>();
-        boolean canUse = owner.phase().isOnMap()
-              && (view.getClientgui() == null || view.getClientgui().getClient().isMyTurn());
         String hexAction = switch (owner.phase()) {
             case MOVEMENT -> "Plot movement here";
             case DEPLOYMENT -> "Deploy here";
@@ -258,17 +258,18 @@ final class GpuBoardActions {
             default -> "Select this hex";
         };
         result.add(new BoardScene.Command("board.useHex", hexAction, "Use the current phase tool at this location.",
-              canUse, false, !(owner.panel() instanceof AttackPhaseDisplay), List.of(), dispatch(() -> {
-                  if (current(owner) && owner.phase().isOnMap()
-                        && (view.getClientgui() == null || view.getClientgui().getClient().isMyTurn())) {
-                      view.mouseAction(coords, BoardView.BOARD_HEX_DRAG, java.awt.event.InputEvent.BUTTON1_DOWN_MASK, 1);
-                      view.mouseAction(coords, BoardView.BOARD_HEX_CLICK, 0, 1);
-                  }
-              })));
+              canUseHex(owner), false, !(owner.panel() instanceof AttackPhaseDisplay), List.of(),
+              dispatch(() -> useHex(owner, coords, 0))));
         result.add(new BoardScene.Command("board.los", "Measure line of sight", "Choose the start and end hexes.",
               true, false, List.of(), dispatch(() -> {
                   if (current(owner)) {
                       view.mouseAction(coords, BoardView.BOARD_HEX_CLICK, java.awt.event.InputEvent.CTRL_DOWN_MASK, 1);
+                  }
+              })));
+        result.add(new BoardScene.Command("board.ruler", "Measure distance", "Choose the start and end hexes.",
+              true, false, List.of(), dispatch(() -> {
+                  if (current(owner)) {
+                      view.mouseAction(coords, BoardView.BOARD_HEX_CLICK, java.awt.event.InputEvent.ALT_DOWN_MASK, 1);
                   }
               })));
         if (view.getClientgui() != null) {
@@ -280,6 +281,44 @@ final class GpuBoardActions {
             }
         }
         return result;
+    }
+
+    /** Invoke the current phase's board tool, retaining modifiers and the exact unit picked in 3D. */
+    void defaultAction(Coords coords, Entity picked, int modifiers) {
+        if (closed.getAsBoolean() || coords == null || !view.getBoard().contains(coords)) {
+            return;
+        }
+        if (GpuBoardSource.isMeasurement(modifiers)) {
+            view.mouseAction(coords, BoardView.BOARD_HEX_CLICK, modifiers, 1);
+            return;
+        }
+        Turn owner = turn();
+        boolean phaseTool = switch (owner.phase()) {
+            case DEPLOYMENT -> owner.panel() instanceof DeploymentDisplay;
+            case MOVEMENT -> owner.panel() instanceof MovementDisplay;
+            case FIRING, PHYSICAL, TARGETING, OFFBOARD -> owner.panel() instanceof AttackPhaseDisplay;
+            default -> false;
+        };
+        if (!phaseTool || owner.actor() == Entity.NONE || !current(owner) || !canUseHex(owner)) {
+            return;
+        }
+        if (picked != null && (modifiers & InputEvent.SHIFT_DOWN_MASK) == 0
+              && owner.panel() instanceof AttackPhaseDisplay && view.getClientgui() != null) {
+            new MapMenu(picked.getPosition(), view.getBoardId(), owner.panel(), view.getClientgui()).selectTarget(picked.getId());
+        } else {
+            useHex(owner, coords, modifiers);
+        }
+    }
+
+    private boolean canUseHex(Turn owner) {
+        return owner.phase().isOnMap() && (view.getClientgui() == null || view.getClientgui().getClient().isMyTurn());
+    }
+
+    private void useHex(Turn owner, Coords coords, int modifiers) {
+        if (current(owner) && canUseHex(owner)) {
+            view.mouseAction(coords, BoardView.BOARD_HEX_DRAG, modifiers | InputEvent.BUTTON1_DOWN_MASK, 1);
+            view.mouseAction(coords, BoardView.BOARD_HEX_CLICK, modifiers, 1);
+        }
     }
 
     List<BoardScene.Command> globalCommands() {

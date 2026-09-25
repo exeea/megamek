@@ -270,6 +270,7 @@ final class BoardRelief {
     private final Detail detail;
     private final Site self;
     private final BoardRiver river;
+    private final BoardConcrete coast;
     private final boolean sculpted;
     private final Map<Coords, Site> sites = new HashMap<>();
     private final Map<Long, Corner> corners = new HashMap<>();
@@ -302,6 +303,7 @@ final class BoardRelief {
         this.scene = scene;
         this.tile = tile;
         river = new BoardRiver(scene, tuning);
+        coast = BoardConcrete.of(scene);
         int hexes = scene.width() * scene.height();
         detail = hexes <= tuning.fullDetailHexes() ? FULL : hexes <= tuning.mediumDetailHexes() ? MEDIUM : COARSE;
         self = site(scene, tile, ramps);
@@ -687,6 +689,8 @@ final class BoardRelief {
             x = cornerX(ix);
             y = cornerY(iy);
             this.around = around;
+            BoardConcrete.Shift constructed = coast.shift(key);
+            if (constructed.x() != 0 || constructed.y() != 0) { move = new float[] { constructed.x(), constructed.y() }; }
             variation = hash(ix * 7 + 3, iy * 13 - 5);
             boolean anyPinned = false;
             for (Site site : around) { anyPinned |= site == null || !site.sculpted(); }
@@ -711,7 +715,10 @@ final class BoardRelief {
             high = Math.max(a, Math.max(b, c));
             mid = a + b + c - low - high;
             float round = 0;
-            for (Site site : around) { round += BoardRelief.geology.get(site.family()).round(); }
+            for (Site site : around) {
+                if (!site.liquid() && site.family() == CONCRETE) { round = 0; break; }
+                round += BoardRelief.geology.get(site.family()).round();
+            }
             fillet = low == high ? 0 : Math.min(.5f, round / 3 * (.8f + .4f * variation)) * BoardGeometry.WIDTH / 2;
             for (Site site : around) {
                 float dx = site.x() - x, dy = site.y() - y, scale = fillet / 6 / (float) Math.hypot(dx, dy);
@@ -728,6 +735,7 @@ final class BoardRelief {
 
         /** Sets {@link #away} and {@link #want}. */
         private void wantShore() {
+            if (move != null) { return; }
             Site water = null, dry = null;
             int wet = 0;
             boolean flat = false;
@@ -837,12 +845,13 @@ final class BoardRelief {
         geology = geology.scale(1f / solids);
         float pin = (span[2] == 1 ? smooth((z - bottom) / (.2f * level)) : 1)
               * (span[2] == 2 ? smooth((top - z) / (.2f * level)) : 1);
-        // Water keeps its outline at its own level, as along the edges (see Edge).
+        // Water and concrete keep their outlines at their own level, as along the edges (see Edge).
         boolean footPinned = false, rimPinned = false;
         float drop = 0;
         for (Site site : corner.around) {
-            footPinned |= site.liquid() && site.level() == from;
-            rimPinned |= site.liquid() && site.level() == to;
+            boolean fixed = site.liquid() || site.family() == CONCRETE;
+            footPinned |= fixed && site.level() == from;
+            rimPinned |= fixed && site.level() == to;
             for (Site other : corner.around) {
                 if (site.level() == to && other.level() == from) { drop = Math.max(drop, drop(site, other)); }
             }
@@ -985,7 +994,7 @@ final class BoardRelief {
         final float ny;
         final float length;
         final boolean profiled;
-        /** A water hex keeps its outline where it is the lower or the upper hex: no relief at the foot or the rim. */
+        /** Water and concrete keep their outlines where they meet a step: no relief at their foot or rim. */
         final boolean footPinned;
         final boolean rimPinned;
         /** The room of the step; see {@link #room(Site, Site)}. */
@@ -1020,8 +1029,8 @@ final class BoardRelief {
             }
             nx = px;
             ny = py;
-            footPinned = lower == null || !lower.sculpted() || lower.liquid();
-            rimPinned = upper != null && upper.liquid();
+            footPinned = lower == null || !lower.sculpted() || lower.liquid() || lower.family() == CONCRETE;
+            rimPinned = upper != null && (upper.liquid() || upper.family() == CONCRETE);
             profiled = upper != null && lower != null && upper.sculpted() && (lower.sculpted() || lower.liquid());
             room = profiled ? room(upper, lower) : 0;
             footRoom = room > 0 ? band(upper, lower, bottom()) : 0;
@@ -2702,7 +2711,12 @@ final class BoardRelief {
           BoardSurface.Finish finish, int edge) {
         float abx = b.x - a.x, aby = b.y - a.y, abz = b.z - a.z, acx = c.x - a.x, acy = c.y - a.y, acz = c.z - a.z;
         float cx = aby * acz - abz * acy, cy = abz * acx - abx * acz, cz = abx * acy - aby * acx;
-        if (cx * cx + cy * cy + cz * cz > 1e-9f) { out.add(new BoardSurface.Face(a, b, c, finish, edge)); }
+        // Coincident straight banks can differ by a float rounding unit. Do not emit microscopic slivers between
+        // their independently sampled rows; their unstable normals would face alternately up and down.
+        float tolerance = 1e-8f * BoardGeometry.HEX_SCALE * BoardGeometry.HEX_SCALE * Math.max(a.dst2(b), a.dst2(c));
+        if (cx * cx + cy * cy + cz * cz > Math.max(1e-9f, tolerance)) {
+            out.add(new BoardSurface.Face(a, b, c, finish, edge));
+        }
     }
 
     // ---- Maths -----------------------------------------------------------------------------------------------

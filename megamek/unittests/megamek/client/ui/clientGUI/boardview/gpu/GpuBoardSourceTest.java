@@ -910,6 +910,73 @@ class GpuBoardSourceTest {
     }
 
     @Test
+    void inspectionSelectsWithoutPhaseToolsAndRejectsStaleOrConcealedUnits() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            AtomicInteger unitSelections = new AtomicInteger();
+            AtomicInteger phaseActions = new AtomicInteger();
+            SwingUtilities.invokeAndWait(() -> fixture.view.addBoardViewListener(new BoardViewListenerAdapter() {
+                @Override
+                public void unitSelected(BoardViewEvent event) {
+                    assertEquals(fixture.entity.getId(), event.getEntityId());
+                    unitSelections.incrementAndGet();
+                }
+
+                @Override
+                public void hexSelected(BoardViewEvent event) {
+                    phaseActions.incrementAndGet();
+                }
+
+                @Override
+                public void hexMoused(BoardViewEvent event) {
+                    phaseActions.incrementAndGet();
+                }
+            }));
+            long generation = fixture.source.takeFrame().boardGeneration();
+            Coords unit = fixture.entity.getPosition();
+            fixture.source.primaryClick(unit, fixture.entity.getId(), 0, generation);
+            SwingUtilities.invokeAndWait(() -> {
+                assertEquals(unit, fixture.view.getSelected());
+                assertEquals(1, unitSelections.get());
+                assertTrue(fixture.source.takeFrame().keepSelectionCamera());
+                fixture.view.centerOn(fixture.entity);
+                fixture.source.refresh();
+                assertFalse(fixture.source.takeFrame().keepSelectionCamera(), "Other navigation keeps its camera behavior");
+            });
+            Coords empty = new Coords(2, 3);
+            fixture.source.primaryClick(empty, Entity.NONE, 0, generation);
+            SwingUtilities.invokeAndWait(() -> assertEquals(empty, fixture.view.getSelected()));
+            fixture.source.primaryClick(unit, fixture.entity.getId(), 0, generation - 1);
+            SwingUtilities.invokeAndWait(() -> {
+                assertEquals(empty, fixture.view.getSelected(), "Input from a replaced board is ignored");
+                Player enemy = new Player(1, "Opponent");
+                enemy.setTeam(2);
+                fixture.game.addPlayer(enemy.getId(), enemy);
+                fixture.entity.setOwner(enemy);
+                fixture.game.getOptions().getOption(OptionsConstants.ADVANCED_DOUBLE_BLIND).setValue(true);
+                fixture.game.getOptions().getOption(OptionsConstants.ADVANCED_TAC_OPS_SENSORS).setValue(true);
+                fixture.entity.addBeenDetectedBy(fixture.player);
+                fixture.source.refresh();
+            });
+            assertTrue(fixture.source.takeFrame().scene().units().getFirst().sensorContact());
+            fixture.source.primaryClick(unit, fixture.entity.getId(), 0, generation);
+            SwingUtilities.invokeAndWait(() -> {
+                assertEquals(1, unitSelections.get(), "Sensor returns must not expose an entity selection");
+                fixture.game.getOptions().getOption(OptionsConstants.ADVANCED_HIDDEN_UNITS).setValue(true);
+                fixture.entity.setHidden(true);
+                fixture.source.refresh();
+            });
+            fixture.source.primaryClick(unit, fixture.entity.getId(), 0, generation);
+            SwingUtilities.invokeAndWait(() -> {
+                assertEquals(1, unitSelections.get(), "Visibility is checked again when the click reaches Swing");
+                assertEquals(0, phaseActions.get(), "Selection cannot plot movement, deploy or choose an attack target");
+                fixture.source.close();
+            });
+            fixture.source.primaryClick(empty, Entity.NONE, 0, generation);
+            SwingUtilities.invokeAndWait(() -> assertEquals(unit, fixture.view.getSelected()));
+        }
+    }
+
+    @Test
     void forwardsBoardCoordinatesAndDoesNotDispatchAfterClose() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             AtomicReference<BoardViewEvent> received = new AtomicReference<>();

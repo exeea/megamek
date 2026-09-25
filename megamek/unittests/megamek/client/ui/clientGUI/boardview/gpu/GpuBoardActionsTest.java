@@ -6,9 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
@@ -16,8 +19,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.awt.Component;
+import java.awt.event.InputEvent;
 import java.util.List;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.JComboBox;
@@ -28,12 +33,18 @@ import megamek.client.Client;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
+import megamek.client.ui.clientGUI.MegaMekGUI;
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
 import megamek.client.ui.dialogs.unitDisplay.WeaponPanel;
+import megamek.client.ui.panels.phaseDisplay.DeploymentDisplay;
 import megamek.client.ui.panels.phaseDisplay.FiringDisplay;
+import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
+import megamek.client.ui.util.MegaMekController;
 import megamek.client.ui.widget.MegaMekButton;
+import megamek.common.Hex;
 import megamek.common.Player;
+import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.game.GameTurn;
@@ -44,6 +55,127 @@ import org.junit.jupiter.api.Test;
 
 class GpuBoardActionsTest {
     private record Controls(GpuBoardActions actions, FiringDisplay phase, WeaponPanel weapons, Entity target) { }
+
+    @Test
+    void terrainPlottingRequiresAnActiveMovementUnitAndTheCurrentPlayersTurn() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            SwingUtilities.invokeAndWait(() -> {
+                ClientGUI gui = mock(ClientGUI.class);
+                Client client = mock(Client.class);
+                when(gui.getClient()).thenReturn(client);
+                when(client.isMyTurn()).thenReturn(true);
+                BoardView view = spy(fixture.view);
+                doReturn(gui).when(view).getClientgui();
+                MovementDisplay movement = mock(MovementDisplay.class);
+                when(movement.currentEntity()).thenReturn(fixture.entity);
+                AtomicBoolean closed = new AtomicBoolean();
+                GpuBoardActions actions = new GpuBoardActions(view, () -> movement, closed::get, () -> { });
+                Coords destination = new Coords(4, 5);
+
+                actions.defaultAction(destination, null, 0);
+                verify(view).mouseAction(destination, BoardView.BOARD_HEX_DRAG, InputEvent.BUTTON1_DOWN_MASK, 1);
+                verify(view).mouseAction(destination, BoardView.BOARD_HEX_CLICK, 0, 1);
+                actions.defaultAction(destination, null, InputEvent.SHIFT_DOWN_MASK);
+                verify(view).mouseAction(destination, BoardView.BOARD_HEX_DRAG,
+                      InputEvent.BUTTON1_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK, 1);
+                verify(view).mouseAction(destination, BoardView.BOARD_HEX_CLICK, InputEvent.SHIFT_DOWN_MASK, 1);
+                clearInvocations(view);
+
+                when(movement.currentEntity()).thenReturn(null);
+                actions.defaultAction(destination, null, 0);
+                when(movement.currentEntity()).thenReturn(fixture.entity);
+                when(client.isMyTurn()).thenReturn(false);
+                actions.defaultAction(destination, null, 0);
+                when(client.isMyTurn()).thenReturn(true);
+                when(movement.isIgnoringEvents()).thenReturn(true);
+                actions.defaultAction(destination, null, 0);
+                when(movement.isIgnoringEvents()).thenReturn(false);
+                fixture.game.setPhase(GamePhase.FIRING);
+                actions.defaultAction(destination, null, 0);
+                fixture.game.setPhase(GamePhase.MOVEMENT);
+                actions.defaultAction(null, null, 0);
+                actions.defaultAction(new Coords(-1, -1), null, 0);
+                closed.set(true);
+                actions.defaultAction(destination, null, 0);
+                verify(view, never()).mouseAction(any(Coords.class), anyInt(), anyInt(), anyInt());
+            });
+        }
+    }
+
+    @Test
+    void deploymentClicksPlaceTheUnitAndShiftClicksTurnItWithoutMovingIt() throws Exception {
+        Board board = new Board(7, 7);
+        for (int x = 0; x < 7; x++) {
+            for (int y = 0; y < 7; y++) {
+                board.setHex(x, y, new Hex());
+            }
+        }
+        try (GpuBoardFixture fixture = GpuBoardFixture.create(board)) {
+            SwingUtilities.invokeAndWait(() -> {
+                fixture.game.setPhase(GamePhase.DEPLOYMENT);
+                fixture.player.setStartingPos(Board.START_ANY);
+                fixture.entity.setPosition(null);
+                fixture.entity.setDeployed(false);
+                ClientGUI gui = mock(ClientGUI.class);
+                Client client = mock(Client.class);
+                gui.controller = mock(MegaMekController.class);
+                when(gui.getClient()).thenReturn(client);
+                when(client.getGame()).thenReturn(fixture.game);
+                when(client.getLocalPlayer()).thenReturn(fixture.player);
+                when(client.isMyTurn()).thenReturn(true);
+                BoardView view = spy(fixture.view);
+                doReturn(gui).when(view).getClientgui();
+                when(gui.boardViews()).thenReturn(List.of(view));
+                when(gui.getBoardView(any(Entity.class))).thenReturn(view);
+                try (var keys = mockStatic(MegaMekGUI.class)) {
+                    keys.when(MegaMekGUI::getKeyDispatcher).thenReturn(gui.controller);
+                    DeploymentDisplay phase = spy(new DeploymentDisplay(gui));
+                    doReturn(fixture.entity).when(phase).currentEntity();
+                    view.addBoardViewListener(phase);
+                    try {
+                        GpuBoardActions actions = new GpuBoardActions(view, () -> phase, () -> false, () -> { });
+                        Coords destination = new Coords(3, 3);
+                        Coords facing = new Coords(4, 3);
+                        actions.defaultAction(destination, null, 0);
+                        assertEquals(destination, fixture.entity.getPosition(), "A terrain click places the deploying unit");
+                        actions.defaultAction(facing, null, InputEvent.SHIFT_DOWN_MASK);
+                        assertEquals(destination, fixture.entity.getPosition(), "Shift changes facing without redeploying");
+                        assertEquals(destination.direction(facing), fixture.entity.getFacing());
+                        assertEquals(fixture.entity.getFacing(), fixture.entity.getSecondaryFacing());
+                        when(client.isMyTurn()).thenReturn(false);
+                        actions.defaultAction(new Coords(2, 2), null, 0);
+                        assertEquals(destination, fixture.entity.getPosition(), "Deployment remains restricted to your turn");
+                    } finally {
+                        view.removeBoardViewListener(phase);
+                        phase.removeAllListeners();
+                    }
+                }
+            });
+        }
+    }
+
+    @Test
+    void enemyDefaultActionTargetsThePickedStackedUnitAndRechecksVisibility() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            Controls controls = controls(fixture);
+            SwingUtilities.invokeAndWait(() -> {
+                Entity second = new BipedMek();
+                second.setId(43);
+                second.setOwner(controls.target().getOwner());
+                second.setPosition(controls.target().getPosition());
+                second.setDeployed(true);
+                fixture.game.addEntity(second, false);
+                second.addBeenSeenBy(fixture.player);
+                controls.actions().defaultAction(second.getPosition(), second, 0);
+                verify(controls.phase()).target(second);
+                verify(controls.phase(), never()).target(controls.target());
+                clearInvocations(controls.phase());
+                second.setHidden(true);
+                controls.actions().defaultAction(second.getPosition(), second, 0);
+                verify(controls.phase(), never()).target(any());
+            });
+        }
+    }
 
     @Test
     void presentationTextDecodesHtmlEntitiesWithoutRemovingLiteralComparisons() {

@@ -132,6 +132,7 @@ class GpuBattleView extends ApplicationAdapter {
     private float hoverClock;
     private long boardGeneration;
     private long centerSequence = -1;
+    private boolean keepSelectionCamera;
     private boolean entrancePending;
     private boolean entranceStarting;
     private int cameraSelection = -1;
@@ -302,6 +303,7 @@ class GpuBattleView extends ApplicationAdapter {
               playbackSpeed == UnitMotion.Speed.INSTANT ? Messages.getString("GpuBoard.instant") : playbackSpeed.label));
         playback.gravityOverride = ui.gravityOverride();
         boardCamera.viewableArea(ui.cameraLeft(), ui.cameraWidth());
+        keepSelectionCamera = frame.keepSelectionCamera();
         if (!fitted) { updateCameraFocus(scene, frame.centerRequest()); }
         var instantAction = playbackSpeed == UnitMotion.Speed.INSTANT ? playback.lastAction() : null;
         playback.advance(Gdx.graphics.getDeltaTime(), playbackSpeed, state -> preparePlaybackCamera(state, scene));
@@ -689,8 +691,9 @@ class GpuBattleView extends ApplicationAdapter {
             }
             return;
         }
-        boolean requested = centerSequence != request.sequence();
-        boolean changedSelection = cameraSelection != scene.selectedId() || cameraFollowingPlayback && instantAction == null;
+        boolean requested = !keepSelectionCamera && centerSequence != request.sequence();
+        boolean changedSelection = !keepSelectionCamera
+              && (cameraSelection != scene.selectedId() || cameraFollowingPlayback && instantAction == null);
         var selection = changedSelection && scene.selectedId() != Entity.NONE
               ? scene.units().stream().filter(unit -> unit.id() == scene.selectedId()).findFirst().orElse(null) : null;
         if (selection == null && requested && request.entityId() != Entity.NONE) {
@@ -1157,7 +1160,7 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     private final class BoardInput extends InputAdapter {
-        private long editorGestureGeneration;
+        private long gestureBoardGeneration;
         private int dragX;
         private int dragY;
         private boolean panning;
@@ -1170,15 +1173,22 @@ class GpuBattleView extends ApplicationAdapter {
         private record KeyPress(int code, int modifiers) { }
         private final Map<Integer, KeyPress> pressedKeys = new HashMap<>();
 
+        private record Pick(Coords coords, int entityId) { }
+
         private Coords pick(int x, int y) {
+            return pickSelection(x, y).coords();
+        }
+
+        private Pick pickSelection(int x, int y) {
             if (scene == null) {
-                return null;
+                return new Pick(null, Entity.NONE);
             }
             var ray = boardCamera.camera.getPickRay(x, y, 0, ui.bottomPixels(),
                   boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight);
             var ground = terrain.hit(scene, ray);
             float nearest = ground == null ? Float.POSITIVE_INFINITY : ground.distance();
             Coords coords = ground == null ? null : ground.coords();
+            int entityId = Entity.NONE;
             float nearestUnit = unitIcons.active() ? Float.POSITIVE_INFINITY : nearest;
             for (BoardScene.Unit unit : scene.units()) {
                 var instance = unitIcons.active() ? unitIcons.instance(unit) : unitInstances.get(unit.id() + ":" + unit.part());
@@ -1187,6 +1197,7 @@ class GpuBattleView extends ApplicationAdapter {
                     if (distance < nearestUnit) {
                         nearestUnit = distance;
                         nearest = distance;
+                        entityId = unit.id();
                         coords = unit.location().coords();
                     }
                 }
@@ -1196,9 +1207,18 @@ class GpuBattleView extends ApplicationAdapter {
                 if (distance < nearest) {
                     nearest = distance;
                     coords = entry.getKey().coords();
+                    entityId = Entity.NONE;
                 }
             }
-            return coords;
+            if (entityId == Entity.NONE && coords != null) {
+                for (BoardScene.Unit unit : scene.units()) {
+                    if (unit.footprint().contains(coords)) {
+                        entityId = unit.id();
+                        break;
+                    }
+                }
+            }
+            return new Pick(coords, entityId);
         }
 
         private void overlayInput(int event, int x, int y, Runnable fallback) {
@@ -1217,7 +1237,7 @@ class GpuBattleView extends ApplicationAdapter {
             startY = y;
             boardGesture = true;
             gestureButton = button;
-            editorGestureGeneration = boardGeneration;
+            gestureBoardGeneration = boardGeneration;
             dragged = false;
             panning = button == Input.Buttons.RIGHT || button == Input.Buttons.MIDDLE;
             boolean shiftDown = (modifiers() & InputEvent.SHIFT_DOWN_MASK) != 0;
@@ -1229,15 +1249,10 @@ class GpuBattleView extends ApplicationAdapter {
                 Coords coords = pick(x, y);
                 int mods = modifiers();
                 if (source.isEditor()) {
-                    source.paintEditor(coords, mods, editorGestureGeneration);
+                    source.paintEditor(coords, mods, gestureBoardGeneration);
                     return true;
                 }
-                boolean plotting = ui.plotting() && !GpuBoardSource.isMeasurement(mods);
-                overlayInput(MouseEvent.MOUSE_PRESSED, x, y, () -> {
-                    if (plotting) {
-                        source.hover(coords, mods);
-                    }
-                });
+                overlayInput(MouseEvent.MOUSE_PRESSED, x, y, () -> { });
             }
             return true;
         }
@@ -1262,16 +1277,11 @@ class GpuBattleView extends ApplicationAdapter {
                 int mods = modifiers();
                 if (source.isEditor()) {
                     if (gestureButton == Input.Buttons.LEFT) {
-                        source.paintEditor(coords, mods, editorGestureGeneration);
+                        source.paintEditor(coords, mods, gestureBoardGeneration);
                     }
                     return true;
                 }
-                boolean plotting = ui.plotting() && !GpuBoardSource.isMeasurement(mods);
-                overlayInput(MouseEvent.MOUSE_DRAGGED, x, y, () -> {
-                    if (plotting) {
-                        source.hover(coords, mods);
-                    }
-                });
+                overlayInput(MouseEvent.MOUSE_DRAGGED, x, y, () -> { });
             }
             dragX = x;
             dragY = y;
@@ -1290,19 +1300,14 @@ class GpuBattleView extends ApplicationAdapter {
                 reset();
                 return true;
             }
-            if (button == Input.Buttons.RIGHT && !orbiting && !dragged && !ui.hit(x, y)) {
+            if (button == Input.Buttons.RIGHT && !dragged && !ui.hit(x, y)) {
                 ui.inspect(pick(x, y), x, y);
             } else if (!panning && button == Input.Buttons.LEFT && !ui.hit(x, y)) {
-                Coords coords = pick(x, y);
+                Pick picked = pickSelection(x, y);
+                long generation = gestureBoardGeneration;
                 int mods = modifiers();
                 overlayInput(MouseEvent.MOUSE_RELEASED, x, y,
-                      () -> Gdx.app.postRunnable(() -> {
-                          if (ui.plotting() || GpuBoardSource.isMeasurement(mods)) {
-                              source.click(coords, false, mods);
-                          } else {
-                              ui.inspect(coords, x, y);
-                          }
-                      }));
+                      () -> source.primaryClick(picked.coords(), picked.entityId(), mods, generation));
             }
             reset();
             return true;

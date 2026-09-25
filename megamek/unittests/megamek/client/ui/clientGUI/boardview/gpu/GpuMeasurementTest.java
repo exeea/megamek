@@ -16,6 +16,7 @@ import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListenerAdapter;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
+import megamek.common.units.Entity;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -23,7 +24,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 class GpuMeasurementTest {
     @ParameterizedTest
     @EnumSource(value = GamePhase.class, names = { "MOVEMENT", "LOUNGE" })
-    void measurementGesturesReachSharedToolsWithoutPlotting(GamePhase phase) throws Exception {
+    void contextMeasurementsReachSharedToolsWithoutPlotting(GamePhase phase) throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             List<BoardViewEvent> events = new ArrayList<>();
             SwingUtilities.invokeAndWait(() -> {
@@ -46,12 +47,19 @@ class GpuMeasurementTest {
                 });
             });
             Coords start = new Coords(4, 4), end = new Coords(8, 6);
-            for (int modifiers : List.of(InputEvent.ALT_DOWN_MASK, InputEvent.CTRL_DOWN_MASK)) {
-                fixture.source.hover(start, modifiers);
-                fixture.source.click(start, false, modifiers);
-                fixture.source.hover(end, modifiers);
-                fixture.source.click(end, false, modifiers);
-                SwingUtilities.invokeAndWait(() -> { });
+            List<Runnable> commands = new ArrayList<>();
+            for (String command : List.of("board.ruler", "board.los")) {
+                for (Coords point : List.of(start, end)) {
+                    SwingUtilities.invokeAndWait(() -> {
+                        GpuBoardActions actions = new GpuBoardActions(fixture.view, () -> fixture.panel,
+                              fixture.source::isClosed, fixture.source::refresh);
+                        Runnable action = actions.contextCommands(point).stream().filter(item -> item.id().equals(command))
+                              .findFirst().orElseThrow().action();
+                        commands.add(action);
+                        action.run();
+                    });
+                    SwingUtilities.invokeAndWait(() -> { });
+                }
             }
             assertEquals(List.of(BoardViewEvent.BOARD_HEX_CLICKED, BoardViewEvent.BOARD_HEX_CLICKED,
                         BoardViewEvent.BOARD_FIRST_LOS_HEX, BoardViewEvent.BOARD_SECOND_LOS_HEX),
@@ -67,10 +75,35 @@ class GpuMeasurementTest {
                 events.clear();
                 fixture.source.close();
             });
-            fixture.source.click(start, false, InputEvent.ALT_DOWN_MASK);
-            fixture.source.click(start, false, InputEvent.CTRL_DOWN_MASK);
+            commands.forEach(Runnable::run);
             SwingUtilities.invokeAndWait(() -> { });
             assertTrue(events.isEmpty(), "Closed boards must reject both measurement gestures");
+        }
+    }
+
+    @Test
+    void mouseMeasurementsRetainTheirEndpointsWithoutAnActingUnit() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            List<BoardViewEvent> events = new ArrayList<>();
+            SwingUtilities.invokeAndWait(() -> fixture.view.addBoardViewListener(new BoardViewListenerAdapter() {
+                @Override
+                public void hexMoused(BoardViewEvent event) {
+                    events.add(event);
+                }
+            }));
+            Coords start = new Coords(4, 4), end = new Coords(8, 6);
+            long generation = fixture.source.takeFrame().boardGeneration();
+            fixture.source.primaryClick(start, Entity.NONE, InputEvent.CTRL_DOWN_MASK, generation);
+            SwingUtilities.invokeAndWait(() -> assertEquals(start, fixture.view.getFirstLOS()));
+            fixture.source.primaryClick(end, Entity.NONE, InputEvent.CTRL_DOWN_MASK, generation);
+            SwingUtilities.invokeAndWait(() -> assertNull(fixture.view.getFirstLOS()));
+            fixture.source.primaryClick(start, Entity.NONE, InputEvent.ALT_DOWN_MASK, generation);
+            fixture.source.primaryClick(end, Entity.NONE, InputEvent.ALT_DOWN_MASK, generation);
+            SwingUtilities.invokeAndWait(() -> {
+                assertEquals(List.of(start, end), events.stream().map(BoardViewEvent::getCoords).toList());
+                assertTrue(events.stream().allMatch(event -> event.getType() == BoardViewEvent.BOARD_HEX_CLICKED
+                      && event.getModifiers() == InputEvent.ALT_DOWN_MASK));
+            });
         }
     }
 

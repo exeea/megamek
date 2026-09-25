@@ -225,6 +225,7 @@ class GpuBoardTuningSmokeTest {
             scroll.updateVisualScroll();
             capture(stage, "tuning-effects-small.png");
         } finally {
+            BoardConcrete.tune(BoardConcrete.DEFAULT_MODE);
             BoardRelief.tune(BoardRelief.DEFAULTS);
             BoardSurface.tune(BoardSurface.DEFAULTS);
             BoardRelief.tuneGeology(BoardRelief.defaultGeology());
@@ -240,6 +241,14 @@ class GpuBoardTuningSmokeTest {
         assertFalse(tuning.panel().findActor("tuning-general-scroll").isVisible());
         assertFalse(tuning.panel().findActor("tuning-scroll").isVisible());
         int revision = BoardGeometry.revision();
+        SelectBox<String> concrete = tuning.panel().findActor("tuning-concrete-shapes");
+        assertEquals(3, concrete.getItems().size);
+        concrete.setSelected("Everywhere");
+        assertEquals(BoardConcrete.Mode.EVERYWHERE, BoardConcrete.mode());
+        concrete.setSelected("None");
+        assertEquals(BoardConcrete.Mode.OFF, BoardConcrete.mode());
+        concrete.setSelected("Water only");
+        assertEquals(BoardConcrete.Mode.WATER_ONLY, BoardConcrete.mode());
         assertTerrainHelp(tuning, scroll);
         set(tuning, "River width (%)", 5);
         assertEquals(.05f, BoardRelief.tuning().riverWidth(), .0001f);
@@ -292,6 +301,8 @@ class GpuBoardTuningSmokeTest {
         GpuBoardTestUi.click("tuning-defaults");
         assertEquals(BoardRelief.DEFAULTS, BoardRelief.tuning());
         assertEquals(BoardSurface.DEFAULTS, BoardSurface.tuning());
+        assertEquals(BoardConcrete.DEFAULT_MODE, BoardConcrete.mode());
+        assertEquals(BoardConcrete.DEFAULT_MODE.ordinal(), concrete.getSelectedIndex());
         assertEquals(BoardRelief.defaultGeology(), BoardRelief.geology());
         scroll.setScrollPercentY(0);
         scroll.updateVisualScroll();

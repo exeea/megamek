@@ -1816,6 +1816,21 @@ public class MapMenu extends JPopupMenu {
         }
     }
 
+    /** Select an explicitly picked unit using the same availability and action as its contextual target entry. */
+    public void selectTarget(int entityId) {
+        if (myEntity == null) {
+            return;
+        }
+        JMenu targets = createTargetMenu();
+        for (Component component : targets.getMenuComponents()) {
+            if (component instanceof JMenuItem item && item.isVisible() && item.isEnabled()
+                  && ("E|" + entityId).equals(item.getActionCommand())) {
+                item.doClick(0);
+                return;
+            }
+        }
+    }
+
     /** Applies the inspected target only when an action is chosen (or the classic popup is shown). */
     public void selectTarget() {
         if (client.isMyTurn() && myEntity != null) {

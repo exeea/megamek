@@ -21,6 +21,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Input;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
@@ -121,13 +122,23 @@ class GpuAttackSmokeTest {
                             } else if (tick == 8) {
                                 assertBounds();
                                 assertTrue(button("fireFire").isDisabled(), "A target must be chosen before firing");
-                                boardUi().inspect(new Coords(5, 3), 180, 180);
+                                clickHex(new Coords(5, 3));
                                 SwingUtilities.invokeAndWait(source.get()::refresh);
                             } else if (tick == 16) {
+                                assertFalse(popup().isVisible(), "Left-clicking an enemy targets it without a menu");
+                                assertEquals(42, firing.get().getTarget().getId());
+                                assertEquals(fixture.entity.getId(), firing.get().currentEntity().getId(),
+                                      "Targeting must preserve the acting unit");
+                                assertTrue(source.get().takeFrame().keepSelectionCamera());
+                                clickHex(fixture.entity.getPosition());
+                                SwingUtilities.invokeAndWait(() -> { });
+                                assertEquals(42, firing.get().getTarget().getId(), "Reselecting the acting unit preserves its target");
+                                boardUi().inspect(new Coords(5, 3), 180, 180);
+                                SwingUtilities.invokeAndWait(source.get()::refresh);
+                            } else if (tick == 17) {
                                 assertTrue(popup().isVisible());
                                 GpuBoardTestUi.click("board.useHex");
                                 assertFalse(popup().isVisible(), "Choosing a target dismisses the popup immediately");
-                                assertFalse(boardUi().plotting(), "Target selection must not enter a movement/twist tool");
                                 SwingUtilities.invokeAndWait(source.get()::refresh);
                             } else if (tick == 18) {
                                 assertTrue(source.get().takeFrame().attack().targetName().contains("Atlas"));
@@ -207,6 +218,16 @@ class GpuAttackSmokeTest {
                             failure.set(error);
                             Gdx.app.exit();
                         }
+                    }
+
+                    private void clickHex(Coords coords) throws Exception {
+                        var point = screenPosition(coords);
+                        var input = Gdx.input.getInputProcessor();
+                        input.touchDown(Math.round(point.x), Math.round(point.y), 0, Input.Buttons.LEFT);
+                        input.touchUp(Math.round(point.x), Math.round(point.y), 0, Input.Buttons.LEFT);
+                        // Overlay routing and the selected board action each enqueue work on Swing.
+                        SwingUtilities.invokeAndWait(() -> { });
+                        SwingUtilities.invokeAndWait(() -> { });
                     }
 
                     private TextButton button(String id) {

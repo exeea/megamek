@@ -93,7 +93,16 @@ final class GpuBoardSource implements AutoCloseable {
     public record Frame(BoardScene scene, List<BoardScene.Animation> timeline, BoardScene.Context context,
           List<BoardScene.Command> globalCommands, Hud hud, String tooltip,
           BoardView.CenterRequest centerRequest, long boardGeneration, String actorName,
-          BoardAtmosphere.Settings scenarioAtmosphere, BoardScene.Attack attack, GpuReportLog.Snapshot reports) {
+          BoardAtmosphere.Settings scenarioAtmosphere, BoardScene.Attack attack, GpuReportLog.Snapshot reports,
+          boolean keepSelectionCamera) {
+        Frame(BoardScene scene, List<BoardScene.Animation> animations, BoardScene.Context context,
+              List<BoardScene.Command> globalCommands, Hud hud, String tooltip,
+              BoardView.CenterRequest centerRequest, long boardGeneration, String actorName,
+              BoardAtmosphere.Settings scenarioAtmosphere, BoardScene.Attack attack, GpuReportLog.Snapshot reports) {
+            this(scene, animations, context, globalCommands, hud, tooltip, centerRequest, boardGeneration, actorName,
+                  scenarioAtmosphere, attack, reports, false);
+        }
+
         Frame(BoardScene scene, List<BoardScene.Animation> animations, BoardScene.Context context,
               List<BoardScene.Command> globalCommands, Hud hud, String tooltip,
               BoardView.CenterRequest centerRequest, long boardGeneration, String actorName,
@@ -129,6 +138,9 @@ final class GpuBoardSource implements AutoCloseable {
     private final java.util.LinkedHashSet<java.util.UUID> receivedAttacks = new java.util.LinkedHashSet<>();
 
     private volatile BoardView view;
+    /** Swing-owned input intent, valid only for the selection and camera request produced by that mouse gesture. */
+    private record MouseSelection(BoardView view, Board board, int actorId, BoardView.CenterRequest request) { }
+    private MouseSelection mouseSelection;
     private final Supplier<JComponent> phasePanel;
     private final BoardEditorPanel editor;
     /** Only Swing owns the active brush stroke; render input carries the board generation it picked. */
@@ -547,7 +559,7 @@ final class GpuBoardSource implements AutoCloseable {
     public synchronized Frame takeFrame() {
         Frame result = new Frame(frame.scene(), List.copyOf(pendingEvents), frame.context(), frame.globalCommands(),
               frame.hud(), frame.tooltip(), frame.centerRequest(), frame.boardGeneration(), frame.actorName(),
-              frame.scenarioAtmosphere(), frame.attack(), frame.reports());
+              frame.scenarioAtmosphere(), frame.attack(), frame.reports(), frame.keepSelectionCamera());
         pendingEvents.clear();
         return result;
     }
@@ -582,7 +594,7 @@ final class GpuBoardSource implements AutoCloseable {
             if (frame != null && frame.scene().boardId() == view.getBoardId()) {
                 frame = new Frame(frame.scene(), frame.timeline(), frame.context(), frame.globalCommands(), nextHud,
                       frame.tooltip(), frame.centerRequest(), frame.boardGeneration(), frame.actorName(),
-                      frame.scenarioAtmosphere(), frame.attack(), frame.reports());
+                      frame.scenarioAtmosphere(), frame.attack(), frame.reports(), frame.keepSelectionCamera());
             }
         }
         Board current = view.game.getBoard(view.getBoardId());
@@ -713,10 +725,14 @@ final class GpuBoardSource implements AutoCloseable {
         Entity actor = view.game.getEntity(actions.actorId());
         boolean knownActor = actor != null && (actor.getOwner().equals(view.getLocalPlayer())
               || visible(actor) && !sensorContact(actor));
+        boolean keepSelectionCamera = mouseSelection != null
+              && mouseSelection.equals(new MouseSelection(view, board, actions.actorId(), view.getCenterRequest()));
+        if (!keepSelectionCamera) { mouseSelection = null; }
         return new Frame(scene, List.of(), nextContext, List.copyOf(nextGlobal), nextHud, nextTooltip,
               view.getCenterRequest(), boardGeneration, knownActor ? actor.getShortName() : "",
               atmosphereFor(view.game.getPlanetaryConditions(), board.isSpace()), actions.attackState(),
-              reports.capture(view.game.getAllReports(), view.game.getRoundCount(), view.game.getPhase(), this::reportIcon));
+              reports.capture(view.game.getAllReports(), view.game.getRoundCount(), view.game.getPhase(), this::reportIcon),
+              keepSelectionCamera);
     }
 
     private Entity reportEntity(int id) {
@@ -1024,8 +1040,8 @@ final class GpuBoardSource implements AutoCloseable {
         });
     }
 
-    /** Selection uses the same unit event as the overview; phase controllers retain selection legality. */
-    void select(Coords coords, int entityId, long generation) {
+    /** Mouse selection and phase actions use the existing controllers without changing the camera. */
+    void primaryClick(Coords coords, int entityId, int modifiers, long generation) {
         SwingUtilities.invokeLater(() -> {
             if (closed || editor != null || generation != boardGeneration || board != view.game.getBoard(view.getBoardId())
                   || coords != null && !board.contains(coords)
@@ -1033,10 +1049,20 @@ final class GpuBoardSource implements AutoCloseable {
                 return;
             }
             Entity entity = view.game.getEntity(entityId);
-            if (entity != null && visible(entity) && !sensorContact(entity)) {
-                view.processBoardViewEvent(new BoardViewEvent(view, BoardViewEvent.SELECT_UNIT, entityId));
+            boolean knownUnit = entity != null && visible(entity) && !sensorContact(entity);
+            boolean modified = (modifiers & (InputEvent.SHIFT_DOWN_MASK | InputEvent.CTRL_DOWN_MASK | InputEvent.ALT_DOWN_MASK)) != 0;
+            if (knownUnit && !modified && !entity.getOwner().isEnemyOf(view.getLocalPlayer())) {
+                // Reselecting the acting unit would reset its phase tool and discard planned orders.
+                if (entityId != actions.actorId()) {
+                    view.processBoardViewEvent(new BoardViewEvent(view, BoardViewEvent.SELECT_UNIT, entityId));
+                }
+            } else if (entityId == Entity.NONE || knownUnit || isMeasurement(modifiers)) {
+                actions.defaultAction(coords, entity, modifiers);
             }
-            view.selectForInspection(coords);
+            if (!isMeasurement(modifiers)) {
+                view.selectForInspection(coords);
+            }
+            mouseSelection = new MouseSelection(view, board, actions.actorId(), view.getCenterRequest());
             refresh();
         });
     }

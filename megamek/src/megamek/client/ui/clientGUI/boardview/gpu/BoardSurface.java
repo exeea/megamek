@@ -70,7 +70,8 @@ final class BoardSurface {
 
     /** Only inputs that alter topology; the ramp mask also captures second-ring road/bridge approaches. */
     record Geometry(int elevation, int waterDepth, boolean frozen, int roadExits, BoardScene.Surface surface,
-          BoardLiquid liquid, boolean detailedGround, List<BoardScene.Feature> features, int ramps) { }
+          BoardLiquid liquid, boolean detailedGround, List<BoardScene.Feature> features, int ramps,
+          List<BoardConcrete.Shift> coast) { }
 
     /** What of a hex further out can reach a hex's shape: through the water's shore, its level, liquid and ground. */
     record Shape(int elevation, int waterDepth, BoardLiquid liquid, boolean detailedGround, BoardScene.Surface surface,
@@ -113,7 +114,8 @@ final class BoardSurface {
 
     private static Geometry geometry(BoardScene scene, BoardScene.Tile tile) {
         return tile == null ? null : new Geometry(tile.elevation(), tile.waterDepth(), tile.frozen(), tile.roadExits(),
-              tile.surface(), tile.liquid(), tile.detailedGround(), tile.features(), ramps(scene, tile));
+              tile.surface(), tile.liquid(), tile.detailedGround(), tile.features(), ramps(scene, tile),
+              BoardConcrete.of(scene).corners(tile.coords()));
     }
 
     static int ramps(BoardScene scene, BoardScene.Tile tile) {
@@ -1055,7 +1057,10 @@ final class BoardSurface {
         for (int k = 0; k < 6; k++) {
             int before = (k + 5) % 6, next = (k + 1) % 6;
             boolean in = inset[before] == 0, out = inset[k] == 0;
-            if (in && out) {
+            if (BoardConcrete.concreteBank(scene, tile, before) || BoardConcrete.concreteBank(scene, tile, k)) {
+                // A poured edge meets the water directly. No beach setback, rounded corner or natural shore field.
+                anchors[k] = new Vector3(shoreCorners[k]);
+            } else if (in && out) {
                 anchors[k] = new Vector3(shoreCorners[k]);
             } else if (in || out) {
                 int other = in ? before : next, mouth = in ? before : k;
@@ -1075,62 +1080,16 @@ final class BoardSurface {
         Vector3[] result = new Vector3[6 * SHORE_SEGMENTS];
         for (int edge = 0; edge < 6; edge++) {
             int next = (edge + 1) % 6;
-            Vector3[] bank = inset[edge] == 0 ? null : bank(anchors[edge], anchors[next], plunge, edge);
+            Vector3[] bank = inset[edge] == 0 || BoardConcrete.concreteBank(scene, tile, edge)
+                  ? null : bank(anchors[edge], anchors[next], plunge, edge);
             for (int segment = 0; segment < SHORE_SEGMENTS; segment++) {
                 Vector3 point = bank == null ? mouthPoint(anchors[edge], anchors[next], segment) : bank[segment];
                 point.z = z;
                 result[edge * SHORE_SEGMENTS + segment] = point;
             }
         }
-        concreteBanks(result);
+        BoardConcrete.straighten(scene, tile, result);
         return result;
-    }
-
-    /**
-     * Paved waterfronts join across the water-side notches of the hex outline. Only the bank inside this water hex
-     * changes: the concrete hexes, including the complete foundations of their buildings, keep their geometry.
-     * Mouth ends stay canonical, so adjacent water and ground meshes still meet at exactly the same points.
-     */
-    private void concreteBanks(Vector3[] shore) {
-        if (tile.liquid().molten()) { return; }
-        int paved = 0;
-        for (int e = 0; e < 6; e++) {
-            if (concreteBank(e)) { paved |= 1 << e; }
-        }
-        if (paved == 63) {
-            // A paved basin must retain its water centre; do not join all the way across it.
-            for (int e = 0; e < 6; e++) { concreteBank(shore, e, 1); }
-        } else {
-            for (int e = 0; e < 6; e++) {
-                if ((paved & 1 << e) == 0 || (paved & 1 << (e + 5) % 6) != 0) { continue; }
-                int count = 1;
-                while ((paved & 1 << (e + count) % 6) != 0) { count++; }
-                if (!concreteBank(shore, e, count)) {
-                    // The long chord would cut through the water's unit footprint. Keep the inlet, with separate
-                    // straight sections following its banks instead of filling it in.
-                    for (int k = 0; k < count; k++) { concreteBank(shore, (e + k) % 6, 1); }
-                }
-            }
-        }
-    }
-
-    private boolean concreteBank(int edge) {
-        BoardScene.Tile land = neighbor(scene, edge);
-        return !mouth(edge) && land != null && land.surface() == BoardScene.Surface.CONCRETE
-              && !land.liquid().present() && land.elevation() >= tile.elevation();
-    }
-
-    /** Replace a bank run with its chord only when the water centre remains safely on the wet side. */
-    private boolean concreteBank(Vector3[] shore, int first, int count) {
-        Vector3 a = shore[first * SHORE_SEGMENTS], b = shore[(first + count) % 6 * SHORE_SEGMENTS];
-        float dx = b.x - a.x, dy = b.y - a.y;
-        float clearance = (dx * (center.y - a.y) - dy * (center.x - a.x)) / (float) Math.hypot(dx, dy);
-        if (!(clearance >= (tile.waterDepth() > 0 ? 12 : 4) * BoardGeometry.HEX_SCALE)) { return false; }
-        int samples = count * SHORE_SEGMENTS;
-        for (int i = 1; i < samples; i++) {
-            shore[(first * SHORE_SEGMENTS + i) % shore.length] = new Vector3(a).lerp(b, i / (float) samples);
-        }
-        return true;
     }
 
     /**
@@ -1237,9 +1196,6 @@ final class BoardSurface {
     private float mouthEnd(int k, int other, boolean plunge) {
         Vector3 c = shoreCorners[k], o = shoreCorners[other];
         float least = mouthLimit(k, plunge) / c.dst(o);
-        // A constructed bank has a fixed setback. The natural shore field must not move its joins independently
-        // from hex to hex, which would turn a straight quay back into a series of dents.
-        if (!tile.liquid().molten() && (concreteBank(k) || concreteBank((k + 5) % 6))) { return least; }
         float mx = (c.x + o.x) / 2, my = (c.y + o.y) / 2;
         float seed = .5f;
         if (shore(mx, my) <= 0 && !tile.liquid().molten()) {

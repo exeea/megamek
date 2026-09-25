@@ -114,6 +114,7 @@ import megamek.client.ui.clientGUI.IMapSettingsObserver;
 import megamek.client.ui.clientGUI.UnitRecipients;
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.RulerDialog;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.clientGUI.boardview.toolTip.TWBoardViewTooltip;
 import megamek.client.ui.dialogs.InformDialog;
 import megamek.client.ui.dialogs.MMDialogs.MMConfirmDialog;
@@ -1019,10 +1020,13 @@ public class ChatLounge extends AbstractPhaseDisplay
 
             JButton previewSaveAs = new JButton(Messages.getString("BoardSelectionDialog.ViewGameBoardSaveAs"));
             previewSaveAs.addActionListener(e -> clientgui.boardSaveAs(boardPreviewGame));
+            JButton preview3D = new JButton(Messages.getString("GpuBoard.preview"));
+            preview3D.addActionListener(e -> GpuBoardWindow.openPreview(boardPreviewW, boardPreviewGame.getBoard()));
 
             JPanel previewSettingsPanel = new JPanel(new FlowLayout());
             previewSettingsPanel.add(showPlayerDeployment);
             previewSettingsPanel.add(previewSaveAs);
+            previewSettingsPanel.add(preview3D);
 
             Box previewPanel = Box.createVerticalBox();
             previewPanel.add(previewSettingsPanel);
