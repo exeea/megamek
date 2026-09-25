@@ -30,6 +30,8 @@ final class GpuUnitModel implements Disposable {
      * The Atlas bare body spans two terrain levels at unit scale 1. Every modular family uses this same
      * conversion, retaining the library's proportions and relative sizes around the Atlas and Mackie.
      * Antennas on other bodies may extend higher; never normalize each model by its own bounding box.
+     * Raising this value means everything will scale down.
+     * Lowering this value means everything will scale up!
      */
     private static final float REFERENCE_ASSAULT_HEIGHT = 54.858f;
 

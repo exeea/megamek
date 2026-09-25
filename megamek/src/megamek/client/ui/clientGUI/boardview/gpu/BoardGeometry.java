@@ -10,7 +10,7 @@ import megamek.common.board.Coords;
 /** Z-up, tightly tiled hex columns. Rendering and picking use these same surfaces. */
 final class BoardGeometry {
     /** Independent default for a whole unit occupying more than one game hex. */
-    static final float DEFAULT_MULTI_HEX_UNIT_SCALE = 0.9f;
+    static final float DEFAULT_MULTI_HEX_UNIT_SCALE = 1.0f;
     /** Whether steps between hexes take room on both sides of their edge; see {@link Tuning#transitions()}. */
     static final boolean DEFAULT_TRANSITIONS = true;
     /** Metres of gap between neighbouring hex tiles; 0 keeps them joined. See {@link Tuning#padding()}. */
@@ -63,7 +63,7 @@ final class BoardGeometry {
         }
     }
 
-    static final Tuning DEFAULTS = new Tuning(1, 0.9f, 1.0f, 18, 0.8f);
+    static final Tuning DEFAULTS = new Tuning(1, 1.0f, 1.0f, 18, 0.8f);
     /**
      * Native tactical markers keep this fraction of the hex radius clear of the shared hex edges. Exactly on
      * an edge a marker is coplanar with the terrain there and flickers against it while the camera rotates.
