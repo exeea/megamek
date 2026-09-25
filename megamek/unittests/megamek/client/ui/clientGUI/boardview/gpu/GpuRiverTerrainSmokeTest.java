@@ -145,7 +145,8 @@ class GpuRiverTerrainSmokeTest {
                     for (String name : families.split(",")) {
                         BoardScene.Surface family = BoardScene.Surface.valueOf(name.trim().toUpperCase(Locale.ROOT));
                         BoardConcrete.tune(concreteMode);
-                        BoardScene scene = pavedMap ? pavedMapScene() : paving ? pavedGroundScene()
+                        BoardScene scene = pavedMap ? pavedMapScene(Integer.getInteger("megamek.gpu.river.mapNumber", 1))
+                              : paving ? pavedGroundScene()
                               : patterns ? coastPatternScene() : dock ? dockScene()
                               : quay ? quayScene(family) : drops ? dropScene(family) : map ? mapScene(family) : scene(family);
                         setWidth(width);
@@ -295,9 +296,9 @@ class GpuRiverTerrainSmokeTest {
     }
 
     /** The reported broad junctions and triangular terrain islands; buildings retain their protected hexes. */
-    static BoardScene pavedMapScene() {
+    static BoardScene pavedMapScene(int number) {
         Board board = new Board();
-        board.load(new File("data/boards/Deserts/16x17 AeroBase 1.board"));
+        board.load(new File("data/boards/Deserts/16x17 AeroBase " + number + ".board"));
         BoardScene.Pixels pixels = groundPixels();
         Map<Integer, String> models = Map.of(Terrains.BUILDING, "buildings/saxarba/building_hard/building_hard_00");
         List<BoardScene.Tile> tiles = new ArrayList<>();

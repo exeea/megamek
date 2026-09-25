@@ -284,7 +284,7 @@ class BoardConcreteShoreTest {
         BoardConcrete.Mode original = BoardConcrete.mode();
         try {
             BoardConcrete.tune(BoardConcrete.Mode.EVERYWHERE);
-            BoardScene scene = GpuRiverTerrainSmokeTest.pavedMapScene();
+            BoardScene scene = GpuRiverTerrainSmokeTest.pavedMapScene(1);
             Set<Coords> island = new HashSet<>();
             var queue = new ArrayDeque<Coords>();
             queue.add(new Coords(8, 9));
@@ -321,6 +321,28 @@ class BoardConcreteShoreTest {
                 if (Math.abs(a.x * b.y - a.y * b.x) > .001f) { turns++; }
             }
             assertEquals(3, turns, "The triangular island has three straight sides without hex teeth");
+        } finally { BoardConcrete.tune(original); }
+    }
+
+    @Test
+    void broadJunctionExtendsItsDiagonalToTheVerticalSide() {
+        BoardConcrete.Mode original = BoardConcrete.mode();
+        try {
+            BoardConcrete.tune(BoardConcrete.Mode.EVERYWHERE);
+            BoardScene scene = GpuRiverTerrainSmokeTest.pavedMapScene(1);
+            Coords diagonal = new Coords(1, 1), vertical = new Coords(4, 1);
+            BoardSurface arm = new BoardSurface(scene, scene.tile(diagonal));
+            BoardSurface trunk = new BoardSurface(scene, scene.tile(vertical));
+            Vector3 a = moved(arm, diagonal, 1), b = moved(arm, diagonal, 2);
+            Vector3 c = moved(trunk, vertical, 3), d = moved(trunk, vertical, 4);
+            for (int[] vertex : new int[][] { { 2, 2, 0 }, { 2, 2, 1 }, { 2, 2, 2 }, { 3, 2, 1 }, { 4, 2, 2 } }) {
+                Coords at = new Coords(vertex[0], vertex[1]);
+                BoardSurface surface = new BoardSurface(scene, scene.tile(at));
+                Vector3 p = moved(surface, at, vertex[2]);
+                assertTrue(Math.min(distance(a, b, p), distance(c, d, p)) < .002f,
+                      "No extra flat section between the diagonal and vertical sides: " + at + " " + p);
+                assertStraightSamples(surface, at);
+            }
         } finally { BoardConcrete.tune(original); }
     }
 

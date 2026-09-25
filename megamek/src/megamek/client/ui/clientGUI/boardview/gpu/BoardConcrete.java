@@ -16,7 +16,7 @@ import megamek.common.board.Coords;
 final class BoardConcrete {
     enum Mode { OFF, WATER_ONLY, EVERYWHERE }
 
-    static final Mode DEFAULT_MODE = Mode.WATER_ONLY;
+    static final Mode DEFAULT_MODE = Mode.EVERYWHERE;
     private static Mode mode = DEFAULT_MODE;
     private static Mode cachedMode;
 
@@ -352,6 +352,29 @@ final class BoardConcrete {
                 } else { i++; }
             } else { i++; }
         }
+        // A short hex-shaped detour at a junction can hide the intersection of its two longer sides. Extend
+        // those sides only if the resulting corner and every adjoining edge still clear their terrain centres.
+        for (int i = 0; i + 2 < runs.size();) {
+            Run a = runs.get(i), middle = runs.get(i + 1), b = runs.get(i + 2);
+            Vector3 joint = a.line.intersection(b.line);
+            if (middle.rectangle || middle.last - middle.first > 4 || joint == null) { i++; continue; }
+            int split = middle.first;
+            for (int j = split + 1; j <= middle.last; j++) {
+                if (joint.dst2(chain.get(j).original) < joint.dst2(chain.get(split).original)) { split = j; }
+            }
+            List<Run> candidate = new ArrayList<>(runs);
+            candidate.set(i, new Run(a.first, split, a.line, a.rectangle));
+            candidate.set(i + 1, new Run(split, b.last, b.line, b.rectangle));
+            candidate.remove(i + 2);
+            if (landingPoints(chain, first, last, scene, candidate) != null) { runs = candidate; }
+            else { i++; }
+        }
+        Vector3[] points = landingPoints(chain, first, last, scene, runs);
+        if (points == null) { return; }
+        for (int i = first; i <= last; i++) { chain.get(i).point.set(points[i - first]); }
+    }
+
+    private static Vector3[] landingPoints(List<Corner> chain, int first, int last, BoardScene scene, List<Run> runs) {
         Vector3[] points = new Vector3[last - first + 1];
         points[0] = new Vector3(chain.get(first).point);
         points[points.length - 1] = new Vector3(chain.get(last).point);
@@ -364,25 +387,25 @@ final class BoardConcrete {
                 Line next = runs.get(i + 1).line;
                 Vector3 joint = run.line.same(next) ? run.line.project(chain.get(run.last).point)
                       : run.line.intersection(next);
-                if (joint == null) { return; }
+                if (joint == null) { return null; }
                 points[run.last - first] = joint;
             }
         }
         if (chain.get(first) == chain.get(last) && !chain.get(first).pinned && !runs.isEmpty()) {
             Line before = runs.getLast().line, after = runs.getFirst().line;
             Vector3 joint = before.same(after) ? after.project(chain.get(first).point) : before.intersection(after);
-            if (joint == null) { return; }
+            if (joint == null) { return null; }
             points[0] = joint;
             points[points.length - 1] = joint;
         }
         // A failed fit leaves the original rectangle intact. Never taper a pier to accommodate its landing.
         for (int i = first; i <= last; i++) {
             Vector3 p = points[i - first];
-            if (p == null || p.dst(chain.get(i).original) > 42.001f * BoardGeometry.HEX_SCALE) { return; }
-            if (i < last && points[i + 1 - first] == null) { return; }
-            if (i < last && !clearEdge(scene, chain.get(i), p, points[i + 1 - first])) { return; }
+            if (p == null || p.dst(chain.get(i).original) > 42.001f * BoardGeometry.HEX_SCALE) { return null; }
+            if (i < last && points[i + 1 - first] == null) { return null; }
+            if (i < last && !clearEdge(scene, chain.get(i), p, points[i + 1 - first])) { return null; }
         }
-        for (int i = first; i <= last; i++) { chain.get(i).point.set(points[i - first]); }
+        return points;
     }
 
     /** Straight quay runs use the board's three construction axes or their perpendiculars. */

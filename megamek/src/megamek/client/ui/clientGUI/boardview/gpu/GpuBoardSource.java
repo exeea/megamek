@@ -584,6 +584,11 @@ final class GpuBoardSource implements AutoCloseable {
                 }
             }
         }
+        int measurement = pendingMeasurementModifiers();
+        if (editor == null && measurement != 0 && !phaseStatus.blocking()) {
+            phaseStatus = new GpuBoardActions.PhaseStatus("Left-click an endpoint to complete the "
+                  + (measurement == InputEvent.CTRL_DOWN_MASK ? "line of sight" : "distance") + " measurement.", false);
+        }
         chatActive = view.getChatterBoxActive();
         OverlayViewport overlayViewport = viewport;
         view.overlayInput(MouseEvent.MOUSE_MOVED, pointer, overlayViewport.size(), overlayViewport.pixels());
@@ -1050,16 +1055,17 @@ final class GpuBoardSource implements AutoCloseable {
             }
             Entity entity = view.game.getEntity(entityId);
             boolean knownUnit = entity != null && visible(entity) && !sensorContact(entity);
-            boolean modified = (modifiers & (InputEvent.SHIFT_DOWN_MASK | InputEvent.CTRL_DOWN_MASK | InputEvent.ALT_DOWN_MASK)) != 0;
+            int clickModifiers = isMeasurement(modifiers) ? modifiers : modifiers | pendingMeasurementModifiers();
+            boolean modified = (clickModifiers & (InputEvent.SHIFT_DOWN_MASK | InputEvent.CTRL_DOWN_MASK | InputEvent.ALT_DOWN_MASK)) != 0;
             if (knownUnit && !modified && !entity.getOwner().isEnemyOf(view.getLocalPlayer())) {
                 // Reselecting the acting unit would reset its phase tool and discard planned orders.
                 if (entityId != actions.actorId()) {
                     view.processBoardViewEvent(new BoardViewEvent(view, BoardViewEvent.SELECT_UNIT, entityId));
                 }
-            } else if (entityId == Entity.NONE || knownUnit || isMeasurement(modifiers)) {
-                actions.defaultAction(coords, entity, modifiers);
+            } else if (entityId == Entity.NONE || knownUnit || isMeasurement(clickModifiers)) {
+                actions.defaultAction(coords, entity, clickModifiers);
             }
-            if (!isMeasurement(modifiers)) {
+            if (!isMeasurement(clickModifiers)) {
                 view.selectForInspection(coords);
             }
             mouseSelection = new MouseSelection(view, board, actions.actorId(), view.getCenterRequest());
@@ -1171,6 +1177,14 @@ final class GpuBoardSource implements AutoCloseable {
     /** Both measurement gestures belong to the shared ruler, independently of the active phase tool. */
     static boolean isMeasurement(int modifiers) {
         return (modifiers & (InputEvent.CTRL_DOWN_MASK | InputEvent.ALT_DOWN_MASK)) != 0;
+    }
+
+    /** Read the shared tools on the EDT; a pending endpoint takes priority over the phase's default action. */
+    private int pendingMeasurementModifiers() {
+        if (view.getFirstLOS() != null) {
+            return InputEvent.CTRL_DOWN_MASK;
+        }
+        return (view.getRulerStart() != null) != (view.getRulerEnd() != null) ? InputEvent.ALT_DOWN_MASK : 0;
     }
 
     boolean isEditor() {

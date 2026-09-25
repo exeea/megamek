@@ -260,13 +260,13 @@ final class GpuBoardActions {
         result.add(new BoardScene.Command("board.useHex", hexAction, "Use the current phase tool at this location.",
               canUseHex(owner), false, !(owner.panel() instanceof AttackPhaseDisplay), List.of(),
               dispatch(() -> useHex(owner, coords, 0))));
-        result.add(new BoardScene.Command("board.los", "Measure line of sight", "Choose the start and end hexes.",
+        result.add(new BoardScene.Command("board.los", "Measure line of sight", "Left-click the other endpoint to complete the measurement.",
               true, false, List.of(), dispatch(() -> {
                   if (current(owner)) {
                       view.mouseAction(coords, BoardView.BOARD_HEX_CLICK, java.awt.event.InputEvent.CTRL_DOWN_MASK, 1);
                   }
               })));
-        result.add(new BoardScene.Command("board.ruler", "Measure distance", "Choose the start and end hexes.",
+        result.add(new BoardScene.Command("board.ruler", "Measure distance", "Left-click the other endpoint to complete the measurement.",
               true, false, List.of(), dispatch(() -> {
                   if (current(owner)) {
                       view.mouseAction(coords, BoardView.BOARD_HEX_CLICK, java.awt.event.InputEvent.ALT_DOWN_MASK, 1);

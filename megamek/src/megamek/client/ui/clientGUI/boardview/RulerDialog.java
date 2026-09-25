@@ -1541,6 +1541,7 @@ public class RulerDialog extends JDialog implements BoardViewListener {
         clear();
         setVisible(false);
 
+        bv.setFirstLOS(null);
         bv.drawRuler(start, end, startColor, endColor);
     }
 

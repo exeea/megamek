@@ -66,6 +66,7 @@ import megamek.client.ui.clientGUI.CommandBarPanel;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.RulerDialog;
 import megamek.client.ui.clientGUI.boardview.overlay.UnitOverviewOverlay;
 import megamek.client.ui.dialogs.BotCommands.BotCommandsDialog;
 import megamek.client.ui.dialogs.BotCommands.BotCommandsPanel;
@@ -124,6 +125,7 @@ class GpuBoardWindowSmokeTest {
             AtomicInteger phaseActions = new AtomicInteger();
             AtomicReference<BoardViewEvent> lastMouseEvent = new AtomicReference<>();
             AtomicInteger unitSelections = new AtomicInteger();
+            RulerDialog ruler = onSwing(() -> new RulerDialog(ui.frame(), ui.view(), fixture.game));
             try {
                 onSwing(() -> {
                     when(ui.view().getClientgui().getClient().isMyTurn()).thenReturn(true);
@@ -141,7 +143,9 @@ class GpuBoardWindowSmokeTest {
 
                         @Override
                         public void hexMoused(BoardViewEvent event) {
-                            phaseActions.incrementAndGet();
+                            if ((event.getModifiers() & InputEvent.ALT_DOWN_MASK) == 0) {
+                                phaseActions.incrementAndGet();
+                            }
                             lastMouseEvent.set(event);
                         }
 
@@ -223,7 +227,44 @@ class GpuBoardWindowSmokeTest {
                         assertEquals(previousSelections + 1, unitSelections.get());
                         return null;
                     });
+                    for (String measurement : List.of("board.los", "board.ruler")) {
+                        input(() -> clickBoard(empty, Input.Buttons.RIGHT));
+                        await(() -> onGl(() -> GpuBoardTestUi.stage().getRoot().findActor(measurement) != null));
+                        input(() -> GpuBoardTestUi.click(measurement));
+                        await(() -> onSwing(() -> empty.equals(ui.view().getRulerStart()) && ui.view().getRulerEnd() == null));
+                        assertTrue(source.phaseStatus.text().contains("Left-click an endpoint"));
+                        assertFalse(onGl(() -> GpuBoardTestUi.stage().getRoot().findActor("tactical-menu").isVisible()));
+                        int actionsBeforeMeasurement = phaseActions.get();
+                        input(() -> clickBoard(unit, Input.Buttons.LEFT));
+                        await(() -> onSwing(() -> unit.equals(ui.view().getRulerEnd())));
+                        onSwing(() -> {
+                            assertEquals(empty, ui.view().getRulerStart());
+                            assertNull(ui.view().getFirstLOS());
+                            assertEquals(actionsBeforeMeasurement, phaseActions.get(), "Measuring cannot plot movement");
+                            assertEquals(previousSelections + 1, unitSelections.get(), "A unit can be a measurement endpoint");
+                            assertFalse(source.phaseStatus.text().contains("Left-click an endpoint"));
+                            return null;
+                        });
+                        assertEquals(cameraFocus, onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).boardCamera.focus.cpy()));
+                        input(() -> clickBoard(empty, Input.Buttons.LEFT));
+                        await(() -> phaseActions.get() == actionsBeforeMeasurement + 2);
+                    }
                 }
+                input(() -> clickBoard(empty, Input.Buttons.RIGHT));
+                await(() -> onGl(() -> GpuBoardTestUi.stage().getRoot().findActor("board.los") != null));
+                input(() -> GpuBoardTestUi.click("board.los"));
+                await(() -> onSwing(() -> empty.equals(ui.view().getFirstLOS())));
+                onSwing(() -> {
+                    ruler.dispatchEvent(new WindowEvent(ruler, WindowEvent.WINDOW_CLOSING));
+                    source.refresh();
+                    assertNull(ui.view().getFirstLOS(), "Closing the ruler cancels its pending LOS endpoint");
+                    assertNull(ui.view().getRulerStart());
+                    assertFalse(source.phaseStatus.text().contains("Left-click an endpoint"));
+                    return null;
+                });
+                int beforeCancelClick = phaseActions.get();
+                input(() -> clickBoard(empty, Input.Buttons.LEFT));
+                await(() -> phaseActions.get() == beforeCancelClick + 2);
                 Vector3 beforeCenter = onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).boardCamera.focus.cpy());
                 onSwing(() -> {
                     ui.view().centerOn(fixture.entity);
@@ -238,6 +279,8 @@ class GpuBoardWindowSmokeTest {
                 assertFalse(source.isClosed());
             } finally {
                 onSwing(() -> {
+                    ui.view().removeBoardViewListener(ruler);
+                    ruler.dispose();
                     GUIPreferences.getInstance().removePreferenceChangeListener(ui.overview());
                     GpuBoardWindow.closeFor(ui.view());
                     ui.frame().dispose();
