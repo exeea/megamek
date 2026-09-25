@@ -1081,18 +1081,22 @@ final class BoardSurface {
         trace[0] = from;
         trace[fine] = to;
         Vector3 rawFrom = along(outlinePoint(start), plunge), rawTo = along(outlinePoint(start + turn), plunge);
-        float fromRadius = radius(from), toRadius = radius(to);
-        float fromOffset = fromRadius - radius(rawFrom), toOffset = toRadius - radius(rawTo);
+        float fromOffset = radius(from) - radius(rawFrom), toOffset = radius(to) - radius(rawTo);
         float blend = BoardRelief.smooth((BoardRelief.tuning().riverWidth() - .25f) / .5f);
         // A plunge pool must meet its fixed inlet continuously, even when the stream is narrow.
         float fromBlend = plunge[(edge + 5) % 6] ? 1 : blend, toBlend = plunge[(edge + 1) % 6] ? 1 : blend;
+        Vector3 fromNormal = bankNormal(from, (edge + 5) % 6), toNormal = bankNormal(to, (edge + 1) % 6);
         for (int i = 1; i <= fine; i++) {
             if (i < fine) {
                 float t = BoardRelief.smooth(i / (float) fine);
                 Vector3 limit = outlinePoint(start + turn * t);
                 trace[i] = along(limit, plunge);
-                float correction = fromBlend * fromOffset * ease(2 * t) + toBlend * toOffset * ease(2 * (1 - t));
                 float rawRadius = radius(trace[i]);
+                // Meet a mouth with the same tangent from both hexes. Correcting only its radius misses cases where
+                // the raw trace follows the hex edge past the fixed opening, then doubles back into a pointed bank.
+                float fromCorrection = fromNormal == null ? fromBlend * fromOffset : bankJoin(from, fromNormal, limit, rawRadius);
+                float toCorrection = toNormal == null ? toBlend * toOffset : bankJoin(to, toNormal, limit, rawRadius);
+                float correction = fromCorrection * ease(2 * t) + toCorrection * ease(2 * (1 - t));
                 float core = Math.min(rawRadius, (tile.waterDepth() > 0 ? 12 : 4) * BoardGeometry.HEX_SCALE);
                 float radius = Math.min(radius(limit), Math.max(core, rawRadius + correction));
                 trace[i].sub(center).scl(radius / rawRadius).add(center);
@@ -1108,6 +1112,20 @@ final class BoardSurface {
             result[segment] = new Vector3(trace[i]).lerp(trace[i + 1], f);
         }
         return result;
+    }
+
+    /** A margin-limited opening shares a bank tangent perpendicular to its seam. Natural shores keep their curve. */
+    private Vector3 bankNormal(Vector3 point, int edge) {
+        if (!mouth(edge) || shore(point.x, point.y) <= .25f * BoardGeometry.HEX_SCALE) { return null; }
+        return new Vector3(shoreCorners[(edge + 1) % 6]).sub(shoreCorners[edge]);
+    }
+
+    /** Radial correction onto the tangent through an end, preserving the bed's non-crossing radial rings. */
+    private float bankJoin(Vector3 end, Vector3 normal, Vector3 limit, float rawRadius) {
+        float denominator = (limit.x - center.x) * normal.x + (limit.y - center.y) * normal.y;
+        float numerator = (end.x - center.x) * normal.x + (end.y - center.y) * normal.y;
+        if (Math.abs(denominator) < 1e-6f || numerator * denominator <= 0) { return 0; }
+        return radius(limit) * numerator / denominator - rawRadius;
     }
 
     private float radius(Vector3 point) {

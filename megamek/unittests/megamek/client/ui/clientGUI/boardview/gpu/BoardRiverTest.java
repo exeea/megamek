@@ -241,6 +241,54 @@ class BoardRiverTest {
     }
 
     @Test
+    void raisedBanksMeetSmoothlyAcrossTheReferenceRiverJunction() {
+        var original = BoardRelief.tuning();
+        var geometry = BoardGeometry.tuning();
+        try {
+            GpuRiverTerrainSmokeTest.tune(.8f, true);
+            BoardScene scene = GpuRiverTerrainSmokeTest.mapScene(BoardScene.Surface.SAND);
+            Coords center = new Coords(6, 8);
+            int n = BoardSurface.SHORE_SEGMENTS, count = 6 * n;
+            for (float width : new float[] { .05f, .25f, .5f, .75f, 1 }) {
+                GpuRiverTerrainSmokeTest.setWidth(width);
+                BoardSurface a = new BoardSurface(scene, scene.tile(center));
+                // Both raised banks in the reported image: 0708/0709 and 0609/0709.
+                for (int direction : new int[] { 0, 4 }) {
+                    Coords next = center.translated(direction);
+                    BoardSurface b = new BoardSurface(scene, scene.tile(next));
+                    int edge = Math.floorMod(1 - direction, 6), opposite = (edge + 3) % 6;
+                    for (int side = 0; side < 2; side++) {
+                        int i = (edge + side) % 6 * n, j = (opposite + 1 - side) % 6 * n;
+                        Vector3 join = a.outline.get(i);
+                        String label = "width=" + width + ", neighbor=" + next + ", bank=" + side;
+                        assertTrue(join.epsilonEquals(b.outline.get(j), .002f), "Shared crossing: " + label);
+                        List<Vector3> bank = new ArrayList<>();
+                        for (int offset = 3; offset > 0; offset--) {
+                            bank.add(side == 0 ? a.outline.get((i + count - offset) % count)
+                                  : b.outline.get((j + count - offset) % count));
+                        }
+                        bank.add(join);
+                        for (int offset = 1; offset <= 3; offset++) {
+                            bank.add(side == 0 ? b.outline.get((j + offset) % count) : a.outline.get((i + offset) % count));
+                        }
+                        for (int p = 1; p < bank.size() - 1; p++) {
+                            Vector3 in = new Vector3(bank.get(p)).sub(bank.get(p - 1));
+                            Vector3 out = new Vector3(bank.get(p + 1)).sub(bank.get(p));
+                            double turn = Math.atan2(in.x * out.y - in.y * out.x, in.x * out.x + in.y * out.y);
+                            assertTrue(Math.abs(turn) < Math.PI / 6,
+                                  "No pointed bank around the hex join: " + label + ", sample=" + p
+                                        + ", turn=" + Math.toDegrees(turn));
+                        }
+                    }
+                }
+            }
+        } finally {
+            BoardRelief.tune(original);
+            BoardGeometry.tune(geometry);
+        }
+    }
+
+    @Test
     void depthZeroCanExposeSandButDeepWaterKeepsItsBedSubmerged() {
         Coords center = new Coords(3, 3);
         for (int depth : new int[] { 0, 1 }) {
