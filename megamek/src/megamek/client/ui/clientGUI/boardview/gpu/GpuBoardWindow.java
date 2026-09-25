@@ -33,10 +33,12 @@ import megamek.client.ui.boardeditor.BoardEditorPanel;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.util.ScreenFit;
 import megamek.common.board.Board;
 import megamek.common.enums.GamePhase;
 import megamek.common.game.Game;
 import megamek.logging.MMLogger;
+import org.lwjgl.glfw.GLFW;
 
 /** Owns the default battle window. A single libGDX application avoids competing global Gdx contexts. */
 public final class GpuBoardWindow {
@@ -79,6 +81,14 @@ public final class GpuBoardWindow {
     private volatile boolean exitRequested;
     private volatile Throwable startupFailure;
     private Runnable afterClose;
+    /** Frames between reads of the window's bounds; a few times a second is plenty to follow a move or resize. */
+    private static final int BOUNDS_POLL_FRAMES = 15;
+    /** The saved bounds the window opens with, read on the Swing thread. */
+    private final GpuWindowBounds startBounds;
+    /** The last normal, un-maximized bounds seen on the GPU thread. */
+    private volatile GpuWindowBounds normalBounds;
+    /** The bounds last handed to the Swing thread to save, so an unchanged window writes nothing. */
+    private volatile GpuWindowBounds publishedBounds;
 
     private GpuBoardWindow(ClientGUI gui, BoardView view, Supplier<JComponent> panel) {
         this(gui, view, panel, null);
@@ -103,6 +113,10 @@ public final class GpuBoardWindow {
             loadingMessage = Messages.getString("GpuBoard.previewLoading");
         }
         startupTimer = new Timer(100, event -> initializeSource());
+        startBounds = GpuWindowBounds.load(GUIPreferences.getInstance());
+        GpuPanelDock.restoredWidth = GUIPreferences.getInstance().getGpuReportPanelWidth();
+        normalBounds = startBounds;
+        publishedBounds = startBounds;
     }
 
     /** Load a browser entry without changing the lobby's selected boards. */
@@ -248,10 +262,22 @@ public final class GpuBoardWindow {
             } else if (editor != null) {
                 configuration.setTitle(Messages.getString("BoardEditor.edit3D"));
             }
-            // Fill the desktop work area while keeping the normal title bar and window controls.
+            // Reopen where the user left it: the normal size and place, maximized again if it was. GLFW maximizes on
+            // the monitor holding the saved place, and restoring returns to the saved size.
             configuration.setDecorated(true);
-            configuration.setMaximized(true);
+            configuration.setWindowedMode(startBounds.width(), startBounds.height());
+            if (!startBounds.centred()) {
+                configuration.setWindowPosition(startBounds.x(), startBounds.y());
+            }
+            configuration.setMaximized(startBounds.maximized());
             configuration.setWindowListener(new WindowListener() {
+                @Override
+                public void created(Lwjgl3Window window) {
+                    // The shared listener detects the shading language first; then the window is fitted on screen.
+                    super.created(window);
+                    fitOnScreen(window);
+                }
+
                 @Override
                 public boolean closeRequested() {
                     requestExit();
@@ -271,10 +297,16 @@ public final class GpuBoardWindow {
                     }
                 }
 
+                private int framesSinceBounds;
+
                 @Override
                 public void render() {
                     setLoadingMessage(loadingMessage);
                     super.render();
+                    if (presented && ++framesSinceBounds >= BOUNDS_POLL_FRAMES) {
+                        framesSinceBounds = 0;
+                        trackBounds();
+                    }
                     if (!presentationRequested) {
                         presentationRequested = true;
                         SwingUtilities.invokeLater(GpuBoardWindow.this::present);
@@ -291,6 +323,64 @@ public final class GpuBoardWindow {
             }
             Throwable renderingFailure = failure;
             SwingUtilities.invokeLater(() -> finish(renderingFailure == null ? startupFailure : renderingFailure));
+        }
+    }
+
+    /**
+     * A window saved on a monitor that has since been unplugged, or moved off the desktop, comes back onto the nearest
+     * monitor's work area. Runs on the GPU thread once the native window exists. A centred window needs no check.
+     */
+    private void fitOnScreen(Lwjgl3Window window) {
+        if (startBounds.centred()) {
+            return;
+        }
+        var fitted = ScreenFit.fit(startBounds.rectangle(), GpuWindowBounds.workAreas());
+        if (fitted.equals(startBounds.rectangle())) {
+            LOGGER.debug("GPU board window restored at {}", fitted);
+            return;
+        }
+        LOGGER.info("GPU board window saved at {} is off screen; moved to {}", startBounds.rectangle(), fitted);
+        long handle = window.getWindowHandle();
+        boolean maximized = startBounds.maximized();
+        if (maximized) {
+            window.restoreWindow();
+        }
+        GLFW.glfwSetWindowSize(handle, fitted.width, fitted.height);
+        window.setPosition(fitted.x, fitted.y);
+        if (maximized) {
+            window.maximizeWindow();
+        }
+        normalBounds = new GpuWindowBounds(fitted.x, fitted.y, fitted.width, fitted.height, maximized);
+    }
+
+    /**
+     * Follows the window as the user moves, resizes or maximizes it, and hands any change to the Swing thread to save.
+     * Runs on the GPU thread. The normal bounds update only while the window is neither maximized nor minimized, so a
+     * maximized window keeps the size it restores to, and a minimized one does not save the far-off position Windows
+     * reports for it.
+     */
+    private void trackBounds() {
+        if (!(Gdx.graphics instanceof Lwjgl3Graphics graphics)) {
+            return;
+        }
+        Lwjgl3Window window = graphics.getWindow();
+        if (window == null || window.isIconified()) {
+            return;
+        }
+        long handle = window.getWindowHandle();
+        boolean maximized = GLFW.glfwGetWindowAttrib(handle, GLFW.GLFW_MAXIMIZED) == GLFW.GLFW_TRUE;
+        GpuWindowBounds normal = normalBounds;
+        if (!maximized) {
+            int[] width = new int[1];
+            int[] height = new int[1];
+            GLFW.glfwGetWindowSize(handle, width, height);
+            normal = new GpuWindowBounds(window.getPositionX(), window.getPositionY(), width[0], height[0], false);
+            normalBounds = normal;
+        }
+        GpuWindowBounds current = new GpuWindowBounds(normal.x(), normal.y(), normal.width(), normal.height(), maximized);
+        if (!current.equals(publishedBounds)) {
+            publishedBounds = current;
+            SwingUtilities.invokeLater(() -> current.save(GUIPreferences.getInstance()));
         }
     }
 
