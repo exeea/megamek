@@ -26,7 +26,7 @@ final class BoardCamera {
     private static final float ENTRANCE_ZOOM = 1.35f;
     static final float MAX_TILT = 80;
     static final float DEFAULT_FIELD_OF_VIEW = 35; // default FOV for Perspective View
-    static final float MIN_FIELD_OF_VIEW = 20;
+    static final float MIN_FIELD_OF_VIEW = 1;
     static final float MAX_FIELD_OF_VIEW = 100;
     /** One keyboard turn. Hex rows line up again every sixth of a circle, so each turn lands on a matching view. */
     static final float ROTATION_STEP = 60;
