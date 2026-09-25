@@ -337,6 +337,12 @@ void main() {
                     vec2 mx = vec2(world.y * sign(face.x), d) / tm, my = vec2(-world.x * sign(face.y), d) / tm + .37;
                     vec4 cover = mix(texture2D(u_mantleColor, my), texture2D(u_mantleColor, mx), side);
                     float w = heightBlend(wall.a, cover.a, want);
+                    if (family(0.0)) {
+                        // Soil thins gradually over the rock, lingering in recesses while raised stone emerges.
+                        // A wider, relief-shaped fade avoids a sharp cut between the brown mantle and grey bedrock.
+                        float soilDepth = d + (wall.a - cover.a) * 1.4;
+                        w = mix(w, 1.0 - smoothstep(mantleDepth - 1.4, mantleDepth + 1.6, soilDepth), rock);
+                    }
                     albedo = mix(albedo, cover.rgb, w);
                     wall.a = mix(wall.a, cover.a, w);
                     if (u_normalMaps > .5) normal = normalize(mix(normal, wallNormal(u_mantleNormal, mx, my, face, side), w));
