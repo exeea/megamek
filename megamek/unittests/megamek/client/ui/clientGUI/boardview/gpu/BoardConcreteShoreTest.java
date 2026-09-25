@@ -242,6 +242,7 @@ class BoardConcreteShoreTest {
         BoardSurface quaySurface = new BoardSurface(scene, scene.tile(quay));
         Vector3 a = moved(pierSurface, pier, 3), b = moved(pierSurface, pier, 4);
         Vector3 c = moved(quaySurface, quay, 3), d = moved(quaySurface, quay, 4);
+        boolean joint = false;
         for (int[] vertex : new int[][] { { 7, 6, 3 }, { 7, 6, 4 }, { 7, 6, 5 }, { 8, 7, 4 },
               { 8, 8, 3 }, { 8, 8, 4 } }) {
             Coords at = new Coords(vertex[0], vertex[1]);
@@ -249,12 +250,10 @@ class BoardConcreteShoreTest {
             Vector3 p = moved(surface, at, vertex[2]);
             assertTrue(Math.min(distance(a, b, p), distance(c, d, p)) < .002f,
                   "The landing follows the two straight sides without an extra hex-shaped step");
-            if (vertex[0] == 8 && vertex[1] == 7) {
-                assertEquals(0, distance(a, b, p), .002f, "The corner is on the pier side");
-                assertEquals(0, distance(c, d, p), .002f, "The same corner is on the quay side");
-            }
+            joint |= Math.max(distance(a, b, p), distance(c, d, p)) < .002f;
             assertStraightSamples(surface, at);
         }
+        assertTrue(joint, "Both extended sides meet at the same corner");
     }
 
     @Test
@@ -342,6 +341,28 @@ class BoardConcreteShoreTest {
                 assertTrue(Math.min(distance(a, b, p), distance(c, d, p)) < .002f,
                       "No extra flat section between the diagonal and vertical sides: " + at + " " + p);
                 assertStraightSamples(surface, at);
+            }
+        } finally { BoardConcrete.tune(original); }
+    }
+
+    @Test
+    void longDiagonalOnAeroBaseTwoHasNoHexSteps() {
+        BoardConcrete.Mode original = BoardConcrete.mode();
+        try {
+            BoardConcrete.tune(BoardConcrete.Mode.EVERYWHERE);
+            BoardScene scene = GpuRiverTerrainSmokeTest.pavedMapScene(2);
+            Coords first = new Coords(4, 11), last = new Coords(10, 14);
+            Vector3 a = moved(new BoardSurface(scene, scene.tile(first)), first, 2);
+            Vector3 b = moved(new BoardSurface(scene, scene.tile(last)), last, 0);
+            for (int x = 4; x <= 10; x += 2) {
+                Coords at = new Coords(x, 9 + x / 2);
+                BoardSurface surface = new BoardSurface(scene, scene.tile(at));
+                for (int k = 0; k <= 2; k++) {
+                    assertEquals(0, distance(a, b, moved(surface, at, k)), .003f,
+                          "The inner diagonal of the runway follows one straight line: " + at);
+                }
+                assertStraightSamples(surface, at);
+                assertUnfolded(surface, "Diagonal runway");
             }
         } finally { BoardConcrete.tune(original); }
     }

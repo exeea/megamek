@@ -2414,8 +2414,9 @@ final class BoardRelief {
     }
 
     /**
-     * Cliff faces for this hex's exposed sides. A sculpted edge whose sides span it at the lower neighbour's level
-     * uses the canonical grid; road gates, special seams and the board's plinth keep straight faces.
+     * Cliff faces for this hex's exposed sides. Dry sculpted ground meets the lower neighbour's canonical boundary;
+     * water walls use that grid only where their sides span it at the lower level. Road gates and the board's plinth
+     * keep straight faces.
      */
     List<BoardSurface.Face> walls(List<BoardSurface.Side> sides) {
         List<BoardSurface.Face> result = new ArrayList<>();
@@ -2424,7 +2425,11 @@ final class BoardRelief {
         for (var entry : byEdge.entrySet()) {
             int e = entry.getKey();
             Edge edge = sculpted ? edge(e) : null;
-            if (edge != null && edge.upper == self && edge.profiled && spans(entry.getValue(), e, edge.bottom())) {
+            // Sides sample the unsculpted topography used for roads and water mouths. A narrow bank there can put
+            // a side's foot at the waterline, below the sculpted bank's boundary. Dry cliffs must still use the
+            // canonical grid, or a straight fallback pulls away from the adjoining sculpted cliff and its bank.
+            if (edge != null && edge.upper == self && edge.profiled
+                  && (!self.liquid() || spans(entry.getValue(), e, edge.bottom()))) {
                 canonicalWall(e, edge, result);
             } else if (edge != null && edge.upper == self && self.liquid()
                   && (edge.lower == null ? (falls & 1 << e) != 0 : edge.lower.liquid())) {

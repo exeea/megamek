@@ -160,6 +160,14 @@ final class BoardConcrete {
         return corners.computeIfAbsent(key(point), ignored -> new Corner(point));
     }
 
+    private static int nearest(List<Corner> chain, Vector3 point, int first, int last) {
+        int result = first;
+        for (int i = first + 1; i <= last; i++) {
+            if (point.dst2(chain.get(i).original) < point.dst2(chain.get(result).original)) { result = i; }
+        }
+        return result;
+    }
+
     /** A broad patch can be one rectangle too. Try the three lattice axes and keep the least displaced safe fit. */
     private static boolean fitRectangle(List<Corner> chain, BoardScene scene) {
         if (chain.stream().anyMatch(corner -> corner.pinned && !corner.dock)) { return false; }
@@ -193,11 +201,7 @@ final class BoardConcrete {
             int[] starts = new int[4];
             for (int k = 0; k < 4; k++) {
                 Vector3 corner = sides[(k + 3) % 4].intersection(sides[k]);
-                float nearest = Float.POSITIVE_INFINITY;
-                for (int i = 0; i < chain.size(); i++) {
-                    float distance = corner.dst2(chain.get(i).original);
-                    if (distance < nearest) { nearest = distance; starts[k] = i; }
-                }
+                starts[k] = nearest(chain, corner, 0, chain.size() - 1);
             }
             boolean ordered = true;
             for (int k = 0; k < 4 && ordered; k++) {
@@ -358,10 +362,7 @@ final class BoardConcrete {
             Run a = runs.get(i), middle = runs.get(i + 1), b = runs.get(i + 2);
             Vector3 joint = a.line.intersection(b.line);
             if (middle.rectangle || middle.last - middle.first > 4 || joint == null) { i++; continue; }
-            int split = middle.first;
-            for (int j = split + 1; j <= middle.last; j++) {
-                if (joint.dst2(chain.get(j).original) < joint.dst2(chain.get(split).original)) { split = j; }
-            }
+            int split = nearest(chain, joint, middle.first, middle.last);
             List<Run> candidate = new ArrayList<>(runs);
             candidate.set(i, new Run(a.first, split, a.line, a.rectangle));
             candidate.set(i + 1, new Run(split, b.last, b.line, b.rectangle));
@@ -375,6 +376,22 @@ final class BoardConcrete {
     }
 
     private static Vector3[] landingPoints(List<Corner> chain, int first, int last, BoardScene scene, List<Run> runs) {
+        // The fitted intersection may belong to a neighbouring lattice corner. Assign it to the nearest one,
+        // instead of pulling the arbitrary subdivision endpoint across a whole hex and rejecting both long sides.
+        List<Run> joined = new ArrayList<>(runs);
+        for (int i = 0; i + 1 < joined.size(); i++) {
+            Run a = joined.get(i), b = joined.get(i + 1);
+            Vector3 joint = a.line.intersection(b.line);
+            if (joint == null) { continue; }
+            int split = nearest(chain, joint, a.first + 1, b.last - 1);
+            joined.set(i, new Run(a.first, split, a.line, a.rectangle));
+            joined.set(i + 1, new Run(split, b.last, b.line, b.rectangle));
+        }
+        Vector3[] points = outlinePoints(chain, first, last, scene, joined);
+        return points == null && !joined.equals(runs) ? outlinePoints(chain, first, last, scene, runs) : points;
+    }
+
+    private static Vector3[] outlinePoints(List<Corner> chain, int first, int last, BoardScene scene, List<Run> runs) {
         Vector3[] points = new Vector3[last - first + 1];
         points[0] = new Vector3(chain.get(first).point);
         points[points.length - 1] = new Vector3(chain.get(last).point);
