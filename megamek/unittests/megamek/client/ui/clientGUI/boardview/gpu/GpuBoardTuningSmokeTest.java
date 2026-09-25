@@ -3,10 +3,12 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.SwingUtilities;
 
@@ -75,6 +77,7 @@ class GpuBoardTuningSmokeTest {
             stage.draw();
             assertTrue(tuning.panel().findActor("tuning-general-scroll").isVisible());
             assertFalse(tuning.panel().findActor("tuning-scroll").isVisible());
+            assertFalse(tuning.panel().findActor("tuning-terrain-scroll").isVisible());
             Slider cameraFov = tuning.panel().findActor("tuning-camera-fov");
             assertTrue(cameraFov.isDisabled());
             GpuBoardTestUi.click("tuning-perspective");
@@ -122,6 +125,8 @@ class GpuBoardTuningSmokeTest {
             assertTrue(tuning.panel().findActor("tuning-scroll").isVisible());
             GpuBoardTestUi.click("tuning-tab-general");
             assertEquals(generalPosition, generalScroll.getScrollY(), "Each tab preserves its scroll position");
+            checkTerrainControls(tuning, stage);
+            checkTerrainRendering(tuning, source.takeFrame().scene());
             var defaultEffects = tuning.atmosphereOptions();
             assertNull(tuning.panel().findActor("Speed gain / hex"));
             set(tuning, "God rays", 0.8f);
@@ -205,6 +210,9 @@ class GpuBoardTuningSmokeTest {
                 assertTrue(tuning.panel().getY() >= 45);
                 GpuBoardTestUi.click("tuning-tab-general");
                 GpuBoardTestUi.assertHorizontalBounds(tuning.panel(), tuning.panel());
+                GpuBoardTestUi.click("tuning-tab-terrain");
+                GpuBoardTestUi.assertHorizontalBounds(tuning.panel(), tuning.panel());
+                capture(stage, "tuning-terrain-" + size[0] + ".png");
                 GpuBoardTestUi.click("tuning-tab-atmosphere");
             }
             GpuBoardTestUi.click("atmosphere-DAWN");
@@ -214,8 +222,104 @@ class GpuBoardTuningSmokeTest {
             scroll.updateVisualScroll();
             capture(stage, "tuning-effects-small.png");
         } finally {
+            BoardRelief.tune(BoardRelief.DEFAULTS);
+            BoardSurface.tune(BoardSurface.DEFAULTS);
+            BoardRelief.tuneGeology(BoardRelief.defaultGeology());
             stage.dispose();
             skin.dispose();
+        }
+    }
+
+    private static void checkTerrainControls(GpuBoardTuning tuning, Stage stage) {
+        GpuBoardTestUi.click("tuning-tab-terrain");
+        ScrollPane scroll = tuning.panel().findActor("tuning-terrain-scroll");
+        assertTrue(scroll.isVisible());
+        assertFalse(tuning.panel().findActor("tuning-general-scroll").isVisible());
+        assertFalse(tuning.panel().findActor("tuning-scroll").isVisible());
+        int revision = BoardGeometry.revision();
+        set(tuning, "Shore spread", -12);
+        set(tuning, "Land retained", .85f);
+        assertEquals(-12, BoardRelief.tuning().shoreSpread());
+        assertEquals(.85f, BoardRelief.tuning().landKeep(), .0001f);
+        assertTrue(BoardGeometry.revision() > revision, "Terrain edits invalidate cached support and picking");
+        set(tuning, "Wet margin", 0);
+        assertEquals(.1f, BoardSurface.tuning().hug(), .0001f, "Banks require a positive wet margin");
+        assertEquals(.1f, tuning.panel().<Slider>findActor("Wet margin").getValue(), .0001f);
+        set(tuning, "Beach width", 2);
+        set(tuning, "Mouth opening", 8);
+        assertEquals(2, BoardSurface.tuning().mouthOpening(), "The opening cannot remove more than its beach");
+        assertEquals(2, tuning.panel().<Slider>findActor("Mouth opening").getValue());
+        GpuBoardTestUi.click("tuning-falls-off-board");
+        assertEquals(!BoardSurface.DEFAULTS.fallsOffBoard(), BoardSurface.tuning().fallsOffBoard());
+        SelectBox<String> family = tuning.panel().findActor("tuning-geology-family");
+        family.setSelectedIndex(BoardScene.Surface.SAND.ordinal());
+        set(tuning, "Ground relief (m)", .2f);
+        set(tuning, "Loose stones / hex", 0);
+        set(tuning, "Low shrubs / hex", 2);
+        assertEquals(.2f, BoardRelief.geology().get(BoardScene.Surface.SAND.ordinal()).relief(), .0001f);
+        assertEquals(0, BoardRelief.geology().get(BoardScene.Surface.SAND.ordinal()).stones());
+        assertEquals(2, BoardRelief.geology().get(BoardScene.Surface.SAND.ordinal()).shrubs());
+        assertEquals(BoardRelief.defaultGeology().get(0), BoardRelief.geology().get(0),
+              "Editing sand does not change grass");
+        revision = BoardGeometry.revision();
+        family.setSelectedIndex(0);
+        family.setSelectedIndex(BoardScene.Surface.SAND.ordinal());
+        assertEquals(revision, BoardGeometry.revision(), "Browsing materials does not change their geometry");
+        assertEquals(.2f, tuning.panel().<Slider>findActor("Ground relief (m)").getValue(), .0001f);
+        List<String> bedrockUnused = List.of("Ground relief (m)", "Corner rounding", "Loose stones / hex",
+              "Low shrubs / hex");
+        family.setSelectedIndex(BoardScene.Surface.values().length);
+        for (String name : bedrockUnused) {
+            assertTrue(tuning.panel().<Slider>findActor(name).isDisabled(), name + " does not apply to bedrock");
+        }
+        family.setSelectedIndex(BoardScene.Surface.SAND.ordinal());
+        for (String name : bedrockUnused) {
+            assertFalse(tuning.panel().<Slider>findActor(name).isDisabled(), name + " applies to surface materials");
+        }
+        scroll.setScrollPercentY(1);
+        scroll.updateVisualScroll();
+        capture(stage, "tuning-terrain-geology.png");
+        float position = scroll.getScrollY();
+        GpuBoardTestUi.click("tuning-tab-general");
+        GpuBoardTestUi.click("tuning-tab-terrain");
+        assertEquals(position, scroll.getScrollY());
+        GpuBoardTestUi.click("tuning-defaults");
+        assertEquals(BoardRelief.DEFAULTS, BoardRelief.tuning());
+        assertEquals(BoardSurface.DEFAULTS, BoardSurface.tuning());
+        assertEquals(BoardRelief.defaultGeology(), BoardRelief.geology());
+        scroll.setScrollPercentY(0);
+        scroll.updateVisualScroll();
+        capture(stage, "tuning-terrain.png");
+    }
+
+    private static void checkTerrainRendering(GpuBoardTuning tuning, BoardScene scene) {
+        var terrain = new GpuTerrain();
+        var camera = new BoardCamera();
+        camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        camera.fit(scene);
+        try {
+            int original = terrainPixels(terrain, camera, scene);
+            set(tuning, "Transition room (m)", 0);
+            assertNotEquals(original, terrainPixels(terrain, camera, scene),
+                  "Terrain sliders rebuild the rendered board even when its snapshot is unchanged");
+            GpuBoardTestUi.click("tuning-defaults");
+            assertEquals(original, terrainPixels(terrain, camera, scene), "Defaults restores the original terrain mesh");
+        } finally {
+            terrain.dispose();
+        }
+    }
+
+    private static int terrainPixels(GpuTerrain terrain, BoardCamera camera, BoardScene scene) {
+        terrain.update(scene);
+        terrain.renderShadows(List.of());
+        ScreenUtils.clear(.12f, .16f, .2f, 1, true);
+        terrain.render(camera.camera, false);
+        terrain.renderTransparent(camera.camera);
+        Pixmap pixels = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
+        try {
+            return pixels.getPixels().hashCode();
+        } finally {
+            pixels.dispose();
         }
     }
 

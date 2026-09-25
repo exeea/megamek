@@ -92,6 +92,7 @@ final class GpuBoardTestUi {
         for (Actor parent = actor.getParent(); parent != null; parent = parent.getParent()) {
             if (!parent.isVisible() && "tuning-scroll".equals(parent.getName())) { click("tuning-tab-atmosphere"); }
             if (!parent.isVisible() && "tuning-general-scroll".equals(parent.getName())) { click("tuning-tab-general"); }
+            if (!parent.isVisible() && "tuning-terrain-scroll".equals(parent.getName())) { click("tuning-tab-terrain"); }
         }
         // Controls can move below the fold as the tuning panel grows. Scroll them into view before real input.
         for (Actor parent = actor.getParent(); parent != null; parent = parent.getParent()) {

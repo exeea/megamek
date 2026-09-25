@@ -129,7 +129,7 @@ final class BoardFlow {
             BoardScene.Tile target = next == null ? null : scene.tile(next);
             if (target == null) {
                 // A river that runs out at the board's edge pours off it (BoardSurface.FALLS_OFF_THE_BOARD).
-                if (next != null && BoardSurface.FALLS_OFF_THE_BOARD) {
+                if (next != null && BoardSurface.tuning().fallsOffBoard()) {
                     return 1 + 1.25f * (float) Math.sqrt(2) * (1 - distance / (float) WATERFALL_APPROACH_HEXES);
                 }
                 break;

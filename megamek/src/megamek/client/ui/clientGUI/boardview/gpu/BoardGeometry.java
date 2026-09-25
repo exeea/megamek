@@ -80,6 +80,7 @@ final class BoardGeometry {
     static float UNIT_HEIGHT_SCALE;
     private static Tuning tuning;
     private static int revision;
+    private static int terrainRevision;
 
     static {
         tune(DEFAULTS);
@@ -108,6 +109,16 @@ final class BoardGeometry {
 
     static int revision() {
         return revision;
+    }
+
+    /** Terrain controls are applied on the GL thread between frames, like the board dimensions above. */
+    static void terrainChanged() {
+        terrainRevision++;
+        revision++;
+    }
+
+    static int terrainRevision() {
+        return terrainRevision;
     }
 
     static float centerX(Coords coords) {

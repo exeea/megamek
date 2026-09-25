@@ -96,6 +96,12 @@ final class GpuBoardTuning {
     private Label cardPending;
     private final List<Control> geometry;
     private final CheckBox transitions;
+    private final List<Control> relief;
+    private final List<Control> water;
+    private final List<Control> terrainDetail;
+    private final CheckBox fallsOffBoard;
+    private final SelectBox<String> geologyFamily;
+    private final List<Control> geology;
     private final List<Control> familySizes;
     private final CheckBox overviewIcons;
     private final List<Control> overview;
@@ -383,19 +389,146 @@ final class GpuBoardTuning {
                 applyDamage();
             }
         });
+        Table terrain = new Table();
+        rows = terrain;
+        rows.top().defaults().pad(0, 3, 0, 3);
+        section(skin, "River shape and land");
+        relief = controls(skin, List.of(
+              new Knob("Shore spread", -20, 12, .5f, "%+.1f"),
+              new Knob("Land retained", .5f, 1, .01f, "%.2f"),
+              new Knob("Corner shift limit", 0, 28, .5f, "%.1f"),
+              new Knob("Shore room", 0, 16, .5f, "%.1f"),
+              new Knob("Shore reach", 64, 128, 1, "%.0f"),
+              new Knob("Narrow channel pull", 0, 2, .05f, "%.2f"),
+              new Knob("Hard ground pull", 1, 4, .1f, "%.1f"),
+              new Knob("Pool radius", 8, 32, .5f, "%.1f"),
+              new Knob("Island radius", 8, 32, .5f, "%.1f"),
+              new Knob("Shore blend", 1, 20, .5f, "%.1f"),
+              new Knob("Shore wander", 0, 16, .5f, "%.1f"),
+              new Knob("Wander length", 70, 280, 5, "%.0f"),
+              new Knob("Shore lip", .5f, 10, .5f, "%.1f"),
+              new Knob("Transition room (m)", 0, 8, .1f, "%.1f")), this::applyRelief, 0);
+        hints(skin, relief,
+              "SHORE_SPREAD: moves both banks outward; larger values widen rivers and lakes. Distances here are in hex-scale units.",
+              "LAND_KEEP: minimum share of a land hex retained when water moves its corners. Larger values limit river expansion.",
+              "SHORE_SHIFT: maximum distance a shoreline can move a hex corner into adjoining land.",
+              "SHORE_ROOM: extra room beyond the waterline for banks beside land at the water's level.",
+              "SHORE_REACH: reach of nearby hexes when shaping a continuous shoreline. Larger values smooth over more neighbours.",
+              "SHORE_NARROW: extra pull along water/land boundaries, preserving narrow rivers and spits of land.",
+              "SHORE_HARD: how strongly roads, paving and other fixed ground push water away.",
+              "SHORE_POOL: water radius retained around each water hex's centre; also shapes isolated ponds.",
+              "SHORE_ISLE: land radius retained around each land hex's centre; also shapes isolated islands.",
+              "SHORE_BLEND: distance over which pond and island protection blend into the shoreline.",
+              "SHORE_WANDER: how far banks vary sideways along their course; 0 removes this variation.",
+              "WANDER_CELL: length of the broad bends along a shoreline.",
+              "SHORE_LIP: width of the bank from its level lip toward the water.",
+              "TRANSITION: room on each side of a height step, in metres. Requires Hex transitions and no Hex padding.");
+        section(skin, "Banks and river openings");
+        water = new ArrayList<>(controls(skin, List.of(
+              new Knob("Wet margin", .1f, 4, .1f, "%.1f"),
+              new Knob("Beach width", 1, 12, .5f, "%.1f"),
+              new Knob("Bank width", 1, 10, .5f, "%.1f"),
+              new Knob("Bank rounding", 1, 12, .5f, "%.1f"),
+              new Knob("Mouth opening", 0, 12, .5f, "%.1f"),
+              new Knob("Plunge opening", 0, 12, .5f, "%.1f"),
+              new Knob("Bed slope share", .1f, .95f, .05f, "%.2f")), this::applyWater, 0));
+        section(skin, "Waterfalls");
+        fallsOffBoard = checkbox(skin, "Waterfalls off board", "tuning-falls-off-board");
+        fallsOffBoard.addListener(new TextTooltip("FALLS_OFF_THE_BOARD: let rivers pour over the board's edge. "
+              + "Also updates the visible current direction.", skin, "menu"));
+        water.addAll(controls(skin, List.of(
+              new Knob("Off-board drop", 1, 8, .5f, "%.1f"),
+              new Knob("Plunge pool swell", 0, 12, .5f, "%.1f"),
+              new Knob("Lip variation", 0, 7, .5f, "%.1f"),
+              new Knob("Fall lip width", .005f, .1f, .005f, "%.3f"),
+              new Knob("Fall lip drop", .1f, 1, .05f, "%.2f"),
+              new Knob("Underwater ledge", 0, 4, .25f, "%.2f"),
+              new Knob("Valley extension", 0, 14, .5f, "%.1f")), this::applyWater, 0));
+        hints(skin, water,
+              "HUG: wet clearance beside slopes and corners that extend into the water, in hex-scale units.",
+              "BEACH: bank inset beside walls and lower land, in hex-scale units.",
+              "SHORE_BANK: bank inset beside land at water level. Moved river-mouth corners keep this width plus one unit.",
+              "SHORE_ROUND: distance over which adjoining banks round into each other.",
+              "MOUTH_OPENING: beach width given back to the river at fixed hex corners. Larger values widen the opening; "
+                    + "limited by Beach width and the shoreline.",
+              "PLUNGE_OPENING: extra opening below waterfalls, limited by Beach width.",
+              "PLATEAU: share of each radius used by the underwater slope. Larger values leave a smaller flat bed.",
+              "BOTTOMLESS_LEVELS: how many terrain levels an off-board waterfall drops before fading.",
+              "PLUNGE_POOL: how far the pool swells outward below a waterfall, in hex-scale units.",
+              "LIP_JUT: maximum uneven projection of a waterfall lip over its pool.",
+              "FALL_LIP_WIDTH: maximum lip curvature radius as a fraction of hex width.",
+              "FALL_LIP_DROP: lip curvature radius as a fraction of the fall's height, capped by Fall lip width.",
+              "LIP_DEPTH: depth of the underwater ledge where a pool spills over a fall.",
+              "VALLEY: distance a joined waterfall corner extends over the pool below.");
+        fallsOffBoard.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                if (!syncing) { applyWater(); }
+            }
+        });
+        section(skin, "Terrain detail");
+        terrainDetail = controls(skin, List.of(
+              new Knob("Full detail hexes", 100, 10000, 100, "%.0f"),
+              new Knob("Medium detail hexes", 100, 40000, 100, "%.0f")), this::applyRelief, 0);
+        hints(skin, terrainDetail,
+              "FULL_DETAIL_HEXES: maximum board size using full terrain detail. Larger limits increase geometry cost.",
+              "MEDIUM_DETAIL_HEXES: maximum board size using medium detail. Larger boards use coarse detail without loose rocks.");
+        section(skin, "Material geology");
+        geologyFamily = choice(skin, "Material", "tuning-geology-family",
+              new String[] { "Grass", "Dirt", "Sand", "Rock", "Concrete", "Snow", "Bedrock under slabs" }, this::syncGeology);
+        geology = controls(skin, List.of(
+              new Knob("Joint width (m)", .25f, 20, .05f, "%.2f"),
+              new Knob("Joint height (m)", .25f, 20, .05f, "%.2f"),
+              new Knob("Joint relief (m)", 0, 3, .05f, "%.2f"),
+              new Knob("Fractures (m)", 0, 3, .05f, "%.2f"),
+              new Knob("Strata relief (m)", 0, 2, .05f, "%.2f"),
+              new Knob("Bedding (m)", .25f, 10, .05f, "%.2f"),
+              new Knob("Buttresses (m)", 0, 3, .05f, "%.2f"),
+              new Knob("Recess (m)", 0, 3, .05f, "%.2f"),
+              new Knob("Ground relief (m)", 0, 2, .05f, "%.2f"),
+              new Knob("Caprock scale", 0, 2, .05f, "%.2f"),
+              new Knob("Talus scale", 0, 2, .05f, "%.2f"),
+              new Knob("Corner rounding", 0, .5f, .01f, "%.2f"),
+              new Knob("Soil jointing", 0, 1, .05f, "%.2f"),
+              new Knob("Bank lean", 0, 1, .01f, "%.2f"),
+              new Knob("Cast slab share", 0, 1, .05f, "%.2f"),
+              new Knob("Loose stones / hex", 0, 6, .1f, "%.1f"),
+              new Knob("Low shrubs / hex", 0, 6, .1f, "%.1f")), this::applyGeology, 0);
+        hints(skin, geology,
+              "Geology.cellWidth: horizontal size of the jointed rock masses.",
+              "Geology.cellHeight: vertical size of the jointed rock masses.",
+              "Geology.cells: relief of the jointed rock masses.",
+              "Geology.fractures: depth of the fractures between rock masses.",
+              "Geology.strata: relief of the geological layers.",
+              "Geology.bedding: spacing of the geological layers.",
+              "Geology.buttress: strength of broad supports along cliff faces.",
+              "Geology.recess: how far cliff faces retreat behind their edges.",
+              "Geology.relief: variation in the ground above the cliffs.",
+              "Geology.cap: scale of the caprock lip.",
+              "Geology.talus: scale of the debris apron at a cliff's foot.",
+              "Geology.round: corner fillet as a fraction of the hex edge.",
+              "Geology.bank: fraction of rock jointing retained by low soil banks.",
+              "Geology.lean: metres a soil bank leans back per metre of depth.",
+              "Geology.cast: contribution of a poured slab above bedrock on tall cliffs.",
+              "Average loose stones per open hex of this material, before placement clearances. Requires full or medium detail.",
+              "Average low shrubs per open hex of this material, before placement clearances. Requires full or medium detail.");
         ScrollPane generalScroll = scroll(skin, general, "tuning-general-scroll");
         ScrollPane atmosphereScroll = scroll(skin, atmospheric, "tuning-scroll");
+        ScrollPane terrainScroll = scroll(skin, terrain, "tuning-terrain-scroll");
         Table tabs = new Table();
         ButtonGroup<TextButton> tabGroup = new ButtonGroup<>();
-        tab(skin, tabs, tabGroup, "General", generalScroll, atmosphereScroll);
-        tab(skin, tabs, tabGroup, "Atmosphere", atmosphereScroll, generalScroll);
+        tab(skin, tabs, tabGroup, "General", generalScroll, atmosphereScroll, terrainScroll);
+        tab(skin, tabs, tabGroup, "Atmosphere", atmosphereScroll, generalScroll, terrainScroll);
+        tab(skin, tabs, tabGroup, "Terrain", terrainScroll, generalScroll, atmosphereScroll);
         atmosphereScroll.setVisible(false);
+        terrainScroll.setVisible(false);
         panel.add(tabs).growX().padBottom(6).row();
-        panel.add(new Stack(generalScroll, atmosphereScroll)).minHeight(0).grow().row();
+        panel.add(new Stack(generalScroll, atmosphereScroll, terrainScroll)).minHeight(0).grow().row();
         panel.add(new Image(skin.getDrawable("rule"))).height(1).growX().padTop(6).row();
         TextButton reset = new TextButton("Defaults", skin, "menu-control");
         reset.setName("tuning-defaults");
-        reset.addListener(new TextTooltip("Restore both tabs: camera projection, geometry, family sizes, visibility, light/fog effects, "
+        reset.addListener(new TextTooltip("Restore all tabs: camera projection, geometry, terrain, water, geology, "
+              + "family sizes, visibility, light/fog effects, "
               + "the game's current planetary conditions, and disable damage preview.",
               skin, "menu"));
         reset.setProgrammaticChangeEvents(false);
@@ -431,7 +564,7 @@ final class GpuBoardTuning {
         return scroll;
     }
 
-    private void tab(Skin skin, Table tabs, ButtonGroup<TextButton> group, String label, ScrollPane page, ScrollPane other) {
+    private void tab(Skin skin, Table tabs, ButtonGroup<TextButton> group, String label, ScrollPane page, ScrollPane... others) {
         TextButton button = new TextButton(label, skin, "menu-control");
         button.setName("tuning-tab-" + label.toLowerCase(Locale.ROOT));
         group.add(button);
@@ -440,14 +573,15 @@ final class GpuBoardTuning {
             public void changed(ChangeEvent event, Actor actor) {
                 if (!button.isChecked()) { return; }
                 if (panel.getStage() != null) {
-                    panel.getStage().unfocus(other);
+                    for (ScrollPane other : others) { panel.getStage().unfocus(other); }
                     panel.getStage().setScrollFocus(page);
                 }
                 damageLocation.hideList();
                 pressure.hideList();
                 atmosphericTaint.hideList();
+                geologyFamily.hideList();
                 page.setVisible(true);
-                other.setVisible(false);
+                for (ScrollPane other : others) { other.setVisible(false); }
             }
         });
         tabs.add(button).growX().height(26).padRight(2);
@@ -461,6 +595,12 @@ final class GpuBoardTuning {
         heading.add(label).minWidth(0).growX();
         rows.add(heading).colspan(3).growX().padTop(spacing).padBottom(3).row();
         return heading;
+    }
+
+    private static void hints(Skin skin, List<Control> controls, String... hints) {
+        for (int i = 0; i < controls.size(); i++) {
+            controls.get(i).slider().addListener(new TextTooltip(hints[i], skin, "menu"));
+        }
     }
 
     private CheckBox checkbox(Skin skin, String label, String name) {
@@ -564,6 +704,12 @@ final class GpuBoardTuning {
         transitions.setChecked(defaults.transitions());
         syncing = false;
         applyGeometry();
+        BoardRelief.tune(BoardRelief.DEFAULTS);
+        BoardSurface.tune(BoardSurface.DEFAULTS);
+        BoardRelief.tuneGeology(BoardRelief.defaultGeology());
+        syncRelief();
+        syncWater();
+        syncGeology();
         float[] familyDefaults = new float[familySizes.size()];
         for (int index = 0; index < familyDefaults.length; index++) {
             familyDefaults[index] = UnitFamilyScale.values()[index].defaultUnitScale;
@@ -765,6 +911,66 @@ final class GpuBoardTuning {
         // Padding replaces transitions while it is on.
         if (transitions != null) { transitions.setDisabled(padding > 0); }
         updateReadings(geometry);
+    }
+
+    private void applyRelief() {
+        int full = Math.round(value(terrainDetail, 0));
+        BoardRelief.tune(new BoardRelief.Tuning(value(relief, 2), value(relief, 3), value(relief, 4), value(relief, 5),
+              value(relief, 6), value(relief, 7), value(relief, 8), value(relief, 9), value(relief, 10), value(relief, 11),
+              value(relief, 0), value(relief, 1), value(relief, 12), value(relief, 13), full,
+              Math.max(full, Math.round(value(terrainDetail, 1)))));
+        syncRelief();
+    }
+
+    private void syncRelief() {
+        BoardRelief.Tuning t = BoardRelief.tuning();
+        setValues(relief, new float[] { t.shoreSpread(), t.landKeep(), t.shoreShift(), t.shoreRoom(), t.shoreReach(),
+              t.shoreNarrow(), t.shoreHard(), t.shorePool(), t.shoreIsle(), t.shoreBlend(), t.shoreWander(),
+              t.wanderCell(), t.shoreLip(), t.transition() });
+        setValues(terrainDetail, new float[] { t.fullDetailHexes(), t.mediumDetailHexes() });
+        updateReadings(relief);
+        updateReadings(terrainDetail);
+    }
+
+    private void applyWater() {
+        BoardSurface.tune(new BoardSurface.Tuning(fallsOffBoard.isChecked(), value(water, 7), value(water, 0),
+              value(water, 1), value(water, 8), value(water, 2), value(water, 3), value(water, 4), value(water, 5),
+              value(water, 9), value(water, 10), value(water, 11), value(water, 6), value(water, 12), value(water, 13)));
+        syncWater();
+    }
+
+    private void syncWater() {
+        BoardSurface.Tuning t = BoardSurface.tuning();
+        syncing = true;
+        fallsOffBoard.setChecked(t.fallsOffBoard());
+        syncing = false;
+        setValues(water, new float[] { t.hug(), t.beach(), t.shoreBank(), t.shoreRound(), t.mouthOpening(),
+              t.plungeOpening(), t.plateau(), t.bottomlessLevels(), t.plungePool(), t.lipJut(), t.fallLipWidth(),
+              t.fallLipDrop(), t.lipDepth(), t.valley() });
+        updateReadings(water);
+    }
+
+    private void applyGeology() {
+        List<BoardRelief.Geology> next = new ArrayList<>(BoardRelief.geology());
+        next.set(geologyFamily.getSelectedIndex(), new BoardRelief.Geology(value(geology, 0), value(geology, 1),
+              value(geology, 2), value(geology, 3), value(geology, 4), value(geology, 5), value(geology, 6),
+              value(geology, 7), value(geology, 8), value(geology, 9), value(geology, 10), value(geology, 11),
+              value(geology, 12), value(geology, 13), value(geology, 14), value(geology, 15), value(geology, 16)));
+        BoardRelief.tuneGeology(next);
+        updateReadings(geology);
+    }
+
+    private void syncGeology() {
+        BoardRelief.Geology g = BoardRelief.geology().get(geologyFamily.getSelectedIndex());
+        setValues(geology, new float[] { g.cellWidth(), g.cellHeight(), g.cells(), g.fractures(), g.strata(),
+              g.bedding(), g.buttress(), g.recess(), g.relief(), g.cap(), g.talus(), g.round(), g.bank(), g.lean(), g.cast(),
+              g.stones(), g.shrubs() });
+        boolean bedrock = geologyFamily.getSelectedIndex() == BoardScene.Surface.values().length;
+        geology.get(8).slider().setDisabled(bedrock);
+        geology.get(11).slider().setDisabled(bedrock);
+        geology.get(15).slider().setDisabled(bedrock);
+        geology.get(16).slider().setDisabled(bedrock);
+        updateReadings(geology);
     }
 
     private void applyFamilySizes() {

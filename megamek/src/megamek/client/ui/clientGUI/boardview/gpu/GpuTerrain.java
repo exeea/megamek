@@ -311,6 +311,7 @@ final class GpuTerrain implements Disposable {
     private DirectionalShadowLight shadow;
     private boolean shadowDirty;
     private BoardGeometry.Tuning tuning;
+    private int terrainRevision = -1;
     private float clock;
     private float floor;
     private int chunkRows;
@@ -708,7 +709,8 @@ final class GpuTerrain implements Disposable {
         BoardGeometry.Tuning nextTuning = BoardGeometry.tuning();
         boolean changedTuning = tuning == null || tuning.hexScale() != nextTuning.hexScale()
               || tuning.levelHeight() != nextTuning.levelHeight() || tuning.gridShade() != nextTuning.gridShade()
-              || tuning.transitions() != nextTuning.transitions() || tuning.padding() != nextTuning.padding();
+              || tuning.transitions() != nextTuning.transitions() || tuning.padding() != nextTuning.padding()
+              || terrainRevision != BoardGeometry.terrainRevision();
         boolean changedLimbScale = limbModel != null && tuning != null && tuning.unitScale() != nextTuning.unitScale();
         boolean changedLight = !Objects.equals(light, scene.light());
         if (tiles == scene.tiles() && !changedTuning && !changedLight && !changedLimbScale) {
@@ -810,6 +812,7 @@ final class GpuTerrain implements Disposable {
         tiles = scene.tiles();
         tuning = nextTuning;
         floor = nextFloor;
+        terrainRevision = BoardGeometry.terrainRevision();
         if (rebuildAll) {
             chunks.forEach(Chunk::dispose);
             chunks.clear();

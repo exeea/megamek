@@ -122,43 +122,44 @@ final class BoardRelief {
      * fillet of every cliff corner as a fraction of the hex edge. Steps of up to two levels are banks of the soil
      * mantle: they keep {@code bank} of the rock's jointing and lean back by {@code lean} metres per metre of depth.
      * {@code cast} is 1 for poured concrete: flat faces, and from three levels a slab one level thick on
-     * {@link #BEDROCK}.
+     * {@link #BEDROCK}. {@code stones} and {@code shrubs} are average loose ground-cover counts per hex.
      */
-    private record Geology(float cellWidth, float cellHeight, float cells, float fractures, float strata, float bedding,
+    record Geology(float cellWidth, float cellHeight, float cells, float fractures, float strata, float bedding,
           float buttress, float recess, float relief, float cap, float talus, float round, float bank, float lean,
-          float cast) {
+          float cast, float stones, float shrubs) {
         Geology plus(Geology o) {
             return new Geology(cellWidth + o.cellWidth, cellHeight + o.cellHeight, cells + o.cells,
                   fractures + o.fractures, strata + o.strata, bedding + o.bedding, buttress + o.buttress,
                   recess + o.recess, relief + o.relief, cap + o.cap, talus + o.talus, round + o.round,
-                  bank + o.bank, lean + o.lean, cast + o.cast);
+                  bank + o.bank, lean + o.lean, cast + o.cast, stones + o.stones, shrubs + o.shrubs);
         }
 
         Geology scale(float f) {
             return new Geology(cellWidth * f, cellHeight * f, cells * f, fractures * f, strata * f, bedding * f,
-                  buttress * f, recess * f, relief * f, cap * f, talus * f, round * f, bank * f, lean * f, cast * f);
+                  buttress * f, recess * f, relief * f, cap * f, talus * f, round * f, bank * f, lean * f, cast * f,
+                  stones * f, shrubs * f);
         }
     }
 
     /** Indexed by {@link BoardScene.Surface#ordinal()}. */
     private static final Geology[] GEOLOGY = {
           // GRASS: earth banks on low steps, blocky granite from three levels.
-          new Geology(4.2f, 3.6f, 1.15f, .70f, .40f, 3.4f, 1.10f, 1.0f, .85f, 1, 1, .5f, .3f, .42f, 0),
+          new Geology(4.2f, 3.6f, 1.15f, .70f, .40f, 3.4f, 1.10f, 1.0f, .85f, 1, 1, .5f, .3f, .42f, 0, .8f, .6f),
           // DIRT: soft, gullied earth.
-          new Geology(2.6f, 9.0f, .45f, .75f, .25f, 1.8f, .80f, .8f, .45f, .6f, 1.1f, .5f, .55f, .38f, 0),
+          new Geology(2.6f, 9.0f, .45f, .75f, .25f, 1.8f, .80f, .8f, .45f, .6f, 1.1f, .5f, .55f, .38f, 0, 1.2f, 1.4f),
           // SAND: sandstone mesas of jointed columns: tall masses split by deep vertical joints, faint bedding.
-          new Geology(5.0f, 14f, 1.8f, 2.2f, .3f, 3.6f, .8f, 1.2f, .95f, 1, 1, .45f, 1, .06f, 0),
+          new Geology(5.0f, 14f, 1.8f, 2.2f, .3f, 3.6f, .8f, 1.2f, .95f, 1, 1, .45f, 1, .06f, 0, 1, 3),
           // ROCK: jointed bedrock.
-          new Geology(3.6f, 4.2f, 1.25f, .75f, .45f, 2.9f, 1.25f, 1.1f, .75f, 1, 1, .42f, 1, .12f, 0),
+          new Geology(3.6f, 4.2f, 1.25f, .75f, .45f, 2.9f, 1.25f, 1.1f, .75f, 1, 1, .42f, 1, .12f, 0, 2.5f, .4f),
           // CONCRETE: flat cast slabs with crisp arrises; from three levels one slab caps the bedrock below.
-          new Geology(6.0f, 6.0f, 0, 0, 0, 3.0f, 0, 0, 0, 0, 0, .05f, 1, 0, 1),
+          new Geology(6.0f, 6.0f, 0, 0, 0, 3.0f, 0, 0, 0, 0, 0, .05f, 1, 0, 1, 0, 0),
           // SNOW: rock under a snow mantle that buries the low steps.
-          new Geology(4.0f, 3.8f, 1.0f, .60f, .40f, 3.2f, 1.05f, 1.0f, .85f, 1, 1, .5f, .5f, .3f, 0),
+          new Geology(4.0f, 3.8f, 1.0f, .60f, .40f, 3.2f, 1.05f, 1.0f, .85f, 1, 1, .5f, .5f, .3f, 0, 1, 0),
     };
 
     /** The rock that carries a concrete slab: jointed bedrock whose top is the slab's underside, so without caprock. */
     private static final Geology BEDROCK = new Geology(3.6f, 4.2f, 1.25f, .75f, .45f, 2.9f, 1.25f, 1.1f, .75f, 0, 1,
-          .42f, 1, .12f, 0);
+          .42f, 1, .12f, 0, 0, 0);
 
     /**
      * Metres of room that a step between natural grounds takes on each side of its edge when the tuning turns hex
@@ -167,14 +168,74 @@ final class BoardRelief {
      */
     static final float TRANSITION = 4;
 
+    /** Visual landform controls. Fixed lattice, stitching and sampling rules remain shared by every hex. */
+    record Tuning(float shoreShift, float shoreRoom, float shoreReach, float shoreNarrow, float shoreHard,
+          float shorePool, float shoreIsle, float shoreBlend, float shoreWander, float wanderCell,
+          float shoreSpread, float landKeep, float shoreLip, float transition, int fullDetailHexes,
+          int mediumDetailHexes) {
+        Tuning {
+            for (float value : new float[] { shoreShift, shoreRoom, shoreReach, shoreNarrow, shoreHard,
+                  shorePool, shoreIsle, shoreBlend, shoreWander, wanderCell, landKeep, shoreLip, transition }) {
+                if (!Float.isFinite(value) || value < 0) { throw new IllegalArgumentException("Invalid terrain tuning"); }
+            }
+            // The fixed shore neighbourhood covers this reach and corner displacement.
+            if (shoreShift > SHORE_SHIFT || shoreReach < 64 || shoreReach > SHORE_REACH || shoreHard < 1
+                  || shorePool <= 0 || shoreIsle <= 0 || shoreBlend <= 0 || wanderCell <= 0 || shoreLip <= 0
+                  || !Float.isFinite(shoreSpread) || landKeep > 1 || transition > TRANSITION
+                  || fullDetailHexes < 1 || mediumDetailHexes < fullDetailHexes) {
+                throw new IllegalArgumentException("Invalid terrain tuning");
+            }
+        }
+    }
+
+    static final Tuning DEFAULTS = new Tuning(SHORE_SHIFT, SHORE_ROOM, SHORE_REACH, SHORE_NARROW, SHORE_HARD,
+          SHORE_POOL, SHORE_ISLE, SHORE_BLEND, SHORE_WANDER, WANDER_CELL, SHORE_SPREAD, LAND_KEEP, SHORE_LIP,
+          TRANSITION, FULL_DETAIL_HEXES, MEDIUM_DETAIL_HEXES);
+    private static Tuning tuning = DEFAULTS;
+    private static final List<Geology> DEFAULT_GEOLOGY = List.of(GEOLOGY[0], GEOLOGY[1], GEOLOGY[2], GEOLOGY[3],
+          GEOLOGY[4], GEOLOGY[5], BEDROCK);
+    private static List<Geology> geology = DEFAULT_GEOLOGY;
+
+    static Tuning tuning() { return tuning; }
+
+    static void tune(Tuning next) {
+        if (next.equals(tuning)) { return; }
+        tuning = next;
+        BoardGeometry.terrainChanged();
+    }
+
+    /** The six surface families followed by the bedrock beneath concrete. Records and returned lists are immutable. */
+    static List<Geology> geology() { return geology; }
+
+    static List<Geology> defaultGeology() { return DEFAULT_GEOLOGY; }
+
+    static void tuneGeology(List<Geology> next) {
+        next = List.copyOf(next);
+        if (next.size() != DEFAULT_GEOLOGY.size()) { throw new IllegalArgumentException("Missing terrain family"); }
+        for (Geology g : next) {
+            for (float value : new float[] { g.cellWidth(), g.cellHeight(), g.cells(), g.fractures(), g.strata(),
+                  g.bedding(), g.buttress(), g.recess(), g.relief(), g.cap(), g.talus(), g.round(), g.bank(),
+                  g.lean(), g.cast(), g.stones(), g.shrubs() }) {
+                if (!Float.isFinite(value) || value < 0) { throw new IllegalArgumentException("Invalid geology"); }
+            }
+            if (g.cellWidth() == 0 || g.cellHeight() == 0 || g.bedding() == 0 || g.round() > .5f
+                  || g.bank() > 1 || g.lean() > 1 || g.cast() > 1) {
+                throw new IllegalArgumentException("Invalid geology");
+            }
+        }
+        if (next.equals(geology)) { return; }
+        geology = next;
+        BoardGeometry.terrainChanged();
+    }
+
     /**
      * World units of room a step takes on each side of its edge: the fixed {@link #TRANSITION} of hex transitions, or
      * with padding half the gap the padding opens between the hexes, so each hex keeps its own flat top and the gap
      * holds the step; zero when neither is on.
      */
     static float stepRoom() {
-        BoardGeometry.Tuning tuning = BoardGeometry.tuning();
-        return tuning.padding() > 0 ? metres(tuning.padding() / 2) : tuning.transitions() ? metres(TRANSITION) : 0;
+        BoardGeometry.Tuning geometry = BoardGeometry.tuning();
+        return geometry.padding() > 0 ? metres(geometry.padding() / 2) : geometry.transitions() ? metres(tuning.transition()) : 0;
     }
     private static final int CONCRETE = BoardScene.Surface.CONCRETE.ordinal();
     private static final int SAND = BoardScene.Surface.SAND.ordinal();
@@ -240,7 +301,7 @@ final class BoardRelief {
         this.scene = scene;
         this.tile = tile;
         int hexes = scene.width() * scene.height();
-        detail = hexes <= FULL_DETAIL_HEXES ? FULL : hexes <= MEDIUM_DETAIL_HEXES ? MEDIUM : COARSE;
+        detail = hexes <= tuning.fullDetailHexes() ? FULL : hexes <= tuning.mediumDetailHexes() ? MEDIUM : COARSE;
         self = site(scene, tile, ramps);
         sculpted = self.sculpted();
         sites.put(tile.coords(), self);
@@ -336,6 +397,12 @@ final class BoardRelief {
         return edge.room > 0 && edge.lower == self && !wall(edge.upper, edge.lower);
     }
 
+    /** Whether this bank borders natural ground that permits a curved shore. */
+    boolean naturalBank(int e) {
+        Site land = neighbor(self, e);
+        return land != null && shoreGround(land);
+    }
+
     /**
      * How far the steps through corner k move its line at this hex's level, in world units. Water hexes that share an
      * open mouth both compute it from the corner's three hexes, so they place the mouth's ends alike.
@@ -379,7 +446,7 @@ final class BoardRelief {
      * evaluating a point gets the same value.
      */
     float shore(float x, float y, boolean molten) {
-        float scale = BoardGeometry.HEX_SCALE, r2 = square(SHORE_REACH * scale), f = 0, gx = 0, gy = 0;
+        float scale = BoardGeometry.HEX_SCALE, r2 = square(tuning.shoreReach() * scale), f = 0, gx = 0, gy = 0;
         float wet = Float.POSITIVE_INFINITY, dry = Float.POSITIVE_INFINITY;
         float width = BoardGeometry.WIDTH, height = BoardGeometry.HEIGHT, step = .75f * width;
         int column = Math.round((x - width / 2) / step);
@@ -402,10 +469,10 @@ final class BoardRelief {
             }
         }
         float slope = 6 / r2 * (float) Math.hypot(gx, gy);
-        float wander = Math.clamp(gradient(x / (WANDER_CELL * scale) + 3.1f, y / (WANDER_CELL * scale) - 1.7f), -1, 1);
-        float value = f / Math.max(slope, 1e-4f / scale) + (SHORE_SPREAD + SHORE_WANDER * wander) * scale;
-        value = -smoothMin(-value, (float) Math.sqrt(wet) - SHORE_POOL * scale, SHORE_BLEND * scale);
-        return smoothMin(value, (float) Math.sqrt(dry) - SHORE_ISLE * scale, SHORE_BLEND * scale);
+        float wander = Math.clamp(gradient(x / (tuning.wanderCell() * scale) + 3.1f, y / (tuning.wanderCell() * scale) - 1.7f), -1, 1);
+        float value = f / Math.max(slope, 1e-4f / scale) + (tuning.shoreSpread() + tuning.shoreWander() * wander) * scale;
+        value = -smoothMin(-value, (float) Math.sqrt(wet) - tuning.shorePool() * scale, tuning.shoreBlend() * scale);
+        return smoothMin(value, (float) Math.sqrt(dry) - tuning.shoreIsle() * scale, tuning.shoreBlend() * scale);
     }
 
     /**
@@ -414,7 +481,7 @@ final class BoardRelief {
      * halvings the turn within it.
      */
     private float shoreReach(float x, float y, float ux, float uy) {
-        float span = SHORE_SHIFT * BoardGeometry.HEX_SCALE, lo = -span, hi = Float.NaN;
+        float span = tuning.shoreShift() * BoardGeometry.HEX_SCALE, lo = -span, hi = Float.NaN;
         if (shore(x + ux * lo, y + uy * lo, false) <= 0) { return lo; }
         for (int i = 1; i <= 8 && Float.isNaN(hi); i++) {
             float s = -span + 2 * span * i / 8;
@@ -458,8 +525,8 @@ final class BoardRelief {
         for (int direction = 0; direction < 6; direction++) {
             if (wet(boardSite(coords.translated(direction)), molten) != wet) { other++; }
         }
-        float pull = wet ? 1 : site.sculpted() && shoreGround(site) ? -1 : -SHORE_HARD;
-        float weight = pull * (1 + SHORE_NARROW * other / 6);
+        float pull = wet ? 1 : site.sculpted() && shoreGround(site) ? -1 : -tuning.shoreHard();
+        float weight = pull * (1 + tuning.shoreNarrow() * other / 6);
         if (index >= 0) { shoreWeights[index] = weight; }
         return weight;
     }
@@ -481,7 +548,7 @@ final class BoardRelief {
             for (Site site : corner.around) { lands += site.liquid() ? 0 : 1; }
             loss += corner.want * (lands == 1 ? height / 2 : height / 4);
         }
-        float budget = (1 - LAND_KEEP) * .75f * BoardGeometry.WIDTH * height;
+        float budget = (1 - tuning.landKeep()) * .75f * BoardGeometry.WIDTH * height;
         float result = loss > budget ? budget / loss : 1;
         keeps.put(land.coords(), result);
         return result;
@@ -633,7 +700,7 @@ final class BoardRelief {
             high = Math.max(a, Math.max(b, c));
             mid = a + b + c - low - high;
             float round = 0;
-            for (Site site : around) { round += GEOLOGY[site.family()].round(); }
+            for (Site site : around) { round += BoardRelief.geology.get(site.family()).round(); }
             fillet = low == high ? 0 : Math.min(.5f, round / 3 * (.8f + .4f * variation)) * BoardGeometry.WIDTH / 2;
             for (Site site : around) {
                 float dx = site.x() - x, dy = site.y() - y, scale = fillet / 6 / (float) Math.hypot(dx, dy);
@@ -668,10 +735,10 @@ final class BoardRelief {
                 flat |= site.level() == water.level();
             }
             float dx = wet == 2 ? dry.x() - x : x - water.x(), dy = wet == 2 ? dry.y() - y : y - water.y();
-            float length = (float) Math.hypot(dx, dy), span = SHORE_SHIFT * BoardGeometry.HEX_SCALE;
+            float length = (float) Math.hypot(dx, dy), span = tuning.shoreShift() * BoardGeometry.HEX_SCALE;
             away[0] = dx / length;
             away[1] = dy / length;
-            float reach = shoreReach(x, y, away[0], away[1]) + (flat ? SHORE_ROOM * BoardGeometry.HEX_SCALE : 0);
+            float reach = shoreReach(x, y, away[0], away[1]) + (flat ? tuning.shoreRoom() * BoardGeometry.HEX_SCALE : 0);
             float most = span;
             if (wet == 2) {
                 // A land's tip moves no nearer its centre than leaves its top, inside the steps' rim, its islet.
@@ -680,7 +747,7 @@ final class BoardRelief {
                 bandOffset(this, z, band);
                 filletOffset(this, z, rounding);
                 float rim = (band[0] + rounding[0]) * away[0] + (band[1] + rounding[1]) * away[1];
-                most = Math.clamp(length - rim - SHORE_ISLE * BoardGeometry.HEX_SCALE, 0, span);
+                most = Math.clamp(length - rim - tuning.shoreIsle() * BoardGeometry.HEX_SCALE, 0, span);
             }
             want = Math.clamp(reach, low == high ? 0 : -span, most);
         }
@@ -753,7 +820,7 @@ final class BoardRelief {
         for (Site site : corner.around) {
             if (site.level() >= to) {
                 solids++;
-                geology = geology == null ? GEOLOGY[site.family()] : geology.plus(GEOLOGY[site.family()]);
+                geology = geology == null ? BoardRelief.geology.get(site.family()) : geology.plus(BoardRelief.geology.get(site.family()));
             }
         }
         geology = geology.scale(1f / solids);
@@ -1023,7 +1090,7 @@ final class BoardRelief {
         if (rest > 0 && spans) {
             // The relief is a function of where the face stands, so a band moves it along instead of squeezing it.
             float fx = px + bx, fy = py + by;
-            d = profile(fx, fy, z, edge.bottom(), edge.top(), edge.drop, GEOLOGY[edge.upper.family()],
+            d = profile(fx, fy, z, edge.bottom(), edge.top(), edge.drop, BoardRelief.geology.get(edge.upper.family()),
                   edge.footPinned, edge.rimPinned, edge.room > 0);
             if (edge.room > 0) {
                 float up = Math.clamp((z - edge.bottom()) / (edge.top() - edge.bottom()), 0, 1);
@@ -1198,8 +1265,8 @@ final class BoardRelief {
         float slab = g.cast() * big;
         float underside = top - BoardGeometry.LEVEL;
         if (slab > 0 && z < underside - .01f * BoardGeometry.LEVEL) {
-            float rock = profile(px, py, z, bottom, underside, drop - (top - underside), BEDROCK, footPinned, false,
-                  banded);
+            float rock = profile(px, py, z, bottom, underside, drop - (top - underside),
+                  BoardRelief.geology.get(GEOLOGY.length), footPinned, false, banded);
             float free = 1 - smooth(h / (.45f * (underside - bottom)));
             result = lerp(result, lerp(smoothMin(rock - m, -.5f * m, m), rock, free), slab);
         }
@@ -1326,7 +1393,7 @@ final class BoardRelief {
             uniformRelief = -1;
             for (Site site : candidates()) {
                 if (!site.detailed() || site.level() != self.level()) { continue; }
-                float relief = GEOLOGY[site.family()].relief();
+                float relief = BoardRelief.geology.get(site.family()).relief();
                 if (uniformRelief >= 0 && relief != uniformRelief) { uniformRelief = -2; break; }
                 uniformRelief = relief;
             }
@@ -1339,7 +1406,7 @@ final class BoardRelief {
             float w = Math.max(0, 1 - (float) Math.sqrt(dx * dx + dy * dy) / radius);
             w *= w;
             weight += w;
-            sum += w * GEOLOGY[site.family()].relief();
+            sum += w * BoardRelief.geology.get(site.family()).relief();
         }
         return weight <= 0 ? 0 : sum / weight;
     }
@@ -1656,7 +1723,7 @@ final class BoardRelief {
             inner.add(start);
             innerParameters.add(first - 1 + from);
         }
-        float shore = SHORE_LIP * BoardGeometry.HEX_SCALE;
+        float shore = tuning.shoreLip() * BoardGeometry.HEX_SCALE;
         for (int k = mouths ? 1 : 0; k < count * perEdge; k++) {
             int index = (first * perEdge + k) % waterline.length, e = index / perEdge;
             Vector3 w = new Vector3(waterline[index]);
@@ -1711,7 +1778,7 @@ final class BoardRelief {
         float base = self.level() * BoardGeometry.LEVEL, water = waterline[0].z, margin = .02f;
         Corner a = corner(self, edge), b = corner(self, edge + 1);
         float length = (float) Math.hypot(b.x + b.move()[0] - a.x - a.move()[0], b.y + b.move()[1] - a.y - a.move()[1]);
-        float ramp = Math.min(SHORE_LIP * BoardGeometry.HEX_SCALE, (before ? 1 - t : t) * length);
+        float ramp = Math.min(tuning.shoreLip() * BoardGeometry.HEX_SCALE, (before ? 1 - t : t) * length);
         for (int i = 1; i < samples; i++) {
             // Where the steps through a corner slide the samples along the mouth, each counts where it lies.
             Vector3 p = new Vector3(boundary.get(starts[edge] + i));
@@ -1776,20 +1843,35 @@ final class BoardRelief {
      * Stitches two open chains that run the same way, sampled at increasing parameters, with upward triangles. Within
      * {@link #LEAD} of the parameter order it goes on along the chain whose next point makes the shorter new diagonal,
      * so each triangle joins points that face each other where the steps through a corner slide the boundary's samples.
+     * First check which choices can finish the strip: a locally upward triangle can otherwise close off a concave
+     * corner and leave only downward triangles to finish it.
      */
     private static void strip(List<BoardSurface.Face> out, List<Vector3> outer, List<Float> outerParameters,
           List<Vector3> inner, List<Float> innerParameters) {
+        boolean[][] reaches = new boolean[outer.size()][inner.size()];
+        for (int i = outer.size() - 1; i >= 0; i--) {
+            for (int j = inner.size() - 1; j >= 0; j--) {
+                reaches[i][j] = i + 1 == outer.size() && j + 1 == inner.size()
+                      || i + 1 < outer.size() && reaches[i + 1][j]
+                      && upward(inner.get(j), outer.get(i), outer.get(i + 1)) >= 0
+                      || j + 1 < inner.size() && reaches[i][j + 1]
+                      && upward(inner.get(j), outer.get(i), inner.get(j + 1)) >= 0;
+            }
+        }
         int i = 0, j = 0;
         while (i + 1 < outer.size() || j + 1 < inner.size()) {
             boolean alongOuter = j + 1 >= inner.size() || i + 1 < outer.size()
                   && (outerParameters.get(i + 1) < innerParameters.get(j + 1) - LEAD
                   || outerParameters.get(i + 1) <= innerParameters.get(j + 1) + LEAD
                   && inner.get(j).dst2(outer.get(i + 1)) <= outer.get(i).dst2(inner.get(j + 1)));
-            // Never a triangle facing down where the other way on makes one facing up.
             if (i + 1 < outer.size() && j + 1 < inner.size()) {
                 float byOuter = upward(inner.get(j), outer.get(i), outer.get(i + 1));
                 float byInner = upward(inner.get(j), outer.get(i), inner.get(j + 1));
-                if ((alongOuter ? byOuter : byInner) < 0 && (alongOuter ? byInner : byOuter) > 0) {
+                boolean outerValid = byOuter >= 0 && reaches[i + 1][j];
+                boolean innerValid = byInner >= 0 && reaches[i][j + 1];
+                if (outerValid != innerValid) {
+                    alongOuter = outerValid;
+                } else if ((alongOuter ? byOuter : byInner) < 0 && (alongOuter ? byInner : byOuter) > 0) {
                     alongOuter = !alongOuter;
                 }
             }
@@ -1820,7 +1902,7 @@ final class BoardRelief {
         for (int e = 0; e < 6; e++) {
             Edge edge = edge(e);
             boolean rim = edge.upper == self;
-            Geology geology = edge.upper == null ? null : GEOLOGY[edge.upper.family()];
+            Geology geology = edge.upper == null ? null : BoardRelief.geology.get(edge.upper.family());
             // Concrete rims stay crisp slab edges.
             if (!edge.profiled || !rim && edge.lower != self || rim && geology.cast() > 0) { continue; }
             float top = edge.top(), bottom = edge.bottom(), drop = top - bottom, big = prominence(edge.drop);
@@ -1945,10 +2027,6 @@ final class BoardRelief {
         }
     }
 
-    /** Loose stones and low shrubs per hex, on average, by surface family ordinal. */
-    private static final float[] STONES = { .8f, 1.2f, 1f, 2.5f, 0, 1f };
-    private static final float[] SHRUBS = { .6f, 1.4f, 3f, .4f, 0, 0 };
-
     /**
      * Sparse field cover: loose stones and low shrubs on open ground, from the hex's own seed and outside the unit
      * anchor. Hexes with features of their own (woods, buildings, rubble) keep only those.
@@ -1957,8 +2035,8 @@ final class BoardRelief {
         if (!detail.rocks() || !self.detailed() || self.liquid() || !tile.features().isEmpty()) { return; }
         Random random = new Random(tile.coords().getX() * 73_856_093L ^ tile.coords().getY() * 19_349_663L ^ 0x5f1e1dL);
         float m = metres(1);
-        int stones = Math.round(STONES[self.family()] * (.3f + 1.4f * random.nextFloat()));
-        int shrubs = Math.round(SHRUBS[self.family()] * (.3f + 1.4f * random.nextFloat()));
+        int stones = Math.round(BoardRelief.geology.get(self.family()).stones() * (.3f + 1.4f * random.nextFloat()));
+        int shrubs = Math.round(BoardRelief.geology.get(self.family()).shrubs() * (.3f + 1.4f * random.nextFloat()));
         // Desert bushes (sage, creosote) grow larger and rounder than a meadow's low shrubs.
         boolean desert = self.family() == SAND;
         for (int i = 0; i < stones + shrubs; i++) {
@@ -2335,7 +2413,7 @@ final class BoardRelief {
             for (Vector3 p : List.of(face.a(), face.b(), face.c())) {
                 shades.putIfAbsent(p, new Shade(normal, Kind.CLIFF, 1, prominence(rimZ - Math.min(side.lowA(), side.lowB())),
                       (p.z - Math.min(side.lowA(), side.lowB())) / metres(1), (rimZ - p.z) / metres(1),
-                      bed(p, GEOLOGY[self.family()])));
+                      bed(p, BoardRelief.geology.get(self.family()))));
             }
         }
     }
@@ -2389,7 +2467,7 @@ final class BoardRelief {
                 lows.add(side.lowA() + (side.lowB() - side.lowA()) * u);
             }
         }
-        Geology geology = GEOLOGY[self.family()];
+        Geology geology = BoardRelief.geology.get(self.family());
         Vector3[][] grid = new Vector3[tops.size()][FALL_ROWS + 1];
         float[][] depth = new float[tops.size()][FALL_ROWS + 1];
         for (int c = 0; c < tops.size(); c++) {
@@ -2453,7 +2531,7 @@ final class BoardRelief {
             }
         }
         float m = metres(1);
-        Geology geology = GEOLOGY[edge.upper.family()];
+        Geology geology = BoardRelief.geology.get(edge.upper.family());
         // Bank or rock: this step's own height, blending into the average of every step through each corner, so a
         // cliff that grows from two to three levels turns from earth to rock gradually and both walls agree there.
         float own = prominence(edge.drop), atA = cornerRock(edge.a, own), atB = cornerRock(edge.b, own);
