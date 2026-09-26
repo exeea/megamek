@@ -27,6 +27,10 @@ record UnitModelDescriptor(int schema, String kind, String family, String mesh, 
     static final int TRIANGLE_LIMIT = 1500;
     /** Equipment is reviewed separately: ideally under 100, always strictly under 150 triangles per module. */
     static final int EQUIPMENT_TRIANGLE_LIMIT = 149;
+    /**
+     * One battle armour suit. A squad is budgeted per suit, so six full suits may pass {@link #TRIANGLE_LIMIT}.
+     */
+    static final int SUIT_TRIANGLE_LIMIT = 330;
 
     UnitModelDescriptor {
         require(schema == 2, "Unsupported modular model schema: " + schema);
@@ -116,13 +120,34 @@ record UnitModelDescriptor(int schema, String kind, String family, String mesh, 
         }
         int triangles = triangleCount(data);
         require(triangles > 0, "Empty modular asset");
-        int limit = "equipment".equals(kind) ? EQUIPMENT_TRIANGLE_LIMIT : TRIANGLE_LIMIT;
+        int limit = triangleLimit(kind, family);
         require(triangles <= limit, kind + " asset exceeds triangle hard cap " + limit + ": " + triangles);
         for (var material : data.materials) {
             require(Set.of("paint", "detail", "bark").contains(material.id), "Unknown material role: " + material.id);
             require((material.textures == null) || material.textures.isEmpty(), "Textures are owned by unit appearance");
         }
         return triangles;
+    }
+
+    /** The hard cap for one asset: equipment modules and battle armour suits have budgets of their own. */
+    static int triangleLimit(String kind, String family) {
+        if ("equipment".equals(kind)) {
+            return EQUIPMENT_TRIANGLE_LIMIT;
+        }
+        boolean isBattleArmourSuit = "troop".equals(kind) && "battle-armor".equals(family);
+        return isBattleArmourSuit ? SUIT_TRIANGLE_LIMIT : TRIANGLE_LIMIT;
+    }
+
+    /**
+     * The hard cap for an assembled formation. Battle armour gets {@link #SUIT_TRIANGLE_LIMIT} per suit (never less
+     * than the ordinary cap), so a six-suit squad of detailed suits still draws; other formations keep
+     * {@link #TRIANGLE_LIMIT}.
+     *
+     * @param family  the formation's family, such as {@code battle-armor} or {@code infantry}
+     * @param members how many figures the formation shows
+     */
+    static int formationTriangleLimit(String family, int members) {
+        return "battle-armor".equals(family) ? Math.max(TRIANGLE_LIMIT, members * SUIT_TRIANGLE_LIMIT) : TRIANGLE_LIMIT;
     }
 
     /** Count repeated node references as rendered geometry, and unused mesh data as resident geometry. */

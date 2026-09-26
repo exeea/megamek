@@ -11,12 +11,14 @@ import java.util.Map;
 import java.util.Set;
 
 import com.badlogic.gdx.files.FileHandle;
+import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.loader.G3dModelLoader;
 import com.badlogic.gdx.graphics.g3d.model.Node;
+import com.badlogic.gdx.graphics.g3d.model.NodePart;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
@@ -208,7 +210,9 @@ final class GpuUnitModels implements Disposable {
                     case "battle-armor" -> BattleArmorVisual.parts(selection.state().structure(), value);
                     default -> throw new IllegalArgumentException("Unknown formation family");
                 };
-                return formation(parts, UnitFamilyScale.forFamily(value.getString("family")));
+                String family = value.getString("family");
+                return formation(parts, farSuits(value), UnitFamilyScale.forFamily(family),
+                      UnitModelDescriptor.formationTriangleLimit(family, parts.size()));
             }
             modelPath = descriptor.getParent().resolve(selectModel(value, selection.variant(), selection.figures()))
                   .normalize();
@@ -246,10 +250,23 @@ final class GpuUnitModels implements Disposable {
         }
     }
 
-    private GpuUnitModel formation(List<InfantryVisual.Part> parts, UnitFamilyScale familyScale) {
+    /** A formation descriptor's far suit, keyed by the trooper it stands in for; empty when it has none. */
+    private static Map<String, String> farSuits(JsonValue descriptor) {
+        String trooper = descriptor.getString("trooper", null);
+        String farTrooper = descriptor.getString("farTrooper", null);
+        return (trooper == null || farTrooper == null) ? Map.of() : Map.of(trooper, farTrooper);
+    }
+
+    /**
+     * @param farSuits simpler suits, keyed by the trooper asset they stand in for, attached to the same joints and
+     *                 hidden until {@link GpuUnitInstance} shows them for a squad small on screen
+     */
+    private GpuUnitModel formation(List<InfantryVisual.Part> parts, Map<String, String> farSuits,
+          UnitFamilyScale familyScale, int triangleLimit) {
         // This Model owns only the assembly tree. NodeParts borrow mesh buffers from the shared asset library.
         Model assembled = new Model();
         List<UnitRig> rigs = new java.util.ArrayList<>();
+        Set<Mesh> farMeshes = new HashSet<>();
         try {
             int bodyTriangles = 0;
             for (var part : parts) {
@@ -261,6 +278,10 @@ final class GpuUnitModels implements Disposable {
                     bodyTriangles += asset.triangles();
                 }
                 ModelInstance member = new ModelInstance(asset.model());
+                String farSuit = farSuits.get(part.asset());
+                if (farSuit != null) {
+                    attachFarSuit(member, farSuit, part.id(), farMeshes);
+                }
                 Node placement = new Node();
                 placement.id = part.id();
                 placement.translation.set(part.x(), part.y(), 0);
@@ -272,16 +293,52 @@ final class GpuUnitModels implements Disposable {
                 assembled.nodes.add(placement);
                 rigs.add(new UnitRig(asset.descriptor()).inside(part.id(), ""));
             }
-            if (bodyTriangles > UnitModelDescriptor.TRIANGLE_LIMIT) {
-                throw new IllegalArgumentException("Bare formation exceeds " + UnitModelDescriptor.TRIANGLE_LIMIT
+            if (bodyTriangles > triangleLimit) {
+                throw new IllegalArgumentException("Bare formation exceeds " + triangleLimit
                       + " triangles: " + bodyTriangles);
             }
             assembled.calculateTransforms();
             // Troops and transports are authored at canonical size in the Mek standard, like every other body.
-            return new GpuUnitModel(assembled, null, true, List.of(), null, rigs, familyScale);
+            return new GpuUnitModel(assembled, null, true, List.of(), null, rigs, familyScale)
+                  .farSuitMeshes(farMeshes);
         } catch (RuntimeException error) {
             assembled.dispose();
             throw error;
+        }
+    }
+
+    /**
+     * Adds a far suit's parts, switched off, to the matching joints of a full suit. Both suits are built on one rig,
+     * so the far parts ride every joint the full suit animates and only the drawn detail changes.
+     */
+    private void attachFarSuit(ModelInstance member, String farSuit, String partId, Set<Mesh> farMeshes) {
+        ModularAsset far = modular(farSuit);
+        if (far == null) {
+            LOGGER.warn("[FormationLod] {}: far suit {} did not load; this figure keeps its full suit", partId, farSuit);
+            return;
+        }
+        List<Node> farNodes = new java.util.ArrayList<>();
+        collectNodes(new ModelInstance(far.model()).nodes, farNodes);
+        for (Node farNode : farNodes) {
+            Node joint = member.getNode(farNode.id, true);
+            if (joint == null) {
+                LOGGER.warn("[FormationLod] {}: far suit {} has joint {}, which the full suit lacks; its parts are left out",
+                      partId, farSuit, farNode.id);
+                continue;
+            }
+            for (NodePart farPart : farNode.parts) {
+                NodePart hidden = farPart.copy();
+                hidden.enabled = false;
+                joint.parts.add(hidden);
+                farMeshes.add(hidden.meshPart.mesh);
+            }
+        }
+    }
+
+    private static void collectNodes(Iterable<Node> nodes, List<Node> into) {
+        for (Node node : nodes) {
+            into.add(node);
+            collectNodes(node.getChildren(), into);
         }
     }
 
