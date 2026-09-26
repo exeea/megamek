@@ -42,6 +42,20 @@ class UnitEquipmentAssemblyTest {
     }
 
     @Test
+    void armVentSpotsAreNeverTheAuthorsDefaultVents() {
+        // A variant with no slotted heat sinks keeps the author's torso vents; the arm's spot is not one of them.
+        JsonValue vents = new JsonReader().parse("""
+              [{"node": "LA#vent-rear-0", "location": "LA", "side": "rear", "authored": true},
+               {"node": "LT#vent-rear-1", "location": "LT", "side": "rear", "authored": true},
+               {"node": "RT#vent-rear-2", "location": "RT", "side": "rear", "authored": true}]""");
+        JsonValue descriptor = new JsonReader().parse("{}");
+        assertEquals(List.of("LT", "RT"), UnitEquipmentAssembly.ventLocations(descriptor, vents, "rear", Map.of()));
+        // With sinks slotted, the torso holding them takes the face's vents; the arm spot plays no part.
+        assertEquals(List.of("LT", "LT"),
+              UnitEquipmentAssembly.ventLocations(descriptor, vents, "rear", Map.of("LT", 2)));
+    }
+
+    @Test
     void rowsRunTheFaceWidthUnlessTheChassisSetsARowWidth() {
         assertEquals(5f, UnitEquipmentAssembly.rowWidth(new JsonReader().parse("{}"), 5f), 1e-6);
         assertEquals(3.4f, UnitEquipmentAssembly.rowWidth(new JsonReader().parse("{\"rowWidth\":3.4}"), 5f), 1e-6);
