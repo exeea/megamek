@@ -34,8 +34,10 @@
 package megamek.client.ui.dialogs.unitSelectorDialogs;
 
 import java.awt.BorderLayout;
+import java.awt.Component;
 import java.awt.ComponentOrientation;
 import java.awt.Dimension;
+import java.awt.FlowLayout;
 import java.awt.GridLayout;
 import java.awt.Image;
 import java.awt.event.MouseAdapter;
@@ -50,6 +52,7 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextPane;
+import javax.swing.JToggleButton;
 import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
 import javax.swing.event.HyperlinkEvent;
@@ -58,6 +61,8 @@ import javax.swing.text.SimpleAttributeSet;
 import javax.swing.text.html.HTML;
 import javax.swing.text.html.HTMLDocument;
 
+import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuUnitPortraits;
 import megamek.client.ui.entityreadout.EntityReadout;
 import megamek.client.ui.entityreadout.ReadoutSections;
 import megamek.client.ui.util.FluffImageHelper;
@@ -65,6 +70,7 @@ import megamek.client.ui.util.UIUtil;
 import megamek.client.ui.util.UIUtil.FixedXPanel;
 import megamek.client.ui.util.ViewFormatting;
 import megamek.common.Report;
+import megamek.common.annotations.Nullable;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.templates.TROView;
 import megamek.common.units.Entity;
@@ -80,6 +86,16 @@ public class EntityReadoutPanel extends JPanel {
     private final JTextPane readoutTextComponent = new JTextPane();
     private final JLabel fluffImageComponent = new JLabel();
     private final JScrollPane scrollPane = new JScrollPane(readoutTextComponent);
+
+    /** The image column: the switch between picture and model on top, and whichever of the two is chosen below. */
+    private final BorderLayout imageColumnLayout = new BorderLayout();
+    private final FixedXPanel imageColumn = new FixedXPanel(imageColumnLayout);
+    private final FixedXPanel fluffPanel = new FixedXPanel();
+    private final UnitModelViewPanel modelView = new UnitModelViewPanel();
+    private final JToggleButton modelToggle = new JToggleButton(Messages.getString("EntityReadoutPanel.modelToggle"));
+
+    /** Whether the model was last chosen over the picture; the next readout opens the same way, until MegaMek exits. */
+    private static boolean isModelPreferred;
 
     public static final int DEFAULT_WIDTH = 360;
 
@@ -147,17 +163,27 @@ public class EntityReadoutPanel extends JPanel {
         }
         textPanel.add(scrollPane);
 
-        var fluffPanel = new FixedXPanel();
         if (width != -1) {
             fluffPanel.setMinimumSize(new Dimension(width, height));
             fluffPanel.setPreferredSize(new Dimension(width, height));
         }
         fluffPanel.add(fluffImageComponent);
+        imageColumn.add(fluffPanel, BorderLayout.CENTER);
+        if (GpuUnitPortraits.isAvailable()) {
+            modelToggle.setSelected(isModelPreferred);
+            modelToggle.addActionListener(event -> {
+                isModelPreferred = modelToggle.isSelected();
+                showPictureOrModel();
+            });
+            JPanel toggleRow = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+            toggleRow.add(modelToggle);
+            imageColumn.add(toggleRow, BorderLayout.NORTH);
+        }
 
         JPanel p = new JPanel();
         p.setLayout(new BoxLayout(p, BoxLayout.LINE_AXIS));
         p.add(textPanel);
-        p.add(fluffPanel);
+        p.add(imageColumn);
         p.add(Box.createHorizontalGlue());
         setLayout(new BorderLayout());
         add(p);
@@ -227,11 +253,54 @@ public class EntityReadoutPanel extends JPanel {
         } else {
             fluffImageComponent.setIcon(null);
         }
+        updateModelView(entity);
+    }
+
+    /**
+     * Hands the unit to the model view and enables the model switch only if the model can be shown: the unit has a
+     * model, and this is the lobby or unit selection rather than a game in progress. The switch's tooltip says why
+     * when it is off.
+     *
+     * @param entity The unit, or {@code null} for none
+     */
+    private void updateModelView(@Nullable Entity entity) {
+        if (!GpuUnitPortraits.isAvailable()) {
+            return;
+        }
+        GpuUnitPortraits.Availability availability = modelView.showUnit(entity);
+        modelToggle.setEnabled(availability == GpuUnitPortraits.Availability.AVAILABLE);
+        modelToggle.setToolTipText(Messages.getString(switch (availability) {
+            case AVAILABLE -> "EntityReadoutPanel.modelToggle.toolTipText";
+            case IN_GAME -> "EntityReadoutPanel.modelToggle.lobbyOnly";
+            case BOARD_OPEN -> "EntityReadoutPanel.modelToggle.boardOpen";
+            case MODELS_DISABLED, NO_MODEL -> "EntityReadoutPanel.modelToggle.unavailable";
+        }));
+        showPictureOrModel();
+    }
+
+    /**
+     * Shows the model if it is chosen and the unit has one, the picture otherwise. The choice stays set for a unit
+     * without a model, so paging on to one that has a model shows it again. Only the shown view takes up room.
+     */
+    private void showPictureOrModel() {
+        boolean isShowingModel = modelToggle.isSelected() && modelToggle.isEnabled();
+        Component wanted = isShowingModel ? modelView : fluffPanel;
+        Component current = imageColumnLayout.getLayoutComponent(BorderLayout.CENTER);
+        if (current != wanted) {
+            if (current != null) {
+                imageColumn.remove(current);
+            }
+            imageColumn.add(wanted, BorderLayout.CENTER);
+            imageColumn.revalidate();
+            imageColumn.repaint();
+        }
+        modelView.setActive(isShowingModel);
     }
 
     public void reset() {
         readoutTextComponent.setText("");
         fluffImageComponent.setIcon(null);
+        updateModelView(null);
     }
 
     /** Forwards a mouse wheel scroll on the fluff image or free space to the TRO entry. */

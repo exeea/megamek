@@ -235,7 +235,17 @@ public final class GpuBoardWindow {
         start(new GpuBoardWindow(gui, view, panel));
     }
 
+    /**
+     * @return {@code true} from the moment a board window starts opening until it has fully closed. The readout's
+     *       model view is unavailable meanwhile, as the board owns the only libGDX application.
+     */
+    static boolean sessionActive() {
+        return active != null;
+    }
+
     private static void start(GpuBoardWindow window) {
+        // libGDX runs one application at a time: the readout's hidden model window must be gone first.
+        GpuUnitPortraits.releaseForBoard();
         try {
             active = window;
             ClientGUI gui = window.gui;
