@@ -90,6 +90,7 @@ class GpuBattleView extends ApplicationAdapter {
     private final BoardSurface.Cache groundSurfaces = new BoardSurface.Cache();
     private final Map<Integer, UnitMotion> motions = playback.motions;
     private final GpuAttackEffects attackEffects = new GpuAttackEffects();
+    private final GpuWaterImpacts waterImpacts = new GpuWaterImpacts();
     private final Map<BoardScene.Pixels, GpuUnitModel> spriteModels = new HashMap<>();
     private final GpuUnitModels unitModels = GpuUnitModels.ENABLED ? new GpuUnitModels() : null;
     private final UnitDamageDisplay damageDisplay = new UnitDamageDisplay();
@@ -305,6 +306,7 @@ class GpuBattleView extends ApplicationAdapter {
             animators.clear();
             groundSurfaces.clear();
             jumpJets.clear();
+            waterImpacts.clear();
             unitPicking.clear();
             hovered = null;
             boardInput.reset();
@@ -330,13 +332,14 @@ class GpuBattleView extends ApplicationAdapter {
         }
         boardGeneration = frame.boardGeneration();
         ui.setPlaybackPaused(playback.paused());
-        terrain.update(scene);
+        terrain.update(scene, boardCamera.camera);
+        boolean detailChanged = terrain.refine(boardCamera.camera);
         if (changedTiles || cameraTerrainRevision != BoardGeometry.revision()) {
             boardCamera.constrainFlight();
             cameraTerrainRevision = BoardGeometry.revision();
         }
         fireControl.update(scene, HIDE_TARGET_ARROWS_DURING_ATTACKS && !playback.attacks().isEmpty());
-        tactical.update(scene);
+        tactical.update(scene, detailChanged);
         fieldOfView.update(scene.fieldOfView());
         fieldOfView.configure(ui.fovStyle(), ui.fovDarkness(), ui.sensorStyle(), ui.sensorDarkness());
         atmosphere.configure(ui.atmosphere());
@@ -442,6 +445,7 @@ class GpuBattleView extends ApplicationAdapter {
         attackEffects.setSmokeLight(smokeLight);
         if (!unitIcons.active()) { jumpJets.render(boardCamera.camera); }
         attackEffects.render(boardCamera.camera);
+        if (!unitIcons.active()) { waterImpacts.render(boardCamera.camera, scene, motions, unitInstances, smokeLight); }
         renderStage("atmosphere composite");
         atmosphere.end(boardCamera.camera, terrain, scene, ui.bottomPixels(), fieldOfView);
         renderStage("weather particles");
@@ -1773,6 +1777,7 @@ class GpuBattleView extends ApplicationAdapter {
         jumpJets.dispose();
         unitIcons.dispose();
         attackEffects.dispose();
+        waterImpacts.dispose();
         if (unitBatch != null) {
             unitBatch.dispose();
         }

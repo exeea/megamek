@@ -18,7 +18,7 @@ final class BoardRiver {
     private int column = Integer.MIN_VALUE, evenRow, oddRow;
     private final List<Sample> window = new ArrayList<>(25);
 
-    private record Sample(float x, float y, boolean junction, List<Channel> channels, List<float[]> lakes) { }
+    private record Sample(float x, float y, boolean rounded, List<Channel> channels, List<float[]> lakes) { }
 
     /** Endpoint properties belong to a whole channel, not each of its twelve line segments. */
     private final class Channel {
@@ -101,11 +101,11 @@ final class BoardRiver {
         float cell = tuning.wanderCell() * BoardGeometry.HEX_SCALE;
         float wander = .3f * tuning.shoreWander() * BoardRelief.gradient(x / cell + 3.1f, y / cell - 1.7f);
         window(x, y);
-        // Round the union of whole branches near a confluence. Blending individual spline samples would inflate
-        // every channel, and blending away from junctions would add a regular bulge at every hex centre.
+        // Round whole branches near confluences and tight bends, where their inner banks otherwise meet in a cusp.
+        // Blending individual spline samples or straight reaches would inflate every channel.
         float round = 0;
         for (Sample sample : window) {
-            if (!sample.junction()) { continue; }
+            if (!sample.rounded()) { continue; }
             float distance = length(x - sample.x(), y - sample.y());
             round = Math.max(round, BoardRelief.smooth(1 - distance / (.8f * BoardGeometry.WIDTH)));
         }
@@ -161,8 +161,10 @@ final class BoardRiver {
             lakes.add(new float[] { BoardGeometry.centerX(b), BoardGeometry.centerY(b),
                   BoardGeometry.centerX(c), BoardGeometry.centerY(c) });
         }
+        boolean bend = Integer.bitCount(mask) == 2 && Integer.bitCount(starts) == 2
+              && (mask & (mask << 3 | mask >> 3) & 63) == 0;
         return new Sample(BoardGeometry.centerX(coords), BoardGeometry.centerY(coords),
-              Integer.bitCount(mask) >= 3 && Integer.bitCount(starts) >= 2, channels(coords), lakes);
+              bend || Integer.bitCount(mask) >= 3 && Integer.bitCount(starts) >= 2, channels(coords), lakes);
     }
 
     /** Board coordinates are finite floats; double products cannot overflow or underflow like float products. */

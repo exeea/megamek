@@ -383,17 +383,17 @@ public class LRMHandler extends MissileWeaponHandler {
         if (allShotsHit()) {
             // We want buildings and large craft to be able to affect this number with AMS
             // treat as a Streak launcher (cluster roll 11) to make this happen
-            missilesHit = Compute.missilesHit(rackSize,
+            missilesHit = clusterMissilesHit(rackSize,
                   nMissilesModifier, weapon.isHotLoaded(), true,
                   isAdvancedAMS());
         } else {
             if (attackingEntity instanceof BattleArmor) {
-                missilesHit = Compute.missilesHit(rackSize
+                missilesHit = clusterMissilesHit(rackSize
                             * ((BattleArmor) attackingEntity).getShootingStrength(),
                       nMissilesModifier, weapon.isHotLoaded(), false,
                       isAdvancedAMS());
             } else {
-                missilesHit = Compute.missilesHit(rackSize,
+                missilesHit = clusterMissilesHit(rackSize,
                       nMissilesModifier, weapon.isHotLoaded(), false,
                       isAdvancedAMS());
             }

@@ -9,10 +9,8 @@ import java.util.Map;
 import java.util.TreeSet;
 
 import com.badlogic.gdx.math.EarClippingTriangulator;
-import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.board.Coords;
 
 /** The actual topography of one hex. Rendering, road continuity, banks and picking share it. */
@@ -328,6 +326,7 @@ final class BoardSurface {
     final List<Side> waterfalls = new ArrayList<>();
     final int ramps;
     final BoardRelief relief;
+    private final TerrainLod lod;
     private final List<Face> edgeTopography = new ArrayList<>();
     private List<Face> wallFaces;
     private float wallFloor = Float.NaN;
@@ -371,10 +370,15 @@ final class BoardSurface {
     }
 
     BoardSurface(BoardScene scene, BoardScene.Tile tile) {
-        this(scene, tile, true);
+        this(scene, tile, TerrainLod.FULL);
     }
 
-    private BoardSurface(BoardScene scene, BoardScene.Tile tile, boolean detailed) {
+    BoardSurface(BoardScene scene, BoardScene.Tile tile, TerrainLod lod) {
+        this(scene, tile, true, lod);
+    }
+
+    private BoardSurface(BoardScene scene, BoardScene.Tile tile, boolean detailed, TerrainLod lod) {
+        this.lod = lod;
         this.scene = scene;
         this.tile = tile;
         center = BoardGeometry.center(tile.coords(), tile.elevation());
@@ -383,7 +387,7 @@ final class BoardSurface {
         }
         ramps = ramps(scene, tile);
         // The relief first: a water hex lays out its waterline round the steps the relief puts beside it.
-        relief = new BoardRelief(scene, tile, ramps);
+        relief = new BoardRelief(scene, tile, ramps, lod);
         if (tile.liquid().present()) {
             river(scene);
         } else if (ramps != 0) {
@@ -423,6 +427,7 @@ final class BoardSurface {
             adjusted = true;
             final int cliffEdge = edge;
             List<Face> wall = faces.stream().filter(f -> f.finish() == Finish.WALL && f.landEdge() == cliffEdge).toList();
+            Map<Float, List<ContactSegment>> sections = new LinkedHashMap<>();
             Vector3 toward = BoardGeometry.center(neighbor(scene, edge).coords(), 0)
                   .sub(BoardGeometry.center(tile.coords(), 0)).nor();
             // Keep the shared mouth endpoints and the bank joins exactly where the neighbouring hex puts them.
@@ -432,21 +437,11 @@ final class BoardSurface {
                 if (point.z >= base) {
                     point.set(relief.wetCliffContact(edge, i / (float) SHORE_SEGMENTS, point.z));
                 } else {
-                    Ray ray = new Ray(new Vector3(point).mulAdd(toward, -BoardGeometry.WIDTH), toward);
-                    Vector3 contact = new Vector3(point), hit = new Vector3();
-                    float nearest = Float.POSITIVE_INFINITY;
-                    for (Face face : wall) {
-                        if (Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit)
-                              && hit.dst2(point) < nearest) {
-                            nearest = hit.dst2(point);
-                            contact.set(hit);
-                        }
-                    }
-                    point.set(contact);
+                    point.set(contactPoint(point, toward, sections.computeIfAbsent(height, z -> contactSection(wall, z))));
                 }
                 point.z = height;
             }
-            refineCliffContact(edge, wall, base);
+            refineCliffContact(edge, wall, base, sections);
         }
         if (adjusted && !gradedWater) {
             // A flat pool's old ears can cross its widened contour at a cliff/bank corner.
@@ -492,9 +487,8 @@ final class BoardSurface {
     }
 
     /** Preserve the bends across a wall quad's diagonal, especially where its bed rises into a dry bank. */
-    private void refineCliffContact(int edge, List<Face> wall, float base) {
+    private void refineCliffContact(int edge, List<Face> wall, float base, Map<Float, List<ContactSegment>> sections) {
         List<Vector3> points = waterBoundary(edge), refined = new ArrayList<>();
-        Map<Float, List<ContactSegment>> sections = new LinkedHashMap<>();
         for (int i = 0; i < points.size() - 1; i++) {
             Vector3 a = points.get(i), b = points.get(i + 1);
             List<Vector3> path = Math.abs(a.z - b.z) < .0001f && a.z < base
@@ -518,6 +512,25 @@ final class BoardSurface {
     }
 
     private record ContactSegment(Vector3 a, Vector3 b) { }
+
+    /** Nearest wall contact along a horizontal line; all scratch data belongs to this surface's build. */
+    private static Vector3 contactPoint(Vector3 point, Vector3 toward, List<ContactSegment> section) {
+        Vector3 contact = new Vector3(point);
+        float nearest = Float.POSITIVE_INFINITY;
+        for (ContactSegment segment : section) {
+            Vector3 a = segment.a(), b = segment.b();
+            float cross = toward.x * (b.y - a.y) - toward.y * (b.x - a.x);
+            if (Math.abs(cross) < .000001f) { continue; }
+            float t = ((a.x - point.x) * toward.y - (a.y - point.y) * toward.x) / cross;
+            if (t < 0 || t > 1) { continue; }
+            Vector3 hit = new Vector3(a).lerp(b, t);
+            if (hit.dst2(point) < nearest) {
+                nearest = hit.dst2(point);
+                contact.set(hit);
+            }
+        }
+        return contact;
+    }
 
     /** Horizontal sections through the actual submerged wall triangles, without assuming planar quads. */
     private static List<ContactSegment> contactSection(List<Face> wall, float z) {
@@ -1024,8 +1037,8 @@ final class BoardSurface {
             ring[i] = new Vector3(outer[i].x, outer[i].y, outer[i].z - bed);
         }
         bedOutline = ring;
-        int hexes = scene.width() * scene.height();
-        int rings = hexes <= BoardRelief.tuning().fullDetailHexes() ? 4 : hexes <= BoardRelief.tuning().mediumDetailHexes() ? 3 : 2;
+        // The optical-depth field samples this bed across chunk boundaries, independently of their render LoDs.
+        int rings = 4;
         for (int k = 1; k <= rings; k++) {
             float x = k / (float) rings, scale = 1 - tuning.plateau() * x;
             // Falling from the rim with some slope, steepest halfway, and easing into the plateau.
@@ -1175,7 +1188,7 @@ final class BoardSurface {
         BoardScene.Tile other = neighbor(scene, fall.edge());
         if (other == null) { return fall.lowA(); }
         if (receivingWater[fall.edge()] == null) {
-            receivingWater[fall.edge()] = new BoardSurface(scene, other, false);
+            receivingWater[fall.edge()] = new BoardSurface(scene, other, false, lod);
         }
         return receivingWater[fall.edge()].waterHeight(x, y);
     }
@@ -1279,7 +1292,8 @@ final class BoardSurface {
         for (int k = 0; k < 6; k++) {
             int before = (k + 5) % 6, next = (k + 1) % 6;
             boolean in = inset[before] == 0, out = inset[k] == 0;
-            if (relief.wetCliffCorner(k)) {
+            if (relief.wetCliffCorner(k) || !in && !out && (relief.wetCliff(before) || relief.wetCliff(k))) {
+                // A beach ending against a cliff tapers to the shared rock seam, not to a freestanding sand shelf.
                 anchors[k] = relief.seam(k, k, 0);
             } else if (BoardConcrete.concreteBank(scene, tile, before) || BoardConcrete.concreteBank(scene, tile, k)) {
                 // A poured edge meets the water directly. No beach setback, rounded corner or natural shore field.
@@ -1340,8 +1354,9 @@ final class BoardSurface {
         Vector3 rawFrom = along(outlinePoint(start), plunge), rawTo = along(outlinePoint(start + turn), plunge);
         float fromOffset = radius(from) - radius(rawFrom), toOffset = radius(to) - radius(rawTo);
         float blend = BoardRelief.smooth((BoardRelief.tuning().riverWidth() - .25f) / .5f);
-        // A plunge pool must meet its fixed inlet continuously, even when the stream is narrow.
-        float fromBlend = plunge[(edge + 5) % 6] ? 1 : blend, toBlend = plunge[(edge + 1) % 6] ? 1 : blend;
+        // Fixed inlets and cliff joins must stay continuous even when the stream is narrow.
+        float fromBlend = plunge[(edge + 5) % 6] || relief.wetCliff(edge + 5) ? 1 : blend;
+        float toBlend = plunge[(edge + 1) % 6] || relief.wetCliff(edge + 1) ? 1 : blend;
         Vector3 fromNormal = bankNormal(from, (edge + 5) % 6), toNormal = bankNormal(to, (edge + 1) % 6);
         for (int i = 1; i <= fine; i++) {
             if (i < fine) {
@@ -1702,7 +1717,7 @@ final class BoardSurface {
                 continue; // Beds of one level share their mouth's profile and their banks' top: nothing stands between.
             }
             BoardSurface adjacent = neighbor == null ? null : neighbors.get(neighbor.coords());
-            if (adjacent == null && neighbor != null) { adjacent = new BoardSurface(scene, neighbor, false); }
+            if (adjacent == null && neighbor != null) { adjacent = new BoardSurface(scene, neighbor, false, lod); }
             TreeSet<Float> cuts = new TreeSet<>(List.of(0f, 1f));
             cuts(a, b, cuts);
             if (adjacent != null) {

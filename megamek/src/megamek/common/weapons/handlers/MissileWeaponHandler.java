@@ -266,7 +266,7 @@ public class MissileWeaponHandler extends AmmoWeaponHandler {
         if (allShotsHit()) {
             // We want buildings and large craft to be able to affect this number with AMS
             // treat as a Streak launcher (cluster roll 11) to make this happen
-            missilesHit = Compute.missilesHit(weaponType.getRackSize(), nMissilesModifier,
+            missilesHit = clusterMissilesHit(weaponType.getRackSize(), nMissilesModifier,
                   weapon.isHotLoaded(), true, isAdvancedAMS());
         } else {
             if (attackingEntity instanceof BattleArmor) {
@@ -275,10 +275,10 @@ public class MissileWeaponHandler extends AmmoWeaponHandler {
                       && !weapon.isSquadSupportWeapon()) {
                     shootingStrength = ((BattleArmor) attackingEntity).getShootingStrength();
                 }
-                missilesHit = Compute.missilesHit(weaponType.getRackSize() * shootingStrength,
+                missilesHit = clusterMissilesHit(weaponType.getRackSize() * shootingStrength,
                       nMissilesModifier, weapon.isHotLoaded(), false, isAdvancedAMS());
             } else {
-                missilesHit = Compute.missilesHit(weaponType.getRackSize(), nMissilesModifier,
+                missilesHit = clusterMissilesHit(weaponType.getRackSize(), nMissilesModifier,
                       weapon.isHotLoaded(), false, isAdvancedAMS());
             }
         }
@@ -469,6 +469,12 @@ public class MissileWeaponHandler extends AmmoWeaponHandler {
     // Aero sanity reduces effectiveness of AMS bays with default cluster mods.
     // This attempts to account for that, but might need some balancing...
     protected double getAeroSanityAMSHitsMod() {
+        double modifier = aeroSanityAMSHitsMod();
+        animationDefenseModifier -= (int) Math.floor(modifier);
+        return modifier;
+    }
+
+    private double aeroSanityAMSHitsMod() {
         if (getParentBayHandler() != null) {
             WeaponHandler bayHandler = getParentBayHandler();
             double counterAVMod = bayHandler.getCounterAV() / (double) bayHandler.weapon.getBayWeapons().size();
@@ -494,6 +500,7 @@ public class MissileWeaponHandler extends AmmoWeaponHandler {
     }
 
     protected int getAMSHitsMod(Vector<Report> vPhaseReport) {
+        animationDefenseModifier = 0;
         if ((target == null)
               || (target.getTargetType() != Targetable.TYPE_ENTITY)
               || CounterAV > 0) {
@@ -656,7 +663,21 @@ public class MissileWeaponHandler extends AmmoWeaponHandler {
                 vPhaseReport.add(r);
             }
         }
-        return apdsMod + amsMod;
+        return recordDefenseModifier(apdsMod + amsMod);
+    }
+
+    private transient int animationDefenseModifier;
+
+    protected final int recordDefenseModifier(int modifier) {
+        animationDefenseModifier = modifier;
+        return modifier;
+    }
+
+    /** The normal resolver owns the dice and table; only observe the difference caused by counter-fire. */
+    protected final int clusterMissilesHit(int missiles, int modifier, boolean hotLoaded, boolean streak, boolean advanced) {
+        return animationDefenseModifier == 0 ? Compute.missilesHit(missiles, modifier, hotLoaded, streak, advanced)
+              : Compute.missilesHit(missiles, modifier, hotLoaded, streak, advanced,
+                    animationDefenseModifier, this::recordMissileInterceptions);
     }
 
     @Override

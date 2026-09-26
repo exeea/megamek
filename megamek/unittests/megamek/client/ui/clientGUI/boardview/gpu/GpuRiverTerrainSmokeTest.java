@@ -206,7 +206,7 @@ class GpuRiverTerrainSmokeTest {
         var t = BoardRelief.tuning();
         BoardRelief.tune(new BoardRelief.Tuning(t.shoreShift(), t.shoreRoom(), t.shoreReach(), t.shoreNarrow(),
               t.shoreHard(), t.shorePool(), t.shoreIsle(), t.shoreBlend(), t.shoreWander(), t.wanderCell(),
-              t.shoreSpread(), t.landKeep(), t.shoreLip(), t.transition(), t.fullDetailHexes(), t.mediumDetailHexes(), width,
+              t.shoreSpread(), t.landKeep(), t.shoreLip(), t.transition(), width,
               t.cliffsIntoWater()));
     }
 

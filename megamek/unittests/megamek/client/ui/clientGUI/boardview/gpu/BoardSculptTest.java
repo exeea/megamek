@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
@@ -126,26 +127,23 @@ class BoardSculptTest {
 
     @ParameterizedTest(name = "transitions {0}")
     @ValueSource(booleans = { false, true })
-    void reducedDetailOfLargeBoardsStaysWatertight(boolean transitions) {
-        withTransitions(transitions, BoardSculptTest::reducedDetailOfLargeBoardsStaysWatertightChecks);
+    void reducedAndMixedDetailStaysWatertight(boolean transitions) {
+        withTransitions(transitions, BoardSculptTest::reducedAndMixedDetailStaysWatertightChecks);
     }
 
-    private static void reducedDetailOfLargeBoardsStaysWatertightChecks() {
-        BoardScene small = scene(DRY, BoardScene.Surface.SAND);
-        int full = 0;
-        for (BoardScene.Tile tile : small.tiles()) {
-            BoardSurface surface = new BoardSurface(small, tile);
-            full += surface.faces.size() + surface.walls(small, BoardGeometry.floor(small)).size();
+    private static void reducedAndMixedDetailStaysWatertightChecks() {
+        int full = reducedDetailStaysWatertight(16, ignored -> TerrainLod.FULL);
+        for (TerrainLod lod : List.of(TerrainLod.MEDIUM, TerrainLod.COARSE, TerrainLod.DISTANT)) {
+            int reduced = reducedDetailStaysWatertight(16, ignored -> lod);
+            assertTrue(reduced < full * .8f, lod + " must reduce triangles: full " + full + ", reduced " + reduced);
+            reducedDetailStaysWatertight(16, at -> TerrainLod.sameChunk(at, new Coords(0, 0)) ? lod : TerrainLod.FULL);
         }
-        int medium = reducedDetailStaysWatertight((int) Math.ceil(Math.sqrt(BoardRelief.FULL_DETAIL_HEXES + 1.0)), true);
-        int coarse = reducedDetailStaysWatertight((int) Math.ceil(Math.sqrt(BoardRelief.MEDIUM_DETAIL_HEXES + 1.0)), false);
-        // The reduced boards also build one more ring of flat hexes than the full-detail layout.
-        assertTrue(medium < full * .8f && coarse < full * .3f, "Triangles: full " + full + ", medium " + medium
-              + ", coarse " + coarse);
+        assertEquals(full, reducedDetailStaysWatertight(200, ignored -> TerrainLod.FULL),
+              "The same terrain and detail must not change when the board gets larger");
     }
 
-    private static int reducedDetailStaysWatertight(int size, boolean rocks) {
-        // The dry layout in the corner of a board just over a detail limit; only its hexes and one ring are built,
+    private static int reducedDetailStaysWatertight(int size, Function<Coords, TerrainLod> detail) {
+        // The dry layout in the corner of a board; only its hexes and one ring are built,
         // so the open edges allowed are exactly the straight borders towards the hexes left out.
         int width = DRY[0].length() + 1, height = DRY.length + 1;
         List<BoardScene.Tile> tiles = new ArrayList<>();
@@ -172,13 +170,12 @@ class BoardSculptTest {
                               BoardGeometry.corner(tile.coords(), 0, edge + 1) });
                     }
                 }
-                BoardSurface surface = new BoardSurface(scene, tile);
+                BoardSurface surface = new BoardSurface(scene, tile, detail.apply(tile.coords()));
                 List<BoardSurface.Face> faces = new ArrayList<>(surface.faces);
                 faces.addAll(surface.walls(scene, floor));
                 for (BoardSurface.Face face : faces) {
                     triangles++;
                     if (face.finish() == BoardSurface.Finish.OUTCROP) {
-                        assertTrue(rocks, "Very large boards leave out the rock kit");
                         continue;
                     }
                     Vector3[] p = { face.a(), face.b(), face.c() };

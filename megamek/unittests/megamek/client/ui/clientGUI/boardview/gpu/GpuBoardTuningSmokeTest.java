@@ -266,6 +266,8 @@ class GpuBoardTuningSmokeTest {
         } finally {
             BoardConcrete.tune(BoardConcrete.DEFAULT_MODE);
             BoardRelief.tune(BoardRelief.DEFAULTS);
+            TerrainLod.tune(TerrainLod.DEFAULTS);
+            TerrainLod.setEnabled(TerrainLod.DEFAULT_ENABLED);
             BoardSurface.tune(BoardSurface.DEFAULTS);
             BoardRelief.tuneGeology(BoardRelief.defaultGeology());
             stage.dispose();
@@ -279,6 +281,19 @@ class GpuBoardTuningSmokeTest {
         assertTrue(scroll.isVisible());
         assertFalse(tuning.panel().findActor("tuning-general-scroll").isVisible());
         assertFalse(tuning.panel().findActor("tuning-scroll").isVisible());
+        CheckBox terrainLod = tuning.panel().findActor("tuning-terrain-lod");
+        assertTrue(terrainLod.isChecked(), "Terrain LoD is on by default");
+        Slider fullDetail = tuning.panel().findActor("Full detail at (px)");
+        Slider mediumDetail = tuning.panel().findActor("Medium detail at (px)");
+        assertFalse(fullDetail.isDisabled());
+        assertFalse(mediumDetail.isDisabled());
+        int lodRevision = BoardGeometry.terrainRevision();
+        GpuBoardTestUi.click("tuning-terrain-lod");
+        assertFalse(TerrainLod.enabled());
+        assertTrue(fullDetail.isDisabled(), "LoD thresholds have no effect while full detail is forced");
+        assertTrue(mediumDetail.isDisabled());
+        assertEquals(TerrainLod.FULL, TerrainLod.select(1, TerrainLod.DISTANT));
+        assertEquals(lodRevision, BoardGeometry.terrainRevision(), "The checkbox must not trigger a whole-board rebuild");
         int revision = BoardGeometry.revision();
         SelectBox<String> concrete = tuning.panel().findActor("tuning-concrete-shapes");
         assertEquals(3, concrete.getItems().size);
@@ -346,6 +361,11 @@ class GpuBoardTuningSmokeTest {
         assertEquals(position, scroll.getScrollY());
         GpuBoardTestUi.click("tuning-defaults");
         assertEquals(BoardRelief.DEFAULTS, BoardRelief.tuning());
+        assertTrue(TerrainLod.enabled());
+        assertTrue(terrainLod.isChecked(), "Defaults restore the terrain LoD checkbox");
+        assertFalse(fullDetail.isDisabled());
+        assertFalse(mediumDetail.isDisabled());
+        assertEquals(TerrainLod.DEFAULTS, TerrainLod.tuning());
         assertEquals(BoardRelief.DEFAULT_CLIFFS_INTO_WATER, wetCliffs.isChecked());
         assertEquals(BoardSurface.DEFAULTS, BoardSurface.tuning());
         assertEquals(BoardConcrete.DEFAULT_MODE, BoardConcrete.mode());

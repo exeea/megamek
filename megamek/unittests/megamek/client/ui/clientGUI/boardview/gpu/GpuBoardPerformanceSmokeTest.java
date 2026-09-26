@@ -3,11 +3,15 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.File;
+import java.lang.reflect.Proxy;
 import java.nio.file.Files;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -21,10 +25,14 @@ import javax.swing.Timer;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Input;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
 import com.badlogic.gdx.utils.ScreenUtils;
+import jdk.jfr.Event;
+import jdk.jfr.Name;
+import jdk.jfr.StackTrace;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.common.Hex;
@@ -224,7 +232,11 @@ class GpuBoardPerformanceSmokeTest {
         }
         int scenarioFrames = warmupFrames + sampleFrames;
         AtomicReference<Throwable> failure = new AtomicReference<>();
+        boolean previousLod = TerrainLod.enabled();
+        TerrainLod.setEnabled(Boolean.parseBoolean(System.getProperty("megamek.gpu.performanceTerrainLod", "true")));
+        phase("capture");
         try (GpuBoardFixture fixture = GpuBoardFixture.create(board(size))) {
+            if (Boolean.getBoolean("megamek.gpu.performanceFrozenCapture")) { stopTimer(fixture); }
             var config = GpuBoardWindow.configuration(false);
             config.setWindowedMode(1280, 900);
             config.useVsync(false);
@@ -233,6 +245,9 @@ class GpuBoardPerformanceSmokeTest {
                 int frame;
                 GpuStageTimings timings;
                 GLProfiler profiler;
+                GL20 rawGl20;
+                Input rawInput;
+                Input fixedInput;
                 GpuDrawCallAudit drawAudit;
                 String profiledStage;
                 final StringBuilder draws = new StringBuilder();
@@ -242,13 +257,34 @@ class GpuBoardPerformanceSmokeTest {
                 final double[] intervals = new double[sampleFrames - 1];
                 long previousFrameStart;
                 boolean measuring;
+                long detailStarted;
+                int detailFrames;
+                double detailSubmissionMaximum;
                 @Override
                 boolean preparePlaybackCamera(UnitPlayback state, BoardScene scene) { return true; }
 
                 @Override
                 public void create() {
+                    phase("open");
                     super.create();
+                    rawInput = Gdx.input;
+                    if (Boolean.getBoolean("megamek.gpu.performanceFrozenCapture")) {
+                        // Preserve hover picking under a fixed cursor without warping the user's desktop pointer.
+                        rawInput.setInputProcessor(null);
+                        fixedInput = (Input) Proxy.newProxyInstance(Input.class.getClassLoader(), new Class<?>[] { Input.class },
+                              (proxy, method, args) -> switch (method.getName()) {
+                                  case "getX" -> Gdx.graphics.getWidth() / 2;
+                                  case "getY" -> Gdx.graphics.getHeight() / 2;
+                                  case "isKeyPressed", "isKeyJustPressed", "isButtonPressed", "isButtonJustPressed",
+                                        "isTouched", "justTouched" -> false;
+                                  default -> method.invoke(rawInput, args);
+                              });
+                    }
+                    // Constructing the tuning UI restores defaults. Apply the benchmark choice after that reset,
+                    // before the first frame builds any terrain.
+                    TerrainLod.setEnabled(Boolean.parseBoolean(System.getProperty("megamek.gpu.performanceTerrainLod", "true")));
                     timings = new GpuStageTimings();
+                    rawGl20 = Gdx.graphics.getGL20();
                     profiler = new GLProfiler(Gdx.graphics);
                     boardCamera.animateOnSelectionChange = false;
                     boardCamera.animateCombatPlayback = false;
@@ -256,6 +292,8 @@ class GpuBoardPerformanceSmokeTest {
                     System.out.printf("PERF full-view size=%d renderer=%s%n", size, Gdx.gl.glGetString(GL20.GL_RENDERER));
                     System.out.printf("PERF full-view warmup=%d samples=%d synchronization=%s%n",
                           warmupFrames, sampleFrames, noFinish ? "none" : "glFinish");
+                    System.out.printf("PERF terrainLoD=%s frozenCapture=%s%n", TerrainLod.enabled(),
+                          Boolean.getBoolean("megamek.gpu.performanceFrozenCapture"));
                 }
 
                 @Override
@@ -282,8 +320,9 @@ class GpuBoardPerformanceSmokeTest {
                 public void render() {
                     long frameStart = System.nanoTime();
                     try {
+                        if (fixedInput != null) { Gdx.input = fixedInput; }
                         int phase = frame % scenarioFrames;
-                        if (phase == 0 && frame > 0) {
+                        if (phase == 0 && frame > 0 && detailFrames == 0) {
                             // Pending timestamp queries belong only to the scenario that issued them.
                             timings.close();
                             timings = new GpuStageTimings();
@@ -302,6 +341,12 @@ class GpuBoardPerformanceSmokeTest {
                         }
                         String scenario = frame < scenarioFrames ? "overview"
                               : frame < 2 * scenarioFrames ? "close" : "moving";
+                        if (phase == 0 && detailFrames == 0) {
+                            phase(frame == 0 ? "terrain-build" : scenario + "-warmup");
+                            detailStarted = System.nanoTime();
+                            detailSubmissionMaximum = 0;
+                        }
+                        if (phase == warmupFrames) { phase(scenario + "-sample"); }
                         measuring = phase >= warmupFrames;
                         if (phase > warmupFrames) {
                             intervals[phase - warmupFrames - 1] = (frameStart - previousFrameStart) / 1e6;
@@ -314,7 +359,10 @@ class GpuBoardPerformanceSmokeTest {
                             }
                             profiler.enable();
                         }
-                        if (measuring) { timings.beginFrame(); }
+                        if (measuring) {
+                            assertSame(rawGl20, Gdx.gl20, "Draw counting must not leave error-checking wrappers in timed frames");
+                            timings.beginFrame();
+                        }
                         long start = System.nanoTime();
                         super.render();
                         if (measuring) { timings.stage(null); }
@@ -322,7 +370,7 @@ class GpuBoardPerformanceSmokeTest {
                         if (!noFinish) { Gdx.gl.glFinish(); }
                         if (phase == warmupFrames - 1) {
                             renderStage(null);
-                            profiler.disable();
+                            GpuStageTimings.stopCounting(profiler, rawGl20);
                             System.out.printf("PERF full-%s draw counts%n stage,draws,vertices,shaderSwitches,textureBindings,glCalls%n%s",
                                   scenario, draws);
                             if (drawAudit != null) {
@@ -331,12 +379,31 @@ class GpuBoardPerformanceSmokeTest {
                                 drawAudit = null;
                             }
                         }
-                        if (frame == 0) { report("full-view-open", start); }
+                        if (frame == 0 && detailFrames == 0) {
+                            report("full-view-open", start);
+                            phase("overview-warmup");
+                        }
+                        if (frame > 0 && phase < warmupFrames - 1) {
+                            detailSubmissionMaximum = Math.max(detailSubmissionMaximum, (submitted - start) / 1e6);
+                        }
+                        // Camera changes may queue several meshes. Measure steady frames only after they settle;
+                        // the moving scenario intentionally includes refinement during panning.
+                        if (phase < warmupFrames - 1 && !scenario.equals("moving") && detailPending(this)) {
+                            detailFrames++;
+                            assertTrue(System.nanoTime() - detailStarted < 180_000_000_000L, "Visible detail must settle");
+                            return;
+                        }
+                        if (detailFrames > 0) {
+                            System.out.printf("PERF full-%s detail-settle=%.3f ms frames=%d maxSubmission=%.3f ms%n", scenario,
+                                  (System.nanoTime() - detailStarted) / 1e6, detailFrames, detailSubmissionMaximum);
+                            detailFrames = 0;
+                        }
                         if (measuring) {
                             samples[phase - warmupFrames] = (System.nanoTime() - start) / 1e6;
                             submissions[phase - warmupFrames] = (submitted - start) / 1e6;
                         }
                         if (phase == scenarioFrames - 1) {
+                            phase(scenario + "-report");
                             Arrays.sort(samples);
                             Arrays.sort(submissions);
                             Arrays.sort(intervals);
@@ -356,25 +423,73 @@ class GpuBoardPerformanceSmokeTest {
                             StringBuilder report = new StringBuilder();
                             timings.appendReport(report, scenario);
                             System.out.print(report);
+                            memory(this, scenario);
                         }
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
-                        if (++frame == 3 * scenarioFrames) { Gdx.app.exit(); }
+                        if (++frame == 3 * scenarioFrames) { phase("done"); Gdx.app.exit(); }
                     } catch (Throwable error) {
                         failure.set(error);
                         Gdx.app.exit();
+                    } finally {
+                        Gdx.input = rawInput;
                     }
                 }
 
                 @Override
                 public void dispose() {
                     if (drawAudit != null) { drawAudit.close(); }
-                    if (profiler.isEnabled()) { profiler.disable(); }
+                    if (profiler.isEnabled()) { GpuStageTimings.stopCounting(profiler, rawGl20); }
                     timings.close();
                     super.dispose();
                 }
+
             }, config);
-        }
+        } finally { TerrainLod.setEnabled(previousLod); }
         assertNull(failure.get(), () -> String.valueOf(failure.get()));
+    }
+
+    @Name("megamek.GpuBenchmarkPhase")
+    @StackTrace(false)
+    private static final class Phase extends Event {
+        String phase;
+        boolean terrainLod;
+    }
+
+    private static void phase(String name) {
+        Phase event = new Phase();
+        event.phase = name;
+        event.terrainLod = TerrainLod.enabled();
+        event.commit();
+        System.out.printf("PERF phase=%s lod=%s at=%s%n", name, TerrainLod.enabled(), Instant.now());
+    }
+
+    private static GpuTerrain terrain(GpuBattleView view) throws Exception {
+        var field = GpuBattleView.class.getDeclaredField("terrain");
+        field.setAccessible(true);
+        return (GpuTerrain) field.get(view);
+    }
+
+    private static boolean detailPending(GpuBattleView view) throws Exception {
+        var field = GpuTerrain.class.getDeclaredField("detailJob");
+        field.setAccessible(true);
+        return field.get(terrain(view)) != null;
+    }
+
+    private static void memory(GpuBattleView view, String scenario) throws Exception {
+        // Outside measured frames. Report installed tiers and heap after collecting temporary build objects.
+        var field = GpuTerrain.class.getDeclaredField("chunks");
+        field.setAccessible(true);
+        Map<String, Integer> levels = new java.util.TreeMap<>();
+        for (Object chunk : (List<?>) field.get(terrain(view))) {
+            var level = chunk.getClass().getDeclaredField("lod");
+            level.setAccessible(true);
+            levels.merge(level.get(chunk).toString(), 1, Integer::sum);
+        }
+        if (!TerrainLod.enabled()) { assertEquals(Set.of("FULL"), levels.keySet()); }
+        System.gc();
+        var runtime = Runtime.getRuntime();
+        System.out.printf("PERF full-%s heapAfterGc=%.1f MiB installed=%s%n", scenario,
+              (runtime.totalMemory() - runtime.freeMemory()) / 1048576.0, levels);
     }
 
     private static double percentile(double[] sorted, double fraction) {
@@ -465,11 +580,12 @@ class GpuBoardPerformanceSmokeTest {
             Gdx.gl.glFinish();
             if (i >= 0) { samples[i] = (System.nanoTime() - start) / 1e6; }
         }
+        GL20 rawGl20 = Gdx.gl20;
         GLProfiler profiler = new GLProfiler(Gdx.graphics);
         profiler.enable();
         draw(terrain, camera);
         if (tactical != null) { tactical.render(camera.camera, 0); }
-        profiler.disable();
+        GpuStageTimings.stopCounting(profiler, rawGl20);
         Arrays.sort(samples);
         System.out.printf("PERF %s median=%.3f ms p95=%.3f ms draws=%d vertices=%.0f%n",
               name, samples[10], samples[19], profiler.getDrawCalls(), profiler.getVertexCount().total);

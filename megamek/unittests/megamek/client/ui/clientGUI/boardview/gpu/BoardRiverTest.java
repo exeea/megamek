@@ -292,6 +292,27 @@ class BoardRiverTest {
     }
 
     @Test
+    void theReferenceRiverBendHasARoundedSandTip() {
+        var original = BoardRelief.tuning();
+        try {
+            BoardWetCliffTest.tune(true);
+            var scene = GpuRiverTerrainSmokeTest.mapScene(BoardScene.Surface.SAND);
+            var surface = new BoardSurface(scene, scene.tile(new Coords(7, 14)));
+            List<Vector3> bank = surface.waterBoundary(5);
+            for (int i = 1; i + 1 < bank.size(); i++) {
+                Vector3 incoming = new Vector3(bank.get(i)).sub(bank.get(i - 1));
+                Vector3 outgoing = new Vector3(bank.get(i + 1)).sub(bank.get(i));
+                double turn = Math.atan2(incoming.x * outgoing.y - incoming.y * outgoing.x,
+                      incoming.x * outgoing.x + incoming.y * outgoing.y);
+                assertTrue(turn > -Math.PI / 6,
+                      "The inner sand bank must round the bend instead of ending in a cusp: " + Math.toDegrees(turn));
+            }
+        } finally {
+            BoardRelief.tune(original);
+        }
+    }
+
+    @Test
     void raisedBanksMeetSmoothlyAcrossTheReferenceRiverJunction() {
         var original = BoardRelief.tuning();
         var geometry = BoardGeometry.tuning();

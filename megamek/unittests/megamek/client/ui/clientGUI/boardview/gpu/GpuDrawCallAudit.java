@@ -80,47 +80,49 @@ final class GpuDrawCallAudit implements RenderableSorter, AutoCloseable {
         // Capture installed ownership after this frame's scene update, without asking providers to submit again.
         if (!indexed) { indexOrigins(); indexed = true; }
         String pass = stage + "/" + passes.merge(stage, 1, Integer::sum);
-        for (Renderable part : renderables) {
-            if (part.meshPart.size == 0) { continue; }
-            Origin origin = origin(part);
-            String family = family(part);
-            BlendingAttribute blend = part.material.get(BlendingAttribute.class, BlendingAttribute.Type);
-            Row row = new Row(pass, origin.category(), family,
-                  shaders.computeIfAbsent(part.shader, ignored -> shaders.size() + 1), part.material.getMask(),
-                  part.environment == null ? 0 : part.environment.getMask(),
-                  part.meshPart.mesh.getVertexAttributes().getMaskWithSizePacked(), blend != null && blend.blended);
-            Counts counts = rows.computeIfAbsent(row, ignored -> new Counts());
-            counts.draws++;
-            counts.submittedIndices += part.meshPart.size;
-            counts.meshes.add(part.meshPart.mesh);
-            // Attributes equality ignores Material.id, which does not affect shader inputs.
-            Attributes attributes = new Attributes();
-            attributes.set(part.material);
-            counts.materials.merge(attributes, 1, Integer::sum);
-            if (origin.chunk() >= 0) {
-                counts.knownChunkDraws++;
-                counts.chunks.add(origin.chunk());
-                counts.chunkMaterials.add(new ChunkMaterial(origin.chunk(), attributes));
-            }
-            if (counts.ids.size() < 3) { counts.ids.add(part.material.id); }
-            List<String> textures = new ArrayList<>();
-            List<String> aliases = new ArrayList<>();
-            for (Attribute attribute : part.material) {
-                aliases.add(Attribute.getAttributeAlias(attribute.type));
-                if (attribute instanceof TextureAttribute texture) {
-                    textures.add(Attribute.getAttributeAlias(attribute.type) + "="
-                          + texture.textureDescription.texture.getTextureObjectHandle());
-                } else if (attribute instanceof GpuWaterShader) {
-                    Object field = field(attribute, "field");
-                    if (field != null) {
-                        counts.waterFields.add(field);
-                        textures.add("waterField=" + ((Texture) field(field, "texture")).getTextureObjectHandle());
+        for (Renderable combined : renderables) {
+            for (Renderable part : GpuTerrainBatch.ranges(combined)) {
+                if (part.meshPart.size == 0) { continue; }
+                Origin origin = origin(part);
+                String family = family(part);
+                BlendingAttribute blend = part.material.get(BlendingAttribute.class, BlendingAttribute.Type);
+                Row row = new Row(pass, origin.category(), family,
+                      shaders.computeIfAbsent(part.shader, ignored -> shaders.size() + 1), part.material.getMask(),
+                      part.environment == null ? 0 : part.environment.getMask(),
+                      part.meshPart.mesh.getVertexAttributes().getMaskWithSizePacked(), blend != null && blend.blended);
+                Counts counts = rows.computeIfAbsent(row, ignored -> new Counts());
+                counts.draws++;
+                counts.submittedIndices += part.meshPart.size;
+                counts.meshes.add(part.meshPart.mesh);
+                // Attributes equality ignores Material.id, which does not affect shader inputs.
+                Attributes attributes = new Attributes();
+                attributes.set(part.material);
+                counts.materials.merge(attributes, 1, Integer::sum);
+                if (origin.chunk() >= 0) {
+                    counts.knownChunkDraws++;
+                    counts.chunks.add(origin.chunk());
+                    counts.chunkMaterials.add(new ChunkMaterial(origin.chunk(), attributes));
+                }
+                if (counts.ids.size() < 3) { counts.ids.add(part.material.id); }
+                List<String> textures = new ArrayList<>();
+                List<String> aliases = new ArrayList<>();
+                for (Attribute attribute : part.material) {
+                    aliases.add(Attribute.getAttributeAlias(attribute.type));
+                    if (attribute instanceof TextureAttribute texture) {
+                        textures.add(Attribute.getAttributeAlias(attribute.type) + "="
+                              + texture.textureDescription.texture.getTextureObjectHandle());
+                    } else if (attribute instanceof GpuWaterShader) {
+                        Object field = field(attribute, "field");
+                        if (field != null) {
+                            counts.waterFields.add(field);
+                            textures.add("waterField=" + ((Texture) field(field, "texture")).getTextureObjectHandle());
+                        }
                     }
                 }
+                counts.textureSets.add(List.copyOf(textures));
+                masks.putIfAbsent(row.materialMask(), String.join("+", aliases));
+                categories.merge(stage + "/" + origin.category(), 1, Integer::sum);
             }
-            counts.textureSets.add(List.copyOf(textures));
-            masks.putIfAbsent(row.materialMask(), String.join("+", aliases));
-            categories.merge(stage + "/" + origin.category(), 1, Integer::sum);
         }
     }
 

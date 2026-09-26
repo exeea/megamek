@@ -12,37 +12,33 @@ import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 
 class BoardWaterSlopeTest {
     @ParameterizedTest
-    @CsvSource({ "2500, 10000", "1, 10000", "1, 1" })
-    void descendingWaterReachesTheCliffFaceAboveItsBed(int fullDetail, int mediumDetail) {
+    @EnumSource(value = TerrainLod.class, names = { "FULL", "MEDIUM", "COARSE" })
+    void descendingWaterReachesTheCliffFaceAboveItsBed(TerrainLod lod) {
         var original = BoardRelief.tuning();
         try {
-            var t = original;
-            BoardRelief.tune(new BoardRelief.Tuning(t.shoreShift(), t.shoreRoom(), t.shoreReach(), t.shoreNarrow(),
-                  t.shoreHard(), t.shorePool(), t.shoreIsle(), t.shoreBlend(), t.shoreWander(), t.wanderCell(),
-                  t.shoreSpread(), t.landKeep(), t.shoreLip(), t.transition(), fullDetail, mediumDetail,
-                  t.riverWidth(), true));
+            BoardWetCliffTest.tune(true);
             Coords high = new Coords(3, 3);
             for (int direction = 0; direction < 6; direction++) {
                 Coords low = high.translated(direction);
                 BoardScene scene = scene(Map.of(high, 2, low, 0), Map.of(high, 1, low, 1));
-                assertCliffContact(scene, low);
+                assertCliffContact(scene, low, lod);
             }
-            assertCliffContact(GpuRiverTerrainSmokeTest.mapScene(BoardScene.Surface.SAND), new Coords(9, 9));
+            assertCliffContact(GpuRiverTerrainSmokeTest.mapScene(BoardScene.Surface.SAND), new Coords(9, 9), lod);
             BoardScene pools = BoardWetCliffTest.mixedDepthScene();
             for (var tile : pools.tiles()) {
-                if (tile.liquid().present()) { assertCliffContact(pools, tile.coords()); }
+                if (tile.liquid().present()) { assertCliffContact(pools, tile.coords(), lod); }
             }
         } finally {
             BoardRelief.tune(original);
         }
     }
 
-    private static void assertCliffContact(BoardScene scene, Coords coords) {
-        BoardSurface surface = new BoardSurface(scene, scene.tile(coords));
+    private static void assertCliffContact(BoardScene scene, Coords coords, TerrainLod lod) {
+        BoardSurface surface = new BoardSurface(scene, scene.tile(coords), lod);
         for (var face : surface.waterFaces) {
             Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
             assertTrue(normal.z >= -.001f, "Extending the water to the cliff must not fold the surface: " + coords
@@ -51,7 +47,7 @@ class BoardWaterSlopeTest {
         for (int edge = 0; edge < 6; edge++) {
             if (!surface.relief.wetCliff(edge)) { continue; }
             var land = scene.tile(coords.translated(BoardGeometry.edgeDirection(edge)));
-            var cliff = new BoardSurface(scene, land);
+            var cliff = new BoardSurface(scene, land, lod);
             int opposite = (edge + 3) % 6;
             var walls = new ArrayList<>(cliff.walls(scene, -100).stream()
                   .filter(f -> f.landEdge() == opposite).toList());

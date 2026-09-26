@@ -114,6 +114,7 @@ final class GpuBoardTuning {
     private final CheckBox transitions;
     private final List<Control> relief;
     private final List<Control> water;
+    private final CheckBox terrainLod;
     private final List<Control> terrainDetail;
     private final SelectBox<String> concreteShapes;
     private final CheckBox fallsOffBoard;
@@ -501,11 +502,24 @@ final class GpuBoardTuning {
             }
         });
         section(skin, "Terrain detail");
+        terrainLod = checkbox(skin, "Terrain LoD", "tuning-terrain-lod");
+        terrainLod.addListener(new TextTooltip("Adjust terrain detail with zoom. Off keeps the full-detail mesh at every distance.",
+              skin, "menu"));
+        terrainLod.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                if (!syncing) {
+                    TerrainLod.setEnabled(terrainLod.isChecked());
+                    syncRelief();
+                }
+            }
+        });
         terrainDetail = controls(skin, List.of(
-              new Knob("Full detail hexes", 100, 10000, 100, "%.0f",
-                    "Largest board that uses the finest terrain detail. Raising this keeps more detail on large boards, but costs more to draw."),
-              new Knob("Medium detail hexes", 100, 40000, 100, "%.0f",
-                    "Largest board that keeps medium detail and loose rocks. Larger boards use simpler ground.")), this::applyRelief, 0, true);
+              new Knob("Full detail at (px)", 16, 256, 4, "%.0f",
+                    "LoD switches to the finest mesh when a hex reaches this width on screen. Lower values keep full detail farther away."),
+              new Knob("Medium detail at (px)", 4, 128, 2, "%.0f",
+                    "LoD switches to medium detail at this hex width on screen. Smaller hexes use coarser meshes; map size does not set quality.")),
+              this::applyRelief, 0, true);
         section(skin, "Material geology");
         geologyFamily = choice(skin, "Material", "tuning-geology-family",
               new String[] { "Grass", "Dirt", "Sand", "Rock", "Concrete", "Snow", "Bedrock under slabs" }, this::syncGeology);
@@ -883,6 +897,8 @@ final class GpuBoardTuning {
         syncing = false;
         applyGeometry();
         BoardRelief.tune(BoardRelief.DEFAULTS);
+        TerrainLod.tune(TerrainLod.DEFAULTS);
+        TerrainLod.setEnabled(TerrainLod.DEFAULT_ENABLED);
         BoardConcrete.tune(BoardConcrete.DEFAULT_MODE);
         syncing = true;
         concreteShapes.setSelectedIndex(BoardConcrete.mode().ordinal());
@@ -1111,10 +1127,11 @@ final class GpuBoardTuning {
 
     private void applyRelief() {
         int full = Math.round(value(terrainDetail, 0));
+        TerrainLod.tune(new TerrainLod.Tuning(full, Math.min(full, Math.round(value(terrainDetail, 1)))));
         BoardRelief.tune(new BoardRelief.Tuning(value(relief, 3), value(relief, 4), value(relief, 5), value(relief, 6),
               value(relief, 7), value(relief, 8), value(relief, 9), value(relief, 10), value(relief, 11), value(relief, 12),
-              value(relief, 1), value(relief, 2), value(relief, 13), value(relief, 14), full,
-              Math.max(full, Math.round(value(terrainDetail, 1))), value(relief, 0) / 100, cliffsIntoWater.isChecked()));
+              value(relief, 1), value(relief, 2), value(relief, 13), value(relief, 14),
+              value(relief, 0) / 100, cliffsIntoWater.isChecked()));
         syncRelief();
     }
 
@@ -1122,11 +1139,13 @@ final class GpuBoardTuning {
         BoardRelief.Tuning t = BoardRelief.tuning();
         syncing = true;
         cliffsIntoWater.setChecked(t.cliffsIntoWater());
+        terrainLod.setChecked(TerrainLod.enabled());
         syncing = false;
         setValues(relief, new float[] { 100 * t.riverWidth(), t.shoreSpread(), t.landKeep(), t.shoreShift(), t.shoreRoom(), t.shoreReach(),
               t.shoreNarrow(), t.shoreHard(), t.shorePool(), t.shoreIsle(), t.shoreBlend(), t.shoreWander(),
               t.wanderCell(), t.shoreLip(), t.transition() });
-        setValues(terrainDetail, new float[] { t.fullDetailHexes(), t.mediumDetailHexes() });
+        setValues(terrainDetail, new float[] { TerrainLod.tuning().fullPixels(), TerrainLod.tuning().mediumPixels() });
+        for (Control control : terrainDetail) { control.slider().setDisabled(!TerrainLod.enabled()); }
         updateReadings(relief);
         updateReadings(terrainDetail);
     }

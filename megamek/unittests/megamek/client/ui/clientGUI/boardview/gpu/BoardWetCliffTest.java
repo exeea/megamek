@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.IntStream;
 
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
@@ -16,6 +17,51 @@ import org.junit.jupiter.api.Test;
 
 class BoardWetCliffTest {
     private static final Coords LAND = new Coords(3, 3);
+
+    @Test
+    void theReferenceBeachTapersIntoTheCliffWithoutAProjectingShelf() {
+        var original = BoardRelief.tuning();
+        try {
+            tune(true);
+            var scene = GpuRiverTerrainSmokeTest.mapScene(BoardScene.Surface.SAND);
+            for (float width : new float[] { .05f, .5f, 1 }) {
+                GpuRiverTerrainSmokeTest.setWidth(width);
+                for (TerrainLod lod : TerrainLod.values()) {
+                    var surface = new BoardSurface(scene, scene.tile(new Coords(7, 14)), lod);
+                    Vector3 end = surface.waterBoundary(3).getFirst();
+                    float base = surface.tile.elevation() * BoardGeometry.LEVEL;
+                    assertTrue(surface.faces.stream()
+                                .filter(face -> face.finish() == BoardSurface.Finish.WALL && face.landEdge() == 2)
+                                .flatMap(face -> vertices(face).stream())
+                                .anyMatch(p -> Math.abs(p.z - base) < .001f
+                                      && Math.hypot(p.x - end.x, p.y - end.y) < .01f),
+                          "The beach must end at the actual cliff foot, without a projecting shelf: " + lod + ", " + width);
+                }
+            }
+        } finally {
+            BoardRelief.tune(original);
+        }
+    }
+
+    @Test
+    void parallelShorelineBuildsKeepTheSameWallContact() {
+        var original = BoardRelief.tuning();
+        try {
+            tune(true);
+            var scene = GpuRiverTerrainSmokeTest.mapScene(BoardScene.Surface.SAND);
+            var coords = List.of(new Coords(7, 14), new Coords(8, 14), new Coords(9, 13));
+            var expected = coords.stream().map(c -> new BoardSurface(scene, scene.tile(c))).toList();
+            // Chunk construction builds these together; shared intersection scratch data used to corrupt the contour.
+            IntStream.range(0, 36).parallel().forEach(i -> {
+                int at = i % coords.size();
+                var actual = new BoardSurface(scene, scene.tile(coords.get(at)));
+                assertTrue(expected.get(at).waterFaces.equals(actual.waterFaces),
+                      "Parallel construction changed the water mesh at " + coords.get(at));
+            });
+        } finally {
+            BoardRelief.tune(original);
+        }
+    }
 
     @Test
     void cliffClassificationCountsBedDepthAndLeavesClimbableSlopesAlone() {
@@ -94,7 +140,7 @@ class BoardWetCliffTest {
         var t = BoardRelief.tuning();
         BoardRelief.tune(new BoardRelief.Tuning(t.shoreShift(), t.shoreRoom(), t.shoreReach(), t.shoreNarrow(),
               t.shoreHard(), t.shorePool(), t.shoreIsle(), t.shoreBlend(), t.shoreWander(), t.wanderCell(),
-              t.shoreSpread(), t.landKeep(), t.shoreLip(), t.transition(), t.fullDetailHexes(), t.mediumDetailHexes(),
+              t.shoreSpread(), t.landKeep(), t.shoreLip(), t.transition(),
               t.riverWidth(), enabled));
     }
 

@@ -134,6 +134,35 @@ class BoardCameraPerspectiveTest {
     }
 
     @Test
+    void zoomedOutOrthographicPanningKeepsTheWholeViewportInFrontOfTheNearPlane() {
+        for (float tilt : new float[] { 0, 55, 80 }) {
+            BoardCamera camera = camera();
+            camera.orbit(45, tilt);
+            camera.camera.zoom = 40;
+            camera.center(new Vector3(6000, -7000, 90));
+            for (int pan = 0; pan < 3; pan++) {
+                Vector3 right = new Vector3(camera.camera.direction).crs(camera.camera.up).nor();
+                Vector3 upOnGround = new Vector3(camera.camera.up.x, camera.camera.up.y, 0);
+                upOnGround.scl(1 / upOnGround.len2());
+                for (float x : new float[] { -.45f, .45f }) {
+                    for (float y : new float[] { -.45f, .45f }) {
+                        Vector3 point = camera.focus.cpy()
+                              .mulAdd(right, x * camera.camera.viewportWidth * camera.camera.zoom)
+                              .mulAdd(upOnGround, y * camera.camera.viewportHeight * camera.camera.zoom);
+                        Vector3 screen = project(camera, point);
+                        assertEquals((x + .5f) * 1200, screen.x, .1f);
+                        assertEquals((y + .5f) * 800, screen.y, .1f);
+                        assertTrue(screen.z > 0 && screen.z < 1,
+                              () -> "Visible ground must not cross a clip plane while panning: " + screen);
+                        assertTrue(camera.camera.frustum.pointInFrustum(point), "Culling must agree with visible ground");
+                    }
+                }
+                camera.pan(120, -250);
+            }
+        }
+    }
+
+    @Test
     void perspectivePanAndPointerZoomKeepTheirWorldPlaneAnchors() {
         for (float fieldOfView : new float[] { 20, 45, 100 }) {
             for (float tilt : new float[] { 0, 40, 70 }) {

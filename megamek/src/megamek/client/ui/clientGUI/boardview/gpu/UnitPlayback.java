@@ -29,6 +29,8 @@ final class UnitPlayback {
     private UnitAttack attack;
     private final List<UnitAttack> attacks = new ArrayList<>();
     private final UnitVolley volley = new UnitVolley();
+    private record Reaction(BoardScene.Movement movement, double start) { }
+    private final List<Reaction> reactions = new ArrayList<>();
     private final List<UnitAttack> visibleAttacks = java.util.Collections.unmodifiableList(attacks);
     private double combatSeconds, combatDuration, combatContact;
     private BoardScene volleyScene;
@@ -158,6 +160,7 @@ final class UnitPlayback {
                 if (conversion != null) {
                     conversion.seconds = Math.min(UnitConversion.DURATION_SECONDS, conversion.seconds + (float) (step * speed.rate));
                 } else if (motion == null) {
+                    double previousCombat = combatSeconds;
                     combatSeconds = Math.min(combatDuration, combatSeconds + step * speed.rate);
                     volley.advance((float) combatSeconds);
                     attacks.forEach(shot -> {
@@ -168,15 +171,24 @@ final class UnitPlayback {
                         }
                         if (previous < shot.contactSeconds && shot.seconds >= shot.contactSeconds) { soundCue.accept(shot, true); }
                     });
+                    for (var reaction : reactions) {
+                        motions.get(reaction.movement().entityId()).advance(
+                              Math.max(0, combatSeconds - Math.max(previousCombat, reaction.start())), 1);
+                    }
                     applySceneUpdates();
                 } else {
                     motion.advance(step, speed.rate);
                 }
                 remaining = Math.max(0, remaining - step);
+                if (motion == null && conversion == null && combatSeconds + 1e-7 < combatDuration) {
+                    if (remaining > 0) { continue; }
+                    return;
+                }
                 if (step * speed.rate + 1e-7 < left) {
                     return;
                 }
                 completed = true;
+                reactions.forEach(reaction -> completeMovement.accept(reaction.movement()));
                 if (active instanceof BoardScene.Movement movement) {
                     completeMovement.accept(movement);
                 } else if (active instanceof BoardScene.Conversion change) {
@@ -194,6 +206,7 @@ final class UnitPlayback {
             active = null;
             attack = null;
             attacks.clear();
+            reactions.clear();
             volley.clear();
             volleyScene = null;
             conversion = null;
@@ -208,6 +221,7 @@ final class UnitPlayback {
 
     /** Interpolate only a displacement actually present in the post-resolution checkpoint. */
     void placeDisplacement(BoardScene.Unit unit, com.badlogic.gdx.math.Vector3 position) {
+        if (reactions.stream().anyMatch(reaction -> reaction.movement().entityId() == unit.id())) { return; }
         if (attack == null || attack.event.result().kind() != megamek.common.ResolvedAttack.Kind.PUSH
               || !attack.event.result().hit() || beforeImpact()) { return; }
         var before = unit.id() == attack.event.entityId() ? attack.event.attacker()
@@ -302,6 +316,7 @@ final class UnitPlayback {
 
     void finish() {
         motions.values().forEach(UnitMotion::finish);
+        if (!completed) { reactions.forEach(reaction -> completeMovement.accept(reaction.movement())); }
         if (active instanceof BoardScene.Movement movement && !completed) {
             completeMovement.accept(movement);
         } else if (active instanceof BoardScene.Conversion change) {
@@ -326,6 +341,7 @@ final class UnitPlayback {
         active = null;
         attack = null;
         attacks.clear();
+        reactions.clear();
         volley.clear();
         volleyScene = null;
         conversion = null;
@@ -354,9 +370,30 @@ final class UnitPlayback {
             settledScene = volleyScene;
             volleyScene = null;
         }
-        while (pending.peekFirst() instanceof BoardScene.SceneUpdate update) {
-            pending.removeFirst();
-            settledScene = update.scene();
+        while (true) {
+            if (pending.peekFirst() instanceof BoardScene.SceneUpdate update) {
+                pending.removeFirst();
+                settledScene = update.scene();
+            } else if (attack != null && !completed && pending.peekFirst() instanceof BoardScene.Movement movement && movement.forced()) {
+                pending.removeFirst();
+                double start = combatContact;
+                boolean continuing = reactions.stream().anyMatch(reaction -> reaction.movement().entityId() == movement.entityId());
+                var motion = start(movement);
+                if (continuing) {
+                    for (int index = 0; index < reactions.size(); index++) {
+                        var reaction = reactions.get(index);
+                        if (reaction.movement().entityId() == movement.entityId()) {
+                            reactions.set(index, new Reaction(movement, reaction.start()));
+                            break;
+                        }
+                    }
+                    combatDuration = Math.max(combatDuration, combatSeconds + motion.remainingSeconds());
+                } else {
+                    reactions.add(new Reaction(movement, start));
+                    combatDuration = Math.max(combatDuration, start + motion.remainingSeconds());
+                    motion.advance(Math.max(0, combatSeconds - start), 1);
+                }
+            } else { break; }
         }
     }
 
@@ -397,6 +434,7 @@ final class UnitPlayback {
             else { attacks.forEach(shot -> holdUnits(shot.event, shown, true)); }
         }
         pending.forEach(event -> holdUnits(event, shown, false));
+        reactions.forEach(reaction -> holdUnits(reaction.movement(), shown, true));
         List<BoardScene.Unit> units = new ArrayList<>();
         for (var unit : scene.units()) {
             var replacement = shown.remove(unit.id());

@@ -221,6 +221,7 @@ public class MRMSaturationHandler extends MRMHandler {
                             bayW.setUsedThisRound(true);
                         }
                         localAMSEngaged = true;
+                        reportCounterAnimation(bayW);
                     }
                 } else {
                     // build up some heat
@@ -262,6 +263,7 @@ public class MRMSaturationHandler extends MRMHandler {
                     if (isAPDS) {
                         localAPDSEngaged = true;
                     }
+                    reportCounterAnimation(counter);
                 }
                 // Determine APDS mod
                 if (localAPDSEngaged) {
@@ -303,7 +305,7 @@ public class MRMSaturationHandler extends MRMHandler {
                 apdsMod += localAPDSMod;
             }
         }
-        return apdsMod + amsMod;
+        return recordDefenseModifier(apdsMod + amsMod);
     }
 
     /**
@@ -325,7 +327,7 @@ public class MRMSaturationHandler extends MRMHandler {
         nMissilesModifier += getAMSHitsMod(vPhaseReport);
 
         // No need for artificial Streak calcs as this type of attack can only target a hex
-        int missilesHit = Compute.missilesHit(weaponType.getRackSize(), nMissilesModifier,
+        int missilesHit = clusterMissilesHit(weaponType.getRackSize(), nMissilesModifier,
               weapon.isHotLoaded(), false, isAdvancedAMS());
 
         return missilesHit;

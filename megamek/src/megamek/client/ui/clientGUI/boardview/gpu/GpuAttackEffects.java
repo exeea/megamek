@@ -67,6 +67,11 @@ final class GpuAttackEffects implements Disposable {
     private final Map<UnitAttack, Map<String, Trace>> traces = new HashMap<>();
     private final Map<UnitAttack, Map<String, GpuMissileEffects.Launch>> launches = new HashMap<>();
     private int muzzleCount, count;
+    private final java.util.List<Trace> interceptionBeams = new java.util.ArrayList<>();
+    private int airbursts;
+
+    List<Trace> interceptionBeams() { return List.copyOf(interceptionBeams); }
+    int airburstCount() { return airbursts; }
 
     void update(UnitAttack next, GpuUnitModels library, Map<String, ModelInstance> instances) {
         update(next == null ? List.of() : List.of(next), library, instances);
@@ -130,7 +135,7 @@ final class GpuAttackEffects implements Disposable {
                     float size = MathUtils.clamp(UnitBounds.subtree(attachment).getDimensions(point).len()
                           * instance.transform.getScaleX() * .5f, 1.5f, 14);
                     String key = binding.node() + ":" + (barrel + 1) + (bullet && index > 0 ? ":round-" + index : "");
-                    emission(paths, key, emitter.effect(), profile, victim, size, bullet ? attack.roundDelay(index, rounds) : 0);
+                    emission(paths, key, emitter.effect(), profile, victim, size, bullet ? attack.roundDelay(index, profile) : 0);
                 }
             }
         }
@@ -155,7 +160,7 @@ final class GpuAttackEffects implements Disposable {
                 liveMuzzle();
                 UnitAttack.center(instance, unit.location(), muzzles[muzzleCount]);
                 forwards[muzzleCount].set(target).sub(muzzles[muzzleCount]).nor();
-                emission(paths, key + ":round-" + round, effect, profile, victim, 2, attack.roundDelay(round, rounds));
+                emission(paths, key + ":round-" + round, effect, profile, victim, 2, attack.roundDelay(round, profile));
             }
         }
     }
@@ -168,7 +173,8 @@ final class GpuAttackEffects implements Disposable {
     private void launch(Map<String, GpuMissileEffects.Launch> captured, String key, int owner, int index,
           Vector3[] ports, ModelInstance victim, int count, ResolvedAttack.Shot profile) {
         var launch = GpuMissileEffects.capture(attack, ports, victim, count, attack.missileHits(owner, index, count),
-              profile != null && (profile.indirect() || profile.artillery()), key.hashCode() ^ attack.event.result().id().hashCode(), profile);
+              profile != null && (profile.indirect() || profile.artillery()), key.hashCode() ^ attack.event.result().id().hashCode(), profile,
+              attack.interceptedMissiles(owner, index, count));
         captured.put(key, launch);
         missiles.add(launch);
     }
@@ -217,6 +223,7 @@ final class GpuAttackEffects implements Disposable {
     int missileCount() { return missiles.missileCount(); }
     int smokeCount() { return missiles.smokeCount(); }
     List<Trace> emissions(UnitAttack shot) { return List.copyOf(traces.getOrDefault(shot, Map.of()).values()); }
+    List<GpuMissileEffects.Launch> missileLaunches(UnitAttack shot) { return List.copyOf(launches.getOrDefault(shot, Map.of()).values()); }
     int flameParticleCount() { return flames.size(); }
 
     void setSmokeLight(Color light) {
@@ -240,6 +247,8 @@ final class GpuAttackEffects implements Disposable {
     }
 
     void render(Camera camera) {
+        interceptionBeams.clear();
+        airbursts = 0;
         if (volley.isEmpty()) { return; }
         ensureResources();
         missiles.begin();
@@ -249,15 +258,91 @@ final class GpuAttackEffects implements Disposable {
         count = 0;
         batch.begin(camera);
         for (var shot : volley) {
+            if (shot.defensive() && shot.interception() != null) { continue; }
             if (shot.seconds < UnitAttack.ANTICIPATION_SECONDS && !shot.chargingPpc() || shot.seconds >= shot.duration) { continue; }
             prepare(shot);
             renderShot();
         }
+        renderInterceptions();
         batch.end();
         missiles.render(camera);
         // Alpha blending retains orange/red detail where flame puffs overlap instead of bleaching into a beam.
         flames.render(camera, flames.size());
         beams.render(camera, 0);
+    }
+
+    private record CounterMuzzle(Vector3 origin, String effect) { }
+
+    /** Counter-fire samples the very same path and clock as the incoming missile and its disappearing trail. */
+    private void renderInterceptions() {
+        for (var salvo : volley) {
+            if (salvo.defensive() || salvo.interception() == null) { continue; }
+            var captured = launches.get(salvo);
+            if (captured == null) { continue; }
+            var counters = new java.util.ArrayList<CounterMuzzle>();
+            for (var counter : volley) {
+                if (!counter.defensive() || counter.interception() == null
+                      || !counter.interception().id().equals(salvo.interception().id())) { continue; }
+                var unit = counter.event.attacker();
+                var instance = instances.get(unit.id() + ":" + unit.part());
+                var assembly = library == null ? null : library.loaded(unit.model(), unit.id());
+                int before = counters.size();
+                if (assembly != null && instance != null) {
+                    for (var binding : assembly.equipment()) {
+                        if (!counter.fires(binding)) { continue; }
+                        for (var emitter : binding.emitters()) {
+                            if (!firingEmitter(emitter) || instance.getNode(emitter.node()) == null) { continue; }
+                            var muzzle = new Vector3();
+                            UnitModelAttachment.emitter(instance, emitter, muzzle, direction);
+                            counters.add(new CounterMuzzle(muzzle, emitter.effect()));
+                        }
+                    }
+                }
+                if (counters.size() == before) {
+                    counters.add(new CounterMuzzle(UnitAttack.center(instance, unit.location(), new Vector3()),
+                          counter.effect(unit.id(), counter.event.result().equipmentIndex())));
+                }
+            }
+            int ordinal = 0;
+            for (var launch : captured.values()) {
+                for (int missile = 0; missile < launch.missiles(); missile++) {
+                    boolean destroyed = launch.intercepted(missile);
+                    // A defense which fired but stopped nothing still shoots at an incoming round.
+                    if (!destroyed && (launch.intercepted() > 0 || missile != 0)) { continue; }
+                    float stop = destroyed ? launch.endProgress(missile)
+                          : UnitAttack.interceptProgress(launch.origins()[0], launch.targets()[missile]);
+                    float start = UnitAttack.ANTICIPATION_SECONDS;
+                    float contact = destroyed ? launch.endSeconds(missile)
+                          : MathUtils.lerp(start, salvo.roundContactSeconds(launch.profile(), 0), stop);
+                    float age = salvo.seconds - contact;
+                    var intercept = GpuMissileEffects.position(launch, missile, stop, new Vector3());
+                    if (destroyed && age >= 0 && age < UnitAttack.RECOVERY_SECONDS) {
+                        float fade = 1 - age / UnitAttack.RECOVERY_SECONDS;
+                        ball(intercept, 2 + age * 13, Color.ORANGE, fade);
+                        point.set(intercept).add(0, 0, age * 8);
+                        ball(point, 2 + age * 16, Color.GRAY, fade * .45f, GL20.GL_ONE_MINUS_SRC_ALPHA);
+                        airbursts++;
+                    }
+                    if (counters.isEmpty()) { continue; }
+                    var counter = counters.get(ordinal++ % counters.size());
+                    if ("laser".equals(counter.effect())) {
+                        if (age < -.04f || age > .06f) { continue; }
+                        GpuMissileEffects.position(launch, missile,
+                              Math.min(stop, GpuMissileEffects.progress(launch, missile, salvo.seconds)), end);
+                        beam(counter.origin(), end, .5f, LASER, 1 - Math.max(0, age) / .06f);
+                        interceptionBeams.add(new Trace(counter.origin().cpy(), new Vector3(), end.cpy(), destroyed));
+                    } else {
+                        for (int round = 0; round < 3; round++) {
+                            float t = (age + .12f - round * .02f) / (.12f - round * .02f);
+                            if (t < 0 || t >= 1) { continue; }
+                            point.set(counter.origin()).lerp(intercept, t);
+                            end.set(counter.origin()).lerp(intercept, Math.max(0, t - .16f));
+                            line(end, point, .45f, Color.YELLOW, 1);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private void renderShot() {
@@ -281,6 +366,8 @@ final class GpuAttackEffects implements Disposable {
                 Vector3 target = endpoints[index];
                 if ("ppc".equals(effect)) {
                     ppc(muzzles[index], target, index);
+                    float flash = attack.contactFlash(attack.roundContactSeconds(profiles[index], 0));
+                    if (impacts[index] && flash > 0) { electricGlow(target, 3 + (1 - flash) * 5, flash); }
                     continue;
                 }
                 if (attack.seconds < UnitAttack.ANTICIPATION_SECONDS) { continue; }
@@ -294,7 +381,13 @@ final class GpuAttackEffects implements Disposable {
                 if (cannon > 0 && "bullet".equals(effect)) {
                     cannonMuzzle(muzzles[index], forwards[index], emitted[index], cannon, age, index * 31);
                 }
-                if (attack.seconds >= attack.contactSeconds) { continue; }
+                float contact = attack.roundContactSeconds(profiles[index], roundDelays[index]);
+                float flash = attack.contactFlash(contact);
+                if (impacts[index] && flash > 0) {
+                    if ("energy".equals(effect)) { ball(target, 3 + (1 - flash) * 6, Color.CYAN, flash); }
+                    else { impact(target, flash, profiles[index]); }
+                }
+                if (attack.seconds >= contact) { continue; }
                 float t = attack.flight();
                 switch (effect) {
                     case "laser" -> beam(muzzles[index], target, .65f, LASER, Math.min(1, t * 8));
@@ -304,8 +397,8 @@ final class GpuAttackEffects implements Disposable {
                         ball(point, 2, Color.WHITE, 1);
                         end.set(start).lerp(target, Math.max(0, t - .13f));
                         line(end, point, 1.4f, Color.CYAN, .8f);
-                        float flash = Math.max(0, 1 - (attack.seconds - UnitAttack.ANTICIPATION_SECONDS) / .12f);
-                        if (flash > 0) { ball(muzzles[index], 4 * flash, Color.CYAN, flash); }
+                        float muzzleFlash = Math.max(0, 1 - (attack.seconds - UnitAttack.ANTICIPATION_SECONDS) / .12f);
+                        if (muzzleFlash > 0) { ball(muzzles[index], 4 * muzzleFlash, Color.CYAN, muzzleFlash); }
                     }
                     case "spray", "screen" -> {
                         Color color = "screen".equals(effect) ? Color.PURPLE : "spray".equals(effect) ? Color.SKY : Color.ORANGE;
@@ -316,7 +409,7 @@ final class GpuAttackEffects implements Disposable {
                         }
                     }
                     default -> {
-                        float travel = age / (attack.contactSeconds - UnitAttack.ANTICIPATION_SECONDS - roundDelays[index]);
+                        float travel = age / (contact - UnitAttack.ANTICIPATION_SECONDS - roundDelays[index]);
                         UnitAttack.projectile(start, target, travel, arcs[index], point);
                         UnitAttack.projectile(start, target, Math.max(0, travel - .07f), arcs[index], end);
                         line(end, point, .55f * Math.max(1, cannon), Color.YELLOW, 1);
@@ -324,30 +417,23 @@ final class GpuAttackEffects implements Disposable {
                 }
             }
         }
-        float impact = attack.contactFlash();
-        if (impact > 0 && (attack.shot() ? !attack.event.result().mounts().isEmpty() : attack.event.result().hit())) {
+        if (attack.shot()) {
             var launched = launches.get(attack);
-            if (launched != null && !launched.isEmpty()) {
+            if (launched != null) {
                 for (var launch : launched.values()) {
+                    float impact = attack.contactFlash(attack.roundContactSeconds(launch.profile(), 0));
+                    if (impact <= 0) { continue; }
                     // Nearby bursts merge visually; keep their cost bounded independently of rack size.
                     int step = Math.max(1, launch.missiles() / 12);
                     for (int index = 0; index < launch.missiles(); index += step) {
+                        if (launch.intercepted(index)) { continue; }
                         impact(launch.targets()[index], impact, launch.profile());
                     }
                 }
             }
-            if (!attack.shot()) { ball(target, 2 + (1 - impact) * 4, Color.LIGHT_GRAY, impact); }
-            else {
-                for (int index = 0; index < muzzleCount; index++) {
-                    if (impacts[index] && !"flame".equals(effects[index])) {
-                        if ("ppc".equals(effects[index])) {
-                            electricGlow(endpoints[index], 3 + (1 - impact) * 5, impact);
-                        } else if ("energy".equals(effects[index])) {
-                            ball(endpoints[index], 3 + (1 - impact) * 6, Color.CYAN, impact);
-                        } else { impact(endpoints[index], impact, profiles[index]); }
-                    }
-                }
-            }
+        } else if (attack.event.result().hit() && attack.contactFlash() > 0) {
+            float impact = attack.contactFlash();
+            ball(target, 2 + (1 - impact) * 4, Color.LIGHT_GRAY, impact);
         }
     }
 
@@ -386,6 +472,7 @@ final class GpuAttackEffects implements Disposable {
 
     /** Muzzle charge, then a continuous hot beam with independently flickering electrical branches. */
     private void ppc(Vector3 muzzle, Vector3 finish, int index) {
+        float contact = attack.roundContactSeconds(profiles[index], 0);
         int seed = attack.event.result().id().hashCode() ^ index * 7919 ^ (int) (attack.seconds * 36) * 109;
         if (attack.seconds < UnitAttack.ANTICIPATION_SECONDS) {
             float charge = MathUtils.clamp(attack.seconds / UnitAttack.ANTICIPATION_SECONDS, 0, 1);
@@ -397,8 +484,8 @@ final class GpuAttackEffects implements Disposable {
                       (UnitAttack.noise(seed + arc) - .5f) * radius * 2);
                 electricArc(muzzle, point, radius * .3f, 3, seed + arc * 31, charge);
             }
-        } else if (attack.seconds < attack.contactSeconds) {
-            float fade = MathUtils.clamp((attack.contactSeconds - attack.seconds) / .05f, 0, 1);
+        } else if (attack.seconds < contact) {
+            float fade = MathUtils.clamp((contact - attack.seconds) / .05f, 0, 1);
             electricGlow(muzzle, 5, fade);
             beam(muzzle, finish, PPC_BEAM_WIDTH, PPC, fade);
             electricArc(muzzle, finish, 5, 8, seed, fade);
@@ -442,8 +529,9 @@ final class GpuAttackEffects implements Disposable {
     private void flame(Vector3 start, Vector3 finish, float size) {
         direction.set(finish).sub(start);
         float time = (attack.seconds - UnitAttack.ANTICIPATION_SECONDS)
-              / Math.max(.18f, attack.contactSeconds - UnitAttack.ANTICIPATION_SECONDS);
-        float fade = MathUtils.clamp((attack.duration - attack.seconds) / .16f, 0, 1);
+              / Math.max(.18f, attack.flightSeconds);
+        float fade = MathUtils.clamp((UnitAttack.ANTICIPATION_SECONDS + attack.flightSeconds
+              + UnitAttack.RECOVERY_SECONDS - attack.seconds) / .16f, 0, 1);
         float seed = (attack.event.result().id().hashCode() & 255) * .17f;
         flameSide.set(direction).crs(Vector3.Z).nor();
         if (flameSide.isZero()) { flameSide.set(Vector3.X); }

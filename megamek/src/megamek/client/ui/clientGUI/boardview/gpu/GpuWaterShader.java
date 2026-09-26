@@ -419,7 +419,24 @@ final class GpuWaterShader extends Attribute {
         }
 
         /** Null when the chunk has no open water; surfaces of the chunk's own tiles are reused, not rebuilt. */
-        static Field build(BoardScene scene, Map<Coords, BoardFlow.Current> currents,
+        record Prepared(int width, int height, float spacing, int firstX, int firstY, byte[] pixels, Pools pools) {
+            /** Only the small texture upload needs a GL context; field sampling is pure CPU work. */
+            Field upload() {
+                Pixmap image = new Pixmap(width, height, Pixmap.Format.RGBA8888);
+                try {
+                    image.getPixels().put(pixels).flip();
+                    Texture texture = new Texture(image);
+                    texture.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
+                    texture.setWrap(Texture.TextureWrap.ClampToEdge, Texture.TextureWrap.ClampToEdge);
+                    return new Field(texture, 1 / (spacing * width), 1 / (spacing * height),
+                          -firstX / (float) width, -firstY / (float) height, pools);
+                } finally {
+                    image.dispose();
+                }
+            }
+        }
+
+        static Prepared prepare(BoardScene scene, Map<Coords, BoardFlow.Current> currents,
               Map<Coords, BoardSurface> surfaces) {
             Pools pools = new Pools(scene, currents, surfaces);
             float minX = Float.POSITIVE_INFINITY, minY = Float.POSITIVE_INFINITY;
@@ -440,51 +457,43 @@ final class GpuWaterShader extends Attribute {
             // Texels carry a one-texel ring beyond the texture, so the depth blur agrees across chunk borders too.
             int span = width + 2;
             Pool[] owners = new Pool[span * (height + 2)];
-            Pixmap pixels = new Pixmap(width, height, Pixmap.Format.RGBA8888);
-            try {
-                ByteBuffer buffer = pixels.getPixels();
-                float[] sample = new float[4];
-                for (int row = -1; row <= height; row++) {
-                    for (int column = -1; column <= width; column++) {
-                        Pool owner = pools.sample((firstX + column + 0.5f) * spacing, (firstY + row + 0.5f) * spacing,
-                              sample);
-                        owners[(row + 1) * span + column + 1] = owner;
-                        if (row < 0 || row == height || column < 0 || column == width) { continue; }
-                        int index = (row * width + column) * 4;
-                        buffer.put(index, unit(0.5f + 0.5f * sample[0] / SHORE_RANGE));
-                        buffer.put(index + 2, unit(0.5f + 0.5f * sample[1] / CURRENT_RANGE));
-                        buffer.put(index + 3, unit(0.5f + 0.5f * sample[2] / CURRENT_RANGE));
-                    }
+            byte[] pixels = new byte[width * height * 4];
+            ByteBuffer buffer = ByteBuffer.wrap(pixels);
+            float[] sample = new float[4];
+            for (int row = -1; row <= height; row++) {
+                for (int column = -1; column <= width; column++) {
+                    Pool owner = pools.sample((firstX + column + 0.5f) * spacing, (firstY + row + 0.5f) * spacing,
+                          sample);
+                    owners[(row + 1) * span + column + 1] = owner;
+                    if (row < 0 || row == height || column < 0 || column == width) { continue; }
+                    int index = (row * width + column) * 4;
+                    buffer.put(index, unit(0.5f + 0.5f * sample[0] / SHORE_RANGE));
+                    buffer.put(index + 2, unit(0.5f + 0.5f * sample[1] / CURRENT_RANGE));
+                    buffer.put(index + 3, unit(0.5f + 0.5f * sample[2] / CURRENT_RANGE));
                 }
-                float[] depth = depths(pools, owners, span, firstX - 1, firstY - 1, spacing);
-                // A 1-2-1 tent softens underwater steps into the few metres a real column blurs them over.
-                for (int row = 0; row < height; row++) {
-                    for (int column = 0; column < width; column++) {
-                        int center = (row + 1) * span + column + 1;
-                        // A sand bar or rooted rock can stand above the surface inside the original outline.
-                        // Its contour is a bank too, and its dry side must carry a negative shore distance.
-                        if (depth[center] < 0) {
-                            int red = Byte.toUnsignedInt(buffer.get((row * width + column) * 4));
-                            buffer.put((row * width + column) * 4, (byte) Math.min(red, 255 - red));
-                        }
-                        float blurred = 0;
-                        for (int dy = -1; dy <= 1; dy++) {
-                            int line = center + dy * span;
-                            float across = Math.max(0, depth[line - 1]) + 2 * Math.max(0, depth[line])
-                                  + Math.max(0, depth[line + 1]);
-                            blurred += dy == 0 ? 2 * across : across;
-                        }
-                        buffer.put((row * width + column) * 4 + 1, unit(blurred / 16 / DEPTH_RANGE));
-                    }
-                }
-                Texture texture = new Texture(pixels);
-                texture.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
-                texture.setWrap(Texture.TextureWrap.ClampToEdge, Texture.TextureWrap.ClampToEdge);
-                return new Field(texture, 1 / (spacing * width), 1 / (spacing * height),
-                      -firstX / (float) width, -firstY / (float) height, pools);
-            } finally {
-                pixels.dispose();
             }
+            float[] depth = depths(pools, owners, span, firstX - 1, firstY - 1, spacing);
+            // A 1-2-1 tent softens underwater steps into the few metres a real column blurs them over.
+            for (int row = 0; row < height; row++) {
+                for (int column = 0; column < width; column++) {
+                    int center = (row + 1) * span + column + 1;
+                    // A sand bar or rooted rock can stand above the surface inside the original outline.
+                    // Its contour is a bank too, and its dry side must carry a negative shore distance.
+                    if (depth[center] < 0) {
+                        int red = Byte.toUnsignedInt(buffer.get((row * width + column) * 4));
+                        buffer.put((row * width + column) * 4, (byte) Math.min(red, 255 - red));
+                    }
+                    float blurred = 0;
+                    for (int dy = -1; dy <= 1; dy++) {
+                        int line = center + dy * span;
+                        float across = Math.max(0, depth[line - 1]) + 2 * Math.max(0, depth[line])
+                              + Math.max(0, depth[line + 1]);
+                        blurred += dy == 0 ? 2 * across : across;
+                    }
+                    buffer.put((row * width + column) * 4 + 1, unit(blurred / 16 / DEPTH_RANGE));
+                }
+            }
+            return new Prepared(width, height, spacing, firstX, firstY, pixels, pools);
         }
 
         /**

@@ -441,6 +441,8 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         public Movement(int entityId, int boardId, List<Waypoint> path, EntityMovementType type, int jumpMP) {
             this(entityId, boardId, path, type, jumpMP, 0);
         }
+
+        boolean forced() { return type == EntityMovementType.MOVE_NONE; }
     }
 
     /** Immutable pixel ownership avoids accessing AWT images or the tileset from the GL thread. */

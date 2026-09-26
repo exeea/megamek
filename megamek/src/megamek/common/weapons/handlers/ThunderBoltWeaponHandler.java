@@ -207,6 +207,7 @@ public class ThunderBoltWeaponHandler extends MissileWeaponHandler {
                 r.add("missile");
                 r.add(diceRoll);
                 vPhaseReport.add(r);
+                recordMissileInterceptions(1);
                 return 0;
             }
             r = new Report(3241);

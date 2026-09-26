@@ -53,6 +53,61 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 class WeaponPlaybackTest {
+    @ParameterizedTest
+    @ValueSource(strings = { "ISAMS", "ISLaserAMS", "ISAPDS" })
+    void defenseSnapshotsCountOnlyMissilesRemovedByTheActualClusterRoll(String defense) throws Exception {
+        var missile = attacker.getWeaponList().stream().filter(mount -> mount.getType().getAmmoType() == AmmoType.AmmoTypeEnum.LRM)
+              .findFirst().orElseThrow();
+        var counter = (WeaponMounted) target.addEquipment(EquipmentType.get(defense), Mek.LOC_LEFT_ARM);
+        if (!defense.equals("ISLaserAMS")) {
+            counter.setLinked(target.addEquipment(EquipmentType.get(defense.equals("ISAPDS") ? "ISAPDS Ammo" : "IS Ammo AMS"), Mek.LOC_LEFT_ARM));
+        }
+        target.setFacing(3);
+        target.setSecondaryFacing(3);
+        var action = action(missile);
+        action.addCounterEquipment(counter);
+        MissileWeaponHandler handler = new LRMHandler(new ToHitData(2, "interception"), action, manager.getGame(), manager);
+        int expectedHits = defense.equals("ISAPDS") ? 0 : 6;
+        try (var compute = mockStatic(Compute.class, CALLS_REAL_METHODS)) {
+            compute.when(() -> Compute.d6(2)).thenReturn(7);
+            compute.clearInvocations();
+            assertEquals(expectedHits, handler.calcHits(new Vector<>()));
+            handler.reportAttackAnimation(expectedHits > 0);
+            compute.verify(() -> Compute.d6(2), times(1));
+        }
+        var incoming = ArgumentCaptor.forClass(ResolvedAttack.Shot.class);
+        var outgoing = ArgumentCaptor.forClass(ResolvedAttack.Shot.class);
+        verify(manager).sendAttackAnimation(eq(attacker), eq(target), eq(ResolvedAttack.Kind.SHOT),
+              eq(missile.getEquipmentNum()), eq(missile.getLocation()), eq(expectedHits > 0), incoming.capture());
+        verify(manager).sendAttackAnimation(eq(target), eq(attacker), eq(ResolvedAttack.Kind.SHOT),
+              eq(counter.getEquipmentNum()), eq(counter.getLocation()), eq(true), outgoing.capture());
+        assertEquals(expectedHits, incoming.getValue().missileHits());
+        assertEquals(12 - expectedHits, incoming.getValue().interception().missiles(), "Count only losses from the twelve otherwise hitting missiles");
+        assertEquals(incoming.getValue().interception().id(), outgoing.getValue().interception().id());
+    }
+
+    @Test
+    void observingDefensePreservesHotloadStreakAdvancedAmsAndLargeRackResolution() {
+        try (var compute = mockStatic(Compute.class, CALLS_REAL_METHODS)) {
+            compute.when(() -> Compute.d6(2)).thenReturn(7);
+            compute.when(Compute::d6).thenReturn(1);
+            for (int rack : new int[] { 0, 6, 20, 40, 60 }) {
+                for (boolean hot : new boolean[] { false, true }) {
+                    for (boolean streak : new boolean[] { false, true }) {
+                        for (boolean advanced : new boolean[] { false, true }) {
+                            int expected = Compute.missilesHit(rack, -4, hot, streak, advanced);
+                            int undefended = Compute.missilesHit(rack, 0, hot, streak, false);
+                            var removed = new java.util.concurrent.atomic.AtomicInteger();
+                            int actual = Compute.missilesHit(rack, -4, hot, streak, advanced, -4, removed::addAndGet);
+                            assertEquals(expected, actual);
+                            assertEquals(undefended - expected, removed.get());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     @Test
     void machineGunArrayVisualsUseTheRulesMembershipAndActualAmmoCount() throws Exception {
         useUnarmedCraft();
@@ -107,6 +162,25 @@ class WeaponPlaybackTest {
         craft.setWeight(50);
         manager.getGame().addEntity(craft, false);
         attacker = craft;
+    }
+
+    @Test
+    void attackValueDefenseOnlyClaimsMissileCountsWhenTheWholeSalvoWasDestroyed() throws Exception {
+        var missile = attacker.getWeaponList().stream().filter(mount -> mount.getType().getAmmoType() == AmmoType.AmmoTypeEnum.LRM)
+              .findFirst().orElseThrow();
+        var counter = (WeaponMounted) target.addEquipment(EquipmentType.get("ISLaserAMS"), Mek.LOC_LEFT_ARM);
+        for (int remainingAV : new int[] { 0, 3 }) {
+            var handler = new MissileWeaponHandler(new ToHitData(2, "AV defense"), action(missile), manager.getGame(), manager);
+            handler.reportCounterAnimation(counter);
+            handler.pdBayEngaged = true;
+            handler.attackValue = remainingAV;
+            handler.reportAttackAnimation(remainingAV > 0);
+        }
+        var profile = ArgumentCaptor.forClass(ResolvedAttack.Shot.class);
+        verify(manager, times(2)).sendAttackAnimation(eq(attacker), eq(target), eq(ResolvedAttack.Kind.SHOT),
+              eq(missile.getEquipmentNum()), eq(missile.getLocation()), anyBoolean(), profile.capture());
+        assertEquals(20, profile.getAllValues().getFirst().interception().missiles());
+        assertEquals(0, profile.getAllValues().getLast().interception().missiles(), "AV reduction is not a discrete missile count");
     }
 
     @Test

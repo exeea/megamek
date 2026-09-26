@@ -111,9 +111,13 @@ final class GpuTactical implements Disposable {
     }
 
     void update(BoardScene scene) {
+        update(scene, false);
+    }
+
+    void update(BoardScene scene, boolean detailChanged) {
         boolean boardChanged = previous == null || previous.boardId() != scene.boardId()
               || previous.width() != scene.width() || previous.height() != scene.height();
-        boolean terrainChanged = boardChanged || !sameTerrain(scene);
+        boolean terrainChanged = detailChanged || boardChanged || !sameTerrain(scene);
         if (tuning != BoardGeometry.revision() || terrainChanged
               || !previous.tactical().fills().equals(scene.tactical().fills())
               || !previous.tactical().walls().equals(scene.tactical().walls())

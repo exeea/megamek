@@ -14,10 +14,57 @@ import com.badlogic.gdx.graphics.g3d.utils.MeshBuilder;
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class GpuWaterCoverageTest {
+    @Test
+    void verticalWaterbedWallsKeepTheirWaterMaterialAndBlendIntoTheBedAtTheirFoot() {
+        var original = BoardRelief.tuning();
+        try {
+            BoardWetCliffTest.tune(true);
+            BoardScene scene = GpuRiverTerrainSmokeTest.mapScene(BoardScene.Surface.SAND);
+            int feet = 0, high = 0, rubble = 0, sheer = 0;
+            for (Coords coords : List.of(new Coords(7, 14), new Coords(8, 14), new Coords(9, 13))) {
+                var surface = new BoardSurface(scene, scene.tile(coords));
+                for (var face : surface.faces) {
+                    if (face.finish() == BoardSurface.Finish.OUTCROP
+                          && Math.max(face.a().z, Math.max(face.b().z, face.c().z)) < BoardGeometry.waterZ(surface.tile)) {
+                        rubble++;
+                    }
+                    if (!bedBoundary(surface, face)) { continue; }
+                    MeshBuilder mesh = mesh();
+                    GpuTerrain.coveredFace(mesh, surface, face, List.of(surface));
+                    int stride = mesh.getAttributes().vertexSize / Float.BYTES;
+                    int colorOffset = mesh.getAttributes().findByUsage(VertexAttributes.Usage.ColorPacked).offset / Float.BYTES;
+                    int uvOffset = mesh.getAttributes().findByUsage(VertexAttributes.Usage.TextureCoordinates).offset / Float.BYTES;
+                    float[] vertices = new float[mesh.getNumVertices() * stride];
+                    mesh.getVertices(vertices, 0);
+                    assertEquals(3, mesh.getNumVertices());
+                    for (int i = 0; i < vertices.length; i += stride) {
+                        assertTrue(List.of(face.a(), face.b(), face.c()).contains(point(vertices, i)),
+                              "Shading must preserve the cliff's geometry");
+                        Color color = new Color();
+                        Color.abgr8888ToColor(color, vertices[i + colorOffset]);
+                        assertTrue(color.b < .125f && color.a < .25f,
+                              "Vertical pool boundaries must keep waterbed shading even on the exact shoreline");
+                        assertTrue(vertices[i + uvOffset] >= 0);
+                        if (vertices[i + uvOffset] == 0) { feet++; }
+                        if (vertices[i + uvOffset] > 2) { high++; }
+                    }
+                    Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
+                    if (Math.abs(normal.z) < .15f) { sheer++; }
+                }
+            }
+            assertTrue(feet > 0 && high > 0, "The wall supplies a continuous height above its bed for sediment blending");
+            assertTrue(rubble > 0, "Fallen rock details should continue below the waterline");
+            assertTrue(sheer > 0, "The scene must exercise vertical cliff faces");
+        } finally {
+            BoardRelief.tune(original);
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = { true, false })
     void clippingPreservesTheWallAndTintsOnlyRockCoveredByTheStream(boolean cliffs) {
@@ -36,9 +83,7 @@ class GpuWaterCoverageTest {
                 for (BoardSurface.Face face : faces) {
                     if ((surface == land && face.landEdge() != 0)
                           || face.finish() == BoardSurface.Finish.BED) { continue; }
-                    MeshBuilder mesh = new MeshBuilder();
-                    mesh.begin(VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal
-                          | VertexAttributes.Usage.TextureCoordinates | VertexAttributes.Usage.ColorPacked, GL20.GL_TRIANGLES);
+                    MeshBuilder mesh = mesh();
                     GpuTerrain.coveredFace(mesh, surface, face, waters);
                     int stride = mesh.getAttributes().vertexSize / Float.BYTES;
                     int colorOffset = mesh.getAttributes().findByUsage(VertexAttributes.Usage.ColorPacked).offset / Float.BYTES;
@@ -73,7 +118,10 @@ class GpuWaterCoverageTest {
                         }
                         if (wet) {
                             wetCount++;
-                            if (!Float.isFinite(height) || height < middle.z - .003f) { tintedOutside += pieceArea; }
+                            // The pool's vertical boundary is shaded by height, including undercuts behind the outline.
+                            if (!bedBoundary(surface, face) && (!Float.isFinite(height) || height < middle.z - .003f)) {
+                                tintedOutside += pieceArea;
+                            }
                         } else {
                             dryCount++;
                             if (height > middle.z + .003f) { dryUnderwater += pieceArea; }
@@ -101,6 +149,20 @@ class GpuWaterCoverageTest {
         } finally {
             BoardRelief.tune(original);
         }
+    }
+
+    private static boolean bedBoundary(BoardSurface surface, BoardSurface.Face face) {
+        return List.of(face.a(), face.b(), face.c()).stream().allMatch(p -> {
+            var shade = surface.relief.shade(p);
+            return shade != null && shade.kind() == BoardRelief.Kind.SUBMERGED_CLIFF;
+        });
+    }
+
+    private static MeshBuilder mesh() {
+        var mesh = new MeshBuilder();
+        mesh.begin(VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal
+              | VertexAttributes.Usage.TextureCoordinates | VertexAttributes.Usage.ColorPacked, GL20.GL_TRIANGLES);
+        return mesh;
     }
 
     private static Vector3 point(float[] vertices, int at) {

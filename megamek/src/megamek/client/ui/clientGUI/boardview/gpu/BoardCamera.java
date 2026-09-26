@@ -930,7 +930,10 @@ final class BoardCamera {
     void update() {
         orientation(azimuth, tilt, camera.direction, camera.up);
         camera.direction.scl(-1);
-        float distance = camera.perspective ? camera.distance() : 10000;
+        // Parallel rays still need their origins in front of all visible ground. At a tilted, zoomed-out view,
+        // the viewport spans depth as well as width; a fixed eye distance clips its lower half when panning.
+        float distance = camera.perspective ? camera.distance() : 10000
+              + camera.viewportHeight * camera.zoom * .5f * camera.up.z / Math.max(.01f, -camera.direction.z);
         if (!firstPerson) {
             camera.position.set(camera.direction).scl(-distance).add(focus);
             camera.position.mulAdd(new Vector3(camera.direction).crs(camera.up).nor(), viewOffsetPixels * camera.zoom);

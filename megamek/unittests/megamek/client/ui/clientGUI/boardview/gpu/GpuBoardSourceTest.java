@@ -1058,4 +1058,26 @@ class GpuBoardSourceTest {
             assertEquals(new Coords(6, 5), fixture.entity.getPosition());
         }
     }
+
+    @Test
+    void publishesForcedDisplacementAndFallsOnceWithoutAMovementPath() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            fixture.source.takeFrame();
+            var before = fixture.entity.getPosition();
+            SwingUtilities.invokeAndWait(() -> {
+                fixture.entity.setPosition(before.translated(0));
+                fixture.entity.setProne(megamek.common.units.ProneCause.FORCED);
+                fixture.source.refresh();
+            });
+            var frame = fixture.source.takeFrame();
+            assertEquals(1, frame.movements().size());
+            var movement = frame.movements().getFirst();
+            assertTrue(movement.forced());
+            assertEquals(before, movement.path().getFirst().coords());
+            assertEquals(before.translated(0), movement.path().getLast().coords());
+            assertEquals(megamek.common.units.ProneCause.FORCED, movement.path().getLast().proneCause());
+            SwingUtilities.invokeAndWait(fixture.source::refresh);
+            assertTrue(fixture.source.takeFrame().movements().isEmpty());
+        }
+    }
 }

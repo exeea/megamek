@@ -259,7 +259,8 @@ final class UnitAnimator {
             if (mek || body.rig.trooper() || "proto-v1".equals(body.rig.type())) {
                 float stance = mek ? Math.max(kneel, Math.max(crouch, fallen)) : 0;
                 boolean quad = "quad-v1".equals(body.rig.type());
-                float gait = jumping || flying || UnitConversion.vehiclePose(unit) > 0 ? 0
+                boolean displaced = bodyMotion.type() == EntityMovementType.MOVE_NONE && bodyMotion.moving();
+                float gait = jumping || flying || displaced || UnitConversion.vehiclePose(unit) > 0 ? 0
                       : (memberStep == null ? envelope : memberStep.gait()) * (1 - stance);
                 // Troops rise from their animated watch stance and settle only after their own arrival.
                 float activity = memberStep != null ? memberStep.standing() : smooth(bodyMotion.progress() * 12)
@@ -288,6 +289,13 @@ final class UnitAnimator {
                     body.rotate("rightArm", Vector3.X, MathUtils.sin(localPhase) * 9 * gait);
                 }
                 if (mek) {
+                    if (displaced) {
+                        // Brace and skid in the resolved direction; a pushed unit does not choose to walk there.
+                        body.rotate("torso", Vector3.X, -bodyMotion.forward() * 12 * envelope * (1 - fallen));
+                        body.rotate("torso", Vector3.Y, bodyMotion.lateral() * 10 * envelope * (1 - fallen));
+                        body.rotate("leftArm", Vector3.X, 18 * envelope * (1 - fallen));
+                        body.rotate("rightArm", Vector3.X, 18 * envelope * (1 - fallen));
+                    }
                     body.rotate("torso", Vector3.X, -crouch * (quad ? 8 : 24) - 6 * kneel);
                     body.rotate("leftArm", Vector3.X, crouch * 35);
                     body.rotate("rightArm", Vector3.X, crouch * 35);
@@ -569,9 +577,34 @@ final class UnitAnimator {
                 body.rotate("torso", Vector3.X, -2 * attack.impact());
                 body.rotate("hull", Vector3.X, -1 * attack.impact());
             }
+            dodge(model, unit, attack);
         }
         instance.calculateTransforms();
         applyRecoil(model);
+    }
+
+    /** A resolved melee miss gets a short evasive step, restored from the rest pose on every frame. */
+    private void dodge(GpuUnitModel model, BoardScene.Unit unit, UnitAttack attack) {
+        float weight = attack.dodgeWeight();
+        if (weight <= 0) { return; }
+        boolean standing = fallen < .01f && crouch < .01f && kneel < .01f;
+        float facing = bodies.stream().allMatch(body -> body.rig.trooper() || body.rig.transport()) ? 0 : unit.location().facing() * 60;
+        var away = attack.dodgeOffset(new Vector3()).rotate(Vector3.Z, facing).scl(1 / model.horizontalScale(unit));
+        for (Body body : bodies) {
+            var root = body.joints.get("root");
+            if (root == null) { continue; }
+            var local = away.cpy();
+            if (root.node().getParent() != null) { local.rot(root.node().getParent().globalTransform.cpy().inv()); }
+            root.node().translation.add(local);
+            if (standing) {
+                float gait = MathUtils.sin(weight * MathUtils.PI);
+                float phase = body.cycleDistance == 0 ? 0 : away.len() / body.memberScale / body.cycleDistance * MathUtils.PI2;
+                body.travelPitch.forEach((role, angle) -> body.rotate(role, Vector3.X, angle * gait));
+                legs(body, phase, gait, 0, 0, MathUtils.atan2(away.x, away.y) * MathUtils.radiansToDegrees);
+                body.rotate("torso", Vector3.X, -6 * weight * away.cpy().nor().y);
+            }
+        }
+        if (standing) { settleContacts(); }
     }
 
     /** Add constrained target tracking after both participants have their final world placement. */
@@ -768,10 +801,15 @@ final class UnitAnimator {
             var part = strikePart(model, body, attack, left);
             if (part == null) { continue; }
             if (attack.approach == null) {
-                // Measure once in the rest pose. Recomputing after each swing would move the contact stance.
-                var inverse = instance.transform.cpy().inv();
+                // Measure the stance facing the target, before the swing. This remains a visual offset only.
+                var direction = BoardGeometry.center(attack.event.destination().coords(), 0)
+                      .sub(BoardGeometry.center(attack.event.attacker().location().coords(), 0))
+                      .rot(instance.transform.cpy().inv());
+                attack.approachTurn = MathUtils.atan2(direction.x, direction.y) * MathUtils.radiansToDegrees;
+                var facing = instance.transform.cpy().rotate(Vector3.Z, -attack.approachTurn);
+                var inverse = facing.cpy().inv();
                 var pivot = part.upper.node().globalTransform.getTranslation(new Vector3());
-                var tip = part.world(instance).mul(inverse);
+                var tip = part.world(instance).mul(instance.transform.cpy().inv());
                 float reach = pivot.dst(tip);
                 if (part.lower != null) {
                     var elbow = part.lower.node().globalTransform.getTranslation(new Vector3());
@@ -782,9 +820,10 @@ final class UnitAnimator {
                 approach.z = 0;
                 float horizontalReach = (float) Math.sqrt(Math.max(0, reach * reach - vertical * vertical)) * .88f;
                 float distance = Math.max(0, approach.len() - horizontalReach);
-                attack.approach = approach.nor().scl(distance).rot(instance.transform)
+                attack.approach = approach.nor().scl(distance).rot(facing)
                       .limit(BoardGeometry.HEIGHT * PHYSICAL_APPROACH_HEXES);
             }
+            instance.transform.rotate(Vector3.Z, -attack.approachTurn * attack.approachFacingWeight());
             float travel = attack.approachWeight();
             float t = attack.travelProgress();
             float gait = MathUtils.clamp(Math.min(t, 1 - t) * 10, 0, 1);

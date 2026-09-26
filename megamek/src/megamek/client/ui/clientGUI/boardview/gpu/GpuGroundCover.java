@@ -40,10 +40,12 @@ final class GpuGroundCover implements Disposable {
     private static final class Cover {
         final BoardSurface.Key key;
         final ModelInstance instance;
+        final BoardTacticalGeometry.Surface surface;
         long generation;
-        Cover(BoardSurface.Key key, ModelInstance instance, long generation) {
+        Cover(BoardSurface.Key key, ModelInstance instance, BoardTacticalGeometry.Surface surface, long generation) {
             this.key = key;
             this.instance = instance;
+            this.surface = surface;
             this.generation = generation;
         }
     }
@@ -91,8 +93,7 @@ final class GpuGroundCover implements Disposable {
         List<BoardScene.Tile> nearby = new ArrayList<>();
         Set<Coords> visible = new HashSet<>();
         for (BoardScene.Tile tile : candidates) {
-            if (tile.surface() != BoardScene.Surface.GRASS || !tile.detailedGround() || tile.liquid().present()
-                  || tile.roadExits() != 0) { continue; }
+            if (!BoardSurfaceBlend.natural(tile) || !grassNearby(scene, tile)) { continue; }
             Vector3 center = BoardGeometry.center(tile.coords(), tile.elevation());
             if (fade(camera, center) <= 0) { continue; }
             if (camera.frustum.sphereInFrustum(center, BoardGeometry.WIDTH * .75f)) {
@@ -118,19 +119,30 @@ final class GpuGroundCover implements Disposable {
 
     private Cover cover(BoardScene scene, BoardScene.Tile tile, Function<Coords, BoardTacticalGeometry.Surface> surfaces) {
         Cover cover = models.get(tile.coords());
-        if (cover != null && cover.generation == generation) { return cover; }
+        BoardTacticalGeometry.Surface surface = surfaces.apply(tile.coords());
+        if (cover != null && cover.generation == generation && cover.surface == surface) { return cover; }
         BoardSurface.Key key = BoardSurface.geometryKey(scene, tile);
         if (key.near().getFirst().ramps() != 0) { return null; }
-        if (cover == null || !cover.key.equals(key)) {
+        if (cover == null || !cover.key.equals(key) || cover.surface != surface) {
             if (cover != null) { cover.instance.model.dispose(); }
-            cover = new Cover(key, build(tile, surfaces.apply(tile.coords())), generation);
+            cover = new Cover(key, build(scene, tile, surface), surface, generation);
             models.put(tile.coords(), cover);
         }
         cover.generation = generation;
         return cover;
     }
 
-    private static ModelInstance build(BoardScene.Tile tile, BoardTacticalGeometry.Surface surface) {
+    private static boolean grassNearby(BoardScene scene, BoardScene.Tile tile) {
+        if (tile.surface() == BoardScene.Surface.GRASS) { return true; }
+        for (int direction = 0; direction < 6; direction++) {
+            var neighbor = scene.tile(tile.coords().translated(direction));
+            if (BoardSurfaceBlend.natural(neighbor) && neighbor.surface() == BoardScene.Surface.GRASS
+                  && Math.abs(neighbor.elevation() - tile.elevation()) <= 1) { return true; }
+        }
+        return false;
+    }
+
+    private static ModelInstance build(BoardScene scene, BoardScene.Tile tile, BoardTacticalGeometry.Surface surface) {
         // Reuse the terrain's finished triangles, just as tactical overlays do; shoreline construction is expensive.
         List<BoardSurface.Face> ground = new ArrayList<>(surface.top().stream()
               .filter(face -> face.finish() == BoardSurface.Finish.TOP).toList());
@@ -156,13 +168,18 @@ final class GpuGroundCover implements Disposable {
         var mesh = builder.part("living-cover", GL20.GL_TRIANGLES, VertexAttributes.Usage.Position
                     | VertexAttributes.Usage.Normal | VertexAttributes.Usage.TextureCoordinates | VertexAttributes.Usage.ColorPacked,
               new Material(ColorAttribute.createDiffuse(Color.WHITE), IntAttribute.createCullFace(GL20.GL_NONE), new Wind()));
-        for (int tuft = 0; tuft < 72; tuft++) {
+        boolean boundary = BoardSurfaceBlend.boundary(scene, tile);
+        for (int tuft = 0; tuft < 72 && total > 0; tuft++) {
             int index = Arrays.binarySearch(areas, random.nextFloat() * total);
             var face = ground.get(Math.min(ground.size() - 1, index < 0 ? -index - 1 : index));
             float a = random.nextFloat(), b = random.nextFloat();
             if (a + b > 1) { a = 1 - a; b = 1 - b; }
             Vector3 root = new Vector3(face.a()).mulAdd(new Vector3(face.b()).sub(face.a()), a)
                   .mulAdd(new Vector3(face.c()).sub(face.a()), b).add(0, 0, -BoardGeometry.WIDTH * .001f);
+            float grass = boundary ? BoardSurfaceBlend.sample(scene, tile, root.x, root.y, root.z).grass()
+                  : tile.surface() == BoardScene.Surface.GRASS ? 1 : 0;
+            // Tufts need a substantial patch, leaving the small interlocking snow/sand margins mostly bare.
+            if (random.nextFloat() > grass * BoardRelief.smooth((grass - .55f) / .35f)) { continue; }
             float tone = random.nextFloat();
             // The meadow texture's own blade palette, so near blades read as part of the ground.
             Color color = new Color(.17f + tone * .16f, .29f + tone * .15f, .08f + tone * .08f, 1);

@@ -25,20 +25,20 @@ import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
-import com.badlogic.gdx.graphics.g3d.utils.DefaultRenderableSorter;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.RenderableSorter;
+import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Changing submission order must preserve mixed materials and transparency within measured reference quantization. */
+/** Reusing terrain material state must preserve mixed materials and transparency across camera views. */
 @Tag("on-demand")
 class GpuTerrainSubmissionSmokeTest {
     @Test
-    void shaderGroupingPreservesTerrainAndTransparentPixelsAcrossCameraViews() {
+    void materialBatchingPreservesTerrainAndTransparentPixelsAcrossCameraViews() {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         var configuration = GpuBoardWindow.configuration(false);
         configuration.setWindowedMode(1280, 900);
@@ -47,6 +47,7 @@ class GpuTerrainSubmissionSmokeTest {
             public void create() {
                 GpuTerrain terrain = new GpuTerrain();
                 ModelBatch units = new ModelBatch();
+                FrameBuffer target = new FrameBuffer(Pixmap.Format.RGBA8888, 1280, 900, true);
                 Model model = new ModelBuilder().createBox(14, 14, 10,
                       new Material(ColorAttribute.createDiffuse(Color.RED)),
                       VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal);
@@ -67,7 +68,7 @@ class GpuTerrainSubmissionSmokeTest {
                     Field sorter = ModelBatch.class.getDeclaredField("sorter");
                     sorter.setAccessible(true);
                     RenderableSorter original = batch.getRenderableSorter();
-                    RenderableSorter reference = new DefaultRenderableSorter(), grouped = new GpuOpaqueSorter();
+                    RenderableSorter reference = new GpuOpaqueSorter(), grouped = original;
                     try {
                         for (float opacity : new float[] { 1, .4f }) {
                             // Set occupancy and water once; neither animation time nor opacity advances during comparisons.
@@ -85,32 +86,43 @@ class GpuTerrainSubmissionSmokeTest {
                                     for (RenderableSorter order : List.of(reference, grouped)) {
                                         sorter.set(batch, order);
                                         for (int warmup = 0; warmup < 30; warmup++) {
-                                            draw(terrain, camera, units, occupants);
+                                            draw(terrain, camera, units, occupants, target);
                                         }
                                     }
                                     sorter.set(batch, reference);
-                                    byte[] before = pixels(terrain, camera, units, occupants);
+                                    byte[] before = pixels(terrain, camera, units, occupants, target);
+                                    // Some procedural cliff fragments vary even with an unchanged reference draw.
+                                    // Use only repeated reference draws, before and after batching, to identify them.
+                                    boolean[] unstable = new boolean[before.length / 4];
+                                    for (int repeat = 0; repeat < 32; repeat++) {
+                                        referenceNoise(before, pixels(terrain, camera, units, occupants, target), unstable);
+                                    }
                                     sorter.set(batch, grouped);
-                                    byte[] after = pixels(terrain, camera, units, occupants);
+                                    byte[] after = pixels(terrain, camera, units, occupants, target);
                                     sorter.set(batch, reference);
-                                    byte[] restored = pixels(terrain, camera, units, occupants);
-                                    Difference referenceDifference = difference(before, restored);
-                                    Difference groupedDifference = difference(before, after);
-                                    System.out.printf("Terrain submission %s: reference %s; grouped %s; total pixels=%d%n",
-                                          name, referenceDifference, groupedDifference, before.length / 4);
-                                    if (!referenceDifference.acceptable() || !groupedDifference.acceptable()) {
+                                    byte[] restored = pixels(terrain, camera, units, occupants, target);
+                                    referenceNoise(before, restored, unstable);
+                                    for (int repeat = 0; repeat < 32; repeat++) {
+                                        referenceNoise(before, pixels(terrain, camera, units, occupants, target), unstable);
+                                    }
+                                    int unstableCount = 0;
+                                    for (boolean value : unstable) { if (value) { unstableCount++; } }
+                                    assertTrue(unstableCount <= 64, "Unstable reference pixels: " + name + " " + unstableCount);
+                                    Difference groupedDifference = difference(before, after, unstable);
+                                    System.out.printf("Terrain submission %s: grouped %s; unstable=%d; total pixels=%d%n",
+                                          name, groupedDifference, unstableCount, before.length / 4);
+                                    if (!groupedDifference.acceptable()) {
                                         save(before, name + "-reference.png");
                                         save(after, name + "-grouped.png");
                                         save(restored, name + "-reference-restored.png");
                                     }
-                                    assertTrue(referenceDifference.acceptable(),
-                                          "The frozen reference must remain stable: " + name + " " + referenceDifference);
                                     assertTrue(groupedDifference.acceptable(),
                                           "Shader grouping must preserve pixels: " + name + " " + groupedDifference);
                                 }
                             }
                         }
                     } finally {
+                        target.end();
                         sorter.set(batch, original);
                     }
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
@@ -118,6 +130,7 @@ class GpuTerrainSubmissionSmokeTest {
                     failure.set(error);
                 } finally {
                     terrain.dispose();
+                    target.dispose();
                     units.dispose();
                     model.dispose();
                     Gdx.app.exit();
@@ -152,8 +165,12 @@ class GpuTerrainSubmissionSmokeTest {
               new BoardScene.Light(-24, -30));
     }
 
-    private static void draw(GpuTerrain terrain, BoardCamera camera, ModelBatch units, List<ModelInstance> occupants) {
+    private static void draw(GpuTerrain terrain, BoardCamera camera, ModelBatch units, List<ModelInstance> occupants,
+          FrameBuffer target) {
         terrain.renderShadows(camera.camera, occupants);
+        target.begin();
+        // Transparent passes leave depth writes off. Clear every reference frame, including its depth buffer.
+        Gdx.gl.glDepthMask(true);
         ScreenUtils.clear(.2f, .26f, .31f, 1, true);
         terrain.render(camera.camera, false);
         units.begin(camera.camera);
@@ -163,8 +180,9 @@ class GpuTerrainSubmissionSmokeTest {
         terrain.render(camera.camera, true);
     }
 
-    private static byte[] pixels(GpuTerrain terrain, BoardCamera camera, ModelBatch units, List<ModelInstance> occupants) {
-        draw(terrain, camera, units, occupants);
+    private static byte[] pixels(GpuTerrain terrain, BoardCamera camera, ModelBatch units, List<ModelInstance> occupants,
+          FrameBuffer target) {
+        draw(terrain, camera, units, occupants, target);
         byte[] pixels = ScreenUtils.getFrameBufferPixels(0, 0, Gdx.graphics.getBackBufferWidth(),
               Gdx.graphics.getBackBufferHeight(), false);
         int varied = 0;
@@ -193,10 +211,19 @@ class GpuTerrainSubmissionSmokeTest {
         boolean acceptable() { return changedPixels <= 8 && maximumChannelDelta <= 1; }
     }
 
-    private static Difference difference(byte[] expected, byte[] actual) {
+    private static void referenceNoise(byte[] before, byte[] sample, boolean[] unstable) {
+        for (int p = 0; p < unstable.length; p++) {
+            for (int channel = 0; channel < 3; channel++) {
+                unstable[p] |= sample[p * 4 + channel] != before[p * 4 + channel];
+            }
+        }
+    }
+
+    private static Difference difference(byte[] expected, byte[] actual, boolean[] unstable) {
         assertEquals(expected.length, actual.length);
         int changedPixels = 0, maximum = 0;
         for (int pixel = 0; pixel < expected.length; pixel += 4) {
+            if (unstable[pixel / 4]) { continue; }
             int delta = 0;
             for (int channel = 0; channel < 4; channel++) {
                 delta = Math.max(delta, Math.abs(Byte.toUnsignedInt(expected[pixel + channel])

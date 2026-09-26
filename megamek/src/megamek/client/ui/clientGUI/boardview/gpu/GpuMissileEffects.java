@@ -28,8 +28,21 @@ final class GpuMissileEffects implements Disposable {
     private static final int MISSILES_PER_BATCH = 512;
     private static final int STRIDE = 7;
     record Launch(UnitAttack attack, Vector3[] origins, Vector3[] targets, int missiles, int hits, boolean indirect, int seed,
-          ResolvedAttack.Shot profile) {
+          ResolvedAttack.Shot profile, int intercepted) {
         boolean hit(int missile) { return Math.floorMod(seed - missile, missiles) < hits; }
+        boolean intercepted(int missile) {
+            int rank = Math.floorMod(seed - missile, missiles);
+            return rank >= hits && rank < hits + intercepted;
+        }
+
+        float endProgress(int missile) {
+            return intercepted(missile) ? UnitAttack.interceptProgress(origins[missile % origins.length], targets[missile]) : 1;
+        }
+
+        float endSeconds(int missile) {
+            float start = UnitAttack.ANTICIPATION_SECONDS + launchDelay(this, missile);
+            return MathUtils.lerp(start, attack.roundContactSeconds(profile, 0), endProgress(missile));
+        }
     }
 
     static Launch capture(UnitAttack attack, Vector3[] origins, ModelInstance target, int missiles, int hits,
@@ -39,14 +52,22 @@ final class GpuMissileEffects implements Disposable {
 
     static Launch capture(UnitAttack attack, Vector3[] origins, ModelInstance target, int missiles, int hits,
           boolean indirect, int seed, ResolvedAttack.Shot profile) {
-        var launch = new Launch(attack, origins, new Vector3[missiles], missiles, MathUtils.clamp(hits, 0, missiles), indirect, seed, profile);
+        return capture(attack, origins, target, missiles, hits, indirect, seed, profile,
+              attack.interception() == null ? 0 : attack.interception().missiles());
+    }
+
+    static Launch capture(UnitAttack attack, Vector3[] origins, ModelInstance target, int missiles, int hits,
+          boolean indirect, int seed, ResolvedAttack.Shot profile, int intercepted) {
+        hits = MathUtils.clamp(hits, 0, missiles);
+        var launch = new Launch(attack, origins, new Vector3[missiles], missiles, hits, indirect, seed, profile,
+              MathUtils.clamp(intercepted, 0, missiles - hits));
         int hitOrdinal = 0;
         for (int missile = 0; missile < missiles; missile++) {
             Vector3 origin = origins[missile % origins.length];
             // Observed artillery landings and counterfire retain their own targets rather than a body surface.
             launch.targets[missile] = launch.hit(missile) && !attack.defensive() && (profile == null || profile.impact() == null)
                   ? attack.hitEndpoint(target, origin, missile + seed, hitOrdinal++, launch.hits, new Vector3())
-                  : attack.endpoint(target, origin, !launch.hit(missile), missile + seed, new Vector3());
+                  : attack.endpoint(target, origin, !launch.hit(missile) && !launch.intercepted(missile), missile + seed, new Vector3());
         }
         return launch;
     }
@@ -73,13 +94,13 @@ final class GpuMissileEffects implements Disposable {
     int smokeCount() { return smokeCount; }
 
     private static float launchDelay(Launch launch, int missile) {
-        return Math.min(LAUNCH_JITTER_SECONDS, (launch.attack.contactSeconds - UnitAttack.ANTICIPATION_SECONDS) * .25f)
+        return Math.min(LAUNCH_JITTER_SECONDS, launch.attack.flightSeconds * .25f)
               * noise(launch.seed + missile * 7919);
     }
 
     static float progress(Launch launch, int missile, float time) {
         float start = UnitAttack.ANTICIPATION_SECONDS + launchDelay(launch, missile);
-        return (time - start) / (launch.attack.contactSeconds - start);
+        return (time - start) / (launch.attack.roundContactSeconds(launch.profile, 0) - start);
     }
 
     /** Includes a small fan-out, then converges on the authorized hit or a shared safe miss area. */
@@ -111,7 +132,7 @@ final class GpuMissileEffects implements Disposable {
             float time = launch.attack.seconds;
             for (int missile = 0; missile < launch.missiles; missile++, ordinal++) {
                 float t = progress(launch, missile, time);
-                if (t >= 0 && t < 1) {
+                if (t >= 0 && t < launch.endProgress(missile)) {
                     position(launch, missile, t, point);
                     position(launch, missile, Math.min(1, t + .002f), direction).sub(point).nor();
                     missile(camera, point, direction);
@@ -123,7 +144,7 @@ final class GpuMissileEffects implements Disposable {
                 for (int puff = 0; puff < perMissile && smokeCount < SMOKE_BUDGET; puff++) {
                     float birth = newest - puff * interval;
                     float at = progress(launch, missile, birth);
-                    if (at < 0 || at >= 1) { continue; }
+                    if (at < 0 || at >= launch.endProgress(missile)) { continue; }
                     float age = time - birth, remaining = Math.max(0, 1 - age / SMOKE_LIFE_SECONDS);
                     Puff sample = smoke[smokeCount];
                     if (sample == null) { sample = new Puff(); smoke[smokeCount] = sample; }
@@ -149,7 +170,7 @@ final class GpuMissileEffects implements Disposable {
         for (var launch : launches) {
             for (int missile = 0; missile < launch.missiles && flames < MISSILES_PER_BATCH; missile++) {
                 float t = progress(launch, missile, launch.attack.seconds);
-                if (t < 0 || t >= 1) { continue; }
+                if (t < 0 || t >= launch.endProgress(missile)) { continue; }
                 position(launch, missile, t, point);
                 position(launch, missile, Math.max(0, t - .003f), direction).sub(point).nor();
                 width.set(right).scl(.5f);

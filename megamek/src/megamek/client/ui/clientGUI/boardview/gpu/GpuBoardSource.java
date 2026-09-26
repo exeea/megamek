@@ -386,6 +386,9 @@ final class GpuBoardSource implements AutoCloseable {
             points.add(pathWaypoint(entity, start.coords(), start.elevation(), start.facing(),
                   startAltitude > 0 ? startAltitude : flightAltitude, start.form()).withProneCause(start.proneCause())
                   .withFallSide(start.fallSide()).withHullDown(start.hullDown()));
+        } else if (frame != null) {
+            frame.scene().units().stream().filter(unit -> unit.id() == entityId && !unit.sensorContact())
+                  .findFirst().ifPresent(unit -> points.add(unit.location()));
         }
         for (UnitLocation location : path) {
             var observedForm = location.form() != null ? location.form() : points.isEmpty() ? null : points.getLast().form();
@@ -410,14 +413,20 @@ final class GpuBoardSource implements AutoCloseable {
         }
         // Publish the final visible state and its movement together, so a frame cannot jump to the end first.
         Frame next = capture();
+        var captured = next.scene().units().stream()
+              .filter(unit -> unit.id() == entityId && !unit.sensorContact()).findFirst().orElse(null);
         if (!points.isEmpty()) {
             points.set(0, supportedEndpoint(points.getFirst(), frame, entityId));
             points.set(points.size() - 1, supportedEndpoint(points.getLast(), next, entityId));
+            if (captured != null && points.getLast().coords().equals(captured.location().coords())
+                  && (UnitMotion.changesPosture(points.getLast(), captured.location())
+                        || points.getLast().elevation() != captured.location().elevation())) {
+                // Legacy path steps can omit the fall at arrival; the final entity packet still confirms it.
+                points.add(captured.location());
+            }
         }
         synchronized (this) {
             if (view == movingView) {
-                var captured = next.scene().units().stream()
-                      .filter(unit -> unit.id() == entityId && !unit.sensorContact()).findFirst().orElse(null);
                 queueMovement(entity, captured, points, type, jumpMP, movementMP);
             }
             publishScene(next, false);
@@ -528,6 +537,10 @@ final class GpuBoardSource implements AutoCloseable {
                     queueAnimation(new BoardScene.Movement(unit.id(), next.scene().boardId(),
                           List.of(old.location(), unit.location()), EntityMovementType.MOVE_SAFE_THRUST, 0,
                           entity == null ? 0 : movementMP(entity, EntityMovementType.MOVE_SAFE_THRUST), unit));
+                } else if (editor == null && UnitMotion.forcedChange(old, unit)) {
+                    // No movement path accompanied this authoritative update (push, domino displacement, or fall).
+                    queueAnimation(new BoardScene.Movement(unit.id(), next.scene().boardId(),
+                          List.of(old.location(), unit.location()), EntityMovementType.MOVE_NONE, 0, 0, unit));
                 }
             }
         }
@@ -938,6 +951,7 @@ final class GpuBoardSource implements AutoCloseable {
                     : waypoint(coords, sensor ? 0 : entity.getElevation(), facing);
         if (!sensor) {
             location = location.withAeroState(aeroState(entity, entity.getElevation(), airborne))
+                  .withProneCause(entity.getProneCause())
                   .withFallSide(entity instanceof Mek ? entity.getFallSide() : null).withHullDown(entity.isHullDown());
             if (location.aeroState() != null) {
                 location = location.withFootprint(footprint);

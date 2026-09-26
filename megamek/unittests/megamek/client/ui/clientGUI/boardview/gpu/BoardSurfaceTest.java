@@ -310,7 +310,7 @@ class BoardSurfaceTest {
             BoardRelief.tune(new BoardRelief.Tuning(original.shoreShift(), original.shoreRoom(), original.shoreReach(),
                   original.shoreNarrow(), original.shoreHard(), original.shorePool(), original.shoreIsle(),
                   original.shoreBlend(), original.shoreWander(), original.wanderCell(), -15, original.landKeep(),
-                  original.shoreLip(), original.transition(), original.fullDetailHexes(), original.mediumDetailHexes(),
+                  original.shoreLip(), original.transition(),
                   original.riverWidth(), original.cliffsIntoWater()));
             BoardSurface narrow = cache.get(scene, scene.tile(center));
             BoardSurface adjoining = cache.get(scene, scene.tile(north));
@@ -376,7 +376,7 @@ class BoardSurfaceTest {
             BoardRelief.tune(new BoardRelief.Tuning(0, relief.shoreRoom(), relief.shoreReach(), relief.shoreNarrow(),
                   relief.shoreHard(), relief.shorePool(), relief.shoreIsle(), relief.shoreBlend(), relief.shoreWander(),
                   relief.wanderCell(), relief.shoreSpread(), relief.landKeep(), relief.shoreLip(), relief.transition(),
-                  relief.fullDetailHexes(), relief.mediumDetailHexes(), relief.riverWidth(), relief.cliffsIntoWater()));
+                  relief.riverWidth(), relief.cliffsIntoWater()));
             BoardSurface before = cache.get(scene, scene.tile(center));
             int n = BoardSurface.SHORE_SEGMENTS;
             float width = before.outline.get(n).dst(before.outline.get(2 * n));

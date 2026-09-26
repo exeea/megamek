@@ -5417,6 +5417,12 @@ public class Compute {
      * @param advancedAMS - the roll can now go below 2, indicating no damage
      */
     public static int missilesHit(int missiles, int nMod, boolean hotLoaded, boolean streak, boolean advancedAMS) {
+        return missilesHit(missiles, nMod, hotLoaded, streak, advancedAMS, 0, null);
+    }
+
+    /** Observe missiles removed by defense using this same roll; the callback never participates in resolution. */
+    public static int missilesHit(int missiles, int nMod, boolean hotLoaded, boolean streak, boolean advancedAMS,
+          int defenseModifier, java.util.function.IntConsumer intercepted) {
         // No missiles fired means no hits. This also guards against a battle armor squad whose
         // shooting strength has been reduced to zero (e.g. all troopers disabled by Improved
         // Magnetic Pulse missiles), which otherwise falls through to the hit-table lookup below.
@@ -5448,17 +5454,27 @@ public class Compute {
             nRoll = 11;
         }
         nRoll += nMod;
+        int undefendedRoll = Math.clamp(nRoll - defenseModifier, 2, 12);
         if (!advancedAMS) {
             nRoll = Math.clamp(nRoll, 2, 12);
         } else {
             nRoll = min(nRoll, 12);
         }
         if (nRoll < 2) {
+            if (intercepted != null) {
+                int remaining = missiles;
+                for (int i = clusterHitsTable.length - 1; i >= 0; i--) {
+                    int racks = remaining / clusterHitsTable[i][0];
+                    intercepted.accept(racks * clusterHitsTable[i][undefendedRoll - 1]);
+                    remaining %= clusterHitsTable[i][0];
+                }
+            }
             return 0;
         }
 
         for (int[] element : clusterHitsTable) {
             if (element[0] == missiles) {
+                if (intercepted != null) { intercepted.accept(Math.max(0, element[undefendedRoll - 1] - element[nRoll - 1])); }
                 return element[nRoll - 1];
             }
         }
@@ -5467,10 +5483,13 @@ public class Compute {
         // if so, take largest, subtract value and try again
         for (int i = clusterHitsTable.length - 1; i >= 0; i--) {
             if (missiles > clusterHitsTable[i][0]) {
+                if (intercepted != null) {
+                    intercepted.accept(Math.max(0, clusterHitsTable[i][undefendedRoll - 1] - clusterHitsTable[i][nRoll - 1]));
+                }
                 return clusterHitsTable[i][nRoll - 1]
                       + Compute.missilesHit(
                       missiles - clusterHitsTable[i][0], nMod,
-                      hotLoaded, streak, advancedAMS);
+                      hotLoaded, streak, advancedAMS, defenseModifier, intercepted);
             }
         }
         throw new RuntimeException(

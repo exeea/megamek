@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -16,6 +17,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.Ray;
 import megamek.client.ui.tileset.MekTileset;
 import megamek.common.Configuration;
 import megamek.common.ResolvedAttack;
@@ -61,16 +63,22 @@ class GpuPhysicalContactSmokeTest {
                         var source = new ModelInstance(model.instance.model);
                         var target = new ModelInstance(model.instance.model);
                         var animator = new UnitAnimator();
+                        var defender = new UnitAnimator();
                         for (float scale : new float[] { .7f, 1f }) {
                             BoardGeometry.tune(new BoardGeometry.Tuning(tuning.hexScale(), scale, tuning.unitHeightScale(),
                                   tuning.levelHeight(), tuning.gridShade(), tuning.multiHexUnitScale()));
-                            for (int facing = 0; facing < 6; facing++) {
+                            for (int pose = 0; pose < 18; pose++) {
+                                int facing = pose / 3;
+                                int offset = pose % 3 - 1;
+                                int targetFacing = (facing + offset + 6) % 6;
                                 var start = new Coords(2, 3);
-                                var end = start.translated(facing);
+                                var end = start.translated(targetFacing);
                                 var attacker = unit(entity.getId(), start, facing, selection);
-                                var victim = unit(9799, end, (facing + 3) % 6, selection);
+                                var victim = unit(9799, end, (targetFacing + 3) % 6, selection);
                                 var origin = BoardGeometry.center(start, 0);
-                                model.place(target, renderer.camera, BoardGeometry.center(end, 0), (facing + 3) * 60, victim);
+                                var toward = BoardGeometry.center(end, 0).sub(origin).nor();
+                                var originalForward = Vector3.Y.cpy().rotate(Vector3.Z, -facing * 60);
+                                model.place(target, renderer.camera, BoardGeometry.center(end, 0), (targetFacing + 3) * 60, victim);
                                 var kinds = entity instanceof QuadMek ? List.of(ResolvedAttack.Kind.KICK)
                                       : List.of(ResolvedAttack.Kind.PUNCH, ResolvedAttack.Kind.KICK, ResolvedAttack.Kind.PUSH, ResolvedAttack.Kind.CLUB);
                                 for (var kind : kinds) {
@@ -81,35 +89,63 @@ class GpuPhysicalContactSmokeTest {
                                     for (boolean hit : List.of(true, false)) {
                                         var result = new ResolvedAttack(new UUID(5, 17), kind,
                                               new UnitLocation(attacker.id(), start, facing, 0, 0),
-                                              new UnitLocation(victim.id(), end, (facing + 3) % 6, 0, 0),
+                                              new UnitLocation(victim.id(), end, (targetFacing + 3) % 6, 0, 0),
                                               Targetable.TYPE_ENTITY, index, index < 0 ? "" : "Tree Club", limb, hit);
                                         var attack = new UnitAttack(new BoardScene.Combat(result, attacker, victim, victim.location()));
-                                        if (facing == 0 && scale == .7f && hit) {
+                                        if (facing == 0 && offset == 0 && scale == .7f && hit) {
                                             verifyTravel(model, animator, source, target, attacker, attack, picking, renderer);
                                         }
                                         Vector3 contact = null;
+                                        Vector3 previousForward = originalForward;
+                                        Vector3 restTarget = null;
                                         for (int frame = 0; frame <= 40; frame++) {
                                             attack.seconds = frame <= 26 ? attack.contactSeconds * frame / 26
                                                   : attack.contactSeconds + (attack.duration - attack.contactSeconds) * (frame - 26) / 14;
                                             animator.apply(model, source, attacker, UnitMotion.Sample.STILL, 0, 0, true, 0);
                                             animator.attack(model, attacker, attack);
                                             model.place(source, renderer.camera, origin, facing * 60, attacker);
+                                            defender.apply(model, target, victim, UnitMotion.Sample.STILL, 0, 0, true, 0);
+                                            defender.attack(model, victim, attack);
+                                            model.place(target, renderer.camera, BoardGeometry.center(end, 0), (targetFacing + 3) * 60, victim);
+                                            var targetCenter = UnitBounds.world(target).getCenter(new Vector3());
+                                            if (frame == 0) { restTarget = targetCenter; }
                                             contact = attack.contact(target, UnitAttack.center(source, attacker.location(), new Vector3()), picking, new Vector3());
                                             animator.aim(model, attacker, attack, contact, target);
+                                            var forward = Vector3.Y.cpy().rot(source.transform).nor();
+                                            assertTrue(previousForward.dot(forward) > .94f, "Approach and return must turn smoothly");
+                                            if (attack.seconds >= attack.approachSeconds && !attack.returning()) {
+                                                assertEquals(1, forward.dot(toward), .0001f, "Strike stance must face the target");
+                                            }
+                                            if (frame == 0 || frame == 40) {
+                                                assertEquals(1, forward.dot(originalForward), .0001f, "Playback must restore the game facing");
+                                            }
+                                            previousForward = forward;
+                                            if (!hit && attack.contactWeight() > 0) {
+                                                var tip = animator.physicalTip(model, attack);
+                                                var from = new Vector3(origin.x, origin.y, tip.z);
+                                                float collision = picking.distance(target, new Ray(from, tip.cpy().sub(from).nor()));
+                                                assertTrue(collision > from.dst2(tip), "A missed swing must clear the posed opponent"
+                                                      + " kind=" + kind + " frame=" + frame + " tip=" + tip + " contact=" + contact);
+                                            }
                                             if (frame == 26) {
                                                 var tip = animator.physicalTip(model, attack);
                                                 assertNotNull(tip);
-                                                String label = model.rigs().getFirst().type() + " " + kind + " facing " + facing + " scale " + scale;
+                                                String label = model.rigs().getFirst().type() + " " + kind + " facing " + facing
+                                                      + " offset " + offset + " scale " + scale;
                                                 if (hit) { assertTrue(tip.dst(contact) < 1.5f, label + " contact gap " + tip.dst(contact)
                                                       + " tip " + tip + " target " + contact + " root " + source.transform.getTranslation(new Vector3())); }
-                                                else { assertTrue(!UnitBounds.world(target).contains(tip), label + " a miss must clear the opponent"); }
+                                                else {
+                                                    assertTrue(targetCenter.cpy().sub(restTarget).dot(toward) > BoardGeometry.HEIGHT * .08f,
+                                                          label + " defender must step away from the attack");
+                                                }
                                             }
-                                            if (scale == .7f && facing == 0 && hit && frame % 2 == 0) {
+                                            if (frame == 40) { assertTrue(targetCenter.dst(restTarget) < .001f, "The dodge must fully recover"); }
+                                            if (scale == .7f && facing == 0 && frame % 2 == 0) {
                                                 for (boolean top : List.of(false, true)) {
                                                 renderer.topView = top;
                                                 renderer.frame(List.of(source, target), origin.cpy().lerp(BoardGeometry.center(end, 0), .5f), null,
                                                       "contact-" + model.rigs().getFirst().type() + "-" + kind.name().toLowerCase(java.util.Locale.ROOT)
-                                                            + (top ? "-top" : "-iso"), frame);
+                                                            + "-turn-" + offset + (hit ? "-hit" : "-dodge") + (top ? "-top" : "-iso"), frame);
                                                 }
                                             }
                                         }

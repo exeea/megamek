@@ -7,12 +7,22 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.profiling.GLProfiler;
 import org.lwjgl.opengl.ARBTimerQuery;
 import org.lwjgl.opengl.GL;
 import org.lwjgl.opengl.GL15;
 
 /** Native benchmark only. Polls completed timestamp queries; never stalls to obtain a result. */
 final class GpuStageTimings implements AutoCloseable {
+    /** libGDX 1.14.2 restores GL30 but leaves its interceptor in GL20 on the LWJGL3 backend. */
+    static void stopCounting(GLProfiler profiler, GL20 rawGl20) {
+        profiler.disable();
+        Gdx.graphics.setGL20(rawGl20);
+        Gdx.gl = Gdx.gl20 = rawGl20;
+    }
+
     private static final int MAX_STAGES = 24;
     private final boolean gpu;
     private final long timestampMask;

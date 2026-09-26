@@ -318,6 +318,7 @@ final class UnitMotion {
     private long sequence;
     private Boarding arrival;
     private Playback arrivedGroup;
+    private Playback arrivedPlayback;
     private ProneCause arrivedProne;
     private BoardScene.Waypoint observed;
 
@@ -334,6 +335,7 @@ final class UnitMotion {
         settledSeconds = Float.POSITIVE_INFINITY;
         arrival = null;
         arrivedGroup = null;
+        arrivedPlayback = null;
         arrivedProne = null;
         elapsed = 0;
     }
@@ -440,14 +442,14 @@ final class UnitMotion {
             boolean standing = changesPosture(from, to) && (to.proneCause() == null || to.proneCause() == ProneCause.NONE)
                   && !Boolean.TRUE.equals(to.hullDown());
             if (standing) {
-                time += rampTravel(travel, blockStart, path, speedGainPerHex);
+                if (type != EntityMovementType.MOVE_NONE) { time += rampTravel(travel, blockStart, path, speedGainPerHex); }
                 time = addPosture(postures, from, to, time);
                 blockStart = travel.size();
             }
             boolean changes = changesGear(path.get(i - 1), path.get(i));
             boolean takeoff = path.get(i - 1).aeroState() == BoardScene.AeroState.LANDED;
             if (changes && takeoff) {
-                time += rampTravel(travel, blockStart, path, speedGainPerHex);
+                if (type != EntityMovementType.MOVE_NONE) { time += rampTravel(travel, blockStart, path, speedGainPerHex); }
                 gear.add(new GearPause(i - 1, true, time, time + LANDING_GEAR_SECONDS));
                 time += LANDING_GEAR_SECONDS;
                 blockStart = travel.size();
@@ -456,29 +458,31 @@ final class UnitMotion {
             double seconds = travelSeconds(path.get(i - 1), path.get(i), distances[distances.length - 1], type, movementMP);
             boolean turningInPlace = seconds > 0 && travelDistance(path.get(i - 1), path.get(i)) == 0;
             if (turningInPlace) {
-                time += rampTravel(travel, blockStart, path, speedGainPerHex);
+                if (type != EntityMovementType.MOVE_NONE) { time += rampTravel(travel, blockStart, path, speedGainPerHex); }
                 blockStart = travel.size();
             }
             double end = time + seconds;
             travel.add(new Travel(time, end, null, distances));
             time = end;
             if (turningInPlace) {
-                time += rampTravel(travel, blockStart, path, speedGainPerHex);
+                if (type != EntityMovementType.MOVE_NONE) { time += rampTravel(travel, blockStart, path, speedGainPerHex); }
                 blockStart = travel.size();
             }
             if (changes && !takeoff) {
-                time += rampTravel(travel, blockStart, path, speedGainPerHex);
+                if (type != EntityMovementType.MOVE_NONE) { time += rampTravel(travel, blockStart, path, speedGainPerHex); }
                 gear.add(new GearPause(i, false, time, time + LANDING_GEAR_SECONDS));
                 time += LANDING_GEAR_SECONDS;
                 blockStart = travel.size();
             }
             if (!standing && changesPosture(from, to)) {
-                time += rampTravel(travel, blockStart, path, speedGainPerHex);
-                time = addPosture(postures, from, to, time);
+                if (type != EntityMovementType.MOVE_NONE) { time += rampTravel(travel, blockStart, path, speedGainPerHex); }
+                double postureStart = type == EntityMovementType.MOVE_NONE
+                      ? Math.max(travel.getLast().start(), time - POSTURE_SECONDS) : time;
+                time = Math.max(time, addPosture(postures, from, to, postureStart));
                 blockStart = travel.size();
             }
         }
-        time += rampTravel(travel, blockStart, path, speedGainPerHex);
+        if (type != EntityMovementType.MOVE_NONE) { time += rampTravel(travel, blockStart, path, speedGainPerHex); }
         return new Playback(path, time + (transport ? UNLOAD_SECONDS : 0), null, type, transport, sequence,
               List.copyOf(travel), List.copyOf(gear), List.copyOf(postures), stagger, settle);
     }
@@ -486,6 +490,15 @@ final class UnitMotion {
     static boolean changesPosture(BoardScene.Waypoint from, BoardScene.Waypoint to) {
         return from != null && ((from.proneCause() != null && to.proneCause() != null && from.proneCause() != to.proneCause())
               || (from.hullDown() != null && to.hullDown() != null && !from.hullDown().equals(to.hullDown())));
+    }
+
+    /** A visible, adjacent relocation or fall without a supplied path. Deployment/teleports stay instantaneous. */
+    static boolean forcedChange(BoardScene.Unit before, BoardScene.Unit after) {
+        if (before == null || before.sensorContact() || after.sensorContact() || before.airborne() || after.airborne()) { return false; }
+        var from = before.location();
+        var to = after.location();
+        return from.coords().distance(to.coords()) == 1
+              || from.coords().equals(to.coords()) && (changesPosture(from, to) || from.elevation() != to.elevation());
     }
 
     private static double addPosture(List<PosturePause> pauses, BoardScene.Waypoint from, BoardScene.Waypoint to, double time) {
@@ -561,6 +574,7 @@ final class UnitMotion {
     private static double travelSeconds(BoardScene.Waypoint from, BoardScene.Waypoint to, double distance,
           EntityMovementType type, int movementMP) {
         double pace = switch (type) {
+            case MOVE_NONE -> .45;
             case MOVE_SPRINT, MOVE_VTOL_SPRINT, MOVE_SKID -> SPRINT_SECONDS_PER_HEX;
             case MOVE_RUN, MOVE_VTOL_RUN, MOVE_SUBMARINE_RUN, MOVE_OVER_THRUST -> RUN_SECONDS_PER_HEX;
             default -> WALK_SECONDS_PER_HEX;
@@ -635,6 +649,7 @@ final class UnitMotion {
             arrivalHeading = arrivalHeading(completed.path());
             arrival = boarding(completed, completed.duration());
             arrivedGroup = completed.stagger() > 0 ? completed : null;
+            arrivedPlayback = completed;
             arrivedProne = end.proneCause();
             settledSeconds = (float) completed.settle();
             elapsed = Math.max(0, elapsed - completed.end());
@@ -697,6 +712,42 @@ final class UnitMotion {
         }
         settledSeconds = Float.POSITIVE_INFINITY;
         arrivedGroup = null;
+        arrivedPlayback = null;
+    }
+
+    record WaterImpact(Vector3 position, float age) { }
+
+    /** A fall's splash is sampled from the posture clock, so pausing, skipping and low frame rates agree. */
+    WaterImpact waterImpact(BoardScene scene) {
+        Playback playback = isMoving() ? remaining.getFirst() : arrivedPlayback;
+        if (playback == null) { return null; }
+        double time = isMoving() ? elapsed : playback.end() + settledSeconds;
+        WaterImpact impact = null;
+        for (var pause : playback.postures()) {
+            if (Posture.of(pause.from()).fallen() > 0 || Posture.of(pause.to()).fallen() == 0) { continue; }
+            BoardScene.Tile water = scene.tile(pause.to().coords());
+            if (water == null || !water.liquid().present() || water.liquid().molten() || water.frozen()) { continue; }
+            double contact = pause.start() + (pause.end() - pause.start()) * .65;
+            // Follow a falling body into the water, including vertical drops and a simultaneous displacement.
+            for (int step = 0; step <= 32; step++) {
+                double at = pause.start() + (pause.end() - pause.start()) * step / 32;
+                var point = position(playback, at);
+                float torso = point.z + BoardGeometry.LEVEL * (1.15f - .9f * posture(playback, at).fallen());
+                if (BoardGeometry.contains(water.coords(), point.x, point.y) && torso <= BoardGeometry.waterZ(water)) {
+                    contact = at;
+                    break;
+                }
+            }
+            float age = (float) (time - contact);
+            if (age < 0 || age > GpuWaterImpacts.LIFETIME) { continue; }
+            var point = position(playback, contact);
+            if (!BoardGeometry.contains(water.coords(), point.x, point.y)) {
+                point = BoardGeometry.center(water.coords(), water.elevation());
+            }
+            point.z = BoardGeometry.waterZ(water) + .25f;
+            impact = new WaterImpact(point, age);
+        }
+        return impact;
     }
 
     private static float arrivalHeading(List<BoardScene.Waypoint> path) {
@@ -906,7 +957,9 @@ final class UnitMotion {
             double start = playback.travel().get(first).start(), end = playback.travel().get(last).end();
             if (seconds <= end) {
                 Easing easing = playback.travel().get(first).easing();
-                seconds = start + (easing == null ? 1 : easing.progress(seconds - start)) * (end - start);
+                float fraction = end == start ? 1 : (float) Math.clamp((seconds - start) / (end - start), 0, 1);
+                seconds = start + (easing == null ? fraction * fraction * (3 - 2 * fraction)
+                      : easing.progress(seconds - start)) * (end - start);
                 break;
             }
             first = last + 1;

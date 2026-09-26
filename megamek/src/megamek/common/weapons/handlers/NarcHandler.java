@@ -120,6 +120,7 @@ public class NarcHandler extends MissileWeaponHandler {
                 report.add("pod");
                 report.add(diceRoll);
                 vPhaseReport.add(report);
+                recordMissileInterceptions(1);
                 return 0;
             }
             report = new Report(3241);

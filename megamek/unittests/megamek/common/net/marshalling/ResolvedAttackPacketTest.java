@@ -22,6 +22,27 @@ import org.junit.jupiter.api.Test;
 
 class ResolvedAttackPacketTest {
     @Test
+    void machineGunRapidFireIsCapturedBeforePlaybackAndSurvivesTheNetworkFilter() throws Exception {
+        var gun = Mounted.createMounted(new Tank(), EquipmentType.get("ISMG"));
+        gun.setRapidFire(true);
+        var shot = ResolvedAttack.Shot.capture(gun);
+        gun.setRapidFire(false);
+        assertEquals(true, shot.machineGun());
+        assertEquals(true, shot.rapidFire());
+        var origin = new UnitLocation(1, new Coords(2, 3), 0, 0, 0);
+        var landing = new UnitLocation(2, new Coords(2, 1), 0, 0, 0);
+        shot = shot.withResolution(null, null).asDefensive().withTrajectory(origin, landing);
+        assertEquals(true, shot.machineGun());
+        assertEquals(true, shot.rapidFire());
+        var result = new ResolvedAttack(UUID.randomUUID(), ResolvedAttack.Kind.SHOT, origin, landing, Targetable.TYPE_ENTITY,
+              0, "ISMG", 0, true, List.of(new ResolvedAttack.Mount(1, 0, shot)), shot);
+        var bytes = new ByteArrayOutputStream();
+        var marshaller = new NativeSerializationMarshaller();
+        marshaller.marshall(new Packet(PacketCommand.ENTITY_ATTACK_RESOLVED, result), bytes);
+        assertEquals(result, marshaller.unmarshall(new ByteArrayInputStream(bytes.toByteArray())).getObject(0));
+    }
+
+    @Test
     void resultSurvivesTheActualNetworkSerializationFilter() throws Exception {
         var marshaller = new NativeSerializationMarshaller();
         for (var kind : ResolvedAttack.Kind.values()) {
@@ -31,6 +52,7 @@ class ResolvedAttackPacketTest {
                   List.of(new ResolvedAttack.Mount(11, 0), new ResolvedAttack.Mount(12, 3,
                         new ResolvedAttack.Shot("Indirect", Set.of("M_STANDARD"), false, false, 1, 20, true, 12))),
                   new ResolvedAttack.Shot("Indirect", Set.of("M_STANDARD"), false, false, 1, 20, true, 12)
+                        .withInterception(UUID.randomUUID(), 5)
                         .withTrajectory(new UnitLocation(1, new Coords(1, 2), 0, 0, 0),
                               new UnitLocation(-1, new Coords(4, 5), 0, 2, 0)))
                   .withImpacts(List.of(new ResolvedAttack.Impact("LA", false, 5), new ResolvedAttack.Impact("RT", true, 7)));

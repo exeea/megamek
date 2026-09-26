@@ -111,6 +111,8 @@ public class WeaponHandler implements AttackHandler, Serializable {
     private transient boolean animationReported;
     private transient Integer animationMissileHits;
     private transient java.util.Set<WeaponMounted> animatedCounters;
+    private transient java.util.UUID animationInterceptionId;
+    private transient int animationIntercepted;
     // Delayed artillery can be saved between firing and landing. Preserve the mounts observed at launch.
     private java.util.List<megamek.common.ResolvedAttack.Mount> animationFiringMounts;
     private transient java.util.Set<Integer> animatedArtillery;
@@ -168,10 +170,19 @@ public class WeaponHandler implements AttackHandler, Serializable {
     protected final void reportCounterAnimation(WeaponMounted counter) {
         if (animatedCounters == null) { animatedCounters = new java.util.HashSet<>(); }
         if (animatedCounters.add(counter)) {
+            if (animationInterceptionId == null) { animationInterceptionId = java.util.UUID.randomUUID(); }
             gameManager.sendAttackAnimation(counter.getEntity(), attackingEntity, megamek.common.ResolvedAttack.Kind.SHOT,
                   counter.getEquipmentNum(), counter.getLocation(), true,
-                  megamek.common.ResolvedAttack.Shot.capture(counter).asDefensive());
+                  megamek.common.ResolvedAttack.Shot.capture(counter).asDefensive().withInterception(animationInterceptionId, 0));
         }
+    }
+
+    /** A rules-observed loss, not all the missiles which happened to miss the target. */
+    protected final void recordMissileInterceptions(int count) { animationIntercepted += Math.max(0, count); }
+
+    private java.util.UUID interceptionId() {
+        return animationInterceptionId != null ? animationInterceptionId
+              : getParentBayHandler() == null ? null : getParentBayHandler().interceptionId();
     }
 
     /** Observe the resolved count before a handler converts missiles into damage points or damage clusters. */
@@ -188,7 +199,15 @@ public class WeaponHandler implements AttackHandler, Serializable {
         if (!animationReported) {
             animationReported = true;
             var shot = megamek.common.ResolvedAttack.Shot.capture(weapon);
-            var resolved = shot == null ? null : shot.withResolution(ammoType, hit ? animationMissileHits : Integer.valueOf(0));
+            if (interceptionId() != null && animationIntercepted == 0 && animationMissileHits == null
+                  && ((amsBayEngaged || pdBayEngaged) && attackValue <= 0
+                        || (amsBayEngagedCap || pdBayEngagedCap) && CapMissileArmor <= 0)) {
+                // AV-only rules do not count partial missile losses, but complete interception is unambiguous.
+                animationIntercepted = firingMounts().stream().filter(mount -> mount.shot() != null)
+                      .mapToInt(mount -> mount.shot().missiles()).sum();
+            }
+            var resolved = shot == null ? null : shot.withResolution(ammoType, hit ? animationMissileHits : Integer.valueOf(0))
+                  .withInterception(interceptionId(), animationIntercepted);
             if (animationFiringMounts == null) {
                 gameManager.sendAttackAnimation(attackingEntity, target, megamek.common.ResolvedAttack.Kind.SHOT,
                       attackingEntity.getEquipmentNum(weapon), weapon.getLocation(), hit, resolved);
@@ -732,6 +751,7 @@ public class WeaponHandler implements AttackHandler, Serializable {
                         }
                         hits = 0;
                         int observedMissiles = 0;
+                        animationIntercepted = 0; // The preliminary calcHits above is replaced by these actual salvos.
                         boolean observedEverySalvo = true;
                         for (int i = 0; i < numWeaponsHit; i++) {
                             hits += calcHits(throwAwayReport);
@@ -750,6 +770,10 @@ public class WeaponHandler implements AttackHandler, Serializable {
                             r.newlines = 0;
                             vPhaseReport.addElement(r);
                             hits -= (CounterAV / nDamPerHit);
+                            if (observedEverySalvo) {
+                                recordMissileInterceptions(Math.min(observedMissiles, CounterAV / nDamPerHit));
+                                animationMissileHits = Math.max(0, observedMissiles - CounterAV / nDamPerHit);
+                            }
                         } else if (amsEngaged) {
                             Report r = new Report(3350);
                             r.subject = entityTarget.getId();
@@ -799,6 +823,7 @@ public class WeaponHandler implements AttackHandler, Serializable {
                                 }
                             }
                             numWeaponsHit = numWeaponsHit - AMSHits;
+                            recordMissileInterceptions(AMSHits);
                         } else if (amsEngaged || apdsEngaged) {
                             // remove the last reports because they showed the
                             // number of shots that hit
@@ -842,6 +867,7 @@ public class WeaponHandler implements AttackHandler, Serializable {
                                 vPhaseReport.add(r);
                             }
                             numWeaponsHit = numWeaponsHit - AMSHits;
+                            recordMissileInterceptions(AMSHits);
                         }
                         nCluster = 1;
                         if (!bMissed) {
@@ -915,6 +941,7 @@ public class WeaponHandler implements AttackHandler, Serializable {
                             report.add(diceRoll);
                             vPhaseReport.add(report);
                             hits = 0;
+                            recordMissileInterceptions(1);
                         } else {
                             report = new Report(3241);
                             report.add("missile");

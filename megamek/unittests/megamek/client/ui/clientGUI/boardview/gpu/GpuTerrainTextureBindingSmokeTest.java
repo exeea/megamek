@@ -1,0 +1,110 @@
+/* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
+package megamek.client.ui.clientGUI.boardview.gpu;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
+
+import com.badlogic.gdx.ApplicationAdapter;
+import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
+import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g3d.ModelBatch;
+import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
+import com.badlogic.gdx.graphics.g3d.utils.BaseShaderProvider;
+import com.badlogic.gdx.graphics.glutils.ShaderProgram;
+import com.badlogic.gdx.utils.BufferUtils;
+import com.badlogic.gdx.utils.ScreenUtils;
+import megamek.common.board.Coords;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+
+/** Shared water inputs must survive more chunk-field binds than the driver's texture unit count. */
+@Tag("on-demand")
+class GpuTerrainTextureBindingSmokeTest {
+    @Test
+    void waterKeepsItsSharedTexturesAcrossManyChunks() {
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        var config = GpuBoardWindow.configuration(false);
+        config.setWindowedMode(960, 720);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                GpuTerrain terrain = new GpuTerrain();
+                boolean previousLod = TerrainLod.enabled();
+                try {
+                    List<BoardScene.Tile> tiles = new ArrayList<>();
+                    BoardScene.Pixels ground = GpuTerrainReliefSmokeTest.scene(BoardScene.Surface.GRASS).tiles().getFirst().ground();
+                    // 45 water chunks exceed libGDX's maximum 32 texture slots, even without other samplers.
+                    for (int x = 0; x < 72; x++) {
+                        for (int y = 0; y < 40; y++) {
+                            tiles.add(new BoardScene.Tile(new Coords(x, y), 0, 1, false, 0,
+                                  BoardScene.Surface.GRASS, ground, null, null, List.of(), List.of()));
+                        }
+                    }
+                    BoardScene scene = new BoardScene(0, 72, 40, tiles, List.of(), List.of(), -1, "", List.of());
+                    BoardCamera camera = new BoardCamera();
+                    camera.resize(960, 720);
+                    camera.setIsometric(true);
+                    camera.fit(scene);
+                    TerrainLod.setEnabled(true);
+                    terrain.update(scene, camera.camera);
+                    terrain.animate(.37f, List.of());
+                    ScreenUtils.clear(.2f, .26f, .31f, 1, true);
+                    terrain.render(camera.camera, false);
+                    terrain.renderTransparent(camera.camera);
+                    ModelBatch batch = (ModelBatch) field(terrain, "batch");
+                    var shaders = BaseShaderProvider.class.getDeclaredField("shaders");
+                    shaders.setAccessible(true);
+                    int checked = 0;
+                    var current = BufferUtils.newIntBuffer(1);
+                    Gdx.gl.glGetIntegerv(GL20.GL_CURRENT_PROGRAM, current);
+                    for (Object shader : (Iterable<?>) shaders.get(batch.getShaderProvider())) {
+                        ShaderProgram program = ((DefaultShader) shader).program;
+                        // The bindings belong to the final drawn program, not previously used opaque shaders.
+                        if (program.getHandle() != current.get(0)) { continue; }
+                        assertTrue(program.getUniformLocation("u_waterField") >= 0, "The last draw must be water");
+                        assertTexture(program, "u_rainNoise", (Texture) field(terrain, "rainNoise"));
+                        Texture detail = (Texture) field(terrain, "waterDetail");
+                        assertTexture(program, "u_waterDetail", detail);
+                        Texture waves = ((GpuOcean) field(terrain, "ocean")).texture();
+                        assertTexture(program, "u_waterOcean", waves == null ? detail : waves);
+                        checked++;
+                    }
+                    assertTrue(checked > 0, "Exercise an actual water shader with chunk fields");
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) { failure.set(error); }
+                finally {
+                    TerrainLod.setEnabled(previousLod);
+                    terrain.dispose();
+                    Gdx.app.exit();
+                }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Water texture lifetime", failure.get()); }
+    }
+
+    private static void assertTexture(ShaderProgram program, String name, Texture expected) {
+        assertTrue(program.getUniformLocation(name) >= 0, "Active water sampler: " + name);
+        var value = BufferUtils.newIntBuffer(1);
+        Gdx.gl.glGetUniformiv(program.getHandle(), program.getUniformLocation(name), value);
+        int unit = value.get(0);
+        Gdx.gl.glGetIntegerv(GL20.GL_ACTIVE_TEXTURE, value);
+        int active = value.get(0);
+        try {
+            Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0 + unit);
+            Gdx.gl.glGetIntegerv(GL20.GL_TEXTURE_BINDING_2D, value);
+            assertEquals(expected.getTextureObjectHandle(), value.get(0), name + " must not sample another chunk's field");
+        } finally { Gdx.gl.glActiveTexture(active); }
+    }
+
+    private static Object field(Object owner, String name) throws Exception {
+        var field = owner.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(owner);
+    }
+}
