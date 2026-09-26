@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.util.Arrays;
 import java.util.List;
 
 import com.badlogic.gdx.math.Intersector;
@@ -18,6 +19,10 @@ final class InfantryFootprint {
     static final boolean SPREAD_OVERLAPS = false;
     /** The room steps take from each side of a hex that is level ground to its edges. */
     static final float[] NO_STEPS = new float[6];
+
+    record Layout(float scale, Vector3 offset) {
+        Vector3 place(Vector3 position) { return new Vector3(position).scl(scale, scale, 1).add(offset); }
+    }
 
     private InfantryFootprint() { }
 
@@ -83,7 +88,10 @@ final class InfantryFootprint {
      * @return whether the member now stands wholly inside
      */
     static boolean fit(Vector3 position, Polygon outline, float scale, float[] room) {
-        float[] limits = limits(outline, scale, room);
+        return fit(position, limits(outline, scale, room));
+    }
+
+    private static boolean fit(Vector3 position, float[] limits) {
         boolean fits = true;
         for (int i = 0; i < SIDES.length / 2; i++) {
             // Opposite sides share an axis; where the member is wider than the ground, it centres between them.
@@ -106,6 +114,24 @@ final class InfantryFootprint {
             if (correction < .0001f) { return fits; }
         }
         return false;
+    }
+
+    /** Draw the layout in, then move it as a whole into the available ground when a bank cuts into just one side. */
+    static Layout layout(List<Vector3> positions, List<Polygon> outlines, float scale, float[] room) {
+        float compression = compress(positions, outlines, scale, room);
+        float[] limits = new float[SIDES.length];
+        Arrays.fill(limits, Float.POSITIVE_INFINITY);
+        for (int member = 0; member < positions.size(); member++) {
+            float[] memberLimits = limits(outlines.get(member), scale, room);
+            Vector3 position = positions.get(member);
+            for (int side = 0; side < SIDES.length; side++) {
+                float reach = SIDES[side].x * position.x + SIDES[side].y * position.y;
+                limits[side] = Math.min(limits[side], memberLimits[side] - compression * reach);
+            }
+        }
+        Vector3 offset = new Vector3();
+        fit(offset, limits);
+        return new Layout(compression, offset);
     }
 
     /**

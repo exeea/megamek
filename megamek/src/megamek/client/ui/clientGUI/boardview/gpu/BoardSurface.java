@@ -828,14 +828,14 @@ final class BoardSurface {
             }
             for (int i = 0; i < count; i++) {
                 int j = (i + 1) % count;
-                quad(ring[i], ring[j], inner[j], inner[i], Finish.BED);
+                quad(ring[i], ring[j], inner[j], inner[i], Finish.BED, i / SHORE_SEGMENTS);
             }
             ring = inner;
             if (k == 1) { interiorFrom = faces.size(); }
         }
         Vector3 anchor = new Vector3(center.x, center.y, surface - full);
         for (int i = 0; i < count; i++) {
-            triangle(anchor, ring[i], ring[(i + 1) % count], Finish.BED);
+            triangle(anchor, ring[i], ring[(i + 1) % count], Finish.BED, i / SHORE_SEGMENTS);
         }
         interiorTo = faces.size();
     }
@@ -1378,6 +1378,12 @@ final class BoardSurface {
         if (new Vector3(b).sub(a).crs(new Vector3(c).sub(a)).len2() > 0.000001f) {
             faces.add(new Face(new Vector3(a), new Vector3(b), new Vector3(c), finish, landEdge));
         }
+    }
+
+    /** Banks and exposed bars continue the land across their own edge, even on a hex with several shore materials. */
+    BoardScene.Surface family(Face face) {
+        BoardScene.Tile land = tile.liquid().present() && face.landEdge() >= 0 ? neighbor(scene, face.landEdge()) : null;
+        return land != null && !land.liquid().present() ? land.surface() : BoardScene.Surface.values()[relief.family()];
     }
 
     float height(float x, float y) {

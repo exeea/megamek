@@ -165,7 +165,7 @@ final class UnitAnimator {
         return null;
     }
 
-    /** The room the steps on each edge of a formation's hex take from its level ground; see BoardRelief.reach. */
+    /** Fit to the completed terrain rim, including corners displaced by rivers and constructed shores. */
     private float[] stepRoom(BoardScene.Unit unit) {
         BoardScene board = scene.get();
         BoardScene.Tile tile = board == null || formation.isEmpty() ? null : board.tile(unit.location().coords());
@@ -173,7 +173,7 @@ final class UnitAnimator {
         var relief = surfaces.get(board, tile).relief;
         float[] room = new float[6];
         for (int edge = 0; edge < room.length; edge++) {
-            room[edge] = relief.reach(edge);
+            room[edge] = relief.topInset(edge);
         }
         return room;
     }

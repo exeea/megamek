@@ -22,8 +22,10 @@ final class InfantryMotion {
     private static final float PARK_START = .72f;
     private final Map<String, Member> members = new LinkedHashMap<>();
     private float layoutScale = Float.NaN;
-    /** The standing formation's scale towards the hex centre, and the unit scale and step room it was worked out for. */
-    private float restLayout = 1, restLayoutScale = Float.NaN;
+    private float[] layoutRoom = InfantryFootprint.NO_STEPS;
+    /** The standing formation's fitted layout, and the unit scale and terrain rim it was worked out for. */
+    private InfantryFootprint.Layout restLayout;
+    private float restLayoutScale = Float.NaN;
     private float[] restLayoutRoom = InfantryFootprint.NO_STEPS;
 
     private static final class Member {
@@ -94,9 +96,9 @@ final class InfantryMotion {
             return new Vector3(door).scl(scale).rotate(Vector3.Z, -heading).add(node.translation);
         }
 
-        /** The authored position with the formation drawn in to fit its hex; see InfantryFootprint.compress. */
-        Vector3 layout(float layout) {
-            return new Vector3(rest).scl(layout, layout, 1);
+        /** The authored position with the whole formation fitted to the available plateau. */
+        Vector3 layout(InfantryFootprint.Layout layout) {
+            return layout.place(rest);
         }
 
         /** The outline this member is fitted by: troopers turn as they watch, vehicles keep their heading. */
@@ -149,11 +151,12 @@ final class InfantryMotion {
         var travel = motion.boarding();
         float scale = model.horizontalScale(unit);
         var vehicles = members.values().stream().filter(member -> member.rig.transport()).toList();
-        boolean fitGoals = travel != null && (scale != layoutScale
+        boolean fitGoals = travel != null && (scale != layoutScale || !Arrays.equals(room, layoutRoom)
               || members.values().stream().anyMatch(member -> member.sequence != travel.sequence()));
         layoutScale = scale;
+        if (fitGoals) { layoutRoom = room.clone(); }
         if (travel != null && members.values().stream().allMatch(member -> member.sequence < 0)) {
-            float layout = restLayout(scale, room);
+            var layout = restLayout(scale, room);
             members.values().forEach(member -> member.node.translation.set(member.layout(layout)));
             avoidVehicles(vehicles, false, scale, room);
         }
@@ -178,8 +181,8 @@ final class InfantryMotion {
         }
         if (fitGoals) {
             // Keep the captured parking positions through unloading and casualty/material rebinds.
-            float layout = compress(true, scale, room);
-            members.values().forEach(member -> member.goal.scl(layout, layout, 1));
+            var layout = layout(true, scale, room);
+            members.values().forEach(member -> member.goal.set(layout.place(member.goal)));
             avoidVehicles(vehicles, true, scale, room);
         }
         for (Member member : members.values()) {
@@ -189,7 +192,7 @@ final class InfantryMotion {
             member.verticalOffset = 0;
         }
         if (travel == null || vehicles.isEmpty()) {
-            float layout = restLayout(scale, room);
+            var layout = restLayout(scale, room);
             for (Member member : members.values()) {
                 if (member.rig.trooper()) {
                     var individual = motion.member(unit.id(), member.rig.container());
@@ -229,27 +232,27 @@ final class InfantryMotion {
     }
 
     /**
-     * The standing formation's layout scale, worked out again only when the unit scale, the members or the steps
+     * The standing formation's layout, worked out again only when the unit scale, the members or the terrain rim
      * around the hex change.
      */
-    private float restLayout(float scale, float[] room) {
+    private InfantryFootprint.Layout restLayout(float scale, float[] room) {
         if (scale != restLayoutScale || !Arrays.equals(room, restLayoutRoom)) {
             restLayoutScale = scale;
             restLayoutRoom = room.clone();
-            restLayout = compress(false, scale, room);
+            restLayout = layout(false, scale, room);
         }
         return restLayout;
     }
 
-    /** How far the authored layout, or the parking goals, must be drawn in as one shape to fit the hex. */
-    private float compress(boolean goal, float scale, float[] room) {
+    /** Fit the authored layout, or the parking goals, as one shape to the available ground. */
+    private InfantryFootprint.Layout layout(boolean goal, float scale, float[] room) {
         List<Vector3> positions = new ArrayList<>();
         List<Polygon> outlines = new ArrayList<>();
         for (var member : members.values()) {
             positions.add(goal ? member.goal : member.rest);
             outlines.add(member.outline(goal ? member.goalHeading : member.restHeading));
         }
-        return InfantryFootprint.compress(positions, outlines, scale, room);
+        return InfantryFootprint.layout(positions, outlines, scale, room);
     }
 
     private void avoidVehicles(List<Member> vehicles, boolean goal, float scale, float[] room) {
@@ -268,7 +271,7 @@ final class InfantryMotion {
         }
     }
 
-    private static void vehicle(Member member, UnitMotion.Boarding travel, float scale, float layout) {
+    private static void vehicle(Member member, UnitMotion.Boarding travel, float scale, InfantryFootprint.Layout layout) {
         if (travel.stage() == UnitMotion.Stage.BOARD) {
             member.node.translation.set(member.start);
             member.orient(member.startHeading);

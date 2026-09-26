@@ -324,7 +324,7 @@ final class BoardRelief {
     }
 
     /**
-     * The ground a water hex's banks, bed and walls take: the commonest of its dry, natural neighbours' (the first of
+     * The fallback ground for a water hex's bed and unassigned walls: the commonest of its dry neighbours' (the first of
      * them on a tie), so a river on a desert map runs between sand, not the meadow a plain water hex would default to;
      * its own where no such neighbour exists.
      */
@@ -1807,8 +1807,8 @@ final class BoardRelief {
             inner.add(inner.getFirst());
             innerParameters.add(6f);
         }
-        strip(destination, outer, outerParameters, lip, lipParameters);
-        strip(destination, lip, lipParameters, inner, innerParameters);
+        strip(destination, outer, outerParameters, lip, lipParameters, first, count, mouths);
+        strip(destination, lip, lipParameters, inner, innerParameters, first, count, mouths);
     }
 
     /**
@@ -1893,7 +1893,7 @@ final class BoardRelief {
      * corner and leave only downward triangles to finish it.
      */
     private static void strip(List<BoardSurface.Face> out, List<Vector3> outer, List<Float> outerParameters,
-          List<Vector3> inner, List<Float> innerParameters) {
+          List<Vector3> inner, List<Float> innerParameters, int first, int count, boolean mouths) {
         boolean[][] reaches = new boolean[outer.size()][inner.size()];
         for (int i = outer.size() - 1; i >= 0; i--) {
             for (int j = inner.size() - 1; j >= 0; j--) {
@@ -1922,13 +1922,57 @@ final class BoardRelief {
                 }
             }
             if (alongOuter) {
-                addTriangle(out, inner.get(j), outer.get(i), outer.get(i + 1), BoardSurface.Finish.TOP);
+                bankTriangle(out, new BankPoint(inner.get(j), innerParameters.get(j)),
+                      new BankPoint(outer.get(i), outerParameters.get(i)),
+                      new BankPoint(outer.get(i + 1), outerParameters.get(i + 1)), first, count, mouths);
                 i++;
             } else {
-                addTriangle(out, inner.get(j), outer.get(i), inner.get(j + 1), BoardSurface.Finish.TOP);
+                bankTriangle(out, new BankPoint(inner.get(j), innerParameters.get(j)),
+                      new BankPoint(outer.get(i), outerParameters.get(i)),
+                      new BankPoint(inner.get(j + 1), innerParameters.get(j + 1)), first, count, mouths);
                 j++;
             }
         }
+    }
+
+    private record BankPoint(Vector3 point, float parameter) {
+        BankPoint at(BankPoint other, float parameter) {
+            // Canonical interpolation keeps a cut shared by neighbouring triangles bit-for-bit identical.
+            if (this.parameter > other.parameter) { return other.at(this, parameter); }
+            return new BankPoint(new Vector3(point).lerp(other.point,
+                  (parameter - this.parameter) / (other.parameter - this.parameter)), parameter);
+        }
+    }
+
+    /** Split the existing bank triangles at material boundaries; keep their shape and tag each shore's owner. */
+    private static void bankTriangle(List<BoardSurface.Face> out, BankPoint a, BankPoint b, BankPoint c,
+          int first, int count, boolean mouths) {
+        float minimum = Math.min(a.parameter, Math.min(b.parameter, c.parameter));
+        float maximum = Math.max(a.parameter, Math.max(b.parameter, c.parameter));
+        int from = (int) Math.floor(minimum), to = Math.max(from, (int) Math.ceil(maximum) - 1);
+        for (int edge = from; edge <= to; edge++) {
+            List<BankPoint> polygon = List.of(a, b, c);
+            polygon = clipBank(polygon, edge, true);
+            polygon = clipBank(polygon, edge + 1, false);
+            // Mouth stubs belong to the dry bank beside them, not the water across the mouth.
+            int owner = Math.floorMod(mouths ? Math.clamp(edge, first, first + count - 1) : edge, 6);
+            for (int i = 1; i + 1 < polygon.size(); i++) {
+                addTriangle(out, polygon.getFirst().point, polygon.get(i).point, polygon.get(i + 1).point,
+                      BoardSurface.Finish.TOP, owner);
+            }
+        }
+    }
+
+    private static List<BankPoint> clipBank(List<BankPoint> polygon, float boundary, boolean above) {
+        List<BankPoint> result = new ArrayList<>();
+        for (int i = 0; i < polygon.size(); i++) {
+            BankPoint a = polygon.get(i), b = polygon.get((i + 1) % polygon.size());
+            boolean keepA = above ? a.parameter >= boundary : a.parameter <= boundary;
+            boolean keepB = above ? b.parameter >= boundary : b.parameter <= boundary;
+            if (keepA) { result.add(a); }
+            if (keepA != keepB) { result.add(a.at(b, boundary)); }
+        }
+        return result;
     }
 
     // ---- Rim formations and fallen rock ----------------------------------------------------------------------
@@ -2343,12 +2387,10 @@ final class BoardRelief {
             float nextOuter = i + 1 < n ? outerParameters.get(i + 1) : 6;
             float nextInner = j + 1 < m ? innerParameters.get(j + 1) : 6;
             if (i < n && (j >= m || nextOuter <= nextInner)) {
-                out.add(new BoardSurface.Face(inner.get(j % m), outer.get(i), outer.get((i + 1) % n),
-                      BoardSurface.Finish.TOP));
+                addTriangle(out, inner.get(j % m), outer.get(i), outer.get((i + 1) % n), BoardSurface.Finish.TOP);
                 i++;
             } else {
-                out.add(new BoardSurface.Face(inner.get(j % m), outer.get(i % n), inner.get((j + 1) % m),
-                      BoardSurface.Finish.TOP));
+                addTriangle(out, inner.get(j % m), outer.get(i % n), inner.get((j + 1) % m), BoardSurface.Finish.TOP);
                 j++;
             }
         }

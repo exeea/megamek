@@ -125,6 +125,62 @@ class InfantryFootprintTest {
     }
 
     @Test
+    void formationStaysOnTheRenderedPlateauBesideRivers() {
+        GdxNativesLoader.load();
+        var formation = Formation.tracked();
+        var original = BoardGeometry.tuning();
+        try {
+            float scale = formation.scale(original, UnitFamilyScale.INFANTRY.unitScale());
+            for (int level : new int[] { 0, 1, 2 }) {
+                for (int direction = 0; direction < 6; direction++) {
+                    BoardScene scene = riverPlateau(level, direction);
+                    var tile = scene.tile(new Coords(3, 3));
+                    var surface = new BoardSurface(scene, tile);
+                    float[] room = new float[6];
+                    for (int edge = 0; edge < room.length; edge++) { room[edge] = surface.relief.topInset(edge); }
+                    var layout = InfantryFootprint.layout(formation.positions, formation.outlines(), scale, room);
+                    assertFalse(overlapping(formation.positions, formation.outlines(), layout.scale()));
+                    var top = surface.faces.stream().filter(face -> face.finish() == BoardSurface.Finish.TOP).toList();
+                    Vector3 center = BoardGeometry.center(tile.coords(), tile.elevation());
+                    for (int member = 0; member < formation.positions.size(); member++) {
+                        var outline = formation.outlines().get(member);
+                        Vector3 position = layout.place(formation.positions.get(member));
+                        outline.setPosition(position.x, position.y);
+                        float[] vertices = outline.getTransformedVertices();
+                        for (int vertex = 0; vertex < vertices.length; vertex += 2) {
+                            float x = center.x + vertices[vertex] * scale;
+                            float y = center.y + vertices[vertex + 1] * scale;
+                            assertTrue(Float.isFinite(BoardSurface.sampleHeight(top, x, y, Float.NaN)),
+                                  "Unsupported member " + member + " river level " + level + " direction " + direction
+                                        + " at " + x + ", " + y + " layout " + layout);
+                        }
+                    }
+                }
+            }
+        } finally {
+            BoardGeometry.tune(original);
+        }
+    }
+
+    /** Three river banks beside the plateau, including the corner moves that a plain edge inset misses. */
+    static BoardScene riverPlateau(int waterLevel, int direction) {
+        var center = new Coords(3, 3);
+        List<Coords> water = List.of(center.translated(direction), center.translated((direction + 1) % 6),
+              center.translated((direction + 2) % 6));
+        List<BoardScene.Tile> tiles = new ArrayList<>();
+        for (int x = 0; x < 7; x++) {
+            for (int y = 0; y < 7; y++) {
+                var coords = new Coords(x, y);
+                boolean wet = water.contains(coords);
+                tiles.add(new BoardScene.Tile(coords, wet ? waterLevel : 2, wet ? 1 : -1, false, 0,
+                      BoardScene.Surface.SAND, null, null, null, null, null, List.of(), List.of(),
+                      wet ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
+            }
+        }
+        return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
+    }
+
+    @Test
     void troopsClearParkedVehiclesEvenWhenTheyMustLeaveTheHex() {
         var vehicle = InfantryFootprint.polygon(new BoundingBox(new Vector3(-50, -50, 0), new Vector3(50, 50, 15)), 0);
         var troop = new BoundingBox(new Vector3(-4, -4, 0), new Vector3(4, 4, 23));
