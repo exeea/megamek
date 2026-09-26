@@ -59,6 +59,35 @@ class UnitModelDescriptorTest {
     }
 
     @Test
+    void battleArmourSuitsHaveTheirOwn330Budget() throws Exception {
+        var descriptor = UnitModelDescriptor.read(assets.resolve("troops/battle-armor-standing.json"));
+        var data = new G3dModelLoader(new JsonReader()).loadModelData(
+              new FileHandle(assets.resolve("troops/battle-armor-standing.g3dj").toFile()));
+        var part = data.meshes.first().parts[0];
+        int otherTriangles = UnitModelDescriptor.triangleCount(data) - part.indices.length / 3;
+        short[] original = part.indices;
+        part.indices = new short[(330 - otherTriangles) * 3];
+        for (int index = 0; index < part.indices.length; index++) {
+            part.indices[index] = original[index % 3];
+        }
+        assertEquals(330, descriptor.validate(data));
+        part.indices = java.util.Arrays.copyOf(part.indices, part.indices.length + 3);
+        assertThrows(IllegalArgumentException.class, () -> descriptor.validate(data));
+    }
+
+    @Test
+    void battleArmourSquadsAreBudgetedPerSuitAndOtherFormationsKeepTheFlatCap() {
+        assertEquals(1980, UnitModelDescriptor.formationTriangleLimit("battle-armor", 6));
+        assertEquals(1650, UnitModelDescriptor.formationTriangleLimit("battle-armor", 5));
+        // Small squads never drop below the ordinary cap.
+        assertEquals(1500, UnitModelDescriptor.formationTriangleLimit("battle-armor", 4));
+        assertEquals(1500, UnitModelDescriptor.formationTriangleLimit("infantry", 6));
+        // A conventional trooper is not a battle armour suit, so it keeps the ordinary cap.
+        assertEquals(1500, UnitModelDescriptor.triangleLimit("troop", "infantry"));
+        assertEquals(330, UnitModelDescriptor.triangleLimit("troop", "battle-armor"));
+    }
+
+    @Test
     void equipmentHasItsOwnStrictUnder150Budget() throws Exception {
         var descriptor = UnitModelDescriptor.read(assets.resolve("equipment/ppc.json"));
         var data = new G3dModelLoader(new JsonReader()).loadModelData(new FileHandle(assets.resolve("equipment/ppc.g3dj").toFile()));

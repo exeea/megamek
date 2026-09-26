@@ -2,9 +2,11 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.List;
+import java.util.Set;
 
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.g3d.Material;
@@ -48,6 +50,7 @@ final class GpuUnitModel implements Disposable {
     private final Vector3 restDimensions;
     private final UnitFamilyScale familyScale;
     private final boolean damageLocations;
+    private Set<Mesh> farSuitMeshes = Set.of();
 
     GpuUnitModel(Model model) {
         this(model, null);
@@ -128,6 +131,26 @@ final class GpuUnitModel implements Disposable {
 
     List<UnitRig> rigs() {
         return rigs;
+    }
+
+    /**
+     * Marks a battle armour squad's far suits by their meshes: their parts start hidden and {@link GpuUnitInstance}
+     * swaps them in for the full suits while the squad is small on screen.
+     *
+     * @return this model
+     */
+    GpuUnitModel farSuitMeshes(Set<Mesh> meshes) {
+        farSuitMeshes = Set.copyOf(meshes);
+        return this;
+    }
+
+    Set<Mesh> farSuitMeshes() {
+        return farSuitMeshes;
+    }
+
+    /** One figure's standing height in model units, for a formation whose figures all stand on the ground. */
+    float figureHeight() {
+        return restDimensions.z;
     }
 
     boolean infantry() {

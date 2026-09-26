@@ -1,7 +1,9 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.util.ArrayList;
 import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Map;
 
 import com.badlogic.gdx.graphics.Camera;
@@ -16,9 +18,11 @@ import com.badlogic.gdx.graphics.g3d.attributes.DepthTestAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.IntAttribute;
 import com.badlogic.gdx.graphics.g3d.model.Node;
+import com.badlogic.gdx.graphics.g3d.model.NodePart;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.Pool;
+import megamek.logging.MMLogger;
 
 /** The normal posed instance, with an opaque depth/outline view that borrows exactly the same mesh buffers. */
 final class GpuUnitInstance extends ModelInstance {
@@ -31,7 +35,13 @@ final class GpuUnitInstance extends ModelInstance {
 
         Attachment(float diameter) { this.diameter = diameter; }
     }
+    private static final MMLogger LOGGER = MMLogger.create(GpuUnitInstance.class);
     private final RenderableProvider depth = this::depthParts;
+    /** A battle armour squad's full and far suit parts; empty for a unit with only one level of detail. */
+    private final List<NodePart> fullSuitParts = new ArrayList<>();
+    private final List<NodePart> farSuitParts = new ArrayList<>();
+    private float figureHeight;
+    private int suitLevel;
     private final Map<Node, Attachment> attachments = new IdentityHashMap<>();
     private final Vector3 detailPosition = new Vector3();
     private float detailPixels = Float.NaN;
@@ -48,16 +58,33 @@ final class GpuUnitInstance extends ModelInstance {
                 attachments.put(node, new Attachment(UnitBounds.subtree(node).getDimensions(new Vector3()).len()));
             }
         }
+        if (!model.farSuitMeshes().isEmpty()) {
+            figureHeight = model.figureHeight();
+            sortSuitParts(nodes, model);
+        }
     }
 
-    /** Render selection only: rigs, emitters, picking, damage flags and shared mesh buffers stay intact. */
+    private void sortSuitParts(Iterable<Node> nodes, GpuUnitModel model) {
+        for (Node node : nodes) {
+            for (NodePart part : node.parts) {
+                (model.farSuitMeshes().contains(part.meshPart.mesh) ? farSuitParts : fullSuitParts).add(part);
+            }
+            sortSuitParts(node.getChildren(), model);
+        }
+    }
+
+    /**
+     * Render selection only: rigs, emitters, picking, damage flags and shared mesh buffers stay intact. Small
+     * equipment is hidden, and a battle armour squad with a far suit switches to it, once too small on screen to read.
+     */
     void equipmentDetail(Camera camera, boolean forceFull) {
-        if (attachments.isEmpty()) { return; }
+        if (attachments.isEmpty() && farSuitParts.isEmpty()) { return; }
         float pixels = BoardCamera.pixelsPerUnit(camera, transform.getTranslation(detailPosition))
               * Math.max(transform.getScaleX(), Math.max(transform.getScaleY(), transform.getScaleZ()));
         if (pixels == detailPixels && forceFull == forcedDetail) { return; }
         detailPixels = pixels;
         forcedDetail = forceFull;
+        suitDetail(pixels, forceFull);
         for (Attachment attachment : attachments.values()) {
             float threshold = EQUIPMENT_HIDE_PIXELS * (attachment.hidden ? 1 + EQUIPMENT_LOD_HYSTERESIS : 1 - EQUIPMENT_LOD_HYSTERESIS);
             boolean next = !forceFull && attachment.diameter * pixels < threshold;
@@ -69,6 +96,30 @@ final class GpuUnitInstance extends ModelInstance {
     }
 
     int hiddenEquipment() { return (int) attachments.values().stream().filter(attachment -> attachment.hidden).count(); }
+
+    /**
+     * Shows the far suits while one figure stands less than {@link FormationLod#FAR_PIXELS} tall, the full ones
+     * otherwise, and always the full ones for a unit in focus.
+     *
+     * @param pixelsPerModelUnit framebuffer pixels per model unit at the instance's current scale
+     * @param forceFull          {@code true} for the selected unit or one in an attack
+     */
+    void suitDetail(float pixelsPerModelUnit, boolean forceFull) {
+        if (farSuitParts.isEmpty()) { return; }
+        float figurePixels = figureHeight * pixelsPerModelUnit;
+        int next = forceFull ? 0 : FormationLod.level(figurePixels, suitLevel);
+        if (next == suitLevel) { return; }
+        suitLevel = next;
+        boolean far = next == 1;
+        fullSuitParts.forEach(part -> part.enabled = !far);
+        farSuitParts.forEach(part -> part.enabled = far);
+        detailRevision++;
+        LOGGER.debug("[FormationLod] squad now shows its {} suits ({} pixels tall{})", far ? "far" : "full",
+              Math.round(figurePixels), forceFull ? ", held full while in focus" : "");
+    }
+
+    /** @return {@code 0} while the full suits show, {@code 1} while the far ones do */
+    int suitLevel() { return suitLevel; }
 
     int detailRevision() { return detailRevision; }
 
