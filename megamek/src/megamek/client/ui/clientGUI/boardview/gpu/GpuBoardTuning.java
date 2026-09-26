@@ -102,7 +102,7 @@ final class GpuBoardTuning {
     /** Construction cursor only; each tab owns its own rows and scroll position. */
     private Table rows = new Table();
     private final BoardCamera camera;
-    private final CheckBox perspective;
+    private final CheckBox firstPerson;
     private final List<Control> cameraFieldOfView;
     private final CheckBox normalMaps;
     private final CheckBox vsync;
@@ -164,15 +164,16 @@ final class GpuBoardTuning {
         Table general = rows;
         rows.top().defaults().pad(0, 3, 0, 3);
         section(skin, "Camera");
-        perspective = checkbox(skin, "Perspective", "tuning-perspective");
-        perspective.addListener(new TextTooltip("Enable perspective: nearby objects appear larger than distant ones. "
-              + "Turn off to return to the orthographic board view.", skin, "menu"));
+        firstPerson = checkbox(skin, "Free Flight", "tuning-free-flight");
+        firstPerson.addListener(new TextTooltip("Fly freely: WASD moves, Q/E lowers/raises, Shift speeds up, "
+              + "right or middle drag looks around, and the wheel moves forward/back. "
+              + "Turn off to restore the tactical view.", skin, "menu"));
         cameraFieldOfView = controls(skin, List.of(new Knob("Camera FOV", BoardCamera.MIN_FIELD_OF_VIEW,
               BoardCamera.MAX_FIELD_OF_VIEW, 1, "%.0f\u00b0")), this::applyCamera, 0);
         cameraFieldOfView.getFirst().slider().setName("tuning-camera-fov");
         cameraFieldOfView.getFirst().slider().addListener(new TextTooltip(
-              "Vertical field of view in degrees. Larger angles show more of the board. Requires Perspective.", skin, "menu"));
-        perspective.addListener(new ChangeListener() {
+              "Vertical field of view in degrees. Larger angles show more of the board. Requires Free Flight.", skin, "menu"));
+        firstPerson.addListener(new ChangeListener() {
             @Override
             public void changed(ChangeEvent event, Actor actor) {
                 if (!syncing) { applyCamera(); }
@@ -867,7 +868,7 @@ final class GpuBoardTuning {
      */
     private void restoreDefaults() {
         syncing = true;
-        perspective.setChecked(false);
+        firstPerson.setChecked(false);
         syncing = false;
         setValues(cameraFieldOfView, new float[] { BoardCamera.DEFAULT_FIELD_OF_VIEW });
         applyCamera();
@@ -1084,9 +1085,17 @@ final class GpuBoardTuning {
 
     private void applyCamera() {
         camera.setFieldOfView(value(cameraFieldOfView, 0));
-        camera.setPerspective(perspective.isChecked());
-        cameraFieldOfView.getFirst().slider().setDisabled(!perspective.isChecked());
+        camera.setFirstPerson(firstPerson.isChecked());
+        syncCamera();
         updateReadings(cameraFieldOfView);
+    }
+
+    /** Camera presets and the Camera menu can also change modes; the camera owns the current choice. */
+    void syncCamera() {
+        syncing = true;
+        firstPerson.setChecked(camera.firstPerson());
+        syncing = false;
+        cameraFieldOfView.getFirst().slider().setDisabled(!camera.firstPerson());
     }
 
     private void applyGeometry() {

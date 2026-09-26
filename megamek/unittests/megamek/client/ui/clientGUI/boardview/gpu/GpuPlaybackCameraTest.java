@@ -461,6 +461,43 @@ class GpuPlaybackCameraTest {
         return view;
     }
 
+    @Test
+    void freeFlightIgnoresSelectionAndPlaybackFramingWithoutDelayingTheAnimation() throws Exception {
+        var first = UnitPlaybackTest.unit(1, 0);
+        var move = movement(2, 7, 9);
+        var view = view(true);
+        try {
+            var initial = scene(first.id(), first, move.unit());
+            view.updateCameraFocus(initial, INITIAL_CENTER);
+            var tactical = view.boardCamera.camera.position.cpy();
+            view.boardCamera.setFirstPerson(true);
+            view.boardCamera.look(35, 50);
+            view.boardCamera.fly(1, 1, 0, 200);
+            var eye = view.boardCamera.camera.position.cpy();
+            var playback = playback(view);
+            var latest = scene(move.entityId(), first, move.unit());
+            var request = new BoardView.CenterRequest(2, move.unit().location().coords(), move.entityId());
+            playback.accept(List.of(move), latest, ignored -> false);
+            playback.advance(.1, UnitMotion.Speed.NORMAL, state -> view.preparePlaybackCamera(state, latest));
+            assertTrue(playback.motions.get(move.entityId()).sample().progress() > 0, "Free flight must not hold up playback");
+            view.updateCameraFocus(latest, request);
+            view.boardCamera.frameSelection(move.unit(), 800);
+            view.boardCamera.frameAttacks(List.of(new UnitAttack(
+                  UnitPlaybackTest.attack(first, move.unit(), ResolvedAttack.Kind.SHOT, true))), 800);
+            view.boardCamera.advance(2);
+            assertEquals(eye, view.boardCamera.camera.position);
+            assertFalse(view.boardCamera.isFraming());
+            playback.finish();
+            view.updateCameraFocus(latest, request);
+            view.boardCamera.setFirstPerson(false);
+            view.updateCameraFocus(latest, request);
+            assertEquals(tactical, view.boardCamera.camera.position);
+            assertFalse(view.boardCamera.isFraming(), "Requests consumed during flight must not replay on exit");
+        } finally {
+            view.dispose();
+        }
+    }
+
     private static UnitPlayback playback(GpuBattleView view) throws ReflectiveOperationException {
         var field = GpuBattleView.class.getDeclaredField("playback");
         field.setAccessible(true);

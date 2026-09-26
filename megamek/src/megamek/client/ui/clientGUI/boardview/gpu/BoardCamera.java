@@ -16,7 +16,7 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import megamek.common.board.Coords;
 
-/** One orbit camera with top/isometric presets and shared geometry for every orientation. */
+/** One camera with tactical orbit presets and free flight over the same board geometry. */
 final class BoardCamera {
     private static final float ISOMETRIC_TILT = 54.73561f;
     // Manual zoom limits: smaller values zoom in, larger values zoom out.
@@ -25,7 +25,7 @@ final class BoardCamera {
     static final float ENTRANCE_SECONDS = 1.2f;
     private static final float ENTRANCE_ZOOM = 1.35f;
     static final float MAX_TILT = 80;
-    static final float DEFAULT_FIELD_OF_VIEW = 35; // default FOV for Perspective View
+    static final float DEFAULT_FIELD_OF_VIEW = 60;
     static final float MIN_FIELD_OF_VIEW = 1;
     static final float MAX_FIELD_OF_VIEW = 100;
     /** One keyboard turn. Hex rows line up again every sixth of a circle, so each turn lands on a matching view. */
@@ -48,6 +48,10 @@ final class BoardCamera {
     boolean animateOnMove = ANIMATE_CAMERA_ON_MOVE;
     private float azimuth;
     private float tilt;
+    /** In first person, camera.position owns the eye; focus and zoom retain the tactical view to restore. */
+    private boolean firstPerson;
+    private float orbitAzimuth, orbitTilt;
+    private boolean orbitFit;
     private float overviewZoom;
     private Vector3 overviewFocus;
     private boolean overviewFit;
@@ -145,6 +149,10 @@ final class BoardCamera {
     }
 
     void setPerspective(boolean value) {
+        if (firstPerson && !value) {
+            setFirstPerson(false);
+            return;
+        }
         if (camera.perspective == value) { return; }
         stopFraming();
         fitToWindow = false;
@@ -154,6 +162,49 @@ final class BoardCamera {
 
     boolean perspective() {
         return camera.perspective;
+    }
+
+    void setFirstPerson(boolean value) {
+        if (firstPerson == value) { return; }
+        stopFraming();
+        stopRotation();
+        framedAction = null;
+        if (value) {
+            orbitAzimuth = azimuth;
+            orbitTilt = tilt;
+            orbitFit = fitToWindow;
+            // Start at the equivalent perspective eye, with the same viewing direction and scale at the pivot.
+            setPerspective(true);
+            firstPerson = true;
+            fitToWindow = false;
+        } else {
+            firstPerson = false;
+            camera.perspective = false;
+            azimuth = orbitAzimuth;
+            tilt = orbitTilt;
+            fitToWindow = orbitFit;
+        }
+        update();
+    }
+
+    boolean firstPerson() { return firstPerson; }
+
+    /** Positive yaw looks right, positive pitch looks up. The eye stays fixed and the horizon never rolls. */
+    void look(float yaw, float pitch) {
+        if (!firstPerson) { return; }
+        azimuth = wrapDegrees(azimuth - yaw);
+        tilt = MathUtils.clamp(tilt + pitch, .5f, 179.5f);
+        update();
+    }
+
+    /** Free flight in world units: forward follows the gaze, sideways strafes, and vertical follows world up. */
+    void fly(float forward, float sideways, float vertical, float distance) {
+        if (!firstPerson) { return; }
+        Vector3 right = new Vector3(camera.direction).crs(camera.up).nor();
+        Vector3 movement = new Vector3(camera.direction).scl(forward).mulAdd(right, sideways).add(0, 0, vertical);
+        if (movement.isZero(.00001f)) { return; }
+        camera.position.mulAdd(movement.nor(), distance);
+        update();
     }
 
     void setFieldOfView(float value) {
@@ -203,7 +254,14 @@ final class BoardCamera {
         float offset = (camera.viewportWidth - MathUtils.clamp(availableWidth, 1, camera.viewportWidth)) / 2 - viewLeftPixels;
         if (MathUtils.isEqual(viewOffsetPixels, offset)) { return; }
         float shift = viewOffsetPixels - offset;
-        Vector3 right = new Vector3(camera.direction).crs(camera.up).nor();
+        Vector3 right;
+        if (firstPerson) {
+            Vector3 outward = new Vector3(), up = new Vector3();
+            orientation(orbitAzimuth, orbitTilt, outward, up);
+            right = up.crs(outward).nor();
+        } else {
+            right = new Vector3(camera.direction).crs(camera.up).nor();
+        }
         focus.mulAdd(right, shift * camera.zoom);
         if (framingTarget != null) {
             Vector3 outward = new Vector3(), up = new Vector3();
@@ -217,6 +275,7 @@ final class BoardCamera {
     }
 
     void setIsometric(boolean value) {
+        setFirstPerson(false);
         stopFraming();
         stopRotation();
         azimuth = value ? 45 : 0;
@@ -225,11 +284,11 @@ final class BoardCamera {
     }
 
     boolean isIsometric() {
-        return MathUtils.isEqual(azimuth, 45) && MathUtils.isEqual(tilt, ISOMETRIC_TILT);
+        return !firstPerson && MathUtils.isEqual(azimuth, 45) && MathUtils.isEqual(tilt, ISOMETRIC_TILT);
     }
 
     boolean isTopDown() {
-        return tilt == 0;
+        return !firstPerson && tilt == 0;
     }
 
     float tilt() {
@@ -245,6 +304,10 @@ final class BoardCamera {
     }
 
     void orbit(float rotation, float inclination) {
+        if (firstPerson) {
+            look(rotation, -inclination);
+            return;
+        }
         stopRotation();
         azimuth = wrapDegrees(azimuth + rotation);
         tilt(inclination);
@@ -252,6 +315,10 @@ final class BoardCamera {
 
     /** Changes only the viewing angle, so holding a tilt key does not interrupt a keyboard turn in progress. */
     void tilt(float inclination) {
+        if (firstPerson) {
+            look(0, -inclination);
+            return;
+        }
         stopFraming();
         fitToWindow = false;
         tilt = MathUtils.clamp(tilt + inclination, 0, MAX_TILT);
@@ -265,6 +332,10 @@ final class BoardCamera {
      * @param direction {@code -1} to turn left, {@code 1} to turn right
      */
     void rotateStep(int direction) {
+        if (firstPerson) {
+            look(direction * ROTATION_STEP, 0);
+            return;
+        }
         stopFraming();
         fitToWindow = false;
         float remaining = isRotating() ? rotationSweep * (1 - rotationProgress()) : 0;
@@ -363,6 +434,7 @@ final class BoardCamera {
 
     /** Fit authorized volley participants into the board area to the left of any open side panel. */
     void frameAttacks(List<UnitAttack> attacks, float availableWidth) {
+        if (firstPerson) { return; }
         if (attacks.isEmpty()) {
             clearPlaybackFrame();
             return;
@@ -404,6 +476,7 @@ final class BoardCamera {
 
     /** Keep the chosen viewing angle and zoom, widening only when the selected unit cannot fit. */
     void frameSelection(BoardScene.Unit unit, float availableWidth) {
+        if (firstPerson) { return; }
         viewableWidth(availableWidth);
         clearPlaybackFrame();
         List<Vector3> points = new ArrayList<>();
@@ -415,6 +488,7 @@ final class BoardCamera {
 
     /** Explicit hex navigation shares the selection transition and animation setting. */
     void frameLocation(Vector3 position, float availableWidth) {
+        if (firstPerson) { return; }
         viewableWidth(availableWidth);
         clearPlaybackFrame();
         animateTo(new Pose(position.cpy(), camera.zoom, azimuth, tilt), position.z, animateOnSelectionChange);
@@ -422,6 +496,7 @@ final class BoardCamera {
 
     /** Fit the complete rendered route once, with the smallest pan and no unnecessary zoom or rotation. */
     void frameMovement(BoardScene.Movement move, UnitMotion motion, BoardScene scene, float availableWidth) {
+        if (firstPerson) { return; }
         float width = MathUtils.clamp(availableWidth, 1, camera.viewportWidth);
         viewableWidth(width);
         if (!beginFrame(move, move.path().size(), width)) { return; }
@@ -650,6 +725,10 @@ final class BoardCamera {
     }
 
     void zoom(float factor) {
+        if (firstPerson) {
+            fly(1, 0, 0, -(float) Math.log(factor) * BoardGeometry.HEIGHT * 3);
+            return;
+        }
         stopFraming();
         fitToWindow = false;
         camera.zoom = MathUtils.clamp(camera.zoom * factor, MIN_ZOOM, MAX_ZOOM);
@@ -658,6 +737,10 @@ final class BoardCamera {
 
     /** Zoom around the pointer's position on the focus plane. Coordinates are local to the board viewport. */
     void zoomAt(float factor, float x, float y) {
+        if (firstPerson) {
+            zoom(factor);
+            return;
+        }
         if (camera.perspective) {
             Vector3 before = pointOnPlane(x, y, focus.z);
             zoom(factor);
@@ -675,6 +758,7 @@ final class BoardCamera {
     }
 
     void fit(BoardScene scene) {
+        setFirstPerson(false);
         stopFraming();
         fitToWindow = true;
         // Follow the board's lowest level so an absolute elevation offset cannot move it behind the camera.
@@ -731,6 +815,12 @@ final class BoardCamera {
     }
 
     void pan(float dx, float dy) {
+        if (firstPerson) {
+            Vector3 right = new Vector3(camera.direction).crs(camera.up).nor();
+            camera.position.mulAdd(right, -dx / displayScale).mulAdd(camera.up, dy / displayScale);
+            update();
+            return;
+        }
         stopFraming();
         fitToWindow = false;
         if (camera.perspective) {
@@ -765,6 +855,7 @@ final class BoardCamera {
     }
 
     void center(Vector3 position) {
+        if (firstPerson) { return; }
         stopFraming();
         fitToWindow = false;
         focus.set(position);
@@ -772,6 +863,7 @@ final class BoardCamera {
     }
 
     void toggleOverview(BoardScene scene) {
+        setFirstPerson(false);
         stopFraming();
         if (overviewFocus == null) {
             overviewZoom = camera.zoom;
@@ -813,13 +905,15 @@ final class BoardCamera {
         orientation(azimuth, tilt, camera.direction, camera.up);
         camera.direction.scl(-1);
         float distance = camera.perspective ? camera.distance() : 10000;
-        camera.position.set(camera.direction).scl(-distance).add(focus);
-        camera.position.mulAdd(new Vector3(camera.direction).crs(camera.up).nor(), viewOffsetPixels * camera.zoom);
+        if (!firstPerson) {
+            camera.position.set(camera.direction).scl(-distance).add(focus);
+            camera.position.mulAdd(new Vector3(camera.direction).crs(camera.up).nor(), viewOffsetPixels * camera.zoom);
+        }
         // Perspective depth precision falls with the square of distance over the near plane: keep the near plane a
         // fiftieth of the way to the pivot, so depth comparisons (occluded outlines, text, fog edges) stay exact there
         // while terrain rising close to a low camera is not clipped.
-        camera.near = camera.perspective ? Math.max(1, distance / 50) : 1;
-        camera.far = Math.max(100000, distance * 4);
+        camera.near = camera.perspective && !firstPerson ? Math.max(1, distance / 50) : 1;
+        camera.far = firstPerson ? 100000 : Math.max(100000, distance * 4);
         camera.update();
         revision++;
     }

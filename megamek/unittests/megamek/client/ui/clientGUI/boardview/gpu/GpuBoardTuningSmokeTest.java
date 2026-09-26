@@ -121,7 +121,8 @@ class GpuBoardTuningSmokeTest {
             assertFalse(tuning.panel().findActor("tuning-terrain-scroll").isVisible());
             Slider cameraFov = tuning.panel().findActor("tuning-camera-fov");
             assertTrue(cameraFov.isDisabled());
-            GpuBoardTestUi.click("tuning-perspective");
+            GpuBoardTestUi.click("tuning-free-flight");
+            assertTrue(camera.firstPerson());
             assertTrue(camera.perspective());
             assertFalse(cameraFov.isDisabled());
             assertEquals(0, camera.camera.projection.val[Matrix4.M33], .0001f,
@@ -434,7 +435,7 @@ class GpuBoardTuningSmokeTest {
         input.keyDown(Input.Keys.UP);
         assertSame(tuning.panel().findActor("Hex scale"), stage.getKeyboardFocus());
         input.keyDown(Input.Keys.UP);
-        assertSame(tuning.panel().findActor("tuning-perspective"), stage.getKeyboardFocus(),
+        assertSame(tuning.panel().findActor("tuning-free-flight"), stage.getKeyboardFocus(),
               "Navigation skips disabled inputs and includes checkboxes");
         input.keyDown(Input.Keys.SPACE);
         assertFalse(tuning.panel().<Slider>findActor("tuning-camera-fov").isDisabled());

@@ -359,10 +359,12 @@ class GpuBattleView extends ApplicationAdapter {
         // The first visible frame's delta may still include the hidden window's loading time.
         boardCamera.advance(entranceStarting ? 0 : Gdx.graphics.getDeltaTime());
         entranceStarting = false;
-        if (source.chatActive()) {
+        if (source.chatActive() || !ui.acceptsCameraKeys() || ui.isTextEditing()) {
             cameraKeys.clear();
         }
-        if (ui.acceptsCameraKeys() && !source.chatActive()) {
+        if (boardCamera.firstPerson()) {
+            advanceFirstPerson(Gdx.graphics.getDeltaTime());
+        } else if (ui.acceptsCameraKeys() && !source.chatActive()) {
             float distance = 500 * Gdx.graphics.getDeltaTime();
             float inclination = TILT_DEGREES_PER_SECOND * Gdx.graphics.getDeltaTime();
             for (KeyCommandBind command : cameraKeys.values()) {
@@ -667,6 +669,13 @@ class GpuBattleView extends ApplicationAdapter {
             // Start with the whole map, ignoring any earlier classic-board centering. Later board switches
             // can follow a unit-list click, whose pending focus request must still be applied.
             centerSequence = centerSequence < 0 ? request.sequence() : 0;
+        }
+        if (boardCamera.firstPerson()) {
+            // Consume automatic requests during free flight so leaving it restores the user's tactical view.
+            centerSequence = request.sequence();
+            cameraSelection = scene.selectedId();
+            cameraFollowingPlayback = false;
+            return;
         }
         boolean firing = playback.attack() != null && playback.attack().shot();
         boolean instant = playbackSpeed == UnitMotion.Speed.INSTANT;
@@ -1171,6 +1180,28 @@ class GpuBattleView extends ApplicationAdapter {
         }
     }
 
+    /** Held camera binds share the existing focus and release routing; free flight uses wall-clock movement. */
+    private void advanceFirstPerson(float seconds) {
+        float forward = 0, sideways = 0, vertical = 0, pitch = 0;
+        for (KeyCommandBind command : cameraKeys.values()) {
+            switch (command) {
+                case SCROLL_NORTH -> forward += 1;
+                case SCROLL_SOUTH -> forward -= 1;
+                case SCROLL_EAST -> sideways += 1;
+                case SCROLL_WEST -> sideways -= 1;
+                case CAMERA_ROTATE_LEFT -> vertical -= 1;
+                case CAMERA_ROTATE_RIGHT -> vertical += 1;
+                case CAMERA_TILT_UP -> pitch += 1;
+                case CAMERA_TILT_DOWN -> pitch -= 1;
+                default -> { }
+            }
+        }
+        float elapsed = MathUtils.clamp(seconds, 0, .1f);
+        if (pitch != 0) { boardCamera.look(0, pitch * TILT_DEGREES_PER_SECOND * elapsed); }
+        float speed = (modifiers() & InputEvent.SHIFT_DOWN_MASK) != 0 ? 4 : 1;
+        boardCamera.fly(forward, sideways, vertical, BoardGeometry.HEIGHT * 3 * speed * elapsed);
+    }
+
     Vector3 screenPosition(Coords coords) {
         Vector3 point = boardCamera.camera.project(BoardGeometry.center(coords, scene.tile(coords).elevation()),
               0, ui.bottomPixels(), boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight);
@@ -1262,7 +1293,7 @@ class GpuBattleView extends ApplicationAdapter {
             dragged = false;
             panning = button == Input.Buttons.RIGHT || button == Input.Buttons.MIDDLE;
             boolean shiftDown = (modifiers() & InputEvent.SHIFT_DOWN_MASK) != 0;
-            orbiting = panning && ((button == Input.Buttons.MIDDLE) != shiftDown);
+            orbiting = panning && (boardCamera.firstPerson() ? !shiftDown : (button == Input.Buttons.MIDDLE) != shiftDown);
             if (panning) {
                 ui.closeMenu();
             }
@@ -1289,7 +1320,11 @@ class GpuBattleView extends ApplicationAdapter {
                 }
                 dragged = true;
                 if (orbiting) {
-                    boardCamera.orbit((x - dragX) * 0.3f / layoutScale, (y - dragY) * 0.3f / layoutScale);
+                    if (boardCamera.firstPerson()) {
+                        boardCamera.look((x - dragX) * 0.3f / layoutScale, (dragY - y) * 0.3f / layoutScale);
+                    } else {
+                        boardCamera.orbit((x - dragX) * 0.3f / layoutScale, (y - dragY) * 0.3f / layoutScale);
+                    }
                 } else {
                     boardCamera.pan(x - dragX, y - dragY);
                 }
@@ -1409,6 +1444,19 @@ class GpuBattleView extends ApplicationAdapter {
                 return true;
             }
             if (!source.chatActive()) {
+                if (boardCamera.firstPerson() && modifiers == InputEvent.SHIFT_DOWN_MASK) {
+                    // Shift accelerates flight, including when held before pressing a movement key.
+                    for (KeyCommandBind command : KeyCommandBind.getAllBindsByKey(awt, 0)) {
+                        switch (command) {
+                            case SCROLL_NORTH, SCROLL_SOUTH, SCROLL_EAST, SCROLL_WEST,
+                                 CAMERA_ROTATE_LEFT, CAMERA_ROTATE_RIGHT, CAMERA_TILT_UP, CAMERA_TILT_DOWN -> {
+                                cameraKeys.put(key, command);
+                                return true;
+                            }
+                            default -> { }
+                        }
+                    }
+                }
                 for (KeyCommandBind command : KeyCommandBind.getAllBindsByKey(awt, modifiers)) {
                     if (command == KeyCommandBind.CENTER_ON_SELECTED && isMoving()) {
                         playback.finish();
@@ -1436,10 +1484,8 @@ class GpuBattleView extends ApplicationAdapter {
                 case SCROLL_NORTH, SCROLL_SOUTH, SCROLL_EAST, SCROLL_WEST, CAMERA_TILT_UP, CAMERA_TILT_DOWN ->
                       cameraKeys.put(key, command);
                 case CAMERA_ROTATE_LEFT, CAMERA_ROTATE_RIGHT -> {
-                    if (ui.acceptsCameraKeys()) {
+                    if (ui.acceptsCameraKeys() && !boardCamera.firstPerson()) {
                         boardCamera.rotateStep(command == KeyCommandBind.CAMERA_ROTATE_LEFT ? -1 : 1);
-                    } else {
-                        LOGGER.debug("[GpuCamera] {} ignored: a menu is open", command);
                     }
                     cameraKeys.put(key, command);
                 }

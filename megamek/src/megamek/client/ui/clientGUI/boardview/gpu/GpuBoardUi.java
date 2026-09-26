@@ -604,8 +604,9 @@ final class GpuBoardUi implements Disposable {
         status.setText("MAP " + (frame.scene().boardId() + 1) + "  /  " + frame.scene().width() + " \u00d7 " + frame.scene().height());
         ((TextButton) stage.getRoot().findActor("top")).setChecked(camera.isTopDown());
         ((TextButton) stage.getRoot().findActor("iso")).setChecked(camera.isIsometric());
+        tuning.syncCamera();
         if (source.isEditor()) {
-            help.setText(Messages.getString("BoardEditor.edit3DHelp"));
+            help.setText(Messages.getString(camera.firstPerson() ? "GpuBoard.firstPersonHelp" : "BoardEditor.edit3DHelp"));
             if (popup.isVisible()) {
                 updateMenu();
             }
@@ -626,6 +627,7 @@ final class GpuBoardUi implements Disposable {
         if (!source.phaseStatus.text().isBlank() && !source.phaseStatus.blocking()) {
             help.setText(source.phaseStatus.text());
         }
+        if (camera.firstPerson()) { help.setText(Messages.getString("GpuBoard.firstPersonHelp")); }
         List<BoardScene.Command> commits = frame.scene().commands().stream().filter(BoardScene.Command::commit).toList();
         List<String> ids = commits.stream().map(command -> command.id() + command.label()).toList();
         if (!ids.equals(completionIds)) {
@@ -928,6 +930,7 @@ final class GpuBoardUi implements Disposable {
 
     private List<BoardScene.Command> cameraCommands() {
         return List.of(
+              cameraToggle("camera-free-flight", "GpuBoard.firstPerson", () -> camera.setFirstPerson(!camera.firstPerson())),
               new BoardScene.Command(Messages.getString("GpuBoard.rotateLeft"), true, () -> camera.orbit(-15, 0)),
               new BoardScene.Command(Messages.getString("GpuBoard.rotateRight"), true, () -> camera.orbit(15, 0)),
               new BoardScene.Command(Messages.getString("GpuBoard.tiltUp"), true, () -> camera.orbit(0, -10)),
@@ -953,6 +956,7 @@ final class GpuBoardUi implements Disposable {
 
     private Boolean cameraToggleState(String id) {
         return switch (id) {
+            case "camera-free-flight" -> camera.firstPerson();
             case "camera-fixed-sun" -> tuning.fixedSun();
             case "camera-overview-icons" -> tuning.overviewIcons();
             case "camera-animate-selection" -> camera.animateOnSelectionChange;
