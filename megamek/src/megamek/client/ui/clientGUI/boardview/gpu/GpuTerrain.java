@@ -578,6 +578,7 @@ final class GpuTerrain implements Disposable {
         final List<ModelInstance> water = new ArrayList<>();
         final List<LiquidSurface> liquidMaterials = new ArrayList<>();
         final List<ModelInstance> tactical = new ArrayList<>();
+        final Map<Coords, BoardTacticalGeometry.Surface> topography = new HashMap<>();
         final List<ModelInstance> flatTrees = new ArrayList<>();
         final List<Prop> props = new ArrayList<>();
         final List<Prop> cutaways = new ArrayList<>();
@@ -714,14 +715,20 @@ final class GpuTerrain implements Disposable {
               || terrainRevision != BoardGeometry.terrainRevision();
         boolean changedLimbScale = limbModel != null && tuning != null && tuning.unitScale() != nextTuning.unitScale();
         boolean changedLight = !Objects.equals(light, scene.light());
-        if (tiles == scene.tiles() && !changedTuning && !changedLight && !changedLimbScale) {
+        if (!changedTuning && !changedLimbScale && sameTerrain(scene.tiles())) {
+            if (tiles != scene.tiles() && updateMarkingsAtlas(scene)) {
+                for (int index = 0; index < chunks.size(); index++) {
+                    buildMarkings(scene, chunks.get(index), index / chunkRows * CHUNK_SIZE, index % chunkRows * CHUNK_SIZE);
+                }
+            }
+            tiles = scene.tiles();
             tuning = nextTuning;
+            if (changedLight) { updateLight(scene.light()); }
             return;
         }
         Map<GroundSlot, BoardScene.Pixels> terrainPixels = new HashMap<>();
         Map<GroundSlot, BoardScene.Pixels> normalPixels = new HashMap<>();
         Map<Coords, BoardScene.Pixels> decalPixels = new HashMap<>();
-        Map<Coords, BoardScene.Pixels> tacticalPixels = new HashMap<>();
         Map<Coords, BoardScene.Pixels> foliagePixels = new HashMap<>();
         float nextFloor = BoardGeometry.floor(scene);
         boolean rebuildAll = changedTuning || tiles == null || tiles.size() != scene.tiles().size() || nextFloor != floor;
@@ -751,9 +758,6 @@ final class GpuTerrain implements Disposable {
             }
             if (decals(tile) != null) {
                 decalPixels.put(tile.coords(), decals(tile));
-            }
-            if (tile.tactical() != null) {
-                tacticalPixels.put(tile.coords(), tile.tactical());
             }
             if (tile.foliage() != null) { foliagePixels.put(tile.coords(), tile.foliage()); }
             if (!rebuildAll) {
@@ -811,7 +815,7 @@ final class GpuTerrain implements Disposable {
         rebuildAll |= ground.update(terrainPixels, normalPixels);
         rebuildAll |= decals.update(decalPixels);
         rebuildAll |= foliage.update(foliagePixels);
-        boolean markingsChanged = tactical.update(tacticalPixels);
+        boolean markingsChanged = updateMarkingsAtlas(scene);
         tiles = scene.tiles();
         coast = nextCoast;
         tuning = nextTuning;
@@ -846,6 +850,27 @@ final class GpuTerrain implements Disposable {
         chunks.add(new Coords(coords.getX() / CHUNK_SIZE, coords.getY() / CHUNK_SIZE));
     }
 
+    private boolean sameTerrain(List<BoardScene.Tile> next) {
+        if (tiles == next) { return true; }
+        if (tiles == null || tiles.size() != next.size()) { return false; }
+        for (int i = 0; i < tiles.size(); i++) {
+            BoardScene.Tile before = tiles.get(i), after = next.get(i);
+            if (!before.sameGeometry(after) || !Objects.equals(before.ground(), after.ground())
+                  || !Objects.equals(before.normals(), after.normals()) || !Objects.equals(before.decals(), after.decals())
+                  || !Objects.equals(before.decalsWithoutLimbs(), after.decalsWithoutLimbs())
+                  || !Objects.equals(before.foliage(), after.foliage())) { return false; }
+        }
+        return true;
+    }
+
+    private boolean updateMarkingsAtlas(BoardScene scene) {
+        Map<Coords, BoardScene.Pixels> pixels = new HashMap<>();
+        for (BoardScene.Tile tile : scene.tiles()) {
+            if (tile.tactical() != null) { pixels.put(tile.coords(), tile.tactical()); }
+        }
+        return tactical.update(pixels);
+    }
+
     private BoardScene.Pixels decals(BoardScene.Tile tile) {
         return limbModel != null && tile.decalsWithoutLimbs() != null ? tile.decalsWithoutLimbs() : tile.decals();
     }
@@ -878,6 +903,7 @@ final class GpuTerrain implements Disposable {
             for (int y = startY; y < Math.min(scene.height(), startY + CHUNK_SIZE); y++) {
                 BoardScene.Tile tile = scene.tile(new Coords(x, y));
                 BoardSurface surface = surfaces.get(tile.coords());
+                chunk.topography.put(tile.coords(), BoardTacticalGeometry.Surface.of(surface, scene, floor));
                 List<BoardSurface.Face> smoothTop = new ArrayList<>();
                 TextureRegion top = ground.region(new GroundSlot(tile.coords(), true));
                 boolean sculpted = surface.relief.sculpted();
@@ -1141,6 +1167,7 @@ final class GpuTerrain implements Disposable {
         overlay.finish(chunk.overlays);
         trees.finish(chunk.flatTrees);
         liquid.finish(chunk.water);
+        if (chunk.waterField != null) { chunk.waterField.finish(); }
         // The floating markings remain visible when only their raised edge enters the viewport.
         chunk.bounds.ext(chunk.bounds.max.x, chunk.bounds.max.y, chunk.bounds.max.z + BoardGeometry.LEVEL / 3);
         buildMarkings(scene, chunk, startX, startY);
@@ -1185,6 +1212,11 @@ final class GpuTerrain implements Disposable {
             }
         }
         marks.finish(chunk.tactical);
+    }
+
+    /** Finished rendering triangles, also used to drape deployment borders and other native overlays. */
+    BoardTacticalGeometry.Surface tacticalSurface(Coords coords) {
+        return chunks.get(coords.getX() / CHUNK_SIZE * chunkRows + coords.getY() / CHUNK_SIZE).topography.get(coords);
     }
 
     /**

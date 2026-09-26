@@ -200,7 +200,7 @@ class GpuBattleView extends ApplicationAdapter {
         boardCamera.setIsometric(true);
         terrain = new GpuTerrain(unitModels, unitBounds);
         fireControl = new GpuFireControl();
-        tactical = new GpuTactical();
+        tactical = new GpuTactical(terrain::tacticalSurface);
         atmosphere = new GpuAtmosphere();
         unitVisibility = new GpuUnitVisibility();
         markers = new GpuMarkers();

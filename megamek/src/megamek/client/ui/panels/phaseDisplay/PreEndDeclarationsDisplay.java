@@ -538,6 +538,9 @@ public class PreEndDeclarationsDisplay extends AttackPhaseDisplay {
             if (clientgui.getClient().getMyTurn().isValidEntity(clickedEntity, game)) {
                 selectEntity(clickedEntity.getId());
             }
+        } else if (clickedEntity != null) {
+            clientgui.inspectUnit(clickedEntity.getId());
+            clientgui.centerOnUnit(clickedEntity);
         }
     }
 

@@ -28,6 +28,7 @@ import java.awt.Rectangle;
 import java.awt.Window;
 import java.awt.event.InputEvent;
 import java.awt.event.WindowEvent;
+import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.HashMap;
 import java.util.List;
@@ -81,6 +82,7 @@ import megamek.client.ui.entityreadout.LiveReadoutDialog;
 import megamek.client.ui.panels.StartingScenarioPanel;
 import megamek.client.ui.panels.WaitingForServerPanel;
 import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
+import megamek.client.ui.panels.phaseDisplay.ReportDisplay;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.Hex;
 import megamek.common.Player;
@@ -90,6 +92,8 @@ import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.loaders.MapSettings;
+import megamek.common.loaders.MekFileParser;
+import megamek.common.units.Entity;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -115,6 +119,109 @@ class GpuBoardWindowSmokeTest {
     }
     private record ClientWindow(JFrame frame, CommonMenuBar menus, BoardView view, JMenuItem gpuChoice,
           UnitOverviewOverlay overview) { }
+
+    @Test
+    void initialBoardAndSidebarClicksSelectWithoutOpeningAUnitMenuFirst() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            ClientWindow ui = onSwing(() -> createClientWindow(fixture));
+            ClientGUI gui = ui.view().getClientgui();
+            Entity second = new MekFileParser(new File("testresources/megamek/common/units/Atlas AS7-D.mtf")).getEntity();
+            UnitDisplayPanel display = onSwing(() -> {
+                second.setId(2);
+                second.setOwner(fixture.player);
+                second.setPosition(new Coords(8, 6));
+                second.setDeployed(true);
+                fixture.game.addEntity(second, false);
+                fixture.game.setPhase(GamePhase.INITIATIVE_REPORT);
+                ReportDisplay report = mock(ReportDisplay.class);
+                when(report.getComponents()).thenReturn(new Component[0]);
+                fixture.panel = report;
+                when(gui.getCurrentPanel()).thenAnswer(invocation -> fixture.panel);
+                when(gui.getUnitDisplayDialog()).thenReturn(mock(UnitDisplayDialog.class));
+                UnitDisplayPanel panel = new UnitDisplayPanel(gui, null);
+                when(gui.getUnitDisplay()).thenReturn(panel);
+                when(gui.getDisplayedUnit()).thenAnswer(invocation -> panel.getCurrentEntity());
+                doAnswer(invocation -> panel.getCurrentEntity()).when(ui.view()).getSelectedEntity();
+                setField(ClientGUI.class, gui, "client", gui.getClient());
+                doCallRealMethod().when(gui).unitSelected(any());
+                doCallRealMethod().when(gui).inspectUnit(org.mockito.ArgumentMatchers.anyInt());
+                doCallRealMethod().when(gui).setSelectedEntityNum(org.mockito.ArgumentMatchers.anyInt());
+                ui.view().addBoardViewListener(gui);
+                ui.view().addOverlay(ui.overview());
+                return panel;
+            });
+            try {
+                openNative(ui);
+                GpuBoardSource source = previewSource();
+                assertNull(onSwing(display::getCurrentEntity));
+                for (boolean isometric : new boolean[] { false, true }) {
+                    input(() -> {
+                        BoardCamera camera = ((GpuBattleView) Gdx.app.getApplicationListener()).boardCamera;
+                        camera.setIsometric(isometric);
+                        camera.fit(source.takeFrame().scene());
+                    });
+                    awaitNavigation();
+                    await(() -> onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).boardCamera.entranceOpacity() == 1));
+                    Vector3 before = onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).boardCamera.focus.cpy());
+                    input(() -> clickBoard(fixture.entity.getPosition(), Input.Buttons.LEFT));
+                    await(() -> onSwing(() -> display.getCurrentEntity() == fixture.entity));
+                    awaitNavigation();
+                    assertEquals(fixture.entity.getId(), source.takeFrame().scene().selectedId());
+                    assertEquals(before, onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).boardCamera.focus.cpy()),
+                          "Selecting on the board must leave the camera alone");
+                    Vector3 beforeSidebar = onGl(() -> {
+                        BoardCamera camera = ((GpuBattleView) Gdx.app.getApplicationListener()).boardCamera;
+                        // Top view only pans when needed to bring the selected unit into view.
+                        camera.pan(2f * Gdx.graphics.getWidth(), 0);
+                        return camera.focus.cpy();
+                    });
+                    int unselectedBorder = onSwing(() -> sidebarBorderColor(ui.overview(), 1));
+                    input(() -> {
+                        float scale = Gdx.graphics.getWidth() / GpuBoardTestUi.stage().getWidth();
+                        float overlayScale = scale / GUIPreferences.getInstance().getGUIScale();
+                        int x = Math.round(Gdx.graphics.getWidth() - 33 * overlayScale);
+                        int y = Math.round(GpuBoardUi.TOP_HEIGHT * scale + 82 * overlayScale);
+                        Gdx.input.getInputProcessor().touchDown(x, y, 0, Input.Buttons.LEFT);
+                        Gdx.input.getInputProcessor().touchUp(x, y, 0, Input.Buttons.LEFT);
+                    });
+                    await(() -> onSwing(() -> display.getCurrentEntity() == second));
+                    awaitNavigation();
+                    assertEquals(second.getId(), source.takeFrame().scene().selectedId());
+                    assertEquals(second.getId(), onSwing(() -> ui.view().getCenterRequest().entityId()));
+                    assertNotEquals(unselectedBorder, onSwing(() -> sidebarBorderColor(ui.overview(), 1)),
+                          "The sidebar highlights selection without a turn");
+                    assertNotEquals(beforeSidebar, onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).boardCamera.focus.cpy()),
+                          "Sidebar selection retains camera navigation");
+                    onSwing(() -> {
+                        fixture.game.setPhase(GamePhase.STARTING_SCENARIO);
+                        fixture.panel = new JPanel();
+                        source.refresh();
+                        return null;
+                    });
+                }
+                assertFalse(onGl(() -> GpuBoardTestUi.stage().getRoot().findActor("tactical-menu").isVisible()));
+            } finally {
+                onSwing(() -> {
+                    ui.view().removeBoardViewListener(gui);
+                    GUIPreferences.getInstance().removePreferenceChangeListener(ui.overview());
+                    GpuBoardWindow.closeFor(ui.view());
+                    ui.frame().dispose();
+                    ui.menus().die();
+                    return null;
+                });
+            }
+        }
+    }
+
+    private static int sidebarBorderColor(UnitOverviewOverlay overview, int index) {
+        var graphics = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB).createGraphics();
+        try {
+            var portraits = overview.captureLayers(graphics, new Rectangle(0, 0, 800, 600));
+            return portraits.get(index).image().getRGB(10, 2);
+        } finally {
+            graphics.dispose();
+        }
+    }
 
     @Test
     void gameClicksSelectUnitsPlotTerrainAndDismissMenusWithoutMovingTheCamera() throws Exception {
@@ -1478,7 +1585,8 @@ class GpuBoardWindowSmokeTest {
         Application app = Gdx.app;
         FutureTask<T> task = new FutureTask<>(action);
         app.postRunnable(task);
-        return task.get(10, TimeUnit.SECONDS);
+        // A cold native startup uploads the board and models before servicing queued input.
+        return task.get(30, TimeUnit.SECONDS);
     }
 
     private static void captureMenu(String name) throws Exception {

@@ -14,6 +14,31 @@ import org.junit.jupiter.api.Test;
 
 class BoardRiverTest {
     @Test
+    void boundedRiverQueriesPreserveTheShoreIntersectionAtJunctionsAndBoardEdges() {
+        var original = BoardRelief.tuning();
+        try {
+            Coords center = new Coords(3, 3);
+            BoardScene scene = scene(Map.of(center, 0, center.translated(0), 1, center.translated(2), 0,
+                  center.translated(4), 2, new Coords(0, 0), 1));
+            for (float width : new float[] { .05f, .5f, 1 }) {
+                GpuRiverTerrainSmokeTest.setWidth(width);
+                BoardRiver river = new BoardRiver(scene, BoardRelief.tuning());
+                for (int x = -80; x < 540; x += 13) {
+                    for (int y = -570; y < 80; y += 17) {
+                        float full = river.field(x, y);
+                        for (float limit : new float[] { -20, -1, 0, 1, 20 }) {
+                            assertEquals(Math.min(limit, full), Math.min(limit, river.field(x, y, limit)),
+                                  "Clamping a river union must preserve the exact shore intersection");
+                        }
+                    }
+                }
+            }
+        } finally {
+            BoardRelief.tune(original);
+        }
+    }
+
+    @Test
     void narrowStreamsKeepUnitsInWaterAndMeetAcrossBends() {
         var original = BoardRelief.tuning();
         try {

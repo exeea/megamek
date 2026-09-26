@@ -407,7 +407,7 @@ final class GpuWaterShader extends Attribute {
     static final class Field implements Disposable {
         final Texture texture;
         final float scaleX, scaleY, offsetX, offsetY;
-        private final Pools pools;
+        private Pools pools;
 
         private Field(Texture texture, float scaleX, float scaleY, float offsetX, float offsetY, Pools pools) {
             this.texture = texture;
@@ -537,6 +537,9 @@ final class GpuWaterShader extends Attribute {
             Pool pool = pools.get(coords);
             return pool == null ? null : pool.surface;
         }
+
+        /** Mesh construction has consumed these samples; rendering needs only the texture and its transform. */
+        void finish() { pools = null; }
 
         @Override
         public void dispose() { texture.dispose(); }

@@ -449,7 +449,7 @@ final class BoardRelief {
     float shore(float x, float y, boolean molten) {
         float value = shoreBase(x, y, molten);
         if (molten) { return value; }
-        float channel = river.field(x, y);
+        float channel = river.field(x, y, value);
         if (channel == Float.NEGATIVE_INFINITY) { return value; }
         return Math.min(value, channel);
     }
@@ -1617,11 +1617,11 @@ final class BoardRelief {
             // Where a joint notches the rim, one side of the notch can run radially; split each quad of the band along
             // the diagonal that keeps both of its triangles facing up.
             if (Math.min(upward(a, b, c), upward(a, c, d)) >= Math.min(upward(a, b, d), upward(b, c, d))) {
-                destination.add(new BoardSurface.Face(a, b, c, BoardSurface.Finish.TOP));
-                destination.add(new BoardSurface.Face(a, c, d, BoardSurface.Finish.TOP));
+                addTriangle(destination, a, b, c, BoardSurface.Finish.TOP);
+                addTriangle(destination, a, c, d, BoardSurface.Finish.TOP);
             } else {
-                destination.add(new BoardSurface.Face(a, b, d, BoardSurface.Finish.TOP));
-                destination.add(new BoardSurface.Face(b, c, d, BoardSurface.Finish.TOP));
+                addTriangle(destination, a, b, d, BoardSurface.Finish.TOP);
+                addTriangle(destination, b, c, d, BoardSurface.Finish.TOP);
             }
         }
         List<Vector3> outer = rim;
@@ -1655,8 +1655,7 @@ final class BoardRelief {
             outerParameters = innerParameters;
         }
         for (int j = 0; j < outer.size(); j++) {
-            destination.add(new BoardSurface.Face(center, outer.get(j), outer.get((j + 1) % outer.size()),
-                  BoardSurface.Finish.TOP));
+            addTriangle(destination, center, outer.get(j), outer.get((j + 1) % outer.size()), BoardSurface.Finish.TOP);
         }
         rocks(destination, center);
         field(destination, center);

@@ -435,7 +435,7 @@ final class GpuBoardTuning {
               new Knob("Shore lip", .5f, 10, .5f, "%.1f",
                     "Width of the small slope from the dry bank down to the water. Higher values make that strip wider."),
               new Knob("Transition room (m)", 0, 8, .1f, "%.1f",
-                    "Space used to join different ground heights. Higher values spread slopes out. Needs Hex transitions on and Hex padding off.")), this::applyRelief, 0);
+                    "Space used to join different ground heights. Higher values spread slopes out. Needs Hex transitions on and Hex padding off.")), this::applyRelief, 0, true);
         section(skin, "Banks and river openings");
         water = new ArrayList<>(controls(skin, List.of(
               new Knob("Wet margin", .1f, 4, .1f, "%.1f",
@@ -451,7 +451,7 @@ final class GpuBoardTuning {
               new Knob("Plunge opening", 0, 12, .5f, "%.1f",
                     "Extra room for water entering a hex below a waterfall. Higher values widen that opening."),
               new Knob("Bed slope share", .1f, .95f, .05f, "%.2f",
-                    "How far slopes reach into a river hex. Higher values leave less flat riverbed and make water descend more gradually between levels.")), this::applyWater, 0));
+                    "How far slopes reach into a river hex. Higher values leave less flat riverbed and make water descend more gradually between levels.")), this::applyWater, 0, true));
         section(skin, "Waterfalls");
         fallsOffBoard = checkbox(skin, "Waterfalls off board", "tuning-falls-off-board");
         fallsOffBoard.addListener(new TextTooltip("Let rivers pour over the edge of the board instead of ending there.", skin, "menu"));
@@ -469,7 +469,7 @@ final class GpuBoardTuning {
               new Knob("Underwater ledge", 0, 4, .25f, "%.2f",
                     "Water depth over the ledge at the top of a waterfall. Higher values make that ledge more deeply submerged."),
               new Knob("Valley extension", 0, 14, .5f, "%.1f",
-                    "How far joined waterfalls reach out where they meet around an inside corner.")), this::applyWater, 0));
+                    "How far joined waterfalls reach out where they meet around an inside corner.")), this::applyWater, 0, true));
         fallsOffBoard.addListener(new ChangeListener() {
             @Override
             public void changed(ChangeEvent event, Actor actor) {
@@ -481,7 +481,7 @@ final class GpuBoardTuning {
               new Knob("Full detail hexes", 100, 10000, 100, "%.0f",
                     "Largest board that uses the finest terrain detail. Raising this keeps more detail on large boards, but costs more to draw."),
               new Knob("Medium detail hexes", 100, 40000, 100, "%.0f",
-                    "Largest board that keeps medium detail and loose rocks. Larger boards use simpler ground.")), this::applyRelief, 0);
+                    "Largest board that keeps medium detail and loose rocks. Larger boards use simpler ground.")), this::applyRelief, 0, true);
         section(skin, "Material geology");
         geologyFamily = choice(skin, "Material", "tuning-geology-family",
               new String[] { "Grass", "Dirt", "Sand", "Rock", "Concrete", "Snow", "Bedrock under slabs" }, this::syncGeology);
@@ -519,7 +519,7 @@ final class GpuBoardTuning {
               new Knob("Loose stones / hex", 0, 6, .1f, "%.1f",
                     "Average number of loose stones per open hex of this material. Stones need room and full or medium detail."),
               new Knob("Low shrubs / hex", 0, 6, .1f, "%.1f",
-                    "Average number of small shrubs per open hex of this material. Shrubs need room and full or medium detail.")), this::applyGeology, 0);
+                    "Average number of small shrubs per open hex of this material. Shrubs need room and full or medium detail.")), this::applyGeology, 0, true);
         ScrollPane generalScroll = scroll(skin, general, "tuning-general-scroll");
         ScrollPane atmosphereScroll = scroll(skin, atmospheric, "tuning-scroll");
         ScrollPane terrainScroll = scroll(skin, terrain, "tuning-terrain-scroll");
@@ -646,6 +646,10 @@ final class GpuBoardTuning {
     }
 
     private List<Control> controls(Skin skin, List<Knob> knobs, Runnable apply, int toggleCount) {
+        return controls(skin, knobs, apply, toggleCount, false);
+    }
+
+    private List<Control> controls(Skin skin, List<Knob> knobs, Runnable apply, int toggleCount, boolean onRelease) {
         List<Control> result = new ArrayList<>();
         for (Knob knob : knobs) {
             Slider slider = new Slider(knob.min(), knob.max(), knob.step(), false, skin, "menu");
@@ -655,11 +659,26 @@ final class GpuBoardTuning {
             slider.addListener(new ChangeListener() {
                 @Override
                 public void changed(ChangeEvent event, Actor actor) {
-                    if (!syncing) {
+                    if (!syncing && !(onRelease && slider.isDragging())) {
                         apply.run();
+                    } else if (!syncing) {
+                        reading.setText(String.format(Locale.ROOT, knob.format(), slider.getValue()));
                     }
                 }
             });
+            if (onRelease) {
+                slider.addListener(new InputListener() {
+                    @Override
+                    public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
+                        return !slider.isDisabled();
+                    }
+
+                    @Override
+                    public void touchUp(InputEvent event, float x, float y, int pointer, int button) {
+                        if (!syncing) { apply.run(); }
+                    }
+                });
+            }
             TextButton toggle = null;
             if (result.size() < toggleCount) {
                 toggle = new TextButton(knob.name(), skin, "menu-control");

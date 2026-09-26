@@ -977,6 +977,36 @@ class GpuBoardSourceTest {
     }
 
     @Test
+    void visibleEnemyClicksInspectDuringInitialAndReportPhases() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            AtomicInteger selections = new AtomicInteger();
+            SwingUtilities.invokeAndWait(() -> {
+                Player enemy = new Player(2, "Enemy");
+                enemy.setTeam(2);
+                fixture.game.addPlayer(enemy.getId(), enemy);
+                fixture.entity.setOwner(enemy);
+                fixture.view.addBoardViewListener(new BoardViewListenerAdapter() {
+                    @Override
+                    public void unitSelected(BoardViewEvent event) {
+                        assertEquals(fixture.entity.getId(), event.getEntityId());
+                        selections.incrementAndGet();
+                    }
+                });
+            });
+            for (GamePhase phase : List.of(GamePhase.STARTING_SCENARIO, GamePhase.INITIATIVE_REPORT)) {
+                SwingUtilities.invokeAndWait(() -> {
+                    fixture.game.setPhase(phase);
+                    fixture.source.refresh();
+                });
+                fixture.source.primaryClick(fixture.entity.getPosition(), fixture.entity.getId(), 0,
+                      fixture.source.takeFrame().boardGeneration());
+                SwingUtilities.invokeAndWait(() -> { });
+            }
+            assertEquals(2, selections.get());
+        }
+    }
+
+    @Test
     void forwardsBoardCoordinatesAndDoesNotDispatchAfterClose() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             AtomicReference<BoardViewEvent> received = new AtomicReference<>();

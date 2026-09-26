@@ -29,6 +29,7 @@ import javax.swing.Timer;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.Messages;
 import megamek.client.ui.boardeditor.BoardEditorPanel;
+import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardFieldOfView;
 import megamek.client.ui.clientGUI.boardview.BoardView;
@@ -173,6 +174,8 @@ final class GpuBoardSource implements AutoCloseable {
     private List<BoardScene.Tile> tiles = List.of();
     private BoardFieldOfView fieldOfView = BoardFieldOfView.EMPTY;
     private boolean terrainDirty = true;
+    /** Swing-owned artwork invalidation; neighbouring exits and terrain blends also change after a hex edit. */
+    private Rectangle dirtyHexes;
     private volatile boolean closed;
     private PlanetaryConditionsDialog conditionsDialog;
     /** Swing-owned visual selection for reopening the editor; never written to the game. */
@@ -236,7 +239,15 @@ final class GpuBoardSource implements AutoCloseable {
 
             @Override
             public void boardChangedHex(BoardEvent event) {
-                dirtyTerrain();
+                onSwing(() -> {
+                    Coords coords = event.getCoords();
+                    if (coords == null) {
+                        terrainDirty = true;
+                    } else {
+                        Rectangle area = new Rectangle(coords.getX() - 1, coords.getY() - 1, 3, 3);
+                        dirtyHexes = dirtyHexes == null ? area : dirtyHexes.union(area);
+                    }
+                });
             }
 
             @Override
@@ -565,7 +576,7 @@ final class GpuBoardSource implements AutoCloseable {
     }
 
     private Frame capture() {
-        phaseStatus = editor == null ? GpuBoardActions.phaseStatus(phasePanel.get())
+        GpuBoardActions.PhaseStatus nextPhaseStatus = editor == null ? GpuBoardActions.phaseStatus(phasePanel.get())
               : new GpuBoardActions.PhaseStatus(editor.getFrame().getTitle(), false);
         if (view.getClientgui() != null) {
             BoardView selectedView = view.getClientgui().getCurrentBoardView()
@@ -585,10 +596,11 @@ final class GpuBoardSource implements AutoCloseable {
             }
         }
         int measurement = pendingMeasurementModifiers();
-        if (editor == null && measurement != 0 && !phaseStatus.blocking()) {
-            phaseStatus = new GpuBoardActions.PhaseStatus("Left-click an endpoint to complete the "
+        if (editor == null && measurement != 0 && !nextPhaseStatus.blocking()) {
+            nextPhaseStatus = new GpuBoardActions.PhaseStatus("Left-click an endpoint to complete the "
                   + (measurement == InputEvent.CTRL_DOWN_MASK ? "line of sight" : "distance") + " measurement.", false);
         }
+        phaseStatus = nextPhaseStatus;
         chatActive = view.getChatterBoxActive();
         OverlayViewport overlayViewport = viewport;
         view.overlayInput(MouseEvent.MOUSE_MOVED, pointer, overlayViewport.size(), overlayViewport.pixels());
@@ -618,13 +630,19 @@ final class GpuBoardSource implements AutoCloseable {
             board.addBoardListener(boardListener);
             terrainDirty = true;
         }
-        boolean changedTerrain = terrainDirty;
-        if (terrainDirty) {
-            List<BoardScene.Tile> nextTiles = new ArrayList<>(Collections.nCopies(board.getWidth() * board.getHeight(), null));
-            view.capturePlanarHexes(new Rectangle(0, 0, board.getWidth(), board.getHeight()), false,
-                  hex -> nextTiles.set(hex.coords().getX() * board.getHeight() + hex.coords().getY(), tile(hex, null)));
+        boolean changedTerrain = terrainDirty || dirtyHexes != null;
+        if (changedTerrain) {
+            List<BoardScene.Tile> nextTiles = terrainDirty
+                  ? new ArrayList<>(Collections.nCopies(board.getWidth() * board.getHeight(), null))
+                  : new ArrayList<>(tiles);
+            Rectangle area = terrainDirty ? new Rectangle(0, 0, board.getWidth(), board.getHeight()) : dirtyHexes;
+            view.capturePlanarHexes(area, false, hex -> {
+                int index = hex.coords().getX() * board.getHeight() + hex.coords().getY();
+                nextTiles.set(index, tile(hex, nextTiles.get(index)));
+            });
             tiles = List.copyOf(nextTiles);
             terrainDirty = false;
+            dirtyHexes = null;
         }
         Rectangle area = visibleArea;
         long revision = view.getPlanarRevision();
@@ -1057,7 +1075,8 @@ final class GpuBoardSource implements AutoCloseable {
             boolean knownUnit = entity != null && visible(entity) && !sensorContact(entity);
             int clickModifiers = isMeasurement(modifiers) ? modifiers : modifiers | pendingMeasurementModifiers();
             boolean modified = (clickModifiers & (InputEvent.SHIFT_DOWN_MASK | InputEvent.CTRL_DOWN_MASK | InputEvent.ALT_DOWN_MASK)) != 0;
-            if (knownUnit && !modified && !entity.getOwner().isEnemyOf(view.getLocalPlayer())) {
+            if (knownUnit && !modified && (!entity.getOwner().isEnemyOf(view.getLocalPlayer())
+                  || !ClientGUI.hasUnitSelectionController(phasePanel.get()))) {
                 // Reselecting the acting unit would reset its phase tool and discard planned orders.
                 if (entityId != actions.actorId()) {
                     view.processBoardViewEvent(new BoardViewEvent(view, BoardViewEvent.SELECT_UNIT, entityId));

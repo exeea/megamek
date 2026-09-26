@@ -13,8 +13,12 @@ final class BoardRiver {
     private static final int STEPS = 12;
     private final BoardScene scene;
     private final BoardRelief.Tuning tuning;
-    private final Map<Coords, List<Channel>> channels = new HashMap<>();
+    private final Map<Coords, Sample> samples = new HashMap<>();
     private final Map<Coords, Integer> masks = new HashMap<>();
+    private int column = Integer.MIN_VALUE, evenRow, oddRow;
+    private final List<Sample> window = new ArrayList<>(25);
+
+    private record Sample(float x, float y, boolean junction, List<Channel> channels, List<float[]> lakes) { }
 
     private record Channel(List<Span> spans) {
         float field(float x, float y, BoardRelief.Tuning tuning, float wander) {
@@ -46,7 +50,7 @@ final class BoardRiver {
             // and both kinds of hex still ask the same world field at their shared opening.
             float natural = (detailedA ? 1 - s : 0) + (detailedB ? s : 0);
             radius = Math.max(radius, 72 * (1 - natural));
-            return radius * BoardGeometry.HEX_SCALE - (float) Math.hypot(x - ax - t * dx, y - ay - t * dy);
+            return radius * BoardGeometry.HEX_SCALE - length(x - ax - t * dx, y - ay - t * dy);
         }
     }
 
@@ -57,56 +61,80 @@ final class BoardRiver {
 
     /** A coordinate-based query: adjoining meshes see the same paths, tangent directions and widths. */
     float field(float x, float y) {
+        return field(x, y, Float.POSITIVE_INFINITY);
+    }
+
+    /** The caller intersects this union with its shore field, so larger values cannot change the shore. */
+    float field(float x, float y, float limit) {
         float result = Float.NEGATIVE_INFINITY;
         float cell = tuning.wanderCell() * BoardGeometry.HEX_SCALE;
         float wander = .3f * tuning.shoreWander() * BoardRelief.gradient(x / cell + 3.1f, y / cell - 1.7f);
-        int column = Math.round((x - BoardGeometry.WIDTH / 2) / (.75f * BoardGeometry.WIDTH));
+        window(x, y);
         // Round the union of whole branches near a confluence. Blending individual spline samples would inflate
         // every channel, and blending away from junctions would add a regular bulge at every hex centre.
         float round = 0;
-        for (int cx = column - 2; cx <= column + 2; cx++) {
-            int row = Math.round((-y - BoardGeometry.HEIGHT / 2 - (cx & 1) * BoardGeometry.HEIGHT / 2)
-                  / BoardGeometry.HEIGHT);
-            for (int cy = row - 2; cy <= row + 2; cy++) {
-                Coords coords = new Coords(cx, cy);
-                int mask = masks.computeIfAbsent(coords, this::mask);
-                if (mask < 0 || Integer.bitCount(mask) < 3) { continue; }
-                // A solid arc of water neighbours is a lake edge, not several river branches meeting.
-                int starts = mask & ~((mask << 1 | mask >> 5) & 63);
-                if (Integer.bitCount(starts) < 2) { continue; }
-                float distance = (float) Math.hypot(x - BoardGeometry.centerX(coords), y - BoardGeometry.centerY(coords));
-                round = Math.max(round, BoardRelief.smooth(1 - distance / (.8f * BoardGeometry.WIDTH)));
-            }
+        for (Sample sample : window) {
+            if (!sample.junction()) { continue; }
+            float distance = length(x - sample.x(), y - sample.y());
+            round = Math.max(round, BoardRelief.smooth(1 - distance / (.8f * BoardGeometry.WIDTH)));
         }
         round *= 2 * tuning.shoreBlend() * BoardGeometry.HEX_SCALE * Math.min(1, .3f + tuning.riverWidth());
-        for (int cx = column - 2; cx <= column + 2; cx++) {
-            int row = Math.round((-y - BoardGeometry.HEIGHT / 2 - (cx & 1) * BoardGeometry.HEIGHT / 2)
-                  / BoardGeometry.HEIGHT);
-            for (int cy = row - 2; cy <= row + 2; cy++) {
-                Coords coords = new Coords(cx, cy);
-                int mask = masks.computeIfAbsent(coords, this::mask);
-                if (mask < 0) { continue; }
-                for (Channel channel : channels.computeIfAbsent(coords, this::channels)) {
-                    float value = channel.field(x, y, tuning, wander);
-                    result = round > 0 ? -BoardRelief.smoothMin(-result, -value, round) : Math.max(result, value);
-                }
-                // Three mutually adjacent water hexes contain open water, not a mesh of separate thin streams.
-                for (int d = 0; d < 6; d++) {
-                    if ((mask & 1 << d) == 0 || (mask & 1 << (d + 1) % 6) == 0) { continue; }
-                    Coords b = coords.translated(d), c = coords.translated((d + 1) % 6);
-                    float ax = BoardGeometry.centerX(coords), ay = BoardGeometry.centerY(coords);
-                    float bx = BoardGeometry.centerX(b), by = BoardGeometry.centerY(b);
-                    float cxp = BoardGeometry.centerX(c), cyp = BoardGeometry.centerY(c);
-                    float ab = (bx - ax) * (y - ay) - (by - ay) * (x - ax);
-                    float bc = (cxp - bx) * (y - by) - (cyp - by) * (x - bx);
-                    float ca = (ax - cxp) * (y - cyp) - (ay - cyp) * (x - cxp);
-                    if (ab >= 0 && bc >= 0 && ca >= 0 || ab <= 0 && bc <= 0 && ca <= 0) {
-                        return Float.POSITIVE_INFINITY;
-                    }
+        for (Sample sample : window) {
+            for (Channel channel : sample.channels()) {
+                float value = channel.field(x, y, tuning, wander);
+                result = round > 0 ? -BoardRelief.smoothMin(-result, -value, round) : Math.max(result, value);
+                if (result >= limit) { return result; }
+            }
+            // Three mutually adjacent water hexes contain open water, not a mesh of separate thin streams.
+            for (float[] lake : sample.lakes()) {
+                float ax = sample.x(), ay = sample.y(), bx = lake[0], by = lake[1], cx = lake[2], cy = lake[3];
+                float ab = (bx - ax) * (y - ay) - (by - ay) * (x - ax);
+                float bc = (cx - bx) * (y - by) - (cy - by) * (x - bx);
+                float ca = (ax - cx) * (y - cy) - (ay - cy) * (x - cx);
+                if (ab >= 0 && bc >= 0 && ca >= 0 || ab <= 0 && bc <= 0 && ca <= 0) {
+                    return Float.POSITIVE_INFINITY;
                 }
             }
         }
         return result;
+    }
+
+    /** Successive shore samples normally share a search window; resolve its coordinates only when it changes. */
+    private void window(float x, float y) {
+        int nextColumn = Math.round((x - BoardGeometry.WIDTH / 2) / (.75f * BoardGeometry.WIDTH));
+        int nextEven = Math.round((-y - BoardGeometry.HEIGHT / 2) / BoardGeometry.HEIGHT);
+        int nextOdd = Math.round((-y - BoardGeometry.HEIGHT / 2 - BoardGeometry.HEIGHT / 2) / BoardGeometry.HEIGHT);
+        if (column == nextColumn && evenRow == nextEven && oddRow == nextOdd) { return; }
+        column = nextColumn;
+        evenRow = nextEven;
+        oddRow = nextOdd;
+        window.clear();
+        for (int cx = column - 2; cx <= column + 2; cx++) {
+            int row = (cx & 1) == 0 ? evenRow : oddRow;
+            for (int cy = row - 2; cy <= row + 2; cy++) {
+                Coords coords = new Coords(cx, cy);
+                int mask = masks.computeIfAbsent(coords, this::mask);
+                if (mask >= 0) { window.add(samples.computeIfAbsent(coords, key -> sample(key, mask))); }
+            }
+        }
+    }
+
+    private Sample sample(Coords coords, int mask) {
+        int starts = mask & ~((mask << 1 | mask >> 5) & 63);
+        List<float[]> lakes = new ArrayList<>();
+        for (int d = 0; d < 6; d++) {
+            if ((mask & 1 << d) == 0 || (mask & 1 << (d + 1) % 6) == 0) { continue; }
+            Coords b = coords.translated(d), c = coords.translated((d + 1) % 6);
+            lakes.add(new float[] { BoardGeometry.centerX(b), BoardGeometry.centerY(b),
+                  BoardGeometry.centerX(c), BoardGeometry.centerY(c) });
+        }
+        return new Sample(BoardGeometry.centerX(coords), BoardGeometry.centerY(coords),
+              Integer.bitCount(mask) >= 3 && Integer.bitCount(starts) >= 2, channels(coords), lakes);
+    }
+
+    /** Board coordinates are finite floats; double products cannot overflow or underflow like float products. */
+    private static float length(float x, float y) {
+        return (float) Math.sqrt((double) x * x + (double) y * y);
     }
 
     private List<Channel> channels(Coords coords) {

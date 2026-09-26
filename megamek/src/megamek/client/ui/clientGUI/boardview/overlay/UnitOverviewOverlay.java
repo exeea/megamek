@@ -319,7 +319,7 @@ public class UnitOverviewOverlay implements IDisplayable, IPreferenceChangeListe
         GameTurn turn = game.getPhase().isSimultaneous(game)
               ? game.getTurnForPlayer(clientgui.getClient().getLocalPlayer().getId()) : game.getTurn();
         Color border = turn != null && turn.isValidEntity(entity, game) ? GUIP.getUnitValidColor() : null;
-        if (entity == clientgui.getDisplayedUnit() && game.getTurn() != null && game.getTurn().isValidEntity(entity, game)) {
+        if (entity == clientgui.getDisplayedUnit()) {
             border = GUIP.getUnitSelectedColor();
         }
         double armor = entity.getArmorRemainingPercent();

@@ -182,6 +182,14 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         boolean water() {
             return waterDepth >= 0;
         }
+
+        /** Inputs shared by terrain meshes, support surfaces and draped tactical geometry. */
+        boolean sameGeometry(Tile other) {
+            return this == other || coords.equals(other.coords) && elevation == other.elevation
+                  && waterDepth == other.waterDepth && frozen == other.frozen && roadExits == other.roadExits
+                  && surface == other.surface && detailedGround == other.detailedGround
+                  && liquid.equals(other.liquid) && features.equals(other.features);
+        }
     }
 
     /** Stand/flight elevation and occupied levels come from the game, including the unit's current stance. */

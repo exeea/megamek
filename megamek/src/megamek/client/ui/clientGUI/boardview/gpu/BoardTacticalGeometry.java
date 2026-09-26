@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.TreeSet;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 import com.badlogic.gdx.math.Vector3;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
@@ -21,6 +22,21 @@ final class BoardTacticalGeometry {
     private static final float WALL_CLEARANCE = 0.6f;
 
     record Triangle(Vector3 a, Vector3 b, Vector3 c, int argb) { }
+    /** Only the finished triangles are retained; none of the terrain builder's scene or shoreline caches. */
+    record Surface(List<BoardSurface.Face> top, List<BoardSurface.Face> slopes) {
+        static Surface of(BoardSurface surface, BoardScene scene, float floor) {
+            List<BoardSurface.Face> top = new ArrayList<>();
+            for (BoardSurface.Face face : surface.faces) {
+                if (surface.tile.frozen() ? face.finish() == BoardSurface.Finish.ICE
+                      : face.finish() == BoardSurface.Finish.TOP || face.finish() == BoardSurface.Finish.SHORE) {
+                    top.add(face);
+                }
+            }
+            if (!surface.tile.frozen()) { top.addAll(surface.waterFaces); }
+            return new Surface(List.copyOf(top), BoardGeometry.tuning().stepsBetweenTops()
+                  ? lying(surface.walls(scene, floor)) : List.of());
+        }
+    }
     private record Edge(float x1, float y1, float x2, float y2) {
         float x(float y) {
             return x1 + (x2 - x1) * (y - y1) / (y2 - y1);
@@ -73,15 +89,22 @@ final class BoardTacticalGeometry {
     }
 
     static void drape(BoardScene scene, Consumer<Triangle> destination) {
-        drape(scene, scene.tactical().fills(), destination);
+        drape(scene, scene.tactical().fills(), destination, surfaces(scene));
     }
 
-    private static void drape(BoardScene scene, List<BoardTactical.Fill> fills, Consumer<Triangle> destination) {
-        Map<Coords, BoardSurface> surfaces = new HashMap<>();
-        // With hex transitions or padding a step's slope and talus lie between the tops; its walls carry them.
-        boolean transitions = BoardGeometry.tuning().stepsBetweenTops();
-        float floor = transitions ? BoardGeometry.floor(scene) : 0;
-        Map<Coords, List<BoardSurface.Face>> slopes = new HashMap<>();
+    static void drape(BoardScene scene, Consumer<Triangle> destination, Function<Coords, Surface> surfaces) {
+        drape(scene, scene.tactical().fills(), destination, surfaces);
+    }
+
+    static Function<Coords, Surface> surfaces(BoardScene scene) {
+        Map<Coords, Surface> cache = new HashMap<>();
+        float floor = BoardGeometry.floor(scene);
+        return coords -> cache.computeIfAbsent(coords,
+              key -> Surface.of(new BoardSurface(scene, scene.tile(key)), scene, floor));
+    }
+
+    private static void drape(BoardScene scene, List<BoardTactical.Fill> fills, Consumer<Triangle> destination,
+          Function<Coords, Surface> surfaces) {
         int layer = 0;
         for (BoardTactical.Fill fill : fills) {
             float lift = (0.35f + Math.min(layer++, 10000) * 0.0001f) * BoardGeometry.HEX_SCALE;
@@ -94,13 +117,10 @@ final class BoardTacticalGeometry {
                 for (int x = firstX; x <= lastX; x++) {
                     for (int y = firstY; y <= lastY; y++) {
                         Coords coords = new Coords(x, y);
-                        BoardSurface surface = surfaces.computeIfAbsent(coords, key -> new BoardSurface(scene, scene.tile(key)));
+                        Surface surface = surfaces.apply(coords);
                         clipSurface(world, surface, lift, destination);
-                        if (transitions) {
-                            for (BoardSurface.Face face : slopes.computeIfAbsent(coords,
-                                  key -> lying(surface.walls(scene, floor)))) {
-                                clip(world, face, lift, destination);
-                            }
+                        for (BoardSurface.Face face : surface.slopes()) {
+                            clip(world, face, lift, destination);
                         }
                     }
                 }
@@ -111,8 +131,13 @@ final class BoardTacticalGeometry {
     /** Cache both presentations once; the camera only selects which one to draw. */
     static void walls(BoardScene scene, boolean flat, Consumer<Triangle> destination,
           BiConsumer<BoardTactical.Wall, Triangle> outline) {
+        walls(scene, flat, destination, outline, surfaces(scene));
+    }
+
+    static void walls(BoardScene scene, boolean flat, Consumer<Triangle> destination,
+          BiConsumer<BoardTactical.Wall, Triangle> outline, Function<Coords, Surface> surfaces) {
         if (flat) {
-            drape(scene, scene.tactical().flatWalls(), destination);
+            drape(scene, scene.tactical().flatWalls(), destination, surfaces);
         }
         for (BoardTactical.Wall wall : scene.tactical().walls()) {
             if (scene.tile(wall.coords()) == null) {
@@ -125,25 +150,16 @@ final class BoardTacticalGeometry {
                 destination.accept(new Triangle(a, c, d, wall.argb()));
                 wallOutline(wall, d, c, triangle -> outline.accept(wall, triangle));
             } else {
-                BoardSurface surface = new BoardSurface(scene, scene.tile(wall.coords()));
+                Surface surface = surfaces.apply(wall.coords());
                 wallOutline(wall, d, c, triangle -> clipSurface(triangle, surface,
                       WALL_CLEARANCE * BoardGeometry.HEX_SCALE, clipped -> outline.accept(wall, clipped)));
             }
         }
     }
 
-    private static void clipSurface(Triangle triangle, BoardSurface surface, float lift, Consumer<Triangle> destination) {
-        for (BoardSurface.Face face : surface.faces) {
-            boolean top = surface.tile.frozen() ? face.finish() == BoardSurface.Finish.ICE
-                  : face.finish() == BoardSurface.Finish.TOP || face.finish() == BoardSurface.Finish.SHORE;
-            if (top) {
-                clip(triangle, face, lift, destination);
-            }
-        }
-        if (!surface.tile.frozen()) {
-            for (BoardSurface.Face face : surface.waterFaces) {
-                clip(triangle, face, lift, destination);
-            }
+    private static void clipSurface(Triangle triangle, Surface surface, float lift, Consumer<Triangle> destination) {
+        for (BoardSurface.Face face : surface.top()) {
+            clip(triangle, face, lift, destination);
         }
     }
 

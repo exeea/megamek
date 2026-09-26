@@ -172,6 +172,7 @@ import megamek.common.preference.PreferenceManager;
 import megamek.common.units.ConvInfantry;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityListFile;
+import megamek.common.units.EntityVisibilityUtils;
 import megamek.common.units.IBomber;
 import megamek.common.units.Targetable;
 import megamek.common.util.AddBotUtil;
@@ -4104,7 +4105,35 @@ public class ClientGUI extends AbstractClientGUI
 
     @Override
     public void unitSelected(BoardViewEvent b) {
-        // ignored
+        JComponent panel = getCurrentPanel();
+        // These controllers select the acting unit (or a special target) themselves.
+        // Startup, report and setup panels still need ordinary unit inspection.
+        if (hasUnitSelectionController(panel)
+              || panel instanceof AbstractPhaseDisplay phase && phase.isIgnoringEvents()) {
+            return;
+        }
+        inspectUnit(b.getEntityId());
+    }
+
+    /** Whether the current panel owns acting-unit selection or special unit targets. */
+    public static boolean hasUnitSelectionController(JComponent panel) {
+        return panel instanceof ActionPhaseDisplay || panel instanceof DeploymentDisplay || panel instanceof PrephaseDisplay;
+    }
+
+    /** Inspect a visible unit without changing the acting unit, its orders, or the camera. */
+    public void inspectUnit(int entityId) {
+        if (shouldIgnoreHotKeys()) {
+            return;
+        }
+        Game game = getClient().getGame();
+        Entity entity = game.getEntity(entityId);
+        Player viewer = getClient().getLocalPlayer();
+        if (entity != null && EntityVisibilityUtils.detectedOrHasVisual(viewer, game, entity)
+              && !EntityVisibilityUtils.onlyDetectedBySensors(viewer, entity)) {
+            getUnitDisplay().displayEntity(entity);
+            setSelectedEntityNum(entity.getId());
+            maybeShowUnitDisplay();
+        }
     }
 
     @Override

@@ -12,6 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
@@ -62,13 +63,23 @@ final class GpuTactical implements Disposable {
     private long builds;
     private final float outlineSpeed;
     private double scrollDistance;
+    private final Function<Coords, BoardTacticalGeometry.Surface> terrain;
 
     GpuTactical() {
         this(OUTLINE_SCROLL_SPEED);
     }
 
     GpuTactical(float outlineSpeed) {
+        this(outlineSpeed, null);
+    }
+
+    GpuTactical(Function<Coords, BoardTacticalGeometry.Surface> terrain) {
+        this(OUTLINE_SCROLL_SPEED, terrain);
+    }
+
+    private GpuTactical(float outlineSpeed, Function<Coords, BoardTacticalGeometry.Surface> terrain) {
         this.outlineSpeed = outlineSpeed;
+        this.terrain = terrain;
     }
 
     static boolean flat(Camera camera) {
@@ -104,8 +115,7 @@ final class GpuTactical implements Disposable {
         }
         for (int i = 0; i < scene.tiles().size(); i++) {
             BoardScene.Tile a = previous.tiles().get(i), b = scene.tiles().get(i);
-            if (a.elevation() != b.elevation() || a.waterDepth() != b.waterDepth() || a.frozen() != b.frozen()
-                  || a.roadExits() != b.roadExits() || !a.features().equals(b.features())) {
+            if (!a.sameGeometry(b)) {
                 return false;
             }
         }
@@ -124,10 +134,12 @@ final class GpuTactical implements Disposable {
         ModelBuilder builder = new ModelBuilder();
         builder.begin();
         builder.node().id = "surface";
-        BoardTacticalGeometry.drape(scene, triangles(builder, "tactical"));
+        Function<Coords, BoardTacticalGeometry.Surface> surfaces = terrain == null
+              ? BoardTacticalGeometry.surfaces(scene) : terrain;
+        BoardTacticalGeometry.drape(scene, triangles(builder, "tactical"), surfaces);
         Map<BasicStroke, Material> outlines = new HashMap<>();
-        walls(builder, scene, false, outlines);
-        walls(builder, scene, true, outlines);
+        walls(builder, scene, false, outlines, surfaces);
+        walls(builder, scene, true, outlines, surfaces);
         var model = builder.end();
         if (model.meshParts.isEmpty()) {
             model.dispose();
@@ -151,12 +163,13 @@ final class GpuTactical implements Disposable {
         };
     }
 
-    private void walls(ModelBuilder builder, BoardScene scene, boolean flat, Map<BasicStroke, Material> materials) {
+    private void walls(ModelBuilder builder, BoardScene scene, boolean flat, Map<BasicStroke, Material> materials,
+          Function<Coords, BoardTacticalGeometry.Surface> surfaces) {
         String name = flat ? "flat-walls" : "upright-walls";
         builder.node().id = name;
         Map<BasicStroke, List<WallTriangle>> outlines = new LinkedHashMap<>();
         BoardTacticalGeometry.walls(scene, flat, triangles(builder, name), (wall, triangle) ->
-              outlines.computeIfAbsent(wall.outline().stroke(), key -> new ArrayList<>()).add(new WallTriangle(wall, triangle)));
+              outlines.computeIfAbsent(wall.outline().stroke(), key -> new ArrayList<>()).add(new WallTriangle(wall, triangle)), surfaces);
         for (var entry : outlines.entrySet()) {
             Material ink = materials.computeIfAbsent(entry.getKey(), stroke -> {
                 Texture texture = outlineTexture(stroke);
