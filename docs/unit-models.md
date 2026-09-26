@@ -1,5 +1,9 @@
 # Sprite-referenced 3D units
 
+For optional HBS/CAB chassis with automatic Gaea fallbacks, see
+[Play with local HBS / CAB models](hbs-models.md). Launch that mode with
+`play-hbs.cmd` from the checkout root.
+
 Authored 3D unit models are controlled by the code switch
 `GpuUnitModels.ENABLED`, currently `true`. Set it to `false` to use the existing
 sprite rendering in both GPU camera views. Asset generation and direct asset

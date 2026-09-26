@@ -30,7 +30,7 @@ final class UnitModelSelection {
               state.appearance(), new UnitModelState.Pose(pose.proneCause(), pose.facing(), pose.secondaryFacing(), form,
                     pose.dead(), pose.armsFlipped(), pose.hullDown()));
         return new BoardScene.UnitModel(tileset.modelFor(entity, part, form), tileset.genericModelFor(entity, part, form),
-              model.variant(), model.figures(), model.twist(), model.damage(), captured);
+              model.variant(), model.figures(), model.twist(), model.damage(), captured, model.chassis());
     }
 
     static BoardScene.UnitModel capture(Entity entity, int part, boolean sensor, MekTileset tileset) {
@@ -46,7 +46,7 @@ final class UnitModelSelection {
             return null;
         }
         String asset = tileset.modelFor(entity, part);
-        if (asset == null) {
+        if (asset == null && !(entity instanceof Mek)) {
             return null;
         }
         // Support assets may reuse an infantry tileset entry without exposing a personnel count.
@@ -61,7 +61,7 @@ final class UnitModelSelection {
             variant = infantry.getMovementMode().name();
         }
         return new BoardScene.UnitModel(asset, tileset.genericModelFor(entity, part),
-              variant, count, twist, damage(entity), state);
+              variant, count, twist, damage(entity), state, entity instanceof Mek ? entity.getChassis() : null);
     }
 
     /**

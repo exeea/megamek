@@ -7,6 +7,9 @@ around the whole map. A 1.2-second ease-out entrance zooms in from a wider view 
 fades in; camera input interrupts the entrance. Launch this checkout with
 `.\gradlew.bat :megamek:run` on Windows or `./gradlew :megamek:run` elsewhere.
 
+For local HBS/CAB chassis with automatic Gaea model fallbacks, use
+`play-hbs.cmd`. See [HBS model setup and scope](hbs-models.md).
+
 The native loading window appears before a scenario or server delivers its first map.
 Starting-scenario, receiving-data and waiting messages come from the existing phase
 panels and appear in that same native window. Normal phase status and waiting-player

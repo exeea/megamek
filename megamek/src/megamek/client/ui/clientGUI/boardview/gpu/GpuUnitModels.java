@@ -34,6 +34,8 @@ final class GpuUnitModels implements Disposable {
 
     private static final MMLogger LOGGER = MMLogger.create(GpuUnitModels.class);
     private final Path root;
+    private final HbsUnitCatalog hbs;
+    private final Map<Path, GpuUnitModel> hbsModels = new HashMap<>();
     private final Map<Path, JsonValue> descriptors = new HashMap<>();
     private final Map<Path, GpuUnitModel> models = new HashMap<>();
     private final Map<Path, ModularAsset> modular = new HashMap<>();
@@ -42,28 +44,34 @@ final class GpuUnitModels implements Disposable {
     private Texture bark;
 
     GpuUnitModels() {
-        this(Configuration.dataDir().toPath().resolve("models"));
+        this(Configuration.dataDir().toPath().resolve("models"), HbsUnitCatalog.configured());
     }
 
     /** Review tests may use a separate asset root; the game always uses its deployed models directory. */
     GpuUnitModels(Path root) {
+        this(root, null);
+    }
+
+    GpuUnitModels(Path root, HbsUnitCatalog hbs) {
         this.root = root.toAbsolutePath().normalize();
+        this.hbs = hbs;
     }
 
     /** The library owns Model disposal. Callers create independent ModelInstances, which share its buffers. */
     record ModularAsset(UnitModelDescriptor descriptor, Model model, int triangles) { }
 
-    private record Assembly(String asset, String fallback, String variant, int figures,
-          UnitModelState.Structure structure, GpuUnitModel model) {
+    private record Assembly(String asset, String fallback, String variant, int figures, String chassis,
+          UnitModelState.Structure structure, GpuUnitModel model, boolean owned) {
         boolean matches(BoardScene.UnitModel selection) {
             return java.util.Objects.equals(asset, selection.asset())
                   && java.util.Objects.equals(fallback, selection.fallback())
+                  && java.util.Objects.equals(chassis, selection.chassis())
                   && java.util.Objects.equals(variant, selection.variant()) && figures == selection.figures()
                   && structure.equals(selection.state().structure());
         }
 
         void dispose() {
-            if (model != null && model.modularCoordinates()) {
+            if (owned && model != null && model.modularCoordinates()) {
                 model.dispose();
             }
         }
@@ -154,7 +162,11 @@ final class GpuUnitModels implements Disposable {
         if (selection.state() != null && cached != null && cached.matches(selection)) {
             return cached.model();
         }
-        GpuUnitModel model = load(selection.asset(), selection);
+        GpuUnitModel model = loadHbs(selection);
+        boolean owned = model == null;
+        if (model == null) {
+            model = load(selection.asset(), selection);
+        }
         if (model == null && !java.util.Objects.equals(selection.asset(), selection.fallback())) {
             model = load(selection.fallback(), selection);
         }
@@ -163,9 +175,65 @@ final class GpuUnitModels implements Disposable {
                 cached.dispose();
             }
             assemblies.put(unitId, new Assembly(selection.asset(), selection.fallback(), selection.variant(),
-                  selection.figures(), selection.state().structure(), model));
+                  selection.figures(), selection.chassis(), selection.state().structure(), model, owned));
         }
         return model;
+    }
+
+    private GpuUnitModel loadHbs(BoardScene.UnitModel selection) {
+        String asset = hbs == null ? null : hbs.descriptor(selection);
+        if (asset == null) {
+            return null;
+        }
+        Path descriptor = hbs.root.resolve(asset).normalize();
+        if (failed.contains(descriptor)) {
+            return null;
+        }
+        try {
+            if (!hbsModels.containsKey(descriptor)) {
+                var value = new JsonReader().parse(new FileHandle(hbs.contained(asset).toFile()));
+                if (value.getInt("schema", 0) != 1) {
+                    throw new IOException("Unsupported HBS model descriptor");
+                }
+                Path mesh = UnitModelDescriptor.contained(hbs.root, descriptor.getParent().resolve(value.getString("mesh")));
+                var data = new G3dModelLoader(new JsonReader()).loadModelData(new FileHandle(mesh.toFile()));
+                // Check actual texture references, not just the importer's descriptor, before allocating GL resources.
+                for (var material : data.materials) {
+                    if (material.textures != null) {
+                        for (var texture : material.textures) {
+                            UnitModelDescriptor.contained(hbs.root, Path.of(texture.fileName));
+                        }
+                    }
+                }
+                Map<String, String> joints = new HashMap<>();
+                if (value.has("joints")) {
+                    for (var joint : value.get("joints")) {
+                        joints.put(joint.name, joint.asString());
+                    }
+                }
+                Model model = new Model(data);
+                try {
+                    for (var texture : model.getManagedDisposables()) {
+                        if (texture instanceof Texture image) {
+                            image.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
+                        }
+                    }
+                    var rigs = joints.isEmpty() ? List.<UnitRig>of()
+                          : List.of(new UnitRig("mek-biped", "biped-v1", null, joints, List.of(), List.of()));
+                    hbsModels.put(descriptor, new GpuUnitModel(model, value.getString("upperBodyNode", null), true,
+                          List.of(), null, rigs, UnitFamilyScale.MEK));
+                    LOGGER.info("[HBS] Loaded {} for {}", mesh, selection.chassis());
+                } catch (RuntimeException error) {
+                    model.dispose();
+                    throw error;
+                }
+            }
+            return hbsModels.get(descriptor);
+        } catch (IOException | RuntimeException error) {
+            failed.add(descriptor);
+            LOGGER.warn("[HBS] Cannot load {}; using Gaea model: {}", descriptor, error.getMessage());
+            return null;
+        }
     }
 
     private GpuUnitModel load(String asset, BoardScene.UnitModel selection) {
@@ -379,6 +447,8 @@ final class GpuUnitModels implements Disposable {
         }
         models.values().forEach(GpuUnitModel::dispose);
         models.clear();
+        hbsModels.values().forEach(GpuUnitModel::dispose);
+        hbsModels.clear();
         descriptors.clear();
         failed.clear();
     }

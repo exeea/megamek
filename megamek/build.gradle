@@ -505,6 +505,20 @@ run {
     jvmArgs = mmJvmOptions
 }
 
+tasks.register('runHbs', JavaExec) {
+    description = 'Play the 3D board with locally imported HBS chassis and Gaea model fallbacks.'
+    group = 'application'
+    dependsOn classes, stageDataFiles
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = application.mainClass
+    workingDir = projectDir
+    jvmArgs = mmJvmOptions
+    systemProperty 'megamek.hbs.models', 'true'
+    systemProperty 'megamek.hbs.cache', providers.gradleProperty('hbsCache')
+            .map { rootProject.file(it).absolutePath }
+            .getOrElse(rootProject.file('.work/hbs-cache').absolutePath)
+}
+
 assemble {
     dependsOn jar
 }
@@ -618,6 +632,7 @@ tasks.register('gpuBoardSmoke', Test) {
             'tools/unit-models/references/legacy').absolutePath
     systemProperty 'megamek.gpu.screenshots', layout.buildDirectory.dir('gpu-board-review').get().asFile.absolutePath
     outputs.upToDateWhen { false }
+    systemProperty 'megamek.hbs.cache', rootProject.file('.work/hbs-cache').absolutePath
 }
 
 jacocoTestReport {

@@ -30,7 +30,8 @@ final class UnitCamouflage {
         }
         var state = selection.state();
         return new BoardScene.UnitModel(selection.asset(), selection.fallback(), selection.variant(), selection.figures(),
-              selection.twist(), selection.damage(), new UnitModelState(state.structure(), resolve(state.appearance()), state.pose()));
+              selection.twist(), selection.damage(), new UnitModelState(state.structure(), resolve(state.appearance()), state.pose()),
+              selection.chassis());
     }
 
     private UnitModelState.Appearance resolve(UnitModelState.Appearance appearance) {

@@ -229,6 +229,9 @@ public class MegaMekGUI implements IPreferenceChangeListener {
     private static MegaMekController controller;
 
     public void start(boolean show) {
+        if (Boolean.getBoolean("megamek.hbs.models")) {
+            GUIPreferences.getInstance().setUse3DBoard(true);
+        }
         createGUI(show);
     }
 

@@ -906,7 +906,8 @@ final class GpuBoardSource implements AutoCloseable {
               new UnitModelState.Pose(pose.proneCause(), pose.facing(), pose.secondaryFacing(), pose.form(), true,
                     pose.armsFlipped(), pose.hullDown()));
         model = model == null ? new BoardScene.UnitModel("", "", "", 1, 0, BoardScene.LocationDamage.NONE, dead)
-              : new BoardScene.UnitModel(model.asset(), model.fallback(), model.variant(), model.figures(), model.twist(), model.damage(), dead);
+              : new BoardScene.UnitModel(model.asset(), model.fallback(), model.variant(), model.figures(), model.twist(), model.damage(), dead,
+                    model.chassis());
         Image image = view.getTileManager().wreckMarkerFor(entity, -1);
         usedImages.put(image, true);
         var pixels = unitImages.computeIfAbsent(image, BoardScene.Pixels::copy);

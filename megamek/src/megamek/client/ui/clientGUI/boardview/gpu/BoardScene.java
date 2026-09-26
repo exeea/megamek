@@ -221,9 +221,15 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
      *                 (its legs), from {@code -2} to {@code 3}; {@code 0} when the two agree
      * @param damage   the locations to show as lost or destroyed
      * @param state    immutable live components and posture, or {@code null} for legacy review fixtures
+     * @param chassis visible Mek chassis identity for optional external artwork, or {@code null}
      */
     record UnitModel(String asset, String fallback, String variant, int figures, int twist, LocationDamage damage,
-          UnitModelState state) {
+          UnitModelState state, String chassis) {
+        UnitModel(String asset, String fallback, String variant, int figures, int twist, LocationDamage damage,
+              UnitModelState state) {
+            this(asset, fallback, variant, figures, twist, damage, state, null);
+        }
+
         UnitModel(String asset, String fallback, String variant, int figures, int twist, LocationDamage damage) {
             this(asset, fallback, variant, figures, twist, damage, null);
         }
