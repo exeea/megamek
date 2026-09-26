@@ -152,7 +152,9 @@ void main() {
     float caustic = 0.0;
     if (submerged > 0.0) {
         albedo *= waterBedTint(floor(v_color.r * 4.0 + 0.5), submerged);
-        caustic = waterBedCaustics(v_cloudPosition.xy * u_rainScale, submerged) * u_rainDetail * u_waterEffects;
+        if (u_rainDetail > 0.0 && u_waterEffects > 0.0) {
+            caustic = waterBedCaustics(v_cloudPosition.xy * u_rainScale, submerged) * u_rainDetail * u_waterEffects;
+        }
     }
 #ifdef lightingFlag
     // Linear light, as on every lit surface. The bed tint above linearises with the colour it tints.

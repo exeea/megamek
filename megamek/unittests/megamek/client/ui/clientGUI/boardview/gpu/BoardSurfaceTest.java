@@ -1175,12 +1175,11 @@ class BoardSurfaceTest {
                 BoardSurface surface = new BoardSurface(scene, tile);
                 Vector3 center = BoardGeometry.center(tile.coords(), tile.elevation());
                 assertEquals(BoardGeometry.groundZ(tile), surface.height(center.x, center.y), .01f,
-                      "Anchor of " + tile.coords() + " in trial " + trial + ": "
-                            + surface.faces.stream().filter(f -> Float.isFinite(f.height(center.x, center.y))).toList());
+                      "Anchor of " + tile.coords() + " in trial " + trial);
                 for (BoardSurface.Face face : surface.faces) {
                     if (face.finish() != BoardSurface.Finish.BED) { continue; }
                     Vector3 n = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
-                    assertTrue(n.z > 0, "A bed of " + tile.coords() + " folds in trial " + trial);
+                    assertTrue(n.z > 0, "A bed of " + tile.coords() + " folds in trial " + trial + ": " + face);
                 }
             }
         }

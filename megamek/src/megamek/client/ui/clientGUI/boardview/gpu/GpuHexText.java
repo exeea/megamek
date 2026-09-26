@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -12,7 +13,10 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.VertexAttribute;
+import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.BitmapFontCache;
 import com.badlogic.gdx.graphics.g2d.GlyphLayout;
@@ -22,18 +26,50 @@ import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.utils.Disposable;
+import com.badlogic.gdx.utils.FloatArray;
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.common.board.Coords;
 
 /** Captured board labels stay legible over their own relief, with the scene's real depth everywhere else. */
 final class GpuHexText implements Disposable {
+    /** Four vertices per glyph, with unsigned 16-bit indices. */
+    private static final int PAGE_GLYPHS = 16_383;
+    private static final int GLYPH_FLOATS = 20;
     private record Plane(int elevation, float headroom) { }
     private record Chunk(BitmapFontCache glyphs, BoundingBox bounds) { }
-    private final Map<Plane, List<Chunk>> groups = new TreeMap<>(Comparator.comparingInt(Plane::elevation)
+    private record Range(BoundingBox bounds, int offset, int count) { }
+    /** Owns the static mesh; the font owns the texture. Ranges keep the original chunk/page drawing order. */
+    private record Page(Texture texture, Mesh mesh, List<Range> ranges) {
+        void render(Camera camera, ShaderProgram shader) {
+            boolean bound = false;
+            int start = 0, count = 0;
+            try {
+                for (Range range : ranges) {
+                    if (camera.frustum.boundsInFrustum(range.bounds())) {
+                        if (!bound) {
+                            texture.bind(0);
+                            mesh.bind(shader);
+                            bound = true;
+                        }
+                        if (count == 0) { start = range.offset(); }
+                        count += range.count();
+                    } else if (count > 0) {
+                        mesh.render(shader, GL20.GL_TRIANGLES, start, count, false);
+                        count = 0;
+                    }
+                }
+                if (count > 0) { mesh.render(shader, GL20.GL_TRIANGLES, start, count, false); }
+            } finally {
+                if (bound) { mesh.unbind(shader); }
+            }
+        }
+    }
+    private final Map<Plane, List<Page>> groups = new TreeMap<>(Comparator.comparingInt(Plane::elevation)
           .thenComparingDouble(Plane::headroom));
     private final ShaderProgram shader;
     private final Matrix4 transform = new Matrix4();
     private List<BoardScene.Tile> tiles;
+    private BitmapFont font;
     private int tuning = -1;
 
     GpuHexText() {
@@ -52,7 +88,7 @@ final class GpuHexText implements Disposable {
 
     /** The font and roof bounds are borrowed; labels are solely the existing board view's captured text. */
     void update(BoardScene scene, BitmapFont font, Function<Coords, BoundingBox> roofBounds) {
-        if (tiles == scene.tiles() && tuning == BoardGeometry.revision()) { return; }
+        if (tiles == scene.tiles() && this.font == font && tuning == BoardGeometry.revision()) { return; }
         float scaleX = font.getData().scaleX, scaleY = font.getData().scaleY;
         Color color = new Color(font.getColor());
         Map<Plane, Map<Coords, Chunk>> next = new HashMap<>();
@@ -91,10 +127,86 @@ final class GpuHexText implements Disposable {
             font.getData().setScale(scaleX, scaleY);
             font.setColor(color);
         }
-        groups.clear();
-        next.forEach((plane, chunks) -> groups.put(plane, List.copyOf(chunks.values())));
+        Map<Plane, List<Page>> uploaded = new HashMap<>();
+        try {
+            next.forEach((plane, chunks) -> uploaded.put(plane, upload(List.copyOf(chunks.values()), font)));
+        } catch (RuntimeException | Error failure) {
+            uploaded.values().forEach(pages -> pages.forEach(page -> page.mesh().dispose()));
+            throw failure;
+        }
+        clear();
+        groups.putAll(uploaded);
         tiles = scene.tiles();
+        this.font = font;
         tuning = BoardGeometry.revision();
+    }
+
+    /** Upload the exact SpriteBatch vertices, joining only consecutive draws with the same font texture. */
+    private static List<Page> upload(List<Chunk> chunks, BitmapFont font) {
+        List<Page> pages = new ArrayList<>();
+        FloatArray vertices = new FloatArray();
+        List<Range> ranges = new ArrayList<>();
+        Texture texture = null;
+        try {
+            for (Chunk chunk : chunks) {
+                // Incremental fonts can gain atlas pages after an earlier chunk's cache was completed.
+                for (int region = 0; region < chunk.glyphs().getPageCount(); region++) {
+                    int remaining = chunk.glyphs().getVertexCount(region);
+                    Texture next = font.getRegions().get(region).getTexture();
+                    int offset = 0;
+                    while (remaining > 0) {
+                        if (vertices.size > 0 && (texture != next || vertices.size == PAGE_GLYPHS * GLYPH_FLOATS)) {
+                            pages.add(page(texture, vertices, ranges));
+                            vertices.clear();
+                            ranges.clear();
+                        }
+                        texture = next;
+                        int count = Math.min(remaining, PAGE_GLYPHS * GLYPH_FLOATS - vertices.size);
+                        ranges.add(new Range(chunk.bounds(), vertices.size / GLYPH_FLOATS * 6,
+                              count / GLYPH_FLOATS * 6));
+                        vertices.addAll(chunk.glyphs().getVertices(region), offset, count);
+                        offset += count;
+                        remaining -= count;
+                    }
+                }
+            }
+            if (vertices.size > 0) { pages.add(page(texture, vertices, ranges)); }
+            return List.copyOf(pages);
+        } catch (RuntimeException | Error failure) {
+            pages.forEach(page -> page.mesh().dispose());
+            throw failure;
+        }
+    }
+
+    private static Page page(Texture texture, FloatArray vertices, List<Range> ranges) {
+        int glyphs = vertices.size / GLYPH_FLOATS;
+        short[] indices = new short[glyphs * 6];
+        for (int glyph = 0, at = 0; glyph < glyphs; glyph++) {
+            int vertex = glyph * 4;
+            indices[at++] = (short) vertex;
+            indices[at++] = (short) (vertex + 1);
+            indices[at++] = (short) (vertex + 2);
+            indices[at++] = (short) (vertex + 2);
+            indices[at++] = (short) (vertex + 3);
+            indices[at++] = (short) vertex;
+        }
+        Mesh mesh = new Mesh(true, glyphs * 4, indices.length,
+              new VertexAttribute(VertexAttributes.Usage.Position, 2, ShaderProgram.POSITION_ATTRIBUTE),
+              new VertexAttribute(VertexAttributes.Usage.ColorPacked, 4, ShaderProgram.COLOR_ATTRIBUTE),
+              new VertexAttribute(VertexAttributes.Usage.TextureCoordinates, 2, ShaderProgram.TEXCOORD_ATTRIBUTE + "0"));
+        try {
+            mesh.setVertices(vertices.items, 0, vertices.size);
+            mesh.setIndices(indices);
+            return new Page(texture, mesh, List.copyOf(ranges));
+        } catch (RuntimeException | Error failure) {
+            mesh.dispose();
+            throw failure;
+        }
+    }
+
+    private void clear() {
+        groups.values().forEach(pages -> pages.forEach(page -> page.mesh().dispose()));
+        groups.clear();
     }
 
     private static float headroom(BoardScene.Tile tile, BoardView.HexText label) {
@@ -116,6 +228,16 @@ final class GpuHexText implements Disposable {
         Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
         batch.begin();
         try {
+            // SpriteBatch normally applies blending when it flushes; the static meshes bypass that upload path.
+            if (batch.isBlendingEnabled()) {
+                Gdx.gl.glEnable(GL20.GL_BLEND);
+                if (batch.getBlendSrcFunc() != -1) {
+                    Gdx.gl.glBlendFuncSeparate(batch.getBlendSrcFunc(), batch.getBlendDstFunc(),
+                          batch.getBlendSrcFuncAlpha(), batch.getBlendDstFuncAlpha());
+                }
+            } else {
+                Gdx.gl.glDisable(GL20.GL_BLEND);
+            }
             depth.bind(1);
             if (unitDepth != null) { unitDepth.bind(2); }
             Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
@@ -129,13 +251,10 @@ final class GpuHexText implements Disposable {
             shader.setUniformf("u_viewport", 0, HdpiUtils.toBackBufferY(bottom), depth.getWidth(), depth.getHeight());
             shader.setUniformf("u_groundBoard", 0, 0, BoardGeometry.WIDTH, BoardGeometry.HEIGHT);
             for (var group : groups.entrySet()) {
-                batch.flush();
                 float z = group.getKey().elevation() * BoardGeometry.LEVEL;
                 batch.setTransformMatrix(transform.setToTranslation(0, 0, z + .6f * BoardGeometry.HEX_SCALE));
                 shader.setUniformf("u_surface", z, group.getKey().headroom());
-                for (Chunk chunk : group.getValue()) {
-                    if (camera.frustum.boundsInFrustum(chunk.bounds())) { chunk.glyphs().draw(batch); }
-                }
+                for (Page page : group.getValue()) { page.render(camera, shader); }
             }
         } finally {
             batch.end();
@@ -147,8 +266,9 @@ final class GpuHexText implements Disposable {
 
     @Override
     public void dispose() {
-        groups.clear();
+        clear();
         tiles = null;
+        font = null;
         shader.dispose();
     }
 }

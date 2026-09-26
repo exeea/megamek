@@ -23,10 +23,12 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Graphics;
+import java.awt.KeyboardFocusManager;
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.Window;
 import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
 import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
 import java.io.File;
@@ -537,6 +539,7 @@ class GpuBoardWindowSmokeTest {
             }));
             input(() -> GpuBoardTestUi.capture(new File("build/gpu-board-review/editor-3d.png")));
             assertEditorElevationScroll(editor, source, first);
+            assertEditorToolsElevationScroll(editor, source, first);
             onGl(() -> { GpuBoardTestUi.click("editor-2d"); return null; });
             await(() -> onSwing(() -> source.isClosed() && editor.getFrame().isShowing()));
             onSwing(() -> {
@@ -610,9 +613,91 @@ class GpuBoardWindowSmokeTest {
     }
 
     private static AbstractButton editorButton(BoardEditorPanel editor, String name) throws Exception {
+        return (AbstractButton) editorComponent(editor, name);
+    }
+
+    private static JComponent editorComponent(BoardEditorPanel editor, String name) throws Exception {
         var field = BoardEditorPanel.class.getDeclaredField(name);
         field.setAccessible(true);
-        return (AbstractButton) field.get(editor);
+        return (JComponent) field.get(editor);
+    }
+
+    private static void assertEditorToolsElevationScroll(BoardEditorPanel editor, GpuBoardSource source, Coords center)
+          throws Exception {
+        Board board = editor.getBoardView().game.getBoard();
+        Map<Coords, Hex> before = onSwing(() -> {
+            Map<Coords, Hex> hexes = new HashMap<>();
+            for (int x = 0; x < board.getWidth(); x++) {
+                for (int y = 0; y < board.getHeight(); y++) {
+                    Coords coords = new Coords(x, y);
+                    hexes.put(coords, board.getHex(coords).duplicate());
+                }
+            }
+            return hexes;
+        });
+        for (int radius = 1; radius <= 2; radius++) {
+            int brushRadius = radius;
+            JComponent focused = onSwing(() -> {
+                AbstractButton brushButton = editorButton(editor, "buttonBrush" + (brushRadius + 1));
+                brushButton.doClick(0);
+                JComponent control = brushRadius == 1 ? brushButton : editorComponent(editor, "texElev");
+                Window tools = SwingUtilities.getWindowAncestor(editor);
+                tools.toFront();
+                tools.requestFocus();
+                control.requestFocusInWindow();
+                return control;
+            });
+            await(() -> onSwing(focused::hasFocus));
+            Map<Coords, Hex> brush = new HashMap<>();
+            Map<Coords, Hex> outside = new HashMap<>();
+            before.forEach((coords, hex) -> (coords.distance(center) <= brushRadius ? brush : outside).put(coords, hex));
+            assertEquals(radius == 1 ? 7 : 19, brush.size());
+            Vector3 cameraBefore = onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).boardCamera.camera.position.cpy());
+            editorToolsControl(focused, true);
+            // Only Swing receives Ctrl. The native viewport receives the wheel without a preceding click or key press.
+            input(() -> editorWheel(center, false, false, -.5f, -.5f, -1));
+            editorToolsControl(focused, false);
+            assertEditorHeights(source, brush, 2);
+            assertEditorHeights(source, outside, 0);
+            assertTrue(onGl(() -> cameraBefore.epsilonEquals(
+                  ((GpuBattleView) Gdx.app.getApplicationListener()).boardCamera.camera.position, .001f)),
+                  "Ctrl in the tools window must raise the full brush without zooming");
+            onSwing(() -> { editorButton(editor, "buttonUndo").doClick(0); return null; });
+            assertEditorHeights(source, before, 0);
+
+            editorToolsControl(focused, true);
+            input(() -> editorWheel(center, false, false, 1));
+            editorToolsControl(focused, false);
+            assertEditorHeights(source, brush, -1);
+            assertEditorHeights(source, outside, 0);
+            onSwing(() -> { editorButton(editor, "buttonUndo").doClick(0); return null; });
+            assertEditorHeights(source, before, 0);
+
+            editorToolsControl(focused, true);
+            input(() -> editorWheel(center, false, false, -.5f));
+            editorToolsControl(focused, false);
+            editorToolsControl(focused, true);
+            input(() -> editorWheel(center, false, false, -.5f));
+            assertEditorHeights(source, before, 0);
+            editorToolsControl(focused, false);
+        }
+        onSwing(() -> { editorButton(editor, "buttonBrush1").doClick(0); return null; });
+        Vector3 cameraBefore = onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).boardCamera.camera.position.cpy());
+        input(() -> editorWheel(center, false, false, -1));
+        await(() -> onGl(() -> !cameraBefore.epsilonEquals(
+              ((GpuBattleView) Gdx.app.getApplicationListener()).boardCamera.camera.position, .001f)));
+        assertEditorHeights(source, before, 0);
+    }
+
+    private static void editorToolsControl(JComponent focused, boolean down) throws Exception {
+        onSwing(() -> {
+            KeyboardFocusManager.getCurrentKeyboardFocusManager().redispatchEvent(focused,
+                  new KeyEvent(focused, down ? KeyEvent.KEY_PRESSED : KeyEvent.KEY_RELEASED,
+                        System.currentTimeMillis(), down ? InputEvent.CTRL_DOWN_MASK : 0,
+                        KeyEvent.VK_CONTROL, KeyEvent.CHAR_UNDEFINED));
+            return null;
+        });
+        onGl(() -> null);
     }
 
     private static void assertEditorElevationScroll(BoardEditorPanel editor, GpuBoardSource source, Coords center)

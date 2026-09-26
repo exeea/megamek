@@ -102,10 +102,10 @@ class GpuTargetingSmokeTest {
                             String angle = frames() == 4 ? "top" : frames() == 2 ? "isometric-low" : "isometric-high";
                             GpuBoardTestUi.capture(new File(output, "targeting-" + angle + ".png"));
                             if (frames() == 2) {
-                                assertEquals(TARGET_BOB_HEIGHT_OFFSET, targetBob(0), .001f);
+                                assertEquals(TARGET_BOB_HEIGHT_OFFSET * BoardGeometry.LEVEL, targetBob(0), .001f);
                                 clock(this, TARGET_BOB_PERIOD_SECONDS / 2);
                             } else if (frames() == 3) {
-                                assertEquals(TARGET_BOB_HEIGHT_OFFSET + TARGET_BOB_HEIGHT_LEVELS * BoardGeometry.LEVEL,
+                                assertEquals((TARGET_BOB_HEIGHT_OFFSET + TARGET_BOB_HEIGHT_LEVELS) * BoardGeometry.LEVEL,
                                       targetBob((float) field(this, "hoverClock")), .001f);
                                 boardCamera.setIsometric(false);
                             } else {

@@ -9,8 +9,10 @@ import java.util.Map;
 import java.util.TreeSet;
 
 import com.badlogic.gdx.math.EarClippingTriangulator;
+import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.board.Coords;
 
 /** The actual topography of one hex. Rendering, road continuity, banks and picking share it. */
@@ -306,6 +308,8 @@ final class BoardSurface {
     private final BoardScene scene;
     private final BoardSurface[] receivingWater = new BoardSurface[6];
     final List<Face> faces = new ArrayList<>();
+    /** Rough cover is part of the drawn mesh; ordinary units may clip it, infantry can seek footing on it. */
+    final List<Face> rough = new ArrayList<>();
     final List<Vector3> water = new ArrayList<>();
     /**
      * The water's full outline within its hex, before a falling mouth pulls its surface back to the crest. Segments on
@@ -313,6 +317,8 @@ final class BoardSurface {
      */
     final List<Vector3> outline = new ArrayList<>();
     final List<Face> waterFaces = new ArrayList<>();
+    /** Extra contacts where the solid cliff's triangle edges bend the constructed water outline. */
+    private final Map<Integer, List<Vector3>> waterContacts = new LinkedHashMap<>();
     /** The water's cut face where the board's edge cuts it off, facing out; drawn like its surface. */
     final List<Face> cutFaces = new ArrayList<>();
     /** Edges a fall pours over off the board's edge, as a bit mask; see {@link #bottomless}. */
@@ -395,8 +401,161 @@ final class BoardSurface {
             for (int edge = 0; edge < 6; edge++) { falls |= crests[edge] == null ? 0 : 1 << edge; }
             // Banks meet the actual ground rim, including emerged shallow bars, while the water keeps its level.
             relief.top(faces, bedOutline, openMouths, crestLine, falls);
+            meetWetCliffs();
+            int roughStart = faces.size();
             relief.boulders(faces);
+            rough.addAll(faces.subList(roughStart, faces.size()));
         }
+    }
+
+    /**
+     * A cliff's submerged foot may lean toward the inset bed. Water meets that face at the surface height, not
+     * vertically above the bed's edge. Move only the outer ring: the bed and the stream's rounded interior stay put.
+     */
+    private void meetWetCliffs() {
+        if (waterFaces.isEmpty()) { return; }
+        float base = tile.elevation() * BoardGeometry.LEVEL;
+        boolean adjusted = false;
+        for (int edge = 0; edge < 6; edge++) {
+            if (!relief.wetCliff(edge)) { continue; }
+            adjusted = true;
+            final int cliffEdge = edge;
+            List<Face> wall = faces.stream().filter(f -> f.finish() == Finish.WALL && f.landEdge() == cliffEdge).toList();
+            Vector3 toward = BoardGeometry.center(neighbor(scene, edge).coords(), 0)
+                  .sub(BoardGeometry.center(tile.coords(), 0)).nor();
+            // Keep the shared mouth endpoints and the bank joins exactly where the neighbouring hex puts them.
+            for (int i = 1; i < SHORE_SEGMENTS; i++) {
+                Vector3 point = waterline[edge * SHORE_SEGMENTS + i];
+                float height = point.z;
+                if (point.z >= base) {
+                    point.set(relief.wetCliffContact(edge, i / (float) SHORE_SEGMENTS, point.z));
+                } else {
+                    Ray ray = new Ray(new Vector3(point).mulAdd(toward, -BoardGeometry.WIDTH), toward);
+                    Vector3 contact = new Vector3(point), hit = new Vector3();
+                    float nearest = Float.POSITIVE_INFINITY;
+                    for (Face face : wall) {
+                        if (Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit)
+                              && hit.dst2(point) < nearest) {
+                            nearest = hit.dst2(point);
+                            contact.set(hit);
+                        }
+                    }
+                    point.set(contact);
+                }
+                point.z = height;
+            }
+            refineCliffContact(edge, wall, base);
+        }
+        if (adjusted && !gradedWater) {
+            // A flat pool's old ears can cross its widened contour at a cliff/bank corner.
+            List<Vector3> contour = new ArrayList<>();
+            for (int edge = 0; edge < 6; edge++) {
+                List<Vector3> points = waterBoundary(edge);
+                // A falling lip keeps its pulled-back water vertices.
+                for (int i = 0; i < points.size() - 1; i++) {
+                    contour.add(waterContacts.containsKey(edge) ? points.get(i) : water.get(edge * SHORE_SEGMENTS + i));
+                }
+            }
+            waterFaces.clear();
+            polygon(contour.toArray(Vector3[]::new), Finish.TOP, waterFaces);
+        }
+    }
+
+    /** The drawn outline of one edge, including both ends; mouths retain their shared construction samples. */
+    List<Vector3> waterBoundary(int edge) {
+        List<Vector3> contact = waterContacts.get(edge);
+        if (contact != null) { return contact; }
+        List<Vector3> points = new ArrayList<>(SHORE_SEGMENTS + 1);
+        for (int i = 0; i <= SHORE_SEGMENTS; i++) { points.add(waterline[(edge * SHORE_SEGMENTS + i) % waterline.length]); }
+        return points;
+    }
+
+    /** Preserve the bends across a wall quad's diagonal, especially where its bed rises into a dry bank. */
+    private void refineCliffContact(int edge, List<Face> wall, float base) {
+        List<Vector3> points = waterBoundary(edge), refined = new ArrayList<>();
+        Map<Float, List<ContactSegment>> sections = new LinkedHashMap<>();
+        for (int i = 0; i < points.size() - 1; i++) {
+            Vector3 a = points.get(i), b = points.get(i + 1);
+            List<Vector3> path = Math.abs(a.z - b.z) < .0001f && a.z < base
+                  ? contactPath(a, b, sections.computeIfAbsent(a.z, z -> contactSection(wall, z))) : List.of(a, b);
+            refined.addAll(path.subList(0, path.size() - 1));
+            if (gradedWater && path.size() > 2) {
+                // Replace just the outer triangle; the remaining rings retain the stream's bulge.
+                for (int f = 0, count = waterFaces.size(); f < count; f++) {
+                    Face face = waterFaces.get(f);
+                    if (face.a() != a || face.b() != b) { continue; }
+                    waterFaces.remove(f);
+                    for (int k = 0; k < path.size() - 1; k++) {
+                        waterFaces.add(new Face(path.get(k), path.get(k + 1), face.c(), Finish.TOP));
+                    }
+                    break;
+                }
+            }
+        }
+        refined.add(points.getLast());
+        waterContacts.put(edge, refined);
+    }
+
+    private record ContactSegment(Vector3 a, Vector3 b) { }
+
+    /** Horizontal sections through the actual submerged wall triangles, without assuming planar quads. */
+    private static List<ContactSegment> contactSection(List<Face> wall, float z) {
+        List<ContactSegment> result = new ArrayList<>();
+        for (Face face : wall) {
+            Vector3[] corners = { face.a(), face.b(), face.c() };
+            Vector3 first = null;
+            for (int i = 0; i < 3; i++) {
+                Vector3 a = corners[i], b = corners[(i + 1) % 3];
+                if ((a.z <= z) == (b.z <= z)) { continue; }
+                Vector3 p = new Vector3(a).lerp(b, (z - a.z) / (b.z - a.z));
+                p.z = z;
+                if (first == null) { first = p; }
+                else if (first.dst2(p) > .000001f) { result.add(new ContactSegment(first, p)); }
+            }
+        }
+        return result;
+    }
+
+    /** Walk either way along a connected section, starting and ending inside a segment when necessary. */
+    private static List<Vector3> contactPath(Vector3 a, Vector3 b, List<ContactSegment> section) {
+        for (int first = 0; first < section.size(); first++) {
+            ContactSegment start = section.get(first);
+            if (!onContact(a, start.a, start.b)) { continue; }
+            for (Vector3 end : List.of(start.a, start.b)) {
+                List<Vector3> path = new ArrayList<>(List.of(a));
+                Vector3 from = a, to = end;
+                int previous = first;
+                for (int step = 0; step <= section.size(); step++) {
+                    if (onContact(b, from, to)) {
+                        if (path.size() > 1 && path.getLast().epsilonEquals(b, .002f)) { path.set(path.size() - 1, b); }
+                        else { path.add(b); }
+                        return path;
+                    }
+                    if (!path.getLast().epsilonEquals(to, .002f)) { path.add(to); }
+                    int next = -1;
+                    for (int k = 0; k < section.size(); k++) {
+                        if (k == previous) { continue; }
+                        ContactSegment candidate = section.get(k);
+                        if (to.epsilonEquals(candidate.a, .002f) || to.epsilonEquals(candidate.b, .002f)) {
+                            next = k;
+                            break;
+                        }
+                    }
+                    if (next < 0) { break; }
+                    from = to;
+                    ContactSegment candidate = section.get(next);
+                    to = from.epsilonEquals(candidate.a, .002f) ? candidate.b : candidate.a;
+                    previous = next;
+                }
+            }
+        }
+        return List.of(a, b);
+    }
+
+    private static boolean onContact(Vector3 p, Vector3 a, Vector3 b) {
+        float dx = b.x - a.x, dy = b.y - a.y, length = dx * dx + dy * dy;
+        float t = length == 0 ? 0 : Math.clamp(((p.x - a.x) * dx + (p.y - a.y) * dy) / length, 0, 1);
+        return square(p.x - a.x - t * dx) + square(p.y - a.y - t * dy) < .000004f;
     }
 
     /** A bridge approach reaches the deck at the edge; ordinary roads share their height change across both hexes. */
@@ -573,7 +732,15 @@ final class BoardSurface {
             Vector3 a = waterline[e * SHORE_SEGMENTS], b = waterline[(e + 1) * SHORE_SEGMENTS % waterline.length];
             for (int i = 0; i < SHORE_SEGMENTS; i++) {
                 Vector3 point = waterline[e * SHORE_SEGMENTS + i];
-                point.z = mouthDepth(point, a, ends[e], b, ends[(e + 1) % 6], middle);
+                if (shore[e] == 0) {
+                    point.z = mouthDepth(point, a, ends[e], b, ends[(e + 1) % 6], middle);
+                } else {
+                    // Soften the banks' shoulders while retaining the rounded descent into the channel.
+                    // Keep the canonical mouth endpoints where neighbouring banks meet.
+                    point.z = waterGrade(point.x, point.y) + mouthDepth(point,
+                          a, ends[e] - waterGrade(a.x, a.y),
+                          b, ends[(e + 1) % 6] - waterGrade(b.x, b.y), 0);
+                }
                 gradedWater |= Math.abs(point.z - base) > .0001f;
             }
         }
@@ -594,7 +761,33 @@ final class BoardSurface {
         return joined;
     }
 
-    /** A sampled slope, with a level centre for units and the same rings used by the riverbed beneath it. */
+    /**
+     * A gentle correction toward connected water levels. Retain most of the radial profile's flowing bulge;
+     * fully blending toward a cross-channel level makes the descent look like a flat ramp. Beds and water share it.
+     */
+    private float waterGrade(float x, float y) {
+        float base = BoardGeometry.waterZ(tile);
+        float radius2 = square((1 + tuning.plateau()) * .5f * BoardGeometry.HEIGHT);
+        float own = Math.max(0, 1 - (square(x - center.x) + square(y - center.y)) / radius2);
+        float total = own * own, change = 0;
+        for (int edge = 0; edge < 6; edge++) {
+            BoardScene.Tile other = neighbor(scene, edge);
+            if (!waterSlope(tile, other)) { continue; }
+            float dx = x - BoardGeometry.centerX(other.coords()), dy = y - BoardGeometry.centerY(other.coords());
+            float weight = Math.max(0, 1 - (dx * dx + dy * dy) / radius2);
+            weight *= weight;
+            total += weight;
+            change += weight * (BoardGeometry.waterZ(other) - base);
+        }
+        return total > 0 ? base + .2f * change / total : base;
+    }
+
+    /** The shared mouth/crest profile is exact at the rim; its correction eases away inside the channel. */
+    private float waterGrade(float x, float y, Vector3 rim, float inward) {
+        return waterGrade(x, y) + (rim.z - waterGrade(rim.x, rim.y)) * ease(inward);
+    }
+
+    /** Sample the rounded descent, with a level centre and the same rings used by the bed beneath it. */
     private void slopingSurface(Vector3[] outer) {
         Vector3[] ring = outer;
         float base = BoardGeometry.waterZ(tile);
@@ -602,8 +795,9 @@ final class BoardSurface {
             float x = k / 4f, scale = 1 - tuning.plateau() * x;
             Vector3[] inner = new Vector3[outer.length];
             for (int i = 0; i < outer.length; i++) {
-                inner[i] = new Vector3(center.x + (outer[i].x - center.x) * scale,
-                      center.y + (outer[i].y - center.y) * scale, base + (outer[i].z - base) * ease(x));
+                float px = center.x + (outer[i].x - center.x) * scale;
+                float py = center.y + (outer[i].y - center.y) * scale;
+                inner[i] = new Vector3(px, py, waterGrade(px, py, outer[i], x));
             }
             for (int i = 0; i < outer.length; i++) {
                 int j = (i + 1) % outer.length;
@@ -626,14 +820,19 @@ final class BoardSurface {
         // Bank vertices lie outside the water mesh. Extend the nearest shore's height for their wetness and bed
         // tint; reverting to the hex's level painted dry banks beside a descending stream as deep water.
         float nearest = Float.POSITIVE_INFINITY;
-        for (int i = 0; i < waterline.length; i++) {
-            Vector3 a = waterline[i], b = waterline[(i + 1) % waterline.length];
-            float dx = b.x - a.x, dy = b.y - a.y, length = dx * dx + dy * dy;
-            float t = length == 0 ? 0 : Math.clamp(((x - a.x) * dx + (y - a.y) * dy) / length, 0, 1);
-            float distance = square(x - a.x - t * dx) + square(y - a.y - t * dy);
-            if (distance < nearest) {
-                nearest = distance;
-                height = BoardRelief.lerp(a.z, b.z, t);
+        for (int edge = 0; edge < 6; edge++) {
+            List<Vector3> contact = waterContacts.get(edge);
+            int count = contact == null ? SHORE_SEGMENTS : contact.size() - 1;
+            for (int i = 0; i < count; i++) {
+                Vector3 a = contact == null ? waterline[edge * SHORE_SEGMENTS + i] : contact.get(i);
+                Vector3 b = contact == null ? waterline[(edge * SHORE_SEGMENTS + i + 1) % waterline.length] : contact.get(i + 1);
+                float dx = b.x - a.x, dy = b.y - a.y, length = dx * dx + dy * dy;
+                float t = length == 0 ? 0 : Math.clamp(((x - a.x) * dx + (y - a.y) * dy) / length, 0, 1);
+                float distance = square(x - a.x - t * dx) + square(y - a.y - t * dy);
+                if (distance < nearest) {
+                    nearest = distance;
+                    height = BoardRelief.lerp(a.z, b.z, t);
+                }
             }
         }
         return height;
@@ -764,8 +963,7 @@ final class BoardSurface {
         float[] ends = new float[6];
         for (int edge = 0; edge < 6; edge++) {
             int previous = (edge + 5) % 6;
-            ends[edge] = shore[edge] > 0 && !relief.wetCliff(edge)
-                  || shore[previous] > 0 && !relief.wetCliff(previous) ? 0
+            ends[edge] = (shore[edge] > 0 || shore[previous] > 0) && !relief.wetCliffCorner(edge) ? 0
                   : spills[edge] || spills[previous] ? ledge : cornerDepth(scene, edge);
         }
         float[] steep = new float[6], scour = new float[6];
@@ -826,7 +1024,8 @@ final class BoardSurface {
                     // centre plateau keep their shared bed depth; neither acquires a step or a raised unit anchor.
                     bed = shallowBed(bed, px, py, BoardRelief.lerp(4 * x * (1 - x), 1 - x, bank[i]));
                 }
-                inner[i] = new Vector3(px, py, surface + (outer[i].z - surface) * ease(x) - bed);
+                float level = gradedWater ? waterGrade(px, py, outer[i], x) : surface;
+                inner[i] = new Vector3(px, py, level - bed);
             }
             for (int i = 0; i < count; i++) {
                 int j = (i + 1) % count;
@@ -1060,7 +1259,6 @@ final class BoardSurface {
             int before = (k + 5) % 6, next = (k + 1) % 6;
             boolean in = inset[before] == 0, out = inset[k] == 0;
             if (relief.wetCliffCorner(k)) {
-                // Shared corner geometry also handles a cliff meeting a slope or a river mouth.
                 anchors[k] = relief.seam(k, k, 0);
             } else if (BoardConcrete.concreteBank(scene, tile, before) || BoardConcrete.concreteBank(scene, tile, k)) {
                 // A poured edge meets the water directly. No beach setback, rounded corner or natural shore field.
@@ -1085,11 +1283,17 @@ final class BoardSurface {
         Vector3[] result = new Vector3[6 * SHORE_SEGMENTS];
         for (int edge = 0; edge < 6; edge++) {
             int next = (edge + 1) % 6;
-            Vector3[] bank = inset[edge] == 0 || BoardConcrete.concreteBank(scene, tile, edge)
+            Vector3[] bank = inset[edge] == 0 || relief.wetCliff(edge) || BoardConcrete.concreteBank(scene, tile, edge)
                   ? null : bank(anchors[edge], anchors[next], plunge, edge);
+            Vector3 cliffA = relief.wetCliff(edge) ? relief.seam(edge, edge, 0) : null;
+            Vector3 cliffB = cliffA == null ? null : relief.seam(edge, next, 0);
             for (int segment = 0; segment < SHORE_SEGMENTS; segment++) {
-                Vector3 point = relief.wetCliff(edge) ? relief.seam(edge, edge, segment / (float) SHORE_SEGMENTS)
-                      : bank == null ? mouthPoint(anchors[edge], anchors[next], segment) : bank[segment];
+                Vector3 point = bank == null ? mouthPoint(anchors[edge], anchors[next], segment) : bank[segment];
+                if (cliffA != null) {
+                    // Follow the rock's curve, retaining the common mouth ends where a cliff changes into a bank.
+                    point.add(relief.seam(edge, edge, segment / (float) SHORE_SEGMENTS)
+                          .sub(mouthPoint(cliffA, cliffB, segment)));
+                }
                 point.z = z;
                 result[edge * SHORE_SEGMENTS + segment] = point;
             }
@@ -1394,6 +1598,11 @@ final class BoardSurface {
 
     float height(float x, float y) {
         return height(faces, x, y);
+    }
+
+    /** The finished terrain before Rough cover, sharing the rendered vertices rather than a second height field. */
+    List<Face> groundFaces() {
+        return faces.subList(0, faces.size() - rough.size());
     }
 
     private float height(List<Face> geometry, float x, float y) {

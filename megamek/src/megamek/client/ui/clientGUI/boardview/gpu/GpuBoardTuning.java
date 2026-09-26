@@ -10,6 +10,7 @@ import javax.swing.SwingUtilities;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.Vector2;
+import com.badlogic.gdx.scenes.scene2d.Action;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
@@ -45,7 +46,9 @@ import megamek.common.planetaryConditions.AtmosphericTaint;
 final class GpuBoardTuning {
     private static final float SLIDER_WIDTH = 120;
     private static final float LABEL_WIDTH = 120;
-    private static final float SLIDER_DEBOUNCE_SECONDS = 0.1f;
+    private static final float SLIDER_DEBOUNCE_SECONDS = 0.25f;
+    private static final float SLIDER_REPEAT_DELAY = 0.3f;
+    private static final float SLIDER_REPEAT_INTERVAL = 0.05f;
 
     private record Knob(String name, float min, float max, float step, String format, String help) {
         Knob(String name, float min, float max, float step, String format) {
@@ -621,10 +624,6 @@ final class GpuBoardTuning {
                 }
                 if (key == Input.Keys.LEFT || key == Input.Keys.RIGHT) {
                     int direction = key == Input.Keys.LEFT ? -1 : 1;
-                    if (actor instanceof Slider slider) {
-                        slider.setValue(slider.getValue() + direction * slider.getStepSize());
-                        return true;
-                    }
                     if (actor instanceof SelectBox<?> choice) {
                         choice.setSelectedIndex(Math.clamp(choice.getSelectedIndex() + direction, 0,
                               choice.getItems().size - 1));
@@ -752,12 +751,68 @@ final class GpuBoardTuning {
             RunnableAction applyAction = new RunnableAction();
             applyAction.setRunnable(apply);
             applyDelay.setAction(applyAction);
+            var keyboard = new InputListener() {
+                private int heldKey = -1;
+                private float repeatIn;
+                private final Action repeat = new Action() {
+                    @Override
+                    public boolean act(float delta) {
+                        if (!slider.hasKeyboardFocus() || slider.isDisabled() || !Gdx.input.isKeyPressed(heldKey)) {
+                            stopRepeating();
+                            return true;
+                        }
+                        repeatIn -= delta;
+                        if (repeatIn <= 0) {
+                            repeatIn = SLIDER_REPEAT_INTERVAL;
+                            step();
+                        }
+                        return false;
+                    }
+                };
+
+                private void step() {
+                    int direction = heldKey == Input.Keys.LEFT ? -1 : 1;
+                    slider.setValue(slider.getValue() + direction * slider.getStepSize());
+                }
+
+                boolean isRepeating() { return repeat.getActor() != null; }
+
+                void stopRepeating() {
+                    heldKey = -1;
+                    slider.removeAction(repeat);
+                    if (!slider.isDragging() && slider.getActions().contains(applyDelay, true)) {
+                        slider.removeAction(applyDelay);
+                        apply.run();
+                    }
+                }
+
+                @Override
+                public boolean keyDown(InputEvent event, int key) {
+                    if (slider.isDisabled() || key != Input.Keys.LEFT && key != Input.Keys.RIGHT) { return false; }
+                    if (heldKey != key) {
+                        stopRepeating();
+                        heldKey = key;
+                        repeatIn = SLIDER_REPEAT_DELAY;
+                        step();
+                        slider.addAction(repeat);
+                    }
+                    return true;
+                }
+
+                @Override
+                public boolean keyUp(InputEvent event, int key) {
+                    if (key != heldKey) { return false; }
+                    stopRepeating();
+                    return true;
+                }
+            };
+            slider.addListener(keyboard);
             slider.addListener(new ChangeListener() {
                 @Override
                 public void changed(ChangeEvent event, Actor actor) {
                     slider.removeAction(applyDelay);
                     if (syncing) { return; }
-                    if (debounce && slider.isDragging()) {
+                    if (debounce && (slider.isDragging() || keyboard.isRepeating())) {
                         reading.setText(String.format(Locale.ROOT, knob.format(), slider.getValue()));
                         applyDelay.restart();
                         slider.addAction(applyDelay);
@@ -770,6 +825,7 @@ final class GpuBoardTuning {
                 @Override
                 public void keyboardFocusChanged(FocusEvent event, Actor actor, boolean hasFocus) {
                     slider.setStyle(hasFocus ? focused : normal);
+                    if (!hasFocus) { keyboard.stopRepeating(); }
                 }
             });
             TextButton toggle = null;

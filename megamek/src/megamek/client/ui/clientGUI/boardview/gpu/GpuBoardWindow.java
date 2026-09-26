@@ -8,6 +8,9 @@ import java.awt.Toolkit;
 import java.awt.Window;
 import java.awt.event.AWTEventListener;
 import java.awt.event.ComponentEvent;
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
+import java.awt.event.MouseEvent;
 import java.awt.event.WindowEvent;
 import java.io.File;
 import java.io.FileInputStream;
@@ -62,6 +65,7 @@ public final class GpuBoardWindow {
      * presented is raised above it instead.
      */
     private final AWTEventListener dialogListener = event -> {
+        forwardEditorToolsInput(event);
         if (closeWithPreviewOwner(event)) {
             return;
         }
@@ -227,7 +231,8 @@ public final class GpuBoardWindow {
                 gui.setMiniReportLocation(false);
             }
             Toolkit.getDefaultToolkit().addAWTEventListener(window.dialogListener,
-                  AWTEvent.COMPONENT_EVENT_MASK | AWTEvent.WINDOW_EVENT_MASK);
+                  AWTEvent.COMPONENT_EVENT_MASK | AWTEvent.WINDOW_EVENT_MASK | AWTEvent.WINDOW_FOCUS_EVENT_MASK
+                        | AWTEvent.KEY_EVENT_MASK | AWTEvent.MOUSE_EVENT_MASK);
             Thread thread = new Thread(window::run, "MegaMek-GPU-board");
             thread.setDaemon(true);
             thread.start();
@@ -414,6 +419,37 @@ public final class GpuBoardWindow {
         Toolkit.getDefaultToolkit().removeAWTEventListener(dialogListener);
         dialogOnTop.forEach(Dialog::setAlwaysOnTop);
         dialogOnTop.clear();
+    }
+
+    /** Swing receives the modifiers while the tools have focus, even when Windows sends the wheel to the map. */
+    private void forwardEditorToolsInput(AWTEvent event) {
+        Lwjgl3Application app = application;
+        if (editor == null || source == null || app == null || closing) {
+            return;
+        }
+        int modifiers;
+        boolean finishStroke;
+        if (event instanceof InputEvent input && SwingUtilities.isDescendingFrom(input.getComponent(), editor)) {
+            modifiers = input.getModifiersEx() & (InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK
+                  | InputEvent.ALT_DOWN_MASK | InputEvent.META_DOWN_MASK);
+            finishStroke = event.getID() == MouseEvent.MOUSE_PRESSED || event.getID() == KeyEvent.KEY_PRESSED
+                  || (event instanceof KeyEvent key && key.getKeyCode() == KeyEvent.VK_CONTROL
+                        && key.getID() == KeyEvent.KEY_RELEASED);
+        } else if (event.getID() == WindowEvent.WINDOW_LOST_FOCUS
+              && event.getSource() == SwingUtilities.getWindowAncestor(editor)) {
+            modifiers = 0;
+            finishStroke = true;
+        } else {
+            return;
+        }
+        if (finishStroke) {
+            source.endEditorStroke();
+        }
+        app.postRunnable(() -> {
+            if (!closing && app.getApplicationListener() instanceof GpuBattleView battle) {
+                battle.editorToolsInput(modifiers, finishStroke);
+            }
+        });
     }
 
     /** Return to the existing client without disconnecting or changing the game. */

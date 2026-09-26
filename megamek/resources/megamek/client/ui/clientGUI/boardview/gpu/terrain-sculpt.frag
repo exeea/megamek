@@ -102,6 +102,16 @@ vec3 wallNormal(sampler2D map, vec2 uvx, vec2 uvy, vec3 face, float side) {
     return normalize(mix(wy, wx, side));
 }
 
+// The exposed face and its submerged continuation use the same world-space rock projections.
+vec4 wallSample(vec3 world, vec3 face, out vec2 uvx, out vec2 uvy, out float side) {
+    vec3 axes = pow(abs(face), vec3(4.0));
+    uvx = vec2(world.y * sign(face.x), -world.z) / u_sculptTiles.z;
+    uvy = vec2(-world.x * sign(face.y), -world.z) / u_sculptTiles.z + .37;
+    vec4 x = texture2D(u_wallColor, uvx), y = texture2D(u_wallColor, uvy);
+    side = clamp((axes.x / max(axes.x + axes.y, 1e-4) - .5) * 3.0 + (x.a - y.a) * 1.2 + .5, 0.0, 1.0);
+    return mix(y, x, side);
+}
+
 // A ground or debris map on a sloping face: seen from above where the face lies back (lying 1), and from the side like
 // the wall maps where it is steep, so it never stretches down the slope. dx, dy are the side coordinates in metres.
 vec4 draped(sampler2D map, vec2 p, vec2 dx, vec2 dy, float side, float tile, float mixer, float lying) {
@@ -215,8 +225,12 @@ void main() {
     bool ground = kind < .125, plant = kind >= .125 && kind < .375, cliff = kind >= .375 && kind < .625;
     bool pit = kind >= .625 && kind < .875;
     bool shore = ground && v_color.a < .25;
+    // Rock-kind bytes 224..254 carry the fractional water level; 255 remains ordinary dry rock.
+    bool wetRock = kind >= .875 && kind < .999;
+    bool waterCovered = shore || wetRock;
     // Wet ground uses the spare ground-kind range for the fractional surface level of a descending stream.
     if (shore) level = v_color.g * 255.0 - 64.0 + kind * 8.0;
+    if (wetRock) level = v_color.g * 255.0 - 64.0 + (kind * 255.0 - 224.0) / 30.0;
     // A water hex's ground packs its water's palette with the nearest step's height, which dry ground carries alone.
     float tintByte = v_color.a * 255.0;
     float palette = floor(tintByte / 16.0 + .03);
@@ -227,10 +241,10 @@ void main() {
     farDetail = .8 * smoothstep(.18, .6, footprint);
     pixelMetres = max(max(length(dFdx(world)), length(dFdy(world))), 1e-4);
     // Depth below this water hex's level, in metres, and height above its water, which lies u_waterLine lower.
-    float depth = shore ? (level * u_levelHeight - v_cloudPosition.z) / u_metre : -1.0;
-    float above = shore ? u_waterLine / u_metre - depth : 99.0;
+    float depth = waterCovered ? (level * u_levelHeight - v_cloudPosition.z) / u_metre : -1.0;
+    float above = waterCovered ? u_waterLine / u_metre - depth : 99.0;
     vec2 p = vec2(world.x, -world.y);
-    if (shore) {
+    if (shore && u_rainDetail > 0.0 && u_waterEffects > 0.0) {
         // The rippling surface bends the view of a submerged bed, so its detail sways with the swell above
         // (water-surface.frag), turned downwind and drifting like it.
         vec2 wind = length(u_wind.xy) > .01 ? normalize(u_wind.xy) : vec2(.8, .6);
@@ -304,16 +318,22 @@ void main() {
             // Walls and rocks: the two vertical projections, V running down the face, never mirrored from outside.
             // Where a rounded corner turns between them, the projection whose relief stands higher shows through.
             vec3 axes = pow(abs(face), vec3(4.0));
-            float t = u_sculptTiles.z;
-            vec2 uvx = vec2(world.y * sign(face.x), -world.z) / t;
-            vec2 uvy = vec2(-world.x * sign(face.y), -world.z) / t + .37;
-            vec4 wallX = texture2D(u_wallColor, uvx), wallY = texture2D(u_wallColor, uvy);
-            float side = clamp((axes.x / max(axes.x + axes.y, 1e-4) - .5) * 3.0 + (wallX.a - wallY.a) * 1.2 + .5, 0.0, 1.0);
-            vec4 wall = mix(wallY, wallX, side);
+            vec2 uvx, uvy;
+            float side;
+            vec4 wall = wallSample(world, face, uvx, uvy, side);
+            // A boulder's crown needs a horizontal stone projection: the two wall projections collapse on a
+            // flat top, otherwise leaving a single colour or stretched stripes under the moss/snow treatment.
+            float crown = cliff ? 0.0 : smoothstep(.45, .85, face.z);
+            if (crown > 0.0) wall = mix(wall, planar(u_wallColor, p, u_sculptTiles.z, fine), crown);
             albedo = wall.rgb;
             if (u_normalMaps > .5) {
                 normal = wallNormal(u_wallNormal, uvx, uvy, face, side);
                 cavity = mix(texture2D(u_wallNormal, uvy).a, texture2D(u_wallNormal, uvx).a, side) * .5 + .5;
+                if (crown > 0.0) {
+                    vec4 top = planarNormal(u_wallNormal, p, u_sculptTiles.z, fine);
+                    normal = normalize(mix(normal, upNormal(top.rgb, face), crown));
+                    cavity = mix(cavity, top.a * .5 + .5, crown);
+                }
             }
             float h = v_diffuseUV.x, d = v_diffuseUV.y;
             if (cliff) {
@@ -427,7 +447,11 @@ void main() {
             // Broad ledges collect the ground cover (sand, snow, moss on alpine rock); on the rock kit only snow and
             // sand dust lie.
             float ledge = smoothstep(.8, .95, face.z) * smoothstep(.3, .6, fine) * (family(0.0) ? .7 : 1.0);
-            if (family(5.0)) ledge = smoothstep(.5, .72, face.z);
+            // Snow caps the upper facets of a boulder, leaving its stone sides legible against the snowfield.
+            if (family(5.0)) {
+                ledge = cliff ? smoothstep(.5, .72, face.z) : smoothstep(.72, .92, face.z);
+                if (!cliff) albedo *= .66;
+            }
             if (!cliff) ledge *= family(5.0) ? smoothstep(.2, .9, h) : family(2.0) ? .45 : 0.0;
             if (ledge > 0.0 && !family(4.0)) {
                 vec4 top = planar(u_groundColor, p, u_sculptTiles.x, broad);
@@ -438,19 +462,35 @@ void main() {
                 }
             }
             if (!cliff) {
-                // Each block its own shade; on alpine meadows moss and turf settle on their tops. Rubble below a
+                // Each block its own shade; on alpine meadows a thin moss stain keeps the stone texture visible. Rubble below a
                 // concrete slab is the bedrock's.
-                albedo *= mix(.78, 1.0, v_color.a);
+                if (!wetRock) albedo *= mix(.78, 1.0, v_color.a);
                 if (family(4.0)) albedo *= bedTint(.5);
                 if (family(0.0)) {
-                    float moss = smoothstep(.55, .85, face.z) * smoothstep(.35, .65, fine);
-                    albedo = mix(albedo, vec3(.24, .30, .14), moss * .8);
+                    float moss = smoothstep(.7, .94, face.z) * smoothstep(.6, .8, fine);
+                    albedo *= mix(vec3(1.0), vec3(.9, .97, .82), moss * .22);
                 }
             }
         }
         if (ground && u_normalMaps > .5) {
             normal = upNormal(detail.rgb, face);
             cavity = detail.a * .6 + .4;
+        }
+        if (shore) {
+            // Rock persists down a steep drowned cliff. As the face lies back into its neighbouring bank, sediment
+            // takes over continuously; both sides of the join then share the bed's tint, caustics and lighting.
+            float rock = rockiness(steps) * (1.0 - smoothstep(.2, .8, face.z));
+            if (rock > 0.0) {
+                vec2 uvx, uvy;
+                float side;
+                vec4 wall = wallSample(world, face, uvx, uvy, side);
+                albedo = mix(albedo, wall.rgb * bedTint(.5), rock);
+                if (u_normalMaps > .5) {
+                    normal = normalize(mix(normal, wallNormal(u_wallNormal, uvx, uvy, face, side), rock));
+                    float relief = mix(texture2D(u_wallNormal, uvy).a, texture2D(u_wallNormal, uvx).a, side);
+                    cavity = mix(cavity, relief * .5 + .5, rock);
+                }
+            }
         }
         if (ground && family(0.0) && !shore && u_wind.z > 0.0) {
             // Gusts roll across a meadow: the grass leans with them and catches the light differently.
@@ -461,18 +501,20 @@ void main() {
             normal = normalize(normal + vec3(gust * sway * .12 * u_wind.z, 0.0));
         }
         albedo = levelGrade(albedo, level);
-        if (shore) {
+        if (waterCovered) {
             // Wet in a band just above the waterline and below it; beneath it the bed keeps the hue its column of
             // water passes and catches caustics (water-optics.glsl), while the surface above removes the brightness
             // the column absorbs.
             albedo *= mix(1.0, .75, 1.0 - smoothstep(0.0, .12, above));
             submerged = max(0.0, depth * u_metre - u_waterLine) / u_levelHeight;
             albedo *= waterBedTint(palette, submerged);
-            caustic = waterBedCaustics(v_cloudPosition.xy * u_rainScale, submerged) * u_rainDetail * u_waterEffects;
+            if (u_rainDetail > 0.0 && u_waterEffects > 0.0) {
+                caustic = waterBedCaustics(v_cloudPosition.xy * u_rainScale, submerged) * u_rainDetail * u_waterEffects;
+            }
         }
     }
     // 1 above the water, 0 on a submerged bed: the water surface draws the grid and takes the rain for it.
-    float exposed = shore ? 1.0 - smoothstep(0.0, 1.0, depth * u_metre - u_waterLine) : 1.0;
+    float exposed = waterCovered ? 1.0 - smoothstep(0.0, 1.0, depth * u_metre - u_waterLine) : 1.0;
     if (ground) albedo *= mix(1.0, terrainGrid(v_cloudPosition.xy * u_rainScale), exposed);
     // Rain darkens exposed ground and rock, and gathers in puddles on level ground.
     float wet = u_wetness * step(0.0, u_groundResponse) * exposed;

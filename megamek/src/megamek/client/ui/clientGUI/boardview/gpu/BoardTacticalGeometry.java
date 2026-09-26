@@ -14,6 +14,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 import com.badlogic.gdx.math.Vector3;
+import megamek.client.ui.clientGUI.boardview.BoardRangeBorder;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.common.board.Coords;
 
@@ -25,7 +26,21 @@ final class BoardTacticalGeometry {
     /** Only the finished triangles are retained; none of the terrain builder's scene or shoreline caches. */
     record Surface(List<BoardSurface.Face> top, List<BoardSurface.Face> slopes,
           List<BoardSurface.Face> faces, List<BoardSurface.Face> water, List<BoardSurface.Face> walls,
-          List<BoardSurface.Side> waterfalls) {
+          List<BoardSurface.Side> waterfalls, float highestTop) {
+        Surface(List<BoardSurface.Face> top, List<BoardSurface.Face> slopes, List<BoardSurface.Face> faces,
+              List<BoardSurface.Face> water, List<BoardSurface.Face> walls, List<BoardSurface.Side> waterfalls) {
+            this(top, slopes, faces, water, walls, waterfalls, highest(top));
+        }
+
+        /** Derived once with this immutable finished-surface snapshot; markers and border endpoints reuse it. */
+        private static float highest(List<BoardSurface.Face> faces) {
+            float z = Float.NEGATIVE_INFINITY;
+            for (BoardSurface.Face face : faces) {
+                z = Math.max(z, Math.max(face.a().z, Math.max(face.b().z, face.c().z)));
+            }
+            return z;
+        }
+
         static Surface of(BoardSurface surface, BoardScene scene, float floor) {
             List<BoardSurface.Face> top = new ArrayList<>();
             for (BoardSurface.Face face : surface.faces) {
@@ -111,26 +126,65 @@ final class BoardTacticalGeometry {
         Clipper clipper = new Clipper();
         int layer = 0;
         for (BoardTactical.Fill fill : fills) {
-            float lift = (0.35f + Math.min(layer++, 10000) * 0.0001f) * BoardGeometry.HEX_SCALE;
-            for (Triangle triangle : flat(fill)) {
-                int firstX = Math.max(0, (int) Math.floor(minX(triangle) / (BoardGeometry.TILE_WIDTH * 0.75f)) - 1);
-                int lastX = Math.min(scene.width() - 1, (int) Math.floor(maxX(triangle) / (BoardGeometry.TILE_WIDTH * 0.75f)));
-                int firstY = Math.max(0, (int) Math.floor(minY(triangle) / BoardGeometry.TILE_HEIGHT) - 1);
-                int lastY = Math.min(scene.height() - 1, (int) Math.floor(maxY(triangle) / BoardGeometry.TILE_HEIGHT));
-                Triangle world = new Triangle(world(triangle.a()), world(triangle.b()), world(triangle.c()), fill.argb());
-                clipper.prepare(world);
-                for (int x = firstX; x <= lastX; x++) {
-                    for (int y = firstY; y <= lastY; y++) {
-                        Coords coords = new Coords(x, y);
-                        Surface surface = surfaces.apply(coords);
-                        clipSurface(surface, lift, destination, clipper);
-                        for (BoardSurface.Face face : surface.slopes()) {
-                            clipper.clip(face, lift, destination);
-                        }
+            drape(scene, fill, layer++, destination, surfaces, clipper);
+        }
+    }
+
+    /** A retained command uses its absolute painter position, including the original capped lift. */
+    static void drape(BoardScene scene, BoardTactical.Fill fill, int layer, Consumer<Triangle> destination,
+          Function<Coords, Surface> surfaces, Clipper clipper) {
+        if (floating(scene, fill, destination, surfaces)) { return; }
+        float lift = layerLift(layer);
+        for (Triangle triangle : flat(fill)) {
+            int firstX = Math.max(0, (int) Math.floor(minX(triangle) / (BoardGeometry.TILE_WIDTH * 0.75f)) - 1);
+            int lastX = Math.min(scene.width() - 1, (int) Math.floor(maxX(triangle) / (BoardGeometry.TILE_WIDTH * 0.75f)));
+            int firstY = Math.max(0, (int) Math.floor(minY(triangle) / BoardGeometry.TILE_HEIGHT) - 1);
+            int lastY = Math.min(scene.height() - 1, (int) Math.floor(maxY(triangle) / BoardGeometry.TILE_HEIGHT));
+            Triangle world = new Triangle(world(triangle.a()), world(triangle.b()), world(triangle.c()), fill.argb());
+            clipper.prepare(world);
+            for (int x = firstX; x <= lastX; x++) {
+                for (int y = firstY; y <= lastY; y++) {
+                    Coords coords = new Coords(x, y);
+                    Surface surface = surfaces.apply(coords);
+                    clipSurface(surface, lift, destination, clipper);
+                    for (BoardSurface.Face face : surface.slopes()) {
+                        clipper.clip(face, lift, destination);
                     }
                 }
             }
         }
+    }
+
+    static Coords borderCoords(BoardScene scene, BoardTactical.HexBorder border) {
+        BoardScene.Tile tile = BoardGeometry.tile(scene, border.anchor().x() * BoardGeometry.HEX_SCALE,
+              -border.anchor().y() * BoardGeometry.HEX_SCALE);
+        return tile == null ? null : tile.coords();
+    }
+
+    /** A single horizontal plane clears its owner's finished top, without sampling neighboring cliffs or lake beds. */
+    static boolean floating(BoardScene scene, BoardTactical.Fill fill, Consumer<Triangle> destination,
+          Function<Coords, Surface> surfaces) {
+        BoardTactical.HexBorder border = fill.border();
+        if (border == null || !border.floating()) { return false; }
+        Coords coords = borderCoords(scene, border);
+        if (coords == null) { return false; }
+        float z = floatingZ(scene, coords, surfaces);
+        for (Triangle triangle : flat(fill)) {
+            Vector3 a = world(triangle.a()), b = world(triangle.b()), c = world(triangle.c());
+            a.z = z; b.z = z; c.z = z;
+            destination.accept(new Triangle(a, b, c, triangle.argb()));
+        }
+        return true;
+    }
+
+    static float floatingZ(BoardScene scene, Coords coords, Function<Coords, Surface> surfaces) {
+        Surface surface = surfaces.apply(coords);
+        float z = surface.top().isEmpty() ? BoardGeometry.surfaceZ(scene.tile(coords)) : surface.highestTop();
+        return z + .5f + GpuBattleView.SELECTION_BOB_HEIGHT_OFFSET;
+    }
+
+    static float layerLift(int layer) {
+        return (0.35f + Math.min(layer, 10000) * 0.0001f) * BoardGeometry.HEX_SCALE;
     }
 
     /** Cache both presentations once; the camera only selects which one to draw. */
@@ -145,24 +199,29 @@ final class BoardTacticalGeometry {
         if (flat) {
             drape(scene, scene.tactical().flatWalls(), destination, surfaces);
         }
-        for (BoardTactical.Wall wall : scene.tactical().walls()) {
-            if (scene.tile(wall.coords()) == null) {
-                continue;
-            }
-            Vector3 c = wallPoint(scene, wall, wall.b(), true), d = wallPoint(scene, wall, wall.a(), true);
-            if (!flat) {
-                Vector3 a = wallPoint(scene, wall, wall.a(), false), b = wallPoint(scene, wall, wall.b(), false);
-                destination.accept(new Triangle(a, b, c, wall.argb()));
-                destination.accept(new Triangle(a, c, d, wall.argb()));
-                wallOutline(wall, d, c, triangle -> outline.accept(wall, triangle));
-            } else {
-                Surface surface = surfaces.apply(wall.coords());
-                wallOutline(wall, d, c, triangle -> {
-                    clipper.prepare(triangle);
-                    clipSurface(surface, WALL_CLEARANCE * BoardGeometry.HEX_SCALE,
-                          clipped -> outline.accept(wall, clipped), clipper);
-                });
-            }
+        for (BoardTactical.Wall wall : BoardRangeBorder.join(scene.tactical().walls())) {
+            wall(scene, wall, flat, destination, outline, surfaces, clipper);
+        }
+    }
+
+    static void wall(BoardScene scene, BoardTactical.Wall wall, boolean flat, Consumer<Triangle> destination,
+          BiConsumer<BoardTactical.Wall, Triangle> outline, Function<Coords, Surface> surfaces, Clipper clipper) {
+        if (scene.tile(wall.coords()) == null) { return; }
+        if (!flat) {
+            Vector3 a = wallPoint(scene, wall, wall.a(), false, surfaces), b = wallPoint(scene, wall, wall.b(), false, surfaces);
+            Vector3 c = wallPoint(scene, wall, wall.b(), true, surfaces), d = wallPoint(scene, wall, wall.a(), true, surfaces);
+            destination.accept(new Triangle(a, b, c, wall.argb()));
+            destination.accept(new Triangle(a, c, d, wall.argb()));
+            wallOutline(wall, d, c, triangle -> outline.accept(wall, triangle));
+        } else {
+            Surface surface = surfaces.apply(wall.coords());
+            Vector3 a = new Vector3(wall.a().x() * BoardGeometry.HEX_SCALE, -wall.a().y() * BoardGeometry.HEX_SCALE, 0);
+            Vector3 b = new Vector3(wall.b().x() * BoardGeometry.HEX_SCALE, -wall.b().y() * BoardGeometry.HEX_SCALE, 0);
+            wallOutline(wall, a, b, triangle -> {
+                clipper.prepare(triangle);
+                clipSurface(surface, WALL_CLEARANCE * BoardGeometry.HEX_SCALE,
+                      clipped -> outline.accept(wall, clipped), clipper);
+            });
         }
     }
 
@@ -187,19 +246,21 @@ final class BoardTacticalGeometry {
         destination.accept(new Triangle(first, third, fourth, wall.outline().argb()));
     }
 
-    private static Vector3 wallPoint(BoardScene scene, BoardTactical.Wall wall, BoardTactical.Point point, boolean top) {
+    private static Vector3 wallPoint(BoardScene scene, BoardTactical.Wall wall, BoardTactical.Point point, boolean top,
+          Function<Coords, Surface> surfaces) {
         Vector3 world = new Vector3(point.x() * BoardGeometry.HEX_SCALE, -point.y() * BoardGeometry.HEX_SCALE, 0);
-        // Like the firing contour, adjoining panels share the full ridge span at their common endpoints.
-        // Use surface elevation, never water depth or the lakebed, when crossing a change in level.
-        float level = scene.tile(wall.coords()).elevation();
-        for (int direction = 0; direction < 6; direction++) {
-            Coords coords = wall.coords().translated(direction);
+        // Only interior owners of adjoining panels contribute to the joint, never terrain outside the range.
+        // Finished tops include sculpted crowns and banks; deep water and lakebeds cannot pull a border down.
+        float z = Math.max(scene.tile(wall.coords()).elevation() * BoardGeometry.LEVEL,
+              surfaces.apply(wall.coords()).highestTop());
+        for (Coords coords : point.equals(wall.a()) ? wall.aNeighbors() : wall.bNeighbors()) {
             BoardScene.Tile neighbor = scene.tile(coords);
-            if (neighbor != null && BoardGeometry.contains(coords, world.x, world.y)) {
-                level = top ? Math.max(level, neighbor.elevation()) : Math.min(level, neighbor.elevation());
+            if (neighbor != null) {
+                float neighborZ = Math.max(neighbor.elevation() * BoardGeometry.LEVEL, surfaces.apply(coords).highestTop());
+                z = top ? Math.max(z, neighborZ) : Math.min(z, neighborZ);
             }
         }
-        world.z = (level + (top ? wall.height() : 0)) * BoardGeometry.LEVEL + WALL_CLEARANCE * BoardGeometry.HEX_SCALE;
+        world.z = z + (top ? wall.height() * BoardGeometry.LEVEL : 0) + WALL_CLEARANCE * BoardGeometry.HEX_SCALE;
         return world;
     }
 
@@ -221,8 +282,8 @@ final class BoardTacticalGeometry {
         return result;
     }
 
-    /** One drape/wall invocation owns its scratch vertices; emitted triangles always own separate vertices. */
-    private static final class Clipper {
+    /** One geometry rebuild owns its scratch vertices; emitted triangles always own separate vertices. */
+    static final class Clipper {
         // Two convex triangles intersect in at most six corners; spare entries also retain boundary duplicates.
         private final Vector3[] first = vertices(), second = vertices();
         private Triangle triangle;

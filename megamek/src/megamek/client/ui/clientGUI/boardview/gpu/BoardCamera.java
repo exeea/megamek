@@ -79,6 +79,10 @@ final class BoardCamera {
     private int framedCount;
     private float framedWidth, framedLeft, framedViewportWidth, framedHeight;
     private int framedGeometry;
+    /** Render-owned height limits of the immutable tile snapshot, shared by successive camera positions. */
+    private List<BoardScene.Tile> visibleTiles;
+    private int visibleGeometry = -1;
+    private float visibleLow, visibleHigh;
 
     BoardCamera() {
         camera.near = 1;
@@ -787,11 +791,15 @@ final class BoardCamera {
 
     /** Bounds of the camera's rays at both terrain height extremes, in board hex coordinates. */
     Rectangle visibleArea(BoardScene scene) {
-        float low = BoardGeometry.floor(scene);
-        float high = scene.tiles().stream().mapToInt(BoardScene.Tile::elevation).max().orElse(0) * BoardGeometry.LEVEL;
+        if (visibleTiles != scene.tiles() || visibleGeometry != BoardGeometry.revision()) {
+            visibleLow = BoardGeometry.floor(scene);
+            visibleHigh = scene.tiles().stream().mapToInt(BoardScene.Tile::elevation).max().orElse(0) * BoardGeometry.LEVEL;
+            visibleTiles = scene.tiles();
+            visibleGeometry = BoardGeometry.revision();
+        }
         BoundingBox bounds = viewportBounds(camera, new BoundingBox(
-              new Vector3(-BoardGeometry.WIDTH, -(scene.height() + 1) * BoardGeometry.HEIGHT, low),
-              new Vector3((scene.width() + 1) * BoardGeometry.WIDTH * .75f, BoardGeometry.HEIGHT, high)));
+              new Vector3(-BoardGeometry.WIDTH, -(scene.height() + 1) * BoardGeometry.HEIGHT, visibleLow),
+              new Vector3((scene.width() + 1) * BoardGeometry.WIDTH * .75f, BoardGeometry.HEIGHT, visibleHigh)));
         int left = Math.max(0, (int) Math.floor(bounds.min.x / (BoardGeometry.WIDTH * 0.75f)) - 2);
         int top = Math.max(0, (int) Math.floor(-bounds.max.y / BoardGeometry.HEIGHT) - 2);
         int rightHex = Math.min(scene.width(), (int) Math.ceil(bounds.max.x / (BoardGeometry.WIDTH * 0.75f)) + 2);

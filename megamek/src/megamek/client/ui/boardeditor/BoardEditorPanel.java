@@ -2427,7 +2427,7 @@ public class BoardEditorPanel extends JPanel
 
     /** The elevation shortcut and its preview share the current brush and only-on-clear filter. Runs on Swing. */
     public List<Coords> elevationBrush(Coords center) {
-        if (center == null || !board.contains(center) || shouldIgnoreHotKeys()) {
+        if (center == null || !board.contains(center) || isEditingBlocked()) {
             return List.of();
         }
         return getBrushCoords(center).stream()
@@ -2500,13 +2500,17 @@ public class BoardEditorPanel extends JPanel
      * @return whether hot keys should be ignored or not
      */
     public boolean shouldIgnoreHotKeys() {
-        return ignoreHotKeys ||
-              UIUtil.isModalDialogDisplayed() ||
-              ((help != null) && help.isVisible()) ||
-              ((settingsDialog != null) && settingsDialog.isVisible()) ||
+        return isEditingBlocked() ||
               texElev.hasFocus() ||
               texTerrainLevel.hasFocus() ||
               texTerrExits.hasFocus();
+    }
+
+    /** Pointer edits over the native map remain available while a tools text field has keyboard focus. */
+    private boolean isEditingBlocked() {
+        return ignoreHotKeys || UIUtil.isModalDialogDisplayed() ||
+              ((help != null) && help.isVisible()) ||
+              ((settingsDialog != null) && settingsDialog.isVisible());
     }
 
     private void setDialogSize(JFileChooser dialog) {

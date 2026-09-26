@@ -11,8 +11,116 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 class BoardWaterSlopeTest {
+    @ParameterizedTest
+    @CsvSource({ "2500, 10000", "1, 10000", "1, 1" })
+    void descendingWaterReachesTheCliffFaceAboveItsBed(int fullDetail, int mediumDetail) {
+        var original = BoardRelief.tuning();
+        try {
+            var t = original;
+            BoardRelief.tune(new BoardRelief.Tuning(t.shoreShift(), t.shoreRoom(), t.shoreReach(), t.shoreNarrow(),
+                  t.shoreHard(), t.shorePool(), t.shoreIsle(), t.shoreBlend(), t.shoreWander(), t.wanderCell(),
+                  t.shoreSpread(), t.landKeep(), t.shoreLip(), t.transition(), fullDetail, mediumDetail,
+                  t.riverWidth(), true));
+            Coords high = new Coords(3, 3);
+            for (int direction = 0; direction < 6; direction++) {
+                Coords low = high.translated(direction);
+                BoardScene scene = scene(Map.of(high, 2, low, 0), Map.of(high, 1, low, 1));
+                assertCliffContact(scene, low);
+            }
+            assertCliffContact(GpuRiverTerrainSmokeTest.mapScene(BoardScene.Surface.SAND), new Coords(9, 9));
+            BoardScene pools = BoardWetCliffTest.mixedDepthScene();
+            for (var tile : pools.tiles()) {
+                if (tile.liquid().present()) { assertCliffContact(pools, tile.coords()); }
+            }
+        } finally {
+            BoardRelief.tune(original);
+        }
+    }
+
+    private static void assertCliffContact(BoardScene scene, Coords coords) {
+        BoardSurface surface = new BoardSurface(scene, scene.tile(coords));
+        for (var face : surface.waterFaces) {
+            Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
+            assertTrue(normal.z >= -.001f, "Extending the water to the cliff must not fold the surface: " + coords
+                  + ", normal=" + normal + ", face=" + face);
+        }
+        for (int edge = 0; edge < 6; edge++) {
+            if (!surface.relief.wetCliff(edge)) { continue; }
+            var land = scene.tile(coords.translated(BoardGeometry.edgeDirection(edge)));
+            var cliff = new BoardSurface(scene, land);
+            int opposite = (edge + 3) % 6;
+            var walls = new ArrayList<>(cliff.walls(scene, -100).stream()
+                  .filter(f -> f.landEdge() == opposite).toList());
+            final int cliffEdge = edge;
+            walls.addAll(surface.faces.stream().filter(f -> f.finish() == BoardSurface.Finish.WALL
+                  && f.landEdge() == cliffEdge).toList());
+            List<Vector3> boundary = surface.waterBoundary(edge);
+            List<Vector3> samples = new ArrayList<>(boundary.subList(1, boundary.size() - 1));
+            for (int i = 0; i < boundary.size() - 1; i++) {
+                Vector3 a = boundary.get(i), b = boundary.get(i + 1);
+                if (a.z < surface.tile.elevation() * BoardGeometry.LEVEL && Math.abs(a.z - b.z) < .0001f) {
+                    samples.add(new Vector3(a).lerp(b, .5f));
+                }
+            }
+            for (Vector3 p : samples) {
+                float distance = Float.POSITIVE_INFINITY;
+                for (var face : walls) {
+                    distance = Math.min(distance, distanceToFace(p, face));
+                }
+                assertTrue(distance < .04f, "Water must touch the drawn cliff, not stop at the bed's inset: "
+                      + coords + ", edge=" + edge + ", sample=" + p + ", gap=" + distance);
+            }
+        }
+    }
+
+    /** A normal projection avoids grazing-ray misses at the refined contour's wall-edge vertices. */
+    private static float distanceToFace(Vector3 point, BoardSurface.Face face) {
+        Vector3 ab = new Vector3(face.b()).sub(face.a()), ac = new Vector3(face.c()).sub(face.a());
+        Vector3 ap = new Vector3(point).sub(face.a());
+        float aa = ab.dot(ab), bb = ac.dot(ac), cross = ab.dot(ac), pa = ap.dot(ab), pb = ap.dot(ac);
+        float determinant = aa * bb - cross * cross;
+        if (determinant < 1e-8f) { return Float.POSITIVE_INFINITY; }
+        float u = (bb * pa - cross * pb) / determinant, v = (aa * pb - cross * pa) / determinant;
+        if (u < -.0001f || v < -.0001f || u + v > 1.0001f) { return Float.POSITIVE_INFINITY; }
+        return Math.abs(ab.crs(ac).nor().dot(ap));
+    }
+
+    @Test
+    void aDescendingStreamKeepsItsRoundedBulgeBetweenSofterBanks() {
+        Coords high = new Coords(3, 3);
+        for (int drop : new int[] { 1, 2 }) {
+            for (int direction = 0; direction < 6; direction++) {
+                Coords low = high.translated(direction), upstream = high.translated((direction + 3) % 6);
+                Coords downstream = low.translated(direction);
+                BoardScene scene = scene(Map.of(upstream, drop, high, drop, low, 0, downstream, 0),
+                      Map.of(upstream, 1, high, 1, low, 1, downstream, 1));
+                BoardSurface a = new BoardSurface(scene, scene.tile(high)), b = new BoardSurface(scene, scene.tile(low));
+                Vector3 from = BoardGeometry.center(high, 0), to = BoardGeometry.center(low, 0);
+                Vector3 across = new Vector3(-(to.y - from.y), to.x - from.x, 0).scl(.2f);
+                for (float along : new float[] { .3f, .4f, .6f, .7f }) {
+                    BoardSurface surface = along < .5f ? a : b;
+                    Vector3 middle = new Vector3(from).lerp(to, along);
+                    float level = surface.waterHeight(middle.x, middle.y);
+                    for (int side : new int[] { -1, 1 }) {
+                        Vector3 point = new Vector3(middle).mulAdd(across, side);
+                        float height = BoardSurface.sampleHeight(surface.waterFaces, point.x, point.y, Float.NaN);
+                        assertTrue(Float.isFinite(height), "The sample must be inside the channel");
+                        assertEquals(level, height, .20f * drop * BoardGeometry.LEVEL,
+                              "Limit bank shoulders: drop=" + drop + ", direction=" + direction + ", at=" + along);
+                        if (along == .7f) {
+                            assertTrue(level - height > .06f * drop * BoardGeometry.LEVEL,
+                                  "The descending water must retain its rounded central bulge, direction=" + direction);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     @Test
     void oneAndTwoLevelStreamsShareSlopingWaterAndBedsRegardlessOfDepth() {
         Coords high = new Coords(3, 3);

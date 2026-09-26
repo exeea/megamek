@@ -70,9 +70,14 @@ final class UnitGroundContact {
                         || UnitAnimator.hullDown(unit))) { continue; }
             var frame = new Matrix4(instance.transform).mul(body.root.globalTransform);
             var center = new Vector3(0, 0, body.bounds.min.z).mul(frame);
-            float ground = UnitLandingSupports.ground(scene, center.x, center.y, surfaces);
+            float ground = UnitLandingSupports.terrain(scene, center.x, center.y, surfaces);
             // A roof, bridge, airborne elevation or unmodelled cliff step is not this unit's ground plane.
             if (!Float.isFinite(ground) || Math.abs(center.z - ground) > 2 * BoardGeometry.HEX_SCALE) { continue; }
+            if (body.rig.trooper() && !member.moving() && motion.boarding() == null
+                  && standOnRough(body, scene, unit)) {
+                changed = true;
+                continue;
+            }
             float span = Math.max(2, Math.min(body.bounds.getWidth(), body.bounds.getHeight()) * .3f);
             float dx = difference(scene, frame, new Vector3(span, 0, 0));
             float dy = difference(scene, frame, new Vector3(0, span, 0));
@@ -86,7 +91,7 @@ final class UnitGroundContact {
             float lift = Float.NEGATIVE_INFINITY;
             for (var contact : body.contacts) {
                 var point = new Vector3(contact.point).mul(contact.node.globalTransform).mul(instance.transform);
-                float surface = UnitLandingSupports.ground(scene, point.x, point.y, surfaces);
+                float surface = UnitLandingSupports.terrain(scene, point.x, point.y, surfaces);
                 if (Float.isFinite(surface)) { lift = Math.max(lift, surface - point.z); }
             }
             if (Float.isFinite(lift) && Math.abs(lift) <= BoardGeometry.LEVEL) {
@@ -103,6 +108,25 @@ final class UnitGroundContact {
     private float difference(BoardScene scene, Matrix4 frame, Vector3 offset) {
         var plus = new Vector3(offset).mul(frame);
         var minus = new Vector3(offset).scl(-1).mul(frame);
-        return UnitLandingSupports.ground(scene, plus.x, plus.y, surfaces) - UnitLandingSupports.ground(scene, minus.x, minus.y, surfaces);
+        return UnitLandingSupports.terrain(scene, plus.x, plus.y, surfaces) - UnitLandingSupports.terrain(scene, minus.x, minus.y, surfaces);
+    }
+
+    /** After the formation sought a gap, stand upright on any boulder left underfoot rather than moving off a rim. */
+    private boolean standOnRough(Body body, BoardScene scene, BoardScene.Unit unit) {
+        var tile = scene.tile(unit.location().coords());
+        if (tile == null || surfaces.get(scene, tile).rough.isEmpty()) { return false; }
+        float lift = Float.NEGATIVE_INFINITY;
+        for (var contact : body.contacts) {
+            Vector3 point = new Vector3(contact.point).mul(contact.node.globalTransform).mul(instance.transform);
+            float height = UnitLandingSupports.ground(scene, point.x, point.y, surfaces);
+            if (Float.isFinite(height)) { lift = Math.max(lift, height - point.z); }
+        }
+        if (!Float.isFinite(lift) || lift <= .001f || lift > BoardGeometry.LEVEL) { return false; }
+        float parentUp = body.root.getParent() == null ? instance.transform.getScaleZ()
+              : new Vector3(Vector3.Z).rot(body.root.getParent().globalTransform).rot(instance.transform).z;
+        if (parentUp <= .0001f) { return false; }
+        body.root.translation.z += lift / parentUp;
+        instance.calculateTransforms();
+        return true;
     }
 }

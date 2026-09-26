@@ -66,7 +66,7 @@ class GpuSelectionPlaybackTest {
     void selectionBobsSmoothlyAboveItsPlaneAndReturnsAfterTheConfiguredPeriod() {
         float period = GpuBattleView.SELECTION_BOB_PERIOD_SECONDS;
         float height = GpuBattleView.SELECTION_BOB_HEIGHT_LEVELS * BoardGeometry.LEVEL;
-        float offset = GpuBattleView.SELECTION_BOB_HEIGHT_OFFSET;
+        float offset = GpuBattleView.SELECTION_BOB_HEIGHT_OFFSET * BoardGeometry.LEVEL;
         assertEquals(offset, GpuBattleView.selectionBob(0), .001f);
         assertEquals(offset + height, GpuBattleView.selectionBob(period / 2), .001f);
         assertEquals(offset, GpuBattleView.selectionBob(period), .001f);

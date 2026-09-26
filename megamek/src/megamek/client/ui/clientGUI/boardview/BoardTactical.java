@@ -47,8 +47,26 @@ public record BoardTactical(List<Fill> fills, List<Label> labels, List<Wall> wal
     public record Point(float x, float y) { }
 
     /** A straight upright segment anchored to its hex's surface; height is in board elevation levels. */
-    public record Wall(Coords coords, Point a, Point b, float height, int argb, Outline outline, float outlineDistance,
-          Playback playback) { }
+    public record Wall(Coords coords, Point a, Point b, BoardRangeBorder border, float outlineDistance, Playback playback,
+          List<Coords> aNeighbors, List<Coords> bNeighbors) {
+        public Wall {
+            aNeighbors = List.copyOf(aNeighbors);
+            bNeighbors = List.copyOf(bNeighbors);
+        }
+
+        public Wall(Coords coords, Point a, Point b, BoardRangeBorder border, float outlineDistance, Playback playback) {
+            this(coords, a, b, border, outlineDistance, playback, List.of(), List.of());
+        }
+
+        public Wall(Coords coords, Point a, Point b, float height, int argb, Outline outline, float outlineDistance,
+              Playback playback) {
+            this(coords, a, b, new BoardRangeBorder(height, argb, outline), outlineDistance, playback);
+        }
+
+        public float height() { return border.height(); }
+        public int argb() { return border.argb(); }
+        public Outline outline() { return border.outline(); }
+    }
 
     /** BasicStroke is immutable; retain the existing painter's line width and dash pattern. */
     public record Outline(int argb, BasicStroke stroke) { }
@@ -59,9 +77,20 @@ public record BoardTactical(List<Fill> fills, List<Label> labels, List<Wall> wal
         }
     }
 
-    public record Fill(List<Contour> contours, int winding, int argb, Playback playback) {
+    /** Anchor is the transformed hex center in board pixels; captured contours remain the generic fallback. */
+    public record HexBorder(Point anchor, double padding, double width, float scale, boolean floating, boolean zone) {
+        public HexBorder(Point anchor, double padding, double width, float scale, boolean floating) {
+            this(anchor, padding, width, scale, floating, false);
+        }
+    }
+
+    public record Fill(List<Contour> contours, int winding, int argb, Playback playback, HexBorder border) {
         public Fill(List<Contour> contours, int winding, int argb) {
             this(contours, winding, argb, Playback.LIVE);
+        }
+
+        public Fill(List<Contour> contours, int winding, int argb, Playback playback) {
+            this(contours, winding, argb, playback, null);
         }
 
         public Fill {

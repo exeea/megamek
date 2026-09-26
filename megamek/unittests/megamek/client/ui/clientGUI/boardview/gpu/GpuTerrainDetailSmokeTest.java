@@ -8,11 +8,13 @@ import java.nio.file.Files;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicReference;
+import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
+import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -24,6 +26,7 @@ class GpuTerrainDetailSmokeTest {
     void capturesMixedBanksAndRoughAcrossMaterials() throws Exception {
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "terrain-detail");
         Files.createDirectories(output.toPath());
+        BoardScene canyon = shortCanyon();
         AtomicReference<Throwable> failure = new AtomicReference<>();
         var original = BoardGeometry.tuning();
         var config = GpuBoardWindow.configuration(false);
@@ -46,7 +49,15 @@ class GpuTerrainDetailSmokeTest {
                     for (var family : BoardScene.Surface.values()) {
                         capture(BoardTerrainDetailTest.rough(family), "rough-" + family.name().toLowerCase(Locale.ROOT),
                               new Coords(2, 2), 1, .34f, terrain, frame, camera);
+                        if (family == BoardScene.Surface.SNOW || family == BoardScene.Surface.GRASS || family == BoardScene.Surface.SAND) {
+                            for (int elevation : new int[] { -3, -1, 1, 3 }) {
+                                capture(BoardTerrainDetailTest.isolatedRough(family, elevation),
+                                      "isolated-" + family.name().toLowerCase(Locale.ROOT) + "-" + elevation,
+                                      new Coords(2, 2), Math.max(0, elevation), .17f, terrain, frame, camera);
+                            }
+                        }
                     }
+                    capture(canyon, "short-canyon-rough", new Coords(5, 11), 0, .20f, terrain, frame, camera);
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) {
                     failure.set(error);
@@ -72,5 +83,18 @@ class GpuTerrainDetailSmokeTest {
             }
         }, config);
         if (failure.get() != null) { throw new AssertionError("Terrain detail review", failure.get()); }
+    }
+
+    private static BoardScene shortCanyon() throws Exception {
+        Board board = new Board();
+        board.load(new File("data/boards/unofficial/Carpe Mortis/16x17 Short Canyon.board"));
+        var scene = new AtomicReference<BoardScene>();
+        try (var fixture = GpuBoardFixture.create(board)) {
+            SwingUtilities.invokeAndWait(() -> {
+                fixture.source.refresh();
+                scene.set(fixture.source.takeFrame().scene());
+            });
+        }
+        return scene.get();
     }
 }

@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -10,6 +11,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.Hex;
 import megamek.common.board.Board;
@@ -20,9 +22,13 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 /** Shared cliff corners, rims and feet on the shipped map, including the artwork-covered bunker. */
 class BoardCliffSeamTest {
-    private static BoardScene commCenter() {
+    private static BoardScene scene(String path) {
+        return scene(new File("data/boards/" + path));
+    }
+
+    static BoardScene scene(File file) {
         Board board = new Board();
-        board.load(new File("data/boards/GrassLands/16x17 Grasslands River CommCenter.board"));
+        board.load(file);
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < board.getWidth(); x++) {
             for (int y = 0; y < board.getHeight(); y++) {
@@ -46,8 +52,85 @@ class BoardCliffSeamTest {
         BoardSculptTest.withTransitions(transitions, BoardCliffSeamTest::checkBoundaries);
     }
 
+    @ParameterizedTest(name = "mixed depths {0}")
+    @ValueSource(booleans = { false, true })
+    void submergedCliffsJoinBothTheRiverbedAndOrdinaryBanks(boolean mixedDepths) throws Exception {
+        var original = BoardRelief.tuning();
+        try {
+            BoardWetCliffTest.tune(true);
+            BoardScene scene = mixedDepths ? BoardWetCliffTest.mixedDepthScene()
+                  : scene("Map Pack Savannahs/16x17 Mountain Lake (Savannah).board");
+            Map<Segment, Integer> joined = new HashMap<>();
+            List<BoardSurface.Face> submerged = new ArrayList<>();
+            Map<String, List<BoardSurface.Face>> upper = new HashMap<>();
+            Coords center = mixedDepths ? new Coords(4, 3) : new Coords(8, 14);
+            for (var tile : scene.tiles()) {
+                if (tile.coords().distance(center) > 3) { continue; }
+                var surface = new BoardSurface(scene, tile);
+                countEdges(joined, surface.faces);
+                var walls = surface.walls(scene, BoardGeometry.floor(scene));
+                countEdges(joined, walls);
+                if (tile.coords().distance(center) <= 1 && tile.liquid().present()) {
+                    checkSubmergedShading(surface);
+                    submerged.addAll(surface.faces.stream()
+                          .filter(face -> face.finish() == BoardSurface.Finish.WALL).toList());
+                    for (var face : surface.faces) {
+                        if (face.finish() != BoardSurface.Finish.TOP) { continue; }
+                        for (var p : List.of(face.a(), face.b(), face.c())) {
+                            assertEquals(BoardRelief.Kind.GROUND, surface.relief.shade(p).kind(),
+                                  "A bank touching the cliff must retain its own ground material: " + p);
+                        }
+                    }
+                } else if (!tile.liquid().present()) {
+                    for (var face : walls) {
+                        if (face.landEdge() < 0) { continue; }
+                        var next = scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(face.landEdge())));
+                        if (next != null && next.liquid().present() && next.coords().distance(center) <= 1) {
+                            upper.computeIfAbsent(tile.coords() + " edge " + face.landEdge(), key -> new ArrayList<>())
+                                  .add(face);
+                        }
+                    }
+                }
+            }
+            Map<Segment, Integer> boundary = new HashMap<>();
+            countEdges(boundary, submerged);
+            assertFalse(boundary.isEmpty());
+            assertJoined(boundary, joined, "Submerged cliff");
+            for (var entry : upper.entrySet()) {
+                Map<Segment, Integer> edge = new HashMap<>();
+                countEdges(edge, entry.getValue());
+                assertJoined(edge, joined, entry.getKey());
+            }
+        } finally {
+            BoardRelief.tune(original);
+        }
+    }
+
+    private static void checkSubmergedShading(BoardSurface surface) throws Exception {
+        var encode = GpuTerrain.class.getDeclaredMethod("sculptVertex", Vector3.class, BoardRelief.Shade.class,
+              float.class, BoardSurface.class);
+        encode.setAccessible(true);
+        for (var face : surface.faces) {
+            for (var point : List.of(face.a(), face.b(), face.c())) {
+                var shade = surface.relief.shade(point);
+                if (shade == null || point.z >= BoardGeometry.waterZ(surface.tile)) { continue; }
+                boolean rock = shade.kind() == BoardRelief.Kind.ROCK;
+                if (!rock && shade.kind() != BoardRelief.Kind.GROUND && shade.kind() != BoardRelief.Kind.SUBMERGED_CLIFF) { continue; }
+                var vertex = (MeshPartBuilder.VertexInfo) encode.invoke(null, point, shade, 0f, surface);
+                int packed = Float.floatToRawIntBits(vertex.color.toFloatBits());
+                int blue = packed >>> 16 & 255;
+                assertTrue((packed >>> 24 & 255) < 64 && (rock ? blue >= 224 && blue < 255 : blue < 32),
+                      "Submerged rock and bank vertices must both enable the water optics: " + point);
+                float waterLevel = (packed >>> 8 & 255) - 64 + (rock ? (blue - 224) / 30f : blue * (8f / 255));
+                assertEquals(BoardGeometry.waterZ(surface.tile),
+                      waterLevel * BoardGeometry.LEVEL - BoardGeometry.HEX_SCALE, .01f,
+                      "The bank and cliff must share the real water level, not their own submerged height: " + point);
+            }
+        }
+    }
+
     private static void checkBoundaries() {
-        BoardScene scene = commCenter();
+        BoardScene scene = scene("GrassLands/16x17 Grasslands River CommCenter.board");
         float floor = BoardGeometry.floor(scene);
         Map<Segment, Integer> joined = new HashMap<>();
         Map<Coords, List<BoardSurface.Face>> cliffs = new HashMap<>();
@@ -71,14 +154,18 @@ class BoardCliffSeamTest {
                 Map<Segment, Integer> boundary = new HashMap<>();
                 countEdges(boundary, cliff.getValue().stream().filter(face -> face.landEdge() == edge).toList());
                 assertFalse(boundary.isEmpty(), "The exposed cliff must exist");
-                List<Segment> open = boundary.entrySet().stream()
-                      .filter(entry -> entry.getValue() == 1 && joined.get(entry.getKey()) < 2
-                            && !covered(entry.getKey(), joined, boundary))
-                      .map(Map.Entry::getKey).toList();
-                assertTrue(open.isEmpty(), cliff.getKey() + " edge " + edge
-                      + " must meet its adjoining cliff, rim and bank: " + open.stream().limit(5).toList());
+                assertJoined(boundary, joined, cliff.getKey() + " edge " + edge);
             }
         }
+    }
+
+    private static void assertJoined(Map<Segment, Integer> boundary, Map<Segment, Integer> joined, String label) {
+        List<Segment> open = boundary.entrySet().stream()
+              .filter(entry -> entry.getValue() == 1 && joined.get(entry.getKey()) < 2
+                    && !covered(entry.getKey(), joined, boundary))
+              .map(Map.Entry::getKey).toList();
+        assertTrue(open.isEmpty(), label + " must meet its adjoining cliff, rim and bank: "
+              + open.stream().limit(5).toList());
     }
 
     private record Point(long x, long y, long z) implements Comparable<Point> {

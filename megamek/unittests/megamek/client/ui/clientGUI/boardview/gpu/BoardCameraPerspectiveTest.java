@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -156,6 +157,62 @@ class BoardCameraPerspectiveTest {
         assertEquals(700 - 64, rightmost, .05f);
     }
 
+    @Test
+    void visibleAreaMatchesFreshHeightLimitsAfterTerrainAndBoardChanges() {
+        BoardScene flat = scene(40, 40, 0);
+        BoardScene raised = scene(40, 40, 20);
+        BoardScene lowered = scene(40, 40, -20);
+        BoardScene replacement = new BoardScene(1, 24, 60, scene(24, 60, 8).tiles(),
+              List.of(), List.of(), -1, "", List.of());
+        for (boolean perspective : new boolean[] { false, true }) {
+            BoardCamera cached = visibleCamera(perspective, 0);
+            var initial = cached.visibleArea(flat);
+            assertNotEquals(initial, visibleCamera(perspective, 0).visibleArea(raised),
+                  "The raised terrain must exercise different viewport limits");
+            int panSteps = 0;
+            for (BoardScene next : List.of(raised, lowered, replacement, flat)) {
+                for (int step = 0; step < 3; step++) {
+                    assertEquals(visibleCamera(perspective, panSteps).visibleArea(next), cached.visibleArea(next));
+                    cached.pan(40, -20);
+                    panSteps++;
+                }
+            }
+        }
+    }
+
+    @Test
+    void visibleAreaRefreshesHeightLimitsWhenGeometrySettingsChange() {
+        BoardGeometry.Tuning original = BoardGeometry.tuning();
+        try {
+            for (boolean perspective : new boolean[] { false, true }) {
+                BoardGeometry.tune(original);
+                BoardScene scene = scene(40, 40, 20);
+                BoardCamera cached = visibleCamera(perspective, 0);
+                var initial = cached.visibleArea(scene);
+                BoardGeometry.tune(new BoardGeometry.Tuning(original.hexScale(), original.unitScale(),
+                      original.unitHeightScale(), original.levelHeight() == 2 ? 18 : 2, original.gridShade(),
+                      original.multiHexUnitScale(), original.transitions(), original.padding()));
+                var expected = visibleCamera(perspective, 0).visibleArea(scene);
+                assertNotEquals(initial, expected, "The level-height change must alter the viewport limits");
+                assertEquals(expected, cached.visibleArea(scene));
+                BoardGeometry.terrainChanged();
+                assertEquals(visibleCamera(perspective, 0).visibleArea(scene), cached.visibleArea(scene));
+            }
+        } finally {
+            BoardGeometry.tune(original);
+        }
+    }
+
+    private static BoardCamera visibleCamera(boolean perspective, int panSteps) {
+        BoardCamera camera = camera();
+        camera.setPerspective(perspective);
+        camera.setIsometric(true);
+        camera.center(new Vector3(1500, -1500, 0));
+        // Repeat the same steps to keep accumulated camera arithmetic identical to the reused camera.
+        for (int step = 0; step < panSteps; step++) { camera.pan(40, -20); }
+        return camera;
+    }
+
     private static BoardCamera camera() {
         BoardCamera camera = new BoardCamera();
         camera.resize(1200, 800);
@@ -167,13 +224,17 @@ class BoardCameraPerspectiveTest {
     }
 
     private static BoardScene scene(int raisedLevel) {
+        return scene(5, 5, raisedLevel);
+    }
+
+    private static BoardScene scene(int width, int height, int raisedLevel) {
         List<BoardScene.Tile> tiles = new ArrayList<>();
-        for (int x = 0; x < 5; x++) {
-            for (int y = 0; y < 5; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), x == 2 && y == 2 ? raisedLevel : 0, -1, false, 0,
+        for (int x = 0; x < width; x++) {
+            for (int y = 0; y < height; y++) {
+                tiles.add(new BoardScene.Tile(new Coords(x, y), x == width / 2 && y == height / 2 ? raisedLevel : 0, -1, false, 0,
                       BoardScene.Surface.GRASS, null, null, null, List.of(), List.of()));
             }
         }
-        return new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of());
+        return new BoardScene(0, width, height, tiles, List.of(), List.of(), -1, "", List.of());
     }
 }

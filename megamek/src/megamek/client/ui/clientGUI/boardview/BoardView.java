@@ -1326,7 +1326,7 @@ public final class BoardView extends AbstractBoardView
         // A capture does not run drawHexes, which is where the deploying entity's legal deployment borders are
         // painted for the interactive board, so the captured layer carries them instead.
         if (!includeUnits && (en_Deployer != null)) {
-            BoardTacticalGraphics.draw(graphics2D, BoardTactical.Playback.HIDE_DURING_MOVEMENT, this::drawDeploymentBorders);
+            BoardTacticalGraphics.drawDeployment(graphics2D, this::drawDeploymentBorders);
         }
 
         // draw C3 links
@@ -1616,12 +1616,12 @@ public final class BoardView extends AbstractBoardView
             if (en_Deployer.getAltitude() > 0) {
                 // Flying Aeros are always above it all
                 if (!en_Deployer.isLocationProhibited(coords, boardId, board.getMaxElevation()) && !boardProhibited) {
-                    drawHexBorder(graphics2D, getHexLocation(coords), Color.yellow);
+                    drawHexBorder(graphics2D, getHexLocation(coords), Color.yellow, true);
                 }
             } else if (en_Deployer.getAltitude() == 0) {
                 // Show prospective Altitude 1+ hexes
                 if (!en_Deployer.isLocationProhibited(coords, boardId, 1) && !boardProhibited) {
-                    drawHexBorder(graphics2D, getHexLocation(coords), Color.cyan);
+                    drawHexBorder(graphics2D, getHexLocation(coords), Color.cyan, true);
                 }
             }
         } else if (isAirDeployGround || isWiGE) {
@@ -1630,7 +1630,7 @@ public final class BoardView extends AbstractBoardView
             // Default to Elevation 1 if ceiling + 1 <= 0.
             int maxHeight = (isWiGE) ? 1 : (hex != null) ? Math.max(hex.ceiling() + 1, 1) : 1;
             if (!en_Deployer.isLocationProhibited(coords, boardId, maxHeight) && !boardProhibited) {
-                drawHexBorder(graphics2D, getHexLocation(coords), Color.cyan);
+                drawHexBorder(graphics2D, getHexLocation(coords), Color.cyan, true);
             }
         } else if (en_Deployer instanceof AbstractBuildingEntity) {
             var deploymentHelper = new AllowedDeploymentHelper(en_Deployer, coords, board, board.getHex(coords), game);
@@ -1638,19 +1638,19 @@ public final class BoardView extends AbstractBoardView
             if (facingOption != null && facingOption.hasValidFacings()) {
                 // Draw hexes that're legal if we rotate
                 if (!boardProhibited) {
-                    drawHexBorder(graphics2D, getHexLocation(coords), Color.yellow);
+                    drawHexBorder(graphics2D, getHexLocation(coords), Color.yellow, true);
                 }
             }
         }
 
         if (!en_Deployer.isLocationProhibited(BoardLocation.of(coords, boardId)) && !boardProhibited) {
             // Draw hexes that are legal at lowest deployment elevation
-            drawHexBorder(graphics2D, getHexLocation(coords), Color.yellow);
+            drawHexBorder(graphics2D, getHexLocation(coords), Color.yellow, true);
         }
 
         if (!en_Deployer.isLocationProhibited(BoardLocation.of(coords, boardId))
               && en_Deployer.isLocationDeadly(coords)) {
-            drawHexBorder(graphics2D, getHexLocation(coords), GUIP.getWarningColor());
+            drawHexBorder(graphics2D, getHexLocation(coords), GUIP.getWarningColor(), true);
         }
     }
 
@@ -1721,7 +1721,7 @@ public final class BoardView extends AbstractBoardView
                               getHexLocation(coords),
                               playerColor,
                               (bThickness + 2) * pCount,
-                              bThickness);
+                              bThickness, true);
                         pCount++;
                     }
                 }
@@ -1789,7 +1789,16 @@ public final class BoardView extends AbstractBoardView
     }
 
     public void drawHexBorder(Graphics2D graphics2D, Point point, Color col, double pad, double lineWidth) {
+        drawHexBorder(graphics2D, point, col, pad, lineWidth, false);
+    }
+
+    private void drawHexBorder(Graphics2D graphics2D, Point point, Color col, double pad, double lineWidth,
+          boolean floating) {
         graphics2D.setColor(col);
+        if (graphics2D instanceof BoardTacticalGraphics tactical) {
+            tactical.fillHexBorder(point, scale, pad, lineWidth, floating);
+            return;
+        }
         graphics2D.fill(AffineTransform.getTranslateInstance(point.x, point.y)
               .createTransformedShape(AffineTransform.getScaleInstance(scale, scale)
                     .createTransformedShape(HexDrawUtilities.getHexFullBorderArea(lineWidth, pad))));
@@ -1800,6 +1809,10 @@ public final class BoardView extends AbstractBoardView
      */
     private void drawHexBorder(Graphics2D graphics2D, Point point, Color color) {
         drawHexBorder(graphics2D, point, color, 0, 1);
+    }
+
+    private void drawHexBorder(Graphics2D graphics2D, Point point, Color color, boolean floating) {
+        drawHexBorder(graphics2D, point, color, 0, 1, floating);
     }
 
     /**
@@ -4845,6 +4858,20 @@ public final class BoardView extends AbstractBoardView
     private BufferedImage planarChunkImage;
     private final AtomicLong planarRevision = new AtomicLong();
 
+    /** Swing-owned painter output only. Rules and colors are still read from the client on every capture. */
+    private record HexOverlayStyle(Color ecm, Color eccm, Color ecmCenter, Color eccmCenter, boolean embedded) {
+        boolean empty() {
+            return ecm == null && eccm == null && ecmCenter == null && eccmCenter == null && !embedded;
+        }
+    }
+    private record CapturedHexOverlay(HexOverlayStyle style, BoardTactical geometry) { }
+    private final Map<Coords, CapturedHexOverlay> capturedHexOverlays = new HashMap<>();
+    private final Map<Coords, BoardTactical> capturedSheetBorders = new HashMap<>();
+    private Board capturedOverlayBoard;
+    private Rectangle capturedOverlayClip;
+    private Color capturedSheetColor;
+    private BoardTactical capturedTacticalGeometry = BoardTactical.EMPTY;
+
     void invalidatePlanarCapture() {
         if (!gpuCapture || !SwingUtilities.isEventDispatchThread()) {
             planarRevision.incrementAndGet();
@@ -4861,6 +4888,16 @@ public final class BoardView extends AbstractBoardView
         planarHexImageCache.clear();
         groundArtwork.clear();
         featureArtwork.clear();
+        clearCapturedHexOverlays();
+        capturedTacticalGeometry = BoardTactical.EMPTY;
+    }
+
+    private void clearCapturedHexOverlays() {
+        capturedHexOverlays.clear();
+        capturedSheetBorders.clear();
+        capturedOverlayBoard = null;
+        capturedOverlayClip = null;
+        capturedSheetColor = null;
     }
 
     /** Immutable navigation intent from the client; a unit request retains its identity even in a stacked hex. */
@@ -5167,7 +5204,12 @@ public final class BoardView extends AbstractBoardView
             }
             drawSprites(graphics, behindTerrainHexSprites);
             drawTacticalLayers(graphics, false);
-            return graphics.snapshot();
+            BoardTactical captured = graphics.snapshot();
+            // Compare on Swing after evaluating every painter, keeping unchanged snapshots cheap on the GL thread.
+            if (!captured.equals(capturedTacticalGeometry)) {
+                capturedTacticalGeometry = captured;
+            }
+            return capturedTacticalGeometry;
         } finally {
             graphics.dispose();
             scale = originalScale;
@@ -6836,6 +6878,17 @@ public final class BoardView extends AbstractBoardView
     /** Capture only affected hexes, in stable order, using the same painters as the classic board. */
     private void captureHexOverlays(BoardTacticalGraphics graphics) {
         Board board = getBoard();
+        Rectangle clip = graphics.getClipBounds();
+        if (capturedOverlayBoard != board || !clip.equals(capturedOverlayClip)) {
+            clearCapturedHexOverlays();
+            capturedOverlayBoard = board;
+            capturedOverlayClip = clip;
+        }
+        Color sheetColor = GUIP.getShowMapSheets() ? GUIP.getMapsheetColor() : null;
+        if (!Objects.equals(sheetColor, capturedSheetColor)) {
+            capturedSheetBorders.clear();
+            capturedSheetColor = sheetColor;
+        }
         Set<Coords> marked = new TreeSet<>(Comparator.comparingInt(Coords::getX).thenComparingInt(Coords::getY));
         marked.addAll(board.embeddedBoardCoords());
         for (Map<Coords, Color> colors : Arrays.asList(ecmHexes, eccmHexes, ecmCenters, eccmCenters)) {
@@ -6853,28 +6906,52 @@ public final class BoardView extends AbstractBoardView
             }
         }
         marked.removeIf(coords -> !board.contains(coords));
-        for (Coords coords : marked) {
-            Graphics2D local = BoardTacticalGraphics.at(graphics, getHexLocation(coords));
-            try {
-                BoardTacticalGraphics.draw(local, BoardTactical.Playback.HOLD_DURING_PLAYBACK,
-                      layer -> drawElectronicWarfare(layer, coords));
-                if (board.embeddedBoardCoords().contains(coords)) {
-                    drawEmbeddedBoard(local);
-                }
-            } finally {
-                local.dispose();
-            }
-        }
-        if (GUIP.getShowMapSheets()) {
-            // Shared edges cross into both hexes; all coverage fills must be below the borders.
+        capturedHexOverlays.keySet().retainAll(marked);
+        capturedSheetBorders.keySet().retainAll(marked);
+        BoardTacticalGraphics scratch = new BoardTacticalGraphics();
+        scratch.setClip(clip);
+        UIUtil.setHighQualityRendering(scratch);
+        try {
             for (Coords coords : marked) {
-                Graphics2D local = BoardTacticalGraphics.at(graphics, getHexLocation(coords));
-                try {
-                    drawMapSheetBorders(local, coords);
-                } finally {
-                    local.dispose();
+                HexOverlayStyle style = new HexOverlayStyle(colorAt(ecmHexes, coords), colorAt(eccmHexes, coords),
+                      colorAt(ecmCenters, coords), colorAt(eccmCenters, coords), board.embeddedBoardCoords().contains(coords));
+                if (style.empty()) {
+                    capturedHexOverlays.remove(coords);
+                    continue;
+                }
+                CapturedHexOverlay previous = capturedHexOverlays.get(coords);
+                if (previous == null || !previous.style().equals(style)) {
+                    BoardTactical captured = captureHexOverlay(scratch, coords, local -> {
+                        BoardTacticalGraphics.draw(local, BoardTactical.Playback.HOLD_DURING_PLAYBACK,
+                              layer -> drawElectronicWarfare(layer, coords));
+                        if (style.embedded()) {
+                            drawEmbeddedBoard(local);
+                        }
+                    });
+                    previous = new CapturedHexOverlay(style, captured);
+                    capturedHexOverlays.put(coords, previous);
+                }
+                graphics.append(previous.geometry());
+            }
+            if (GUIP.getShowMapSheets()) {
+                // Shared edges cross into both hexes; all coverage fills must be below the borders.
+                for (Coords coords : marked) {
+                    graphics.append(capturedSheetBorders.computeIfAbsent(coords,
+                          key -> captureHexOverlay(scratch, key, local -> drawMapSheetBorders(local, key))));
                 }
             }
+        } finally {
+            scratch.dispose();
+        }
+    }
+
+    private BoardTactical captureHexOverlay(BoardTacticalGraphics captured, Coords coords, Consumer<Graphics2D> painter) {
+        Graphics2D local = BoardTacticalGraphics.at(captured, getHexLocation(coords));
+        try {
+            painter.accept(local);
+            return captured.takeSnapshot();
+        } finally {
+            local.dispose();
         }
     }
 

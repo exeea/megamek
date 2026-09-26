@@ -26,6 +26,23 @@ import org.junit.jupiter.api.Test;
 
 class InfantryFootprintTest {
     @Test
+    void roughFootingFindsAGapButNeverPushesAFullPlateauOverItsEdge() {
+        var bounds = new BoundingBox(new Vector3(-2, -2, 0), new Vector3(2, 2, 8));
+        var outline = InfantryFootprint.outline(bounds, 0, true);
+        var rock = new Polygon(new float[] { -8, -8, 8, -8, 8, 8, -8, 8 });
+        var start = new Vector3(0, 0, 7);
+        assertTrue(InfantryFootprint.avoidRough(start, outline, List.of(rock), 1, InfantryFootprint.NO_STEPS));
+        assertFalse(Intersector.overlapConvexPolygons(outline, rock));
+        assertTrue(inside(start, bounds, 0, 1, InfantryFootprint.NO_STEPS));
+        assertEquals(7, start.z);
+        var occupied = new Polygon(new float[] { -100, -100, 100, -100, 100, 100, -100, 100 });
+        var original = new Vector3(0, 0, 7);
+        start.set(original);
+        assertFalse(InfantryFootprint.avoidRough(start, outline, List.of(occupied), 1, InfantryFootprint.NO_STEPS));
+        assertEquals(original, start, "With no gap, stand on the rock instead of walking off the plateau");
+    }
+
+    @Test
     void fitsDifferentHeadingsAtBothBoardScalesWithoutChangingHeightOrMesh() {
         GdxNativesLoader.load();
         var bounds = new BoundingBox(new Vector3(-6, -5, 0), new Vector3(6, 8, 32));

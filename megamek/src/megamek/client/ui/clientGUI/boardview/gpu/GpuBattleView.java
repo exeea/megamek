@@ -109,6 +109,8 @@ class GpuBattleView extends ApplicationAdapter {
     private final Map<String, BoardScene.LocationDamage> unitDamage = new HashMap<>();
     private final Map<Integer, KeyCommandBind> cameraKeys = new HashMap<>();
     private final BoardInput boardInput = new BoardInput();
+    /** Render-thread snapshot of modifiers delivered to the separate Swing tools window. */
+    private int editorToolsModifiers;
     private final List<Hover> hover = new ArrayList<>();
     private GpuTerrain terrain;
     private GpuFireControl fireControl;
@@ -1076,7 +1078,7 @@ class GpuBattleView extends ApplicationAdapter {
         lines.begin(ShapeRenderer.ShapeType.Line);
         if (hovered != null && scene.tile(hovered) != null && !ui.hit(Gdx.input.getX(), Gdx.input.getY())) {
             lines.setColor(Color.WHITE);
-            if (source.isEditor() && modifiers() == InputEvent.CTRL_DOWN_MASK && ui.acceptsCameraKeys()) {
+            if (source.isEditor() && editorModifiers() == InputEvent.CTRL_DOWN_MASK && ui.acceptsCameraKeys()) {
                 for (Coords coords : source.editorBrush(hovered, boardGeneration)) {
                     if (scene.tile(coords) != null) {
                         ring(coords, scene.tile(coords).elevation());
@@ -1111,8 +1113,9 @@ class GpuBattleView extends ApplicationAdapter {
         return markerBob(seconds, TARGET_BOB_HEIGHT_OFFSET, TARGET_BOB_HEIGHT_LEVELS, TARGET_BOB_PERIOD_SECONDS);
     }
 
+    /** Both the offset and the wave height are terrain levels, so both scale with the board's level height. */
     private static float markerBob(float seconds, float offset, float height, float period) {
-        return offset + height * BoardGeometry.LEVEL * (1 - MathUtils.cos(MathUtils.PI2 * seconds / period)) / 2;
+        return (offset + height * (1 - MathUtils.cos(MathUtils.PI2 * seconds / period)) / 2) * BoardGeometry.LEVEL;
     }
 
     private void unitBand(BoardScene.Unit unit, float width, float lift, boolean dashed) {
@@ -1150,14 +1153,14 @@ class GpuBattleView extends ApplicationAdapter {
     private void ring(Coords coords, float elevation) {
         // The outline stays inside the hex: on the shared edge it lies in the terrain's plane there, and the part
         // that spills onto a neighbour reads at that neighbour's level.
-        Vector3 center = BoardGeometry.center(coords, elevation);
+        float z = tactical.deploymentActive() ? BoardTacticalGeometry.floatingZ(scene, coords, terrain::tacticalSurface)
+              : elevation * BoardGeometry.LEVEL + .5f;
+        Vector3 center = BoardGeometry.center(coords, 0);
         Vector3 first = new Vector3();
         Vector3 second = new Vector3();
         for (int edge = 0; edge < 6; edge++) {
-            lines.line(BoardGeometry.markerPoint(BoardGeometry.corner(first, coords, elevation, edge), center)
-                        .add(0, 0, 0.5f),
-                  BoardGeometry.markerPoint(BoardGeometry.corner(second, coords, elevation, edge + 1), center)
-                        .add(0, 0, 0.5f));
+            lines.line(BoardGeometry.markerPoint(BoardGeometry.corner(first, coords, 0, edge), center).add(0, 0, z),
+                  BoardGeometry.markerPoint(BoardGeometry.corner(second, coords, 0, edge + 1), center).add(0, 0, z));
         }
     }
 
@@ -1336,6 +1339,10 @@ class GpuBattleView extends ApplicationAdapter {
             orbiting = false;
             dragged = false;
             boardGesture = false;
+            clearElevationScroll();
+        }
+
+        private void clearElevationScroll() {
             elevationScrollHex = null;
             elevationScroll = 0;
         }
@@ -1352,15 +1359,14 @@ class GpuBattleView extends ApplicationAdapter {
         private void finishElevationScroll() {
             if (elevationScrollHex != null) {
                 source.endEditorStroke();
-                elevationScrollHex = null;
-                elevationScroll = 0;
+                clearElevationScroll();
             }
         }
 
         @Override
         public boolean scrolled(float amountX, float amountY) {
             if (!ui.hit(Gdx.input.getX(), Gdx.input.getY())) {
-                if (source.isEditor() && modifiers() == InputEvent.CTRL_DOWN_MASK) {
+                if (source.isEditor() && editorModifiers() == InputEvent.CTRL_DOWN_MASK) {
                     if (!boardGesture && ui.acceptsCameraKeys() && !ui.isTextEditing()) {
                         Coords coords = pick(Gdx.input.getX(), Gdx.input.getY());
                         if (coords != null) {
@@ -1609,6 +1615,18 @@ class GpuBattleView extends ApplicationAdapter {
         if (source != null) {
             source.stopKeys();
         }
+    }
+
+    /** The EDT finishes the undo entry before a palette action; reset its fractional wheel input on the GL thread. */
+    void editorToolsInput(int modifiers, boolean finishStroke) {
+        editorToolsModifiers = modifiers;
+        if (finishStroke) {
+            boardInput.clearElevationScroll();
+        }
+    }
+
+    private int editorModifiers() {
+        return modifiers() | editorToolsModifiers;
     }
 
     static int modifiers() {

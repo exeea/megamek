@@ -37,13 +37,18 @@ final class GpuReviewFrame implements Disposable {
 
     /** One frame of the scene from the camera, lit, shadowed and composited as on the board. */
     void render(GpuTerrain terrain, BoardCamera camera, BoardScene scene) {
+        render(terrain, camera, scene, true);
+    }
+
+    /** Hiding the water exposes the bed and bank joins for geometry reviews. */
+    void render(GpuTerrain terrain, BoardCamera camera, BoardScene scene, boolean water) {
         atmosphere.updateLight(camera.camera);
         terrain.setAtmosphere(atmosphere.lighting());
         terrain.renderShadows(camera.camera, List.of());
         atmosphere.prepareClouds(terrain, scene, 0);
         atmosphere.begin((int) camera.camera.viewportWidth, (int) camera.camera.viewportHeight, 0);
         terrain.render(camera.camera, false);
-        terrain.renderTransparent(camera.camera);
+        if (water) { terrain.renderTransparent(camera.camera); }
         atmosphere.end(camera.camera, terrain, scene, 0);
         atmosphere.renderWeather(camera.camera, scene);
     }

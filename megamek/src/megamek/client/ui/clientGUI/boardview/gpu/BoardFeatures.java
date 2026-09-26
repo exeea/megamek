@@ -150,7 +150,8 @@ final class BoardFeatures {
         if (hex.containsTerrain(Terrains.BRIDGE)) { exits |= hex.getTerrain(Terrains.BRIDGE).getExits(); }
         for (int i = 0; i < count; i++) {
             double angle = i * 2.399963 + random.nextFloat() * .45 + random.nextFloat();
-            float radius = 23 + random.nextFloat() * 5;
+            // Equal-area cover includes the centre and the slopes; units do not reserve an empty ring in Rough.
+            float radius = 29 * (float) Math.sqrt(i / (count - 1f));
             float x = (float) Math.cos(angle) * radius, y = (float) Math.sin(angle) * radius;
             float size = .55f + random.nextFloat() * .55f;
             float height = .22f + random.nextFloat() * .32f;
@@ -160,8 +161,8 @@ final class BoardFeatures {
                 Coords next = coords.translated(direction);
                 float dx = (BoardGeometry.centerX(next) - BoardGeometry.centerX(coords)) / BoardGeometry.HEX_SCALE;
                 float dy = (BoardGeometry.centerY(next) - BoardGeometry.centerY(coords)) / BoardGeometry.HEX_SCALE;
-                road |= x * dx + y * dy > 0
-                      && Math.abs(x * dy - y * dx) / Math.hypot(dx, dy) < 9 + size * ROUGH_BOULDER_WIDTH / 2;
+                float along = Math.max(0, (x * dx + y * dy) / (dx * dx + dy * dy));
+                road |= Math.hypot(x - along * dx, y - along * dy) < 9 + size * ROUGH_BOULDER_WIDTH / 2;
             }
             if (road) { continue; }
             result.add(new BoardScene.Feature("rough-boulder", x, y, random.nextFloat() * 360, size, height, 0,

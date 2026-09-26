@@ -1,25 +1,36 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Font;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.VertexAttributes;
+import com.badlogic.gdx.graphics.g2d.BitmapFont;
+import com.badlogic.gdx.graphics.g2d.BitmapFontCache;
+import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
@@ -27,7 +38,12 @@ import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
+import com.badlogic.gdx.graphics.glutils.ShaderProgram;
+import com.badlogic.gdx.graphics.profiling.GLProfiler;
 import com.badlogic.gdx.math.Matrix4;
+import com.badlogic.gdx.math.collision.BoundingBox;
+import com.badlogic.gdx.utils.Array;
+import com.badlogic.gdx.utils.FloatArray;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.common.board.Coords;
@@ -131,10 +147,247 @@ class GpuHexTextSmokeTest {
             try { assertEquals(0, pink(covered), "A taller object in the same hex must still occlude its terrain labels"); }
             finally { covered.dispose(); }
             checkUnitOcclusion(terrain, atmosphere, camera, scene, labels, batch);
+            checkStaticMeshes(batch);
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
         } finally {
             object.dispose(); batch.dispose(); skin.dispose(); labels.dispose(); atmosphere.dispose(); terrain.dispose();
         }
+    }
+
+    private record LegacyChunk(BitmapFontCache glyphs, BoundingBox bounds) { }
+
+    /** Compares the same font-cache draws before and after static upload, including alpha and atlas-page ordering. */
+    private static void checkStaticMeshes(SpriteBatch batch) {
+        GpuHexText labels = new GpuHexText();
+        Texture first = texture(0xffffffff), second = texture(0x5fff8fc0), depth = texture(0xffffffff);
+        BitmapFont font = font(first, second);
+        GLProfiler profiler = new GLProfiler(Gdx.graphics);
+        String meshesBefore = Mesh.getManagedStatus();
+        try {
+            BoardCamera camera = new BoardCamera();
+            camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+            camera.setIsometric(false);
+            Gdx.gl.glViewport(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
+            BoardScene scene = textScene(24, "ABAB");
+            assertEquals(1, font.getRegions().size);
+            labels.update(scene, font, coords -> null);
+            assertEquals(2, font.getRegions().size, "Later chunks introduce another incremental font atlas page");
+            List<LegacyChunk> legacy = legacy(scene, font);
+            assertVertices(labels, legacy, font);
+            ShaderProgram previous = batch.getShader();
+            camera.fit(scene);
+            parity(labels, legacy, batch, camera, depth);
+            assertSame(previous, batch.getShader(), "The annotation batch keeps its shader after direct mesh rendering");
+            assertArrayEquals(new Matrix4().val, batch.getTransformMatrix().val,
+                  "Later annotations retain their identity transform");
+            ScreenUtils.clear(.1f, .2f, .3f, 1, true);
+            batch.setProjectionMatrix(new Matrix4().setToOrtho2D(0, 0,
+                  Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight()));
+            batch.begin();
+            batch.draw(first, 12, 12, 32, 32);
+            batch.end();
+            Pixmap annotation = pixels();
+            try { assertEquals(0xffffffff, annotation.getPixel(28, 28), "The restored SpriteBatch still draws annotations"); }
+            finally { annotation.dispose(); }
+            camera.camera.zoom = .2f;
+            camera.center(BoardGeometry.center(new Coords(15, 15), 0));
+            long visible = legacy.stream().filter(chunk -> camera.camera.frustum.boundsInFrustum(chunk.bounds())).count();
+            assertTrue(visible > 0 && visible < legacy.size(), "The close view must contain culled chunk ranges");
+            parity(labels, legacy, batch, camera, depth);
+
+            // One font page over many chunks crosses both signed-short and unsigned-short index boundaries.
+            BoardScene large = textScene(48, "AAAAAAAA");
+            labels.update(large, font, coords -> null);
+            List<Object> pages = pages(labels);
+            assertEquals(2, pages.size(), "Consecutive chunks share bounded pages instead of individual draw calls");
+            assertVertices(labels, legacy(large, font), font);
+            labels.update(large, font, coords -> { throw new AssertionError("Unchanged labels must keep their meshes"); });
+            assertSame(pages.getFirst(), pages(labels).getFirst());
+            camera.fit(large);
+            profiler.enable();
+            try {
+                ScreenUtils.clear(.1f, .2f, .3f, 1, true);
+                profiler.reset();
+                labels.render(batch, camera.camera, depth, 0);
+                assertEquals(2, profiler.getDrawCalls(), "All visible ranges merge into one draw per static mesh page");
+                camera.center(new com.badlogic.gdx.math.Vector3(-10000, 10000, 0));
+                profiler.reset();
+                labels.render(batch, camera.camera, depth, 0);
+                assertEquals(0, profiler.getDrawCalls(), "An off-board view must submit no glyph meshes");
+            } finally { profiler.disable(); }
+            labels.update(textScene(1, ""), font, coords -> null);
+            assertEquals(meshesBefore, Mesh.getManagedStatus(), "Replacing text releases all old static meshes");
+            assertTrue(Gdx.gl.glIsTexture(first.getTextureObjectHandle()));
+            assertTrue(Gdx.gl.glIsTexture(second.getTextureObjectHandle()), "Font atlas pages are borrowed, not disposed");
+        } finally {
+            if (profiler.isEnabled()) { profiler.disable(); }
+            labels.dispose();
+            font.dispose();
+            first.dispose(); second.dispose(); depth.dispose();
+        }
+        assertEquals(meshesBefore, Mesh.getManagedStatus());
+    }
+
+    private static void parity(GpuHexText labels, List<LegacyChunk> legacy, SpriteBatch batch, BoardCamera camera,
+          Texture depth) {
+        ScreenUtils.clear(.1f, .2f, .3f, 1, true);
+        labels.render(batch, camera.camera, depth, 0);
+        Pixmap actual = pixels();
+        // The unchanged text shader/depth uniforms were just set by render. Only the submission path differs.
+        ScreenUtils.clear(.1f, .2f, .3f, 1, true);
+        ShaderProgram previous = batch.getShader();
+        batch.setShader(field(labels, "shader"));
+        batch.setProjectionMatrix(camera.camera.combined);
+        batch.setTransformMatrix(new Matrix4().setToTranslation(0, 0, .6f * BoardGeometry.HEX_SCALE));
+        batch.begin();
+        try {
+            for (LegacyChunk chunk : legacy) {
+                if (camera.camera.frustum.boundsInFrustum(chunk.bounds())) { chunk.glyphs().draw(batch); }
+            }
+        } finally {
+            batch.end();
+            batch.setTransformMatrix(new Matrix4());
+            batch.setShader(previous);
+        }
+        Pixmap expected = pixels();
+        try {
+            int background = actual.getPixel(0, 0);
+            boolean ink = false;
+            for (int y = 0; y < actual.getHeight() && !ink; y++) {
+                for (int x = 0; x < actual.getWidth() && !ink; x++) { ink = actual.getPixel(x, y) != background; }
+            }
+            assertTrue(ink, "Pixel parity must include rendered glyphs");
+            assertTrue(actual.getPixels().equals(expected.getPixels()),
+                  "Static glyph meshes must reproduce every pixel of the existing BitmapFontCache draw path");
+        } finally { actual.dispose(); expected.dispose(); }
+    }
+
+    private static void assertVertices(GpuHexText labels, List<LegacyChunk> chunks, BitmapFont font) {
+        FloatArray expected = new FloatArray(), actual = new FloatArray();
+        List<Texture> textures = new ArrayList<>();
+        for (LegacyChunk chunk : chunks) {
+            for (int region = 0; region < chunk.glyphs().getPageCount(); region++) {
+                int count = chunk.glyphs().getVertexCount(region);
+                if (count == 0) { continue; }
+                expected.addAll(chunk.glyphs().getVertices(region), 0, count);
+                for (int glyph = 0; glyph < count / 20; glyph++) { textures.add(font.getRegion(region).getTexture()); }
+            }
+        }
+        int glyph = 0;
+        for (Object page : pages(labels)) {
+            Mesh mesh = field(page, "mesh");
+            assertTrue(mesh.getNumVertices() <= 65_532);
+            assertEquals(mesh.getNumVertices() / 4 * 6, mesh.getNumIndices());
+            float[] vertices = new float[mesh.getNumVertices() * 5];
+            mesh.getVertices(vertices);
+            actual.addAll(vertices);
+            short[] indices = new short[mesh.getNumIndices()];
+            mesh.getIndices(indices);
+            int[] quad = { 0, 1, 2, 2, 3, 0 };
+            for (int i = 0; i < indices.length; i++) {
+                assertEquals(i / 6 * 4 + quad[i % 6], Short.toUnsignedInt(indices[i]), "SpriteBatch quad winding");
+            }
+            for (int i = 0; i < vertices.length / 20; i++) { assertSame(textures.get(glyph++), field(page, "texture")); }
+        }
+        assertEquals(expected.size, actual.size);
+        for (int i = 0; i < expected.size; i++) {
+            assertEquals(Float.floatToRawIntBits(expected.items[i]), Float.floatToRawIntBits(actual.items[i]),
+                  "Glyph position, packed alpha/color and UV bits must survive upload at float " + i);
+        }
+    }
+
+    /** Independent copy of the previous single-plane layout/draw input, without static mesh construction. */
+    private static List<LegacyChunk> legacy(BoardScene scene, BitmapFont font) {
+        Map<Coords, LegacyChunk> chunks = new HashMap<>();
+        float scaleX = font.getData().scaleX, scaleY = font.getData().scaleY;
+        var color = new com.badlogic.gdx.graphics.Color(font.getColor());
+        try {
+            for (BoardScene.Tile tile : scene.tiles()) {
+                for (BoardView.HexText text : tile.text()) {
+                    Coords cell = new Coords(tile.coords().getX() / GpuTerrain.CHUNK_SIZE,
+                          tile.coords().getY() / GpuTerrain.CHUNK_SIZE);
+                    LegacyChunk chunk = chunks.computeIfAbsent(cell,
+                          key -> new LegacyChunk(new BitmapFontCache(font, false), new BoundingBox().inf()));
+                    float x = BoardGeometry.centerX(tile.coords()), y = BoardGeometry.centerY(tile.coords());
+                    chunk.bounds().ext(x - BoardGeometry.WIDTH, y - BoardGeometry.WIDTH, -1)
+                          .ext(x + BoardGeometry.WIDTH, y + BoardGeometry.WIDTH, 1);
+                    font.getData().setScale(text.font().getSize2D() / GpuBoardUi.FONT_RESOLUTION);
+                    int argb = text.argb();
+                    font.setColor((argb >>> 16 & 255) / 255f, (argb >>> 8 & 255) / 255f,
+                          (argb & 255) / 255f, (argb >>> 24 & 255) / 255f);
+                    GlyphLayout layout = new GlyphLayout(font, text.text());
+                    float baseline = y + BoardGeometry.HEIGHT / 2 - text.baseline() * BoardGeometry.HEX_SCALE;
+                    chunk.glyphs().addText(layout, x - layout.width / 2,
+                          text.fromTop() ? baseline : baseline + layout.height);
+                }
+            }
+        } finally { font.getData().setScale(scaleX, scaleY); font.setColor(color); }
+        return List.copyOf(chunks.values());
+    }
+
+    private static BoardScene textScene(int size, String text) {
+        Font font = new Font(Font.SANS_SERIF, Font.PLAIN, GpuBoardUi.FONT_RESOLUTION);
+        List<BoardView.HexText> labels = text.isEmpty() ? List.of()
+              : List.of(new BoardView.HexText(text, 22, font, 0xafff70ff, true, 0));
+        List<BoardView.HexText> firstPage = text.isEmpty() ? List.of()
+              : List.of(new BoardView.HexText(text.replace('B', 'A'), 22, font, 0xafff70ff, true, 0));
+        List<BoardScene.Tile> tiles = new ArrayList<>();
+        for (int x = 0; x < size; x++) {
+            for (int y = 0; y < size; y++) {
+                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS,
+                      null, null, null, List.of(), x < size / 2 ? firstPage : labels));
+            }
+        }
+        return new BoardScene(0, size, size, tiles, List.of(), List.of(), -1, "", List.of());
+    }
+
+    private static BitmapFont font(Texture first, Texture second) {
+        Array<TextureRegion> regions = new Array<>();
+        regions.add(new TextureRegion(first));
+        BitmapFont.BitmapFontData data = new BitmapFont.BitmapFontData() {
+            @Override
+            public BitmapFont.Glyph getGlyph(char character) {
+                if (character == 'B' && super.getGlyph(character) == null) {
+                    regions.add(new TextureRegion(second));
+                    BitmapFont.Glyph glyph = glyph('B', 1);
+                    setGlyph(character, glyph);
+                    setGlyphRegion(glyph, regions.peek());
+                }
+                return super.getGlyph(character);
+            }
+        };
+        data.lineHeight = 16; data.capHeight = 14; data.down = -16; data.spaceXadvance = 7;
+        data.setGlyph('A', glyph('A', 0));
+        BitmapFont result = new BitmapFont(data, regions, false);
+        assertFalse(result.ownsTexture());
+        return result;
+    }
+
+    private static BitmapFont.Glyph glyph(char character, int page) {
+        BitmapFont.Glyph glyph = new BitmapFont.Glyph();
+        glyph.id = character; glyph.page = page; glyph.width = 11; glyph.height = 14;
+        glyph.xadvance = 7; glyph.yoffset = -14;
+        return glyph;
+    }
+
+    private static Texture texture(int rgba) {
+        Pixmap pixels = new Pixmap(16, 16, Pixmap.Format.RGBA8888);
+        try { pixels.setColor(rgba); pixels.fill(); return new Texture(pixels); }
+        finally { pixels.dispose(); }
+    }
+
+    private static List<Object> pages(GpuHexText labels) {
+        Map<?, List<Object>> groups = field(labels, "groups");
+        return groups.values().stream().flatMap(List::stream).toList();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> T field(Object object, String name) {
+        try {
+            var field = object.getClass().getDeclaredField(name);
+            field.setAccessible(true);
+            return (T) field.get(object);
+        } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
     }
 
     private static void checkUnitOcclusion(GpuTerrain terrain, GpuAtmosphere atmosphere, BoardCamera camera,

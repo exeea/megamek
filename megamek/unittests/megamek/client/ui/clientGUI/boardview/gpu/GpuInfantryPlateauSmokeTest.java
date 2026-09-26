@@ -36,6 +36,7 @@ class GpuInfantryPlateauSmokeTest {
         board.load(new File("data/boards/Map Pack Savannahs/16x17 Mountain Lake (Savannah).board"));
         var failure = new AtomicReference<Throwable>();
         var original = BoardGeometry.tuning();
+        var originalRelief = BoardRelief.tuning();
         var output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "infantry-plateau");
         assertTrue(output.isDirectory() || output.mkdirs());
         try (var fixture = GpuBoardFixture.create(board)) {
@@ -63,6 +64,29 @@ class GpuInfantryPlateauSmokeTest {
                     try {
                         view.create();
                         BoardGeometry.tune(BoardGeometry.DEFAULTS);
+                        view.render();
+                        view.boardCamera.advance(BoardCamera.ENTRANCE_SECONDS);
+                        for (boolean cliffs : new boolean[] { false, true }) {
+                            BoardWetCliffTest.tune(cliffs);
+                            view.boardCamera.setIsometric(true);
+                            view.boardCamera.camera.zoom = .16f;
+                            view.boardCamera.center(BoardGeometry.center(new Coords(8, 14), 0));
+                            view.render();
+                            GpuBoardTestUi.capture(new File(output, cliffs ? "cliff-into-water.png" : "cliff-with-beach.png"));
+                            if (cliffs) {
+                                view.boardCamera.orbit(30, 15);
+                                view.render();
+                                GpuBoardTestUi.capture(new File(output, "cliff-foot-oblique.png"));
+                                for (var bank : List.of(new Coords(7, 14), new Coords(9, 13))) {
+                                    view.boardCamera.setIsometric(true);
+                                    view.boardCamera.orbit(0, -15);
+                                    view.boardCamera.camera.zoom = .10f;
+                                    view.boardCamera.center(BoardGeometry.center(bank, 0));
+                                    view.render();
+                                    GpuBoardTestUi.capture(new File(output, "cliff-bank-" + bank.getX() + ".png"));
+                                }
+                            }
+                        }
                         view.render();
                         view.boardCamera.setIsometric(true);
                         view.boardCamera.camera.zoom = .17f;
@@ -115,6 +139,7 @@ class GpuInfantryPlateauSmokeTest {
                     } finally {
                         view.dispose();
                         BoardGeometry.tune(original);
+                        BoardRelief.tune(originalRelief);
                         Gdx.app.exit();
                     }
                 }
@@ -149,11 +174,11 @@ class GpuInfantryPlateauSmokeTest {
                         var point = new Vector3(vertices[v] + fraction * (vertices[next] - vertices[v]),
                               vertices[v + 1] + fraction * (vertices[next + 1] - vertices[v + 1]), 0)
                               .add(member.translation).mul(instance.transform);
-                        // A joined neighbour can own the edge of the plateau. Allow the same small height variation
-                        // as rigid ground contact, but reject a footprint over the descending bank or missing ground.
+                        // A joined neighbour can own part of the plateau. Rock outcrops can rise above it; the
+                        // regression is missing support or a descending bank beneath the formation's footprint.
                         float ground = UnitLandingSupports.ground(scene, point.x, point.y, surfaces);
                         assertTrue(Float.isFinite(ground)
-                                    && Math.abs(ground - tile.elevation() * BoardGeometry.LEVEL) <= 2 * BoardGeometry.HEX_SCALE,
+                                    && ground >= tile.elevation() * BoardGeometry.LEVEL - 2 * BoardGeometry.HEX_SCALE,
                               unit.location().coords() + " " + rig.container() + " is unsupported at " + point
                                     + "; ground " + ground);
                     }

@@ -206,6 +206,28 @@ final class InfantryFootprint {
         for (int pass = 0; pass < 12 && separate(position, outline, obstacles, scale); pass++) { }
     }
 
+    /** Seek clear footing nearby, staying inside the plateau. If crowded, retain the original spot on the rocks. */
+    static boolean avoidRough(Vector3 position, Polygon outline, List<Polygon> obstacles, float scale, float[] room) {
+        Vector3 original = new Vector3(position);
+        float[] limits = limits(outline, scale, room);
+        for (int attempt = 0; attempt < 49; attempt++) {
+            position.set(original);
+            if (attempt > 0) {
+                float radius = BoardGeometry.WIDTH * .22f / scale * (float) Math.sqrt(attempt / 48f);
+                float angle = attempt * 2.399963f;
+                position.add(MathUtils.cos(angle) * radius, MathUtils.sin(angle) * radius, 0);
+            }
+            if (!fit(position, limits.clone())) { continue; }
+            // A few projections find a close gap; the spiral also tries the other side of a crowded cluster.
+            for (int pass = 0; pass < 6; pass++) {
+                if (!separate(position, outline, obstacles, scale)) { return true; }
+                if (!fit(position, limits.clone())) { break; }
+            }
+        }
+        position.set(original);
+        return false;
+    }
+
     private static boolean separate(Vector3 position, Polygon shape, List<Polygon> obstacles, float scale) {
         boolean moved = false;
         var separation = new Intersector.MinimumTranslationVector();

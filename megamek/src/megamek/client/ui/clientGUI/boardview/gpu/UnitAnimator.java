@@ -461,8 +461,9 @@ final class UnitAnimator {
     /** Called after footprint fitting and world placement, before final bounds, picking, shadows and drawing. */
     boolean groundSupports(BoardScene scene, BoardScene.Unit unit, UnitMotion.Sample motion) {
         if (dying) { return false; }
+        boolean rough = formation.roughGround(instance, scene, unit, motion, surfaces, stepRoom(unit));
         boolean contact = groundContact != null && groundContact.apply(scene, unit, motion);
-        return (landingSupports != null && landingSupports.apply(scene, unit, motion)) || contact;
+        return (landingSupports != null && landingSupports.apply(scene, unit, motion)) || contact || rough;
     }
 
     void conversion(UnitConversion conversion, BoardScene.Unit unit) {

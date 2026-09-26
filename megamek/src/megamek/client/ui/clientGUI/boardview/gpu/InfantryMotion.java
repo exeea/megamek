@@ -11,6 +11,7 @@ import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.model.Node;
 import com.badlogic.gdx.graphics.g3d.model.NodePart;
 import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Polygon;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
@@ -27,6 +28,9 @@ final class InfantryMotion {
     private InfantryFootprint.Layout restLayout;
     private float restLayoutScale = Float.NaN;
     private float[] restLayoutRoom = InfantryFootprint.NO_STEPS;
+    private BoardSurface roughSurface;
+    private float[] roughLayout;
+    private final Map<String, Vector3> roughOffsets = new LinkedHashMap<>();
 
     private static final class Member {
         final UnitRig rig;
@@ -111,6 +115,7 @@ final class InfantryMotion {
         Map<String, Member> previous = new LinkedHashMap<>(members);
         members.clear();
         restLayoutScale = Float.NaN;
+        roughSurface = null;
         for (var rig : model.rigs()) {
             if (rig.container() != null && (rig.trooper() || rig.transport())) {
                 var rest = model.instance.getNode(rig.container());
@@ -269,6 +274,74 @@ final class InfantryMotion {
                       member.outline(goal ? member.goalHeading : member.heading), obstacles, scale, room);
             }
         }
+    }
+
+    /** Standing infantry seek gaps in the rendered Rough mesh; vehicles keep their fitted positions. */
+    boolean roughGround(ModelInstance instance, BoardScene scene, BoardScene.Unit unit, UnitMotion.Sample motion,
+          BoardSurface.Cache surfaces, float[] room) {
+        if (members.isEmpty() || motion.moving() || motion.boarding() != null || motion.airborne(unit)) { return false; }
+        BoardScene.Tile tile = scene.tile(unit.location().coords());
+        if (tile == null || tile.liquid().present() || unit.location().elevation() != tile.elevation()) { return false; }
+        BoardSurface surface = surfaces.get(scene, tile);
+        if (surface.rough.isEmpty()) { return false; }
+        // Watching headings cannot shuffle troopers: their outlines enclose every heading. Terrain edits, scale,
+        // placement, parking or membership changes do invalidate the derived layout.
+        float[] layout = Arrays.copyOf(instance.transform.val, 22 + members.size() * 4);
+        System.arraycopy(room, 0, layout, 16, 6);
+        int index = 22;
+        for (Member member : members.values()) {
+            layout[index++] = member.node.translation.x;
+            layout[index++] = member.node.translation.y;
+            layout[index++] = member.node.translation.z;
+            layout[index++] = member.rig.transport() ? member.heading : 0;
+        }
+        if (surface != roughSurface || !Arrays.equals(layout, roughLayout)) {
+            roughSurface = surface;
+            roughLayout = layout;
+            roughOffsets.clear();
+            Vector3 center = BoardGeometry.center(tile.coords(), tile.elevation());
+            List<Polygon> rocks = new ArrayList<>();
+            for (var face : surface.rough) {
+                if (Math.max(face.a().z, Math.max(face.b().z, face.c().z)) <= center.z) { continue; }
+                Polygon polygon = new Polygon(new float[] { face.a().x - center.x, face.a().y - center.y,
+                      face.b().x - center.x, face.b().y - center.y, face.c().x - center.x, face.c().y - center.y });
+                if (Math.abs(polygon.area()) > .00001f) { rocks.add(polygon); }
+            }
+            Map<Member, Polygon> shapes = new LinkedHashMap<>();
+            for (Member member : members.values()) { shapes.put(member, footprint(member, instance.transform, center)); }
+            Matrix4 local = new Matrix4(instance.transform).inv();
+            for (var entry : members.entrySet()) {
+                Member member = entry.getValue();
+                if (!member.rig.trooper()) { continue; }
+                Vector3 original = new Vector3(member.node.translation).mul(instance.transform).sub(center);
+                Vector3 position = new Vector3(original);
+                List<Polygon> obstacles = new ArrayList<>(rocks);
+                shapes.forEach((other, shape) -> { if (other != member) { obstacles.add(shape); } });
+                Polygon shape = shapes.get(member);
+                InfantryFootprint.avoidRough(position, shape, obstacles, 1, room);
+                shape.setPosition(position.x, position.y);
+                Vector3 offset = position.add(center).mul(local).sub(member.node.translation);
+                offset.z = 0;
+                roughOffsets.put(entry.getKey(), offset);
+            }
+        }
+        roughOffsets.forEach((id, offset) -> members.get(id).node.translation.add(offset));
+        instance.calculateTransforms();
+        return true;
+    }
+
+    /** Outline in world units relative to the hex, preserving a transport's heading and a trooper's turning room. */
+    private static Polygon footprint(Member member, Matrix4 transform, Vector3 center) {
+        float[] vertices = member.outline(member.heading).getTransformedVertices().clone();
+        Vector3 origin = new Vector3(member.node.translation).mul(transform);
+        for (int i = 0; i < vertices.length; i += 2) {
+            Vector3 point = new Vector3(vertices[i], vertices[i + 1], 0).add(member.node.translation).mul(transform).sub(origin);
+            vertices[i] = point.x;
+            vertices[i + 1] = point.y;
+        }
+        Polygon polygon = new Polygon(vertices);
+        polygon.setPosition(origin.x - center.x, origin.y - center.y);
+        return polygon;
     }
 
     private static void vehicle(Member member, UnitMotion.Boarding travel, float scale, InfantryFootprint.Layout layout) {

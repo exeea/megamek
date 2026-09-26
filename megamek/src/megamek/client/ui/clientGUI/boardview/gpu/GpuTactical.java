@@ -6,8 +6,10 @@ import java.awt.Shape;
 import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,24 +20,29 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
-import com.badlogic.gdx.graphics.VertexAttributes;
+import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
+import com.badlogic.gdx.graphics.g3d.Renderable;
+import com.badlogic.gdx.graphics.g3d.RenderableProvider;
 import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.DepthTestAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.IntAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
-import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
-import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.Disposable;
+import com.badlogic.gdx.utils.FloatArray;
+import com.badlogic.gdx.utils.Pool;
+import megamek.client.ui.clientGUI.boardview.BoardRangeBorder;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.board.Coords;
@@ -46,10 +53,21 @@ final class GpuTactical implements Disposable {
     static final float OUTLINE_SCROLL_SPEED = 4f;
     /** top-view degrees for switch to tactical view on/off */
     static final float FLAT_TILT_DEGREES = 15;
+    /** A small depth bias keeps range curtains/tints stable where they share a vertical terrain face. */
+    static final float COPLANAR_DEPTH_FAR = 1f - .000001f;
 
     private record TextImage(BoardScene.Pixels pixels, float x, float y) { }
-    private record WallTriangle(BoardTactical.Wall wall, BoardTacticalGeometry.Triangle triangle) { }
+    private static final int PAGE_TRIANGLES = 10000;
+    private record FillKey(BoardTactical.Fill fill, int layer) { }
+    private record FillGeometry(Map<Coords, BoardTacticalGeometry.Surface> surfaces, float[] vertices, int elevation) { }
+    private record WallGeometry(Map<Coords, BoardTacticalGeometry.Surface> surfaces, int[] levels,
+          float[] body, float[] uprightOutline, float[] flatOutline) { }
+    /** Presentation 0 is always drawn; 1 and 2 are the upright and flat wall alternatives. */
+    private record Group(int presentation, BasicStroke stroke) { }
+    private record Span(float[] vertices, int start, int count) { }
     private final ModelBatch batch = new ModelBatch();
+    private final GpuHexMasks hexMasks = new GpuHexMasks();
+    private final GpuHexMasks deploymentTint = new GpuHexMasks();
     private final SpriteBatch textBatch = new SpriteBatch();
     private final GpuTextures<List<BoardTactical.Text>> textures = new GpuTextures<>(true);
     private final Map<List<BoardTactical.Text>, TextImage> images = new HashMap<>();
@@ -57,10 +75,15 @@ final class GpuTactical implements Disposable {
     private final Material material = new Material(ColorAttribute.createDiffuse(Color.WHITE),
           new BlendingAttribute(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA),
           new DepthTestAttribute(GL20.GL_LEQUAL, false), IntAttribute.createCullFace(GL20.GL_NONE));
+    private final Material wallMaterial = material.copy();
     private BoardScene previous;
-    private ModelInstance instance;
+    private Map<FillKey, FillGeometry> fills = Map.of();
+    private Map<BoardTactical.Wall, WallGeometry> walls = Map.of();
+    private Map<Group, List<Page>> pages = Map.of();
+    private Map<BasicStroke, Material> outlines = Map.of();
     private int tuning = -1;
     private long builds;
+    private boolean iconsPresent;
     private final float outlineSpeed;
     private double scrollDistance;
     private final Function<Coords, BoardTacticalGeometry.Surface> terrain;
@@ -80,6 +103,7 @@ final class GpuTactical implements Disposable {
     private GpuTactical(float outlineSpeed, Function<Coords, BoardTacticalGeometry.Surface> terrain) {
         this.outlineSpeed = outlineSpeed;
         this.terrain = terrain;
+        wallMaterial.set(new DepthTestAttribute(GL20.GL_LEQUAL, 0, COPLANAR_DEPTH_FAR, false));
     }
 
     static boolean flat(Camera camera) {
@@ -87,13 +111,15 @@ final class GpuTactical implements Disposable {
     }
 
     void update(BoardScene scene) {
-        boolean terrainChanged = previous == null || previous.boardId() != scene.boardId()
-              || previous.width() != scene.width() || previous.height() != scene.height() || !sameTerrain(scene);
+        boolean boardChanged = previous == null || previous.boardId() != scene.boardId()
+              || previous.width() != scene.width() || previous.height() != scene.height();
+        boolean terrainChanged = boardChanged || !sameTerrain(scene);
         if (tuning != BoardGeometry.revision() || terrainChanged
               || !previous.tactical().fills().equals(scene.tactical().fills())
               || !previous.tactical().walls().equals(scene.tactical().walls())
               || !previous.tactical().flatWalls().equals(scene.tactical().flatWalls())) {
-            rebuild(scene);
+            rebuild(scene, boardChanged || tuning != BoardGeometry.revision() || terrain == null && terrainChanged,
+                  terrainChanged);
             tuning = BoardGeometry.revision();
         }
         if (previous == null || !previous.tactical().labels().equals(scene.tactical().labels())) {
@@ -122,92 +148,267 @@ final class GpuTactical implements Disposable {
         return true;
     }
 
-    private void rebuild(BoardScene scene) {
-        builds++;
-        if (instance != null) {
-            instance.model.dispose();
-            instance = null;
-        }
-        if (scene.tactical().fills().isEmpty() && scene.tactical().walls().isEmpty()) {
-            return;
-        }
-        ModelBuilder builder = new ModelBuilder();
-        builder.begin();
-        builder.node().id = "surface";
+    private void rebuild(BoardScene scene, boolean reset, boolean terrainChanged) {
         Function<Coords, BoardTacticalGeometry.Surface> surfaces = terrain == null
               ? BoardTacticalGeometry.surfaces(scene) : terrain;
-        BoardTacticalGeometry.drape(scene, triangles(builder, "tactical"), surfaces);
-        Map<BasicStroke, Material> outlines = new HashMap<>();
-        walls(builder, scene, false, outlines, surfaces);
-        walls(builder, scene, true, outlines, surfaces);
-        var model = builder.end();
-        if (model.meshParts.isEmpty()) {
-            model.dispose();
-        } else {
-            instance = new ModelInstance(model);
+        var clipper = new BoardTacticalGeometry.Clipper();
+        Map<FillKey, FillGeometry> nextFills = new HashMap<>();
+        Map<BoardTactical.Wall, WallGeometry> nextWalls = new HashMap<>();
+        Map<Group, List<float[]>> groups = new LinkedHashMap<>();
+        var deployment = BoardDeploymentGeometry.zoneFills(scene);
+        var perimeter = BoardDeploymentGeometry.perimeter(scene, deployment);
+        List<BoardTactical.Wall> commands = new ArrayList<>(scene.tactical().walls());
+        commands.addAll(BoardDeploymentGeometry.walls(scene, perimeter));
+        commands = BoardRangeBorder.join(commands);
+        deploymentTint.updateDeployment(scene, deployment.values(), surfaces);
+        boolean masked = hexMasks.update(scene, surfaces, !iconsPresent);
+        addFills(scene, masked ? List.of() : scene.tactical().fills(), new Group(0, null), groups, nextFills,
+              surfaces, clipper, reset, terrainChanged);
+        groups.put(new Group(1, null), new ArrayList<>());
+        for (BoardTactical.Wall wall : commands) {
+            WallGeometry geometry = reset ? null : walls.get(wall);
+            if (geometry == null || terrainChanged && (!current(geometry.surfaces(), surfaces)
+                  || !Arrays.equals(geometry.levels(), wallLevels(scene, wall)))) {
+                geometry = wallGeometry(scene, wall, surfaces, clipper, geometry);
+            }
+            nextWalls.put(wall, geometry);
+            add(groups, new Group(1, null), geometry.body());
+            if (wall.outline() != null) {
+                add(groups, new Group(1, wall.outline().stroke()), geometry.uprightOutline());
+            }
+        }
+        addFills(scene, scene.tactical().flatWalls(), new Group(2, null), groups, nextFills, surfaces, clipper, reset, terrainChanged);
+        addFills(scene, perimeter, new Group(2, null), groups, nextFills, surfaces, clipper, reset, terrainChanged);
+        for (BoardTactical.Wall wall : commands) {
+            if (wall.outline() != null) {
+                add(groups, new Group(2, wall.outline().stroke()), nextWalls.get(wall).flatOutline());
+            }
+        }
+        replacePages(groups);
+        fills = nextFills;
+        walls = nextWalls;
+        builds++;
+    }
+
+    private void addFills(BoardScene scene, List<BoardTactical.Fill> commands, Group group,
+          Map<Group, List<float[]>> groups, Map<FillKey, FillGeometry> retained,
+          Function<Coords, BoardTacticalGeometry.Surface> surfaces, BoardTacticalGeometry.Clipper clipper,
+          boolean reset, boolean terrainChanged) {
+        groups.computeIfAbsent(group, ignored -> new ArrayList<>());
+        for (int layer = 0; layer < commands.size(); layer++) {
+            BoardTactical.Fill command = commands.get(layer);
+            if (BoardDeploymentGeometry.isZone(command)) { continue; }
+            FillKey key = new FillKey(command, command.border() != null && command.border().floating()
+                  ? 0 : Math.min(layer, 10000));
+            FillGeometry geometry = retained.get(key);
+            if (geometry == null) { geometry = reset ? null : fills.get(key); }
+            int elevation = geometry == null || terrainChanged
+                  ? floatingElevation(scene, key.fill()) : geometry.elevation();
+            if (geometry == null || terrainChanged
+                  && (geometry.elevation() != elevation || !current(geometry.surfaces(), surfaces))) {
+                Map<Coords, BoardTacticalGeometry.Surface> used = new HashMap<>();
+                FloatArray vertices = new FloatArray();
+                BoardTacticalGeometry.drape(scene, key.fill(), key.layer(), packed(vertices, null),
+                      tracking(surfaces, used), clipper);
+                geometry = new FillGeometry(used.isEmpty() ? Map.of() : used,
+                      reuse(vertices, geometry == null ? null : geometry.vertices()), elevation);
+            }
+            retained.put(key, geometry);
+            add(groups, group, geometry.vertices());
         }
     }
 
-    private Consumer<BoardTacticalGeometry.Triangle> triangles(ModelBuilder builder, String name) {
-        MeshPartBuilder[] mesh = new MeshPartBuilder[1];
-        int[] count = { 0 };
-        MeshPartBuilder.VertexInfo a = new MeshPartBuilder.VertexInfo(), b = new MeshPartBuilder.VertexInfo(),
-              c = new MeshPartBuilder.VertexInfo();
+    private static int floatingElevation(BoardScene scene, BoardTactical.Fill fill) {
+        if (fill.border() == null || !fill.border().floating()) { return Integer.MIN_VALUE; }
+        Coords coords = BoardTacticalGeometry.borderCoords(scene, fill.border());
+        return coords == null ? Integer.MIN_VALUE : scene.tile(coords).elevation();
+    }
+
+    private static WallGeometry wallGeometry(BoardScene scene, BoardTactical.Wall wall,
+          Function<Coords, BoardTacticalGeometry.Surface> surfaces, BoardTacticalGeometry.Clipper clipper,
+          WallGeometry previous) {
+        Map<Coords, BoardTacticalGeometry.Surface> used = new HashMap<>();
+        FloatArray body = new FloatArray(), upright = new FloatArray(), flat = new FloatArray();
+        var tracked = tracking(surfaces, used);
+        var uprightTriangles = packed(upright, wall);
+        var flatTriangles = packed(flat, wall);
+        BoardTacticalGeometry.wall(scene, wall, false, packed(body, null),
+              (ignored, triangle) -> uprightTriangles.accept(triangle), tracked, clipper);
+        BoardTacticalGeometry.wall(scene, wall, true, ignored -> { },
+              (ignored, triangle) -> flatTriangles.accept(triangle), tracked, clipper);
+        return new WallGeometry(used, wallLevels(scene, wall), reuse(body, previous == null ? null : previous.body()),
+              reuse(upright, previous == null ? null : previous.uprightOutline()),
+              reuse(flat, previous == null ? null : previous.flatOutline()));
+    }
+
+    private static int[] wallLevels(BoardScene scene, BoardTactical.Wall wall) {
+        int[] levels = new int[7];
+        for (int i = 0; i < levels.length; i++) {
+            var tile = scene.tile(i == 0 ? wall.coords() : wall.coords().translated(i - 1));
+            levels[i] = tile == null ? Integer.MIN_VALUE : tile.elevation();
+        }
+        return levels;
+    }
+
+    private static Function<Coords, BoardTacticalGeometry.Surface> tracking(
+          Function<Coords, BoardTacticalGeometry.Surface> surfaces, Map<Coords, BoardTacticalGeometry.Surface> used) {
+        return coords -> used.computeIfAbsent(coords, surfaces);
+    }
+
+    private static boolean current(Map<Coords, BoardTacticalGeometry.Surface> used,
+          Function<Coords, BoardTacticalGeometry.Surface> surfaces) {
+        for (var entry : used.entrySet()) {
+            if (surfaces.apply(entry.getKey()) != entry.getValue()) { return false; }
+        }
+        return true;
+    }
+
+    private static float[] reuse(FloatArray vertices, float[] previous) {
+        float[] result = vertices.toArray();
+        return Arrays.equals(result, previous) ? previous : result;
+    }
+
+    private static void add(Map<Group, List<float[]>> groups, Group group, float[] vertices) {
+        if (vertices.length > 0) { groups.computeIfAbsent(group, ignored -> new ArrayList<>()).add(vertices); }
+    }
+
+    /** Keep the old draw boundaries: changing transparent part centers would change painter ordering. */
+    private void replacePages(Map<Group, List<float[]>> groups) {
+        Map<Group, List<Page>> next = new LinkedHashMap<>();
+        Map<BasicStroke, Material> inks = new HashMap<>();
+        List<Page> created = new ArrayList<>();
+        List<Texture> createdTextures = new ArrayList<>();
+        try {
+            for (var entry : groups.entrySet()) {
+                Group group = entry.getKey();
+                if (entry.getValue().isEmpty()) { continue; }
+                Material ink = group.presentation() == 1 ? wallMaterial : material;
+                if (group.stroke() != null) {
+                    ink = inks.get(group.stroke());
+                    if (ink == null) {
+                        ink = outlines.get(group.stroke());
+                        if (ink == null) {
+                            Texture texture = outlineTexture(group.stroke());
+                            createdTextures.add(texture);
+                            ink = wallMaterial.copy();
+                            TextureAttribute diffuse = TextureAttribute.createDiffuse(texture);
+                            diffuse.scaleU = 1 / dashPeriod(group.stroke());
+                            ink.set(diffuse);
+                        }
+                        inks.put(group.stroke(), ink);
+                    }
+                }
+                List<Page> previousPages = pages.getOrDefault(group, List.of());
+                List<Page> replacement = new ArrayList<>();
+                int capacity = PAGE_TRIANGLES * 3 * (group.stroke() == null ? 4 : 6), count = 0;
+                List<Span> spans = new ArrayList<>();
+                for (float[] vertices : entry.getValue()) {
+                    for (int start = 0; start < vertices.length;) {
+                        int length = Math.min(capacity - count, vertices.length - start);
+                        spans.add(new Span(vertices, start, length));
+                        count += length;
+                        start += length;
+                        if (count == capacity) {
+                            appendPage(replacement, previousPages, spans, group, ink, created);
+                            spans = new ArrayList<>();
+                            count = 0;
+                        }
+                    }
+                }
+                if (!spans.isEmpty()) { appendPage(replacement, previousPages, spans, group, ink, created); }
+                next.put(group, replacement);
+            }
+        } catch (RuntimeException | Error failure) {
+            created.forEach(Page::dispose);
+            createdTextures.forEach(Texture::dispose);
+            throw failure;
+        }
+        var retained = new HashSet<Page>();
+        next.values().forEach(retained::addAll);
+        pages.values().forEach(group -> group.stream().filter(page -> !retained.contains(page)).forEach(Page::dispose));
+        outlines.forEach((stroke, ink) -> {
+            if (!inks.containsKey(stroke)) {
+                ink.get(TextureAttribute.class, TextureAttribute.Diffuse).textureDescription.texture.dispose();
+            }
+        });
+        pages = next;
+        outlines = inks;
+    }
+
+    private static void appendPage(List<Page> destination, List<Page> previous, List<Span> spans,
+          Group group, Material material, List<Page> created) {
+        int index = destination.size();
+        Page page = index < previous.size() ? previous.get(index) : null;
+        if (page == null || !page.spans.equals(spans)) {
+            page = new Page(spans, group, material);
+            created.add(page);
+        }
+        destination.add(page);
+    }
+
+    /** Pages own only their mesh. Command arrays and animated stroke materials are shared by the active geometry. */
+    private static final class Page implements RenderableProvider, Disposable {
+        final List<Span> spans;
+        final Renderable renderable = new Renderable();
+
+        Page(List<Span> spans, Group group, Material material) {
+            this.spans = List.copyOf(spans);
+            int count = spans.stream().mapToInt(Span::count).sum(), stride = group.stroke() == null ? 4 : 6;
+            float[] vertices = new float[count];
+            int offset = 0;
+            for (Span span : spans) {
+                System.arraycopy(span.vertices(), span.start(), vertices, offset, span.count());
+                offset += span.count();
+            }
+            short[] indices = new short[count / stride];
+            for (int i = 0; i < indices.length; i++) { indices[i] = (short) i; }
+            Mesh mesh = group.stroke() == null
+                  ? new Mesh(true, indices.length, indices.length, VertexAttribute.Position(), VertexAttribute.ColorPacked())
+                  : new Mesh(true, indices.length, indices.length, VertexAttribute.Position(), VertexAttribute.ColorPacked(),
+                        VertexAttribute.TexCoords(0));
+            try {
+                mesh.setVertices(vertices);
+                mesh.setIndices(indices);
+                renderable.meshPart.set("tactical", mesh, 0, indices.length, GL20.GL_TRIANGLES);
+                renderable.meshPart.update();
+                renderable.material = material;
+            } catch (RuntimeException | Error failure) {
+                mesh.dispose();
+                throw failure;
+            }
+        }
+
+        @Override
+        public void getRenderables(Array<Renderable> renderables, Pool<Renderable> pool) {
+            renderable.shader = null;
+            renderable.environment = null;
+            renderables.add(renderable);
+        }
+
+        @Override
+        public void dispose() { renderable.meshPart.mesh.dispose(); }
+    }
+
+    private static Consumer<BoardTacticalGeometry.Triangle> packed(FloatArray vertices, BoardTactical.Wall wall) {
         Color color = new Color();
         return triangle -> {
-            // Three independent vertices per triangle, below the unsigned-short index limit even on large maps.
-            if (count[0] % 10000 == 0) {
-                mesh[0] = builder.part(name + "-" + count[0], GL20.GL_TRIANGLES,
-                      VertexAttributes.Usage.Position | VertexAttributes.Usage.ColorPacked, material);
-            }
             Color.argb8888ToColor(color, triangle.argb());
-            // MeshBuilder copies each vertex into its float buffer before returning.
-            mesh[0].triangle(a.setPos(triangle.a()).setCol(color), b.setPos(triangle.b()).setCol(color),
-                  c.setPos(triangle.c()).setCol(color));
-            count[0]++;
+            float bits = color.toFloatBits();
+            pack(vertices, triangle.a(), bits, wall);
+            pack(vertices, triangle.b(), bits, wall);
+            pack(vertices, triangle.c(), bits, wall);
         };
     }
 
-    private void walls(ModelBuilder builder, BoardScene scene, boolean flat, Map<BasicStroke, Material> materials,
-          Function<Coords, BoardTacticalGeometry.Surface> surfaces) {
-        String name = flat ? "flat-walls" : "upright-walls";
-        builder.node().id = name;
-        Map<BasicStroke, List<WallTriangle>> outlines = new LinkedHashMap<>();
-        BoardTacticalGeometry.walls(scene, flat, triangles(builder, name), (wall, triangle) ->
-              outlines.computeIfAbsent(wall.outline().stroke(), key -> new ArrayList<>()).add(new WallTriangle(wall, triangle)), surfaces);
-        for (var entry : outlines.entrySet()) {
-            Material ink = materials.computeIfAbsent(entry.getKey(), stroke -> {
-                Texture texture = outlineTexture(stroke);
-                builder.manage(texture);
-                Material result = material.copy();
-                result.id = "outline-" + materials.size();
-                TextureAttribute diffuse = TextureAttribute.createDiffuse(texture);
-                diffuse.scaleU = 1 / dashPeriod(stroke);
-                result.set(diffuse);
-                return result;
-            });
-            MeshPartBuilder mesh = null;
-            for (int i = 0; i < entry.getValue().size(); i++) {
-                if (i % 10000 == 0) {
-                    mesh = builder.part(name + "-" + ink.id + "-" + i, GL20.GL_TRIANGLES,
-                          VertexAttributes.Usage.Position | VertexAttributes.Usage.ColorPacked
-                                | VertexAttributes.Usage.TextureCoordinates, ink);
-                }
-                var outlined = entry.getValue().get(i);
-                var triangle = outlined.triangle();
-                Color color = color(triangle.argb());
-                mesh.triangle(outlineVertex(outlined.wall(), triangle.a(), color),
-                      outlineVertex(outlined.wall(), triangle.b(), color), outlineVertex(outlined.wall(), triangle.c(), color));
-            }
+    private static void pack(FloatArray vertices, Vector3 point, float color, BoardTactical.Wall wall) {
+        vertices.add(point.x, point.y, point.z, color);
+        if (wall != null) {
+            float dx = wall.b().x() - wall.a().x(), dy = wall.b().y() - wall.a().y();
+            float length = (float) Math.hypot(dx, dy);
+            float along = ((point.x / BoardGeometry.HEX_SCALE - wall.a().x()) * dx
+                  + (-point.y / BoardGeometry.HEX_SCALE - wall.a().y()) * dy) / length;
+            vertices.add(wall.outline().stroke().getDashPhase() + wall.outlineDistance() + along, 0.5f);
         }
-    }
-
-    private static MeshPartBuilder.VertexInfo outlineVertex(BoardTactical.Wall wall, Vector3 point, Color color) {
-        float dx = wall.b().x() - wall.a().x(), dy = wall.b().y() - wall.a().y();
-        float length = (float) Math.hypot(dx, dy);
-        float along = ((point.x / BoardGeometry.HEX_SCALE - wall.a().x()) * dx
-              + (-point.y / BoardGeometry.HEX_SCALE - wall.a().y()) * dy) / length;
-        return vertex(point, color).setUV(wall.outline().stroke().getDashPhase() + wall.outlineDistance() + along, 0.5f);
     }
 
     private static float dashPeriod(BasicStroke stroke) {
@@ -245,36 +446,38 @@ final class GpuTactical implements Disposable {
         }
     }
 
-    private static MeshPartBuilder.VertexInfo vertex(Vector3 point, Color color) {
-        return new MeshPartBuilder.VertexInfo().setPos(point).setCol(color);
-    }
-
-    private static Color color(int argb) {
-        return new Color(((argb >>> 16) & 255) / 255f, ((argb >>> 8) & 255) / 255f,
-              (argb & 255) / 255f, (argb >>> 24) / 255f);
-    }
-
     void render(Camera camera, float deltaSeconds) {
         render(camera, deltaSeconds, List.of());
     }
 
     void render(Camera camera, float deltaSeconds, Collection<ModelInstance> icons) {
+        if (iconsPresent != !icons.isEmpty()) {
+            iconsPresent = !icons.isEmpty();
+            // Different transparent-page centers can reorder a depth-independent icon and a regular border.
+            // Keep their established generic ordering whenever icons participate in this pass.
+            if (previous != null) { rebuild(previous, false, false); }
+        }
         scrollDistance += deltaSeconds * outlineSpeed;
-        if (instance != null) {
-            boolean flat = flat(camera);
-            instance.getNode("flat-walls").parts.forEach(part -> part.enabled = flat);
-            instance.getNode("upright-walls").parts.forEach(part -> part.enabled = !flat);
-            for (Material part : instance.materials) {
-                TextureAttribute texture = part.get(TextureAttribute.class, TextureAttribute.Diffuse);
-                if (texture != null) {
-                    double offset = -scrollDistance * texture.scaleU;
-                    texture.offsetU = (float) (offset - Math.floor(offset));
+        for (Material ink : outlines.values()) {
+            TextureAttribute texture = ink.get(TextureAttribute.class, TextureAttribute.Diffuse);
+            double offset = -scrollDistance * texture.scaleU;
+            texture.offsetU = (float) (offset - Math.floor(offset));
+        }
+        if (pages.isEmpty() && icons.isEmpty() && !hexMasks.active() && !deploymentTint.active()) { return; }
+        boolean flat = flat(camera);
+        batch.begin(camera);
+        deploymentTint.submit(batch, camera);
+        hexMasks.submit(batch, camera);
+        for (var entry : pages.entrySet()) {
+            int presentation = entry.getKey().presentation();
+            if (presentation == 0 || presentation == (flat ? 2 : 1)) {
+                for (Page page : entry.getValue()) {
+                    var bounds = page.renderable.meshPart;
+                    if (camera.frustum.boundsInFrustum(bounds.center.x, bounds.center.y, bounds.center.z,
+                          bounds.halfExtents.x, bounds.halfExtents.y, bounds.halfExtents.z)) { batch.render(page); }
                 }
             }
         }
-        if (instance == null && icons.isEmpty()) { return; }
-        batch.begin(camera);
-        if (instance != null) { batch.render(instance); }
         for (var icon : icons) {
             if (camera.frustum.boundsInFrustum(UnitBounds.world(icon))) { batch.render(icon); }
         }
@@ -355,12 +558,21 @@ final class GpuTactical implements Disposable {
         return builds;
     }
 
+    boolean deploymentActive() {
+        return deploymentTint.active();
+    }
+
     @Override
     public void dispose() {
-        if (instance != null) {
-            instance.model.dispose();
-            instance = null;
-        }
+        hexMasks.dispose();
+        deploymentTint.dispose();
+        pages.values().forEach(group -> group.forEach(Page::dispose));
+        pages = Map.of();
+        outlines.values().forEach(ink ->
+              ink.get(TextureAttribute.class, TextureAttribute.Diffuse).textureDescription.texture.dispose());
+        outlines = Map.of();
+        fills = Map.of();
+        walls = Map.of();
         batch.dispose();
         textBatch.dispose();
         textures.dispose();

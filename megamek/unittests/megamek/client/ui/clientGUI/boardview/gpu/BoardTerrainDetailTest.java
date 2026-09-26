@@ -70,30 +70,51 @@ class BoardTerrainDetailTest {
     }
 
     @Test
-    void roughBouldersHaveGroundedBasesAndLeaveTheUnitAnchorClearOnSlopes() {
+    void roughBouldersCoverTheCentreAndMergeIntoTheFinishedSlopes() {
         for (var family : BoardScene.Surface.values()) {
-            BoardScene scene = rough(family);
-            var tile = scene.tile(new Coords(2, 2));
-            BoardSurface surface = new BoardSurface(scene, tile);
-            var ground = surface.faces.stream().filter(f -> f.finish() != BoardSurface.Finish.OUTCROP
-                  && f.finish() != BoardSurface.Finish.DRESSING).toList();
-            var rocks = surface.faces.stream().filter(f -> f.finish() == BoardSurface.Finish.OUTCROP).toList();
-            assertFalse(rocks.isEmpty(), "Rough must generate real rock geometry for " + family);
-            Vector3 center = BoardGeometry.center(tile.coords(), tile.elevation());
-            int buried = 0, exposed = 0;
-            for (var face : rocks) {
-                assertEquals(family, surface.family(face));
-                for (var p : List.of(face.a(), face.b(), face.c())) {
-                    assertNotNull(surface.relief.shade(p), "Rocks use the terrain shader's local geology");
-                    assertTrue(Math.hypot(p.x - center.x, p.y - center.y) > 12 * BoardGeometry.HEX_SCALE);
-                    float z = BoardSurface.sampleHeight(ground, p.x, p.y, Float.NaN);
-                    assertTrue(Float.isFinite(z), "The whole rock footprint has ground below it");
-                    if (p.z < z) { buried++; } else { exposed++; }
+            for (int elevation : new int[] { -3, -1, 0, 1, 3 }) {
+                BoardScene scene = isolatedRough(family, elevation);
+                var tile = scene.tile(new Coords(2, 2));
+                BoardSurface surface = new BoardSurface(scene, tile);
+                List<BoardSurface.Face> ground = new ArrayList<>(surface.groundFaces());
+                for (var other : scene.tiles()) {
+                    var neighbor = new BoardSurface(scene, other);
+                    ground.addAll(neighbor.groundFaces());
+                    ground.addAll(neighbor.walls(scene, BoardGeometry.floor(scene)));
                 }
+                ground.removeIf(f -> f.finish() == BoardSurface.Finish.OUTCROP || f.finish() == BoardSurface.Finish.DRESSING);
+                var rocks = surface.rough;
+                assertFalse(rocks.isEmpty(), "Rough must generate real rock geometry for " + family);
+                Vector3 center = BoardGeometry.center(tile.coords(), tile.elevation());
+                int buried = 0, exposed = 0;
+                for (var face : rocks) {
+                    assertEquals(family, surface.family(face));
+                    for (var p : List.of(face.a(), face.b(), face.c())) {
+                        assertNotNull(surface.relief.shade(p), "Rocks use the terrain shader's local geology");
+                        float z = BoardSurface.sampleHeight(ground, p.x, p.y, Float.NaN);
+                        assertTrue(Float.isFinite(z), "The whole rock footprint has ground below it");
+                        if (p.z < z) { buried++; } else { exposed++; }
+                    }
+                }
+                assertTrue(buried > 0 && exposed > 0, "Rocks emerge from the terrain instead of floating above it");
+                assertTrue(surface.height(center.x, center.y) > center.z + BoardGeometry.HEX_SCALE,
+                      "Rough covers the centre even on an isolated high or low tile: " + family + " " + elevation);
+                int visible = 0, outer = 0;
+                for (var feature : tile.features()) {
+                    float x = center.x + feature.x() * BoardGeometry.HEX_SCALE;
+                    float y = center.y + feature.y() * BoardGeometry.HEX_SCALE;
+                    float rock = BoardSurface.sampleHeight(rocks, x, y, Float.NEGATIVE_INFINITY);
+                    if (rock > BoardSurface.sampleHeight(ground, x, y, center.z) + .1f * BoardGeometry.HEX_SCALE) {
+                        visible++;
+                        if (Math.hypot(feature.x(), feature.y()) > 20) { outer++; }
+                    }
+                }
+                assertTrue(visible >= 7, family + " " + elevation + " lost Rough cover: " + visible);
+                assertTrue(outer >= 3, "Rough must remain on the slopes and their feet: " + family + " " + elevation);
+                assertEquals(center.z, UnitLandingSupports.terrain(scene, center.x, center.y, new BoardSurface.Cache()), .01f,
+                      "Vehicles use the ground beneath the Rough");
+                assertEquals(surface.faces, new BoardSurface(scene, tile).faces, "Rebuilding never reshuffles the rocks");
             }
-            assertTrue(buried > 0 && exposed > 0, "Rocks emerge from the terrain instead of floating above it");
-            assertEquals(center.z, surface.height(center.x, center.y), .01f);
-            assertEquals(surface.faces, new BoardSurface(scene, tile).faces, "Rebuilding never reshuffles the rocks");
         }
     }
 
@@ -138,6 +159,19 @@ class BoardTerrainDetailTest {
                 Coords coords = new Coords(x, y);
                 Hex hex = roughHex(family, y < 3 ? 1 : 2);
                 tiles.add(tile(coords, family, x < 2 ? 0 : 1, -1, 0, BoardFeatures.capture(hex, coords, Map.of())));
+            }
+        }
+        return new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of());
+    }
+
+    static BoardScene isolatedRough(BoardScene.Surface family, int elevation) {
+        List<BoardScene.Tile> tiles = new ArrayList<>();
+        for (int x = 0; x < 5; x++) {
+            for (int y = 0; y < 5; y++) {
+                Coords coords = new Coords(x, y);
+                boolean center = coords.equals(new Coords(2, 2));
+                tiles.add(tile(coords, family, center ? Math.max(0, elevation) : Math.max(0, -elevation), -1, 0,
+                      center ? BoardFeatures.capture(roughHex(family, 1), coords, Map.of()) : List.of()));
             }
         }
         return new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of());

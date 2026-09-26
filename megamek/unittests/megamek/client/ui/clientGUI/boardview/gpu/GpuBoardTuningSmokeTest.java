@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.io.File;
 import java.util.List;
@@ -61,6 +63,7 @@ class GpuBoardTuningSmokeTest {
                     stage.draw();
                     checkSliderKeyboard(tuning, stage);
                     checkTerrainDrag(tuning, stage, tuning.panel().findActor("tuning-terrain-scroll"));
+                    checkSliderRepeat(tuning, stage);
                     GpuBoardTestUi.click("tuning-defaults");
                 } catch (Throwable error) {
                     failure.set(error);
@@ -368,10 +371,10 @@ class GpuBoardTuningSmokeTest {
         input.touchDown((int) start.x, (int) start.y, 0, Input.Buttons.LEFT);
         assertTrue(slider.isDragging(), "The real pointer must capture the terrain slider");
         assertSame(slider, stage.getKeyboardFocus(), "Clicking a slider gives it keyboard focus");
-        stage.act(.06f);
+        stage.act(.15f);
         assertEquals(revision, BoardGeometry.revision(), "Terrain edits wait for the debounce");
         input.touchDragged((int) end.x, (int) end.y, 0);
-        stage.act(.06f);
+        stage.act(.15f);
         assertNotEquals(original, slider.getValue() / 100, "The control previews its dragged value");
         assertEquals(revision, BoardGeometry.revision(), "Moving the slider restarts the debounce");
         assertEquals(original, BoardRelief.tuning().riverWidth(), "The board keeps its terrain while the value is moving");
@@ -379,9 +382,9 @@ class GpuBoardTuningSmokeTest {
         input.touchUp((int) end.x, (int) end.y, 1, Input.Buttons.LEFT);
         assertTrue(slider.isDragging());
         assertEquals(revision, BoardGeometry.revision(), "A rejected second pointer must not commit the active drag");
-        stage.act(.05f);
+        stage.act(.11f);
         assertTrue(slider.isDragging());
-        assertEquals(revision + 1, BoardGeometry.revision(), "Pausing for 100 ms applies without releasing the pointer");
+        assertEquals(revision + 1, BoardGeometry.revision(), "Pausing for 250 ms applies without releasing the pointer");
         assertEquals(slider.getValue() / 100, BoardRelief.tuning().riverWidth(), .0001f);
         stage.act(.2f);
         assertEquals(revision + 1, BoardGeometry.revision(), "A stationary slider applies only once");
@@ -391,11 +394,11 @@ class GpuBoardTuningSmokeTest {
         input.touchUp((int) start.x, (int) start.y, 0, Input.Buttons.LEFT);
         assertFalse(slider.isDragging());
         assertEquals(revision + 2, BoardGeometry.revision(), "Releasing applies the latest value immediately");
-        stage.act(.2f);
+        stage.act(.3f);
         assertEquals(revision + 2, BoardGeometry.revision(), "Release cancels the pending debounce");
         assertEquals(slider.getValue() / 100, BoardRelief.tuning().riverWidth(), .0001f);
         input.touchDown((int) end.x, (int) end.y, 0, Input.Buttons.LEFT);
-        stage.act(.11f);
+        stage.act(.26f);
         input.touchUp((int) end.x, (int) end.y, 0, Input.Buttons.LEFT);
         assertEquals(revision + 3, BoardGeometry.revision(), "Release after a pause does not rebuild unchanged terrain");
         assertEquals(slider.getValue() / 100, BoardRelief.tuning().riverWidth(), .0001f);
@@ -462,6 +465,76 @@ class GpuBoardTuningSmokeTest {
         assertSame(tuning.panel().findActor("Caprock scale"), stage.getKeyboardFocus(),
               "Navigation skips terrain inputs disabled for this material");
         GpuBoardTestUi.click("tuning-defaults");
+    }
+
+    private static void checkSliderRepeat(GpuBoardTuning tuning, Stage stage) {
+        Input realInput = Gdx.input;
+        var input = realInput.getInputProcessor();
+        Input keyboard = mock(Input.class);
+        when(keyboard.getInputProcessor()).thenReturn(input);
+        Gdx.input = keyboard;
+        try {
+            GpuBoardTestUi.click("Unit scale");
+            Slider slider = tuning.panel().findActor("Unit scale");
+            float initial = slider.getValue();
+            when(keyboard.isKeyPressed(Input.Keys.RIGHT)).thenReturn(true);
+            input.keyDown(Input.Keys.RIGHT);
+            stage.act(.2f);
+            assertEquals(initial + slider.getStepSize(), slider.getValue(), .0001f,
+                  "A tap changes one step before the initial repeat delay");
+            stage.act(.11f);
+            stage.act(.06f);
+            assertEquals(initial + 3 * slider.getStepSize(), slider.getValue(), .0001f,
+                  "Holding right continues increasing without further key-down events");
+            input.keyDown(Input.Keys.RIGHT);
+            assertEquals(initial + 3 * slider.getStepSize(), slider.getValue(), .0001f,
+                  "Native key repeats must not double the scheduled repeat");
+            when(keyboard.isKeyPressed(Input.Keys.RIGHT)).thenReturn(false);
+            input.keyUp(Input.Keys.RIGHT);
+            stage.act(.5f);
+            assertEquals(initial + 3 * slider.getStepSize(), slider.getValue(), .0001f,
+                  "Releasing the key stops changes");
+
+            when(keyboard.isKeyPressed(Input.Keys.LEFT)).thenReturn(true);
+            input.keyDown(Input.Keys.LEFT);
+            stage.act(.2f);
+            stage.act(.11f);
+            stage.act(.06f);
+            assertEquals(initial, slider.getValue(), .0001f, "Holding left keeps decreasing by the same step");
+            input.keyDown(Input.Keys.DOWN);
+            Slider next = tuning.panel().findActor("Unit height scale");
+            float nextValue = next.getValue();
+            stage.act(.5f);
+            assertEquals(initial, slider.getValue(), .0001f, "Moving focus stops the old slider's repeat");
+            assertEquals(nextValue, next.getValue(), "A held key does not start repeating on the next input");
+            when(keyboard.isKeyPressed(Input.Keys.LEFT)).thenReturn(false);
+            input.keyUp(Input.Keys.LEFT);
+
+            GpuBoardTestUi.click("River width (%)");
+            Slider river = tuning.panel().findActor("River width (%)");
+            when(keyboard.isKeyPressed(Input.Keys.RIGHT)).thenReturn(true);
+            input.keyDown(Input.Keys.RIGHT);
+            float applied = BoardRelief.tuning().riverWidth();
+            stage.act(.2f);
+            stage.act(.11f);
+            stage.act(.06f);
+            assertTrue(river.getValue() / 100 > applied);
+            assertEquals(applied, BoardRelief.tuning().riverWidth(), "Held terrain edits share the debounce");
+            when(keyboard.isKeyPressed(Input.Keys.RIGHT)).thenReturn(false);
+            input.keyUp(Input.Keys.RIGHT);
+            assertEquals(river.getValue() / 100, BoardRelief.tuning().riverWidth(), .0001f,
+                  "Key release immediately applies the final terrain value");
+
+            when(keyboard.isKeyPressed(Input.Keys.RIGHT)).thenReturn(true);
+            input.keyDown(Input.Keys.RIGHT);
+            float released = river.getValue();
+            // Window focus loss can clear the native key state without delivering a key-up event to this actor.
+            when(keyboard.isKeyPressed(Input.Keys.RIGHT)).thenReturn(false);
+            stage.act(.5f);
+            assertEquals(released, river.getValue(), "A missing key-up must not leave a stuck repeat");
+        } finally {
+            Gdx.input = realInput;
+        }
     }
 
     private static void checkTerrainRendering(GpuBoardTuning tuning, BoardScene scene) {

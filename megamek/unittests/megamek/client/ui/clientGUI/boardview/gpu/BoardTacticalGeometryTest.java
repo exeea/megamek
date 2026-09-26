@@ -3,10 +3,12 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.BasicStroke;
 import java.awt.Color;
+import java.awt.Point;
 import java.awt.geom.Area;
 import java.awt.geom.Rectangle2D;
 import java.util.ArrayList;
@@ -15,12 +17,120 @@ import java.util.List;
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
+import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
 import megamek.client.ui.clientGUI.boardview.HexDrawUtilities;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 
 class BoardTacticalGeometryTest {
+    @Test
+    void floatingBordersKeepOnePlaneAboveTheFinishedOwnerWithoutQueryingNeighbors() {
+        var fill = hexBorder(new Coords(1, 1), true);
+        var flat = BoardTacticalGeometry.flat(fill);
+        assertFalse(flat.isEmpty());
+        for (int level : new int[] { -2, 0, 3 }) {
+            for (int depth : new int[] { -1, 5 }) {
+                for (boolean frozen : new boolean[] { false, true }) {
+                    BoardScene scene = borderScene(fill, level, depth, frozen);
+                    assertEquals(new Coords(1, 1), BoardTacticalGeometry.borderCoords(scene, fill.border()));
+                    for (float top : new float[] { Float.NaN, level * BoardGeometry.LEVEL - BoardGeometry.HEX_SCALE,
+                          level * BoardGeometry.LEVEL, level * BoardGeometry.LEVEL + 3.25f }) {
+                        var support = floatingSupport(level * BoardGeometry.LEVEL, top);
+                        for (int layer : new int[] { 0, 10000, 10001 }) {
+                            int[] queries = { 0 };
+                            List<BoardTacticalGeometry.Triangle> actual = new ArrayList<>();
+                            BoardTacticalGeometry.drape(scene, fill, layer, actual::add, coords -> {
+                                assertEquals(new Coords(1, 1), coords, "Only the owner's finished top is relevant");
+                                queries[0]++;
+                                return support;
+                            }, new BoardTacticalGeometry.Clipper());
+                            assertEquals(1, queries[0], "One finished owner lookup, independent of triangle count");
+                            assertEquals(flat.size(), actual.size());
+                            float height = (Float.isNaN(top) ? BoardGeometry.surfaceZ(scene.tile(new Coords(1, 1))) : top)
+                                  + .5f + GpuBattleView.SELECTION_BOB_HEIGHT_OFFSET;
+                            for (int index = 0; index < flat.size(); index++) {
+                                var a = flat.get(index);
+                                var b = actual.get(index);
+                                assertEquals(a.argb(), b.argb());
+                                List<Vector3> source = List.of(a.a(), a.b(), a.c());
+                                List<Vector3> result = List.of(b.a(), b.b(), b.c());
+                                for (int vertex = 0; vertex < 3; vertex++) {
+                                    assertEquals(source.get(vertex).x * BoardGeometry.HEX_SCALE, result.get(vertex).x);
+                                    assertEquals(-source.get(vertex).y * BoardGeometry.HEX_SCALE, result.get(vertex).y);
+                                    assertEquals(height, result.get(vertex).z, .00001f,
+                                          "Keep one plane above the owner; ignore beds, slopes, neighbors and painter order");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void ordinaryBordersStillDrapeExactlyAndMissingOwnersDoNotCreateFloatingGeometry() {
+        var ordinary = hexBorder(new Coords(1, 1), false);
+        var generic = new BoardTactical.Fill(ordinary.contours(), ordinary.winding(), ordinary.argb(), ordinary.playback());
+        BoardScene scene = borderScene(ordinary, 2, 5, false);
+        var surfaces = BoardTacticalGeometry.surfaces(scene);
+        List<BoardTacticalGeometry.Triangle> expected = new ArrayList<>(), actual = new ArrayList<>();
+        BoardTacticalGeometry.drape(scene, generic, 7, expected::add, surfaces, new BoardTacticalGeometry.Clipper());
+        int[] queries = { 0 };
+        BoardTacticalGeometry.drape(scene, ordinary, 7, actual::add, coords -> {
+            queries[0]++;
+            return surfaces.apply(coords);
+        }, new BoardTacticalGeometry.Clipper());
+        assertTrue(queries[0] > 0);
+        assertFalse(expected.isEmpty());
+        assertEquals(expected, actual, "A nonfloating hint must leave the existing drape path unchanged");
+
+        actual.clear();
+        assertFalse(BoardTacticalGeometry.floating(scene, generic, actual::add, surfaces));
+        assertFalse(BoardTacticalGeometry.floating(scene, ordinary, actual::add, surfaces));
+        var outside = hexBorder(new Coords(3, 1), true);
+        assertNull(BoardTacticalGeometry.borderCoords(scene, outside.border()));
+        assertFalse(BoardTacticalGeometry.floating(scene, outside, actual::add, surfaces));
+        assertTrue(actual.isEmpty());
+    }
+
+    private static BoardTacticalGeometry.Surface floatingSupport(float nominal, float height) {
+        var bed = new BoardSurface.Face(new Vector3(0, 0, nominal - 100), new Vector3(1, 0, nominal - 100),
+              new Vector3(0, 1, nominal - 100), BoardSurface.Finish.TOP);
+        var slope = new BoardSurface.Face(new Vector3(0, 0, nominal + 100), new Vector3(1, 0, nominal + 100),
+              new Vector3(0, 1, nominal + 100), BoardSurface.Finish.TOP);
+        List<BoardSurface.Face> top = Float.isNaN(height) ? List.of() : List.of(new BoardSurface.Face(
+              new Vector3(0, 0, height - 1), new Vector3(1, 0, height), new Vector3(0, 1, height - .25f),
+              BoardSurface.Finish.TOP));
+        return new BoardTacticalGeometry.Surface(top, List.of(slope), List.of(bed), List.of(), List.of(), List.of());
+    }
+
+    private static BoardTactical.Fill hexBorder(Coords coords, boolean floating) {
+        var graphics = new BoardTacticalGraphics();
+        try {
+            graphics.setColor(new Color(45, 160, 215, 109));
+            graphics.fillHexBorder(new Point(coords.getX() * 63, coords.getY() * 72 + (coords.getX() & 1) * 36),
+                  1, 1.5, 2.25, floating);
+            return graphics.snapshot().fills().getFirst();
+        } finally {
+            graphics.dispose();
+        }
+    }
+
+    private static BoardScene borderScene(BoardTactical.Fill fill, int level, int depth, boolean frozen) {
+        List<BoardScene.Tile> tiles = new ArrayList<>();
+        for (int x = 0; x < 2; x++) {
+            for (int y = 0; y < 2; y++) {
+                boolean owner = x == 1 && y == 1;
+                tiles.add(new BoardScene.Tile(new Coords(x, y), owner ? level : level + 7, owner ? depth : -1,
+                      owner && frozen, 0, BoardScene.Surface.GRASS, null, null, null, List.of(), List.of()));
+            }
+        }
+        return new BoardScene(0, 2, 2, tiles, List.of(), List.of(), -1, "", List.of(), null,
+              List.of(), List.of(), List.of(), new BoardTactical(List.of(fill), List.of()));
+    }
+
     @Test
     void originalWhiteStrokeFollowsTheTopOfTheTranslucentWall() {
         var graphics = new BoardTacticalGraphics();

@@ -1261,14 +1261,18 @@ final class GpuBoardSource implements AutoCloseable {
     void adjustEditorElevation(Coords coords, int levels, long generation) {
         SwingUtilities.invokeLater(() -> {
             if (!closed && editor != null && generation == boardGeneration && board == view.game.getBoard()
-                  && coords != null && board.contains(coords) && levels != 0 && !editor.shouldIgnoreHotKeys()) {
+                  && coords != null && board.contains(coords) && levels != 0) {
+                List<Coords> brush = editor.elevationBrush(coords);
+                if (brush.isEmpty()) {
+                    return;
+                }
                 if (!editorElevationStroke) {
                     finishEditorStroke();
                     editorStrokeBoard = board;
                     editorElevationStroke = true;
                 }
                 // Capture the brush now, so a later palette change cannot retarget accepted wheel input.
-                for (Coords hex : editor.elevationBrush(coords)) {
+                for (Coords hex : brush) {
                     pendingElevation.merge(hex, levels, Integer::sum);
                 }
             }
@@ -1283,7 +1287,7 @@ final class GpuBoardSource implements AutoCloseable {
     }
 
     void endEditorStroke() {
-        SwingUtilities.invokeLater(() -> {
+        onSwing(() -> {
             finishEditorStroke();
             if (!closed) {
                 refresh();

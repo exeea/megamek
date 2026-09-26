@@ -697,24 +697,28 @@ final class GpuWaterShader extends Attribute {
 
         Pool(BoardSurface surface, BoardFlow.Current current) {
             this.surface = surface;
-            List<Vector3> points = surface.outline;
-            outline = new float[points.size() * 2];
+            List<Vector3> points = new ArrayList<>();
             List<Float> segments = new ArrayList<>();
+            for (int edge = 0; edge < 6; edge++) {
+                List<Vector3> boundary = surface.waterBoundary(edge);
+                for (int i = 0; i < boundary.size() - 1; i++) {
+                    Vector3 a = boundary.get(i), b = boundary.get(i + 1);
+                    points.add(a);
+                    // Open mouths continue into the next pool and falling lips into their sheet; neither is a bank.
+                    if (!surface.mouth(edge)) { segments.addAll(List.of(a.x, a.y, b.x, b.y)); }
+                }
+            }
+            outline = new float[points.size() * 2];
             float lowX = Float.POSITIVE_INFINITY, lowY = Float.POSITIVE_INFINITY;
             float highX = Float.NEGATIVE_INFINITY, highY = Float.NEGATIVE_INFINITY;
-            int perEdge = points.size() / 6;
             for (int i = 0; i < points.size(); i++) {
-                Vector3 a = points.get(i), b = points.get((i + 1) % points.size());
+                Vector3 a = points.get(i);
                 outline[i * 2] = a.x;
                 outline[i * 2 + 1] = a.y;
                 lowX = Math.min(lowX, a.x);
                 lowY = Math.min(lowY, a.y);
                 highX = Math.max(highX, a.x);
                 highY = Math.max(highY, a.y);
-                // Open mouths continue into the next pool and falling lips into their sheet; neither is a bank.
-                if (!surface.mouth(i / perEdge)) {
-                    segments.addAll(List.of(a.x, a.y, b.x, b.y));
-                }
             }
             for (BoardSurface.Face face : surface.faces) {
                 if (face.finish() == BoardSurface.Finish.ICE || face.finish() == BoardSurface.Finish.DRESSING) { continue; }

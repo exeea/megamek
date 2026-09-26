@@ -125,7 +125,12 @@ final class UnitLandingSupports {
     }
 
     static float ground(BoardScene scene, float x, float y, BoardSurface.Cache surfaces) {
-        return surface(scene, x, y, surfaces, false);
+        return surface(scene, x, y, surfaces, false, true);
+    }
+
+    /** Units may clip Rough cover; support planes still follow the actual ground, banks and road ramps. */
+    static float terrain(BoardScene scene, float x, float y, BoardSurface.Cache surfaces) {
+        return surface(scene, x, y, surfaces, false, false);
     }
 
     private static BoardScene floorScene;
@@ -139,13 +144,13 @@ final class UnitLandingSupports {
      * hex's footprint instead of its top; it belongs to the walls of the higher hex, this one or a neighbour.
      */
     private static float ground(BoardScene scene, BoardScene.Tile tile, float x, float y, BoardSurface.Cache surfaces,
-          boolean liquid) {
+          boolean liquid, boolean rough) {
         BoardSurface surface = surfaces == null ? new BoardSurface(scene, tile) : surfaces.get(scene, tile);
-        float top = BoardSurface.sampleHeight(surface.faces, x, y, Float.NaN);
+        float top = BoardSurface.sampleHeight(rough ? surface.faces : surface.groundFaces(), x, y, Float.NaN);
         if (!Float.isNaN(top)) { return top; }
         // A neighbour's faces can reach over this footprint, as a water hex's shore does over a corner this land gives
         // up; a step's slope lying over it counts too, and the higher of them is what is drawn.
-        float beside = beside(scene, tile, x, y, surfaces, liquid);
+        float beside = beside(scene, tile, x, y, surfaces, liquid, rough);
         if (!BoardGeometry.tuning().stepsBetweenTops()) {
             return Float.isNaN(beside) ? BoardGeometry.groundZ(tile) : beside;
         }
@@ -174,13 +179,13 @@ final class UnitLandingSupports {
      * that covers it. NaN where no neighbour's face lies over the point, and on water hexes.
      */
     private static float beside(BoardScene scene, BoardScene.Tile tile, float x, float y, BoardSurface.Cache surfaces,
-          boolean liquid) {
+          boolean liquid, boolean rough) {
         float height = Float.NaN;
         for (int direction = 0; direction < 6 && !tile.liquid().present(); direction++) {
             BoardScene.Tile other = scene.tile(tile.coords().translated(direction));
             if (other == null) { continue; }
             BoardSurface surface = surfaces == null ? new BoardSurface(scene, other) : surfaces.get(scene, other);
-            float ground = BoardSurface.sampleHeight(surface.faces, x, y, Float.NaN);
+            float ground = BoardSurface.sampleHeight(rough ? surface.faces : surface.groundFaces(), x, y, Float.NaN);
             if (Float.isNaN(ground)) { continue; }
             // Ice lies level over the hex as the shore moves its corners (BoardSurface's ICE fan).
             float wet = !other.liquid().present() ? Float.NaN : other.frozen() ? BoardGeometry.surfaceZ(other)
@@ -193,10 +198,11 @@ final class UnitLandingSupports {
 
     /** The visible hex surface, including liquid, for flat tactical artwork. */
     static float surface(BoardScene scene, float x, float y, BoardSurface.Cache surfaces) {
-        return surface(scene, x, y, surfaces, true);
+        return surface(scene, x, y, surfaces, true, true);
     }
 
-    private static float surface(BoardScene scene, float x, float y, BoardSurface.Cache surfaces, boolean includeLiquid) {
+    private static float surface(BoardScene scene, float x, float y, BoardSurface.Cache surfaces, boolean includeLiquid,
+          boolean rough) {
         if (!Float.isFinite(x) || !Float.isFinite(y)) {
             return Float.NaN;
         }
@@ -210,7 +216,7 @@ final class UnitLandingSupports {
                     continue;
                 }
                 float sample = tile.frozen() ? BoardGeometry.surfaceZ(tile)
-                      : ground(scene, tile, x, y, surfaces, includeLiquid);
+                      : ground(scene, tile, x, y, surfaces, includeLiquid, rough);
                 float water = BoardGeometry.waterZ(tile);
                 if (includeLiquid && tile.liquid().present() && !tile.frozen()) {
                     BoardSurface shape = surfaces == null ? new BoardSurface(scene, tile) : surfaces.get(scene, tile);

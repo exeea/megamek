@@ -32,8 +32,8 @@
  */
 package megamek.client.ui.clientGUI.boardview.sprite;
 
-
 import java.awt.AlphaComposite;
+import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
@@ -42,6 +42,8 @@ import java.awt.Shape;
 import java.awt.image.ImageObserver;
 
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.BoardRangeBorder;
+import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.util.UIUtil;
@@ -114,9 +116,9 @@ public class SensorRangeSprite extends FieldOfFireSprite {
     protected void drawBorderXC(Graphics2D graph, Shape fillShape, Shape lineShape) {
         if (graph instanceof BoardTacticalGraphics tactical
               && (getRangeBracket() == VISUAL || getRangeBracket() == VISUAL_DARK)) {
-            graph.setColor(getColor(getRangeBracket()));
-            graph.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, GPU_VISUAL_RANGE_OPACITY));
-            tactical.wall(lineShape, fillShape, getPosition(), GPU_VISUAL_RANGE_HEIGHT, lineColor);
+            var border = new BoardRangeBorder(GPU_VISUAL_RANGE_HEIGHT, getColor(getRangeBracket()).getRGB(),
+                  GPU_VISUAL_RANGE_OPACITY, new BoardTactical.Outline(lineColor.getRGB(), (BasicStroke) graph.getStroke()));
+            tactical.wall(lineShape, fillShape, getPosition(), border);
         } else {
             super.drawBorderXC(graph, fillShape, lineShape);
         }

@@ -158,6 +158,11 @@ void main() {
         vec4 small = ((texture2D(u_waterDetail, crossing * advectedA * 3.8 + driftB) - 0.5) * weightA
               + (texture2D(u_waterDetail, crossing * advectedB * 3.8 + driftB) - 0.5) * weightB) * preserve;
         small.rg = small.rg * crossing;
+        // Rapids churn in larger, faster-moving patches than the fine surface grain. Keep one clock and blend
+        // their contribution by agitation: multiplying time by local agitation would shear the texture at joins.
+        vec4 rapidDetail = ((texture2D(u_waterDetail, crossing * advectedA * 0.65 + driftB * 4.0) - 0.5) * weightA
+              + (texture2D(u_waterDetail, crossing * advectedB * 0.65 + driftB * 4.0) - 0.5) * weightB) * preserve;
+        rapidDetail.rg = rapidDetail.rg * crossing;
 
         // Wind waves: every wave of the ocean simulation travels at its own speed, so the surface keeps changing
         // instead of sliding. Four scales, each turned against the others: long swells a few hexes across, the
@@ -183,7 +188,7 @@ void main() {
         }
         float waves = (mix(0.75, 1.35, gust) * mix(0.45, 1.0, open) + 0.9 * agitation) * effects;
         // Slopes are the surface's gradient: the normal leans away from the way the water rises.
-        vec2 slope = swell.xy * waves + small.rg * (0.06 + 0.4 * agitation) * effects;
+        vec2 slope = swell.xy * waves + (small.rg * 0.06 + rapidDetail.rg * (0.4 * agitation)) * effects;
         vec3 ripples = rainRippleField(position) * effects;
         slope += ripples.xy;
 
@@ -262,18 +267,23 @@ void main() {
         }
         // The impact breaks up before reaching a bank; shoreline foam still follows the actual waterline.
         boil *= effects * smoothstep(0.004, 0.06, shore);
-        // Foam patches ride the churned water outward: advected in two phases like the current, each restarting only
-        // while unseen, so the foam keeps moving away from the falls without ever shearing or pulsing.
-        vec2 drift = push * (0.06 / max(length(push), 1.0));
-        vec2 bubbleA = position - drift * ((phase - 0.5) * FLOW_CYCLE);
-        vec2 bubbleB = position - drift * ((fract(phase + 0.5) - 0.5) * FLOW_CYCLE) + 0.37;
-        float bubbles = 0.5 + ((texture2D(u_waterDetail, bubbleA * 3.4 + 0.61).b - 0.5) * weightA
-              + (texture2D(u_waterDetail, bubbleB * 3.4 + 0.61).b - 0.5) * weightB)
-              * inversesqrt(weightA * weightA + weightB * weightB);
-        // Solid white right below the fall, breaking into patches and then lace as the foam spreads.
-        float settle = 1.0 - boil;
-        float impact = smoothstep(settle, settle + 0.15, bubbles * 0.6 + (noise + 0.5) * 0.4)
-              * smoothstep(0.0, 0.15, boil);
+        float bubbles = 0.0, impact = 0.0;
+        // Without a nearby landing boil is zero, so neither bubbles nor impact contributes. The uniform branch
+        // keeps mip selection defined for every fragment of materials that do have falling water nearby.
+        if (u_splashCount > 0) {
+            // Foam patches ride the churned water outward: advected in two phases like the current, each restarting
+            // only while unseen, so the foam keeps moving away from the falls without ever shearing or pulsing.
+            vec2 drift = push * (0.06 / max(length(push), 1.0));
+            vec2 bubbleA = position - drift * ((phase - 0.5) * FLOW_CYCLE);
+            vec2 bubbleB = position - drift * ((fract(phase + 0.5) - 0.5) * FLOW_CYCLE) + 0.37;
+            bubbles = 0.5 + ((texture2D(u_waterDetail, bubbleA * 3.4 + 0.61).b - 0.5) * weightA
+                  + (texture2D(u_waterDetail, bubbleB * 3.4 + 0.61).b - 0.5) * weightB)
+                  * inversesqrt(weightA * weightA + weightB * weightB);
+            // Solid white right below the fall, breaking into patches and then lace as the foam spreads.
+            float settle = 1.0 - boil;
+            impact = smoothstep(settle, settle + 0.15, bubbles * 0.6 + (noise + 0.5) * 0.4)
+                  * smoothstep(0.0, 0.15, boil);
+        }
         vec3 normal = normalize(surfaceNormal + vec3(-slope, 0.0));
 
         // Banks: a crisp line where the water touches, never thinner than a pixel so it holds still from afar; the
@@ -290,10 +300,10 @@ void main() {
         float surf = smoothstep(1.0 - coverage, 1.2 - coverage, grainy) * smoothstep(0.0, 0.003, shore);
         // Whitecaps where the simulated crests fold over, in open water only, grained by the ripple foam.
         float whitecap = smoothstep(0.3, 0.85, swell.w * (0.5 + grainy)) * open;
-        float web = small.a + 0.5;
-        // Rapids: soft, broken foam that gathers in clusters; more of the surface churns as the rapids strengthen.
-        float threshold = 0.82 - 0.36 * agitation - 0.25 * broad.b;
-        float rapids = smoothstep(threshold, threshold + 0.3, small.b * 0.65 + noise * 0.35 + 0.5 + web * 0.12)
+        // Strong rapids increase motion and the number of broken foam patches, while leaving water between them.
+        // The fine grain frays their edges; the caustic network must not turn the entire reach into a white web.
+        float threshold = 0.70 - 0.16 * agitation + 0.16 * (0.5 - broad.b);
+        float rapids = smoothstep(threshold, threshold + 0.18, rapidDetail.b * 0.8 + small.b * 0.2 + 0.5)
               * smoothstep(0.05, 0.3, agitation);
         // The foam round a unit breaks up like any other: dense where the water piles up, in drifts further out.
         float stirred = smoothstep(1.0 - 1.25 * wading, 1.15 - 1.25 * wading, grainy);
@@ -370,7 +380,7 @@ void main() {
         body *= 1.0 + clamp(ripples.z, -1.0, 1.0) * 0.35;
         // Churning water carries air: paler and more opaque long before it breaks into foam; spray thrown up by a
         // fall lights the water around it.
-        float aerated = max(agitation * 0.4, boil * boil * 0.5) * churn * foamWater;
+        float aerated = max(agitation * mix(0.10, 0.35, rapids), boil * boil * 0.5) * churn * foamWater;
         body = mix(body, froth * mix(facets, whiteLight, 0.5) * 0.85, aerated);
         bodyAlpha = mix(bodyAlpha, 0.85, aerated);
         // The column thins to nothing at the bank, so water meets its shore without a drawn edge.
