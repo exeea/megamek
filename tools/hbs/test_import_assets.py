@@ -1,5 +1,7 @@
 """Numerical and filtering boundaries; uses synthetic geometry, never CAB files."""
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace as Value
 from unittest.mock import patch
 
@@ -9,9 +11,37 @@ import import_assets as importer
 
 
 class ImportTests(unittest.TestCase):
+    def test_discovery_includes_non_base_names_and_prefers_era_duplicates(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            broad = root / 'Community-Asset-Bundle-Clan-Mech' / 'CAB-Clan Mech' / 'assetbundles'
+            era = root / 'Community-Asset-Bundle-Clan-GoldenCentury' / 'CAB-Clan-GoldenCentury' / 'assetbundles'
+            broad.mkdir(parents=True)
+            era.mkdir(parents=True)
+            for folder in (broad, era):
+                for name in ('chrprfmech_madcatbase-001', 'chrprfmech_hunchbackiichotd-001'):
+                    (folder / name).touch()
+            for name in ('chrprfmech_hatamotochisam-001', 'chrprfmech_roughneckcrane-001',
+                         'chrprfmech_uzielbase-001.prefab', 'chrprfmech_madcatbase-001.manifest',
+                         'chrprfweap_madcat-001'):
+                (broad / name).touch()
+            (root / 'chrprfmech_outsidebase-001').touch()
+            (broad / 'chrprfmech_directorybase-001').mkdir()
+
+            self.assertEqual({
+                'madcat': era / 'chrprfmech_madcatbase-001',
+                'hunchbackiichotd': era / 'chrprfmech_hunchbackiichotd-001',
+                'hatamotochisam': broad / 'chrprfmech_hatamotochisam-001',
+                'roughneckcrane': broad / 'chrprfmech_roughneckcrane-001',
+                'uziel': broad / 'chrprfmech_uzielbase-001.prefab',
+            }, importer.discover(root))
+
     def test_prefab_filter_excludes_alternative_damage_and_sensor_meshes(self):
         self.assertTrue(importer.intact('/chassis/mesh/mesh_LArm/LArm_whole/left_forearm'))
-        for path in ('/mesh/Head_dmg/cockpit', '/mesh/leg_explode', '/BlipObject/mech', '/vfx/fire'):
+        self.assertTrue(importer.intact('/chrPrfMech_shadowhawkBase-001/mesh/mesh_Head/Head_whole/shd_head_cockpit'))
+        self.assertTrue(importer.intact('/chrPrfMech_shadowcatBase-001/mesh/shadowcat_torso'))
+        for path in ('/mesh/Head_dmg/cockpit', '/mesh/leg_explode', '/BlipObject/mech', '/vfx/fire',
+                     '/shadow/plane', '/mesh/mesh_shadow'):
             self.assertFalse(importer.intact(path), path)
         self.assertEqual('LA-forearm', importer.location('/mesh/mesh_LArm/LArm_whole/left_forearm'))
         self.assertEqual('LL-foot', importer.location('/mesh/mesh_LLeg/LLeg_whole/left_leg_foot'))

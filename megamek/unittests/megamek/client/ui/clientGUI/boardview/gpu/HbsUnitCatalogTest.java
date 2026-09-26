@@ -23,7 +23,8 @@ class HbsUnitCatalogTest {
               {"schema":1,"models":{
                 "bushwacker":{"descriptor":"bushwacker/model.json"},
                 "madcat":{"descriptor":"madcat/model.json"},
-                "ionkingfisher":{"descriptor":"kingfisher/model.json"}
+                "ionkingfisher":{"descriptor":"kingfisher/model.json"},
+                "hunchbackiichotd":{"descriptor":"hunchbackiic/model.json"}
               }}
               """);
         return new HbsUnitCatalog(directory);
@@ -36,6 +37,7 @@ class HbsUnitCatalogTest {
         assertEquals("madcat/model.json", catalog.descriptor("Mad Cat (Timber Wolf)"));
         assertEquals("madcat/model.json", catalog.descriptor("Timber Wolf"));
         assertEquals("kingfisher/model.json", catalog.descriptor("Kingfisher"));
+        assertEquals("hunchbackiic/model.json", catalog.descriptor("Hunchback IIC"));
         assertNull(catalog.descriptor("Mad Cat Mk II"));
         assertNull(catalog.descriptor("Bushwacker II"));
         assertNull(catalog.descriptor("Unknown Chassis"));

@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Stream;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
@@ -33,8 +34,10 @@ import megamek.common.Configuration;
 import megamek.common.units.BipedMek;
 import megamek.common.units.EntityMovementMode;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 /** Requires the user's local cache; proprietary artwork is never a test fixture or a build dependency. */
 @Tag("on-demand")
@@ -52,13 +55,21 @@ class GpuHbsModelsSmokeTest {
               UnitModelState.capture(mek), chassis);
     }
 
-    @Test
-    void rendersImportedChassisAlongsideGaeaAndKeepsSharedBuffersAlive() throws Exception {
+    private static Stream<Arguments> chassisGroups() {
+        return Stream.of(
+              Arguments.of("hbs", List.of("Bushwacker", "Uziel", "Mad Cat (Timber Wolf)", "Dire Wolf")),
+              Arguments.of("hbs-recovered", List.of("Hunchback IIC", "HatamotoChiSam", "RoughneckCrane",
+                    "phawklam", "shawklam")));
+    }
+
+    @ParameterizedTest
+    @MethodSource("chassisGroups")
+    void rendersImportedChassisAlongsideGaeaAndKeepsSharedBuffersAlive(String imagePrefix, List<String> chassis)
+          throws Exception {
         Path cache = Path.of(System.getProperty(HbsUnitCatalog.CACHE_PROPERTY, "../.work/hbs-cache"));
         assumeTrue(Files.isRegularFile(cache.resolve("catalog.json")), "Import local HBS assets first");
         var catalog = new HbsUnitCatalog(cache);
-        assumeTrue(List.of("Bushwacker", "Uziel", "Mad Cat", "Dire Wolf").stream()
-              .allMatch(chassis -> catalog.descriptor(chassis) != null));
+        assumeTrue(chassis.stream().allMatch(name -> catalog.descriptor(name) != null));
         Files.writeString(brokenCache.resolve("catalog.json"), """
               {"schema":1,"models":{"bushwacker":{"descriptor":"missing.json"},
                 "uziel":{"descriptor":"broken.json"}}}
@@ -76,27 +87,27 @@ class GpuHbsModelsSmokeTest {
                 try {
                     var fallbackLibrary = new GpuUnitModels(Configuration.dataDir().toPath().resolve("models"), brokenCatalog);
                     try {
-                        for (String chassis : List.of("Bushwacker", "Uziel")) {
-                            var fallback = fallbackLibrary.get(selection(chassis), 50);
+                        for (String name : List.of("Bushwacker", "Uziel")) {
+                            var fallback = fallbackLibrary.get(selection(name), 50);
                             assertNotNull(fallback);
                             assertNotNull(fallback.instance.getMaterial("paint"), "Broken HBS assets must use Gaea");
                         }
                     } finally {
                         fallbackLibrary.dispose();
                     }
-                    var selections = List.of(selection("Bushwacker"), selection("Uziel"),
-                          selection("Mad Cat (Timber Wolf)"), selection("Dire Wolf"), selection("Unknown HBS Chassis"));
+                    var selections = new ArrayList<>(chassis.stream().map(GpuHbsModelsSmokeTest::selection).toList());
+                    selections.add(selection("Unknown HBS Chassis"));
                     var instances = new ArrayList<ModelInstance>();
                     for (int i = 0; i < selections.size(); i++) {
                         var visual = library.get(selections.get(i), i);
                         assertNotNull(visual);
                         assertSame(visual, library.loaded(selections.get(i), i));
                         assertTrue(visual.instance.calculateBoundingBox(new com.badlogic.gdx.math.collision.BoundingBox()).isValid());
-                        if (i < 4) {
+                        if (i < chassis.size()) {
                             assertTrue(visual.instance.model.materials.first().id.matches("-?\\d+"), "HBS material expected");
                         }
                         var instance = new ModelInstance(visual.instance.model);
-                        instance.transform.setToTranslation((i - 2) * 65, 0, 0);
+                        instance.transform.setToTranslation((i - (selections.size() - 1) / 2f) * 65, 0, 0);
                         if (i == 1) {
                             visual.turnUpperBody(instance, 30);
                         }
@@ -104,13 +115,14 @@ class GpuHbsModelsSmokeTest {
                     }
                     var shared = library.get(selections.getFirst(), 99);
                     assertSame(shared, library.get(selections.getFirst(), 0));
-                    library.retainAssemblies(Set.of(0, 1, 2, 3, 4));
+                    library.retainAssemblies(Set.of(0, 1, 2, 3, 4, 5));
                     // Removing one unit must not dispose another unit's shared HBS mesh or textures.
                     assertSame(shared, library.get(selections.getFirst(), 100));
                     var environment = new Environment();
                     environment.set(ColorAttribute.createAmbientLight(.6f, .6f, .6f, 1));
                     environment.add(new DirectionalLight().set(.9f, .85f, .8f, -.3f, -.7f, -1));
-                    var camera = new OrthographicCamera(345, 218.5f);
+                    float width = selections.size() * 65 + 20;
+                    var camera = new OrthographicCamera(width, width * 760 / 1200f);
                     camera.near = 1;
                     camera.far = 1000;
                     Path output = Path.of(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
@@ -137,7 +149,7 @@ class GpuHbsModelsSmokeTest {
                                 }
                             }
                             assertTrue(changed > 500, "Models must render visible geometry");
-                            PixmapIO.writePNG(new FileHandle(output.resolve("hbs-" + (top ? "top" : "isometric") + ".png").toFile()),
+                            PixmapIO.writePNG(new FileHandle(output.resolve(imagePrefix + "-" + (top ? "top" : "isometric") + ".png").toFile()),
                                   pixels, -1, true);
                         } finally {
                             pixels.dispose();

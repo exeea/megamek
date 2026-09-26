@@ -64,7 +64,8 @@ def transform_points(points, transform):
 
 def intact(path):
     """These branches are visual alternatives, even when Unity marks them active."""
-    return not re.search(r"(?i)(?:_dmg|_destroyed|_damage|_explode|blip|vfx|shadow|simgame|collider)", path)
+    return not re.search(r"(?i)(?:_dmg|_destroyed|_damage|_explode|blip|vfx|simgame|collider|"
+                         r"(?:^|[/_])shadow(?:[/_]|$))", path)
 
 
 def prefab_scene(root):
@@ -220,7 +221,7 @@ def material(pointer, output, materials, textures):
 def convert(bundle, output):
     env = UnityPy.load(str(bundle))
     candidates = sorted((p, o) for p, o in env.container.items()
-                        if Path(p).stem.lower() == bundle.name.lower() and o.type.name == "GameObject")
+                        if Path(p).stem.lower() == bundle.stem.lower() and o.type.name == "GameObject")
     if not candidates:
         raise ValueError("No base chassis prefab")
     transforms, names, renderers = prefab_scene(candidates[0][1].read())
@@ -298,12 +299,13 @@ def write_json(path, value):
 def discover(source):
     choices = {}
     # Era-specific repositories take precedence over older all-era CAB repositories.
-    paths = sorted(source.rglob("chrprfmech_*base-*.prefab")) + sorted(source.rglob("chrprfmech_*base-001"))
-    paths.sort(key=lambda p: (any(part.endswith("-Mech") for part in p.parts), str(p).lower()))
+    paths = sorted(source.rglob("chrprfmech_*"),
+                   key=lambda p: (any(part.endswith("-Mech") for part in p.parts), str(p).lower()))
     for path in paths:
-        if path.is_file() and path.parent.name.lower() == "assetbundles":
-            token = re.sub(r"^chrprfmech_|base-\d+(?:\.prefab)?$", "", path.name.lower())
-            choices.setdefault(key(token), path)
+        # A few CAB chassis omit "base" (for example, chrprfmech_hunchbackiichotd-001).
+        match = re.fullmatch(r"chrprfmech_(.+?)(?:base)?-\d+(?:\.prefab)?", path.name.lower())
+        if match and path.is_file() and path.parent.name.lower() == "assetbundles":
+            choices.setdefault(key(match[1]), path)
     return choices
 
 
