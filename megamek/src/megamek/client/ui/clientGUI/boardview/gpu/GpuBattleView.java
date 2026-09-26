@@ -147,6 +147,7 @@ class GpuBattleView extends ApplicationAdapter {
     private float layoutScale;
     private float layoutPreference;
     private long hoverCameraRevision;
+    private int cameraTerrainRevision = -1;
 
     GpuBattleView(GpuBoardSource source) {
         this.source = source;
@@ -330,7 +331,10 @@ class GpuBattleView extends ApplicationAdapter {
         boardGeneration = frame.boardGeneration();
         ui.setPlaybackPaused(playback.paused());
         terrain.update(scene);
-        boardCamera.constrainFlight();
+        if (changedTiles || cameraTerrainRevision != BoardGeometry.revision()) {
+            boardCamera.constrainFlight();
+            cameraTerrainRevision = BoardGeometry.revision();
+        }
         fireControl.update(scene, HIDE_TARGET_ARROWS_DURING_ATTACKS && !playback.attacks().isEmpty());
         tactical.update(scene);
         fieldOfView.update(scene.fieldOfView());

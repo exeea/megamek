@@ -76,7 +76,10 @@ class GpuFreeFlightSmokeTest {
                             boardCamera.look(0, 90 - boardCamera.tilt());
                         } else if (frames() == 34) {
                             GpuBoardTestUi.capture(new File(output, "free-flight-horizon.png"));
-                            boardCamera.look(0, -20);
+                            boardCamera.look(180, 0);
+                        } else if (frames() == 36) {
+                            GpuBoardTestUi.capture(new File(output, "free-flight-rear-labels.png"));
+                            boardCamera.look(-180, -20);
                             eye = boardCamera.camera.position.cpy();
                             Gdx.input.getInputProcessor().keyDown(Input.Keys.W);
                             Gdx.input.getInputProcessor().keyDown(Input.Keys.E);
@@ -97,6 +100,18 @@ class GpuFreeFlightSmokeTest {
                             pause();
                         } else if (frames() == 46) {
                             assertEquals(eye, boardCamera.camera.position, "Losing focus stops held flight");
+                            var scene = fixture.source.takeFrame().scene();
+                            var tile = scene.tiles().getFirst();
+                            boardCamera.camera.position.set(BoardGeometry.center(tile.coords(), tile.elevation())).add(0, 0, 200);
+                            boardCamera.update();
+                            boardCamera.fly(0, 0, -1, 10000);
+                            eye = boardCamera.camera.position.cpy();
+                            assertTrue(eye.z > BoardGeometry.floor(scene), "The rendered terrain must stop downward flight");
+                            boardCamera.fly(0, 0, -1, 10000);
+                            assertEquals(eye.z, boardCamera.camera.position.z, .01f);
+                            boardCamera.look(0, 90 - boardCamera.tilt());
+                        } else if (frames() == 47) {
+                            GpuBoardTestUi.capture(new File(output, "free-flight-ground-clearance.png"));
                             GpuBoardTestUi.click("top");
                             assertFalse(boardCamera.firstPerson());
                         } else if (frames() == 48) {
