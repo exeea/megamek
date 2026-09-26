@@ -430,6 +430,20 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String WINDOW_POS_Y = "WindowPosY";
     public static final String WINDOW_SIZE_HEIGHT = "WindowSizeHeight";
     public static final String WINDOW_SIZE_WIDTH = "WindowSizeWidth";
+    /**
+     * The GPU board window, in GLFW screen coordinates. On a scaled Windows display these differ from the Swing
+     * coordinates of the WindowPos keys, so the two are never shared. The size is the window's normal, un-maximized
+     * size; a maximized window keeps it for when it is restored.
+     */
+    public static final String GPU_BOARD_POS_X = "GpuBoardPosX";
+    public static final String GPU_BOARD_POS_Y = "GpuBoardPosY";
+    public static final String GPU_BOARD_SIZE_WIDTH = "GpuBoardSizeWidth";
+    public static final String GPU_BOARD_SIZE_HEIGHT = "GpuBoardSizeHeight";
+    public static final String GPU_BOARD_MAXIMIZED = "GpuBoardMaximized";
+    /** Width of the GPU board's report panel, as last dragged. */
+    public static final String GPU_REPORT_PANEL_WIDTH = "GpuReportPanelWidth";
+    public static final String PLANETARY_CONDITIONS_POS_X = "PlanetaryConditionsPosX";
+    public static final String PLANETARY_CONDITIONS_POS_Y = "PlanetaryConditionsPosY";
     public static final String RND_ARMY_SIZE_HEIGHT = "RndArmySizeHeight";
     public static final String RND_ARMY_SIZE_WIDTH = "RndArmySizeWidth";
     public static final String RND_ARMY_POS_X = "RndArmyPosX";
@@ -977,6 +991,15 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
         store.setDefault(WINDOW_SIZE_HEIGHT, 600);
         store.setDefault(WINDOW_SIZE_WIDTH, 800);
+        // -1 centres the GPU board window; it opens maximized, as it always has, until the user changes that.
+        store.setDefault(GPU_BOARD_POS_X, -1);
+        store.setDefault(GPU_BOARD_POS_Y, -1);
+        store.setDefault(GPU_BOARD_SIZE_WIDTH, 1280);
+        store.setDefault(GPU_BOARD_SIZE_HEIGHT, 800);
+        store.setDefault(GPU_BOARD_MAXIMIZED, true);
+        store.setDefault(GPU_REPORT_PANEL_WIDTH, 362);
+        store.setDefault(PLANETARY_CONDITIONS_POS_X, -1);
+        store.setDefault(PLANETARY_CONDITIONS_POS_Y, -1);
 
         store.setDefault(RND_MAP_SIZE_HEIGHT, 500);
         store.setDefault(RND_MAP_SIZE_WIDTH, 500);
@@ -1864,6 +1887,38 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public int getWindowSizeWidth() {
         return store.getInt(WINDOW_SIZE_WIDTH);
+    }
+
+    public int getGpuBoardPosX() {
+        return store.getInt(GPU_BOARD_POS_X);
+    }
+
+    public int getGpuBoardPosY() {
+        return store.getInt(GPU_BOARD_POS_Y);
+    }
+
+    public int getGpuBoardSizeWidth() {
+        return store.getInt(GPU_BOARD_SIZE_WIDTH);
+    }
+
+    public int getGpuBoardSizeHeight() {
+        return store.getInt(GPU_BOARD_SIZE_HEIGHT);
+    }
+
+    public boolean getGpuBoardMaximized() {
+        return store.getBoolean(GPU_BOARD_MAXIMIZED);
+    }
+
+    public int getGpuReportPanelWidth() {
+        return store.getInt(GPU_REPORT_PANEL_WIDTH);
+    }
+
+    public int getPlanetaryConditionsPosX() {
+        return store.getInt(PLANETARY_CONDITIONS_POS_X);
+    }
+
+    public int getPlanetaryConditionsPosY() {
+        return store.getInt(PLANETARY_CONDITIONS_POS_Y);
     }
 
     public boolean getMekInFirst() {
@@ -2815,6 +2870,38 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setWindowSizeWidth(int i) {
         store.setValue(WINDOW_SIZE_WIDTH, i);
+    }
+
+    public void setGpuBoardPosX(int x) {
+        store.setValue(GPU_BOARD_POS_X, x);
+    }
+
+    public void setGpuBoardPosY(int y) {
+        store.setValue(GPU_BOARD_POS_Y, y);
+    }
+
+    public void setGpuBoardSizeWidth(int width) {
+        store.setValue(GPU_BOARD_SIZE_WIDTH, width);
+    }
+
+    public void setGpuBoardSizeHeight(int height) {
+        store.setValue(GPU_BOARD_SIZE_HEIGHT, height);
+    }
+
+    public void setGpuBoardMaximized(boolean maximized) {
+        store.setValue(GPU_BOARD_MAXIMIZED, maximized);
+    }
+
+    public void setGpuReportPanelWidth(int width) {
+        store.setValue(GPU_REPORT_PANEL_WIDTH, width);
+    }
+
+    public void setPlanetaryConditionsPosX(int x) {
+        store.setValue(PLANETARY_CONDITIONS_POS_X, x);
+    }
+
+    public void setPlanetaryConditionsPosY(int y) {
+        store.setValue(PLANETARY_CONDITIONS_POS_Y, y);
     }
 
     @Deprecated(since = "0.51.0", forRemoval = true)

@@ -22,6 +22,8 @@ final class UnitEquipmentModels {
 
     /** The placement profile that asks for a weapon to be drawn held in the fist. */
     static final String HELD = "held";
+    /** Added to a profile's name for the version of it a launcher linked to Artemis uses, when the art has one. */
+    static final String GUIDED = "-guided";
 
     UnitEquipmentModels(JsonValue catalog) {
         if (catalog.getInt("schema", 0) != 2 || catalog.get("equipment") == null || catalog.get("fallbacks") == null) {
@@ -66,7 +68,10 @@ final class UnitEquipmentModels {
         boolean held = false;
         if (profiles != null) {
             String profile = placement.getString("profile", "");
-            String profiled = profiles.getString(profile, null);
+            String profiled = mount.guided() ? profiles.getString(profile + GUIDED, null) : null;
+            if (profiled == null) {
+                profiled = profiles.getString(profile, null);
+            }
             if (profiled != null) {
                 model = profiled;
                 held = HELD.equals(profile);

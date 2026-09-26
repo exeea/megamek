@@ -358,6 +358,34 @@
     </KeyBind>
 
     <KeyBind>
+        <command>calledShotHigh</command> <!-- Alt+Up -->
+        <keyCode>38</keyCode>
+        <modifier>512</modifier>
+        <isRepeatable>false</isRepeatable>
+    </KeyBind>
+
+    <KeyBind>
+        <command>calledShotLow</command> <!-- Alt+Down -->
+        <keyCode>40</keyCode>
+        <modifier>512</modifier>
+        <isRepeatable>false</isRepeatable>
+    </KeyBind>
+
+    <KeyBind>
+        <command>calledShotLeft</command> <!-- Alt+Left -->
+        <keyCode>37</keyCode>
+        <modifier>512</modifier>
+        <isRepeatable>false</isRepeatable>
+    </KeyBind>
+
+    <KeyBind>
+        <command>calledShotRight</command> <!-- Alt+Right -->
+        <keyCode>39</keyCode>
+        <modifier>512</modifier>
+        <isRepeatable>false</isRepeatable>
+    </KeyBind>
+
+    <KeyBind>
         <command>pause</command> <!-- Ctrl+Shift+P -->
         <keyCode>80</keyCode>
         <modifier>192</modifier>
@@ -456,9 +484,9 @@
     </KeyBind>
 
     <KeyBind>
-        <command>viewLosSetting</command> <!-- Ctrl+Alt+L -->
+        <command>viewLosSetting</command> <!-- L -->
         <keyCode>76</keyCode>
-        <modifier>640</modifier>
+        <modifier>0</modifier>
         <isRepeatable>false</isRepeatable>
     </KeyBind>
 
@@ -620,6 +648,62 @@
         <command>toggleBotCommandsDisplay</command> <!-- Ctrl+Shift+G -->
         <keyCode>71</keyCode>
         <modifier>192</modifier>
+        <isRepeatable>false</isRepeatable>
+    </KeyBind>
+
+    <KeyBind>
+        <command>toggleFovSpotting</command> <!-- Ctrl+O -->
+        <keyCode>79</keyCode>
+        <modifier>128</modifier>
+        <isRepeatable>false</isRepeatable>
+    </KeyBind>
+
+    <KeyBind>
+        <command>toggleShowObjects</command> <!-- O -->
+        <keyCode>79</keyCode>
+        <modifier>0</modifier>
+        <isRepeatable>false</isRepeatable>
+    </KeyBind>
+
+    <KeyBind>
+        <command>cameraRotateLeft</command> <!-- Q -->
+        <keyCode>81</keyCode>
+        <modifier>0</modifier>
+        <isRepeatable>true</isRepeatable>
+    </KeyBind>
+
+    <KeyBind>
+        <command>cameraRotateRight</command> <!-- E -->
+        <keyCode>69</keyCode>
+        <modifier>0</modifier>
+        <isRepeatable>true</isRepeatable>
+    </KeyBind>
+
+    <KeyBind>
+        <command>cameraTiltUp</command> <!-- Page Up -->
+        <keyCode>33</keyCode>
+        <modifier>0</modifier>
+        <isRepeatable>true</isRepeatable>
+    </KeyBind>
+
+    <KeyBind>
+        <command>cameraTiltDown</command> <!-- Page Down -->
+        <keyCode>34</keyCode>
+        <modifier>0</modifier>
+        <isRepeatable>true</isRepeatable>
+    </KeyBind>
+
+    <KeyBind>
+        <command>cameraReset</command> <!-- Home -->
+        <keyCode>36</keyCode>
+        <modifier>0</modifier>
+        <isRepeatable>false</isRepeatable>
+    </KeyBind>
+
+    <KeyBind>
+        <command>cameraFitBoard</command> <!-- End -->
+        <keyCode>35</keyCode>
+        <modifier>0</modifier>
         <isRepeatable>false</isRepeatable>
     </KeyBind>
 

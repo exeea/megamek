@@ -424,7 +424,7 @@ final class UnitEquipmentAssembly {
             JsonValue placement = rule.get("placement");
             var drawnAs = new UnitModelEquipment.Mount(mount.index(), rule.getString("drawAs"), mount.location(),
                   mount.secondLocation(), mount.rear(), mount.omniPod(), mount.size(), mount.policy(), mount.family(),
-                  mount.members());
+                  mount.members(), mount.guided());
             var visual = catalog.resolve(drawnAs, placement);
             GpuUnitModels.ModularAsset module = visual == null ? null : library.modular(visual.asset());
             var point = points.get(placement.getString("hardpoint"));

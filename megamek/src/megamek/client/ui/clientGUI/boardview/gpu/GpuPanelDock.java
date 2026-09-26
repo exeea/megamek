@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.List;
+import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
@@ -15,6 +16,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
+import megamek.client.ui.clientGUI.GUIPreferences;
 
 /** One right-hand dock: shared bounds and visibility, with an optional resizable report panel. */
 final class GpuPanelDock {
@@ -26,7 +28,12 @@ final class GpuPanelDock {
     private final Table resizable;
     private Table active;
     private Table fallback;
-    private float preferredWidth = WIDTH;
+    /**
+     * The report panel width the next dock opens with. Set from the saved preference on the Swing thread before the
+     * GPU thread starts, and updated here when the user drags the panel, so a reopened board keeps the width.
+     */
+    static volatile float restoredWidth = WIDTH;
+    private float preferredWidth = Math.max(WIDTH, restoredWidth);
     private float left, right, bottom, height;
 
     GpuPanelDock(Skin skin, Runnable changed, Table resizable, Table... panels) {
@@ -123,6 +130,9 @@ final class GpuPanelDock {
             public void touchUp(InputEvent event, float x, float y, int pointer, int button) {
                 dragging = false;
                 cursor(false);
+                restoredWidth = preferredWidth;
+                int saved = Math.round(preferredWidth);
+                SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setGpuReportPanelWidth(saved));
             }
 
             @Override
