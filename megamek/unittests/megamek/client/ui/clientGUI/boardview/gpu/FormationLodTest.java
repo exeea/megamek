@@ -24,4 +24,15 @@ class FormationLodTest {
         assertEquals(1, FormationLod.level(boundary * .85f, 0));
         assertEquals(0, FormationLod.level(boundary * 1.15f, 1));
     }
+
+    @Test
+    void aMekSwitchesAtItsOwnHeightNotASuitsHeight() {
+        float boundary = FormationLod.MEK_FAR_PIXELS;
+        // Tall enough for a suit to show its full detail, but a Mek this small already draws its far body.
+        assertEquals(1, FormationLod.level(FormationLod.FAR_PIXELS * 1.5f, 0, boundary));
+        assertEquals(0, FormationLod.level(boundary * 1.2f, 1, boundary));
+        // The same margin keeps a Mek at its boundary from flickering.
+        assertEquals(0, FormationLod.level(boundary * .95f, 0, boundary));
+        assertEquals(1, FormationLod.level(boundary * 1.05f, 1, boundary));
+    }
 }

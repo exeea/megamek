@@ -39,21 +39,21 @@ final class GpuFormationLodReview {
             assertEquals(ROOT + "battle-armor/elemental.json", selection.asset());
             GpuUnitModel squadModel = library.get(selection, armor.getId());
             assertNotNull(squadModel, "A " + squad + "-suit Elemental squad must fit the per-suit budget");
-            assertFalse(squadModel.farSuitMeshes().isEmpty());
+            assertFalse(squadModel.detailLevels().far().isEmpty());
             var instance = new GpuUnitInstance(squadModel);
             assertEquals(squad * fullSuit, drawnTriangles(instance.nodes));
             // A suit only 20 pixels tall shows its far detail.
             float small = 20 / squadModel.figureHeight();
-            instance.suitDetail(small, false);
-            assertEquals(1, instance.suitLevel());
+            instance.farDetail(small, false);
+            assertEquals(1, instance.detailLevel());
             assertEquals(squad * farSuit, drawnTriangles(instance.nodes));
             // Zoomed in again, the full suits return.
-            instance.suitDetail(10, false);
-            assertEquals(0, instance.suitLevel());
+            instance.farDetail(10, false);
+            assertEquals(0, instance.detailLevel());
             assertEquals(squad * fullSuit, drawnTriangles(instance.nodes));
             // A unit in focus keeps its full suits however small it is.
-            instance.suitDetail(small, true);
-            assertEquals(0, instance.suitLevel());
+            instance.farDetail(small, true);
+            assertEquals(0, instance.detailLevel());
             assertEquals(squad * fullSuit, drawnTriangles(instance.nodes));
         }
     }

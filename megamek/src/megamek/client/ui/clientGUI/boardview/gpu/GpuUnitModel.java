@@ -50,7 +50,24 @@ final class GpuUnitModel implements Disposable {
     private final Vector3 restDimensions;
     private final UnitFamilyScale familyScale;
     private final boolean damageLocations;
-    private Set<Mesh> farSuitMeshes = Set.of();
+    private DetailLevels detailLevels = DetailLevels.NONE;
+
+    /**
+     * The meshes a unit with two levels of detail swaps between.
+     *
+     * @param near      the meshes drawn up close and hidden while the far ones show; empty means every part that is
+     *                  not far, as for a battle armour squad whose suits carry their own weapons
+     * @param far       the meshes drawn only while the unit is small on screen; empty for one level of detail
+     * @param farPixels the height on screen, in framebuffer pixels, below which the far meshes show
+     */
+    record DetailLevels(Set<Mesh> near, Set<Mesh> far, float farPixels) {
+        static final DetailLevels NONE = new DetailLevels(Set.of(), Set.of(), 0);
+
+        DetailLevels {
+            near = Set.copyOf(near);
+            far = Set.copyOf(far);
+        }
+    }
 
     GpuUnitModel(Model model) {
         this(model, null);
@@ -134,21 +151,24 @@ final class GpuUnitModel implements Disposable {
     }
 
     /**
-     * Marks a battle armour squad's far suits by their meshes: their parts start hidden and {@link GpuUnitInstance}
-     * swaps them in for the full suits while the squad is small on screen.
+     * Marks the far detail by its meshes, a battle armour squad's far suits or a Mek's far body: their parts start
+     * hidden and {@link GpuUnitInstance} swaps them in for the near ones while the unit is small on screen.
      *
      * @return this model
      */
-    GpuUnitModel farSuitMeshes(Set<Mesh> meshes) {
-        farSuitMeshes = Set.copyOf(meshes);
+    GpuUnitModel detailLevels(DetailLevels levels) {
+        detailLevels = levels;
         return this;
     }
 
-    Set<Mesh> farSuitMeshes() {
-        return farSuitMeshes;
+    DetailLevels detailLevels() {
+        return detailLevels;
     }
 
-    /** One figure's standing height in model units, for a formation whose figures all stand on the ground. */
+    /**
+     * The standing height in model units that the level of detail measures: one figure's, for a formation whose
+     * figures all stand on the ground, or the whole unit's otherwise.
+     */
     float figureHeight() {
         return restDimensions.z;
     }

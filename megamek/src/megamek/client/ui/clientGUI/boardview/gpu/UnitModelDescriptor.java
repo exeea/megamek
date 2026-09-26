@@ -17,11 +17,12 @@ import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Quaternion;
 import com.badlogic.gdx.math.Vector3;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import megamek.common.annotations.Nullable;
 
 /** Schema 2: independent rigid assets, +Y forward / +Z up, with no legacy Z compression. No GL resources. */
 record UnitModelDescriptor(int schema, String kind, String family, String mesh, Bounds bounds, String rig,
           Map<String, String> joints, Map<String, String> locations, List<Hardpoint> hardpoints, List<Emitter> emitters,
-          List<LandingSupport> landingSupports, Map<String, String> legBends) {
+          List<LandingSupport> landingSupports, Map<String, String> legBends, @Nullable String detail) {
     private static final ObjectMapper JSON = new ObjectMapper();
     /** Bare body/troop geometry only. Loadout modules have a separate measured cost. */
     static final int TRIANGLE_LIMIT = 1500;
@@ -31,6 +32,13 @@ record UnitModelDescriptor(int schema, String kind, String family, String mesh, 
      * One battle armour suit. A squad is budgeted per suit, so six full suits may pass {@link #TRIANGLE_LIMIT}.
      */
     static final int SUIT_TRIANGLE_LIMIT = 330;
+    /**
+     * A body drawn only up close, with a simpler far body that takes over once the unit is small on screen. The far
+     * body keeps {@link #TRIANGLE_LIMIT}; only the near one may use this larger allowance.
+     */
+    static final int NEAR_BODY_TRIANGLE_LIMIT = 3000;
+    /** The {@code detail} value that marks a near body. */
+    static final String NEAR_DETAIL = "near";
 
     UnitModelDescriptor {
         require(schema == 2, "Unsupported modular model schema: " + schema);
@@ -58,6 +66,13 @@ record UnitModelDescriptor(int schema, String kind, String family, String mesh, 
               "Landing supports belong to aircraft bodies");
         require(landingSupports.stream().map(LandingSupport::id).distinct().count() == landingSupports.size(),
               "Duplicate landing support ID");
+        require((detail == null) || (NEAR_DETAIL.equals(detail) && "body".equals(kind)),
+              "Only a body may be marked near detail, and near is the only level: " + detail);
+    }
+
+    /** @return {@code true} for a body drawn only up close, which needs a far body to stand in for it */
+    boolean nearDetail() {
+        return NEAR_DETAIL.equals(detail);
     }
 
     static UnitModelDescriptor read(Path file) throws IOException {
@@ -120,7 +135,7 @@ record UnitModelDescriptor(int schema, String kind, String family, String mesh, 
         }
         int triangles = triangleCount(data);
         require(triangles > 0, "Empty modular asset");
-        int limit = triangleLimit(kind, family);
+        int limit = nearDetail() ? NEAR_BODY_TRIANGLE_LIMIT : triangleLimit(kind, family);
         require(triangles <= limit, kind + " asset exceeds triangle hard cap " + limit + ": " + triangles);
         for (var material : data.materials) {
             require(Set.of("paint", "detail", "bark").contains(material.id), "Unknown material role: " + material.id);

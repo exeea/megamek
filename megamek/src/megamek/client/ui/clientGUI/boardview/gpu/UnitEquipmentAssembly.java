@@ -25,6 +25,8 @@ import megamek.logging.MMLogger;
 
 /** One attachment/fitting implementation for every family, using the actual immutable loadout. */
 final class UnitEquipmentAssembly {
+    /** Above a family's own spot (10), so a weapon the fist can hold as a gun stays in the fist. */
+    private static final int HELD_PRIORITY = 20;
     private static final MMLogger LOGGER = MMLogger.create(UnitEquipmentAssembly.class);
     private static final JsonValue DEFAULT_PLACEMENT = new JsonValue(JsonValue.ValueType.object);
     private static final Pattern HEAT_SINK = Pattern.compile("(?i)heat ?sink");
@@ -388,7 +390,8 @@ final class UnitEquipmentAssembly {
                       || (!requiredForm.isEmpty() && !requiredForm.equals(form))) {
                     continue;
                 }
-                int priority = (anyLocation ? -1000 : 0) + (requiredForm.isEmpty() ? 0 : 100) + (family.isEmpty() ? 0 : 10);
+                int priority = (anyLocation ? -1000 : 0) + (requiredForm.isEmpty() ? 0 : 100) + (family.isEmpty() ? 0 : 10)
+                      + heldPriority(catalog, mount, settings);
                 if (priority > best) {
                     candidates.clear();
                     best = priority;
@@ -432,6 +435,21 @@ final class UnitEquipmentAssembly {
             pending.add(new Pending(mount, point, settings, visual, module));
         }
         return pending;
+    }
+
+    /**
+     * A hand that can hold this weapon as a gun outranks every other spot on its arm, even one the chassis keeps for
+     * the weapon's family: a large laser stays in the fist while the chassis's forearm laser spots take the medium
+     * lasers, which have no held shape.
+     *
+     * @return {@link #HELD_PRIORITY} for a held-gun mount that draws this weapon as a held gun, otherwise {@code 0}
+     */
+    private static int heldPriority(UnitEquipmentModels catalog, UnitModelEquipment.Mount mount, JsonValue settings) {
+        if (!UnitEquipmentModels.HELD.equals(settings.getString("profile", ""))) {
+            return 0;
+        }
+        var held = catalog.resolve(mount, settings);
+        return ((held != null) && held.held()) ? HELD_PRIORITY : 0;
     }
 
     /**

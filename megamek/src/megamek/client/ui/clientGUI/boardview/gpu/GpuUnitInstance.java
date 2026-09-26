@@ -8,6 +8,7 @@ import java.util.Map;
 
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
@@ -37,11 +38,12 @@ final class GpuUnitInstance extends ModelInstance {
     }
     private static final MMLogger LOGGER = MMLogger.create(GpuUnitInstance.class);
     private final RenderableProvider depth = this::depthParts;
-    /** A battle armour squad's full and far suit parts; empty for a unit with only one level of detail. */
-    private final List<NodePart> fullSuitParts = new ArrayList<>();
-    private final List<NodePart> farSuitParts = new ArrayList<>();
+    /** The parts each level of detail draws; both empty for a unit with only one level. */
+    private final List<NodePart> nearParts = new ArrayList<>();
+    private final List<NodePart> farParts = new ArrayList<>();
     private float figureHeight;
-    private int suitLevel;
+    private float farPixels;
+    private int detailLevel;
     private final Map<Node, Attachment> attachments = new IdentityHashMap<>();
     private final Vector3 detailPosition = new Vector3();
     private float detailPixels = Float.NaN;
@@ -58,33 +60,42 @@ final class GpuUnitInstance extends ModelInstance {
                 attachments.put(node, new Attachment(UnitBounds.subtree(node).getDimensions(new Vector3()).len()));
             }
         }
-        if (!model.farSuitMeshes().isEmpty()) {
+        var levels = model.detailLevels();
+        if (!levels.far().isEmpty()) {
             figureHeight = model.figureHeight();
-            sortSuitParts(nodes, model);
+            farPixels = levels.farPixels();
+            sortDetailParts(nodes, levels);
         }
     }
 
-    private void sortSuitParts(Iterable<Node> nodes, GpuUnitModel model) {
+    /** Parts that belong to neither level, such as a Mek's weapons, are left alone and show at both. */
+    private void sortDetailParts(Iterable<Node> nodes, GpuUnitModel.DetailLevels levels) {
         for (Node node : nodes) {
             for (NodePart part : node.parts) {
-                (model.farSuitMeshes().contains(part.meshPart.mesh) ? farSuitParts : fullSuitParts).add(part);
+                Mesh mesh = part.meshPart.mesh;
+                if (levels.far().contains(mesh)) {
+                    farParts.add(part);
+                } else if (levels.near().isEmpty() || levels.near().contains(mesh)) {
+                    nearParts.add(part);
+                }
             }
-            sortSuitParts(node.getChildren(), model);
+            sortDetailParts(node.getChildren(), levels);
         }
     }
 
     /**
      * Render selection only: rigs, emitters, picking, damage flags and shared mesh buffers stay intact. Small
-     * equipment is hidden, and a battle armour squad with a far suit switches to it, once too small on screen to read.
+     * equipment is hidden, and a unit with far detail (a battle armour squad's far suits, a Mek's far body) switches
+     * to it, once too small on screen to read.
      */
     void equipmentDetail(Camera camera, boolean forceFull) {
-        if (attachments.isEmpty() && farSuitParts.isEmpty()) { return; }
+        if (attachments.isEmpty() && farParts.isEmpty()) { return; }
         float pixels = BoardCamera.pixelsPerUnit(camera, transform.getTranslation(detailPosition))
               * Math.max(transform.getScaleX(), Math.max(transform.getScaleY(), transform.getScaleZ()));
         if (pixels == detailPixels && forceFull == forcedDetail) { return; }
         detailPixels = pixels;
         forcedDetail = forceFull;
-        suitDetail(pixels, forceFull);
+        farDetail(pixels, forceFull);
         for (Attachment attachment : attachments.values()) {
             float threshold = EQUIPMENT_HIDE_PIXELS * (attachment.hidden ? 1 + EQUIPMENT_LOD_HYSTERESIS : 1 - EQUIPMENT_LOD_HYSTERESIS);
             boolean next = !forceFull && attachment.diameter * pixels < threshold;
@@ -98,28 +109,28 @@ final class GpuUnitInstance extends ModelInstance {
     int hiddenEquipment() { return (int) attachments.values().stream().filter(attachment -> attachment.hidden).count(); }
 
     /**
-     * Shows the far suits while one figure stands less than {@link FormationLod#FAR_PIXELS} tall, the full ones
-     * otherwise, and always the full ones for a unit in focus.
+     * Shows the far detail while the unit (one figure, for a squad) stands less than its model's far height on
+     * screen, the near detail otherwise, and always the near detail for a unit in focus.
      *
      * @param pixelsPerModelUnit framebuffer pixels per model unit at the instance's current scale
      * @param forceFull          {@code true} for the selected unit or one in an attack
      */
-    void suitDetail(float pixelsPerModelUnit, boolean forceFull) {
-        if (farSuitParts.isEmpty()) { return; }
-        float figurePixels = figureHeight * pixelsPerModelUnit;
-        int next = forceFull ? 0 : FormationLod.level(figurePixels, suitLevel);
-        if (next == suitLevel) { return; }
-        suitLevel = next;
+    void farDetail(float pixelsPerModelUnit, boolean forceFull) {
+        if (farParts.isEmpty()) { return; }
+        float unitPixels = figureHeight * pixelsPerModelUnit;
+        int next = forceFull ? 0 : FormationLod.level(unitPixels, detailLevel, farPixels);
+        if (next == detailLevel) { return; }
+        detailLevel = next;
         boolean far = next == 1;
-        fullSuitParts.forEach(part -> part.enabled = !far);
-        farSuitParts.forEach(part -> part.enabled = far);
+        nearParts.forEach(part -> part.enabled = !far);
+        farParts.forEach(part -> part.enabled = far);
         detailRevision++;
-        LOGGER.debug("[FormationLod] squad now shows its {} suits ({} pixels tall{})", far ? "far" : "full",
-              Math.round(figurePixels), forceFull ? ", held full while in focus" : "");
+        LOGGER.debug("[FormationLod] unit now shows its {} detail ({} pixels tall{})", far ? "far" : "near",
+              Math.round(unitPixels), forceFull ? ", held near while in focus" : "");
     }
 
-    /** @return {@code 0} while the full suits show, {@code 1} while the far ones do */
-    int suitLevel() { return suitLevel; }
+    /** @return {@code 0} while the near detail shows, {@code 1} while the far detail does */
+    int detailLevel() { return detailLevel; }
 
     int detailRevision() { return detailRevision; }
 

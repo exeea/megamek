@@ -104,6 +104,42 @@ class UnitModelDescriptorTest {
     }
 
     @Test
+    void aNearDetailBodyMayUse3000TrianglesAndAnOrdinaryBodyMayNot() throws Exception {
+        ObjectNode document = (ObjectNode) json.readTree(assets.resolve("bodies/warhammer.json").toFile());
+        document.put("detail", "near");
+        Path near = scratch.resolve("near.json");
+        json.writeValue(near.toFile(), document);
+        var nearBody = UnitModelDescriptor.read(near);
+        var ordinaryBody = UnitModelDescriptor.read(assets.resolve("bodies/warhammer.json"));
+        var data = new G3dModelLoader(new JsonReader()).loadModelData(
+              new FileHandle(assets.resolve("bodies/warhammer.g3dj").toFile()));
+        var part = data.meshes.first().parts[0];
+        int otherTriangles = UnitModelDescriptor.triangleCount(data) - part.indices.length / 3;
+        short[] original = part.indices;
+        part.indices = new short[(3000 - otherTriangles) * 3];
+        for (int index = 0; index < part.indices.length; index++) {
+            part.indices[index] = original[index % 3];
+        }
+        assertEquals(3000, nearBody.validate(data));
+        assertThrows(IllegalArgumentException.class, () -> ordinaryBody.validate(data));
+        part.indices = java.util.Arrays.copyOf(part.indices, part.indices.length + 3);
+        assertThrows(IllegalArgumentException.class, () -> nearBody.validate(data));
+    }
+
+    @Test
+    void onlyABodyMayBeMarkedNearAndNearIsTheOnlyLevel() throws Exception {
+        ObjectNode equipment = (ObjectNode) json.readTree(assets.resolve("equipment/ppc.json").toFile());
+        equipment.put("detail", "near");
+        Path broken = scratch.resolve("broken.json");
+        json.writeValue(broken.toFile(), equipment);
+        assertThrows(JsonMappingException.class, () -> UnitModelDescriptor.read(broken));
+        ObjectNode body = (ObjectNode) json.readTree(assets.resolve("bodies/warhammer.json").toFile());
+        body.put("detail", "medium");
+        json.writeValue(broken.toFile(), body);
+        assertThrows(JsonMappingException.class, () -> UnitModelDescriptor.read(broken));
+    }
+
+    @Test
     void brokenSocketNodesAndVerticesAreRejectedBeforeGpuAllocation() throws Exception {
         Path file = assets.resolve("bodies/warhammer.json");
         ObjectNode document = (ObjectNode) json.readTree(file.toFile());

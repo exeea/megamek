@@ -9,6 +9,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Mesh;
@@ -299,8 +300,9 @@ final class GpuUnitModels implements Disposable {
             }
             assembled.calculateTransforms();
             // Troops and transports are authored at canonical size in the Mek standard, like every other body.
-            return new GpuUnitModel(assembled, null, true, List.of(), null, rigs, familyScale)
-                  .farSuitMeshes(farMeshes);
+            var levels = farMeshes.isEmpty() ? GpuUnitModel.DetailLevels.NONE
+                  : new GpuUnitModel.DetailLevels(Set.of(), farMeshes, FormationLod.FAR_PIXELS);
+            return new GpuUnitModel(assembled, null, true, List.of(), null, rigs, familyScale).detailLevels(levels);
         } catch (RuntimeException error) {
             assembled.dispose();
             throw error;
@@ -317,13 +319,30 @@ final class GpuUnitModels implements Disposable {
             LOGGER.warn("[FormationLod] {}: far suit {} did not load; this figure keeps its full suit", partId, farSuit);
             return;
         }
-        List<Node> farNodes = new java.util.ArrayList<>();
-        collectNodes(new ModelInstance(far.model()).nodes, farNodes);
-        for (Node farNode : farNodes) {
-            Node joint = member.getNode(farNode.id, true);
+        attachFarParts(new ModelInstance(far.model()).nodes, id -> member.getNode(id, true),
+              "[FormationLod] " + partId + ": far suit " + farSuit, farMeshes);
+    }
+
+    /**
+     * Copies every part of a far model, switched off, onto the node of the same name in the full model. Both are built
+     * on one rig, so the far parts ride every joint the full model animates and only the drawn detail changes.
+     *
+     * @param farNodes  the far model's top nodes, already trimmed to the arm forms this unit uses
+     * @param fullNodes finds a node of the full model by its name, or gives {@code null} when it has none
+     * @param logPrefix the feature tag and model named in a warning
+     * @param farMeshes collects the far parts' meshes, so the instance can tell them from the full ones
+     */
+    static void attachFarParts(Iterable<Node> farNodes, Function<String, Node> fullNodes, String logPrefix,
+          Set<Mesh> farMeshes) {
+        List<Node> nodes = new java.util.ArrayList<>();
+        collectNodes(farNodes, nodes);
+        for (Node farNode : nodes) {
+            if (farNode.parts.isEmpty()) {
+                continue;
+            }
+            Node joint = fullNodes.apply(farNode.id);
             if (joint == null) {
-                LOGGER.warn("[FormationLod] {}: far suit {} has joint {}, which the full suit lacks; its parts are left out",
-                      partId, farSuit, farNode.id);
+                LOGGER.warn("{} has node {}, which the full model lacks; its parts are left out", logPrefix, farNode.id);
                 continue;
             }
             for (NodePart farPart : farNode.parts) {
