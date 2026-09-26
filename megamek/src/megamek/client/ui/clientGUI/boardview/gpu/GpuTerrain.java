@@ -1251,6 +1251,11 @@ final class GpuTerrain implements Disposable {
         return chunks.get(coords.getX() / CHUNK_SIZE * chunkRows + coords.getY() / CHUNK_SIZE).topography.get(coords);
     }
 
+    /** Camera input borrows the installed mesh snapshot, including between receipt and installation of a new board. */
+    void moveCamera(Vector3 eye, Vector3 movement, float radius) {
+        BoardCameraCollision.move(coverScene, this::tacticalSurface, eye, movement, radius);
+    }
+
     /**
      * Sculpted tops, cliffs and rock formations share a material per surface family. Shared vertices carry the
      * canonical normal, occlusion and material masks across mesh boundaries.
@@ -1424,6 +1429,19 @@ final class GpuTerrain implements Disposable {
 
     private static void coveredFace(Supplier<MeshPartBuilder> triangles, BoardSurface surface, BoardSurface.Face face,
           List<BoardSurface> waters) {
+        if (List.of(face.a(), face.b(), face.c()).stream().allMatch(p -> {
+            BoardRelief.Shade shade = surface.relief.shade(p);
+            return shade != null && shade.kind() == BoardRelief.Kind.SUBMERGED_CLIFF;
+        })) {
+            // This is the pool's own vertical bed boundary. Its projection lies on (or behind an undercut in)
+            // the water outline, so an XY coverage test cannot decide whether it is submerged. Keep the bed's
+            // waterline and material mapping; the shader uses height to leave the narrow emerged rim dry.
+            float shore = GpuWaterShader.palette(surface.tile.liquid());
+            triangles.get().triangle(sculptVertex(face.a(), surface.relief.shade(face.a()), shore, surface),
+                  sculptVertex(face.b(), surface.relief.shade(face.b()), shore, surface),
+                  sculptVertex(face.c(), surface.relief.shade(face.c()), shore, surface));
+            return;
+        }
         List<List<MeshPartBuilder.VertexInfo>> dry = new ArrayList<>();
         dry.add(List.of(sculptVertex(face.a(), surface.relief.shade(face.a()), Float.NaN, surface),
               sculptVertex(face.b(), surface.relief.shade(face.b()), Float.NaN, surface),

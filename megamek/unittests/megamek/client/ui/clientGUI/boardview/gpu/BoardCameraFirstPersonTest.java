@@ -105,8 +105,8 @@ class BoardCameraFirstPersonTest {
 
     @Test
     void closeFreeFlightViewPicksTheSameTerrainAndPresetsExitTheMode() {
-        Coords coords = new Coords(2, 2);
-        BoardScene scene = new BoardScene(0, 5, 5, List.of(new BoardScene.Tile(coords, 0, -1, false, 0,
+        Coords coords = new Coords(0, 0);
+        BoardScene scene = new BoardScene(0, 1, 1, List.of(new BoardScene.Tile(coords, 0, -1, false, 0,
               BoardScene.Surface.GRASS, null, null, null, List.of(), List.of())), List.of(), List.of(), -1, "", List.of());
         BoardCamera camera = camera();
         camera.setIsometric(false);

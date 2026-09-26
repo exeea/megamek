@@ -1212,6 +1212,10 @@ final class GpuBoardUi implements Disposable {
     }
 
     boolean acceptsCameraKeys() {
+        return !phaseNotice.isVisible() && !isTextEditing();
+    }
+
+    boolean acceptsBoardKeys() {
         return !phaseNotice.isVisible() && !popup.isVisible() && !reportPanel.panel().isVisible() && !tuning.panel().isVisible();
     }
 

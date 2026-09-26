@@ -89,8 +89,9 @@ class GpuFreeFlightSmokeTest {
                             eye = boardCamera.camera.position.cpy();
                             GpuBoardTestUi.click("tuning");
                         } else if (frames() == 42) {
-                            assertEquals(eye, boardCamera.camera.position, "Opening a panel stops held flight");
+                            assertTrue(eye.dst(boardCamera.camera.position) > .01f, "Opening a panel must allow held flight");
                             Gdx.input.getInputProcessor().keyUp(Input.Keys.W);
+                            eye = boardCamera.camera.position.cpy();
                             GpuBoardTestUi.click("tuning");
                             Gdx.input.getInputProcessor().keyDown(Input.Keys.W);
                             pause();

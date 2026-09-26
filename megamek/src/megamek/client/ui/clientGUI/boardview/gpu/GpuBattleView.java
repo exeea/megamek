@@ -18,6 +18,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.InputMultiplexer;
+import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
@@ -201,6 +202,7 @@ class GpuBattleView extends ApplicationAdapter {
     private void createBoard() {
         boardCamera.setIsometric(true);
         terrain = new GpuTerrain(unitModels, unitBounds);
+        boardCamera.flightCollision = (eye, movement) -> terrain.moveCamera(eye, movement, boardCamera.collisionRadius());
         fireControl = new GpuFireControl();
         tactical = new GpuTactical(terrain::tacticalSurface);
         atmosphere = new GpuAtmosphere();
@@ -225,7 +227,7 @@ class GpuBattleView extends ApplicationAdapter {
             public boolean keyDown(int key) {
                 boardInput.finishElevationScroll();
                 // Window commands precede Scene2D focus; ordinary typing and navigation stay with the focused control.
-                return isWindowShortcut(key) ? boardInput.keyDown(key) : super.keyDown(key);
+                return isWindowShortcut(key) || isCameraShortcut(key) ? boardInput.keyDown(key) : super.keyDown(key);
             }
 
             @Override
@@ -328,6 +330,7 @@ class GpuBattleView extends ApplicationAdapter {
         boardGeneration = frame.boardGeneration();
         ui.setPlaybackPaused(playback.paused());
         terrain.update(scene);
+        boardCamera.constrainFlight();
         fireControl.update(scene, HIDE_TARGET_ARROWS_DURING_ATTACKS && !playback.attacks().isEmpty());
         tactical.update(scene);
         fieldOfView.update(scene.fieldOfView());
@@ -968,29 +971,28 @@ class GpuBattleView extends ApplicationAdapter {
               .thenComparingDouble(entry -> boardCamera.camera.position.dst2(entry.getValue()))
               .thenComparingInt(entry -> entry.getKey().id())
               .thenComparingInt(entry -> entry.getKey().part()))
-              .map(entry -> Map.entry(entry.getKey(), boardCamera.camera.project(new Vector3(entry.getValue()), 0, 0,
-                  boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight)))
-              .filter(entry -> withinAnnotationDistance(entry.getValue().x, entry.getValue().y,
+              .map(entry -> Map.entry(entry.getKey(), annotationAnchor(boardCamera.camera, entry.getValue(), boardCamera.firstPerson())))
+              .filter(entry -> withinAnnotationDistance(entry.getValue().x(), entry.getValue().y(),
                   boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight,
                   UNIT_ANNOTATION_MAX_OFFSCREEN_DISTANCE * layoutScale)).toList();
         List<Rectangle> placed = new ArrayList<>();
         List<Rectangle> markerBounds = markers.labelObstacles(boardCamera.camera);
         List<Rectangle> occupied = new ArrayList<>(markerBounds);
-        for (Map.Entry<BoardScene.Unit, Vector3> entry : ordered) {
+        for (Map.Entry<BoardScene.Unit, AnnotationAnchor> entry : ordered) {
             BoardScene.Unit unit = entry.getKey();
-            Vector3 point = entry.getValue();
+            AnnotationAnchor point = entry.getValue();
             TextureRegion region = annotationTextures.region(unit.id() + ":" + unit.part());
             float scale = Math.min(annotationScale(layoutScale), boardCamera.camera.viewportWidth / region.getRegionWidth());
             scale = Math.min(scale, boardCamera.camera.viewportHeight / region.getRegionHeight());
             float width = region.getRegionWidth() * scale;
             float height = region.getRegionHeight() * scale;
-            Rectangle bounds = new Rectangle(MathUtils.clamp(point.x - width / 2, 0,
-                  boardCamera.camera.viewportWidth - width), MathUtils.clamp(point.y + 6 * layoutScale,
+            Rectangle bounds = new Rectangle(MathUtils.clamp(point.x() - width / 2, 0,
+                  boardCamera.camera.viewportWidth - width), point.behind() ? 0 : MathUtils.clamp(point.y() + 6 * layoutScale,
                         0, boardCamera.camera.viewportHeight - height), width, height);
-            List<Rectangle> obstacles = SPREAD_UNIT_ANNOTATIONS || unit.sensorContact() ? occupied : markerBounds;
+            List<Rectangle> obstacles = point.behind() || SPREAD_UNIT_ANNOTATIONS || unit.sensorContact() ? occupied : markerBounds;
             placed.add(!obstacles.isEmpty()
                   ? spreadAnnotation(bounds, obstacles, boardCamera.camera.viewportWidth,
-                        boardCamera.camera.viewportHeight, 2 * layoutScale)
+                        point.behind() ? height : boardCamera.camera.viewportHeight, 2 * layoutScale)
                   : bounds);
             occupied.add(placed.getLast());
         }
@@ -1003,6 +1005,21 @@ class GpuBattleView extends ApplicationAdapter {
         }
         markers.renderLabels(annotationBatch, boardCamera.camera, layoutScale, occupied);
         annotationBatch.end();
+    }
+
+    record AnnotationAnchor(float x, float y, boolean behind) { }
+
+    /** Perspective projection mirrors points behind the eye. Put those labels on the bottom edge by bearing. */
+    static AnnotationAnchor annotationAnchor(Camera camera, Vector3 anchor, boolean firstPerson) {
+        Vector3 relative = anchor.cpy().sub(camera.position);
+        float depth = relative.dot(camera.direction);
+        if (firstPerson && depth <= 0) {
+            float lateral = relative.dot(camera.direction.cpy().crs(camera.up).nor());
+            float bearing = (float) Math.atan2(lateral, Math.max(camera.near, -depth));
+            return new AnnotationAnchor(camera.viewportWidth * (.5f + bearing / MathUtils.PI), 0, true);
+        }
+        Vector3 screen = camera.project(anchor.cpy(), 0, 0, camera.viewportWidth, camera.viewportHeight);
+        return new AnnotationAnchor(screen.x, screen.y, false);
     }
 
     static boolean withinAnnotationDistance(float screenX, float screenY, float viewportWidth,
@@ -1443,28 +1460,26 @@ class GpuBattleView extends ApplicationAdapter {
             if (!ui.acceptsCameraKeys() && !isWindowShortcut(key)) {
                 return true;
             }
-            if (!source.chatActive()) {
+            if (!source.chatActive() && ui.acceptsCameraKeys()) {
                 if (boardCamera.firstPerson() && modifiers == InputEvent.SHIFT_DOWN_MASK) {
                     // Shift accelerates flight, including when held before pressing a movement key.
                     for (KeyCommandBind command : KeyCommandBind.getAllBindsByKey(awt, 0)) {
-                        switch (command) {
-                            case SCROLL_NORTH, SCROLL_SOUTH, SCROLL_EAST, SCROLL_WEST,
-                                 CAMERA_ROTATE_LEFT, CAMERA_ROTATE_RIGHT, CAMERA_TILT_UP, CAMERA_TILT_DOWN -> {
-                                cameraKeys.put(key, command);
-                                return true;
-                            }
-                            default -> { }
+                        if (heldCameraCommand(command)) {
+                            cameraKeys.put(key, command);
+                            return true;
                         }
                     }
                 }
                 for (KeyCommandBind command : KeyCommandBind.getAllBindsByKey(awt, modifiers)) {
-                    if (command == KeyCommandBind.CENTER_ON_SELECTED && isMoving()) {
-                        playback.finish();
-                    }
                     if (cameraCommand(key, command)) {
                         return true;
                     }
                 }
+            }
+            if (!ui.acceptsBoardKeys() && !isWindowShortcut(key)) { return true; }
+            if (!source.chatActive() && isMoving()
+                  && KeyCommandBind.getAllBindsByKey(awt, modifiers).contains(KeyCommandBind.CENTER_ON_SELECTED)) {
+                playback.finish();
             }
             if (awt != KeyEvent.VK_UNDEFINED) {
                 pressedKeys.put(key, new KeyPress(awt, modifiers));
@@ -1535,6 +1550,21 @@ class GpuBattleView extends ApplicationAdapter {
             source.keyTyped(character);
             return true;
         }
+    }
+
+    private boolean isCameraShortcut(int key) {
+        if (source.chatActive() || !ui.acceptsCameraKeys()) { return false; }
+        int mods = modifiers();
+        if (boardCamera.firstPerson() && mods == InputEvent.SHIFT_DOWN_MASK) { mods = 0; }
+        return KeyCommandBind.getAllBindsByKey(awtKey(key), mods).stream().anyMatch(GpuBattleView::heldCameraCommand);
+    }
+
+    private static boolean heldCameraCommand(KeyCommandBind command) {
+        return switch (command) {
+            case SCROLL_NORTH, SCROLL_SOUTH, SCROLL_EAST, SCROLL_WEST,
+                 CAMERA_ROTATE_LEFT, CAMERA_ROTATE_RIGHT, CAMERA_TILT_UP, CAMERA_TILT_DOWN -> true;
+            default -> false;
+        };
     }
 
     private boolean isWindowShortcut(int key) {

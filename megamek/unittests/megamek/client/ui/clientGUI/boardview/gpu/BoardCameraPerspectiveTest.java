@@ -243,6 +243,8 @@ class BoardCameraPerspectiveTest {
     private static BoardCamera visibleCamera(boolean perspective, int panSteps) {
         BoardCamera camera = camera();
         camera.setPerspective(perspective);
+        // Keep the edge rays inside this board so height changes affect the bounds instead of board-edge clamping.
+        camera.setFieldOfView(35);
         camera.setIsometric(true);
         camera.center(new Vector3(1500, -1500, 0));
         // Repeat the same steps to keep accumulated camera arithmetic identical to the reused camera.

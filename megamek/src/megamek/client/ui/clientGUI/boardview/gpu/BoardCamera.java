@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.awt.Rectangle;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.BiConsumer;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
@@ -52,6 +53,8 @@ final class BoardCamera {
     private boolean firstPerson;
     private float orbitAzimuth, orbitTilt;
     private boolean orbitFit;
+    /** Render-thread movement constraint supplied by the board view, borrowing its installed terrain geometry. */
+    BiConsumer<Vector3, Vector3> flightCollision;
     private float overviewZoom;
     private Vector3 overviewFocus;
     private boolean overviewFit;
@@ -177,6 +180,7 @@ final class BoardCamera {
             setPerspective(true);
             firstPerson = true;
             fitToWindow = false;
+            moveEye(new Vector3());
         } else {
             firstPerson = false;
             camera.perspective = false;
@@ -203,8 +207,28 @@ final class BoardCamera {
         Vector3 right = new Vector3(camera.direction).crs(camera.up).nor();
         Vector3 movement = new Vector3(camera.direction).scl(forward).mulAdd(right, sideways).add(0, 0, vertical);
         if (movement.isZero(.00001f)) { return; }
-        camera.position.mulAdd(movement.nor(), distance);
+        moveEye(movement.nor().scl(distance));
         update();
+    }
+
+    private void moveEye(Vector3 movement) {
+        if (flightCollision == null) { camera.position.add(movement); }
+        else { flightCollision.accept(camera.position, movement); }
+    }
+
+    /** Recheck clearance when terrain, viewport or lens settings change, without disturbing a valid flight pose. */
+    void constrainFlight() {
+        if (!firstPerson || flightCollision == null) { return; }
+        Vector3 before = camera.position.cpy();
+        moveEye(new Vector3());
+        if (!before.equals(camera.position)) { update(); }
+    }
+
+    /** Enclose the near-plane corners even with a wide lens or viewport, so looking around cannot clip a cliff. */
+    float collisionRadius() {
+        float halfHeight = (float) Math.tan(Math.toRadians(camera.fieldOfView / 2));
+        float aspect = camera.viewportWidth / Math.max(1, camera.viewportHeight);
+        return Math.max(4 * BoardGeometry.HEX_SCALE, (float) Math.sqrt(1 + halfHeight * halfHeight * (1 + aspect * aspect)) + .1f);
     }
 
     void setFieldOfView(float value) {
@@ -215,6 +239,7 @@ final class BoardCamera {
         fitToWindow = false;
         camera.fieldOfView = clamped;
         update();
+        constrainFlight();
     }
 
     float fieldOfView() {
@@ -231,6 +256,7 @@ final class BoardCamera {
         camera.zoom *= displayScale / scale;
         overviewZoom *= displayScale / scale;
         displayScale = scale;
+        constrainFlight();
         if (fitToWindow && scene != null) {
             float elapsed = entranceElapsed;
             fit(scene);
@@ -817,7 +843,7 @@ final class BoardCamera {
     void pan(float dx, float dy) {
         if (firstPerson) {
             Vector3 right = new Vector3(camera.direction).crs(camera.up).nor();
-            camera.position.mulAdd(right, -dx / displayScale).mulAdd(camera.up, dy / displayScale);
+            moveEye(right.scl(-dx / displayScale).mulAdd(camera.up, dy / displayScale));
             update();
             return;
         }
