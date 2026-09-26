@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
@@ -23,8 +24,8 @@ import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.PixmapIO;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector2;
-import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.Group;
+import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
@@ -41,6 +42,38 @@ import org.junit.jupiter.api.Test;
 
 @Tag("on-demand")
 class GpuBoardTuningSmokeTest {
+    @Test
+    void slidersDebounceAndSupportKeyboardNavigation() {
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                var skin = new GpuBoardSkin();
+                var stage = new Stage(new ScreenViewport());
+                try {
+                    var tuning = new GpuBoardTuning(skin.skin);
+                    stage.addActor(tuning.panel());
+                    Gdx.input.setInputProcessor(new InputMultiplexer(stage));
+                    var dock = new GpuPanelDock(skin.skin, () -> { }, null, tuning.panel());
+                    dock.resize(1280, 800, 0, 0, 0, 0);
+                    dock.show(tuning.panel());
+                    stage.act(0);
+                    stage.draw();
+                    checkSliderKeyboard(tuning, stage);
+                    checkTerrainDrag(tuning, stage, tuning.panel().findActor("tuning-terrain-scroll"));
+                    GpuBoardTestUi.click("tuning-defaults");
+                } catch (Throwable error) {
+                    failure.set(error);
+                } finally {
+                    stage.dispose();
+                    skin.dispose();
+                    Gdx.app.exit();
+                }
+            }
+        }, GpuBoardWindow.configuration(false));
+        if (failure.get() != null) { throw new AssertionError(failure.get()); }
+    }
+
     @Test
     void presetsAndDerivedControlsStayVisualAndResetEffectTuning() throws Exception {
         try (var fixture = GpuBoardFixture.create()) {
@@ -253,6 +286,12 @@ class GpuBoardTuningSmokeTest {
         assertEquals(BoardConcrete.Mode.WATER_ONLY, BoardConcrete.mode());
         checkTerrainDrag(tuning, stage, scroll);
         assertTerrainHelp(tuning, scroll);
+        CheckBox wetCliffs = tuning.panel().findActor("tuning-cliffs-into-water");
+        assertEquals(BoardRelief.DEFAULT_CLIFFS_INTO_WATER, wetCliffs.isChecked());
+        int cliffRevision = BoardGeometry.revision();
+        GpuBoardTestUi.click("tuning-cliffs-into-water");
+        assertEquals(!BoardRelief.DEFAULT_CLIFFS_INTO_WATER, BoardRelief.tuning().cliffsIntoWater());
+        assertTrue(BoardGeometry.revision() > cliffRevision, "Cliff edits invalidate terrain and unit support");
         set(tuning, "River width (%)", 5);
         assertEquals(.05f, BoardRelief.tuning().riverWidth(), .0001f);
         set(tuning, "Shore spread", -12);
@@ -303,6 +342,7 @@ class GpuBoardTuningSmokeTest {
         assertEquals(position, scroll.getScrollY());
         GpuBoardTestUi.click("tuning-defaults");
         assertEquals(BoardRelief.DEFAULTS, BoardRelief.tuning());
+        assertEquals(BoardRelief.DEFAULT_CLIFFS_INTO_WATER, wetCliffs.isChecked());
         assertEquals(BoardSurface.DEFAULTS, BoardSurface.tuning());
         assertEquals(BoardConcrete.DEFAULT_MODE, BoardConcrete.mode());
         assertEquals(BoardConcrete.DEFAULT_MODE.ordinal(), concrete.getSelectedIndex());
@@ -327,18 +367,101 @@ class GpuBoardTuningSmokeTest {
         var input = Gdx.input.getInputProcessor();
         input.touchDown((int) start.x, (int) start.y, 0, Input.Buttons.LEFT);
         assertTrue(slider.isDragging(), "The real pointer must capture the terrain slider");
+        assertSame(slider, stage.getKeyboardFocus(), "Clicking a slider gives it keyboard focus");
+        stage.act(.06f);
+        assertEquals(revision, BoardGeometry.revision(), "Terrain edits wait for the debounce");
         input.touchDragged((int) end.x, (int) end.y, 0);
+        stage.act(.06f);
         assertNotEquals(original, slider.getValue() / 100, "The control previews its dragged value");
-        assertEquals(revision, BoardGeometry.revision(), "Dragging must not rebuild terrain");
-        assertEquals(original, BoardRelief.tuning().riverWidth(), "The board keeps the applied terrain during a drag");
+        assertEquals(revision, BoardGeometry.revision(), "Moving the slider restarts the debounce");
+        assertEquals(original, BoardRelief.tuning().riverWidth(), "The board keeps its terrain while the value is moving");
         input.touchDown((int) end.x, (int) end.y, 1, Input.Buttons.LEFT);
         input.touchUp((int) end.x, (int) end.y, 1, Input.Buttons.LEFT);
         assertTrue(slider.isDragging());
         assertEquals(revision, BoardGeometry.revision(), "A rejected second pointer must not commit the active drag");
-        input.touchUp((int) end.x, (int) end.y, 0, Input.Buttons.LEFT);
-        assertFalse(slider.isDragging());
-        assertEquals(revision + 1, BoardGeometry.revision(), "Releasing applies the final terrain value once");
+        stage.act(.05f);
+        assertTrue(slider.isDragging());
+        assertEquals(revision + 1, BoardGeometry.revision(), "Pausing for 100 ms applies without releasing the pointer");
         assertEquals(slider.getValue() / 100, BoardRelief.tuning().riverWidth(), .0001f);
+        stage.act(.2f);
+        assertEquals(revision + 1, BoardGeometry.revision(), "A stationary slider applies only once");
+        input.touchDragged((int) start.x, (int) start.y, 0);
+        stage.act(.05f);
+        assertEquals(revision + 1, BoardGeometry.revision());
+        input.touchUp((int) start.x, (int) start.y, 0, Input.Buttons.LEFT);
+        assertFalse(slider.isDragging());
+        assertEquals(revision + 2, BoardGeometry.revision(), "Releasing applies the latest value immediately");
+        stage.act(.2f);
+        assertEquals(revision + 2, BoardGeometry.revision(), "Release cancels the pending debounce");
+        assertEquals(slider.getValue() / 100, BoardRelief.tuning().riverWidth(), .0001f);
+        input.touchDown((int) end.x, (int) end.y, 0, Input.Buttons.LEFT);
+        stage.act(.11f);
+        input.touchUp((int) end.x, (int) end.y, 0, Input.Buttons.LEFT);
+        assertEquals(revision + 3, BoardGeometry.revision(), "Release after a pause does not rebuild unchanged terrain");
+        assertEquals(slider.getValue() / 100, BoardRelief.tuning().riverWidth(), .0001f);
+    }
+
+    private static void checkSliderKeyboard(GpuBoardTuning tuning, Stage stage) {
+        var input = Gdx.input.getInputProcessor();
+        GpuBoardTestUi.click("tuning-tab-general");
+        Slider slider = tuning.panel().findActor("Unit scale");
+        var normalStyle = slider.getStyle();
+        GpuBoardTestUi.click("Unit scale");
+        assertSame(slider, stage.getKeyboardFocus());
+        assertSame(normalStyle.knobOver, slider.getStyle().knob, "Keyboard focus remains visible after clicking");
+        float value = slider.getValue();
+        assertTrue(input.keyDown(Input.Keys.RIGHT));
+        input.keyUp(Input.Keys.RIGHT);
+        assertEquals(value + slider.getStepSize(), slider.getValue(), .0001f);
+        assertEquals(slider.getValue(), BoardGeometry.tuning().unitScale(), .0001f);
+        assertTrue(input.keyDown(Input.Keys.LEFT));
+        input.keyUp(Input.Keys.LEFT);
+        assertEquals(value, slider.getValue(), .0001f);
+        slider.setValue(slider.getMaxValue());
+        input.keyDown(Input.Keys.RIGHT);
+        assertEquals(slider.getMaxValue(), slider.getValue(), "Keyboard edits respect the slider bounds");
+        slider.setValue(slider.getMinValue());
+        input.keyDown(Input.Keys.LEFT);
+        assertEquals(slider.getMinValue(), slider.getValue());
+        input.keyDown(Input.Keys.DOWN);
+        assertSame(tuning.panel().findActor("Unit height scale"), stage.getKeyboardFocus());
+        assertSame(normalStyle, slider.getStyle(), "Losing focus restores the ordinary slider appearance");
+        input.keyDown(Input.Keys.UP);
+        assertSame(slider, stage.getKeyboardFocus());
+        input.keyDown(Input.Keys.UP);
+        assertSame(tuning.panel().findActor("Hex scale"), stage.getKeyboardFocus());
+        input.keyDown(Input.Keys.UP);
+        assertSame(tuning.panel().findActor("tuning-perspective"), stage.getKeyboardFocus(),
+              "Navigation skips disabled inputs and includes checkboxes");
+        input.keyDown(Input.Keys.SPACE);
+        assertFalse(tuning.panel().<Slider>findActor("tuning-camera-fov").isDisabled());
+        input.keyDown(Input.Keys.DOWN);
+        assertSame(tuning.panel().findActor("tuning-camera-fov"), stage.getKeyboardFocus());
+
+        GpuBoardTestUi.click("tuning-tab-terrain");
+        assertNull(stage.getKeyboardFocus(), "Switching tabs releases focus from the hidden tab");
+        Slider river = tuning.panel().findActor("River width (%)");
+        GpuBoardTestUi.click("River width (%)");
+        value = river.getValue();
+        input.keyDown(Input.Keys.RIGHT);
+        assertEquals((value + river.getStepSize()) / 100, BoardRelief.tuning().riverWidth(), .0001f);
+        input.keyDown(Input.Keys.UP);
+        assertSame(tuning.panel().findActor("tuning-concrete-shapes"), stage.getKeyboardFocus(),
+              "Navigation includes dropdowns");
+        input.keyDown(Input.Keys.DOWN);
+        assertSame(river, stage.getKeyboardFocus());
+        ScrollPane scroll = tuning.panel().findActor("tuning-terrain-scroll");
+        float before = scroll.getScrollY();
+        for (int i = 0; i < 10; i++) { input.keyDown(Input.Keys.DOWN); }
+        assertSame(tuning.panel().findActor("Shore blend"), stage.getKeyboardFocus());
+        assertTrue(scroll.getScrollY() > before, "Keyboard navigation scrolls the next input into view");
+        SelectBox<String> family = tuning.panel().findActor("tuning-geology-family");
+        family.setSelectedIndex(BoardScene.Surface.values().length);
+        GpuBoardTestUi.click("Recess (m)");
+        input.keyDown(Input.Keys.DOWN);
+        assertSame(tuning.panel().findActor("Caprock scale"), stage.getKeyboardFocus(),
+              "Navigation skips terrain inputs disabled for this material");
+        GpuBoardTestUi.click("tuning-defaults");
     }
 
     private static void checkTerrainRendering(GpuBoardTuning tuning, BoardScene scene) {

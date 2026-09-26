@@ -8,10 +8,16 @@ import java.util.Locale;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Input;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
+import com.badlogic.gdx.scenes.scene2d.actions.DelayAction;
+import com.badlogic.gdx.scenes.scene2d.actions.RunnableAction;
+import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.ButtonGroup;
 import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
@@ -25,6 +31,8 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
+import com.badlogic.gdx.scenes.scene2d.utils.Disableable;
+import com.badlogic.gdx.scenes.scene2d.utils.FocusListener;
 import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.Scaling;
 import megamek.client.ui.clientGUI.GUIPreferences;
@@ -37,13 +45,14 @@ import megamek.common.planetaryConditions.AtmosphericTaint;
 final class GpuBoardTuning {
     private static final float SLIDER_WIDTH = 120;
     private static final float LABEL_WIDTH = 120;
+    private static final float SLIDER_DEBOUNCE_SECONDS = 0.1f;
 
     private record Knob(String name, float min, float max, float step, String format, String help) {
         Knob(String name, float min, float max, float step, String format) {
             this(name, min, max, step, format, "");
         }
     }
-    private record Control(Knob knob, Slider slider, Label reading, TextButton toggle) { }
+    private record Control(Knob knob, Slider slider, Label reading, TextButton toggle, DelayAction applyDelay) { }
 
     /** One row of the panel: the board value it drives, its range and how its reading is written. */
     private static final List<Knob> KNOBS = List.of(
@@ -574,13 +583,81 @@ final class GpuBoardTuning {
         scroll.setFadeScrollBars(false);
         scroll.setScrollingDisabled(true, false);
         scroll.setFlickScroll(false);
+        scroll.addCaptureListener(new InputListener() {
+            @Override
+            public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
+                if (button != Input.Buttons.LEFT) { return false; }
+                for (Actor actor = event.getTarget(); actor != scroll; actor = actor.getParent()) {
+                    if (isInput(actor)) {
+                        if (!((Disableable) actor).isDisabled()) { scroll.getStage().setKeyboardFocus(actor); }
+                        break;
+                    }
+                }
+                return false;
+            }
+        });
         scroll.addListener(new InputListener() {
             @Override
             public void enter(InputEvent event, float x, float y, int pointer, Actor fromActor) {
                 panel.getStage().setScrollFocus(scroll);
             }
+
+            @Override
+            public boolean keyDown(InputEvent event, int key) {
+                Actor actor = event.getTarget();
+                if (!isInput(actor) || ((Disableable) actor).isDisabled()) { return false; }
+                if (key == Input.Keys.UP || key == Input.Keys.DOWN) {
+                    List<Actor> inputs = new ArrayList<>();
+                    collectInputs(content, inputs);
+                    int next = inputs.indexOf(actor) + (key == Input.Keys.UP ? -1 : 1);
+                    if (next >= 0 && next < inputs.size()) {
+                        Actor target = inputs.get(next);
+                        scroll.getStage().setKeyboardFocus(target);
+                        Vector2 position = target.localToAscendantCoordinates(content, new Vector2());
+                        scroll.scrollTo(position.x, position.y, target.getWidth(), target.getHeight());
+                        scroll.updateVisualScroll();
+                    }
+                    return true;
+                }
+                if (key == Input.Keys.LEFT || key == Input.Keys.RIGHT) {
+                    int direction = key == Input.Keys.LEFT ? -1 : 1;
+                    if (actor instanceof Slider slider) {
+                        slider.setValue(slider.getValue() + direction * slider.getStepSize());
+                        return true;
+                    }
+                    if (actor instanceof SelectBox<?> choice) {
+                        choice.setSelectedIndex(Math.clamp(choice.getSelectedIndex() + direction, 0,
+                              choice.getItems().size - 1));
+                        return true;
+                    }
+                }
+                if (key == Input.Keys.ENTER || key == Input.Keys.SPACE) {
+                    if (actor instanceof Button button) {
+                        button.getClickListener().clicked(event, button.getWidth() / 2, button.getHeight() / 2);
+                        return true;
+                    }
+                    if (actor instanceof SelectBox<?> choice) {
+                        choice.showList();
+                        return true;
+                    }
+                }
+                return false;
+            }
         });
         return scroll;
+    }
+
+    private static boolean isInput(Actor actor) {
+        return actor instanceof Slider || actor instanceof Button || actor instanceof SelectBox<?>;
+    }
+
+    private static void collectInputs(Actor actor, List<Actor> inputs) {
+        if (!actor.isVisible() || actor.getTouchable() == Touchable.disabled) { return; }
+        if (isInput(actor)) {
+            if (!((Disableable) actor).isDisabled()) { inputs.add(actor); }
+        } else if (actor instanceof Group group) {
+            for (Actor child : group.getChildren()) { collectInputs(child, inputs); }
+        }
     }
 
     private void tab(Skin skin, Table tabs, ButtonGroup<TextButton> group, String label, ScrollPane page, ScrollPane... others) {
@@ -660,21 +737,39 @@ final class GpuBoardTuning {
         return controls(skin, knobs, apply, toggleCount, false);
     }
 
-    private List<Control> controls(Skin skin, List<Knob> knobs, Runnable apply, int toggleCount, boolean onRelease) {
+    private List<Control> controls(Skin skin, List<Knob> knobs, Runnable apply, int toggleCount, boolean debounce) {
         List<Control> result = new ArrayList<>();
+        Slider.SliderStyle normal = skin.get("menu", Slider.SliderStyle.class);
+        Slider.SliderStyle focused = new Slider.SliderStyle(normal);
+        focused.knob = normal.knobOver;
         for (Knob knob : knobs) {
             Slider slider = new Slider(knob.min(), knob.max(), knob.step(), false, skin, "menu");
             slider.setName(knob.name());
             Label reading = new Label("", skin, "small");
             reading.setAlignment(Align.right);
+            // Unpooled actions belong to this control and can be restarted or cancelled during a sync.
+            DelayAction applyDelay = new DelayAction(SLIDER_DEBOUNCE_SECONDS);
+            RunnableAction applyAction = new RunnableAction();
+            applyAction.setRunnable(apply);
+            applyDelay.setAction(applyAction);
             slider.addListener(new ChangeListener() {
                 @Override
                 public void changed(ChangeEvent event, Actor actor) {
-                    if (!syncing && !(onRelease && slider.isDragging())) {
-                        apply.run();
-                    } else if (!syncing) {
+                    slider.removeAction(applyDelay);
+                    if (syncing) { return; }
+                    if (debounce && slider.isDragging()) {
                         reading.setText(String.format(Locale.ROOT, knob.format(), slider.getValue()));
+                        applyDelay.restart();
+                        slider.addAction(applyDelay);
+                    } else {
+                        apply.run();
                     }
+                }
+            });
+            slider.addListener(new FocusListener() {
+                @Override
+                public void keyboardFocusChanged(FocusEvent event, Actor actor, boolean hasFocus) {
+                    slider.setStyle(hasFocus ? focused : normal);
                 }
             });
             TextButton toggle = null;
@@ -690,7 +785,7 @@ final class GpuBoardTuning {
                     }
                 });
             }
-            result.add(new Control(knob, slider, reading, toggle));
+            result.add(new Control(knob, slider, reading, toggle, applyDelay));
             rows.add(toggle == null ? new Label(knob.name(), skin, "menu") : toggle).left().width(LABEL_WIDTH);
             rows.add(slider).minWidth(60).prefWidth(SLIDER_WIDTH).growX().height(20);
             rows.add(reading).width(38).right().row();
@@ -770,7 +865,9 @@ final class GpuBoardTuning {
     private void setValues(List<Control> controls, float[] values) {
         syncing = true;
         for (int index = 0; index < controls.size(); index++) {
-            controls.get(index).slider().setValue(values[index]);
+            Control control = controls.get(index);
+            control.slider().removeAction(control.applyDelay());
+            control.slider().setValue(values[index]);
         }
         syncing = false;
     }
