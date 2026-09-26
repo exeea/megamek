@@ -724,6 +724,14 @@ final class GpuWaterShader extends Attribute {
                 if (face.finish() == BoardSurface.Finish.ICE || face.finish() == BoardSurface.Finish.DRESSING) { continue; }
                 waterline(segments, surface, face);
             }
+            for (BoardSurface.Face face : surface.cliffWater) {
+                for (Vector3 p : List.of(face.a(), face.b(), face.c())) {
+                    lowX = Math.min(lowX, p.x);
+                    lowY = Math.min(lowY, p.y);
+                    highX = Math.max(highX, p.x);
+                    highY = Math.max(highY, p.y);
+                }
+            }
             banks = new float[segments.size()];
             for (int i = 0; i < banks.length; i++) { banks[i] = segments.get(i); }
             minX = lowX;
@@ -752,7 +760,9 @@ final class GpuWaterShader extends Attribute {
                 float xi = outline[i], yi = outline[i + 1], xj = outline[j], yj = outline[j + 1];
                 if ((yi > y) != (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) { inside = !inside; }
             }
-            return inside;
+            if (inside) { return true; }
+            // The visible surface can reach into a cliff recess beyond the original shore contour.
+            return surface.cliffWater.stream().anyMatch(face -> Float.isFinite(face.height(x, y)));
         }
 
         /** Squared distance to the nearest bank segment, or the given bound when every bank is further away. */

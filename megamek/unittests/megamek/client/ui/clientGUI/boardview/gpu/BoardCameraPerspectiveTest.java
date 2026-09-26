@@ -97,6 +97,43 @@ class BoardCameraPerspectiveTest {
     }
 
     @Test
+    void fittingUsesRelativeHeightAtHighAndLowAbsoluteElevations() {
+        for (boolean perspective : new boolean[] { false, true }) {
+            for (float tilt : new float[] { 0, 55, 80 }) {
+                BoardCamera reference = camera();
+                reference.setPerspective(perspective);
+                reference.orbit(30, tilt);
+                reference.viewableArea(100, 600);
+                reference.fit(scene(5, 5, 0, 2));
+                for (int base : new int[] { -9999, 9999 }) {
+                    BoardCamera camera = camera();
+                    camera.setPerspective(perspective);
+                    camera.orbit(30, tilt);
+                    camera.viewableArea(100, 600);
+                    BoardScene scene = scene(5, 5, base, 2);
+                    camera.fit(scene);
+                    assertEquals(reference.camera.zoom, camera.camera.zoom, .001f,
+                          "Absolute elevation must not change the fitted scale");
+                    for (var tile : scene.tiles()) {
+                        for (float elevation : new float[] { BoardGeometry.floor(scene) / BoardGeometry.LEVEL,
+                              tile.elevation() }) {
+                            for (int corner = 0; corner < 6; corner++) {
+                                Vector3 screen = project(camera, BoardGeometry.corner(tile.coords(), elevation, corner));
+                                Vector3 expected = project(reference,
+                                      BoardGeometry.corner(tile.coords(), elevation - base, corner));
+                                assertEquals(expected.x, screen.x, .2f);
+                                assertEquals(expected.y, screen.y, .2f);
+                                assertTrue(screen.z > 0 && screen.z < 1,
+                                      "The fitted terrain must be in front of the camera and within its clip planes");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     void perspectivePanAndPointerZoomKeepTheirWorldPlaneAnchors() {
         for (float fieldOfView : new float[] { 20, 45, 100 }) {
             for (float tilt : new float[] { 0, 40, 70 }) {
@@ -228,10 +265,15 @@ class BoardCameraPerspectiveTest {
     }
 
     private static BoardScene scene(int width, int height, int raisedLevel) {
+        return scene(width, height, 0, raisedLevel);
+    }
+
+    private static BoardScene scene(int width, int height, int base, int raisedLevel) {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < width; x++) {
             for (int y = 0; y < height; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), x == width / 2 && y == height / 2 ? raisedLevel : 0, -1, false, 0,
+                int elevation = base + (x == width / 2 && y == height / 2 ? raisedLevel : 0);
+                tiles.add(new BoardScene.Tile(new Coords(x, y), elevation, -1, false, 0,
                       BoardScene.Surface.GRASS, null, null, null, List.of(), List.of()));
             }
         }

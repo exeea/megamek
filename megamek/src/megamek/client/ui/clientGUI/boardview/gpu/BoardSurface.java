@@ -311,6 +311,8 @@ final class BoardSurface {
     /** Rough cover is part of the drawn mesh; ordinary units may clip it, infantry can seek footing on it. */
     final List<Face> rough = new ArrayList<>();
     final List<Vector3> water = new ArrayList<>();
+    /** The surface overlap inside cliff recesses; these same faces also belong to waterFaces. */
+    final List<Face> cliffWater = new ArrayList<>();
     /**
      * The water's full outline within its hex, before a falling mouth pulls its surface back to the crest. Segments on
      * open mouths continue into the next pool; every other segment is a bank.
@@ -458,6 +460,25 @@ final class BoardSurface {
             }
             waterFaces.clear();
             polygon(contour.toArray(Vector3[]::new), Finish.TOP, waterFaces);
+        }
+        if (adjusted && gradedWater) {
+            // Carry the contact sheet a short distance inside the rock. The cliff hides this overlap; its
+            // undercuts then contain water too, instead of exposing an air gap behind the surface's outline.
+            for (int edge = 0; edge < 6; edge++) {
+                if (!relief.wetCliff(edge)) { continue; }
+                Vector3 into = BoardGeometry.center(neighbor(scene, edge).coords(), 0)
+                      .sub(BoardGeometry.center(tile.coords(), 0)).nor().scl(BoardRelief.metres(2));
+                List<Vector3> boundary = waterBoundary(edge);
+                for (int i = 0; i + 1 < boundary.size(); i++) {
+                    Vector3 a = boundary.get(i), b = boundary.get(i + 1);
+                    if (Math.max(a.z, b.z) <= base) { continue; }
+                    if ((b.x - a.x) * into.y - (b.y - a.y) * into.x >= 0) { continue; }
+                    Vector3 outerA = new Vector3(a).add(into), outerB = new Vector3(b).add(into);
+                    cliffWater.add(new Face(b, a, outerA, Finish.TOP));
+                    cliffWater.add(new Face(b, outerA, outerB, Finish.TOP));
+                }
+            }
+            waterFaces.addAll(cliffWater);
         }
     }
 

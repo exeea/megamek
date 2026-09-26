@@ -30,7 +30,16 @@ import org.junit.jupiter.api.Test;
 class GpuBoardFileSmokeTest {
     @Test
     void capturesShippedBoards() throws Exception {
-        String boards = System.getProperty("megamek.gpu.boards", "Map Pack Savannahs/16x17 Wide River (Svannah).board");
+        capture(System.getProperty("megamek.gpu.boards", "Map Pack Savannahs/16x17 Wide River (Svannah).board"));
+    }
+
+    @Test
+    void rendersTallCliffBoardsAcrossMeshBoundaries() throws Exception {
+        // Maze A overflows a partially filled mesh; Thunder Rift can overflow even a fresh mesh within one hex.
+        capture("unofficial/Jakes Map Pack/16x17 Maze A.board,Legendary Battles BattleMats/32x17 Thunder Rift.board");
+    }
+
+    private static void capture(String boards) throws Exception {
         float hour = Float.parseFloat(System.getProperty("megamek.gpu.boards.hour", "13"));
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "boards");
         Files.createDirectories(output.toPath());

@@ -677,8 +677,10 @@ final class BoardCamera {
     void fit(BoardScene scene) {
         stopFraming();
         fitToWindow = true;
+        // Follow the board's lowest level so an absolute elevation offset cannot move it behind the camera.
+        float plane = BoardGeometry.weatherBase(scene);
         focus.set(scene.width() * BoardGeometry.WIDTH * 0.375f,
-              -(scene.height() + 0.5f) * BoardGeometry.HEIGHT / 2, 0);
+              -(scene.height() + 0.5f) * BoardGeometry.HEIGHT / 2, plane);
         update();
         if (camera.perspective) {
             List<Vector3> points = new ArrayList<>();
@@ -692,7 +694,7 @@ final class BoardCamera {
             }
             if (!points.isEmpty()) {
                 var pose = perspectiveFit(points, camera.viewportWidth - 2 * (viewOffsetPixels + viewLeftPixels),
-                      azimuth, tilt, 0, true, 0);
+                      azimuth, tilt, 0, true, plane);
                 focus.set(pose.focus());
                 camera.zoom = pose.zoom();
                 update();
