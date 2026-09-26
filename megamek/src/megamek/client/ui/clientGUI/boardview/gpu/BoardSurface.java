@@ -395,6 +395,7 @@ final class BoardSurface {
             for (int edge = 0; edge < 6; edge++) { falls |= crests[edge] == null ? 0 : 1 << edge; }
             // Banks meet the actual ground rim, including emerged shallow bars, while the water keeps its level.
             relief.top(faces, bedOutline, openMouths, crestLine, falls);
+            relief.boulders(faces);
         }
     }
 
@@ -763,7 +764,8 @@ final class BoardSurface {
         float[] ends = new float[6];
         for (int edge = 0; edge < 6; edge++) {
             int previous = (edge + 5) % 6;
-            ends[edge] = shore[edge] > 0 || shore[previous] > 0 ? 0
+            ends[edge] = shore[edge] > 0 && !relief.wetCliff(edge)
+                  || shore[previous] > 0 && !relief.wetCliff(previous) ? 0
                   : spills[edge] || spills[previous] ? ledge : cornerDepth(scene, edge);
         }
         float[] steep = new float[6], scour = new float[6];
@@ -779,12 +781,12 @@ final class BoardSurface {
             int edge = i / SHORE_SEGMENTS;
             if (i % SHORE_SEGMENTS == 0) {
                 rim[i] = ends[edge];
-            } else if (shore[edge] == 0) {
+            } else if (shore[edge] == 0 || relief.wetCliff(edge)) {
                 // Beds of one level meet at their mean depth; a fall pours over its ledge into the pool below, whose
                 // bed keeps its own depth.
                 BoardScene.Tile other = neighbor(scene, edge);
                 float middle = spills[edge] ? ledge
-                      : other != null && (other.elevation() == tile.elevation() || waterSlope(tile, other))
+                      : shore[edge] == 0 && other != null && (other.elevation() == tile.elevation() || waterSlope(tile, other))
                             ? (full + depth(other)) / 2 : full;
                 int next = (edge + 1) % 6;
                 rim[i] = mouthDepth(waterline[i], waterline[edge * SHORE_SEGMENTS], ends[edge],
@@ -797,7 +799,7 @@ final class BoardSurface {
         for (int i = 0; i < count; i++) {
             int edge = i / SHORE_SEGMENTS;
             float t = i % SHORE_SEGMENTS / (float) SHORE_SEGMENTS;
-            bank[i] = shore[edge] == 0 ? 0 : Math.min(shore[(edge + 5) % 6] > 0 ? 1 : BoardRelief.smooth(2 * t),
+            bank[i] = shore[edge] == 0 || relief.wetCliff(edge) ? 0 : Math.min(shore[(edge + 5) % 6] > 0 ? 1 : BoardRelief.smooth(2 * t),
                   shore[(edge + 1) % 6] > 0 ? 1 : BoardRelief.smooth(2 * (1 - t)));
             float bed = shallow ? shallowBed(rim[i], outer[i].x, outer[i].y, bank[i]) : rim[i];
             ring[i] = new Vector3(outer[i].x, outer[i].y, outer[i].z - bed);
@@ -1057,7 +1059,10 @@ final class BoardSurface {
         for (int k = 0; k < 6; k++) {
             int before = (k + 5) % 6, next = (k + 1) % 6;
             boolean in = inset[before] == 0, out = inset[k] == 0;
-            if (BoardConcrete.concreteBank(scene, tile, before) || BoardConcrete.concreteBank(scene, tile, k)) {
+            if (relief.wetCliffCorner(k)) {
+                // Shared corner geometry also handles a cliff meeting a slope or a river mouth.
+                anchors[k] = relief.seam(k, k, 0);
+            } else if (BoardConcrete.concreteBank(scene, tile, before) || BoardConcrete.concreteBank(scene, tile, k)) {
                 // A poured edge meets the water directly. No beach setback, rounded corner or natural shore field.
                 anchors[k] = new Vector3(shoreCorners[k]);
             } else if (in && out) {
@@ -1083,7 +1088,8 @@ final class BoardSurface {
             Vector3[] bank = inset[edge] == 0 || BoardConcrete.concreteBank(scene, tile, edge)
                   ? null : bank(anchors[edge], anchors[next], plunge, edge);
             for (int segment = 0; segment < SHORE_SEGMENTS; segment++) {
-                Vector3 point = bank == null ? mouthPoint(anchors[edge], anchors[next], segment) : bank[segment];
+                Vector3 point = relief.wetCliff(edge) ? relief.seam(edge, edge, segment / (float) SHORE_SEGMENTS)
+                      : bank == null ? mouthPoint(anchors[edge], anchors[next], segment) : bank[segment];
                 point.z = z;
                 result[edge * SHORE_SEGMENTS + segment] = point;
             }
@@ -1409,8 +1415,13 @@ final class BoardSurface {
 
     /** Derived once per immutable terrain snapshot; repeated pointer rays reuse the rendered topology. */
     List<Face> walls(BoardScene scene, float floor) {
+        return walls(scene, floor, Map.of());
+    }
+
+    /** Neighbours must have completed construction; only their immutable edge topography is borrowed. */
+    List<Face> walls(BoardScene scene, float floor, Map<Coords, BoardSurface> neighbors) {
         if (wallFaces == null || wallFloor != floor) {
-            wallFaces = relief.walls(sides(scene, floor));
+            wallFaces = relief.walls(sides(scene, floor, neighbors));
             wallFloor = floor;
         }
         return wallFaces;
@@ -1447,6 +1458,11 @@ final class BoardSurface {
      * stands beneath its crest, from the ledge the water pours over down to the pool below.
      */
     List<Side> sides(BoardScene scene, float floor) {
+        return sides(scene, floor, Map.of());
+    }
+
+    /** The build's completed surfaces save reconstructing neighbouring tops; the lookup is not retained. */
+    List<Side> sides(BoardScene scene, float floor, Map<Coords, BoardSurface> neighbors) {
         List<Side> result = new ArrayList<>();
         for (int edge = 0; edge < 6; edge++) {
             // The edge as the shore moves its corners, where both hexes' tops meet.
@@ -1455,7 +1471,8 @@ final class BoardSurface {
             if (mouth(edge) && neighbor != null && neighbor.elevation() == tile.elevation()) {
                 continue; // Beds of one level share their mouth's profile and their banks' top: nothing stands between.
             }
-            BoardSurface adjacent = neighbor == null ? null : new BoardSurface(scene, neighbor, false);
+            BoardSurface adjacent = neighbor == null ? null : neighbors.get(neighbor.coords());
+            if (adjacent == null && neighbor != null) { adjacent = new BoardSurface(scene, neighbor, false); }
             TreeSet<Float> cuts = new TreeSet<>(List.of(0f, 1f));
             cuts(a, b, cuts);
             if (adjacent != null) {

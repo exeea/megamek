@@ -15,12 +15,14 @@ import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Input;
 import com.badlogic.gdx.InputMultiplexer;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.PixmapIO;
 import com.badlogic.gdx.math.Matrix4;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
@@ -249,6 +251,7 @@ class GpuBoardTuningSmokeTest {
         assertEquals(BoardConcrete.Mode.OFF, BoardConcrete.mode());
         concrete.setSelected("Water only");
         assertEquals(BoardConcrete.Mode.WATER_ONLY, BoardConcrete.mode());
+        checkTerrainDrag(tuning, stage, scroll);
         assertTerrainHelp(tuning, scroll);
         set(tuning, "River width (%)", 5);
         assertEquals(.05f, BoardRelief.tuning().riverWidth(), .0001f);
@@ -307,6 +310,35 @@ class GpuBoardTuningSmokeTest {
         scroll.setScrollPercentY(0);
         scroll.updateVisualScroll();
         capture(stage, "tuning-terrain.png");
+    }
+
+    private static void checkTerrainDrag(GpuBoardTuning tuning, Stage stage, ScrollPane scroll) {
+        Slider slider = tuning.panel().findActor("River width (%)");
+        Vector2 position = slider.localToAscendantCoordinates(scroll.getWidget(), new Vector2());
+        scroll.scrollTo(position.x, position.y, slider.getWidth(), slider.getHeight(), false, true);
+        scroll.updateVisualScroll();
+        stage.draw();
+        Vector2 start = stage.stageToScreenCoordinates(slider.localToStageCoordinates(
+              new Vector2(slider.getWidth() * .25f, slider.getHeight() / 2)));
+        Vector2 end = stage.stageToScreenCoordinates(slider.localToStageCoordinates(
+              new Vector2(slider.getWidth() * .75f, slider.getHeight() / 2)));
+        int revision = BoardGeometry.revision();
+        float original = BoardRelief.tuning().riverWidth();
+        var input = Gdx.input.getInputProcessor();
+        input.touchDown((int) start.x, (int) start.y, 0, Input.Buttons.LEFT);
+        assertTrue(slider.isDragging(), "The real pointer must capture the terrain slider");
+        input.touchDragged((int) end.x, (int) end.y, 0);
+        assertNotEquals(original, slider.getValue() / 100, "The control previews its dragged value");
+        assertEquals(revision, BoardGeometry.revision(), "Dragging must not rebuild terrain");
+        assertEquals(original, BoardRelief.tuning().riverWidth(), "The board keeps the applied terrain during a drag");
+        input.touchDown((int) end.x, (int) end.y, 1, Input.Buttons.LEFT);
+        input.touchUp((int) end.x, (int) end.y, 1, Input.Buttons.LEFT);
+        assertTrue(slider.isDragging());
+        assertEquals(revision, BoardGeometry.revision(), "A rejected second pointer must not commit the active drag");
+        input.touchUp((int) end.x, (int) end.y, 0, Input.Buttons.LEFT);
+        assertFalse(slider.isDragging());
+        assertEquals(revision + 1, BoardGeometry.revision(), "Releasing applies the final terrain value once");
+        assertEquals(slider.getValue() / 100, BoardRelief.tuning().riverWidth(), .0001f);
     }
 
     private static void checkTerrainRendering(GpuBoardTuning tuning, BoardScene scene) {

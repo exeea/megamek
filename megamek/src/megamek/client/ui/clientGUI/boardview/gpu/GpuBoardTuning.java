@@ -105,6 +105,7 @@ final class GpuBoardTuning {
     private final List<Control> terrainDetail;
     private final SelectBox<String> concreteShapes;
     private final CheckBox fallsOffBoard;
+    private final CheckBox cliffsIntoWater;
     private final SelectBox<String> geologyFamily;
     private final List<Control> geology;
     private final List<Control> familySizes;
@@ -437,6 +438,16 @@ final class GpuBoardTuning {
               new Knob("Transition room (m)", 0, 8, .1f, "%.1f",
                     "Space used to join different ground heights. Higher values spread slopes out. Needs Hex transitions on and Hex padding off.")), this::applyRelief, 0, true);
         section(skin, "Banks and river openings");
+        cliffsIntoWater = checkbox(skin, "Cliffs directly into water", "tuning-cliffs-into-water");
+        cliffsIntoWater.addListener(new TextTooltip("Keep more flat land above waterside cliffs and let their rock face "
+              + "continue down to the riverbed, without a dry beach. Applies to drops of three or more levels, counting "
+              + "water depth. Turn off to restore the beach and rubble slope.", skin, "menu"));
+        cliffsIntoWater.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                if (!syncing) { applyRelief(); }
+            }
+        });
         water = new ArrayList<>(controls(skin, List.of(
               new Knob("Wet margin", .1f, 4, .1f, "%.1f",
                     "Small gap between the water and a raised bank. Higher values pull the water farther from slopes and corners."),
@@ -666,19 +677,6 @@ final class GpuBoardTuning {
                     }
                 }
             });
-            if (onRelease) {
-                slider.addListener(new InputListener() {
-                    @Override
-                    public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
-                        return !slider.isDisabled();
-                    }
-
-                    @Override
-                    public void touchUp(InputEvent event, float x, float y, int pointer, int button) {
-                        if (!syncing) { apply.run(); }
-                    }
-                });
-            }
             TextButton toggle = null;
             if (result.size() < toggleCount) {
                 toggle = new TextButton(knob.name(), skin, "menu-control");
@@ -954,12 +952,15 @@ final class GpuBoardTuning {
         BoardRelief.tune(new BoardRelief.Tuning(value(relief, 3), value(relief, 4), value(relief, 5), value(relief, 6),
               value(relief, 7), value(relief, 8), value(relief, 9), value(relief, 10), value(relief, 11), value(relief, 12),
               value(relief, 1), value(relief, 2), value(relief, 13), value(relief, 14), full,
-              Math.max(full, Math.round(value(terrainDetail, 1))), value(relief, 0) / 100));
+              Math.max(full, Math.round(value(terrainDetail, 1))), value(relief, 0) / 100, cliffsIntoWater.isChecked()));
         syncRelief();
     }
 
     private void syncRelief() {
         BoardRelief.Tuning t = BoardRelief.tuning();
+        syncing = true;
+        cliffsIntoWater.setChecked(t.cliffsIntoWater());
+        syncing = false;
         setValues(relief, new float[] { 100 * t.riverWidth(), t.shoreSpread(), t.landKeep(), t.shoreShift(), t.shoreRoom(), t.shoreReach(),
               t.shoreNarrow(), t.shoreHard(), t.shorePool(), t.shoreIsle(), t.shoreBlend(), t.shoreWander(),
               t.wanderCell(), t.shoreLip(), t.transition() });

@@ -32,6 +32,7 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
@@ -486,7 +487,7 @@ class GpuBoardWindowSmokeTest {
                 javax.imageio.ImageIO.write(image, "jpg", new File(output, "editor-tools.jpg"));
                 return null;
             });
-            input(() -> editorStroke(source, List.of(first, second), 0, true));
+            input(() -> editorStroke(List.of(first, second), 0, true));
             onSwing(() -> {
                 assertTrue(board.getHex(first).containsTerrain(Terrains.WOODS));
                 assertTrue(board.getHex(second).containsTerrain(Terrains.WOODS));
@@ -509,14 +510,14 @@ class GpuBoardWindowSmokeTest {
             });
             Coords elevated = new Coords(4, 2);
             Coords sampled = new Coords(4, 3);
-            input(() -> editorStroke(source, List.of(elevated), InputEvent.CTRL_DOWN_MASK, false));
+            input(() -> editorStroke(List.of(elevated), InputEvent.CTRL_DOWN_MASK, false));
             onSwing(() -> {
                 assertEquals(2, board.getHex(elevated).getLevel(), "Ctrl paints the selected elevation instead of measuring");
                 editorButton(editor, "buttonRo").doClick(0);
                 return null;
             });
-            input(() -> editorStroke(source, List.of(elevated), InputEvent.ALT_DOWN_MASK, false));
-            input(() -> editorStroke(source, List.of(sampled), 0, false));
+            input(() -> editorStroke(List.of(elevated), InputEvent.ALT_DOWN_MASK, false));
+            input(() -> editorStroke(List.of(sampled), 0, false));
             assertTrue(onSwing(() -> board.getHex(sampled).containsTerrain(Terrains.WOODS)), "Alt samples the existing hex");
             pressShortcut(KeyCommandBind.UNDO);
             pressShortcut(KeyCommandBind.UNDO);
@@ -525,8 +526,8 @@ class GpuBoardWindowSmokeTest {
                 editorButton(editor, "buttonRaiseLower").doClick(0);
                 return null;
             });
-            input(() -> editorStroke(source, List.of(first), InputEvent.SHIFT_DOWN_MASK, false));
-            input(() -> editorStroke(source, List.of(first), InputEvent.SHIFT_DOWN_MASK, false));
+            input(() -> editorStroke(List.of(first), InputEvent.SHIFT_DOWN_MASK, false));
+            input(() -> editorStroke(List.of(first), InputEvent.SHIFT_DOWN_MASK, false));
             assertEquals(2, onSwing(() -> board.getHex(first).getLevel()), "Consecutive clicks start fresh elevation strokes");
             await(() -> onGl(() -> {
                 var field = GpuBattleView.class.getDeclaredField("scene");
@@ -535,7 +536,8 @@ class GpuBoardWindowSmokeTest {
                 return rendered.tile(first).elevation() == 2;
             }));
             input(() -> GpuBoardTestUi.capture(new File("build/gpu-board-review/editor-3d.png")));
-            input(() -> GpuBoardTestUi.click("editor-2d"));
+            assertEditorElevationScroll(editor, source, first);
+            onGl(() -> { GpuBoardTestUi.click("editor-2d"); return null; });
             await(() -> onSwing(() -> source.isClosed() && editor.getFrame().isShowing()));
             onSwing(() -> {
                 assertSame(board, view.game.getBoard());
@@ -553,11 +555,16 @@ class GpuBoardWindowSmokeTest {
             Board replacement = view.game.getBoard();
             int oldLevel = onSwing(() -> replacement.getHex(first).getLevel());
             reopened.paintEditor(first, InputEvent.SHIFT_DOWN_MASK, generation);
+            reopened.adjustEditorElevation(first, 5, generation);
             reopened.endEditorStroke();
             onSwing(() -> {
                 assertEquals(oldLevel, replacement.getHex(first).getLevel(), "Old board picks cannot edit the new board");
                 return null;
             });
+            reopened.adjustEditorElevation(first, 1, reopened.takeFrame().boardGeneration());
+            reopened.endEditorStroke();
+            assertEquals(oldLevel + 1, onSwing(() -> replacement.getHex(first).getLevel()),
+                  "A new board accepts a new wheel stroke after stale input was rejected");
             onGl(() -> {
                 long handle = ((Lwjgl3Graphics) Gdx.graphics).getWindow().getWindowHandle();
                 var callback = GLFW.glfwSetWindowCloseCallback(handle, null);
@@ -608,6 +615,138 @@ class GpuBoardWindowSmokeTest {
         return (AbstractButton) field.get(editor);
     }
 
+    private static void assertEditorElevationScroll(BoardEditorPanel editor, GpuBoardSource source, Coords center)
+          throws Exception {
+        Board board = editor.getBoardView().game.getBoard();
+        Map<Coords, Hex> before = onSwing(() -> {
+            editorButton(editor, "buttonLW").doClick(0);
+            editorButton(editor, "buttonDeployZone").doClick(0);
+            editorButton(editor, "buttonBrush2").doClick(0);
+            Map<Coords, Hex> hexes = new HashMap<>();
+            editor.elevationBrush(center).forEach(c -> hexes.put(c, board.getHex(c).duplicate()));
+            assertEquals(7, hexes.size());
+            assertTrue(hexes.values().stream().map(Hex::getLevel).distinct().count() > 1,
+                  "The test brush includes uneven terrain");
+            source.setHover(center);
+            source.refresh();
+            assertEquals(hexes.keySet(), new java.util.HashSet<>(source.editorBrush(center,
+                  source.takeFrame().boardGeneration())), "The preview matches the editor's brush");
+            return hexes;
+        });
+        BoardScene.Tile distant = source.takeFrame().scene().tile(new Coords(0, 7));
+        Vector3 cameraBefore = onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).boardCamera.camera.position.cpy());
+        input(() -> editorWheel(center, true, false, -.25f, -.25f));
+        assertEditorHeights(source, before, 0);
+        input(() -> editorWheel(center, true, true, -.5f, -1));
+        assertEditorHeights(source, before, 2);
+        assertSame(distant, source.takeFrame().scene().tile(new Coords(0, 7)),
+              "A wheel edit must retain distant tile snapshots instead of rebuilding the board");
+        onSwing(() -> {
+            assertTrue(editorButton(editor, "buttonDeployZone").isSelected(), "Wheel editing does not switch tools");
+            for (var entry : before.entrySet()) {
+                Hex current = board.getHex(entry.getKey()).duplicate();
+                current.setLevel(entry.getValue().getLevel());
+                assertEquals(entry.getValue().getClipboardString(), current.getClipboardString(),
+                      "Wheel editing preserves each hex's terrain");
+            }
+            return null;
+        });
+        assertTrue(onGl(() -> cameraBefore.epsilonEquals(
+              ((GpuBattleView) Gdx.app.getApplicationListener()).boardCamera.camera.position, .001f)),
+              "Ctrl+wheel must not zoom");
+        pressShortcut(KeyCommandBind.UNDO);
+        assertEditorHeights(source, before, 0);
+        pressShortcut(KeyCommandBind.REDO);
+        assertEditorHeights(source, before, 2);
+        pressShortcut(KeyCommandBind.UNDO);
+        assertEditorHeights(source, before, 0);
+
+        input(() -> editorWheel(center, true, false, 1));
+        input(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).pause());
+        assertEditorHeights(source, before, -1);
+        pressShortcut(KeyCommandBind.UNDO);
+        assertEditorHeights(source, before, 0);
+        input(() -> editorWheel(center, true, false, -1));
+        pressShortcut(KeyCommandBind.UNDO);
+        assertEditorHeights(source, before, 0);
+        input(() -> Gdx.input.getInputProcessor().keyUp(Input.Keys.CONTROL_LEFT));
+
+        input(() -> editorWheel(center, true, false, -1));
+        input(() -> {
+            // The toolbar receives this click before BoardInput; it must still finish the wheel undo entry.
+            Gdx.input.getInputProcessor().touchDown(10, 10, 0, Input.Buttons.LEFT);
+            Gdx.input.getInputProcessor().touchUp(10, 10, 0, Input.Buttons.LEFT);
+        });
+        onSwing(() -> {
+            editorButton(editor, "buttonUndo").doClick(0);
+            return null;
+        });
+        assertEditorHeights(source, before, 0);
+
+        onSwing(() -> {
+            editorButton(editor, "buttonOOC").setSelected(true);
+            source.setHover(center);
+            source.refresh();
+            assertFalse(source.editorBrush(center, source.takeFrame().boardGeneration()).contains(center),
+                  "Only-on-clear also filters the preview");
+            return null;
+        });
+        input(() -> editorWheel(center, true, true, -1));
+        onSwing(() -> {
+            before.forEach((coords, hex) -> assertEquals(hex.getLevel() + (hex.isClearHex() ? 1 : 0),
+                  board.getHex(coords).getLevel(), "Only-on-clear filters the entire brush"));
+            return null;
+        });
+        pressShortcut(KeyCommandBind.UNDO);
+        assertEditorHeights(source, before, 0);
+        input(() -> editorWheel(null, true, true, -1));
+        assertEditorHeights(source, before, 0);
+        input(() -> editorWheel(center, false, false, -1));
+        await(() -> onGl(() -> !cameraBefore.epsilonEquals(
+              ((GpuBattleView) Gdx.app.getApplicationListener()).boardCamera.camera.position, .001f)));
+        assertEditorHeights(source, before, 0);
+        onSwing(() -> {
+            editorButton(editor, "buttonOOC").setSelected(false);
+            editorButton(editor, "buttonBrush1").doClick(0);
+            editorButton(editor, "buttonRaiseLower").doClick(0);
+            return null;
+        });
+    }
+
+    private static void assertEditorHeights(GpuBoardSource source, Map<Coords, Hex> before, int delta) throws Exception {
+        onSwing(() -> {
+            source.refresh();
+            before.forEach((coords, hex) -> {
+                assertEquals(hex.getLevel() + delta, source.currentView().game.getBoard().getHex(coords).getLevel());
+                assertEquals(hex.getLevel() + delta, source.takeFrame().scene().tile(coords).elevation(),
+                      "The local scene capture must include the elevation edit");
+            });
+            return null;
+        });
+    }
+
+    /** Dispatch wheel events through the native input multiplexer, including fractional trackpad deltas. */
+    private static void editorWheel(Coords coords, boolean control, boolean release, float... amounts) {
+        Input original = Gdx.input;
+        Input pointer = mock(Input.class);
+        Vector3 screen = coords == null ? new Vector3(10, 10, 0)
+              : ((GpuBattleView) Gdx.app.getApplicationListener()).screenPosition(coords);
+        when(pointer.getX()).thenReturn(Math.round(screen.x));
+        when(pointer.getY()).thenReturn(Math.round(screen.y));
+        when(pointer.isKeyPressed(Input.Keys.CONTROL_LEFT)).thenReturn(control);
+        Gdx.input = pointer;
+        try {
+            for (float amount : amounts) {
+                original.getInputProcessor().scrolled(0, amount);
+            }
+            if (release) {
+                original.getInputProcessor().keyUp(Input.Keys.CONTROL_LEFT);
+            }
+        } finally {
+            Gdx.input = original;
+        }
+    }
+
     private static void openEditor(BoardEditorPanel editor) throws Exception {
         Application previous = Gdx.app;
         onSwing(() -> { editorButton(editor, "editorViewButton").doClick(0); return null; });
@@ -617,7 +756,7 @@ class GpuBoardWindowSmokeTest {
     }
 
     /** Real native picking and drag dispatch, including releases over the toolbar. */
-    private static void editorStroke(GpuBoardSource source, List<Coords> hexes, int modifiers, boolean releaseOverToolbar) {
+    private static void editorStroke(List<Coords> hexes, int modifiers, boolean releaseOverToolbar) {
         Input original = Gdx.input;
         Input keyboard = mock(Input.class);
         when(keyboard.getInputProcessor()).thenReturn(original.getInputProcessor());
@@ -626,13 +765,12 @@ class GpuBoardWindowSmokeTest {
         when(keyboard.isKeyPressed(Input.Keys.ALT_LEFT)).thenReturn((modifiers & InputEvent.ALT_DOWN_MASK) != 0);
         Gdx.input = keyboard;
         try {
-            BoardCamera camera = ((GpuBattleView) Gdx.app.getApplicationListener()).boardCamera;
-            int bottom = Math.round(34 * Gdx.graphics.getHeight() / GpuBoardTestUi.stage().getHeight());
+            GpuBattleView battle = (GpuBattleView) Gdx.app.getApplicationListener();
             Point last = null;
             for (Coords coords : hexes) {
-                Vector3 point = camera.camera.project(BoardGeometry.center(coords, source.takeFrame().scene().tile(coords).elevation()),
-                      0, bottom, camera.camera.viewportWidth, camera.camera.viewportHeight);
-                Point screen = new Point(Math.round(point.x), Gdx.graphics.getHeight() - Math.round(point.y));
+                // Pick against the frame actually on screen, not a newer Swing snapshot awaiting rendering.
+                Vector3 point = battle.screenPosition(coords);
+                Point screen = new Point(Math.round(point.x), Math.round(point.y));
                 if (last == null) {
                     original.getInputProcessor().touchDown(screen.x, screen.y, 0, Input.Buttons.LEFT);
                 } else {

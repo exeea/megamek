@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -707,6 +708,8 @@ final class GpuTerrain implements Disposable {
     }
 
     void update(BoardScene scene) {
+        // Finished chunk geometry supersedes any temporary builders used by input before this update.
+        pickingSurfaces.clear();
         coverScene = scene;
         BoardGeometry.Tuning nextTuning = BoardGeometry.tuning();
         boolean changedTuning = tuning == null || tuning.hexScale() != nextTuning.hexScale()
@@ -812,9 +815,18 @@ final class GpuTerrain implements Disposable {
             currents = next;
         }
         rims.retainUsed();
-        rebuildAll |= ground.update(terrainPixels, normalPixels);
-        rebuildAll |= decals.update(decalPixels);
-        rebuildAll |= foliage.update(foliagePixels);
+        ground.updateRegions(terrainPixels, normalPixels).forEach(slot -> {
+            dirtyChunk(changedChunks, slot.coords());
+            if (!slot.rims()) {
+                // A water chunk also uses its neighbouring land's base artwork for the bank.
+                for (int direction = 0; direction < 6; direction++) {
+                    BoardScene.Tile neighbor = scene.tile(slot.coords().translated(direction));
+                    if (neighbor != null && neighbor.liquid().present()) { dirtyChunk(changedChunks, neighbor.coords()); }
+                }
+            }
+        });
+        decals.updateRegions(decalPixels, Map.of()).forEach(coords -> dirtyChunk(changedChunks, coords));
+        foliage.updateRegions(foliagePixels, Map.of()).forEach(coords -> dirtyChunk(changedChunks, coords));
         boolean markingsChanged = updateMarkingsAtlas(scene);
         tiles = scene.tiles();
         coast = nextCoast;
@@ -892,10 +904,13 @@ final class GpuTerrain implements Disposable {
             }
         }
         Map<Coords, BoardSurface> surfaces = new java.util.concurrent.ConcurrentHashMap<>();
+        chunkTiles.parallelStream().forEach(tile -> surfaces.put(tile.coords(), new BoardSurface(scene, tile)));
+        // Every neighbour's top is complete before cliff construction borrows it. Each task still owns its walls.
         chunkTiles.parallelStream().forEach(tile -> {
-            BoardSurface surface = new BoardSurface(scene, tile);
-            if (surface.relief.sculpted()) { surface.walls(scene, floor); }
-            surfaces.put(tile.coords(), surface);
+            BoardSurface surface = surfaces.get(tile.coords());
+            if (surface.relief.sculpted() || BoardGeometry.tuning().stepsBetweenTops()) {
+                surface.walls(scene, floor, surfaces);
+            }
         });
         // Every water material in the chunk reads one field, so it is built before any material.
         chunk.waterField = GpuWaterShader.Field.build(scene, currents, surfaces);
@@ -980,7 +995,7 @@ final class GpuTerrain implements Disposable {
                 }
                 Map<BoardSurface.Side, List<BoardSurface.Face>> walls = new LinkedHashMap<>();
                 if (!sculpted) {
-                    for (BoardSurface.Side side : surface.sides(scene, floor)) {
+                    for (BoardSurface.Side side : surface.sides(scene, floor, surfaces)) {
                         walls.put(side, surface.relief.walls(List.of(side)));
                     }
                 }
@@ -1094,6 +1109,8 @@ final class GpuTerrain implements Disposable {
                     }
                 }
                 for (BoardScene.Feature feature : tile.features()) {
+                    // Rough boulders are already part of the shared terrain mesh, shading and picking geometry.
+                    if (feature.kind() == BoardScene.FeatureKind.BOULDER) { continue; }
                     if (feature.kind() == BoardScene.FeatureKind.SCATTER) {
                         // Road approaches can extend into a hex that has no road terrain of its own.
                         if (!tile.liquid().present() && surface.ramps == 0
@@ -1227,7 +1244,6 @@ final class GpuTerrain implements Disposable {
           BoardSurface surface, TextureRegion top, float floor) {
         List<BoardSurface.Face> walls = surface.walls(scene, floor);
         BoardScene.Surface family = BoardScene.Surface.values()[surface.relief.family()];
-        Material material = sculptMaterial(family);
         boolean liquid = tile.liquid().present();
         List<BoardSurface.Face> ground = new ArrayList<>();
         List<BoardSurface.Face> formed = new ArrayList<>();
@@ -1242,8 +1258,14 @@ final class GpuTerrain implements Disposable {
         }
         // A water hex's ground carries its water's palette, so the shader wets it and tints it below the waterline.
         float shore = liquid ? GpuWaterShader.palette(tile.liquid()) : Float.NaN;
-        solid.add(material, mesh -> sculptedFaces(mesh, surface, formed, shore));
-        if (!bed.isEmpty()) { solid.add(material, mesh -> bedFaces(mesh, surface, bed, shore)); }
+        for (var group : byFamily(surface, formed).entrySet()) {
+            solid.add(sculptMaterial(group.getKey()), mesh -> sculptedFaces(mesh, surface, group.getValue(), shore));
+        }
+        // Normals span the whole bed even where its emerged bars change material at a bank junction.
+        Map<Vector3, Vector3> bedNormals = wallNormals(bed);
+        for (var group : byFamily(surface, bed).entrySet()) {
+            solid.add(sculptMaterial(group.getKey()), mesh -> bedFaces(mesh, surface, group.getValue(), shore, bedNormals));
+        }
         if (!submerged.isEmpty()) {
             // Below the water it faces, a wall takes that water's tint (terrain-cliff.frag).
             String geology = family == BoardScene.Surface.CONCRETE ? "terrain/rock" : family.wall;
@@ -1273,9 +1295,18 @@ final class GpuTerrain implements Disposable {
         }
     }
 
+    private static Map<BoardScene.Surface, List<BoardSurface.Face>> byFamily(BoardSurface surface,
+          List<BoardSurface.Face> faces) {
+        Map<BoardScene.Surface, List<BoardSurface.Face>> groups = new EnumMap<>(BoardScene.Surface.class);
+        for (BoardSurface.Face face : faces) {
+            groups.computeIfAbsent(surface.family(face), key -> new ArrayList<>()).add(face);
+        }
+        return groups;
+    }
+
     /** A water hex's bed, smoothly shaded over shared vertices; shore is its water's palette. */
-    private static void bedFaces(MeshPartBuilder mesh, BoardSurface surface, List<BoardSurface.Face> bed, float shore) {
-        Map<Vector3, Vector3> normals = wallNormals(bed);
+    private static void bedFaces(MeshPartBuilder mesh, BoardSurface surface, List<BoardSurface.Face> bed, float shore,
+          Map<Vector3, Vector3> normals) {
         Map<Vector3, Short> indices = new HashMap<>();
         Function<Vector3, Short> shared = p -> indices.computeIfAbsent(p, key -> {
             BoardRelief.Shade bank = surface.relief.shade(key);
@@ -1866,18 +1897,23 @@ final class GpuTerrain implements Disposable {
     }
 
     BoardGeometry.Hit hit(BoardScene scene, Ray ray) {
+        boolean sameBoard = coverScene != null && coverScene.boardId() == scene.boardId()
+              && coverScene.width() == scene.width() && coverScene.height() == scene.height();
+        // Input can arrive after new scene/tuning state but before update installs its terrain meshes.
+        boolean finished = sameBoard && tiles == scene.tiles() && tuning == BoardGeometry.tuning()
+              && terrainRevision == BoardGeometry.terrainRevision();
         Coords result = null;
         float nearest = Float.POSITIVE_INFINITY;
         List<BoardScene.Tile> candidates = new ArrayList<>();
         Vector3 hit = new Vector3();
-        for (int index = 0; index < chunks.size(); index++) {
+        for (int index = 0; sameBoard && index < chunks.size(); index++) {
             Chunk chunk = chunks.get(index);
             if (!Intersector.intersectRayBoundsFast(ray, chunk.bounds)) {
                 continue;
             }
             // Reuse render bounds before invoking the shared surface picker; a pointer event must not
             // inspect six neighbors and allocate geometry bounds for every hex of a 40,000-hex board.
-            chunkTiles(scene, index, candidates);
+            if (finished) { chunkTiles(scene, index, candidates); }
             for (Prop prop : chunk.props) {
                 if (flatTrees && prop.tree()) { continue; }
                 if (!Intersector.intersectRayBoundsFast(ray, prop.bounds())) {
@@ -1897,7 +1933,9 @@ final class GpuTerrain implements Disposable {
                 }
             }
         }
-        BoardGeometry.Hit groundHit = BoardGeometry.hit(scene, ray, candidates, floor, pickingSurfaces);
+        BoardGeometry.Hit groundHit = finished
+              ? BoardGeometry.hit(scene, ray, candidates, floor, this::tacticalSurface)
+              : BoardGeometry.hit(scene, ray, scene.tiles(), BoardGeometry.floor(scene), pickingSurfaces);
         return groundHit != null && groundHit.distance() <= nearest ? groundHit
               : result == null ? null : new BoardGeometry.Hit(result, nearest);
     }
@@ -1934,7 +1972,7 @@ final class GpuTerrain implements Disposable {
             updateDetail(camera);
         }
         batch.begin(camera);
-        if (!drawTactical && coverScene != null) {
+        if (!drawTactical && coverScene != null && GpuGroundCover.visibleAtScale(camera)) {
             List<BoardScene.Tile> candidates = new ArrayList<>();
             BoundingBox guard = new BoundingBox();
             float margin = BoardGeometry.WIDTH * 2;
@@ -1945,7 +1983,7 @@ final class GpuTerrain implements Disposable {
                 guard.update();
                 if (camera.frustum.boundsInFrustum(guard)) { chunkTiles(coverScene, index, candidates); }
             }
-            for (ModelInstance instance : groundCover.visible(coverScene, camera, candidates)) {
+            for (ModelInstance instance : groundCover.visible(coverScene, camera, candidates, this::tacticalSurface)) {
                 batch.render(instance, environment);
             }
         }

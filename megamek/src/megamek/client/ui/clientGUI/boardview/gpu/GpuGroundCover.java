@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.function.Function;
 
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
@@ -21,6 +22,7 @@ import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.IntAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
+import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
 import megamek.common.board.Coords;
@@ -49,8 +51,6 @@ final class GpuGroundCover implements Disposable {
     private int revision = -1;
     private int boardId = -1;
     private List<BoardScene.Tile> tiles;
-    /** The board's floor for the current tiles, which transition slopes are built against. */
-    private float floor;
     private long generation;
 
     static String vertex(String source) {
@@ -71,7 +71,13 @@ final class GpuGroundCover implements Disposable {
         return t * t * (3 - 2 * t);
     }
 
-    List<ModelInstance> visible(BoardScene scene, Camera camera, List<BoardScene.Tile> candidates) {
+    /** Orthographic detail has one scale everywhere; perspective detail still depends on each tile's depth. */
+    static boolean visibleAtScale(Camera camera) {
+        return camera.projection.val[Matrix4.M33] == 0 || fade(camera, camera.position) > 0;
+    }
+
+    List<ModelInstance> visible(BoardScene scene, Camera camera, List<BoardScene.Tile> candidates,
+          Function<Coords, BoardTacticalGeometry.Surface> surfaces) {
         if (revision != BoardGeometry.revision() || boardId != scene.boardId()) {
             dispose();
             revision = BoardGeometry.revision();
@@ -79,7 +85,6 @@ final class GpuGroundCover implements Disposable {
         }
         if (tiles != scene.tiles()) {
             tiles = scene.tiles();
-            floor = BoardGeometry.floor(scene);
             generation++;
         }
         List<ModelInstance> result = new ArrayList<>();
@@ -91,7 +96,7 @@ final class GpuGroundCover implements Disposable {
             Vector3 center = BoardGeometry.center(tile.coords(), tile.elevation());
             if (fade(camera, center) <= 0) { continue; }
             if (camera.frustum.sphereInFrustum(center, BoardGeometry.WIDTH * .75f)) {
-                Cover cover = cover(scene, tile);
+                Cover cover = cover(scene, tile, surfaces);
                 if (cover != null) { result.add(cover.instance); visible.add(tile.coords()); }
             } else if (camera.frustum.sphereInFrustum(center, BoardGeometry.WIDTH * 2)) {
                 nearby.add(tile);
@@ -101,7 +106,7 @@ final class GpuGroundCover implements Disposable {
         long deadline = System.nanoTime() + 2_000_000;
         for (BoardScene.Tile tile : nearby) {
             if (System.nanoTime() >= deadline) { break; }
-            cover(scene, tile);
+            cover(scene, tile, surfaces);
         }
         var iterator = models.entrySet().iterator();
         while (models.size() > CACHE_SIZE && iterator.hasNext()) {
@@ -111,27 +116,27 @@ final class GpuGroundCover implements Disposable {
         return result;
     }
 
-    private Cover cover(BoardScene scene, BoardScene.Tile tile) {
+    private Cover cover(BoardScene scene, BoardScene.Tile tile, Function<Coords, BoardTacticalGeometry.Surface> surfaces) {
         Cover cover = models.get(tile.coords());
         if (cover != null && cover.generation == generation) { return cover; }
         BoardSurface.Key key = BoardSurface.geometryKey(scene, tile);
         if (key.near().getFirst().ramps() != 0) { return null; }
         if (cover == null || !cover.key.equals(key)) {
             if (cover != null) { cover.instance.model.dispose(); }
-            cover = new Cover(key, build(scene, tile, floor), generation);
+            cover = new Cover(key, build(tile, surfaces.apply(tile.coords())), generation);
             models.put(tile.coords(), cover);
         }
         cover.generation = generation;
         return cover;
     }
 
-    private static ModelInstance build(BoardScene scene, BoardScene.Tile tile, float floor) {
-        BoardSurface surface = new BoardSurface(scene, tile);
-        List<BoardSurface.Face> ground = new ArrayList<>(surface.faces.stream()
+    private static ModelInstance build(BoardScene.Tile tile, BoardTacticalGeometry.Surface surface) {
+        // Reuse the terrain's finished triangles, just as tactical overlays do; shoreline construction is expensive.
+        List<BoardSurface.Face> ground = new ArrayList<>(surface.top().stream()
               .filter(face -> face.finish() == BoardSurface.Finish.TOP).toList());
         if (BoardGeometry.tuning().stepsBetweenTops()) {
             // A step's slope is meadow too where it lies back far enough; the hex above it owns it.
-            for (BoardSurface.Face face : BoardTacticalGeometry.lying(surface.walls(scene, floor))) {
+            for (BoardSurface.Face face : surface.slopes()) {
                 Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
                 if (normal.z > .7f) { ground.add(face); }
             }

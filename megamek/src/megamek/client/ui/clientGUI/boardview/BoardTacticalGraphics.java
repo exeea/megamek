@@ -153,9 +153,10 @@ public final class BoardTacticalGraphics extends AbstractGraphics2D {
         if ((color >>> 24) == 0) {
             return;
         }
-        if (getClip() != null) {
+        Shape clip = getClip();
+        if (clip != null && !clip.contains(shape.getBounds2D())) {
             Area clipped = new Area(shape);
-            clipped.intersect(new Area(getClip()));
+            clipped.intersect(new Area(clip));
             shape = clipped;
         }
         PathIterator path = shape.getPathIterator(getTransform(), 0.25);

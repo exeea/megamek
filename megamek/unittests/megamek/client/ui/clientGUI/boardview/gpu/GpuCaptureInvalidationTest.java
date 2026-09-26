@@ -7,10 +7,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Color;
 import java.awt.Rectangle;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.swing.SwingUtilities;
 
 import megamek.common.board.Coords;
+import megamek.common.board.BoardLocation;
 import megamek.common.Hex;
 import org.junit.jupiter.api.Test;
 
@@ -31,6 +33,39 @@ class GpuCaptureInvalidationTest {
                           "Incremental artwork and neighbour captures must match a complete board capture");
                 }
             });
+        }
+    }
+
+    @Test
+    void batchedEdgeEditsUndoAndWholeBoardChangesMatchCompleteCaptures() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            SwingUtilities.invokeAndWait(() -> {
+                var board = fixture.game.getBoard();
+                Coords first = new Coords(0, 0), last = new Coords(board.getWidth() - 1, board.getHeight() - 1);
+                Hex firstBefore = board.getHex(first).duplicate(), lastBefore = board.getHex(last).duplicate();
+                board.setHexes(Map.of(BoardLocation.of(first, board.getBoardId()), new Hex(3),
+                      BoardLocation.of(last, board.getBoardId()), new Hex(-2)));
+                fixture.source.refresh();
+                assertEquals(3, fixture.source.takeFrame().scene().tile(first).elevation());
+                assertEquals(-2, fixture.source.takeFrame().scene().tile(last).elevation());
+                assertCompleteCapture(fixture);
+                board.setHexes(Map.of(BoardLocation.of(first, board.getBoardId()), firstBefore,
+                      BoardLocation.of(last, board.getBoardId()), lastBefore));
+                fixture.source.refresh();
+                assertCompleteCapture(fixture);
+                board.getHex(first).setLevel(6);
+                board.initializeAllAutomaticTerrain();
+                fixture.source.refresh();
+                assertEquals(6, fixture.source.takeFrame().scene().tile(first).elevation());
+                assertCompleteCapture(fixture);
+            });
+        }
+    }
+
+    private static void assertCompleteCapture(GpuBoardFixture fixture) {
+        try (GpuBoardSource fresh = new GpuBoardSource(fixture.view, () -> fixture.panel)) {
+            assertEquals(fresh.takeFrame().scene().tiles(), fixture.source.takeFrame().scene().tiles(),
+                  "Accumulated edits, undo and whole-board invalidation must match a complete capture");
         }
     }
 

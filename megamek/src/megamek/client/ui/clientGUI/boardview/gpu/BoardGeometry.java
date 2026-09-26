@@ -1,6 +1,8 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.util.function.Function;
+
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
@@ -229,16 +231,27 @@ final class BoardGeometry {
     }
 
     static Hit hit(BoardScene scene, Ray ray, Iterable<BoardScene.Tile> candidates, float floor) {
-        return hit(scene, ray, candidates, floor, null);
+        return hit(scene, ray, candidates, floor, (BoardSurface.Cache) null);
     }
 
     static Hit hit(BoardScene scene, Ray ray, Iterable<BoardScene.Tile> candidates, float floor, BoardSurface.Cache cache) {
-        Hit hit = nearest(scene, ray, candidates, floor, cache);
+        return hit(scene, ray, candidates, floor, cache, null);
+    }
+
+    /** Borrow the installed terrain's finished geometry without retaining its builders or scene. */
+    static Hit hit(BoardScene scene, Ray ray, Iterable<BoardScene.Tile> candidates, float floor,
+          Function<Coords, BoardTacticalGeometry.Surface> surfaces) {
+        return hit(scene, ray, candidates, floor, null, surfaces);
+    }
+
+    private static Hit hit(BoardScene scene, Ray ray, Iterable<BoardScene.Tile> candidates, float floor,
+          BoardSurface.Cache cache, Function<Coords, BoardTacticalGeometry.Surface> surfaces) {
+        Hit hit = nearest(scene, ray, candidates, floor, cache, surfaces);
         if (hit == null) {
             // A ray exactly along a shared triangle edge can miss both triangles in float arithmetic. Symmetry lines
             // through hex centres make that reproducible for axis-aligned pointer rays, so retry once, nudged.
             Ray nudged = new Ray(new Vector3(ray.origin).add(.0013f * HEX_SCALE, .0007f * HEX_SCALE, 0), ray.direction);
-            hit = nearest(scene, nudged, candidates, floor, cache);
+            hit = nearest(scene, nudged, candidates, floor, cache, surfaces);
         }
         return hit;
     }
@@ -276,7 +289,7 @@ final class BoardGeometry {
     }
 
     private static Hit nearest(BoardScene scene, Ray ray, Iterable<BoardScene.Tile> candidates, float floor,
-          BoardSurface.Cache cache) {
+          BoardSurface.Cache cache, Function<Coords, BoardTacticalGeometry.Surface> surfaces) {
         Coords result = null;
         float nearest = Float.POSITIVE_INFINITY;
         Vector3 hit = new Vector3();
@@ -294,21 +307,23 @@ final class BoardGeometry {
                   new Vector3(WIDTH + reach, HEIGHT + reach, high - floor + 0.01f))) {
                 continue;
             }
-            BoardSurface surface = cache == null ? new BoardSurface(scene, tile) : cache.get(scene, tile);
-            for (BoardSurface.Face face : surface.faces) {
+            BoardSurface surface = surfaces != null ? null
+                  : cache == null ? new BoardSurface(scene, tile) : cache.get(scene, tile);
+            BoardTacticalGeometry.Surface finished = surfaces == null ? null : surfaces.apply(tile.coords());
+            for (BoardSurface.Face face : finished == null ? surface.faces : finished.faces()) {
                 if (Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit)
                       && ray.origin.dst2(hit) < nearest) {
                     nearest = ray.origin.dst2(hit);
                     result = footprint(scene, tile.coords(), hit);
                 }
             }
-            for (BoardSurface.Face face : surface.waterFaces) {
+            for (BoardSurface.Face face : finished == null ? surface.waterFaces : finished.water()) {
                 if (Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit) && ray.origin.dst2(hit) < nearest) {
                     nearest = ray.origin.dst2(hit);
                     result = footprint(scene, tile.coords(), hit);
                 }
             }
-            for (BoardSurface.Face face : surface.walls(scene, floor)) {
+            for (BoardSurface.Face face : finished == null ? surface.walls(scene, floor) : finished.walls()) {
                 if (Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit)
                       && ray.origin.dst2(hit) < nearest) {
                     nearest = ray.origin.dst2(hit);
@@ -317,7 +332,7 @@ final class BoardGeometry {
                     result = foot(scene, tile.coords(), hit);
                 }
             }
-            for (BoardSurface.Side side : surface.waterfalls) {
+            for (BoardSurface.Side side : finished == null ? surface.waterfalls : finished.waterfalls()) {
                 Vector3 lowerA = new Vector3(side.a().x, side.a().y, side.lowA());
                 Vector3 lowerB = new Vector3(side.b().x, side.b().y, side.lowB());
                 float distance = Float.POSITIVE_INFINITY;

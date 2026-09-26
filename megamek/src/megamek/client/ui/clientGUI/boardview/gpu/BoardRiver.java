@@ -20,21 +20,46 @@ final class BoardRiver {
 
     private record Sample(float x, float y, boolean junction, List<Channel> channels, List<float[]> lakes) { }
 
-    private record Channel(List<Span> spans) {
-        float field(float x, float y, BoardRelief.Tuning tuning, float wander) {
-            float result = Float.NEGATIVE_INFINITY;
-            for (Span span : spans) { result = Math.max(result, span.field(x, y, tuning, wander)); }
-            return result;
-        }
-    }
+    /** Endpoint properties belong to a whole channel, not each of its twelve line segments. */
+    private final class Channel {
+        private final List<Span> spans;
+        private final float depthA, depthB;
+        private final boolean broadA, broadB, detailedA, detailedB, uniform;
 
-    private record Span(float ax, float ay, float bx, float by, float depthA, float depthB, float start, float end,
-          boolean broadA, boolean broadB, boolean detailedA, boolean detailedB) {
-        float field(float x, float y, BoardRelief.Tuning tuning, float wander) {
-            float dx = bx - ax, dy = by - ay, length = dx * dx + dy * dy;
-            float t = length == 0 ? 0 : Math.clamp(((x - ax) * dx + (y - ay) * dy) / length, 0, 1);
-            float s = start + (end - start) * t;
-            float deep = BoardRelief.lerp(Math.clamp(depthA, 0, 1), Math.clamp(depthB, 0, 1), BoardRelief.smooth(s));
+        Channel(List<Span> spans, BoardScene.Tile a, BoardScene.Tile b, boolean broadA, boolean broadB) {
+            this.spans = spans;
+            depthA = Math.clamp(a.waterDepth(), 0, 1);
+            depthB = Math.clamp(b.waterDepth(), 0, 1);
+            this.broadA = broadA;
+            this.broadB = broadB;
+            detailedA = a.detailedGround();
+            detailedB = b.detailedGround();
+            uniform = depthA == depthB && broadA == broadB && detailedA == detailedB;
+        }
+
+        float field(float x, float y, float wander) {
+            float result = Float.NEGATIVE_INFINITY;
+            float commonRadius = uniform ? radius(0, wander) : 0;
+            double nearest = Double.POSITIVE_INFINITY;
+            for (int i = 0; i < spans.size(); i++) {
+                Span span = spans.get(i);
+                float t = span.length() == 0 ? 0 : Math.clamp(((x - span.ax()) * span.dx()
+                      + (y - span.ay()) * span.dy()) / span.length(), 0, 1);
+                double distance = lengthSquared(x - span.ax() - t * span.dx(), y - span.ay() - t * span.dy());
+                if (uniform) {
+                    nearest = Math.min(nearest, distance);
+                } else {
+                    float radius = radius(span.start() + span.range() * t, wander);
+                    result = Math.max(result, radius - (float) Math.sqrt(distance));
+                }
+            }
+            // Equal radii need only the nearest segment; taking its square root once gives the same float union.
+            return uniform ? commonRadius - (float) Math.sqrt(nearest) : result;
+        }
+
+        private float radius(float s, float wander) {
+            float smooth = BoardRelief.smooth(s);
+            float deep = BoardRelief.lerp(depthA, depthB, smooth);
             // Width belongs to the whole channel, not its crossings of hex edges. Carry the room needed by a
             // deep-water unit along the stream instead of making a fixed pool at every centre. Depth-zero reaches
             // have no unit-sized minimum; blend gently where a shallow reach meets deeper water.
@@ -44,13 +69,19 @@ final class BoardRiver {
             radius = Math.max(minimum, radius + wander * tuning.riverWidth());
             // Open water leaves room for the shared shore field to shape the lake's bank. Widen the approaching
             // stream gradually too: a large round cap at the lake's first centre would make a sharp inlet corner.
-            float open = BoardRelief.lerp(broadA ? 1 : 0, broadB ? 1 : 0, BoardRelief.smooth(s));
+            float open = BoardRelief.lerp(broadA ? 1 : 0, broadB ? 1 : 0, smooth);
             radius = BoardRelief.lerp(radius, Math.max(radius, BoardGeometry.WIDTH / (2 * BoardGeometry.HEX_SCALE)), open);
             // Special artwork (including bridges) keeps its original water footprint. The approach widens smoothly,
             // and both kinds of hex still ask the same world field at their shared opening.
             float natural = (detailedA ? 1 - s : 0) + (detailedB ? s : 0);
             radius = Math.max(radius, 72 * (1 - natural));
-            return radius * BoardGeometry.HEX_SCALE - length(x - ax - t * dx, y - ay - t * dy);
+            return radius * BoardGeometry.HEX_SCALE;
+        }
+    }
+
+    private record Span(float ax, float ay, float dx, float dy, float length, float start, float range) {
+        Span(float ax, float ay, float bx, float by, float start, float end) {
+            this(ax, ay, bx - ax, by - ay, (bx - ax) * (bx - ax) + (by - ay) * (by - ay), start, end - start);
         }
     }
 
@@ -80,8 +111,10 @@ final class BoardRiver {
         }
         round *= 2 * tuning.shoreBlend() * BoardGeometry.HEX_SCALE * Math.min(1, .3f + tuning.riverWidth());
         for (Sample sample : window) {
-            for (Channel channel : sample.channels()) {
-                float value = channel.field(x, y, tuning, wander);
+            List<Channel> channels = sample.channels();
+            for (int i = 0; i < channels.size(); i++) {
+                Channel channel = channels.get(i);
+                float value = channel.field(x, y, wander);
                 result = round > 0 ? -BoardRelief.smoothMin(-result, -value, round) : Math.max(result, value);
                 if (result >= limit) { return result; }
             }
@@ -134,16 +167,17 @@ final class BoardRiver {
 
     /** Board coordinates are finite floats; double products cannot overflow or underflow like float products. */
     private static float length(float x, float y) {
-        return (float) Math.sqrt((double) x * x + (double) y * y);
+        return (float) Math.sqrt(lengthSquared(x, y));
     }
+
+    private static double lengthSquared(float x, float y) { return (double) x * x + (double) y * y; }
 
     private List<Channel> channels(Coords coords) {
         List<Channel> result = new ArrayList<>();
         BoardScene.Tile tile = tile(coords);
         float ax = BoardGeometry.centerX(coords), ay = BoardGeometry.centerY(coords);
         boolean broadA = broad(coords);
-        result.add(new Channel(List.of(new Span(ax, ay, ax, ay, tile.waterDepth(), tile.waterDepth(), 0, 0, broadA, broadA,
-              tile.detailedGround(), tile.detailedGround()))));
+        result.add(new Channel(List.of(new Span(ax, ay, ax, ay, 0, 0)), tile, tile, broadA, broadA));
         for (int d = 0; d < 6; d++) {
             Coords other = coords.translated(d);
             BoardScene.Tile next = tile(other);
@@ -186,12 +220,11 @@ final class BoardRiver {
                       + (-2 * t3 + 3 * t2) * bx + (t3 - t2) * ux;
                 float qy = (2 * t3 - 3 * t2 + 1) * ay + (t3 - 2 * t2 + t) * ty
                       + (-2 * t3 + 3 * t2) * by + (t3 - t2) * uy;
-                spans.add(new Span(px, py, qx, qy, tile.waterDepth(), next.waterDepth(), (i - 1f) / STEPS, t, broadA, broadB,
-                      tile.detailedGround(), next.detailedGround()));
+                spans.add(new Span(px, py, qx, qy, (i - 1f) / STEPS, t));
                 px = qx;
                 py = qy;
             }
-            result.add(new Channel(List.copyOf(spans)));
+            result.add(new Channel(List.copyOf(spans), tile, next, broadA, broadB));
         }
         return List.copyOf(result);
     }

@@ -32,6 +32,8 @@ final class GpuTextures<K> implements Disposable {
     private TextureAtlas atlas;
     private PixmapPacker normalPacker;
     private TextureAtlas normalAtlas;
+    private int slotCount;
+    private long packedArea;
 
     GpuTextures() {
         this(false);
@@ -48,6 +50,11 @@ final class GpuTextures<K> implements Disposable {
 
     /** Optional pre-generated normals share each color slot's placement and lifetime. */
     boolean update(Map<K, BoardScene.Pixels> colors, Map<K, BoardScene.Pixels> normalImages) {
+        return !updateRegions(colors, normalImages).isEmpty();
+    }
+
+    /** Keys whose UVs or texture pages changed; unchanged meshes can keep their existing atlas references. */
+    Set<K> updateRegions(Map<K, BoardScene.Pixels> colors, Map<K, BoardScene.Pixels> normalImages) {
         Map<K, Images> images = new HashMap<>();
         colors.forEach((key, pixels) -> {
             BoardScene.Pixels normal = normalImages.get(key);
@@ -58,7 +65,7 @@ final class GpuTextures<K> implements Disposable {
         });
         boolean normalMaps = !normalImages.isEmpty();
         if (images.isEmpty()) {
-            boolean changed = !entries.isEmpty();
+            Set<K> changed = Set.copyOf(entries.keySet());
             dispose();
             return changed;
         }
@@ -99,29 +106,41 @@ final class GpuTextures<K> implements Disposable {
                     Gdx.gl.glGenerateMipmap(GL20.GL_TEXTURE_2D);
                 });
             }
-            return false;
+            return Set.of();
         }
-        dispose();
-        Map<Images, String> names = new HashMap<>();
+        Map<K, Entry> before = new HashMap<>(entries);
+        Map<Images, Entry> shared = new HashMap<>();
+        entries.values().forEach(entry -> shared.put(entry.images(), entry));
         Set<Images> unique = new HashSet<>(images.values());
-        long area = unique.stream().mapToLong(pixels ->
-              (long) (pixels.color().width() + ATLAS_BLEED) * (pixels.color().height() + ATLAS_BLEED)).sum();
-        int side = 128;
-        while (side < 2048 && side * (long) side < area * 1.3) {
-            side *= 2;
+        long area = unique.stream().mapToLong(GpuTextures::area).sum();
+        long addedArea = unique.stream().filter(pixels -> !shared.containsKey(pixels)).mapToLong(GpuTextures::area).sum();
+        int imageWidth = unique.stream().mapToInt(pixels -> pixels.color().width()).max().orElse(0);
+        int imageHeight = unique.stream().mapToInt(pixels -> pixels.color().height()).max().orElse(0);
+        // Append new artwork without moving any live slot. Compact only when discarded artwork would more
+        // than double the live storage (with one page of headroom), or the page format/size must change.
+        boolean repack = atlas == null || (normalAtlas != null) != normalMaps
+              || imageWidth + 3 * ATLAS_BLEED > packer.getPageWidth()
+              || imageHeight + 3 * ATLAS_BLEED > packer.getPageHeight()
+              || packedArea + addedArea > Math.max(2 * area, (long) packer.getPageWidth() * packer.getPageHeight());
+        if (repack) {
+            dispose();
+            shared.clear();
+            int side = 128;
+            while (side < 2048 && side * (long) side < area * 1.3) { side *= 2; }
+            // Guillotine packing reserves two outer margins AND one margin on each packed rectangle.
+            int width = Math.max(side, imageWidth + 3 * ATLAS_BLEED);
+            int height = Math.max(side, imageHeight + 3 * ATLAS_BLEED);
+            packer = new PixmapPacker(width, height, Pixmap.Format.RGBA8888, ATLAS_BLEED, true);
+            if (normalMaps) {
+                normalPacker = new PixmapPacker(width, height, Pixmap.Format.RGBA8888, ATLAS_BLEED, true);
+            }
         }
-        // Guillotine packing reserves two outer margins AND one margin on each packed rectangle.
-        int width = Math.max(side, unique.stream().mapToInt(pixels -> pixels.color().width()).max().orElse(0) + 3 * ATLAS_BLEED);
-        int height = Math.max(side, unique.stream().mapToInt(pixels -> pixels.color().height()).max().orElse(0) + 3 * ATLAS_BLEED);
-        packer = new PixmapPacker(width, height, Pixmap.Format.RGBA8888, ATLAS_BLEED, true);
-        if (normalMaps) {
-            normalPacker = new PixmapPacker(width, height, Pixmap.Format.RGBA8888, ATLAS_BLEED, true);
-        }
+        Map<Images, String> names = new HashMap<>();
         images.forEach((key, pixels) -> {
-            if (names.containsKey(pixels)) {
+            if (shared.containsKey(pixels) || names.containsKey(pixels)) {
                 return;
             }
-            String name = "image" + names.size();
+            String name = "image" + slotCount++;
             pack(packer, name, pixels.color(), false);
             if (normalMaps) {
                 // Identical sizes and insertion order give both atlases the same pages and UVs.
@@ -129,21 +148,33 @@ final class GpuTextures<K> implements Disposable {
                 pack(normalPacker, name, pixels.normal() == null ? pixels.color() : pixels.normal(), pixels.normal() == null);
             }
             names.put(pixels, name);
+            packedArea += area(pixels);
         });
-        atlas = atlas(packer);
-        if (normalMaps) {
-            normalAtlas = atlas(normalPacker);
-            names.values().forEach(name -> normals.put(atlas.findRegion(name).getTexture(),
-                  normalAtlas.findRegion(name).getTexture()));
+        if (!names.isEmpty()) {
+            atlas = atlas(packer, atlas);
+            if (normalMaps) {
+                normalAtlas = atlas(normalPacker, normalAtlas);
+                names.values().forEach(name -> normals.put(atlas.findRegion(name).getTexture(),
+                      normalAtlas.findRegion(name).getTexture()));
+            }
         }
-        Map<Images, Entry> shared = new HashMap<>();
         names.forEach((pixels, name) -> shared.put(pixels, new Entry(pixels, name, atlas.findRegion(name))));
+        entries.clear();
         images.forEach((key, pixels) -> entries.put(key, shared.get(pixels)));
-        return true;
+        Set<K> changed = new HashSet<>(before.keySet());
+        changed.addAll(entries.keySet());
+        changed.removeIf(key -> before.containsKey(key) && entries.containsKey(key)
+              && before.get(key).region() == entries.get(key).region());
+        return changed;
     }
 
-    private TextureAtlas atlas(PixmapPacker source) {
-        TextureAtlas result = source.generateTextureAtlas(mipmaps ? Texture.TextureFilter.MipMapLinearLinear : Texture.TextureFilter.Linear,
+    private static long area(Images pixels) {
+        return (long) (pixels.color().width() + ATLAS_BLEED) * (pixels.color().height() + ATLAS_BLEED);
+    }
+
+    private TextureAtlas atlas(PixmapPacker source, TextureAtlas result) {
+        if (result == null) { result = new TextureAtlas(); }
+        source.updateTextureAtlas(result, mipmaps ? Texture.TextureFilter.MipMapLinearLinear : Texture.TextureFilter.Linear,
               Texture.TextureFilter.Linear, mipmaps);
         if (mipmaps) {
             for (Texture texture : result.getTextures()) {
@@ -222,5 +253,7 @@ final class GpuTextures<K> implements Disposable {
         }
         normals.clear();
         entries.clear();
+        slotCount = 0;
+        packedArea = 0;
     }
 }

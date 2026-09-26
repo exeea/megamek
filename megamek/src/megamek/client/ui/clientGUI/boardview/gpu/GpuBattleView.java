@@ -213,7 +213,15 @@ class GpuBattleView extends ApplicationAdapter {
         ui = new GpuBoardUi(source, boardCamera, () -> playbackSpeed = playbackSpeed.next(), playback::togglePaused);
         Gdx.input.setInputProcessor(new InputMultiplexer(ui.stage, boardInput) {
             @Override
+            public boolean touchDown(int x, int y, int pointer, int button) {
+                // Finish wheel edits before a toolbar or menu action can consume the click.
+                boardInput.finishElevationScroll();
+                return super.touchDown(x, y, pointer, button);
+            }
+
+            @Override
             public boolean keyDown(int key) {
+                boardInput.finishElevationScroll();
                 // Window commands precede Scene2D focus; ordinary typing and navigation stay with the focused control.
                 return isWindowShortcut(key) ? boardInput.keyDown(key) : super.keyDown(key);
             }
@@ -294,6 +302,7 @@ class GpuBattleView extends ApplicationAdapter {
             jumpJets.clear();
             unitPicking.clear();
             hovered = null;
+            boardInput.reset();
             fitted = false;
         }
         List<BoardScene.Tile> previousTiles = scene == null ? null : scene.tiles();
@@ -597,7 +606,7 @@ class GpuBattleView extends ApplicationAdapter {
                     facing = 0; // Troops and their transports have cosmetic member headings, no gameplay facing.
                 }
                 var turn = upperBodyTurns.get(key);
-                animators.computeIfAbsent(key, ignored -> new UnitAnimator(groundSurfaces)).apply(visual, instance, unit,
+                animators.computeIfAbsent(key, ignored -> new UnitAnimator(groundSurfaces, () -> scene)).apply(visual, instance, unit,
                       sample, hoverClock, animationSeconds(),
                       playbackSpeed == UnitMotion.Speed.INSTANT, turn == null ? 0 : turn.degrees());
                 animators.get(key).attacks(visual, unit, playback.attacks());
@@ -798,7 +807,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (instance == null || instance.model != model.instance.model) {
             instance = newUnitInstance(key, model);
         }
-        animators.computeIfAbsent(key, ignored -> new UnitAnimator()).apply(model, instance, unit,
+        animators.computeIfAbsent(key, ignored -> new UnitAnimator(groundSurfaces, () -> scene)).apply(model, instance, unit,
               motions.get(unit.id()).sample(), hoverClock, 0, true, unit.model().twist());
     }
 
@@ -1066,9 +1075,16 @@ class GpuBattleView extends ApplicationAdapter {
         lines.setTransformMatrix(selectionTransform.idt());
         lines.begin(ShapeRenderer.ShapeType.Line);
         if (hovered != null && scene.tile(hovered) != null && !ui.hit(Gdx.input.getX(), Gdx.input.getY())) {
-            BoardScene.Tile tile = scene.tile(hovered);
             lines.setColor(Color.WHITE);
-            ring(hovered, tile.elevation());
+            if (source.isEditor() && modifiers() == InputEvent.CTRL_DOWN_MASK && ui.acceptsCameraKeys()) {
+                for (Coords coords : source.editorBrush(hovered, boardGeneration)) {
+                    if (scene.tile(coords) != null) {
+                        ring(coords, scene.tile(coords).elevation());
+                    }
+                }
+            } else {
+                ring(hovered, scene.tile(hovered).elevation());
+            }
         }
         lines.end();
     }
@@ -1170,6 +1186,8 @@ class GpuBattleView extends ApplicationAdapter {
         private int gestureButton;
         private int startX;
         private int startY;
+        private Coords elevationScrollHex;
+        private float elevationScroll;
         private record KeyPress(int code, int modifiers) { }
         private final Map<Integer, KeyPress> pressedKeys = new HashMap<>();
 
@@ -1318,6 +1336,8 @@ class GpuBattleView extends ApplicationAdapter {
             orbiting = false;
             dragged = false;
             boardGesture = false;
+            elevationScrollHex = null;
+            elevationScroll = 0;
         }
 
         @Override
@@ -1329,9 +1349,36 @@ class GpuBattleView extends ApplicationAdapter {
             return false;
         }
 
+        private void finishElevationScroll() {
+            if (elevationScrollHex != null) {
+                source.endEditorStroke();
+                elevationScrollHex = null;
+                elevationScroll = 0;
+            }
+        }
+
         @Override
         public boolean scrolled(float amountX, float amountY) {
             if (!ui.hit(Gdx.input.getX(), Gdx.input.getY())) {
+                if (source.isEditor() && modifiers() == InputEvent.CTRL_DOWN_MASK) {
+                    if (!boardGesture && ui.acceptsCameraKeys() && !ui.isTextEditing()) {
+                        Coords coords = pick(Gdx.input.getX(), Gdx.input.getY());
+                        if (coords != null) {
+                            if (!coords.equals(elevationScrollHex)) {
+                                elevationScroll = 0;
+                                elevationScrollHex = coords;
+                            }
+                            elevationScroll -= amountY;
+                            int levels = (int) elevationScroll;
+                            elevationScroll -= levels;
+                            if (levels != 0) {
+                                source.adjustEditorElevation(coords, levels, boardGeneration);
+                            }
+                        }
+                    }
+                    return true;
+                }
+                finishElevationScroll();
                 boardCamera.zoomAt((float) Math.pow(1.12, amountY), Gdx.input.getX(),
                       Gdx.graphics.getHeight() - Gdx.input.getY() - ui.bottomPixels());
                 return true;
@@ -1418,6 +1465,9 @@ class GpuBattleView extends ApplicationAdapter {
 
         @Override
         public boolean keyUp(int key) {
+            if (key == Input.Keys.CONTROL_LEFT || key == Input.Keys.CONTROL_RIGHT) {
+                finishElevationScroll();
+            }
             if (cameraKeys.remove(key) != null) {
                 return true;
             }

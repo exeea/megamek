@@ -15,6 +15,8 @@ import megamek.common.units.Terrains;
 final class BoardFeatures {
     /** Global scatter density: 0 disables it, 1 is the baseline, 3 triples each biome's placement chance. */
     static final float SCATTER_DENSITY_MULTIPLIER = 3.0f;
+    /** Width in tile pixels of a Rough boulder at feature scale one; placement and meshing share this size. */
+    static final float ROUGH_BOULDER_WIDTH = 12;
     /** Tree species by where they grow; repeated names are the common ones. */
     private static final List<String> TEMPERATE = List.of("tree", "pine", "tree-broad", "birch", "tree-slender",
           "pine-tall", "pine-broad");
@@ -36,7 +38,7 @@ final class BoardFeatures {
         for (int terrain : hex.getTerrainTypes()) {
             boolean base = switch (terrain) {
                 case Terrains.WOODS, Terrains.JUNGLE, Terrains.FOLIAGE_ELEV, Terrains.SAND, Terrains.TUNDRA,
-                      Terrains.PAVEMENT, Terrains.SNOW, Terrains.WATER, Terrains.RAPIDS,
+                      Terrains.PAVEMENT, Terrains.SNOW, Terrains.WATER, Terrains.RAPIDS, Terrains.ROUGH,
                       Terrains.CLIFF_TOP, Terrains.CLIFF_BOTTOM, Terrains.INCLINE_TOP, Terrains.INCLINE_BOTTOM,
                       Terrains.INCLINE_HIGH_TOP, Terrains.INCLINE_HIGH_BOTTOM, Terrains.METAL_CONTENT,
                       Terrains.DEPLOYMENT_ZONE -> true;
@@ -132,8 +134,39 @@ final class BoardFeatures {
                       height * (1f + (index % 3) * 0.05f), 0, BoardScene.FeatureKind.TREE));
             }
         }
+        rough(hex, coords, result);
         scatter(hex, coords, result);
         return List.copyOf(result);
+    }
+
+    /** Rough is actual terrain cover, independent of cosmetic scatter density, with larger cover for ultra rough. */
+    private static void rough(Hex hex, Coords coords, List<BoardScene.Feature> result) {
+        if (!hex.containsTerrain(Terrains.ROUGH)
+              || hex.containsAnyTerrainOf(Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL,
+                    Terrains.SPACE, Terrains.SKY, Terrains.MAGMA)) { return; }
+        Random random = new Random(coords.getX() * 73_856_093L ^ coords.getY() * 19_349_663L ^ 0xb01deL);
+        int count = hex.terrainLevel(Terrains.ROUGH) == 2 ? 14 : 9;
+        int exits = hex.containsTerrain(Terrains.ROAD) ? hex.getTerrain(Terrains.ROAD).getExits() : 0;
+        if (hex.containsTerrain(Terrains.BRIDGE)) { exits |= hex.getTerrain(Terrains.BRIDGE).getExits(); }
+        for (int i = 0; i < count; i++) {
+            double angle = i * 2.399963 + random.nextFloat() * .45 + random.nextFloat();
+            float radius = 23 + random.nextFloat() * 5;
+            float x = (float) Math.cos(angle) * radius, y = (float) Math.sin(angle) * radius;
+            float size = .55f + random.nextFloat() * .55f;
+            float height = .22f + random.nextFloat() * .32f;
+            boolean road = false;
+            for (int direction = 0; direction < 6; direction++) {
+                if ((exits & 1 << direction) == 0) { continue; }
+                Coords next = coords.translated(direction);
+                float dx = (BoardGeometry.centerX(next) - BoardGeometry.centerX(coords)) / BoardGeometry.HEX_SCALE;
+                float dy = (BoardGeometry.centerY(next) - BoardGeometry.centerY(coords)) / BoardGeometry.HEX_SCALE;
+                road |= x * dx + y * dy > 0
+                      && Math.abs(x * dy - y * dx) / Math.hypot(dx, dy) < 9 + size * ROUGH_BOULDER_WIDTH / 2;
+            }
+            if (road) { continue; }
+            result.add(new BoardScene.Feature("rough-boulder", x, y, random.nextFloat() * 360, size, height, 0,
+                  BoardScene.FeatureKind.BOULDER));
+        }
     }
 
     /** Cosmetic clusters leave the unit centre clear; terrain updates never reshuffle neighboring details. */
@@ -141,7 +174,7 @@ final class BoardFeatures {
         if (hex.containsAnyTerrainOf(Terrains.WATER, Terrains.ICE, Terrains.ROAD, Terrains.PAVEMENT,
               Terrains.BRIDGE, Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL, Terrains.FIELDS,
               Terrains.WOODS, Terrains.JUNGLE, Terrains.SPACE, Terrains.SKY, Terrains.MAGMA, Terrains.FIRE,
-              Terrains.GEYSER, Terrains.SWAMP, Terrains.MUD, Terrains.HAZARDOUS_LIQUID, Terrains.FORTIFIED)) {
+              Terrains.GEYSER, Terrains.SWAMP, Terrains.MUD, Terrains.HAZARDOUS_LIQUID, Terrains.FORTIFIED, Terrains.ROUGH)) {
             return;
         }
         BoardScene.Surface surface = surface(hex);

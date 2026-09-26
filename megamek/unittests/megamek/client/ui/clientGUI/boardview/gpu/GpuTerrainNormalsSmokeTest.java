@@ -74,8 +74,9 @@ class GpuTerrainNormalsSmokeTest {
                   new BoardScene.Light(30, -20));
             for (BoardScene.Tile tile : scene.tiles()) {
                 assertNotNull(tile.normals(), "Every captured ground image carries its pre-generated normal layer");
-                assertTrue(tile.features().stream().allMatch(feature -> feature.kind() == BoardScene.FeatureKind.SCATTER),
-                      "Rubble and rough add only sparse decoration to their ground artwork");
+                assertTrue(tile.features().stream().allMatch(feature -> feature.kind() == BoardScene.FeatureKind.SCATTER
+                            || feature.kind() == BoardScene.FeatureKind.BOULDER),
+                      "Ground detail consists of cosmetic scatter or rough boulders");
                 assertNull(tile.decals(), "Painted stones belong in the ground, not an overlay hiding its lighting");
             }
             var configuration = GpuBoardWindow.configuration(false);

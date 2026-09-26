@@ -218,8 +218,14 @@ class BoardTacticalGeometryTest {
             var scene = new BoardScene(0, 3, 1, tiles, List.of(), List.of(), -1, "", List.of(), null,
                   List.of(), List.of(), List.of(), graphics.snapshot());
             List<BoardTacticalGeometry.Triangle> triangles = new ArrayList<>();
-            BoardTacticalGeometry.drape(scene, triangles::add);
+            List<BoardTacticalGeometry.Triangle> captured = new ArrayList<>();
+            BoardTacticalGeometry.drape(scene, triangle -> {
+                triangles.add(triangle);
+                captured.add(new BoardTacticalGeometry.Triangle(new Vector3(triangle.a()), new Vector3(triangle.b()),
+                      new Vector3(triangle.c()), triangle.argb()));
+            });
             assertFalse(triangles.isEmpty());
+            assertEquals(captured, triangles, "Later surface clips must not overwrite earlier emitted vertices");
             assertTrue(triangles.stream().flatMap(t -> List.of(t.a(), t.b(), t.c()).stream())
                   .anyMatch(p -> p.z > BoardGeometry.LEVEL));
             assertTrue(triangles.stream().flatMap(t -> List.of(t.a(), t.b(), t.c()).stream())

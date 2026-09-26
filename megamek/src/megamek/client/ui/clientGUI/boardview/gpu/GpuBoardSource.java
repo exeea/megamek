@@ -146,6 +146,12 @@ final class GpuBoardSource implements AutoCloseable {
     private final BoardEditorPanel editor;
     /** Only Swing owns the active brush stroke; render input carries the board generation it picked. */
     private Board editorStrokeBoard;
+    /** Swing combines wheel ticks between captures; releasing Ctrl commits the shared editor undo entry. */
+    private final Map<Coords, Integer> pendingElevation = new HashMap<>();
+    private boolean editorElevationStroke;
+    /** Swing-owned brush settings are published only as a preview, never read directly by the render thread. */
+    private record EditorBrush(Coords center, long generation, List<Coords> hexes) { }
+    private volatile EditorBrush editorBrush = new EditorBrush(null, -1, List.of());
     private GpuBoardActions actions;
     volatile UiPreferences uiPreferences;
     volatile GpuBoardActions.PhaseStatus phaseStatus = new GpuBoardActions.PhaseStatus("", false);
@@ -560,7 +566,12 @@ final class GpuBoardSource implements AutoCloseable {
     public void refresh() {
         requireSwingThread();
         if (!closed) {
+            flushEditorElevation();
             Frame next = capture();
+            if (editor != null) {
+                Coords center = hoverCoords;
+                editorBrush = new EditorBrush(center, boardGeneration, editor.elevationBrush(center));
+            }
             synchronized (this) {
                 publishScene(next, true);
             }
@@ -616,6 +627,7 @@ final class GpuBoardSource implements AutoCloseable {
         }
         Board current = view.game.getBoard(view.getBoardId());
         if (current != board) {
+            finishEditorStroke();
             if (board != null) {
                 board.removeBoardListener(boardListener);
             }
@@ -1231,10 +1243,43 @@ final class GpuBoardSource implements AutoCloseable {
         SwingUtilities.invokeLater(() -> {
             if (!closed && editor != null && generation == boardGeneration && board == view.game.getBoard()
                   && coords != null && board.contains(coords) && !editor.shouldIgnoreHotKeys()) {
+                if (editorElevationStroke) {
+                    finishEditorStroke();
+                }
                 editorStrokeBoard = board;
                 editor.paintIn3D(coords, modifiers);
             }
         });
+    }
+
+    List<Coords> editorBrush(Coords center, long generation) {
+        EditorBrush preview = editorBrush;
+        return generation == preview.generation() && java.util.Objects.equals(center, preview.center())
+              ? preview.hexes() : List.of();
+    }
+
+    void adjustEditorElevation(Coords coords, int levels, long generation) {
+        SwingUtilities.invokeLater(() -> {
+            if (!closed && editor != null && generation == boardGeneration && board == view.game.getBoard()
+                  && coords != null && board.contains(coords) && levels != 0 && !editor.shouldIgnoreHotKeys()) {
+                if (!editorElevationStroke) {
+                    finishEditorStroke();
+                    editorStrokeBoard = board;
+                    editorElevationStroke = true;
+                }
+                // Capture the brush now, so a later palette change cannot retarget accepted wheel input.
+                for (Coords hex : editor.elevationBrush(coords)) {
+                    pendingElevation.merge(hex, levels, Integer::sum);
+                }
+            }
+        });
+    }
+
+    private void flushEditorElevation() {
+        if (editorStrokeBoard != null && editorStrokeBoard == view.game.getBoard()) {
+            editor.adjustElevation(pendingElevation);
+        }
+        pendingElevation.clear();
     }
 
     void endEditorStroke() {
@@ -1247,6 +1292,8 @@ final class GpuBoardSource implements AutoCloseable {
     }
 
     private void finishEditorStroke() {
+        flushEditorElevation();
+        editorElevationStroke = false;
         if (editorStrokeBoard != null) {
             if (editorStrokeBoard == view.game.getBoard()) {
                 editor.finishBrushStroke();

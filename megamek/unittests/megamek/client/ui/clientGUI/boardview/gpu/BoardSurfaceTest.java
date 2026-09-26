@@ -24,6 +24,28 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardSurfaceTest {
     @Test
+    void completedNeighborSurfacesPreserveExactWallsAndOutsideChunkFallbacks() {
+        for (BoardScene scene : List.of(scene(false), scene(true), randomBoard(new Random(7419)),
+              GpuRiverTerrainSmokeTest.dropScene(BoardScene.Surface.SAND))) {
+            Map<Coords, BoardSurface> surfaces = new java.util.concurrent.ConcurrentHashMap<>();
+            scene.tiles().parallelStream().forEach(tile -> surfaces.put(tile.coords(), new BoardSurface(scene, tile)));
+            Map<Coords, BoardSurface> partial = new HashMap<>(surfaces);
+            partial.keySet().removeIf(coords -> (coords.getX() & 1) == 0);
+            float floor = -6 * BoardGeometry.LEVEL;
+            for (BoardSurface surface : surfaces.values()) {
+                var expected = surface.sides(scene, floor);
+                assertEquals(expected, surface.sides(scene, floor, surfaces), "Finished neighbor edges");
+                assertEquals(expected, surface.sides(scene, floor, partial), "Missing neighbors use the original path");
+            }
+            // Match the renderer's barrier: all tops exist before independent wall builders read their neighbors.
+            surfaces.values().parallelStream().forEach(surface -> {
+                var expected = new BoardSurface(scene, surface.tile).walls(scene, floor);
+                assertEquals(expected, surface.walls(scene, floor, surfaces), "Finished neighbor walls");
+            });
+        }
+    }
+
+    @Test
     void supportCacheReusesGeometryAcrossPosesAndInvalidatesForTerrainAndTuning() {
         var cache = new BoardSurface.Cache();
         var scene = scene(false);
@@ -288,7 +310,8 @@ class BoardSurfaceTest {
             BoardRelief.tune(new BoardRelief.Tuning(original.shoreShift(), original.shoreRoom(), original.shoreReach(),
                   original.shoreNarrow(), original.shoreHard(), original.shorePool(), original.shoreIsle(),
                   original.shoreBlend(), original.shoreWander(), original.wanderCell(), -15, original.landKeep(),
-                  original.shoreLip(), original.transition(), original.fullDetailHexes(), original.mediumDetailHexes(), original.riverWidth()));
+                  original.shoreLip(), original.transition(), original.fullDetailHexes(), original.mediumDetailHexes(),
+                  original.riverWidth(), original.cliffsIntoWater()));
             BoardSurface narrow = cache.get(scene, scene.tile(center));
             BoardSurface adjoining = cache.get(scene, scene.tile(north));
             assertNotSame(before, narrow);
@@ -353,7 +376,7 @@ class BoardSurfaceTest {
             BoardRelief.tune(new BoardRelief.Tuning(0, relief.shoreRoom(), relief.shoreReach(), relief.shoreNarrow(),
                   relief.shoreHard(), relief.shorePool(), relief.shoreIsle(), relief.shoreBlend(), relief.shoreWander(),
                   relief.wanderCell(), relief.shoreSpread(), relief.landKeep(), relief.shoreLip(), relief.transition(),
-                  relief.fullDetailHexes(), relief.mediumDetailHexes(), relief.riverWidth()));
+                  relief.fullDetailHexes(), relief.mediumDetailHexes(), relief.riverWidth(), relief.cliffsIntoWater()));
             BoardSurface before = cache.get(scene, scene.tile(center));
             int n = BoardSurface.SHORE_SEGMENTS;
             float width = before.outline.get(n).dst(before.outline.get(2 * n));
@@ -1078,7 +1101,7 @@ class BoardSurfaceTest {
                 }
             }
         }
-        edges.forEach((edge, count) -> assertEquals(2, count, "An edge near the corner is shared by " + count));
+        edges.forEach((edge, count) -> assertEquals(2, count, "An edge near the corner " + edge + " is shared by " + count));
     }
 
     @Test
@@ -1152,7 +1175,8 @@ class BoardSurfaceTest {
                 BoardSurface surface = new BoardSurface(scene, tile);
                 Vector3 center = BoardGeometry.center(tile.coords(), tile.elevation());
                 assertEquals(BoardGeometry.groundZ(tile), surface.height(center.x, center.y), .01f,
-                      "Anchor of " + tile.coords() + " in trial " + trial);
+                      "Anchor of " + tile.coords() + " in trial " + trial + ": "
+                            + surface.faces.stream().filter(f -> Float.isFinite(f.height(center.x, center.y))).toList());
                 for (BoardSurface.Face face : surface.faces) {
                     if (face.finish() != BoardSurface.Finish.BED) { continue; }
                     Vector3 n = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
@@ -1289,7 +1313,7 @@ class BoardSurfaceTest {
                     continue;
                 }
                 Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
-                assertTrue(normal.z >= -.001f * normal.len(), label + ": a bank of " + coords + " faces down");
+                assertTrue(normal.z >= -.001f * normal.len(), label + ": a bank of " + coords + " faces down: " + face);
             }
         }
     }

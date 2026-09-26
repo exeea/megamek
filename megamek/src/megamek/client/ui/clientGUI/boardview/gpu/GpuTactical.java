@@ -151,14 +151,19 @@ final class GpuTactical implements Disposable {
     private Consumer<BoardTacticalGeometry.Triangle> triangles(ModelBuilder builder, String name) {
         MeshPartBuilder[] mesh = new MeshPartBuilder[1];
         int[] count = { 0 };
+        MeshPartBuilder.VertexInfo a = new MeshPartBuilder.VertexInfo(), b = new MeshPartBuilder.VertexInfo(),
+              c = new MeshPartBuilder.VertexInfo();
+        Color color = new Color();
         return triangle -> {
             // Three independent vertices per triangle, below the unsigned-short index limit even on large maps.
             if (count[0] % 10000 == 0) {
                 mesh[0] = builder.part(name + "-" + count[0], GL20.GL_TRIANGLES,
                       VertexAttributes.Usage.Position | VertexAttributes.Usage.ColorPacked, material);
             }
-            Color color = color(triangle.argb());
-            mesh[0].triangle(vertex(triangle.a(), color), vertex(triangle.b(), color), vertex(triangle.c(), color));
+            Color.argb8888ToColor(color, triangle.argb());
+            // MeshBuilder copies each vertex into its float buffer before returning.
+            mesh[0].triangle(a.setPos(triangle.a()).setCol(color), b.setPos(triangle.b()).setCol(color),
+                  c.setPos(triangle.c()).setCol(color));
             count[0]++;
         };
     }

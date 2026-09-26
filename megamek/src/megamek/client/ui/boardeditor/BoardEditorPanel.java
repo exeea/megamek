@@ -53,6 +53,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.Stack;
@@ -338,7 +339,7 @@ public class BoardEditorPanel extends JPanel
                         for (Coords h : allBrushHexes) {
                             if (!buttonOOC.isSelected() || board.getHex(h).isClearHex()) {
                                 saveToUndo(h);
-                                relevelHex(h);
+                                relevelHex(h, hexLevelToDraw);
                             }
                         }
                     }
@@ -1140,9 +1141,9 @@ public class BoardEditorPanel extends JPanel
     /**
      * Changes the hex level at Coords c. Expects c to be on the board.
      */
-    private void relevelHex(Coords c) {
+    private void relevelHex(Coords c, int level) {
         Hex newHex = board.getHex(c).duplicate();
-        newHex.setLevel(hexLevelToDraw);
+        newHex.setLevel(level);
         board.resetStoredElevation();
         board.setHex(c, newHex);
 
@@ -2422,6 +2423,25 @@ public class BoardEditorPanel extends JPanel
             bv.mouseAction(coords, BoardView.BOARD_HEX_DRAG, modifiers | InputEvent.BUTTON1_DOWN_MASK,
                   MouseEvent.BUTTON1);
         }
+    }
+
+    /** The elevation shortcut and its preview share the current brush and only-on-clear filter. Runs on Swing. */
+    public List<Coords> elevationBrush(Coords center) {
+        if (center == null || !board.contains(center) || shouldIgnoreHotKeys()) {
+            return List.of();
+        }
+        return getBrushCoords(center).stream()
+              .filter(c -> !buttonOOC.isSelected() || board.getHex(c).isClearHex()).toList();
+    }
+
+    /** Changes each hex relative to its own height without selecting a tool or replacing its terrain. Runs on Swing. */
+    public void adjustElevation(Map<Coords, Integer> changes) {
+        changes.forEach((coords, levels) -> {
+            if (levels != 0 && board.contains(coords)) {
+                saveToUndo(coords);
+                relevelHex(coords, board.getHex(coords).getLevel() + levels);
+            }
+        });
     }
 
     /** One mouse gesture is one undo entry, including release outside the board or a view/focus change. */

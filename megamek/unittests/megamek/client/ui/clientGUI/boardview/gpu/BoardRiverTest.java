@@ -14,6 +14,36 @@ import org.junit.jupiter.api.Test;
 
 class BoardRiverTest {
     @Test
+    void channelProfilesKeepTheExactShoreFieldAcrossDepthAndArtworkChanges() {
+        var original = BoardRelief.tuning();
+        var geometry = BoardGeometry.tuning();
+        try {
+            BoardGeometry.tune(BoardGeometry.DEFAULTS);
+            BoardRelief.tune(BoardRelief.DEFAULTS);
+            Coords center = new Coords(3, 3), artwork = center.translated(2);
+            BoardScene scene = scene(Map.of(center, 1, center.translated(0), 0, center.translated(1), 2,
+                  artwork, 1, center.translated(4), 0, new Coords(0, 0), 1), artwork);
+            float[] widths = { .05f, .5f, 1 };
+            // Baselines from the original per-segment radius evaluation, including lake inlets and board edges.
+            long[] expected = { -4827553379463602763L, 7478450553283130916L, -4695998352484549673L };
+            for (int i = 0; i < widths.length; i++) {
+                GpuRiverTerrainSmokeTest.setWidth(widths[i]);
+                BoardRiver river = new BoardRiver(scene, BoardRelief.tuning());
+                long fingerprint = 1;
+                for (int x = -80; x < 540; x += 13) {
+                    for (int y = -570; y < 80; y += 17) {
+                        fingerprint = 31 * fingerprint + Float.floatToIntBits(river.field(x + .25f, y + .75f));
+                    }
+                }
+                assertEquals(expected[i], fingerprint, "Exact shore profile at width " + widths[i]);
+            }
+        } finally {
+            BoardRelief.tune(original);
+            BoardGeometry.tune(geometry);
+        }
+    }
+
+    @Test
     void boundedRiverQueriesPreserveTheShoreIntersectionAtJunctionsAndBoardEdges() {
         var original = BoardRelief.tuning();
         try {
@@ -130,11 +160,7 @@ class BoardRiverTest {
         try {
             GpuRiverTerrainSmokeTest.setWidth(.05f);
             Coords center = new Coords(3, 3), north = center.translated(0);
-            BoardScene initial = scene(Map.of(center, 1, north, 1, center.translated(3), 1));
-            List<BoardScene.Tile> tiles = initial.tiles().stream().map(t -> new BoardScene.Tile(t.coords(), t.elevation(),
-                  t.waterDepth(), t.frozen(), t.roadExits(), t.surface(), t.ground(), t.normals(), t.decals(), t.decalsWithoutLimbs(),
-                  t.tactical(), t.features(), t.text(), t.liquid(), t.foliage(), !t.coords().equals(north))).toList();
-            BoardScene scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
+            BoardScene scene = scene(Map.of(center, 1, north, 1, center.translated(3), 1), north);
             BoardSurface a = new BoardSurface(scene, scene.tile(center)), b = new BoardSurface(scene, scene.tile(north));
             int n = BoardSurface.SHORE_SEGMENTS;
             for (int i = 0; i <= n; i++) {
@@ -412,15 +438,16 @@ class BoardRiverTest {
         }
     }
 
-    private static BoardScene scene(Map<Coords, Integer> water) {
+    private static BoardScene scene(Map<Coords, Integer> water, Coords... artwork) {
         List<BoardScene.Tile> tiles = new ArrayList<>();
+        List<Coords> special = List.of(artwork);
         for (int x = 0; x < 7; x++) {
             for (int y = 0; y < 7; y++) {
                 Coords coords = new Coords(x, y);
                 int depth = water.getOrDefault(coords, -1);
                 tiles.add(new BoardScene.Tile(coords, depth >= 0 ? 0 : 1, depth, false, 0, BoardScene.Surface.SAND,
                       null, null, null, null, null, List.of(), List.of(), depth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE,
-                      null, true));
+                      null, !special.contains(coords)));
             }
         }
         return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());

@@ -94,7 +94,7 @@ class GpuResourcesSmokeTest {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 17; x++) {
             for (int y = 0; y < 17; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), x == 8 ? 3 : 0, -1, false, 0,
+                tiles.add(new BoardScene.Tile(new Coords(x, y), x == 8 ? 3 : 0, x == 7 && y == 8 ? 1 : -1, false, 0,
                       BoardScene.Surface.GRASS, art, null, null, List.of(), List.of()));
             }
         }
@@ -116,6 +116,48 @@ class GpuResourcesSmokeTest {
                     }
                 }
             }
+            Coords moved = new Coords(16, 16);
+            BoardGeometry.Tuning previousTuning = BoardGeometry.tuning();
+            try {
+                BoardGeometry.tune(new BoardGeometry.Tuning(previousTuning.hexScale() * 2,
+                      previousTuning.unitScale(), previousTuning.unitHeightScale(), previousTuning.levelHeight(),
+                      previousTuning.gridShade(), previousTuning.multiHexUnitScale(), previousTuning.transitions(),
+                      previousTuning.padding()));
+                Ray ray = new Ray(BoardGeometry.center(moved, 0).add(0, 0, 1000), new Vector3(0, 0, -1));
+                BoardGeometry.Hit expected = BoardGeometry.hit(scene, ray);
+                assertNotNull(expected);
+                assertEquals(moved, expected.coords());
+                assertEquals(expected, terrain.hit(scene, ray),
+                      "New tuning must pick beyond the installed chunk bounds before terrain.update");
+            } finally {
+                BoardGeometry.tune(previousTuning);
+            }
+            List<BoardScene.Tile> elevated = new ArrayList<>(tiles);
+            elevated.set(tiles.indexOf(scene.tile(moved)), new BoardScene.Tile(moved, 6, -1, false, 0,
+                  BoardScene.Surface.GRASS, art, null, null, List.of(), List.of()));
+            BoardScene elevatedScene = new BoardScene(0, 17, 17, elevated, List.of(), List.of(), -1, "", List.of());
+            Ray ray = new Ray(BoardGeometry.center(moved, 6).add(0, 0, 1000), new Vector3(0, 0, -1));
+            BoardGeometry.Hit expected = BoardGeometry.hit(elevatedScene, ray);
+            assertNotNull(expected);
+            assertEquals(moved, expected.coords());
+            assertNotEquals(BoardGeometry.hit(scene, ray), expected,
+                  "The elevation edit must change the exact hit distance");
+            assertEquals(expected, terrain.hit(elevatedScene, ray),
+                  "A new scene must use its edited surface before terrain.update");
+            // Splitting a shared artwork slot must rebuild the edited chunk without rebuilding distant geometry.
+            Coords edited = new Coords(8, 8), distant = new Coords(0, 0);
+            var untouched = terrain.tacticalSurface(distant);
+            var beforeEdit = terrain.tacticalSurface(edited);
+            Coords bank = new Coords(7, 8);
+            var beforeBank = terrain.tacticalSurface(bank);
+            BoardScene.Tile previous = scene.tile(edited);
+            List<BoardScene.Tile> changed = new ArrayList<>(tiles);
+            changed.set(tiles.indexOf(previous), new BoardScene.Tile(edited, previous.elevation(), -1, false, 0,
+                  BoardScene.Surface.GRASS, hexPixels(java.awt.Color.YELLOW), null, null, List.of(), List.of()));
+            terrain.update(new BoardScene(0, 17, 17, changed, List.of(), List.of(), -1, "", List.of()));
+            assertSame(untouched, terrain.tacticalSurface(distant), "An artwork edit must leave distant chunks intact");
+            assertNotSame(beforeEdit, terrain.tacticalSurface(edited));
+            assertNotSame(beforeBank, terrain.tacticalSurface(bank), "Banks across a chunk border borrow the edited artwork");
         } finally {
             terrain.dispose();
         }
@@ -346,7 +388,10 @@ class GpuResourcesSmokeTest {
             assertSame(atlas.region("one"), atlas.region("two"), "Identical artwork must occupy one atlas slot");
             assertFalse(atlas.update(Map.of("one", sand, "two", sand)), "Shared slots can update together");
             assertSame(atlas.region("one"), atlas.region("two"));
-            assertTrue(atlas.update(Map.of("one", sand, "two", grass)), "Diverging aliases must split before upload");
+            var unchanged = atlas.region("one");
+            assertEquals(java.util.Set.of("two"), atlas.updateRegions(Map.of("one", sand, "two", grass), Map.of()),
+                  "Only the edited alias may invalidate mesh UVs");
+            assertSame(unchanged, atlas.region("one"), "An edit must preserve unrelated slots and their texture page");
             assertNotSame(atlas.region("one"), atlas.region("two"));
             assertTrue(atlas.update(Map.of("one", grass, "two", matchingGrass)), "Converging images must merge again");
             assertSame(atlas.region("one"), atlas.region("two"));

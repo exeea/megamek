@@ -130,7 +130,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         }
     }
 
-    enum FeatureKind { PROP, BUILDING, TREE, LIMB, SCATTER }
+    enum FeatureKind { PROP, BUILDING, TREE, LIMB, SCATTER, BOULDER }
 
     /** Authored model or scatter shape, placement in tile pixels, and height in elevation levels. */
     record Feature(String asset, float x, float y, float rotation, float scale, float height, float elevation,

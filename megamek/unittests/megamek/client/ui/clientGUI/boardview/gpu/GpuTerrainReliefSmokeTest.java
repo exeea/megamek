@@ -194,11 +194,13 @@ class GpuTerrainReliefSmokeTest {
         GpuGroundCover cover = new GpuGroundCover();
         try {
             BoardScene first = coverScene(pixels, null, 0);
-            var model = cover.visible(first, camera.camera, first.tiles()).getFirst();
+            var model = cover.visible(first, camera.camera, first.tiles(), BoardTacticalGeometry.surfaces(first)).getFirst();
             BoardScene tactical = coverScene(pixels, pixels, 0), edited = coverScene(pixels, pixels, 1);
-            assertSame(model, cover.visible(tactical, camera.camera, tactical.tiles()).getFirst(),
+            assertSame(model, cover.visible(tactical, camera.camera, tactical.tiles(), coords -> {
+                throw new AssertionError("An unchanged surface must not be requested again");
+            }).getFirst(),
                   "Tactical-only snapshot replacement must retain grass GPU resources");
-            assertNotSame(model, cover.visible(edited, camera.camera, edited.tiles()).getFirst(),
+            assertNotSame(model, cover.visible(edited, camera.camera, edited.tiles(), BoardTacticalGeometry.surfaces(edited)).getFirst(),
                   "A real terrain edit must replace the derived cover");
         } finally { cover.dispose(); }
     }

@@ -156,14 +156,14 @@ class BoardFeaturesTest {
     }
 
     @Test
-    void woodlandMixesSilhouettesWhileRubbleAndRoughAddOnlySmallScatter() {
+    void woodlandMixesSilhouettesWhileRubbleKeepsSmallScatter() {
         Hex hex = new Hex(0);
         Coords coords = new Coords(3, 2);
         hex.addTerrain(new Terrain(Terrains.WOODS, 2));
         hex.addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, 2));
         assertTrue(BoardFeatures.capture(hex, coords, Map.of()).stream().map(BoardScene.Feature::asset).distinct().count() >= 5);
         for (String theme : new String[] { "", "snow", "desert" }) {
-            for (int terrain : new int[] { Terrains.RUBBLE, Terrains.ROUGH }) {
+            for (int terrain : new int[] { Terrains.RUBBLE }) {
                 hex.removeAllTerrains();
                 hex.setTheme(theme);
                 hex.addTerrain(new Terrain(terrain, 4));
