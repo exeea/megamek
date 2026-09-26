@@ -35,6 +35,12 @@ final class UnitEquipmentAssembly {
      * back vents stay on the torso, and a chassis without leg spots is unchanged.
      */
     private static final List<String> LEGS = List.of("LL", "RL");
+    /**
+     * Arms take vents of their own, apart from the torso's two a face: an arm holding slotted heat sinks shows every
+     * vent spot the body offers on it (the Thunderbolt IIC's upper arm and forearm backs). A body without arm spots
+     * is unchanged.
+     */
+    private static final List<String> ARMS = List.of("LA", "RA");
     /** House rule: at most two vents on the front and two on the back. */
     private static final int VENTS_PER_FACE = 2;
     /** Clear space kept around a vent, so a weapon beside it does not sit on its edge. */
@@ -129,7 +135,8 @@ final class UnitEquipmentAssembly {
      * the front, in legs holding them when the body offers a spot on that leg), the two
      * with the most, or both in one when only one holds any; a variant whose sinks all sit in the engine keeps the
      * author's vents where the author put them. Each vent takes the first spot of its torso that no weapon covers and
-     * no other vent has taken. A vent with no free spot is left off, and every unused spot is removed.
+     * no other vent has taken. A vent with no free spot is left off, and every unused spot is removed. An arm holding
+     * heat sinks keeps every uncovered vent spot the body offers on it, outside that count (see ARMS).
      */
     private static void chooseVents(JsonValue descriptor, UnitModelState.Structure structure, Model assembled,
           List<Binding> bindings) {
@@ -150,10 +157,16 @@ final class UnitEquipmentAssembly {
             }
         }
         Map<String, Integer> sinks = new HashMap<>();
+        Set<String> sinkArms = new HashSet<>();
         for (var mount : structure.equipment()) {
-            boolean ventable = TORSO.contains(mount.location()) || LEGS.contains(mount.location());
-            if (ventable && HEAT_SINK.matcher(mount.internalName()).find()) {
+            if (!HEAT_SINK.matcher(mount.internalName()).find()) {
+                continue;
+            }
+            if (TORSO.contains(mount.location()) || LEGS.contains(mount.location())) {
                 sinks.merge(mount.location(), 1, Integer::sum);
+            } else if (ARMS.contains(mount.location())) {
+                // Counted apart, so arm sinks neither change the torso's vents nor switch off the author's defaults.
+                sinkArms.add(mount.location());
             }
         }
         Set<String> kept = new HashSet<>();
@@ -189,6 +202,24 @@ final class UnitEquipmentAssembly {
             }
         }
         for (JsonValue vent : vents) {
+            String location = vent.getString("location");
+            if (!ARMS.contains(location)) {
+                continue;
+            }
+            String name = vent.getString("node");
+            if (!sinkArms.contains(location)) {
+                LOGGER.debug("Arm vent spot {} left off: {} slots no heat sinks", name, location);
+                continue;
+            }
+            BoundingBox box = ventBox(assembled, vent);
+            if (box == null || overlapsAny(box, weapons)) {
+                LOGGER.debug("Arm vent spot {} is covered by a weapon", name);
+                continue;
+            }
+            kept.add(name);
+            LOGGER.debug("Vent kept at {} ({} arm, {})", name, location, vent.getString("side"));
+        }
+        for (JsonValue vent : vents) {
             String name = vent.getString("node");
             Node node = assembled.getNode(name, true);
             if (node != null && !kept.contains(name)) {
@@ -201,7 +232,7 @@ final class UnitEquipmentAssembly {
      * The torso each vent on this face belongs in, one entry per vent. The torsos with the most slotted heat sinks
      * win; with none slotted, the author's own vents keep their places.
      */
-    private static List<String> ventLocations(JsonValue descriptor, JsonValue vents, String side,
+    static List<String> ventLocations(JsonValue descriptor, JsonValue vents, String side,
           Map<String, Integer> sinks) {
         List<String> wanted = new ArrayList<>();
         if (sinks.isEmpty()) {
@@ -211,8 +242,9 @@ final class UnitEquipmentAssembly {
                 return wanted;
             }
             for (JsonValue vent : vents) {
+                // An arm's vents show only for the heat sinks in that arm (see ARMS), never as a default.
                 if (side.equals(vent.getString("side")) && vent.getBoolean("authored", false)
-                      && wanted.size() < VENTS_PER_FACE) {
+                      && !ARMS.contains(vent.getString("location")) && wanted.size() < VENTS_PER_FACE) {
                     wanted.add(vent.getString("location"));
                 }
             }
