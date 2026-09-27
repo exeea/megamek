@@ -228,7 +228,7 @@ final class BoardCamera {
     float collisionRadius() {
         float halfHeight = (float) Math.tan(Math.toRadians(camera.fieldOfView / 2));
         float aspect = camera.viewportWidth / Math.max(1, camera.viewportHeight);
-        return Math.max(4 * BoardGeometry.HEX_SCALE, (float) Math.sqrt(1 + halfHeight * halfHeight * (1 + aspect * aspect)) + .1f);
+        return Math.max(4 * BoardGeometry.hexScale(), (float) Math.sqrt(1 + halfHeight * halfHeight * (1 + aspect * aspect)) + .1f);
     }
 
     void setFieldOfView(float value) {
@@ -495,7 +495,7 @@ final class BoardCamera {
         float inclination = topView ? tilt : Math.min(tilt, ISOMETRIC_TILT);
         float plane = (float) attacks.stream().mapToDouble(attack ->
               (attack.event.attacker().location().elevation() + attack.event.destination().elevation()) / 2)
-              .average().orElse(0) * BoardGeometry.LEVEL;
+              .average().orElse(0) * BoardGeometry.level();
         animateTo(fittedPose(points, width, bearing, inclination, topView ? camera.zoom : .5f / displayScale, !topView, plane),
               plane, animateCombatPlayback);
     }
@@ -508,8 +508,8 @@ final class BoardCamera {
         List<Vector3> points = new ArrayList<>();
         addUnit(points, unit);
         animateTo(fittedPose(points, availableWidth, azimuth, tilt, camera.zoom, tilt > ATTACK_TOP_VIEW_TILT_DEGREES,
-                    unit.location().elevation() * BoardGeometry.LEVEL),
-              unit.location().elevation() * BoardGeometry.LEVEL, animateOnSelectionChange);
+                    unit.location().elevation() * BoardGeometry.level()),
+              unit.location().elevation() * BoardGeometry.level(), animateOnSelectionChange);
     }
 
     /** Explicit hex navigation shares the selection transition and animation setting. */
@@ -534,8 +534,8 @@ final class BoardCamera {
                 for (var occupied : unit.footprint()) {
                     for (int corner = 0; corner < 6; corner++) {
                         var base = pose.outlinePoint(occupied, corner, 0);
-                        points.add(base.cpy().add(0, 0, -.25f * BoardGeometry.LEVEL));
-                        points.add(base.add(0, 0, Math.max(1, unit.height() + 1) * BoardGeometry.LEVEL));
+                        points.add(base.cpy().add(0, 0, -.25f * BoardGeometry.level()));
+                        points.add(base.add(0, 0, Math.max(1, unit.height() + 1) * BoardGeometry.level()));
                     }
                 }
             }
@@ -547,8 +547,8 @@ final class BoardCamera {
         }
         if (!points.isEmpty()) {
             animateTo(fittedPose(points, width, azimuth, tilt, camera.zoom, false,
-                        move.path().getFirst().elevation() * BoardGeometry.LEVEL),
-                  move.path().getFirst().elevation() * BoardGeometry.LEVEL, animateOnMove);
+                        move.path().getFirst().elevation() * BoardGeometry.level()),
+                  move.path().getFirst().elevation() * BoardGeometry.level(), animateOnMove);
         }
     }
 
@@ -752,7 +752,7 @@ final class BoardCamera {
 
     void zoom(float factor) {
         if (firstPerson) {
-            fly(1, 0, 0, -(float) Math.log(factor) * BoardGeometry.HEIGHT * 3);
+            fly(1, 0, 0, -(float) Math.log(factor) * BoardGeometry.height() * 3);
             return;
         }
         stopFraming();
@@ -789,12 +789,12 @@ final class BoardCamera {
         fitToWindow = true;
         // Follow the board's lowest level so an absolute elevation offset cannot move it behind the camera.
         float plane = BoardGeometry.weatherBase(scene);
-        focus.set(scene.width() * BoardGeometry.WIDTH * 0.375f,
-              -(scene.height() + 0.5f) * BoardGeometry.HEIGHT / 2, plane);
+        focus.set(scene.width() * BoardGeometry.width() * 0.375f,
+              -(scene.height() + 0.5f) * BoardGeometry.height() / 2, plane);
         update();
         if (camera.perspective) {
             List<Vector3> points = new ArrayList<>();
-            float floor = BoardGeometry.floor(scene) / BoardGeometry.LEVEL;
+            float floor = BoardGeometry.floor(scene) / BoardGeometry.level();
             for (BoardScene.Tile tile : scene.tiles()) {
                 float top = tile.elevation();
                 for (BoardScene.Feature feature : tile.features()) {
@@ -816,7 +816,7 @@ final class BoardCamera {
         float minY = Float.POSITIVE_INFINITY;
         float maxX = Float.NEGATIVE_INFINITY;
         float maxY = Float.NEGATIVE_INFINITY;
-        float floor = BoardGeometry.floor(scene) / BoardGeometry.LEVEL;
+        float floor = BoardGeometry.floor(scene) / BoardGeometry.level();
         for (BoardScene.Tile tile : scene.tiles()) {
             float top = tile.elevation();
             for (BoardScene.Feature feature : tile.features()) {
@@ -913,17 +913,17 @@ final class BoardCamera {
     Rectangle visibleArea(BoardScene scene) {
         if (visibleTiles != scene.tiles() || visibleGeometry != BoardGeometry.revision()) {
             visibleLow = BoardGeometry.floor(scene);
-            visibleHigh = scene.tiles().stream().mapToInt(BoardScene.Tile::elevation).max().orElse(0) * BoardGeometry.LEVEL;
+            visibleHigh = scene.tiles().stream().mapToInt(BoardScene.Tile::elevation).max().orElse(0) * BoardGeometry.level();
             visibleTiles = scene.tiles();
             visibleGeometry = BoardGeometry.revision();
         }
         BoundingBox bounds = viewportBounds(camera, new BoundingBox(
-              new Vector3(-BoardGeometry.WIDTH, -(scene.height() + 1) * BoardGeometry.HEIGHT, visibleLow),
-              new Vector3((scene.width() + 1) * BoardGeometry.WIDTH * .75f, BoardGeometry.HEIGHT, visibleHigh)));
-        int left = Math.max(0, (int) Math.floor(bounds.min.x / (BoardGeometry.WIDTH * 0.75f)) - 2);
-        int top = Math.max(0, (int) Math.floor(-bounds.max.y / BoardGeometry.HEIGHT) - 2);
-        int rightHex = Math.min(scene.width(), (int) Math.ceil(bounds.max.x / (BoardGeometry.WIDTH * 0.75f)) + 2);
-        int bottom = Math.min(scene.height(), (int) Math.ceil(-bounds.min.y / BoardGeometry.HEIGHT) + 2);
+              new Vector3(-BoardGeometry.width(), -(scene.height() + 1) * BoardGeometry.height(), visibleLow),
+              new Vector3((scene.width() + 1) * BoardGeometry.width() * .75f, BoardGeometry.height(), visibleHigh)));
+        int left = Math.max(0, (int) Math.floor(bounds.min.x / (BoardGeometry.width() * 0.75f)) - 2);
+        int top = Math.max(0, (int) Math.floor(-bounds.max.y / BoardGeometry.height()) - 2);
+        int rightHex = Math.min(scene.width(), (int) Math.ceil(bounds.max.x / (BoardGeometry.width() * 0.75f)) + 2);
+        int bottom = Math.min(scene.height(), (int) Math.ceil(-bounds.min.y / BoardGeometry.height()) + 2);
         return new Rectangle(left, top, Math.max(0, rightHex - left), Math.max(0, bottom - top));
     }
 

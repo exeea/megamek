@@ -193,6 +193,8 @@ public class WeaponHandler implements AttackHandler, Serializable {
 
     /** One visual result per resolved salvo, independent of the number of damage clusters. */
     protected final void reportAttackAnimation(boolean hit) {
+        // These attacks change exterior occupancy or damage an already attached target; they launch no projectile.
+        if (this instanceof SwarmAttackHandler || this instanceof SwarmWeaponAttackHandler) { return; }
         // A Swarm continuation reuses airborne missiles. It must not emit another full rack from the gun.
         // Its secondary flight needs a separate observed origin/visibility event before it can be animated.
         if (weaponAttackAction.isSwarmingMissiles()) { return; }

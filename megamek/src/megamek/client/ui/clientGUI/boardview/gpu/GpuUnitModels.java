@@ -20,6 +20,7 @@ import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.loader.G3dModelLoader;
 import com.badlogic.gdx.graphics.g3d.model.Node;
 import com.badlogic.gdx.graphics.g3d.model.NodePart;
+import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
@@ -40,6 +41,7 @@ final class GpuUnitModels implements Disposable {
     private final Map<Path, ModularAsset> modular = new HashMap<>();
     private final Map<Integer, Assembly> assemblies = new HashMap<>();
     private final Set<Path> failed = new HashSet<>();
+    private final Map<String, Texture> modelTextures = new HashMap<>();
     private Texture bark;
 
     GpuUnitModels() {
@@ -52,7 +54,12 @@ final class GpuUnitModels implements Disposable {
     }
 
     /** The library owns Model disposal. Callers create independent ModelInstances, which share its buffers. */
-    record ModularAsset(UnitModelDescriptor descriptor, Model model, int triangles) { }
+    record ModularAsset(UnitModelDescriptor descriptor, List<Model> levels, List<Integer> triangleCounts) {
+        Model model() { return levels.getFirst(); }
+        Model model(int level) { return levels.get(level); }
+        int triangles() { return triangleCounts.getFirst(); }
+        int triangles(int level) { return triangleCounts.get(level); }
+    }
 
     private record Assembly(String asset, String fallback, String variant, int figures,
           UnitModelState.Structure structure, GpuUnitModel model) {
@@ -68,6 +75,12 @@ final class GpuUnitModels implements Disposable {
                 model.dispose();
             }
         }
+    }
+
+    /** GLB is the deployed format; existing custom G3DJ descriptors remain readable. No GPU allocation here. */
+    static ModelData meshData(FileHandle file) {
+        return file.extension().equals("glb") ? RigidGlb.loadLods(file).getFirst()
+              : new G3dModelLoader(new JsonReader()).loadModelData(file);
     }
 
     JsonValue descriptor(String asset) {
@@ -90,24 +103,38 @@ final class GpuUnitModels implements Disposable {
                 UnitModelDescriptor.contained(root, descriptor);
                 var value = UnitModelDescriptor.read(descriptor);
                 Path mesh = UnitModelDescriptor.contained(root, descriptor.getParent().resolve(value.mesh()));
-                var data = new G3dModelLoader(new JsonReader()).loadModelData(new FileHandle(mesh.toFile()));
-                int triangles = value.validate(data);
-                Model model = new Model(data);
+                var file = new FileHandle(mesh.toFile());
+                var data = file.extension().equals("glb") ? RigidGlb.loadLods(file, root) : List.of(meshData(file));
+                List<Model> levels = new java.util.ArrayList<>();
+                List<Integer> counts = new java.util.ArrayList<>();
                 try {
-                    for (var material : model.materials) {
-                        if ("bark".equals(material.id)) {
-                            if (bark == null) {
-                                Path texture = UnitModelDescriptor.contained(root, root.resolve("board/textures/foliage/bark.png"));
-                                bark = new Texture(new FileHandle(texture.toFile()), true);
-                                bark.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
-                                bark.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
+                    for (int level = 0; level < 3; level++) {
+                        var geometry = data.get(Math.min(level, data.size() - 1));
+                        int previous = data.indexOf(geometry);
+                        if (previous < level) {
+                            levels.add(levels.get(previous));
+                            counts.add(counts.get(previous));
+                            continue;
+                        }
+                        counts.add(value.validate(geometry, level));
+                        Model model = ModelTextures.create(geometry, modelTextures, filename -> modelTextures.computeIfAbsent(
+                              filename, key -> new Texture(new FileHandle(key), true)));
+                        levels.add(model);
+                        for (var material : model.materials) {
+                            if ("bark".equals(material.id) && !material.has(TextureAttribute.Diffuse)) {
+                                if (bark == null) {
+                                    Path texture = UnitModelDescriptor.contained(root, root.resolve("board/textures/foliage/bark.png"));
+                                    bark = new Texture(new FileHandle(texture.toFile()), true);
+                                    bark.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
+                                    bark.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
+                                }
+                                material.set(TextureAttribute.createDiffuse(bark));
                             }
-                            material.set(TextureAttribute.createDiffuse(bark));
                         }
                     }
-                    modular.put(descriptor, new ModularAsset(value, model, triangles));
+                    modular.put(descriptor, new ModularAsset(value, List.copyOf(levels), List.copyOf(counts)));
                 } catch (IOException | RuntimeException error) {
-                    model.dispose();
+                    new HashSet<>(levels).forEach(Model::dispose);
                     throw error;
                 }
             }
@@ -212,7 +239,7 @@ final class GpuUnitModels implements Disposable {
                     default -> throw new IllegalArgumentException("Unknown formation family");
                 };
                 String family = value.getString("family");
-                return formation(parts, farSuits(value), UnitFamilyScale.forFamily(family),
+                return formation(parts, lod1Suits(value), UnitFamilyScale.forFamily(family),
                       UnitModelDescriptor.formationTriangleLimit(family, parts.size()));
             }
             modelPath = descriptor.getParent().resolve(selectModel(value, selection.variant(), selection.figures()))
@@ -224,7 +251,7 @@ final class GpuUnitModels implements Disposable {
                 if (!Files.isRegularFile(modelPath)) {
                     throw new IllegalArgumentException("Missing unit mesh " + modelPath);
                 }
-                var data = new G3dModelLoader(new JsonReader()).loadModelData(new FileHandle(modelPath.toFile()));
+                var data = meshData(new FileHandle(modelPath.toFile()));
                 // Schema-1 variants already contain their loadouts; their total is not a bare-body budget.
                 GpuUnitModel visual = new GpuUnitModel(new Model(data), value.getString("upperBodyNode", null),
                       UnitFamilyScale.forFamily(value.getString("family", value.getString("kind", ""))));
@@ -251,23 +278,23 @@ final class GpuUnitModels implements Disposable {
         }
     }
 
-    /** A formation descriptor's far suit, keyed by the trooper it stands in for; empty when it has none. */
-    private static Map<String, String> farSuits(JsonValue descriptor) {
+    /** A formation's optional LOD1 suit, keyed by its LOD0 trooper. Older custom field names remain readable. */
+    private static Map<String, String> lod1Suits(JsonValue descriptor) {
         String trooper = descriptor.getString("trooper", null);
-        String farTrooper = descriptor.getString("farTrooper", null);
-        return (trooper == null || farTrooper == null) ? Map.of() : Map.of(trooper, farTrooper);
+        String trooperLod1 = descriptor.getString("trooperLod1", descriptor.getString("farTrooper", null));
+        return (trooper == null || trooperLod1 == null) ? Map.of() : Map.of(trooper, trooperLod1);
     }
 
     /**
-     * @param farSuits simpler suits, keyed by the trooper asset they stand in for, attached to the same joints and
+     * @param lod1Suits simpler suits, keyed by the trooper asset they stand in for, attached to the same joints and
      *                 hidden until {@link GpuUnitInstance} shows them for a squad small on screen
      */
-    private GpuUnitModel formation(List<InfantryVisual.Part> parts, Map<String, String> farSuits,
+    private GpuUnitModel formation(List<InfantryVisual.Part> parts, Map<String, String> lod1Suits,
           UnitFamilyScale familyScale, int triangleLimit) {
         // This Model owns only the assembly tree. NodeParts borrow mesh buffers from the shared asset library.
         Model assembled = new Model();
         List<UnitRig> rigs = new java.util.ArrayList<>();
-        Set<Mesh> farMeshes = new HashSet<>();
+        Set<Mesh> lod1Meshes = new HashSet<>();
         try {
             int bodyTriangles = 0;
             for (var part : parts) {
@@ -279,9 +306,12 @@ final class GpuUnitModels implements Disposable {
                     bodyTriangles += asset.triangles();
                 }
                 ModelInstance member = new ModelInstance(asset.model());
-                String farSuit = farSuits.get(part.asset());
-                if (farSuit != null) {
-                    attachFarSuit(member, farSuit, part.id(), farMeshes);
+                String lod1Suit = lod1Suits.get(part.asset());
+                if (asset.model(1) != asset.model()) {
+                    attachLod1Parts(new ModelInstance(asset.model(1)).nodes, id -> member.getNode(id, true),
+                          "[FormationLod] " + part.id(), lod1Meshes);
+                } else if (lod1Suit != null) {
+                    attachLod1Suit(member, lod1Suit, part.id(), lod1Meshes);
                 }
                 Node placement = new Node();
                 placement.id = part.id();
@@ -300,8 +330,8 @@ final class GpuUnitModels implements Disposable {
             }
             assembled.calculateTransforms();
             // Troops and transports are authored at canonical size in the Mek standard, like every other body.
-            var levels = farMeshes.isEmpty() ? GpuUnitModel.DetailLevels.NONE
-                  : new GpuUnitModel.DetailLevels(Set.of(), farMeshes, FormationLod.FAR_PIXELS);
+            var levels = lod1Meshes.isEmpty() ? GpuUnitModel.DetailLevels.NONE
+                  : new GpuUnitModel.DetailLevels(Set.of(), lod1Meshes, FormationLod.LOD1_PIXELS);
             return new GpuUnitModel(assembled, null, true, List.of(), null, rigs, familyScale).detailLevels(levels);
         } catch (RuntimeException error) {
             assembled.dispose();
@@ -310,17 +340,16 @@ final class GpuUnitModels implements Disposable {
     }
 
     /**
-     * Adds a far suit's parts, switched off, to the matching joints of a full suit. Both suits are built on one rig,
-     * so the far parts ride every joint the full suit animates and only the drawn detail changes.
+     * Adds LOD1 parts, switched off, to matching LOD0 joints. Both levels follow the same animated rig.
      */
-    private void attachFarSuit(ModelInstance member, String farSuit, String partId, Set<Mesh> farMeshes) {
-        ModularAsset far = modular(farSuit);
+    private void attachLod1Suit(ModelInstance member, String lod1Suit, String partId, Set<Mesh> lod1Meshes) {
+        ModularAsset far = modular(lod1Suit);
         if (far == null) {
-            LOGGER.warn("[FormationLod] {}: far suit {} did not load; this figure keeps its full suit", partId, farSuit);
+            LOGGER.warn("[FormationLod] {}: LOD1 suit {} did not load; this figure keeps LOD0", partId, lod1Suit);
             return;
         }
-        attachFarParts(new ModelInstance(far.model()).nodes, id -> member.getNode(id, true),
-              "[FormationLod] " + partId + ": far suit " + farSuit, farMeshes);
+        attachLod1Parts(new ModelInstance(far.model()).nodes, id -> member.getNode(id, true),
+              "[FormationLod] " + partId + ": LOD1 suit " + lod1Suit, lod1Meshes);
     }
 
     /**
@@ -330,10 +359,10 @@ final class GpuUnitModels implements Disposable {
      * @param farNodes  the far model's top nodes, already trimmed to the arm forms this unit uses
      * @param fullNodes finds a node of the full model by its name, or gives {@code null} when it has none
      * @param logPrefix the feature tag and model named in a warning
-     * @param farMeshes collects the far parts' meshes, so the instance can tell them from the full ones
+     * @param lod1Meshes collects the far parts' meshes, so the instance can tell them from the full ones
      */
-    static void attachFarParts(Iterable<Node> farNodes, Function<String, Node> fullNodes, String logPrefix,
-          Set<Mesh> farMeshes) {
+    static void attachLod1Parts(Iterable<Node> farNodes, Function<String, Node> fullNodes, String logPrefix,
+          Set<Mesh> lod1Meshes) {
         List<Node> nodes = new java.util.ArrayList<>();
         collectNodes(farNodes, nodes);
         for (Node farNode : nodes) {
@@ -349,7 +378,7 @@ final class GpuUnitModels implements Disposable {
                 NodePart hidden = farPart.copy();
                 hidden.enabled = false;
                 joint.parts.add(hidden);
-                farMeshes.add(hidden.meshPart.mesh);
+                lod1Meshes.add(hidden.meshPart.mesh);
             }
         }
     }
@@ -390,8 +419,10 @@ final class GpuUnitModels implements Disposable {
     public void dispose() {
         assemblies.values().forEach(Assembly::dispose);
         assemblies.clear();
-        modular.values().forEach(asset -> asset.model().dispose());
+        modular.values().forEach(asset -> new HashSet<>(asset.levels()).forEach(Model::dispose));
         modular.clear();
+        modelTextures.values().forEach(Texture::dispose);
+        modelTextures.clear();
         if (bark != null) {
             bark.dispose();
             bark = null;

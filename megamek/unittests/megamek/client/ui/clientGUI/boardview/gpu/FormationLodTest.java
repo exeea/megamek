@@ -14,7 +14,7 @@ class FormationLodTest {
 
     @Test
     void theSwitchNeedsAClearMarginSoASquadAtTheBoundaryDoesNotFlicker() {
-        float boundary = FormationLod.FAR_PIXELS;
+        float boundary = FormationLod.LOD1_PIXELS;
         // Just under the boundary: a full suit stays full, a far suit stays far.
         assertEquals(0, FormationLod.level(boundary * .95f, 0));
         assertEquals(1, FormationLod.level(boundary * .95f, 1));
@@ -27,9 +27,9 @@ class FormationLodTest {
 
     @Test
     void aMekSwitchesAtItsOwnHeightNotASuitsHeight() {
-        float boundary = FormationLod.MEK_FAR_PIXELS;
+        float boundary = FormationLod.MEK_LOD1_PIXELS;
         // Tall enough for a suit to show its full detail, but a Mek this small already draws its far body.
-        assertEquals(1, FormationLod.level(FormationLod.FAR_PIXELS * 1.5f, 0, boundary));
+        assertEquals(1, FormationLod.level(FormationLod.LOD1_PIXELS * 1.5f, 0, boundary));
         assertEquals(0, FormationLod.level(boundary * 1.2f, 1, boundary));
         // The same margin keeps a Mek at its boundary from flickering.
         assertEquals(0, FormationLod.level(boundary * .95f, 0, boundary));

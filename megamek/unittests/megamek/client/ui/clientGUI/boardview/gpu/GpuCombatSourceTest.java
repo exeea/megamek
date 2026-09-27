@@ -7,13 +7,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
 import java.util.UUID;
 import javax.swing.SwingUtilities;
 
 import megamek.common.Player;
 import megamek.common.ResolvedAttack;
+import megamek.common.battleArmor.BattleArmor;
 import megamek.common.event.GameAttackResolvedEvent;
 import megamek.common.units.Aero;
+import megamek.common.units.ConvInfantry;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementType;
 import megamek.common.units.Targetable;
@@ -21,6 +24,38 @@ import megamek.common.units.UnitLocation;
 import org.junit.jupiter.api.Test;
 
 class GpuCombatSourceTest {
+    @Test
+    void impactTargetTypeIsCapturedAndKeepsBattleArmorDistinct() throws Exception {
+        try (var fixture = GpuBoardFixture.create()) {
+            var infantry = new ConvInfantry();
+            infantry.initializeInternal(28, ConvInfantry.LOC_INFANTRY);
+            var armor = new BattleArmor();
+            armor.setSquadSize(4);
+            for (int location = 1; location <= 4; location++) { armor.initializeInternal(1, location); }
+            for (Entity target : List.of(infantry, armor)) {
+                SwingUtilities.invokeAndWait(() -> {
+                    target.setId(target == infantry ? 2 : 3);
+                    target.setChassis(target == infantry ? "Infantry review" : "Battle Armor review");
+                    target.setModel("Test");
+                    target.setOwner(fixture.player);
+                    target.setPosition(fixture.entity.getPosition().translated(0));
+                    target.setDeployed(true);
+                    fixture.game.addEntity(target, false);
+                    fixture.view.redrawAllEntities();
+                    var from = new UnitLocation(fixture.entity.getId(), fixture.entity.getPosition(), 0, 0, 0);
+                    var to = new UnitLocation(target.getId(), target.getPosition(), 0, 0, 0);
+                    var result = new ResolvedAttack(UUID.randomUUID(), ResolvedAttack.Kind.SHOT, from, to,
+                          Targetable.TYPE_ENTITY, 0, "ISAC5", 0, true);
+                    fixture.game.processGameEvent(new GameAttackResolvedEvent(this, result, fixture.entity, target));
+                });
+                SwingUtilities.invokeAndWait(() -> { });
+                var combat = fixture.source.takeFrame().animations().stream().filter(BoardScene.Combat.class::isInstance)
+                      .map(BoardScene.Combat.class::cast).findFirst().orElseThrow();
+                assertEquals(target == infantry, combat.conventionalInfantryTarget(), "Only conventional infantry suppresses sparks");
+            }
+        }
+    }
+
     @Test
     void removedWrecksUseTheExistingBoardListAndRespectTheWreckPreference() throws Exception {
         var preferences = megamek.client.ui.clientGUI.GUIPreferences.getInstance();
@@ -68,7 +103,8 @@ class GpuCombatSourceTest {
             });
             assertEquals(location.coords(), combat.attacker().location().coords());
             assertEquals(oldModel, combat.attacker().model());
-            assertTrue(fixture.source.takeFrame().animations().isEmpty());
+            assertTrue(fixture.source.takeFrame().animations().stream().noneMatch(BoardScene.Combat.class::isInstance),
+                  "A scene refresh may publish a checkpoint, but cannot replay combat");
         }
     }
 

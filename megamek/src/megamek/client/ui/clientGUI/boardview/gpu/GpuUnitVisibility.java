@@ -67,6 +67,11 @@ final class GpuUnitVisibility implements Disposable {
 
     void render(Camera camera, List<ModelInstance> units, Texture sceneDepth, int bottom, float intensity, float scale,
           UnitBounds.Frame bounds) {
+        render(camera, units, sceneDepth, bottom, intensity, scale, bounds, null);
+    }
+
+    void render(Camera camera, List<ModelInstance> units, Texture sceneDepth, int bottom, float intensity, float scale,
+          UnitBounds.Frame bounds, Texture effectOpacity) {
         depthCurrent = false;
         if (intensity <= 0 || units.isEmpty()) {
             return;
@@ -108,17 +113,21 @@ final class GpuUnitVisibility implements Disposable {
             sceneDepth.bind(0);
             unitDepth.bind(1);
             unitColors.getColorBufferTexture().bind(2);
+            (effectOpacity == null ? sceneDepth : effectOpacity).bind(3);
             shader.setUniformi("u_sceneDepth", 0);
             shader.setUniformi("u_unitDepth", 1);
             shader.setUniformi("u_unitColors", 2);
+            shader.setUniformi("u_effectOpacity", 3);
+            shader.setUniformf("u_effectSize", effectOpacity == null ? 0 : effectOpacity.getWidth(),
+                  effectOpacity == null ? 0 : effectOpacity.getHeight());
             // A small world-space tolerance avoids highlighting an exposed surface due to depth rounding.
-            shader.setUniformf("u_bias", 0.05f * BoardGeometry.HEX_SCALE);
+            shader.setUniformf("u_bias", 0.05f * BoardGeometry.hexScale());
             shader.setUniformf("u_projectionDepth", camera.projection.val[Matrix4.M22], camera.projection.val[Matrix4.M23],
                   camera.projection.val[Matrix4.M32], camera.projection.val[Matrix4.M33]);
             // World positions and hexes of both the unit and what stands before it, for the own-hex exemption.
             shader.setUniformMatrix("u_inverseView", camera.invProjectionView);
-            shader.setUniformf("u_groundBoard", 0, 0, BoardGeometry.WIDTH, BoardGeometry.HEIGHT);
-            shader.setUniformf("u_levelHeight", BoardGeometry.LEVEL);
+            shader.setUniformf("u_groundBoard", 0, 0, BoardGeometry.width(), BoardGeometry.height());
+            shader.setUniformf("u_levelHeight", BoardGeometry.level());
             shader.setUniformf("u_step", 1.5f * scale / camera.viewportWidth, 1.5f * scale / camera.viewportHeight);
             shader.setUniformf("u_intensity", MathUtils.clamp(intensity, 0, 1));
             quad.render(shader, GL20.GL_TRIANGLES);
@@ -137,7 +146,7 @@ final class GpuUnitVisibility implements Disposable {
      * which that hex's own relief, grass and scatter stay. The pass never counts them as hiding the unit.
      */
     static float ownHex(BoardScene.Tile tile) {
-        float top = tile.elevation() + BoardRelief.decoration(tile) / BoardGeometry.LEVEL;
+        float top = tile.elevation() + BoardRelief.decoration(tile) / BoardGeometry.level();
         return MathUtils.clamp((float) Math.ceil(top * 4) + 128, 1, 255) / 255;
     }
 

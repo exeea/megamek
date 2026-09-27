@@ -4,15 +4,46 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.util.List;
 import java.util.IdentityHashMap;
+import java.util.List;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.math.Vector3;
+import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 class GpuSurfaceBlendTest {
+    @ParameterizedTest
+    @EnumSource(TerrainLod.class)
+    void steepContactsKeepTheirMaterialsAndSurfaceAreaAtEveryLod(TerrainLod lod) {
+        var center = BoardSurfaceBlendTest.CENTER;
+        var neighbour = center.translated(BoardGeometry.edgeDirection(0));
+        var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+              c.equals(neighbour) ? BoardScene.Surface.SAND : BoardScene.Surface.GRASS,
+              c.equals(center) || c.equals(neighbour) ? 4 : 0, -1, 0));
+        var tile = scene.tile(center);
+        var surface = new BoardSurface(scene, tile, lod);
+        var faces = surface.walls(scene, -BoardGeometry.level()).stream()
+              .filter(f -> surface.relief.shade(f.a()) != null
+                    && surface.relief.shade(f.a()).kind() == BoardRelief.Kind.CLIFF).toList();
+        var groups = GpuSurfaceBlend.prepare(scene, tile, faces, p -> {
+            var shade = surface.relief.shade(p);
+            return new MeshPartBuilder.VertexInfo().setPos(p).setNor(shade.normal())
+                  .setUV(shade.rim(), shade.foot()).setCol(1, shade.level(), .5f, shade.tint());
+        }, BoardRelief.metres(lod == TerrainLod.DISTANT ? 8 : lod == TerrainLod.COARSE ? 4 : 2));
+        var triangles = groups.values().stream().flatMap(List::stream).toList();
+        double before = faces.stream().mapToDouble(f -> area(f.a(), f.b(), f.c())).sum();
+        double after = triangles.stream().mapToDouble(t -> area(t.a().vertex().position,
+              t.b().vertex().position, t.c().vertex().position)).sum();
+        assertEquals(before, after, before * .00001, "Material sampling cannot change the LOD silhouette");
+        assertTrue(triangles.stream().flatMap(t -> List.of(t.a(), t.b(), t.c()).stream()).anyMatch(p ->
+              p.vertex().normal.z < .6f && p.cover().sand() > .1f && p.cover().grass() > .1f),
+              "Steep rock faces need both materials in " + lod);
+    }
+
     @Test
     void coincidentCliffAndGroundVerticesKeepTheirDistinctShadingRoles() {
         var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
@@ -34,6 +65,38 @@ class GpuSurfaceBlendTest {
         for (var t : triangles) {
             assertEquals(t.a().vertex().color.b, t.b().vertex().color.b);
             assertEquals(t.a().vertex().color.b, t.c().vertex().color.b);
+        }
+    }
+
+    @Test
+    void crowdedCliffsKeepEveryContributingFamilyInTheirPalettes() {
+        var families = List.of(BoardScene.Surface.GRASS, BoardScene.Surface.SAND, BoardScene.Surface.SNOW,
+              BoardScene.Surface.DIRT, BoardScene.Surface.ROCK);
+        var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+              families.get(Math.floorMod(c.getX() + 2 * c.getY(), families.size())), c.getY() < 4 ? 4 : 0, -1, 0));
+        for (int x = 2; x <= 6; x++) {
+            var tile = scene.tile(new Coords(x, 3));
+            var surface = new BoardSurface(scene, tile);
+            var faces = surface.walls(scene, -BoardGeometry.level()).stream()
+                  .filter(f -> surface.relief.shade(f.a()) != null
+                        && surface.relief.shade(f.a()).kind() == BoardRelief.Kind.CLIFF).toList();
+            var groups = GpuSurfaceBlend.prepare(scene, tile, faces, p -> {
+                var shade = surface.relief.shade(p);
+                return new MeshPartBuilder.VertexInfo().setPos(p).setNor(shade.normal())
+                      .setUV(shade.rim(), shade.foot()).setCol(1, shade.level(), .5f, shade.tint());
+            });
+            assertTrue(!groups.isEmpty());
+            for (var group : groups.entrySet()) {
+                var palette = group.getKey();
+                for (var triangle : group.getValue()) {
+                    for (var point : List.of(triangle.a(), triangle.b(), triangle.c())) {
+                        float represented = point.cover().weight(palette.base());
+                        if (palette.first() != palette.base()) { represented += point.cover().weight(palette.first()); }
+                        if (palette.second() != palette.base()) { represented += point.cover().weight(palette.second()); }
+                        assertEquals(1, represented, .00001f, "Cliff junctions must not drop a material");
+                    }
+                }
+            }
         }
     }
 

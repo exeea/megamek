@@ -13,6 +13,8 @@ final class BoardRiver {
     private static final int STEPS = 12;
     private final BoardScene scene;
     private final BoardRelief.Tuning tuning;
+    private final float scale = BoardGeometry.hexScale();
+    private final float width = BoardGeometry.width(), height = BoardGeometry.height();
     private final Map<Coords, Sample> samples = new HashMap<>();
     private final Map<Coords, Integer> masks = new HashMap<>();
     private int column = Integer.MIN_VALUE, evenRow, oddRow;
@@ -70,12 +72,12 @@ final class BoardRiver {
             // Open water leaves room for the shared shore field to shape the lake's bank. Widen the approaching
             // stream gradually too: a large round cap at the lake's first centre would make a sharp inlet corner.
             float open = BoardRelief.lerp(broadA ? 1 : 0, broadB ? 1 : 0, smooth);
-            radius = BoardRelief.lerp(radius, Math.max(radius, BoardGeometry.WIDTH / (2 * BoardGeometry.HEX_SCALE)), open);
+            radius = BoardRelief.lerp(radius, Math.max(radius, width / (2 * scale)), open);
             // Special artwork (including bridges) keeps its original water footprint. The approach widens smoothly,
             // and both kinds of hex still ask the same world field at their shared opening.
             float natural = (detailedA ? 1 - s : 0) + (detailedB ? s : 0);
             radius = Math.max(radius, 72 * (1 - natural));
-            return radius * BoardGeometry.HEX_SCALE;
+            return radius * scale;
         }
     }
 
@@ -98,7 +100,7 @@ final class BoardRiver {
     /** The caller intersects this union with its shore field, so larger values cannot change the shore. */
     float field(float x, float y, float limit) {
         float result = Float.NEGATIVE_INFINITY;
-        float cell = tuning.wanderCell() * BoardGeometry.HEX_SCALE;
+        float cell = tuning.wanderCell() * scale;
         float wander = .3f * tuning.shoreWander() * BoardRelief.gradient(x / cell + 3.1f, y / cell - 1.7f);
         window(x, y);
         // Round whole branches near confluences and tight bends, where their inner banks otherwise meet in a cusp.
@@ -107,9 +109,9 @@ final class BoardRiver {
         for (Sample sample : window) {
             if (!sample.rounded()) { continue; }
             float distance = length(x - sample.x(), y - sample.y());
-            round = Math.max(round, BoardRelief.smooth(1 - distance / (.8f * BoardGeometry.WIDTH)));
+            round = Math.max(round, BoardRelief.smooth(1 - distance / (.8f * width)));
         }
-        round *= 2 * tuning.shoreBlend() * BoardGeometry.HEX_SCALE * Math.min(1, .3f + tuning.riverWidth());
+        round *= 2 * tuning.shoreBlend() * scale * Math.min(1, .3f + tuning.riverWidth());
         for (Sample sample : window) {
             List<Channel> channels = sample.channels();
             for (int i = 0; i < channels.size(); i++) {
@@ -134,9 +136,9 @@ final class BoardRiver {
 
     /** Successive shore samples normally share a search window; resolve its coordinates only when it changes. */
     private void window(float x, float y) {
-        int nextColumn = Math.round((x - BoardGeometry.WIDTH / 2) / (.75f * BoardGeometry.WIDTH));
-        int nextEven = Math.round((-y - BoardGeometry.HEIGHT / 2) / BoardGeometry.HEIGHT);
-        int nextOdd = Math.round((-y - BoardGeometry.HEIGHT / 2 - BoardGeometry.HEIGHT / 2) / BoardGeometry.HEIGHT);
+        int nextColumn = Math.round((x - width / 2) / (.75f * width));
+        int nextEven = Math.round((-y - height / 2) / height);
+        int nextOdd = Math.round((-y - height / 2 - height / 2) / height);
         if (column == nextColumn && evenRow == nextEven && oddRow == nextOdd) { return; }
         column = nextColumn;
         evenRow = nextEven;
@@ -234,7 +236,7 @@ final class BoardRiver {
     /** Slow changes in direction, more visible in narrow streams; the world coordinates give both ends of a
      * shared centre the same turn. Bound the turn so a thin channel stays visible from its centre. */
     private float meander(float x, float y) {
-        float cell = .5f * tuning.wanderCell() * BoardGeometry.HEX_SCALE;
+        float cell = .5f * tuning.wanderCell() * scale;
         float angle = 1.25f * (1 - .5f * tuning.riverWidth()) * tuning.shoreWander() / 8
               * BoardRelief.gradient(x / cell + 2.3f, y / cell - 2.3f);
         float limit = .3f + .4f * tuning.riverWidth();

@@ -1351,6 +1351,8 @@ class MovePathHandler extends AbstractTWRuleHandler {
                 report.add(rollTarget.getDesc());
                 report.add(diceRoll);
 
+                gameManager.sendAttackAnimation(entity, swarmer, megamek.common.ResolvedAttack.Kind.SHAKE_OFF,
+                      -1, Entity.LOC_NONE, diceRoll.getIntValue() >= rollTarget.getValue());
                 if (diceRoll.getIntValue() < rollTarget.getValue()) {
                     report.choose(false);
                     addReport(report);

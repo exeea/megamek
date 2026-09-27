@@ -23,12 +23,19 @@ final class GpuWaterImpacts implements Disposable {
     private final Map<Integer, Contact> contacts = new HashMap<>();
     private final UnitPicking surfaces = new UnitPicking();
     private int ripples;
+    private UnitAttachmentMotion attachment;
+    private final Map<String, Burst> suitEntries = new HashMap<>();
 
     int particleCount() { return spray.size(); }
     int rippleCount() { return ripples; }
     Vector3 contact(int unit) { return contacts.containsKey(unit) ? contacts.get(unit).bursts().getLast().origin().cpy() : null; }
 
     void render(Camera camera, BoardScene scene, Map<Integer, UnitMotion> motions, Map<String, ModelInstance> instances, Color light) {
+        render(camera, scene, motions, instances, light, null);
+    }
+
+    void render(Camera camera, BoardScene scene, Map<Integer, UnitMotion> motions, Map<String, ModelInstance> instances,
+          Color light, UnitAttachmentMotion release) {
         spray.begin();
         ripples = 0;
         spray.setSmokeLight(light);
@@ -73,29 +80,66 @@ final class GpuWaterImpacts implements Disposable {
                 if (burst == 3 && fade > 0 && crossesSurface && surfaces.waterline(instance, "*", level, point)) {
                     // Ripples belong to the current surface contact; a fully submerged unit leaves only entry spray.
                     point.z = level + .25f;
-                    float radius = BoardGeometry.HEIGHT * .1f + t * 26;
+                    float radius = BoardGeometry.height() * .1f + t * 26;
                     width.set(radius, 0, 0);
                     length.set(0, radius, 0);
                     spray.quad(point, width, length, -1, 0, fade * .65f);
                     ripples++;
                 }
-                for (int drop = 0; drop < 16; drop++) {
-                    float angle = (drop + burst * 16) * 2.399963f + unit.id(), speed = 12 + drop % 7 * 2.5f;
-                    float height = t * (22 + drop % 5 * 4) - 42 * t * t;
-                    if (height < 0) { continue; }
-                    float spread = BoardGeometry.HEIGHT * .06f + t * speed;
-                    point.set(emission.origin()).add(MathUtils.cos(angle) * spread,
-                          MathUtils.sin(angle) * spread, height);
-                    width.set(right).scl((1.2f + drop % 3 * .35f) * fade);
-                    length.set(camera.up).scl((2 + fade * 3) * fade);
-                    spray.quad(point, width, length, -1, 1, fade * (.35f + burst * .15f));
-                }
+                droplets(camera, emission.origin(), t, fade, unit.id() + burst * 16 * 2.399963f, 1, .35f + burst * .15f);
             }
         }
+        suitSplashes(camera, scene, instances, release);
         spray.render(camera, spray.size());
     }
 
-    void clear() { contacts.clear(); surfaces.clear(); }
+    private void suitSplashes(Camera camera, BoardScene scene, Map<String, ModelInstance> instances, UnitAttachmentMotion release) {
+        if (attachment != release) { suitEntries.clear(); attachment = release; }
+        if (release == null || release.boarding()) { return; }
+        var unit = release.event.before();
+        var instance = instances.get(unit.id() + ":" + unit.part());
+        if (instance != null) {
+            for (var member : instance.nodes) {
+                var bounds = UnitBounds.subtree(member).mul(instance.transform);
+                if (!bounds.isValid()) { continue; }
+                var center = bounds.getCenter(new Vector3());
+                var tile = BoardGeometry.tile(scene, center.x, center.y);
+                if (tile == null || tile.waterDepth() <= 0 || tile.frozen() || tile.liquid().molten()) { continue; }
+                float level = tile.elevation() * BoardGeometry.level();
+                if (bounds.min.z <= level && !suitEntries.containsKey(member.id)) {
+                    center.z = level + .25f;
+                    suitEntries.put(member.id, new Burst(center, release.seconds));
+                }
+            }
+        }
+        for (var entry : suitEntries.entrySet()) {
+            var burst = entry.getValue();
+            float age = release.seconds - burst.start(), fade = Math.max(0, 1 - age / LIFETIME);
+            if (fade <= 0) { continue; }
+            float radius = 2 + age * 12;
+            point.set(burst.origin());
+            width.set(radius, 0, 0);
+            length.set(0, radius, 0);
+            spray.quad(point, width, length, -1, 0, fade * .6f);
+            ripples++;
+            droplets(camera, burst.origin(), age, fade, entry.getKey().hashCode(), .35f, .65f);
+        }
+    }
+
+    private void droplets(Camera camera, Vector3 origin, float age, float fade, float seed, float scale, float opacity) {
+        for (int drop = 0; drop < 16; drop++) {
+            float angle = drop * 2.399963f + seed, speed = 12 + drop % 7 * 2.5f;
+            float height = age * (22 + drop % 5 * 4) - 42 * age * age;
+            if (height < 0) { continue; }
+            float spread = BoardGeometry.height() * .06f + age * speed;
+            point.set(origin).add(MathUtils.cos(angle) * spread * scale, MathUtils.sin(angle) * spread * scale, height * scale);
+            width.set(right).scl((1.2f + drop % 3 * .35f) * fade * scale);
+            length.set(camera.up).scl((2 + fade * 3) * fade * scale);
+            spray.quad(point, width, length, -1, 1, fade * opacity);
+        }
+    }
+
+    void clear() { contacts.clear(); surfaces.clear(); suitEntries.clear(); attachment = null; }
 
     @Override
     public void dispose() { clear(); spray.dispose(); }

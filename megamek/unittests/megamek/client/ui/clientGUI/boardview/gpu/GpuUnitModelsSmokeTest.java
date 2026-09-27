@@ -26,7 +26,6 @@ import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.environment.DirectionalLight;
-import com.badlogic.gdx.graphics.g3d.loader.G3dModelLoader;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.JsonReader;
 import org.junit.jupiter.api.Tag;
@@ -48,7 +47,7 @@ class GpuUnitModelsSmokeTest {
                     File root = new File(referenceRoot, "units");
                     var manifest = new JsonReader().parse(new FileHandle(new File(root, "manifest.json")));
                     for (var entry : manifest.get("models")) {
-                        var data = new G3dModelLoader(new JsonReader()).loadModelData(new FileHandle(new File(root, entry.name)));
+                        var data = GpuUnitModels.meshData(new FileHandle(new File(root, entry.name)));
                         Model model = new Model(data);
                         try {
                             int triangles = 0;
@@ -86,7 +85,7 @@ class GpuUnitModelsSmokeTest {
                             for (var part : asset.instance.model.meshParts) {
                                 triangles += part.size / 3;
                             }
-                            String path = "infantry/" + movement.getValue() + "/squad-" + slots + ".g3dj";
+                            String path = "infantry/" + movement.getValue() + "/squad-" + slots + ".glb";
                             assertEquals(manifest.get("models").get(path).getInt("triangles"), triangles, path);
                         }
                     }

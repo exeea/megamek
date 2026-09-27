@@ -6,7 +6,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
+import java.util.function.BiFunction;
 
 import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.VertexAttribute;
@@ -21,7 +21,6 @@ import com.badlogic.gdx.graphics.g3d.model.Node;
 import com.badlogic.gdx.graphics.g3d.model.NodePart;
 import com.badlogic.gdx.graphics.g3d.shaders.DepthShader;
 import com.badlogic.gdx.graphics.g3d.utils.DepthShaderProvider;
-import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.Disposable;
@@ -82,7 +81,7 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         int capacity = 64;
 
         Batch(Model model) {
-            mesh = new InstancedMesh(model.meshes.first());
+            mesh = new GpuInstancedMesh(model.meshes.first());
             mesh.enableInstancedRendering(false, capacity, attributes());
             for (Node node : model.nodes) { collect(node); }
         }
@@ -118,30 +117,6 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     }
 
     /**
-     * A static copy of a tree model's mesh that unbinds in the order a core profile needs. libGDX 1.14.2 unbinds the
-     * vertex array object first and then disables the instance attributes, which with no vertex array object bound is
-     * GL_INVALID_OPERATION on every instanced draw; this mesh disables them while its own vertex array object is bound.
-     */
-    private static final class InstancedMesh extends Mesh {
-        InstancedMesh(Mesh source) {
-            super(true, source.getNumVertices(), source.getNumIndices(), source.getVertexAttributes());
-            float[] vertexData = new float[source.getNumVertices() * source.getVertexSize() / Float.BYTES];
-            source.getVertices(vertexData);
-            setVertices(vertexData);
-            short[] indexData = new short[source.getNumIndices()];
-            source.getIndices(indexData);
-            setIndices(indexData);
-        }
-
-        @Override
-        public void unbind(ShaderProgram shader, int[] locations, int[] instanceLocations) {
-            if (instances != null && instances.getNumInstances() > 0) { instances.unbind(shader, instanceLocations); }
-            vertices.unbind(shader, locations);
-            if (indices.getNumIndices() > 0) { indices.unbind(); }
-        }
-    }
-
-    /**
      * libGDX tells a mesh's attributes apart by usage and unit, and adds the unit to the shader location, so the two
      * instance attributes differ by usage: the place and horizontal scale, and the turn and vertical scale.
      */
@@ -163,14 +138,15 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         }
     }
 
-    private final Function<String, Model> models;
-    private final Map<String, Batch> batches = new HashMap<>();
+    private final BiFunction<String, Integer, Model> models;
+    private static final int BATCHES_PER_SPECIES = Pass.values().length * TreeLod.LEVELS;
+    private final Map<String, Batch[]> batches = new HashMap<>();
     private final List<Batch> gathered = new ArrayList<>();
     private Pass pass = Pass.COLOUR;
     private long uploads;
 
     /** models: loads a tree model, already marked for the foliage shader, by asset name. */
-    GpuTreeInstances(Function<String, Model> models) {
+    GpuTreeInstances(BiFunction<String, Integer, Model> models) {
         this.models = models;
     }
 
@@ -184,8 +160,10 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     /** Adds a chunk's trees at its detail level. */
     void add(Stand stand, int level) {
         for (Map.Entry<String, FloatArray> entry : stand.trees.entrySet()) {
-            String asset = TreeLod.asset(entry.getKey(), level);
-            Batch batch = batches.computeIfAbsent(pass.ordinal() + asset, key -> new Batch(models.apply(asset)));
+            Batch[] species = batches.computeIfAbsent(entry.getKey(), key -> new Batch[BATCHES_PER_SPECIES]);
+            int index = pass.ordinal() * TreeLod.LEVELS + level;
+            Batch batch = species[index];
+            if (batch == null) { species[index] = batch = new Batch(models.apply(entry.getKey(), level)); }
             if (batch.data.isEmpty()) { gathered.add(batch); }
             batch.data.addAll(entry.getValue());
         }
@@ -211,16 +189,21 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     /** Bytes of the shared tree meshes and of their instance buffers. */
     long bytes() {
         long total = 0;
-        for (Batch batch : batches.values()) {
-            total += (long) batch.mesh.getNumVertices() * batch.mesh.getVertexSize()
-                  + (long) batch.mesh.getNumIndices() * Short.BYTES + (long) batch.capacity * STRIDE * Float.BYTES;
+        for (Batch[] species : batches.values()) {
+            for (Batch batch : species) {
+                if (batch == null) { continue; }
+                total += (long) batch.mesh.getNumVertices() * batch.mesh.getVertexSize()
+                      + (long) batch.mesh.getNumIndices() * Short.BYTES + (long) batch.capacity * STRIDE * Float.BYTES;
+            }
         }
         return total;
     }
 
     @Override
     public void dispose() {
-        batches.values().forEach(Batch::dispose);
+        for (Batch[] species : batches.values()) {
+            for (Batch batch : species) { if (batch != null) { batch.dispose(); } }
+        }
         batches.clear();
         gathered.clear();
     }

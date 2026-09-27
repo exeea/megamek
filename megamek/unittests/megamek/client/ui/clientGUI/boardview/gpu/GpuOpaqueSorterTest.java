@@ -16,6 +16,26 @@ import org.junit.jupiter.api.Test;
 
 class GpuOpaqueSorterTest {
     @Test
+    void recreatingProgramsPreservesDrawOrderAndDepthTies() {
+        var camera = new OrthographicCamera();
+        var sorter = new GpuOpaqueSorter();
+        Shader a = mock(Shader.class), b = mock(Shader.class);
+        var parts = new Array<>(new Renderable[] { part(a, 3), part(b, 3), part(a, 1), part(b, 2) });
+        var reference = new Array<>(parts);
+        sorter.sort(camera, reference);
+        for (int attempt = 0; attempt < 16; attempt++) {
+            Shader nextA = mock(Shader.class), nextB = mock(Shader.class);
+            parts.get(0).shader = parts.get(2).shader = nextA;
+            parts.get(1).shader = parts.get(3).shader = nextB;
+            var recreated = new Array<>(parts);
+            sorter.sort(camera, recreated);
+            for (int i = 0; i < reference.size; i++) {
+                assertSame(reference.get(i), recreated.get(i), "Recompiling programs must not reorder the scene");
+            }
+        }
+    }
+
+    @Test
     void coverUsesDefaultOrderingForTheWholePassAndGroupingResumesWithoutIt() {
         var camera = new OrthographicCamera();
         var sorter = new GpuOpaqueSorter();

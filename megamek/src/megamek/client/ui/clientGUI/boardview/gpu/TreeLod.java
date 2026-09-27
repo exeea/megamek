@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 /** Screen-pixel budgets for the shared orthographic board, independent of orbit and camera distance. */
 final class TreeLod {
     private static final float[] PIXELS = { 80, 24 };
+    static final int LEVELS = PIXELS.length + 1;
     private static final float HYSTERESIS = 0.1f;
 
     private TreeLod() { }
@@ -21,6 +22,6 @@ final class TreeLod {
     }
 
     static String asset(String name, int level) {
-        return name + "-lod" + level;
+        return MeshLod.name(name, level);
     }
 }

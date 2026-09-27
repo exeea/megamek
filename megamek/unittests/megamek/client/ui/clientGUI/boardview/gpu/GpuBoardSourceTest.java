@@ -637,7 +637,7 @@ class GpuBoardSourceTest {
     }
 
     @Test
-    void groundIncludesRoughAndRubbleArtworkForNormalMapping() throws Exception {
+    void groundLeavesRoughToItsBouldersAndKeepsRubbleArtwork() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             Coords coords = new Coords(0, 16);
             AtomicReference<BufferedImage> plain = new AtomicReference<>();
@@ -657,8 +657,8 @@ class GpuBoardSourceTest {
                 rubble.set(groundArt(fixture, coords));
                 hex.removeTerrain(Terrains.RUBBLE);
             });
-            assertFalse(samePixels(new BoardScene.Pixels(plain.get()), new BoardScene.Pixels(rough.get())),
-                  "Rough terrain's painted stones must reach the ground artwork");
+            assertTrue(samePixels(new BoardScene.Pixels(plain.get()), new BoardScene.Pixels(rough.get())),
+                  "Rough's native boulders must not also be painted into the ground");
             assertFalse(samePixels(new BoardScene.Pixels(plain.get()), new BoardScene.Pixels(rubble.get())),
                   "Rubble's painted stones must reach the ground artwork");
         }
@@ -749,8 +749,9 @@ class GpuBoardSourceTest {
                   .allMatch(feature -> feature.asset().startsWith("building") && feature.height() == 3));
             assertTrue(scene.tile(woods).features().size() >= 4);
             assertTrue(scene.tile(woods).features().stream()
-                  .allMatch(feature -> feature.height() <= 2 && feature.height() > 1
-                        && feature.kind() == BoardScene.FeatureKind.TREE));
+                  .allMatch(feature -> feature.height() >= 2 && feature.height() <= 2.2f
+                        && feature.kind() == BoardScene.FeatureKind.TREE),
+                  "Trees reach the board's foliage height, with a small variation above it");
         }
     }
 

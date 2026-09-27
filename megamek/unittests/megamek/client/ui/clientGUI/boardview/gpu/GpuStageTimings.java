@@ -38,6 +38,7 @@ final class GpuStageTimings implements AutoCloseable {
         int count;
         long start;
         boolean pending;
+        boolean measured;
     }
 
     private static final class Samples {
@@ -60,15 +61,21 @@ final class GpuStageTimings implements AutoCloseable {
     }
 
     void beginFrame() {
+        beginFrame(true);
+    }
+
+    /** Exercise query objects during warmup too: their first driver use can otherwise stall the first sample. */
+    void beginFrame(boolean measured) {
         poll();
         for (Frame frame : frames) {
             if (!frame.pending) {
                 active = frame;
                 active.count = 0;
+                active.measured = measured;
                 return;
             }
         }
-        dropped++;
+        if (measured) { dropped++; }
     }
 
     void stage(String name) {
@@ -91,6 +98,7 @@ final class GpuStageTimings implements AutoCloseable {
             if (!frame.pending || (gpu && GL15.glGetQueryObjecti(frame.queries[frame.count], GL15.GL_QUERY_RESULT_AVAILABLE) == 0)) {
                 continue;
             }
+            if (!frame.measured) { frame.pending = false; continue; }
             long previous = gpu ? ARBTimerQuery.glGetQueryObjectui64(frame.queries[0], GL15.GL_QUERY_RESULT) : 0;
             for (int i = 0; i < frame.count; i++) {
                 var result = samples.computeIfAbsent(frame.names[i], ignored -> new Samples());
@@ -115,6 +123,8 @@ final class GpuStageTimings implements AutoCloseable {
               gpu ? String.format(Locale.ROOT, "%.4f", percentile(result.gpu, .5)) : "n/a",
               gpu ? String.format(Locale.ROOT, "%.4f", percentile(result.gpu, .95)) : "n/a")));
         samples.clear();
+        // A trailing query can still be unavailable after screenshot readback. Never attribute it to the next view.
+        for (Frame frame : frames) { frame.measured = false; }
         dropped = 0;
     }
 

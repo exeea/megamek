@@ -38,12 +38,14 @@ final class BoardFeatures {
         for (int terrain : hex.getTerrainTypes()) {
             boolean base = switch (terrain) {
                 case Terrains.WOODS, Terrains.JUNGLE, Terrains.FOLIAGE_ELEV, Terrains.SAND, Terrains.TUNDRA,
-                      Terrains.PAVEMENT, Terrains.SNOW, Terrains.WATER, Terrains.RAPIDS, Terrains.ROUGH,
+                      Terrains.PAVEMENT, Terrains.SNOW, Terrains.WATER, Terrains.HAZARDOUS_LIQUID, Terrains.RAPIDS, Terrains.ROUGH,
                       Terrains.CLIFF_TOP, Terrains.CLIFF_BOTTOM, Terrains.INCLINE_TOP, Terrains.INCLINE_BOTTOM,
                       Terrains.INCLINE_HIGH_TOP, Terrains.INCLINE_HIGH_BOTTOM, Terrains.METAL_CONTENT,
-                      Terrains.DEPLOYMENT_ZONE -> true;
+                      Terrains.DEPLOYMENT_ZONE, Terrains.FIRE, Terrains.SMOKE, Terrains.FIELDS, Terrains.SWAMP, Terrains.MUD -> true;
                 case Terrains.BUILDING, Terrains.BLDG_CF, Terrains.BLDG_ELEV, Terrains.BLDG_CLASS,
                       Terrains.BLDG_ARMOR, Terrains.BLDG_BASEMENT_TYPE, Terrains.BLDG_FLUFF -> concreteBuilding;
+                case Terrains.ROAD -> BoardRoad.capture(hex) != BoardRoad.Kind.NONE
+                      && !hex.containsAnyTerrainOf(Terrains.WATER, Terrains.ICE);
                 default -> false;
             };
             if (!base) { return false; }
@@ -66,10 +68,21 @@ final class BoardFeatures {
         if (theme.contains("lunar") || theme.contains("rock") || theme.contains("volcan")) {
             return BoardScene.Surface.ROCK;
         }
-        if (hex.containsAnyTerrainOf(Terrains.MUD, Terrains.SWAMP) || theme.contains("dirt") || theme.contains("mars")) {
+        if (hex.containsAnyTerrainOf(Terrains.MUD, Terrains.SWAMP, Terrains.FIELDS) || theme.contains("dirt") || theme.contains("mars")) {
             return BoardScene.Surface.DIRT;
         }
         return BoardScene.Surface.GRASS;
+    }
+
+    static BoardScene.Biome biome(Hex hex) {
+        if (hex.containsAnyTerrainOf(Terrains.ICE, Terrains.WATER, Terrains.HAZARDOUS_LIQUID, Terrains.PAVEMENT, Terrains.MAGMA)) {
+            return BoardScene.Biome.NONE;
+        }
+        if (hex.containsTerrain(Terrains.SWAMP)) {
+            return hex.terrainLevel(Terrains.SWAMP) == 1 ? BoardScene.Biome.MARSH : BoardScene.Biome.QUICKSAND;
+        }
+        if (hex.containsTerrain(Terrains.FIELDS)) { return BoardScene.Biome.FIELD; }
+        return hex.containsTerrain(Terrains.MUD) ? BoardScene.Biome.MUD : BoardScene.Biome.NONE;
     }
 
     static List<BoardScene.Feature> capture(Hex hex, Coords coords, Map<Integer, String> structureModels) {
@@ -97,24 +110,17 @@ final class BoardFeatures {
                   Math.max(1, hex.terrainLevel(heightTerrain)), 0, structure.getKey() == Terrains.BUILDING
                         ? BoardScene.FeatureKind.BUILDING : BoardScene.FeatureKind.PROP));
         }
-        if (hex.containsTerrain(Terrains.FIELDS)) {
+        if (hex.containsTerrain(Terrains.FIELDS) && !detailedGround(hex, structureModels)) {
             add(result, "field", 1, 0, 0);
         }
         if (hex.containsTerrain(Terrains.BRIDGE)) {
             int exits = hex.getTerrain(Terrains.BRIDGE).getExits() & 63;
-            for (int direction = 0; direction < 6; direction++) {
-                if ((exits & (1 << direction)) != 0) {
-                    Coords neighbor = coords.translated(direction);
-                    float dx = (neighbor.getX() - coords.getX()) * BoardGeometry.TILE_WIDTH * 0.75f;
-                    float dy = -((neighbor.getY() - coords.getY()) * BoardGeometry.TILE_HEIGHT
-                          + ((neighbor.getX() & 1) - (coords.getX() & 1)) * BoardGeometry.TILE_HEIGHT / 2);
-                    result.add(new BoardScene.Feature("bridge", 0, 0, (float) Math.toDegrees(Math.atan2(-dx, dy)),
-                          (float) Math.hypot(dx, dy) / BoardGeometry.TILE_HEIGHT, 1,
-                          hex.terrainLevel(Terrains.BRIDGE_ELEV)));
-                }
-            }
+            result.add(new BoardScene.Feature("bridge", 0, 0, 0, 1, 1,
+                  hex.terrainLevel(Terrains.BRIDGE_ELEV), BoardScene.FeatureKind.PROP, exits));
         }
         boolean jungle = hex.containsTerrain(Terrains.JUNGLE);
+        BoardRoad road = BoardRoad.capture(hex) == BoardRoad.Kind.NONE ? null
+              : BoardRoad.clearance(coords, hex.getTerrain(Terrains.ROAD).getExits());
         if (jungle || hex.containsTerrain(Terrains.WOODS)) {
             int density = hex.terrainLevel(jungle ? Terrains.JUNGLE : Terrains.WOODS);
             int count = density >= 3 ? 16 : density == 2 ? 9 : 3;
@@ -129,8 +135,15 @@ final class BoardFeatures {
                 float radius = density >= 2 ? 28 * (float) Math.sqrt(index / (count - 1f))
                       : 20 + index * 2;
                 String tree = species.get(Math.floorMod(coords.getX() * 31 + coords.getY() * 17 + index, species.size()));
-                result.add(new BoardScene.Feature(tree, (float) Math.cos(angle) * radius,
-                      (float) Math.sin(angle) * radius, index * 137.5f, crown * (0.9f + (index % 3) * 0.1f),
+                float x = (float) Math.cos(angle) * radius, y = (float) Math.sin(angle) * radius;
+                // Preserve the authoritative woods density, relocating trunks to the verge instead of deleting trees.
+                for (int attempt = 0; road != null && road.distance(x, y) < BoardRoad.SHOULDER + 2 && attempt < 24; attempt++) {
+                    angle += 2.399963;
+                    x = (float) Math.cos(angle) * 29;
+                    y = (float) Math.sin(angle) * 29;
+                }
+                result.add(new BoardScene.Feature(tree, x,
+                      y, index * 137.5f, crown * (0.9f + (index % 3) * 0.1f),
                       height * (1f + (index % 3) * 0.05f), 0, BoardScene.FeatureKind.TREE));
             }
         }
@@ -146,8 +159,9 @@ final class BoardFeatures {
                     Terrains.SPACE, Terrains.SKY, Terrains.MAGMA)) { return; }
         Random random = new Random(coords.getX() * 73_856_093L ^ coords.getY() * 19_349_663L ^ 0xb01deL);
         int count = hex.terrainLevel(Terrains.ROUGH) == 2 ? 14 : 9;
-        int exits = hex.containsTerrain(Terrains.ROAD) ? hex.getTerrain(Terrains.ROAD).getExits() : 0;
-        if (hex.containsTerrain(Terrains.BRIDGE)) { exits |= hex.getTerrain(Terrains.BRIDGE).getExits(); }
+        BoardRoad road = hex.containsTerrain(Terrains.ROAD)
+              ? BoardRoad.clearance(coords, hex.getTerrain(Terrains.ROAD).getExits()) : null;
+        int exits = hex.containsTerrain(Terrains.BRIDGE) ? hex.getTerrain(Terrains.BRIDGE).getExits() : 0;
         for (int i = 0; i < count; i++) {
             double angle = i * 2.399963 + random.nextFloat() * .45 + random.nextFloat();
             // Equal-area cover includes the centre and the slopes; units do not reserve an empty ring in Rough.
@@ -155,16 +169,16 @@ final class BoardFeatures {
             float x = (float) Math.cos(angle) * radius, y = (float) Math.sin(angle) * radius;
             float size = .55f + random.nextFloat() * .55f;
             float height = .22f + random.nextFloat() * .32f;
-            boolean road = false;
+            boolean blocked = road != null && road.distance(x, y) < BoardRoad.SHOULDER + size * ROUGH_BOULDER_WIDTH / 2;
             for (int direction = 0; direction < 6; direction++) {
                 if ((exits & 1 << direction) == 0) { continue; }
                 Coords next = coords.translated(direction);
-                float dx = (BoardGeometry.centerX(next) - BoardGeometry.centerX(coords)) / BoardGeometry.HEX_SCALE;
-                float dy = (BoardGeometry.centerY(next) - BoardGeometry.centerY(coords)) / BoardGeometry.HEX_SCALE;
+                float dx = (BoardGeometry.centerX(next) - BoardGeometry.centerX(coords)) / BoardGeometry.hexScale();
+                float dy = (BoardGeometry.centerY(next) - BoardGeometry.centerY(coords)) / BoardGeometry.hexScale();
                 float along = Math.max(0, (x * dx + y * dy) / (dx * dx + dy * dy));
-                road |= Math.hypot(x - along * dx, y - along * dy) < 9 + size * ROUGH_BOULDER_WIDTH / 2;
+                blocked |= Math.hypot(x - along * dx, y - along * dy) < 9 + size * ROUGH_BOULDER_WIDTH / 2;
             }
-            if (road) { continue; }
+            if (blocked) { continue; }
             result.add(new BoardScene.Feature("rough-boulder", x, y, random.nextFloat() * 360, size, height, 0,
                   BoardScene.FeatureKind.BOULDER));
         }

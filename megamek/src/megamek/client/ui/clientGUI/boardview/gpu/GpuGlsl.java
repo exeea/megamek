@@ -115,11 +115,6 @@ final class GpuGlsl {
         return Math.clamp(Math.min(major * 100 + minor * 10, cap), MINIMUM, MAXIMUM);
     }
 
-    /** The GLSL version shaders are compiled as, such as 460; tessellation needs 400, compute shaders 430. */
-    static int version() {
-        return version;
-    }
-
     /** The graphics card the board draws with, as its driver names it; empty before the board's context exists. */
     static String renderer() {
         return renderer == null ? "" : renderer;

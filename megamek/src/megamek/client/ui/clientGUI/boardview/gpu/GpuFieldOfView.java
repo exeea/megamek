@@ -101,13 +101,13 @@ final class GpuFieldOfView implements Disposable {
         mask.bind(3);
         shader.setUniformi("u_fov", 3);
         shader.setUniformf("u_fovSize", previous.width(), previous.height());
-        shader.setUniformf("u_fovHexSize", BoardGeometry.WIDTH, BoardGeometry.HEIGHT);
+        shader.setUniformf("u_fovHexSize", BoardGeometry.width(), BoardGeometry.height());
         shader.setUniformMatrix("u_fovInverseView", camera.invProjectionView);
         shader.setUniformf("u_fovOptions", previous.highlightAlpha() / 255f, previous.spotting() ? 1 : 0);
         shader.setUniformf("u_dimmedDesaturation", DIMMED_DESATURATION);
         bindEffect(shader, "u_fovEffect", fovStyle, fovDarkness);
         bindEffect(shader, "u_sensorEffect", sensorStyle, sensorDarkness);
-        float pixel = BoardCamera.worldUnitsPerPixel(camera) / BoardGeometry.HEIGHT;
+        float pixel = BoardCamera.worldUnitsPerPixel(camera) / BoardGeometry.height();
         shader.setUniformf("u_fovEdge", Math.max(0.004f, Math.min(0.04f, pixel * 1.5f)));
     }
 

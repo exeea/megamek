@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -14,6 +15,8 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 /** The rock kit: closed library solids, rim formations scaled by drop, fallen rock below, anchors kept clear. */
 class BoardRocksTest {
@@ -44,13 +47,14 @@ class BoardRocksTest {
         }
     }
 
-    @Test
-    void libraryRocksAreClosedOutwardSolids() {
+    @ParameterizedTest
+    @EnumSource(TerrainLod.class)
+    void libraryRocksAreClosedOutwardSolids(TerrainLod detail) {
         // Blocks, boulders and the masses of shrubs.
         for (int kind = 0; kind < 3; kind++) {
             int count = kind == 0 ? BoardRocks.BLOCKS : kind == 1 ? BoardRocks.BOULDERS : BoardRocks.BUSHES;
             for (int variant = 0; variant < count; variant++) {
-                BoardRocks.Rock rock = kind == 2 ? BoardRocks.bush(variant) : BoardRocks.rock(kind == 0, variant);
+                BoardRocks.Rock rock = kind == 2 ? BoardRocks.bush(variant) : BoardRocks.rock(kind == 0, variant, detail);
                 Map<List<Key>, Integer> edges = new HashMap<>();
                 double volume = 0;
                 int triangles = 0;
@@ -68,12 +72,19 @@ class BoardRocksTest {
                 }
                 for (List<Key> edge : edges.keySet()) {
                     assertEquals(1, edges.getOrDefault(List.of(edge.get(1), edge.get(0)), 0),
-                          "Each directed edge meets its reverse exactly once: a closed, consistently wound solid");
+                          detail + " kind=" + kind + " variant=" + variant + " edge=" + edge
+                                + ": each directed edge meets its reverse exactly once");
                 }
                 assertTrue(volume > .02, "Faces wind outward and enclose a real volume");
                 assertTrue(triangles <= 120, "A rock keeps a small triangle budget");
                 assertTrue(kind != 2 || triangles <= 48, "A shrub's many masses each cost well under a boulder");
                 assertTrue(rock.height() > .2f && rock.height() < 1.2f);
+                if (kind != 2 && detail != TerrainLod.FULL) {
+                    int fullTriangles = BoardRocks.rock(kind == 0, variant).polygons().stream()
+                          .mapToInt(p -> p.points().length - 2).sum();
+                    assertTrue(triangles <= fullTriangles, "Distant rocks keep a closed silhouette with fewer facets");
+                    if (detail == TerrainLod.DISTANT) { assertTrue(triangles <= 28); }
+                }
             }
         }
     }
@@ -81,6 +92,54 @@ class BoardRocksTest {
     private static List<BoardSurface.Face> rocks(BoardScene scene, Coords coords) {
         return new BoardSurface(scene, scene.tile(coords)).faces.stream()
               .filter(face -> face.finish() == BoardSurface.Finish.OUTCROP).toList();
+    }
+
+    @Test
+    void scatterUsesEightTrianglesWithBroadCrownsAndOnlyItsBaseOpen() {
+        for (BoardScene.Surface family : BoardScene.Surface.values()) {
+            for (int variant = 0; variant < Math.max(BoardRocks.BLOCKS, BoardRocks.BOULDERS); variant++) {
+                for (boolean slab : new boolean[] { false, true }) {
+                    BoardRocks.Rock rock = BoardRocks.scatter(family, variant, slab);
+                    Map<List<Key>, Integer> edges = new HashMap<>();
+                    var crown = new HashSet<Key>();
+                    int triangles = 0;
+                    for (BoardRocks.Polygon polygon : rock.polygons()) {
+                        Vector3[] p = polygon.points();
+                        assertEquals(3, p.length);
+                        assertNotNull(polygon.normal(), "Simplification must not collapse a face");
+                        assertTrue(polygon.normal().z > 0, "Scatter has only outward-facing upper surfaces");
+                        for (int i = 0; i < p.length; i++) {
+                            if (p[i].z > 0) { crown.add(Key.of(p[i])); }
+                            edges.merge(List.of(Key.of(p[i]), Key.of(p[(i + 1) % p.length])), 1, Integer::sum);
+                        }
+                        triangles++;
+                    }
+                    assertEquals(8, triangles, "Tiny rocks use their own eight-triangle geometry");
+                    assertTrue(crown.size() >= 2, "A rock needs a ridge or crown, not a single pyramid apex");
+                    int open = 0;
+                    for (List<Key> edge : edges.keySet()) {
+                        int reverse = edges.getOrDefault(List.of(edge.get(1), edge.get(0)), 0);
+                        if (reverse == 0) {
+                            assertEquals(0, edge.get(0).z(), "Only the base may be open");
+                            assertEquals(0, edge.get(1).z(), "The whole open edge must lie on the base");
+                            open++;
+                        } else {
+                            assertEquals(1, reverse, "The exposed faces must join without gaps");
+                        }
+                    }
+                    assertTrue(open >= 4 && open <= 6, "The four- or six-sided footprint is the only opening");
+                }
+            }
+        }
+        var silhouettes = new HashSet<HashSet<Key>>();
+        for (String family : new String[] { "block", "boulder" }) {
+            for (int variant = 0; variant < 8; variant++) {
+                var points = new HashSet<Key>();
+                BoardRocks.scatter("stone-" + family + "-" + variant).polygons()
+                      .forEach(polygon -> { for (Vector3 point : polygon.points()) { points.add(Key.of(point)); } });
+                assertTrue(silhouettes.add(points), "Every stone variant must have distinct geometry");
+            }
+        }
     }
 
     private static float tallest(List<BoardSurface.Face> faces, float level) {

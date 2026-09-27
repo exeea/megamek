@@ -34,7 +34,7 @@ final class InfantryFootprint {
             var a = BoardGeometry.corner(hex, 0, i).sub(center);
             var edge = BoardGeometry.corner(hex, 0, i + 1).sub(center).sub(a);
             var normal = new Vector3(edge.y, -edge.x, 0).nor();
-            result[i] = new Vector3(normal.x, normal.y, normal.dot(a) / BoardGeometry.HEX_SCALE);
+            result[i] = new Vector3(normal.x, normal.y, normal.dot(a) / BoardGeometry.hexScale());
         }
         return result;
     }
@@ -76,7 +76,7 @@ final class InfantryFootprint {
                 float y = vertices[v] * sine + vertices[v + 1] * cosine;
                 extent = Math.max(extent, side.x * x + side.y * y);
             }
-            limits[i] = ((side.z - EDGE_MARGIN) * BoardGeometry.HEX_SCALE - room[i]) / scale - extent;
+            limits[i] = ((side.z - EDGE_MARGIN) * BoardGeometry.hexScale() - room[i]) / scale - extent;
         }
         return limits;
     }
@@ -213,7 +213,7 @@ final class InfantryFootprint {
         for (int attempt = 0; attempt < 49; attempt++) {
             position.set(original);
             if (attempt > 0) {
-                float radius = BoardGeometry.WIDTH * .22f / scale * (float) Math.sqrt(attempt / 48f);
+                float radius = BoardGeometry.width() * .22f / scale * (float) Math.sqrt(attempt / 48f);
                 float angle = attempt * 2.399963f;
                 position.add(MathUtils.cos(angle) * radius, MathUtils.sin(angle) * radius, 0);
             }
@@ -234,7 +234,7 @@ final class InfantryFootprint {
         for (var obstacle : obstacles) {
             shape.setPosition(position.x, position.y);
             if (Intersector.overlapConvexPolygons(shape, obstacle, separation)) {
-                float distance = separation.depth + EDGE_MARGIN * BoardGeometry.HEX_SCALE / scale;
+                float distance = separation.depth + EDGE_MARGIN * BoardGeometry.hexScale() / scale;
                 position.add(separation.normal.x * distance, separation.normal.y * distance, 0);
                 moved = true;
             }

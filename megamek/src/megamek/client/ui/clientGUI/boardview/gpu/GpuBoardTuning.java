@@ -36,6 +36,7 @@ import com.badlogic.gdx.scenes.scene2d.utils.Disableable;
 import com.badlogic.gdx.scenes.scene2d.utils.FocusListener;
 import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.Scaling;
+import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.common.planetaryConditions.Atmosphere;
 import megamek.common.planetaryConditions.AtmosphericTaint;
@@ -116,6 +117,8 @@ final class GpuBoardTuning {
     private final List<Control> water;
     private final CheckBox terrainLod;
     private final List<Control> terrainDetail;
+    private final Label terrainProgress;
+    private int terrainPercent = -1;
     private final SelectBox<String> concreteShapes;
     private final CheckBox fallsOffBoard;
     private final CheckBox cliffsIntoWater;
@@ -412,6 +415,9 @@ final class GpuBoardTuning {
         Table terrain = new Table();
         rows = terrain;
         rows.top().defaults().pad(0, 3, 0, 3);
+        terrainProgress = new Label("", skin, "small");
+        terrainProgress.setName("terrain-build-progress");
+        rows.add(terrainProgress).colspan(3).left().row();
         section(skin, "Concrete shapes");
         concreteShapes = choice(skin, "Rectangle fitting", "tuning-concrete-shapes",
               new String[] { "None", "Water only", "Everywhere" }, this::applyConcreteShapes);
@@ -1148,6 +1154,12 @@ final class GpuBoardTuning {
         for (Control control : terrainDetail) { control.slider().setDisabled(!TerrainLod.enabled()); }
         updateReadings(relief);
         updateReadings(terrainDetail);
+    }
+
+    void terrainProgress(int percent) {
+        if (terrainPercent == percent) { return; }
+        terrainPercent = percent;
+        terrainProgress.setText(percent < 0 ? "" : Messages.getString("GpuBoard.preparingTerrain", percent));
     }
 
     private void applyWater() {

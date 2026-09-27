@@ -247,20 +247,19 @@ void main() {
         }
         atmosphere = weights > 0.00001 ? atmosphere / weights : texture2D(u_fog, v_uv);
     }
-    vec3 color = scene.rgb;
-    if (scene.a <= 0.0) {
-        color = mix(u_horizon, u_sky, smoothstep(0.0, 1.0, v_uv.y));
-    }
+    // Scene clear RGB contains u_sky. Replace its uncovered part with the sky gradient continuously;
+    // treating any nonzero alpha as opaque leaves a hard sky-colored border around dissipating volumes.
+    float coverage = depth < 1.0 ? 1.0 : clamp(scene.a, 0.0, 1.0);
+    vec3 sky = mix(u_horizon, u_sky, smoothstep(0.0, 1.0, v_uv.y));
+    vec3 color = scene.rgb + (sky - u_sky) * (1.0 - coverage);
     vec3 linear = pow(max(color, vec3(0.0)), vec3(2.2));
     vec4 sand = sandLayer(depth);
     linear = (linear * sand.a + sand.rgb) * atmosphere.a + atmosphere.rgb;
     linear *= u_exposure * (1.0 + u_lightning);
-    if (scene.a > 0.0) {
-        // Sky colors already carry the time/cover palette; do not grade or desaturate them a second time.
-        linear *= u_tint;
-        float luminance = dot(linear, vec3(0.2126, 0.7152, 0.0722));
-        linear = mix(vec3(luminance), linear, u_saturation);
-    }
+    // Sky colors already carry the time/cover palette; grade in proportion to scene coverage.
+    vec3 graded = linear * u_tint;
+    float luminance = dot(graded, vec3(0.2126, 0.7152, 0.0722));
+    linear = mix(linear, mix(vec3(luminance), graded, u_saturation), coverage);
     // Lens glare borrows the active sun's color, after terrain grading and before display conversion/FoV.
     linear += sunGlare() * u_exposure;
     color = pow(shoulder(linear), vec3(1.0 / 2.2));

@@ -18,9 +18,11 @@ final class BoardConcrete {
 
     static final Mode DEFAULT_MODE = Mode.EVERYWHERE;
     private static Mode mode = DEFAULT_MODE;
-    private static Mode cachedMode;
 
-    static Mode mode() { return mode; }
+    static Mode mode() {
+        TerrainSettings settings = TerrainSettings.current();
+        return settings == null ? mode : settings.concrete();
+    }
 
     static void tune(Mode next) {
         if (next != mode) {
@@ -32,23 +34,28 @@ final class BoardConcrete {
 
     private static final Shift ZERO = new Shift(0, 0);
     /** One immutable derived outline, shared by terrain and picking; no scene, artwork or GL resources are retained. */
-    private static WeakReference<List<BoardScene.Tile>> snapshot = new WeakReference<>(null);
-    private static BoardConcrete cached;
-    private static int width, height;
-    private static float scale;
+    private record Cached(WeakReference<List<BoardScene.Tile>> tiles, int width, int height, float scale,
+          Mode mode, BoardConcrete shape) {
+        boolean matches(BoardScene scene) {
+            return tiles.get() == scene.tiles() && width == scene.width() && height == scene.height()
+                  && scale == BoardGeometry.hexScale() && mode == BoardConcrete.mode();
+        }
+    }
+    // Retain the displayed and pending outlines. A cache miss must not hold a monitor during board construction.
+    private static volatile Cached cached, previous;
     private final Map<Long, Shift> shifts;
 
-    static synchronized BoardConcrete of(BoardScene scene) {
-        if (snapshot.get() != scene.tiles() || width != scene.width() || height != scene.height()
-              || scale != BoardGeometry.HEX_SCALE || cachedMode != mode) {
-            cached = new BoardConcrete(scene);
-            snapshot = new WeakReference<>(scene.tiles());
-            width = scene.width();
-            height = scene.height();
-            scale = BoardGeometry.HEX_SCALE;
-            cachedMode = mode;
+    static BoardConcrete of(BoardScene scene) {
+        Cached first = cached, second = previous;
+        if (first != null && first.matches(scene)) { return first.shape(); }
+        if (second != null && second.matches(scene)) { return second.shape(); }
+        BoardConcrete shape = new BoardConcrete(scene);
+        synchronized (BoardConcrete.class) {
+            if (cached != null && cached.matches(scene)) { return cached.shape(); }
+            previous = cached;
+            cached = new Cached(new WeakReference<>(scene.tiles()), scene.width(), scene.height(), BoardGeometry.hexScale(), mode(), shape);
         }
-        return cached;
+        return shape;
     }
 
     Shift shift(long corner) { return shifts.getOrDefault(corner, ZERO); }
@@ -69,8 +76,8 @@ final class BoardConcrete {
     }
 
     private static long key(Vector3 p) {
-        return ((long) Math.round(p.x / (BoardGeometry.WIDTH / 4)) << 32)
-              ^ (Math.round(p.y / (BoardGeometry.HEIGHT / 2)) & 0xffffffffL);
+        return ((long) Math.round(p.x / (BoardGeometry.width() / 4)) << 32)
+              ^ (Math.round(p.y / (BoardGeometry.height() / 2)) & 0xffffffffL);
     }
 
     /** Construction-only vertices. Each is the same lattice corner seen by its three adjoining hexes. */
@@ -89,7 +96,7 @@ final class BoardConcrete {
     }
 
     private BoardConcrete(BoardScene scene) {
-        if (mode == Mode.OFF) { shifts = Map.of(); return; }
+        if (mode() == Mode.OFF) { shifts = Map.of(); return; }
         Map<Long, Corner> corners = new TreeMap<>();
         for (BoardScene.Tile land : scene.tiles()) {
             if (land.liquid().present() || land.surface() != BoardScene.Surface.CONCRETE) { continue; }
@@ -181,8 +188,8 @@ final class BoardConcrete {
         if (area <= 0 || land.size() < 6) { return false; }
         Vector3[] best = null;
         float bestError = Float.POSITIVE_INFINITY;
-        for (float angle : new float[] { 0, (float) Math.atan2(BoardGeometry.HEIGHT / 2, .75f * BoardGeometry.WIDTH),
-              -(float) Math.atan2(BoardGeometry.HEIGHT / 2, .75f * BoardGeometry.WIDTH) }) {
+        for (float angle : new float[] { 0, (float) Math.atan2(BoardGeometry.height() / 2, .75f * BoardGeometry.width()),
+              -(float) Math.atan2(BoardGeometry.height() / 2, .75f * BoardGeometry.width()) }) {
             float ux = (float) Math.cos(angle), uy = (float) Math.sin(angle), vx = -uy, vy = ux;
             float u0 = Float.POSITIVE_INFINITY, u1 = Float.NEGATIVE_INFINITY;
             float v0 = Float.POSITIVE_INFINITY, v1 = Float.NEGATIVE_INFINITY;
@@ -193,8 +200,8 @@ final class BoardConcrete {
                 v0 = Math.min(v0, vx * x + vy * y);
                 v1 = Math.max(v1, vx * x + vy * y);
             }
-            if (Math.min(u1 - u0, v1 - v0) < 54 * BoardGeometry.HEX_SCALE) { continue; }
-            float margin = 16 * BoardGeometry.HEX_SCALE;
+            if (Math.min(u1 - u0, v1 - v0) < 54 * BoardGeometry.hexScale()) { continue; }
+            float margin = 16 * BoardGeometry.hexScale();
             Line[] sides = { new Line(ux, uy, u0 - margin), new Line(vx, vy, v0 - margin),
                   new Line(-ux, -uy, -u1 - margin), new Line(-vx, -vy, -v1 - margin) };
             Line[] edges = new Line[chain.size()];
@@ -221,7 +228,7 @@ final class BoardConcrete {
                 Line previous = edges[(i + chain.size() - 1) % chain.size()], next = edges[i];
                 if (previous != next) { turns++; }
                 Vector3 p = previous == next ? next.project(chain.get(i).original) : previous.intersection(next);
-                if (p == null || p.dst(chain.get(i).original) > 42 * BoardGeometry.HEX_SCALE) { fits = false; break; }
+                if (p == null || p.dst(chain.get(i).original) > 42 * BoardGeometry.hexScale()) { fits = false; break; }
                 points[i] = p;
                 error += p.dst2(chain.get(i).original);
             }
@@ -274,7 +281,7 @@ final class BoardConcrete {
 
         boolean same(Line other) {
             return Math.abs(nx - other.nx) + Math.abs(ny - other.ny) < .0001f
-                  && Math.abs(offset - other.offset) < .001f * BoardGeometry.HEX_SCALE;
+                  && Math.abs(offset - other.offset) < .001f * BoardGeometry.hexScale();
         }
 
         Vector3 intersection(Line other) {
@@ -342,7 +349,7 @@ final class BoardConcrete {
                   && (a.line.nx * b.line.nx + a.line.ny * b.line.ny > .98f
                         || (a.rectangle ? b.last - b.first : a.last - a.first) <= 2);
             for (int j = a.first; fits && j <= b.last; j++) {
-                fits = Math.abs(rail.side(chain.get(j).point)) <= 24 * BoardGeometry.HEX_SCALE;
+                fits = Math.abs(rail.side(chain.get(j).point)) <= 24 * BoardGeometry.hexScale();
             }
             if (fits) {
                 runs.set(i, new Run(a.first, b.last, rail, true));
@@ -418,7 +425,7 @@ final class BoardConcrete {
         // A failed fit leaves the original rectangle intact. Never taper a pier to accommodate its landing.
         for (int i = first; i <= last; i++) {
             Vector3 p = points[i - first];
-            if (p == null || p.dst(chain.get(i).original) > 42.001f * BoardGeometry.HEX_SCALE) { return null; }
+            if (p == null || p.dst(chain.get(i).original) > 42.001f * BoardGeometry.hexScale()) { return null; }
             if (i < last && points[i + 1 - first] == null) { return null; }
             if (i < last && !clearEdge(scene, chain.get(i), p, points[i + 1 - first])) { return null; }
         }
@@ -446,8 +453,8 @@ final class BoardConcrete {
         for (int i = begin; i <= end; i++) {
             for (BoardScene.Tile tile : chain.get(i).tiles) {
                 float at = nx * BoardGeometry.centerX(tile.coords()) + ny * BoardGeometry.centerY(tile.coords());
-                if (outside(tile)) { low = Math.max(low, at + 18 * BoardGeometry.HEX_SCALE); }
-                else { high = Math.min(high, at - 16 * BoardGeometry.HEX_SCALE); }
+                if (outside(tile)) { low = Math.max(low, at + 18 * BoardGeometry.hexScale()); }
+                else { high = Math.min(high, at - 16 * BoardGeometry.hexScale()); }
             }
         }
         if (low <= high) { offset = Math.clamp(offset, low, high); }
@@ -462,7 +469,7 @@ final class BoardConcrete {
             float distance = Math.abs(line.side(chain.get(i).point));
             if (distance > error) { error = distance; split = i; }
         }
-        if (last - first > 1 && (error > 24 * BoardGeometry.HEX_SCALE || low > high)) {
+        if (last - first > 1 && (error > 24 * BoardGeometry.hexScale() || low > high)) {
             fitQuay(chain, first, split, scene, runs);
             fitQuay(chain, split, last, scene, runs);
         } else { runs.add(new Run(first, last, line, false)); }
@@ -475,8 +482,8 @@ final class BoardConcrete {
             if (!corner.next.tiles.contains(tile)) { continue; }
             float cx = BoardGeometry.centerX(tile.coords()), cy = BoardGeometry.centerY(tile.coords());
             float side = (dx * (cy - a.y) - dy * (cx - a.x)) / length;
-            if (outside(tile) ? side > -17.999f * BoardGeometry.HEX_SCALE
-                  : side < 15.999f * BoardGeometry.HEX_SCALE) { return false; }
+            if (outside(tile) ? side > -17.999f * BoardGeometry.hexScale()
+                  : side < 15.999f * BoardGeometry.hexScale()) { return false; }
             if (!tile.liquid().present() && (outside(tile) ? protectedOutside(scene, tile) : protectedLand(scene, tile))) {
                 for (int k = 0; k < 6; k++) {
                     Vector3 p = BoardGeometry.corner(tile.coords(), 0, k);
@@ -503,7 +510,7 @@ final class BoardConcrete {
 
     private static boolean outside(BoardScene.Tile tile) {
         return tile != null && !tile.liquid().molten() && (tile.liquid().present()
-              || mode == Mode.EVERYWHERE && tile.surface() != BoardScene.Surface.CONCRETE);
+              || mode() == Mode.EVERYWHERE && tile.surface() != BoardScene.Surface.CONCRETE);
     }
 
     static boolean concreteBank(BoardScene scene, BoardScene.Tile water, int edge) {
@@ -517,7 +524,7 @@ final class BoardConcrete {
      * cross the water centre is rejected using the actual lattice geometry, irrespective of direction.
      */
     static void straighten(BoardScene scene, BoardScene.Tile water, Vector3[] shore) {
-        if (mode == Mode.OFF || water.liquid().molten()) { return; }
+        if (mode() == Mode.OFF || water.liquid().molten()) { return; }
         int paved = 0;
         for (int e = 0; e < 6; e++) {
             if (concreteBank(scene, water, e)) { paved |= 1 << e; }
@@ -550,7 +557,7 @@ final class BoardConcrete {
         float dx = b.x - a.x, dy = b.y - a.y;
         float cx = BoardGeometry.centerX(water.coords()), cy = BoardGeometry.centerY(water.coords());
         float clearance = (dx * (cy - a.y) - dy * (cx - a.x)) / (float) Math.hypot(dx, dy);
-        if (!(clearance >= (water.waterDepth() > 0 ? 12 : 4) * BoardGeometry.HEX_SCALE)) { return false; }
+        if (!(clearance >= (water.waterDepth() > 0 ? 12 : 4) * BoardGeometry.hexScale())) { return false; }
         int samples = count * perEdge;
         for (int i = 1; i < samples; i++) {
             shore[(first * perEdge + i) % shore.length] = new Vector3(a).lerp(b, i / (float) samples);

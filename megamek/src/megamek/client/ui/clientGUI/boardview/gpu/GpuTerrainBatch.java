@@ -22,6 +22,7 @@ import com.badlogic.gdx.graphics.g3d.utils.RenderContext;
 import com.badlogic.gdx.graphics.g3d.utils.RenderableSorter;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.utils.Array;
+import com.badlogic.gdx.utils.IntArray;
 
 /**
  * Reuses static terrain material state across consecutive compatible draws. Chunks own their original meshes;
@@ -31,11 +32,13 @@ import com.badlogic.gdx.utils.Array;
  */
 final class GpuTerrainBatch implements RenderableSorter {
     private static final float[] IDENTITY = new Matrix4().val;
+    private static final Renderable EMPTY = new Renderable();
     private final GpuOpaqueSorter original = new GpuOpaqueSorter();
     private final Predicate<Material> terrain;
     private final Map<Material, Integer> materialIds = new IdentityHashMap<>();
     private final Map<Attributes, Integer> materialValues = new HashMap<>();
     private final Array<Renderable> ordered = new Array<>();
+    private final List<Group> groups = new ArrayList<>();
     private boolean enabled = true;
 
     GpuTerrainBatch(Predicate<Material> terrain) { this.terrain = terrain; }
@@ -43,11 +46,12 @@ final class GpuTerrainBatch implements RenderableSorter {
     void setEnabled(boolean value) { enabled = value; }
 
     /** Materials are immutable between terrain updates; do not retain replaced chunks through this lookup. */
-    void clear() { materialIds.clear(); materialValues.clear(); ordered.clear(); }
+    void clear() { materialIds.clear(); materialValues.clear(); ordered.clear(); groups.clear(); }
 
     @Override
     public void sort(Camera camera, Array<Renderable> parts) {
         original.sort(camera, parts);
+        for (Group group : groups) { group.clear(); }
         if (!enabled) { return; }
         for (Renderable part : parts) {
             if (part.material.has(GpuGroundCover.Wind.TYPE)) { return; }
@@ -55,6 +59,7 @@ final class GpuTerrainBatch implements RenderableSorter {
         ordered.clear();
         GpuTerrain.ShadingDetail flat = camera.projection.val[Matrix4.M33] != 0 ? GpuTerrain.detail(camera, null) : null;
         int from = 0;
+        int usedGroups = 0;
         while (from < parts.size) {
             Shader shader = parts.get(from).shader;
             int to = from + 1;
@@ -65,15 +70,19 @@ final class GpuTerrainBatch implements RenderableSorter {
                 for (int i = from; i < to; i++) { ordered.add(parts.get(i)); }
             } else {
                 // Material sorting changes winners at shared depth ties. Reuse state only in the existing order.
-                Group group = new Group((DefaultShader) shader);
-                Renderable combined = new Renderable().set(parts.get(from));
-                combined.shader = group;
-                ordered.add(combined);
+                if (usedGroups == groups.size()) { groups.add(new Group()); }
+                Group group = groups.get(usedGroups++);
+                group.shader = (DefaultShader) shader;
+                group.combined.set(parts.get(from));
+                group.combined.shader = group;
+                ordered.add(group.combined);
                 for (int i = from; i < to; i++) {
                     Renderable part = parts.get(i);
                     GpuTerrain.ShadingDetail detail = flat == null ? GpuTerrain.detail(camera, part) : flat;
                     int material = materialId(part.material);
-                    group.parts.add(new Range(part, material, detail));
+                    group.parts.add(part);
+                    group.materials.add(material);
+                    group.details.add(detail);
                 }
             }
             from = to;
@@ -83,7 +92,7 @@ final class GpuTerrainBatch implements RenderableSorter {
         ordered.clear();
     }
 
-    private boolean eligible(Renderable part) {
+    boolean eligible(Renderable part) {
         return terrain.test(part.material) && part.bones == null && !part.meshPart.mesh.isInstanced()
               && part.meshPart.primitiveType == GL20.GL_TRIANGLES && part.meshPart.size > 0
               && !part.material.has(BlendingAttribute.Type) && !part.material.has(FloatAttribute.AlphaTest)
@@ -100,17 +109,22 @@ final class GpuTerrainBatch implements RenderableSorter {
 
     /** The draw audit inspects the actual ranges rather than counting a material group as one hardware draw. */
     static Iterable<Renderable> ranges(Renderable part) {
-        return part.shader instanceof Group group ? group.parts.stream().map(Range::part).toList() : List.of(part);
+        return part.shader instanceof Group group ? group.parts : List.of(part);
     }
 
-    private record Range(Renderable part, int material, GpuTerrain.ShadingDetail detail) { }
-
     private static final class Group implements Shader {
-        final DefaultShader shader;
-        final List<Range> parts = new ArrayList<>();
+        DefaultShader shader;
+        final Renderable combined = new Renderable();
+        final Array<Renderable> parts = new Array<>();
+        final IntArray materials = new IntArray();
+        final Array<GpuTerrain.ShadingDetail> details = new Array<>();
 
-        Group(DefaultShader shader) {
-            this.shader = shader;
+        void clear() {
+            parts.clear();
+            materials.clear();
+            details.clear();
+            combined.set(EMPTY);
+            shader = null;
         }
 
         @Override
@@ -127,21 +141,21 @@ final class GpuTerrainBatch implements RenderableSorter {
 
         @Override
         public void render(Renderable ignored) {
-            Range bound = parts.getFirst();
-            shader.render(bound.part());
+            int bound = 0;
+            shader.render(parts.get(bound));
             boolean borrowed = false;
-            for (int i = 1; i < parts.size(); i++) {
-                Range next = parts.get(i);
-                if (bound.material() == next.material() && bound.detail().equals(next.detail())
-                      && bound.part().environment == next.part().environment) {
-                    next.part().meshPart.render(shader.program);
+            for (int i = 1; i < parts.size; i++) {
+                Renderable next = parts.get(i);
+                if (materials.get(bound) == materials.get(i) && details.get(bound).equals(details.get(i))
+                      && parts.get(bound).environment == next.environment) {
+                    next.meshPart.render(shader.program);
                     borrowed = true;
                 } else {
                     // Direct mesh draws unbind their VAO. Restore the mesh BaseShader still believes is bound
                     // before handing control back; begin/end remain once per shader, never once per material.
-                    if (borrowed) { bound.part().meshPart.mesh.bind(shader.program); }
-                    shader.render(next.part());
-                    bound = next;
+                    if (borrowed) { parts.get(bound).meshPart.mesh.bind(shader.program); }
+                    shader.render(next);
+                    bound = i;
                     borrowed = false;
                 }
             }

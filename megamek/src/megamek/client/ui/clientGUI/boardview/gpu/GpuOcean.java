@@ -66,17 +66,6 @@ final class GpuOcean implements Disposable {
         return result[latest] == null ? null : result[latest].getColorBufferTexture();
     }
 
-    /** The latest result read back, four floats per texel row by row; empty where nothing was simulated. */
-    FloatBuffer pixels() {
-        FloatBuffer pixels = BufferUtils.newFloatBuffer(result[latest] == null ? 0 : SIZE * SIZE * 4);
-        if (result[latest] == null) { return pixels; }
-        IntBuffer state = saveState();
-        result[latest].bind();
-        Gdx.gl.glReadPixels(0, 0, SIZE, SIZE, GL20.GL_RGBA, GL20.GL_FLOAT, pixels);
-        restoreState(state);
-        return pixels;
-    }
-
     /** World-space scale of the texture: multiply a world position by it to get texture coordinates. */
     static float scale() {
         return 1 / BoardRelief.metres(PATCH_METRES);

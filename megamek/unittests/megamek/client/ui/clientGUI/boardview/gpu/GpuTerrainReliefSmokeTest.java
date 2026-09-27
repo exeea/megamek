@@ -1,9 +1,8 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
-import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -14,6 +13,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
@@ -21,6 +21,7 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.board.Coords;
@@ -59,8 +60,9 @@ class GpuTerrainReliefSmokeTest {
                         camera.camera.zoom = .26f;
                         camera.center(BoardGeometry.center(new Coords(4, 5), 1));
                         terrain.renderShadows(camera.camera, List.of());
-                        // Warm shaders, shadows and the offscreen vegetation guard band before comparisons.
+                        // Finish progressive grass preparation so changes cannot be mistaken for animation.
                         for (int warmup = 0; warmup < 12; warmup++) { frame(terrain, camera); }
+                        settleCover(terrain, camera);
                         GpuBoardTestUi.capture(new File(output, "terrain-" + family + "-iso.png"));
                         long[] times = new long[12];
                         for (int sample = 0; sample < times.length; sample++) {
@@ -92,7 +94,7 @@ class GpuTerrainReliefSmokeTest {
                         camera.setIsometric(false);
                         camera.center(BoardGeometry.center(new Coords(4, 4), 3));
                         terrain.renderShadows(camera.camera, List.of());
-                        frame(terrain, camera);
+                        settleCover(terrain, camera);
                         GpuBoardTestUi.capture(new File(output, "terrain-" + family + "-top.png"));
                         if (family == BoardScene.Surface.SAND) {
                             var shadows = terrain.environment().shadowMap;
@@ -135,6 +137,17 @@ class GpuTerrainReliefSmokeTest {
         ScreenUtils.clear(.2f, .26f, .31f, 1, true);
         terrain.render(camera.camera, false);
         terrain.renderTransparent(camera.camera);
+    }
+
+    private static void settleCover(GpuTerrain terrain, BoardCamera camera) throws ReflectiveOperationException {
+        var field = GpuTerrain.class.getDeclaredField("groundCover");
+        field.setAccessible(true);
+        GpuGroundCover cover = (GpuGroundCover) field.get(terrain);
+        long deadline = System.nanoTime() + 5_000_000_000L;
+        do {
+            frame(terrain, camera);
+            assertTrue(System.nanoTime() < deadline, "Visible grass must finish before image comparisons");
+        } while (cover.busy());
     }
 
     private static void checkWind(GpuTerrain terrain, BoardCamera camera) {
@@ -194,15 +207,37 @@ class GpuTerrainReliefSmokeTest {
         GpuGroundCover cover = new GpuGroundCover();
         try {
             BoardScene first = coverScene(pixels, null, 0);
-            var model = cover.visible(first, camera.camera, first.tiles(), BoardTacticalGeometry.surfaces(first)).getFirst();
+            var surfaces = BoardTacticalGeometry.surfaces(first);
+            var model = prepareCover(cover, first, camera, surfaces).getFirst();
+            long uploads = cover.uploads();
             BoardScene tactical = coverScene(pixels, pixels, 0), edited = coverScene(pixels, pixels, 1);
-            assertSame(model, cover.visible(tactical, camera.camera, tactical.tiles(), coords -> {
-                throw new AssertionError("An unchanged surface must not be requested again");
-            }).getFirst(),
+            assertSame(model, prepareCover(cover, tactical, camera, surfaces).getFirst(),
                   "Tactical-only snapshot replacement must retain grass GPU resources");
-            assertNotSame(model, cover.visible(edited, camera.camera, edited.tiles(), BoardTacticalGeometry.surfaces(edited)).getFirst(),
-                  "A real terrain edit must replace the derived cover");
+            assertEquals(uploads, cover.uploads(), "Unchanged ground must not upload grass instances again");
+            assertSame(model, prepareCover(cover, tactical, camera, BoardTacticalGeometry.surfaces(first)).getFirst(),
+                  "Replacement roots keep the shared blade mesh");
+            assertTrue(cover.uploads() > uploads, "New terrain surfaces must replace the derived roots");
+            uploads = cover.uploads();
+            assertSame(model, prepareCover(cover, edited, camera, BoardTacticalGeometry.surfaces(edited)).getFirst());
+            assertTrue(cover.uploads() > uploads, "A height edit must replace grass roots");
+            var editedSurfaces = BoardTacticalGeometry.surfaces(edited);
+            prepareCover(cover, edited, camera, editedSurfaces);
+            uploads = cover.uploads();
+            for (int i = 0; i < 60; i++) { cover.visible(edited, camera.camera, edited.tiles(), editedSurfaces); }
+            assertEquals(uploads, cover.uploads(), "A stationary camera must not rebuild or upload cover");
         } finally { cover.dispose(); }
+    }
+
+    private static List<ModelInstance> prepareCover(GpuGroundCover cover, BoardScene scene, BoardCamera camera,
+          Function<Coords, BoardTacticalGeometry.Surface> surfaces) {
+        long deadline = System.nanoTime() + 5_000_000_000L;
+        List<ModelInstance> instances;
+        do {
+            instances = cover.visible(scene, camera.camera, scene.tiles(), surfaces);
+            assertTrue(System.nanoTime() < deadline, "Budgeted grass preparation must finish");
+        } while (cover.busy());
+        assertTrue(instances.size() <= 2, "Grass batches are per blade detail, never per hex");
+        return instances;
     }
 
     private static BoardScene coverScene(BoardScene.Pixels pixels, BoardScene.Pixels tactical, int elevation) {

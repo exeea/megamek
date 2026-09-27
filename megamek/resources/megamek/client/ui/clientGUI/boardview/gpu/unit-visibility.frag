@@ -6,6 +6,8 @@ varying vec2 v_uv;
 uniform sampler2D u_sceneDepth;
 uniform sampler2D u_unitDepth;
 uniform sampler2D u_unitColors;
+uniform sampler2D u_effectOpacity;
+uniform vec2 u_effectSize;
 uniform vec2 u_step;
 uniform float u_bias;
 uniform float u_intensity;
@@ -21,18 +23,39 @@ vec3 worldAt(vec2 uv, float depth) {
     return p.xyz / p.w;
 }
 
+float effectHiddenAt(vec2 uv, float unit) {
+    if (u_effectSize.x < 1.0 || texture2D(u_effectOpacity, uv).a < 0.5) return 0.0;
+    // Use a sample that actually ended on this surface. A half-resolution ray beside a thin limb may hit smoky
+    // background instead; its opacity must not outline the foreground limb.
+    vec2 base = (floor(uv * u_effectSize - 0.5) + 0.5) / u_effectSize;
+    vec2 texel = 1.0 / u_effectSize;
+    float tolerance = max(u_bias, length(worldAt(uv + texel, unit) - worldAt(uv, unit)) * 2.0);
+    float nearest = tolerance;
+    vec2 sampleUV = vec2(-1.0);
+    float distance = cameraDepth(unit);
+    for (int y = 0; y < 2; y++) {
+        for (int x = 0; x < 2; x++) {
+            vec2 candidate = base + vec2(float(x), float(y)) * texel;
+            float separation = abs(cameraDepth(depthAt(u_sceneDepth, candidate)) - distance);
+            if (separation < nearest) { nearest = separation; sampleUV = candidate; }
+        }
+    }
+    return sampleUV.x < 0.0 ? 0.0 : step(0.6, texture2D(u_effectOpacity, sampleUV).a);
+}
+
 // 1 where the scene hides the unit. The ground's own relief, grass and scatter in the hex the unit stands in never do:
 // the capture's alpha holds the height below which that hex's decoration stays, in quarter levels offset by 128 (0 for
 // markers, which have no such exemption), so only what stands in another hex, or rises above it, hides a unit.
 float hiddenAt(vec2 uv) {
     if (min(uv.x, uv.y) < 0.0 || max(uv.x, uv.y) > 1.0) return 0.0;
     float unit = depthAt(u_unitDepth, uv), scene = depthAt(u_sceneDepth, uv);
-    if (unit >= 1.0 || behind(scene, unit, u_bias) < 0.5) return 0.0;
+    if (unit >= 1.0) return 0.0;
+    if (behind(scene, unit, u_bias) < 0.5) return effectHiddenAt(uv, unit);
     vec3 occluder = worldAt(uv, scene), surface = worldAt(uv, unit);
     float groundTop = (texture2D(u_unitColors, uv).a * 255.0 - 128.0) * 0.25 * u_levelHeight;
     bool own = boardHex(occluder.xy * vec2(1.0, -1.0) / u_groundBoard.zw)
           == boardHex(surface.xy * vec2(1.0, -1.0) / u_groundBoard.zw);
-    return own && occluder.z <= groundTop ? 0.0 : 1.0;
+    return own && occluder.z <= groundTop ? effectHiddenAt(uv, unit) : 1.0;
 }
 
 void main() {

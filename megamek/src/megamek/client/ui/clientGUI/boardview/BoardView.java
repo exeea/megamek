@@ -5291,7 +5291,8 @@ public final class BoardView extends AbstractBoardView
                 int extension = source.lastIndexOf('.');
                 if (extension > 0) {
                     String model = "buildings/" + source.substring(0, extension);
-                    if (new File(Configuration.dataDir(), "models/board/" + model + ".g3dj").isFile()) {
+                    if (new File(Configuration.dataDir(), "models/board/" + model + ".glb").isFile()
+                          || new File(Configuration.dataDir(), "models/board/" + model + ".g3dj").isFile()) {
                         for (int terrain : new int[] { Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL }) {
                             if (hex.containsTerrain(terrain) && gpuTileset.imageHasTerrain(image, terrain)) {
                                 models.putIfAbsent(terrain, model);
@@ -5501,7 +5502,7 @@ public final class BoardView extends AbstractBoardView
           Terrains.BRIDGE, Terrains.BRIDGE_CF, Terrains.BRIDGE_ELEV, Terrains.BRIDGE_REPAIRED,
           Terrains.WOODS, Terrains.JUNGLE, Terrains.FOLIAGE_ELEV, Terrains.INDUSTRIAL, Terrains.ROUGH,
           Terrains.CLIFF_TOP, Terrains.CLIFF_BOTTOM, Terrains.INCLINE_TOP, Terrains.INCLINE_BOTTOM,
-          Terrains.INCLINE_HIGH_TOP, Terrains.INCLINE_HIGH_BOTTOM };
+          Terrains.INCLINE_HIGH_TOP, Terrains.INCLINE_HIGH_BOTTOM, Terrains.FIRE, Terrains.SMOKE };
 
     /**
      * @param lastCursor The lastCursor to set.
@@ -5785,7 +5786,8 @@ public final class BoardView extends AbstractBoardView
             }
         }
         clearShadowMap();
-        boardPanel.repaint();
+        if (boardPanel instanceof BoardViewPanel panel) { panel.repaintTerrain(); }
+        else { boardPanel.repaint(); }
     }
 
     @Override

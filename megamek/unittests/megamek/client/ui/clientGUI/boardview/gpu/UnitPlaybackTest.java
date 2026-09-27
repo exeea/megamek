@@ -83,6 +83,83 @@ class UnitPlaybackTest {
     }
 
     @Test
+    void stateOnlyTransitionsQueueButRepeatedSnapshotsAndRevealDoNotReplayThem() {
+        var ground = aircraft(0, BoardScene.AeroState.LANDED);
+        var air = aircraft(4, BoardScene.AeroState.AIRBORNE);
+        var completions = new ArrayList<BoardScene.Movement>();
+        var playback = new UnitPlayback(completions::add);
+        playback.accept(List.of(), scene(ground), ignored -> false);
+        assertFalse(playback.busy());
+
+        playback.accept(List.of(), scene(air), ignored -> false);
+        playback.advance(0, UnitMotion.Speed.NORMAL);
+        var motion = playback.motions.get(ground.id());
+        assertNotNull(motion.sample().gear(), "An observed takeoff must play its landing-gear transition");
+        double takeoffSeconds = motion.remainingSeconds();
+        playback.accept(List.of(), scene(air), ignored -> false);
+        playback.accept(List.of(), scene(ground), ignored -> false);
+        playback.accept(List.of(), scene(ground), ignored -> false);
+        assertEquals(takeoffSeconds, motion.remainingSeconds(), "New snapshots must not restart the active takeoff");
+
+        playback.advance(takeoffSeconds / UnitMotion.Speed.NORMAL.rate + UnitPlayback.COMPLETION_HOLD_SECONDS,
+              UnitMotion.Speed.NORMAL);
+        assertEquals(1, completions.size());
+        assertEquals(List.of(ground.location(), air.location()), completions.getFirst().path());
+        assertEquals(BoardGeometry.center(air.location().coords(), 0), motion.position(),
+              "The queued landing must begin at the takeoff's destination");
+        playback.finish();
+        assertEquals(2, completions.size(), "Repeated snapshots must not enqueue duplicate transitions");
+        assertEquals(List.of(air.location(), ground.location()), completions.getLast().path());
+        assertEquals(BoardGeometry.center(ground.location().coords(), 0), motion.position());
+        playback.accept(List.of(), scene(ground), ignored -> false);
+        assertFalse(playback.busy());
+
+        var revealed = new UnitPlayback();
+        revealed.accept(List.of(), scene(air), ignored -> false);
+        revealed.advance(0, UnitMotion.Speed.NORMAL);
+        assertFalse(revealed.busy(), "First seeing an airborne unit must not invent a takeoff");
+        assertTrue(revealed.motions.isEmpty());
+    }
+
+    @Test
+    void observedTakeoffPrecedesAFlightPathWithoutReplayingEitherMove() {
+        var ground = aircraft(0, BoardScene.AeroState.LANDED);
+        var air = aircraft(1, BoardScene.AeroState.AIRBORNE);
+        var end = aircraft(2, BoardScene.AeroState.AIRBORNE);
+        var completions = new ArrayList<BoardScene.Movement>();
+        var playback = new UnitPlayback(completions::add);
+        playback.accept(List.of(), scene(ground), ignored -> false);
+        playback.accept(List.of(), scene(air), ignored -> false);
+        playback.advance(0, UnitMotion.Speed.NORMAL);
+        var motion = playback.motions.get(ground.id());
+        double takeoffSeconds = motion.remainingSeconds();
+        var flight = new BoardScene.Movement(air.id(), 0,
+              List.of(air.location().withFootprint(List.of()), end.location()),
+              EntityMovementType.MOVE_SAFE_THRUST, 0, 0, end);
+        playback.accept(List.of(flight), scene(end), ignored -> false);
+        playback.accept(List.of(), scene(end), ignored -> false);
+        playback.advance(takeoffSeconds / UnitMotion.Speed.NORMAL.rate + UnitPlayback.COMPLETION_HOLD_SECONDS,
+              UnitMotion.Speed.NORMAL);
+        assertEquals(1, completions.size());
+        assertEquals(BoardGeometry.center(air.location().coords(), 0), motion.position());
+        assertNull(motion.sample().gear(), "Continuing flight must not repeat the takeoff transition");
+        playback.advance(motion.remainingSeconds() / (2 * UnitMotion.Speed.NORMAL.rate), UnitMotion.Speed.NORMAL);
+        assertTrue(motion.position().epsilonEquals(BoardGeometry.center(air.location().coords(), 0)
+              .lerp(BoardGeometry.center(end.location().coords(), 0), .5f), .001f));
+        playback.finish();
+        assertEquals(2, completions.size());
+        assertSame(flight, completions.getLast());
+        assertFalse(playback.busy());
+    }
+
+    private static BoardScene.Unit aircraft(int row, BoardScene.AeroState state) {
+        Coords coords = new Coords(0, row);
+        var location = new BoardScene.Waypoint(coords, 0, 0).withAeroState(state).withFootprint(List.of(coords));
+        return new BoardScene.Unit(1, -1, "Aircraft", location, null, false, null, 2,
+              state != BoardScene.AeroState.LANDED);
+    }
+
+    @Test
     void visualGravityChangesNewJumpArcsAndTimingWithoutChangingCapturedMoves() {
         var start = unit(1, 0).location();
         var landing = unit(1, 1);

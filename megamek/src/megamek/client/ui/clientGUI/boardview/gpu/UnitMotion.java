@@ -83,9 +83,9 @@ final class UnitMotion {
         float tilt(double seconds, double horizontalDistance) {
             // Sample the trajectory, independent of rendering frame rate; exhaust inherits the resulting body pose.
             double delta = .001;
-            double horizontalSpeed = horizontalDistance * BoardGeometry.HEIGHT
+            double horizontalSpeed = horizontalDistance * BoardGeometry.height()
                   * (progress(seconds + delta) - progress(seconds - delta));
-            double verticalSpeed = BoardGeometry.LEVEL * (elevation(seconds + delta) - elevation(seconds - delta));
+            double verticalSpeed = BoardGeometry.level() * (elevation(seconds + delta) - elevation(seconds - delta));
             float angle = (float) Math.toDegrees(Math.atan2(horizontalSpeed, Math.max(0, verticalSpeed)));
             double launch = Math.clamp(seconds / (ascent * POWERED_JUMP_FRACTION), 0, 1);
             // Finish recovery at the apex, before a fast low-gravity climb flattens its trajectory.
@@ -188,7 +188,7 @@ final class UnitMotion {
             double middle = totalDistance - 2 * RAMP_HEXES;
             double traveled = Math.clamp(distance - RAMP_HEXES, 0, middle);
             double blend = Math.min(.5, middle / 2);
-            // Ease growth into and out of the middle, without moving either three-hex ramp boundary.
+            // Ease growth into and out of the middle, without moving either configured ramp boundary.
             if (traveled < blend) {
                 traveled = blendGrowth(traveled, blend);
             } else if (traveled > middle - blend) {
@@ -233,12 +233,6 @@ final class UnitMotion {
     private record GearPause(int waypoint, boolean retract, double start, double end) { }
     private record PosturePause(BoardScene.Waypoint from, BoardScene.Waypoint to, double start, double end) { }
     record Posture(float crouch, float fallen, megamek.common.units.FallSide side, boolean rising, float progress, float kneel) {
-        static Posture of(ProneCause cause) {
-            return of(cause, null);
-        }
-        static Posture of(ProneCause cause, megamek.common.units.FallSide side) {
-            return of(cause, side, false);
-        }
         static Posture of(ProneCause cause, megamek.common.units.FallSide side, boolean hullDown) {
             return new Posture(cause == ProneCause.VOLUNTARY ? 1 : 0,
                   cause == ProneCause.FORCED || cause == ProneCause.UNKNOWN ? 1 : 0, side, false, 1,
@@ -320,14 +314,12 @@ final class UnitMotion {
     private Playback arrivedGroup;
     private Playback arrivedPlayback;
     private ProneCause arrivedProne;
-    private BoardScene.Waypoint observed;
 
     public UnitMotion(BoardScene.Waypoint initial) {
         snap(initial);
     }
 
     public void snap(BoardScene.Waypoint location) {
-        observed = location;
         remaining.clear();
         position.set(BoardGeometry.center(location.coords(), location.elevation()));
         facing = location.facing() * 60;
@@ -338,15 +330,6 @@ final class UnitMotion {
         arrivedPlayback = null;
         arrivedProne = null;
         elapsed = 0;
-    }
-
-    /** Some takeoff/landing updates have no travel path. Visible transitions still use this same playback clock. */
-    void observe(BoardScene.Waypoint location) {
-        var from = isMoving() ? remaining.getLast().path().getLast() : observed;
-        if (changesGear(from, location)) {
-            append(List.of(from, location), EntityMovementType.MOVE_SAFE_THRUST, 0);
-        }
-        observed = location;
     }
 
     public void append(List<BoardScene.Waypoint> path, EntityMovementType type, int jumpMP) {
@@ -559,11 +542,11 @@ final class UnitMotion {
 
     private static double horizontalDistance(BoardScene.Waypoint from, BoardScene.Waypoint to) {
         return Math.hypot(BoardGeometry.centerX(to.coords()) - BoardGeometry.centerX(from.coords()),
-              BoardGeometry.centerY(to.coords()) - BoardGeometry.centerY(from.coords())) / BoardGeometry.HEIGHT;
+              BoardGeometry.centerY(to.coords()) - BoardGeometry.centerY(from.coords())) / BoardGeometry.height();
     }
 
     private static double travelDistance(BoardScene.Waypoint from, BoardScene.Waypoint to) {
-        double vertical = (to.elevation() - from.elevation()) * BoardGeometry.LEVEL / BoardGeometry.HEIGHT;
+        double vertical = (to.elevation() - from.elevation()) * BoardGeometry.level() / BoardGeometry.height();
         return Math.hypot(horizontalDistance(from, to), vertical);
     }
 
@@ -694,7 +677,7 @@ final class UnitMotion {
             var end = playback.path().getLast();
             var position = BoardGeometry.center(start.coords(), start.elevation())
                   .lerp(BoardGeometry.center(end.coords(), end.elevation()), progress);
-            position.z = playback.jump().elevation(seconds) * BoardGeometry.LEVEL;
+            position.z = playback.jump().elevation(seconds) * BoardGeometry.level();
             return position;
         }
         float step = progress * (playback.path().size() - 1);
@@ -732,7 +715,7 @@ final class UnitMotion {
             for (int step = 0; step <= 32; step++) {
                 double at = pause.start() + (pause.end() - pause.start()) * step / 32;
                 var point = position(playback, at);
-                float torso = point.z + BoardGeometry.LEVEL * (1.15f - .9f * posture(playback, at).fallen());
+                float torso = point.z + BoardGeometry.level() * (1.15f - .9f * posture(playback, at).fallen());
                 if (BoardGeometry.contains(water.coords(), point.x, point.y) && torso <= BoardGeometry.waterZ(water)) {
                     contact = at;
                     break;
@@ -1023,7 +1006,7 @@ final class UnitMotion {
         if (angle < .01 || angle > 179.99) {
             return 0;
         }
-        return (float) (BoardGeometry.HEIGHT * Math.min(CORNER_RADIUS_HEXES,
+        return (float) (BoardGeometry.height() * Math.min(CORNER_RADIUS_HEXES,
               Math.min(horizontalDistance(path.get(index - 1), path.get(index)),
                     horizontalDistance(path.get(index), path.get(index + 1))) / 2));
     }
@@ -1074,7 +1057,7 @@ final class UnitMotion {
         var previous = curve(path, index, 0, false);
         for (int i = 1; i <= segments; i++) {
             var position = curve(path, index, i / (float) segments, false);
-            distances[i] = distances[i - 1] + previous.dst(position) / BoardGeometry.HEIGHT;
+            distances[i] = distances[i - 1] + previous.dst(position) / BoardGeometry.height();
             previous = position;
         }
         return distances;

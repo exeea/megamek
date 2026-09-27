@@ -201,3 +201,36 @@ libGDX's generic framebuffer builder reserves depth textures for its GL30 path,
 so this desktop-only attachment is created explicitly and disposed with its owner.
 See the pinned [libGDX framebuffer implementation](https://github.com/libgdx/libgdx/blob/1.14.2/gdx/src/com/badlogic/gdx/graphics/glutils/GLFrameBuffer.java).
 Other GPU vendors/platforms have not been validated in this run.
+
+## Scene target format: RGBA16F cost gate (2026-09-24)
+
+The highlight shoulder in the composite would gain headroom from a half-float scene
+target. Its cost was measured with `GpuTerrainBenchmarkSmokeTest` (32×32 production
+board, 12 units, 1440×1080, fixed noon, 40 measured frames per mode) on the
+NVIDIA GeForce RTX 4070 Laptop GPU (OpenGL 4.6.0, driver 610.88), with only the scene
+colour attachment switched to `GL_RGBA16F`; the fog buffer stayed RGBA8. The gate was
+at most 0.15 ms of added GPU time per frame in every mode, from the median of three
+runs per format. GPU stage medians in ms (opaque terrain + transparent effects +
+atmosphere composite):
+
+| Mode | RGBA8 | RGBA16F | Terrain Δ | Transparent Δ | Composite Δ | Sum Δ |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| iso-medium-steady | 6.024 | 6.231 | +0.114 | +0.004 | +0.089 | +0.207 |
+| top-medium-steady | 1.483 | 4.166 | +2.388 | +0.093 | +0.202 | +2.683 |
+| iso-close-steady | 2.851 | 2.862 | +0.039 | −0.020 | −0.008 | +0.011 |
+| top-close-steady | 1.123 | 0.964 | −0.123 | −0.022 | −0.015 | −0.160 |
+| iso-medium-pan | 3.859 | 5.167 | +1.198 | +0.007 | +0.097 | +1.308 |
+| iso-close-pan | 3.246 | 1.515 | −1.683 | −0.015 | −0.034 | −1.732 |
+
+The gate failed in three modes, so the scene target stays RGBA8. Most of these
+deltas are not the format's cost: in both formats the runs of one mode fall into
+two clusters about three times apart (for example top-medium-steady terrain
+1.1–1.4 ms or 3.7–3.9 ms), and the "cutaways and light" stage, which does not touch
+the scene target, moves with them, so they are GPU clock states. Three more runs per
+format, interleaved, did not settle it: over all six runs the sum Δ medians were
+−0.075, +1.367, +0.926, −0.008, −0.905 and −0.104 ms in the order above. The one
+stable signal is the composite's read of the wider texture in iso-medium-steady:
+0.232–0.247 ms in all six RGBA8 runs against 0.311–0.342 ms in five of six RGBA16F
+runs, about +0.08 ms. The Intel Iris Xe was not measured (the test JVM runs on the
+RTX 4070 and Windows' graphics setting decides that), nor was macOS. Reports:
+`.work/claude-code/terrain/light/bench/rgba8-{1..6}` and `rgba16f-{1..6}`.

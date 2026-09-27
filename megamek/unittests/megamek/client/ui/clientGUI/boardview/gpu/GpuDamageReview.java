@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuCamouflageReview.field;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuCamouflageReview.parts;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuCamouflageReview.renderReady;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -28,6 +29,8 @@ import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.model.NodePart;
+import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Matrix4;
 import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
@@ -43,6 +46,12 @@ final class GpuDamageReview {
     private GpuDamageReview() { }
 
     static void verify(GpuUnitModels library) throws Exception {
+        verifyModels(library);
+        groundRemains(library);
+    }
+
+    /** Asset/material behavior can be reviewed independently of terrain rebuilding and collectable prop placement. */
+    static void verifyModels(GpuUnitModels library) throws Exception {
         var damage = new UnitDamageDisplay();
         var batch = new ModelBatch(GpuUnitShader.provider());
         try {
@@ -116,7 +125,6 @@ final class GpuDamageReview {
             damage.dispose();
             batch.dispose();
         }
-        groundRemains(library);
     }
 
     private static Texture texture(NodePart part) {
@@ -135,11 +143,13 @@ final class GpuDamageReview {
                 fixture.entity.destroyLocation(Mek.LOC_LEFT_ARM, true);
                 fixture.entity.setInternal(IArmorState.ARMOR_DESTROYED, Mek.LOC_RIGHT_LEG);
                 fixture.source.refresh();
+                // Raising the supporting hex queues a displacement; this review starts at the final setup state.
+                fixture.source.takeFrame();
             });
             var view = new GpuBattleView(fixture.source);
             try {
                 view.create();
-                view.render();
+                renderReady(view);
                 var terrain = (GpuTerrain) field(view, "terrain");
                 var unit = (ModelInstance) ((Map<?, ?>) field(view, "unitInstances")).get("1:-1");
                 assertTrue(UnitDamageDisplay.locationParts(unit, "LA").stream().noneMatch(part -> part.enabled));
@@ -184,17 +194,19 @@ final class GpuDamageReview {
                     fixture.game.getBoard().setHex(coords, hex);
                     fixture.source.refresh();
                 });
-                view.render();
+                renderReady(view);
                 var remaining = limbInstances(terrain, model);
                 assertEquals(2, remaining.size());
                 assertTrue(remaining.stream().allMatch(after -> props.stream()
-                      .anyMatch(before -> java.util.Arrays.equals(before.transform.val, after.transform.val))),
-                      "Picking up a limb preserves the other placements");
+                      .anyMatch(before -> samePlacement(before, after))),
+                      () -> "Picking up a limb preserves the other placements: before="
+                            + props.stream().map(prop -> java.util.Arrays.toString(prop.transform.val)).toList()
+                            + ", after=" + remaining.stream().map(prop -> java.util.Arrays.toString(prop.transform.val)).toList());
                 SwingUtilities.invokeAndWait(() -> {
                     fixture.game.getBoard().setHex(coords, new Hex(2));
                     fixture.source.refresh();
                 });
-                view.render();
+                renderReady(view);
                 assertTrue(limbInstances(terrain, model).isEmpty());
                 assertTrue(parts(new ModelInstance(library.equipment("Limb Club").model()).nodes)
                       .stream().allMatch(part -> part.enabled), "Terrain must not alter shared equipment");
@@ -202,6 +214,15 @@ final class GpuDamageReview {
                 view.dispose();
             }
         }
+    }
+
+    private static boolean samePlacement(ModelInstance before, ModelInstance after) {
+        for (int i = 0; i < before.transform.val.length; i++) {
+            // Equivalent terrain triangles can round ground height by one ULP; XY, rotation and scale stay exact.
+            float tolerance = i == Matrix4.M23 ? .00001f : 0;
+            if (!MathUtils.isEqual(before.transform.val[i], after.transform.val[i], tolerance)) { return false; }
+        }
+        return true;
     }
 
     private static BoardScene.Pixels selectedDecals(GpuTerrain terrain, Coords coords) throws Exception {
@@ -223,10 +244,10 @@ final class GpuDamageReview {
         return result;
     }
 
-    private static void capture(GpuBattleView view, String name) {
+    private static void capture(GpuBattleView view, String name) throws Exception {
         for (boolean top : new boolean[] { false, true }) {
             view.boardCamera.setIsometric(!top);
-            view.render();
+            renderReady(view);
             var image = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
             try {
                 PixmapIO.writePNG(new FileHandle(new File(System.getProperty("megamek.gpu.screenshots"),

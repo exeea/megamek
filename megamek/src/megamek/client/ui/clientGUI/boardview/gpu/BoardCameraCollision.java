@@ -47,15 +47,15 @@ final class BoardCameraCollision {
 
     private static List<BoardSurface.Face> faces(BoardScene scene, Function<Coords, BoardTacticalGeometry.Surface> surfaces,
           Vector3 eye, Vector3 displacement, float radius) {
-        float reach = radius + BoardGeometry.WIDTH + 2 * BoardRelief.overhang();
+        float reach = radius + BoardGeometry.width() + 2 * BoardRelief.overhang();
         List<BoardSurface.Face> faces = new ArrayList<>();
         float endX = eye.x + displacement.x, endY = eye.y + displacement.y;
-        int left = Math.max(0, (int) Math.floor((Math.min(eye.x, endX) - reach) / (BoardGeometry.WIDTH * .75f)));
+        int left = Math.max(0, (int) Math.floor((Math.min(eye.x, endX) - reach) / (BoardGeometry.width() * .75f)));
         int right = Math.min(scene.width() - 1,
-              (int) Math.ceil((Math.max(eye.x, endX) + reach) / (BoardGeometry.WIDTH * .75f)));
-        int top = Math.max(0, (int) Math.floor((-Math.max(eye.y, endY) - reach) / BoardGeometry.HEIGHT));
+              (int) Math.ceil((Math.max(eye.x, endX) + reach) / (BoardGeometry.width() * .75f)));
+        int top = Math.max(0, (int) Math.floor((-Math.max(eye.y, endY) - reach) / BoardGeometry.height()));
         int bottom = Math.min(scene.height() - 1,
-              (int) Math.ceil((-Math.min(eye.y, endY) + reach) / BoardGeometry.HEIGHT));
+              (int) Math.ceil((-Math.min(eye.y, endY) + reach) / BoardGeometry.height()));
         for (int x = left; x <= right; x++) {
             for (int y = top; y <= bottom; y++) {
                 var surface = surfaces.apply(new Coords(x, y));

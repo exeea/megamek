@@ -3,16 +3,15 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
 
-/** Render-owned cliff-top rim composition. Original artwork and game snapshots remain immutable. */
+/** CPU cliff-top lightness masks, shared by the bounded terrain workers. Original artwork stays immutable. */
 final class BoardRim {
     static final float BLEND_OPACITY = 0.7f;
     static final float GROUND_UV_SCALE = 0.96f; // MUST NOT TOUCH!!! With 1.0f we have some black pixels in the textures around the borders!
@@ -29,10 +28,16 @@ final class BoardRim {
     private record Patch(int edge, float from, float to, boolean high) { }
     private record Key(Images ground, List<Triangle> faces, List<Patch> patches) { }
 
-    private final Map<Key, Images> cache = new HashMap<>();
-    private final Set<Key> used = new HashSet<>();
+    private final Map<Key, Images> cache = new ConcurrentHashMap<>();
+    private final Set<Key> used = ConcurrentHashMap.newKeySet();
 
     Images material(BoardScene scene, BoardScene.Tile tile, float floor, GpuAssets assets) {
+        return material(scene, tile, floor, assets.inclineMask(), assets.highInclineMask());
+    }
+
+    /** CPU-only composition; asset decoding and cache ownership stay with the caller. */
+    Images material(BoardScene scene, BoardScene.Tile tile, float floor,
+          BoardScene.Pixels incline, BoardScene.Pixels highIncline) {
         Images ground = new Images(tile.ground(), tile.normals());
         if (tile.liquid().present()) { return ground; }
         BoardSurface surface = new BoardSurface(scene, tile);
@@ -54,15 +59,15 @@ final class BoardRim {
             Vector3 along = new Vector3(b).sub(a).nor();
             // Match the original clipped mesh: full edges extend into the corners; road mouths clip each end.
             float from = side.a().epsilonEquals(a, 0.02f) ? Float.NEGATIVE_INFINITY
-                  : quantize(new Vector3(side.a()).sub(a).dot(along) / BoardGeometry.HEX_SCALE);
+                  : quantize(new Vector3(side.a()).sub(a).dot(along) / BoardGeometry.hexScale());
             float to = side.b().epsilonEquals(b, 0.02f) ? Float.POSITIVE_INFINITY
-                  : quantize(new Vector3(side.b()).sub(a).dot(along) / BoardGeometry.HEX_SCALE);
+                  : quantize(new Vector3(side.b()).sub(a).dot(along) / BoardGeometry.hexScale());
             patches.add(new Patch(side.edge(), from, to, highDrop(scene, tile, side)));
         }
         Key key = new Key(ground, List.copyOf(faces), List.copyOf(patches));
         used.add(key);
         return cache.computeIfAbsent(key,
-              ignored -> compose(key, assets.inclineMask(), assets.highInclineMask()));
+              ignored -> compose(key, incline, highIncline));
     }
 
     /**
@@ -74,7 +79,7 @@ final class BoardRim {
         if (neighbor != null) {
             return tile.elevation() - neighbor.elevation() > 2;
         }
-        return Math.round(Math.max(side.a().z - side.lowA(), side.b().z - side.lowB()) / BoardGeometry.LEVEL) > 2;
+        return Math.round(Math.max(side.a().z - side.lowA(), side.b().z - side.lowB()) / BoardGeometry.level()) > 2;
     }
 
     /** End of one terrain snapshot update; keep only combinations used by that snapshot. */
@@ -89,7 +94,7 @@ final class BoardRim {
     }
 
     private static float local(float value, float center) {
-        return quantize((value - center) / BoardGeometry.HEX_SCALE);
+        return quantize((value - center) / BoardGeometry.hexScale());
     }
 
     private static float quantize(float value) {
@@ -101,88 +106,23 @@ final class BoardRim {
         return ax * by - ay * bx;
     }
 
-    /**
-     * Prepare each authored south-edge pattern once. Paint brightness supplies approximate stone height, not
-     * baked sunlight; an outward bevel gives the cliff lip its broad shape. Both maps are subsequently composed
-     * into the existing ground atlases, so relief adds no draw calls or texture lookups to the ground shader.
-     */
-    static Images relief(BoardScene.Pixels source, boolean high) {
-        int width = source.width(), height = source.height();
-        float[] light = new float[width * height], coverage = new float[width * height];
-        float total = 0, weight = 0;
-        int firstRow = height;
-        for (int i = 0; i < light.length; i++) {
-            int rgba = source.rgba(i);
-            light[i] = ((rgba >>> 24) * 0.2126f + (rgba >>> 16 & 255) * 0.7152f
-                  + (rgba >>> 8 & 255) * 0.0722f) / 255;
-            coverage[i] = (rgba & 255) / 255f;
-            total += light[i] * coverage[i];
-            weight += coverage[i];
-            if (coverage[i] > 0) { firstRow = Math.min(firstRow, i / width); }
-        }
-        float mean = weight > 0 ? total / weight : 0.5f;
-        float[] heights = new float[light.length], smooth = new float[light.length];
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                int i = y * width + x;
-                // Alpha-weighted filtering keeps transparent black out of the height estimate.
-                float sum = 0, mass = 0;
-                for (int dy = -1; dy <= 1; dy++) {
-                    for (int dx = -1; dx <= 1; dx++) {
-                        int j = Math.clamp(y + dy, 0, height - 1) * width + Math.clamp(x + dx, 0, width - 1);
-                        sum += light[j] * coverage[j];
-                        mass += coverage[j];
-                    }
-                }
-                smooth[i] = mass > 0 ? sum / mass : mean;
-                float outward = Math.max(0, (y - firstRow + 0.5f) / Math.max(1, height - firstRow));
-                float stone = smooth[i] * 0.3f + light[i] * 0.7f;
-                heights[i] = coverage[i] * ((stone - mean) * (high ? 22 : 14)
-                      - (high ? 6 : 2.5f) * outward * outward);
-            }
-        }
-        BufferedImage color = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
-        BufferedImage normal = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
-        Vector3 direction = new Vector3();
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                int i = y * width + x;
-                // Retain restrained pigment variation and crevices; moving light supplies the strong contrast.
-                float cavity = Math.min(0.22f, Math.max(0, smooth[i] - light[i]) * 1.2f);
-                int gray = channel((128 + (light[i] - mean) * 192) * (1 - cavity));
-                int alpha = source.rgba(i) & 255;
-                color.setRGB(x, y, (alpha << 24) | (gray << 16) | (gray << 8) | gray);
-                if (alpha == 0) {
-                    normal.setRGB(x, y, 0xff8080ff);
-                    continue;
-                }
-                float dx = (heights[y * width + Math.max(0, x - 1)]
-                      - heights[y * width + Math.min(width - 1, x + 1)]) * width / BoardGeometry.TILE_WIDTH * 0.5f;
-                float dy = (heights[Math.max(0, y - 1) * width + x]
-                      - heights[Math.min(height - 1, y + 1) * width + x]) * height / BoardGeometry.TILE_HEIGHT * 0.5f;
-                direction.set(dx, dy, 1).nor();
-                normal.setRGB(x, y, 0xff000000 | (encode(direction.x) << 16)
-                      | (encode(direction.y) << 8) | encode(direction.z));
-            }
-        }
-        return new Images(new BoardScene.Pixels(color), new BoardScene.Pixels(normal));
-    }
-
-    private static Images compose(Key key, Images incline, Images high) {
+    private static Images compose(Key key, BoardScene.Pixels incline, BoardScene.Pixels high) {
         BoardScene.Pixels ground = key.ground().color();
         int width = Math.max(ground.width(), (int) BoardGeometry.TILE_WIDTH);
         int height = Math.max(ground.height(), (int) BoardGeometry.TILE_HEIGHT);
         BufferedImage color = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
-        BufferedImage normal = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
-        float[] albedo = new float[4], detail = new float[4];
-        Vector3 base = new Vector3(), combined = new Vector3(), bump = new Vector3();
+        BoardScene.Pixels baseNormal = key.ground().normal();
+        // Custom artwork can be smaller than a rim. Keep its existing normals aligned with the enlarged color slot.
+        BufferedImage normal = baseNormal != null && (baseNormal.width() != width || baseNormal.height() != height)
+              ? new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB) : null;
+        float[] albedo = new float[4];
         Vector3[] corners = new Vector3[6];
         Vector3[] along = new Vector3[6];
         var origin = new Coords(0, 0);
         Vector3 center = BoardGeometry.center(origin, 0);
         for (int edge = 0; edge < 6; edge++) {
             // Local artwork coordinates are independent of board scale and absolute tile position.
-            corners[edge] = BoardGeometry.corner(origin, 0, edge).sub(center).scl(1 / BoardGeometry.HEX_SCALE);
+            corners[edge] = BoardGeometry.corner(origin, 0, edge).sub(center).scl(1 / BoardGeometry.hexScale());
         }
         for (int edge = 0; edge < 6; edge++) {
             along[edge] = new Vector3(corners[(edge + 1) % 6]).sub(corners[edge]);
@@ -191,17 +131,12 @@ final class BoardRim {
             for (int x = 0; x < width; x++) {
                 int rgba = texel(ground, x, y, width, height, albedo);
                 float red = rgba >>> 24, green = rgba >>> 16 & 255, blue = rgba >>> 8 & 255;
-                int packedNormal = key.ground().normal() == null ? 0x8080ffff
-                      : texel(key.ground().normal(), x, y, width, height, detail);
-                base.set(((packedNormal >>> 24) - 128) / 127f, ((packedNormal >>> 16 & 255) - 128) / 127f,
-                      ((packedNormal >>> 8 & 255) - 128) / 127f).nor();
                 float px = ((x + 0.5f) / width - 0.5f) * BoardGeometry.TILE_WIDTH / GROUND_UV_SCALE;
                 float py = (0.5f - (y + 0.5f) / height) * BoardGeometry.TILE_HEIGHT / GROUND_UV_SCALE;
                 boolean inside = false;
                 for (Triangle face : key.faces()) {
                     if (face.contains(px, py)) { inside = true; break; }
                 }
-                boolean changed = false;
                 if (inside) {
                     int coveredEdges = 0;
                     for (Patch patch : key.patches()) {
@@ -213,50 +148,27 @@ final class BoardRim {
                         float position = (px - a.x) * tx + (py - a.y) * ty;
                         if (distance > 26 || position < patch.from() || position > patch.to()) { continue; }
                         coveredEdges |= 1 << patch.edge();
-                        Images rim = patch.high() ? high : incline;
+                        BoardScene.Pixels rim = patch.high() ? high : incline;
                         float u = 0.25f + position / (2 * length);
                         float v = 1 - distance / BoardGeometry.TILE_HEIGHT;
-                        sample(rim.color(), u, v, albedo);
+                        sample(rim, u, v, albedo);
                         float alpha = albedo[3] / 255f * BLEND_OPACITY;
                         if (alpha <= 0) { continue; }
-                        // The rim is a mask: gray is lightness about mid gray, so it leaves the top layer as it
-                        // is at 128 and shades it darker or lighter where it lands, weighted by its own alpha.
+                        // Match libGDX: use the original mask's gray around 128, weighted by its alpha and opacity.
                         float shade = 1 + alpha * (albedo[0] / 128f - 1);
                         red *= shade;
                         green *= shade;
                         blue *= shade;
-                        if (rim.normal() != null) {
-                            sample(rim.normal(), u, v, detail);
-                            float nx = (detail[0] - 128) / 127f, ny = (detail[1] - 128) / 127f;
-                            // Rim U follows the edge and V points outward; ground U is +X and V is -Y.
-                            bump.set(tx * nx + ty * ny, -ty * nx + tx * ny, (detail[2] - 128) / 127f).nor();
-                            blendNormal(base, bump, alpha, combined);
-                            base.set(combined);
-                            changed = true;
-                        }
                     }
                 }
                 color.setRGB(x, y, ((rgba & 255) << 24) | (channel(red) << 16) | (channel(green) << 8) | channel(blue));
-                normal.setRGB(x, y, changed ? 0xff000000 | (encode(base.x) << 16) | (encode(base.y) << 8) | encode(base.z)
-                      : (packedNormal >>> 8) | 0xff000000);
+                if (normal != null) {
+                    int packed = texel(baseNormal, x, y, width, height, albedo);
+                    normal.setRGB(x, y, (packed >>> 8) | ((packed & 255) << 24));
+                }
             }
         }
-        return new Images(new BoardScene.Pixels(color), new BoardScene.Pixels(normal));
-    }
-
-    /** Reoriented normal mapping: a neutral detail map preserves the base relief at any coverage. */
-    static void blendNormal(Vector3 base, Vector3 detail, float alpha, Vector3 out) {
-        float x = detail.x * alpha, y = detail.y * alpha, z = 1 + (detail.z - 1) * alpha;
-        float length = (float) Math.sqrt(x * x + y * y + z * z);
-        x /= length;
-        y /= length;
-        z /= length;
-        float dot = -base.x * x - base.y * y + (base.z + 1) * z;
-        out.set(base.x, base.y, base.z + 1).scl(dot / Math.max(0.0001f, base.z + 1)).add(x, y, -z).nor();
-    }
-
-    private static int encode(float value) {
-        return channel(128 + 127 * value);
+        return new Images(new BoardScene.Pixels(color), normal == null ? baseNormal : new BoardScene.Pixels(normal));
     }
 
     private static int channel(float value) {

@@ -65,7 +65,7 @@ final class UnitBounds {
                 continue;
             }
             var mesh = part.meshPart;
-            // G3DJ import supplies these bounds. Procedural/sprite fallback parts initialize them once on demand.
+            // Model import supplies these bounds. Procedural/sprite fallback parts initialize them once on demand.
             if (mesh.radius < 0) {
                 mesh.update();
             }

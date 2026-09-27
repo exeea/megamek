@@ -4,7 +4,6 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
@@ -23,9 +22,8 @@ import megamek.common.loaders.MekFileParser;
 import megamek.common.units.Mek;
 
 /**
- * A Mek with two levels of detail, built from the shipped Atlas: its body copied as a near body, the original as the
- * far one. Near up close, far once small on screen, near again in focus; the weapons show at both levels. A near body
- * with no far body is refused, so it can never be drawn at its full cost from afar.
+ * A Mek with two levels of detail, built from the shipped Atlas. Weapons show at both levels, focused units retain
+ * LOD0, and an absent optional LOD1 keeps the same unit's LOD0 body.
  */
 final class GpuMekLodReview {
     private static final String MEKS = "units/modular/meks/";
@@ -39,14 +37,16 @@ final class GpuMekLodReview {
         copy(Configuration.dataDir().toPath().resolve("models/units/modular"), modular);
         var json = new ObjectMapper();
         ObjectNode nearBody = (ObjectNode) json.readTree(modular.resolve("bodies/atlas.json").toFile());
-        nearBody.put("detail", "near");
+        nearBody.put("detail", "lod0");
         json.writeValue(modular.resolve("bodies/atlas-near.json").toFile(), nearBody);
         ObjectNode twoLevels = (ObjectNode) json.readTree(modular.resolve("meks/atlas.json").toFile());
         twoLevels.put("body", "units/modular/bodies/atlas-near.json");
-        twoLevels.put("farBody", "units/modular/bodies/atlas.json");
+        twoLevels.put("bodyLod1", "units/modular/bodies/atlas.json");
         json.writeValue(modular.resolve("meks/atlas-lod.json").toFile(), twoLevels);
-        twoLevels.remove("farBody");
+        twoLevels.remove("bodyLod1");
         json.writeValue(modular.resolve("meks/atlas-near-only.json").toFile(), twoLevels);
+        twoLevels.put("bodyLod1", "units/modular/bodies/missing-lod1.json");
+        json.writeValue(modular.resolve("meks/atlas-missing-lod1.json").toFile(), twoLevels);
 
         EquipmentType.initializeTypes();
         var tileset = new MekTileset(new File(Configuration.dataDir(), "images/units"));
@@ -58,33 +58,80 @@ final class GpuMekLodReview {
         var captured = UnitModelSelection.capture(atlas, -1, false, tileset);
         var library = new GpuUnitModels(root);
         try {
+            verifyPackedBody(library, tileset, "meks/3039u/Phoenix Hawk PXH-1.mtf", "phoenix-hawk", 910);
+            verifyPackedBody(library, tileset, "meks/3085u/Phoenix/Phoenix Hawk IIC 3.mtf", "phoenix-hawk-iic", 911);
             int bodyTriangles = library.modular("units/modular/bodies/atlas.json").triangles();
             GpuUnitModel mek = library.get(selection(captured, MEKS + "atlas-lod.json", atlas), atlas.getId());
             assertNotNull(mek, "The Atlas with a near and a far body must assemble");
-            assertFalse(mek.detailLevels().far().isEmpty());
+            assertFalse(mek.detailLevels().lod1().isEmpty());
             assertFalse(mek.equipment().isEmpty(), "The Atlas AS7-D carries weapons");
             var instance = new GpuUnitInstance(mek);
             int weapons = drawnTriangles(instance.nodes) - bodyTriangles;
             assertTrue(weapons > 0);
             // Small on screen: the far body replaces the near one, and the weapons stay.
             float small = 20 / mek.figureHeight();
-            instance.farDetail(small, false);
+            instance.bodyDetail(small, false);
             assertEquals(1, instance.detailLevel());
             assertEquals(bodyTriangles + weapons, drawnTriangles(instance.nodes));
             assertNoNearPartDrawn(instance.nodes, mek.detailLevels());
             // Zoomed in again, the near body returns.
-            instance.farDetail(10, false);
+            instance.bodyDetail(10, false);
             assertEquals(0, instance.detailLevel());
             assertNoFarPartDrawn(instance.nodes, mek.detailLevels());
             // A Mek in focus keeps its near body however small it is.
-            instance.farDetail(small, true);
+            instance.bodyDetail(small, true);
             assertEquals(0, instance.detailLevel());
 
-            assertNull(library.get(selection(captured, MEKS + "atlas-near-only.json", atlas), atlas.getId() + 1),
-                  "A near body without a far body must fall back rather than draw at its full cost");
+            for (String asset : new String[] { "atlas-near-only.json", "atlas-missing-lod1.json" }) {
+                GpuUnitModel fallback = library.get(selection(captured, MEKS + asset, atlas), atlas.getId() + 1);
+                assertNotNull(fallback, "Missing optional LOD1 retains the same unit's LOD0 body");
+                assertTrue(fallback.detailLevels().lod1().isEmpty());
+                var fallbackInstance = new GpuUnitInstance(fallback);
+                fallbackInstance.bodyDetail(small, false);
+                assertEquals(0, fallbackInstance.detailLevel());
+                assertEquals(bodyTriangles + weapons, drawnTriangles(fallbackInstance.nodes));
+            }
         } finally {
             library.dispose();
         }
+    }
+
+    /** Each chassis selects two levels from its own GLB while retaining its equipment. */
+    private static void verifyPackedBody(GpuUnitModels library, MekTileset tileset, String unitFile, String name, int id)
+          throws Exception {
+        Mek unit = (Mek) new MekFileParser(new File(Configuration.dataDir(), "mekfiles/unit_files.zip"), unitFile).getEntity();
+        unit.setId(id);
+        var captured = UnitModelSelection.capture(unit, -1, false, tileset);
+        var body = library.modular("units/modular/bodies/" + name + ".json");
+        assertNotNull(body);
+        assertTrue(body.triangles(1) < body.triangles(), "The same chassis has an authored simpler level");
+        var model = library.get(selection(captured, MEKS + name + ".json", unit), id);
+        assertNotNull(model);
+        var instance = new GpuUnitInstance(model);
+        // Anatomy filtering removes unused hand/arm alternatives before either level is drawn.
+        int lod0 = meshTriangles(instance.nodes, model.detailLevels().lod0());
+        int lod1 = meshTriangles(instance.nodes, model.detailLevels().lod1());
+        assertTrue(lod0 > lod1 && lod1 > 0);
+        int equipment = drawnTriangles(instance.nodes) - lod0;
+        assertTrue(equipment > 0);
+        instance.bodyDetail(20 / model.figureHeight(), false);
+        assertEquals(1, instance.detailLevel());
+        assertEquals(lod1 + equipment, drawnTriangles(instance.nodes));
+        assertNoNearPartDrawn(instance.nodes, model.detailLevels());
+        instance.bodyDetail(20 / model.figureHeight(), true);
+        assertEquals(0, instance.detailLevel());
+        assertEquals(lod0 + equipment, drawnTriangles(instance.nodes));
+    }
+
+    private static int meshTriangles(Iterable<Node> nodes, java.util.Set<com.badlogic.gdx.graphics.Mesh> meshes) {
+        int result = 0;
+        for (var node : nodes) {
+            for (var part : node.parts) {
+                if (meshes.contains(part.meshPart.mesh)) { result += part.meshPart.size / 3; }
+            }
+            result += meshTriangles(node.getChildren(), meshes);
+        }
+        return result;
     }
 
     private static BoardScene.UnitModel selection(BoardScene.UnitModel captured, String asset, Mek mek) {
@@ -108,7 +155,7 @@ final class GpuMekLodReview {
     private static void assertNoNearPartDrawn(Iterable<Node> nodes, GpuUnitModel.DetailLevels levels) {
         for (Node node : nodes) {
             for (var part : node.parts) {
-                assertFalse(part.enabled && levels.near().contains(part.meshPart.mesh), node.id);
+                assertFalse(part.enabled && levels.lod0().contains(part.meshPart.mesh), node.id);
             }
             assertNoNearPartDrawn(node.getChildren(), levels);
         }
@@ -117,7 +164,7 @@ final class GpuMekLodReview {
     private static void assertNoFarPartDrawn(Iterable<Node> nodes, GpuUnitModel.DetailLevels levels) {
         for (Node node : nodes) {
             for (var part : node.parts) {
-                assertFalse(part.enabled && levels.far().contains(part.meshPart.mesh), node.id);
+                assertFalse(part.enabled && levels.lod1().contains(part.meshPart.mesh), node.id);
             }
             assertNoFarPartDrawn(node.getChildren(), levels);
         }

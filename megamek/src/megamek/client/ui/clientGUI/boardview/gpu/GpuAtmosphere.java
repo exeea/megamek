@@ -390,14 +390,14 @@ final class GpuAtmosphere implements Disposable {
         compositeShader.setUniformf("u_fogSize", hasScattering() ? fog.getWidth() : 1, hasScattering() ? fog.getHeight() : 1);
         compositeShader.setUniformf("u_projectionDepth", camera.projection.val[Matrix4.M22],
               camera.projection.val[Matrix4.M23], camera.projection.val[Matrix4.M32], camera.projection.val[Matrix4.M33]);
-        compositeShader.setUniformf("u_edgeScale", BoardGeometry.LEVEL);
+        compositeShader.setUniformf("u_edgeScale", BoardGeometry.level());
         compositeShader.setUniformf("u_exposure", exposure());
         compositeShader.setUniformf("u_tint", lighting.tint().r, lighting.tint().g, lighting.tint().b);
         compositeShader.setUniformf("u_saturation", lighting.saturation());
         compositeShader.setUniformf("u_sky", lighting.sky().r, lighting.sky().g, lighting.sky().b);
         compositeShader.setUniformf("u_horizon", lighting.horizon().r, lighting.horizon().g, lighting.horizon().b);
         compositeShader.setUniformMatrix("u_inverseView", camera.invProjectionView);
-        compositeShader.setUniformf("u_groundBoard", board.width(), board.height(), BoardGeometry.WIDTH, BoardGeometry.HEIGHT);
+        compositeShader.setUniformf("u_groundBoard", board.width(), board.height(), BoardGeometry.width(), BoardGeometry.height());
         bindSand(camera, board);
         bindSunGlare(camera);
         // Strike promptly when enabled, then at seven-second intervals, with a quick attack and longer decay.
@@ -458,27 +458,27 @@ final class GpuAtmosphere implements Disposable {
     }
 
     private void updateGroundBase(BoardScene board) {
-        if (groundTiles != board.tiles() || groundLevel != BoardGeometry.LEVEL) {
+        if (groundTiles != board.tiles() || groundLevel != BoardGeometry.level()) {
             groundTiles = board.tiles();
-            groundLevel = BoardGeometry.LEVEL;
+            groundLevel = BoardGeometry.level();
             groundBase = BoardGeometry.weatherBase(board);
         }
     }
 
     private void bindGroundLayer(ShaderProgram shader, Camera camera, BoardScene board, float top, int noiseUnit) {
         shader.setUniformMatrix("u_inverseView", camera.invProjectionView);
-        shader.setUniformf("u_groundBoard", board.width(), board.height(), BoardGeometry.WIDTH, BoardGeometry.HEIGHT);
-        shader.setUniformf("u_boundsMin", -BoardGeometry.WIDTH, -(board.height() + 1) * BoardGeometry.HEIGHT,
+        shader.setUniformf("u_groundBoard", board.width(), board.height(), BoardGeometry.width(), BoardGeometry.height());
+        shader.setUniformf("u_boundsMin", -BoardGeometry.width(), -(board.height() + 1) * BoardGeometry.height(),
               groundBase);
-        shader.setUniformf("u_boundsMax", (board.width() + 1) * BoardGeometry.WIDTH * 0.75f, BoardGeometry.HEIGHT, top);
+        shader.setUniformf("u_boundsMax", (board.width() + 1) * BoardGeometry.width() * 0.75f, BoardGeometry.height(), top);
         layerScreenBounds[0] = Float.POSITIVE_INFINITY;
         layerScreenBounds[1] = Float.POSITIVE_INFINITY;
         layerScreenBounds[2] = Float.NEGATIVE_INFINITY;
         layerScreenBounds[3] = Float.NEGATIVE_INFINITY;
         // Projected corners bound a convex volume while it lies entirely in front of the near plane.
         for (int corner = 0; corner < 8; corner++) {
-            groundProjection.set((corner & 1) == 0 ? -BoardGeometry.WIDTH : (board.width() + 1) * BoardGeometry.WIDTH * 0.75f,
-                  (corner & 2) == 0 ? -(board.height() + 1) * BoardGeometry.HEIGHT : BoardGeometry.HEIGHT,
+            groundProjection.set((corner & 1) == 0 ? -BoardGeometry.width() : (board.width() + 1) * BoardGeometry.width() * 0.75f,
+                  (corner & 2) == 0 ? -(board.height() + 1) * BoardGeometry.height() : BoardGeometry.height(),
                   (corner & 4) == 0 ? groundBase : top);
             if (camera.projection.val[Matrix4.M33] == 0
                   && (groundProjection.x - camera.position.x) * camera.direction.x
@@ -516,13 +516,13 @@ final class GpuAtmosphere implements Disposable {
     private void bindSand(Camera camera, BoardScene board) {
         float strength = settings.effects().sand();
         if (strength > 0) { updateGroundBase(board); }
-        float height = settings.groundLayerHeight() * BoardGeometry.LEVEL;
-        compositeShader.setUniformf("u_sand", strength, height, groundBase, 1 / BoardGeometry.LEVEL);
+        float height = settings.groundLayerHeight() * BoardGeometry.level();
+        compositeShader.setUniformf("u_sand", strength, height, groundBase, 1 / BoardGeometry.level());
         compositeShader.setUniformf("u_sandMaxOpacity", MAX_SAND_OPACITY);
         if (strength <= 0) { return; }
         bindGroundLayer(compositeShader, camera, board, groundBase + height * 3, 4);
         compositeShader.setUniformf("u_sandWind", MathUtils.sinDeg(settings.effects().windDirection()),
-              MathUtils.cosDeg(settings.effects().windDirection()), groundMotion.grains, 1 / BoardGeometry.WIDTH);
+              MathUtils.cosDeg(settings.effects().windDirection()), groundMotion.grains, 1 / BoardGeometry.width());
         compositeShader.setUniformf("u_sandOffset", groundMotion.sand);
         // Dust scatters the light that reaches the ground, so it does not glow on moonless maps.
         Color ground = lighting.groundLight();
@@ -543,25 +543,25 @@ final class GpuAtmosphere implements Disposable {
     private void renderFog(Camera camera, GpuTerrain terrain, BoardScene board) {
         updateGroundBase(board);
         float base = groundBase;
-        float height = settings.groundLayerHeight() * BoardGeometry.LEVEL;
+        float height = settings.groundLayerHeight() * BoardGeometry.level();
         fog.begin();
         screenState();
         fogShader.bind();
         sceneDepth.bind(0);
         fogShader.setUniformi("u_depth", 0);
-        float variation = options.fogHeightVariation() * BoardGeometry.LEVEL;
+        float variation = options.fogHeightVariation() * BoardGeometry.level();
         float top = base + Math.max((height + variation) * 3, settings.haze() > 0 ? height * 6 : 0);
         bindGroundLayer(fogShader, camera, board,
               Math.max(top, hasRays() ? clouds.base() : base), 3);
-        fogShader.setUniformf("u_fog", settings.fog() * 0.7f / BoardGeometry.LEVEL, height, base);
-        fogShader.setUniformf("u_haze", settings.haze() * 0.035f / BoardGeometry.WIDTH);
-        fogShader.setUniformf("u_fogVariation", variation, options.fogDensityVariation(), BoardGeometry.LEVEL * 0.25f);
-        fogShader.setUniformf("u_noiseScale", 0.5f / BoardGeometry.WIDTH);
+        fogShader.setUniformf("u_fog", settings.fog() * 0.7f / BoardGeometry.level(), height, base);
+        fogShader.setUniformf("u_haze", settings.haze() * 0.035f / BoardGeometry.width());
+        fogShader.setUniformf("u_fogVariation", variation, options.fogDensityVariation(), BoardGeometry.level() * 0.25f);
+        fogShader.setUniformf("u_noiseScale", 0.5f / BoardGeometry.width());
         fogShader.setUniformf("u_fogOffset", groundMotion.fog);
         fogShader.setUniformf("u_fogColor", lighting.fog().r, lighting.fog().g, lighting.fog().b);
         fogShader.setUniformf("u_maxOpacity", BoardAtmosphere.MAX_FOG_OPACITY);
         fogShader.setUniformf("u_rays", hasRays()
-              ? BoardAtmosphere.clouds(settings).scattering() * options.rays() / BoardGeometry.WIDTH : 0);
+              ? BoardAtmosphere.clouds(settings).scattering() * options.rays() / BoardGeometry.width() : 0);
         fogShader.setUniformf("u_sunColor", lighting.direct().r, lighting.direct().g, lighting.direct().b);
         fogShader.setUniformf("u_sunDirection", -lighting.direction().x, -lighting.direction().y, -lighting.direction().z);
         fogShader.setUniformi("u_cloudShadow", 0);

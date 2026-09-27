@@ -132,9 +132,17 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
 
     enum FeatureKind { PROP, BUILDING, TREE, LIMB, SCATTER, BOULDER }
 
+    /** Captured visual ground treatment; movement and cover modifiers remain in the game terrain. */
+    enum Biome { NONE, FIELD, MARSH, QUICKSAND, MUD }
+
     /** Authored model or scatter shape, placement in tile pixels, and height in elevation levels. */
     record Feature(String asset, float x, float y, float rotation, float scale, float height, float elevation,
-          FeatureKind kind) {
+          FeatureKind kind, int bridgeExits) {
+        Feature(String asset, float x, float y, float rotation, float scale, float height, float elevation,
+              FeatureKind kind) {
+            this(asset, x, y, rotation, scale, height, elevation, kind, 0);
+        }
+
         Feature(String asset, float x, float y, float rotation, float scale, float height, float elevation) {
             this(asset, x, y, rotation, scale, height, elevation, FeatureKind.PROP);
         }
@@ -144,7 +152,29 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
     record Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
           Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
           Pixels tactical, List<Feature> features, List<BoardView.HexText> text, BoardLiquid liquid, Pixels foliage,
-          boolean detailedGround) {
+          boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome) {
+        Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
+              Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
+              Pixels tactical, List<Feature> features, List<BoardView.HexText> text, BoardLiquid liquid, Pixels foliage,
+              boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke) {
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
+                  tactical, features, text, liquid, foliage, detailedGround, road, fireSmoke, Biome.NONE);
+        }
+        Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
+              Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
+              Pixels tactical, List<Feature> features, List<BoardView.HexText> text, BoardLiquid liquid, Pixels foliage,
+              boolean detailedGround, BoardRoad.Kind road) {
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
+                  tactical, features, text, liquid, foliage, detailedGround, road, BoardFireSmoke.NONE);
+        }
+
+        Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
+              Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
+              Pixels tactical, List<Feature> features, List<BoardView.HexText> text, BoardLiquid liquid, Pixels foliage,
+              boolean detailedGround) {
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
+                  tactical, features, text, liquid, foliage, detailedGround, BoardRoad.Kind.NONE);
+        }
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
               Pixels tactical, List<Feature> features, List<BoardView.HexText> text, BoardLiquid liquid, Pixels foliage) {
@@ -187,16 +217,32 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         boolean sameGeometry(Tile other) {
             return this == other || coords.equals(other.coords) && elevation == other.elevation
                   && waterDepth == other.waterDepth && frozen == other.frozen && roadExits == other.roadExits
-                  && surface == other.surface && detailedGround == other.detailedGround
+                  && surface == other.surface && detailedGround == other.detailedGround && road == other.road && biome == other.biome
                   && liquid.equals(other.liquid) && features.equals(other.features);
         }
     }
 
     /** Stand/flight elevation and occupied levels come from the game, including the unit's current stance. */
     public record Unit(int id, int part, String name, Waypoint location, Pixels image, boolean sensorContact,
-          Pixels annotations, int height, boolean airborne, UnitModel model, int outlineRgb, List<Coords> footprint) {
+          Pixels annotations, int height, boolean airborne, UnitModel model, int outlineRgb, List<Coords> footprint,
+          Attachment attachment) {
         public Unit {
             footprint = List.copyOf(footprint);
+        }
+
+        Unit(int id, int part, String name, Waypoint location, Pixels image, boolean sensorContact,
+              Pixels annotations, int height, boolean airborne, UnitModel model, int outlineRgb, List<Coords> footprint) {
+            this(id, part, name, location, image, sensorContact, annotations, height, airborne, model, outlineRgb, footprint, null);
+        }
+
+        Unit withAttachment(Attachment value) {
+            return new Unit(id, part, name, location, image, sensorContact, annotations, height, airborne, model, outlineRgb,
+                  footprint, value);
+        }
+
+        Unit at(Waypoint point) {
+            return new Unit(id, part, name, point, image, sensorContact, annotations, height, airborne, model, outlineRgb,
+                  point.footprint().isEmpty() ? List.of(point.coords()) : point.footprint(), attachment);
         }
 
         Unit(int id, int part, String name, Waypoint location, Pixels image, boolean sensorContact,
@@ -208,6 +254,20 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               Pixels annotations, int height, boolean airborne) {
             this(id, part, name, location, image, sensorContact, annotations, height, airborne, null, 0xFFC0C0C0);
         }
+    }
+
+    /** Exterior occupancy observed on Swing. Internal bay passengers never acquire an attachment. */
+    record Attachment(int carrierId, boolean hostile) { }
+
+    enum Release { BOARD, CLIMB_DOWN, THROWN, JUMP, WATER }
+
+    /** Both endpoints are authorized snapshots, including the destination and surviving figures after release. */
+    record AttachmentChange(int boardId, Unit before, Unit after, Unit carrier, Release release, Waypoint destination) implements Animation {
+        AttachmentChange(int boardId, Unit before, Unit after, Unit carrier, Release release) {
+            this(boardId, before, after, carrier, release, after == null ? carrier.location() : after.location());
+        }
+        @Override
+        public int entityId() { return before.id(); }
     }
 
     /**
@@ -411,7 +471,13 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         public int boardId() { return scene.boardId(); }
     }
 
-    record Combat(megamek.common.ResolvedAttack result, Unit attacker, Unit target, Waypoint destination) implements Animation {
+    /** Target type is captured with the visible event, independently of its chosen model or sprite. */
+    record Combat(megamek.common.ResolvedAttack result, Unit attacker, Unit target, Waypoint destination,
+          boolean conventionalInfantryTarget) implements Animation {
+        Combat(megamek.common.ResolvedAttack result, Unit attacker, Unit target, Waypoint destination) {
+            this(result, attacker, target, destination, false);
+        }
+
         @Override
         public int entityId() { return attacker.id(); }
 

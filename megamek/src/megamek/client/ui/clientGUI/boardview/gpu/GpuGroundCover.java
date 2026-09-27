@@ -11,23 +11,26 @@ import java.util.Random;
 import java.util.Set;
 import java.util.function.Function;
 
+import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.IntAttribute;
-import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
+import com.badlogic.gdx.utils.FloatArray;
+import com.badlogic.gdx.utils.IntArray;
 import megamek.common.board.Coords;
 
-/** Small persistent grass meshes. Travel retains nearby cover; zoom scales blades continuously into the ground. */
+/** Persistent surface roots, rendered as curved GPU blades in at most two instanced draws. GL ownership stays here. */
 final class GpuGroundCover implements Disposable {
     static final class Wind extends FloatAttribute {
         static final long TYPE = register("boardVegetationWind");
@@ -37,45 +40,179 @@ final class GpuGroundCover implements Disposable {
     }
 
     private static final int CACHE_SIZE = 384;
+    private static final int ROOTS_PER_HEX = 4096;
+    private static final int STRIDE = 4;
+    private static final float START_PIXELS = 120, FULL_PIXELS = 500;
+    private static final long BUILD_NANOS = 2_000_000;
     private static final class Cover {
         final BoardSurface.Key key;
-        final ModelInstance instance;
         final BoardTacticalGeometry.Surface surface;
+        final List<BoardSurface.Face> ground;
+        final float[] areas;
+        final float total;
+        final FloatArray roots = new FloatArray();
+        final Random random;
+        final BoardRoad road;
+        final boolean boundary;
+        int samples;
         long generation;
-        Cover(BoardSurface.Key key, ModelInstance instance, BoardTacticalGeometry.Surface surface, long generation) {
+
+        Cover(BoardScene scene, BoardScene.Tile tile, BoardSurface.Key key, BoardTacticalGeometry.Surface surface, long generation) {
             this.key = key;
-            this.instance = instance;
             this.surface = surface;
             this.generation = generation;
+            ground = new ArrayList<>(surface.top().stream().filter(face -> face.finish() == BoardSurface.Finish.TOP).toList());
+            if (BoardGeometry.tuning().stepsBetweenTops()) { ground.addAll(surface.slopes()); }
+            ground.removeIf(face -> new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor().z <= .7f);
+            areas = new float[ground.size()];
+            float sum = 0;
+            for (int i = 0; i < ground.size(); i++) {
+                var face = ground.get(i);
+                sum += Math.abs((face.b().x - face.a().x) * (face.c().y - face.a().y)
+                      - (face.c().x - face.a().x) * (face.b().y - face.a().y));
+                areas[i] = sum;
+            }
+            total = sum;
+            random = new Random(tile.coords().getX() * 0x9E3779B97F4A7C15L ^ tile.coords().getY() * 0xC2B2AE3D27D4EB4FL);
+            boundary = BoardSurfaceBlend.boundary(scene, tile);
+            road = BoardRoad.rendered(tile) ? BoardRoad.of(scene, tile) : null;
+        }
+
+        /** Roots are an ordered, deterministic prefix: zooming extends it, never rearranges existing blades. */
+        void prepare(BoardScene scene, BoardScene.Tile tile, int target, long deadline) {
+            if (total <= 0) { samples = ROOTS_PER_HEX; return; }
+            while (samples < target) {
+                if ((samples & 31) == 0 && System.nanoTime() >= deadline) { break; }
+                int rank = samples++;
+                int index = Arrays.binarySearch(areas, random.nextFloat() * total);
+                var face = ground.get(Math.min(ground.size() - 1, index < 0 ? -index - 1 : index));
+                float a = random.nextFloat(), b = random.nextFloat();
+                if (a + b > 1) { a = 1 - a; b = 1 - b; }
+                float x = face.a().x + (face.b().x - face.a().x) * a + (face.c().x - face.a().x) * b;
+                float y = face.a().y + (face.b().y - face.a().y) * a + (face.c().y - face.a().y) * b;
+                float z = face.a().z + (face.b().z - face.a().z) * a + (face.c().z - face.a().z) * b;
+                if (road != null && road.distance((x - BoardGeometry.centerX(tile.coords())) / BoardGeometry.hexScale(),
+                      (y - BoardGeometry.centerY(tile.coords())) / BoardGeometry.hexScale()) < BoardRoad.SHOULDER + 1) { continue; }
+                float grass = boundary ? BoardSurfaceBlend.sample(scene, tile, x, y, z).grass()
+                      : tile.surface() == BoardScene.Surface.GRASS ? 1 : 0;
+                if (random.nextFloat() <= grass * BoardRelief.smooth((grass - .55f) / .35f)) {
+                    roots.addAll(x, y, z - BoardGeometry.width() * .001f, rank);
+                }
+            }
+        }
+
+        int count(int target) {
+            int low = 0, high = roots.size / STRIDE;
+            while (low < high) {
+                int middle = (low + high) >>> 1;
+                if (roots.items[middle * STRIDE + 3] < target) { low = middle + 1; } else { high = middle; }
+            }
+            return low;
         }
     }
+
+    /** Two tiny blade templates share every hex. A stationary view uploads no instance data. */
+    private static final class Batch implements Disposable {
+        final int segments;
+        final List<Cover> current = new ArrayList<>(), previous = new ArrayList<>();
+        final IntArray counts = new IntArray(), previousCounts = new IntArray();
+        final FloatArray data = new FloatArray();
+        GpuInstancedMesh mesh;
+        ModelInstance instance;
+        int capacity;
+        long uploads;
+
+        Batch(int segments) { this.segments = segments; }
+
+        void begin() { current.clear(); counts.clear(); }
+
+        void add(Cover cover, int count) {
+            if (count > 0) { current.add(cover); counts.add(count); }
+        }
+
+        ModelInstance upload() {
+            if (current.isEmpty()) { previous.clear(); previousCounts.clear(); return null; }
+            boolean changed = !counts.equals(previousCounts) || current.size() != previous.size();
+            for (int i = 0; !changed && i < current.size(); i++) { changed = current.get(i) != previous.get(i); }
+            if (!changed) { return instance; }
+            data.clear();
+            for (int i = 0; i < current.size(); i++) { data.addAll(current.get(i).roots.items, 0, counts.get(i) * STRIDE); }
+            if (mesh == null) {
+                int vertices = segments * 2 + 1;
+                mesh = new GpuInstancedMesh(vertices, (segments * 2 - 1) * 3,
+                      new VertexAttributes(VertexAttribute.Position(), VertexAttribute.Normal(), VertexAttribute.ColorPacked()));
+                float[] points = new float[vertices * 7];
+                for (int i = 0; i < vertices; i++) {
+                    points[i * 7] = i == vertices - 1 ? 0 : i % 2 == 0 ? -1 : 1;
+                    points[i * 7 + 1] = (i / 2) / (float) segments;
+                    points[i * 7 + 5] = 1;
+                    points[i * 7 + 6] = Color.WHITE.toFloatBits();
+                }
+                short[] indices = new short[(vertices - 2) * 3];
+                for (int i = 0; i < vertices - 2; i++) {
+                    indices[i * 3] = (short) (i % 2 == 0 ? i : i + 1);
+                    indices[i * 3 + 1] = (short) (i % 2 == 0 ? i + 1 : i);
+                    indices[i * 3 + 2] = (short) (i + 2);
+                }
+                mesh.setVertices(points); mesh.setIndices(indices);
+                ModelBuilder builder = new ModelBuilder();
+                builder.begin();
+                builder.part("living-cover", mesh, GL20.GL_TRIANGLES,
+                      new Material(ColorAttribute.createDiffuse(Color.WHITE), IntAttribute.createCullFace(GL20.GL_NONE), new Wind()));
+                builder.manage(mesh);
+                instance = new ModelInstance(builder.end());
+            }
+            int count = data.size / STRIDE;
+            if (count > capacity) {
+                if (capacity > 0) { mesh.disableInstancedRendering(); }
+                capacity = Math.max(count, Math.max(256, capacity * 2));
+                mesh.enableInstancedRendering(false, capacity, new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_coverRoot"));
+            }
+            mesh.setInstanceData(data.items, 0, data.size);
+            previous.clear(); previous.addAll(current);
+            previousCounts.clear(); previousCounts.addAll(counts);
+            uploads++;
+            return instance;
+        }
+
+        @Override
+        public void dispose() {
+            if (instance != null) { instance.model.dispose(); }
+            mesh = null; instance = null; capacity = 0;
+            begin(); previous.clear(); previousCounts.clear(); data.clear();
+        }
+    }
+
     private final Map<Coords, Cover> models = new LinkedHashMap<>(64, .75f, true);
+    private final Batch[] batches = { new Batch(2), new Batch(4) };
     private int revision = -1;
     private int boardId = -1;
     private List<BoardScene.Tile> tiles;
     private long generation;
+    private boolean preparing;
 
     static String vertex(String source) {
-        return source.replace("void main() {", "attribute vec2 a_texCoord0;\nuniform vec3 u_wind;\nuniform float u_rainTime;\n"
-                    + "uniform float u_worldMetre;\nuniform float u_coverFade;\n"
-                    + "varying vec2 v_coverData;\nvarying vec2 v_coverRoot;\nvoid main() {")
-              .replace("gl_Position = u_projViewTrans * pos;", "float flex = a_texCoord0.y * a_texCoord0.y;\n"
-                    + "v_coverData = a_texCoord0;\nv_coverRoot = a_position.xy / u_worldMetre;\n"
-                    + "float gust = sin(dot(pos.xy, vec2(.73, .41)) / u_worldMetre - u_rainTime * 2.3);\n"
-                    + "pos.xy += u_wind.xy * u_wind.z * flex * u_worldMetre * (.035 + .025 * gust) * u_coverFade;\n"
-                    + "pos.z -= (1.0 - u_coverFade) * a_texCoord0.y * a_texCoord0.x;\n"
-                    + "gl_Position = u_projViewTrans * pos;");
+        String meadow = "uniform sampler2D u_rainNoise;\n"
+              + Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-meadow.glsl").readString();
+        String blade = Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-grass.glsl").readString()
+              .replace("@START_PIXELS@", Float.toString(START_PIXELS)).replace("@FULL_PIXELS@", Float.toString(FULL_PIXELS))
+              .replace("@ROOTS_PER_HEX@", Float.toString(ROOTS_PER_HEX));
+        return source.replace("void main() {", meadow + blade + "\nvoid main() {\nvec3 coverPosition, coverNormal; vec4 coverColor;\n"
+                    + "grassBlade(a_position, coverPosition, coverNormal, coverColor);\n")
+              .replace("vec4 pos = u_worldTrans * vec4(a_position, 1.0);", "vec4 pos = vec4(coverPosition, 1.0);")
+              .replace("vec3 normal = normalize(u_normalMatrix * a_normal);", "vec3 normal = coverNormal;")
+              .replace("v_color = a_color;", "v_color = coverColor;");
     }
 
-    static float fade(Camera camera, Vector3 position) {
-        float pixels = BoardGeometry.WIDTH * BoardCamera.pixelsPerUnit(camera, position);
-        float t = Math.clamp((pixels - 95) / 105, 0, 1);
+    private static float density(float pixels) {
+        float t = Math.clamp((pixels - START_PIXELS) / (FULL_PIXELS - START_PIXELS), 0, 1);
         return t * t * (3 - 2 * t);
     }
 
     /** Orthographic detail has one scale everywhere; perspective detail still depends on each tile's depth. */
     static boolean visibleAtScale(Camera camera) {
-        return camera.projection.val[Matrix4.M33] == 0 || fade(camera, camera.position) > 0;
+        return camera.projection.val[Matrix4.M33] == 0
+              || density(BoardGeometry.width() * BoardCamera.pixelsPerUnit(camera, camera.position)) > 0;
     }
 
     List<ModelInstance> visible(BoardScene scene, Camera camera, List<BoardScene.Tile> candidates,
@@ -90,47 +227,60 @@ final class GpuGroundCover implements Disposable {
             generation++;
         }
         List<ModelInstance> result = new ArrayList<>();
-        List<BoardScene.Tile> nearby = new ArrayList<>();
+        preparing = false;
+        for (Batch batch : batches) { batch.begin(); }
         Set<Coords> visible = new HashSet<>();
+        long deadline = System.nanoTime() + BUILD_NANOS;
+        Vector3 nearest = new Vector3();
         for (BoardScene.Tile tile : candidates) {
-            if (!BoardSurfaceBlend.natural(tile) || !grassNearby(scene, tile)) { continue; }
+            if (!BoardSurfaceBlend.natural(tile) || BoardBiome.kind(tile) != BoardScene.Biome.NONE
+                  || !grassNearby(scene, tile)) { continue; }
             Vector3 center = BoardGeometry.center(tile.coords(), tile.elevation());
-            if (fade(camera, center) <= 0) { continue; }
-            if (camera.frustum.sphereInFrustum(center, BoardGeometry.WIDTH * .75f)) {
-                Cover cover = cover(scene, tile, surfaces);
-                if (cover != null) { result.add(cover.instance); visible.add(tile.coords()); }
-            } else if (camera.frustum.sphereInFrustum(center, BoardGeometry.WIDTH * 2)) {
-                nearby.add(tile);
+            float radius = BoardGeometry.width() * .75f;
+            if (!camera.frustum.sphereInFrustum(center, radius)) { continue; }
+            // Submit enough roots for the nearest edge; the shader evaluates density at each actual root.
+            nearest.set(center).mulAdd(camera.direction, -radius);
+            float pixels = BoardGeometry.width() * BoardCamera.pixelsPerUnit(camera, nearest);
+            int target = (int) Math.ceil(ROOTS_PER_HEX * density(pixels));
+            if (target == 0) { continue; }
+            visible.add(tile.coords());
+            Cover cover = models.get(tile.coords());
+            BoardTacticalGeometry.Surface surface = surfaces.apply(tile.coords());
+            if (surface == null) { continue; }
+            if (cover == null || cover.generation != generation || cover.surface != surface) {
+                if ((cover == null || cover.surface != surface) && System.nanoTime() >= deadline) {
+                    preparing = true; continue;
+                }
+                BoardSurface.Key key = BoardSurface.geometryKey(scene, tile);
+                if (cover == null || !cover.key.equals(key) || cover.surface != surface) {
+                    if (System.nanoTime() >= deadline) { preparing = true; continue; }
+                    cover = new Cover(scene, tile, key, surface, generation);
+                    models.put(tile.coords(), cover);
+                }
+                cover.generation = generation;
             }
+            cover.prepare(scene, tile, target, deadline);
+            preparing |= cover.samples < target;
+            int detail = pixels >= 280 ? 1 : 0;
+            batches[detail].add(cover, cover.count(target));
         }
-        // Prefetch only outside the viewport, under a small CPU budget. Visible grass never waits in a build queue.
-        long deadline = System.nanoTime() + 2_000_000;
-        for (BoardScene.Tile tile : nearby) {
-            if (System.nanoTime() >= deadline) { break; }
-            cover(scene, tile, surfaces);
+        for (Batch batch : batches) {
+            ModelInstance instance = batch.upload();
+            if (instance != null) { result.add(instance); }
         }
+        // No speculative builds: an overflowing guard band used to rebuild and evict patches every stationary frame.
         var iterator = models.entrySet().iterator();
         while (models.size() > CACHE_SIZE && iterator.hasNext()) {
             var entry = iterator.next();
-            if (!visible.contains(entry.getKey())) { entry.getValue().instance.model.dispose(); iterator.remove(); }
+            if (!visible.contains(entry.getKey())) { iterator.remove(); }
         }
         return result;
     }
 
-    private Cover cover(BoardScene scene, BoardScene.Tile tile, Function<Coords, BoardTacticalGeometry.Surface> surfaces) {
-        Cover cover = models.get(tile.coords());
-        BoardTacticalGeometry.Surface surface = surfaces.apply(tile.coords());
-        if (cover != null && cover.generation == generation && cover.surface == surface) { return cover; }
-        BoardSurface.Key key = BoardSurface.geometryKey(scene, tile);
-        if (key.near().getFirst().ramps() != 0) { return null; }
-        if (cover == null || !cover.key.equals(key) || cover.surface != surface) {
-            if (cover != null) { cover.instance.model.dispose(); }
-            cover = new Cover(key, build(scene, tile, surface), surface, generation);
-            models.put(tile.coords(), cover);
-        }
-        cover.generation = generation;
-        return cover;
-    }
+    long uploads() { return batches[0].uploads + batches[1].uploads; }
+
+    /** Whether the most recent visible request still has roots to prepare within later frame budgets. */
+    boolean busy() { return preparing; }
 
     private static boolean grassNearby(BoardScene scene, BoardScene.Tile tile) {
         if (tile.surface() == BoardScene.Surface.GRASS) { return true; }
@@ -142,75 +292,11 @@ final class GpuGroundCover implements Disposable {
         return false;
     }
 
-    private static ModelInstance build(BoardScene scene, BoardScene.Tile tile, BoardTacticalGeometry.Surface surface) {
-        // Reuse the terrain's finished triangles, just as tactical overlays do; shoreline construction is expensive.
-        List<BoardSurface.Face> ground = new ArrayList<>(surface.top().stream()
-              .filter(face -> face.finish() == BoardSurface.Finish.TOP).toList());
-        if (BoardGeometry.tuning().stepsBetweenTops()) {
-            // A step's slope is meadow too where it lies back far enough; the hex above it owns it.
-            for (BoardSurface.Face face : surface.slopes()) {
-                Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
-                if (normal.z > .7f) { ground.add(face); }
-            }
-        }
-        // Area-weighted sampling puts roots exactly on the rendered triangles, without searching every face per blade.
-        float[] areas = new float[ground.size()];
-        float total = 0;
-        for (int i = 0; i < ground.size(); i++) {
-            var face = ground.get(i);
-            total += Math.abs((face.b().x - face.a().x) * (face.c().y - face.a().y)
-                  - (face.c().x - face.a().x) * (face.b().y - face.a().y));
-            areas[i] = total;
-        }
-        Random random = new Random(tile.coords().getX() * 0x9E3779B97F4A7C15L ^ tile.coords().getY() * 0xC2B2AE3D27D4EB4FL);
-        ModelBuilder builder = new ModelBuilder();
-        builder.begin();
-        var mesh = builder.part("living-cover", GL20.GL_TRIANGLES, VertexAttributes.Usage.Position
-                    | VertexAttributes.Usage.Normal | VertexAttributes.Usage.TextureCoordinates | VertexAttributes.Usage.ColorPacked,
-              new Material(ColorAttribute.createDiffuse(Color.WHITE), IntAttribute.createCullFace(GL20.GL_NONE), new Wind()));
-        boolean boundary = BoardSurfaceBlend.boundary(scene, tile);
-        for (int tuft = 0; tuft < 72 && total > 0; tuft++) {
-            int index = Arrays.binarySearch(areas, random.nextFloat() * total);
-            var face = ground.get(Math.min(ground.size() - 1, index < 0 ? -index - 1 : index));
-            float a = random.nextFloat(), b = random.nextFloat();
-            if (a + b > 1) { a = 1 - a; b = 1 - b; }
-            Vector3 root = new Vector3(face.a()).mulAdd(new Vector3(face.b()).sub(face.a()), a)
-                  .mulAdd(new Vector3(face.c()).sub(face.a()), b).add(0, 0, -BoardGeometry.WIDTH * .001f);
-            float grass = boundary ? BoardSurfaceBlend.sample(scene, tile, root.x, root.y, root.z).grass()
-                  : tile.surface() == BoardScene.Surface.GRASS ? 1 : 0;
-            // Tufts need a substantial patch, leaving the small interlocking snow/sand margins mostly bare.
-            if (random.nextFloat() > grass * BoardRelief.smooth((grass - .55f) / .35f)) { continue; }
-            float tone = random.nextFloat();
-            // The meadow texture's own blade palette, so near blades read as part of the ground.
-            Color color = new Color(.17f + tone * .16f, .29f + tone * .15f, .08f + tone * .08f, 1);
-            for (int blade = 0; blade < 3; blade++) {
-                float angle = random.nextFloat() * (float) Math.PI * 2;
-                Vector3 along = new Vector3((float) Math.cos(angle), (float) Math.sin(angle), 0);
-                Vector3 width = new Vector3(-along.y, along.x, 0).scl(BoardGeometry.WIDTH * (.0045f + random.nextFloat() * .003f));
-                float height = BoardGeometry.WIDTH * (.024f + random.nextFloat() * .024f);
-                Vector3 bend = new Vector3(root).mulAdd(along, height * .20f).add(0, 0, height * .55f);
-                Vector3 tip = new Vector3(root).mulAdd(along, height * .60f).add(0, 0, height);
-                triangle(mesh, new Vector3(root).sub(width), new Vector3(root).add(width), bend, color, height, 0, 0, .55f);
-                triangle(mesh, new Vector3(root).add(width), tip, bend, color, height, 0, 1, .55f);
-            }
-        }
-        return new ModelInstance(builder.end());
-    }
-
-    private static void triangle(MeshPartBuilder mesh, Vector3 a, Vector3 b, Vector3 c, Color color,
-          float height, float u, float v, float w) {
-        Vector3 normal = new Vector3(b).sub(a).crs(new Vector3(c).sub(a)).nor();
-        mesh.triangle(vertex(a, normal, color, height, u), vertex(b, normal, color, height, v), vertex(c, normal, color, height, w));
-    }
-
-    private static MeshPartBuilder.VertexInfo vertex(Vector3 point, Vector3 normal, Color color, float height, float flex) {
-        return new MeshPartBuilder.VertexInfo().setPos(point).setNor(normal).setCol(color).setUV(height, flex);
-    }
-
     @Override
     public void dispose() {
-        models.values().forEach(cover -> cover.instance.model.dispose());
+        for (Batch batch : batches) { batch.dispose(); }
         models.clear();
         tiles = null;
+        preparing = false;
     }
 }

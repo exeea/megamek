@@ -1,0 +1,86 @@
+// Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
+uniform sampler2D u_biomeHexes;
+uniform vec2 u_biomeBoard;
+
+// BoardRelief.hash/noise in GLSL: roots and wetland material evaluate the same world field.
+float biomeHash(ivec2 p) {
+    uint h = uint(p.x) * 374761393u + uint(p.y) * 668265263u;
+    h = (h ^ (h >> 13)) * 1274126177u;
+    return float((h ^ (h >> 16)) & 0x00ffffffu) / 16777216.0;
+}
+float biomeNoise(vec2 p) {
+    ivec2 cell = ivec2(floor(p));
+    vec2 t = fract(p); t = t * t * (3.0 - 2.0 * t);
+    return mix(mix(biomeHash(cell), biomeHash(cell + ivec2(1, 0)), t.x),
+          mix(biomeHash(cell + ivec2(0, 1)), biomeHash(cell + ivec2(1, 1)), t.x), t.y);
+}
+float biomeWetness(vec2 p) {
+    vec2 q = p + 1.3 * (vec2(biomeNoise(p / 4.0 + vec2(31.0, 0.0)),
+          biomeNoise(p / 4.0 + vec2(0.0, -23.0))) - .5);
+    return .55 * biomeNoise(q / 5.7) + .30 * biomeNoise(q / 2.0 + vec2(19.0, -7.0))
+          + .15 * biomeNoise(q / .65);
+}
+
+float biomeHexDistance(vec2 p) {
+    p = abs(p);
+    const float a = 30.0 * 72.0 / 84.0 * .5, b = 7.5;
+    return max(p.y - a, (a * p.x + b * p.y - 15.0 * a) / sqrt(a*a + b*b));
+}
+
+// One bounded stencil serves both the shoreline treatment and the connected liquid's optical mixture.
+// A negative waterLevel disables the liquid work for dry terrain. No additional textures or per-hex draws.
+void terrainCoverage(vec3 world, float edge, float waterLevel, out vec4 cover, out vec4 liquids) {
+    cover = vec4(0.0); liquids = vec4(0.0);
+    if (u_biomeBoard.x < 1.0) return;
+    const float width = 30.0, height = 30.0 * 72.0 / 84.0;
+    int column = int(floor(world.x / (width * .75)));
+    bool aqueous = waterLevel > -1000.0;
+    vec2 mixed = world.xy;
+    if (aqueous) {
+        mixed += (vec2(biomeNoise(world.xy / 8.0), biomeNoise(world.xy / 7.1 + 17.0)) - .5) * 4.0;
+        mixed += (vec2(biomeNoise(mixed / 2.7 + 31.0), biomeNoise(mixed / 2.1 - 9.0)) - .5) * 2.0;
+    }
+    float filament = aqueous ? biomeNoise(mixed / 1.3) * 7.0 : 0.0;
+    float fineMix = 1.0 - smoothstep(.08, .4, length(fwidth(world.xy)));
+    float total = 0.0;
+    for (int dx = -1; dx <= 1; dx++) {
+        int x = column + dx;
+        float parity = mod(float(x), 2.0);
+        int row = int(floor(-world.y / height - parity * .5));
+        for (int dy = -1; dy <= 1; dy++) {
+            int y = row + dy;
+            vec2 center = vec2((3.0 * float(x) + 2.0) * width * .25, -(2.0 * float(y) + parity + 1.0) * height * .5);
+            float distance = biomeHexDistance(world.xy - center);
+            float w = 1.0 - smoothstep(-edge, edge, distance);
+            float lw = aqueous ? 1.0 - smoothstep(-5.0, 5.0, biomeHexDistance(mixed - center)) : 0.0;
+            // Fold narrow pigment filaments through the mixing band; uniform interiors remain unchanged.
+            lw = clamp(lw + 4.0 * lw * (1.0 - lw) * .13 * sin(lw * 42.0 + filament) * fineMix, 0.0, 1.0);
+            total += w;
+            if ((w > 0.0 || lw > 0.0) && x >= 0 && y >= 0 && float(x) < u_biomeBoard.x && float(y) < u_biomeBoard.y) {
+                vec4 tile = texelFetch(u_biomeHexes, ivec2(x, y), 0);
+                float level = tile.a * 255.0 - 64.0;
+                float z = level * u_levelHeight / u_metre;
+                int kind = int(tile.r * 255.0 + .5);
+                vec4 kinds = vec4(kind == 1, kind == 2, kind == 3, kind == 4);
+                cover += kinds * w * (1.0 - smoothstep(.15, 1.25, abs(world.z - z)));
+                int liquid = int(tile.g * 255.0 + .5);
+                liquids += vec4(liquid == 1, liquid == 2, liquid == 3, liquid == 4) * lw
+                      * (1.0 - smoothstep(.05, .25, abs(waterLevel - level)));
+            }
+        }
+    }
+    cover /= max(total, .0001);
+    liquids /= max(dot(liquids, vec4(1.0)), .0001);
+}
+
+vec4 biomeCoverage(vec3 world, float edge) {
+    vec4 cover, liquids;
+    terrainCoverage(world, edge, -10000.0, cover, liquids);
+    return cover;
+}
+
+vec4 liquidCoverage(vec3 world, float level) {
+    vec4 cover, liquids;
+    terrainCoverage(world, .01, level, cover, liquids);
+    return liquids;
+}

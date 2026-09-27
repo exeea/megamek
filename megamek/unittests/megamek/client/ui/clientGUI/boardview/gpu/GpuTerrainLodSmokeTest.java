@@ -29,6 +29,40 @@ import org.lwjgl.opengl.GL11;
 @Tag("on-demand")
 class GpuTerrainLodSmokeTest {
     @Test
+    void closingDuringPreparationStopsTheWorkerAndAllowsReopening() {
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        var config = GpuBoardWindow.configuration(false);
+        config.setWindowedMode(640, 480);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                GpuTerrain terrain = new GpuTerrain();
+                try {
+                    BoardScene scene = GpuTerrainReliefSmokeTest.scene(BoardScene.Surface.GRASS);
+                    BoardCamera camera = new BoardCamera();
+                    camera.resize(640, 480);
+                    camera.fit(scene);
+                    terrain.update(scene, camera.camera);
+                    terrain.refine(camera.camera);
+                    terrain.dispose();
+                    assertTrue(((java.util.concurrent.ExecutorService) field(terrain, "detailWorker")).isTerminated());
+                    terrain = new GpuTerrain();
+                    terrain.update(scene, camera.camera);
+                    settle(terrain, null, scene, camera);
+                    assertTrue(terrain.ready(scene));
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) {
+                    failure.set(error);
+                } finally {
+                    terrain.dispose();
+                    Gdx.app.exit();
+                }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Terrain close/reopen lifecycle", failure.get()); }
+    }
+
+    @Test
     void zoomRestoresDetailAndEditsDiscardObsoletePreparation() {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         var config = GpuBoardWindow.configuration(false);
@@ -39,6 +73,7 @@ class GpuTerrainLodSmokeTest {
                 GpuTerrain terrain = new GpuTerrain();
                 GpuTactical tactical = new GpuTactical(terrain::tacticalSurface);
                 boolean previousLod = TerrainLod.enabled();
+                var previousSettings = BoardGeometry.tuning();
                 try {
                     TerrainLod.setEnabled(true);
                     verifiesPreparedWaterTextureUpload();
@@ -50,6 +85,8 @@ class GpuTerrainLodSmokeTest {
                     camera.fit(scene);
                     view(camera, 30);
                     terrain.update(scene, camera.camera);
+                    assertTrue(terrain.busy(), "Opening must enqueue work instead of constructing the board in this call");
+                    settle(terrain, tactical, scene, camera);
                     var distant = terrain.tacticalSurface(at);
                     assertEquals(TerrainLod.DISTANT, firstLod(terrain));
 
@@ -87,19 +124,46 @@ class GpuTerrainLodSmokeTest {
                           before.surface(), before.ground(), null, null, null, null, List.of(), List.of(),
                           BoardLiquid.NONE, null, true));
                     BoardScene edited = new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
+                    var displayed = terrain.tacticalSurface(at);
                     terrain.update(edited, camera.camera);
-                    var installed = terrain.tacticalSurface(at);
+                    assertSame(displayed, terrain.tacticalSurface(at), "The displayed revision survives while its replacement is prepared");
+                    // A second request supersedes both an in-flight LoD job and the first edit, without a queue of old edits.
+                    terrain.refine(camera.camera);
+                    terrain.update(scene, camera.camera);
+                    terrain.update(edited, camera.camera);
                     settle(terrain, tactical, edited, camera);
-                    assertSame(installed, terrain.tacticalSurface(at), "The stale job must not overwrite the edit");
+                    assertNotSame(displayed, terrain.tacticalSurface(at));
                     Vector3 center = BoardGeometry.center(at, before.elevation() + 2);
                     double height = terrain.tacticalSurface(at).top().stream()
                           .mapToDouble(face -> face.height(center.x, center.y)).max().orElseThrow();
                     assertTrue(Math.abs(height - center.z) < BoardRelief.metres(.3f));
+
+                    // Unit scale alone does not rebuild a board without fallen limb props.
+                    BoardGeometry.tune(new BoardGeometry.Tuning(1, 1.2f, 1, 18, .8f));
+                    terrain.update(edited, camera.camera);
+                    assertTrue(!terrain.busy());
+                    var oldSettings = terrain.settings();
+                    var oldSurface = terrain.tacticalSurface(at);
+                    BoardGeometry.tune(new BoardGeometry.Tuning(1.3f, 1.2f, 1, 24, .8f));
+                    terrain.update(edited, camera.camera);
+                    terrain.refine(camera.camera);
+                    assertSame(oldSettings, terrain.settings(), "Pending tuning must not change the displayed coordinate system");
+                    assertSame(oldSurface, terrain.tacticalSurface(at));
+                    BoardGeometry.tune(new BoardGeometry.Tuning(1.5f, 1.2f, 1, 27, .8f));
+                    terrain.update(edited, camera.camera);
+                    settle(terrain, tactical, edited, camera);
+                    assertEquals(BoardGeometry.tuning(), terrain.settings().geometry());
+                    assertNotSame(oldSurface, terrain.tacticalSurface(at));
+                    Vector3 changedCenter = BoardGeometry.center(at, before.elevation() + 2);
+                    var hit = terrain.hit(edited, new com.badlogic.gdx.math.collision.Ray(
+                          new Vector3(changedCenter).add(0, 0, 1000), new Vector3(0, 0, -1)));
+                    assertEquals(at, hit.coords(), "Picking switches to the same published scale and height as terrain");
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) {
                     failure.set(error);
                 } finally {
                     TerrainLod.setEnabled(previousLod);
+                    BoardGeometry.tune(previousSettings);
                     tactical.dispose();
                     terrain.dispose();
                     Gdx.app.exit();
@@ -127,7 +191,7 @@ class GpuTerrainLodSmokeTest {
         } finally { field.dispose(); }
     }
 
-    private static void settle(GpuTerrain terrain, GpuTactical tactical, BoardScene scene, BoardCamera camera) throws Exception {
+    static void settle(GpuTerrain terrain, GpuTactical tactical, BoardScene scene, BoardCamera camera) throws Exception {
         long deadline = System.nanoTime() + 60_000_000_000L;
         double maximum = 0;
         while (true) {
@@ -136,8 +200,8 @@ class GpuTerrainLodSmokeTest {
             double elapsed = (System.nanoTime() - start) / 1e6;
             maximum = Math.max(maximum, elapsed);
             if (changed) { System.out.printf("LOD install %.3f ms%n", elapsed); }
-            tactical.update(scene, changed);
-            if (!changed && field(terrain, "detailJob") == null) {
+            if (tactical != null && terrain.ready(scene)) { tactical.update(terrain.presentation(scene), changed); }
+            if (!changed && !terrain.busy()) {
                 System.out.printf("LOD maximum render-thread handoff %.3f ms%n", maximum);
                 return;
             }

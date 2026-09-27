@@ -12,9 +12,18 @@ enum TerrainLod {
 
     static final int CHUNK_SIZE = 8;
     static final boolean DEFAULT_ENABLED = true;
+    private static final TerrainLod[] LEVELS = values();
     record Tuning(int fullPixels, int mediumPixels) {
         Tuning {
             if (mediumPixels < 1 || fullPixels < mediumPixels) { throw new IllegalArgumentException("Invalid terrain detail"); }
+        }
+
+        float threshold(int level) {
+            return switch (level) {
+                case 0 -> fullPixels;
+                case 1 -> mediumPixels;
+                default -> mediumPixels * .25f;
+            };
         }
     }
     static final Tuning DEFAULTS = new Tuning(64, 24);
@@ -42,12 +51,10 @@ enum TerrainLod {
     /** Nearest-point projected hex width, with separate refinement/coarsening thresholds to avoid oscillation. */
     static TerrainLod select(float pixels, TerrainLod current) {
         if (!enabled) { return FULL; }
-        float full = tuning.fullPixels(), medium = tuning.mediumPixels();
-        float[] thresholds = { full, medium, medium * .25f };
         int level = current == null ? 3 : current.ordinal();
-        while (level > 0 && pixels >= thresholds[level - 1] * (current == null ? 1 : 1.1f)) { level--; }
-        while (level < 3 && pixels < thresholds[level] * .9f) { level++; }
-        return values()[level];
+        while (level > 0 && pixels >= tuning.threshold(level - 1) * (current == null ? 1 : 1.1f)) { level--; }
+        while (level < 3 && pixels < tuning.threshold(level) * .9f) { level++; }
+        return LEVELS[level];
     }
 
     static boolean sameChunk(Coords a, Coords b) {

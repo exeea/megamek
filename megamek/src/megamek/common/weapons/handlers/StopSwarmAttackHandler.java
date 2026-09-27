@@ -80,6 +80,8 @@ public class StopSwarmAttackHandler extends WeaponHandler {
             return false;
         }
         // swarming ended successfully
+        gameManager.sendAttackAnimation(attackingEntity, game.getEntity(attackingEntity.getSwarmTargetId()),
+              megamek.common.ResolvedAttack.Kind.STOP_SWARM, -1, Entity.LOC_NONE, true);
         Report report = new Report(3110);
         report.subject = subjectId;
         vPhaseReport.addElement(report);

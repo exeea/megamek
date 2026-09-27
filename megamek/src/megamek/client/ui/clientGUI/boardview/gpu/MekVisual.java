@@ -32,8 +32,8 @@ final class MekVisual {
                 filterAnatomy(node, structure.anatomy());
                 assembled.nodes.add(node);
             }
-            // Before the weapons: the unused hand or gun body is detached afterwards, and takes its far parts along.
-            var levels = attachFarBody(library, descriptor, body, structure.anatomy(), assembled);
+            // Before the weapons: detaching an unused hand or gun body must also detach its LOD1 parts.
+            var levels = attachLod1Body(library, descriptor, body, structure.anatomy(), assembled);
             assembled.calculateTransforms();
             var bindings = UnitEquipmentAssembly.attachAll(library, descriptor, body, structure, assembled);
             assembled.calculateTransforms();
@@ -47,67 +47,61 @@ final class MekVisual {
     }
 
     /**
-     * Adds the descriptor's far body, switched off, to the near body's nodes. A near body (one over the ordinary
-     * budget) is refused without a usable far body, so a detailed Mek is never drawn at its full cost from afar.
+     * Adds optional LOD1 parts, switched off, to the LOD0 joints. Missing LOD1 keeps the LOD0 body at every distance.
      *
-     * @return the near and far meshes, or {@link GpuUnitModel.DetailLevels#NONE} for a Mek with one level of detail
+     * @return both levels, or {@link GpuUnitModel.DetailLevels#NONE} when LOD0 is the only usable body
      */
-    private static GpuUnitModel.DetailLevels attachFarBody(GpuUnitModels library, JsonValue descriptor,
+    private static GpuUnitModel.DetailLevels attachLod1Body(GpuUnitModels library, JsonValue descriptor,
           GpuUnitModels.ModularAsset body, @Nullable UnitModelState.MekAnatomy anatomy, Model assembled) {
-        String farAsset = descriptor.getString("farBody", null);
-        boolean isNearBody = body.descriptor().nearDetail();
-        if (farAsset == null) {
-            if (isNearBody) {
-                throw new IllegalArgumentException("A near-detail Mek body needs a farBody in its descriptor");
+        String lod1Asset = descriptor.getString("body");
+        Model lod1Model = body.model(1);
+        int lod1Triangles = body.triangles(1);
+        if (lod1Model == body.model()) {
+            // Older custom recipes may still refer to a separate component.
+            lod1Asset = descriptor.getString("bodyLod1", descriptor.getString("farBody", null));
+            if (lod1Asset == null) { return GpuUnitModel.DetailLevels.NONE; }
+            var lod1 = library.modular(lod1Asset);
+            String problem = lod1BodyProblem(body, lod1);
+            if (problem != null) {
+                LOGGER.warn("[MekLod] LOD1 body {} is unusable ({}); this Mek keeps LOD0", lod1Asset, problem);
+                return GpuUnitModel.DetailLevels.NONE;
             }
-            return GpuUnitModel.DetailLevels.NONE;
+            lod1Model = lod1.model();
+            lod1Triangles = lod1.triangles();
         }
-        var far = library.modular(farAsset);
-        String problem = farBodyProblem(body, far);
-        if (problem != null) {
-            if (isNearBody) {
-                throw new IllegalArgumentException("Unusable far body " + farAsset + ": " + problem);
-            }
-            LOGGER.warn("[MekLod] far body {} is unusable ({}); this Mek keeps one level of detail", farAsset, problem);
-            return GpuUnitModel.DetailLevels.NONE;
-        }
-        Set<Mesh> farMeshes = new HashSet<>();
-        var farNodes = new ModelInstance(far.model()).nodes;
-        for (Node node : farNodes) {
+        Set<Mesh> lod1Meshes = new HashSet<>();
+        var lod1Nodes = new ModelInstance(lod1Model).nodes;
+        for (Node node : lod1Nodes) {
             filterAnatomy(node, anatomy);
         }
-        GpuUnitModels.attachFarParts(farNodes, id -> assembled.getNode(id, true), "[MekLod] far body " + farAsset,
-              farMeshes);
-        if (farMeshes.isEmpty()) {
-            if (isNearBody) {
-                throw new IllegalArgumentException("Far body " + farAsset + " shares no node with the near body");
-            }
-            LOGGER.warn("[MekLod] far body {} shares no node with the body; this Mek keeps one level of detail",
-                  farAsset);
+        GpuUnitModels.attachLod1Parts(lod1Nodes, id -> assembled.getNode(id, true), "[MekLod] LOD1 body " + lod1Asset,
+              lod1Meshes);
+        if (lod1Meshes.isEmpty()) {
+            LOGGER.warn("[MekLod] LOD1 body {} shares no node with LOD0; this Mek keeps LOD0", lod1Asset);
             return GpuUnitModel.DetailLevels.NONE;
         }
-        Set<Mesh> nearMeshes = new HashSet<>();
-        body.model().meshes.forEach(nearMeshes::add);
-        LOGGER.debug("[MekLod] {} carries far body {} ({} near triangles, {} far)", descriptor.getString("body"),
-              farAsset, body.triangles(), far.triangles());
-        return new GpuUnitModel.DetailLevels(nearMeshes, farMeshes, FormationLod.MEK_FAR_PIXELS);
+        Set<Mesh> lod0Meshes = new HashSet<>();
+        body.model().meshes.forEach(lod0Meshes::add);
+        LOGGER.debug("[MekLod] {} carries LOD1 body {} ({} LOD0 triangles, {} LOD1)", descriptor.getString("body"),
+              lod1Asset, body.triangles(), lod1Triangles);
+        return new GpuUnitModel.DetailLevels(lod0Meshes, lod1Meshes, FormationLod.MEK_LOD1_PIXELS);
     }
 
-    /** @return why {@code far} cannot stand in for {@code near}, or {@code null} when it can */
-    private static @Nullable String farBodyProblem(GpuUnitModels.ModularAsset near,
-          @Nullable GpuUnitModels.ModularAsset far) {
-        if (far == null) {
+    /** @return why {@code lod1} cannot stand in for {@code lod0}, or {@code null} when it can */
+    private static @Nullable String lod1BodyProblem(GpuUnitModels.ModularAsset lod0,
+          @Nullable GpuUnitModels.ModularAsset lod1) {
+        if (lod1 == null) {
             return "it did not load";
         }
-        var farDescriptor = far.descriptor();
-        if (!"body".equals(farDescriptor.kind())) {
-            return "it is a " + farDescriptor.kind() + ", not a body";
+        var descriptor = lod1.descriptor();
+        if (!"body".equals(descriptor.kind())) {
+            return "it is a " + descriptor.kind() + ", not a body";
         }
-        if (farDescriptor.nearDetail()) {
-            return "it is itself a near-detail body";
+        if (descriptor.lod0Detail()) {
+            return "it is itself marked as LOD0";
         }
-        if (!farDescriptor.rig().equals(near.descriptor().rig())) {
-            return "its rig " + farDescriptor.rig() + " differs from the near body's " + near.descriptor().rig();
+        if (!descriptor.rig().equals(lod0.descriptor().rig())) {
+            return "its rig " + descriptor.rig() + " differs from LOD0's " + lod0.descriptor().rig();
         }
         return null;
     }

@@ -8,8 +8,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import com.badlogic.gdx.files.FileHandle;
-import com.badlogic.gdx.graphics.g3d.loader.G3dModelLoader;
-import com.badlogic.gdx.utils.JsonReader;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -32,8 +30,12 @@ class UnitModelDescriptorTest {
             Path file = assets.resolve(key + ".json");
             var descriptor = UnitModelDescriptor.read(file);
             Path mesh = UnitModelDescriptor.contained(assets, file.getParent().resolve(descriptor.mesh()));
-            var data = new G3dModelLoader(new JsonReader()).loadModelData(new FileHandle(mesh.toFile()));
+            var levels = RigidGlb.loadLods(new FileHandle(mesh.toFile()));
+            var data = levels.getFirst();
             descriptor.validate(data);
+            for (int level = 1; level < levels.size(); level++) {
+                if (levels.get(level) != levels.get(level - 1)) { descriptor.validate(levels.get(level), level); }
+            }
             int triangles = 0;
             for (var part : data.meshes.first().parts) {
                 triangles += part.indices.length / 3;
@@ -45,7 +47,7 @@ class UnitModelDescriptorTest {
     @Test
     void detailedMeshesMayExceedTheTargetButNotTheHardCap() throws Exception {
         var descriptor = UnitModelDescriptor.read(assets.resolve("bodies/warhammer.json"));
-        var data = new G3dModelLoader(new JsonReader()).loadModelData(new FileHandle(assets.resolve("bodies/warhammer.g3dj").toFile()));
+        var data = GpuUnitModels.meshData(new FileHandle(assets.resolve("bodies/warhammer.glb").toFile()));
         var part = data.meshes.first().parts[0];
         int otherTriangles = UnitModelDescriptor.triangleCount(data) - part.indices.length / 3;
         short[] original = part.indices;
@@ -61,8 +63,8 @@ class UnitModelDescriptorTest {
     @Test
     void battleArmourSuitsHaveTheirOwn330Budget() throws Exception {
         var descriptor = UnitModelDescriptor.read(assets.resolve("troops/battle-armor-standing.json"));
-        var data = new G3dModelLoader(new JsonReader()).loadModelData(
-              new FileHandle(assets.resolve("troops/battle-armor-standing.g3dj").toFile()));
+        var data = GpuUnitModels.meshData(
+              new FileHandle(assets.resolve("troops/battle-armor-standing.glb").toFile()));
         var part = data.meshes.first().parts[0];
         int otherTriangles = UnitModelDescriptor.triangleCount(data) - part.indices.length / 3;
         short[] original = part.indices;
@@ -90,7 +92,7 @@ class UnitModelDescriptorTest {
     @Test
     void equipmentHasItsOwnStrictUnder150Budget() throws Exception {
         var descriptor = UnitModelDescriptor.read(assets.resolve("equipment/ppc.json"));
-        var data = new G3dModelLoader(new JsonReader()).loadModelData(new FileHandle(assets.resolve("equipment/ppc.g3dj").toFile()));
+        var data = GpuUnitModels.meshData(new FileHandle(assets.resolve("equipment/ppc.glb").toFile()));
         var part = data.meshes.first().parts[0];
         int otherTriangles = UnitModelDescriptor.triangleCount(data) - part.indices.length / 3;
         short[] original = part.indices;
@@ -104,15 +106,15 @@ class UnitModelDescriptorTest {
     }
 
     @Test
-    void aNearDetailBodyMayUse3000TrianglesAndAnOrdinaryBodyMayNot() throws Exception {
+    void anExplicitLod0BodyMayUse3000TrianglesAndAnOrdinaryBodyMayNot() throws Exception {
         ObjectNode document = (ObjectNode) json.readTree(assets.resolve("bodies/warhammer.json").toFile());
-        document.put("detail", "near");
+        document.put("detail", "lod0");
         Path near = scratch.resolve("near.json");
         json.writeValue(near.toFile(), document);
         var nearBody = UnitModelDescriptor.read(near);
         var ordinaryBody = UnitModelDescriptor.read(assets.resolve("bodies/warhammer.json"));
-        var data = new G3dModelLoader(new JsonReader()).loadModelData(
-              new FileHandle(assets.resolve("bodies/warhammer.g3dj").toFile()));
+        var data = GpuUnitModels.meshData(
+              new FileHandle(assets.resolve("bodies/warhammer.glb").toFile()));
         var part = data.meshes.first().parts[0];
         int otherTriangles = UnitModelDescriptor.triangleCount(data) - part.indices.length / 3;
         short[] original = part.indices;
@@ -127,9 +129,9 @@ class UnitModelDescriptorTest {
     }
 
     @Test
-    void onlyABodyMayBeMarkedNearAndNearIsTheOnlyLevel() throws Exception {
+    void onlyABodyMayRequestTheLod0TriangleAllowance() throws Exception {
         ObjectNode equipment = (ObjectNode) json.readTree(assets.resolve("equipment/ppc.json").toFile());
-        equipment.put("detail", "near");
+        equipment.put("detail", "lod0");
         Path broken = scratch.resolve("broken.json");
         json.writeValue(broken.toFile(), equipment);
         assertThrows(JsonMappingException.class, () -> UnitModelDescriptor.read(broken));
@@ -147,7 +149,7 @@ class UnitModelDescriptorTest {
         Path broken = scratch.resolve("broken.json");
         json.writeValue(broken.toFile(), document);
         var descriptor = UnitModelDescriptor.read(broken);
-        var data = new G3dModelLoader(new JsonReader()).loadModelData(new FileHandle(assets.resolve("bodies/warhammer.g3dj").toFile()));
+        var data = GpuUnitModels.meshData(new FileHandle(assets.resolve("bodies/warhammer.glb").toFile()));
         assertThrows(IllegalArgumentException.class, () -> descriptor.validate(data));
         var valid = UnitModelDescriptor.read(file);
         data.meshes.first().vertices[0] = Float.NaN;
@@ -172,7 +174,7 @@ class UnitModelDescriptorTest {
         Path file = assets.resolve("bodies/family-spheroid.json");
         var descriptor = UnitModelDescriptor.read(file);
         assertEquals(4, descriptor.landingSupports().size());
-        var data = new G3dModelLoader(new JsonReader()).loadModelData(new FileHandle(file.resolveSibling(descriptor.mesh()).toFile()));
+        var data = GpuUnitModels.meshData(new FileHandle(file.resolveSibling(descriptor.mesh()).toFile()));
         descriptor.validate(data);
         ObjectNode document = (ObjectNode) json.readTree(file.toFile());
         ((ObjectNode) document.get("landingSupports").get(0)).put("foot", "missing-pad");
@@ -195,9 +197,9 @@ class UnitModelDescriptorTest {
     @Test
     void assetReferencesCannotEscapeTheModelDirectory() throws Exception {
         Path root = Files.createDirectory(scratch.resolve("models"));
-        Path outside = Files.writeString(scratch.resolve("outside.g3dj"), "{}");
+        Path outside = Files.writeString(scratch.resolve("outside.glb"), "{}");
         assertThrows(IllegalArgumentException.class, () -> UnitModelDescriptor.contained(root, outside));
         assertThrows(IllegalArgumentException.class,
-              () -> UnitModelDescriptor.contained(root, root.resolve("../outside.g3dj")));
+              () -> UnitModelDescriptor.contained(root, root.resolve("../outside.glb")));
     }
 }

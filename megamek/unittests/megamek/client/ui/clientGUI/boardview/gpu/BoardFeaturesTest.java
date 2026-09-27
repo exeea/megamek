@@ -26,7 +26,7 @@ class BoardFeaturesTest {
         var models = Map.of(Terrains.BUILDING, "building");
         assertFalse(BoardFeatures.detailedGround(hex, Map.of()), "An unmodeled building still needs its artwork");
         assertTrue(BoardFeatures.detailedGround(hex, models), "The model stands on the normal concrete material");
-        for (int terrain : new int[] { Terrains.ROAD, Terrains.RUBBLE, Terrains.BLDG_BASE_COLLAPSED,
+        for (int terrain : new int[] { Terrains.ROAD_FLUFF, Terrains.RUBBLE, Terrains.BLDG_BASE_COLLAPSED,
               Terrains.FORTIFIED }) {
             hex.addTerrain(new Terrain(terrain, 1));
             assertFalse(BoardFeatures.detailedGround(hex, models), "Keep separate terrain markings: " + terrain);
@@ -189,7 +189,10 @@ class BoardFeaturesTest {
         var models = Map.of(Terrains.BUILDING, selectedRoof, Terrains.INDUSTRIAL, industrialRoof);
         var features = BoardFeatures.capture(hex, new Coords(2, 2), models);
         assertTrue(features.stream().anyMatch(feature -> feature.asset().equals(selectedRoof) && feature.height() == 4));
-        assertEquals(2, features.stream().filter(feature -> feature.asset().equals("bridge") && feature.elevation() == 2).count());
+        var bridges = features.stream().filter(feature -> feature.asset().equals("bridge")).toList();
+        assertEquals(1, bridges.size(), "One connected deck per bridge hex");
+        assertEquals(2, bridges.getFirst().elevation());
+        assertEquals(18, bridges.getFirst().bridgeExits());
         assertTrue(features.stream().anyMatch(feature -> feature.asset().equals(industrialRoof) && feature.height() == 3));
         assertEquals(features, BoardFeatures.capture(hex, new Coords(2, 2), models), "Placement must remain stable across snapshots");
         assertFalse(BoardFeatures.capture(hex, new Coords(2, 2), Map.of()).stream()
@@ -216,7 +219,8 @@ class BoardFeaturesTest {
         hex.removeAllTerrains();
         hex.setTheme("");
         hex.addTerrain(new Terrain(Terrains.FIELDS, 1));
+        assertEquals(BoardScene.Biome.FIELD, BoardFeatures.biome(hex));
         assertTrue(BoardFeatures.capture(hex, new Coords(0, 0), Map.of()).stream()
-              .anyMatch(feature -> feature.asset().equals("field") && feature.height() == 1));
+              .noneMatch(feature -> feature.asset().equals("field")), "Instanced crops replace the legacy field prop");
     }
 }

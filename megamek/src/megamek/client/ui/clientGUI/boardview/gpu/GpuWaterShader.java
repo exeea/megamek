@@ -96,17 +96,17 @@ final class GpuWaterShader extends Attribute {
                 for (BoardSurface.Side fall : upper.waterfalls) {
                     Coords below = upper.tile.coords().translated(BoardGeometry.edgeDirection(fall.edge()));
                     if (!below.equals(pool)) { continue; }
-                    float levels = (BoardGeometry.waterZ(upper.tile) - fall.lowA()) / BoardGeometry.LEVEL;
-                    float radius = (0.12f + 0.05f * (float) Math.sqrt(Math.min(4, levels))) * BoardGeometry.WIDTH;
+                    float levels = (BoardGeometry.waterZ(upper.tile) - fall.lowA()) / BoardGeometry.level();
+                    float radius = (0.12f + 0.05f * (float) Math.sqrt(Math.min(4, levels))) * BoardGeometry.width();
                     // A narrow stream cannot churn a lake-sized disk. Leave quieter water beside its impact.
-                    radius = Math.min(radius, Math.max(2 * BoardGeometry.HEX_SCALE, .3f * fall.a().dst(fall.b())));
+                    radius = Math.min(radius, Math.max(2 * BoardGeometry.hexScale(), .3f * fall.a().dst(fall.b())));
                     float start = upper.fallJoins(fall, true) ? 0 : .08f;
                     float end = upper.fallJoins(fall, false) ? 1 : .92f;
                     Vector3 from = GpuWaterfall.landing(upper, fall, start);
                     for (int k = 1; k <= 2; k++) {
                         Vector3 to = GpuWaterfall.landing(upper, fall, start + (end - start) * k / 2f);
                         // The boil reaches out a little over twice its radius, and behind the curtain to the wall.
-                        if (distance(middle, from, to) < BoardGeometry.WIDTH * .6f + 2.2f * radius) {
+                        if (distance(middle, from, to) < BoardGeometry.width() * .6f + 2.2f * radius) {
                             hits.add(new Impact(from, to, radius));
                         }
                         from = to;
@@ -130,15 +130,22 @@ final class GpuWaterShader extends Attribute {
     }
 
     private GpuWaterShader(GpuWaterShader original, boolean spray) {
+        this(original, spray, original.field);
+    }
+
+    private GpuWaterShader(GpuWaterShader original, boolean spray, Field field) {
         super(TYPE);
         // The impacts are immutable and the chunk owns the field; copied materials share both.
         palette = original.palette;
         falling = original.falling;
         procedural = original.procedural;
         this.spray = spray;
-        field = original.field;
+        this.field = field;
         impacts = original.impacts;
     }
+
+    /** Unchanged vertices in a replacement chunk must sample that chunk's newly owned field. */
+    GpuWaterShader withField(Field field) { return new GpuWaterShader(this, spray, field); }
 
     /** The same water's spray, thrown up where its falls land. */
     GpuWaterShader spray() { return new GpuWaterShader(this, true); }
@@ -195,7 +202,7 @@ final class GpuWaterShader extends Attribute {
                     var water = attributes.get(GpuWaterShader.class, TYPE);
                     if (water != null && impactIndex < water.impacts.size()) {
                         Impact impact = water.impacts.get(impactIndex);
-                        float scale = 1 / BoardGeometry.WIDTH;
+                        float scale = 1 / BoardGeometry.width();
                         target.set(id, impact.from().x * scale, impact.from().y * scale,
                               impact.to().x * scale, impact.to().y * scale);
                     }
@@ -206,7 +213,7 @@ final class GpuWaterShader extends Attribute {
                 public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                     var water = attributes.get(GpuWaterShader.class, TYPE);
                     if (water != null && impactIndex < water.impacts.size()) {
-                        target.set(id, water.impacts.get(impactIndex).radius() / BoardGeometry.WIDTH);
+                        target.set(id, water.impacts.get(impactIndex).radius() / BoardGeometry.width());
                     }
                 }
             });
@@ -450,7 +457,7 @@ final class GpuWaterShader extends Attribute {
                 maxY = Math.max(maxY, pool.maxY);
             }
             if (minX > maxX) { return null; }
-            float spacing = BoardGeometry.HEIGHT / 16;
+            float spacing = BoardGeometry.height() / 16;
             int firstX = (int) Math.floor(minX / spacing) - 1, firstY = (int) Math.floor(minY / spacing) - 1;
             int width = (int) Math.ceil(maxX / spacing) - firstX + 2;
             int height = (int) Math.ceil(maxY / spacing) - firstY + 2;
@@ -531,7 +538,7 @@ final class GpuWaterShader extends Attribute {
                 BoardScene.Tile tile = owner.surface.tile;
                 float floor = Float.isFinite(bed[i]) ? bed[i] : BoardGeometry.groundZ(tile);
                 float x = (firstX + i % span + .5f) * spacing, y = (firstY + i / span + .5f) * spacing;
-                depth[i] = (owner.surface.waterHeight(x, y) - floor) / BoardGeometry.LEVEL;
+                depth[i] = (owner.surface.waterHeight(x, y) - floor) / BoardGeometry.level();
             }
             return depth;
         }
@@ -597,7 +604,7 @@ final class GpuWaterShader extends Attribute {
          */
         Pool sample(float x, float y, float[] result) {
             gather(x, y);
-            float range = SHORE_RANGE * BoardGeometry.WIDTH;
+            float range = SHORE_RANGE * BoardGeometry.width();
             Pool inside = null;
             float nearest = range * range;
             for (int i = 0; i < count; i++) {
@@ -618,7 +625,7 @@ final class GpuWaterShader extends Attribute {
                     }
                 }
             }
-            float distance = (float) Math.sqrt(nearest) / BoardGeometry.WIDTH;
+            float distance = (float) Math.sqrt(nearest) / BoardGeometry.width();
             result[0] = inside == null ? -distance : distance;
             blend(x, y, result);
             if (inside != null) {
@@ -649,7 +656,7 @@ final class GpuWaterShader extends Attribute {
 
         /** Finds the hex whose centre is nearest, then its open water and its neighbours'. */
         private void gather(float x, float y) {
-            float width = BoardGeometry.WIDTH, height = BoardGeometry.HEIGHT;
+            float width = BoardGeometry.width(), height = BoardGeometry.height();
             int column = Math.round((x - width / 2) / (width * .75f)), bestColumn = column, bestRow = 0;
             float nearest = Float.POSITIVE_INFINITY;
             for (int c = column - 1; c <= column + 1; c++) {
@@ -677,7 +684,7 @@ final class GpuWaterShader extends Attribute {
 
         /** Current and agitation of the gathered pools, blended by a smooth kernel around each hex centre. */
         private void blend(float x, float y, float[] result) {
-            float radius2 = BLEND_RADIUS * BoardGeometry.WIDTH * BLEND_RADIUS * BoardGeometry.WIDTH;
+            float radius2 = BLEND_RADIUS * BoardGeometry.width() * BLEND_RADIUS * BoardGeometry.width();
             float weight = 0, currentX = 0, currentY = 0, agitation = 0;
             for (int i = 0; i < count; i++) {
                 Pool pool = candidates[i];
@@ -751,7 +758,7 @@ final class GpuWaterShader extends Attribute {
             centerY = BoardGeometry.centerY(surface.tile.coords());
             // Texture displacement per second, as BoardFlow reports it, becomes world velocity in hex widths.
             currentX = -current.u();
-            currentY = current.v() * BoardGeometry.HEIGHT / BoardGeometry.WIDTH;
+            currentY = current.v() * BoardGeometry.height() / BoardGeometry.width();
             float rapids = switch (surface.tile.liquid().rapids()) {
                 case 1 -> .5f;
                 case 2 -> .9f;

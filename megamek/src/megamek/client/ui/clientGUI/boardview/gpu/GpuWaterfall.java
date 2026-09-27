@@ -39,7 +39,7 @@ final class GpuWaterfall {
     private GpuWaterfall() { }
 
     private static float thrown(float height) {
-        return Math.clamp(THROW * height, MIN_THROW * BoardGeometry.HEX_SCALE, MAX_THROW * BoardGeometry.HEX_SCALE);
+        return Math.clamp(THROW * height, MIN_THROW * BoardGeometry.hexScale(), MAX_THROW * BoardGeometry.hexScale());
     }
 
     /** Radius over which a fall spreads into the water it lands in. */
@@ -99,7 +99,7 @@ final class GpuWaterfall {
             float landingZ = surface.receivingHeight(drop, landingX, landingY);
             for (int r = 0; r < rows; r++) {
                 float offset = offset(localLip, height, fillet, thrown, r)
-                      + stream * BULGE * BoardGeometry.HEX_SCALE * (float) Math.pow(fall[r], .65f);
+                      + stream * BULGE * BoardGeometry.hexScale() * (float) Math.pow(fall[r], .65f);
                 float descent = (top - z[r]) / height;
                 result[i][r] = new Vector3(base.x, base.y, base.z + (landingZ - base.z) * descent).mulAdd(direction, offset);
             }
@@ -135,10 +135,10 @@ final class GpuWaterfall {
         BoardSurface.Crest crest = surface.crest(drop);
         int columns = grid.length - 1, rows = grid[0].length;
         float top = BoardGeometry.waterZ(surface.tile), height = Math.max(.001f, top - drop.lowA());
-        float repeat = 48 * BoardGeometry.HEX_SCALE;
+        float repeat = 48 * BoardGeometry.hexScale();
         boolean freeA = !surface.fallJoins(drop, true), freeB = !surface.fallJoins(drop, false);
         float[] across = across(grid, crest, freeA, freeB);
-        Color data = new Color(0, 0, Math.min(1, height / (GpuWaterShader.DEPTH_RANGE * BoardGeometry.LEVEL)), 0);
+        Color data = new Color(0, 0, Math.min(1, height / (GpuWaterShader.DEPTH_RANGE * BoardGeometry.level())), 0);
         short[][] index = new short[columns + 1][rows];
         Vector3 alongMouth = new Vector3(), alongPath = new Vector3(), normal = new Vector3();
         for (int i = 0; i <= columns; i++) {
@@ -181,7 +181,7 @@ final class GpuWaterfall {
     private static float[] across(Vector3[][] grid, BoardSurface.Crest crest, boolean freeA, boolean freeB) {
         int columns = grid.length - 1;
         float[] result = new float[columns + 1];
-        float unit = U_LENGTH * BoardGeometry.HEX_SCALE;
+        float unit = U_LENGTH * BoardGeometry.hexScale();
         for (int i = 1; i <= columns; i++) {
             Vector3 a = grid[i - 1][1], b = grid[i][1];
             result[i] = result[i - 1] + (float) Math.hypot(b.x - a.x, b.y - a.y) / unit;

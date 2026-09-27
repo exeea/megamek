@@ -88,6 +88,36 @@ class BoardSurfaceBlendTest {
     }
 
     @Test
+    void cliffContactsContinueDownAllSixCornersWithoutBorrowingTheValleyCover() {
+        for (int corner = 0; corner < 6; corner++) {
+            var neighbour = CENTER.translated(BoardGeometry.edgeDirection(corner));
+            var scene = scene(c -> tile(c, c.equals(CENTER) ? BoardScene.Surface.GRASS
+                  : c.equals(neighbour) ? BoardScene.Surface.SAND : BoardScene.Surface.SNOW,
+                  c.equals(CENTER) || c.equals(neighbour) ? 4 : 0, -1, 0));
+            var p = BoardGeometry.corner(CENTER, 0, corner);
+            for (int level = 1; level <= 4; level++) {
+                p.z = level * BoardGeometry.level();
+                var cover = BoardSurfaceBlend.sampleCliff(scene, scene.tile(CENTER), p.x, p.y, p.z);
+                assertEquals(cover, BoardSurfaceBlend.sampleCliff(scene, scene.tile(neighbour), p.x, p.y, p.z));
+                assertTrue(cover.grass() > .1f && cover.sand() > .1f, "Corner " + corner + ": " + cover);
+                assertEquals(0, cover.snow(), "The valley floor cannot paint a cliff above it");
+                assertEquals(1, cover.grass() + cover.sand(), .00001f);
+            }
+        }
+    }
+
+    @Test
+    void cliffSamplingExcludesConstructionAndColumnsBelowTheSample() {
+        var next = CENTER.translated(2);
+        var scene = scene(c -> tile(c, c.equals(CENTER) ? BoardScene.Surface.SAND
+              : c.equals(next) ? BoardScene.Surface.CONCRETE : BoardScene.Surface.GRASS,
+              c.equals(CENTER) ? 4 : c.equals(next) ? 5 : 1, -1, 0));
+        var p = BoardGeometry.center(CENTER, 3).lerp(BoardGeometry.center(next, 3), .5f);
+        assertEquals(BoardSurfaceBlend.solid(BoardScene.Surface.SAND),
+              BoardSurfaceBlend.sampleCliff(scene, scene.tile(CENTER), p.x, p.y, p.z));
+    }
+
+    @Test
     void neighbouringBanksAgreeFromTheirLandCornerDownToTheWaterline() {
         for (int depth : new int[] { 0, 1 }) {
             var scene = BoardTerrainDetailTest.shores(depth, false);

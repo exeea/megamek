@@ -245,7 +245,7 @@ final class UnitAnimator {
             // Mix adjacent troop IDs so their gait, breathing and watch motions do not synchronize.
             float seed = Math.floorMod(identity * (body.rig.trooper() ? 0x9E3779B9 : 1), 4096) * (MathUtils.PI2 / 4096);
             var memberStep = formation.step(body.rig.container());
-            float distance = (memberStep == null ? bodyMotion.steps() * BoardGeometry.HEIGHT / model.horizontalScale(unit)
+            float distance = (memberStep == null ? bodyMotion.steps() * BoardGeometry.height() / model.horizontalScale(unit)
                   : memberStep.distance()) / body.memberScale;
             float travelSign = body.rig.trooper() || bodyMotion.forward() >= -.001f ? 1 : -1;
             float strideYaw = body.rig.trooper() ? 0 : MathUtils.atan2(bodyMotion.lateral() * travelSign,
@@ -323,7 +323,7 @@ final class UnitAnimator {
                 body.rotate("hull", Vector3.X, MathUtils.sin(localPhase * 2) * .65f * envelope);
                 if (motion.moving()) {
                     float traveled = body.rig.transport() ? formation.drivenDistance(body.rig.container())
-                          : motion.steps() * BoardGeometry.HEIGHT / model.horizontalScale(unit);
+                          : motion.steps() * BoardGeometry.height() / model.horizontalScale(unit);
                     if (body.movementSequence != motion.sequence()) {
                         body.lastSteps = 0;
                         body.movementSequence = motion.sequence();
@@ -353,6 +353,49 @@ final class UnitAnimator {
 
     static boolean hullDown(BoardScene.Unit unit) {
         return unit.location().hullDown() == null ? unit.model().state().pose().hullDown() : unit.location().hullDown();
+    }
+
+    /** Hold the carrier with one hand while hostile suits repeatedly strike with the other. */
+    void attachmentPose(boolean hostile, float clock, UnitAttachmentMotion transition) {
+        float grip = transition == null ? 1 : transition.grip();
+        float travel = transition == null ? 0 : MathUtils.sin(transition.progress() * MathUtils.PI);
+        float landing = transition == null || transition.boarding() || transition.event.release() == BoardScene.Release.WATER ? 0
+              : MathUtils.sin(MathUtils.clamp((transition.progress() - .65f) / .35f, 0, 1) * MathUtils.PI) * .7f;
+        for (Body body : bodies) {
+            if (!body.rig.trooper()) { continue; }
+            Map<Joint, Quaternion> ground = new HashMap<>();
+            Map<Joint, Vector3> positions = new HashMap<>();
+            body.joints.values().forEach(joint -> ground.put(joint, joint.node.rotation.cpy()));
+            body.joints.values().forEach(joint -> positions.put(joint, joint.node.translation.cpy()));
+            float phase = clock * 7 + Math.floorMod(body.rig.container().hashCode(), 37);
+            float strike = hostile ? Math.max(0, MathUtils.sin(phase)) : 0;
+            body.reset();
+            body.rotate("leftArm", Vector3.X, 125);
+            body.rotate("leftForearm", Vector3.X, -35);
+            body.rotate("rightArm", Vector3.X, 110 - strike * 60);
+            body.rotate("rightForearm", Vector3.X, -25 + strike * 65);
+            body.rotate("leftLeg", Vector3.X, 45);
+            body.rotate("rightLeg", Vector3.X, 30);
+            body.rotate("leftShin", Vector3.X, -90);
+            body.rotate("rightShin", Vector3.X, -75);
+            body.rotate("torso", Vector3.X, 8 + strike * 7);
+            body.joints.values().forEach(joint -> joint.node.rotation.set(ground.get(joint).slerp(joint.node.rotation, grip)));
+            body.joints.values().forEach(joint -> joint.node.translation.set(positions.get(joint).lerp(joint.node.translation, grip)));
+            float climb = transition != null && !transition.thrown() ? travel * MathUtils.sin(phase * 1.4f) : 0;
+            body.rotate("leftArm", Vector3.X, 20 * climb);
+            body.rotate("rightArm", Vector3.X, -20 * climb);
+            body.rotate("leftLeg", Vector3.X, 25 * climb);
+            body.rotate("rightLeg", Vector3.X, -25 * climb);
+            if (transition != null && transition.thrown()) {
+                body.rotate("leftArm", Vector3.Y, -45 * travel);
+                body.rotate("rightArm", Vector3.Y, 45 * travel);
+            }
+            body.rotate("leftLeg", Vector3.X, 30 * landing);
+            body.rotate("rightLeg", Vector3.X, 30 * landing);
+            body.rotate("leftShin", Vector3.X, -60 * landing);
+            body.rotate("rightShin", Vector3.X, -60 * landing);
+        }
+        instance.calculateTransforms();
     }
 
     /** One planted boot and the opposite knee carry a biped; quadrupeds lower onto all four knees. */
@@ -541,6 +584,25 @@ final class UnitAnimator {
             return;
         }
         var event = attack.event;
+        if (attack.removal()) {
+            if (unit.id() == event.entityId()) {
+                float envelope = UnitAttack.smooth(attack.seconds / .18f)
+                      * (1 - UnitAttack.smooth((attack.seconds - attack.contactSeconds) / .55f));
+                float shake = MathUtils.sin(attack.seconds * 18) * envelope;
+                boolean brush = event.result().kind() == megamek.common.ResolvedAttack.Kind.BRUSH_OFF;
+                for (Body body : bodies) {
+                    body.rotate("torso", Vector3.Y, 10 * shake);
+                    body.rotate("torso", Vector3.Z, 12 * shake);
+                    body.rotate("hull", Vector3.Y, 7 * shake);
+                    body.rotate("hull", Vector3.X, 4 * shake);
+                    String arm = event.result().limb() == megamek.common.units.Mek.LOC_LEFT_ARM ? "leftArm" : "rightArm";
+                    body.rotate(brush ? arm : "leftArm", Vector3.X, (90 + 25 * shake) * envelope);
+                    body.rotate(brush ? arm.replace("Arm", "Forearm") : "rightArm", Vector3.X, 65 * envelope);
+                }
+                instance.calculateTransforms();
+            }
+            return;
+        }
         if (attack.death()) {
             if (unit.id() == event.entityId()) {
                 dying = true;
@@ -609,6 +671,7 @@ final class UnitAnimator {
 
     /** Add constrained target tracking after both participants have their final world placement. */
     void aim(GpuUnitModel model, BoardScene.Unit unit, UnitAttack attack, Vector3 target, ModelInstance victim) {
+        if (attack.removal()) { return; }
         if (instance == null || attack == null || attack.event.entityId() != unit.id() || attack.aimWeight() <= 0
               || dying) { return; }
         if (attack.shot()) {
@@ -821,7 +884,7 @@ final class UnitAnimator {
                 float horizontalReach = (float) Math.sqrt(Math.max(0, reach * reach - vertical * vertical)) * .88f;
                 float distance = Math.max(0, approach.len() - horizontalReach);
                 attack.approach = approach.nor().scl(distance).rot(facing)
-                      .limit(BoardGeometry.HEIGHT * PHYSICAL_APPROACH_HEXES);
+                      .limit(BoardGeometry.height() * PHYSICAL_APPROACH_HEXES);
             }
             instance.transform.rotate(Vector3.Z, -attack.approachTurn * attack.approachFacingWeight());
             float travel = attack.approachWeight();
@@ -1002,7 +1065,7 @@ final class UnitAnimator {
     }
 
     static float hoverOffset(float seconds, int id, int part) {
-        return HOVER_LEVELS * BoardGeometry.LEVEL * MathUtils.sin(MathUtils.PI2 * seconds / HOVER_PERIOD_SECONDS
+        return HOVER_LEVELS * BoardGeometry.level() * MathUtils.sin(MathUtils.PI2 * seconds / HOVER_PERIOD_SECONDS
               + MathUtils.PI2 * HOVER_PHASE_STEP * (id + part));
     }
 }

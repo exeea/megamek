@@ -1,5 +1,43 @@
 # Sprite-referenced 3D units
 
+Deployed modular bodies, troops, transports and equipment use GLB (binary glTF 2.0).
+Their existing JSON descriptors still own rig roles, hardpoints, emitters and
+assembly recipes. `RigidGlb` uses JglTF to parse geometry without OpenGL, converts
+Y-up coordinates and linear vertex colors into the renderer's Z-up/display-color
+convention, and preserves named rigid nodes and material roles. Unit animation,
+camouflage, damage and loadout assembly keep their existing owners. Legacy custom
+G3DJ descriptors remain readable. The migrated library contains 718 GLBs with 723 authored mesh levels;
+its existing geometry and triangle budgets were preserved.
+
+All 475 authoring and historical reference meshes under `mm-data/tools/` also
+use GLB. Their descriptors, manifests and review tools use the converted files;
+empty squad references retain their hierarchy without a geometry buffer.
+Neither deployed `data/` nor authoring/reference `tools/` contains G3DJ assets.
+
+Each component uses one `<component>.glb`, containing identity groups named
+`<component>-lod0`, optionally `-lod1` and `-lod2`. Their child nodes retain the
+rig's original names. For example, `atlas.glb` contains `atlas-lod0`, while
+`phoenix-hawk.glb` contains its own `phoenix-hawk-lod0` and `phoenix-hawk-lod1`.
+Phoenix Hawk IIC is a separate component with its own levels. Recipes refer only
+to the component's `body`/`trooper` descriptor. The importer resolves missing
+optional levels toward LOD0 once and the library shares the resulting buffers.
+LOD0 is required; malformed declared levels report an asset error. Unit drawing
+currently switches between LOD0 and LOD1. `detail: lod0` grants the detailed-body
+triangle allowance. Older custom separate-level references remain readable.
+
+Authored diffuse textures may be embedded PNG/JPEG images or local relative image
+references inside the model directory. The library caches textures by image and
+sampler and owns disposal; models and instances borrow them. Embedded images keep
+encoded bytes for graphics-context restoration. The `detail` role retains fixed
+artwork; runtime camouflage can replace the diffuse map of the `paint` role.
+Animated/skinned glTF, morph targets and required extensions remain unsupported.
+
+`RigidGlbTest` exercises the CPU import boundary; `UnitModelDescriptorTest` checks
+the deployed component descriptors and meshes. Run
+`./gradlew :megamek:gpuBoardSmoke --tests '*GpuGlbUnitsSmokeTest'` for native GLB
+assembly, animation, effects, camouflage and damage-material checks. The broader
+`GpuModularUnitModelsSmokeTest` also covers terrain contacts and collectable limbs.
+
 Authored 3D unit models are controlled by the code switch
 `GpuUnitModels.ENABLED`, currently `true`. Set it to `false` to use the existing
 sprite rendering in both GPU camera views. Asset generation and direct asset
@@ -31,7 +69,8 @@ The optional `movementFormations` map in the infantry descriptor is keyed by
 
 `MekModelCatalog` exports the current unit/equipment data and actual selected
 sprites through MegaMek's existing loaders. Blender builds the source chassis
-and equipment modules offline, then bakes each variant into G3DJ. The renderer
+and equipment modules offline. The current modular exporter writes reusable GLBs;
+the historical baked variants remain review references. The renderer
 uses the same movement timeline, placement, shadows and camera scene as before.
 It receives immutable model-selection data after visibility filtering. A sensor
 contact has no model identity. Invalid assets fall back without preventing the

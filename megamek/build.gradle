@@ -47,6 +47,8 @@ dependencies {
     implementation "com.badlogicgames.gdx:gdx:${gdxVersion}"
     implementation "com.badlogicgames.gdx:gdx-backend-lwjgl3:${gdxVersion}"
     implementation "com.badlogicgames.gdx:gdx-freetype:${gdxVersion}"
+    // CPU-only glTF decoding; terrain workers and unit validation share the same mesh data.
+    implementation 'de.javagl:jgltf-model:2.0.4'
     runtimeOnly "com.badlogicgames.gdx:gdx-platform:${gdxVersion}:natives-desktop"
     runtimeOnly "com.badlogicgames.gdx:gdx-freetype-platform:${gdxVersion}:natives-desktop"
 
@@ -614,6 +616,8 @@ tasks.register('gpuBoardSmoke', Test) {
     filter { includeTestsMatching 'megamek.client.ui.clientGUI.boardview.gpu.*SmokeTest' }
     jvmArgs = mmJvmOptions
     systemProperty 'java.awt.headless', 'false'
+    systemProperty 'megamek.gpu.referenceFoliage', new File(gradle.includedBuild('mm-data').projectDir,
+            'tools/board-models/foliage').absolutePath
     systemProperty 'megamek.gpu.referenceModels', new File(gradle.includedBuild('mm-data').projectDir,
             'tools/unit-models/references/legacy').absolutePath
     systemProperty 'megamek.gpu.screenshots', layout.buildDirectory.dir('gpu-board-review').get().asFile.absolutePath
@@ -799,6 +803,16 @@ tasks.register('exportMekModelCatalog', JavaExec) {
     def modelDataDir = project.findProperty('unitModelDataRoot') ?: mmDataDir
     args "${modelDataDir}/data", "${modelDataDir}/.work/mek-models/catalog.json"
     jvmArgs = ['-Xmx2048m', '-Djava.awt.headless=true']
+}
+
+tasks.register('exportBridgeShapes', JavaExec) {
+    dependsOn classes
+    description = 'Export all bridge exit outlines using the ground-road layout for offline GLB generation.'
+    group = 'utility'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'megamek.client.ui.clientGUI.boardview.gpu.BoardBridge'
+    args project.findProperty('bridgeShapesOutput') ?: "${mmDataDir}/tools/board-models/bridge-shapes.json"
+    jvmArgs = ['-Djava.awt.headless=true']
 }
 
 tasks.register('exportEquipmentModelCatalog', JavaExec) {

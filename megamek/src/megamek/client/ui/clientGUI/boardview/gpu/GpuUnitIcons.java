@@ -38,7 +38,7 @@ final class GpuUnitIcons implements Disposable {
     /** Returns true when cached picking meshes must be released along with an obsolete atlas layout. */
     boolean update(boolean enabled, float threshold, Camera camera, BoardScene scene,
           Map<BoardScene.Unit, UnitFootprint.Pose> poses, Map<BoardScene.Unit, Vector3> anchors, BoardSurface.Cache surfaces) {
-        active = useIcons(enabled, camera, BoardGeometry.WIDTH / BoardCamera.worldUnitsPerPixel(camera), threshold, active);
+        active = useIcons(enabled, camera, BoardGeometry.width() / BoardCamera.worldUnitsPerPixel(camera), threshold, active);
         if (!active) { return false; }
         var images = scene.units().stream().map(BoardScene.Unit::image).distinct()
               .collect(Collectors.toMap(image -> image, image -> image));
@@ -65,9 +65,9 @@ final class GpuUnitIcons implements Disposable {
             float ground = UnitLandingSupports.surface(scene, position.x, position.y, surfaces);
             var tile = scene.tile(unit.location().coords());
             if (!Float.isFinite(ground)) { ground = tile == null ? 0 : BoardGeometry.surfaceZ(tile); }
-            float scale = SIZE_IN_HEXES * Math.min(BoardGeometry.WIDTH / unit.image().width(),
-                  BoardGeometry.HEIGHT / unit.image().height());
-            instance.transform.setToTranslation(position.x, position.y, ground + .25f * BoardGeometry.HEX_SCALE)
+            float scale = SIZE_IN_HEXES * Math.min(BoardGeometry.width() / unit.image().width(),
+                  BoardGeometry.height() / unit.image().height());
+            instance.transform.setToTranslation(position.x, position.y, ground + .25f * BoardGeometry.hexScale())
                   .rotate(Vector3.Z, -pose.facing()).scale(scale, scale, 1);
             anchors.put(unit, model.anchor(instance, camera));
         }

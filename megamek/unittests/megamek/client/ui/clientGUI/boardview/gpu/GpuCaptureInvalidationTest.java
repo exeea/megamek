@@ -7,16 +7,93 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Color;
 import java.awt.Rectangle;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.swing.SwingUtilities;
 
-import megamek.common.board.Coords;
-import megamek.common.board.BoardLocation;
 import megamek.common.Hex;
+import megamek.common.board.Board;
+import megamek.common.board.BoardLocation;
+import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 
 class GpuCaptureInvalidationTest {
+    @Test
+    void panningReusesOverlapAndMatchesFreshTacticalCaptures() throws Exception {
+        // More than the painter's small image cache: a full viewport repaint would invoke old hex painters again.
+        Hex[] hexes = new Hex[40 * 40];
+        Arrays.setAll(hexes, ignored -> new Hex(0));
+        try (GpuBoardFixture fixture = GpuBoardFixture.create(new Board(40, 40, hexes))) {
+            SwingUtilities.invokeAndWait(() -> {
+                Set<Coords> painted = new HashSet<>();
+                fixture.view.addHexDrawPlugin((graphics, hex, game, coords, view) -> {
+                    painted.add(coords);
+                    graphics.setColor(new Color(coords.getX() * 5, coords.getY() * 5, 50));
+                    graphics.fillRect(90, 90, 20, 20);
+                });
+                fixture.view.clearHexImageCache();
+                Rectangle previous = new Rectangle(1, 1, 20, 20);
+                fixture.source.setVisibleArea(previous);
+                fixture.source.refresh();
+                // Horizontal/diagonal pans, shrinking, enlarging, disjoint moves, and revisiting old terrain.
+                for (Rectangle next : new Rectangle[] { new Rectangle(2, 1, 20, 20), new Rectangle(3, 2, 20, 20),
+                      new Rectangle(4, 3, 8, 8), new Rectangle(2, 1, 22, 22), new Rectangle(32, 32, 5, 5),
+                      new Rectangle(1, 1, 20, 20) }) {
+                    BoardScene before = fixture.source.takeFrame().scene();
+                    painted.clear();
+                    fixture.source.setVisibleArea(next);
+                    fixture.source.refresh();
+                    BoardScene after = fixture.source.takeFrame().scene();
+                    Rectangle overlap = previous.intersection(next);
+                    Set<Coords> exposed = new HashSet<>();
+                    for (int x = next.x; x < next.x + next.width; x++) {
+                        for (int y = next.y; y < next.y + next.height; y++) {
+                            Coords at = new Coords(x, y);
+                            if (overlap.contains(x, y)) {
+                                assertSame(before.tile(at), after.tile(at), "Panning retains the unchanged overlap");
+                            } else { exposed.add(at); }
+                        }
+                    }
+                    assertTrue(exposed.containsAll(painted), "Only exposed hexes may need painting; cached images can be reused");
+                    fixture.view.capturePlanarTactical(next, hex -> {
+                        BoardScene.Pixels expected = BoardScene.Pixels.capture(hex.tactical(), null);
+                        assertEquals(expected, after.tile(hex.coords()).tactical(), "Incremental pixels match fresh capture");
+                    });
+                    for (var tile : after.tiles()) {
+                        assertTrue(next.contains(tile.coords().getX(), tile.coords().getY()) || tile.tactical() == null,
+                              "Offscreen tactical images are released");
+                    }
+                    previous = next;
+                }
+                painted.clear();
+                fixture.view.clearHexImageCache();
+                fixture.source.refresh();
+                assertEquals(previous.width * previous.height, painted.size(), "Invalidation repaints the entire view");
+            });
+        }
+    }
+
+    @Test
+    void localHeightEditOnlyInvokesLocalTacticalPainters() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            SwingUtilities.invokeAndWait(() -> {
+                Set<Coords> painted = new HashSet<>();
+                fixture.view.addHexDrawPlugin((graphics, hex, game, coords, view) -> painted.add(coords));
+                fixture.source.refresh();
+                painted.clear();
+                Coords at = new Coords(5, 5);
+                fixture.game.getBoard().setHex(at, new Hex(4));
+                fixture.source.refresh();
+                assertTrue(painted.size() <= 9, "Local edit repainted " + painted.size() + " hexes");
+                assertTrue(painted.contains(at));
+                assertCompleteCapture(fixture);
+            });
+        }
+    }
+
     @Test
     void singleHexEditsRetainDistantArtworkAndMatchAFreshCapture() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {

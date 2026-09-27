@@ -71,11 +71,17 @@ class GpuScatterSmokeTest {
                         var features = scene.tiles().stream().flatMap(tile -> tile.features().stream()).toList();
                         assertTrue(!features.isEmpty() && features.size() <= 1536,
                               "Clusters stay bounded regardless of the density multiplier");
-                        int triangles = features.stream().mapToInt(feature -> switch (feature.asset()) {
-                            case "scatter-grass", "scatter-dry-grass" -> 6;
-                            case "scatter-plant" -> 16;
-                            default -> 9;
-                        }).sum();
+                        int triangles = scene.tiles().stream().mapToInt(tile -> tile.features().stream()
+                              .mapToInt(feature -> switch (feature.asset()) {
+                                  case "scatter-grass", "scatter-dry-grass" -> 6;
+                                  case "scatter-plant" -> 16;
+                                  default -> {
+                                      int count = GpuScatter.rock(tile, feature).polygons().stream()
+                                            .mapToInt(polygon -> polygon.points().length - 2).sum();
+                                      assertEquals(8, count, "Tiny scatter uses eight-triangle rocks with an open base");
+                                      yield count;
+                                  }
+                              }).sum()).sum();
                         float diameter = (float) features.stream().mapToDouble(GpuScatter::diameter).max().orElseThrow();
                         BoardCamera camera = new BoardCamera();
                         camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());

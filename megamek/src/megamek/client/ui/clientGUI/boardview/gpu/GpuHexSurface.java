@@ -61,8 +61,8 @@ final class GpuHexSurface implements Disposable {
                     int lastX = wholeHex ? x : Math.min(scene.width() - 1, (int) Math.floor(right / (BoardGeometry.TILE_WIDTH * .75f)));
                     int firstY = wholeHex ? y : Math.max(0, (int) Math.floor(top / BoardGeometry.TILE_HEIGHT) - 1);
                     int lastY = wholeHex ? y : Math.min(scene.height() - 1, (int) Math.floor(bottom / BoardGeometry.TILE_HEIGHT));
-                    float minX = left * BoardGeometry.HEX_SCALE, maxX = right * BoardGeometry.HEX_SCALE;
-                    float minY = -bottom * BoardGeometry.HEX_SCALE, maxY = -top * BoardGeometry.HEX_SCALE;
+                    float minX = left * BoardGeometry.hexScale(), maxX = right * BoardGeometry.hexScale();
+                    float minY = -bottom * BoardGeometry.hexScale(), maxY = -top * BoardGeometry.hexScale();
                     for (int cx = firstX; cx <= lastX; cx++) {
                         for (int cy = firstY; cy <= lastY; cy++) {
                             var surface = dependencies.computeIfAbsent(new Coords(cx, cy), surfaces);
@@ -124,10 +124,10 @@ final class GpuHexSurface implements Disposable {
         int startX = chunk.getX() * GpuTerrain.CHUNK_SIZE, startY = chunk.getY() * GpuTerrain.CHUNK_SIZE;
         int endX = Math.min(scene.width(), startX + GpuTerrain.CHUNK_SIZE);
         int endY = Math.min(scene.height(), startY + GpuTerrain.CHUNK_SIZE);
-        float minX = startX * BoardGeometry.TILE_WIDTH * .75f * BoardGeometry.HEX_SCALE;
-        float maxX = ((endX - 1) * BoardGeometry.TILE_WIDTH * .75f + BoardGeometry.TILE_WIDTH) * BoardGeometry.HEX_SCALE;
-        float minY = -(endY + .5f) * BoardGeometry.TILE_HEIGHT * BoardGeometry.HEX_SCALE;
-        float maxY = -startY * BoardGeometry.TILE_HEIGHT * BoardGeometry.HEX_SCALE;
+        float minX = startX * BoardGeometry.TILE_WIDTH * .75f * BoardGeometry.hexScale();
+        float maxX = ((endX - 1) * BoardGeometry.TILE_WIDTH * .75f + BoardGeometry.TILE_WIDTH) * BoardGeometry.hexScale();
+        float minY = -(endY + .5f) * BoardGeometry.TILE_HEIGHT * BoardGeometry.hexScale();
+        float maxY = -startY * BoardGeometry.TILE_HEIGHT * BoardGeometry.hexScale();
         BoundingBox result = new BoundingBox().inf();
         if (wholeHex) {
             for (int x = startX; x < endX; x++) {
@@ -168,7 +168,7 @@ final class GpuHexSurface implements Disposable {
 
     private static void liftedBounds(BoundingBox bounds) {
         // Current painter lift is capped at 1.35 unscaled pixels; keep culling conservative after vertex lift.
-        bounds.max.z += 2 * BoardGeometry.HEX_SCALE;
+        bounds.max.z += 2 * BoardGeometry.hexScale();
         bounds.update();
     }
 

@@ -3,9 +3,11 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -34,6 +36,48 @@ final class GpuTextures<K> implements Disposable {
     private TextureAtlas normalAtlas;
     private int slotCount;
     private long packedArea;
+    private boolean retainReplaced;
+    private record Pages(TextureAtlas color, PixmapPacker colorPacker, TextureAtlas normal, PixmapPacker normalPacker)
+          implements Disposable {
+        @Override
+        public void dispose() {
+            for (Disposable resource : new Disposable[] { color, colorPacker, normal, normalPacker }) {
+                if (resource != null) { resource.dispose(); }
+            }
+        }
+    }
+    private final List<Pages> retired = new ArrayList<>();
+    private TextureAtlas publishedColor, publishedNormal;
+
+    /** Terrain keeps old atlas pages alive until all meshes borrowing them have been retired. */
+    void retainReplacedPages() { retainReplaced = true; }
+
+    void publish() { publishedColor = atlas; publishedNormal = normalAtlas; }
+
+    void releaseRetiredPages() {
+        retired.removeIf(pages -> {
+            if (pages.color() != null && pages.color() == publishedColor
+                  || pages.normal() != null && pages.normal() == publishedNormal) { return false; }
+            pages.dispose();
+            return true;
+        });
+    }
+
+    private void replacePages() {
+        if (!retainReplaced) { dispose(); return; }
+        Pages pages = new Pages(atlas, packer, normalAtlas, normalPacker);
+        if (atlas != null && atlas == publishedColor || normalAtlas != null && normalAtlas == publishedNormal) {
+            retired.add(pages);
+        } else { pages.dispose(); }
+        atlas = null;
+        packer = null;
+        normalAtlas = null;
+        normalPacker = null;
+        normals.clear();
+        entries.clear();
+        slotCount = 0;
+        packedArea = 0;
+    }
 
     GpuTextures() {
         this(false);
@@ -66,7 +110,7 @@ final class GpuTextures<K> implements Disposable {
         boolean normalMaps = !normalImages.isEmpty();
         if (images.isEmpty()) {
             Set<K> changed = Set.copyOf(entries.keySet());
-            dispose();
+            replacePages();
             return changed;
         }
         Map<Entry, Images> replacements = new IdentityHashMap<>();
@@ -82,6 +126,10 @@ final class GpuTextures<K> implements Disposable {
               });
         // Previously different images may become identical after an edit; merge those slots too.
         sameLayout &= new HashSet<>(replacements.values()).size() == replacements.size();
+        // Pending terrain must not repaint the pages still displayed by the previous revision. Append changed
+        // artwork to new slots; publication will switch every mesh whose UVs changed in the same frame.
+        sameLayout &= !retainReplaced || replacements.entrySet().stream()
+              .allMatch(item -> item.getKey().images().equals(item.getValue()));
         if (sameLayout) {
             Set<Texture> updated = new HashSet<>();
             Map<Entry, Entry> next = new IdentityHashMap<>();
@@ -123,7 +171,7 @@ final class GpuTextures<K> implements Disposable {
               || imageHeight + 3 * ATLAS_BLEED > packer.getPageHeight()
               || packedArea + addedArea > Math.max(2 * area, (long) packer.getPageWidth() * packer.getPageHeight());
         if (repack) {
-            dispose();
+            replacePages();
             shared.clear();
             int side = 128;
             while (side < 2048 && side * (long) side < area * 1.3) { side *= 2; }
@@ -235,6 +283,9 @@ final class GpuTextures<K> implements Disposable {
 
     @Override
     public void dispose() {
+        publishedColor = null;
+        publishedNormal = null;
+        releaseRetiredPages();
         if (atlas != null) {
             atlas.dispose();
             atlas = null;

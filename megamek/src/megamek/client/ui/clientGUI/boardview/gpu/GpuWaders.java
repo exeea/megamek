@@ -57,7 +57,7 @@ final class GpuWaders {
             float radius = BODY * (box.getWidth() + box.getHeight()) / 2;
             bodies[count * 4] = x;
             bodies[count * 4 + 1] = y;
-            bodies[count * 4 + 2] = Math.max(radius, 2 * BoardGeometry.HEX_SCALE);
+            bodies[count * 4 + 2] = Math.max(radius, 2 * BoardGeometry.hexScale());
             bodies[count * 4 + 3] = level;
             motion[count * 4] = vx;
             motion[count * 4 + 1] = vy;

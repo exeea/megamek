@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuCamouflageReview.field;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuCamouflageReview.renderReady;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -64,7 +65,7 @@ class GpuOverviewIconsSmokeTest {
                     var view = new GpuBattleView(fixture.source);
                     try {
                         view.create();
-                        view.render();
+                        renderReady(view);
                         verify(view, fixture);
                     } catch (Throwable error) { failure.set(error); }
                     finally { view.dispose(); Gdx.app.exit(); }
@@ -84,6 +85,7 @@ class GpuOverviewIconsSmokeTest {
         var unit = scene.units().getFirst();
         var models = (Map<String, ModelInstance>) field(view, "unitInstances");
         var original = models.get("1:-1");
+        assertNotNull(original);
         for (var tile : scene.tiles()) {
             if (tile.features().stream().anyMatch(feature -> feature.kind() == BoardScene.FeatureKind.TREE)) {
                 assertNotNull(tile.foliage(), "Forested hexes retain their matching flat tileset art");
@@ -92,14 +94,14 @@ class GpuOverviewIconsSmokeTest {
         verifyFoliageSilhouette(scene);
         view.boardCamera.setIsometric(false);
         view.boardCamera.zoom(2 / view.boardCamera.camera.zoom);
-        view.render();
+        renderReady(view);
         assertFalse(icons.active(), "The option is opt-in");
         GpuBoardTestUi.click("camera");
         GpuBoardTestUi.click("camera-overview-icons");
         assertTrue(ui.overviewIcons());
         assertTrue(GpuBoardTestUi.stage().getRoot().<CheckBox>findActor("tuning-overview-icons").isChecked());
         GpuBoardTestUi.click("camera");
-        view.render();
+        renderReady(view);
         assertTrue(icons.active());
         assertTrue((boolean) field(terrain, "flatTrees"));
         assertTrue(((List<?>) field(terrain, "shadowModels")).isEmpty(), "Hidden models must not cast shadows");
@@ -111,8 +113,8 @@ class GpuOverviewIconsSmokeTest {
         assertEquals(0.25f * BoardGeometry.HEX_SCALE, icon.transform.getTranslation(new Vector3()).z, .0001f);
         capture("overview-icons-top.png");
 
-        view.boardCamera.orbit(75, 29);
-        view.render();
+        view.boardCamera.orbit(75, GpuTactical.FLAT_TILT_DEGREES - 1);
+        renderReady(view);
         assertTrue(icons.active());
         assertEquals(1, new Vector3(Vector3.Z).rot(icon.transform).nor().z, .0001f,
               "The icon lies on the board instead of following the camera tilt");
@@ -136,7 +138,7 @@ class GpuOverviewIconsSmokeTest {
               "Even airborne animation poses project onto the hex surface");
 
         view.boardCamera.orbit(0, 2);
-        view.render();
+        renderReady(view);
         assertFalse(icons.active());
         assertFalse((boolean) field(terrain, "flatTrees"));
         assertSame(original, models.get("1:-1"));
@@ -145,21 +147,30 @@ class GpuOverviewIconsSmokeTest {
 
         view.boardCamera.setIsometric(false);
         view.boardCamera.zoom(.6f / view.boardCamera.camera.zoom);
-        view.render();
-        assertFalse(icons.active(), "Near top view keeps the full models");
+        renderReady(view);
+        assertTrue(icons.active(), "The default tactical policy has no zoom cutoff");
         view.boardCamera.zoom(2 / view.boardCamera.camera.zoom);
-        view.render();
+        renderReady(view);
         assertTrue(icons.active());
         GpuBoardTestUi.click("tuning");
         Slider threshold = GpuBoardTestUi.stage().getRoot().findActor("Icon switch hex px");
+        threshold.setValue(56);
+        renderReady(view);
+        assertTrue(icons.active());
+        view.boardCamera.zoom(.6f / view.boardCamera.camera.zoom);
+        renderReady(view);
+        assertFalse(icons.active(), "A finite zoom cutoff keeps full models at close range");
+        view.boardCamera.zoom(2 / view.boardCamera.camera.zoom);
+        renderReady(view);
+        assertTrue(icons.active());
         threshold.setValue(24);
-        view.render();
+        renderReady(view);
         assertFalse(icons.active());
         threshold.setValue(90);
-        view.render();
+        renderReady(view);
         assertTrue(icons.active());
         GpuBoardTestUi.click("tuning-defaults");
-        view.render();
+        renderReady(view);
         assertFalse(icons.active());
         assertEquals(GpuUnitIcons.DEFAULT_HEX_PIXELS, ui.overviewHexPixels());
         SwingUtilities.invokeAndWait(() -> {

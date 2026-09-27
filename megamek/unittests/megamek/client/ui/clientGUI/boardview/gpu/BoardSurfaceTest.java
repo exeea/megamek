@@ -24,6 +24,28 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardSurfaceTest {
     @Test
+    void supportHeightKeepsScaleToleranceAndIgnoresIceAndDressing() {
+        var original = TerrainSettings.capture();
+        for (float scale : new float[] { .5f, 1, 2 }) {
+            var settings = new TerrainSettings(new BoardGeometry.Tuning(scale, 1, 1, 18, .8f),
+                  original.relief(), original.water(), original.geology(), original.concrete(),
+                  original.revision(), original.terrainRevision());
+            try (var ignored = TerrainSettings.use(settings)) {
+                var ground = new BoardSurface.Face(new Vector3(0, 0, 3), new Vector3(2 * scale, 0, 3),
+                      new Vector3(0, 2 * scale, 3), BoardSurface.Finish.BANK);
+                var ice = new BoardSurface.Face(new Vector3(0, 0, 9), new Vector3(2 * scale, 0, 9),
+                      new Vector3(0, 2 * scale, 9), BoardSurface.Finish.ICE);
+                var dressing = new BoardSurface.Face(ice.a(), ice.b(), ice.c(), BoardSurface.Finish.DRESSING);
+                var faces = List.of(ice, ground, dressing);
+                assertEquals(3, BoardSurface.sampleHeight(faces, .5f * scale, .5f * scale, -7), .000001f);
+                assertEquals(3, BoardSurface.sampleHeight(faces, -.0008f * scale, .5f * scale, -7), .000001f);
+                assertEquals(-7, BoardSurface.sampleHeight(faces, -.0012f * scale, .5f * scale, -7));
+                assertEquals(-7, BoardSurface.sampleHeight(List.of(ice, dressing), .5f * scale, .5f * scale, -7));
+            }
+        }
+    }
+
+    @Test
     void completedNeighborSurfacesPreserveExactWallsAndOutsideChunkFallbacks() {
         for (BoardScene scene : List.of(scene(false), scene(true), randomBoard(new Random(7419)),
               GpuRiverTerrainSmokeTest.dropScene(BoardScene.Surface.SAND))) {
@@ -168,6 +190,17 @@ class BoardSurfaceTest {
                 assertEquals(BoardGeometry.LEVEL, road.height(gate.x, gate.y), 0.01f,
                       "The road must reach the deck's full height at the shared edge");
                 assertEquals(center.z, road.height(center.x, center.y), 0.01f);
+                Vector3 hub = new Vector3(center).lerp(gate, .5f);
+                hub.z = center.z;
+                Vector3 deck = new Vector3(gate.x, gate.y, BoardGeometry.LEVEL);
+                assertTrue(road.roadNormal(hub).epsilonEquals(Vector3.Z, .0001f));
+                assertTrue(road.roadNormal(deck).epsilonEquals(Vector3.Z, .0001f),
+                      "The approach must become level before joining the bridge deck");
+                Vector3 leaving = new Vector3(hub).lerp(deck, .01f), arriving = new Vector3(deck).lerp(hub, .01f);
+                assertTrue(Math.abs(road.height(leaving.x, leaving.y) - hub.z) < .002f * BoardGeometry.LEVEL,
+                      "Round the actual departure, not just the lighting normal");
+                assertTrue(Math.abs(road.height(arriving.x, arriving.y) - deck.z) < .002f * BoardGeometry.LEVEL,
+                      "Round the actual arrival at the bridge deck");
                 assertEquals(0, belowBridge.height(gate.x, gate.y), 0.01f,
                       "The bridge approach must not deform the ground beneath the deck");
                 Vector3 bridgeCenter = BoardGeometry.center(neighbor, 0);

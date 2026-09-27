@@ -166,7 +166,7 @@ class UnitEquipmentAssemblyTest {
         var body = new UnitModelDescriptor(2, "body", "mek", "body.g3dj", bounds, "biped-v1",
               Map.of("root", "RA"), Map.of(), points, List.of(), List.of(), Map.of(), null);
         var structure = new UnitModelState.Structure(EntityMovementMode.BIPED, equipment, List.of(), 0, false, anatomy);
-        var bindings = UnitEquipmentAssembly.attachAll(library, recipe, new GpuUnitModels.ModularAsset(body, assembled, 1),
+        var bindings = UnitEquipmentAssembly.attachAll(library, recipe, new GpuUnitModels.ModularAsset(body, List.of(assembled, assembled, assembled), List.of(1, 1, 1)),
               structure, assembled);
         assembled.calculateTransforms();
         return new GpuUnitModel(assembled, "RA", true, bindings);
@@ -185,7 +185,7 @@ class UnitEquipmentAssemblyTest {
         var descriptor = new UnitModelDescriptor(2, "equipment", family, asset.replace(".json", ".g3dj"), bounds,
               "rigid-v1",
               Map.of("root", "barrel"), Map.of(), List.of(), List.of(emitter), List.of(), Map.of(), null);
-        when(library.modular(asset)).thenReturn(new GpuUnitModels.ModularAsset(descriptor, shape, 1));
+        when(library.modular(asset)).thenReturn(new GpuUnitModels.ModularAsset(descriptor, List.of(shape, shape, shape), List.of(1, 1, 1)));
     }
 
     private static UnitModelEquipment.Mount mount(int index, String primary, String secondary) {
@@ -209,7 +209,7 @@ class UnitEquipmentAssemblyTest {
               "muzzle", "bullet");
         var weapon = new UnitModelDescriptor(2, "equipment", "ballistic", "gun.g3dj", bounds, "rigid-v1",
               Map.of("root", "barrel"), Map.of(), List.of(), List.of(emitter), List.of(), Map.of(), null);
-        when(library.modular("gun.json")).thenReturn(new GpuUnitModels.ModularAsset(weapon, gun, 1));
+        when(library.modular("gun.json")).thenReturn(new GpuUnitModels.ModularAsset(weapon, List.of(gun, gun, gun), List.of(1, 1, 1)));
 
         Model assembled = new Model();
         List<UnitModelDescriptor.Hardpoint> points = new ArrayList<>();
@@ -230,7 +230,7 @@ class UnitEquipmentAssemblyTest {
         var body = new UnitModelDescriptor(2, "body", "mek", "body.g3dj", bounds, "biped-v1",
               Map.of("root", "CT"), Map.of(), points, List.of(), List.of(), Map.of(), null);
         var structure = new UnitModelState.Structure(EntityMovementMode.BIPED, equipment, List.of(), 0, false, anatomy);
-        var bindings = UnitEquipmentAssembly.attachAll(library, recipe, new GpuUnitModels.ModularAsset(body, assembled, 1),
+        var bindings = UnitEquipmentAssembly.attachAll(library, recipe, new GpuUnitModels.ModularAsset(body, List.of(assembled, assembled, assembled), List.of(1, 1, 1)),
               structure, assembled);
         assembled.calculateTransforms();
         return new GpuUnitModel(assembled, "CT", true, bindings);

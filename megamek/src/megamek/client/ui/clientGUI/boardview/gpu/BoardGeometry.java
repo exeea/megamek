@@ -11,6 +11,8 @@ import megamek.common.board.Coords;
 
 /** Z-up, tightly tiled hex columns. Rendering and picking use these same surfaces. */
 final class BoardGeometry {
+    /** One level in authored board models, using the same units as an 84 by 72 hex. */
+    static final int MODEL_LEVEL_HEIGHT = 18;
     /** Independent default for a whole unit occupying more than one game hex. */
     static final float DEFAULT_MULTI_HEX_UNIT_SCALE = 1.0f;
     /** Whether steps between hexes take room on both sides of their edge; see {@link Tuning#transitions()}. */
@@ -65,7 +67,7 @@ final class BoardGeometry {
         }
     }
 
-    static final Tuning DEFAULTS = new Tuning(1, 1.0f, 1.0f, 18, 0.8f);
+    static final Tuning DEFAULTS = new Tuning(1, 1.0f, 1.0f, MODEL_LEVEL_HEIGHT, 0.8f);
     /**
      * Native tactical markers keep this fraction of the hex radius clear of the shared hex edges. Exactly on
      * an edge a marker is coplanar with the terrain there and flickers against it while the camera rotates.
@@ -91,8 +93,20 @@ final class BoardGeometry {
     private BoardGeometry() { }
 
     static Tuning tuning() {
-        return tuning;
+        TerrainSettings settings = TerrainSettings.current();
+        return settings == null ? tuning : settings.geometry();
     }
+
+    static float hexScale() { return tuning().hexScale(); }
+    static float width() { return TILE_WIDTH * hexScale(); }
+    static float height() { return TILE_HEIGHT * hexScale(); }
+    static float level() {
+        Tuning settings = tuning();
+        return settings.levelHeight() * settings.hexScale();
+    }
+    static float unitScale() { return tuning().unitScale(); }
+    static float multiHexUnitScale() { return tuning().multiHexUnitScale(); }
+    static float unitHeightScale() { return tuning().unitHeightScale(); }
 
     static void tune(Tuning next) {
         if (next.equals(tuning)) {
@@ -110,7 +124,8 @@ final class BoardGeometry {
     }
 
     static int revision() {
-        return revision;
+        TerrainSettings settings = TerrainSettings.current();
+        return settings == null ? revision : settings.revision();
     }
 
     /** Terrain controls are applied on the GL thread between frames, like the board dimensions above. */
@@ -120,19 +135,22 @@ final class BoardGeometry {
     }
 
     static int terrainRevision() {
-        return terrainRevision;
+        TerrainSettings settings = TerrainSettings.current();
+        return settings == null ? terrainRevision : settings.terrainRevision();
     }
 
     static float centerX(Coords coords) {
-        return coords.getX() * WIDTH * 0.75f + WIDTH / 2;
+        float width = width();
+        return coords.getX() * width * 0.75f + width / 2;
     }
 
     static float centerY(Coords coords) {
-        return -(coords.getY() * HEIGHT + (coords.getX() & 1) * HEIGHT / 2 + HEIGHT / 2);
+        float height = height();
+        return -(coords.getY() * height + (coords.getX() & 1) * height / 2 + height / 2);
     }
 
     static Vector3 center(Coords coords, float elevation) {
-        return new Vector3(centerX(coords), centerY(coords), elevation * LEVEL);
+        return new Vector3(centerX(coords), centerY(coords), elevation * level());
     }
 
     static Vector3 corner(Coords coords, float elevation, int corner) {
@@ -148,8 +166,8 @@ final class BoardGeometry {
      */
     static Vector3 corner(Vector3 out, Coords coords, float elevation, int corner) {
         int k = Math.floorMod(corner, 6);
-        return out.set((3 * coords.getX() + 2 + CORNER_DX[k]) * (WIDTH / 4),
-              (-(2 * coords.getY() + (coords.getX() & 1) + 1) + CORNER_DY[k]) * (HEIGHT / 2), elevation * LEVEL);
+        return out.set((3 * coords.getX() + 2 + CORNER_DX[k]) * (width() / 4),
+              (-(2 * coords.getY() + (coords.getX() & 1) + 1) + CORNER_DY[k]) * (height() / 2), elevation * level());
     }
 
     static int edgeDirection(int edge) {
@@ -169,23 +187,23 @@ final class BoardGeometry {
 
     /** Liquid beds include a two-world-unit visual recess even without positive game water depth. */
     static float groundZ(BoardScene.Tile tile) {
-        return tile.elevation() * LEVEL - (tile.liquid().present() ? Math.max(2 * HEX_SCALE, tile.waterDepth() * LEVEL) : 0);
+        return tile.elevation() * level() - (tile.liquid().present() ? Math.max(2 * hexScale(), tile.waterDepth() * level()) : 0);
     }
 
     static float waterZ(BoardScene.Tile tile) {
-        return tile.elevation() * LEVEL - HEX_SCALE;
+        return tile.elevation() * level() - hexScale();
     }
 
     static float surfaceZ(BoardScene.Tile tile) {
         if (tile.frozen()) {
-            return tile.elevation() * LEVEL;
+            return tile.elevation() * level();
         }
         return tile.liquid().present() ? waterZ(tile) : groundZ(tile);
     }
 
     static float floor(BoardScene scene) {
         float lowest = Float.POSITIVE_INFINITY;
-        float depth = LEVEL;
+        float depth = level();
         for (BoardScene.Tile tile : scene.tiles()) {
             lowest = Math.min(lowest, groundZ(tile));
             // At small elevation-height settings, sculpted hollows can extend below a single game level.
@@ -194,21 +212,21 @@ final class BoardGeometry {
         return lowest - depth;
     }
 
-    /** Shared atmosphere baseline: hex LEVEL, never a riverbed, water DEPTH, or model height. */
+    /** Shared atmosphere baseline: hex elevation, never a riverbed, water depth, or model height. */
     static float weatherBase(BoardScene scene) {
-        return scene.tiles().stream().mapToInt(BoardScene.Tile::elevation).min().orElse(0) * LEVEL;
+        return scene.tiles().stream().mapToInt(BoardScene.Tile::elevation).min().orElse(0) * level();
     }
 
     static boolean contains(Coords coords, float x, float y) {
         float dx = Math.abs(x - centerX(coords));
         float dy = Math.abs(y - centerY(coords));
-        return dy <= HEIGHT / 2 + 0.001f && (HEIGHT / 2) * dx + (WIDTH / 4) * dy <= WIDTH * HEIGHT / 4 + 0.001f;
+        return dy <= height() / 2 + 0.001f && (height() / 2) * dx + (width() / 4) * dy <= width() * height() / 4 + 0.001f;
     }
 
     /** The hex whose footprint holds (x, y), or null off the board. */
     static BoardScene.Tile tile(BoardScene scene, float x, float y) {
-        int column = (int) Math.floor(x / (WIDTH * .75f));
-        int row = (int) Math.floor(-y / HEIGHT);
+        int column = (int) Math.floor(x / (width() * .75f));
+        int row = (int) Math.floor(-y / height());
         for (int cx = column - 1; cx <= column + 1; cx++) {
             for (int cy = row - 1; cy <= row + 1; cy++) {
                 BoardScene.Tile tile = scene.tile(new Coords(cx, cy));
@@ -218,7 +236,9 @@ final class BoardGeometry {
         return null;
     }
 
-    record Hit(Coords coords, float distance) { }
+    record Hit(Coords coords, float distance, boolean hardSurface) {
+        Hit(Coords coords, float distance) { this(coords, distance, false); }
+    }
 
     static Coords pick(BoardScene scene, Ray ray) {
         Hit hit = hit(scene, ray);
@@ -250,7 +270,7 @@ final class BoardGeometry {
         if (hit == null) {
             // A ray exactly along a shared triangle edge can miss both triangles in float arithmetic. Symmetry lines
             // through hex centres make that reproducible for axis-aligned pointer rays, so retry once, nudged.
-            Ray nudged = new Ray(new Vector3(ray.origin).add(.0013f * HEX_SCALE, .0007f * HEX_SCALE, 0), ray.direction);
+            Ray nudged = new Ray(new Vector3(ray.origin).add(.0013f * hexScale(), .0007f * hexScale(), 0), ray.direction);
             hit = nearest(scene, nudged, candidates, floor, cache, surfaces);
         }
         return hit;
@@ -266,9 +286,9 @@ final class BoardGeometry {
         for (int direction = 0; direction < 6; direction++) {
             BoardScene.Tile neighbor = scene.tile(owner.translated(direction));
             if (neighbor == null || !contains(neighbor.coords(), hit.x, hit.y)) { continue; }
-            float talus = LEVEL * .3f;
-            if (tuning.stepsBetweenTops() && high != null) {
-                talus = Math.max(talus, (high.elevation() * LEVEL - surfaceZ(neighbor)) * .5f);
+            float talus = level() * .3f;
+            if (tuning().stepsBetweenTops() && high != null) {
+                talus = Math.max(talus, (high.elevation() * level() - surfaceZ(neighbor)) * .5f);
             }
             if (hit.z < surfaceZ(neighbor) + talus) { return neighbor.coords(); }
         }
@@ -292,19 +312,20 @@ final class BoardGeometry {
           BoardSurface.Cache cache, Function<Coords, BoardTacticalGeometry.Surface> surfaces) {
         Coords result = null;
         float nearest = Float.POSITIVE_INFINITY;
+        boolean hardSurface = false;
         Vector3 hit = new Vector3();
         for (BoardScene.Tile tile : candidates) {
-            float high = tile.elevation() * LEVEL;
+            float high = tile.elevation() * level();
             for (int direction = 0; direction < 6; direction++) {
                 BoardScene.Tile neighbor = scene.tile(tile.coords().translated(direction));
-                high = Math.max(high, BoardSurface.roadEdgeElevation(tile, neighbor, direction) * LEVEL);
+                high = Math.max(high, BoardSurface.roadEdgeElevation(tile, neighbor, direction) * level());
             }
             high += BoardRelief.headroom(tile);
             // Sculpted cliffs, talus and rim lips can reach slightly beyond the logical footprint.
             float reach = 2 * BoardRelief.overhang();
             if (!Intersector.intersectRayBoundsFast(ray,
                   new Vector3(centerX(tile.coords()), centerY(tile.coords()), (floor + high) / 2),
-                  new Vector3(WIDTH + reach, HEIGHT + reach, high - floor + 0.01f))) {
+                  new Vector3(width() + reach, height() + reach, high - floor + 0.01f))) {
                 continue;
             }
             BoardSurface surface = surfaces != null ? null
@@ -315,12 +336,14 @@ final class BoardGeometry {
                       && ray.origin.dst2(hit) < nearest) {
                     nearest = ray.origin.dst2(hit);
                     result = footprint(scene, tile.coords(), hit);
+                    hardSurface = hardSurface(tile, face);
                 }
             }
             for (BoardSurface.Face face : finished == null ? surface.waterFaces : finished.water()) {
                 if (Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit) && ray.origin.dst2(hit) < nearest) {
                     nearest = ray.origin.dst2(hit);
                     result = footprint(scene, tile.coords(), hit);
+                    hardSurface = false;
                 }
             }
             for (BoardSurface.Face face : finished == null ? surface.walls(scene, floor) : finished.walls()) {
@@ -330,6 +353,7 @@ final class BoardGeometry {
                     // A rock face belongs to the higher hex that owns it; the scree at its foot, which spreads
                     // past the logical edge, lies on the lower hex whose footprint contains it.
                     result = foot(scene, tile.coords(), hit);
+                    hardSurface = hardSurface(tile, face);
                 }
             }
             for (BoardSurface.Side side : finished == null ? surface.waterfalls : finished.waterfalls()) {
@@ -345,9 +369,17 @@ final class BoardGeometry {
                 if (distance < nearest) {
                     nearest = distance;
                     result = tile.coords();
+                    hardSurface = false;
                 }
             }
         }
-        return result == null ? null : new Hit(result, nearest);
+        return result == null ? null : new Hit(result, nearest, hardSurface);
+    }
+
+    private static boolean hardSurface(BoardScene.Tile tile, BoardSurface.Face face) {
+        if (face.finish() == BoardSurface.Finish.ICE || face.finish() == BoardSurface.Finish.DRESSING) { return false; }
+        return face.finish() == BoardSurface.Finish.OUTCROP
+              || tile.surface() == BoardScene.Surface.ROCK || tile.surface() == BoardScene.Surface.CONCRETE
+              || tile.surface() == BoardScene.Surface.GRASS && face.finish() == BoardSurface.Finish.WALL;
     }
 }

@@ -14,7 +14,7 @@ change. Opening another board captures its starting conditions.
 
 | Control | Visual effect |
 | --- | --- |
-| Time of day | Starts at a random quarter-hour within the planetary lighting window; the slider overrides it. 00:00 and 24:00 both mean midnight |
+| Time of day | Starts at a random minute within the planetary lighting window; the slider overrides it. 00:00 and 24:00 both mean midnight |
 | Fixed sun/moon | Off by default. Also available in the Camera menu, synchronized with this checkbox. Keep the source at the same screen direction through camera rotation, tilt, pan and zoom; terrain, units, cloud shadows and rays share that direction |
 | Atmosphere presets | Complete previews of real planetary-condition combinations; replace the visual atmosphere and reset the extra atmosphere controls to their constants |
 | Planetary conditions... | Opens the currently selected visual conditions; Apply always reapplies every derived value and resets the extra atmosphere controls, even for unchanged conditions. Cancel preserves all tuning |
@@ -30,7 +30,7 @@ change. Opening another board captures its starting conditions.
 | Fog density variation | Thin the spaces between fog banks (0–1); default 0.85. Zero gives uniform density, one permits clear gaps; the 25% opacity cap remains |
 | Fog calm drift | Default from `GpuAtmosphere.FOG_CALM_DRIFT = 0.2f` hex widths/second; gentle intrinsic movement when wind is calm. Zero disables calm drift; wind still moves the fog |
 | Haze | Add more uniform atmospheric extinction |
-| Exposure (EV) | Brighten or darken the scene by up to two stops; neutral daylight includes a +0.8-stop lift, fading to -0.4 EV at night |
+| Exposure (EV) | Brighten or darken the scene by up to two stops. Zero is neutral at every hour: the view's adaptation to day, dusk and night is already part of the light |
 | Rain / Snow / Hail / Blowing sand / Lightning | Buttons toggle each effect; adjacent sliders adjust intensity (zero is off). Turning an effect back on sets it to half strength |
 | Wind strength / Wind direction | Move fog banks, sand, cloud shadows and precipitation. Fog, clouds and sand retain gentle motion when calm. Direction is clockwise from north, toward where weather travels |
 | God rays | Default 0.5; scale shaft density from 0 to 2; zero disables the shaft pass when ordinary fog/haze is also off |
@@ -143,11 +143,11 @@ the GPU window can choose a new time. No gameplay random rolls are consumed.
 
 | Scenario condition | Initial visualization |
 | --- | --- |
-| Day | Random 08:00–17:00 daylight |
+| Day | Random 09:00–15:30 daylight |
 | Dusk / Dawn (`DUSK_DAWN`) | Random 06:00–06:45 dawn or 17:15–18:00 sunset twilight |
 | Full moon | Random 20:00–04:00 with a cool directional moonlight source and ambient fill; the default for night previews |
-| Moonless / Pitch black | Random 20:00–04:00 with no directional moonlight or lunar shadows, plus another -0.6 / -1.0 EV (total -1.0 / -1.4 EV); retain ambient readability |
-| Glare / Solar flare | Random 08:00–17:00 with slightly increased exposure |
+| Moonless / Pitch black | Random 20:00–04:00 with no directional moonlight or lunar shadows, plus a -0.6 / -1.0 EV exposure compensation (level ground -3.5 / -3.9 EV against clear noon, against -2.0 under the full moon); retain ambient readability |
+| Glare / Solar flare | Random 09:00–15:30 with slightly increased exposure |
 | Clear | No cloud cover or precipitation; independently configured fog/sand still apply |
 | Light / Moderate / Heavy / Gusting rain / Downpour | Increasing rain intensity; heavy and gusting rain share density, with actual scenario wind determining drift |
 | Light / Moderate / Flurries / Heavy snow | Increasing snowfall intensity; actual scenario wind determines drift |
@@ -214,11 +214,13 @@ as directional sunlight and moonlight exchange positions.
 `BoardAtmosphere` derives sun/moon direction, direct and ambient colors, fog and
 background colors, tint, and saturation from one immutable settings record.
 Morning and evening cast shadows in opposite directions, low sunlight casts
-longer shadows, and Full Moon nights retain cool ambient fill and moonlight.
+longer shadows, and Full Moon nights keep a slightly cool ambient fill and moonlight.
 Twilight warmth peaks at the horizon independently of the remaining daylight.
-Dawn uses peach light and dusk uses amber light, with warm diffuse illumination
-on the board and a cooler violet upper sky. Diffuse warmth preserves its luminance;
-midday and full-night surface lighting keep their established values. The sky has
+The sinking sun dims and turns golden through the air's extinction. Around sunset the
+shade takes the deep blue of the sky overhead (`TWILIGHT_SKY`) and a quarter share of
+the horizon's warm glow (`WARM_SHARE`), both at constant luminance, so it reads cool
+against the golden sun (fill B/R 1.39 at 17:30 against the sun's 0.41), and the upper
+sky turns deep blue in the blue hour instead of violet. The sky has
 separate horizon and upper colors instead of borrowing the fog color. It receives
 exposure once, without the terrain's additional tint/desaturation. Smooth solar-height
 curves join night, twilight and day when previewing different times; the combat clock
@@ -238,31 +240,74 @@ and shaders; no additional light, shader or pass is added. Disabling it restores
 the normal world-space direction. The clock still determines lighting color,
 strength and the sun/moon handover.
 
-`BoardAtmosphere.MOONLIGHT_SHADOW_CONTRAST` controls the fraction of ambient fill
-transferred into visible moonlight, giving Full Moon nights stronger native cast shadows.
+`BoardAtmosphere.MOONLIGHT_SHADOW_CONTRAST` controls the fraction of the night sky's fill
+transferred into the shadow-casting moonlight, giving Full Moon nights stronger native cast shadows.
 The **Moon shadow contrast** control under **Light and fog effects** overrides it;
 Defaults restores the constant. Zero restores the original softer shadows, and
-higher values deepen them subject to the same directional RGB budget as daylight.
-The transfer fades with the moon, leaves Moonless/Pitch Black and daylight alone,
+higher values deepen them; at 1 the moonlight takes all of the fill, so moon shadows are black.
+The transfer fades with the moon's shadows at the handover, leaves Moonless/Pitch Black and daylight alone,
 and preserves each RGB channel on lit level ground, the sky palette and exposure.
 It uses the existing light and shadow map, with no shader or render-pass changes.
 
-`DAYLIGHT_SHADOW_CONTRAST = 0.25f` transfers up to 25% of ambient sky fill into
-the visible sun, including dawn and dusk. Compensation for the sun's angle preserves each
-RGB channel on sunlit level ground. Its RGB budget caps the world-space directional
-components at 0.95 instead of disabling contrast near the horizon. The low-angle
-direction is bounded to about 12 degrees above the terrain, producing shadows about
-4.8–4.9 times the caster height throughout the scenario's dawn/dusk windows. This is
-a readable LDR approximation, not an astronomical horizon with infinitely long shadows.
-The remaining ambient light keeps shade readable. Cast shadows and
-sun-facing/away-facing surfaces gain contrast through the existing shaders;
-exposure and sunlit flat-ground brightness stay the same. See the
+`BoardAtmosphere.lighting()` holds the board's one light model, in linear RGB and one
+unit: a white level surface in clear noon light receives luminance 1. The sun dims and
+warms through the air's extinction along its path (`EXTINCTION` per air mass; the air
+mass is 1 overhead and about 9.3 on the horizon). Extinction does not depend on
+pressure, so airless and standard air light the ground alike. A neutral sky fills the
+shade, 4:1 against the sun on clear noon level ground (`KEY_FILL`), falling to 30% as
+the sun sets. The full moon and the night sky are only a little blue (`NIGHT_TINT`,
+moonlight B/R 1.18). The twilight sky keeps lighting the ground until the sun is about
+17 degrees below the horizon (`daylight` rises from sun altitude -0.30 to 0.25), so the
+blue hour stays brighter than a moonless night. The view adapts to 60% of every change in
+light (`ADAPTATION`), and that exposure is applied to the light before it leaves Java, so
+unlit effects, markers and the sky keep their authored brightness at every hour. Level
+ground against clear noon, from `lighting()`: 09:00 -0.24 EV, 13:00 -0.02, 15:30 -0.33,
+17:00 -0.84, 17:30 -1.04, 18:00 -1.57, 18:30 (the handover) -2.04, 19:00 (a low moon)
+-2.24, 19:09 -2.25, the darkest point, full moon -2.00, and moonless -3.32 and pitch black -3.72 with
+their scenario exposures. Direct light may exceed 1 (1.77 at dusk); ambient stays below 1
+(at most 0.32), which libGDX's ambient cubemap requires. Every lit shader multiplies its linearised color by this light
+(see [gpu-board.md](gpu-board.md)); fog scatters 80% of the light on level ground, and
+blowing sand's fog and the composite's sand veil share one dust albedo (`SAND_DUST`,
+which `GpuAtmosphere` passes to the veil with the light). The sun's low-angle direction is bounded to about 12
+degrees above the terrain, producing shadows about 4.8–4.9 times the caster height
+throughout the scenario's dawn/dusk windows. This is a readable approximation, not an
+astronomical horizon with infinitely long shadows. The moon stays at least about 28 degrees
+up (`MIN_MOON_ALTITUDE`), with shadows about two caster heights long: its beam carries
+the night fill the moon contrast moves into it, and a grazing moon lit the walls, rocks and
+plants facing it brighter than daylight did. From `lighting()`, a wall turned to the light
+(half the sky and the whole beam) at 19:00 went from -0.65 EV against clear-noon level ground
+to -1.52, below a wall turned to the 13:00 sun (-1.02); midnight is unchanged. Rendered on the
+RTX 4070 (SAND oblique showcase, `light/fix-before/` and `light/fix-after/`), the 19:00 frame's
+linear p90/p10 spread fell from 10.1 to 3.2, beside midnight's 3.7, and a moonlit sand wall
+sample from luma 106 to 85 (67 at 13:00); walls facing the moon still read brighter than walls that face
+away from the noon sun. See the
 [lighting study](gpu-lighting-study.md) for measured values, the pipeline audit,
 and the limits of this approximation.
 
-Sun visibility reaches full strength at 06:00 and remains through 18:00. The single
-directional source fades to zero before switching between sun and moon, in the
-surrounding twilight. Sun and moon colors are never summed onto the same direction.
+One directional light casts the shadows, so the sun and the moon hand it over at a sun
+altitude of -0.09 (`HANDOVER`, 05:39 and 18:21), where both have faded out, and the
+shadow direction flips unseen. At dusk the sun's shadows fade over the 40 minutes before
+the flip (a smoothstep over `SUN_FADE` = 0.17 of altitude) and the moon's return over the
+45 minutes after it (an ease-out over `MOON_FADE` = 0.19), as the twilight sky darkens;
+dawn mirrors it. The sun outshines the twilight sky and the moon does not, so the two
+curves differ and the shadows weaken and return at about the same pace. Moonlight whose
+shadows the twilight sky washes out still lights the ground as fill, so the board does
+not darken at the flip, and a moon still up at dawn or dusk adds only fill, never light
+from the sun's direction or color. Sun and moon colors are never summed onto the same
+direction. From `lighting()` at one-minute steps (the tuning slider's step), the share of
+level-ground light that casts shadows changes by at most 0.026 per minute and the
+view by at most 0.033 EV per minute; that share is 0.15–0.20 ten minutes from either
+flip and 0.51–0.66 half an hour from it, and 0.65 of the light is fill at 06:00 and
+18:00, the ends of the scenario's dawn and dusk windows. Rendered on the RTX 4070 (SAND
+oblique showcase, every five minutes, `light/handover-before/` and
+`light/handover-after/` under `.work/claude-code/terrain/`): the frame's linear
+p90/p10 spread now falls from 7.1 at 17:40 through 5.0 at 18:00 and 3.6 at 18:15 to 2.9
+at 18:30 and returned to 10.1 at 19:00 under the grazing moon, now 3.1–3.2 from 18:35 on
+(`light/fix-handover/`); before the crossfade, the sun's shadows collapsed between 18:05
+and 18:20 and the moon's appeared between 18:25 and 18:40 (7.7, 2.9, 12.1). A second,
+unshadowed directional light for the outgoing source was considered and not adopted:
+every lit shader, water's included, would need a second light term for about 20
+minutes of modeling a day, while the crossfade changes no shader.
 Only Full Moon enables the night source. The derived lighting record identifies the
 active sun for god rays; sky brightness is no longer used to infer which source is
 casting shadows. Geometry, cloud transmission and shafts use the same final light.
@@ -316,9 +361,19 @@ See [cloud rendering](gpu-clouds.md) for the
 model, ownership, limitations and validation.
 
 The final pass applies fog transmission and scattering, exposure, color tint,
-saturation, and a subtle vignette. Daylight is calibrated for the existing LDR
-tileset; there is no additional filmic curve to amplify its baked contrast.
-Neutral exposure lifts daylight by 0.8 stops and uses -0.4 EV at night, a 1.2-stop day/night difference.
+saturation, one highlight shoulder and a subtle vignette. The shoulder replaces the
+former clip at white (the user's decision of 2026-09-24, reversing the earlier
+no-filmic rule). It is the identity up to linear 0.6 (display 202), so mid-tones and
+the tileset palette keep their authored values, and above that it rolls each channel
+smoothly towards white, so bright orange sand turns cream instead of clipping flat.
+It applies to surfaces, sky and glare alike. The scene target stays RGBA8 and clips
+linear values above 1 before the composite's exposure, which is one unless the scenario
+or Tuning compensates, so the curve's input tops out at 1 (display 237). Measured on the
+RTX 4070 at 13:00 (`light/fix-after/`), 0.004–0.013% of the SAND overview, oblique and rim
+pixels reach that plateau and none of the GRASS ones. An RGBA16F scene target was measured and not adopted; see
+[gpu-weather-performance.md](gpu-weather-performance.md).
+The composite's exposure is only the scenario or Tuning compensation (2^EV) and lightning;
+the day/night adaptation is part of the light.
 The cloud atlas is the sole attenuation of surface sunlight/moonlight by clouds.
 Open columns retain clear-weather incident lighting, ambient fill and grading;
 dense cloud shade reduces direct light up to the cover-dependent opacity limit,
@@ -475,9 +530,14 @@ No timing queries or synchronization are added to gameplay rendering.
 
 `BoardAtmosphereTest` covers the daily light cycle, clock wrapping, finite light
 directions, every scenario light/weather category and its random clock window, pressure and space exclusions,
-effective blowing sand, and shader input bounds. It also checks preserved sunlit
-ground RGB values, camera-relative direction and brightness across orbit/tilt/pan/zoom,
+effective blowing sand, and shader input bounds. It also checks the clear-noon light
+unit with a warm sun and a neutral fill, a sinking sun that dims and warms, the full moon
+two stops below noon, airless worlds lit like standard air, fog and dust that follow the
+ground light, moonlit walls that stay below sunlit ones, camera-relative direction and
+brightness across orbit/tilt/pan/zoom,
 explicit moon suppression, stronger clear-day shadows, unchanged light in cloud openings, twilight/night fill,
+shadows that fade over tens of minutes on both sides of the sun/moon handover without a per-minute jump in
+shadow strength or brightness, a moon that only adds fill while the sun casts the shadows,
 warm dawn/dusk across every sampled time, continuous sky palettes and the cloud veil's
 top-to-bottom fade, and the absence of clipped light channels near the horizon. `GpuScenarioAtmosphereTest`
 checks publication, stable sampled times and immutable ownership across the Swing/render boundary,
@@ -493,9 +553,21 @@ speed, continuous periodic travel and bounded variation controls.
 exercises actual shaders, fog at different heights, contrast under maximum fog,
 daylight cast-shadow contrast, full-moon versus moonless/pitch-black lighting,
 shared fixed-light projections, shadow resource reuse, live controls, and resizing.
+A gray unit roof and gray tileset ground must light within 4% of each other in linear
+luminance at noon and under the full moon (one light model; at noon, the light unit, only
+the light levels can differ, so the full-moon comparison is the one that catches a
+display/linear mismatch); an opaque cloud must leave each level surface its ambient
+share of the light in linear luminance, and a unit's wall only its sky light, without
+the sunlit ground's bounce; and overcast twilight ground must stay as readable as the
+clear full moon (display luminance 0.29; the RTX 4070 measured a minimum of 0.322 at
+06:00 and 0.325 at 18:00, and 0.324 under the full moon). Wet tileset ground must render
+at least 10% darker: its material darkens the albedo by 10–17.5% and the wet film's
+sheen gives a little light back.
 At all eight dawn/dusk clock choices, native checks compare the same receiver with
 and without a caster, checking visible contrast inside the long shadow and unchanged
-lighting beyond its end. Both camera presets and Fixed sun/moon are exercised.
+lighting beyond its end (on the RTX 4070 the shadow/lit display ratio is 0.68–0.70 inside the
+windows and 0.82–0.84 at 06:00 and 18:00, where the sun's shadows begin to fade into the
+handover; shadows are 4.8–4.9 caster heights long). Both camera presets and Fixed sun/moon are exercised.
 Twilight and cloud-cover checks read actual sky/ground pixels and verify that the
 atlas shader scales opacity without changing its cloud shapes. The min/max sliders
 are checked for effective range, override retention and Defaults restoration.

@@ -20,7 +20,6 @@ import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
-import com.badlogic.gdx.graphics.g3d.loader.G3dModelLoader;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.utils.JsonReader;
@@ -127,8 +126,8 @@ final class GpuMekAssemblyReview {
             // The Locust hangs its guns under its pods, which only the six-view sheet shows from below.
             if (previous != null && !entry[0].startsWith("locust") && !entry[0].startsWith("panther")
                   && !entry[0].startsWith("urbanmech")) {
-                Model old = new G3dModelLoader(new JsonReader()).loadModel(new FileHandle(new File(referenceRoot,
-                      previous.getString("asset"))));
+                Model old = new Model(GpuUnitModels.meshData(new FileHandle(new File(referenceRoot,
+                      previous.getString("asset")))));
                 references.add(old);
                 var oldInstance = new ModelInstance(old);
                 oldInstance.transform.scale(1, 1, 54);

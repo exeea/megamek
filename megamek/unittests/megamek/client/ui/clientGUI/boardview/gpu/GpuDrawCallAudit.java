@@ -60,6 +60,7 @@ final class GpuDrawCallAudit implements RenderableSorter, AutoCloseable {
     private final Map<Long, String> masks = new LinkedHashMap<>();
     private String stage = "unlabelled";
     private boolean indexed;
+    private long terrainPageBytes;
 
     GpuDrawCallAudit(GpuBattleView view) {
         terrain = (GpuTerrain) field(view, "terrain");
@@ -129,6 +130,8 @@ final class GpuDrawCallAudit implements RenderableSorter, AutoCloseable {
     void report(String scenario) {
         System.out.printf("DRAW AUDIT %s: terrain colour ModelBatch only; stage/category submitted draws=%s%n",
               scenario, categories);
+        System.out.printf("DRAW AUDIT terrainPageGeometry=%.3f MiB (vertex/index capacity; CPU and GPU each store a copy)%n",
+              terrainPageBytes / 1048576.0);
         System.out.println("pass,source,family,shader,materialMask,environmentMask,vertexMask,blended,draws,indices,"
               + "meshes,usedVertices,vertexCapacity,maxMeshVertices,meshesAt48k,meshesAt65532,materialValues,"
               + "repeatedMaterialDraws,knownChunks,knownChunkDraws,chunkMaterialBuckets,sameChunkMaterialExtraDraws,"
@@ -189,6 +192,16 @@ final class GpuDrawCallAudit implements RenderableSorter, AutoCloseable {
                 }
             }
         }
+        Object terrainPages = field(terrain, "terrainPages", true);
+        if (terrainPages != null) {
+            for (Object page : ((Map<?, ?>) field(terrainPages, "pages")).values()) {
+                for (Object value : (Array<?>) field(page, "cached")) {
+                    Mesh mesh = ((Renderable) value).meshPart.mesh;
+                    addOrigin(mesh, "terrain-paged", -1);
+                }
+            }
+            terrainPageBytes = pageBytes(terrainPages);
+        }
         List<?> chunks = (List<?>) field(terrain, "chunks");
         for (int index = 0; index < chunks.size(); index++) {
             Object chunk = chunks.get(index);
@@ -231,6 +244,15 @@ final class GpuDrawCallAudit implements RenderableSorter, AutoCloseable {
             }
         }
         return "-";
+    }
+
+    static long pageBytes(Object cache) {
+        Set<Mesh> meshes = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Object page : ((Map<?, ?>) field(cache, "pages")).values()) {
+            for (Object value : (Array<?>) field(page, "cached")) { meshes.add(((Renderable) value).meshPart.mesh); }
+        }
+        return meshes.stream().mapToLong(mesh -> (long) mesh.getMaxVertices() * mesh.getVertexSize()
+              + (long) mesh.getMaxIndices() * Short.BYTES).sum();
     }
 
     private static Object field(Object object, String name) {

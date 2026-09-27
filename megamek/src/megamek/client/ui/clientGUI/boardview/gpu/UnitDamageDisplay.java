@@ -163,10 +163,6 @@ final class UnitDamageDisplay implements Disposable {
     private final EnumMap<Stage, Texture> overlays = new EnumMap<>(Stage.class);
     private final EnumSet<Stage> attemptedOverlays = EnumSet.noneOf(Stage.class);
 
-    void applyTexture(ModelInstance instance, BoardScene.LocationDamage damage) {
-        applyTexture(instance, damage, 0);
-    }
-
     void applyTexture(ModelInstance instance, BoardScene.LocationDamage damage, int unitId) {
         applyTexture(instance, unitId);
         damage.stages().forEach((location, stage) -> {
@@ -225,10 +221,6 @@ final class UnitDamageDisplay implements Disposable {
         for (Node node : instance.nodes) {
             applyTexture(node, unitId);
         }
-    }
-
-    void wreck(ModelInstance instance, GpuUnitModel model) {
-        wreck(instance, model, 0);
     }
 
     void wreck(ModelInstance instance, GpuUnitModel model, int unitId) {

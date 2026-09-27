@@ -26,6 +26,7 @@ uniform sampler2D u_waterOcean;  // GpuOcean: RG wave slope, B crest compression
 uniform float u_waterOceanScale; // world XY to ocean UV; zero without the simulation
 uniform float u_metre;           // world units per metre
 uniform float u_levelHeight;     // world units per level
+uniform float u_waterLine;       // water surface inset below its game level, shared with the bed shader
 uniform int u_waderCount;
 uniform vec4 u_waders[12];       // GpuWaders: centre XY, radius at the waterline, water level; world units
 uniform vec4 u_waderMotion[12];  // velocity XY, world units per second
@@ -36,6 +37,7 @@ const float OCEAN_SIZE = 128.0;  // texels along a side of the ocean texture
 const mat2 CROSSING = mat2(0.52, 0.85, -0.85, 0.52);
 const mat2 CROSSING2 = mat2(-0.46, 0.888, -0.888, -0.46);
 
+// biome-water-functions
 void main() {
     float palette = u_waterMaterial.x;
     bool falling = u_waterMaterial.y > 0.5;
@@ -44,6 +46,12 @@ void main() {
     // The water's cut face where the board's edge cuts it off (GpuTerrain.waterCut): blue marks it, green is its depth
     // below the surface over WATER_DEPTH_RANGE. A fall's vertex colour means other things.
     bool cut = !falling && v_color.b > 0.5;
+    vec4 habitat = vec4(0.0), mixture = waterPalette(palette);
+    if (!spray && !cut) {
+        vec4 connected;
+        terrainCoverage(v_cloudPosition / u_metre, 14.0, (v_cloudPosition.z + u_waterLine) / u_levelHeight, habitat, connected);
+        if (dot(connected, vec4(1.0)) > .5) mixture = connected;
+    }
     vec2 position = v_cloudPosition.xy * u_rainScale;
     float effects = u_waterEffects;
     float detail = u_rainDetail * effects;
@@ -53,10 +61,11 @@ void main() {
 #ifdef diffuseColorFlag
     tint = u_diffuseColor.rgb;
 #endif
-    vec3 scatter = waterScatter(palette);
+    if (procedural) tint = mix(vec3(1.0), vec3(.4, 1.0, .12), mixture.w);
+    vec3 scatter = waterScatter(mixture);
     // Clear water foams white; silty and chemical water foams in the color of what it carries.
     vec3 froth = mix(vec3(0.94, 0.97, 1.0), scatter / max(max(scatter.r, scatter.g), scatter.b),
-          palette < 0.5 ? 0.08 : 0.3) * tint;
+          mix(.3, .08, mixture.x)) * tint;
 
     // Level-surface irradiance for the column, foam, mist and falls alike: white water scatters light through its
     // whole volume, so a fall's foam reads exactly like the foam it lands in.
@@ -128,6 +137,8 @@ void main() {
         vec4 field = texture2D(u_waterField, v_cloudPosition.xy * u_waterFieldMap.xy + u_waterFieldMap.zw);
         float shore = (field.r * 2.0 - 1.0) * SHORE_RANGE;
         float depth = field.g * WATER_DEPTH_RANGE;
+        float wetShore = falling ? 0.0 : clamp(dot(habitat.yzw, vec3(3.0)), 0.0, 1.0)
+              * (1.0 - smoothstep(.12, .65, depth)) * mix(.45, 1.0, mixture.x);
         vec2 current = (field.ba * 2.0 - 1.0) * effects;
         float agitation = (falling ? v_color.a : v_color.r) * effects;
 
@@ -187,6 +198,7 @@ void main() {
             noise = large.b * 0.6 + small.b * 0.4;
         }
         float waves = (mix(0.75, 1.35, gust) * mix(0.45, 1.0, open) + 0.9 * agitation) * effects;
+        waves *= 1.0 - wetShore * .75;
         // Slopes are the surface's gradient: the normal leans away from the way the water rises.
         vec2 slope = swell.xy * waves + (small.rg * 0.06 + rapidDetail.rg * (0.4 * agitation)) * effects;
         vec3 ripples = rainRippleField(position) * effects;
@@ -204,7 +216,7 @@ void main() {
         float fetch = smoothstep(0.12, 0.25, beyond - shore);
         float nearBank = (1.0 - smoothstep(0.05, 0.28, shore)) * smoothstep(0.0, 0.01, shore) * fetch;
         float march = shore * 95.0 + u_rainTime * 1.6 + broad.r * 11.0 + gust * 5.0;
-        slope += seaward * (cos(march) * 0.5 * nearBank * mix(0.6, 1.0, gust) * effects);
+        slope += seaward * (cos(march) * 0.5 * nearBank * mix(0.6, 1.0, gust) * effects * (1.0 - wetShore * .9));
 
         // Units standing in the water: it piles against each in a broken, swelling collar, sends ripples out and,
         // behind a moving one, spreads into a wake: two arms of foam at the angle every wake keeps, churned water
@@ -313,9 +325,9 @@ void main() {
         // effect fades around emerging bars and rocks instead of painting the old hex-shaped shoreline white.
         float foamWater = falling ? 1.0 : mix(0.035, 1.0, smoothstep(0.06, 0.45, depth))
               * smoothstep(0.0, 0.006, shore);
-        foam *= foamWater;
+        foam *= foamWater * (1.0 - wetShore * .94);
 
-        vec3 kept = waterTransmission(palette, depth);
+        vec3 kept = waterTransmission(mixture, depth);
         float facing = clamp(dot(normal, view), 0.0, 1.0);
         // Reflection rises more gently than Fresnel's law toward grazing: waves tilted away from the steep board
         // camera catch the sky while those facing it show the water, which is what makes waves read from above.
@@ -354,7 +366,7 @@ void main() {
               / (4.0 * max(facing, 0.1)) * 0.6 * effects;
         // Thin crests let the sun through, brightest when the viewer looks toward it: they glow like the shallows.
         float behind = max(dot(normalize(viewDirection().xy + 1e-5), normalize(toSun.xy + 1e-5)), 0.0);
-        glow = waterShallows(palette) * sunlight * (smoothstep(0.02, 0.35, swell.z) * (0.35 + 0.65 * behind)
+        glow = waterShallows(mixture) * sunlight * (smoothstep(0.02, 0.35, swell.z) * (0.35 + 0.65 * behind)
               * 0.5 * effects);
 #endif
         // The brighter side of the sky lights the faces tilted toward it, even overcast or seen from straight above.
@@ -367,13 +379,17 @@ void main() {
             float column = max(1.0 - max(max(kept.r, kept.g), kept.b), 0.3 * smoothstep(0.0, 0.1, depth));
             // Deep water varies a little in tone over a few hexes, as depth and silt do, instead of one flat blue.
             vec3 deep = scatter * mix(0.86, 1.12, broad.r);
-            body = mix(waterShallows(palette), deep, smoothstep(0.1, 1.6, depth)) * facets * column;
+            body = mix(waterShallows(mixture), deep, smoothstep(0.1, 1.6, depth)) * facets * column;
             bodyAlpha = min(column, WATER_MAX_OPACITY);
         } else {
             bodyAlpha = 1.0;
             body = texture2D(u_diffuseTexture, v_diffuseUV).rgb * tint * facets;
         }
-        body += glow * bodyAlpha;
+        // Suspended peat/silt joins shallow marsh pools and bare mud to open water over several metres.
+        vec3 wetColor = mix(vec3(.105, .14, .072), vec3(.24, .195, .105),
+              clamp((habitat.z + habitat.w) / max(dot(habitat.yzw, vec3(1.0)), .0001), 0.0, 1.0));
+        body = mix(body, wetColor * facets * bodyAlpha, wetShore);
+        body += glow * bodyAlpha * (1.0 - wetShore);
         // Wind-roughened faces scatter a soft image of the sky across the column: waves show under any light.
         body += sky * (bodyAlpha * (1.0 - fresnel) * 0.15);
         // Raindrop rings: each crest and trough catches the light differently.

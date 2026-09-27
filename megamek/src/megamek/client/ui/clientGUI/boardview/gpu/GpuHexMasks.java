@@ -53,10 +53,6 @@ final class GpuHexMasks implements Disposable {
      * A complete opaque regular-border pass has independent hex footprints. Translucent/overlapping borders and
      * interleaved artwork keep their original geometry and sorting centers, preserving painter order and clipping.
      */
-    boolean update(BoardScene next, Function<Coords, BoardTacticalGeometry.Surface> finished) {
-        return update(next, finished, true);
-    }
-
     boolean update(BoardScene next, Function<Coords, BoardTacticalGeometry.Surface> finished, boolean enabled) {
         List<BoardTactical.Fill> commands = next.tactical().fills();
         List<Entry> entries = enabled ? entries(next, commands) : null;
@@ -123,8 +119,8 @@ final class GpuHexMasks implements Disposable {
             }
             Coords coords = BoardTacticalGeometry.borderCoords(scene, border);
             if (coords == null || !owners.add(coords)
-                  || Math.abs(border.anchor().x() - BoardGeometry.centerX(coords) / BoardGeometry.HEX_SCALE) > .0001f
-                  || Math.abs(border.anchor().y() + BoardGeometry.centerY(coords) / BoardGeometry.HEX_SCALE) > .0001f) {
+                  || Math.abs(border.anchor().x() - BoardGeometry.centerX(coords) / BoardGeometry.hexScale()) > .0001f
+                  || Math.abs(border.anchor().y() + BoardGeometry.centerY(coords) / BoardGeometry.hexScale()) > .0001f) {
                 return null;
             }
             result.add(new Entry(fill, coords, index));
@@ -205,7 +201,7 @@ final class GpuHexMasks implements Disposable {
             program.bind();
             program.setUniformMatrix("u_projTrans", camera.combined);
             program.setUniformf("u_board", scene.width(), scene.height(), BoardGeometry.TILE_WIDTH, BoardGeometry.TILE_HEIGHT);
-            program.setUniformf("u_hexScale", BoardGeometry.HEX_SCALE);
+            program.setUniformf("u_hexScale", BoardGeometry.hexScale());
             context.setDepthTest(GL20.GL_LEQUAL, 0, tint ? GpuTactical.COPLANAR_DEPTH_FAR : 1);
             context.setDepthMask(false);
             context.setCullFace(GL20.GL_NONE);

@@ -49,7 +49,8 @@ class GpuResourcesSmokeTest {
                 try {
                     checkAtlas();
                     checkAssets();
-                    checkInteriorCourtyard();
+                    checkInteriorCourtyard(1);
+                    checkInteriorCourtyard(BoardGeometry.MODEL_LEVEL_HEIGHT);
                     checkChunkPicking();
                     checkFeatureAndWaterTransparency();
                     checkModelShadows();
@@ -163,7 +164,7 @@ class GpuResourcesSmokeTest {
         }
     }
 
-    private void checkInteriorCourtyard() {
+    private void checkInteriorCourtyard(float height) {
         ModelBuilder builder = new ModelBuilder();
         builder.begin();
         var mesh = builder.part("roof", GL20.GL_TRIANGLES,
@@ -171,19 +172,24 @@ class GpuResourcesSmokeTest {
         // Four wings around an open courtyard, with a detached annex outside the main footprint.
         for (float[] rect : new float[][] { { -30, -30, -10, 30 }, { 10, -30, 30, 30 },
               { -10, -30, 10, -10 }, { -10, 10, 10, 30 }, { 40, -8, 56, 8 } }) {
-            mesh.rect(rect[0], rect[1], 1, rect[2], rect[1], 1,
-                  rect[2], rect[3], 1, rect[0], rect[3], 1, 0, 0, 1);
+            mesh.rect(rect[0], rect[1], height, rect[2], rect[1], height,
+                  rect[2], rect[3], height, rect[0], rect[3], height, 0, 0, 1);
         }
         Model shell = builder.end();
         Model interior = GpuBuildingInterior.build(shell, 3);
         try {
+            BoundingBox floors = new ModelInstance(interior, "floors").calculateBoundingBox(new BoundingBox());
+            assertEquals(height * 2 / 3, floors.max.z, .0001f, "Floors share the shell's local height");
+            assertEquals(height * .002f / 3, floors.min.z, .0001f, "Ground floor clears the terrain");
+            BoundingBox struts = new ModelInstance(interior, "struts").calculateBoundingBox(new BoundingBox());
+            assertEquals(height, struts.getDepth(), .0001f, "Columns span the full shell height");
             List<Vector3> triangles = GpuTerrain.triangles(interior);
             for (float x : new float[] { 0, 35, 60 }) {
-                assertFalse(Intersector.intersectRayTriangles(new Ray(new Vector3(x, 0, 2), new Vector3(0, 0, -1)),
+                assertFalse(Intersector.intersectRayTriangles(new Ray(new Vector3(x, 0, height + 1), new Vector3(0, 0, -1)),
                       triangles, new Vector3()), "Floors and struts must leave courtyard, gap and exterior open");
             }
             for (float x : new float[] { -25, 48 }) {
-                assertTrue(Intersector.intersectRayTriangles(new Ray(new Vector3(x, 0, 2), new Vector3(0, 0, -1)),
+                assertTrue(Intersector.intersectRayTriangles(new Ray(new Vector3(x, 0, height + 1), new Vector3(0, 0, -1)),
                       triangles, new Vector3()), "Both main building and disconnected wing must have interiors");
             }
         } finally {

@@ -9,10 +9,83 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class TerrainLodTest {
+    @Test
+    void distantCliffTopsDoNotFoldAtBrokenRims() {
+        List<BoardScene.Tile> tiles = new ArrayList<>();
+        for (int x = 0; x < 11; x++) {
+            for (int y = 0; y < 7; y++) {
+                var family = x % 2 == 0 ? BoardScene.Surface.SAND : BoardScene.Surface.ROCK;
+                tiles.add(new BoardScene.Tile(new Coords(x, y), (3 * x + 2 * y) % 8, -1, false, 0, family,
+                      null, null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
+            }
+        }
+        var scene = new BoardScene(0, 11, 7, tiles, List.of(), List.of(), -1, "", List.of());
+        int compared = 0;
+        for (var tile : tiles) {
+            var surface = new BoardSurface(scene, tile, TerrainLod.DISTANT);
+            for (var face : surface.faces) {
+                if (face.finish() != BoardSurface.Finish.TOP) { continue; }
+                float projected = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).z;
+                assertTrue(projected >= -.001f, "Broken cliff rims must not fold over at " + tile.coords());
+                compared++;
+            }
+        }
+        assertTrue(compared > 100, "Exercise varied cliff rims and chunk boundaries");
+    }
+
+    @Test
+    void distantGroundKeepsCoverageAndFullDetailChunkSeams() {
+        List<BoardScene.Tile> tiles = new ArrayList<>();
+        for (int x = 0; x < 10; x++) {
+            for (int y = 0; y < 7; y++) {
+                tiles.add(new BoardScene.Tile(new Coords(x, y), 1, -1, false, 0, BoardScene.Surface.GRASS,
+                      null, null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
+            }
+        }
+        var scene = new BoardScene(0, 10, 7, tiles, List.of(), List.of(), -1, "", List.of());
+        Coords at = new Coords(7, 3);
+        var distant = new BoardSurface(scene, scene.tile(at), TerrainLod.DISTANT);
+        var full = new BoardSurface(scene, scene.tile(at), TerrainLod.FULL);
+        double[] area = new double[2];
+        for (int i = 0; i < 2; i++) {
+            for (var face : (i == 0 ? distant : full).faces) {
+                if (face.finish() != BoardSurface.Finish.TOP) { continue; }
+                float projected = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).z;
+                assertTrue(projected > 0, "Ground triangles must face up");
+                area[i] += projected;
+            }
+        }
+        assertEquals(area[1], area[0], .01, "Simplification must retain the entire ground footprint");
+        assertTrue(distant.faces.size() * 4 < full.faces.size(), "Subpixel ground should use substantially fewer triangles");
+        Vector3 center = BoardGeometry.center(at, 1);
+        for (int direction = 0; direction < 6; direction++) {
+            Coords other = at.translated(direction);
+            if (TerrainLod.sameChunk(at, other)) { continue; }
+            var neighbor = new BoardSurface(scene, scene.tile(other), TerrainLod.FULL);
+            int edge = Math.floorMod(1 - direction, 6);
+            for (int step = 1; step < TerrainLod.FULL.steps; step++) {
+                Vector3 p = BoardGeometry.corner(at, 1, edge)
+                      .lerp(BoardGeometry.corner(at, 1, edge + 1), step / (float) TerrainLod.FULL.steps);
+                Vector3 inside = new Vector3(p).lerp(center, .002f);
+                Vector3 outside = new Vector3(p).lerp(BoardGeometry.center(other, 1), .002f);
+                assertEquals(distant.height(inside.x, inside.y), neighbor.height(outside.x, outside.y), .05f,
+                      "Distant ground must meet its full-detail neighbor");
+                for (float radius : new float[] { .25f, .5f, .75f }) {
+                    Vector3 sample = new Vector3(center).lerp(p, radius);
+                    assertEquals(full.height(sample.x, sample.y), distant.height(sample.x, sample.y),
+                          BoardGeometry.width() / 24, "Height error stays below a quarter pixel at a six-pixel hex width");
+                }
+            }
+        }
+    }
+
     @Test
     void waterCliffsMeetAcrossMixedDetailChunkBoundaries() {
         var previous = BoardRelief.tuning();
@@ -43,9 +116,10 @@ class TerrainLodTest {
         } finally { BoardRelief.tune(previous); }
     }
 
-    @Test
-    void waterFieldDoesNotIntroduceASeamBetweenDetailLevels() {
-        var scene = waterScene(new Coords(7, 3));
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    void waterFieldDoesNotIntroduceASeamBetweenDetailLevels(boolean rough) {
+        var scene = waterScene(new Coords(7, 3), rough);
         Map<Coords, BoardSurface> left = new HashMap<>(), right = new HashMap<>();
         for (var tile : scene.tiles()) {
             (tile.coords().getX() < 8 ? left : right).put(tile.coords(),
@@ -70,13 +144,19 @@ class TerrainLodTest {
     }
 
     private static BoardScene waterScene(Coords land) {
+        return waterScene(land, false);
+    }
+
+    private static BoardScene waterScene(Coords land, boolean rough) {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 10; x++) {
             for (int y = 0; y < 7; y++) {
                 var at = new Coords(x, y);
                 boolean dry = at.equals(land);
+                var features = !dry && rough ? List.of(new BoardScene.Feature("rough-boulder", 8, 5, 17, 1.8f, .7f, 0,
+                      BoardScene.FeatureKind.BOULDER)) : List.<BoardScene.Feature>of();
                 tiles.add(new BoardScene.Tile(at, dry ? 5 : 0, dry ? -1 : 1, false, 0, BoardScene.Surface.SAND,
-                      null, null, null, null, null, List.of(), List.of(), dry ? BoardLiquid.NONE : BoardLiquid.WATER, null, true));
+                      null, null, null, null, null, features, List.of(), dry ? BoardLiquid.NONE : BoardLiquid.WATER, null, true));
             }
         }
         return new BoardScene(0, 10, 7, tiles, List.of(), List.of(), -1, "", List.of());

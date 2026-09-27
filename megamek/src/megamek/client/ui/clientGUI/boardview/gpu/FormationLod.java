@@ -2,18 +2,17 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 /**
- * Level of detail for a unit with a far model, chosen like a tree's: by how tall the unit stands on screen. Level 0 is
- * the full model; level 1 is the simpler far one, drawn once the full model's small details would be only a pixel or
- * two. A battle armour squad measures one suit; a Mek measures its whole body.
+ * Screen-size selection between a unit's LOD0 and authored LOD1. A battle armour squad measures one suit; a Mek
+ * measures its whole body. The instance retains LOD0 when the optional LOD1 mesh is absent.
  */
 final class FormationLod {
-    /** Below this height in framebuffer pixels a suit is drawn with its far detail. */
-    static final float FAR_PIXELS = 48;
+    /** Below this height in framebuffer pixels a suit selects LOD1. */
+    static final float LOD1_PIXELS = 48;
     /**
-     * Below this height in framebuffer pixels a Mek is drawn with its far body. A tuning value, to be settled in
-     * play: below it a near body's panel lines and vent slats no longer read.
+     * Below this height in framebuffer pixels a Mek selects LOD1. This tuning value marks where LOD0's panel lines
+     * and vent slats no longer read.
      */
-    static final float MEK_FAR_PIXELS = 96;
+    static final float MEK_LOD1_PIXELS = 96;
     /** Keeps a squad at the zoom boundary from flickering between its two suits. */
     private static final float HYSTERESIS = 0.1f;
 
@@ -23,21 +22,21 @@ final class FormationLod {
      * @param pixels   one suit's height in framebuffer pixels
      * @param previous the level shown now, so the switch back needs a clear margin
      *
-     * @return {@code 0} for the full suit, {@code 1} for the far suit
+     * @return the requested numeric LOD
      */
     static int level(float pixels, int previous) {
-        return level(pixels, previous, FAR_PIXELS);
+        return level(pixels, previous, LOD1_PIXELS);
     }
 
     /**
-     * @param pixels    the unit's measured height in framebuffer pixels
-     * @param previous  the level shown now, so the switch back needs a clear margin
-     * @param farPixels the height below which the far model is drawn
+     * @param pixels     the unit's measured height in framebuffer pixels
+     * @param previous   the level shown now, so the switch back needs a clear margin
+     * @param lod1Pixels the height below which LOD1 is selected
      *
-     * @return {@code 0} for the full model, {@code 1} for the far one
+     * @return the requested numeric LOD
      */
-    static int level(float pixels, int previous, float farPixels) {
-        float threshold = farPixels * (previous == 0 ? 1 - HYSTERESIS : 1 + HYSTERESIS);
+    static int level(float pixels, int previous, float lod1Pixels) {
+        float threshold = lod1Pixels * (previous == 0 ? 1 - HYSTERESIS : 1 + HYSTERESIS);
         return pixels < threshold ? 1 : 0;
     }
 }

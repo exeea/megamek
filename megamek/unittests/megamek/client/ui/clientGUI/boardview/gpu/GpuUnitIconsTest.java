@@ -10,14 +10,15 @@ import org.junit.jupiter.api.Test;
 
 class GpuUnitIconsTest {
     @Test
-    void sharesMarkerTiltRuleAtEveryBearingAndRequiresDistantZoom() {
+    void followsTacticalTiltAtEveryBearingAndRequiresDistantZoom() {
         GdxNativesLoader.load();
         BoardCamera camera = new BoardCamera();
         for (int bearing = 0; bearing < 360; bearing += 30) {
-            for (float tilt : new float[] { 0, 29.9f, 30, 30.1f, 60 }) {
+            for (float tilt : new float[] { 0, GpuTactical.FLAT_TILT_DEGREES - 0.1f,
+                  GpuTactical.FLAT_TILT_DEGREES, GpuTactical.FLAT_TILT_DEGREES + 0.1f, 30, 60 }) {
                 camera.setIsometric(false);
                 camera.orbit(bearing, tilt);
-                boolean expected = GpuMarkers.flat(camera.camera);
+                boolean expected = tilt <= GpuTactical.FLAT_TILT_DEGREES;
                 assertEquals(expected, GpuUnitIcons.useIcons(true, camera.camera, 40, 56, false));
                 assertFalse(GpuUnitIcons.useIcons(false, camera.camera, 40, 56, true));
                 assertFalse(GpuUnitIcons.useIcons(true, camera.camera, 80, 56, false));

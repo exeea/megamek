@@ -24,13 +24,7 @@ final class GpuTerrainDepth implements RenderableProvider {
     private final Array<Renderable> ranges = new Array<>();
 
     GpuTerrainDepth(List<ModelInstance> instances) {
-        Array<Renderable> source = new Array<>();
-        Pool<Renderable> pool = new Pool<>() {
-            @Override
-            protected Renderable newObject() { return new Renderable(); }
-        };
-        for (ModelInstance instance : instances) { instance.getRenderables(source, pool); }
-        for (Renderable next : source) {
+        for (Renderable next : snapshot(instances)) {
             Renderable previous = ranges.isEmpty() ? null : ranges.peek();
             if (previous != null && mergeable(previous) && mergeable(next)
                   && previous.meshPart.mesh == next.meshPart.mesh
@@ -43,6 +37,17 @@ final class GpuTerrainDepth implements RenderableProvider {
                 ranges.add(next);
             }
         }
+    }
+
+    /** Persistent ranges borrowing static instance meshes/materials; capture again when the owning chunk changes. */
+    static Array<Renderable> snapshot(List<ModelInstance> instances) {
+        Array<Renderable> result = new Array<>();
+        Pool<Renderable> pool = new Pool<>() {
+            @Override
+            protected Renderable newObject() { return new Renderable(); }
+        };
+        for (ModelInstance instance : instances) { instance.getRenderables(result, pool); }
+        return result;
     }
 
     private static boolean mergeable(Renderable value) {

@@ -472,6 +472,10 @@ final class GpuBoardUi implements Disposable {
 
     boolean overviewIcons() { return tuning.overviewIcons(); }
 
+    Skin skin() { return skin; }
+
+    void terrainProgress(int percent) { tuning.terrainProgress(percent); }
+
     float overviewHexPixels() { return tuning.overviewHexPixels(); }
 
     float buildingOpacity() {

@@ -6,10 +6,16 @@ varying vec3 v_normal;
 varying vec4 v_color;
 varying vec2 v_coverData;
 varying vec2 v_coverRoot;
+#ifdef biomeVegetationFlag
+varying vec2 v_coverFade;
+#endif
 
 void main() {
-    float coverage = meadowCover(v_coverRoot);
-    if (coverage < .12) discard;
+#ifdef biomeVegetationFlag
+    // Complementary coverage keeps overlapping LODs opaque without doubling leaves or changing depth ownership.
+    float coverage = fract(52.9829189 * fract(dot(floor(gl_FragCoord.xy), vec2(.06711056, .00583715))));
+    if (coverage < v_coverFade.x || coverage >= v_coverFade.y) discard;
+#endif
     // An upward-biased normal approximates the many sunlit leaves in a tuft without black card-like speckles.
     vec3 leaf = normalize(v_normal) * (gl_FrontFacing ? 1.0 : -1.0);
     vec3 normal = normalize(mix(vec3(0.0, 0.0, 1.0), leaf, .45));

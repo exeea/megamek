@@ -55,17 +55,16 @@ final class GpuUnitModel implements Disposable {
     /**
      * The meshes a unit with two levels of detail swaps between.
      *
-     * @param near      the meshes drawn up close and hidden while the far ones show; empty means every part that is
-     *                  not far, as for a battle armour squad whose suits carry their own weapons
-     * @param far       the meshes drawn only while the unit is small on screen; empty for one level of detail
-     * @param farPixels the height on screen, in framebuffer pixels, below which the far meshes show
+     * @param lod0       the most detailed meshes; empty means every part outside LOD1, as for battle armour suits
+     * @param lod1       the simpler meshes; empty when LOD1 is absent and LOD0 must remain visible
+     * @param lod1Pixels the height on screen, in framebuffer pixels, below which LOD1 shows
      */
-    record DetailLevels(Set<Mesh> near, Set<Mesh> far, float farPixels) {
+    record DetailLevels(Set<Mesh> lod0, Set<Mesh> lod1, float lod1Pixels) {
         static final DetailLevels NONE = new DetailLevels(Set.of(), Set.of(), 0);
 
         DetailLevels {
-            near = Set.copyOf(near);
-            far = Set.copyOf(far);
+            lod0 = Set.copyOf(lod0);
+            lod1 = Set.copyOf(lod1);
         }
     }
 
@@ -282,8 +281,8 @@ final class GpuUnitModel implements Disposable {
             return placeScaled(placed, camera, ground, facing, scale, verticalScale(scale, scaleTuning));
         }
         // Schema-1 sprite sections retain their original placement while external compatibility is supported.
-        float scale = (multiHex ? 1 : BoardGeometry.UNIT_SCALE) * scaleTuning.unitScale();
-        float thickness = height * BoardGeometry.LEVEL * BoardGeometry.UNIT_HEIGHT_SCALE
+        float scale = (multiHex ? 1 : BoardGeometry.unitScale()) * scaleTuning.unitScale();
+        float thickness = height * BoardGeometry.level() * BoardGeometry.unitHeightScale()
               * scaleTuning.unitScale() * scaleTuning.heightScale();
         return placeScaled(placed, camera, ground, facing, scale, thickness);
     }
@@ -316,17 +315,17 @@ final class GpuUnitModel implements Disposable {
 
     private float verticalScale(float horizontalScale, UnitFamilyScale scaleTuning) {
         // Model coordinates have the same units on every axis. Only explicit height controls alter proportions.
-        return horizontalScale * BoardGeometry.UNIT_HEIGHT_SCALE * scaleTuning.heightScale();
+        return horizontalScale * BoardGeometry.unitHeightScale() * scaleTuning.heightScale();
     }
 
     private float horizontalScale(UnitFootprint.Layout footprint, UnitFamilyScale scaleTuning) {
         if (footprint == null) {
-            return 2 * BoardGeometry.LEVEL / REFERENCE_ASSAULT_HEIGHT * BoardGeometry.UNIT_SCALE * scaleTuning.unitScale();
+            return 2 * BoardGeometry.level() / REFERENCE_ASSAULT_HEIGHT * BoardGeometry.unitScale() * scaleTuning.unitScale();
         }
         // Large units retain their occupied-footprint fitting, uniformly on all axes including height.
         float scale = scaleTuning.unitScale() * BoardGeometry.tuning().levelHeight()
               / BoardGeometry.DEFAULTS.levelHeight();
-        return BoardGeometry.MULTI_HEX_UNIT_SCALE * scale * Math.min(footprint.width() / Math.max(1, restDimensions.x),
+        return BoardGeometry.multiHexUnitScale() * scale * Math.min(footprint.width() / Math.max(1, restDimensions.x),
               footprint.depth() / Math.max(1, restDimensions.y));
     }
 

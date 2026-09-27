@@ -35,6 +35,8 @@ final class UnitPlayback {
     private double combatSeconds, combatDuration, combatContact;
     private BoardScene volleyScene;
     private UnitConversion conversion;
+    private UnitAttachmentMotion attachment;
+    private double attachmentStart;
     private double hold;
     private boolean completed;
     private boolean paused;
@@ -149,15 +151,21 @@ final class UnitPlayback {
                     collectVolley();
                 } else if (active instanceof BoardScene.Conversion change) {
                     conversion = new UnitConversion(change);
+                } else if (active instanceof BoardScene.AttachmentChange change) {
+                    attachment = new UnitAttachmentMotion(change);
+                    attachmentStart = 0;
                 }
             }
             if (!completed) {
                 if (!cameraReady.test(this)) { return; }
                 UnitMotion motion = active instanceof BoardScene.Movement ? motions.get(active.entityId()) : null;
-                double left = conversion != null ? UnitConversion.DURATION_SECONDS - conversion.seconds
+                double left = active instanceof BoardScene.AttachmentChange ? UnitAttachmentMotion.DURATION - attachment.seconds
+                      : conversion != null ? UnitConversion.DURATION_SECONDS - conversion.seconds
                       : motion == null ? combatDuration - combatSeconds : motion.remainingSeconds();
                 double step = Math.min(remaining, Math.max(0, left) / speed.rate);
-                if (conversion != null) {
+                if (active instanceof BoardScene.AttachmentChange) {
+                    attachment.seconds = Math.min(UnitAttachmentMotion.DURATION, attachment.seconds + (float) (step * speed.rate));
+                } else if (conversion != null) {
                     conversion.seconds = Math.min(UnitConversion.DURATION_SECONDS, conversion.seconds + (float) (step * speed.rate));
                 } else if (motion == null) {
                     double previousCombat = combatSeconds;
@@ -176,11 +184,15 @@ final class UnitPlayback {
                               Math.max(0, combatSeconds - Math.max(previousCombat, reaction.start())), 1);
                     }
                     applySceneUpdates();
+                    if (attachment != null) {
+                        attachment.seconds = (float) Math.min(UnitAttachmentMotion.DURATION, combatSeconds - attachmentStart);
+                    }
                 } else {
                     motion.advance(step, speed.rate);
                 }
                 remaining = Math.max(0, remaining - step);
-                if (motion == null && conversion == null && combatSeconds + 1e-7 < combatDuration) {
+                if (motion == null && conversion == null && !(active instanceof BoardScene.AttachmentChange)
+                      && combatSeconds + 1e-7 < combatDuration) {
                     if (remaining > 0) { continue; }
                     return;
                 }
@@ -195,9 +207,15 @@ final class UnitPlayback {
                     settleConversion(change);
                 }
                 applySceneUpdates();
-                hold = COMPLETION_HOLD_SECONDS;
+                hold = pending.peekFirst() instanceof BoardScene.AttachmentChange
+                      || active instanceof BoardScene.AttachmentChange && pending.peekFirst() instanceof BoardScene.Movement
+                      || pending.peekFirst() instanceof BoardScene.Combat next
+                            && (next.result().kind() == megamek.common.ResolvedAttack.Kind.BRUSH_OFF
+                                  || next.result().kind() == megamek.common.ResolvedAttack.Kind.SHAKE_OFF)
+                      ? 0 : COMPLETION_HOLD_SECONDS;
             }
             double pause = Math.min(remaining, hold);
+            if (attachment != null) { attachment.seconds += (float) (pause * speed.rate); }
             hold -= pause;
             remaining -= pause;
             if (hold > 1e-9) {
@@ -210,6 +228,7 @@ final class UnitPlayback {
             volley.clear();
             volleyScene = null;
             conversion = null;
+            attachment = null;
         }
     }
 
@@ -283,6 +302,8 @@ final class UnitPlayback {
 
     UnitConversion conversion() { return conversion; }
 
+    UnitAttachmentMotion attachment() { return attachment; }
+
     boolean busy() { return active != null || !pending.isEmpty(); }
 
     /** The final queued action lets Instant playback settle its camera once, after the whole queue is applied. */
@@ -345,6 +366,7 @@ final class UnitPlayback {
         volley.clear();
         volleyScene = null;
         conversion = null;
+        attachment = null;
         hold = 0;
         completed = false;
     }
@@ -363,6 +385,15 @@ final class UnitPlayback {
 
     /** Checkpoints after an action become visible at arrival/impact, before its recovery or completion hold. */
     private void applySceneUpdates() {
+        if (attachment != null && attachment.progress() >= 1 && !attachment.settled) {
+            attachment.settled = true;
+            if (settledScene != null) {
+                var shown = new ArrayList<>(settledScene.units());
+                shown.removeIf(unit -> unit.id() == attachment.event.entityId());
+                if (attachment.event.after() != null) { shown.add(attachment.event.after()); }
+                settledScene = settledScene.withUnits(shown);
+            }
+        }
         if (active != null && !completed && beforeImpact()) {
             return;
         }
@@ -393,6 +424,13 @@ final class UnitPlayback {
                     combatDuration = Math.max(combatDuration, start + motion.remainingSeconds());
                     motion.advance(Math.max(0, combatSeconds - start), 1);
                 }
+            } else if (attack != null && !completed && attachment == null
+                  && pending.peekFirst() instanceof BoardScene.AttachmentChange change) {
+                pending.removeFirst();
+                attachment = new UnitAttachmentMotion(change);
+                attachmentStart = combatContact;
+                attachment.seconds = (float) Math.min(UnitAttachmentMotion.DURATION, combatSeconds - attachmentStart);
+                combatDuration = Math.max(combatDuration, attachmentStart + UnitAttachmentMotion.DURATION);
             } else { break; }
         }
     }
@@ -435,6 +473,15 @@ final class UnitPlayback {
         }
         pending.forEach(event -> holdUnits(event, shown, false));
         reactions.forEach(reaction -> holdUnits(reaction.movement(), shown, true));
+        if (attachment != null && attachment.progress() < 1) {
+            // Keep the released figures until they reach the resolved endpoint, even when damage removes them.
+            var change = attachment.event;
+            var endpoint = change.destination();
+            var before = change.before();
+            shown.put(before.id(), new BoardScene.Unit(before.id(), before.part(), before.name(), endpoint, before.image(),
+                  false, before.annotations(), before.height(), false, before.model(), before.outlineRgb(),
+                  List.of(endpoint.coords()), attachment.boarding() ? change.after().attachment() : null));
+        }
         List<BoardScene.Unit> units = new ArrayList<>();
         for (var unit : scene.units()) {
             var replacement = shown.remove(unit.id());
@@ -480,7 +527,11 @@ final class UnitPlayback {
             var footprint = location.footprint().isEmpty()
                   ? playing ? unit.footprint() : List.of(location.coords()) : location.footprint();
             shown.putIfAbsent(unit.id(), new BoardScene.Unit(unit.id(), unit.part(), appearance.name(), location, appearance.image(),
-                  false, appearance.annotations(), unit.height(), unit.airborne(), appearance.model(), unit.outlineRgb(), footprint));
+                  false, appearance.annotations(), unit.height(), unit.airborne(), appearance.model(), unit.outlineRgb(), footprint,
+                  appearance.attachment()));
+        } else if (event instanceof BoardScene.AttachmentChange change) {
+            shown.putIfAbsent(change.entityId(), change.before());
+            shown.putIfAbsent(change.carrier().id(), change.carrier());
         }
     }
 }

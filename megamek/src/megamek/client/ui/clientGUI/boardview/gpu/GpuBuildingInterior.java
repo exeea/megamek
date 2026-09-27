@@ -27,11 +27,12 @@ final class GpuBuildingInterior {
     static Model build(Model shell, int levels) {
         List<Vector3> roof = new ArrayList<>();
         List<Vector3> triangles = GpuTerrain.triangles(shell);
+        float height = shell.calculateBoundingBox(new BoundingBox()).max.z;
         BoundingBox bounds = new BoundingBox().inf();
         for (int index = 0; index < triangles.size(); index += 3) {
             Vector3 a = triangles.get(index), b = triangles.get(index + 1), c = triangles.get(index + 2);
-            // Authored structures have identity nodes and a flat roof at local Z=1.
-            if (a.z == 1 && b.z == 1 && c.z == 1) {
+            // Authored structures stand at Z=0 with a flat roof at their actual local height.
+            if (a.z == height && b.z == height && c.z == height) {
                 roof.add(a);
                 roof.add(b);
                 roof.add(c);
@@ -44,14 +45,14 @@ final class GpuBuildingInterior {
         for (int x = 0; x < across; x++) {
             for (int y = 0; y < along; y++) {
                 addColumn(columns, roof, bounds.min.x + bounds.getWidth() * (x + 0.5f) / across,
-                      bounds.min.y + bounds.getHeight() * (y + 0.5f) / along);
+                      bounds.min.y + bounds.getHeight() * (y + 0.5f) / along, height);
             }
         }
         // Small or disconnected wings can miss the grid. Give uncovered roof sections a nearby support.
         for (int index = 0; index < roof.size(); index += 3) {
             Vector3 center = new Vector3(roof.get(index)).add(roof.get(index + 1)).add(roof.get(index + 2)).scl(1f / 3);
             if (columns.stream().noneMatch(column -> column.dst2(center) < SPACING * SPACING)) {
-                addColumn(columns, roof, center.x, center.y);
+                addColumn(columns, roof, center.x, center.y, height);
             }
         }
         ModelBuilder builder = new ModelBuilder();
@@ -60,7 +61,7 @@ final class GpuBuildingInterior {
         MeshPartBuilder struts = builder.part("struts", GL20.GL_TRIANGLES, ATTRIBUTES,
               new Material("struts", ColorAttribute.createDiffuse(0.29f, 0.31f, 0.33f, 1)));
         for (Vector3 column : columns) {
-            BoxShapeBuilder.build(struts, column.x, column.y, 0.499f, STRUT_WIDTH, STRUT_WIDTH, 1);
+            BoxShapeBuilder.build(struts, column.x, column.y, 0.499f * height, STRUT_WIDTH, STRUT_WIDTH, height);
         }
         builder.node().id = "floors";
         Material floorMaterial = new Material("floors", ColorAttribute.createDiffuse(0.58f, 0.56f, 0.52f, 1));
@@ -68,7 +69,7 @@ final class GpuBuildingInterior {
             // Separate parts let ModelBuilder split tall structures before a mesh exceeds its vertex limit.
             MeshPartBuilder floors = builder.part("floor-" + level, GL20.GL_TRIANGLES, ATTRIBUTES, floorMaterial);
             // Ground floor clears the terrain; upper floors sit at the game's level boundaries.
-            float z = (level == 0 ? 0.002f : level) / levels;
+            float z = (level == 0 ? 0.002f : level) * height / levels;
             for (int index = 0; index < roof.size(); index += 3) {
                 Vector3 a = roof.get(index), b = roof.get(index + 1), c = roof.get(index + 2);
                 floors.triangle(vertex(a, z, 1), vertex(b, z, 1), vertex(c, z, 1));
@@ -82,12 +83,12 @@ final class GpuBuildingInterior {
         return new MeshPartBuilder.VertexInfo().setPos(point.x, point.y, z).setNor(0, 0, normalZ);
     }
 
-    private static void addColumn(List<Vector3> columns, List<Vector3> roof, float x, float y) {
+    private static void addColumn(List<Vector3> columns, List<Vector3> roof, float x, float y, float height) {
         float half = STRUT_WIDTH / 2;
         // Checking the footprint keeps columns out of courtyards, gaps and concave outside corners.
         if (inside(roof, x, y) && inside(roof, x - half, y - half) && inside(roof, x + half, y - half)
               && inside(roof, x - half, y + half) && inside(roof, x + half, y + half)) {
-            columns.add(new Vector3(x, y, 1));
+            columns.add(new Vector3(x, y, height));
         }
     }
 

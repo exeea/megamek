@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.awt.Shape;
 import java.awt.geom.Area;
 import java.awt.geom.PathIterator;
 import java.util.ArrayList;
@@ -65,9 +66,14 @@ final class BoardTacticalGeometry {
 
     /** Horizontal trapezoids preserve holes, dashed strokes, concave polygons and glyph counters. */
     static List<Triangle> flat(BoardTactical.Fill fill) {
+        return flat(fill.shape(), fill.argb());
+    }
+
+    /** Also used by physical surface markings, which borrow exactly the same tessellator and draping clipper. */
+    static List<Triangle> flat(Shape shape, int argb) {
         List<Edge> edges = new ArrayList<>();
         TreeSet<Float> levels = new TreeSet<>();
-        PathIterator path = new Area(fill.shape()).getPathIterator(null, 0.25);
+        PathIterator path = new Area(shape).getPathIterator(null, 0.25);
         float[] point = new float[6];
         float x = 0, y = 0, startX = 0, startY = 0;
         while (!path.isDone()) {
@@ -99,8 +105,8 @@ final class BoardTacticalGeometry {
                 Edge left = crossings.get(i - 1), right = crossings.get(i);
                 Vector3 a = new Vector3(left.x(bottom), bottom, 0), b = new Vector3(right.x(bottom), bottom, 0);
                 Vector3 c = new Vector3(right.x(top), top, 0), d = new Vector3(left.x(top), top, 0);
-                add(result::add, a, b, c, fill.argb());
-                add(result::add, a, c, d, fill.argb());
+                add(result::add, a, b, c, argb);
+                add(result::add, a, c, d, argb);
             }
         }
         return result;
@@ -156,8 +162,8 @@ final class BoardTacticalGeometry {
     }
 
     static Coords borderCoords(BoardScene scene, BoardTactical.HexBorder border) {
-        BoardScene.Tile tile = BoardGeometry.tile(scene, border.anchor().x() * BoardGeometry.HEX_SCALE,
-              -border.anchor().y() * BoardGeometry.HEX_SCALE);
+        BoardScene.Tile tile = BoardGeometry.tile(scene, border.anchor().x() * BoardGeometry.hexScale(),
+              -border.anchor().y() * BoardGeometry.hexScale());
         return tile == null ? null : tile.coords();
     }
 
@@ -184,7 +190,7 @@ final class BoardTacticalGeometry {
     }
 
     static float layerLift(int layer) {
-        return (0.35f + Math.min(layer, 10000) * 0.0001f) * BoardGeometry.HEX_SCALE;
+        return (0.35f + Math.min(layer, 10000) * 0.0001f) * BoardGeometry.hexScale();
     }
 
     /** Cache both presentations once; the camera only selects which one to draw. */
@@ -215,11 +221,11 @@ final class BoardTacticalGeometry {
             wallOutline(wall, d, c, triangle -> outline.accept(wall, triangle));
         } else {
             Surface surface = surfaces.apply(wall.coords());
-            Vector3 a = new Vector3(wall.a().x() * BoardGeometry.HEX_SCALE, -wall.a().y() * BoardGeometry.HEX_SCALE, 0);
-            Vector3 b = new Vector3(wall.b().x() * BoardGeometry.HEX_SCALE, -wall.b().y() * BoardGeometry.HEX_SCALE, 0);
+            Vector3 a = new Vector3(wall.a().x() * BoardGeometry.hexScale(), -wall.a().y() * BoardGeometry.hexScale(), 0);
+            Vector3 b = new Vector3(wall.b().x() * BoardGeometry.hexScale(), -wall.b().y() * BoardGeometry.hexScale(), 0);
             wallOutline(wall, a, b, triangle -> {
                 clipper.prepare(triangle);
-                clipSurface(surface, WALL_CLEARANCE * BoardGeometry.HEX_SCALE,
+                clipSurface(surface, WALL_CLEARANCE * BoardGeometry.hexScale(),
                       clipped -> outline.accept(wall, clipped), clipper);
             });
         }
@@ -239,7 +245,7 @@ final class BoardTacticalGeometry {
         }
         var stroke = wall.outline().stroke();
         Vector3 side = new Vector3(a.y - b.y, b.x - a.x, 0).nor()
-              .scl(stroke.getLineWidth() * BoardGeometry.HEX_SCALE / 2);
+              .scl(stroke.getLineWidth() * BoardGeometry.hexScale() / 2);
         Vector3 first = new Vector3(a).sub(side), second = new Vector3(b).sub(side);
         Vector3 third = new Vector3(b).add(side), fourth = new Vector3(a).add(side);
         destination.accept(new Triangle(first, second, third, wall.outline().argb()));
@@ -248,24 +254,24 @@ final class BoardTacticalGeometry {
 
     private static Vector3 wallPoint(BoardScene scene, BoardTactical.Wall wall, BoardTactical.Point point, boolean top,
           Function<Coords, Surface> surfaces) {
-        Vector3 world = new Vector3(point.x() * BoardGeometry.HEX_SCALE, -point.y() * BoardGeometry.HEX_SCALE, 0);
+        Vector3 world = new Vector3(point.x() * BoardGeometry.hexScale(), -point.y() * BoardGeometry.hexScale(), 0);
         // Only interior owners of adjoining panels contribute to the joint, never terrain outside the range.
         // Finished tops include sculpted crowns and banks; deep water and lakebeds cannot pull a border down.
-        float z = Math.max(scene.tile(wall.coords()).elevation() * BoardGeometry.LEVEL,
+        float z = Math.max(scene.tile(wall.coords()).elevation() * BoardGeometry.level(),
               surfaces.apply(wall.coords()).highestTop());
         for (Coords coords : point.equals(wall.a()) ? wall.aNeighbors() : wall.bNeighbors()) {
             BoardScene.Tile neighbor = scene.tile(coords);
             if (neighbor != null) {
-                float neighborZ = Math.max(neighbor.elevation() * BoardGeometry.LEVEL, surfaces.apply(coords).highestTop());
+                float neighborZ = Math.max(neighbor.elevation() * BoardGeometry.level(), surfaces.apply(coords).highestTop());
                 z = top ? Math.max(z, neighborZ) : Math.min(z, neighborZ);
             }
         }
-        world.z = z + (top ? wall.height() * BoardGeometry.LEVEL : 0) + WALL_CLEARANCE * BoardGeometry.HEX_SCALE;
+        world.z = z + (top ? wall.height() * BoardGeometry.level() : 0) + WALL_CLEARANCE * BoardGeometry.hexScale();
         return world;
     }
 
     private static Vector3 world(Vector3 point) {
-        return new Vector3(point.x * BoardGeometry.HEX_SCALE, -point.y * BoardGeometry.HEX_SCALE, 0);
+        return new Vector3(point.x * BoardGeometry.hexScale(), -point.y * BoardGeometry.hexScale(), 0);
     }
 
     private static float cross(Vector3 a, Vector3 b, Vector3 c) {

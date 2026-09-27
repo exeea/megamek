@@ -137,6 +137,8 @@ final class GpuBoardSource implements AutoCloseable {
     }
 
     private final java.util.LinkedHashSet<java.util.UUID> receivedAttacks = new java.util.LinkedHashSet<>();
+    private final Map<Integer, BoardScene.Combat> removalAttempts = new HashMap<>();
+    private final Set<Integer> voluntaryReleases = new java.util.HashSet<>();
 
     private volatile BoardView view;
     /** Swing-owned input intent, valid only for the selection and camera request produced by that mouse gesture. */
@@ -467,7 +469,7 @@ final class GpuBoardSource implements AutoCloseable {
     private BoardScene.Unit inForm(BoardScene.Unit unit, Entity entity, BoardScene.Waypoint location, UnitLocation.Form form) {
         var model = UnitModelSelection.inForm(unit.model(), entity, unit.part(), MMStaticDirectoryManager.getMekTileset(), form);
         return new BoardScene.Unit(unit.id(), unit.part(), unit.name(), location, unit.image(), false, unit.annotations(),
-              unit.height(), form == null ? unit.airborne() : form.airborne(), model, unit.outlineRgb(), unit.footprint());
+              unit.height(), form == null ? unit.airborne() : form.airborne(), model, unit.outlineRgb(), unit.footprint(), unit.attachment());
     }
 
     /** Copy authorized, then-visible appearance once; no Entity reaches the GL thread. */
@@ -486,6 +488,14 @@ final class GpuBoardSource implements AutoCloseable {
         if (receivedAttacks.size() > 2048) {
             receivedAttacks.removeFirst();
         }
+        if (result.kind() == megamek.common.ResolvedAttack.Kind.DEATH && frame != null
+              && frame.scene().units().stream().anyMatch(unit -> unit.id() == attacker.getId() && unit.attachment() != null)) {
+            return; // Exterior casualties remain on their carrier until its resolved release, rather than collapsing in midair.
+        }
+        if (result.kind() == megamek.common.ResolvedAttack.Kind.STOP_SWARM) {
+            voluntaryReleases.add(attacker.getId());
+            return;
+        }
         var usedImages = new IdentityHashMap<Image, Boolean>();
         var firing = unit(attacker, -1, result.attacker().coords(), false, usedImages);
         if (result.shot() != null && result.shot().launch() != null) {
@@ -493,14 +503,28 @@ final class GpuBoardSource implements AutoCloseable {
                   result.attacker().form());
         }
         var receiving = target == null ? null : unit(target, -1, result.target().coords(), false, usedImages);
+        if (frame != null) {
+            var observed = frame.scene().units().stream().collect(Collectors.toMap(BoardScene.Unit::id,
+                  java.util.function.Function.identity(), (first, second) -> first));
+            if (observed.containsKey(firing.id())) { firing = firing.withAttachment(observed.get(firing.id()).attachment()); }
+            if (receiving != null && observed.containsKey(receiving.id())) {
+                receiving = receiving.withAttachment(observed.get(receiving.id()).attachment());
+            }
+        }
         var destination = receiving == null
               ? waypoint(result.target().coords(), result.target().elevation(), result.target().facing())
               : receiving.location();
+        if (result.kind() == megamek.common.ResolvedAttack.Kind.SHAKE_OFF) {
+            // Movement resolution sends this before the carrier's path. Keep its confirmed result with that path.
+            removalAttempts.put(attacker.getId(), new BoardScene.Combat(result, firing, receiving, destination));
+            return;
+        }
         // A resolved attack packet precedes its damage packets. This checkpoint closes the preceding action.
         Frame before = capture();
         synchronized (this) {
             publishScene(before, true);
-            queueAnimation(new BoardScene.Combat(result, firing, receiving, destination));
+            queueAnimation(new BoardScene.Combat(result, firing, receiving, destination,
+                  target != null && target.isConventionalInfantry()));
         }
     }
 
@@ -537,18 +561,104 @@ final class GpuBoardSource implements AutoCloseable {
                     queueAnimation(new BoardScene.Movement(unit.id(), next.scene().boardId(),
                           List.of(old.location(), unit.location()), EntityMovementType.MOVE_SAFE_THRUST, 0,
                           entity == null ? 0 : movementMP(entity, EntityMovementType.MOVE_SAFE_THRUST), unit));
-                } else if (editor == null && UnitMotion.forcedChange(old, unit)) {
+                } else if (editor == null && old != null && old.attachment() == null && unit.attachment() == null
+                      && UnitMotion.forcedChange(old, unit)) {
                     // No movement path accompanied this authoritative update (push, domino displacement, or fall).
                     queueAnimation(new BoardScene.Movement(unit.id(), next.scene().boardId(),
                           List.of(old.location(), unit.location()), EntityMovementType.MOVE_NONE, 0, 0, unit));
                 }
             }
         }
+        if (frame != null && frame.boardGeneration() == next.boardGeneration()) {
+            queueAttachments(frame.scene(), next.scene());
+        }
         if (frame == null || frame.boardGeneration() != next.boardGeneration() || !next.scene().samePlaybackState(frame.scene())
               || (!pendingEvents.isEmpty() && !(pendingEvents.getLast() instanceof BoardScene.SceneUpdate))) {
             queueAnimation(new BoardScene.SceneUpdate(next.scene()));
         }
         frame = next;
+    }
+
+    /** Close carrier movement at its destination before releasing any of its exterior passengers. */
+    private void queueAttachments(BoardScene previous, BoardScene next) {
+        Map<Integer, BoardScene.Unit> oldUnits = new HashMap<>(), newUnits = new HashMap<>();
+        previous.units().forEach(unit -> oldUnits.put(unit.id(), unit));
+        next.units().forEach(unit -> newUnits.put(unit.id(), unit));
+        List<BoardScene.AttachmentChange> changes = new ArrayList<>();
+        List<BoardScene.Unit> held = new ArrayList<>(next.units());
+        for (var before : oldUnits.values()) {
+            var after = newUnits.get(before.id());
+            var from = before.attachment();
+            var to = after == null ? null : after.attachment();
+            if (before.sensorContact() || after != null && after.sensorContact() || java.util.Objects.equals(from, to)) { continue; }
+            int carrierId = to == null ? from.carrierId() : to.carrierId();
+            var carrier = newUnits.get(carrierId);
+            if (carrier == null || carrier.sensorContact()) { continue; }
+            Entity passenger = view.game.getEntityFromAllSources(before.id());
+            if (after == null && (passenger == null || !passenger.isDestroyed() && !passenger.isDoomed())) { continue; }
+            if (passenger != null && (!EntityVisibilityUtils.detectedOrHasVisual(view.getLocalPlayer(), view.game, passenger)
+                  || sensorContact(passenger))) { continue; }
+            var release = to != null ? BoardScene.Release.BOARD : from.hostile() ? BoardScene.Release.THROWN : BoardScene.Release.CLIMB_DOWN;
+            boolean voluntary = to == null && voluntaryReleases.remove(before.id());
+            if (voluntary) { release = BoardScene.Release.CLIMB_DOWN; }
+            var movement = !pendingEvents.isEmpty() && pendingEvents.getLast() instanceof BoardScene.Movement move
+                  && move.entityId() == carrierId ? move : null;
+            var destination = after != null ? after.location() : passenger != null && passenger.getPosition() != null
+                  ? waypoint(passenger.getPosition(), passenger.getElevation(), passenger.getFacing()) : carrier.location();
+            if (to == null && !voluntary && movement != null) {
+                var tile = next.tile(destination.coords());
+                if (tile != null && tile.waterDepth() > 0 && !tile.frozen()) { release = BoardScene.Release.WATER; }
+                if (movement.type() == EntityMovementType.MOVE_JUMP) { release = BoardScene.Release.JUMP; }
+            }
+            changes.add(new BoardScene.AttachmentChange(next.boardId(), before, after, carrier, release, destination));
+            held.removeIf(unit -> unit.id() == before.id());
+            held.add(before);
+        }
+        var attempts = removalAttempts.values().stream().filter(attempt -> newUnits.containsKey(attempt.entityId())
+              && pendingEvents.stream().anyMatch(event -> event instanceof BoardScene.Movement
+                    && event.entityId() == attempt.entityId())).toList();
+        if (changes.isEmpty() && attempts.isEmpty()) { return; }
+        BoardScene.Movement continuation = null;
+        if (changes.size() == 1 && changes.getFirst().release() == BoardScene.Release.WATER
+              && !pendingEvents.isEmpty() && pendingEvents.getLast() instanceof BoardScene.Movement movement
+              && movement.entityId() == changes.getFirst().carrier().id() && movement.type() != EntityMovementType.MOVE_JUMP) {
+            var change = changes.getFirst();
+            int index = releaseStep(movement.path(), change.destination());
+            if (index > 0 && index < movement.path().size() - 1) {
+                // The unit can continue past the water-entry hex. Release there, never at its later endpoint.
+                var atWater = change.carrier().at(movement.path().get(index));
+                pendingEvents.set(pendingEvents.size() - 1, new BoardScene.Movement(movement.entityId(), movement.boardId(),
+                      movement.path().subList(0, index + 1), movement.type(), movement.jumpMP(), movement.movementMP(), atWater, movement.gravity()));
+                continuation = new BoardScene.Movement(movement.entityId(), movement.boardId(),
+                      movement.path().subList(index, movement.path().size()), movement.type(), movement.jumpMP(), movement.movementMP(),
+                      movement.unit(), movement.gravity());
+                held.replaceAll(unit -> unit.id() == atWater.id() ? atWater : unit);
+                changes.set(0, new BoardScene.AttachmentChange(change.boardId(), change.before(), change.after(), atWater,
+                      change.release(), change.destination()));
+            }
+        }
+        queueAnimation(new BoardScene.SceneUpdate(next.withUnits(held)));
+        for (var attempt : attempts) {
+            removalAttempts.remove(attempt.entityId());
+            var carrier = newUnits.get(attempt.entityId());
+            Entity target = attempt.target() == null ? null : view.game.getEntityFromAllSources(attempt.target().id());
+            if (carrier.sensorContact() || target == null || !visible(target) || sensorContact(target)) { continue; }
+            queueAnimation(new BoardScene.Combat(attempt.result(), carrier, attempt.target(), carrier.location()));
+        }
+        changes.forEach(this::queueAnimation);
+        if (continuation != null) {
+            var atWater = changes.getFirst().carrier();
+            queueAnimation(new BoardScene.SceneUpdate(next.withUnits(next.units().stream()
+                  .map(unit -> unit.id() == atWater.id() ? atWater : unit).toList())));
+            queueAnimation(continuation);
+        }
+    }
+
+    static int releaseStep(List<BoardScene.Waypoint> path, BoardScene.Waypoint destination) {
+        for (int index = 1; index < path.size(); index++) {
+            if (path.get(index).coords().equals(destination.coords())) { return index; }
+        }
+        return -1;
     }
 
     /** Copy the game's current capability once at the event boundary; the renderer never recalculates MP rules. */
@@ -651,11 +761,15 @@ final class GpuBoardSource implements AutoCloseable {
             synchronized (this) {
                 pendingEvents.clear();
                 receivedAttacks.clear();
+                removalAttempts.clear();
+                voluntaryReleases.clear();
             }
             board.addBoardListener(boardListener);
             terrainDirty = true;
         }
-        boolean changedTerrain = terrainDirty || dirtyHexes != null;
+        boolean allTerrain = terrainDirty;
+        Rectangle changedHexes = dirtyHexes;
+        boolean changedTerrain = allTerrain || changedHexes != null;
         if (changedTerrain) {
             List<BoardScene.Tile> nextTiles = terrainDirty
                   ? new ArrayList<>(Collections.nCopies(board.getWidth() * board.getHeight(), null))
@@ -671,27 +785,41 @@ final class GpuBoardSource implements AutoCloseable {
         }
         Rectangle area = visibleArea;
         long revision = view.getPlanarRevision();
-        if (changedTerrain || revision != capturedRevision || view.game.getPhase() != capturedPhase || !area.equals(capturedArea)) {
+        boolean allMarkings = allTerrain || revision != capturedRevision || view.game.getPhase() != capturedPhase;
+        boolean changedMarkings = changedTerrain || allMarkings;
+        if (changedMarkings || !area.equals(capturedArea)) {
             List<BoardScene.Tile> painted = new ArrayList<>(tiles);
             for (int index = 0; index < tiles.size(); index++) {
                 BoardScene.Tile old = tiles.get(index);
                 if (old.tactical() != null && !area.contains(old.coords().getX(), old.coords().getY())) {
                     painted.set(index, new BoardScene.Tile(old.coords(), old.elevation(), old.waterDepth(), old.frozen(),
                           old.roadExits(), old.surface(), old.ground(), old.normals(), old.decals(), old.decalsWithoutLimbs(),
-                          null, old.features(), old.text(), old.liquid(), old.foliage(), old.detailedGround()));
+                          null, old.features(), old.text(), old.liquid(), old.foliage(), old.detailedGround(), old.road(), old.fireSmoke(), old.biome()));
                 }
             }
-            view.capturePlanarTactical(area, hex -> {
+            // A terrain edit repaints its changed hexes and newly exposed view only. Explicit painter/overlay
+            // invalidation remains global, including FoV changes caused by an edited blocker.
+            List<Rectangle> exposed = new ArrayList<>();
+            if (allMarkings || capturedArea == null || !area.intersects(capturedArea)) {
+                exposed.add(area);
+            } else {
+                exposed.addAll(List.of(SwingUtilities.computeDifference(area, capturedArea)));
+                if (changedHexes != null) {
+                    Rectangle local = changedHexes.intersection(area).intersection(capturedArea);
+                    if (!local.isEmpty()) { exposed.add(local); }
+                }
+            }
+            for (Rectangle region : exposed) { view.capturePlanarTactical(region, hex -> {
                 int index = hex.coords().getX() * board.getHeight() + hex.coords().getY();
                 BoardScene.Tile old = tiles.get(index);
                 BoardScene.Tile next = new BoardScene.Tile(old.coords(), old.elevation(), old.waterDepth(), old.frozen(),
                       old.roadExits(), old.surface(), old.ground(), old.normals(), old.decals(), old.decalsWithoutLimbs(),
                       terrainImages.capture(hex.tactical(), old.tactical()), old.features(), hex.text(), old.liquid(),
-                      old.foliage(), old.detailedGround());
+                      old.foliage(), old.detailedGround(), old.road(), old.fireSmoke(), old.biome());
                 if (!next.equals(old)) {
                     painted.set(index, next);
                 }
-            });
+            }); }
             if (!painted.equals(tiles)) {
                 tiles = List.copyOf(painted);
             }
@@ -704,8 +832,20 @@ final class GpuBoardSource implements AutoCloseable {
         List<BoardScene.Unit> units = new ArrayList<>();
         camouflage.begin();
         Map<Image, Boolean> usedImages = new IdentityHashMap<>();
+        var attachments = exteriorAttachments(view.game.getEntitiesVector(), entity ->
+              EntityVisibilityUtils.detectedOrHasVisual(view.getLocalPlayer(), view.game, entity) && !sensorContact(entity),
+              this::visible);
         for (Entity entity : view.game.getEntitiesVector()) {
-            if (!visible(entity)) {
+            var attachment = attachments.get(entity.getId());
+            if (attachment == null && (!visible(entity) || entity.getTransportId() != Entity.NONE)) {
+                continue;
+            }
+            if (attachment != null) {
+                Entity carrier = view.game.getEntity(attachment.carrierId());
+                var before = frame == null ? null : frame.scene().units().stream()
+                      .filter(unit -> unit.id() == entity.getId() && !unit.sensorContact()).findFirst().orElse(null);
+                units.add((entity.isDestroyed() || entity.isDoomed()) && before != null ? before
+                      : unit(entity, -1, carrier.getPosition(), false, usedImages).withAttachment(attachment));
                 continue;
             }
             boolean sensor = sensorContact(entity);
@@ -716,6 +856,20 @@ final class GpuBoardSource implements AutoCloseable {
             } else {
                 entity.getSecondaryPositions().forEach((part, coords) ->
                       units.add(unit(entity, part, coords, false, usedImages)));
+            }
+        }
+        if (frame != null) {
+            for (var passenger : frame.scene().units()) {
+                if (passenger.attachment() == null || !passenger.attachment().hostile()
+                      || units.stream().anyMatch(unit -> unit.id() == passenger.id())) { continue; }
+                Entity carrier = view.game.getEntity(passenger.attachment().carrierId());
+                Entity removed = view.game.getEntityFromAllSources(passenger.id());
+                if (view.game.getEntity(passenger.id()) == null && removed != null && (removed.isDestroyed() || removed.isDoomed())
+                      && EntityVisibilityUtils.detectedOrHasVisual(view.getLocalPlayer(), view.game, removed) && !sensorContact(removed)
+                      && carrier != null && visible(carrier) && !sensorContact(carrier) && carrier.getSwarmAttackerId() == passenger.id()) {
+                    // A removal packet can precede its carrier's path. Retain only the already authorized appearance.
+                    units.add(passenger);
+                }
             }
         }
         if (GpuUnitModels.ENABLED && GUIPreferences.getInstance().getShowWrecks()) {
@@ -849,6 +1003,27 @@ final class GpuBoardSource implements AutoCloseable {
               && EntityVisibilityUtils.detectedOrHasVisual(view.getLocalPlayer(), view.game, entity);
     }
 
+    /** The carrier owns exterior occupancy, so separately delivered passenger updates cannot release it early. */
+    static Map<Integer, BoardScene.Attachment> exteriorAttachments(List<Entity> entities,
+          java.util.function.Predicate<Entity> identified, java.util.function.Predicate<Entity> onBoard) {
+        Map<Integer, BoardScene.Attachment> result = new HashMap<>();
+        Map<Integer, Entity> byId = new HashMap<>();
+        entities.forEach(entity -> byId.put(entity.getId(), entity));
+        for (Entity carrier : entities) {
+            if (!onBoard.test(carrier) || !identified.test(carrier)) { continue; }
+            for (Entity passenger : carrier.getExternalUnits()) {
+                if (passenger instanceof megamek.common.battleArmor.BattleArmor && identified.test(passenger)) {
+                    result.put(passenger.getId(), new BoardScene.Attachment(carrier.getId(), false));
+                }
+            }
+            Entity swarmer = byId.get(carrier.getSwarmAttackerId());
+            if (swarmer instanceof megamek.common.units.Infantry && identified.test(swarmer)) {
+                result.put(swarmer.getId(), new BoardScene.Attachment(carrier.getId(), true));
+            }
+        }
+        return result;
+    }
+
     private List<BoardScene.FiringLine> firingLines() {
         List<BoardScene.FiringLine> result = new ArrayList<>();
         for (var sprite : view.getAttackSprites()) {
@@ -903,7 +1078,7 @@ final class GpuBoardSource implements AutoCloseable {
               terrainImages.capture(pixels.tactical(), previous == null ? null : previous.tactical()),
               BoardFeatures.capture(hex, pixels.coords(), pixels.structureModels()), pixels.text(), BoardLiquid.capture(hex),
               terrainImages.captureOverlay(pixels.foliage(), previous == null ? null : previous.foliage()),
-              BoardFeatures.detailedGround(hex, pixels.structureModels()));
+              BoardFeatures.detailedGround(hex, pixels.structureModels()), BoardRoad.capture(hex), BoardFireSmoke.capture(hex), BoardFeatures.biome(hex));
     }
 
     private boolean sensorContact(Entity entity) {

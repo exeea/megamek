@@ -39,10 +39,10 @@ final class GpuUnitInstance extends ModelInstance {
     private static final MMLogger LOGGER = MMLogger.create(GpuUnitInstance.class);
     private final RenderableProvider depth = this::depthParts;
     /** The parts each level of detail draws; both empty for a unit with only one level. */
-    private final List<NodePart> nearParts = new ArrayList<>();
-    private final List<NodePart> farParts = new ArrayList<>();
+    private final List<NodePart> lod0Parts = new ArrayList<>();
+    private final List<NodePart> lod1Parts = new ArrayList<>();
     private float figureHeight;
-    private float farPixels;
+    private float lod1Pixels;
     private int detailLevel;
     private final Map<Node, Attachment> attachments = new IdentityHashMap<>();
     private final Vector3 detailPosition = new Vector3();
@@ -61,9 +61,9 @@ final class GpuUnitInstance extends ModelInstance {
             }
         }
         var levels = model.detailLevels();
-        if (!levels.far().isEmpty()) {
+        if (!levels.lod1().isEmpty()) {
             figureHeight = model.figureHeight();
-            farPixels = levels.farPixels();
+            lod1Pixels = levels.lod1Pixels();
             sortDetailParts(nodes, levels);
         }
     }
@@ -73,10 +73,10 @@ final class GpuUnitInstance extends ModelInstance {
         for (Node node : nodes) {
             for (NodePart part : node.parts) {
                 Mesh mesh = part.meshPart.mesh;
-                if (levels.far().contains(mesh)) {
-                    farParts.add(part);
-                } else if (levels.near().isEmpty() || levels.near().contains(mesh)) {
-                    nearParts.add(part);
+                if (levels.lod1().contains(mesh)) {
+                    lod1Parts.add(part);
+                } else if (levels.lod0().isEmpty() || levels.lod0().contains(mesh)) {
+                    lod0Parts.add(part);
                 }
             }
             sortDetailParts(node.getChildren(), levels);
@@ -85,17 +85,16 @@ final class GpuUnitInstance extends ModelInstance {
 
     /**
      * Render selection only: rigs, emitters, picking, damage flags and shared mesh buffers stay intact. Small
-     * equipment is hidden, and a unit with far detail (a battle armour squad's far suits, a Mek's far body) switches
-     * to it, once too small on screen to read.
+     * equipment is hidden, and a unit with an authored LOD1 body or suit switches to it once small on screen.
      */
     void equipmentDetail(Camera camera, boolean forceFull) {
-        if (attachments.isEmpty() && farParts.isEmpty()) { return; }
+        if (attachments.isEmpty() && lod1Parts.isEmpty()) { return; }
         float pixels = BoardCamera.pixelsPerUnit(camera, transform.getTranslation(detailPosition))
               * Math.max(transform.getScaleX(), Math.max(transform.getScaleY(), transform.getScaleZ()));
         if (pixels == detailPixels && forceFull == forcedDetail) { return; }
         detailPixels = pixels;
         forcedDetail = forceFull;
-        farDetail(pixels, forceFull);
+        bodyDetail(pixels, forceFull);
         for (Attachment attachment : attachments.values()) {
             float threshold = EQUIPMENT_HIDE_PIXELS * (attachment.hidden ? 1 + EQUIPMENT_LOD_HYSTERESIS : 1 - EQUIPMENT_LOD_HYSTERESIS);
             boolean next = !forceFull && attachment.diameter * pixels < threshold;
@@ -109,27 +108,26 @@ final class GpuUnitInstance extends ModelInstance {
     int hiddenEquipment() { return (int) attachments.values().stream().filter(attachment -> attachment.hidden).count(); }
 
     /**
-     * Shows the far detail while the unit (one figure, for a squad) stands less than its model's far height on
-     * screen, the near detail otherwise, and always the near detail for a unit in focus.
+     * Shows LOD1 below the model's screen-height threshold, LOD0 otherwise. Missing LOD1 and units in focus use LOD0.
      *
      * @param pixelsPerModelUnit framebuffer pixels per model unit at the instance's current scale
      * @param forceFull          {@code true} for the selected unit or one in an attack
      */
-    void farDetail(float pixelsPerModelUnit, boolean forceFull) {
-        if (farParts.isEmpty()) { return; }
+    void bodyDetail(float pixelsPerModelUnit, boolean forceFull) {
+        if (lod1Parts.isEmpty()) { return; }
         float unitPixels = figureHeight * pixelsPerModelUnit;
-        int next = forceFull ? 0 : FormationLod.level(unitPixels, detailLevel, farPixels);
+        int next = forceFull ? 0 : FormationLod.level(unitPixels, detailLevel, lod1Pixels);
         if (next == detailLevel) { return; }
         detailLevel = next;
-        boolean far = next == 1;
-        nearParts.forEach(part -> part.enabled = !far);
-        farParts.forEach(part -> part.enabled = far);
+        boolean lod1 = next == 1;
+        lod0Parts.forEach(part -> part.enabled = !lod1);
+        lod1Parts.forEach(part -> part.enabled = lod1);
         detailRevision++;
-        LOGGER.debug("[FormationLod] unit now shows its {} detail ({} pixels tall{})", far ? "far" : "near",
-              Math.round(unitPixels), forceFull ? ", held near while in focus" : "");
+        LOGGER.debug("[FormationLod] unit now shows LOD{} ({} pixels tall{})", next,
+              Math.round(unitPixels), forceFull ? ", held at LOD0 while in focus" : "");
     }
 
-    /** @return {@code 0} while the near detail shows, {@code 1} while the far detail does */
+    /** @return the numeric LOD currently drawn */
     int detailLevel() { return detailLevel; }
 
     int detailRevision() { return detailRevision; }

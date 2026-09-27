@@ -25,7 +25,7 @@ final class GpuFormationLodReview {
         var tileset = new MekTileset(new File(Configuration.dataDir(), "images/units"));
         tileset.loadFromFile("mekset.txt");
         int fullSuit = library.modular(ROOT + "troops/elemental-standing.json").triangles();
-        int farSuit = library.modular(ROOT + "troops/elemental-far-standing.json").triangles();
+        int lod1Suit = library.modular(ROOT + "troops/elemental-standing.json").triangles(1);
         for (int squad : new int[] { 5, 6 }) {
             var armor = new BattleArmor();
             armor.setId(300 + squad);
@@ -39,20 +39,20 @@ final class GpuFormationLodReview {
             assertEquals(ROOT + "battle-armor/elemental.json", selection.asset());
             GpuUnitModel squadModel = library.get(selection, armor.getId());
             assertNotNull(squadModel, "A " + squad + "-suit Elemental squad must fit the per-suit budget");
-            assertFalse(squadModel.detailLevels().far().isEmpty());
+            assertFalse(squadModel.detailLevels().lod1().isEmpty());
             var instance = new GpuUnitInstance(squadModel);
             assertEquals(squad * fullSuit, drawnTriangles(instance.nodes));
             // A suit only 20 pixels tall shows its far detail.
             float small = 20 / squadModel.figureHeight();
-            instance.farDetail(small, false);
+            instance.bodyDetail(small, false);
             assertEquals(1, instance.detailLevel());
-            assertEquals(squad * farSuit, drawnTriangles(instance.nodes));
+            assertEquals(squad * lod1Suit, drawnTriangles(instance.nodes));
             // Zoomed in again, the full suits return.
-            instance.farDetail(10, false);
+            instance.bodyDetail(10, false);
             assertEquals(0, instance.detailLevel());
             assertEquals(squad * fullSuit, drawnTriangles(instance.nodes));
             // A unit in focus keeps its full suits however small it is.
-            instance.farDetail(small, true);
+            instance.bodyDetail(small, true);
             assertEquals(0, instance.detailLevel());
             assertEquals(squad * fullSuit, drawnTriangles(instance.nodes));
         }

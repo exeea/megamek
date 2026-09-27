@@ -98,7 +98,7 @@ float sculptShadow(vec3 normal, vec3 light) {
 #endif
 }
 
-void surfaceLighting(vec3 normal, float film, out vec3 ambient, out vec3 direct, out vec3 sheen) {
+void surfaceLighting(vec3 normal, float film, float roughness, out vec3 ambient, out vec3 direct, out vec3 sheen) {
     ambient = skyLight(normal, GROUND_ALBEDO);
     direct = vec3(0.0);
     sheen = vec3(0.0);
@@ -108,7 +108,19 @@ void surfaceLighting(vec3 normal, float film, out vec3 ambient, out vec3 direct,
         vec3 light = -u_dirLights[i].direction;
         float incidence = max(0.0, dot(normal, light));
         direct += u_dirLights[i].color * incidence;
-        if (film > 0.0 && incidence > 0.0) {
+        if (roughness >= 0.0 && incidence > 0.0) {
+            // Dielectric GGX for materials with authored roughness. Wet pores develop a smoother water film.
+            vec3 halfVector = normalize(light + view);
+            float nv = max(.001, dot(normal, view)), nh = max(0.0, dot(normal, halfVector));
+            float r = mix(clamp(roughness, .15, .98), .12, film);
+            float a2 = r * r * r * r;
+            float denominator = nh * nh * (a2 - 1.0) + 1.0;
+            float distribution = a2 / max(3.14159265 * denominator * denominator, .0001);
+            float k = (r + 1.0) * (r + 1.0) / 8.0;
+            float visibility = nv / (nv * (1.0 - k) + k) * incidence / (incidence * (1.0 - k) + k);
+            float fresnel = .04 + .96 * pow(1.0 - max(0.0, dot(view, halfVector)), 5.0);
+            sheen += u_dirLights[i].color * distribution * visibility * fresnel / (4.0 * nv);
+        } else if (film > 0.0 && incidence > 0.0) {
             vec3 halfVector = normalize(light + view);
             float exponent = mix(12.0, 96.0, film);
             float fresnel = 0.02 + 0.98 * pow(1.0 - max(0.0, dot(view, halfVector)), 5.0);
@@ -122,5 +134,10 @@ void surfaceLighting(vec3 normal, float film, out vec3 ambient, out vec3 direct,
     direct *= visibility;
     sheen *= visibility;
 #endif
+}
+
+// Existing surfaces keep their established water-film response until they supply a roughness map.
+void surfaceLighting(vec3 normal, float film, out vec3 ambient, out vec3 direct, out vec3 sheen) {
+    surfaceLighting(normal, film, -1.0, ambient, direct, sheen);
 }
 #endif

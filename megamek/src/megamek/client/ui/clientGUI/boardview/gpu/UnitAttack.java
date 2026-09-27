@@ -42,6 +42,7 @@ final class UnitAttack {
     final float approachSeconds;
     java.util.function.Function<Ray, BoardGeometry.Hit> landscape;
     private final Map<Integer, Vector3> misses = new HashMap<>();
+    private final Map<Vector3, Boolean> hardImpacts = new HashMap<>();
     private final Map<Integer, Vector3> beamMisses = new HashMap<>();
     private UnitPicking surfaces;
     private record HitPoint(ModelInstance target, String location, int seed) { }
@@ -61,14 +62,14 @@ final class UnitAttack {
             if (mount.shot() != null) { profiles.put(mountKey(mount.entityId(), mount.equipmentIndex()), mount.shot()); }
         });
         float distance = BoardGeometry.center(event.attacker().location().coords(), event.attacker().location().elevation())
-              .dst(BoardGeometry.center(event.destination().coords(), event.destination().elevation())) / BoardGeometry.HEIGHT;
+              .dst(BoardGeometry.center(event.destination().coords(), event.destination().elevation())) / BoardGeometry.height();
         approachSeconds = event.result().kind() == ResolvedAttack.Kind.PUSH ? MELEE_RUN_SECONDS : MELEE_WALK_SECONDS;
         flightSeconds = MathUtils.clamp(distance * .05f, interception() == null ? .18f : .45f, .7f);
         float firingSeconds = machineGunFireSeconds(event.result().shot());
         for (var profile : profiles.values()) { firingSeconds = Math.max(firingSeconds, machineGunFireSeconds(profile)); }
-        contactSeconds = death() ? DEATH_SECONDS : shot() ? ANTICIPATION_SECONDS + flightSeconds + firingSeconds
+        contactSeconds = removal() ? .85f : death() ? DEATH_SECONDS : shot() ? ANTICIPATION_SECONDS + flightSeconds + firingSeconds
               : approachSeconds + MELEE_SWING_SECONDS;
-        duration = death() ? DEATH_SECONDS : contactSeconds + RECOVERY_SECONDS + (shot() ? 0 : MELEE_RUN_SECONDS);
+        duration = removal() ? 1.4f : death() ? DEATH_SECONDS : contactSeconds + RECOVERY_SECONDS + (shot() ? 0 : MELEE_RUN_SECONDS);
         firingEndSeconds = event.result().mounts().stream()
               .anyMatch(mount -> "flame".equals(effect(mount.entityId(), mount.equipmentIndex())))
               ? Math.max(contactSeconds, ANTICIPATION_SECONDS + flightSeconds + RECOVERY_SECONDS) : contactSeconds;
@@ -79,6 +80,10 @@ final class UnitAttack {
     }
 
     boolean death() { return event.result().kind() == ResolvedAttack.Kind.DEATH; }
+
+    boolean removal() {
+        return event.result().kind() == ResolvedAttack.Kind.BRUSH_OFF || event.result().kind() == ResolvedAttack.Kind.SHAKE_OFF;
+    }
 
     boolean defensive() { return event.result().shot() != null && event.result().shot().defensive(); }
 
@@ -104,7 +109,7 @@ final class UnitAttack {
     /** The same visible posed endpoint is used for aiming and effects in either camera. */
     static Vector3 center(ModelInstance instance, BoardScene.Waypoint location, Vector3 result) {
         return instance == null ? result.set(BoardGeometry.center(location.coords(), location.elevation()))
-              .add(0, 0, BoardGeometry.LEVEL * .5f) : UnitBounds.world(instance).getCenter(result);
+              .add(0, 0, BoardGeometry.level() * .5f) : UnitBounds.world(instance).getCenter(result);
     }
 
     /** A cosmetic miss must clear the posed target, including large hulls; it never changes the resolved outcome. */
@@ -162,7 +167,7 @@ final class UnitAttack {
             }
             // Point defense aims into the incoming approach, never at the launcher's hull.
             center(targetInstance, event.destination(), result);
-            return result.set(origin.cpy().lerp(result, .25f)).add(0, 0, BoardGeometry.LEVEL * .35f);
+            return result.set(origin.cpy().lerp(result, .25f)).add(0, 0, BoardGeometry.level() * .35f);
         }
         center(targetInstance, event.destination(), result);
         if (!missed) { return shot() ? hitEndpoint(targetInstance, origin, missile, 0, 1, result) : result; }
@@ -194,14 +199,14 @@ final class UnitAttack {
     private void scatter(ModelInstance targetInstance, Vector3 origin, int ordinal, boolean beam, Vector3 result) {
         var center = center(targetInstance, event.destination(), new Vector3());
         var bounds = targetInstance == null ? null : UnitBounds.world(targetInstance);
-        float radius = bounds == null ? BoardGeometry.HEIGHT * .35f : Math.max(bounds.getWidth(), bounds.getHeight()) * .55f;
+        float radius = bounds == null ? BoardGeometry.height() * .35f : Math.max(bounds.getWidth(), bounds.getHeight()) * .55f;
         var hit = new Vector3();
         int seed = event.result().id().hashCode() ^ ordinal * 7919;
         for (int attempt = 0; attempt < 16; attempt++) {
             float angle = noise(seed + attempt * 31) * MathUtils.PI2;
-            float spread = radius + BoardGeometry.HEIGHT * (.15f + noise(seed + 137 + attempt) * 1.6f);
+            float spread = radius + BoardGeometry.height() * (.15f + noise(seed + 137 + attempt) * 1.6f);
             result.set(center).add(MathUtils.cos(angle) * spread, MathUtils.sin(angle) * spread,
-                  beam ? (noise(seed + 991) * 2 - 1) * (bounds == null ? BoardGeometry.LEVEL : bounds.getDepth()) : 0);
+                  beam ? (noise(seed + 991) * 2 - 1) * (bounds == null ? BoardGeometry.level() : bounds.getDepth()) : 0);
             if (shot() && !beam) { ground(result); }
             var ray = new Ray(origin, new Vector3(result).sub(origin).nor());
             if (bounds == null || !Intersector.intersectRayBounds(ray, bounds, hit)
@@ -217,7 +222,7 @@ final class UnitAttack {
         beamAim(target, origin, ordinal, result);
         var ray = new Ray(origin, result.cpy().sub(origin).nor());
         var hit = landscape == null ? null : landscape.apply(ray);
-        result.set(origin).mulAdd(ray.direction, hit == null ? BoardGeometry.HEIGHT * 200 : (float) Math.sqrt(hit.distance()));
+        result.set(origin).mulAdd(ray.direction, hit == null ? BoardGeometry.height() * 200 : (float) Math.sqrt(hit.distance()));
         return hit != null;
     }
 
@@ -228,9 +233,23 @@ final class UnitAttack {
         return result;
     }
 
+    /** Capture the struck material once from the same installed geometry that placed the impact. */
+    boolean hardImpact(Vector3 point) {
+        if (landscape == null) { return false; }
+        Boolean captured = hardImpacts.get(point);
+        if (captured != null) { return captured; }
+        float offset = BoardGeometry.level() * .1f;
+        var ray = new Ray(point.cpy().add(0, 0, offset), new Vector3(0, 0, -1));
+        var hit = landscape.apply(ray);
+        if (hit == null) { return false; }
+        boolean hard = hit.hardSurface() && Math.abs(hit.distance() - offset * offset) < offset * offset * .5f;
+        hardImpacts.put(point.cpy(), hard);
+        return hard;
+    }
+
     private void ground(Vector3 point) {
-        float fallback = event.destination().elevation() * BoardGeometry.LEVEL;
-        var ray = new Ray(new Vector3(point.x, point.y, Math.max(point.z, fallback) + BoardGeometry.LEVEL * 100), new Vector3(0, 0, -1));
+        float fallback = event.destination().elevation() * BoardGeometry.level();
+        var ray = new Ray(new Vector3(point.x, point.y, Math.max(point.z, fallback) + BoardGeometry.level() * 100), new Vector3(0, 0, -1));
         var hit = landscape == null ? null : landscape.apply(ray);
         point.z = hit == null ? fallback : ray.origin.z - (float) Math.sqrt(hit.distance());
     }
@@ -327,7 +346,7 @@ final class UnitAttack {
     /** The closer of half the approach and two hexes from the defended unit, measured in the board plane. */
     static float interceptProgress(Vector3 origin, Vector3 target) {
         float distance = (float) Math.hypot(target.x - origin.x, target.y - origin.y);
-        return Math.max(.5f, 1 - 2 * BoardGeometry.HEIGHT / Math.max(.001f, distance));
+        return Math.max(.5f, 1 - 2 * BoardGeometry.height() / Math.max(.001f, distance));
     }
 
     float contactFlash() {
@@ -356,7 +375,7 @@ final class UnitAttack {
     }
 
     static float arcHeight(Vector3 origin, Vector3 target) {
-        return Math.max(BoardGeometry.HEIGHT * .4f, origin.dst(target) * .25f);
+        return Math.max(BoardGeometry.height() * .4f, origin.dst(target) * .25f);
     }
 
     float impact() {
@@ -427,7 +446,7 @@ final class UnitAttack {
     }
 
     float dodgeWeight() {
-        if (shot() || death() || event.result().hit() || event.target() == null) { return 0; }
+        if (shot() || death() || removal() || event.result().hit() || event.target() == null) { return 0; }
         return seconds <= contactSeconds ? smooth((seconds - approachSeconds) / MELEE_SWING_SECONDS)
               : 1 - smooth((seconds - contactSeconds) / RECOVERY_SECONDS);
     }
@@ -435,7 +454,7 @@ final class UnitAttack {
     Vector3 dodgeOffset(Vector3 result) {
         return result.set(BoardGeometry.center(event.destination().coords(), 0))
               .sub(BoardGeometry.center(event.attacker().location().coords(), 0)).nor()
-              .scl(BoardGeometry.HEIGHT * MELEE_DODGE_HEXES * dodgeWeight());
+              .scl(BoardGeometry.height() * MELEE_DODGE_HEXES * dodgeWeight());
     }
 
     float travelProgress() {

@@ -21,6 +21,33 @@ class BoardGeometryTest {
         GdxNativesLoader.load();
     }
 
+    @Test
+    void terrainImpactsUseThePickedMaterialAndCacheItForPlayback() {
+        for (var material : BoardScene.Surface.values()) {
+            for (int water : new int[] { -1, 2 }) {
+                var tile = new BoardScene.Tile(new Coords(0, 0), 0, water, false, 0, material,
+                      null, null, null, List.of(), List.of());
+                var board = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
+                var cache = new BoardSurface.Cache();
+                var ray = new Ray(BoardGeometry.center(tile.coords(), 0).add(0, 0, 100), new Vector3(0, 0, -1));
+                var hit = BoardGeometry.hit(board, ray, board.tiles(), BoardGeometry.floor(board), cache);
+                boolean sparks = water < 0 && (material == BoardScene.Surface.ROCK || material == BoardScene.Surface.CONCRETE);
+                assertEquals(sparks, hit.hardSurface(), "The exposed material matters, including water over rock");
+                var at = ray.origin.cpy().mulAdd(ray.direction, (float) Math.sqrt(hit.distance()));
+                var attack = new UnitAttack(UnitPlaybackTest.attack(UnitPlaybackTest.unit(1, 1), UnitPlaybackTest.unit(2, 0),
+                      megamek.common.ResolvedAttack.Kind.SHOT, false));
+                var picks = new java.util.concurrent.atomic.AtomicInteger();
+                attack.landscape = probe -> {
+                    picks.incrementAndGet();
+                    return BoardGeometry.hit(board, probe, board.tiles(), BoardGeometry.floor(board), cache);
+                };
+                assertEquals(sparks, attack.hardImpact(at));
+                assertEquals(sparks, attack.hardImpact(at.cpy()));
+                assertEquals(1, picks.get(), "An impact must not repeat terrain picking on every animation frame");
+            }
+        }
+    }
+
     private BoardScene scene(int raisedLevel) {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 5; x++) {

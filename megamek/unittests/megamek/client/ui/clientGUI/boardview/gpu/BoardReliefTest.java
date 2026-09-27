@@ -96,9 +96,9 @@ class BoardReliefTest {
                 Coords other = coords.translated(direction);
                 BoardSurface neighbor = new BoardSurface(scene, scene.tile(other));
                 int edge = Math.floorMod(1 - direction, 6);
-                for (int step = 1; step < BoardRelief.EDGE_STEPS; step++) {
+                for (int step = 1; step < TerrainLod.FULL.steps; step++) {
                     Vector3 p = BoardGeometry.corner(coords, 1, edge)
-                          .lerp(BoardGeometry.corner(coords, 1, edge + 1), step / (float) BoardRelief.EDGE_STEPS);
+                          .lerp(BoardGeometry.corner(coords, 1, edge + 1), step / (float) TerrainLod.FULL.steps);
                     // Nudge inside each hex: both sampled faces must agree on either side of the shared edge.
                     Vector3 inside = new Vector3(p).lerp(center, .002f);
                     Vector3 outside = new Vector3(p).lerp(BoardGeometry.center(other, 1), .002f);

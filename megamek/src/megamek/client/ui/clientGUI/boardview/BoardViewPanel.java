@@ -67,6 +67,11 @@ public class BoardViewPanel extends JPanel implements Scrollable {
         super.repaint(delay, x, y, width, height);
     }
 
+    /** Board hex events already tell native captures exactly which terrain changed. */
+    void repaintTerrain() {
+        super.repaint(0, 0, 0, getWidth(), getHeight());
+    }
+
     @Override
     public Point getToolTipLocation(MouseEvent event) {
         Coords hexCoords = boardView.getCoordsAt(event.getPoint());

@@ -1,18 +1,6 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 uniform float u_gridShade;
 
-// Color uses the continuous field; blade density alone thresholds it into meadow clearings.
-float meadowField(vec2 metres) {
-    vec2 warp = vec2(sin(metres.y * .31), cos(metres.x * .29)) * .025;
-    float broad = texture2D(u_rainNoise, metres * .009 + warp).g;
-    float detail = texture2D(u_rainNoise, metres * .027 + .317).b;
-    return broad * .7 + detail * .3;
-}
-
-float meadowCover(vec2 metres) {
-    return smoothstep(.20, .66, meadowField(metres));
-}
-
 // Shared by physical ground and its living cover: the grid stays visible through the grass.
 float terrainGrid(vec2 position) {
     float column = floor((position.x - .5) / .75 + .5);

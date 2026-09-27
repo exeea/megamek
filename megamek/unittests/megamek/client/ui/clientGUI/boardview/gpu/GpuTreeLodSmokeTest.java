@@ -40,7 +40,8 @@ import org.junit.jupiter.api.Test;
 class GpuTreeLodSmokeTest {
     private static final List<String> TREES = List.of("tree", "tree-broad", "tree-slender", "birch", "willow", "pine",
           "pine-tall", "palm", "palm-bent", "tree-snow", "tree-broad-snow", "tree-slender-snow", "birch-snow",
-          "willow-snow", "pine-snow", "pine-tall-snow");
+          "willow-snow", "pine-snow", "pine-tall-snow", "pine-broad", "pine-broad-snow", "tree-dead",
+          "tree-dead-snow", "cactus", "cactus-flowers");
 
     @Test
     void changesSubmittedGeometryWithoutChangingPickingOpacityOrShadows() {
@@ -68,7 +69,7 @@ class GpuTreeLodSmokeTest {
                         terrain.update(scene);
                         int[] triangles = new int[3];
                         for (int level = 0; level < 3; level++) {
-                            Model model = assets.model(TreeLod.asset(name, level));
+                            Model model = assets.lodModel(name, level);
                             for (var part : model.meshParts) {
                                 triangles[level] += part.size / 3;
                             }
@@ -76,7 +77,8 @@ class GpuTreeLodSmokeTest {
                         }
                         assertTrue(triangles[1] <= 240 && triangles[2] <= 96, name);
                         BoundingBox bounds = assets.model(name).calculateBoundingBox(new BoundingBox());
-                        float diameter = bounds.getDimensions(new Vector3()).scl(1, 1, 36).len();
+                        assertEquals(30, bounds.getDepth(), .001f, "Plant GLBs must not contain flattened geometry: " + name);
+                        float diameter = bounds.getDimensions(new Vector3()).scl(1, 1, 36 / bounds.getDepth()).len();
                         BoardGeometry.Hit nearHit = terrain.hit(scene, new Ray(new Vector3(center).add(0, 0, 1000),
                               new Vector3(0, 0, -1)));
                         int nearCount = 0;
@@ -165,7 +167,18 @@ class GpuTreeLodSmokeTest {
         ModelBatch batch = new ModelBatch();
         try {
             for (String name : TREES) {
-                Model reference = assets.model(name);
+                var file = new com.badlogic.gdx.files.FileHandle(new File(
+                      System.getProperty("megamek.gpu.referenceFoliage"), name + ".glb"));
+                var data = RigidGlb.loadLods(file, new File(System.getProperty("megamek.gpu.referenceFoliage"))
+                      .toPath().toAbsolutePath().getParent().getParent().getParent()).getFirst();
+                Model reference = new Model(data, filename -> assets.material("foliage/"
+                      + new com.badlogic.gdx.files.FileHandle(filename).nameWithoutExtension()));
+                // Reference geometry is test-owned; its textures belong to the shared cache.
+                var owned = reference.getManagedDisposables().iterator();
+                while (owned.hasNext()) {
+                    if (owned.next() instanceof com.badlogic.gdx.graphics.Texture) { owned.remove(); }
+                }
+                try {
                 for (float tilt : new float[] { 0, 54.73561f, 80 }) {
                     for (int bearing = 0; bearing < 360; bearing += 90) {
                         BoardCamera camera = new BoardCamera();
@@ -174,11 +187,11 @@ class GpuTreeLodSmokeTest {
                         camera.center(new Vector3(0, 0, 18));
                         camera.zoom(0.001f);
                         BufferedImage original = render(batch, environment, reference, camera);
-                        BufferedImage optimized = render(batch, environment, assets.model(TreeLod.asset(name, 0)), camera);
+                        BufferedImage optimized = render(batch, environment, assets.lodModel(name, 0), camera);
                         int changed = differences(original, optimized);
                         assertEquals(0, changed, name + " at tilt " + tilt + ", bearing " + bearing);
                         if (tilt == 54.73561f && bearing == 0) {
-                            BufferedImage half = render(batch, environment, assets.model(TreeLod.asset(name, 1)), camera);
+                            BufferedImage half = render(batch, environment, assets.lodModel(name, 1), camera);
                             BufferedImage comparison = new BufferedImage(original.getWidth() * 3, original.getHeight(),
                                   BufferedImage.TYPE_INT_RGB);
                             var graphics = comparison.createGraphics();
@@ -199,6 +212,7 @@ class GpuTreeLodSmokeTest {
                         }
                     }
                 }
+                } finally { reference.dispose(); }
             }
             compareDistantLevels(assets, batch, environment);
         } finally {
@@ -218,8 +232,8 @@ class GpuTreeLodSmokeTest {
             }
             for (int row = 0; row < TREES.size(); row++) {
                 String name = TREES.get(row);
-                float diameter = assets.model(name).calculateBoundingBox(new BoundingBox())
-                      .getDimensions(new Vector3()).scl(1, 1, 36).len();
+                BoundingBox bounds = assets.model(name).calculateBoundingBox(new BoundingBox());
+                float diameter = bounds.getDimensions(new Vector3()).scl(1, 1, 36 / bounds.getDepth()).len();
                 graphics.drawString(name, 12, row * 132 + 94);
                 BoardCamera camera = new BoardCamera();
                 camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
@@ -229,7 +243,7 @@ class GpuTreeLodSmokeTest {
                     int level = column == 0 ? 0 : column == 3 ? 2 : 1;
                     camera.camera.zoom = zoomForSize(diameter, column < 2 ? 88 : 26.4f);
                     camera.update();
-                    BufferedImage frame = render(batch, environment, assets.model(TreeLod.asset(name, level)), camera);
+                    BufferedImage frame = render(batch, environment, assets.lodModel(name, level), camera);
                     graphics.drawImage(frame.getSubimage(frame.getWidth() / 2 - 64, frame.getHeight() / 2 - 64, 128, 128),
                           192 + column * 128, row * 132 + 32, null);
                 }
@@ -243,7 +257,8 @@ class GpuTreeLodSmokeTest {
     private static BufferedImage render(ModelBatch batch, Environment environment, Model model, BoardCamera camera) {
         ScreenUtils.clear(0.035f, 0.055f, 0.075f, 1, true);
         ModelInstance instance = new ModelInstance(model);
-        instance.transform.setToScaling(1, 1, 36);
+        // All levels share the LOD0 coordinate frame, whose catalog height is 30.
+        instance.transform.setToScaling(1, 1, 36 / 30f);
         batch.begin(camera.camera);
         batch.render(instance, environment);
         batch.end();
@@ -269,8 +284,13 @@ class GpuTreeLodSmokeTest {
         int changed = 0;
         for (int y = 0; y < a.getHeight(); y++) {
             for (int x = 0; x < a.getWidth(); x++) {
-                if (a.getRGB(x, y) != b.getRGB(x, y)) {
-                    changed++;
+                // Linear glTF colors round through float32; permit one display-channel step, not silhouette changes.
+                int first = a.getRGB(x, y), second = b.getRGB(x, y);
+                for (int shift = 0; shift <= 16; shift += 8) {
+                    if (Math.abs((first >> shift & 255) - (second >> shift & 255)) > 1) {
+                        changed++;
+                        break;
+                    }
                 }
             }
         }

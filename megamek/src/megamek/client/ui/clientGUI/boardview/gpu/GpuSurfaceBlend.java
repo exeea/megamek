@@ -9,10 +9,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 
+import com.badlogic.gdx.graphics.TextureArray;
 import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.Attribute;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
+import com.badlogic.gdx.graphics.g3d.utils.TextureDescriptor;
 import com.badlogic.gdx.math.Vector3;
 
 /** Extra data only on material boundaries. Palettes are shared by a chunk, never unique to individual hexes. */
@@ -21,25 +23,43 @@ final class GpuSurfaceBlend extends Attribute {
     static final VertexAttributes VERTICES = new VertexAttributes(VertexAttribute.Position(), VertexAttribute.Normal(),
           VertexAttribute.ColorPacked(), VertexAttribute.TexCoords(0),
           new VertexAttribute(VertexAttributes.Usage.Generic, 3, "a_coverWeights"));
-    final float[] parameters;
+    final TextureDescriptor<TextureArray> texture;
+    final float[] families, responses;
+    final float[][] tiles, layers;
 
-    GpuSurfaceBlend(int first, float firstMetres, int second, float secondMetres, float firstResponse, float secondResponse) {
+    GpuSurfaceBlend(TextureArray texture, float[] families, float[] responses, float[][] tiles, float[][] layers) {
         super(TYPE);
-        parameters = new float[] { first, firstMetres, second, secondMetres, firstResponse, secondResponse };
+        this.texture = new TextureDescriptor<>(texture);
+        this.families = families.clone();
+        this.responses = responses.clone();
+        this.tiles = Arrays.stream(tiles).map(float[]::clone).toArray(float[][]::new);
+        this.layers = Arrays.stream(layers).map(float[]::clone).toArray(float[][]::new);
     }
 
     @Override
     public GpuSurfaceBlend copy() {
-        return new GpuSurfaceBlend((int) parameters[0], parameters[1], (int) parameters[2], parameters[3], parameters[4], parameters[5]);
+        return new GpuSurfaceBlend(texture.texture, families, responses, tiles, layers);
     }
 
     @Override
     public int compareTo(Attribute other) {
-        return type != other.type ? Long.compare(type, other.type) : Arrays.compare(parameters, ((GpuSurfaceBlend) other).parameters);
+        if (type != other.type) { return Long.compare(type, other.type); }
+        var blend = (GpuSurfaceBlend) other;
+        int result = texture.compareTo(blend.texture);
+        if (result == 0) { result = Arrays.compare(families, blend.families); }
+        if (result == 0) { result = Arrays.compare(responses, blend.responses); }
+        for (int i = 0; i < tiles.length && result == 0; i++) {
+            result = Arrays.compare(tiles[i], blend.tiles[i]);
+            if (result == 0) { result = Arrays.compare(layers[i], blend.layers[i]); }
+        }
+        return result;
     }
 
     @Override
-    public int hashCode() { return 31 * super.hashCode() + Arrays.hashCode(parameters); }
+    public int hashCode() {
+        return java.util.Objects.hash(super.hashCode(), texture, Arrays.hashCode(families), Arrays.hashCode(responses),
+              Arrays.deepHashCode(tiles), Arrays.deepHashCode(layers));
+    }
 
     static String vertex(String source) {
         return source.replace("void main()", "#ifdef terrainBlendFlag\nattribute vec3 a_coverWeights;\n"
@@ -74,17 +94,21 @@ final class GpuSurfaceBlend extends Attribute {
     static Map<Palette, List<Triangle>> prepare(BoardScene scene, BoardScene.Tile tile, List<BoardSurface.Face> faces,
           Function<Vector3, MeshPartBuilder.VertexInfo> vertices, float spacing) {
         return prepare(tile.surface(), faces, vertices,
-              p -> BoardSurfaceBlend.sample(scene, tile, p.x, p.y, p.z), spacing);
+              v -> v.color.b > .375f && v.color.b < .625f
+                    ? BoardSurfaceBlend.sampleCliff(scene, tile, v.position.x, v.position.y, v.position.z)
+                    : BoardSurfaceBlend.sample(scene, tile, v.position.x, v.position.y, v.position.z), spacing);
     }
 
     private static Map<Palette, List<Triangle>> prepare(BoardScene.Surface family, List<BoardSurface.Face> faces,
-          Function<Vector3, MeshPartBuilder.VertexInfo> vertices, Function<Vector3, BoardSurfaceBlend.Cover> cover,
+          Function<Vector3, MeshPartBuilder.VertexInfo> vertices, Function<MeshPartBuilder.VertexInfo, BoardSurfaceBlend.Cover> cover,
           float spacing) {
         Map<Palette, List<Triangle>> groups = new LinkedHashMap<>();
         // Coincident cliff/top vertices deliberately carry different packed roles and UV meanings.
         Map<Vector3, Point> points = new IdentityHashMap<>();
-        Function<Vector3, Point> point = p -> points.computeIfAbsent(p, key -> new Point(vertices.apply(key),
-              cover.apply(key)));
+        Function<Vector3, Point> point = p -> points.computeIfAbsent(p, key -> {
+            var v = vertices.apply(key);
+            return new Point(v, cover.apply(v));
+        });
         for (var face : faces) {
             append(groups, family, cover, point.apply(face.a()), point.apply(face.b()), point.apply(face.c()), spacing, 0);
         }
@@ -100,12 +124,12 @@ final class GpuSurfaceBlend extends Attribute {
             var b = points.get(i).vertex().position;
             var c = points.get(i + 1).vertex().position;
             if (new Vector3(b).sub(a).crs(new Vector3(c).sub(a)).len2() <= 1e-8f) { continue; }
-            append(groups, family, cover, points.getFirst(), points.get(i), points.get(i + 1), spacing, 0);
+            append(groups, family, v -> cover.apply(v.position), points.getFirst(), points.get(i), points.get(i + 1), spacing, 0);
         }
     }
 
     private static void append(Map<Palette, List<Triangle>> groups, BoardScene.Surface family,
-          Function<Vector3, BoardSurfaceBlend.Cover> cover,
+          Function<MeshPartBuilder.VertexInfo, BoardSurfaceBlend.Cover> cover,
           Point a, Point b, Point c, float spacing, int depth) {
         int mask = a.cover().mask() | b.cover().mask() | c.cover().mask();
         float ab = a.vertex().position.dst2(b.vertex().position), bc = b.vertex().position.dst2(c.vertex().position);
@@ -132,12 +156,11 @@ final class GpuSurfaceBlend extends Attribute {
     }
 
     private static void appendSplit(Map<Palette, List<Triangle>> groups, BoardScene.Surface family,
-          Function<Vector3, BoardSurfaceBlend.Cover> cover,
+          Function<MeshPartBuilder.VertexInfo, BoardSurfaceBlend.Cover> cover,
           Point a, Point b, Point c, float spacing, int depth) {
         var v = new MeshPartBuilder.VertexInfo().set(a.vertex()).lerp(b.vertex(), .5f);
         v.normal.nor();
-        var p = v.position;
-        var mid = new Point(v, cover.apply(p));
+        var mid = new Point(v, cover.apply(v));
         append(groups, family, cover, a, mid, c, spacing, depth + 1);
         append(groups, family, cover, mid, b, c, spacing, depth + 1);
     }

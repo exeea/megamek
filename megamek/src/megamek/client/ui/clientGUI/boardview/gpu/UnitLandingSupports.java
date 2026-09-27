@@ -107,9 +107,10 @@ final class UnitLandingSupports {
                 support.visible(false);
                 continue;
             }
-            float reach = Math.max(0, contact.z - ground) / up.z;
+            // Sculpted ground can sit slightly above the rest pad. Compress as well as extend the shaft.
+            float reach = (contact.z - ground) / up.z;
             float stretch = support.restScale.z * (1 + reach / support.definition.length());
-            if (!Float.isFinite(reach) || !Float.isFinite(stretch)) {
+            if (!Float.isFinite(reach) || !Float.isFinite(stretch) || stretch <= 0) {
                 support.visible(false);
                 continue;
             }
@@ -206,8 +207,8 @@ final class UnitLandingSupports {
         if (!Float.isFinite(x) || !Float.isFinite(y)) {
             return Float.NaN;
         }
-        int column = (int) Math.floor(x / (BoardGeometry.WIDTH * .75f));
-        int row = (int) Math.floor(-y / BoardGeometry.HEIGHT);
+        int column = (int) Math.floor(x / (BoardGeometry.width() * .75f));
+        int row = (int) Math.floor(-y / BoardGeometry.height());
         float height = Float.NEGATIVE_INFINITY;
         for (int cx = Math.max(0, column - 1); cx <= Math.min(scene.width() - 1, column + 1); cx++) {
             for (int cy = Math.max(0, row - 1); cy <= Math.min(scene.height() - 1, row + 1); cy++) {

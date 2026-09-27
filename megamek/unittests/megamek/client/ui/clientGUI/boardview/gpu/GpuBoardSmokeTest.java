@@ -64,6 +64,8 @@ class GpuBoardSmokeTest {
                 private long topHash;
                 private long movingHash;
                 private long previousFrame;
+                private long lastRenderedFrame = -1;
+                private final long deadline = System.nanoTime() + 180_000_000_000L;
                 private Coords orbitTarget;
 
                 private final List<Double> frameMillis = new ArrayList<>();
@@ -78,6 +80,11 @@ class GpuBoardSmokeTest {
                 public void render() {
                     try {
                         super.render();
+                        assertTrue(System.nanoTime() < deadline, "The board view must finish loading and complete its input sequence");
+                        // Board replacement now renders loading frames between visible terrain frames. Do not
+                        // repeat an input action (especially another board replacement) during that interval.
+                        if (frames() == lastRenderedFrame) { return; }
+                        lastRenderedFrame = frames();
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                         long now = System.nanoTime();
                         if (frames() > 260 && frames() <= 350 || frames() > 430) {

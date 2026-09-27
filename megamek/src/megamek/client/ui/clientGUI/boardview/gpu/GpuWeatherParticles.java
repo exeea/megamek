@@ -81,7 +81,7 @@ final class GpuWeatherParticles implements Disposable {
             shader.setUniformf("u_right", right);
             shader.setUniformf("u_up", camera.up);
             shader.setUniformf("u_clock", clock);
-            shader.setUniformf("u_level", BoardGeometry.LEVEL);
+            shader.setUniformf("u_level", BoardGeometry.level());
             shader.setUniformf("u_light", light.r, light.g, light.b);
             float windX = MathUtils.sinDeg(effects.windDirection());
             float windY = MathUtils.cosDeg(effects.windDirection());
@@ -110,9 +110,9 @@ final class GpuWeatherParticles implements Disposable {
 
     /** Bound the volume to the board and the camera's footprint at both ends of the weather layer. */
     private boolean bounds(Camera camera, BoardScene scene) {
-        if (tiles != scene.tiles() || level != BoardGeometry.LEVEL) {
+        if (tiles != scene.tiles() || level != BoardGeometry.level()) {
             tiles = scene.tiles();
-            level = BoardGeometry.LEVEL;
+            level = BoardGeometry.level();
             bottom = BoardGeometry.weatherBase(scene);
             top = Float.NEGATIVE_INFINITY;
             for (BoardScene.Tile tile : tiles) {
@@ -124,8 +124,8 @@ final class GpuWeatherParticles implements Disposable {
             }
         }
         BoundingBox visible = BoardCamera.viewportBounds(camera, new BoundingBox(
-              new Vector3(-BoardGeometry.WIDTH, -(scene.height() + 1) * BoardGeometry.HEIGHT, bottom),
-              new Vector3((scene.width() + 1) * BoardGeometry.WIDTH * .75f, BoardGeometry.HEIGHT, top)));
+              new Vector3(-BoardGeometry.width(), -(scene.height() + 1) * BoardGeometry.height(), bottom),
+              new Vector3((scene.width() + 1) * BoardGeometry.width() * .75f, BoardGeometry.height(), top)));
         if (visible.getWidth() <= 0 || visible.getHeight() <= 0) {
             return false;
         }

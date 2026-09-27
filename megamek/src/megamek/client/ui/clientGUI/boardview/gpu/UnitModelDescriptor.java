@@ -33,18 +33,19 @@ record UnitModelDescriptor(int schema, String kind, String family, String mesh, 
      */
     static final int SUIT_TRIANGLE_LIMIT = 330;
     /**
-     * A body drawn only up close, with a simpler far body that takes over once the unit is small on screen. The far
-     * body keeps {@link #TRIANGLE_LIMIT}; only the near one may use this larger allowance.
+     * The larger allowance for an explicitly marked LOD0 body. Authored LOD1 bodies keep {@link #TRIANGLE_LIMIT}.
      */
-    static final int NEAR_BODY_TRIANGLE_LIMIT = 3000;
-    /** The {@code detail} value that marks a near body. */
-    static final String NEAR_DETAIL = "near";
+    static final int LOD0_BODY_TRIANGLE_LIMIT = 3000;
+    /** The {@code detail} value that grants a body the LOD0 triangle allowance. */
+    static final String LOD0_DETAIL = "lod0";
 
     UnitModelDescriptor {
+        // Custom descriptors written before the numeric LOD convention remain readable.
+        if ("near".equals(detail)) { detail = LOD0_DETAIL; }
         require(schema == 2, "Unsupported modular model schema: " + schema);
         require(Set.of("body", "troop", "equipment").contains(kind), "Unknown model kind: " + kind);
         require((family != null) && !family.isBlank(), "Missing model family");
-        require((mesh != null) && mesh.endsWith(".g3dj"), "Expected a G3DJ mesh");
+        require((mesh != null) && (mesh.endsWith(".glb") || mesh.endsWith(".g3dj")), "Expected a GLB mesh or legacy G3DJ");
         require(bounds != null, "Missing rest bounds");
         require((rig != null) && !rig.isBlank(), "Missing rig identifier");
         joints = Map.copyOf(joints);
@@ -66,13 +67,13 @@ record UnitModelDescriptor(int schema, String kind, String family, String mesh, 
               "Landing supports belong to aircraft bodies");
         require(landingSupports.stream().map(LandingSupport::id).distinct().count() == landingSupports.size(),
               "Duplicate landing support ID");
-        require((detail == null) || (NEAR_DETAIL.equals(detail) && "body".equals(kind)),
-              "Only a body may be marked near detail, and near is the only level: " + detail);
+        require((detail == null) || (LOD0_DETAIL.equals(detail) && "body".equals(kind)),
+              "Only a body may request the lod0 triangle allowance: " + detail);
     }
 
-    /** @return {@code true} for a body drawn only up close, which needs a far body to stand in for it */
-    boolean nearDetail() {
-        return NEAR_DETAIL.equals(detail);
+    /** @return whether this body explicitly uses the larger LOD0 triangle allowance */
+    boolean lod0Detail() {
+        return LOD0_DETAIL.equals(detail);
     }
 
     static UnitModelDescriptor read(Path file) throws IOException {
@@ -88,30 +89,37 @@ record UnitModelDescriptor(int schema, String kind, String family, String mesh, 
     }
 
     int validate(ModelData data) {
+        return validate(data, 0);
+    }
+
+    /** LOD0 owns sockets and effects. Optional levels need the shared rig and their own geometry budget. */
+    int validate(ModelData data, int level) {
         Map<String, ModelNode> modelNodes = new HashMap<>();
         for (ModelNode node : data.nodes) {
             collect(node, modelNodes);
         }
         Set<String> nodes = modelNodes.keySet();
         require(nodes.containsAll(joints.values()), "Rig references missing nodes");
-        require(nodes.containsAll(locations.keySet()), "Location references missing nodes");
-        for (var leg : UnitRig.LEGS) {
-            if (!legBends.containsKey(leg[0])) { continue; }
-            for (int index = 0; index < 2; index++) {
-                var parent = modelNodes.get(joints.get(leg[index]));
-                var child = modelNodes.get(joints.get(leg[index + 1]));
-                require(parent.children != null && java.util.Arrays.asList(parent.children).contains(child),
-                      "Leg bend requires a hip / knee / foot chain: " + leg[0]);
+        if (level == 0) {
+            require(nodes.containsAll(locations.keySet()), "Location references missing nodes");
+            for (var leg : UnitRig.LEGS) {
+                if (!legBends.containsKey(leg[0])) { continue; }
+                for (int index = 0; index < 2; index++) {
+                    var parent = modelNodes.get(joints.get(leg[index]));
+                    var child = modelNodes.get(joints.get(leg[index + 1]));
+                    require(parent.children != null && java.util.Arrays.asList(parent.children).contains(child),
+                          "Leg bend requires a hip / knee / foot chain: " + leg[0]);
+                }
             }
-        }
-        hardpoints.forEach(point -> require(nodes.contains(point.node()), "Missing hardpoint node: " + point.id()));
-        emitters.forEach(emitter -> require(nodes.contains(emitter.node()), "Missing emitter node: " + emitter.id()));
-        Set<String> supportNodes = new HashSet<>();
-        for (var support : landingSupports) {
-            support.validate(modelNodes);
-            for (String node : List.of(support.node(), support.shaft(), support.foot())) {
-                require(joints.containsValue(node), "Landing support must belong to the rig: " + node);
-                require(supportNodes.add(node), "Landing supports cannot share controls: " + node);
+            hardpoints.forEach(point -> require(nodes.contains(point.node()), "Missing hardpoint node: " + point.id()));
+            emitters.forEach(emitter -> require(nodes.contains(emitter.node()), "Missing emitter node: " + emitter.id()));
+            Set<String> supportNodes = new HashSet<>();
+            for (var support : landingSupports) {
+                support.validate(modelNodes);
+                for (String node : List.of(support.node(), support.shaft(), support.foot())) {
+                    require(joints.containsValue(node), "Landing support must belong to the rig: " + node);
+                    require(supportNodes.add(node), "Landing supports cannot share controls: " + node);
+                }
             }
         }
         for (var meshData : data.meshes) {
@@ -135,11 +143,17 @@ record UnitModelDescriptor(int schema, String kind, String family, String mesh, 
         }
         int triangles = triangleCount(data);
         require(triangles > 0, "Empty modular asset");
-        int limit = nearDetail() ? NEAR_BODY_TRIANGLE_LIMIT : triangleLimit(kind, family);
+        int limit = level == 0 && lod0Detail() ? LOD0_BODY_TRIANGLE_LIMIT : triangleLimit(kind, family);
         require(triangles <= limit, kind + " asset exceeds triangle hard cap " + limit + ": " + triangles);
         for (var material : data.materials) {
             require(Set.of("paint", "detail", "bark").contains(material.id), "Unknown material role: " + material.id);
-            require((material.textures == null) || material.textures.isEmpty(), "Textures are owned by unit appearance");
+            // Authored diffuse maps may be embedded or shared. Runtime camouflage still owns the paint role.
+            if (material.textures != null) {
+                for (var texture : material.textures) {
+                    require(texture.usage == com.badlogic.gdx.graphics.g3d.model.data.ModelTexture.USAGE_DIFFUSE,
+                          "Units support authored diffuse textures");
+                }
+            }
         }
         return triangles;
     }

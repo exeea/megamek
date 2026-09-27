@@ -1,7 +1,7 @@
 # GPU battle view
 
-The Java client has a libGDX/LWJGL3 board with one 3D scene, an orthographic orbit
-camera, animated unit models, and contextual Scene2D controls. The client remembers
+The Java client has a libGDX/LWJGL3 board with one 3D scene, a tactical orbit camera and a first-person
+Free Flight mode, animated unit models, and contextual Scene2D controls. The client remembers
 the last board visualization, with 3D as the initial default. Its isometric camera fits closely
 around the whole map. A 1.2-second ease-out entrance zooms in from a wider view as the board
 fades in; camera input interrupts the entrance. Launch this checkout with
@@ -69,6 +69,10 @@ do not receive building interiors.
 The asset directory also contains bridge-arm, crop-row and twenty-two authored tree
 models (thirteen species and nine snow-covered forms), plus three rendering detail
 levels for each tree. All are at or below 480 triangles.
+Plant GLBs preserve their natural proportions at local height 30, with the base
+at zero. Placement divides the required foliage height by the model's actual
+Z extent; all LODs share that same placement transform. They can be inspected
+and edited in an ordinary GLB viewer without a compensating stretch.
 Runtime only loads models
 actually used by the board. Roof and wall picking uses their actual triangles.
 
@@ -133,9 +137,28 @@ checks that it drops to zero below the distance cutoff. It also checks
 cutoff hysteresis, matching shadows/depth, unchanged picking and clear road
 approaches, and captures overview/close views using the shipped ground artwork.
 
+Plantation fields and marsh reeds use `GpuBiomeVegetation` with persistent roots
+and three shared mesh tiers per kind. Adjacent tiers cross-fade using complementary
+screen-space coverage, retaining opaque depth writes. Projected hex widths of
+12–36 pixels introduce distant stems, 64–128 replace them with medium detail, and
+240–480 replace medium detail with full plants. The shader evaluates each root's
+depth in perspective; the CPU submits every tier needed between a tile's nearest
+and farthest bounds. These intervals come from the same constants as the shader.
+Zooming within a transition changes shader coverage without reuploading roots
+while the visible patches stay unchanged. A terrain LOD handoff retains its old
+plant roots until the replacement is prepared; actual terrain edits discard them.
+The ground's row material remains visible after distant stems fade out.
+
+`GpuBiomeLodSmokeTest` crosses the former switches and every transition endpoint
+in both directions, using native orthographic and perspective captures. It also
+checks instance-buffer reuse during a fade and saves full zoom sweeps.
+`GpuBiomeSmokeTest` compares geometry costs outside the transition bands and checks
+wind, lighting, terrain edits and resource disposal. Overlaps draw both tiers;
+this continuity change is not a claim of lower GPU cost.
+
 Trees select detail from a conservative projected bounding diameter in framebuffer
-pixels. The board is orthographic: its fixed orbit distance is not a useful LoD
-measure. `TreeLod` uses 80- and 24-pixel thresholds with 10% hysteresis. Zooming out
+pixels. Orthographic views use zoom; perspective views also account for object depth.
+`TreeLod` uses 80- and 24-pixel thresholds with 10% hysteresis. Zooming out
 switches below 72 and 21.6 pixels; zooming in restores detail above 88 and 26.4.
 Top and orbit views use the same selection, including display scaling and tree
 height/hex-size tuning. Color, camera depth and shadows use that selection;
@@ -146,7 +169,10 @@ Every pass gathers the trees of the chunks it draws and submits one draw per mod
 part, so a detail change rebuilds nothing. The colour, camera depth and shadow
 passes each keep their own instance buffers and upload only when their trees
 change, so a frame that repeats the last one uploads nothing
-(`GpuDetailSmokeTest`); holding each model once per pass doubles the tree
+(`GpuDetailSmokeTest`). A tree mesh unbinds its instance attributes before its
+vertex array object: libGDX 1.14.2 does it the other way round, which a core
+context rejects with `GL_INVALID_OPERATION` on every instanced draw (found on the
+Iris Xe by `GpuTerrainBenchmarkSmokeTest`, which now passes). Holding each model once per pass doubles the tree
 geometry to 1.6, 3.6 and 4.3 MB in the benchmark below. `GpuForestBenchmarkSmokeTest` builds a
 40 by 40 board with 5,499 trees and views it at far, middle and near zoom (Mesa
 llvmpipe, OpenGL 4.5 core). Against the earlier merged per-chunk tree meshes:
@@ -185,15 +211,37 @@ separates zero-elevation bridges from the riverbank and its road decals, avoidin
 coplanar depth flicker without changing the game's bridge elevation.
 
 Dry hexes use [sculpted terrain](gpu-terrain-materials.md): a continuous landform of
-tops, cliffs with filleted corners, rim formations, talus and a small generated rock kit,
+tops, cliffs with filleted corners, rim formations, talus and a small shared rock kit,
 lit in linear space with per-level grading. Grassland shows earth banks on steps of up to
 two levels and granite from three; sand uses bedded sandstone; rocky themes use rock;
 snowfields bury low steps; concrete stands in cast slabs, and from three levels one slab
-rests on bedrock. Rough and rubble retain their semantic artwork on a sculpted outline.
+rests on bedrock. Rough uses the ground engine with embedded boulders across its centre,
+slopes and talus; rubble retains its semantic artwork on a sculpted outline. Rough's
+stone stays visible under snow caps and faint moss staining. Ordinary units and formation
+vehicles may clip those boulders; standing infantry seek nearby gaps within the plateau
+and stand on the rocks when no gap fits.
+
+`BoardRocks` is the shared mesh library for Rough boulders, rim formations, loose rocks
+on slopes and cliff feet, waterfall rocks and cosmetic stone scatter. Its eight jointed
+blocks serve sand and concrete; its eight rounded boulders serve the other grounds.
+Placements choose a stable variant, scale and rotation. Cosmetic slabs also use the
+jointed blocks. Tiny scatter uses sixteen dedicated eight-triangle rocks:
+eight angular blocks with broad crowns and eight boulders with offset ridges.
+Their outlines and proportions vary, with an open base buried below ground.
+`BoardRelief` owns terrain placement
+and ground contact. Each variant has an editable GLB under `mm-data/data/models/board/rocks/`,
+with root nodes `<variant>-lod0`, `-lod1` and `-lod2`. `scatter.glb` holds the tiny
+stones, shrub masses, six-triangle grass and sixteen-triangle plant, each named
+`<shape>-lod0`. LOD0 is required; missing optional levels reuse the preceding
+level at load time. Scatter never falls back to a terrain rock. The shared CPU
+geometry also supplies placement and picking; rendering remains batched per chunk.
+
 **Tuning > General > Hex transitions** (off by default) gives each step between two
 natural grounds 4 m of room on both sides of its edge: a slope up to two levels, a
 detailed cliff above a talus from three. Units, trees, the tactical overlay and
-picking follow the new outline.
+picking follow the new outline. **Hex padding** (0 to 8 m, off by default) does the
+same with room of half the padding on each side; see
+[Sculpted terrain](gpu-terrain-materials.md).
 Water, road and ramp hexes keep the geometry
 described here, with the upper-rim atlas and cornice handling below; their shores and beds
 take the sculpted materials of the adjoining land. Those unsculpted edges still use the
@@ -240,17 +288,16 @@ deliberate restart of that phase, so a mask's silhouette must not carry a hard f
 at the very ends of a strip. Nothing else shapes it: the strip's own alpha ends the
 skirt, so no separate depth profile or concrete rule remains.
 
-The legacy cliff-top rim uses one pair of masks for every family. An exposed edge whose
+The legacy cliff-top rim uses one pair of lightness masks for every family, matching
+the `libGDX` branch. An exposed edge whose
 adjacent hex sits no more than two levels lower wears `textures/terrain/incline_dark`;
 anything deeper is a high incline and wears the coarser
 `textures/terrain/high_incline_dark`, exactly the board's own split, and a board-edge
-drop is judged by its own depth. Both retain their authored coverage and distinct
-stone pattern. At first use `BoardRim.relief` centers each mask's covered brightness
-around neutral gray (128), retaining pigment variation and restrained crevice shading.
-It also derives a small height field from the pattern and an outward bevel: the
-incline has shallow stone relief, while the high incline has a deeper broken lip.
-Finite differences of that height field produce tangent-space normals. These are
-artistic height estimates, not measured geometry. Each pattern is mapped
+drop is judged by its own depth. Both use the original PNG without brightness
+normalization: gray 128 leaves the ground unchanged, darker values darken it and
+brighter values lighten it, weighted by the image's alpha and 70% blend opacity.
+The masks generate no height field or normals and preserve the ground's existing
+normal map. Each pattern is mapped
 to its own exposed edge and clipped around road approaches, so one image serves every
 orientation instead of per-material south-edge variants. Coverage comes from the shared
 `BoardSurface` top triangles and exposed side segments, preserving road mouths and
@@ -258,28 +305,30 @@ corners. The composed color occupies one aligned ground-atlas slot, so the rim r
 ground lighting, geometry shadows and the normal-map toggle without a separately lit
 transparent top mesh.
 
-`BoardRim` rotates those normals with the edge and combines them with the ground's
-existing relief using reoriented normal mapping. Color channels saturate independently
-when bright patches overlap. Composition is cached by ground images and exposed geometry;
+Color channels saturate independently when bright patches overlap.
+Composition is cached by ground images and exposed geometry;
 changing the light only updates shader uniforms. Both camera views use the same maps.
 The existing ground shader supplies per-pixel directional lighting, geometry/cloud
 shadows and rain sheen. No extra cliff-top pass, texture sample or ray-marching loop
-is added. Height data is temporary preparation data; it does not displace terrain,
-change picking, create silhouette overhangs or cast per-stone geometry shadows.
+is added. The color composition does not displace terrain, change picking, create
+silhouette overhangs or cast per-stone geometry shadows.
 
 Materials are composed when terrain inputs change, cached by their source
 pixels and local footprint, and shared across matching tiles. Unused combinations
 are released after each terrain update. Camera and light changes reuse the
 unlit maps. Original images stay separate and editable; banks borrow the ground
 without its cliff-top decoration. The vertical cornice remains a separate mesh.
-A neutral mid gray in the prepared rim color leaves the ground pigment unchanged.
-Highlights and shaded stone faces then follow the scene light through the composed
-normal map, while crevice shading remains in the material.
+Transparent or neutral-gray rim pixels leave the ground unchanged. The rim's
+lightness pattern belongs to the material; lighting uses the ground's existing normals.
 
 Blender source, reproducible exporter, texture prompts, model counts, and
 Quaternius CC0 attribution are recorded in the asset directory's README and
-`mm-data/tools/`. Runtime loads indexed G3DJ files and requires no Blender
-installation. The Gradle data-staging task includes these models and textures.
+`mm-data/tools/`. All deployed unit and board meshes load indexed GLB files through
+the CPU-only `RigidGlb` adapter. Each plant packages its three LODs in one file;
+buildings embed their roof image and reference the shared facade texture.
+`ModelTextures` shares image resources and supports embedded PNG/JPEG restoration.
+No model requires Blender at runtime. The Gradle data-staging
+task includes these models and textures.
 
 ## Liquids
 
@@ -288,19 +337,129 @@ A water hex's solid surface is its riverbed. Positive depth lowers it by
 with the water one unit below the surrounding top, so grounded units only wet
 their feet. Positive-depth water sits just below the hex's surface elevation.
 Water of every depth sits one world unit below the nominal surface so changing
-depth does not introduce a water-surface step. Rounded, slightly irregular
-shorelines follow the water-neighbor pattern, inspired by `Structured_Water`.
-Dry-facing edges have a land bank; adjacent water hexes share exactly matching
-open mouths. Each shore segment uses a bounded six-piece curve.
-Every bed is one sculpted basin. It falls from the waterline, gently at first,
-steepest halfway and easing into a level plateau around the hex centre, where
-grounded units stand at the game depth. An open mouth's bed follows a profile both
+depth does not introduce a water-surface step.
+
+A water hex is sculpted ground like land (`BoardRelief`). Each bank and its exposed
+bed continue the material of the land across that edge; other faces use the commonest
+neighbour's family. Its steps to land are canonical
+walls with the land's cliffs, slopes, fillets, talus and rock kit, and hex
+transitions apply to them. Where the water stands above the land, or a wall of three
+levels or more stands above the water, the water hex keeps its outline on the hex
+edge and the land takes a step half as wide, all on its own side: a levee slope below
+the water, a cut bank below land. A slope of one or two levels up from the water keeps
+its room on both sides and runs on under the water to its bed; beside water no deeper
+than its surface its foot stands that room inside the water hex, and a mouth through a
+corner such a slope moves ends that far along it, both hexes computing it alike
+(`BoardRelief.cornerReach`). For its landforms a step counts from the upper hex's
+level, a water hex's surface, down to the ground below, which in water is its bed
+(`BoardRelief.drop`): land two levels above water one level deep stands over a
+three-level rock cliff, as does water three levels above land.
+
+**GPU Tuning → Terrain → Banks and river openings → Cliffs directly into water**
+removes the exposed beach and cliff setback beside detailed natural land. It defaults
+to `BoardRelief.DEFAULT_CLIFFS_INTO_WATER = false`. The rock continues to the water's
+bed, while the water surface retains its game level and the plateau gains the room
+previously used by the setback. The threshold still counts terrain depth: level 2
+land beside level 0, depth 1 water is a three-level cliff. One- and two-level terrain
+slopes retain their existing shape, as do roads and constructed concrete shores.
+Turning the option off restores the beach and talus profile described below. Defaults
+restores the constant; toggling rebuilds the shared rendered, picked and unit-support
+geometry. At a cliff-to-slope junction the bank tapers into the slope, and both water
+hexes retain matching mouth endpoints and bed heights. Submerged cliff faces use the
+bed's water tint and lighting, with exposed rock blending into sediment as the bank
+flattens. The water edge follows the actual cliff triangles at the local water height,
+including their bends where a deep bed rises into a dry bank. The water mesh and its
+shore-distance field use that same contact contour; shared river mouths retain their
+matching endpoints.
+
+With the option off, or where the terrain forms a lower bank, the hex's own ground is
+its bank: a strip from its canonical boundary to the waterline, level at the hex's
+level with a narrow shore down to the water, shaded like the land (a vertex tint
+below a quarter carries the water palette and the nearest step's height, so the
+shader wets it near the waterline). Beds, banks and the walls in the air draw with
+the sculpted materials of that family; a wall face below the water it faces keeps
+the legacy drowned-cliff look. Fallen blocks from the land's cliffs lie on the bank,
+never over the water. The bank's boundary, level lip and waterline are stitched in
+order, but within a third of an edge by the shorter diagonal, a lip never leans back
+over the waterline, and a triangle that would face down is stitched the other way, so
+the bank does not fold where the steps through a corner slide the boundary's samples.
+A mouth's stub keeps the boundary samples by where they lie along the mouth, so both
+hexes of the mouth keep and lift the same ones.
+
+The waterline is where one shore field turns from water to land (`BoardSurface.shore`),
+so a bank runs on across hex edges instead of each hex drawing its own bay. The field
+sums a kernel (1 - d^2/r^2)^2 of radius `SHORE_RADIUS` (73.5 units, seven quarters of an
+edge) round the centres of the water hex and its six neighbours: +1 for this hex, for
+water its water joins and for land at another level, -1 for natural ground at the
+water's level, -2.5 (`SHORE_HARD`) for paving, special artwork, roads and other ground
+that keeps its corners. Divided by its slope it measures distance, so beside land at
+its own level the bank runs through the middles of the edges between water and land,
+straight along a straight edge in all three hex axes; it stands 3 units into the
+water (`SHORE_BIAS`) and wanders 5.25 units either way over noise cells of 90 units
+(`SHORE_WANDER`, `WANDER_CELL`). Off the board a hex counts as the nearest board hex, so
+rivers run straight on into the edge. The waterline stays inside the banks each hex
+keeps, rounded over 6 units where they meet (`SHORE_ROUND`): 4.5 units inside an edge
+beside land at its level (`SHORE_BANK`), an 8-unit beach (`BEACH`) beside walls, lower
+land and raised water, and beside a slope up from the water (land a level above water
+a level deep, with hex transitions on) only the slope's reach plus a wet margin
+(`BoardSurface.HUG`, 1.5 units), so the water runs up to the slope, which carries on
+under it to the bed (`BoardRelief.slope`); it also keeps the wet margin clear of corners
+that the land rounds into it (`BoardRelief.cornerInset`). Under such a slope the bed
+reaches nearly its full depth at the slope's foot. Below a fall the field swells into a
+plunge pool (`PLUNGE_POOL`, 6 units). Each bank point is the first place the field turns
+on the ray from the hex centre toward the banks' envelope (8 steps and 12 halvings), so
+the waterline stays star-shaped round the centre and the bed never folds. Waterlines
+have twelve points per edge.
+
+Where a land hex of natural ground pokes a corner in between two water hexes of its
+level, that corner gives way at that level: it moves 17 units toward the land's centre
+along the mouth line between the two water hexes (`BoardRelief.SHORE_SHIFT`), 7.5 at a
+point, land with three or more water neighbours at its level in a row (`SHORE_POINT`).
+The move runs out evenly along each edge through the corner, so every seam stays one
+canonical polyline and the land's top stays convex; the water hexes' tops take in the
+tip and draw the shore there, and the land stays level within 0.13 hex widths of the
+moved seam. The mouth between the two water hexes then ends where the field turns, past
+the land's old corner, both hexes finding the bit-identical point; elsewhere a mouth
+beside a bank ends four units of beach short of its corner (6.5 below a fall). Picking
+resolves a hit on a top, bank, bed or water to the hex whose footprint holds it
+(`BoardGeometry.footprint`), and unit support over a footprint the hex's own faces miss
+takes the highest of its neighbours' faces there and the steps' slopes lying over it
+(`UnitLandingSupports.beside`); ice covers the moved corners. The promontory rule reads
+second-ring water, which the cache key carries as each hex's mask of liquid neighbours
+at its level (`BoardSurface.Geometry.shores`).
+
+Measured against the Savannah map photos (Wide River, Mountain Lake) with the
+designers' scorer on dumped waterlines, from the review-fix baseline (the designers'
+dumps and sweeps) to this shore (this build's):
+pointwise error 16.2 to 13.7 units on Wide River (bias -6.6 to -2.7) and 14.6 to 10.8
+on Mountain Lake (bias -7.5 to 0.0); the one-hex-period ripple on the two banks the user
+circled on Wide River fell from 15.3 and 15.5 to 2.6 and 1.1 units peak to peak; the
+median bend radius rose from 34 to 86 units (Wide River) and 39 to 77 (Mountain Lake),
+with 14% and 17% of the length bending tighter than 24 units (35% and 31% before);
+water hexes are now 93% wet at the median on Wide River (87% before) and 87% on
+Mountain Lake (78%; its least-wet depth-1 hex 79% instead of 47%). A straight one-hex
+river is about 1.34 edges wide (51-62 units), depth 0 included, as measured on the
+prototype, whose waterlines this build matches within 0.001 units on both boards. On
+30 random 7x7 boards (565 water hexes) in
+all four tunings (transitions, padding 8, padding 3, off) no bank faces down, no bed
+folds (513 folded bed faces before), no waterline crosses itself, mouths match to 0.00
+units and every unit anchor stands at its game height (35 units off before); 30 frozen
+and 30 flat random boards show no water fold either, and the two Savannah boards keep
+their open-edge counts (236 and 922, all pre-existing). Unit support matches the ground
+drawn at all but 16 of 272,691 points over land beside water on 20 random boards, by at
+most 1.30 units where a neighbour's rim rock stands over the land's own top (4,212 off,
+by up to 36 units, before).
+Every bed is one sculpted basin. It falls from the waterline toward a level plateau
+around the hex centre, where grounded units stand at the game depth. Under each bank
+it drops as the land beside it and the water's depth suggest: steeply under higher
+ground and in deep water, gently off land at the water's own level. Between rim and
+plateau it undulates into bars and pools, and below a fall it scours a deeper pool.
+An open mouth's bed follows a profile both
 hexes compute alike: the mean of their depths when they share a level (across a fall
 each side keeps its own), easing to the depth at either end, which is none where a
 bank meets the mouth and the mean of the connected water of that level around a
 corner where three water hexes meet. Different depths at one level therefore join by
-underwater slopes without a step; only a fall keeps a wall. A basin whose rim lies
-at its own depth all round, as inside a lake, stays a flat fan, and boards of more
+underwater slopes without a step; only a fall keeps a wall. Boards of more
 than 2,500 or 10,000 hexes use fewer rings, like the land's sculpting. The bed
 shades smoothly from shared vertices. Beds and banks take the sculpted materials of
 the land around them. Submerged ground, whether bed, bank or drowned wall, keeps
@@ -310,44 +469,83 @@ rippling surface bends the view of it, while rain wets only what stands above th
 water and the grid is drawn once, on the water itself. Steep submerged banks take
 their material from the side, as walls do, so it never stretches downhill, and a
 wall below the water line takes the palette and depth of the water it faces. A water
-hex's walls in the air, beside falls and at the board edge, take the sculpted bank
-or cliff look of land walls of the same height. Wet banks continue the adjoining dry
-hex's surface family into the waterline. Special terrain keeps its selected artwork
-and legacy sandy fade.
-Banks at the board boundary use the water hex's own ground artwork.
-River mouths use roughly 33 of the hex edge's 42 world units at default scale;
-their sandy fade starts at the edge corners. Connected channels retain this
-width through bends, while isolated basins keep their rounded land banks.
-A mouth that spills does not reach the shared edge: its water stops a lip short,
-so the fall can curve down over that gap from inside. Non-falling mouths keep the
-matching contours exactly.
-Hexes with exactly two nonadjacent water neighbors use a curved channel with
-consistent width instead of a bay around each hex centre. The bed remains at
-full depth beneath the hex centre, keeping grounded units on the riverbed.
-Concave channels are triangulated from their outline for both rendering and
-picking. Junctions, adjacent openings and isolated pools retain the bay contours.
+hex's walls in the air take the sculpted bank or cliff look of land walls of the
+same height. River mouths use roughly 33 of the hex edge's 42 world units at default
+scale where no land corner gives way and no slope steps through their corners. A mouth
+that spills stops a lip short of the crest its fall pours over, so the fall
+can curve down over that gap from inside. Non-falling mouths keep the matching
+contours exactly.
+The bed remains at full depth beneath the hex centre, keeping grounded units on the
+riverbed. Concave channels are triangulated from their outline for both rendering
+and picking.
+
+At the board's edge water runs on as if into the missing hex: no bank rises there.
+`BoardSurface.FALLS_OFF_THE_BOARD` (off by default) makes a river that runs out at the
+board's edge, a hex on the edge whose water joins a single neighbour at its level or
+above, pour off the board over the off-board edges across from that neighbour, as
+one fall wrapping round the corners between them. Nothing lies below the board, so
+such a fall is bottomless: it drops three levels, frays away as it falls, like its
+free sides, and throws up no spray; its current speeds up toward the brink as
+toward any fall. All other water at the board's edge, and every river end when the
+constant is off, is cut off with the board like a slice of cake: its bed reaches
+the edge and a vertical face of water stands from the bed up to the surface
+(`BoardSurface.cutFaces`). It is drawn as a section through the water, not its surface
+(`GpuTerrain.waterCut` marks its vertices, blue 1 and green its depth below the surface
+over four levels, for a branch of `water-surface.frag`): the palette's scattered light
+dimmed by the water's own transmission, from half opacity at the waterline toward opaque
+with depth, with no waves, foam, glints, rain or grid, and never drawn from inside.
+The water field counts points beyond the board's edge as the nearest open water, at its
+full depth, so the surface runs on to the cut without fading or a contact line. A lava
+cut is a planar-mapped lava wall. Verified by render on the RTX 4070
+(`river-terrain/*-cut-transitions.png`, `*-edge-transitions.png`). A river's head that
+ends against its own banks inside the board runs at 40% speed.
 
 An open mouth leading to a lower, unfrozen water hex generates one waterfall from
-the upper surface to the lower surface (`GpuWaterfall`). The bed rises to a ledge
-one world unit under the water at a falling mouth, so the wall beneath the fall
-closes up to just under the sheet. The water stops a lip short of the shared edge;
-the sheet starts on that pulled-back edge, curves over the crest and follows the
-path of thrown water, level at first and ever steeper, landing a short way out in
-the receiving pool (0.16 of the drop, 1.5 to 7 world units at default scale), into
-which a short fillet spreads it. Across the mouth the curtain is divided into
-streams that bulge gently as they fall. Where two falls of the same drop share a
-corner, from one pool or from two pools side by side that fall into the same pool,
-both sheets and both pools turn that corner on one miter vector, with one normal,
-so the curtain wraps round the corner without a gap or a crease; only free ends
-fray. The sheet's reach is part of the chunk's cull bounds.
-A procedural fall pours over its crest as thin, glassy water in the pool's shallow
-colour, mirroring the sky, with a bright line along the rounded crest, and breaks
-into white water within a metre or two of falling. Its streaks are mapped by time of
-flight: water crosses the crest at about 1.5 m/s and then falls freely, so ribbons,
-tumbling clumps and fine threads speed up and stretch as they fall, with glassy gaps
-between them, and one steady clock scrolls them all without shearing the pattern.
-Toward the foot it breaks up into rounded billows and dissolves into the churned
-water it lands in. White water keeps a trace of its liquid's hue, so toxic falls stay
+the upper surface to the lower surface (`GpuWaterfall`). It pours over a crest
+(`BoardSurface.Crest`), a smooth curve across the mouth. A free end meets its bank on
+the edge. Where the fall carries on round a corner into another fall of the same
+drop, both crests pass one point with one tangent: the hex's own corner on a prow,
+and seven world units out along the edge two pools share in a valley, where the
+falls of two pools side by side meet around the pool below. A fall that runs on
+over several edges therefore curves round them like a natural crest while still
+following its hexes: it bows at most seven world units out over the pool it falls
+into and never into its own hex. A fall that stands free between two banks has an
+uneven lip: its crest juts out over the pool below by up to 3.5 world units, by
+world-space noise that fades to nothing at its ends, and sheet, pulled-back surface,
+ledge and wall all follow it. The bed reaches out to the crest in a ledge one
+world unit under the water, and the wall beneath the fall follows the crest down to
+the pool below, so it closes up to just under the sheet. Walls under and beside a
+fall are rock of the hex's family (`BoardRelief.fallWall`): eight rows per column,
+relieved like a cliff but held to their line at the rim and the foot and fading out
+toward the corners, and only receding under the crest so they stay behind the sheet.
+Corners where two water hexes step down to each other keep their place, so the
+walls round them meet without a gap. Rocks of the family mark the fall: two
+shoulder blocks where the lip meets its banks, a few breakers on the ledge just
+behind the lip, and boulders in the pool at its foot. Below a fall the pool opens
+nearly to both corners of the mouth, so the whole sheet lands in water, and widens
+round the fall's foot. The water stops a lip short
+of the crest; the sheet starts on that pulled-back edge, curves over the crest and
+follows the path of thrown water, level at first and ever steeper, landing a short
+way out in the receiving pool (0.16 of the drop, 1.5 to 7 world units at default
+scale), into which a short fillet spreads it. Across the crest the curtain is
+divided into streams that bulge gently as they fall, easing to nothing at its ends.
+Falls that share a corner share its vertices and normal, and every pattern across a
+sheet repeats a whole number of times per unit of its coordinate along the crest,
+which agrees to a whole unit at the corner, so curtain, pattern and spray run on
+round the corner without a gap, crease or seam; only free ends fray. The sheet's
+and its spray's reach are part of the chunk's cull bounds.
+A procedural fall pours over its crest as thin, clear water in the pool's blue,
+mirroring the sky and, while still smooth, the sun, with a bright line along the
+rounded crest, and gathers air all
+the way down: a few white streaks under the crest widen and merge, the water between
+them turns milky, and at the foot the whole sheet is white. Air mixes in over the
+metres fallen, so a tall fall is white over most of its height while a short one
+stays bluer. The streaks are mapped by time of flight: water crosses the crest at
+about 1.5 m/s and then falls freely, so long ribbons, fine threads and tumbling
+clumps speed up and stretch as they fall, and one steady clock scrolls them all
+without shearing the pattern.
+Toward the foot it breaks up into rounded billows and plunges, white and whole,
+into the boil it raises, vanishing raggedly only in its last metre. White water keeps a trace of its liquid's hue, so toxic falls stay
 green and Martian ones rust, and it is lit as a volume: faces turned to the sun
 glow, light passing through lifts the shaded side, and in shade it still passes on
 part of the sun's light, like the foam it lands in. The inward face draws at 40%
@@ -413,11 +611,28 @@ foam that pulses with each wave and breaks into drifts. Whitecaps form where the
 simulated crests fold over in open water; rapids foam gathers in broken clusters
 that spread as the rapids strengthen, and churning water turns paler and more opaque
 before it breaks. Far off, foam blurs into its mean instead of vanishing, so rapids
-still read as white water. Below a fall the pool boils white along the landing line and the
-foam streams away in streaks that break into patches and lace, with rings pushed
-outward, a curtain of mist rising in front of the landing water, wider than the
-fall, and a low billow of it drifting out over the pool; mist glows when seen
-against the sun.
+still read as white water. Below a fall the pool boils white round the landing line
+and right back to the wall behind the curtain, breaking into patches and lace as the
+churned water carries the foam outward, with rings pushed outward. Each pool gathers
+the landing lines of every fall that lands in it or in its neighbours at its level,
+each following its crest in two stretches, so the boil runs on round the corners
+falls share and across hex edges without a seam. The landing water splashes
+(`GpuWaterfall.spray`): dense white puffs burst up all along the landing line and on
+to the corners it shares with the next fall, some back against the fall, bright
+droplets are
+flung out over the pool in arcs, drawn out along their flight as short streaks, and
+both fall back into the water, while mist billows up and drifts away with the wind.
+A taller fall throws its spray higher and farther. Every particle is a camera-facing
+quad in a static mesh that the water's vertex shader launches on a loop, each launch
+with a fresh aim, so nothing runs on the CPU per frame; spray glows when seen
+against the sun. A unit standing partly in open water, wading in depth 0 or taller
+than the water it stands in, stirs it (`GpuWaders`): the water piles against it in a
+broken, swelling collar of foam, each breaking wave sends a ring of foam and ripples
+out from it, and while it moves it trails a wake of two foam arms at the angle every
+wake keeps, with churned water right behind it. Up to twelve units at once reach the
+water shader each frame as their bounding box's centre, a radius of 0.4 of its
+horizontal extent at the waterline, and their smoothed velocity; a unit wholly under
+the surface or clear above it stirs nothing.
 Rain rings, cloud and geometry shadows and the hex grid shade together with the
 water. Every texture is read outside per-pixel branches, so mip selection is defined
 everywhere, and no pattern is turned by a direction that varies across the surface,
@@ -459,12 +674,13 @@ surface animation in place, except immediately at a lower outlet. Rapids and
 torrents flow faster; molten material flows more slowly. The final three connected
 hexes before a waterfall accelerate toward the lip. Larger drops increase this
 boost, capped at four levels; unrelated nearby rivers are unaffected.
-Falls scroll downward. Receiving water boils and streams foam away from the landing
-line, with outward rings, a soft mist curtain and a billow. The impact footprint grows with
-drop height and is restricted to the lower pool. It works without rain and
-disappears when the drop is removed or frozen. The mist cards share the receiving
-water material and transparent pass; there are no per-droplet CPU objects. Magma
-does not receive water splashes.
+Falls scroll downward. Receiving water boils and carries foam away from the landing
+line, with outward rings and splashing spray. The impact footprint grows with drop
+height and spreads over the lower pool, across its hexes. It works without rain and
+disappears when the drop is removed or frozen. The spray is drawn in the transparent
+pass from a copy of the fall's material, one draw for all the falls of a chunk, at
+full opacity even over GIF water; there are no per-droplet CPU objects. Magma does not
+receive water splashes.
 This is a channel/bay topology heuristic, not a fluid simulation or game-rule
 change. Ice and incompatible liquid types break connections. An outlet edit
 recomputes the field and rebuilds affected reaches even across chunk boundaries;
@@ -509,6 +725,25 @@ posed pack. Member identities keep idle variation stable across casualties and
 material changes. Each member rises for movement and settles into its watch stance
 after its own arrival, including transport unloading.
 
+A formation keeps its authored shape in its hex (`InfantryFootprint.layout`). At a larger unit scale the whole
+layout draws in and shifts toward the available ground, preserving model size and relative spacing. Parking places
+after a move use the same fit. The limits come from the completed terrain rim (`BoardRelief.topInset`), including
+river-shifted corners, slope room and cliff notches. Both ordinary rendering and movement completion give the animator
+the current board and shared surface cache; a changed rim updates standing and parked layouts. Troops are fitted by the octagon around
+every heading of their footprint, so turning to watch outward cannot carry an arm or weapon past an edge; vehicles
+keep their parked heading. Members that cannot all fit pack as tightly as they can without overlapping, and only the
+excess overflows; nothing falls back to the authored spread. `InfantryFootprintTest` checks a tracked platoon's four
+troops and two APCs at combined unit/family scales 0.6, 1, 2, 3 and 5, set through the Unit scale and the infantry
+family's own size, on a plateau whose slopes take room on five of its edges, and beside rivers in all six directions.
+`GpuInfantryPlateauSmokeTest` exercises the live view on Mountain Lake hexes 0913 and 0914 with jump infantry and tracked
+transports, checking support after terrain edits and instant arrival in both camera views.
+
+Infantry is authored at canonical size, measured against the Atlas's 15.4 m: a soldier stands 1.8 m, battle armor
+2.7 m, and the jeeps and APCs that carry them are in the same scale. ProtoMeks stand 6 m. Formations use the same
+uniform Atlas conversion as every other body, so troops keep their authored proportions; the figures carry no
+height-only boost. Infantry defaults to family size 2.0 and battle armor to 1.8 so they read on the board;
+their transports and spacing grow with them.
+
 Units use authored bodies assembled with equipment at runtime. `GpuUnitModel` shares placement,
 rigs and annotation bounds. Extruded sprite meeples have been removed; unavailable or disabled
 models retain a flat two-triangle sprite fallback. Raised sensor/terrain symbols independently
@@ -520,9 +755,16 @@ participating in current attacks show full equipment. Every pass shares that cho
 and outlines. The actual body, embedded infantry detail, picking bounds, damage flags and emitter
 transforms are retained; changing detail never reassembles a unit or uploads a mesh.
 
-Single-hex footprint size uses `UNIT_SCALE` independently of hex scale. Multi-hex models use
-their full occupied footprint and `MULTI_HEX_UNIT_SCALE` (default 0.85), with a dedicated tuning slider.
-Family unit/height scales multiply board tuning and default to 1. Articulated models retain their authored
+All single-hex modular models use one conversion from the library's shared Atlas/Mackie authoring coordinates:
+`2 * LEVEL / 54.858`, uniformly on X, Y and Z. The Atlas's bare standing body is 54.858 model units tall, so it
+stands exactly two terrain levels at the default **Unit scale** 1.0, before family/height tuning.
+Other bodies retain their authored relative sizes; antennas such as the BattleMaster's may reach above the Atlas.
+No body is normalized by its own height or by its gameplay `.height()`. **Unit scale** and family size multipliers
+resize all three axes. Multi-hex models retain their full occupied-footprint fitting and **Multi-hex unit scale**
+(default 1.0), also uniformly on all axes, with a dedicated tuning slider. **Base level height** resizes models
+on all three axes: a unit keeps its proportions and stays as many levels tall. Only
+**Unit height scale** and the family height scales stretch a model's height alone.
+Family unit/height scales multiply board tuning; Mek family and weight-class multipliers default to 1. Articulated models retain their authored
 proportions when prone; animation supplies the changed stance. Sensor contacts use a red question mark with a fixed marker size.
 Visibility is resolved by the existing client before the snapshot is published.
 
@@ -617,7 +859,21 @@ client's visibility rules are never drawn.
 The highlight compares the nearest unit surface against the rendered scene's
 depth, using the same animated model instances in every camera view. This avoids
 highlighting a unit's own rear surfaces or overlapping limbs. Superimposed units
-share the nearest surface at each pixel. Surfaces already made transparent by
+share the nearest surface at each pixel. The uneven ground, grass and scatter of
+the hex a unit stands in never count as hiding it (the user, 2026-09-24): the
+unit capture's alpha carries that hex's level plus its decoration height
+(`BoardRelief.decoration`, the same height hex labels ignore) in quarter levels,
+and an occluder counts only when it stands in another hex or rises above that
+height, so trees and buildings of the unit's own hex still do. The hex is the one
+under the unit's drawn position (`BoardGeometry.tile`), so a unit walking through
+other hexes takes each one's exemption in turn. The pass compares the occluder's hex
+with the hex under each visible pixel of the unit, so a limb reaching over a
+neighbouring hex is exempt from that hex's ground decoration up to the standing hex's
+height. Markers carry 0
+and keep no exemption. Depths compare with `behind()` (`camera-depth.glsl`),
+which also requires a gap of a few depth-buffer steps, so a perspective camera
+far away does not mark exposed units as hidden. Verified by
+`GpuUnitVisibilitySmokeTest` on the RTX 4070. Surfaces already made transparent by
 the opacity controls use their existing see-through rendering. The highlight
 is drawn after atmosphere/weather and before tactical annotations, with an
 outline sized in screen pixels. It shares the hardware scene depth with fog and
@@ -714,17 +970,18 @@ Diagnostic firing heat-map icons also remain in the board layer with their combi
 | Top view / Isometric | Restore a camera preset, retaining focus and zoom |
 | Fit board | Frame terrain, water, and feature heights |
 | Mouse wheel / numpad +/- | Zoom |
-| Right or middle drag | Pan |
-| Shift + right/middle drag | Orbit and tilt |
+| Right drag / Shift + middle drag | Pan |
+| Middle drag / Shift + right drag | Orbit and tilt |
 | Q / E | Turn the camera one hex side (60 degrees); hold to keep turning |
 | Page Up / Page Down | Tilt toward overhead / lower the viewing angle while held |
 | Home / End | Reset camera and fit board / fit board at the current angle |
 | T / Z | Toggle the isometric preset / toggle the overview zoom |
-| Click / short right-click | Inspect a hex or visible unit |
-| Plot movement here / movement mode | Enter the existing persistent board tool |
-| Escape | Dismiss an open menu/tuning panel; otherwise leave the board tool and invoke Cancel |
-| Ctrl-click / Measure line of sight | Existing two-hex LOS tool |
-| Alt-click | Existing two-hex ruler; measurements bypass the phase's plotting tool |
+| Left-click | Select your unit; deploy on terrain during deployment, plot paths during movement, or target a clicked enemy during attack phases; dismiss an open contextual menu without acting |
+| Shift-click | Use the phase's existing facing, turn, or torso-twist action |
+| Short right-click | Open the contextual menu |
+| Plot movement here | Apply the current movement tool to the menu's hex |
+| Escape | Dismiss an open menu/tuning panel; otherwise invoke Cancel |
+| Ctrl-click / Alt-click | Existing two-hex LOS / distance tools; also available from each endpoint's context menu |
 | All actions / F10 | Search the current phase's commands |
 | Tab / Shift+Tab | Select the next / previous unit through the current phase's controls |
 | Enter / slash | Activate the existing chat box / start a chat command |
@@ -768,12 +1025,37 @@ board click. Menus retain scrolling and viewport clamping; disabled explanations
 appear in tooltips instead of expanding every unavailable row. Keyboard navigation skips disabled actions.
 Camera rotation, fitting, and menu interaction do not issue game orders.
 
-The Tuning panel has two tabs. **General** contains geometry, family sizes, overview icons, visibility, field of view,
+The Tuning panel has two tabs. **General** contains camera projection, geometry, family sizes, overview icons, visibility, field of view,
 sensor range and damage preview. **Atmosphere** contains planetary presets, lighting, planetary properties,
 weather and light/fog effects. Each tab retains its scroll position; the shared **Defaults** button resets
 both. Longer help text is available in tooltips.
 
-**Unit family sizes** exposes the existing `UnitFamilyScale` multipliers, all neutral at **1.0**.
+**Free Flight** replaces the former **Perspective** choice, available in **Camera** and
+**Tuning > General > Camera**. It uses a first-person perspective eye: WASD moves forward/back along
+the gaze and strafes, Q/E moves down/up, and Shift makes travel four times faster. These reuse the
+configured pan and rotate keys. Right or middle drag looks around; Shift with either drag slides
+the eye sideways/up. Page Up/Down looks up/down. The wheel and zoom buttons move forward/back.
+The cursor stays available for normal selection and menus. Camera movement keys work with Tuning,
+Report and menus open in both modes; focused text fields retain their typing keys.
+
+Flight sweeps a small sphere around the eye against the installed ground, slopes, cliffs and water
+triangles, sliding at contact and preventing fast movement from tunnelling through terrain. The sphere
+encloses the near plane, and an eye embedded by terrain edits is lifted clear. Unit and prop models are
+not collision obstacles. There is no board-edge constraint. Looking above the horizon and nearly
+straight up/down is supported, without rolling. Selection changes and combat/movement playback
+do not reposition the eye or wait for camera framing. The same scene, picking geometry, visibility
+rules and animation clock serve both modes. Text entry and loss of window focus stop held travel.
+Annotations for units behind the eye stay on the bottom edge, positioned by their left/right bearing;
+labels in front retain their normal projected positions.
+
+**Camera FOV** adjusts the vertical field of view from 1 to 100 degrees, defaulting to 60. FOV,
+window resize and panel changes leave the flight eye fixed. Turning Free Flight off restores the
+previous tactical focus, zoom and orientation. Top, Isometric, Fit board, Home, End and overview
+return to the tactical camera. Orthographic projection remains the default; **Defaults** restores
+it and resets the FOV to 60 degrees.
+
+**Unit family sizes** exposes the existing `UnitFamilyScale` multipliers, neutral at **1.0** except infantry and
+battle armor, which start at **1.8**.
 Infantry, battle armor, vehicles, aircraft, naval, ProtoMeks, static and other models each have their own
 uniform size control. Meks have an overall multiplier plus light (including ultralight), medium, heavy,
 assault and superheavy multipliers. These multiply the general Unit scale and preserve authored proportions;
@@ -795,7 +1077,7 @@ tactical batches and add no fullscreen effect or render target. `GpuOverviewIcon
 the real Camera toggle, artwork, switching, picking and shadow restoration, and checks that canopy
 pixels outside the hex survive the native render.
 
-Tuning defaults are hex scale 1, unit scale 0.7, unit height scale 0.87, level
+Tuning defaults are hex scale 1, unit scale 1.0, multi-hex unit scale 1.0, unit height scale 1.0, level
 height 18, grid shade 0.8, hex transitions off, building opacity 50%, and see-through
 intensity 75%. Opacity is local to the GPU window and changes materials without
 rebuilding terrain. Defaults restores these values. A single geometry tuning record updates all derived
@@ -929,8 +1211,25 @@ Detailed dialogs use the Swing client; native chat input
 uses its existing editor and sending actions. See [contextual-ui.md](contextual-ui.md).
 
 Time, lighting, weather presets, and their limits are documented in
-[gpu-atmosphere.md](gpu-atmosphere.md). Daylight is calibrated for the tileset's
-LDR artwork; its postprocessing does not add another filmic contrast curve.
+[gpu-atmosphere.md](gpu-atmosphere.md). The composite ends with one highlight shoulder:
+the identity below display 202, so the tileset's mid-tones keep their authored values,
+while brighter highlights roll off towards white instead of clipping.
+Every lit surface shares one light model (`light-model.glsl`): its display-authored color
+is linearised, multiplied by BoardAtmosphere's linear, already exposed light (the sky from
+above, the sunlit ground from below, plus the sun or moon) and encoded for display again.
+Sculpted terrain, trees, tileset ground, skirts, grass tufts, cliffs and roads do this in
+their own shaders; units, props, buildings and liquids do it through
+`GpuUnitShader.linearVertex`/`linearFragment` around libGDX's DefaultShader, whose emission
+stays display-encoded so molten liquids and lit equipment keep their authored glow. Water
+multiplies its display colors by the same light, encoded for display. Measured on the RTX
+4070: a gray 0.61 unit roof and gray-155 tileset ground light within 4% of each other at
+noon and under the full moon, and the lit gray-155 tileset renders luma 154 at 13:00.
+The sun and the full moon hand the one shadow-casting light over in twilight (05:39 and
+18:21), each fading over 40 to 45 minutes and the moon staying as fill, so shadows and
+brightness never jump between the time slider's one-minute steps. The moon stays at least
+about 28 degrees up, so a low moon no longer lights walls brighter than daylight does, and
+cloud shadows dim both the direct light and the sunlit ground's bounce; see
+[gpu-atmosphere.md](gpu-atmosphere.md).
 Tactical markings and hex text draw after atmosphere compositing with restored
 opaque depth. HEIGHT labels are raised to the building/feature height and fit
 on the roof footprint. Other hex labels retain their terrain anchors.
@@ -1047,7 +1346,39 @@ the classic board keeps its ground labels.
   `GpuGlsl.detect()` reads its version and every shader compiled afterwards is
   GLSL of that version, from 3.30 up to 4.60; `-Dmegamek.gpu.glsl=330` caps it
   for troubleshooting a driver. The log and the tuning panel's Geometry section
-  show the context and the GLSL in use. Tessellation shaders need 4.00 and
+  show the context and the GLSL in use.
+- Tuning > General > Graphics card appears only on a Windows computer with the
+  pair of cards NVIDIA Optimus switches between: exactly two hardware cards, one
+  of them NVIDIA. Once the board is open, `GpuGraphicsCard.cards()` lists the
+  cards through DXGI, the list Windows' graphics settings show, skipping the
+  software Microsoft Basic Render Driver, and the log names the cards found. On
+  the user's laptop it lists "Intel(R) Iris(R) Xe Graphics" and "NVIDIA GeForce
+  RTX 4070 Laptop GPU", and `GpuBoardTuningSmokeTest` captures the open list
+  (`tuning-graphics-card.png`). Everywhere else, macOS, Linux and any other system included, the choice is
+  hidden and the system picks the card. The dropdown offers System default and
+  the two cards by the names Windows gives them. The choice is saved in the
+  client settings (`GUIPreferences.getBoardGraphicsCard()`: SYSTEM, INTEGRATED
+  for the other card, DISCRETE for the NVIDIA one), and
+  `-Dmegamek.gpu.card=DISCRETE` overrides it for one run, as tests and benchmarks
+  do. `GpuGraphicsCard.apply()` sets NVIDIA Optimus's process override
+  `SHIM_MCCOMPAT` (0x800000001 the NVIDIA card, 0x800000000 the other) with
+  `SetEnvironmentVariableW` just before the run's first OpenGL context, the hidden
+  windows of `GpuGlsl`. Windows ties a process to the card of its first context,
+  so a change applies from the next start of MegaMek; the panel says so and shows
+  the card in use (`GL_RENDERER`). Measured on the user's laptop (Intel Iris Xe
+  driver 32.0.101.7088, NVIDIA RTX 4070 Laptop GPU driver 610.88, Java 21,
+  LWJGL 3.3.3): with the override set before the first context, the board ran on
+  the chosen card, also with Swing already running. Once any context existed,
+  nothing moved the process to the other card, not closing GLFW, not a new
+  variable and not loading `nvapi64.dll`; so choosing the card while the board
+  is open is not possible. The override only says "the NVIDIA card or the other
+  one", so other computers get no choice: AMD switchable graphics has no such
+  variable, and two discrete cards are chosen in Windows' graphics settings or
+  the NVIDIA Control Panel. Not verified: a desktop whose processor graphics are
+  enabled beside an NVIDIA card also shows the choice, though Optimus may not run
+  there (the panel's "In use" line shows the card that draws); and computers
+  where Java2D's Direct3D pipeline creates a device before the board opens (on the
+  Iris Xe the JDK leaves that pipeline off). Tessellation shaders need 4.00 and
   compute shaders 4.30. The shaders keep the GLSL 1.x spelling that libGDX's
   built-in shaders use (`attribute`, `varying`, `texture2D`, `gl_FragColor`); a
   prefix on every compiled shader maps it onto the chosen version. The explicit
@@ -1084,7 +1415,7 @@ the classic board keeps its ground labels.
 - `BoardGeometry` owns dimensions and terrain picking; `BoardSurface` defines
   the physical roads, banks, beds and exposed sides.
 - `GpuAssets` owns shared feature meshes, repeating textures, and water frames.
-  `BoardRim` owns cached cliff-top color/normal composition; `GpuTextures` owns
+  `BoardRim` owns cached cliff-top color composition and preserves ground normals; `GpuTextures` owns
   its GPU atlas storage and the undecorated ground slots used by riverbanks.
 - `GpuTerrain` batches terrain and opaque features in 8 by 8 chunks. Changes to
   a tile's height/material/features rebuild its chunk and affected neighbors;
@@ -1220,12 +1551,12 @@ skirt from its shore but not across an open mouth.
 two-level grassland step renders as an earth bank and a three-level one as rock, rain
 darkens every family's cliffs except snow, and special ground art keeps its own colour on
 its sculpted top. `GpuTerrainShowcaseSmokeTest` renders the sculpted review scene.
-`BoardRimTest` checks the mask's lightness rule, mid-gray neutrality, alpha weighting,
-highlight saturation, raised-stone normals, outward bevels and the two/three-level split,
+`BoardRimTest` checks the libGDX lightness rule, mid-gray neutrality, alpha weighting, highlight saturation,
+preservation of existing or absent ground normals and the two/three-level split,
 all six edge rotations at three board scales, road openings, cache release and
 custom-texture fallbacks.
 `GpuRimMaterialSmokeTest` checks both drop types under opposing lights in both camera
-views, compares normals enabled/disabled and asserts equal terrain draw counts.
+views, verifies that flat ground gains no rim normal relief and asserts equal terrain draw counts.
 Its screenshots are `rim-drop-{2,3}-{top,iso}-light-{0,1}.png`. The
 `cliff-edges-{top,iso}-light-{0,1}.png` captures use shipped grass artwork, with a
 two-level plateau on the left and a three-level plateau on the right. Draw-count

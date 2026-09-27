@@ -101,19 +101,19 @@ final class GpuHexText implements Disposable {
                     Chunk chunk = next.computeIfAbsent(plane, key -> new HashMap<>())
                           .computeIfAbsent(cell, key -> new Chunk(new BitmapFontCache(font, false), new BoundingBox().inf()));
                     float centerX = BoardGeometry.centerX(tile.coords()), centerY = BoardGeometry.centerY(tile.coords());
-                    float z = plane.elevation() * BoardGeometry.LEVEL;
-                    chunk.bounds().ext(centerX - BoardGeometry.WIDTH, centerY - BoardGeometry.WIDTH, z - 1)
-                          .ext(centerX + BoardGeometry.WIDTH, centerY + BoardGeometry.WIDTH, z + 1);
+                    float z = plane.elevation() * BoardGeometry.level();
+                    chunk.bounds().ext(centerX - BoardGeometry.width(), centerY - BoardGeometry.width(), z - 1)
+                          .ext(centerX + BoardGeometry.width(), centerY + BoardGeometry.width(), z + 1);
                     font.getData().setScale(label.font().getSize2D() / GpuBoardUi.FONT_RESOLUTION);
                     int argb = label.argb();
                     font.setColor(((argb >>> 16) & 255) / 255f, ((argb >>> 8) & 255) / 255f,
                           (argb & 255) / 255f, ((argb >>> 24) & 255) / 255f);
                     GlyphLayout layout = new GlyphLayout(font, label.text());
                     float x = centerX;
-                    float baseline = centerY + BoardGeometry.HEIGHT / 2 - label.baseline() * BoardGeometry.HEX_SCALE;
+                    float baseline = centerY + BoardGeometry.height() / 2 - label.baseline() * BoardGeometry.hexScale();
                     BoundingBox roof = label.elevation() > 0 ? roofBounds.apply(tile.coords()) : null;
                     if (roof != null) {
-                        float fit = Math.min(1, Math.max(8, roof.getWidth() - 4 * BoardGeometry.HEX_SCALE) / layout.width);
+                        float fit = Math.min(1, Math.max(8, roof.getWidth() - 4 * BoardGeometry.hexScale()) / layout.width);
                         font.getData().setScale(font.getData().scaleX * fit);
                         layout.setText(font, label.text());
                         x = roof.getCenterX();
@@ -212,7 +212,7 @@ final class GpuHexText implements Disposable {
     private static float headroom(BoardScene.Tile tile, BoardView.HexText label) {
         if (label.elevation() > 0 || tile.liquid().present()) { return 0; }
         // Whole world units keep differently sized scatter in a small number of font batches.
-        return (float) Math.ceil(BoardRelief.decoration(tile) / BoardGeometry.HEX_SCALE) * BoardGeometry.HEX_SCALE;
+        return (float) Math.ceil(BoardRelief.decoration(tile) / BoardGeometry.hexScale()) * BoardGeometry.hexScale();
     }
 
     void render(SpriteBatch batch, Camera camera, Texture depth, int bottom) {
@@ -244,15 +244,15 @@ final class GpuHexText implements Disposable {
             shader.setUniformi("u_depth", 1);
             shader.setUniformi("u_units", unitDepth == null ? 1 : 2);
             shader.setUniformf("u_unitOptions", unitDepth == null ? 0 : 1,
-                  .05f * BoardGeometry.HEX_SCALE);
+                  .05f * BoardGeometry.hexScale());
             shader.setUniformf("u_projectionDepth", camera.projection.val[Matrix4.M22], camera.projection.val[Matrix4.M23],
                   camera.projection.val[Matrix4.M32], camera.projection.val[Matrix4.M33]);
             shader.setUniformMatrix("u_inverseView", camera.invProjectionView);
             shader.setUniformf("u_viewport", 0, HdpiUtils.toBackBufferY(bottom), depth.getWidth(), depth.getHeight());
-            shader.setUniformf("u_groundBoard", 0, 0, BoardGeometry.WIDTH, BoardGeometry.HEIGHT);
+            shader.setUniformf("u_groundBoard", 0, 0, BoardGeometry.width(), BoardGeometry.height());
             for (var group : groups.entrySet()) {
-                float z = group.getKey().elevation() * BoardGeometry.LEVEL;
-                batch.setTransformMatrix(transform.setToTranslation(0, 0, z + .6f * BoardGeometry.HEX_SCALE));
+                float z = group.getKey().elevation() * BoardGeometry.level();
+                batch.setTransformMatrix(transform.setToTranslation(0, 0, z + .6f * BoardGeometry.hexScale()));
                 shader.setUniformf("u_surface", z, group.getKey().headroom());
                 for (Page page : group.getValue()) { page.render(camera, shader); }
             }

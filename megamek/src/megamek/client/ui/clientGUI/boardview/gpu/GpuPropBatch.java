@@ -18,73 +18,66 @@ import com.badlogic.gdx.graphics.g3d.ModelCache;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.RenderableProvider;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
+import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.MeshBuilder;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.Disposable;
-import com.badlogic.gdx.utils.Pool;
+import com.badlogic.gdx.utils.FloatArray;
+import com.badlogic.gdx.utils.ShortArray;
 
 /**
- * Combines the visible chunks' plain opaque props. Sources must be the chunks' persistent cached renderables:
+ * Combines the visible chunks' opaque colour/texture props. Sources must be the chunks' persistent cached renderables:
  * geometry, transforms and materials stay fixed until a chunk replaces those renderables. Source meshes and
- * materials remain borrowed; this helper owns only the meshes of its spatial pages. Chunk culling happens before
- * add(). A visible-set change rebuilds only its affected pages, each containing at most sixteen terrain chunks.
+ * materials remain borrowed; this helper owns only the meshes of its spatial pages. Supply hidden chunks too:
+ * camera movement selects cached index ranges, while replacement sources invalidate only their own page.
  */
 final class GpuPropBatch implements Disposable {
-    static final int CHUNKS_PER_PAGE = 4;
+    static final int CHUNKS_PER_PAGE = GpuMeshPage.CHUNKS_PER_PAGE;
     private static final float[] IDENTITY = new Matrix4().val;
-    private final Map<Integer, Page> pages = new HashMap<>();
+    private final Map<Integer, GpuMeshPage> pages = new HashMap<>();
     private final Array<Renderable> source = new Array<>();
     private final Array<Renderable> separate = new Array<>();
+    private boolean enabled = true;
     private long rebuilds;
 
-    private static final class Page implements RenderableProvider {
-        final Array<Renderable> current = new Array<>();
-        final Array<Renderable> previous = new Array<>();
-        final Array<Renderable> cached = new Array<>();
-
-        @Override
-        public void getRenderables(Array<Renderable> destination, Pool<Renderable> pool) {
-            for (Renderable value : cached) { value.shader = null; value.environment = null; }
-            destination.addAll(cached);
-        }
-    }
+    void setEnabled(boolean value) { enabled = value; }
 
     void begin() {
         source.clear();
         separate.clear();
-        for (Page page : pages.values()) { page.current.clear(); }
+        if (enabled) { pages.values().forEach(GpuMeshPage::begin); }
     }
 
-    void add(RenderableProvider props, int pageId) {
+    void add(RenderableProvider props, int pageId, boolean visible) {
         // Chunk.solidProps supplies persistent renderables and does not need a temporary renderable pool.
         source.clear();
         props.getRenderables(source, null);
-        for (Renderable value : source) {
-            if (eligible(value)) {
-                pages.computeIfAbsent(pageId, key -> new Page()).current.add(value);
-            } else {
+        add(source, pageId, visible);
+    }
+
+    void add(Array<Renderable> parts, int pageId, boolean visible) {
+        for (Renderable value : parts) {
+            if (enabled && eligible(value)) {
+                pages.computeIfAbsent(pageId, key -> new GpuMeshPage()).add(value, visible);
+            } else if (visible) {
                 separate.add(value);
             }
         }
     }
 
     void render(ModelBatch batch, Environment environment) {
-        for (Page page : pages.values()) {
-            // Keep an invisible page's last meshes for a return visit; there is only one cache per board page.
-            if (page.current.isEmpty()) { continue; }
-            boolean changed = page.previous.size != page.current.size;
-            for (int i = 0; !changed && i < page.current.size; i++) {
-                changed = page.previous.get(i) != page.current.get(i);
+        boolean built = false;
+        if (enabled) {
+            for (GpuMeshPage page : pages.values()) {
+                page.update();
+                if (!built && page.needsBuild()) {
+                    page.build();
+                    rebuilds++;
+                    built = true;
+                }
+                page.render(batch, environment);
             }
-            if (changed) {
-                disposeMeshes(page.cached);
-                copy(page.current, page.cached);
-                page.previous.clear();
-                page.previous.addAll(page.current);
-                rebuilds++;
-            }
-            batch.render(page, environment);
         }
         for (Renderable value : separate) {
             value.environment = environment;
@@ -93,19 +86,23 @@ final class GpuPropBatch implements Disposable {
     }
 
     private static boolean eligible(Renderable value) {
+        long mask = value.material.getMask();
         return value.bones == null && !value.meshPart.mesh.isInstanced()
               && value.meshPart.primitiveType == GL20.GL_TRIANGLES && value.meshPart.size > 0
               && value.meshPart.mesh.getNumIndices() > 0 && Arrays.equals(value.worldTransform.val, IDENTITY)
-              && value.material.getMask() == ColorAttribute.Diffuse;
+              && (mask & ~(ColorAttribute.Diffuse | TextureAttribute.Diffuse)) == 0;
     }
 
     /** Chunk caches already contain world-space vertices. Copy them without normalizing their normals again. */
-    private static void copy(Array<Renderable> source, Array<Renderable> destination) {
+    static void copy(Array<Renderable> source, Array<Renderable> destination, Array<GpuMeshPage.Range> ranges) {
         Array<Renderable> ordered = new Array<>(source);
         new ModelCache.Sorter().sort(null, ordered);
         MeshBuilder builder = null;
         VertexAttributes attributes = null;
         Material material = null;
+        Renderable combined = null;
+        FloatArray points = new FloatArray();
+        ShortArray indices = new ShortArray();
         try {
             for (Renderable value : ordered) {
                 Mesh mesh = value.meshPart.mesh;
@@ -119,21 +116,43 @@ final class GpuPropBatch implements Disposable {
                     material = null;
                 }
                 if (material == null || !material.same(value.material, true)) {
-                    Renderable combined = new Renderable();
+                    combined = new Renderable();
                     combined.material = material = value.material;
                     builder.part("props", GL20.GL_TRIANGLES, combined.meshPart);
                     destination.add(combined);
                 }
-                builder.addMesh(value.meshPart);
+                int offset = builder.getNumIndices();
+                // LibGDX's addMesh(part) reads the entire source mesh for every small range. Copy only the
+                // referenced vertex span, reusing scratch buffers instead of retaining whole chunk arrays.
+                copyVertices(mesh, value.meshPart.offset, value.meshPart.size, points, indices);
+                builder.addMesh(points.items, indices.items, 0, indices.size);
+                ranges.add(new GpuMeshPage.Range(value, combined, offset, builder.getNumIndices() - offset));
             }
             if (builder != null) { builder.end(); }
         } catch (RuntimeException | Error failure) {
             disposeMeshes(destination);
+            ranges.clear();
             throw failure;
         }
     }
 
-    /** Counts geometry uploads requested by visible-source changes, for native performance checks. */
+    /** Read only an indexed range's CPU vertex span; neither operation reads back from the GPU. */
+    static void copyVertices(Mesh mesh, int offset, int count, FloatArray points, ShortArray indices) {
+        short[] selected = indices.setSize(count);
+        mesh.getIndices(offset, count, selected, 0);
+        int first = 65535, last = 0;
+        for (int i = 0; i < count; i++) {
+            int vertex = Short.toUnsignedInt(selected[i]);
+            first = Math.min(first, vertex);
+            last = Math.max(last, vertex);
+        }
+        int stride = mesh.getVertexSize() / Float.BYTES;
+        int floats = (last - first + 1) * stride;
+        mesh.getVertices(first * stride, floats, points.setSize(floats), 0);
+        for (int i = 0; i < count; i++) { selected[i] = (short) (Short.toUnsignedInt(selected[i]) - first); }
+    }
+
+    /** Counts page builds caused by source replacement, never by visibility changes. */
     long rebuilds() { return rebuilds; }
 
     /** Transfers the temporary builder's tightly sized meshes to destination; source meshes remain borrowed. */
@@ -164,7 +183,7 @@ final class GpuPropBatch implements Disposable {
 
     @Override
     public void dispose() {
-        for (Page page : pages.values()) { disposeMeshes(page.cached); }
+        pages.values().forEach(GpuMeshPage::dispose);
         pages.clear();
         source.clear();
         separate.clear();

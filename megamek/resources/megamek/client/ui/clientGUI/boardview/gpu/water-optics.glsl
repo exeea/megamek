@@ -11,34 +11,35 @@ const float WATER_PATH = 1.7;
 const float WATER_MAX_OPACITY = 0.5;
 
 // Absorption per level of optical path. Red goes first, which turns shallow water over pale gravel turquoise.
-vec3 waterAbsorption(float palette) {
-    if (palette < 0.5) return vec3(1.9, 0.5, 0.33);
-    if (palette < 1.5) return vec3(0.75, 1.25, 2.4);   // Mars: rust silt keeps red
-    if (palette < 2.5) return vec3(0.9, 2.2, 2.0);     // volcanic: iron-red
-    return vec3(2.4, 0.7, 3.2);                          // hazardous: chemical green
+vec4 waterPalette(float palette) {
+    return vec4(lessThan(abs(vec4(0.0, 1.0, 2.0, 3.0) - palette), vec4(.5)));
 }
+vec3 waterAbsorption(vec4 weights) {
+    return weights.x * vec3(1.9, .5, .33) + weights.y * vec3(.75, 1.25, 2.4)
+          + weights.z * vec3(.9, 2.2, 2.0) + weights.w * vec3(2.4, .7, 3.2);
+}
+vec3 waterAbsorption(float palette) { return waterAbsorption(waterPalette(palette)); }
 
 // Color of light scattered back out of a deep column lit by white light: clear water turns a deep navy.
-vec3 waterScatter(float palette) {
-    if (palette < 0.5) return vec3(0.012, 0.13, 0.26);
-    if (palette < 1.5) return vec3(0.46, 0.26, 0.10);
-    if (palette < 2.5) return vec3(0.30, 0.10, 0.10);
-    return vec3(0.14, 0.40, 0.05);
+vec3 waterScatter(vec4 weights) {
+    return weights.x * vec3(.012, .13, .26) + weights.y * vec3(.46, .26, .10)
+          + weights.z * vec3(.30, .10, .10) + weights.w * vec3(.14, .40, .05);
 }
+vec3 waterScatter(float palette) { return waterScatter(waterPalette(palette)); }
 
 // Shallow water over a pale bed glows with the bed's light scattered back through it: clear water turquoise.
-vec3 waterShallows(float palette) {
-    if (palette < 0.5) return vec3(0.08, 0.66, 0.62);
-    if (palette < 1.5) return vec3(0.66, 0.44, 0.20);
-    if (palette < 2.5) return vec3(0.50, 0.22, 0.17);
-    return vec3(0.30, 0.62, 0.10);
+vec3 waterShallows(vec4 weights) {
+    return weights.x * vec3(.08, .66, .62) + weights.y * vec3(.66, .44, .20)
+          + weights.z * vec3(.50, .22, .17) + weights.w * vec3(.30, .62, .10);
 }
+vec3 waterShallows(float palette) { return waterShallows(waterPalette(palette)); }
 
 // Even ankle-deep water reads as water: a shallow floor of optical depth, faded in from the water line itself.
-vec3 waterTransmission(float palette, float levels) {
+vec3 waterTransmission(vec4 palette, float levels) {
     float optical = max(levels, 0.0) + 0.16 * smoothstep(0.0, 0.05, levels);
     return exp(-waterAbsorption(palette) * (optical * WATER_PATH));
 }
+vec3 waterTransmission(float palette, float levels) { return waterTransmission(waterPalette(palette), levels); }
 
 // Two drifting copies of one network; their minimum is a sharp web of focused light that keeps re-forming.
 float waterCaustics(vec2 position) {
@@ -50,10 +51,11 @@ float waterCaustics(vec2 position) {
 
 // What a submerged surface keeps of its own color: the hue its column passes, less the brightness the surface above
 // removes, which is all of it up to WATER_MAX_OPACITY.
-vec3 waterBedTint(float palette, float levels) {
+vec3 waterBedTint(vec4 palette, float levels) {
     vec3 kept = waterTransmission(palette, levels);
     return kept / max(max(max(kept.r, kept.g), kept.b), 1.0 - WATER_MAX_OPACITY);
 }
+vec3 waterBedTint(float palette, float levels) { return waterBedTint(waterPalette(palette), levels); }
 
 // Light on a submerged surface: the water scatters daylight in every direction, so below the surface orientation and
 // shadows soften with depth toward the surface's own colour under that scattered light.

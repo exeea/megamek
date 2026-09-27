@@ -119,7 +119,7 @@ final class GpuFireControl implements Disposable {
                 builder.manage(created);
                 return created;
             });
-            float repeatLength = BoardFiringGeometry.RANGE_HEIGHT * BoardGeometry.LEVEL
+            float repeatLength = BoardFiringGeometry.RANGE_HEIGHT * BoardGeometry.level()
                   * texture.getWidth() / texture.getHeight();
             // Fit a whole number of repeats, so a letter crosses the closing edge without a phase jump.
             float repeats = Math.max(1, Math.round(perimeter / repeatLength));
@@ -141,11 +141,11 @@ final class GpuFireControl implements Disposable {
             Color color = color(line.rgb(), 1).lerp(Color.WHITE, 0.22f);
             List<Vector3> path = BoardFiringGeometry.trajectory(scene, line);
             for (int i = 1; i < path.size(); i++) {
-                tube(mesh, path.get(i - 1), path.get(i), .725f * BoardGeometry.HEX_SCALE * TARGET_ARROW_SIZE, color);
+                tube(mesh, path.get(i - 1), path.get(i), .725f * BoardGeometry.hexScale() * TARGET_ARROW_SIZE, color);
             }
             Vector3 end = path.getLast();
             Vector3 direction = new Vector3(end).sub(path.get(path.size() - 2)).nor();
-            float length = Math.min(12 * BoardGeometry.HEX_SCALE, path.getFirst().dst(end) * 0.2f) * TARGET_ARROW_SIZE;
+            float length = Math.min(12 * BoardGeometry.hexScale(), path.getFirst().dst(end) * 0.2f) * TARGET_ARROW_SIZE;
             cone(mesh, new Vector3(end).mulAdd(direction, -length), end, length * 0.2f, color);
         }
         Model model = builder.end();
@@ -188,8 +188,8 @@ final class GpuFireControl implements Disposable {
     /** No time input: range letters are always flat and upright, including while orbiting or switching cameras. */
     static void labelTransform(Matrix4 out, Camera camera, BoardScene.Tile tile) {
         Vector3 right = new Vector3(camera.direction).crs(camera.up).nor();
-        float clearance = BoardGeometry.LEVEL * RANGE_LABEL_CLEARANCE_LEVELS
-              + (BoardGeometry.WIDTH * Math.abs(right.z) + BoardGeometry.HEIGHT * Math.abs(camera.up.z)) / 2;
+        float clearance = BoardGeometry.level() * RANGE_LABEL_CLEARANCE_LEVELS
+              + (BoardGeometry.width() * Math.abs(right.z) + BoardGeometry.height() * Math.abs(camera.up.z)) / 2;
         Vector3 center = BoardGeometry.center(tile.coords(), tile.elevation()).add(0, 0, clearance);
         out.set(center, GpuMarkers.orientation(camera, true));
     }
@@ -259,7 +259,7 @@ final class GpuFireControl implements Disposable {
         Vector3 along = new Vector3(edge.bottomB().x - edge.bottomA().x,
               edge.bottomB().y - edge.bottomA().y, 0).nor();
         return new Vector3(Vector3.Z).crs(along)
-              .scl(BoardGeometry.MARKER_INSET * BoardGeometry.WIDTH / 2 * FRAME_RATIO);
+              .scl(BoardGeometry.MARKER_INSET * BoardGeometry.width() / 2 * FRAME_RATIO);
     }
 
     private static void rangeFace(MeshPartBuilder mesh, BoardFiringGeometry.RangeEdge edge, Color color,
@@ -270,7 +270,7 @@ final class GpuFireControl implements Disposable {
         Vector3 c = new Vector3(inside ? edge.topA() : edge.topB()).add(shift);
         Vector3 d = new Vector3(inside ? edge.topB() : edge.topA()).add(shift);
         Color ink = new Color(color.r, color.g, color.b, 1);
-        float height = BoardFiringGeometry.RANGE_HEIGHT * BoardGeometry.LEVEL;
+        float height = BoardFiringGeometry.RANGE_HEIGHT * BoardGeometry.level();
         float vA = (d.z - a.z) / height, vB = (c.z - b.z) / height;
         float uA = inside ? to : from, uB = inside ? from : to;
         // Clamp V below the top band, retaining a translucent skirt at cliffs without stretching the letters.
@@ -292,7 +292,7 @@ final class GpuFireControl implements Disposable {
         quad(mesh, b, innerB, innerC, c, color);
         Color cap = new Color(color).mul(1, 1, 1, 1.5f);
         quad(mesh, d, c, innerC, innerD, cap);
-        tube(mesh, d, c, 0.65f * BoardGeometry.HEX_SCALE, new Color(color.r, color.g, color.b, 0.85f));
+        tube(mesh, d, c, 0.65f * BoardGeometry.hexScale(), new Color(color.r, color.g, color.b, 0.85f));
     }
 
     private static void quad(MeshPartBuilder mesh, Vector3 a, Vector3 b, Vector3 c, Vector3 d, Color color) {
@@ -332,7 +332,7 @@ final class GpuFireControl implements Disposable {
 
     void render(Camera camera, float deltaSeconds) {
         if (BoardView.GPU_SCROLLING_RANGE_LABELS) {
-            scrollDistance += deltaSeconds * RANGE_SCROLL_SPEED * BoardGeometry.HEX_SCALE;
+            scrollDistance += deltaSeconds * RANGE_SCROLL_SPEED * BoardGeometry.hexScale();
         }
         if (instance != null) {
             if (BoardView.GPU_SCROLLING_RANGE_LABELS) {
@@ -365,8 +365,8 @@ final class GpuFireControl implements Disposable {
                 labelTransform(labelMatrix, camera, tile);
                 labelBatch.setTransformMatrix(labelMatrix);
                 labelBatch.setColor(color(label.rgb(), 1));
-                labelBatch.draw(labelTextures.region(label.label()), -BoardGeometry.WIDTH / 2,
-                      -BoardGeometry.HEIGHT / 2, BoardGeometry.WIDTH, BoardGeometry.HEIGHT);
+                labelBatch.draw(labelTextures.region(label.label()), -BoardGeometry.width() / 2,
+                      -BoardGeometry.height() / 2, BoardGeometry.width(), BoardGeometry.height());
             }
             labelBatch.end();
         }

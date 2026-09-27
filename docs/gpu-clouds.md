@@ -9,8 +9,8 @@ clouds, cloud-view shader, cloud-view buffer or cloud compositing texture.
 
 The battle clock and weather stay fixed unless the user or scenario changes them;
 there is no automatic weather transition, accumulation or drying simulation.
-The initial clock is a random quarter-hour within the planetary lighting window
-(day 08:00–17:00, DUSK_DAWN 06:00–06:45 or 17:15–18:00, night 20:00–04:00). The GPU window retains
+The initial clock is a random minute within the planetary lighting window
+(day 09:00–15:30, DUSK_DAWN 06:00–06:45 or 17:15–18:00, night 20:00–04:00). The GPU window retains
 that choice through refreshes and weather changes; Time of day overrides it.
 
 ## Controls and fixed settings
@@ -32,6 +32,9 @@ For nonzero cover, strength interpolates linearly between these limits; zero cov
 has no cloud shadows. Transmission is `1 - strength * (1 - exp(-opticalDepth))`.
 This preserves density, the footprint and clear openings while making sparse-cover
 patches lighter. The atlas supplies this same transmission to surfaces and shafts.
+On surfaces it dims the sun or moon and the light the sunlit ground reflects onto walls,
+undersides and unit sides (`skyLight()` in `surface-lighting.glsl`, and the libGDX shaders'
+`v_groundBounce`), but not the sky light.
 Raising the minimum above the maximum raises the maximum too, and the panel displays
 the effective range. Defaults restores both limits. There is no extra texture or pass.
 

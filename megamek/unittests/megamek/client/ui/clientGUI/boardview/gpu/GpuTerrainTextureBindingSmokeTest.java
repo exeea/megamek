@@ -2,10 +2,12 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -26,6 +28,81 @@ import org.junit.jupiter.api.Test;
 /** Shared water inputs must survive more chunk-field binds than the driver's texture unit count. */
 @Tag("on-demand")
 class GpuTerrainTextureBindingSmokeTest {
+    @Test
+    void pendingArtworkDoesNotRepaintTheDisplayedAtlasSlot() {
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        var config = GpuBoardWindow.configuration(false);
+        config.setWindowedMode(640, 480);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                GpuTextures<String> atlas = new GpuTextures<>();
+                try {
+                    var pixels = new java.awt.image.BufferedImage(2, 2, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+                    pixels.setRGB(0, 0, 0xffff0000);
+                    atlas.retainReplacedPages();
+                    atlas.update(Map.of("hex", new BoardScene.Pixels(pixels)));
+                    atlas.publish();
+                    var displayed = atlas.region("hex");
+                    pixels.setRGB(0, 0, 0xff0000ff);
+                    assertEquals(java.util.Set.of("hex"), atlas.updateRegions(Map.of("hex", new BoardScene.Pixels(pixels)), Map.of()));
+                    assertNotSame(displayed, atlas.region("hex"));
+                    assertEquals(0xff0000ff, rgba(displayed), "The old mesh must still sample its red artwork");
+                    assertEquals(0x0000ffff, rgba(atlas.region("hex")), "The pending mesh receives the blue replacement");
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) { failure.set(error); }
+                finally { atlas.dispose(); Gdx.app.exit(); }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Atlas publication consistency", failure.get()); }
+    }
+
+    private static int rgba(com.badlogic.gdx.graphics.g2d.TextureRegion region) {
+        Texture texture = region.getTexture();
+        texture.bind();
+        var data = BufferUtils.newByteBuffer(texture.getWidth() * texture.getHeight() * 4);
+        org.lwjgl.opengl.GL11.glGetTexImage(GL20.GL_TEXTURE_2D, 0, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, data);
+        return data.order(java.nio.ByteOrder.BIG_ENDIAN).getInt((region.getRegionY() * texture.getWidth() + region.getRegionX()) * 4);
+    }
+
+    @Test
+    void canceledAtlasReplacementsRetainOnlyTheDisplayedPages() {
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        var config = GpuBoardWindow.configuration(false);
+        config.setWindowedMode(640, 480);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                GpuTextures<String> atlas = new GpuTextures<>(true);
+                try {
+                    var pixels = GpuTerrainReliefSmokeTest.scene(BoardScene.Surface.SAND).tiles().getFirst().ground();
+                    atlas.retainReplacedPages();
+                    atlas.update(Map.of("hex", pixels));
+                    atlas.publish();
+                    Texture displayed = atlas.region("hex").getTexture();
+                    int displayedHandle = displayed.getTextureObjectHandle();
+                    for (int i = 0; i < 32; i++) {
+                        Texture pending = atlas.region("hex").getTexture();
+                        // Changing the page format forces a repack without manufacturing enormous images.
+                        atlas.updateRegions(Map.of("hex", pixels), i % 2 == 0 ? Map.of("hex", pixels) : Map.of());
+                        atlas.releaseRetiredPages();
+                        assertEquals(displayedHandle, displayed.getTextureObjectHandle());
+                        assertTrue(org.lwjgl.opengl.GL11.glIsTexture(displayedHandle));
+                        if (pending != displayed) { assertEquals(0, pending.getTextureObjectHandle()); }
+                        assertEquals(1, ((List<?>) field(atlas, "retired")).size(), "Canceled pages must not accumulate");
+                    }
+                    atlas.publish();
+                    atlas.releaseRetiredPages();
+                    assertEquals(0, displayed.getTextureObjectHandle(), "Retire old pages after replacement meshes publish");
+                    assertTrue(((List<?>) field(atlas, "retired")).isEmpty());
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) { failure.set(error); }
+                finally { atlas.dispose(); Gdx.app.exit(); }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Atlas replacement lifetime", failure.get()); }
+    }
+
     @Test
     void waterKeepsItsSharedTexturesAcrossManyChunks() {
         AtomicReference<Throwable> failure = new AtomicReference<>();
@@ -53,6 +130,7 @@ class GpuTerrainTextureBindingSmokeTest {
                     camera.fit(scene);
                     TerrainLod.setEnabled(true);
                     terrain.update(scene, camera.camera);
+                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                     terrain.animate(.37f, List.of());
                     ScreenUtils.clear(.2f, .26f, .31f, 1, true);
                     terrain.render(camera.camera, false);

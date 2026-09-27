@@ -26,7 +26,7 @@ import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Both cliff-edge patterns respond to moving light through the existing ground normal atlas. */
+/** Legacy cliff-edge color patterns preserve the ground's existing normal atlas. */
 @Tag("on-demand")
 class GpuRimMaterialSmokeTest {
     @Test
@@ -83,7 +83,7 @@ class GpuRimMaterialSmokeTest {
     }
 
     @Test
-    void bothCliffPatternsHaveReliefUnderOpposingLightsWithoutExtraDraws() {
+    void bothCliffPatternsKeepFlatNormalsUnderOpposingLightsWithoutExtraDraws() {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
@@ -128,24 +128,27 @@ class GpuRimMaterialSmokeTest {
             camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
             camera.camera.zoom = 0.18f;
             camera.center(BoardGeometry.center(raised, drop));
+            List<BoardSurface.Face> top = new BoardSurface(scene, scene.tile(raised)).faces.stream()
+                  .filter(face -> face.finish() == BoardSurface.Finish.TOP).toList();
             List<Vector3> probes = new ArrayList<>();
             for (int edge = 0; edge < 6; edge++) {
                 Vector3 a = BoardGeometry.corner(raised, drop, edge), b = BoardGeometry.corner(raised, drop, edge + 1);
                 Vector3 along = b.cpy().sub(a).nor(), inward = new Vector3(-along.y, along.x, 0);
                 for (int u = 2; u <= 8; u++) {
-                    for (int depth = 3; depth <= 21; depth += 2) {
-                        probes.add(a.cpy().lerp(b, u / 10f).mulAdd(inward, depth));
+                    for (int depth = 9; depth <= 21; depth += 2) {
+                        Vector3 point = a.cpy().lerp(b, u / 10f).mulAdd(inward, depth);
+                        // A sculpted cliff can recede inside the original hex edge. Sample its artwork, not its wall.
+                        float height = BoardSurface.sampleHeight(top, point.x, point.y, Float.NaN);
+                        if (Float.isFinite(height)) { probes.add(point.set(point.x, point.y, height)); }
                     }
                 }
             }
+            assertTrue(probes.size() > 100, "Both rim patterns must have broad coverage on the actual top surface");
             probes.add(BoardGeometry.center(raised, drop));
             File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
             assertTrue(output.isDirectory() || output.mkdirs());
             for (boolean isometric : new boolean[] { false, true }) {
                 camera.setIsometric(isometric);
-                int centreIndex = probes.size() - 1;
-                int[][] light = new int[2][];
-                int[][] flatLight = new int[2][];
                 for (int direction = 0; direction < 2; direction++) {
                     Vector3 direction3 = new Vector3(direction == 0 ? -1 : 1, 0, -0.5f).nor();
                     terrain.setAtmosphere(new BoardAtmosphere.Lighting(direction3, new Color(0.7f, 0.7f, 0.7f, 1),
@@ -155,38 +158,27 @@ class GpuRimMaterialSmokeTest {
                     profiler.enable();
                     try {
                         terrain.setNormalMaps(false);
-                        flatLight[direction] = samples(terrain, camera, probes);
+                        int[] flatLight = samples(terrain, camera, probes);
                         int draws = profiler.getDrawCalls();
                         profiler.reset();
                         terrain.setNormalMaps(true);
-                        light[direction] = samples(terrain, camera, probes);
-                        assertEquals(draws, profiler.getDrawCalls(), "Relief uses the existing terrain draws");
+                        int[] light = samples(terrain, camera, probes);
+                        assertEquals(draws, profiler.getDrawCalls(), "Rim color uses the existing terrain draws");
+                        for (int index = 0; index < probes.size(); index++) {
+                            assertEquals(flatLight[index] >>> 24, light[index] >>> 24, 2,
+                                  "Rim color must not add normal relief: drop " + drop + ", probe " + index);
+                        }
                     } finally {
                         profiler.disable();
                     }
                     GpuBoardTestUi.capture(new File(output, "rim-drop-" + drop + "-" + (isometric ? "iso" : "top")
                           + "-light-" + direction + ".png"));
                 }
-                int relit = 0;
-                float reliefChange = 0, flatChange = 0;
-                for (int index = 0; index < centreIndex; index++) {
-                    float change = Math.abs(ratio(light[0], index, centreIndex) - ratio(light[1], index, centreIndex));
-                    reliefChange += change;
-                    flatChange += Math.abs(ratio(flatLight[0], index, centreIndex) - ratio(flatLight[1], index, centreIndex));
-                    if (change > 0.06f) { relit++; }
-                }
-                assertTrue(relit > 20, "Drop " + drop + " must visibly react to light: " + relit + " probes");
-                assertTrue(reliefChange > flatChange + 5, "Normals must relight the pattern beyond flat-face lighting");
             }
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
         } finally {
             terrain.dispose();
         }
-    }
-
-    /** Red-channel sample at a probe, relative to the untouched centre of the raised tile. */
-    private static float ratio(int[] samples, int index, int centreIndex) {
-        return (samples[index] >>> 24) / (float) (samples[centreIndex] >>> 24);
     }
 
     private static int[] samples(GpuTerrain terrain, BoardCamera camera, List<Vector3> probes) {

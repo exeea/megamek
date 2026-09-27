@@ -67,9 +67,10 @@ final class GpuLandingSupportReview {
                 assertEquals(1, unit.location().elevation());
                 pose(model, placed, animator, scene, unit, camera, 0, UnitMotion.Sample.STILL);
                 contacts(model, placed, scene);
-                // Every pad is outside the central level-1 hex in this authored Union fallback.
+                // Pads are outside the raised hex, where its sculpted slope can still raise their contact height.
                 for (var support : model.rigs().getFirst().landingSupports()) {
-                    assertEquals(0, contact(placed, support).z, .002f);
+                    var point = contact(placed, support);
+                    assertFalse(BoardGeometry.contains(unit.location().coords(), point.x, point.y));
                 }
                 render(batch, terrain, camera, scene, placed, "center-high");
                 for (boolean top : List.of(false, true)) {

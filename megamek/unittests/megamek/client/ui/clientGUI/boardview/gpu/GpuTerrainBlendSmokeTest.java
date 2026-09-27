@@ -67,7 +67,7 @@ class GpuTerrainBlendSmokeTest {
                         var island = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
                               c.equals(BoardSurfaceBlendTest.CENTER) ? patch : BoardScene.Surface.GRASS, 0, -1, 0));
                         capture(island, "island-" + patch.name().toLowerCase(java.util.Locale.ROOT), terrain, frame, camera);
-                        if (patch == BoardScene.Surface.SAND) { compareRebuild(island, frame, camera); }
+                        if (patch == BoardScene.Surface.SAND) { compareRebuild(island, terrain, frame, camera); }
                     }
                     for (int depth : new int[] { 0, 1 }) {
                         var shores = BoardTerrainDetailTest.shores(depth, false);
@@ -101,25 +101,27 @@ class GpuTerrainBlendSmokeTest {
                 }
             }
 
-            private void capture(BoardScene scene, String name, GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera) {
+            private void capture(BoardScene scene, String name, GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera) throws Exception {
                 terrain.update(scene);
                 terrain.animate(.5f, List.of());
                 for (boolean oblique : new boolean[] { false, true }) {
                     camera.setIsometric(oblique);
                     camera.camera.zoom = .42f;
                     camera.center(BoardGeometry.center(BoardSurfaceBlendTest.CENTER, 0));
-                    frame.render(terrain, camera, scene);
+                    renderSettled(terrain, frame, camera, scene);
                     GpuReviewFrame.save(new File(output, name + (oblique ? "-oblique" : "-top") + ".png"));
                 }
             }
 
-            private void compareRebuild(BoardScene scene, GpuReviewFrame frame, BoardCamera camera) {
+            private void compareRebuild(BoardScene scene, GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera) throws Exception {
                 byte[] edited = screen();
                 var fresh = new GpuTerrain();
                 try {
                     fresh.update(scene);
-                    fresh.animate(.5f, List.of());
-                    frame.render(fresh, camera, scene);
+                    var clock = GpuTerrain.class.getDeclaredField("clock");
+                    clock.setAccessible(true);
+                    fresh.animate(clock.getFloat(terrain), List.of());
+                    renderSettled(fresh, frame, camera, scene);
                     byte[] rebuilt = screen();
                     long error = 0;
                     int large = 0;
@@ -133,6 +135,17 @@ class GpuTerrainBlendSmokeTest {
                 } finally {
                     fresh.dispose();
                 }
+            }
+
+            private void renderSettled(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera, BoardScene scene) throws Exception {
+                var field = GpuTerrain.class.getDeclaredField("groundCover");
+                field.setAccessible(true);
+                var cover = (GpuGroundCover) field.get(terrain);
+                long deadline = System.nanoTime() + 30_000_000_000L;
+                do {
+                    frame.render(terrain, camera, scene);
+                    assertTrue(System.nanoTime() < deadline, "Ground cover preparation must finish before pixel comparison");
+                } while (cover.busy());
             }
 
             private byte[] screen() {

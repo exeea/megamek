@@ -409,8 +409,8 @@ final class GpuTactical implements Disposable {
         if (wall != null) {
             float dx = wall.b().x() - wall.a().x(), dy = wall.b().y() - wall.a().y();
             float length = (float) Math.hypot(dx, dy);
-            float along = ((point.x / BoardGeometry.HEX_SCALE - wall.a().x()) * dx
-                  + (-point.y / BoardGeometry.HEX_SCALE - wall.a().y()) * dy) / length;
+            float along = ((point.x / BoardGeometry.hexScale() - wall.a().x()) * dx
+                  + (-point.y / BoardGeometry.hexScale() - wall.a().y()) * dy) / length;
             vertices.add(wall.outline().stroke().getDashPhase() + wall.outlineDistance() + along, 0.5f);
         }
     }
@@ -505,12 +505,12 @@ final class GpuTactical implements Disposable {
             if (tile == null) {
                 continue;
             }
-            Vector3 position = new Vector3(anchor.x() * BoardGeometry.HEX_SCALE, -anchor.y() * BoardGeometry.HEX_SCALE,
-                  BoardGeometry.surfaceZ(tile) + 2 * BoardGeometry.HEX_SCALE);
-            if (!camera.frustum.sphereInFrustum(position, BoardGeometry.WIDTH)) {
+            Vector3 position = new Vector3(anchor.x() * BoardGeometry.hexScale(), -anchor.y() * BoardGeometry.hexScale(),
+                  BoardGeometry.surfaceZ(tile) + 2 * BoardGeometry.hexScale());
+            if (!camera.frustum.sphereInFrustum(position, BoardGeometry.width())) {
                 continue;
             }
-            Vector3 right = new Vector3(camera.direction).crs(camera.up).nor().scl(BoardGeometry.HEX_SCALE);
+            Vector3 right = new Vector3(camera.direction).crs(camera.up).nor().scl(BoardGeometry.hexScale());
             Vector3 screen = camera.project(new Vector3(position), 0, 0, camera.viewportWidth, camera.viewportHeight);
             float scale = camera.project(new Vector3(position).add(right), 0, 0,
                   camera.viewportWidth, camera.viewportHeight).dst(screen);

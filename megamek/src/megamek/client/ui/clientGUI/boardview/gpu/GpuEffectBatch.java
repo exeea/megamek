@@ -17,6 +17,7 @@ final class GpuEffectBatch implements Disposable {
     private final int capacity;
     private final String fragment;
     private final Color smokeLight = new Color(Color.WHITE);
+    private final Vector3 quadWidth = new Vector3(), quadLength = new Vector3(), quadOrigin = new Vector3();
     private float[] vertices;
     private Mesh mesh;
     private ShaderProgram shader;
@@ -31,6 +32,26 @@ final class GpuEffectBatch implements Disposable {
     }
 
     void begin() { offset = 0; }
+
+    void billboard(Camera camera, Vector3 center, float radius, float kind, float alpha) {
+        quadWidth.set(camera.direction).crs(camera.up).nor().scl(radius);
+        quadLength.set(camera.up).scl(radius);
+        quad(center, quadWidth, quadLength, -1, kind, alpha);
+    }
+
+    /** A camera-facing streak; an end-on view retains a small head instead of collapsing to zero area. */
+    void ribbon(Camera camera, Vector3 start, Vector3 finish, float width, float kind, float alpha) {
+        quadLength.set(finish).sub(start);
+        if (quadLength.isZero(.001f)) { return; }
+        quadWidth.set(quadLength).crs(camera.direction);
+        if (quadWidth.len2() < quadLength.len2() * .0001f) {
+            quadWidth.set(camera.direction).crs(camera.up);
+            quadLength.set(camera.up).scl(width * 2);
+            quadOrigin.set(finish).mulAdd(quadLength, -.5f);
+        } else { quadOrigin.set(start); }
+        quadWidth.nor().scl(width);
+        quad(quadOrigin, quadWidth, quadLength, 0, kind, alpha);
+    }
 
     void quad(Vector3 origin, Vector3 width, Vector3 length, float from, float kind, float alpha) {
         if (alpha <= 0 || offset == capacity * 4 * STRIDE) { return; }

@@ -9142,6 +9142,8 @@ public class TWGameManager extends AbstractGameManager {
         r.add(roll.getDesc());
         r.add(diceRoll);
 
+        sendAttackAnimation(entity, game.getEntity(entity.getSwarmAttackerId()), megamek.common.ResolvedAttack.Kind.SHAKE_OFF,
+              -1, Entity.LOC_NONE, diceRoll.getIntValue() >= roll.getValue());
         if (diceRoll.getIntValue() < roll.getValue()) {
             r.choose(false);
             addReport(r);
@@ -13269,6 +13271,9 @@ public class TWGameManager extends AbstractGameManager {
         r.add(baa.getArm() == BrushOffAttackAction.LEFT ? pr.roll : pr.rollRight);
         r.newlines = 0;
         addReport(r);
+
+        sendAttackAnimation(ae, te, megamek.common.ResolvedAttack.Kind.BRUSH_OFF, -1,
+              baa.getArm() == BrushOffAttackAction.LEFT ? Mek.LOC_LEFT_ARM : Mek.LOC_RIGHT_ARM, rollValue >= toHit.getValue());
 
         // do we hit?
         if (rollValue < toHit.getValue()) {
@@ -28375,6 +28380,7 @@ public class TWGameManager extends AbstractGameManager {
         if (attacker == null || target == null || attacker.getPosition() == null || target.getPosition() == null
               || attacker.getBoardId() != target.getBoardId()
               || kind != megamek.common.ResolvedAttack.Kind.SHOT && kind != megamek.common.ResolvedAttack.Kind.DEATH
+                    && kind != megamek.common.ResolvedAttack.Kind.SHAKE_OFF && kind != megamek.common.ResolvedAttack.Kind.STOP_SWARM
                     && !(attacker instanceof Mek)) {
             return;
         }

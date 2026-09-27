@@ -8,65 +8,50 @@ import com.badlogic.gdx.math.Vector3;
 
 /** Tiny untextured details, baked into a single opaque mesh per terrain chunk. */
 final class GpuScatter {
-    private static final int[][] ROCK_FACES = {
-          { 0, 1, 5 }, { 1, 2, 6 }, { 1, 6, 5 }, { 2, 3, 6 }, { 3, 4, 7 },
-          { 3, 7, 6 }, { 4, 0, 5 }, { 4, 5, 7 }, { 5, 6, 7 }
-    };
-
     private GpuScatter() { }
 
+    /** Tiny stones use only the scatter kit's eight-triangle meshes. */
+    static BoardRocks.Rock rock(BoardScene.Tile tile, BoardScene.Feature feature) {
+        return BoardRocks.scatter(tile.surface(), Math.round(feature.rotation()), feature.asset().equals("scatter-slab"));
+    }
+
     static float diameter(BoardScene.Feature feature) {
-        return (float) Math.hypot(8 * feature.scale() * BoardGeometry.HEX_SCALE,
-              feature.height() * BoardGeometry.LEVEL);
+        return (float) Math.hypot(8 * feature.scale() * BoardGeometry.hexScale(),
+              feature.height() * BoardGeometry.level());
     }
 
     static void build(MeshPartBuilder mesh, BoardScene.Tile tile, BoardSurface surface, BoardScene.Feature feature) {
         // On the hex's own ground, never over a receding rim or a transition's slope.
-        float[] spot = surface.relief.settle(BoardGeometry.centerX(tile.coords()) + feature.x() * BoardGeometry.HEX_SCALE,
-              BoardGeometry.centerY(tile.coords()) + feature.y() * BoardGeometry.HEX_SCALE, BoardRelief.metres(.3f));
+        float[] spot = surface.relief.settle(BoardGeometry.centerX(tile.coords()) + feature.x() * BoardGeometry.hexScale(),
+              BoardGeometry.centerY(tile.coords()) + feature.y() * BoardGeometry.hexScale(), BoardRelief.metres(.3f));
         float x = spot[0], y = spot[1];
         Matrix4 transform = new Matrix4().setToTranslation(x, y, surface.height(x, y))
               .rotate(Vector3.Z, feature.rotation())
-              .scale(feature.scale() * BoardGeometry.HEX_SCALE, feature.scale() * BoardGeometry.HEX_SCALE,
-                    feature.height() * BoardGeometry.LEVEL);
+              .scale(feature.scale() * BoardGeometry.hexScale(), feature.scale() * BoardGeometry.hexScale(),
+                    feature.height() * BoardGeometry.level());
         Color color = color(tile.surface(), feature.asset());
         float shade = .88f + .24f * feature.rotation() / 360;
         color.mul(shade, shade, shade, 1);
+        BoardRocks.Rock shape;
         switch (feature.asset()) {
             case "scatter-grass", "scatter-dry-grass" -> {
-                // Three splayed blades; back faces keep them visible from every board rotation.
-                for (int blade = 0; blade < 3; blade++) {
-                    Matrix4 direction = new Matrix4(transform).rotate(Vector3.Z, blade * 137.5f);
-                    triangle(mesh, point(-.5f, 0, 0, direction), point(.5f, 0, 0, direction),
-                          point(.8f, 2.5f - blade * .35f, 1 - blade * .15f, direction), color, true);
-                }
+                shape = BoardRocks.scatter("grass");
             }
             case "scatter-plant" -> {
-                // Four broad, creased leaves also read as a low succulent on sand.
-                for (int leaf = 0; leaf < 4; leaf++) {
-                    Matrix4 direction = new Matrix4(transform).rotate(Vector3.Z, leaf * 97);
-                    Vector3 root = point(0, 0, .05f, direction);
-                    Vector3 left = point(-.85f, 1.7f, .85f, direction);
-                    Vector3 tip = point(.2f, 3.6f - leaf * .15f, .4f, direction);
-                    Vector3 right = point(.8f, 1.5f, .55f, direction);
-                    triangle(mesh, root, right, tip, color, true);
-                    triangle(mesh, root, tip, left, color, true);
-                }
+                shape = BoardRocks.scatter("plant");
             }
             case "scatter-rock", "scatter-slab" -> {
+                shape = rock(tile, feature);
                 float height = feature.asset().equals("scatter-slab") ? .4f : 1;
-                Vector3[] points = {
-                      point(-3, -1, -.08f, transform), point(-.8f, -2.4f, -.08f, transform),
-                      point(2.9f, -1.8f, -.08f, transform), point(3, 1.3f, -.08f, transform),
-                      point(-1.4f, 2.3f, -.08f, transform), point(-1.4f, -.8f, .75f * height, transform),
-                      point(1.4f, -.5f, height, transform), point(.2f, 1.3f, .78f * height, transform)
-                };
-                for (int[] face : ROCK_FACES) {
-                    triangle(mesh, points[face[0]], points[face[1]], points[face[2]], color, false);
-                }
-                // The open underside is buried in the ground, so it needs no triangles.
+                // Keep the entire open base below ground, with the same footprint and summit as before.
+                transform.translate(0, 0, -.08f).scale(6, 4.8f, (height + .08f) / shape.height());
             }
             default -> throw new IllegalArgumentException("Unknown terrain scatter: " + feature.asset());
+        }
+        for (BoardRocks.Polygon polygon : shape.polygons()) {
+            Vector3[] points = polygon.points();
+            triangle(mesh, points[0].cpy().mul(transform), points[1].cpy().mul(transform),
+                  points[2].cpy().mul(transform), color);
         }
     }
 
@@ -87,17 +72,9 @@ final class GpuScatter {
         };
     }
 
-    private static Vector3 point(float x, float y, float z, Matrix4 transform) {
-        return new Vector3(x, y, z).mul(transform);
-    }
-
-    private static void triangle(MeshPartBuilder mesh, Vector3 a, Vector3 b, Vector3 c, Color color, boolean back) {
+    private static void triangle(MeshPartBuilder mesh, Vector3 a, Vector3 b, Vector3 c, Color color) {
         Vector3 normal = new Vector3(b).sub(a).crs(new Vector3(c).sub(a)).nor();
         mesh.triangle(vertex(a, normal, color), vertex(b, normal, color), vertex(c, normal, color));
-        if (back) {
-            normal.scl(-1);
-            mesh.triangle(vertex(c, normal, color), vertex(b, normal, color), vertex(a, normal, color));
-        }
     }
 
     private static MeshPartBuilder.VertexInfo vertex(Vector3 point, Vector3 normal, Color color) {

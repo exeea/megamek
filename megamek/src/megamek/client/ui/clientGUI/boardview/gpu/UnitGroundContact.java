@@ -72,7 +72,7 @@ final class UnitGroundContact {
             var center = new Vector3(0, 0, body.bounds.min.z).mul(frame);
             float ground = UnitLandingSupports.terrain(scene, center.x, center.y, surfaces);
             // A roof, bridge, airborne elevation or unmodelled cliff step is not this unit's ground plane.
-            if (!Float.isFinite(ground) || Math.abs(center.z - ground) > 2 * BoardGeometry.HEX_SCALE) { continue; }
+            if (!Float.isFinite(ground) || Math.abs(center.z - ground) > 2 * BoardGeometry.hexScale()) { continue; }
             if (body.rig.trooper() && !member.moving() && motion.boarding() == null
                   && standOnRough(body, scene, unit)) {
                 changed = true;
@@ -94,7 +94,7 @@ final class UnitGroundContact {
                 float surface = UnitLandingSupports.terrain(scene, point.x, point.y, surfaces);
                 if (Float.isFinite(surface)) { lift = Math.max(lift, surface - point.z); }
             }
-            if (Float.isFinite(lift) && Math.abs(lift) <= BoardGeometry.LEVEL) {
+            if (Float.isFinite(lift) && Math.abs(lift) <= BoardGeometry.level()) {
                 float parentUp = body.root.getParent() == null ? instance.transform.getScaleZ()
                       : new Vector3(Vector3.Z).rot(body.root.getParent().globalTransform).rot(instance.transform).z;
                 body.root.translation.z += lift / parentUp;
@@ -121,7 +121,7 @@ final class UnitGroundContact {
             float height = UnitLandingSupports.ground(scene, point.x, point.y, surfaces);
             if (Float.isFinite(height)) { lift = Math.max(lift, height - point.z); }
         }
-        if (!Float.isFinite(lift) || lift <= .001f || lift > BoardGeometry.LEVEL) { return false; }
+        if (!Float.isFinite(lift) || lift <= .001f || lift > BoardGeometry.level()) { return false; }
         float parentUp = body.root.getParent() == null ? instance.transform.getScaleZ()
               : new Vector3(Vector3.Z).rot(body.root.getParent().globalTransform).rot(instance.transform).z;
         if (parentUp <= .0001f) { return false; }

@@ -117,7 +117,7 @@ final class BoardFlow {
             // water runs on as if into the hex beyond.
             if (neighbors.get(tile.coords()).size() <= 1 && !edge(scene, tile.coords())) { speed *= .4f; }
             // UV V points toward world -Y. Offsetting against the velocity moves the painted features downstream.
-            result.put(tile.coords(), new Current(-direction.x * speed, direction.y * speed * BoardGeometry.WIDTH / BoardGeometry.HEIGHT));
+            result.put(tile.coords(), new Current(-direction.x * speed, direction.y * speed * BoardGeometry.width() / BoardGeometry.height()));
         }
         return Map.copyOf(result);
     }
