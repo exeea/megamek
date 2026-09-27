@@ -541,7 +541,12 @@ final class UnitEquipmentAssembly {
         }
         // Wings span the torso and clear its rear face; they must not compete with guns or exhaust for face space.
         // A chassis rule's spot is its own, so it neither takes room from nor gives room to that location's face.
-        var area = point.id().equals("partial-wing") || item.placement().getBoolean("rule", false)
+        // A held gun's barrel leaves the gun body's own face, ahead of the arm, so the weapons on the forearm behind
+        // it cannot crowd it off that face (or out of sight).
+        boolean isPartialWing = point.id().equals("partial-wing");
+        boolean isChassisRule = item.placement().getBoolean("rule", false);
+        boolean isHeldBarrel = item.visual().held();
+        var area = (isPartialWing || isChassisRule || isHeldBarrel)
               ? new MountFrame(socket)
               // Two locations can share one face, as a Locust's head and centre weapons share its chin turret; the
               // packer then keeps them apart instead of drawing one over the other.

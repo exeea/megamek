@@ -19,6 +19,7 @@ import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.model.MeshPart;
 import com.badlogic.gdx.graphics.g3d.model.Node;
 import com.badlogic.gdx.graphics.g3d.model.NodePart;
+import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.GdxNativesLoader;
 import com.badlogic.gdx.utils.JsonReader;
 import com.badlogic.gdx.utils.JsonValue;
@@ -110,6 +111,81 @@ class UnitEquipmentAssemblyTest {
         } finally {
             model.dispose();
         }
+    }
+
+    @Test
+    void aHeldGunLeavesTheMiddleOfItsGunBodyHoweverCrowdedTheArm() {
+        // A big launcher packed into the same hand first used to shove the held barrel off the gun body's face.
+        var anatomy = new UnitModelState.MekAnatomy("biped", List.of("RA"), List.of("RA"));
+        var gun = new UnitModelEquipment.Mount(7, "Gun", "RA", "", false, false, 0, EquipmentModelPolicy.WEAPON,
+              "ballistic", List.of());
+        var launcher = new UnitModelEquipment.Mount(8, "Box", "RA", "", false, false, 0, EquipmentModelPolicy.WEAPON,
+              "missile", List.of());
+        var model = assembleHeld(anatomy, List.of(gun, launcher));
+        try {
+            var held = model.equipment().stream().filter(item -> item.index() == 7).findFirst().orElseThrow();
+            var crowding = model.equipment().stream().filter(item -> item.index() == 8).findFirst().orElseThrow();
+            assertFalse(held.embedded());
+            assertFalse(crowding.embedded(), "The launcher still finds room of its own");
+            Vector3 barrel = model.instance.getNode(held.node(), true).globalTransform.getTranslation(new Vector3());
+            assertEquals(0f, barrel.x, 1e-4, "The barrel stays on the gun body's face, not beside it");
+            assertEquals(0f, barrel.z, 1e-4, "The barrel stays on the gun body's face, not above or below it");
+        } finally {
+            model.dispose();
+        }
+    }
+
+    /** One right arm with a hand whose spot draws a gun held in the fist, and a launcher spot on the same face. */
+    private static GpuUnitModel assembleHeld(UnitModelState.MekAnatomy anatomy,
+          List<UnitModelEquipment.Mount> equipment) {
+        var library = mock(GpuUnitModels.class);
+        when(library.descriptor("equipment.json")).thenReturn(new JsonReader().parse("""
+              {"schema":2,"equipment":{"Gun":{"model":"gun.json","profiles":{"held":"gun.json"}},
+               "Box":{"model":"box.json"}},"fallbacks":{"weapon":"gun.json"}}
+              """));
+        registerModule(library, "gun.json", "ballistic", new UnitModelDescriptor.Bounds(List.of(-.5f, 0f, -.5f),
+              List.of(.5f, 2f, .5f)));
+        registerModule(library, "box.json", "missile", new UnitModelDescriptor.Bounds(List.of(-3f, 0f, -3f),
+              List.of(3f, 2f, 3f)));
+        Model assembled = new Model();
+        Node arm = node("RA");
+        assembled.nodes.add(arm);
+        arm.addChild(node("RA@hand"));
+        List<UnitModelDescriptor.Hardpoint> points = List.of(
+              new UnitModelDescriptor.Hardpoint("RA-hand", "RA", "front", "RA", List.of(0f, 0f, 0f),
+                    List.of(0f, 0f, 0f, 1f), List.of(8f, 20f, 8f), .5f, 1f, List.of("weapon")),
+              new UnitModelDescriptor.Hardpoint("RA@hand:missile-0", "RA", "front", "RA", List.of(0f, 0f, 0f),
+                    List.of(0f, 0f, 0f, 1f), List.of(8f, 20f, 8f), .5f, 1f, List.of("weapon")));
+        var recipe = new JsonReader().parse("""
+              {"equipment":"equipment.json","mounts":[
+               {"hardpoint":"RA-hand","form":"hand","profile":"held"},
+               {"hardpoint":"RA@hand:missile-0","family":"missile","form":"hand"}]}
+              """);
+        assembled.calculateTransforms();
+        var bounds = new UnitModelDescriptor.Bounds(List.of(-1f, 0f, -1f), List.of(1f, 2f, 1f));
+        var body = new UnitModelDescriptor(2, "body", "mek", "body.g3dj", bounds, "biped-v1",
+              Map.of("root", "RA"), Map.of(), points, List.of(), List.of(), Map.of(), null);
+        var structure = new UnitModelState.Structure(EntityMovementMode.BIPED, equipment, List.of(), 0, false, anatomy);
+        var bindings = UnitEquipmentAssembly.attachAll(library, recipe, new GpuUnitModels.ModularAsset(body, assembled, 1),
+              structure, assembled);
+        assembled.calculateTransforms();
+        return new GpuUnitModel(assembled, "RA", true, bindings);
+    }
+
+    private static void registerModule(GpuUnitModels library, String asset, String family,
+          UnitModelDescriptor.Bounds bounds) {
+        Model shape = new Model();
+        Node root = node("barrel");
+        MeshPart mesh = new MeshPart();
+        mesh.mesh = mock(Mesh.class);
+        root.parts.add(new NodePart(mesh, new Material("paint")));
+        shape.nodes.add(root);
+        var emitter = new UnitModelDescriptor.Emitter("muzzle", "barrel", List.of(0f, 2f, 0f), List.of(0f, 1f, 0f),
+              "muzzle", "bullet");
+        var descriptor = new UnitModelDescriptor(2, "equipment", family, asset.replace(".json", ".g3dj"), bounds,
+              "rigid-v1",
+              Map.of("root", "barrel"), Map.of(), List.of(), List.of(emitter), List.of(), Map.of(), null);
+        when(library.modular(asset)).thenReturn(new GpuUnitModels.ModularAsset(descriptor, shape, 1));
     }
 
     private static UnitModelEquipment.Mount mount(int index, String primary, String secondary) {
