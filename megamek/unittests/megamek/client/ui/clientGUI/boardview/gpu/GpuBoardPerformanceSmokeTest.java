@@ -424,6 +424,15 @@ class GpuBoardPerformanceSmokeTest {
                             timings.appendReport(report, scenario);
                             System.out.print(report);
                             memory(this, scenario);
+                            if (scenario.equals("moving") && Boolean.getBoolean("megamek.gpu.performanceFarPan")) {
+                                // Extra visual regression capture, after all performance samples are complete.
+                                measuring = false;
+                                boardCamera.fit(fixture.source.takeFrame().scene());
+                                boardCamera.camera.zoom = 40;
+                                boardCamera.pan(0, 180);
+                                super.render();
+                                GpuBoardTestUi.capture(new File(output, "performance-full-far-pan.png"));
+                            }
                         }
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                         if (++frame == 3 * scenarioFrames) { phase("done"); Gdx.app.exit(); }
