@@ -38,8 +38,12 @@ class GpuRoadSourceTest {
     }
 
     static BoardScene minesScene() throws Exception {
+        return scene("Deserts/16x17 Mines 1.board");
+    }
+
+    static BoardScene scene(String path) throws Exception {
         Board board = new Board();
-        board.load(new File("data/boards/Deserts/16x17 Mines 1.board"));
+        board.load(new File("data/boards/" + path));
         var scene = new AtomicReference<BoardScene>();
         try (var fixture = GpuBoardFixture.create(board)) {
             SwingUtilities.invokeAndWait(() -> {

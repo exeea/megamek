@@ -98,10 +98,9 @@ final class GpuOcean implements Disposable {
     }
 
     private void create() {
-        String vertex = GpuShaderSource.read("ocean.vert");
-        spectrum = program(vertex, "ocean-spectrum.frag");
-        butterfly = program(vertex, "ocean-fft.frag");
-        finish = program(vertex, "ocean-finish.frag");
+        spectrum = GpuShaderManager.program(() -> program("ocean-spectrum.frag"), next -> spectrum = next);
+        butterfly = GpuShaderManager.program(() -> program("ocean-fft.frag"), next -> butterfly = next);
+        finish = GpuShaderManager.program(() -> program("ocean-finish.frag"), next -> finish = next);
         quad = new Mesh(true, 4, 0, new VertexAttribute(VertexAttributes.Usage.Position, 2, "a_position"));
         quad.setVertices(new float[] { -1, -1, 1, -1, -1, 1, 1, 1 });
         for (int i = 0; i < 2; i++) {
@@ -131,8 +130,8 @@ final class GpuOcean implements Disposable {
         restoreState(state);
     }
 
-    private static ShaderProgram program(String vertex, String fragment) {
-        return GpuGlsl.compile(fragment, vertex, GpuShaderSource.read(fragment));
+    private static ShaderProgram program(String fragment) {
+        return GpuGlsl.compile(fragment, GpuShaderSource.read("ocean.vert"), GpuShaderSource.read(fragment));
     }
 
     /**
@@ -281,7 +280,7 @@ final class GpuOcean implements Disposable {
     @Override
     public void dispose() {
         for (ShaderProgram program : new ShaderProgram[] { spectrum, butterfly, finish }) {
-            if (program != null) { program.dispose(); }
+            if (program != null) { GpuShaderManager.dispose(program); }
         }
         spectrum = butterfly = finish = null;
         if (quad != null) { quad.dispose(); }

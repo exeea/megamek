@@ -5,16 +5,127 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.File;
 import java.util.List;
 
+import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
+import com.badlogic.gdx.utils.GdxNativesLoader;
+import megamek.common.Configuration;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardTunnelTest {
+    @BeforeAll
+    static void natives() { GdxNativesLoader.load(); }
+
+    @ParameterizedTest
+    @ValueSource(strings = { BoardTunnel.ASSET, BoardTunnel.BRIDGE_ASSET })
+    void lowPolyPortalCarriesAFullWidthRoadInsideWithoutADarkStripAtTheMouth(String asset) {
+        File root = new File(Configuration.dataDir(), "models/board");
+        var model = RigidGlb.loadLods(new FileHandle(new File(root, asset + ".glb")), root.toPath()).getFirst();
+        int floorTriangles = 0, total = 0;
+        float start = Float.POSITIVE_INFINITY, end = Float.NEGATIVE_INFINITY;
+        for (var mesh : model.meshes) {
+            for (var part : mesh.parts) {
+                total += part.indices.length / 3;
+                if (!part.id.contains("tunnel-floor")) { continue; }
+                floorTriangles += part.indices.length / 3;
+                for (short index : part.indices) {
+                    int i = Short.toUnsignedInt(index) * RigidGlb.STRIDE;
+                    float x = mesh.vertices[i], y = mesh.vertices[i + 1], z = mesh.vertices[i + 2];
+                    assertEquals(BoardRoad.Kind.PAVED.halfWidth, Math.abs(x), .001f, "The road must not narrow inside");
+                    assertEquals(y < 3 ? -.02f : 0, z, .001f, "Only the hidden underlap is recessed below the approach");
+                    if (y <= 6) { assertEquals(1, mesh.vertices[i + 6], .001f, "No dark threshold at the mouth"); }
+                    start = Math.min(start, y);
+                    end = Math.max(end, y);
+                }
+            }
+        }
+        assertEquals(8, floorTriangles, "Only four flat quads are needed for the interior light fade");
+        assertEquals(2.75f, start, .001f, "A quarter-unit underlap seals the lattice's slightly oblique hex edges");
+        assertEquals(BoardTunnel.DEPTH, end, .001f);
+        assertTrue(total < 300, "A single inexpensive LOD0 is sufficient");
+        boolean wings = false;
+        for (var material : model.materials) { wings |= material.id.equals("tunnel-wings"); }
+        assertEquals(asset.equals(BoardTunnel.ASSET), wings);
+    }
+
+    @Test
+    void lavaTubesBridgeExitsReceivePortalsAtDeckHeight() throws Exception {
+        var scene = GpuRoadSourceTest.scene("Map Pack Volcanic/16x17 Lava Tubes 1.board");
+        int portals = 0;
+        for (var tile : scene.tiles()) {
+            var entrances = BoardTunnel.entrances(scene, tile);
+            for (var tunnel : entrances) {
+                assertEquals(BoardTunnel.BRIDGE_ASSET, tunnel.asset());
+                assertEquals(GpuRoads.SURFACE_LIFT * BoardGeometry.hexScale(), tunnel.origin().z, .0001f);
+                assertEquals(BoardRoad.Kind.NONE, tile.road(), "These are authored bridges, with no ground road");
+                assertEquals(BoardRoad.Kind.PAVED, tunnel.kind());
+                portals++;
+            }
+        }
+        assertEquals(13, portals, "Only cliff-facing bridge exits, excluding the four inter-bridge connections");
+    }
+
+    @ParameterizedTest
+    @EnumSource(BoardScene.Surface.class)
+    void groundAndBridgePortalsOpenNativeWallsInEveryTerrainFamily(BoardScene.Surface family) {
+        var at = BoardRoadTest.CENTER;
+        for (boolean bridge : new boolean[] { false, true }) {
+            for (int direction = 0; direction < 6; direction++) {
+                int d = direction;
+                var scene = BoardSurfaceBlendTest.scene(c -> {
+                    var tile = BoardRoadTest.tile(c, c.equals(at) && !bridge ? BoardRoad.Kind.GRAVEL : BoardRoad.Kind.NONE,
+                          c.equals(at) && !bridge ? 1 << d : 0,
+                          c.equals(at.translated(d)) ? bridge ? 2 : 4 : bridge ? -2 : 0, family);
+                    return bridge && c.equals(at) ? bridge(tile, 1 << d) : tile;
+                });
+                var entrances = BoardTunnel.entrances(scene, scene.tile(at));
+                assertEquals(1, entrances.size(), family + " direction " + d + " bridge=" + bridge);
+                var tunnel = entrances.getFirst();
+                assertEquals(bridge ? BoardTunnel.BRIDGE_ASSET : BoardTunnel.ASSET, tunnel.asset());
+                assertEquals(bridge ? BoardRoad.Kind.PAVED : BoardRoad.Kind.GRAVEL, tunnel.kind());
+                var upper = new BoardSurface(scene, scene.tile(at.translated(d)));
+                var walls = upper.walls(scene, BoardGeometry.floor(scene));
+                float scale = BoardGeometry.hexScale();
+                for (float across : new float[] { -7, 0, 7 }) {
+                    Vector3 eye = new Vector3(across, -5, 4).mul(tunnel.transform());
+                    assertFalse(hit(walls, new Ray(eye, tunnel.along()), 22 * scale),
+                          "Cliff still blocks the carriageway: " + family + " exit " + d + " bridge=" + bridge);
+                }
+                Vector3 above = new Vector3(0, -5, 25).mul(tunnel.transform());
+                Ray roof = new Ray(above, tunnel.along());
+                assertTrue(hit(walls, roof, BoardGeometry.width()) || hit(upper.groundFaces(), roof, BoardGeometry.width()),
+                      "Natural cliff/cap above the arch remains: " + family + " exit " + d + " bridge=" + bridge);
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = { -4, -2, -1, 0, 1 })
+    void bridgeExitsIntoOpenAirOrGroundWithoutHeadroomDoNotAcquirePortals(int rise) {
+        var at = BoardRoadTest.CENTER;
+        var scene = BoardSurfaceBlendTest.scene(c -> {
+            var tile = BoardRoadTest.tile(c, BoardRoad.Kind.NONE, 0, c.equals(at.translated(0)) ? rise : -2,
+                  BoardScene.Surface.ROCK);
+            return c.equals(at) ? bridge(tile, 1) : tile;
+        });
+        assertTrue(BoardTunnel.entrances(scene, scene.tile(at)).isEmpty());
+    }
+
+    private static BoardScene.Tile bridge(BoardScene.Tile t, int exits) {
+        return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(),
+              t.ground(), t.normals(), t.decals(), t.decalsWithoutLimbs(), t.tactical(),
+              List.of(new BoardScene.Feature("bridge", 0, 0, 0, 1, 1, 2, BoardScene.FeatureKind.PROP, exits)),
+              t.text(), t.liquid(), t.foliage(), t.detailedGround(), t.road());
+    }
+
     @Test
     void minesBouldersLeaveBothTunnelMouthsAndTheirApproachesClear() throws Exception {
         var scene = GpuRoadSourceTest.minesScene();

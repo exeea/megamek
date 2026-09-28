@@ -113,7 +113,7 @@ final class GpuTerrain implements Disposable {
     private final GpuTerrainBatch terrainBatch = new GpuTerrainBatch(material -> material.has(Ground.TYPE)
           && !material.has(GpuLiquidShader.Frame.TYPE) && !material.has(GpuWaterShader.TYPE));
     private final GpuTerrainPages terrainPages = new GpuTerrainPages(terrainBatch::eligible);
-    private final ModelBatch batch = new ModelBatch(new DefaultShaderProvider(
+    private final ModelBatch batch = new ModelBatch(GpuShaderManager.provider("Terrain", () -> new DefaultShaderProvider(
           GpuCloudShadow.vertex(GpuUnitShader.linearVertex(DefaultShader.getDefaultVertexShader())),
           GpuCloudShadow.fragment(GpuUnitShader.linearFragment(DefaultShader.getDefaultFragmentShader()), false)) {
         private final DefaultShader.Config groundShader = new DefaultShader.Config(GpuRoads.vertex(config.vertexShader),
@@ -434,10 +434,12 @@ final class GpuTerrain implements Disposable {
             });
             return result;
         }
-    }, terrainBatch);
-    private final ModelBatch depthBatch = new ModelBatch(GpuTreeInstances.depthProvider(new DepthShader.Config(null,
-          GpuShaderSource.read("shadow-depth.frag"))),
+    }), terrainBatch);
+    private final ModelBatch depthBatch = new ModelBatch(GpuShaderManager.provider("Shadows", () ->
+          GpuTreeInstances.depthProvider(new DepthShader.Config(null, GpuShaderSource.read("shadow-depth.frag")))),
           new GpuOpaqueSorter());
+
+    void shadersChanged() { staticShadowValid = false; shadowDirty = true; }
 
     record ShadingDetail(float ripple, float rain) { }
 
@@ -1924,9 +1926,13 @@ final class GpuTerrain implements Disposable {
             }
         }
         for (var tunnel : BoardTunnel.entrances(scene, tile)) {
-            Model model = assets.model(BoardTunnel.ASSET);
+            Model model = assets.model(tunnel.asset());
             if (model == null) { continue; }
             ModelInstance instance = new ModelInstance(model);
+            // The road continues inside with the same world UVs, normal/surface maps and weather response as its approach.
+            Material tunnelFloor = instance.getMaterial("tunnel-floor");
+            tunnelFloor.set(roadMaterial(GpuRoads.texture(tunnel.kind()).substring("roads/".length()), false));
+            tunnelFloor.set(new BridgeDeck());
             instance.transform.set(tunnel.transform());
             BoundingBox bounds = instance.calculateBoundingBox(new BoundingBox()).mul(instance.transform);
             chunk.props.add(new Prop(tile.coords(), instance, bounds, null, false));

@@ -11,6 +11,9 @@ import java.util.Map;
 import java.util.stream.IntStream;
 
 import com.badlogic.gdx.files.FileHandle;
+import com.badlogic.gdx.math.Intersector;
+import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.GdxNativesLoader;
 import megamek.common.Configuration;
 import megamek.common.Hex;
@@ -44,6 +47,7 @@ class BoardBridgeTest {
         var file = new FileHandle(new File(root, BoardBridge.asset(exits) + ".glb"));
         var model = RigidGlb.loadLods(file, root.toPath()).getFirst();
         List<float[]> top = new ArrayList<>();
+        List<float[]> geometry = new ArrayList<>();
         for (var mesh : model.meshes) {
             for (var part : mesh.parts) {
                 for (int i = 0; i < part.indices.length; i += 3) {
@@ -53,6 +57,7 @@ class BoardBridgeTest {
                               triangle, p * 3, 3);
                     }
                     if (triangle[2] == triangle[5] && triangle[5] == triangle[8]) { top.add(triangle); }
+                    geometry.add(triangle);
                 }
             }
         }
@@ -92,7 +97,23 @@ class BoardBridgeTest {
         for (int d = 0; d < 6; d++) {
             var gate = BoardGeometry.center(at.translated(d), 0).sub(center).scl(.499f);
             float z = height(top, gate.x, gate.y);
-            if ((exits & (1 << d)) != 0) { assertEquals(0, z, .001f, "Exit " + d); }
+            if ((exits & (1 << d)) != 0) {
+                assertEquals(0, z, .001f, "Exit " + d);
+                // A vertical ray just inside the deck misses a zero-thickness rail
+                // extruded across its end. A vehicle must also pass through the edge.
+                Vector3 along = new Vector3(gate).nor(), across = new Vector3(along.y, -along.x, 0);
+                for (float offset : new float[] { -6, 0, 6 }) {
+                    Ray crossing = new Ray(new Vector3(gate).mulAdd(along, -.25f).mulAdd(across, offset).add(0, 0, 1), along);
+                    Vector3 hit = new Vector3();
+                    for (float[] triangle : geometry) {
+                        boolean blocked = Intersector.intersectRayTriangle(crossing,
+                              new Vector3(triangle[0], triangle[1], triangle[2]),
+                              new Vector3(triangle[3], triangle[4], triangle[5]),
+                              new Vector3(triangle[6], triangle[7], triangle[8]), hit) && hit.dst(crossing.origin) < .6f;
+                        assertTrue(!blocked, "Barrier across bridge exit " + d + " at " + offset);
+                    }
+                }
+            }
             else { assertEquals(Float.NEGATIVE_INFINITY, z, "Unconnected exit " + d); }
         }
     }

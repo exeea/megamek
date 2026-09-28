@@ -64,7 +64,8 @@ final class GpuTerrainBatch implements RenderableSorter {
             Shader shader = parts.get(from).shader;
             int to = from + 1;
             while (to < parts.size && parts.get(to).shader == shader) { to++; }
-            boolean eligible = shader instanceof DefaultShader;
+            Shader implementation = GpuShaderProvider.unwrap(shader);
+            boolean eligible = implementation instanceof DefaultShader;
             for (int i = from; eligible && i < to; i++) { eligible = eligible(parts.get(i)); }
             if (!eligible) {
                 for (int i = from; i < to; i++) { ordered.add(parts.get(i)); }
@@ -72,7 +73,7 @@ final class GpuTerrainBatch implements RenderableSorter {
                 // Material sorting changes winners at shared depth ties. Reuse state only in the existing order.
                 if (usedGroups == groups.size()) { groups.add(new Group()); }
                 Group group = groups.get(usedGroups++);
-                group.shader = (DefaultShader) shader;
+                group.shader = (DefaultShader) implementation;
                 group.combined.set(parts.get(from));
                 group.combined.shader = group;
                 ordered.add(group.combined);

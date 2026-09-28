@@ -56,22 +56,13 @@ final class GpuCloudShadow extends Attribute {
         source = insert(source, MAIN, declarations + "\n" + (ground ? "" : "in vec3 v_groundBounce;\n") + MAIN);
         if (ground) {
             return insert(source, "albedo *= ambient + direct;",
-                  "#ifdef cloudShadowFlag\nfloat cloudLight = cloudTransmission(v_cloudPosition);\n"
-                        + "direct *= cloudLight;\nsheen *= cloudLight;\n#endif\n"
-                        + "albedo *= ambient + direct;");
+                  GpuShaderSource.read("cloud-surface.glsl") + "\nalbedo *= ambient + direct;");
         }
         int start = source.indexOf(MAIN) + MAIN.length();
         String body = source.substring(start).replace("v_lightDiffuse", "cloudDiffuse")
               .replace("v_lightSpecular", "cloudSpecular").replace("v_ambientLight", "cloudAmbient");
         // Ambient remains separate in libGDX's shadow-enabled scene shaders. Emissive materials are unaffected.
-        return source.substring(0, start) + "\n#ifdef lightingFlag\n"
-              + "float cloudLight = 1.0;\n#ifdef cloudShadowFlag\n"
-              + "cloudLight = cloudTransmission(v_cloudPosition);\n#endif\n"
-              + "vec3 cloudDiffuse = v_lightDiffuse * cloudLight;\n#ifdef specularFlag\n"
-              + "vec3 cloudSpecular = v_lightSpecular * cloudLight;\n#endif\n"
-              + "#if defined(ambientFlag) && defined(separateAmbientFlag)\nvec3 cloudAmbient = v_ambientLight;\n"
-              + "#ifdef normalFlag\ncloudAmbient -= (1.0 - cloudLight) * v_groundBounce;\n#endif\n#endif\n"
-              + "#endif\n" + body;
+        return source.substring(0, start) + "\n" + GpuShaderSource.read("cloud-lighting.glsl") + "\n" + body;
     }
 
     private static String insert(String source, String anchor, String replacement) {

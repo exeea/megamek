@@ -66,18 +66,22 @@ final class GpuHexText implements Disposable {
     }
     private final Map<Plane, List<Page>> groups = new TreeMap<>(Comparator.comparingInt(Plane::elevation)
           .thenComparingDouble(Plane::headroom));
-    private final ShaderProgram shader;
+    private ShaderProgram shader;
     private final Matrix4 transform = new Matrix4();
     private List<BoardScene.Tile> tiles;
     private BitmapFont font;
     private int tuning = -1;
 
     GpuHexText() {
+        shader = GpuShaderManager.program(GpuHexText::program, next -> shader = next);
+    }
+
+    private static ShaderProgram program() {
         String vertex = GpuShaderSource.read("hex-text.vert");
         String fragment = GpuShaderSource.read("hex-text.frag")
               .replace("// GROUND_LAYER", GpuShaderSource.read("ground-layer.glsl"))
               .replace("// CAMERA_DEPTH", GpuShaderSource.read("camera-depth.glsl"));
-        shader = GpuGlsl.compile("GPU hex text", vertex, fragment);
+        return GpuGlsl.compile("GPU hex text", vertex, fragment);
     }
 
     /** The font and roof bounds are borrowed; labels are solely the existing board view's captured text. */
@@ -263,6 +267,6 @@ final class GpuHexText implements Disposable {
         clear();
         tiles = null;
         font = null;
-        shader.dispose();
+        GpuShaderManager.dispose(shader);
     }
 }

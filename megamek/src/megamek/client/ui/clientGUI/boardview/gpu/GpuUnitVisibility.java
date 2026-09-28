@@ -16,6 +16,7 @@ import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.Shader;
 import com.badlogic.gdx.graphics.g3d.shaders.DepthShader;
 import com.badlogic.gdx.graphics.g3d.utils.DepthShaderProvider;
+import com.badlogic.gdx.graphics.g3d.utils.ShaderProvider;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.graphics.glutils.HdpiUtils;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
@@ -29,7 +30,7 @@ import com.badlogic.gdx.utils.ScreenUtils;
 /** Occluded parts of visible units and opted-in markers. Owns GL resources; never changes scene materials or depth. */
 final class GpuUnitVisibility implements Disposable {
     static final float DEFAULT_OUTLINE_INTENSITY = 0.55f;
-    private final ShaderProgram shader;
+    private ShaderProgram shader;
     private final Mesh quad;
     private final ModelBatch colorBatch;
     private final Rectangle screenBounds = new Rectangle();
@@ -39,13 +40,18 @@ final class GpuUnitVisibility implements Disposable {
     private boolean depthCurrent;
 
     GpuUnitVisibility() {
+        shader = GpuShaderManager.program(() -> GpuAtmosphere.shader("unit-visibility.frag"), next -> shader = next);
+        quad = GpuAtmosphere.screenQuad();
+        colorBatch = new ModelBatch(GpuShaderManager.provider("Unit outlines", GpuUnitVisibility::colorProvider),
+              new GpuOpaqueSorter());
+    }
+
+    private static ShaderProvider colorProvider() {
         DepthShader.Config config = new DepthShader.Config();
         config.defaultCullFace = GL20.GL_BACK;
         config.depthBufferOnly = true;
         config.fragmentShader = GpuShaderSource.read("unit-color.frag");
-        shader = GpuAtmosphere.shader("unit-visibility.frag");
-        quad = GpuAtmosphere.screenQuad();
-        colorBatch = new ModelBatch(new DepthShaderProvider(config) {
+        return new DepthShaderProvider(config) {
             @Override
             protected Shader createShader(Renderable renderable) {
                 return new DepthShader(renderable, this.config, GpuGlsl.compile("GPU unit outline",
@@ -60,7 +66,7 @@ final class GpuUnitVisibility implements Disposable {
                     }
                 };
             }
-        }, new GpuOpaqueSorter());
+        };
     }
 
     void render(Camera camera, List<ModelInstance> units, Texture sceneDepth, int bottom, float intensity, float scale) {
@@ -197,6 +203,6 @@ final class GpuUnitVisibility implements Disposable {
         disposeBuffers();
         colorBatch.dispose();
         quad.dispose();
-        shader.dispose();
+        GpuShaderManager.dispose(shader);
     }
 }

@@ -221,9 +221,9 @@ final class GpuTerrainEffects implements Disposable {
     private void initialize() {
         if (shader != null) { return; }
         try {
-            shader = GpuGlsl.compile("GPU terrain fire/smoke",
-                  GpuShaderSource.read("terrain-effects.vert"), GpuShaderSource.read("terrain-effects.frag"));
-            composite = GpuAtmosphere.shader("terrain-effects-composite.frag");
+            shader = GpuShaderManager.program(() -> GpuGlsl.compile("GPU terrain fire/smoke",
+                  GpuShaderSource.read("terrain-effects.vert"), GpuShaderSource.read("terrain-effects.frag")), next -> shader = next);
+            composite = GpuShaderManager.program(() -> GpuAtmosphere.shader("terrain-effects-composite.frag"), next -> composite = next);
             quad = GpuAtmosphere.screenQuad();
             noise = GpuAtmosphere.noise();
             mesh = new Mesh(false, BATCH_SIZE * 8, BATCH_SIZE * 36, VertexAttribute.Position(),
@@ -242,8 +242,8 @@ final class GpuTerrainEffects implements Disposable {
     public void dispose() {
         if (mesh != null) { mesh.dispose(); mesh = null; }
         if (quad != null) { quad.dispose(); quad = null; }
-        if (shader != null) { shader.dispose(); shader = null; }
-        if (composite != null) { composite.dispose(); composite = null; }
+        if (shader != null) { GpuShaderManager.dispose(shader); shader = null; }
+        if (composite != null) { GpuShaderManager.dispose(composite); composite = null; }
         if (noise != null) { noise.dispose(); noise = null; }
         if (buffer != null) { buffer.dispose(); buffer = null; }
         sources.clear(); visible.clear(); tiles = null; motion.clear();

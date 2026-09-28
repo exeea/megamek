@@ -178,11 +178,12 @@ final class GpuHexMasks implements Disposable {
 
     /** Uses the same transparent sorting and GL-state owner as ordinary tactical pages and unit icons. */
     private final class MaskShader implements Shader {
-        private final ShaderProgram program;
+        private ShaderProgram program;
         private RenderContext context;
 
         MaskShader() {
-            program = GpuGlsl.compile("GPU hex mask", GpuShaderSource.read("hex-mask.vert"), GpuShaderSource.read("hex-mask.frag"));
+            program = GpuShaderManager.program(() -> GpuGlsl.compile("GPU hex mask",
+                  GpuShaderSource.read("hex-mask.vert"), GpuShaderSource.read("hex-mask.frag")), next -> program = next);
         }
 
         @Override
@@ -219,7 +220,7 @@ final class GpuHexMasks implements Disposable {
         public int compareTo(Shader other) { return 0; }
 
         @Override
-        public void dispose() { program.dispose(); }
+        public void dispose() { GpuShaderManager.dispose(program); }
     }
 
     boolean active() { return layer != null; }

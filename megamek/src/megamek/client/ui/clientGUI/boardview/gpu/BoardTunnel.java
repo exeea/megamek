@@ -9,8 +9,9 @@ import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
 
 /** Cosmetic portals at authored road exits blocked by a tall wall. Never adds a game connection. */
-record BoardTunnel(Coords road, Vector3 origin, Vector3 along) {
+record BoardTunnel(Coords road, Vector3 origin, Vector3 along, BoardRoad.Kind kind, boolean bridge) {
     static final String ASSET = "road-tunnel";
+    static final String BRIDGE_ASSET = "road-tunnel-bridge";
     // Asset contract: tools/build_tunnel_asset.py. +Y points into the cliff, Z is up.
     static final float HALF_WIDTH = 9.5f;
     static final float SPRING = 6;
@@ -18,22 +19,38 @@ record BoardTunnel(Coords road, Vector3 origin, Vector3 along) {
     static final int ARCH_SEGMENTS = 16;
 
     static List<BoardTunnel> entrances(BoardScene scene, BoardScene.Tile tile) {
-        if (!BoardRoad.rendered(tile)) { return List.of(); }
         List<BoardTunnel> result = new ArrayList<>();
-        for (int d = 0; d < 6; d++) {
-            if ((tile.roadExits() & 1 << d) == 0) { continue; }
-            var next = scene.tile(tile.coords().translated(d));
-            if (next == null || next.liquid().present() || next.elevation() - tile.elevation() <= 2
-                  || BoardSurface.hasRoadApproach(tile, next, d)
-                  || (next.elevation() - tile.elevation()) * BoardGeometry.level() < 20 * BoardGeometry.hexScale()) { continue; }
-            Vector3 center = BoardGeometry.center(tile.coords(), tile.elevation());
-            Vector3 neighbor = BoardGeometry.center(next.coords(), tile.elevation());
-            Vector3 along = new Vector3(neighbor).sub(center).nor();
-            Vector3 origin = center.lerp(neighbor, .5f).mulAdd(along, -3 * BoardGeometry.hexScale());
-            result.add(new BoardTunnel(tile.coords(), origin, along));
+        if (BoardRoad.rendered(tile)) {
+            entrances(scene, tile, tile.roadExits(), tile.elevation(), tile.road(), false, result);
+        }
+        for (var feature : tile.features()) {
+            if (feature.asset().equals("bridge")) {
+                entrances(scene, tile, feature.bridgeExits(), tile.elevation() + feature.elevation(),
+                      BoardRoad.Kind.PAVED, true, result);
+            }
         }
         return List.copyOf(result);
     }
+
+    private static void entrances(BoardScene scene, BoardScene.Tile tile, int exits, float elevation,
+          BoardRoad.Kind kind, boolean bridge, List<BoardTunnel> result) {
+        for (int d = 0; d < 6; d++) {
+            if ((exits & 1 << d) == 0) { continue; }
+            var next = scene.tile(tile.coords().translated(d));
+            if (next == null || next.liquid().present()
+                  || (next.elevation() - elevation) * BoardGeometry.level() < 20 * BoardGeometry.hexScale()) { continue; }
+            // Ground roads keep their existing two-hex grading. A suspended deck instead meets the cliff at deck height.
+            if (!bridge && (next.elevation() - elevation <= 2 || BoardSurface.hasRoadApproach(tile, next, d))) { continue; }
+            Vector3 center = BoardGeometry.center(tile.coords(), elevation);
+            Vector3 neighbor = BoardGeometry.center(next.coords(), elevation);
+            Vector3 along = new Vector3(neighbor).sub(center).nor();
+            Vector3 origin = center.lerp(neighbor, .5f).mulAdd(along, -3 * BoardGeometry.hexScale());
+            origin.z += GpuRoads.SURFACE_LIFT * BoardGeometry.hexScale();
+            result.add(new BoardTunnel(tile.coords(), origin, along, kind, bridge));
+        }
+    }
+
+    String asset() { return bridge ? BRIDGE_ASSET : ASSET; }
 
     Matrix4 transform() {
         float turn = (float) Math.toDegrees(Math.atan2(-along.x, along.y));
@@ -51,7 +68,8 @@ record BoardTunnel(Coords road, Vector3 origin, Vector3 along) {
         Vector3 p = local(base);
         float scale = BoardGeometry.hexScale(), r = radius / scale;
         if (p.z >= 20 || p.z + height / scale <= -1) { return false; }
-        boolean shell = Math.abs(p.x) < 18 + r && p.y > -7 - r && p.y < DEPTH + r;
+        boolean shell = Math.abs(p.x) < (bridge ? 13.3f : 18) + r
+              && p.y > (bridge ? -.1f : -7) - r && p.y < DEPTH + r;
         boolean approach = Math.abs(p.x) < HALF_WIDTH + 1 + r && p.y > -36 - r && p.y < r;
         return shell || approach;
     }

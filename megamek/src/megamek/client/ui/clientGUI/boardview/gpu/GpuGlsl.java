@@ -96,6 +96,7 @@ final class GpuGlsl {
      * The successful sources are compiled again by libGDX to retain its normal uniform and context management.
      */
     private static ShaderProgram compilePrepared(String name, String vertex, String fragment) {
+        GpuShaderManager.compiling(name, vertex, fragment);
         export(name, vertex, fragment);
         int vertexHandle = 0, fragmentHandle = 0, program = 0;
         var gl = Gdx.gl20;
@@ -121,7 +122,14 @@ final class GpuGlsl {
         try {
             ShaderProgram.prependVertexCode = "";
             ShaderProgram.prependFragmentCode = "";
-            ShaderProgram result = new ShaderProgram(vertex, fragment);
+            boolean editable = GpuShaderManager.current() != null;
+            ShaderProgram result = new ShaderProgram(vertex, fragment) {
+                @Override
+                public int fetchUniformLocation(String uniform, boolean pedantic) {
+                    // A preview may temporarily stop using an input, which the GL compiler then removes.
+                    return super.fetchUniformLocation(uniform, pedantic && !editable);
+                }
+            };
             if (!result.isCompiled()) { throw new GdxRuntimeException(name + ": " + result.getLog()); }
             return result;
         } finally {

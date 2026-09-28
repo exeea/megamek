@@ -64,11 +64,7 @@ final class GpuUnitShader extends DefaultShader {
         source = GpuGlsl.libGdx(source, true);
         source = replaceOnce(source, MAIN, lightModel() + "\nout vec3 v_groundBounce;\n" + MAIN, "vertex");
         String ambient = "#endif // sphericalHarmonicsFlag";
-        return replaceOnce(source, ambient, ambient + "\n#if defined(ambientFlag) && defined(normalFlag)\n"
-              + "vec3 sunOnGround = vec3(0.0);\n#if numDirectionalLights > 0\n"
-              + "sunOnGround = u_dirLights[0].color * max(0.0, -u_dirLights[0].direction.z);\n#endif\n"
-              + "v_groundBounce = hemisphere(vec3(0.0), sunOnGround, GROUND_ALBEDO, normal.z);\n"
-              + "ambientLight = hemisphere(ambientLight, sunOnGround, GROUND_ALBEDO, normal.z);\n#endif\n", "vertex");
+        return replaceOnce(source, ambient, ambient + "\n" + GpuShaderSource.read("linear-ambient.glsl") + "\n", "vertex");
     }
 
     /**
@@ -79,11 +75,9 @@ final class GpuUnitShader extends DefaultShader {
         source = GpuGlsl.libGdx(source, false);
         source = replaceOnce(source, MAIN, lightModel() + "\n" + MAIN, "fragment");
         String lit = "#if (!defined(lightingFlag))";
-        source = replaceOnce(source, lit, "#ifdef lightingFlag\nvec3 displayEmissive = emissive.rgb;\n"
-              + "emissive.rgb = vec3(0.0);\ndiffuse.rgb = toLinear(diffuse.rgb);\n#endif\n" + lit, "fragment");
+        source = replaceOnce(source, lit, GpuShaderSource.read("linear-material.glsl") + "\n" + lit, "fragment");
         String fog = "#endif // end fogFlag";
-        return replaceOnce(source, fog, fog + "\n#ifdef lightingFlag\n"
-              + "fragColor.rgb = toDisplay(fragColor.rgb) + displayEmissive;\n#endif\n", "fragment");
+        return replaceOnce(source, fog, fog + "\n" + GpuShaderSource.read("linear-output.glsl") + "\n", "fragment");
     }
 
     private static String lightModel() {

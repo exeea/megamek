@@ -27,7 +27,7 @@ final class GpuClouds implements Disposable {
     static final float MAX_MOTION_STRENGTH = 1.0f;
 
 
-    private final ShaderProgram shadowShader;
+    private ShaderProgram shadowShader;
     private final Texture noise;
     private final FrameBuffer shadow;
     private final Mesh quad;
@@ -43,18 +43,18 @@ final class GpuClouds implements Disposable {
 
     GpuClouds(Mesh quad) {
         this.quad = quad;
-        shadowShader = GpuAtmosphere.shader("cloud-transmission.frag");
+        shadowShader = GpuShaderManager.program(() -> GpuAtmosphere.shader("cloud-transmission.frag"), next -> shadowShader = next);
         try {
             noise = GpuAtmosphere.noise();
         } catch (RuntimeException failure) {
-            shadowShader.dispose();
+            GpuShaderManager.dispose(shadowShader);
             throw failure;
         }
         try {
             shadow = GpuAtmosphere.buffer(SHADOW_SIZE, SHADOW_SIZE, false);
         } catch (RuntimeException failure) {
             noise.dispose();
-            shadowShader.dispose();
+            GpuShaderManager.dispose(shadowShader);
             throw failure;
         }
         shadow.getColorBufferTexture().setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
@@ -149,6 +149,6 @@ final class GpuClouds implements Disposable {
     public void dispose() {
         shadow.dispose();
         noise.dispose();
-        shadowShader.dispose();
+        GpuShaderManager.dispose(shadowShader);
     }
 }

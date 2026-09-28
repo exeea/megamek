@@ -160,6 +160,7 @@ class GpuBattleView extends ApplicationAdapter {
     private boolean waitingForAssetCapture;
     private boolean assetReloadFailed;
     private boolean disposed;
+    private final GpuShaderManager shaderEdits = new GpuShaderManager();
 
     GpuBattleView(BoardSource source) {
         this.source = source;
@@ -173,7 +174,7 @@ class GpuBattleView extends ApplicationAdapter {
     /** Attach the first map after the native loading window is already visible. Runs on the render thread. */
     void attachSource(BoardSource next) {
         source = next;
-        createBoard();
+        shaderEdits.run(this::createBoard);
     }
 
     void prepareEntrance() {
@@ -190,6 +191,10 @@ class GpuBattleView extends ApplicationAdapter {
 
     @Override
     public void create() {
+        shaderEdits.run(this::createView);
+    }
+
+    private void createView() {
         if (source == null) {
             createLoadingStage();
             Gdx.input.setInputProcessor(new InputMultiplexer(loadingStage));
@@ -259,7 +264,7 @@ class GpuBattleView extends ApplicationAdapter {
         tactical = new GpuTactical(terrain::tacticalSurface);
         atmosphere = new GpuAtmosphere();
         unitVisibility = new GpuUnitVisibility();
-        unitBatch = new ModelBatch(GpuUnitShader.provider(), new GpuOpaqueSorter());
+        unitBatch = new ModelBatch(GpuShaderManager.provider("Units", GpuUnitShader::provider), new GpuOpaqueSorter());
         annotationBatch = new SpriteBatch();
         hexText = new GpuHexText();
         lines = new ShapeRenderer();
@@ -315,6 +320,11 @@ class GpuBattleView extends ApplicationAdapter {
 
     @Override
     public void render() {
+        shaderEdits.run(this::renderBoard);
+    }
+
+    private void renderBoard() {
+        if (!waitingForAssetCapture && shaderEdits.update() && terrain != null) { terrain.shadersChanged(); }
         if (ui != null && ui.takeAssetReloadRequest()) { reloadAssets(); }
         if (waitingForAssetCapture || assetReloadFailed) {
             if (source.isClosed()) { Gdx.app.exit(); return; }
@@ -341,7 +351,7 @@ class GpuBattleView extends ApplicationAdapter {
         SwingUtilities.invokeLater(() -> {
             try {
                 source.reloadAssets();
-                application.postRunnable(() -> {
+                application.postRunnable(() -> shaderEdits.run(() -> {
                     if (disposed || source.isClosed()) { return; }
                     waitingForAssetCapture = false;
                     try {
@@ -364,7 +374,7 @@ class GpuBattleView extends ApplicationAdapter {
                     } catch (RuntimeException failure) {
                         assetReloadFailed(failure);
                     }
-                });
+                }));
             } catch (java.io.IOException | RuntimeException failure) {
                 application.postRunnable(() -> {
                     if (!disposed && !source.isClosed()) { assetReloadFailed(failure); }
@@ -1898,6 +1908,11 @@ class GpuBattleView extends ApplicationAdapter {
 
     @Override
     public void dispose() {
+        try { shaderEdits.run(this::disposeView); }
+        finally { shaderEdits.close(); }
+    }
+
+    private void disposeView() {
         disposed = true;
         if (loadingStage != null) {
             loadingStage.dispose();

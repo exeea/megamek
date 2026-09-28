@@ -46,6 +46,7 @@ import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.function.Supplier;
+import javax.swing.text.JTextComponent;
 
 import megamek.client.ui.boardeditor.BoardEditorPanel;
 import megamek.client.ui.clientGUI.GUIPreferences;
@@ -127,6 +128,12 @@ public class MegaMekController implements KeyEventDispatcher {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent evt) {
+
+        // Text controls own typing and editing shortcuts, including in nonmodal editor windows.
+        if (evt.getComponent() instanceof JTextComponent) {
+            stopAllRepeating();
+            return false;
+        }
 
         // Don't consider hotkeys when the clientGUI has a dialog visible
         if (((clientGUI != null) && clientGUI.shouldIgnoreHotKeys())

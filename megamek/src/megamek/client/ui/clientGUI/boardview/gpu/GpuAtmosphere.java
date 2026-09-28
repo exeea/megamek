@@ -98,8 +98,8 @@ final class GpuAtmosphere implements Disposable {
     }
 
     private final Mesh quad;
-    private final ShaderProgram fogShader;
-    private final ShaderProgram compositeShader;
+    private ShaderProgram fogShader;
+    private ShaderProgram compositeShader;
     private FrameBuffer sceneColor;
     private Texture sceneDepth;
     private FrameBuffer fog;
@@ -159,11 +159,11 @@ final class GpuAtmosphere implements Disposable {
     }
 
     GpuAtmosphere() {
-        fogShader = shader("atmosphere-fog.frag");
+        fogShader = GpuShaderManager.program(() -> shader("atmosphere-fog.frag"), next -> fogShader = next);
         try {
-            compositeShader = shader("atmosphere-composite.frag");
+            compositeShader = GpuShaderManager.program(() -> shader("atmosphere-composite.frag"), next -> compositeShader = next);
         } catch (RuntimeException failure) {
-            fogShader.dispose();
+            GpuShaderManager.dispose(fogShader);
             throw failure;
         }
         quad = screenQuad();
@@ -604,7 +604,7 @@ final class GpuAtmosphere implements Disposable {
         if (clouds != null) { clouds.dispose(); }
         if (groundNoise != null) { groundNoise.dispose(); }
         quad.dispose();
-        fogShader.dispose();
-        compositeShader.dispose();
+        GpuShaderManager.dispose(fogShader);
+        GpuShaderManager.dispose(compositeShader);
     }
 }

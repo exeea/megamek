@@ -56,20 +56,6 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     /** Floats per tree: x, y, z and the horizontal scale; the cosine and sine of its turn, its vertical scale and 0. */
     static final int STRIDE = 8;
     private static final String MAIN = "void main() {";
-    /**
-     * The instance attributes sit at the same fixed locations in every program. A tree mesh keeps one vertex array
-     * object for the colour and depth shaders alike, and a location made per-instance by one of them must never carry
-     * another shader's per-vertex data.
-     */
-    private static final String DECLARATIONS = """
-          layout(location = 14) in vec4 a_instance0;
-          layout(location = 15) in vec4 a_instance1;
-          vec3 instanceTurn(vec3 v) {
-              return vec3(a_instance1.x * v.x - a_instance1.y * v.y, a_instance1.y * v.x + a_instance1.x * v.y, v.z);
-          }
-          vec3 instancePosition(vec3 p) { return instanceTurn(p * vec3(a_instance0.w, a_instance0.w, a_instance1.z)) + a_instance0.xyz; }
-          vec3 instanceNormal(vec3 n) { return normalize(instanceTurn(n / vec3(a_instance0.w, a_instance0.w, a_instance1.z))); }
-          """;
 
     /** One tree model at one detail level in one pass: an instanced copy of its mesh and a renderable per part. */
     private final class Batch implements Disposable {
@@ -214,7 +200,7 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
 
     /** The scene vertex shader, placing each vertex by its tree's instance data instead of the world transform. */
     static String vertex(String source) {
-        source = insert(source, MAIN, DECLARATIONS + MAIN);
+        source = insert(source, MAIN, GpuShaderSource.read("tree-instances.glsl") + "\n" + MAIN);
         source = insert(source, "vec4 pos = u_worldTrans * vec4(a_position, 1.0);",
               "vec4 pos = vec4(instancePosition(a_position), 1.0);");
         return insert(source, "vec3 normal = normalize(u_normalMatrix * a_normal);", "vec3 normal = instanceNormal(a_normal);");
@@ -250,7 +236,7 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     }
 
     private static String depthVertex(String source) {
-        source = insert(source, MAIN, DECLARATIONS + "uniform mat4 u_projViewTrans;\n" + MAIN);
+        source = insert(source, MAIN, GpuShaderSource.read("tree-instances.glsl") + "\nuniform mat4 u_projViewTrans;\n" + MAIN);
         return insert(source, "vec4 pos = u_projViewWorldTrans * vec4(a_position, 1.0);",
               "vec4 pos = u_projViewTrans * vec4(instancePosition(a_position), 1.0);");
     }

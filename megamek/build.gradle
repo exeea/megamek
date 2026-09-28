@@ -58,6 +58,8 @@ dependencies {
 
     implementation 'com.formdev:flatlaf:3.7.1'
     implementation 'com.formdev:flatlaf-extras:3.7.1'
+    // The board's shader editor reuses a full text editor (undo, folding, search and syntax highlighting).
+    implementation 'com.fifesoft:rsyntaxtextarea:3.6.0'
 
     implementation 'com.sun.mail:jakarta.mail:2.0.2'
 

@@ -623,6 +623,21 @@ final class GpuBoardTuning {
         buttons.add(reloadAssets).width(110).height(24).padLeft(8);
         buttons.add(assetReloadStatus).minWidth(0).growX().left().padLeft(8).padRight(8);
         panel.add(buttons).growX().padTop(4).row();
+        GpuShaderManager shaderEdits = GpuShaderManager.current();
+        TextButton editShaders = new TextButton("Edit shaders", skin, "menu-control");
+        editShaders.setName("tuning-edit-shaders");
+        editShaders.setDisabled(shaderEdits == null);
+        editShaders.setProgrammaticChangeEvents(false);
+        editShaders.addListener(new TextTooltip("Edit GLSL with live preview on this board. "
+              + "Invalid edits keep the last working shaders; save only when you are ready.", skin, "menu"));
+        editShaders.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                editShaders.setChecked(false);
+                if (shaderEdits != null) { shaderEdits.showEditor(); }
+            }
+        });
+        panel.add(editShaders).left().height(24).padTop(4).row();
         restoreDefaults();
     }
 

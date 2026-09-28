@@ -23,7 +23,7 @@ void grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
     vec2 direction = vec2(cos(angle), sin(angle));
     vec3 side = vec3(-direction.y, direction.x, 0.0);
     float meadow = meadowCover(root.xy / u_worldMetre);
-    float height = u_coverHexWidth * mix(.018, .043, variation) * mix(.55, 1.0, meadow);
+    float height = u_coverHexWidth * mix(.025, .07, variation) * mix(.55, 1.0, meadow);
     float width = u_coverHexWidth * mix(.0015, .0028, grassRandom(seed + 37u)) * mix(.75, 1.0, meadow);
     float pixels = u_coverPixels / max(.001, abs((u_projViewTrans * vec4(root, 1.0)).w));
     float density = smoothstep(GRASS_START_PIXELS, GRASS_FULL_PIXELS, pixels) * GRASS_ROOTS_PER_HEX;

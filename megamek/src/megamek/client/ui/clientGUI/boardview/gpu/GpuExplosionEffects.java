@@ -78,7 +78,8 @@ final class GpuExplosionEffects implements Disposable {
     void render(Camera camera, GpuEffectDepth snapshot) {
         if (count == 0) { return; }
         if (shader == null) {
-            shader = GpuGlsl.compile("GPU explosion", GpuShaderSource.read("explosion.vert"), GpuShaderSource.read("explosion.frag"));
+            shader = GpuShaderManager.program(() -> GpuGlsl.compile("GPU explosion",
+                  GpuShaderSource.read("explosion.vert"), GpuShaderSource.read("explosion.frag")), next -> shader = next);
             // The same unit cube bounds every analytic volume. Allocate/upload once, then move it with uniforms.
             proxy = new Mesh(true, 8, 36, VertexAttribute.Position());
             proxy.setVertices(new float[] {
@@ -132,7 +133,7 @@ final class GpuExplosionEffects implements Disposable {
     public void dispose() {
         ownDepth.dispose();
         if (proxy != null) { proxy.dispose(); proxy = null; }
-        if (shader != null) { shader.dispose(); shader = null; }
+        if (shader != null) { GpuShaderManager.dispose(shader); shader = null; }
         begin();
     }
 }

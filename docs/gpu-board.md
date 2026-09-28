@@ -1045,6 +1045,47 @@ all board shader programs, including unit materials, atmosphere/clouds/weather, 
 water and combat effects. Inactive effects compile when next drawn. Shader compile errors during reload leave
 the tuning panel available for another attempt after correcting the file; diagnostics are written to the log.
 
+The shader resources also contain the snippets inserted into libGDX's shaders: `tree-instances.glsl` is shared by
+the colour and shadow-depth passes, `water-spray.glsl` animates waterfall spray, `cloud-lighting.glsl` and
+`cloud-surface.glsl` apply cloud shadows, and `linear-ambient.glsl`, `linear-material.glsl`, and `linear-output.glsl`
+adapt surface lighting. `road-mask.vert` and `terrain-blend.vert` pass terrain attributes to the fragment stage.
+These files use the same overrides and editor drafts as the other shader resources. Java retains the insertion
+points, calls, material flags, shared constant substitutions, and libGDX compatibility adapter; shader bodies live
+in the resources. Snippets are inserted at the locations described in their header comments, rather than compiled
+as standalone stages.
+
+The integrated alternative is **GPU Tuning > Edit shaders**: a resizable GLSL editor beside the live board, with
+file tabs, syntax highlighting, folding, line numbers, undo/redo, search/replace and Ctrl+wheel font sizing.
+**Live preview** is enabled initially. After a 500 ms pause in typing, the board's `GpuShaderManager` compiles the
+affected programs on the render thread and publishes them together between frames. Shared `.glsl` edits update
+every dependent material variant already used by the board. Meshes, textures, camera, game state and animation
+clocks remain in their existing owners; shader edits do not invoke Reload assets or rebuild the terrain.
+Invalid compilation/linking or incompatible existing input types leave all current programs working. Errors
+appear in the editor; **Show failed source** exposes the complete stages with the driver's line numbers, and
+**Compiled sources** inspects the currently active variants. Inactive effects are checked when first drawn;
+an invalid draft then falls back to its original shader and reports the failure. New uniforms or vertex inputs
+still require bindings in the renderer. Compilation can briefly stall a frame, particularly for shared files
+with many material variants; the debounce is not a guarantee of compiler latency.
+
+Typing changes an in-memory preview. **Apply / Ctrl+Enter** compiles immediately; **Save all / Ctrl+S** applies
+and saves edited files, and **Revert file** restores the selected file's last saved text. **Ctrl+F** focuses search.
+If typing continues during a requested save, it waits for the latest edit to compile successfully; a compilation
+failure cancels that save. **Reload file** rereads the selected file after edits outside MegaMek.
+The path below each file shows where Save writes: an existing override, a checkout resource, or a new
+`data/shaders/` override for a bundled resource. Saving refuses to overwrite a file changed by another editor.
+Closing the editor hides it and retains its drafts for that board window; closing the board ends the preview.
+
+For SHADERed or another desktop GLSL editor, add `-Dmegamek.gpu.shaderExport=<directory>` to MegaMek's JVM options.
+Each compiled board program writes a complete `.vert`/`.frag` pair there, including the material defines, shared
+functions and any adapted libGDX source. Matching filenames identify a pair; the content-derived suffix keeps
+different material variants separate. Exports use the runtime's selected GLSL version; add
+`-Dmegamek.gpu.glsl=330` to check the minimum standard. Open a pair in a SHADERed shader pass and configure its vertex
+inputs, uniforms and textures ([SHADERed shader passes](https://shadered.org/docs/shaderpass.html)). These are shader
+source exports, not captures of the scene's buffers, texture contents or uniform values. Programs are exported when
+first used or reloaded, so draw the relevant material/effect before looking for it. Exported files are inspection/editing
+copies; bring changes back to the corresponding resource or `data/shaders/` override, then use **Reload assets**.
+Standalone stages can also be opened directly; snippets and terrain/unit variants need the assembled export.
+
 The Tuning panel has two tabs. **General** contains camera projection, geometry, family sizes, overview icons, visibility, field of view,
 sensor range and damage preview. **Atmosphere** contains planetary presets, lighting, planetary properties,
 weather and light/fog effects. Each tab retains its scroll position; the shared **Defaults** button resets
@@ -1399,10 +1440,15 @@ the classic board keeps its ground labels.
   there (the panel's "In use" line shows the card that draws); and computers
   where Java2D's Direct3D pipeline creates a device before the board opens (on the
   Iris Xe the JDK leaves that pipeline off). Tessellation shaders need 4.00 and
-  compute shaders 4.30. The shaders keep the GLSL 1.x spelling that libGDX's
-  built-in shaders use (`attribute`, `varying`, `texture2D`, `gl_FragColor`); a
-  prefix on every compiled shader maps it onto the chosen version. The explicit
-  `#version` makes every driver apply the same rules. With Mesa llvmpipe
+  compute shaders 4.30. Board shaders use GLSL 3.30 core syntax: `in`/`out`,
+  `texture`/`textureLod` and an explicit fragment output at location 0. Complete
+  resource stages declare `#version 330 core`; the runtime replaces that version
+  and inserts material defines after it. Shared snippets, including
+  `unit-material.vert` and `unit-material.frag`, are not standalone stages.
+  libGDX's scene/depth source is adapted before board code is inserted. The
+  global legacy prefixes remain only for unmodified libGDX programs such as
+  SpriteBatch and ShapeRenderer; board programs compile without those prefixes.
+  The explicit `#version` makes every driver apply the same rules. With Mesa llvmpipe
   (OpenGL 4.5 core, so GLSL 4.50) the 84 board smoke tests fail only as they do
   on the OpenGL 2.0 baseline, for missing skin, building and unit art. On the
   Iris Xe (OpenGL 4.6, GLSL 4.60) `GpuShadowSmokeTest`,

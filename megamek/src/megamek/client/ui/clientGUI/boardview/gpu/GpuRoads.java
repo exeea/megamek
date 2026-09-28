@@ -96,9 +96,8 @@ final class GpuRoads {
     private GpuRoads() { }
 
     static String vertex(String source) {
-        return source.replace("void main()", "#ifdef roadMaskFlag\nin vec2 a_roadMaskUV;\n"
-                    + "out vec2 v_roadMaskUV;\n#endif\nvoid main()")
-              .replace("void main() {", "void main() {\n#ifdef roadMaskFlag\nv_roadMaskUV = a_roadMaskUV;\n#endif\n");
+        return source.replace("void main() {",
+              GpuShaderSource.read("road-mask.vert") + "\nvoid main() {\nroadMaskCoordinates();\n");
     }
 
     static FloatAttribute attribute(Patch patch) {
@@ -109,7 +108,7 @@ final class GpuRoads {
         return new Surface(transition ? patch.texture().equals("roads/dirt") ? 2 : 1 : finish);
     }
 
-    private static String texture(BoardRoad.Kind kind) {
+    static String texture(BoardRoad.Kind kind) {
         return "roads/" + switch (kind) {
             case PAVED, ALLEY -> "asphalt";
             case GRAVEL -> "gravel";

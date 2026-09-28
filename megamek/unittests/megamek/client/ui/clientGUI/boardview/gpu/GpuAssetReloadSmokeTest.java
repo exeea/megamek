@@ -173,14 +173,14 @@ class GpuAssetReloadSmokeTest {
                             GpuBoardTestUi.click("tuning-reload-assets");
                             step = 2;
                         } else if (step == 2 && !button.isDisabled()) {
-                            assertTrue(status.getText().toString().startsWith("Reload failed"));
+                            assertEquals("FAIL (logs)", status.getText().toString());
                             Files.write(tileset, tilesetBytes);
                             rockBytes = Files.readAllBytes(rockMesh);
                             Files.writeString(rockMesh, "unfinished GLB export");
                             GpuBoardTestUi.click("tuning-reload-assets");
                             step = 3;
                         } else if (step == 3 && !button.isDisabled()) {
-                            assertTrue(status.getText().toString().startsWith("Reload failed"));
+                            assertEquals("FAIL (logs)", status.getText().toString());
                             // A failure after GPU disposal still leaves the panel usable and the board unpickable.
                             Gdx.input.getInputProcessor().mouseMoved(100, 200);
                             Gdx.input.getInputProcessor().touchDown(100, 200, 0, com.badlogic.gdx.Input.Buttons.LEFT);
@@ -193,13 +193,13 @@ class GpuAssetReloadSmokeTest {
                             GpuBoardTestUi.click("tuning-reload-assets");
                             step = 5;
                         } else if (step == 5 && !button.isDisabled()) {
-                            assertTrue(status.getText().toString().startsWith("Reload failed"));
+                            assertEquals("FAIL (logs)", status.getText().toString());
                             Files.writeString(shaders.resolve("atmosphere-composite.frag"), compositeSource);
                             Files.writeString(shaders.resolve("unit-material.frag"), "invalid shader source");
                             GpuBoardTestUi.click("tuning-reload-assets");
                             step = 6;
                         } else if (step == 6 && !button.isDisabled()) {
-                            assertTrue(status.getText().toString().startsWith("Reload failed"));
+                            assertEquals("FAIL (logs)", status.getText().toString());
                             // This failure occurs inside the scene framebuffer, after a ModelBatch has begun.
                             assertEquals(0, GL11.glGetInteger(GL20.GL_FRAMEBUFFER_BINDING));
                             GpuBoardTestUi.stage().draw();
@@ -253,7 +253,9 @@ class GpuAssetReloadSmokeTest {
 
     private static void addPrograms(Map<String, ShaderProgram> result, String name, ModelBatch batch) throws Exception {
         int index = 0;
-        for (Object shader : (Iterable<?>) field(batch.getShaderProvider(), "shaders")) {
+        var provider = batch.getShaderProvider();
+        if (provider instanceof GpuShaderProvider editable) { provider = editable.active(); }
+        for (Object shader : (Iterable<?>) field(provider, "shaders")) {
             result.put(name + index++, (ShaderProgram) field(shader, "program"));
         }
     }

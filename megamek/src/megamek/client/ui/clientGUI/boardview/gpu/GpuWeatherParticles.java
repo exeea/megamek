@@ -21,7 +21,7 @@ final class GpuWeatherParticles implements Disposable {
     private static final int BASE_PARTICLES = 768;
     private static final int PARTICLES = BASE_PARTICLES * 6;
     private static final int[] DENSITY_MULTIPLIERS = { 6, 6, 4 };
-    private final ShaderProgram shader;
+    private ShaderProgram shader;
     private final Mesh mesh;
     private final Vector3 right = new Vector3();
     private final Vector3 origin = new Vector3();
@@ -32,8 +32,8 @@ final class GpuWeatherParticles implements Disposable {
     private float top;
 
     GpuWeatherParticles() {
-        shader = GpuGlsl.compile("GPU precipitation",
-              GpuShaderSource.read("weather-particles.vert"), GpuShaderSource.read("weather-particles.frag"));
+        shader = GpuShaderManager.program(() -> GpuGlsl.compile("GPU precipitation",
+              GpuShaderSource.read("weather-particles.vert"), GpuShaderSource.read("weather-particles.frag")), next -> shader = next);
         float[] vertices = new float[PARTICLES * 4 * 5];
         short[] indices = new short[PARTICLES * 6];
         Random random = new Random(20260918);
@@ -132,6 +132,6 @@ final class GpuWeatherParticles implements Disposable {
     @Override
     public void dispose() {
         mesh.dispose();
-        shader.dispose();
+        GpuShaderManager.dispose(shader);
     }
 }
