@@ -119,6 +119,7 @@ final class UnitEquipmentAssembly {
         for (Pending item : pending) {
             attach(library, assembled, item, areas, bindings, holding.contains(item.point().location()));
         }
+        warnOverUnitBudget(descriptor, body, pending);
         shareJumpJets(assembled, sharedJets, drawnJets, bindings);
         // An arm holding a gun shows the chassis's gun body in place of its hand; any other arm keeps its hand.
         for (String arm : new String[] { "LA", "RA" }) {
@@ -129,6 +130,38 @@ final class UnitEquipmentAssembly {
         }
         chooseVents(descriptor, structure, assembled, bindings);
         return bindings;
+    }
+
+    /**
+     * Logs a warning for each level of detail at which this assembled unit, body plus fitted equipment, passes its
+     * {@link UnitModelDescriptor#UNIT_TRIANGLE_BUDGETS budget}. The unit is still drawn in full; the warning names
+     * the body and splits the count, so it shows whether the body or the loadout needs lightening. A level is only
+     * checked when the body authors it: a body without its own LOD1 or LOD2 never draws at that budget. Equipment
+     * without a level of its own counts at its nearest more detailed one. Jump jets sharing a drawn nozzle add no
+     * geometry and are not counted.
+     *
+     * @param descriptor the unit's assembly descriptor, which names its body
+     * @param body       the bare body
+     * @param drawn      the equipment modules attached to the unit
+     */
+    private static void warnOverUnitBudget(JsonValue descriptor, GpuUnitModels.ModularAsset body, List<Pending> drawn) {
+        List<Integer> budgets = UnitModelDescriptor.UNIT_TRIANGLE_BUDGETS;
+        for (int level = 0; level < budgets.size(); level++) {
+            boolean isAuthoredLevel = (level == 0) || (body.model(level) != body.model(level - 1));
+            if (!isAuthoredLevel) {
+                continue;
+            }
+            int equipment = 0;
+            for (Pending item : drawn) {
+                equipment += item.module().triangles(level);
+            }
+            int total = body.triangles(level) + equipment;
+            if (total > budgets.get(level)) {
+                LOGGER.warn("[UnitBudget] {}: LOD{} draws {} triangles (body {} + {} fitted modules {}), over the"
+                            + " {} budget; drawn anyway", descriptor.getString("body", "?"), level, total,
+                      body.triangles(level), drawn.size(), equipment, budgets.get(level));
+            }
+        }
     }
 
     /**

@@ -2,7 +2,6 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -17,10 +16,8 @@ import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
-import com.badlogic.gdx.graphics.g3d.loader.G3dModelLoader;
 import com.badlogic.gdx.graphics.g3d.model.Node;
 import com.badlogic.gdx.graphics.g3d.model.NodePart;
-import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
@@ -37,7 +34,6 @@ final class GpuUnitModels implements Disposable {
     private static final MMLogger LOGGER = MMLogger.create(GpuUnitModels.class);
     private final Path root;
     private final Map<Path, JsonValue> descriptors = new HashMap<>();
-    private final Map<Path, GpuUnitModel> models = new HashMap<>();
     private final Map<Path, ModularAsset> modular = new HashMap<>();
     private final Map<Integer, Assembly> assemblies = new HashMap<>();
     private final Set<Path> failed = new HashSet<>();
@@ -77,12 +73,6 @@ final class GpuUnitModels implements Disposable {
         }
     }
 
-    /** GLB is the deployed format; existing custom G3DJ descriptors remain readable. No GPU allocation here. */
-    static ModelData meshData(FileHandle file) {
-        return file.extension().equals("glb") ? RigidGlb.loadLods(file).getFirst()
-              : new G3dModelLoader(new JsonReader()).loadModelData(file);
-    }
-
     JsonValue descriptor(String asset) {
         Path file = root.resolve(asset).normalize();
         try {
@@ -104,7 +94,8 @@ final class GpuUnitModels implements Disposable {
                 var value = UnitModelDescriptor.read(descriptor);
                 Path mesh = UnitModelDescriptor.contained(root, descriptor.getParent().resolve(value.mesh()));
                 var file = new FileHandle(mesh.toFile());
-                var data = file.extension().equals("glb") ? RigidGlb.loadLods(file, root) : List.of(meshData(file));
+                // The descriptor only accepts GLB meshes, whose levels are named groups.
+                var data = RigidGlb.loadLods(file, root);
                 List<Model> levels = new java.util.ArrayList<>();
                 List<Integer> counts = new java.util.ArrayList<>();
                 try {
@@ -204,76 +195,47 @@ final class GpuUnitModels implements Disposable {
         if (!descriptor.startsWith(root) || failed.contains(descriptor)) {
             return null;
         }
-        Path modelPath = descriptor;
-        boolean assembly = false;
+        JsonValue value;
         try {
-            JsonValue value = descriptor(asset);
-            int schema = value.getInt("schema", 0);
-            if (schema != 1 && schema != 2) {
-                throw new IllegalArgumentException("Unsupported unit-model schema: " + descriptor);
+            value = descriptor(asset);
+            // Only modular (schema 2) descriptors exist; the older pre-built variant format is no longer read.
+            if (value.getInt("schema", 0) != 2) {
+                throw new IllegalArgumentException("Unsupported unit-model schema " + value.getInt("schema", 0));
             }
-            if (value.getInt("schema") == 2) {
-                assembly = true;
-                if (selection.state() == null) {
-                    return null;
-                }
-                String compatibility = value.getString("compatibility", null);
-                if (compatibility != null && !compatibility.equals(selection.variant())) {
-                    return null;
-                }
-                if ("mek".equals(value.getString("kind"))) {
-                    return MekVisual.assemble(this, value, selection.state().structure());
-                }
-                if ("family".equals(value.getString("kind"))) {
-                    return FamilyVisual.assemble(this, value, selection.state().structure());
-                }
-                if ("squadron".equals(value.getString("kind"))) {
-                    return SquadronVisual.assemble(this, value, selection.state().structure());
-                }
-                if (!"formation".equals(value.getString("kind"))) {
-                    throw new IllegalArgumentException("Unknown assembly kind");
-                }
-                List<InfantryVisual.Part> parts = switch (value.getString("family")) {
-                    case "infantry" -> InfantryVisual.parts(selection.state().structure(), value, selection.figures());
-                    case "battle-armor" -> BattleArmorVisual.parts(selection.state().structure(), value);
-                    default -> throw new IllegalArgumentException("Unknown formation family");
-                };
-                String family = value.getString("family");
-                return formation(parts, lod1Suits(value), UnitFamilyScale.forFamily(family),
-                      UnitModelDescriptor.formationTriangleLimit(family, parts.size()));
-            }
-            modelPath = descriptor.getParent().resolve(selectModel(value, selection.variant(), selection.figures()))
-                  .normalize();
-            if (!modelPath.startsWith(root) || failed.contains(modelPath)) {
+        } catch (RuntimeException error) {
+            failed.add(descriptor);
+            LOGGER.warn("Cannot load 3D unit asset {}; using its fallback: {}", descriptor, error.getMessage());
+            return null;
+        }
+        if (selection.state() == null) {
+            return null;
+        }
+        try {
+            String compatibility = value.getString("compatibility", null);
+            if (compatibility != null && !compatibility.equals(selection.variant())) {
                 return null;
             }
-            if (!models.containsKey(modelPath)) {
-                if (!Files.isRegularFile(modelPath)) {
-                    throw new IllegalArgumentException("Missing unit mesh " + modelPath);
-                }
-                var data = meshData(new FileHandle(modelPath.toFile()));
-                // Schema-1 variants already contain their loadouts; their total is not a bare-body budget.
-                GpuUnitModel visual = new GpuUnitModel(new Model(data), value.getString("upperBodyNode", null),
-                      UnitFamilyScale.forFamily(value.getString("family", value.getString("kind", ""))));
-                boolean isMek = "mek".equals(value.getString("kind", ""));
-                if (isMek && !visual.turnsUpperBody()) {
-                    LOGGER.debug("[GpuTwist] {} has no upper body part to turn: a torso twist turns the whole unit",
-                          modelPath);
-                }
-                // Say what loaded, not only what failed. Without this a unit showing its old artwork and a
-                // unit whose asset never resolved produce the same empty log, and neither can be told apart
-                // from the renderer simply not having run.
-                LOGGER.debug("[GpuModel] loaded {} ({} triangles in the bare body)", modelPath,
-                      visual.instance.model.meshParts.size);
-                models.put(modelPath, visual);
+            if ("mek".equals(value.getString("kind"))) {
+                return MekVisual.assemble(this, value, selection.state().structure());
             }
-            return models.get(modelPath);
+            if ("family".equals(value.getString("kind"))) {
+                return FamilyVisual.assemble(this, value, selection.state().structure());
+            }
+            if ("squadron".equals(value.getString("kind"))) {
+                return SquadronVisual.assemble(this, value, selection.state().structure());
+            }
+            if (!"formation".equals(value.getString("kind"))) {
+                throw new IllegalArgumentException("Unknown assembly kind");
+            }
+            List<InfantryVisual.Part> parts = switch (value.getString("family")) {
+                case "infantry" -> InfantryVisual.parts(selection.state().structure(), value, selection.figures());
+                case "battle-armor" -> BattleArmorVisual.parts(selection.state().structure(), value);
+                default -> throw new IllegalArgumentException("Unknown formation family");
+            };
+            return formation(parts, lod1Suits(value), UnitFamilyScale.forFamily(value.getString("family")));
         } catch (RuntimeException error) {
             // A bad custom loadout must not poison a shared descriptor for every other unit.
-            if (!assembly) {
-                failed.add(modelPath);
-            }
-            LOGGER.warn("Cannot load 3D unit asset {}; using its fallback: {}", modelPath, error.getMessage());
+            LOGGER.warn("Cannot load 3D unit asset {}; using its fallback: {}", descriptor, error.getMessage());
             return null;
         }
     }
@@ -290,7 +252,7 @@ final class GpuUnitModels implements Disposable {
      *                 hidden until {@link GpuUnitInstance} shows them for a squad small on screen
      */
     private GpuUnitModel formation(List<InfantryVisual.Part> parts, Map<String, String> lod1Suits,
-          UnitFamilyScale familyScale, int triangleLimit) {
+          UnitFamilyScale familyScale) {
         // This Model owns only the assembly tree. NodeParts borrow mesh buffers from the shared asset library.
         Model assembled = new Model();
         List<UnitRig> rigs = new java.util.ArrayList<>();
@@ -324,9 +286,9 @@ final class GpuUnitModels implements Disposable {
                 assembled.nodes.add(placement);
                 rigs.add(new UnitRig(asset.descriptor()).inside(part.id(), ""));
             }
-            if (bodyTriangles > triangleLimit) {
-                throw new IllegalArgumentException("Bare formation exceeds " + triangleLimit
-                      + " triangles: " + bodyTriangles);
+            if (bodyTriangles > UnitModelDescriptor.MAX_TRIANGLES) {
+                throw new IllegalArgumentException("Bare formation exceeds the " + UnitModelDescriptor.MAX_TRIANGLES
+                      + " triangle ceiling: " + bodyTriangles);
             }
             assembled.calculateTransforms();
             // Troops and transports are authored at canonical size in the Mek standard, like every other body.
@@ -400,21 +362,6 @@ final class GpuUnitModels implements Disposable {
         });
     }
 
-    static String selectModel(JsonValue descriptor, String variant, int figures) {
-        boolean formation = "formation".equals(descriptor.getString("kind", ""));
-        String key = formation ? Integer.toString(figures) : variant;
-        if (formation) {
-            JsonValue movements = descriptor.get("movementFormations");
-            JsonValue choices = movements == null ? null : movements.get(variant);
-            if (choices != null && choices.has(key)) {
-                return choices.getString(key);
-            }
-        }
-        // Older/custom formation descriptors and unsupported movement types retain their base poses.
-        JsonValue choices = descriptor.get(formation ? "formations" : "variants");
-        return choices != null && choices.has(key) ? choices.getString(key) : descriptor.getString("fallback");
-    }
-
     @Override
     public void dispose() {
         assemblies.values().forEach(Assembly::dispose);
@@ -427,8 +374,6 @@ final class GpuUnitModels implements Disposable {
             bark.dispose();
             bark = null;
         }
-        models.values().forEach(GpuUnitModel::dispose);
-        models.clear();
         descriptors.clear();
         failed.clear();
     }

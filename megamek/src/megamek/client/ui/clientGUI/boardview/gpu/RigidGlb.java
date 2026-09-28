@@ -83,11 +83,10 @@ final class RigidGlb {
         var roots = source.getSceneModels().get(asset.scene()).getNodeModels();
         String shape = file.nameWithoutExtension();
         Map<String, NodeModel> groups = new HashMap<>();
+        // Every level is named, so which mesh draws at a given size is always visible in the file itself.
         boolean grouped = roots.stream().anyMatch(node -> node.getName() != null && node.getName().matches(".*-lod[0-2]"));
-        if (!grouped) {
-            var data = convert(file, shape, asset, roots);
-            return List.of(data, data, data);
-        }
+        require(grouped, "Name the levels of " + file.name() + " as groups " + MeshLod.name(shape, 0)
+              + " (and optionally " + MeshLod.name(shape, 1) + ", " + MeshLod.name(shape, 2) + ")");
         for (var group : roots) {
             require(Set.of(MeshLod.name(shape, 0), MeshLod.name(shape, 1), MeshLod.name(shape, 2))
                   .contains(group.getName()), "Unexpected LOD group: " + group.getName());

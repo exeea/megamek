@@ -225,7 +225,7 @@ class GpuModularUnitModelsSmokeTest {
             assertNotNull(group);
             assertEquals(6, group.instance.nodes.size);
             assertTrue(triangles(group.instance.nodes) > 0);
-            assertTrue(triangles(group.instance.nodes) <= UnitModelDescriptor.TRIANGLE_LIMIT);
+            assertTrue(triangles(group.instance.nodes) <= UnitModelDescriptor.MAX_TRIANGLES);
             assertDeferredEquipment(library, groupSelection, triangles(group.instance.nodes));
             instances.add(formationInstance(group, infantry, groupSelection));
             var descriptor = new JsonReader().parse(new FileHandle(new File(Configuration.dataDir(),
