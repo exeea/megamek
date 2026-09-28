@@ -92,6 +92,7 @@ public class GameOptions extends BasicGameOptions {
         addOption(base, OptionsConstants.BASE_AUTO_AMS, true);
         addOption(base, OptionsConstants.BASE_RANDOM_BASEMENTS, true);
         addOption(base, OptionsConstants.BASE_BREEZE, false);
+        addOption(base, OptionsConstants.BASE_WALK_ON_DEPLOYMENT, false);
 
         IBasicOptionGroup gameMaster = addGroup("gameMaster");
         addOption(gameMaster, OptionsConstants.GAME_MASTER_ALLOW, true);
@@ -113,6 +114,8 @@ public class GameOptions extends BasicGameOptions {
         addOption(victory, OptionsConstants.VICTORY_USE_OBJECTIVES, false);
         addOption(victory, OptionsConstants.VICTORY_VP_WIN_THRESHOLD, 0);
         addOption(victory, OptionsConstants.VICTORY_VP_SUDDEN_DEATH, false);
+        addOption(victory, OptionsConstants.VICTORY_USE_SENSOR_CHECK, false);
+        addOption(victory, OptionsConstants.VICTORY_SCAN_EXIT_TURN, 5);
 
         IBasicOptionGroup allowed = addGroup("allowedUnits");
         addOption(allowed, OptionsConstants.ALLOWED_CANON_ONLY, false);
@@ -138,6 +141,7 @@ public class GameOptions extends BasicGameOptions {
         addOption(advancedRules, OptionsConstants.ADVANCED_SUPPRESS_DB_BV, false);
         addOption(advancedRules, OptionsConstants.ADVANCED_TEAM_VISION, true);
         addOption(advancedRules, OptionsConstants.ADVANCED_TAC_OPS_BAP, false);
+        addOption(advancedRules, OptionsConstants.ADVANCED_TAC_OPS_SCANNING, false);
         addOption(advancedRules, OptionsConstants.ADVANCED_TAC_OPS_ECCM, false);
         addOption(advancedRules, OptionsConstants.ADVANCED_TAC_OPS_C3_EMERGENCY_MASTER, false);
         addOption(advancedRules, OptionsConstants.ADVANCED_TAC_OPS_GHOST_TARGET, false);
@@ -189,6 +193,7 @@ public class GameOptions extends BasicGameOptions {
         IBasicOptionGroup advancedCombat = addGroup("advancedCombat");
         addOption(advancedCombat, OptionsConstants.ADVANCED_COMBAT_TAC_OPS_AMS, false);
         addOption(advancedCombat, OptionsConstants.ADVANCED_COMBAT_INFANTRY_ACTION_DEFENDER_WITHDRAWAL, false);
+        addOption(advancedCombat, OptionsConstants.ADVANCED_COMBAT_INFANTRY_ACTION_COMMITTED_UNITS_HOLD, true);
         addOption(advancedCombat, OptionsConstants.ADVANCED_COMBAT_TAC_OPS_MANUAL_AMS, false);
         addOption(advancedCombat, OptionsConstants.ADVANCED_COMBAT_FLOATING_CRITS, false);
         addOption(advancedCombat, OptionsConstants.ADVANCED_COMBAT_TAC_OPS_CRIT_ROLL, false);
@@ -210,6 +215,7 @@ public class GameOptions extends BasicGameOptions {
         addOption(advancedCombat, OptionsConstants.ADVANCED_COMBAT_TAC_OPS_DIRECT_BLOW, false);
         addOption(advancedCombat, OptionsConstants.ADVANCED_COMBAT_TAC_OPS_BURST, false);
         addOption(advancedCombat, OptionsConstants.ADVANCED_COMBAT_TAC_OPS_HEAT, false);
+        addOption(advancedCombat, OptionsConstants.ADVANCED_COMBAT_TAC_OPS_AVOIDING_SHUTDOWN, false);
         addOption(advancedCombat, OptionsConstants.ADVANCED_COMBAT_TAC_OPS_PARTIAL_COVER, false);
         addOption(advancedCombat, OptionsConstants.ADVANCED_COMBAT_TAC_OPS_BA_CRITICAL_SLOTS, false);
         addOption(advancedCombat, OptionsConstants.ADVANCED_COMBAT_TAC_OPS_HOT_LOAD, false);
@@ -401,17 +407,17 @@ public class GameOptions extends BasicGameOptions {
 
         // Migrate old boolean track_neural_interface_hardware to new CHOICE neural_interface_mode
         // Old false = implant-only benefits = Pilot Only mode (not Off)
-        if ((null != name) && name.equals(OptionsConstants.ADVANCED_TRACK_NEURAL_INTERFACE_HARDWARE)) {
+        if ((name != null) && name.equals(OptionsConstants.ADVANCED_TRACK_NEURAL_INTERFACE_HARDWARE)) {
             name = OptionsConstants.ADVANCED_NEURAL_INTERFACE_MODE;
             value = Boolean.parseBoolean(value.toString())
                   ? OptionsConstants.NEURAL_INTERFACE_MODE_FULL_TRACKING
                   : OptionsConstants.NEURAL_INTERFACE_MODE_PILOT_ONLY;
         }
 
-        if ((null != name) && (null != value)) {
+        if ((name != null) && (value != null)) {
             IOption tempOption = getOption(name);
 
-            if (null != tempOption) {
+            if (tempOption != null) {
                 if (!tempOption.getValue().toString()
                       .equals(value.toString())) {
                     try {

@@ -47,6 +47,7 @@ import megamek.common.compute.Compute;
 import megamek.common.enums.GamePhase;
 import megamek.common.equipment.AmmoMounted;
 import megamek.common.equipment.AmmoType;
+import megamek.common.equipment.EquipmentActivation;
 import megamek.common.equipment.MiscType;
 import megamek.common.equipment.Mounted;
 import megamek.common.equipment.WeaponMounted;
@@ -101,7 +102,7 @@ public class MissileBayWeaponHandler extends AmmoBayWeaponHandler {
         for (WeaponMounted bayW : weapon.getBayWeapons()) {
             // check the currently loaded ammo
             AmmoMounted bayWAmmo = bayW.getLinkedAmmo();
-            if (null == bayWAmmo || bayWAmmo.getUsableShotsLeft() < 1) {
+            if (bayWAmmo == null || bayWAmmo.getUsableShotsLeft() < 1) {
                 // try loading something else
                 attackingEntity.loadWeaponWithSameAmmo(bayW);
                 bayWAmmo = bayW.getLinkedAmmo();
@@ -136,13 +137,13 @@ public class MissileBayWeaponHandler extends AmmoBayWeaponHandler {
                     recordFiringMount(bayW);
                     int shots = bayW.getCurrentShots();
                     for (int i = 0; i < shots; i++) {
-                        if (null == bayWAmmo
-                              || bayWAmmo.getUsableShotsLeft() < 1) {
+                        if (bayWAmmo == null
+                            || bayWAmmo.getUsableShotsLeft() < 1) {
                             // try loading something else
                             attackingEntity.loadWeaponWithSameAmmo(bayW);
                             bayWAmmo = bayW.getLinkedAmmo();
                         }
-                        if (null != bayWAmmo) {
+                        if (bayWAmmo != null) {
                             bayWAmmo.setShotsLeft(bayWAmmo.getBaseShotsLeft() - 1);
                         }
                     }
@@ -234,10 +235,7 @@ public class MissileBayWeaponHandler extends AmmoBayWeaponHandler {
         Mounted<?> bayW = attackingEntity.getEquipment(wId);
         Mounted<?> mLinker = bayW.getLinkedBy();
         int bonus;
-        if ((mLinker != null && mLinker.getType() instanceof MiscType
-              && !mLinker.isDestroyed() && !mLinker.isMissing()
-              && !mLinker.isBreached() && mLinker.getType().hasFlag(
-              MiscType.F_ARTEMIS))
+        if (EquipmentActivation.isGuidanceActive(mLinker, MiscType.F_ARTEMIS)
               && ammoType.getMunitionType().contains(AmmoType.Munitions.M_ARTEMIS_CAPABLE)) {
             bonus = (int) Math.ceil(ammoType.getRackSize() / 5.0);
             if ((ammoType.getAmmoType() == AmmoType.AmmoTypeEnum.SRM) || (ammoType.getAmmoType()
@@ -247,10 +245,7 @@ public class MissileBayWeaponHandler extends AmmoBayWeaponHandler {
             current_av = current_av + bonus;
         }
         // check for Artemis V
-        if (((mLinker != null) && (mLinker.getType() instanceof MiscType)
-              && !mLinker.isDestroyed() && !mLinker.isMissing()
-              && !mLinker.isBreached() && mLinker.getType().hasFlag(
-              MiscType.F_ARTEMIS_V))) {
+        if (EquipmentActivation.isGuidanceActive(mLinker, MiscType.F_ARTEMIS_V)) {
             ammoType.getMunitionType();
         }// MML3 WOULD get a bonus from Artemis V, if you were crazy enough
         // to cross-tech it
@@ -287,7 +282,7 @@ public class MissileBayWeaponHandler extends AmmoBayWeaponHandler {
         Entity entityTarget = (target.getTargetType() == Targetable.TYPE_ENTITY) ? (Entity) target
               : null;
 
-        if ((((null == entityTarget) || entityTarget.isAirborne())
+        if ((((entityTarget == null) || entityTarget.isAirborne())
               && target != null
               && (target.getTargetType() != Targetable.TYPE_HEX_CLEAR
               && target.getTargetType() != Targetable.TYPE_HEX_IGNITE

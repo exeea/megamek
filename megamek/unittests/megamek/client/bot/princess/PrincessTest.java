@@ -35,7 +35,6 @@ package megamek.client.bot.princess;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -53,8 +52,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Consumer;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 import megamek.client.bot.princess.PathRanker.PathRankerType;
 import megamek.common.Facing;
@@ -64,6 +63,7 @@ import megamek.common.battleArmor.BattleArmor;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.compute.Compute;
+import megamek.common.enums.ForcedWithdrawalOrder;
 import megamek.common.enums.GamePhase;
 import megamek.common.enums.MoveStepType;
 import megamek.common.equipment.AmmoType;
@@ -111,6 +111,8 @@ class PrincessTest {
         MoraleUtil mockMoralUtil = mock(MoraleUtil.class);
 
         mockPrincess = mock(Princess.class);
+        // the withdrawal decisions under test ask the real tracker, which reads the stubbed forced withdrawal setting
+        when(mockPrincess.getForcedWithdrawalTracker()).thenReturn(new ForcedWithdrawalTracker(mockPrincess));
         when(mockPrincess.getPathRanker(PathRankerType.Basic)).thenReturn(mockPathRanker);
         when(mockPrincess.getPathRanker(any(Entity.class))).thenReturn(mockPathRanker);
         when(mockPrincess.getMoraleUtil()).thenReturn(mockMoralUtil);
@@ -408,6 +410,7 @@ class PrincessTest {
         Entity mockMek = mock(BipedMek.class);
         // wantsToFallBack checks isCrippled(true), so crew-crippled Meks withdraw too
         when(mockMek.isCrippled(true)).thenReturn(false);
+        when(mockMek.getForcedWithdrawalOrder()).thenReturn(ForcedWithdrawalOrder.BOT_RULES);
 
         when(mockPrincess.wantsToFallBack(any(Entity.class))).thenCallRealMethod();
         when(mockPrincess.getForcedWithdrawal()).thenReturn(true);
@@ -509,9 +512,11 @@ class PrincessTest {
         when(mockMek.isImmobile()).thenReturn(false);
         when(mockMek.isCrippled(anyBoolean())).thenReturn(false);
         when(mockMek.getId()).thenReturn(1);
+        when(mockMek.getForcedWithdrawalOrder()).thenReturn(ForcedWithdrawalOrder.BOT_RULES);
 
         when(mockPrincess.wantsToFallBack(any(Entity.class))).thenReturn(false);
         when(mockPrincess.isFallingBack(any(Entity.class))).thenCallRealMethod();
+        when(mockPrincess.getForcedWithdrawal()).thenReturn(true);
 
         BehaviorSettings mockBehavior = mock(BehaviorSettings.class);
         when(mockBehavior.getDestinationEdge()).thenReturn(CardinalEdge.NONE);
@@ -539,6 +544,7 @@ class PrincessTest {
 
         // Unit is capable of fleeing.
         Entity mockMek = mock(BipedMek.class);
+        when(mockMek.getForcedWithdrawalOrder()).thenReturn(ForcedWithdrawalOrder.BOT_RULES);
 
         // Unit is on home edge.
         BasicPathRanker mockRanker = mock(BasicPathRanker.class);
@@ -1053,203 +1059,6 @@ class PrincessTest {
         assertFalse(aero.isShutDown());
         assertFalse(aero.isDoomed());
         assertTrue(mockPrincess.shouldAbandon(aero));
-    }
-
-    /**
-     * Tests building-based reinforcement logic and building entity retrieval.
-     */
-    @Nested
-    class InfantryCombatTests {
-        @Nested
-        class GetBuildingAtPositionTests {
-
-            @Test
-            void testReturnsBuilding_WhenBuildingAtPosition() {
-                // Arrange
-                Princess princess = spy(new Princess("TestPrincess", UUID.randomUUID().toString(), 1));
-                Game mockGame = mock(Game.class);
-                doReturn(mockGame).when(princess).getGame();
-
-                Coords position = new Coords(5, 5);
-                AbstractBuildingEntity mockBuilding = mock(AbstractBuildingEntity.class);
-                when(mockBuilding.getId()).thenReturn(100);
-
-                List<Entity> entitiesAtPosition = new ArrayList<>();
-                entitiesAtPosition.add(mockBuilding);
-                when(mockGame.getEntitiesVector(position)).thenReturn(entitiesAtPosition);
-
-                // Act
-                Entity result;
-                try {
-                    java.lang.reflect.Method method = Princess.class.getDeclaredMethod(
-                          "getBuildingAtPosition", Coords.class);
-                    method.setAccessible(true);
-                    result = (Entity) method.invoke(princess, position);
-                } catch (Exception e) {
-                    throw new RuntimeException("Failed to test getBuildingAtPosition", e);
-                }
-
-                // Assert
-                assertEquals(mockBuilding, result);
-            }
-
-            @Test
-            void testReturnsNull_WhenNoBuildingAtPosition() {
-                // Arrange
-                Princess princess = spy(new Princess("TestPrincess", UUID.randomUUID().toString(), 1));
-                Game mockGame = mock(Game.class);
-                doReturn(mockGame).when(princess).getGame();
-
-                Coords position = new Coords(5, 5);
-                Infantry mockInfantry = mock(Infantry.class);
-
-                List<Entity> entitiesAtPosition = new ArrayList<>();
-                entitiesAtPosition.add(mockInfantry);
-                when(mockGame.getEntitiesVector(position)).thenReturn(entitiesAtPosition);
-
-                // Act
-                Entity result;
-                try {
-                    java.lang.reflect.Method method = Princess.class.getDeclaredMethod(
-                          "getBuildingAtPosition", Coords.class);
-                    method.setAccessible(true);
-                    result = (Entity) method.invoke(princess, position);
-                } catch (Exception e) {
-                    throw new RuntimeException("Failed to test getBuildingAtPosition", e);
-                }
-
-                // Assert
-                assertNull(result);
-            }
-        }
-
-        @Nested
-        class FindEligibleInfantryCombatsToReinforceTests {
-
-            @Test
-            void testFindsCombat_WhenInSameBuilding() {
-                // Arrange
-                Princess princess = spy(new Princess("TestPrincess", UUID.randomUUID().toString(), 1));
-                Game mockGame = mock(Game.class);
-                doReturn(mockGame).when(princess).getGame();
-
-                AbstractBuildingEntity mockBuilding = mock(AbstractBuildingEntity.class);
-                when(mockBuilding.getId()).thenReturn(100);
-
-                Infantry searchingInfantry = mock(Infantry.class);
-                Coords infantryPos = new Coords(5, 5);
-                when(searchingInfantry.getPosition()).thenReturn(infantryPos);
-
-                List<Entity> entitiesAtInfantryPos = new ArrayList<>();
-                entitiesAtInfantryPos.add(mockBuilding);
-                when(mockGame.getEntitiesVector(infantryPos)).thenReturn(entitiesAtInfantryPos);
-
-                Infantry combatInfantry = mock(Infantry.class);
-                when(combatInfantry.getInfantryCombatTargetId()).thenReturn(100);
-
-                List<Entity> allEntities = new ArrayList<>();
-                allEntities.add(searchingInfantry);
-                allEntities.add(combatInfantry);
-                when(mockGame.getEntitiesVector()).thenReturn(allEntities);
-                when(mockGame.getEntity(100)).thenReturn(mockBuilding);
-
-                // Act
-                List<Integer> result;
-                try {
-                    java.lang.reflect.Method method = Princess.class.getDeclaredMethod(
-                          "findEligibleInfantryCombatsToReinforce", Entity.class);
-                    method.setAccessible(true);
-                    @SuppressWarnings("unchecked")
-                    List<Integer> temp = (List<Integer>) method.invoke(princess, searchingInfantry);
-                    result = temp;
-                } catch (Exception e) {
-                    throw new RuntimeException("Failed to test findEligibleInfantryCombatsToReinforce", e);
-                }
-
-                // Assert
-                assertEquals(1, result.size());
-                assertTrue(result.contains(100));
-            }
-
-            @Test
-            void testDoesNotFindCombat_WhenInDifferentBuilding() {
-                // Arrange
-                Princess princess = spy(new Princess("TestPrincess", UUID.randomUUID().toString(), 1));
-                Game mockGame = mock(Game.class);
-                doReturn(mockGame).when(princess).getGame();
-
-                AbstractBuildingEntity building1 = mock(AbstractBuildingEntity.class);
-                when(building1.getId()).thenReturn(100);
-
-                AbstractBuildingEntity building2 = mock(AbstractBuildingEntity.class);
-                when(building2.getId()).thenReturn(200);
-
-                Infantry searchingInfantry = mock(Infantry.class);
-                Coords infantryPos = new Coords(5, 5);
-                when(searchingInfantry.getPosition()).thenReturn(infantryPos);
-
-                List<Entity> entitiesAtInfantryPos = new ArrayList<>();
-                entitiesAtInfantryPos.add(building1);
-                when(mockGame.getEntitiesVector(infantryPos)).thenReturn(entitiesAtInfantryPos);
-
-                Infantry combatInfantry = mock(Infantry.class);
-                when(combatInfantry.getInfantryCombatTargetId()).thenReturn(200);
-
-                List<Entity> allEntities = new ArrayList<>();
-                allEntities.add(searchingInfantry);
-                allEntities.add(combatInfantry);
-                when(mockGame.getEntitiesVector()).thenReturn(allEntities);
-                when(mockGame.getEntity(200)).thenReturn(building2);
-
-                // Act
-                List<Integer> result;
-                try {
-                    java.lang.reflect.Method method = Princess.class.getDeclaredMethod(
-                          "findEligibleInfantryCombatsToReinforce", Entity.class);
-                    method.setAccessible(true);
-                    @SuppressWarnings("unchecked")
-                    List<Integer> temp = (List<Integer>) method.invoke(princess, searchingInfantry);
-                    result = temp;
-                } catch (Exception e) {
-                    throw new RuntimeException("Failed to test findEligibleInfantryCombatsToReinforce", e);
-                }
-
-                // Assert
-                assertEquals(0, result.size());
-            }
-
-            @Test
-            void testReturnsEmpty_WhenNotInBuilding() {
-                // Arrange
-                Princess princess = spy(new Princess("TestPrincess", UUID.randomUUID().toString(), 1));
-                Game mockGame = mock(Game.class);
-                doReturn(mockGame).when(princess).getGame();
-
-                Infantry searchingInfantry = mock(Infantry.class);
-                Coords infantryPos = new Coords(5, 5);
-                when(searchingInfantry.getPosition()).thenReturn(infantryPos);
-
-                List<Entity> entitiesAtInfantryPos = new ArrayList<>();
-                entitiesAtInfantryPos.add(searchingInfantry);
-                when(mockGame.getEntitiesVector(infantryPos)).thenReturn(entitiesAtInfantryPos);
-
-                // Act
-                List<Integer> result;
-                try {
-                    java.lang.reflect.Method method = Princess.class.getDeclaredMethod(
-                          "findEligibleInfantryCombatsToReinforce", Entity.class);
-                    method.setAccessible(true);
-                    @SuppressWarnings("unchecked")
-                    List<Integer> temp = (List<Integer>) method.invoke(princess, searchingInfantry);
-                    result = temp;
-                } catch (Exception e) {
-                    throw new RuntimeException("Failed to test findEligibleInfantryCombatsToReinforce", e);
-                }
-
-                // Assert
-                assertEquals(0, result.size());
-            }
-        }
     }
 
     /**

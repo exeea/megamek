@@ -54,7 +54,7 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import javax.imageio.ImageIO;
-import javax.swing.UIManager;
+import javax.swing.*;
 
 import megamek.MMConstants;
 import megamek.client.ui.util.ImageAtlasMap;
@@ -87,7 +87,7 @@ public final class ImageUtil {
 
         }
 
-        GRAPHICS_CONFIGURATION = (null != graphicsDevice) ? graphicsDevice.getDefaultConfiguration() : null;
+        GRAPHICS_CONFIGURATION = (graphicsDevice != null) ? graphicsDevice.getDefaultConfiguration() : null;
     }
 
     public static final int IMAGE_SCALE_BICUBIC = 1;
@@ -101,7 +101,7 @@ public final class ImageUtil {
      *       it
      */
     public static BufferedImage createAcceleratedImage(Image base) {
-        if ((null == GRAPHICS_CONFIGURATION) || (null == base)) {
+        if ((GRAPHICS_CONFIGURATION == null) || (base == null)) {
             return null;
         }
         BufferedImage acceleratedImage = GRAPHICS_CONFIGURATION.createCompatibleImage(base.getWidth(null),
@@ -236,7 +236,7 @@ public final class ImageUtil {
      */
     @Deprecated(since = "0.51.0", forRemoval = true)
     public static void addImageLoader(ImageLoader loader) {
-        if (null != loader && !IMAGE_LOADERS.contains(loader)) {
+        if (loader != null && !IMAGE_LOADERS.contains(loader)) {
             IMAGE_LOADERS.addFirst(loader);
         }
     }
@@ -251,12 +251,12 @@ public final class ImageUtil {
      * @return The image if possible, a placeholder image otherwise
      */
     public static Image loadImageFromFile(String fileName) {
-        if (null == fileName) {
+        if (fileName == null) {
             return failStandardImage();
         }
         for (ImageLoader loader : IMAGE_LOADERS) {
             Image img = loader.loadImage(fileName);
-            if (null != img) {
+            if (img != null) {
                 return img;
             }
         }
@@ -341,7 +341,7 @@ public final class ImageUtil {
          * @return {@link Coords} parsed.
          */
         protected @Nullable Coords parseCoords(@Nullable String coords) {
-            if (null == coords || coords.isEmpty()) {
+            if (coords == null || coords.isEmpty()) {
                 return null;
             }
 
@@ -383,7 +383,7 @@ public final class ImageUtil {
             Coords start = parseCoords(coords.substring(0, coordsSplitter));
             Coords size = parseCoords(coords.substring(coordsSplitter + 1));
 
-            if ((null == start) || (null == size) || (0 == size.getX()) || (0 == size.getY())) {
+            if ((start == null) || (size == null) || (0 == size.getX()) || (0 == size.getY())) {
                 return null;
             }
 
@@ -397,7 +397,7 @@ public final class ImageUtil {
             LOGGER.info("Loading atlas: {}", baseFile);
             Image base = Toolkit.getDefaultToolkit().getImage(baseFile.getPath());
 
-            if (null == base) {
+            if (base == null) {
                 return null;
             }
 
@@ -454,7 +454,7 @@ public final class ImageUtil {
                 } else {
                     start = parseCoords(coords.substring(0, coordsSplitter));
                     size = parseCoords(coords.substring(coordsSplitter + 1));
-                    if ((null == start) || (null == size) || (0 == size.getX()) || (0 == size.getY())) {
+                    if ((start == null) || (size == null) || (0 == size.getX()) || (0 == size.getY())) {
                         return null;
                     }
                     // If we don't have any negative values, this entry isn't doing any image

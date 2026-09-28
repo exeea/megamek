@@ -32,17 +32,20 @@
  */
 package megamek.client.ui.dialogs.buttonDialogs;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
+import java.awt.GraphicsEnvironment;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
@@ -51,25 +54,11 @@ import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Hashtable;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import javax.swing.JButton;
-import javax.swing.JCheckBox;
-import javax.swing.JComboBox;
-import javax.swing.JComponent;
-import javax.swing.DefaultListModel;
-import javax.swing.JLabel;
-import javax.swing.JList;
-import javax.swing.ListSelectionModel;
-import javax.swing.JPanel;
-import javax.swing.JScrollPane;
-import javax.swing.JSlider;
-import javax.swing.JSpinner;
-import javax.swing.JTextArea;
-import javax.swing.JTextField;
-import javax.swing.SwingConstants;
+import javax.swing.*;
 
 import megamek.client.ui.Messages;
 import megamek.client.ui.buttons.ColourSelectorButton;
@@ -83,6 +72,7 @@ import megamek.client.ui.settings.SettingsPagePanel;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.PlayerColour;
 import megamek.client.ui.util.UIUtil;
+import megamek.common.equipment.SensorFamily;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -1371,6 +1361,7 @@ class CommonSettingsDialogTest {
         JSlider volumeSlider = new JSlider(0, 100);
         volumeSlider.setToolTipText("Master volume help");
         JCheckBox chatMute = new JCheckBox(Messages.getString("CommonSettingsDialog.soundMuteChat"));
+        JCheckBox soundPrompt = new JCheckBox(Messages.getString("CommonSettingsDialog.soundPrompt"));
         JTextField chatSoundFile = new JTextField(5);
         JCheckBox myTurnMute = new JCheckBox(Messages.getString("CommonSettingsDialog.soundMuteMyTurn"));
         JTextField myTurnSoundFile = new JTextField(5);
@@ -1384,7 +1375,7 @@ class CommonSettingsDialogTest {
               volumeLabel, volumeSlider,
               chatMute, chatSoundFile,
               myTurnMute, myTurnSoundFile,
-              otherTurnsMute, otherTurnsSoundFile);
+              otherTurnsMute, otherTurnsSoundFile, soundPrompt);
 
         assertEquals(2, content.getComponentCount());
         JPanel volumeSection = (JPanel) content.getComponent(0);
@@ -1420,7 +1411,7 @@ class CommonSettingsDialogTest {
         JPanel notificationGrid = findNamedPanel(notificationsSection,
             "pnlCommonSettingsAudioNotificationGrid");
         assertSame(notificationsSection, notificationGrid);
-        assertEquals(6, notificationGrid.getComponentCount());
+        assertEquals(8, notificationGrid.getComponentCount());
         JPanel chatSoundControl = (JPanel) notificationGrid.getComponent(1);
         JPanel myTurnSoundControl = (JPanel) notificationGrid.getComponent(3);
         JPanel otherTurnsSoundControl = (JPanel) notificationGrid.getComponent(5);
@@ -1430,6 +1421,7 @@ class CommonSettingsDialogTest {
         assertCell(notificationGrid, myTurnSoundControl, 1, 1);
         assertCell(notificationGrid, otherTurnsMute, 0, 2);
         assertCell(notificationGrid, otherTurnsSoundControl, 1, 2);
+        assertCell(notificationGrid, soundPrompt, 0, 3);
           assertAudioFileControl(chatSoundControl, chatSoundFile, "btnChatSoundChooser",
             "CommonSettingsDialog.soundMuteChat.chooser.title");
           assertAudioFileControl(myTurnSoundControl, myTurnSoundFile, "btnMyTurnSoundChooser",
@@ -1688,6 +1680,42 @@ class CommonSettingsDialogTest {
         CommonSettingsDialog.createSettingsPanel(List.of(row(wideButton), row(nestedPanel)));
 
         assertEquals(nestedWidth, nestedButton.getPreferredSize().width);
+    }
+
+    @Test
+    void sensorPreferenceResetRestoresTheShippedOrder() {
+        DefaultListModel<SensorFamily> scrambled = new DefaultListModel<>();
+        scrambled.addElement(SensorFamily.RADAR);
+        scrambled.addElement(SensorFamily.ESM);
+
+        SettingsButton resetButton = CommonSettingsDialog.createSensorPreferenceResetButton();
+        resetButton.addActionListener(
+              event -> CommonSettingsDialog.loadSensorPreferenceOrder(scrambled, SensorFamily.defaultOrder()));
+        CommonSettingsDialog.createSensorPreferenceGrid(scrambled, resetButton);
+
+        resetButton.doClick();
+
+        assertEquals(SensorFamily.defaultOrder(), Collections.list(scrambled.elements()),
+              "Reset to Default must put the sensor ranking back to the order MegaMek ships with");
+    }
+
+    @Test
+    void everySettingsPageMapsEverySectionItBuilds() {
+        // The page tables in createCenterPane index each panel's groups by hand, so adding a settings group without
+        // adding its section entry throws only when a player opens the dialog. Building the real dialog here turns
+        // that into a test failure instead. (Regression: the sensor preference group shipped unmapped.)
+        //
+        // The dialog needs a real window, which a headless CI runner cannot give it, so this one only runs on a
+        // machine with a display. Every other test in this class builds panels rather than windows and runs anywhere.
+        assumeFalse(GraphicsEnvironment.isHeadless(), "Building the settings dialog needs a display");
+
+        JFrame owner = new JFrame();
+        try {
+            assertDoesNotThrow(() -> new CommonSettingsDialog(owner).dispose(),
+                  "Every settings group must be mapped to exactly one section on its page");
+        } finally {
+            owner.dispose();
+        }
     }
 
     @Test

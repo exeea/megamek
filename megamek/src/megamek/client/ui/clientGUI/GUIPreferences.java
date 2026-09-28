@@ -33,18 +33,14 @@
  */
 package megamek.client.ui.clientGUI;
 
-import java.awt.Color;
-import java.awt.Dimension;
-import java.awt.Font;
-import java.awt.Point;
-import java.awt.Rectangle;
-import java.awt.Window;
+import java.awt.*;
 import java.io.File;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
-import javax.swing.ToolTipManager;
-import javax.swing.UIManager;
+import java.util.StringJoiner;
+import javax.swing.*;
 
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.LabelDisplayStyle;
@@ -52,6 +48,7 @@ import megamek.client.ui.util.PlayerColour;
 import megamek.common.Configuration;
 import megamek.common.annotations.Nullable;
 import megamek.common.enums.WeaponSortOrder;
+import megamek.common.equipment.SensorFamily;
 import megamek.common.preference.IPreferenceStore;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.preference.PreferenceStoreProxy;
@@ -423,6 +420,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String SOUND_MUTE_CHAT = "SoundMuteChat";
     public static final String SOUND_MUTE_MY_TURN = "SoundMuteMyTurn";
     public static final String SOUND_MUTE_OTHERS_TURN = "SoundMuteOthersTurn";
+    public static final String SOUND_PROMPT_SUPPRESS = "SoundPrompt";
     public static final String TOOLTIP_DELAY = "TooltipDelay";
     public static final String TOOLTIP_DISMISS_DELAY = "TooltipDismissDelay";
     public static final String TOOLTIP_DIST_SUPPRESSION = "TooltipDistSuppression";
@@ -471,6 +469,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String SHOW_DAMAGE_DECAL = "ShowDamageDecal";
     public static final String SKIN_FILE = "SkinFile";
     public static final String DEFAULT_WEAPON_SORT_ORDER = "DefaultWeaponSortOrder";
+    public static final String SENSOR_PREFERENCE_ORDER = "SensorPreferenceOrder";
     public static final String UI_THEME = "UITheme";
     public static final String BOARD_EDIT_LOAD_SIZE_HEIGHT = "BoardEditLoadSizeHeight";
     public static final String BOARD_EDIT_LOAD_SIZE_WIDTH = "BoardEditLoadSizeWidth";
@@ -978,6 +977,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(SOUND_MUTE_CHAT, true);
         store.setDefault(SOUND_MUTE_MY_TURN, false);
         store.setDefault(SOUND_MUTE_OTHERS_TURN, true);
+        store.setDefault(SOUND_PROMPT_SUPPRESS, false);
 
         store.setDefault(TOOLTIP_DELAY, 1000);
         store.setDefault(TOOLTIP_DISMISS_DELAY, -1);
@@ -1013,6 +1013,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
         store.setDefault(SHOW_UNIT_OVERVIEW, true);
         store.setDefault(DEFAULT_WEAPON_SORT_ORDER, WeaponSortOrder.DEFAULT.name());
+        store.setDefault(SENSOR_PREFERENCE_ORDER, joinSensorPreference(SensorFamily.defaultOrder()));
         store.setDefault(SHOW_DAMAGE_LEVEL, true);
         store.setDefault(SHOW_DAMAGE_DECAL, true);
         store.setDefault(SKIN_FILE, "BW - Default.xml");
@@ -1953,6 +1954,41 @@ public class GUIPreferences extends PreferenceStoreProxy {
         return WeaponSortOrder.valueOf(store.getString(DEFAULT_WEAPON_SORT_ORDER));
     }
 
+    /**
+     * Returns the player's sensor families in preference order, most preferred first. A unit deploys using the first
+     * family on this list that it actually carries a sensor for.
+     *
+     * <p>The stored value is tolerated rather than trusted: unknown names left over from an older or newer build are
+     * dropped, duplicates are ignored, and any family the stored list does not mention is appended in
+     * {@link SensorFamily#defaultOrder()} order. The returned list therefore always holds every family exactly
+     * once.</p>
+     *
+     * @return every sensor family, most preferred first
+     */
+    public List<SensorFamily> getSensorPreferenceOrder() {
+        List<SensorFamily> order = new ArrayList<>();
+        for (String familyName : store.getString(SENSOR_PREFERENCE_ORDER).split(",")) {
+            String trimmedName = familyName.trim();
+            if (trimmedName.isEmpty()) {
+                continue;
+            }
+            try {
+                SensorFamily family = SensorFamily.valueOf(trimmedName);
+                if (!order.contains(family)) {
+                    order.add(family);
+                }
+            } catch (IllegalArgumentException ignored) {
+                // A family that no longer exists; the default order below fills the gap
+            }
+        }
+        for (SensorFamily family : SensorFamily.defaultOrder()) {
+            if (!order.contains(family)) {
+                order.add(family);
+            }
+        }
+        return order;
+    }
+
     public String getAsCardFont() {
         return store.getString(AS_CARD_FONT);
     }
@@ -2024,6 +2060,23 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setDefaultWeaponSortOrder(final WeaponSortOrder weaponSortOrder) {
         store.setValue(DEFAULT_WEAPON_SORT_ORDER, weaponSortOrder.name());
+    }
+
+    /**
+     * Stores the sensor families in preference order, most preferred first.
+     *
+     * @param sensorPreferenceOrder the families, most preferred first
+     */
+    public void setSensorPreferenceOrder(final List<SensorFamily> sensorPreferenceOrder) {
+        store.setValue(SENSOR_PREFERENCE_ORDER, joinSensorPreference(sensorPreferenceOrder));
+    }
+
+    private static String joinSensorPreference(List<SensorFamily> sensorPreferenceOrder) {
+        StringJoiner joiner = new StringJoiner(",");
+        for (SensorFamily family : sensorPreferenceOrder) {
+            joiner.add(family.name());
+        }
+        return joiner.toString();
     }
 
     public boolean getBoardEdRndStart() {
@@ -2833,6 +2886,24 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setSoundMuteMyTurn(boolean state) {
         store.setValue(SOUND_MUTE_MY_TURN, state);
+    }
+
+    /**
+     * Should we prompt for turn sounds?
+     *
+     * @param state enable or disable prompting
+     */
+    public void setSoundPromptSuppress(boolean state) {
+        store.setValue(SOUND_PROMPT_SUPPRESS, state);
+    }
+
+    /**
+     * Are we prompting?
+     *
+     * @return the value of SOUND_PROMPT
+     */
+    public boolean getSoundPromptSuppress() {
+        return store.getBoolean(SOUND_PROMPT_SUPPRESS);
     }
 
     public void setSoundMuteOthersTurn(boolean state) {

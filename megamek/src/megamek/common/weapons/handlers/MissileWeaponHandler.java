@@ -41,7 +41,6 @@ import java.util.Enumeration;
 import java.util.List;
 import java.util.Vector;
 
-import megamek.common.HitData;
 import megamek.common.RangeType;
 import megamek.common.Report;
 import megamek.common.ToHitData;
@@ -51,10 +50,12 @@ import megamek.common.compute.Compute;
 import megamek.common.compute.ComputeArc;
 import megamek.common.compute.ComputeECM;
 import megamek.common.enums.GamePhase;
+import megamek.common.enums.HitDamageType;
 import megamek.common.equipment.AmmoMounted;
 import megamek.common.equipment.AmmoType;
 import megamek.common.equipment.AmmoType.AmmoTypeEnum;
 import megamek.common.equipment.AmmoType.Munitions;
+import megamek.common.equipment.EquipmentActivation;
 import megamek.common.equipment.MiscType;
 import megamek.common.equipment.Mounted;
 import megamek.common.equipment.WeaponMounted;
@@ -86,7 +87,7 @@ public class MissileWeaponHandler extends AmmoWeaponHandler {
     public MissileWeaponHandler(ToHitData t, WeaponAttackAction w, Game g, TWGameManager m)
           throws EntityLoadingException {
         super(t, w, g, m);
-        generalDamageType = HitData.DAMAGE_MISSILE;
+        generalDamageType = HitDamageType.DAMAGE_MISSILE;
         advancedAMS =
               Game.rulesManager.getRulesEquipment().getAMSReduction(g.getOptions().booleanOption(OptionsConstants.ADVANCED_COMBAT_TAC_OPS_AMS));
         advancedPD = g.getOptions().booleanOption(OptionsConstants.ADVANCED_AERO_RULES_STRATOPS_ADV_POINT_DEFENSE);
@@ -141,10 +142,7 @@ public class MissileWeaponHandler extends AmmoWeaponHandler {
               attackingEntity.getPosition(),
               target.getPosition());
 
-        if (((mLinker != null) && (mLinker.getType() instanceof MiscType)
-              && !mLinker.isDestroyed() && !mLinker.isMissing()
-              && !mLinker.isBreached() && mLinker.getType().hasFlag(
-              MiscType.F_ARTEMIS))
+        if (EquipmentActivation.isGuidanceActive(mLinker, MiscType.F_ARTEMIS)
               && (ammoType.getMunitionType().contains(AmmoType.Munitions.M_ARTEMIS_CAPABLE))) {
             if (bECMAffected) {
                 // ECM prevents bonus
@@ -161,10 +159,7 @@ public class MissileWeaponHandler extends AmmoWeaponHandler {
             } else {
                 nMissilesModifier += 2;
             }
-        } else if (((mLinker != null)
-              && (mLinker.getType() instanceof MiscType)
-              && !mLinker.isDestroyed() && !mLinker.isMissing()
-              && !mLinker.isBreached() && mLinker.getType().hasFlag(MiscType.F_ARTEMIS_PROTO))
+        } else if (EquipmentActivation.isGuidanceActive(mLinker, MiscType.F_ARTEMIS_PROTO)
               && (ammoType.getMunitionType().contains(AmmoType.Munitions.M_ARTEMIS_CAPABLE))) {
             if (bECMAffected) {
                 // ECM prevents bonus
@@ -181,10 +176,7 @@ public class MissileWeaponHandler extends AmmoWeaponHandler {
             } else {
                 nMissilesModifier += 1;
             }
-        } else if (((mLinker != null)
-              && (mLinker.getType() instanceof MiscType)
-              && !mLinker.isDestroyed() && !mLinker.isMissing()
-              && !mLinker.isBreached() && mLinker.getType().hasFlag(MiscType.F_ARTEMIS_V))
+        } else if (EquipmentActivation.isGuidanceActive(mLinker, MiscType.F_ARTEMIS_V)
               && (ammoType.getMunitionType().contains(AmmoType.Munitions.M_ARTEMIS_V_CAPABLE))) {
             if (bECMAffected) {
                 // ECM prevents bonus
@@ -201,10 +193,7 @@ public class MissileWeaponHandler extends AmmoWeaponHandler {
             } else {
                 nMissilesModifier += 3;
             }
-        } else if (((mLinker != null)
-              && (mLinker.getType() instanceof MiscType)
-              && !mLinker.isDestroyed() && !mLinker.isMissing()
-              && !mLinker.isBreached() && mLinker.getType().hasFlag(MiscType.F_APOLLO))
+        } else if (EquipmentActivation.isGuidanceActive(mLinker, MiscType.F_APOLLO)
               && (ammoType.getAmmoType() == AmmoType.AmmoTypeEnum.MRM)) {
             nMissilesModifier += Game.rulesManager.getRulesWeapons().getMRMClusterModifier(true);
         } else if (ammoType.getAmmoType() == AmmoType.AmmoTypeEnum.MRM) {
@@ -350,9 +339,7 @@ public class MissileWeaponHandler extends AmmoWeaponHandler {
         Mounted<?> mLinker = weapon.getLinkedBy();
         AmmoType ammoType = ammo.getType();
         int bonus = 0;
-        if (((mLinker != null) && (mLinker.getType() instanceof MiscType)
-              && !mLinker.isDestroyed() && !mLinker.isMissing()
-              && !mLinker.isBreached() && mLinker.getType().hasFlag(MiscType.F_ARTEMIS))
+        if (EquipmentActivation.isGuidanceActive(mLinker, MiscType.F_ARTEMIS)
               && (ammoType.getMunitionType().contains(AmmoType.Munitions.M_ARTEMIS_CAPABLE))) {
             // MML3 gets no bonus from Artemis IV (how sad)
             if (ammoType.getRackSize() > 3) {
@@ -364,9 +351,7 @@ public class MissileWeaponHandler extends AmmoWeaponHandler {
             }
         }
 
-        if (((mLinker != null) && (mLinker.getType() instanceof MiscType)
-              && !mLinker.isDestroyed() && !mLinker.isMissing()
-              && !mLinker.isBreached() && mLinker.getType().hasFlag(MiscType.F_ARTEMIS_PROTO))
+        if (EquipmentActivation.isGuidanceActive(mLinker, MiscType.F_ARTEMIS_PROTO)
               && (ammoType.getMunitionType().contains(AmmoType.Munitions.M_ARTEMIS_CAPABLE))) {
             // MML3 gets no bonus from Artemis IV (how sad)
             if (ammoType.getRackSize() > 3) {
@@ -378,9 +363,7 @@ public class MissileWeaponHandler extends AmmoWeaponHandler {
             }
         }
 
-        if (((mLinker != null) && (mLinker.getType() instanceof MiscType)
-              && !mLinker.isDestroyed() && !mLinker.isMissing()
-              && !mLinker.isBreached() && mLinker.getType().hasFlag(MiscType.F_ARTEMIS_V))
+        if (EquipmentActivation.isGuidanceActive(mLinker, MiscType.F_ARTEMIS_V)
               && (ammoType.getMunitionType().contains(AmmoType.Munitions.M_ARTEMIS_V_CAPABLE))) {
             // MML3 WOULD get a bonus from Artemis V, if you were crazy enough
             // to cross-tech it
@@ -511,7 +494,7 @@ public class MissileWeaponHandler extends AmmoWeaponHandler {
         Entity entityTarget = (Entity) target;
         // any AMS attacks by the target?
         List<WeaponMounted> lCounters = weaponAttackAction.getCounterEquipment();
-        if (null != lCounters) {
+        if (lCounters != null) {
             // resolve AMS counter-fire
             for (WeaponMounted counter : lCounters) {
                 // Set up differences between different types of AMS
@@ -1054,8 +1037,9 @@ public class MissileWeaponHandler extends AmmoWeaponHandler {
                 }
                 // Targeting a building.
                 if (target.getTargetType() == Targetable.TYPE_BUILDING) {
-                    // The building takes the full brunt of the attack, one damage grouping at a time.
-                    handleBuildingDamageByGrouping(vPhaseReport, bldg, hits, nCluster, target.getPosition());
+                    // The building takes the full brunt of the attack, all its hits as one attack (TW p. 171)
+                    nDamage = nDamPerHit * hits;
+                    handleBuildingDamage(vPhaseReport, bldg, nDamage, target.getPosition());
                     // And we're done!
                     return false;
                 }
@@ -1077,11 +1061,13 @@ public class MissileWeaponHandler extends AmmoWeaponHandler {
                 r.subject = attackingEntity.getId();
                 r.newlines--;
                 vPhaseReport.add(r);
-                // The missed volley hits the building one damage grouping at a time; bSalvo is forced on so the
-                // building damage does not report a hit
+                int nDamage = nDamPerHit * hits;
+                // We want to set bSalvo to true to prevent
+                // handleBuildingDamage from reporting a hit
                 boolean savedSalvo = bSalvo;
                 bSalvo = true;
-                handleBuildingDamageByGrouping(vPhaseReport, bldg, hits, nCluster, target.getPosition());
+                handleBuildingDamage(vPhaseReport, bldg, nDamage,
+                      target.getPosition());
                 bSalvo = savedSalvo;
             }
         }
@@ -1095,15 +1081,9 @@ public class MissileWeaponHandler extends AmmoWeaponHandler {
         AmmoType ammoType = ammo.getType();
         Mounted<?> mLinker = weapon.getLinkedBy();
         if ((weaponType.getAmmoType() == AmmoType.AmmoTypeEnum.ATM)
-              || ((mLinker != null)
-              && (mLinker.getType() instanceof MiscType)
-              && !mLinker.isDestroyed() && !mLinker.isMissing()
-              && !mLinker.isBreached() && (mLinker.getType().hasFlag(
-              MiscType.F_ARTEMIS)
-              || mLinker.getType().hasFlag(
-              MiscType.F_ARTEMIS_V)
-              || mLinker.getType().hasFlag(
-              MiscType.F_ARTEMIS_PROTO)))) {
+              || EquipmentActivation.isGuidanceActive(mLinker, MiscType.F_ARTEMIS)
+              || EquipmentActivation.isGuidanceActive(mLinker, MiscType.F_ARTEMIS_V)
+              || EquipmentActivation.isGuidanceActive(mLinker, MiscType.F_ARTEMIS_PROTO)) {
             if ((!weapon.hasModes() || !weapon.curMode().equals("Indirect"))
                   && (((ammoType.getAmmoType() == AmmoType.AmmoTypeEnum.ATM) &&
                   ((ammoType.getMunitionType().contains(AmmoType.Munitions.M_STANDARD))

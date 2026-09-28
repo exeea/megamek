@@ -47,8 +47,8 @@ import megamek.common.board.Coords;
 import megamek.common.compute.Compute;
 import megamek.common.compute.ComputeSideTable;
 import megamek.common.enums.AimingMode;
+import megamek.common.enums.HitDamageType;
 import megamek.common.equipment.ArmorType;
-import megamek.common.equipment.EquipmentType;
 import megamek.common.game.Game;
 import megamek.common.loaders.EntityLoadingException;
 import megamek.common.rolls.TargetRoll;
@@ -70,7 +70,7 @@ public class PlasmaCannonHandler extends AmmoWeaponHandler {
     public PlasmaCannonHandler(ToHitData toHit, WeaponAttackAction waa, Game g, TWGameManager m)
           throws EntityLoadingException {
         super(toHit, waa, g, m);
-        generalDamageType = HitData.DAMAGE_ENERGY;
+        generalDamageType = HitDamageType.DAMAGE_HEAT;
     }
 
     /**
@@ -196,14 +196,8 @@ public class PlasmaCannonHandler extends AmmoWeaponHandler {
                 report.subject = subjectId;
                 report.indent();
             }
+            // The infantry inside are not hurt: only an intentional attack on a building reaches them (TW p. 172)
             vPhaseReport.addAll(buildingReport);
-            // Damage any infantry in the building.
-            Vector<Report> infantryReport = gameManager.damageInfantryIn(coverBuilding, nDamage,
-                  coverLoc, weaponType.getInfantryDamageClass());
-            for (Report report : infantryReport) {
-                report.indent(2);
-            }
-            vPhaseReport.addAll(infantryReport);
         }
         missed = true;
     }
