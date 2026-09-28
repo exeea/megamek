@@ -216,7 +216,7 @@ class GpuTerrainReliefSmokeTest {
             assertEquals(uploads, cover.uploads(), "Unchanged ground must not upload grass instances again");
             assertSame(model, prepareCover(cover, tactical, camera, BoardTacticalGeometry.surfaces(first)).getFirst(),
                   "Replacement roots keep the shared blade mesh");
-            assertTrue(cover.uploads() > uploads, "New terrain surfaces must replace the derived roots");
+            assertEquals(uploads, cover.uploads(), "Equivalent support geometry must retain the derived roots");
             uploads = cover.uploads();
             assertSame(model, prepareCover(cover, edited, camera, BoardTacticalGeometry.surfaces(edited)).getFirst());
             assertTrue(cover.uploads() > uploads, "A height edit must replace grass roots");

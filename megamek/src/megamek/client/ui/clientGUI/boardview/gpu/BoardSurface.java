@@ -1955,6 +1955,32 @@ final class BoardSurface {
             }
             i++;
         }
+        // At a ramp/bank join the two triangles of a concave quad need not have been emitted together.
+        // Flip only an inverted pair; keep every boundary vertex and do not add a covering skirt or more triangles.
+        for (int i = 0; i < faces.size(); i++) {
+            if (upward(faces.get(i)) > 0) { continue; }
+            Face face = faces.get(i);
+            List<Vector3> points = List.of(face.a(), face.b(), face.c());
+            boolean repaired = false;
+            for (int edge = 0; edge < 3 && !repaired; edge++) {
+                Vector3 a = points.get(edge), b = points.get((edge + 1) % 3), c = points.get((edge + 2) % 3);
+                for (int j = 0; j < faces.size() && !repaired; j++) {
+                    if (i == j) { continue; }
+                    Face other = faces.get(j);
+                    List<Vector3> opposite = List.of(other.a(), other.b(), other.c());
+                    for (int k = 0; k < 3; k++) {
+                        if (!b.equals(opposite.get(k)) || !a.equals(opposite.get((k + 1) % 3))) { continue; }
+                        Vector3 d = opposite.get((k + 2) % 3);
+                        Face first = new Face(c, a, d, Finish.TOP), second = new Face(c, d, b, Finish.TOP);
+                        if (upward(first) > .00001f && upward(second) > .00001f) {
+                            faces.set(i, first);
+                            faces.set(j, second);
+                            repaired = true;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private static float upward(Face face) {
@@ -1978,7 +2004,7 @@ final class BoardSurface {
             Vector3 nominal = new Vector3(corners[edge]).lerp(corners[(edge + 1) % 6], t);
             Vector3 rim = relief.roadPoint(edge, t, height(edgeTopography, nominal.x, nominal.y));
             float mx = (rim.x - nominal.x) * radius, my = (rim.y - nominal.y) * radius;
-            float keep = BoardRelief.roadDisplacement(road, center.x, center.y, p.x, p.y, mx, my);
+            float keep = ramps == 0 ? 1 : BoardRelief.roadDisplacement(road, center.x, center.y, p.x, p.y, mx, my);
             return new Vector3(p).add(mx * keep, my * keep, 0);
         }
         return new Vector3(p);

@@ -29,7 +29,7 @@ void biomePlant(vec3 point, vec3 sourceNormal, vec4 pigment, out vec3 position, 
           : u_biomeLod < 1.5 ? coverage.xy : coverage.yz;
     vec2 wind = length(u_wind.xy) > .01 ? normalize(u_wind.xy) : vec2(.8, .6);
     float gust = sin(dot(root.xy / u_metre, vec2(.21, .12)) - u_rainTime * 1.6);
-    vec2 flex = wind * (.012 + u_wind.z * (crop ? 5.0 : 1.0) * ((crop ? .055 : .080) + .025 * gust));
+    vec2 flex = wind * (.012 + u_wind.z * (crop ? 5.0 : 3.0) * ((crop ? .055 : .080) + .025 * gust));
     vec2 bend = flex * point.z * point.z;
     position = root + vec3(turn * point.xy + bend, point.z) * height;
     vec2 leaf = turn * sourceNormal.xy;

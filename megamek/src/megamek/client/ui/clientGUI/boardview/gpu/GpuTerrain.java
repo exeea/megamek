@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.lang.ref.WeakReference;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -808,6 +809,8 @@ final class GpuTerrain implements Disposable {
     private record TileRange(int layer, Mesh mesh, Material material, int offset, int count) { }
 
     private static final class TileMesh {
+        // Vegetation already retains its support; find that same geometry even after the bounded CPU cache evicts it.
+        WeakReference<BoardTacticalGeometry.Surface> support;
         final List<TileRange> ranges = new ArrayList<>();
         final List<Prop> props = new ArrayList<>();
         final List<ModelInstance> struts = new ArrayList<>();
@@ -2069,6 +2072,7 @@ final class GpuTerrain implements Disposable {
                 chunk.tileMeshes.put(coords, tile);
                 if (prepared.reused().contains(coords)) {
                     TileMesh previous = source.tileMeshes.get(coords);
+                    tile.support = previous.support;
                     for (TileRange range : previous.ranges) {
                         Material material = reusedMaterials.computeIfAbsent(range.material(), original -> {
                             Material copy = new Material(original);
@@ -2188,6 +2192,8 @@ final class GpuTerrain implements Disposable {
         if (coverScene == null || coverScene.tile(coords) == null) { return null; }
         Chunk chunk = chunks.get(coords.getX() / CHUNK_SIZE * chunkRows + coords.getY() / CHUNK_SIZE);
         TileMesh tile = chunk.tileMeshes.get(coords);
+        BoardTacticalGeometry.Surface retained = tile.support == null ? null : tile.support.get();
+        if (retained != null) { return retained; }
         CpuGeometry cached = cpuGeometry.get(tile);
         if (cached == null) {
             cached = installedSettings.call(() -> {
@@ -2202,6 +2208,7 @@ final class GpuTerrain implements Disposable {
 
     /** Render-thread-owned LRU; it retains four chunks' worth of exact geometry, independently of board size. */
     private void rememberGeometry(TileMesh tile, CpuGeometry geometry) {
+        tile.support = new WeakReference<>(geometry.tactical());
         cpuGeometry.put(tile, geometry);
         if (cpuGeometry.size() > 4 * CHUNK_SIZE * CHUNK_SIZE) {
             cpuGeometry.remove(cpuGeometry.keySet().iterator().next());

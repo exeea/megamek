@@ -247,6 +247,8 @@ final class GpuGroundCover implements Disposable {
             if (target == 0) { continue; }
             visible.add(tile.coords());
             Cover cover = models.get(tile.coords());
+            // A cold support lookup can rebuild terrain geometry. Include it in the preparation budget.
+            if (cover == null && System.nanoTime() >= deadline) { preparing = true; continue; }
             BoardTacticalGeometry.Surface surface = surfaces.apply(tile.coords());
             if (surface == null) { continue; }
             int detail = pixels >= 280 ? 1 : 0;

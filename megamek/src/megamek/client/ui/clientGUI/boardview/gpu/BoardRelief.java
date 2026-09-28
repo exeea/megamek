@@ -245,7 +245,7 @@ final class BoardRelief {
      * {@link #waterFamily}).
      */
     record Site(Coords coords, int level, boolean sculpted, boolean detailed, int family, boolean liquid, int depth, boolean road,
-          int ix, int iy) {
+          int ramps, int ix, int iy) {
         float x() { return cornerX(ix); }
 
         float y() { return cornerY(iy); }
@@ -312,7 +312,7 @@ final class BoardRelief {
               && (liquid || road || ramps == 0 && tile.roadExits() == 0 && tile.road() == BoardRoad.Kind.NONE);
         BoardScene.Surface family = liquid ? waterFamily(scene, tile) : tile.surface();
         return new Site(tile.coords(), tile.elevation(), shaped, shaped && tile.detailedGround(), family.ordinal(),
-              liquid, liquid ? Math.max(0, tile.waterDepth()) : 0, road, centerIx(tile.coords()), centerIy(tile.coords()));
+              liquid, liquid ? Math.max(0, tile.waterDepth()) : 0, road, ramps, centerIx(tile.coords()), centerIy(tile.coords()));
     }
 
     /**
@@ -1320,9 +1320,12 @@ final class BoardRelief {
         float keep = 1;
         for (Corner end : new Corner[] { edge.a, edge.b }) {
             for (Site site : end.around) {
-                if (site == null || !site.road()) { continue; }
+                if (site == null || !site.road() || site.ramps() == 0) { continue; }
                 BoardRoad road = roads.computeIfAbsent(site.coords(), key -> BoardRoad.of(scene, scene.tile(key)));
-                keep = Math.min(keep, roadDisplacement(road, site.x(), site.y(), px, py, point.x - px, point.y - py));
+                float weight = site == edge.upper || site == edge.lower ? 1
+                      : 1 - smooth((end == edge.a ? t : 1 - t) / .3f);
+                float allowed = roadDisplacement(road, site.x(), site.y(), px, py, point.x - px, point.y - py);
+                keep = Math.min(keep, lerp(1, allowed, weight));
             }
         }
         if (keep < 1) {
@@ -1332,21 +1335,14 @@ final class BoardRelief {
         return point;
     }
 
-    /** Keep the native slope unless its displacement actually enters a road's shoulder. */
+    /** Carved ramp banks return to the native slope outside the road corridor. */
     static float roadDisplacement(BoardRoad road, float cx, float cy, float x, float y, float dx, float dy) {
         float scale = BoardGeometry.hexScale();
         float px = (x - cx) / scale, py = (y - cy) / scale;
-        dx /= scale;
-        dy /= scale;
-        if (road.distance(px, py) <= 3) { return 0; }
-        if (road.distance(px + dx, py + dy) >= 3) { return 1; }
-        float low = 0, high = 1;
-        for (int i = 0; i < 14; i++) {
-            float mid = (low + high) * .5f;
-            if (road.distance(px + dx * mid, py + dy * mid) >= 3) { low = mid; }
-            else { high = mid; }
-        }
-        return low;
+        float clearance = Math.max(0, road.distance(px, py) - 3);
+        float room = Math.min(BoardGeometry.width() * .05f, clearance * scale * .2f);
+        float keep = Math.min(1, room / Math.max(.00001f, (float) Math.hypot(dx, dy)));
+        return lerp(keep, 1, smooth((clearance - 6) / 12));
     }
 
     // ---- Wall profile ----------------------------------------------------------------------------------------
@@ -2875,7 +2871,7 @@ final class BoardRelief {
                     high = Math.max(high, Math.max(side.a().z, side.b().z));
                 }
                 float[] rows = rows(low, high);
-                for (BoardSurface.Side side : entry.getValue()) { fallWall(side, rows, result); }
+                fallWall(e, entry.getValue(), rows, result);
             } else {
                 for (BoardSurface.Side side : entry.getValue()) { straightWall(side, result); }
             }
@@ -2984,41 +2980,44 @@ final class BoardRelief {
      * the adjoining cliff's canonical corners across the dry banks. Under the crest the rock only recedes, so it stays
      * behind the sheet. Beside the crest its columns are the rim's own samples; under it, points along the crest.
      */
-    private void fallWall(BoardSurface.Side side, float[] rows, List<BoardSurface.Face> result) {
-        int e = side.edge(), n = (e + 1) % 6;
+    private void fallWall(int e, List<BoardSurface.Side> sides, float[] rows, List<BoardSurface.Face> result) {
+        int n = (e + 1) % 6;
         float m = metres(1);
         float ax = cornerX(self.ix() + CORNER_DX[e]), ay = cornerY(self.iy() + CORNER_DY[e]);
         float bx = cornerX(self.ix() + CORNER_DX[n]), by = cornerY(self.iy() + CORNER_DY[n]);
         float length = (float) Math.hypot(bx - ax, by - ay), ox = (by - ay) / length, oy = -(bx - ax) / length;
-        boolean crest = Math.abs((side.a().x - ax) * ox + (side.a().y - ay) * oy) > .01f * BoardGeometry.hexScale()
-              || Math.abs((side.b().x - ax) * ox + (side.b().y - ay) * oy) > .01f * BoardGeometry.hexScale();
         List<Vector3> tops = new ArrayList<>();
         List<Float> lows = new ArrayList<>();
-        if (crest) {
-            for (int k = 0; k <= 3; k++) {
-                float u = k / 3f;
-                tops.add(new Vector3(side.a()).lerp(side.b(), u));
-                lows.add(side.lowA() + (side.lowB() - side.lowA()) * u);
-            }
-        } else {
-            // The rim's own samples, as a straight wall splits: the wall meets the bank above at every one.
-            Vector3 start = BoardGeometry.corner(tile.coords(), tile.elevation(), e);
-            Vector3 end = BoardGeometry.corner(tile.coords(), tile.elevation(), e + 1);
+        List<Boolean> connected = new ArrayList<>();
+        sides.sort((a, b) -> Float.compare(along(e, a.a()), along(e, b.a())));
+        for (BoardSurface.Side side : sides) {
+            boolean crest = Math.abs((side.a().x - ax) * ox + (side.a().y - ay) * oy) > .01f * BoardGeometry.hexScale()
+                  || Math.abs((side.b().x - ax) * ox + (side.b().y - ay) * oy) > .01f * BoardGeometry.hexScale();
             float ta = along(e, side.a()), tb = along(e, side.b());
-            int count = samples(edge(e));
-            List<Float> cuts = new ArrayList<>(List.of(ta));
-            for (int i = 1; i < count; i++) {
-                float t = i / (float) count;
-                if (t > ta + .0001f && t < tb - .0001f) { cuts.add(t); }
+            List<Float> cuts = new ArrayList<>(List.of(0f));
+            if (crest) {
+                cuts.add(1 / 3f);
+                cuts.add(2 / 3f);
+            } else {
+                // Retain every rim sample, as well as the bank/crest junctions.
+                int count = samples(edge(e));
+                for (int i = 1; i < count; i++) {
+                    float t = i / (float) count;
+                    if (t > ta + .0001f && t < tb - .0001f) { cuts.add((t - ta) / (tb - ta)); }
+                }
             }
-            cuts.add(tb);
+            cuts.add(1f);
             for (int i = 0; i < cuts.size(); i++) {
-                float t = cuts.get(i), u = (t - ta) / (tb - ta);
-                Vector3 top = i == 0 ? rimPoint(side, ta, side.a())
-                      : rimPoint(side, t, i == cuts.size() - 1 ? side.b() : new Vector3(start).lerp(end, t));
-                top.z = side.a().z + (side.b().z - side.a().z) * u;
+                float u = cuts.get(i);
+                Vector3 top = new Vector3(side.a()).lerp(side.b(), u);
+                if (!crest) { top = rimPoint(side, lerp(ta, tb, u), top); }
+                float low = lerp(side.lowA(), side.lowB(), u);
+                // One column owns a strip junction: both faces use the same position, normal and material data.
+                if (i == 0 && !tops.isEmpty() && top.epsilonEquals(tops.getLast(), .01f * BoardGeometry.hexScale())
+                      && Math.abs(low - lows.getLast()) < .01f * BoardGeometry.hexScale()) { continue; }
                 tops.add(top);
-                lows.add(side.lowA() + (side.lowB() - side.lowA()) * u);
+                lows.add(low);
+                connected.add(i != 0);
             }
         }
         Geology geology = BoardRelief.geology().get(self.family());
@@ -3066,7 +3065,9 @@ final class BoardRelief {
             Corner end = t < .00001f ? startCorner : t > .99999f ? endCorner : null;
             for (int r = 0; r <= last; r++) {
                 Vector3 p = grid[c][r];
-                Vector3 across = new Vector3(grid[Math.min(columns, c + 1)][r]).sub(grid[Math.max(0, c - 1)][r]);
+                int left = connected.get(c) ? c - 1 : c;
+                int right = c < columns && connected.get(c + 1) ? c + 1 : c;
+                Vector3 across = new Vector3(grid[right][r]).sub(grid[left][r]);
                 Vector3 up = new Vector3(grid[c][Math.min(last, r + 1)]).sub(grid[c][Math.max(0, r - 1)]);
                 float[] direction = end == null ? null : cornerDirection(end, p.z);
                 if (direction != null) { across.set(-direction[1], direction[0], 0); }
@@ -3083,6 +3084,7 @@ final class BoardRelief {
             }
         }
         for (int c = 0; c < columns; c++) {
+            if (!connected.get(c + 1)) { continue; }
             for (int r = 0; r < last; r++) {
                 addQuad(result, grid[c][r + 1], grid[c][r], grid[c + 1][r], grid[c + 1][r + 1],
                       BoardSurface.Finish.WALL, e);

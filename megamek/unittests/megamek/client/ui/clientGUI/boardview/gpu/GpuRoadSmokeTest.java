@@ -91,6 +91,20 @@ class GpuRoadSmokeTest {
                     GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                     frame.render(terrain, camera, scene);
                     GpuReviewFrame.save(new File(output, "mines-road-fluff-sand-oblique.png"));
+                    // This interior plateau fills the upper four fifths of the close view. Blue there is exposed sky,
+                    // not the board's outer silhouette: catch the actual corner holes from the Mines report.
+                    byte[] pixels = screen();
+                    int width = Gdx.graphics.getBackBufferWidth(), height = Gdx.graphics.getBackBufferHeight();
+                    int holes = 0;
+                    for (int y = height / 5; y < height * 9 / 10; y++) {
+                        for (int x = 2; x < width - 2; x++) {
+                            int index = (y * width + x) * 4;
+                            int red = Byte.toUnsignedInt(pixels[index]), green = Byte.toUnsignedInt(pixels[index + 1]);
+                            int blue = Byte.toUnsignedInt(pixels[index + 2]);
+                            if (blue > red + 35 && blue > green + 15) { holes++; }
+                        }
+                    }
+                    assertEquals(0, holes, "No sky may show through the Mines plateau, cliff feet or roadside slopes");
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) {
                     failure.set(error);

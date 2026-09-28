@@ -199,7 +199,8 @@ void main() {
             noise = large.b * 0.6 + small.b * 0.4;
         }
         float waves = (mix(0.75, 1.35, gust) * mix(0.45, 1.0, open) + 0.9 * agitation) * effects;
-        waves *= 1.0 - wetShore * .75;
+        float marshShare = habitat.y / max(dot(habitat.yzw, vec3(1.0)), .0001);
+        waves *= 1.0 - wetShore * mix(.75, .25, marshShare);
         // Slopes are the surface's gradient: the normal leans away from the way the water rises.
         vec2 slope = swell.xy * waves + (small.rg * 0.06 + rapidDetail.rg * (0.4 * agitation)) * effects;
         vec3 ripples = rainRippleField(position) * effects;

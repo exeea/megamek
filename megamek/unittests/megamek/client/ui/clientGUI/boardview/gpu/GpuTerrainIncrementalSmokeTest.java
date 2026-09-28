@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.lang.ref.Reference;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -59,6 +60,18 @@ class GpuTerrainIncrementalSmokeTest {
                     Map<Coords, BoardTacticalGeometry.Surface> beforeEviction = new HashMap<>();
                     for (var tile : scene.tiles()) { beforeEviction.put(tile.coords(), incremental.tacticalSurface(tile.coords())); }
                     ((Map<?, ?>) field(incremental, "cpuGeometry")).clear();
+                    for (var tile : scene.tiles()) {
+                        assertSame(beforeEviction.get(tile.coords()), incremental.tacticalSurface(tile.coords()),
+                              "Live vegetation support must survive query-cache eviction without reconstruction");
+                    }
+                    assertTrue(((Map<?, ?>) field(incremental, "cpuGeometry")).isEmpty(),
+                          "Retained support must not churn the bounded query cache");
+                    // A weak link does not own geometry. Exercise the cold path once the link is gone too.
+                    for (Object chunk : (List<?>) field(incremental, "chunks")) {
+                        for (Object tile : ((Map<?, ?>) field(chunk, "tileMeshes")).values()) {
+                            ((Reference<?>) field(tile, "support")).clear();
+                        }
+                    }
                     for (var tile : scene.tiles()) {
                         assertEquals(beforeEviction.get(tile.coords()), incremental.tacticalSurface(tile.coords()),
                               "Evicted query geometry must reproduce the installed surface at " + tile.coords());

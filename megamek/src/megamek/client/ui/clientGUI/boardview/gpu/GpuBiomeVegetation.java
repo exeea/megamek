@@ -55,12 +55,15 @@ final class GpuBiomeVegetation implements Disposable {
         final BoardVegetation.Key key;
         BoardTacticalGeometry.Surface surface;
         final List<BoardSurface.Face> ground;
+        final Support support, water;
         final BoardScene.Biome kind;
         final FloatArray roots = new FloatArray();
         final BoardRoad road;
         final float across, along;
-        final int minX, maxX, maxY;
+        final int minX, minY, maxX, maxY;
         int x, y;
+        int tier = 2;
+        float requested = 1, prepared;
         long generation;
         // Keep the rendered roots during a terrain LOD handoff, until this replacement is complete.
         Patch previous;
@@ -69,6 +72,8 @@ final class GpuBiomeVegetation implements Disposable {
             key = BoardVegetation.key(scene, tile);
             this.surface = surface;
             ground = support(tile, surface);
+            support = new Support(ground);
+            water = tile.liquid().present() ? new Support(surface.water()) : null;
             this.generation = generation;
             kind = BoardBiome.plantKind(scene, tile);
             road = BoardRoad.rendered(tile) ? BoardRoad.of(scene, tile) : null;
@@ -81,21 +86,34 @@ final class GpuBiomeVegetation implements Disposable {
             minX = (int) Math.floor((u - 21) / across);
             maxX = (int) Math.ceil((u + 21) / across);
             x = minX;
-            y = (int) Math.floor((v - 21) / along);
+            minY = (int) Math.floor((v - 21) / along);
+            y = minY;
             maxY = (int) Math.ceil((v + 21) / along);
         }
 
         void prepare(BoardScene scene, BoardScene.Tile tile, long deadline) {
+            prepare(scene, tile, 1, deadline);
+        }
+
+        void prepare(BoardScene scene, BoardScene.Tile tile, float density, long deadline) {
+            requested = density;
             int checked = 0;
             float metre = BoardRelief.metres(1);
-            while (y <= maxY) {
-                if ((checked++ & 31) == 0 && System.nanoTime() >= deadline) { break; }
+            // Prepare the distant subset first. Zooming in extends it; zooming out never prepares hidden roots.
+            while (prepared < requested) {
+                if ((checked++ & 7) == 0 && System.nanoTime() >= deadline) { break; }
+                if (y > maxY) {
+                    prepared = DENSITY[tier--];
+                    x = minX; y = minY;
+                    continue;
+                }
                 int ix = x++, iy = y;
                 if (x > maxX) { x = minX; y++; }
                 // Thin the same world-space lattice at every LOD, independently of wetland coverage and plant height.
                 // Reject before sampling support geometry, so omitted roots also avoid preparation and buffer cost.
                 if (BoardRelief.hash(ix + 379, iy - 827) >= (kind == BoardScene.Biome.FIELD ? .38f : .46f)) { continue; }
                 float seed = BoardRelief.hash(ix, iy);
+                if (seed >= DENSITY[tier] || (tier < 2 && seed < DENSITY[tier + 1])) { continue; }
                 float u = (ix + (BoardRelief.hash(ix + 37, iy) - .5f)
                       * (kind == BoardScene.Biome.FIELD ? .12f : .7f)) * across;
                 float v = (iy + (BoardRelief.hash(ix, iy + 17) - .5f) * .55f) * along;
@@ -103,13 +121,12 @@ final class GpuBiomeVegetation implements Disposable {
                 float py = (u * BoardBiome.ROW_Y + v * BoardBiome.ROW_X) * metre;
                 if (BoardGeometry.tile(scene, px, py) != tile) { continue; }
                 // Water's tactical top includes the water plane. Roots instead follow the actual bank/bar mesh.
-                float z = BoardSurface.sampleHeight(ground, px, py, Float.NaN);
+                float z = support.height(px, py);
                 if (!Float.isFinite(z)) { continue; }
                 float cover = BoardBiome.coverage(scene, kind, px, py, z);
                 if (kind == BoardScene.Biome.FIELD ? cover < .60f : seed > .88f * BoardRelief.smooth(cover)) { continue; }
-                if (tile.liquid().present()) {
-                    float water = BoardSurface.sampleHeight(surface.water(), px, py, Float.NEGATIVE_INFINITY);
-                    if (z <= water + .015f * metre) { continue; }
+                if (water != null) {
+                    if (z <= water.height(px, py) + .015f * metre) { continue; }
                 }
                 if (road != null && road.distance((px - BoardGeometry.centerX(tile.coords())) / BoardGeometry.hexScale(),
                       (py - BoardGeometry.centerY(tile.coords())) / BoardGeometry.hexScale()) < BoardRoad.SHOULDER + 1) { continue; }
@@ -121,7 +138,43 @@ final class GpuBiomeVegetation implements Disposable {
             }
         }
 
-        boolean busy() { return y <= maxY; }
+        boolean busy() { return prepared < requested; }
+    }
+
+    /** Small CPU index of the published triangles, not a second height field. No per-root whole-mesh scan. */
+    private static final class Support {
+        private static final int SIDE = 8;
+        final List<List<BoardSurface.Face>> cells = new ArrayList<>(SIDE * SIDE);
+        final float minX, minY, scaleX, scaleY;
+
+        Support(List<BoardSurface.Face> faces) {
+            float left = Float.POSITIVE_INFINITY, bottom = left, right = Float.NEGATIVE_INFINITY, top = right;
+            for (var face : faces) {
+                left = Math.min(left, Math.min(face.a().x, Math.min(face.b().x, face.c().x)));
+                bottom = Math.min(bottom, Math.min(face.a().y, Math.min(face.b().y, face.c().y)));
+                right = Math.max(right, Math.max(face.a().x, Math.max(face.b().x, face.c().x)));
+                top = Math.max(top, Math.max(face.a().y, Math.max(face.b().y, face.c().y)));
+            }
+            minX = left; minY = bottom;
+            scaleX = SIDE / Math.max(right - left, .001f); scaleY = SIDE / Math.max(top - bottom, .001f);
+            for (int i = 0; i < SIDE * SIDE; i++) { cells.add(new ArrayList<>()); }
+            float tolerance = .001f * BoardGeometry.hexScale();
+            for (var face : faces) {
+                int x0 = column(Math.min(face.a().x, Math.min(face.b().x, face.c().x)) - tolerance);
+                int x1 = column(Math.max(face.a().x, Math.max(face.b().x, face.c().x)) + tolerance);
+                int y0 = row(Math.min(face.a().y, Math.min(face.b().y, face.c().y)) - tolerance);
+                int y1 = row(Math.max(face.a().y, Math.max(face.b().y, face.c().y)) + tolerance);
+                for (int y = y0; y <= y1; y++) {
+                    for (int x = x0; x <= x1; x++) { cells.get(y * SIDE + x).add(face); }
+                }
+            }
+        }
+
+        private int column(float x) { return Math.clamp((int) ((x - minX) * scaleX), 0, SIDE - 1); }
+        private int row(float y) { return Math.clamp((int) ((y - minY) * scaleY), 0, SIDE - 1); }
+        float height(float x, float y) {
+            return BoardSurface.sampleHeight(cells.get(row(y) * SIDE + column(x)), x, y, Float.NaN);
+        }
     }
 
     private static List<BoardSurface.Face> support(BoardScene.Tile tile, BoardTacticalGeometry.Surface surface) {
@@ -229,6 +282,8 @@ final class GpuBiomeVegetation implements Disposable {
                   new Vector3(center).mulAdd(camera.direction, -radius));
             if (nearPixels <= START_PIXELS[2]) { continue; }
             float farPixels = BoardGeometry.width() * BoardCamera.pixelsPerUnit(camera, center.mulAdd(camera.direction, radius));
+            float density = nearPixels > START_PIXELS[0] ? DENSITY[0]
+                  : nearPixels > START_PIXELS[1] ? DENSITY[1] : DENSITY[2];
             visible.add(tile.coords());
             var surface = surfaces.apply(tile.coords());
             if (surface == null) { continue; }
@@ -238,25 +293,29 @@ final class GpuBiomeVegetation implements Disposable {
                 var key = BoardVegetation.key(scene, tile);
                 if (patch == null || !patch.key.equals(key) || !patch.ground.equals(support(tile, surface))) {
                     Patch previous = patch == null ? null : patch.previous == null ? patch : patch.previous;
+                    boolean retain = previous != null && previous.kind == kind && (previous.key.equals(key)
+                          || previous.ground.equals(support(tile, surface)));
+                    // Mesh LOD replacements share the same frame budget as first-time preparation.
+                    if (System.nanoTime() >= deadline) {
+                        preparing = true;
+                        if (retain) { add(previous, kind, nearPixels, farPixels); }
+                        else { patches.remove(tile.coords()); }
+                        continue;
+                    }
                     patch = new Patch(scene, tile, surface, generation);
                     // Keep complete roots while an unchanged floor's cover boundary or its mesh LOD updates.
                     // Changed elevations discard old roots so plants cannot float over or through the new ground.
-                    if (previous != null && previous.kind == patch.kind && (previous.key.equals(key)
-                          || previous.ground.equals(support(tile, surface)))) { patch.previous = previous; }
+                    if (retain) { patch.previous = previous; }
                     patches.put(tile.coords(), patch);
                 }
                 patch.surface = surface;
                 patch.generation = generation;
             }
-            patch.prepare(scene, tile, deadline);
+            patch.prepare(scene, tile, density, deadline);
             preparing |= patch.busy();
             if (!patch.busy()) { patch.previous = null; }
             Patch rendered = patch.previous == null ? patch : patch.previous;
-            for (int lod = 0; lod < DENSITY.length; lod++) {
-                if (nearPixels > START_PIXELS[lod] && (lod == 0 || farPixels < FULL_PIXELS[lod - 1])) {
-                    batches[(kind == BoardScene.Biome.FIELD ? 0 : 3) + lod].add(rendered);
-                }
-            }
+            add(rendered, kind, nearPixels, farPixels);
         }
         List<ModelInstance> result = new ArrayList<>();
         for (Batch batch : batches) {
@@ -273,6 +332,14 @@ final class GpuBiomeVegetation implements Disposable {
             if (!visible.contains(iterator.next().getKey())) { iterator.remove(); }
         }
         return result;
+    }
+
+    private void add(Patch patch, BoardScene.Biome kind, float nearPixels, float farPixels) {
+        for (int lod = 0; lod < DENSITY.length; lod++) {
+            if (nearPixels > START_PIXELS[lod] && (lod == 0 || farPixels < FULL_PIXELS[lod - 1])) {
+                batches[(kind == BoardScene.Biome.FIELD ? 0 : 3) + lod].add(patch);
+            }
+        }
     }
 
     boolean busy() { return preparing; }

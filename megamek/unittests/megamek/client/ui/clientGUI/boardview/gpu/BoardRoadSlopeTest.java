@@ -60,6 +60,15 @@ class BoardRoadSlopeTest {
 
     private record Segment(Vector3 a, Vector3 b) { }
 
+    @ParameterizedTest
+    @ValueSource(ints = { 0, 1, 2 })
+    void climbingJunctionsCloseTheSurroundingNativeSlopes(int layout) {
+        var at = BoardRoadTest.CENTER;
+        int[] rises = layout == 0 ? new int[] { 2, 2, 2, 2, 2, 2 }
+              : layout == 1 ? new int[] { -2, -2, -2, -2, -2, -2 } : new int[] { -2, 1, 2, -1, 0, 2 };
+        assertClosed(BoardRoadRampTest.junction(at, rises), at);
+    }
+
     /** Check the emitted mesh, including T junctions, rather than just comparing the boundary helper to itself. */
     private static void assertClosed(BoardScene scene, Coords at) {
         Map<Coords, BoardSurface> surfaces = new HashMap<>();
