@@ -58,7 +58,7 @@ import javax.swing.JScrollPane;
 
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.game.Game;
 import megamek.common.units.CombatVehicleEscapePod;
@@ -270,7 +270,7 @@ public class AbandonUnitDialog extends JDialog implements ActionListener {
      * Highlights the specified entity on the board view.
      */
     private void highlightEntity(Entity entity) {
-        BoardView boardView = clientGUI.getBoardView();
+        BoardClientState boardView = clientGUI.getBoardState();
 
         boardView.highlightSelectedEntities(Collections.singletonList(entity));
 
@@ -285,7 +285,7 @@ public class AbandonUnitDialog extends JDialog implements ActionListener {
      * Clears all highlighting from the board view.
      */
     private void clearHighlighting() {
-        BoardView boardView = clientGUI.getBoardView();
+        BoardClientState boardView = clientGUI.getBoardState();
         boardView.highlightSelectedEntities(Collections.emptyList());
         boardView.setHighlightedEntityHexes(Collections.emptyList());
         boardView.repaint();

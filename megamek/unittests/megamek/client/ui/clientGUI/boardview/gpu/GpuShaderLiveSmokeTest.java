@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuMixedUnitBenchmarkSmokeTest.field;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuShaderPreviewSmokeTest.hasGreenPixels;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
@@ -12,12 +13,16 @@ import java.awt.image.BufferedImage;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import javax.imageio.ImageIO;
+import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
+import javax.swing.JTable;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.Gdx;
@@ -86,6 +91,8 @@ class GpuShaderLiveSmokeTest {
                 String composite, light;
                 int step;
                 long revision;
+                float sampleSeconds;
+                BufferedImage originalRain;
 
                 @Override
                 public void render() {
@@ -143,7 +150,64 @@ class GpuShaderLiveSmokeTest {
                                   source.vertex().contains("live-editor-shared-include")));
                             assertEquals(composite, GpuShaderSource.readDisk("atmosphere-composite.frag"));
                             checkInactiveEffect();
+                            manager.run(() -> assertTrue(manager.apply(Map.of()).success()));
+                            SwingUtilities.invokeAndWait(() -> editor.open("beams.frag"));
+                            step = 5;
+                        } else if (step == 5 && sample() != null && sample().preset() == GpuShaderPreview.Preset.LASER) {
+                            assertTrue(sample().image() != null, sample().message());
+                            sampleSeconds = sample().seconds();
+                            step = 6;
+                        } else if (step == 6 && sample() != null && sample().seconds() > sampleSeconds) {
+                            SwingUtilities.invokeAndWait(() -> {
+                                try {
+                                    ((JCheckBox) field(editor.previewPanel(), "play")).doClick();
+                                    ((JButton) field(editor.previewPanel(), "replay")).doClick();
+                                }
+                                catch (Exception error) { throw new AssertionError(error); }
+                            });
+                            revision = manager.revision();
+                            edit("beams.frag", """
+                                  #version 330 core
+                                  layout(location = 0) out vec4 fragColor;
+                                  void main() { fragColor = vec4(0.0, 1.0, 0.0, 1.0); }
+                                  """);
+                            step = 7;
+                        } else if (step == 7 && manager.revision() > revision && greenSample()) {
+                            assertSame(originalTerrain, field(this, "terrain"));
                             assertEquals(0, fixture.clicks.get(), "Editor never issues game commands");
+                            SwingUtilities.invokeAndWait(() -> editor.open("explosion.frag"));
+                            step = 8;
+                        } else if (step == 8 && sample() != null && sample().preset() == GpuShaderPreview.Preset.EXPLOSION) {
+                            assertTrue(sample().image() != null, sample().message());
+                            SwingUtilities.invokeAndWait(() -> editor.open("weather-particles.frag"));
+                            step = 9;
+                        } else if (step == 9 && input("u_light", 3) != null && sample() != null
+                              && sample().preset() == GpuShaderPreview.Preset.RAIN) {
+                            assertTrue(input("u_wind", 3) != null && input("u_clock", 3) != null && input("u_projView", 3) != null,
+                                  "Weather inputs come from program reflection");
+                            originalRain = sample().image();
+                            override("u_light", "1, 0, 0");
+                            step = 10;
+                        } else if (step == 10 && "1.0, 0.0, 0.0".equals(input("u_light", 3)) && redSample()) {
+                            capture();
+                            override("u_light", "");
+                            step = 11;
+                        } else if (step == 11 && "".equals(input("u_light", 4)) && sameSample(originalRain)) {
+                            revision = manager.revision();
+                            String weather = GpuShaderSource.readDisk("weather-particles.frag");
+                            assertTrue(weather.contains("color * u_light"));
+                            edit("weather-particles.frag", weather.replace("void main()", "uniform float u_previewGain = 1.0;\nvoid main()")
+                                  .replace("color * u_light", "color * u_light * u_previewGain"));
+                            step = 12;
+                        } else if (step == 12 && manager.revision() > revision && input("u_previewGain", 3) != null) {
+                            override("u_previewGain", "0");
+                            step = 13;
+                        } else if (step == 13 && "0.0".equals(input("u_previewGain", 3)) && !sameSample(originalRain)) {
+                            override("u_previewGain", "");
+                            step = 14;
+                        } else if (step == 14 && "1.0".equals(input("u_previewGain", 3)) && sameSample(originalRain)) {
+                            assertEquals(0, fixture.clicks.get());
+                            capture();
                             Gdx.app.exit();
                         }
                     } catch (Throwable error) { failure.set(error); Gdx.app.exit(); }
@@ -170,6 +234,63 @@ class GpuShaderLiveSmokeTest {
                         catch (Exception error) { throw new AssertionError(error); }
                     });
                     return status.get();
+                }
+
+                GpuShaderPreview.Frame sample() throws Exception {
+                    var result = new AtomicReference<GpuShaderPreview.Frame>();
+                    SwingUtilities.invokeAndWait(() -> {
+                        try { result.set((GpuShaderPreview.Frame) field(editor.previewPanel(), "displayed")); }
+                        catch (Exception error) { throw new AssertionError(error); }
+                    });
+                    return result.get();
+                }
+
+                boolean greenSample() throws Exception {
+                    var frame = sample();
+                    return frame != null && frame.image() != null && hasGreenPixels(frame.image());
+                }
+
+                boolean sameSample(BufferedImage expected) throws Exception {
+                    var frame = sample();
+                    return frame != null && frame.image() != null && Arrays.equals(expected.getRGB(0, 0, expected.getWidth(), expected.getHeight(), null, 0,
+                          expected.getWidth()), frame.image().getRGB(0, 0, expected.getWidth(), expected.getHeight(), null, 0, expected.getWidth()));
+                }
+
+                boolean redSample() throws Exception {
+                    var frame = sample();
+                    if (frame == null || frame.image() == null) { return false; }
+                    return Arrays.stream(frame.image().getRGB(0, 0, frame.image().getWidth(), frame.image().getHeight(), null, 0,
+                          frame.image().getWidth())).filter(rgb -> (rgb >> 16 & 255) > (rgb >> 8 & 255) + 40
+                                && (rgb >> 16 & 255) > (rgb & 255) + 40).limit(26).count() > 25;
+                }
+
+                String input(String name, int column) throws Exception {
+                    var result = new AtomicReference<String>();
+                    SwingUtilities.invokeAndWait(() -> {
+                        try {
+                            var table = (JTable) field(editor.inputsPanel(), "table");
+                            for (int row = 0; row < table.getRowCount(); row++) {
+                                if (table.getValueAt(row, 0).equals(name)) { result.set(table.getValueAt(row, column).toString()); }
+                            }
+                        } catch (Exception error) { throw new AssertionError(error); }
+                    });
+                    return result.get();
+                }
+
+                void override(String name, String value) throws Exception {
+                    SwingUtilities.invokeAndWait(() -> {
+                        try {
+                            var table = (JTable) field(editor.inputsPanel(), "table");
+                            for (int row = 0; row < table.getRowCount(); row++) {
+                                if (table.getValueAt(row, 0).equals(name)) {
+                                    table.setValueAt(value, row, 4);
+                                    table.scrollRectToVisible(table.getCellRect(row, 4, true));
+                                    return;
+                                }
+                            }
+                            throw new AssertionError("Missing dynamic input " + name);
+                        } catch (Exception error) { throw new AssertionError(error); }
+                    });
                 }
 
                 void assertPink() {

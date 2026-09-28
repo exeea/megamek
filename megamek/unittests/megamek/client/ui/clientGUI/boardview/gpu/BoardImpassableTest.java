@@ -59,7 +59,7 @@ class BoardImpassableTest {
                 boolean showTerrain = preferences.getShowMapHexPopup();
                 try {
                     preferences.setShowMapHexPopup(true);
-                    fixture.view.setTooltipProvider(new TWBoardViewTooltip(fixture.game, null, fixture.view));
+                    fixture.view.setTooltipProvider(new TWBoardViewTooltip(fixture.game, null, fixture.view.getClientState()));
                     Coords coords = new Coords(0, 16);
                     Hex hex = new Hex(2);
                     hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1));

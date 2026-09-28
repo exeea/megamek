@@ -46,8 +46,7 @@ import megamek.client.Client;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
-import megamek.client.ui.clientGUI.boardview.IBoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.dialogs.phaseDisplay.TargetChoiceDialog;
 import megamek.client.ui.dialogs.phaseDisplay.TeleMissileSettingDialog;
 import megamek.client.ui.dialogs.phaseDisplay.TriggerAPPodDialog;
@@ -418,15 +417,15 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay implements ListSel
             }
 
             target(null);
-            clientgui.getBoardView(entity).clearMarkedHexes();
-            clientgui.getBoardView(entity).highlight(entity.getPosition());
+            clientgui.getBoardState(entity).clearMarkedHexes();
+            clientgui.getBoardState(entity).highlight(entity.getPosition());
 
             refreshAll();
             cacheVisibleTargets();
 
-            if (!clientgui.getBoardView(entity).isMovingUnits() && !entity.isOffBoard()) {
+            if (!clientgui.getBoardState(entity).isMovingUnits() && !entity.isOffBoard()) {
                 clientgui.showBoardView(entity.getBoardId());
-                clientgui.getBoardView(entity).centerOn(entity);
+                clientgui.getBoardState(entity).centerOn(entity);
             }
 
             setTwistEnabled(entity.canChangeSecondaryFacing() && entity.getCrew().isActive());
@@ -498,7 +497,7 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay implements ListSel
         } else {
             setNextEnabled(true);
             butDone.setEnabled(true);
-            clientgui.boardViews().forEach(boardView -> boardView.select(null));
+            clientgui.boardStates().forEach(boardView -> boardView.select(null));
             initDonePanelForNewTurn();
         }
         setupButtonPanel();
@@ -642,7 +641,7 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay implements ListSel
 
         // and add it into the game, temporarily
         game.addAction(saa);
-        clientgui.getBoardView(game.getEntity(currentEntity)).addAttack(saa);
+        clientgui.getBoardState(game.getEntity(currentEntity)).addAttack(saa);
 
         // refresh weapon panel, as both will have changed
         updateTarget();
@@ -815,7 +814,7 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay implements ListSel
     private void removeTempAttacks() {
         // remove temporary attacks from game & board
         game.removeActionsFor(currentEntity);
-        clientgui.boardViews().forEach(bv -> ((BoardView) bv).removeAttacksFor(currentEntity()));
+        clientgui.boardStates().forEach(bv -> bv.removeAttacksFor(currentEntity()));
     }
 
     /**
@@ -831,7 +830,7 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay implements ListSel
                       currentEntity().getPosition()));
                 clientgui.getUnitDisplay().wPan.displayMek(currentEntity());
                 game.removeAction(lastAction);
-                clientgui.boardViews().forEach(bv -> ((BoardView) bv).refreshAttacks());
+                clientgui.boardStates().forEach(bv -> bv.refreshAttacks());
             }
         }
     }
@@ -843,7 +842,7 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay implements ListSel
         if (currentEntity() == null) {
             return;
         }
-        clientgui.boardViews().forEach(bv -> ((BoardView) bv).redrawEntity(currentEntity()));
+        clientgui.boardStates().forEach(bv -> bv.redrawEntity(currentEntity()));
         clientgui.getUnitDisplay().displayEntity(currentEntity());
         if (GUIP.getFireDisplayTabDuringFiringPhases()) {
             clientgui.getUnitDisplay().showPanel(MekPanelTabStrip.WEAPONS);
@@ -1009,8 +1008,8 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay implements ListSel
             return;
         }
 
-        clientgui.getBoardView(targ).centerOn(targ);
-        clientgui.getBoardView(targ).select(targ.getPosition());
+        clientgui.getBoardState(targ).centerOn(targ);
+        clientgui.getBoardState(targ).select(targ.getPosition());
 
         target(targ);
     }
@@ -1042,8 +1041,8 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay implements ListSel
             return;
         }
 
-        clientgui.getBoardView(targ).centerOn(targ);
-        clientgui.getBoardView(targ).select(targ.getPosition());
+        clientgui.getBoardState(targ).centerOn(targ);
+        clientgui.getBoardState(targ).select(targ.getPosition());
 
         target(targ);
     }
@@ -1156,7 +1155,7 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay implements ListSel
                 updateFlipArms(false);
                 torsoTwist(b.getCoords());
             } else if (phase.isTargeting()) {
-                target(new HexTarget(b.getCoords(), b.getBoardView().getBoardId(), Targetable.TYPE_HEX_ARTILLERY));
+                target(new HexTarget(b.getCoords(), b.getBoardState().getBoardId(), Targetable.TYPE_HEX_ARTILLERY));
             } else {
                 target(chooseTarget(b.getBoardLocation()));
             }
@@ -1495,7 +1494,7 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay implements ListSel
     @Override
     public void clear() {
         clearAttacks();
-        clientgui.boardViews().forEach(IBoardView::clearMarkedHexes);
+        clientgui.boardStates().forEach(BoardClientState::clearMarkedHexes);
         refreshAll();
     }
 
@@ -1509,7 +1508,7 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay implements ListSel
 
         if (clientgui.getClient().isMyTurn() && (currentEntity() != null)) {
             clientgui.maybeShowUnitDisplay();
-            var bv = clientgui.getBoardView(currentEntity());
+            var bv = clientgui.getBoardState(currentEntity());
             if (bv != null) {
                 bv.centerOn(currentEntity());
             }
@@ -1533,7 +1532,7 @@ public class TargetingPhaseDisplay extends AttackPhaseDisplay implements ListSel
                 clientgui.maybeShowUnitDisplay();
                 clientgui.getUnitDisplay().displayEntity(entity);
                 if (entity.isDeployed()) {
-                    clientgui.getBoardView(entity).centerOn(entity);
+                    clientgui.getBoardState(entity).centerOn(entity);
                 }
             }
         }

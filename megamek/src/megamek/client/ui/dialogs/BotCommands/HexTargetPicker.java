@@ -52,7 +52,7 @@ import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListenerAdapter;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
 import megamek.common.RangeType;
@@ -77,7 +77,7 @@ public class HexTargetPicker {
     private static final int ALL_HEX_BORDERS = 63;
 
     private final ClientGUI clientGUI;
-    private final BoardView boardView;
+    private final BoardClientState boardView;
     private final String orderDescription;
     private final boolean singleHex;
     private final int maxHexes;
@@ -102,7 +102,7 @@ public class HexTargetPicker {
      * @param maxHexes          The maximum number of hexes that may be picked, or 0 for no limit
      * @param onTargetsSelected Called with the picked hexes as dash-separated hex numbers (e.g. "0810-0811")
      */
-    public HexTargetPicker(ClientGUI clientGUI, BoardView boardView, String orderDescription, boolean singleHex,
+    public HexTargetPicker(ClientGUI clientGUI, BoardClientState boardView, String orderDescription, boolean singleHex,
           int maxHexes, Consumer<String> onTargetsSelected) {
         this.clientGUI = clientGUI;
         this.boardView = boardView;

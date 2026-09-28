@@ -34,7 +34,7 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.MegaMekGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
 import megamek.client.ui.dialogs.unitDisplay.WeaponPanel;
 import megamek.client.ui.panels.phaseDisplay.DeploymentDisplay;
@@ -64,7 +64,7 @@ class GpuBoardActionsTest {
                 Client client = mock(Client.class);
                 when(gui.getClient()).thenReturn(client);
                 when(client.isMyTurn()).thenReturn(true);
-                BoardView view = spy(fixture.view);
+                BoardClientState view = spy(fixture.view.getClientState());
                 doReturn(gui).when(view).getClientgui();
                 MovementDisplay movement = mock(MovementDisplay.class);
                 when(movement.currentEntity()).thenReturn(fixture.entity);
@@ -73,12 +73,12 @@ class GpuBoardActionsTest {
                 Coords destination = new Coords(4, 5);
 
                 actions.defaultAction(destination, null, 0);
-                verify(view).mouseAction(destination, BoardView.BOARD_HEX_DRAG, InputEvent.BUTTON1_DOWN_MASK, 1);
-                verify(view).mouseAction(destination, BoardView.BOARD_HEX_CLICK, 0, 1);
+                verify(view).mouseAction(destination, BoardClientState.BOARD_HEX_DRAG, InputEvent.BUTTON1_DOWN_MASK, 1);
+                verify(view).mouseAction(destination, BoardClientState.BOARD_HEX_CLICK, 0, 1);
                 actions.defaultAction(destination, null, InputEvent.SHIFT_DOWN_MASK);
-                verify(view).mouseAction(destination, BoardView.BOARD_HEX_DRAG,
+                verify(view).mouseAction(destination, BoardClientState.BOARD_HEX_DRAG,
                       InputEvent.BUTTON1_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK, 1);
-                verify(view).mouseAction(destination, BoardView.BOARD_HEX_CLICK, InputEvent.SHIFT_DOWN_MASK, 1);
+                verify(view).mouseAction(destination, BoardClientState.BOARD_HEX_CLICK, InputEvent.SHIFT_DOWN_MASK, 1);
                 clearInvocations(view);
 
                 when(movement.currentEntity()).thenReturn(null);
@@ -123,10 +123,10 @@ class GpuBoardActionsTest {
                 when(client.getGame()).thenReturn(fixture.game);
                 when(client.getLocalPlayer()).thenReturn(fixture.player);
                 when(client.isMyTurn()).thenReturn(true);
-                BoardView view = spy(fixture.view);
+                BoardClientState view = spy(fixture.view.getClientState());
                 doReturn(gui).when(view).getClientgui();
-                when(gui.boardViews()).thenReturn(List.of(view));
-                when(gui.getBoardView(any(Entity.class))).thenReturn(view);
+                when(gui.boardStates()).thenReturn(List.of(view));
+                when(gui.getBoardState(any(Entity.class))).thenReturn(view);
                 try (var keys = mockStatic(MegaMekGUI.class)) {
                     keys.when(MegaMekGUI::getKeyDispatcher).thenReturn(gui.controller);
                     DeploymentDisplay phase = spy(new DeploymentDisplay(gui));
@@ -199,7 +199,7 @@ class GpuBoardActionsTest {
                 menus.get().addActionListener(event -> clicks.incrementAndGet());
                 ClientGUI gui = mock(ClientGUI.class);
                 when(gui.getMenuBar()).thenReturn(menus.get());
-                BoardView view = spy(fixture.view);
+                BoardClientState view = spy(fixture.view.getClientState());
                 doReturn(gui).when(view).getClientgui();
                 commands.set(new GpuBoardActions(view, () -> fixture.panel, () -> false, () -> { }).globalCommands());
                 fixture.game.setPhase(GamePhase.MOVEMENT_REPORT);
@@ -256,7 +256,7 @@ class GpuBoardActionsTest {
             when(client.getLocalPlayer()).thenReturn(fixture.player);
             when(client.isMyTurn()).thenReturn(true);
             when(client.getMyTurn()).thenReturn(new GameTurn(fixture.player.getId()));
-            BoardView view = spy(fixture.view);
+            BoardClientState view = spy(fixture.view.getClientState());
             doReturn(gui).when(view).getClientgui();
             FiringDisplay phase = mock(FiringDisplay.class);
             when(phase.currentEntity()).thenReturn(fixture.entity);

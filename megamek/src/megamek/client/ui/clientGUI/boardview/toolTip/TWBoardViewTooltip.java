@@ -32,7 +32,6 @@
  */
 package megamek.client.ui.clientGUI.boardview.toolTip;
 
-import java.awt.Point;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Enumeration;
@@ -44,7 +43,7 @@ import java.util.Set;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.sprite.AttackSprite;
 import megamek.client.ui.clientGUI.tooltip.HexTooltip;
 import megamek.client.ui.clientGUI.tooltip.UnitToolTip;
@@ -68,24 +67,22 @@ import megamek.common.units.Entity;
 import megamek.common.units.EntityVisibilityUtils;
 import megamek.common.units.Targetable;
 
-public class TWBoardViewTooltip implements BoardViewTooltipProvider {
+public class TWBoardViewTooltip {
 
     private final GUIPreferences GUIP = GUIPreferences.getInstance();
 
     private final ClientGUI clientGui;
     private final Game game;
-    private final BoardView bv;
+    private final BoardClientState bv;
 
-    public TWBoardViewTooltip(Game game, @Nullable ClientGUI clientGui, BoardView boardView) {
+    public TWBoardViewTooltip(Game game, @Nullable ClientGUI clientGui, BoardClientState boardView) {
         this.clientGui = clientGui;
         this.game = game;
         bv = boardView;
     }
 
-    @Override
-    public String getTooltip(Point point, Coords movementTarget) {
-        final Coords coords = bv.getCoordsAt(point);
-        if (!bv.getBoard().contains(coords)) {
+    public String getTooltip(Coords coords, Coords movementTarget) {
+        if (coords == null || !bv.getBoard().contains(coords)) {
             return null;
         }
 
@@ -185,7 +182,7 @@ public class TWBoardViewTooltip implements BoardViewTooltipProvider {
         }
 
         // check if it's on any flares
-        result.append(HexTooltip.getFlares(GUIP, bv, point));
+        result.append(HexTooltip.getFlares(GUIP, bv, coords));
 
         // Add wreck info
         result.append(HexTooltip.getWrecks(GUIP, bv, coords));

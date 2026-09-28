@@ -37,8 +37,8 @@ import java.awt.geom.AffineTransform;
 import java.util.List;
 
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.FontHandler;
 import megamek.client.ui.util.StringDrawer;
@@ -101,7 +101,7 @@ public class FlightPathIndicatorSprite extends HexSprite implements TacticalSpri
     private final StringDrawer flyOffIcon = new StringDrawer(FLY_OFF)
           .at(HEX_CENTER_X, HEX_CENTER_Y).useConfig(symbolConfig);
 
-    public FlightPathIndicatorSprite(BoardView boardView, List<MoveStep> steps, int index, boolean last) {
+    public FlightPathIndicatorSprite(BoardGlyphContext boardView, List<MoveStep> steps, int index, boolean last) {
         super(boardView, steps.get(index).getPosition());
         currentStep = steps.get(index);
         isLast = last;
@@ -223,7 +223,7 @@ public class FlightPathIndicatorSprite extends HexSprite implements TacticalSpri
      * and turn restrictions.
      */
     private boolean canTurnWithThrustCost(MoveStep step) {
-        return step.canAeroTurn(bv.game);
+        return step.canAeroTurn(bv.getGame());
     }
 
     private boolean canTurnWithThrustCost() {

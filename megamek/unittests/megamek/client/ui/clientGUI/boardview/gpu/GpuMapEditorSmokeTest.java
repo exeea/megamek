@@ -5,13 +5,18 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mockConstruction;
 
+import java.awt.Window;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.nio.file.Files;
 import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.atomic.AtomicInteger;
 import javax.imageio.ImageIO;
 import javax.swing.AbstractButton;
 import javax.swing.JSpinner;
@@ -28,11 +33,55 @@ import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedConstruction;
 
 /** Real tools and model events, with construction of the legacy renderer intercepted for the entire session. */
 @Tag("on-demand")
 class GpuMapEditorSmokeTest {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void closingTheEditorDisposesItsHiddenOwnerAndAnyClassicView(boolean classic) throws Exception {
+        var preferences = GUIPreferences.getInstance();
+        boolean nag = preferences.getNagForMapEdReadme();
+        preferences.setNagForMapEdReadme(false);
+        AtomicInteger closed = new AtomicInteger();
+        try {
+            onEdt(() -> {
+                var controller = new MegaMekController();
+                var editor = new BoardEditorPanel(controller);
+                controller.boardEditor = editor;
+                try {
+                    assertFalse(editor.getFrame().isVisible());
+                    editor.getFrame().addWindowListener(new WindowAdapter() {
+                        @Override
+                        public void windowClosed(WindowEvent event) {
+                            closed.incrementAndGet();
+                        }
+                    });
+                    editor.boardNew(false);
+                    if (classic) {
+                        editor.showClassicEditor();
+                        editor.getFrame().setVisible(true);
+                        assertTrue(editor.hasClassicView());
+                    }
+                    editor.getFrame().dispatchEvent(new WindowEvent(editor.getFrame(), WindowEvent.WINDOW_CLOSING));
+                    assertFalse(editor.getFrame().isDisplayable());
+                    assertFalse(editor.hasClassicView());
+                    assertNull(controller.boardEditor);
+                    assertTrue(editor.getGame().getGameListeners().isEmpty());
+                    for (Window owned : editor.getFrame().getOwnedWindows()) {
+                        assertFalse(owned.isDisplayable());
+                    }
+                } finally { editor.dispose(); }
+                return null;
+            });
+            onEdt(() -> null);
+            assertEquals(1, closed.get(), "A hidden owner still notifies the main menu when the session closes");
+        } finally { preferences.setNagForMapEdReadme(nag); }
+    }
+
     @Test
     void switchingBackFromTheClassicEditorReleasesOnlyItsSubscriptions() throws Exception {
         var preferences = GUIPreferences.getInstance();

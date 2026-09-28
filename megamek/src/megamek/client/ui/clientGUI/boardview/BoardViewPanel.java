@@ -59,20 +59,6 @@ public class BoardViewPanel extends JPanel implements Scrollable {
     }
 
     @Override
-    public void repaint(long delay, int x, int y, int width, int height) {
-        // Swing funnels both full and regional repaint requests through this method, including animated images.
-        if (boardView != null) {
-            boardView.invalidatePlanarCapture();
-        }
-        super.repaint(delay, x, y, width, height);
-    }
-
-    /** Board hex events already tell native captures exactly which terrain changed. */
-    void repaintTerrain() {
-        super.repaint(0, 0, 0, getWidth(), getHeight());
-    }
-
-    @Override
     public Point getToolTipLocation(MouseEvent event) {
         Coords hexCoords = boardView.getCoordsAt(event.getPoint());
         Point point = boardView.getCentreHexLocation(hexCoords);

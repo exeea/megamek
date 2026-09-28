@@ -33,14 +33,11 @@
 package megamek.client.ui.clientGUI.boardview.sprite;
 
 import java.awt.*;
-import java.text.MessageFormat;
 
-import megamek.client.ui.Messages;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.EntityWreckHelper;
 import megamek.common.board.Coords;
-import megamek.common.preference.PreferenceManager;
 import megamek.common.units.Entity;
 import megamek.common.units.Terrains;
 import megamek.common.util.ImageUtil;
@@ -57,7 +54,7 @@ public abstract class AbstractWreckSprite extends Sprite {
 
     protected int secondaryPos;
 
-    public AbstractWreckSprite(BoardView boardView1) {
+    public AbstractWreckSprite(BoardGlyphContext boardView1) {
         super(boardView1);
     }
 
@@ -185,13 +182,6 @@ public abstract class AbstractWreckSprite extends Sprite {
 
     @Override
     public StringBuffer getTooltip() {
-        StringBuffer result = new StringBuffer();
-        result.append(Messages.getString("BoardView1.Tooltip.Wreckof")).append(" ");
-        result.append(entity.getChassis());
-        result.append(MessageFormat.format(" ({0})", entity.getOwner().getName()));
-        if (PreferenceManager.getClientPreferences().getShowUnitId()) {
-            result.append(MessageFormat.format(" [ID: {0}]", entity.getId()));
-        }
-        return result;
+        return new StringBuffer(megamek.client.ui.clientGUI.tooltip.HexTooltip.wreckText(entity));
     }
 }

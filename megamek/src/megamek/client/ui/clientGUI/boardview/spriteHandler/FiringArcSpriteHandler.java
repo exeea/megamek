@@ -175,7 +175,7 @@ public class FiringArcSpriteHandler extends BoardViewSpriteHandler implements IP
      */
     public void renewSprites() {
         clear();
-        if (clientGUI.boardViews().isEmpty()) {
+        if (clientGUI.boardStates().isEmpty()) {
             return;
         }
         if (!GUIP.getShowFieldOfFire() || (firingEntity == null) || (firingPosition == null)
@@ -274,7 +274,7 @@ public class FiringArcSpriteHandler extends BoardViewSpriteHandler implements IP
                 }
                 // create sprite if there's a border to paint
                 if (edgesToPaint > 0) {
-                    FieldOfFireSprite ffSprite = new FieldOfFireSprite(clientGUI.getBoardView(firingEntity),
+                    FieldOfFireSprite ffSprite = new FieldOfFireSprite(clientGUI.getBoardState(firingEntity),
                           bracket,
                           loc,
                           edgesToPaint);
@@ -315,7 +315,7 @@ public class FiringArcSpriteHandler extends BoardViewSpriteHandler implements IP
                 if (board.contains(mark) && fieldFire.get(bracket).contains(mark)
                       && ((bracket > 0) || (numMinMarkers < 2))) {
                     TextMarkerSprite tS =
-                          new TextMarkerSprite(clientGUI.getBoardView(firingEntity),
+                          new TextMarkerSprite(clientGUI.getBoardState(firingEntity),
                                 mark,
                                 bracket);
                     currentSprites.add(tS);
@@ -326,7 +326,7 @@ public class FiringArcSpriteHandler extends BoardViewSpriteHandler implements IP
             }
         }
 
-        clientGUI.getBoardView(firingEntity).addSprites(currentSprites);
+        clientGUI.getBoardState(firingEntity).addSprites(currentSprites);
     }
 
     @Override

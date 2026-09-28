@@ -30,7 +30,7 @@ void biomePlant(vec3 point, vec3 sourceNormal, vec4 pigment, out vec3 position, 
     float gust = vegetationGust(root.xy);
     // Stiffer crops bow less than flexible marsh leaves. Strength scales both lean and angular excursion.
     float flex = u_wind.z * (crop ? .78 + .22 * gust : 1.0 + .28 * gust);
-    // Crop ribbons share one stalk angle, keeping their leaf joints attached at every existing mesh LOD.
+    // Crop cards share one stalk angle, preserving the plant image through every mesh LOD.
     // Marsh leaves form a flexible arch, with no displacement at the grounded base.
     float angleAtHeight = crop ? flex : flex * point.z / top;
     float sine = sin(angleAtHeight), cosine = cos(angleAtHeight);

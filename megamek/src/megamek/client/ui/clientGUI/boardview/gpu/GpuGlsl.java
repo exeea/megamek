@@ -122,14 +122,7 @@ final class GpuGlsl {
         try {
             ShaderProgram.prependVertexCode = "";
             ShaderProgram.prependFragmentCode = "";
-            boolean editable = GpuShaderManager.current() != null;
-            ShaderProgram result = new ShaderProgram(vertex, fragment) {
-                @Override
-                public int fetchUniformLocation(String uniform, boolean pedantic) {
-                    // A preview may temporarily stop using an input, which the GL compiler then removes.
-                    return super.fetchUniformLocation(uniform, pedantic && !editable);
-                }
-            };
+            ShaderProgram result = new GpuShaderUniforms(name, vertex, fragment);
             if (!result.isCompiled()) { throw new GdxRuntimeException(name + ": " + result.getLog()); }
             return result;
         } finally {

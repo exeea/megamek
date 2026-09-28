@@ -32,7 +32,7 @@ class GpuOverlayTest {
     void nativeLayersKeepWidgetsAboveAndBelowTextInPainterOrder() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             SwingUtilities.invokeAndWait(() -> {
-                KeyBindingsOverlay keys = new KeyBindingsOverlay(fixture.view) {
+                KeyBindingsOverlay keys = new KeyBindingsOverlay(fixture.view.getClientState()) {
                     @Override
                     protected boolean getVisibilityGUIPreference() {
                         return true;
@@ -85,7 +85,7 @@ class GpuOverlayTest {
                 preferences.setValue(GUIPreferences.GUI_SCALE, 1f);
                 preferences.setValue(GUIPreferences.PLANETARY_CONDITIONS_BACKGROUND_TRANSPARENCY, 0);
                 String text = "Native text: rivers, 25\u00b0C, 1.0g";
-                fixture.view.addOverlay(new KeyBindingsOverlay(fixture.view) {
+                fixture.view.addOverlay(new KeyBindingsOverlay(fixture.view.getClientState()) {
                     @Override
                     protected boolean getVisibilityGUIPreference() {
                         return true;
@@ -152,13 +152,13 @@ class GpuOverlayTest {
     void fadesStartHiddenReverseContinuouslyAndKeepTheSameArtwork() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             SwingUtilities.invokeAndWait(() -> {
-                KeyBindingsOverlay keys = new KeyBindingsOverlay(fixture.view) {
+                KeyBindingsOverlay keys = new KeyBindingsOverlay(fixture.view.getClientState()) {
                     @Override
                     protected boolean getVisibilityGUIPreference() {
                         return false;
                     }
                 };
-                PlanetaryConditionsOverlay conditions = new PlanetaryConditionsOverlay(fixture.view) {
+                PlanetaryConditionsOverlay conditions = new PlanetaryConditionsOverlay(fixture.view.getClientState()) {
                     @Override
                     protected boolean getVisibilityGUIPreference() {
                         return false;

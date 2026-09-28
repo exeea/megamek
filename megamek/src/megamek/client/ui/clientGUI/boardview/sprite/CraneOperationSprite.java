@@ -43,7 +43,7 @@ import java.awt.RenderingHints;
 import javax.swing.ImageIcon;
 
 import megamek.MMConstants;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.annotations.Nullable;
@@ -86,7 +86,7 @@ public class CraneOperationSprite extends HexSprite {
      * @param turnsCompleted the turns of crane work banked so far
      * @param turnsRequired  the turns of crane work the operation needs
      */
-    public CraneOperationSprite(BoardView boardView, Coords location, @Nullable Entity fadingUnit, int facing,
+    public CraneOperationSprite(BoardGlyphContext boardView, Coords location, @Nullable Entity fadingUnit, int facing,
           int turnsCompleted, int turnsRequired) {
         super(boardView, location);
         this.fadingUnit = fadingUnit;

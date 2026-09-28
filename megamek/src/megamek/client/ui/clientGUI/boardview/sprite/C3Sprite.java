@@ -40,7 +40,7 @@ import java.awt.Polygon;
 import java.awt.Rectangle;
 import java.awt.image.ImageObserver;
 
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.common.units.Entity;
 
@@ -62,7 +62,7 @@ public class C3Sprite extends Sprite implements TacticalSprite {
 
     Color spriteColor;
 
-    public C3Sprite(BoardView boardView1, final Entity e, final Entity m) {
+    public C3Sprite(BoardGlyphContext boardView1, final Entity e, final Entity m) {
         super(boardView1);
         entityE = e;
         entityM = m;
@@ -117,7 +117,7 @@ public class C3Sprite extends Sprite implements TacticalSprite {
 
         final double angle = (entityE.getPosition().radian(entityM.getPosition()) + (Math.PI * 1.5)) % (Math.PI
               * 2); // angle
-        final double lineWidth = this.bv.getScale() * BoardView.C3_LINE_WIDTH; // line width
+        final double lineWidth = this.bv.getScale() * BoardGlyphContext.C3_LINE_WIDTH; // line width
 
         c3Poly = new Polygon();
         int roundedWidth = (int) Math.round(Math.sin(angle) * lineWidth);

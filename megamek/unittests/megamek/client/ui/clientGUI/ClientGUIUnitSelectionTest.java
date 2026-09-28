@@ -17,7 +17,7 @@ import javax.swing.SwingUtilities;
 
 import megamek.client.Client;
 import megamek.client.event.BoardViewEvent;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
 import megamek.client.ui.panels.phaseDisplay.ActionPhaseDisplay;
 import megamek.client.ui.panels.phaseDisplay.DeployMinefieldDisplay;
@@ -50,7 +50,7 @@ class ClientGUIUnitSelectionTest {
     private final Entity unit = new BipedMek();
     private final ClientGUI gui = mock(ClientGUI.class);
     private final UnitDisplayPanel display = mock(UnitDisplayPanel.class);
-    private final BoardView view = mock(BoardView.class);
+    private final BoardClientState view = mock(BoardClientState.class);
 
     ClientGUIUnitSelectionTest() {
         player.setTeam(1);

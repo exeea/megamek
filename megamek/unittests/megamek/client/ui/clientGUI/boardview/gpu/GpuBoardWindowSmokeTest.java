@@ -29,6 +29,7 @@ import java.awt.Rectangle;
 import java.awt.Window;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
+import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
 import java.io.File;
@@ -207,7 +208,7 @@ class GpuBoardWindowSmokeTest {
                 onSwing(() -> {
                     ui.view().removeBoardViewListener(gui);
                     GUIPreferences.getInstance().removePreferenceChangeListener(ui.overview());
-                    GpuBoardWindow.closeFor(ui.view());
+                    GpuBoardWindow.closeFor(ui.view().getClientState());
                     ui.frame().dispose();
                     ui.menus().die();
                     return null;
@@ -235,7 +236,7 @@ class GpuBoardWindowSmokeTest {
             AtomicInteger phaseActions = new AtomicInteger();
             AtomicReference<BoardViewEvent> lastMouseEvent = new AtomicReference<>();
             AtomicInteger unitSelections = new AtomicInteger();
-            RulerDialog ruler = onSwing(() -> new RulerDialog(ui.frame(), ui.view(), fixture.game));
+            RulerDialog ruler = onSwing(() -> new RulerDialog(ui.frame(), ui.view().getClientState(), fixture.game));
             try {
                 onSwing(() -> {
                     when(ui.view().getClientgui().getClient().isMyTurn()).thenReturn(true);
@@ -392,7 +393,7 @@ class GpuBoardWindowSmokeTest {
                     ui.view().removeBoardViewListener(ruler);
                     ruler.dispose();
                     GUIPreferences.getInstance().removePreferenceChangeListener(ui.overview());
-                    GpuBoardWindow.closeFor(ui.view());
+                    GpuBoardWindow.closeFor(ui.view().getClientState());
                     ui.frame().dispose();
                     ui.menus().die();
                     return null;
@@ -426,8 +427,16 @@ class GpuBoardWindowSmokeTest {
     void editorSwitchSharesBrushesUndoHistoryAndBoardAndRejectsStalePicks() throws Exception {
         boolean nag = GUIPreferences.getInstance().getNagForMapEdReadme();
         GUIPreferences.getInstance().setNagForMapEdReadme(false);
+        AtomicInteger closed = new AtomicInteger();
         BoardEditorPanel editor = onSwing(() -> {
             BoardEditorPanel result = new BoardEditorPanel(null);
+            assertFalse(result.getFrame().isVisible(), "Startup must not flash the 2D editor before 3D opens");
+            result.getFrame().addWindowListener(new WindowAdapter() {
+                @Override
+                public void windowClosed(WindowEvent event) {
+                    closed.incrementAndGet();
+                }
+            });
             MapSettings settings = MapSettings.getInstance();
             settings.setBoardSize(8, 8);
             setField(BoardEditorPanel.class, result, "mapSettings", settings);
@@ -570,15 +579,44 @@ class GpuBoardWindowSmokeTest {
             reopened.endEditorStroke();
             assertEquals(oldLevel + 1, onSwing(() -> replacement.getHex(first).getLevel()),
                   "A new board accepts a new wheel stroke after stale input was rejected");
-            onGl(() -> {
-                long handle = ((Lwjgl3Graphics) Gdx.graphics).getWindow().getWindowHandle();
-                var callback = GLFW.glfwSetWindowCloseCallback(handle, null);
-                GLFW.glfwSetWindowCloseCallback(handle, callback);
-                callback.invoke(handle);
+            long handle = onGl(() -> ((Lwjgl3Graphics) Gdx.graphics).getWindow().getWindowHandle());
+            for (int response : new int[] { JOptionPane.CANCEL_OPTION, JOptionPane.NO_OPTION }) {
+                onGl(() -> {
+                    var callback = GLFW.glfwSetWindowCloseCallback(handle, null);
+                    GLFW.glfwSetWindowCloseCallback(handle, callback);
+                    callback.invoke(handle);
+                    return null;
+                });
+                await(() -> onSwing(() -> savePrompt(editor.getFrame()) != null));
+                onSwing(() -> {
+                    JOptionPane prompt = savePrompt(editor.getFrame());
+                    assertEquals(Messages.getString("BoardEditor.exitprompt"), prompt.getMessage());
+                    assertTrue(SwingUtilities.getWindowAncestor(prompt).isAlwaysOnTop());
+                    prompt.setValue(response);
+                    return null;
+                });
+                onSwing(() -> null);
+                if (response == JOptionPane.CANCEL_OPTION) {
+                    assertFalse(reopened.isClosed());
+                    assertEquals(0, closed.get(), "Cancelling keeps the editor session open");
+                    assertFalse(onSwing(() -> editor.getFrame().isVisible()));
+                    assertFalse(editor.hasClassicView());
+                    assertSame(replacement, editor.getGame().getBoard());
+                    assertEquals(handle, onGl(() -> ((Lwjgl3Graphics) Gdx.graphics).getWindow().getWindowHandle()));
+                }
+            }
+            await(() -> !GpuBoardWindow.isActiveFor(null));
+            onSwing(() -> {
+                assertTrue(reopened.isClosed());
+                assertEquals(1, closed.get(), "Closing notifies the main menu exactly once");
+                assertFalse(editor.hasClassicView(), "Closing must not recreate the 2D editor");
+                assertFalse(editor.getFrame().isDisplayable());
+                for (Window owned : editor.getFrame().getOwnedWindows()) {
+                    assertFalse(owned.isDisplayable(), "Closing also disposes the editor's tools and dialogs");
+                }
+                assertTrue(editor.getGame().getGameListeners().isEmpty());
                 return null;
             });
-            await(() -> onSwing(() -> reopened.isClosed() && editor.getFrame().isShowing()));
-            assertSame(replacement, editor.getGame().getBoard(), "Native close returns to the same 2D editor");
         } finally {
             onSwing(() -> {
                 editor.dispose();
@@ -981,7 +1019,7 @@ class GpuBoardWindowSmokeTest {
                 onSwing(() -> {
                     assertTrue(preview instanceof GpuMapSource, "Preview uses the model directly");
                     assertTrue(preview.takeFrame().scene().units().isEmpty());
-                    GpuBoardWindow.open(ui.view(), () -> fixture.panel);
+                    GpuBoardWindow.open(ui.view().getClientState(), () -> fixture.panel);
                     ui.frame().setVisible(false);
                     return null;
                 });
@@ -1053,7 +1091,7 @@ class GpuBoardWindowSmokeTest {
                 });
             } finally {
                 onSwing(() -> {
-                    GpuBoardWindow.closeFor(ui.view());
+                    GpuBoardWindow.closeFor(ui.view().getClientState());
                     ui.frame().dispose();
                     ui.view().dispose();
                     GUIPreferences.getInstance().removePreferenceChangeListener(ui.menus());
@@ -1158,7 +1196,7 @@ class GpuBoardWindowSmokeTest {
                     preferences.removePreferenceChangeListener(gui);
                     preferences.removePreferenceChangeListener(gui.getForceDisplayPanel());
                     fixture.game.removeGameListener(gui.getForceDisplayPanel());
-                    GpuBoardWindow.closeFor(ui.view());
+                    GpuBoardWindow.closeFor(ui.view().getClientState());
                     unit.dispose();
                     force.dispose();
                     ui.frame().dispose();
@@ -1184,7 +1222,7 @@ class GpuBoardWindowSmokeTest {
                 Application previous = Gdx.app;
                 onSwing(() -> {
                     phase.set(new StartingScenarioPanel());
-                    when(gui.getCurrentBoardView()).thenReturn(Optional.empty());
+                    when(gui.getCurrentBoardState()).thenReturn(Optional.empty());
                     GpuBoardWindow.open(gui, phase::get);
                     return null;
                 });
@@ -1207,7 +1245,7 @@ class GpuBoardWindowSmokeTest {
                     return message.getText().toString().equals(Messages.getString("ClientGUI.waitingOnTheServer"));
                 }));
                 onSwing(() -> {
-                    when(gui.getCurrentBoardView()).thenReturn(Optional.of(ui.view()));
+                    when(gui.getCurrentBoardState()).thenReturn(Optional.of(ui.view().getClientState()));
                     return null;
                 });
                 await(() -> onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames() >= 5));
@@ -1228,7 +1266,7 @@ class GpuBoardWindowSmokeTest {
                     BoardView view = new BoardView(fixture.game, null, gui, 0);
                     view.setLocalPlayer(fixture.player);
                     ui.view().dispose();
-                    when(gui.getCurrentBoardView()).thenReturn(Optional.of(view));
+                    when(gui.getCurrentBoardState()).thenReturn(Optional.of(view.getClientState()));
                     return view;
                 });
                 try {
@@ -1413,7 +1451,7 @@ class GpuBoardWindowSmokeTest {
             } finally {
                 onSwing(() -> {
                     preferences.removePreferenceChangeListener(gui);
-                    GpuBoardWindow.closeFor(ui.view());
+                    GpuBoardWindow.closeFor(ui.view().getClientState());
                     bot.dispose();
                     minimap.dispose();
                     ui.frame().dispose();
@@ -1486,7 +1524,7 @@ class GpuBoardWindowSmokeTest {
                 assertFalse(onSwing(() -> GpuBoardWindow.isActiveFor(gui)));
             } finally {
                 onSwing(() -> {
-                    GpuBoardWindow.closeFor(ui.view());
+                    GpuBoardWindow.closeFor(ui.view().getClientState());
                     report.dispose();
                     ui.frame().dispose();
                     ui.view().dispose();
@@ -1675,7 +1713,7 @@ class GpuBoardWindowSmokeTest {
                 assertTrue(preferences.getUse3DBoard());
                 assertEquals(ClientGUI.VIEW_CLASSIC_BOARD, ui.gpuChoice().getActionCommand());
                 onSwing(() -> {
-                    GpuBoardWindow.closeFor(ui.view());
+                    GpuBoardWindow.closeFor(ui.view().getClientState());
                     ui.frame().dispose();
                     return null;
                 });
@@ -1691,7 +1729,7 @@ class GpuBoardWindowSmokeTest {
                     preferences.setValue(GUIPreferences.GUI_SCALE, originalScale);
                     preferences.setShowUnitOverview(originalOverview);
                     preferences.removePreferenceChangeListener(ui.overview());
-                    GpuBoardWindow.closeFor(ui.view());
+                    GpuBoardWindow.closeFor(ui.view().getClientState());
                     ui.frame().dispose();
                     ui.menus().die();
                     return null;
@@ -1723,11 +1761,11 @@ class GpuBoardWindowSmokeTest {
         return ((GpuBattleView) Gdx.app.getApplicationListener()).boardCamera.focus.epsilonEquals(expected, 0.01f);
     }
 
-    private ClientWindow createClientWindow(GpuBoardFixture fixture) {
+    private ClientWindow createClientWindow(GpuBoardFixture fixture) throws Exception {
         return createClientWindow(fixture, true);
     }
 
-    private ClientWindow createClientWindow(GpuBoardFixture fixture, boolean classic) {
+    private ClientWindow createClientWindow(GpuBoardFixture fixture, boolean classic) throws Exception {
         fixture.source.close();
         ClientGUI gui = mock(ClientGUI.class, invocation -> switch (invocation.getMethod().getName()) {
             case "refreshAuxiliaryWindows", "setMapVisible", "setBotCommandsLocation",
@@ -1742,6 +1780,14 @@ class GpuBoardWindowSmokeTest {
         JFrame frame = new JFrame("MegaMek - Classic board switch test");
         CommonMenuBar menus = CommonMenuBar.getMenuBarForGame();
         menus.setPhase(GamePhase.MOVEMENT);
+        when(gui.getClient()).thenReturn(client);
+        when(client.getGame()).thenReturn(fixture.game);
+        when(client.getLocalPlayer()).thenReturn(fixture.player);
+        when(gui.getFrame()).thenReturn(frame);
+        when(gui.getMainPanel()).thenReturn(new JPanel());
+        fixture.view.dispose();
+        fixture.view = new BoardView(fixture.game, null, gui, 0);
+        fixture.view.setLocalPlayer(fixture.player);
         if (classic) {
             frame.add(fixture.view.getComponent());
         }
@@ -1765,8 +1811,12 @@ class GpuBoardWindowSmokeTest {
             return null;
         }).when(gui).setClassicBoardViewEnabled(anyBoolean());
         when(gui.getMenuBar()).thenReturn(menus);
-        when(gui.getCurrentBoardView()).thenReturn(Optional.of(view));
+        when(gui.getCurrentBoardState()).thenReturn(Optional.of(view.getClientState()));
         when(gui.boardViews()).thenReturn(List.of(view));
+        when(gui.boardStates()).thenReturn(List.of(view.getClientState()));
+        when(gui.getBoardState()).thenReturn(view.getClientState());
+        when(gui.getBoardState(any(BoardLocation.class))).thenReturn(view.getClientState());
+        when(gui.getBoardState(any(Entity.class))).thenReturn(view.getClientState());
         when(gui.getBoardView()).thenReturn(view);
         when(gui.getBoardView(any(BoardLocation.class))).thenReturn(view);
         when(gui.getMainPanel()).thenReturn(new JPanel());
@@ -1782,7 +1832,7 @@ class GpuBoardWindowSmokeTest {
         menus.addActionListener(event -> {
             if (event.getActionCommand().equals(ClientGUI.VIEW_GPU_BOARD)) {
                 GUIPreferences.getInstance().setUse3DBoard(true);
-                GpuBoardWindow.open(view, () -> fixture.panel);
+                GpuBoardWindow.open(view.getClientState(), () -> fixture.panel);
             } else if (event.getActionCommand().equals(ClientGUI.VIEW_CLASSIC_BOARD)) {
                 GUIPreferences.getInstance().setUse3DBoard(false);
                 GpuBoardWindow.showClassic(gui);

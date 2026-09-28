@@ -18,6 +18,20 @@ import org.junit.jupiter.api.Test;
 
 class GpuRoadSourceTest {
     @Test
+    void lavaTubesBridgeFloorsUseNativeRockInsteadOfTheVioletLegacyTile() throws Exception {
+        var scene = scene("Map Pack Volcanic/16x17 Lava Tubes 1.board");
+        var bridges = scene.tiles().stream().filter(t -> t.features().stream().anyMatch(f -> f.asset().equals("bridge")))
+              .toList();
+        assertEquals(4, bridges.size());
+        for (var tile : bridges) {
+            assertTrue(tile.detailedGround(), "Native ground beneath bridge " + tile.coords().getBoardNum());
+            assertEquals(BoardScene.Surface.ROCK, tile.surface());
+            assertFalse(tile.liquid().present());
+            assertEquals(-2, tile.elevation());
+        }
+    }
+
+    @Test
     void minesCapturesEveryAuthoredRoadExitWithSandUnderTheCurves() throws Exception {
         Board board = new Board();
         board.load(new File("data/boards/Deserts/16x17 Mines 1.board"));

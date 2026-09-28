@@ -23,7 +23,7 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GameCommandsMenu;
 import megamek.client.ui.clientGUI.MapMenu;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.dialogs.unitDisplay.WeaponPanel;
 import megamek.client.ui.panels.phaseDisplay.AbstractPhaseDisplay;
 import megamek.client.ui.panels.phaseDisplay.ActionPhaseDisplay;
@@ -42,12 +42,12 @@ import megamek.common.units.Entity;
 final class GpuBoardActions {
     private record Turn(JComponent panel, GamePhase phase, int index, int actor) { }
 
-    private final BoardView view;
+    private final BoardClientState view;
     private final Supplier<JComponent> panel;
     private final BooleanSupplier closed;
     private final GpuMenuCommands menus;
 
-    GpuBoardActions(BoardView view, Supplier<JComponent> panel, BooleanSupplier closed, Runnable changed) {
+    GpuBoardActions(BoardClientState view, Supplier<JComponent> panel, BooleanSupplier closed, Runnable changed) {
         this.view = view;
         this.panel = panel;
         this.closed = closed;
@@ -255,13 +255,13 @@ final class GpuBoardActions {
         result.add(new BoardScene.Command("board.los", "Measure line of sight", "Left-click the other endpoint to complete the measurement.",
               true, false, List.of(), dispatch(() -> {
                   if (current(owner)) {
-                      view.mouseAction(coords, BoardView.BOARD_HEX_CLICK, java.awt.event.InputEvent.CTRL_DOWN_MASK, 1);
+                      view.mouseAction(coords, BoardClientState.BOARD_HEX_CLICK, java.awt.event.InputEvent.CTRL_DOWN_MASK, 1);
                   }
               })));
         result.add(new BoardScene.Command("board.ruler", "Measure distance", "Left-click the other endpoint to complete the measurement.",
               true, false, List.of(), dispatch(() -> {
                   if (current(owner)) {
-                      view.mouseAction(coords, BoardView.BOARD_HEX_CLICK, java.awt.event.InputEvent.ALT_DOWN_MASK, 1);
+                      view.mouseAction(coords, BoardClientState.BOARD_HEX_CLICK, java.awt.event.InputEvent.ALT_DOWN_MASK, 1);
                   }
               })));
         if (view.getClientgui() != null) {
@@ -281,7 +281,7 @@ final class GpuBoardActions {
             return;
         }
         if (GpuBoardSource.isMeasurement(modifiers)) {
-            view.mouseAction(coords, BoardView.BOARD_HEX_CLICK, modifiers, 1);
+            view.mouseAction(coords, BoardClientState.BOARD_HEX_CLICK, modifiers, 1);
             return;
         }
         Turn owner = turn();
@@ -308,8 +308,8 @@ final class GpuBoardActions {
 
     private void useHex(Turn owner, Coords coords, int modifiers) {
         if (current(owner) && canUseHex(owner)) {
-            view.mouseAction(coords, BoardView.BOARD_HEX_DRAG, modifiers | InputEvent.BUTTON1_DOWN_MASK, 1);
-            view.mouseAction(coords, BoardView.BOARD_HEX_CLICK, modifiers, 1);
+            view.mouseAction(coords, BoardClientState.BOARD_HEX_DRAG, modifiers | InputEvent.BUTTON1_DOWN_MASK, 1);
+            view.mouseAction(coords, BoardClientState.BOARD_HEX_CLICK, modifiers, 1);
         }
     }
 

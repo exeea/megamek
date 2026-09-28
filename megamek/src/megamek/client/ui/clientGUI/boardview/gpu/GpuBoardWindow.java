@@ -35,7 +35,7 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.boardeditor.BoardEditorPanel;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.util.ScreenFit;
 import megamek.common.board.Board;
 import megamek.common.enums.GamePhase;
@@ -51,7 +51,7 @@ public final class GpuBoardWindow {
     private static final MMLogger LOGGER = MMLogger.create(GpuBoardWindow.class);
     private static GpuBoardWindow active;
     private final ClientGUI gui;
-    private final BoardView initialView;
+    private final BoardClientState initialView;
     private final Supplier<JComponent> panel;
     private final Timer startupTimer;
     private volatile BoardSource source;
@@ -96,11 +96,11 @@ public final class GpuBoardWindow {
     /** The bounds last handed to the Swing thread to save, so an unchanged window writes nothing. */
     private volatile GpuWindowBounds publishedBounds;
 
-    private GpuBoardWindow(ClientGUI gui, BoardView view, Supplier<JComponent> panel) {
+    private GpuBoardWindow(ClientGUI gui, BoardClientState view, Supplier<JComponent> panel) {
         this(gui, view, panel, null, null, null);
     }
 
-    private GpuBoardWindow(ClientGUI gui, BoardView view, Supplier<JComponent> panel, Window previewOwner,
+    private GpuBoardWindow(ClientGUI gui, BoardClientState view, Supplier<JComponent> panel, Window previewOwner,
           BoardEditorPanel editor, Game mapGame) {
         this.gui = gui;
         this.editor = editor;
@@ -111,7 +111,7 @@ public final class GpuBoardWindow {
         if (preview) { previewTitle = previewTitle(mapGame.getBoard()); }
         classicWindow = preview ? previewOwner
               : editor != null ? editor.getFrame()
-                    : gui == null ? SwingUtilities.getWindowAncestor(view.getPanel()) : gui.getFrame();
+                    : gui == null ? null : gui.getFrame();
         if (editor != null) {
             loadingMessage = Messages.getString("BoardEditor.edit3DLoading");
         } else if (preview) {
@@ -172,7 +172,7 @@ public final class GpuBoardWindow {
         }
     }
 
-    public static synchronized void open(BoardView view, Supplier<JComponent> panel) {
+    public static synchronized void open(BoardClientState view, Supplier<JComponent> panel) {
         open(view.getClientgui(), view, panel);
     }
 
@@ -190,7 +190,7 @@ public final class GpuBoardWindow {
             } else if (active.preview) {
                 active.close(false);
                 active.afterClose = () -> {
-                    if (editor.getFrame().isShowing()) {
+                    if (editor.getFrame().isDisplayable()) {
                         toggleEditor(editor);
                     }
                 };
@@ -225,7 +225,7 @@ public final class GpuBoardWindow {
         open(gui, null, panel);
     }
 
-    private static void open(ClientGUI gui, BoardView view, Supplier<JComponent> panel) {
+    private static void open(ClientGUI gui, BoardClientState view, Supplier<JComponent> panel) {
         if (!SwingUtilities.isEventDispatchThread()) {
             throw new IllegalStateException("Open the GPU board on the Swing event thread");
         }
@@ -238,7 +238,7 @@ public final class GpuBoardWindow {
                     }
                 };
             } else if (active.gui != gui || (gui == null && active.initialView != view)) {
-                JOptionPane.showMessageDialog(gui == null ? view.getPanel() : gui.getFrame(),
+                JOptionPane.showMessageDialog(gui == null ? null : gui.getFrame(),
                       Messages.getString("GpuBoard.alreadyOpen"));
             } else if (!active.closing) {
                 active.focus(false);
@@ -446,8 +446,7 @@ public final class GpuBoardWindow {
             String status = GpuBoardActions.phaseStatus(panel.get()).text();
             loadingMessage = status.isBlank() ? Messages.getString("ClientGUI.waitingOnTheServer") : status;
         }
-        BoardView view = gui == null ? initialView : gui.getCurrentBoardView()
-              .filter(BoardView.class::isInstance).map(BoardView.class::cast).orElse(null);
+        BoardClientState view = gui == null ? initialView : gui.getCurrentBoardState().orElse(null);
         if (mapGame == null && view == null) { return; }
         if (mapGame != null && (mapGame.getBoard().getWidth() < 1 || mapGame.getBoard().getHeight() < 1)) { return; }
         try {
@@ -459,7 +458,7 @@ public final class GpuBoardWindow {
         }
     }
 
-    /** Native close is the client's normal quit action. Cancelled saves leave this window running. */
+    /** Native close uses the editor or client's normal quit action. Cancelled saves leave this window running. */
     private void requestExit() {
         if (exitRequested || closing) {
             return;
@@ -467,8 +466,11 @@ public final class GpuBoardWindow {
         exitRequested = true;
         SwingUtilities.invokeLater(() -> {
             try {
-                if (gui == null) {
-                    close(editor != null);
+                if (editor != null) {
+                    if (source != null) { source.endEditorStroke(); }
+                    editor.handleExit();
+                } else if (gui == null) {
+                    close(false);
                 } else {
                     gui.handleExit();
                 }
@@ -671,7 +673,7 @@ public final class GpuBoardWindow {
         }
     }
 
-    public static synchronized void closeFor(BoardView view) {
+    public static synchronized void closeFor(BoardClientState view) {
         if (active != null && (active.initialView == view || active.source instanceof GpuBoardSource gameSource && gameSource.currentView() == view)) {
             active.close(false);
         }
@@ -715,4 +717,10 @@ public final class GpuBoardWindow {
         JOptionPane.showMessageDialog(owner, Messages.getString("GpuBoard.previewUnavailable"),
               Messages.getString("GpuBoard.preview"), JOptionPane.ERROR_MESSAGE);
     }
+    public static synchronized void cameraCommand(ClientGUI gui, megamek.client.ui.util.KeyCommandBind command) {
+        if (active != null && active.gui == gui && active.application != null) {
+            active.application.postRunnable(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).cameraCommand(command));
+        }
+    }
+
 }

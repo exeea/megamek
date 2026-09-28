@@ -97,7 +97,7 @@ class GpuDeploymentFacingSmokeTest {
                     }
                     doAnswer(ignored -> actor.get()).when(phase.get()).currentEntity();
                     view.addBoardViewListener(phase.get());
-                    source.set(new GpuBoardSource(view, phase::get));
+                    source.set(new GpuBoardSource(view.getClientState(), phase::get));
                 });
                 new Lwjgl3Application(new GpuBattleView(source.get()) {
                     // Four cases per vessel: both cameras, with Shift released before or after the mouse.

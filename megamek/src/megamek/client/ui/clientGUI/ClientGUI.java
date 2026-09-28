@@ -75,6 +75,7 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.audio.AudioService;
 import megamek.client.ui.clientGUI.audio.SoundManager;
 import megamek.client.ui.clientGUI.audio.SoundType;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.CollapseWarning;
 import megamek.client.ui.clientGUI.boardview.IBoardView;
@@ -384,7 +385,7 @@ public class ClientGUI extends AbstractClientGUI
     public ForceDisplayPanel forceDisplayPanel;
     private ForceDisplayDialog forceDisplayDialog;
     private MapMenu popup;
-    private RulerDialog ruler;
+    private final Map<Integer, RulerDialog> rulers = new HashMap<>();
     protected JComponent curPanel;
     /** Open the default board once per game; later phase changes preserve a manual choice or rendering fallback. */
     private boolean boardViewChosen;
@@ -1262,7 +1263,7 @@ public class ClientGUI extends AbstractClientGUI
 
 
     public void customizePlayer() {
-        PlayerSettingsDialog psd = new PlayerSettingsDialog(this, client, (BoardView) boardViews.get(0));
+        PlayerSettingsDialog psd = new PlayerSettingsDialog(this, client, getBoardState());
         psd.setVisible(true);
     }
 
@@ -1549,7 +1550,8 @@ public class ClientGUI extends AbstractClientGUI
                 showLOSSettingDialog();
                 break;
             case VIEW_ZOOM_IN:
-                boardViews.get(0).zoomIn();
+                if (GpuBoardWindow.isActiveFor(this)) { GpuBoardWindow.cameraCommand(this, KeyCommandBind.ZOOM_IN); }
+                else { getCurrentBoardView().ifPresent(IBoardView::zoomIn); }
                 break;
             case VIEW_GPU_BOARD:
                 GUIP.setUse3DBoard(true);
@@ -1561,27 +1563,30 @@ public class ClientGUI extends AbstractClientGUI
                 GpuBoardWindow.showClassic(this);
                 break;
             case VIEW_ZOOM_OUT:
-                boardViews.get(0).zoomOut();
+                if (GpuBoardWindow.isActiveFor(this)) { GpuBoardWindow.cameraCommand(this, KeyCommandBind.ZOOM_OUT); }
+                else { getCurrentBoardView().ifPresent(IBoardView::zoomOut); }
                 break;
             case VIEW_ZOOM_RESET:
-                boardViews.get(0).zoomReset();
+                if (GpuBoardWindow.isActiveFor(this)) { GpuBoardWindow.cameraCommand(this, KeyCommandBind.CAMERA_RESET); }
+                else { getCurrentBoardView().ifPresent(IBoardView::zoomReset); }
                 break;
             case VIEW_ZOOM_OVERVIEW_TOGGLE:
-                boardViews.get(0).zoomOverviewToggle();
+                if (GpuBoardWindow.isActiveFor(this)) { GpuBoardWindow.cameraCommand(this, KeyCommandBind.ZOOM_OVERVIEW_TOGGLE); }
+                else { getCurrentBoardView().ifPresent(IBoardView::zoomOverviewToggle); }
                 break;
             case VIEW_TOGGLE_ISOMETRIC:
                 GUIP.setIsometricEnabled(!GUIP.getIsometricEnabled());
                 break;
             case VIEW_TOGGLE_FOV_HIGHLIGHT:
                 GUIP.setFovHighlight(!GUIP.getFovHighlight());
-                boardViews.get(0).refreshDisplayables();
+                onAllBoardStates(BoardClientState::refreshDisplayables);
                 if (client.getGame().getPhase().isMovement()) {
-                    ((BoardView) boardViews.get(0)).clearHexImageCache();
+                    onAllBoardStates(BoardClientState::visibilityChanged);
                 }
                 break;
             case VIEW_TOGGLE_FIELD_OF_FIRE:
                 GUIP.setShowFieldOfFire(!GUIP.getShowFieldOfFire());
-                boardViews.get(0).getPanel().repaint();
+                onAllBoardStates(BoardClientState::repaint);
                 break;
             case VIEW_TOGGLE_FLEE_ZONE:
                 toggleFleeZone();
@@ -1591,15 +1596,15 @@ public class ClientGUI extends AbstractClientGUI
                 break;
             case VIEW_TOGGLE_FOV_DARKEN:
                 GUIP.setFovDarken(!GUIP.getFovDarken());
-                boardViews.get(0).refreshDisplayables();
+                onAllBoardStates(BoardClientState::refreshDisplayables);
                 if (client.getGame().getPhase().isMovement()) {
-                    ((BoardView) boardViews.get(0)).clearHexImageCache();
+                    onAllBoardStates(BoardClientState::visibilityChanged);
                 }
                 break;
             case VIEW_TOGGLE_FOV_SPOTTING:
                 GUIP.setFovSpottingMode(!GUIP.getFovSpottingMode());
-                boardViews.get(0).refreshDisplayables();
-                ((BoardView) boardViews.get(0)).clearHexImageCache();
+                onAllBoardStates(BoardClientState::refreshDisplayables);
+                onAllBoardStates(BoardClientState::visibilityChanged);
                 break;
             case VIEW_TOGGLE_SHOW_OBJECTS:
                 // the ground object sprite handler listens for the preference change and re-renders
@@ -1624,7 +1629,7 @@ public class ClientGUI extends AbstractClientGUI
                 }
                 break;
             case VIEW_CHANGE_THEME:
-                ((BoardView) boardViews.get(0)).changeTheme();
+                getCurrentBoardState().ifPresent(BoardClientState::changeTheme);
                 break;
             case FIRE_SAVE_WEAPON_ORDER:
                 Entity ent = getUnitDisplay().getCurrentEntity();
@@ -1722,6 +1727,7 @@ public class ClientGUI extends AbstractClientGUI
         }
 
         // Ruler display
+        RulerDialog ruler = getCurrentBoardState().map(state -> rulers.get(state.getBoardId())).orElse(null);
         if ((ruler != null) && (ruler.getSize().width != 0) && (ruler.getSize().height != 0)) {
             GUIP.setRulerPosX(ruler.getLocation().x);
             GUIP.setRulerPosY(ruler.getLocation().y);
@@ -1744,8 +1750,16 @@ public class ClientGUI extends AbstractClientGUI
 
         // Tell all the displays to remove themselves as listeners.
         GpuBoardWindow.closeFor(this);
+        client.getGame().removeGameListener(gameListener);
         boolean reportHandled = false;
         boardViews().forEach(IBoardView::dispose);
+        boardViews.clear();
+        miniMaps.values().forEach(MinimapDialog::dispose);
+        miniMaps.clear();
+        rulers.values().forEach(RulerDialog::dispose);
+        rulers.clear();
+        boardStates().forEach(BoardClientState::close);
+        boardStates.clear();
 
         for (String s : phaseComponents.keySet()) {
             JComponent component = phaseComponents.get(s);
@@ -1780,6 +1794,7 @@ public class ClientGUI extends AbstractClientGUI
         }
 
         GUIP.removePreferenceChangeListener(this);
+        tilesetManager.close();
         super.die();
     }
 
@@ -1804,7 +1819,7 @@ public class ClientGUI extends AbstractClientGUI
     public void switchPanel(GamePhase phase) {
         // Clear the old panel's listeners.
         if (curPanel instanceof BoardViewListener) {
-            boardViews().forEach(b -> b.removeBoardViewListener((BoardViewListener) curPanel));
+            boardStates().forEach(b -> b.removeBoardViewListener((BoardViewListener) curPanel));
         }
 
         if (curPanel instanceof ActionListener) {
@@ -1829,7 +1844,7 @@ public class ClientGUI extends AbstractClientGUI
                 ChatLounge cl = (ChatLounge) phaseComponents.get(String.valueOf(GamePhase.LOUNGE));
                 cb.setDoneButton(cl.getButDone());
                 cl.setBottom(cb.getComponent());
-                boardViews().forEach(bv -> ((BoardView) bv).getTilesetManager().reset());
+                boardStates().forEach(bv -> bv.getTilesetManager().reset());
                 break;
             case POINTBLANK_SHOT:
             case VICTORY_SETUP:
@@ -1877,7 +1892,7 @@ public class ClientGUI extends AbstractClientGUI
 
         // Set the new panel's listeners
         if (curPanel instanceof BoardViewListener listener) {
-            boardViews().forEach(b -> b.addBoardViewListener(listener));
+            boardStates().forEach(b -> b.addBoardViewListener(listener));
         }
 
         if (curPanel instanceof ActionListener) {
@@ -1919,11 +1934,14 @@ public class ClientGUI extends AbstractClientGUI
 
     /** Construct the legacy map components only when that visualization is requested. */
     public void setClassicBoardViewEnabled(boolean enabled) {
-        boardViewsContainer.setClassicViewEnabled(enabled);
-        if (!enabled) {
-            boardViews().stream().filter(BoardView.class::isInstance).map(BoardView.class::cast)
-                  .forEach(BoardView::releaseClassicView);
+        if (enabled) {
+            boardStates().forEach(this::createClassicBoardView);
+        } else {
+            boardViews().forEach(IBoardView::dispose);
+            boardViews.clear();
         }
+        boardViewsContainer.setClassicViewEnabled(enabled);
+        boardViewsContainer.updateMapTabs();
     }
 
     /** Reapply auxiliary window presentation after changing board windows, without changing saved docking choices. */
@@ -2172,7 +2190,8 @@ public class ClientGUI extends AbstractClientGUI
 
     protected void showBoardPopup(BoardViewEvent event) {
         if (fillPopup(event)) {
-            event.getBoardView().showPopup(popup, event.getCoords());
+            BoardView classic = getBoardView(event.getBoardId());
+            if (classic != null) { classic.showPopup(popup, event.getCoords()); }
         }
     }
 
@@ -2665,7 +2684,7 @@ public class ClientGUI extends AbstractClientGUI
     }
 
     private boolean fillPopup(BoardViewEvent event) {
-        popup = new MapMenu(event.getCoords(), event.getBoardView().getBoardId(), curPanel, this);
+        popup = new MapMenu(event.getCoords(), event.getBoardState().getBoardId(), curPanel, this);
         return popup.getHasMenu();
     }
 
@@ -3218,6 +3237,7 @@ public class ClientGUI extends AbstractClientGUI
      * distance, to-hit modifiers, and an elevation cross-section diagram.
      */
     private void showLOSSettingDialog() {
+        RulerDialog ruler = getCurrentBoardState().map(state -> rulers.get(state.getBoardId())).orElse(null);
         if (ruler != null) {
             ruler.setVisible(true);
             ruler.toFront();
@@ -3421,58 +3441,47 @@ public class ClientGUI extends AbstractClientGUI
 
         @Override
         public void gameBoardNew(GameBoardNewEvent e) {
-            Board newBoard = e.getNewBoard();
-            final int boardId = e.getBoardId();
-
-            if (newBoard != null) {
+            int boardId = e.getBoardId();
+            IBoardView oldView = boardViews.remove(boardId);
+            if (oldView != null) { oldView.dispose(); }
+            RulerDialog oldRuler = rulers.remove(boardId);
+            if (oldRuler != null) { oldRuler.dispose(); }
+            BoardClientState oldState = boardStates.remove(boardId);
+            if (oldState != null) { oldState.close(); }
+            var oldMinimap = miniMaps.remove(boardId);
+            if (oldMinimap != null) { oldMinimap.dispose(); }
+            if (e.getNewBoard() != null) {
                 try {
-                    if (boardViews.containsKey(boardId)) {
-                        boardViews.get(boardId).removeBoardViewListener(ClientGUI.this);
-                        boardViews.get(boardId).dispose();
-                    }
-                    if (miniMaps.containsKey(boardId)) {
-                        miniMaps.get(boardId).setVisible(false);
-                        miniMaps.get(boardId).dispose();
-                    }
-                    BoardView boardView = new BoardView(client.getGame(), controller, ClientGUI.this, boardId);
-                    MinimapDialog newMinimap = new MinimapDialog(frame);
-                    newMinimap.add(new MinimapPanel(newMinimap,
-                          client.getGame(),
-                          boardView,
-                          ClientGUI.this,
-                          null,
-                          boardId));
-                    boolean isInLounge = client.getGame().getPhase().isLounge();
-                    newMinimap.setVisible(!isInLounge
+                    BoardClientState state = new BoardClientState(client.getGame(), controller, ClientGUI.this, boardId, null);
+                    boardStates.put(boardId, state);
+                    state.setLocalPlayer(client.getLocalPlayer());
+                    state.addBoardViewListener(ClientGUI.this);
+                    if (curPanel instanceof BoardViewListener listener) { state.addBoardViewListener(listener); }
+                    state.addOverlay(new ChatterBoxOverlay(ClientGUI.this, state, controller, cb));
+                    state.addOverlay(new UnitOverviewOverlay(ClientGUI.this));
+                    state.addOverlay(new UnitOverviewOverlay(ClientGUI.this, true));
+                    offBoardOverlay = new OffBoardTargetOverlay(ClientGUI.this);
+                    state.addOverlay(offBoardOverlay);
+                    state.addOverlay(new KeyBindingsOverlay(state));
+                    state.addOverlay(new PlanetaryConditionsOverlay(state));
+                    state.addOverlay(new TurnDetailsOverlay(state));
+                    toastOverlay = new BoardToastOverlay(state, ClientGUI.this);
+                    state.addOverlay(toastOverlay);
+                    state.redrawAllEntities();
+                    state.refreshAttacks();
+                    if (boardViewsContainer.isClassicViewEnabled()) { createClassicBoardView(state); }
+                    MinimapDialog minimap = new MinimapDialog(frame);
+                    minimap.add(new MinimapPanel(minimap, client.getGame(), state, ClientGUI.this, null, boardId));
+                    minimap.setVisible(!client.getGame().getPhase().isLounge()
                           && (boardViewsContainer.isClassicViewEnabled() || GpuBoardWindow.isActiveFor(ClientGUI.this))
                           && GUIP.getMinimapEnabled());
-                    miniMaps.put(boardId, newMinimap);
-                    boardViews.put(boardId, boardView);
-                    boardView.getPanel().setPreferredSize(clientGuiPanel.getSize());
-                    boardView.addBoardViewListener(ClientGUI.this);
-                    var cb2 = new ChatterBoxOverlay(ClientGUI.this, boardView, controller, cb);
-                    offBoardOverlay = new OffBoardTargetOverlay(ClientGUI.this);
-                    boardView.getPanel().addKeyListener(cb2);
-                    boardView.addOverlay(cb2);
-                    boardView.addOverlay(new UnitOverviewOverlay(ClientGUI.this));
-                    boardView.addOverlay(new UnitOverviewOverlay(ClientGUI.this, true));
-                    boardView.addOverlay(offBoardOverlay);
-                    boardView.addOverlay(new KeyBindingsOverlay(boardView));
-                    boardView.addOverlay(new PlanetaryConditionsOverlay(boardView));
-                    boardView.addOverlay(new TurnDetailsOverlay(boardView));
-                    toastOverlay = new BoardToastOverlay(boardView, ClientGUI.this);
-                    boardView.addOverlay(toastOverlay);
-                    boardView.setTooltipProvider(new TWBoardViewTooltip(client.getGame(), ClientGUI.this, boardView));
-                    boardViewsContainer.updateMapTabs();
-                    ruler = new RulerDialog(frame, boardView, client.getGame());
-                    boardView.addBoardViewListener(ClientGUI.this);
-                    if (CG_BOARD_VIEW.equals(mainNames.get(client.getGame().getPhase().toString()))) {
-                        showDefaultBoard(CG_BOARD_VIEW);
-                    }
-                } catch (IOException ex) {
-                    // this is likely fatal anyway
-                    throw new RuntimeException(ex);
-                }
+                    miniMaps.put(boardId, minimap);
+                    rulers.put(boardId, new RulerDialog(frame, state, client.getGame()));
+                } catch (IOException ex) { throw new IllegalStateException("Could not initialize board presentation", ex); }
+            }
+            boardViewsContainer.updateMapTabs();
+            if (CG_BOARD_VIEW.equals(mainNames.get(client.getGame().getPhase().toString()))) {
+                showDefaultBoard(CG_BOARD_VIEW);
             }
         }
 
@@ -3512,7 +3521,7 @@ public class ClientGUI extends AbstractClientGUI
 
         @Override
         public void gamePhaseChange(GamePhaseChangeEvent e) {
-            for (IBoardView bv : boardViews()) {
+            for (BoardClientState bv : boardStates()) {
                 // This is a really lame place for this, but I couldn't find a
                 // better one without making massive changes (which didn't seem
                 // worth it for one little feature).
@@ -3522,10 +3531,7 @@ public class ClientGUI extends AbstractClientGUI
                     // and the equals function of Player isn't powerful enough.
                     bv.setLocalPlayer(client.getLocalPlayer().getId());
                 }
-                if (bv instanceof BoardView boardView) {
-                    // Make sure the ChatterBox starts out deactivated.
-                    boardView.setChatterBoxActive(false);
-                }
+                bv.setChatterBoxActive(false);
             }
 
             // Swap to this phase's panel.
@@ -3621,7 +3627,7 @@ public class ClientGUI extends AbstractClientGUI
 
         @Override
         public void gameEnd(GameEndEvent e) {
-            getBoardView().clearMovementData();
+            getBoardState().clearMovementData();
             clearFieldOfFire();
             clearTemporarySprites();
             getLocalBots().values().forEach(AbstractClient::die);
@@ -3905,10 +3911,10 @@ public class ClientGUI extends AbstractClientGUI
                         return;
                     }
                     // If this is the client to handle the PBS, take care of it
-                    getBoardView().centerOn(attacker);
-                    getBoardView().highlight(attacker.getPosition());
-                    getBoardView().select(target.getPosition());
-                    getBoardView().cursor(target.getPosition());
+                    getBoardState().centerOn(attacker);
+                    getBoardState().highlight(attacker.getPosition());
+                    getBoardState().select(target.getPosition());
+                    getBoardState().cursor(target.getPosition());
 
                     // Ask whether the player wants to take a PBS or not
                     int pbsChoice = JOptionPane.showConfirmDialog(frame,
@@ -3933,7 +3939,7 @@ public class ClientGUI extends AbstractClientGUI
                         currentDisplay.beginMyTurn();
                         currentDisplay.selectEntity(gameCFREvent.getEntityId());
                         currentDisplay.target(target);
-                        getBoardView().select(target.getPosition());
+                        getBoardState().select(target.getPosition());
                     } else { // PBS declined
                         client.sendHiddenPBSCFRResponse(null);
                     }
@@ -4034,21 +4040,17 @@ public class ClientGUI extends AbstractClientGUI
 
     @Override
     public void setChatBoxActive(boolean active) {
-        getBoardView().setChatterBoxActive(active);
+        getCurrentBoardState().ifPresent(state -> state.setChatterBoxActive(active));
     }
 
     @Override
     public void clearChatBox() {
-        Optional<IBoardView> ibv = getCurrentBoardView();
-        if (ibv.isPresent() && ibv.get() instanceof BoardView bv) {
-            bv.setChatterBoxActive(false);
-        }
+        getCurrentBoardState().ifPresent(state -> state.setChatterBoxActive(false));
     }
 
     @Override
     public boolean isChatBoxActive() {
-        Optional<IBoardView> ibv = getCurrentBoardView();
-        return ibv.isPresent() && ibv.get() instanceof BoardView bv && bv.getChatterBoxActive();
+        return getCurrentBoardState().map(BoardClientState::getChatterBoxActive).orElse(false);
     }
 
     @Override
@@ -4093,10 +4095,7 @@ public class ClientGUI extends AbstractClientGUI
      * @param selectedEntityNum The selectedEntityNum to set.
      */
     public void setSelectedEntityNum(int selectedEntityNum) {
-        boardViews().stream()
-              .filter(bv -> bv instanceof BoardView)
-              .map(bv -> (BoardView) bv)
-              .forEach(bv -> bv.selectEntity(client.getGame().getEntity(selectedEntityNum)));
+        boardStates().forEach(state -> state.selectEntity(client.getGame().getEntity(selectedEntityNum)));
     }
 
     public RandomArmyDialog getRandomArmyDialog() {
@@ -4144,7 +4143,7 @@ public class ClientGUI extends AbstractClientGUI
         waitD.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
         // save!
         try {
-            ImageIO.write(boardViews.get(0).getEntireBoardImage(ignoreUnits, false),
+            ImageIO.write(getCurrentBoardState().orElseThrow().getEntireBoardImage(ignoreUnits),
                   CG_FILE_FORMAT_NAME_PNG,
                   curFileBoardImage);
         } catch (IOException e) {
@@ -4664,7 +4663,7 @@ public class ClientGUI extends AbstractClientGUI
      * @return True when the currently shown BoardView is in the process of showing some animation
      */
     public boolean isCurrentBoardViewShowingAnimation() {
-        return getCurrentBoardView().filter(IBoardView::isShowingAnimation).isPresent();
+        return getCurrentBoardState().filter(BoardClientState::isShowingAnimation).isPresent();
     }
 
     /**
@@ -4679,7 +4678,7 @@ public class ClientGUI extends AbstractClientGUI
     private void centerOn(@Nullable BoardLocation boardLocation, @Nullable Entity entity) {
         if (getClient().getGame().hasBoardLocation(boardLocation)) {
             showBoardView(boardLocation.boardId());
-            BoardView board = getBoardView(boardLocation);
+            BoardClientState board = getBoardState(boardLocation);
             if (entity == null) {
                 board.centerOnHex(boardLocation.coords());
             } else {
@@ -4722,6 +4721,7 @@ public class ClientGUI extends AbstractClientGUI
     }
 
     public void suspendBoardTooltips() {
+        onAllBoardStates(BoardClientState::suspendTooltip);
         onAllBoardViews(BoardView::suspendTooltip);
         // hide any currently shown tooltip, but don't disable tooltips entirely:
         ToolTipManager.sharedInstance().setEnabled(false);
@@ -4729,10 +4729,29 @@ public class ClientGUI extends AbstractClientGUI
     }
 
     public void activateBoardTooltips() {
+        onAllBoardStates(BoardClientState::activateTooltip);
         onAllBoardViews(BoardView::activateTooltip);
     }
 
     public TilesetManager getTilesetManager() {
         return tilesetManager;
     }
+    public void onAllBoardStates(Consumer<BoardClientState> consumer) {
+        boardStates().forEach(consumer);
+    }
+
+    private void createClassicBoardView(BoardClientState state) {
+        if (boardViews.containsKey(state.getBoardId())) { return; }
+        try {
+            BoardView view = new BoardView(state, controller, this);
+            view.setTooltipProvider(new TWBoardViewTooltip(client.getGame(), this, state));
+            view.getPanel().setPreferredSize(clientGuiPanel.getSize());
+            view.getPanel().addKeyListener(new java.awt.event.KeyAdapter() {
+                @Override public void keyPressed(java.awt.event.KeyEvent event) { state.chatKey(event); }
+            });
+            boardViews.put(state.getBoardId(), view);
+            view.redrawAllEntities();
+        } catch (IOException exception) { throw new IllegalStateException("Could not open the classic board", exception); }
+    }
+
 }

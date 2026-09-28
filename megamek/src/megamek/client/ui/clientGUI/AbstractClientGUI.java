@@ -53,6 +53,7 @@ import megamek.client.IClient;
 import megamek.client.commands.ClientCommand;
 import megamek.client.ui.IClientCommandHandler;
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.IBoardView;
 import megamek.client.ui.clientGUI.boardview.spriteHandler.BoardViewSpriteHandler;
 import megamek.client.ui.dialogs.MMDialogs.MMNarrativeStoryDialog;
@@ -92,6 +93,8 @@ public abstract class AbstractClientGUI implements IClientGUI, IClientCommandHan
      * The {@link megamek.client.ui.clientGUI.boardview.BoardView}'s of the game with the board ID as the map key
      */
     public final Map<Integer, IBoardView> boardViews = new HashMap<>();
+    /** Authoritative client presentation, retained when its renderer changes. */
+    protected final Map<Integer, BoardClientState> boardStates = new HashMap<>();
 
     /**
      * The minimaps of the game with the board ID as the map key
@@ -290,5 +293,19 @@ public abstract class AbstractClientGUI implements IClientGUI, IClientCommandHan
      */
     public Optional<IBoardView> getCurrentBoardView() {
         return boardViewsContainer.getCurrentBoardView();
+    }
+
+    /** Shared board presentation, independent of the selected renderer. */
+    public BoardClientState getBoardState(int boardId) {
+        return boardStates.get(boardId);
+    }
+    public BoardClientState getBoardState() { return getCurrentBoardState().orElse(null); }
+    public BoardClientState getBoardState(Targetable target) { return getBoardState(target.getBoardId()); }
+    public BoardClientState getBoardState(BoardLocation location) { return getBoardState(location.boardId()); }
+    public List<BoardClientState> boardStates() {
+        return List.copyOf(boardStates.values());
+    }
+    public Optional<BoardClientState> getCurrentBoardState() {
+        return boardViewsContainer.getCurrentBoardId().map(this::getBoardState);
     }
 }

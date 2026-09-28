@@ -62,10 +62,10 @@ import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Hex;
 import megamek.common.LosEffects;
-import megamek.common.equipment.MiscType;
 import megamek.common.Player;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
+import megamek.common.equipment.MiscType;
 import megamek.common.game.Game;
 import megamek.common.options.OptionsConstants;
 import megamek.common.units.Entity;
@@ -106,7 +106,7 @@ public class RulerDialog extends JDialog implements BoardViewListener {
     private Color startColor;
     private Color endColor;
     private int distance;
-    private final BoardView bv;
+    private final BoardClientState bv;
     private final Game game;
     private boolean flip;
 
@@ -187,7 +187,7 @@ public class RulerDialog extends JDialog implements BoardViewListener {
     private final JScrollPane compareScrollPane = new JScrollPane(compareTable);
     private boolean compareExpanded;
 
-    public RulerDialog(JFrame frame, BoardView boardView, Game game) {
+    public RulerDialog(JFrame frame, BoardClientState boardView, Game game) {
         super(frame, getRulerTitle(game), false);
         enableEvents(AWTEvent.WINDOW_EVENT_MASK);
 
@@ -534,7 +534,6 @@ public class RulerDialog extends JDialog implements BoardViewListener {
     }
 
     private void cancel() {
-        dispose();
         butClose_actionPerformed();
     }
 
@@ -1705,4 +1704,10 @@ public class RulerDialog extends JDialog implements BoardViewListener {
             return entity.getDisplayName() + " [Elev " + elevation + ", Effective " + effectiveElevation + "]";
         }
     }
+    @Override
+    public void dispose() {
+        bv.removeBoardViewListener(this);
+        super.dispose();
+    }
+
 }

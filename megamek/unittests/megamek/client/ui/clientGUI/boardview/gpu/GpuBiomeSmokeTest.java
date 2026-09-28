@@ -17,7 +17,11 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
+import com.badlogic.gdx.graphics.g3d.ModelInstance;
+import com.badlogic.gdx.graphics.g3d.attributes.IntAttribute;
+import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
 import com.badlogic.gdx.graphics.g3d.utils.BaseShaderProvider;
 import com.badlogic.gdx.math.Vector3;
@@ -46,7 +50,7 @@ class GpuBiomeSmokeTest {
                 var terrain = new GpuTerrain();
                 var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
-                int maskHandle = 0, sedgeHandle = 0;
+                int maskHandle = 0, cropHandle = 0, sedgeHandle = 0;
                 try {
                     GpuRiverTerrainSmokeTest.tune(.94f, true);
                     TerrainLod.setEnabled(true);
@@ -240,13 +244,26 @@ class GpuBiomeSmokeTest {
                     GpuReviewFrame.save(new File(output, "Fire-And-Ice-2-top.png"));
                     metrics.append("Fire And Ice 2 swamp focus: ").append(focus.coords()).append('\n');
                     metrics.append("Maximum active texture samplers: ").append(samplerBudget(terrain)).append('\n');
-                    var sedge = (com.badlogic.gdx.graphics.Texture) field(plants, "sedge");
-                    assertTrue(sedge.getWidth() <= 512 && sedge.getHeight() <= 512, "The shared cutout has a bounded upload size");
-                    metrics.append("Shared cutout upload: ").append(sedge.getWidth()).append('x').append(sedge.getHeight())
-                          .append(" RGBA8 plus mipmaps (1,398,100 bytes at 512x512)\n");
+                    camera.setIsometric(true);
+                    camera.center(BoardGeometry.center(new Coords(4, 4), 0));
+                    settle(terrain, plants, frame, camera, contacts);
+                    for (String name : List.of("crop", "sedge")) {
+                        var texture = (Texture) field(plants, name);
+                        assertTrue(texture.getWidth() <= 512 && texture.getHeight() <= 512, "Shared cutouts have bounded upload sizes");
+                        for (Object batch : (Object[]) field(plants, "batches")) {
+                            if ((boolean) field(batch, "crop") != name.equals("crop")) { continue; }
+                            var instance = (ModelInstance) field(batch, "instance");
+                            if (instance == null) { continue; }
+                            var diffuse = instance.materials.first().get(TextureAttribute.class, TextureAttribute.Diffuse);
+                            assertEquals(texture, diffuse.textureDescription.texture, "Every LOD must reuse its plant kind's cutout");
+                        }
+                        metrics.append(name).append(" cutout upload: ").append(texture.getWidth()).append('x').append(texture.getHeight())
+                              .append(" RGBA8 plus mipmaps (1,398,100 bytes at 512x512)\n");
+                    }
                     Files.writeString(new File(output, "metrics.txt").toPath(), metrics.toString());
                     maskHandle = mask.texture().getTextureObjectHandle();
-                    sedgeHandle = ((com.badlogic.gdx.graphics.Texture) field(plants, "sedge")).getTextureObjectHandle();
+                    cropHandle = ((Texture) field(plants, "crop")).getTextureObjectHandle();
+                    sedgeHandle = ((Texture) field(plants, "sedge")).getTextureObjectHandle();
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) { failure.set(error); }
                 finally {
@@ -256,6 +273,9 @@ class GpuBiomeSmokeTest {
                     }
                     if (sedgeHandle != 0 && org.lwjgl.opengl.GL11.glIsTexture(sedgeHandle)) {
                         failure.compareAndSet(null, new AssertionError("Sedge texture leaked after disposal"));
+                    }
+                    if (cropHandle != 0 && org.lwjgl.opengl.GL11.glIsTexture(cropHandle)) {
+                        failure.compareAndSet(null, new AssertionError("Crop texture leaked after disposal"));
                     }
                     frame.dispose();
                     BoardGeometry.tune(original);
@@ -341,7 +361,17 @@ class GpuBiomeSmokeTest {
 
     /** Removing only the biome mask must affect actual bank faces, not just their adjoining flat hexes. */
     private static void slopeMaterialResponds(GpuTerrain terrain, GpuBiomeSurface mask, GpuReviewFrame frame,
-          BoardCamera camera, BoardScene scene) {
+          BoardCamera camera, BoardScene scene) throws Exception {
+        // Measure the ground material itself; taller cutouts can otherwise hide the sampled bank pixels.
+        var hidden = new ArrayList<IntAttribute>();
+        for (Object batch : (Object[]) field(field(terrain, "biomeVegetation"), "batches")) {
+            var instance = (ModelInstance) field(batch, "instance");
+            if (instance == null) { continue; }
+            var cull = instance.materials.first().get(IntAttribute.class, IntAttribute.CullFace);
+            hidden.add(cull);
+            cull.value = GL20.GL_FRONT_AND_BACK;
+        }
+        frame.render(terrain, camera, scene);
         var before = Pixmap.createFromFrameBuffer(0, 0, 1280, 960);
         var blank = new Pixmap(scene.width(), scene.height(), Pixmap.Format.RGBA8888);
         try {
@@ -379,6 +409,7 @@ class GpuBiomeSmokeTest {
         } finally {
             before.dispose(); blank.dispose();
             mask.dispose(); mask.update(scene);
+            for (var cull : hidden) { cull.value = GL20.GL_NONE; }
         }
     }
 

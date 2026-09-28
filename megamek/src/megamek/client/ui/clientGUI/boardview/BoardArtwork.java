@@ -33,7 +33,7 @@ import megamek.common.units.Terrains;
 import megamek.common.util.ImageUtil;
 
 /** EDT-owned artwork composition. Game and map sources share this service; it never constructs a view. */
-public final class BoardArtwork {
+public final class BoardArtwork implements AutoCloseable {
     public record HexImage(Coords coords, BufferedImage terrain, BufferedImage normals, BufferedImage decals,
           BufferedImage decalsWithoutLimbs, BufferedImage tactical, List<BoardHexText> text,
           Map<Integer, String> structureModels, BufferedImage foliage) { }
@@ -399,5 +399,13 @@ public final class BoardArtwork {
           Terrains.WOODS, Terrains.JUNGLE, Terrains.FOLIAGE_ELEV, Terrains.INDUSTRIAL, Terrains.ROUGH,
           Terrains.CLIFF_TOP, Terrains.CLIFF_BOTTOM, Terrains.INCLINE_TOP, Terrains.INCLINE_BOTTOM,
           Terrains.INCLINE_HIGH_TOP, Terrains.INCLINE_HIGH_BOTTOM, Terrains.FIRE, Terrains.SMOKE, Terrains.IMPASSABLE };
+
+    @Override
+    public void close() {
+        clear();
+        groundNormals.clear();
+        if (gpuTileset != null) { gpuTileset.close(); gpuTileset = null; }
+        hexMask = null;
+    }
 
 }

@@ -33,7 +33,7 @@
 package megamek.client.ui.clientGUI.boardview.spriteHandler;
 
 import megamek.client.ui.clientGUI.AbstractClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.sprite.RubbleClearSprite;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
@@ -65,7 +65,7 @@ public class RubbleClearSpriteHandler extends BoardViewSpriteHandler {
      */
     public void updateRubbleClearSprites() {
         clear();
-        if (clientGUI.boardViews().isEmpty()) {
+        if (clientGUI.boardStates().isEmpty()) {
             return;
         }
         for (Entity entity : game.getEntitiesVector()) {
@@ -77,7 +77,7 @@ public class RubbleClearSpriteHandler extends BoardViewSpriteHandler {
                 continue;
             }
             BoardLocation location = BoardLocation.of(target, entity.getBoardId());
-            BoardView boardView = (BoardView) clientGUI.getBoardView(location);
+            BoardClientState boardView = clientGUI.getBoardState(location);
             if (boardView != null) {
                 int turnsCompleted = clearer.getRubbleClearTurnsCompleted();
                 int turnsRequired = clearer.getRubbleClearTurnsRequired();

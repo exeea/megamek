@@ -36,9 +36,8 @@ import java.awt.Dimension;
 import java.awt.Image;
 import java.awt.Rectangle;
 
-import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.common.Configuration;
 import megamek.common.equipment.Flare;
 import megamek.common.util.ImageUtil;
@@ -59,7 +58,7 @@ public class FlareSprite extends Sprite {
 
     private final Flare flare;
 
-    public FlareSprite(BoardView boardView1, final Flare f) {
+    public FlareSprite(BoardGlyphContext boardView1, final Flare f) {
         super(boardView1);
         flare = f;
         getBounds();
@@ -84,6 +83,6 @@ public class FlareSprite extends Sprite {
 
     @Override
     public StringBuffer getTooltip() {
-        return new StringBuffer(Messages.getString("BoardView1.flare", flare.turnsToBurn));
+        return new StringBuffer(megamek.client.ui.clientGUI.tooltip.HexTooltip.flareText(flare));
     }
 }

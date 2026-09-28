@@ -154,8 +154,8 @@ class GpuOverlaySmokeTest {
                 preferences.setValue(GUIPreferences.GUI_SCALE, 1f);
                 BoardView painterView = spy(fixture.view);
                 doReturn(mock(ClientGUI.class)).when(painterView).getClientgui();
-                KeyBindingsOverlay keys = new KeyBindingsOverlay(painterView);
-                PlanetaryConditionsOverlay conditions = new PlanetaryConditionsOverlay(painterView);
+                KeyBindingsOverlay keys = new KeyBindingsOverlay(painterView.getClientState());
+                PlanetaryConditionsOverlay conditions = new PlanetaryConditionsOverlay(painterView.getClientState());
                 keys.setVisible(true);
                 conditions.setVisible(true);
                 fixture.view.addOverlay(keys);

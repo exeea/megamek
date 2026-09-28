@@ -51,7 +51,7 @@ class GpuMeasurementTest {
             for (String command : List.of("board.ruler", "board.los")) {
                 for (Coords point : List.of(start, end)) {
                     SwingUtilities.invokeAndWait(() -> {
-                        GpuBoardActions actions = new GpuBoardActions(fixture.view, () -> fixture.panel,
+                        GpuBoardActions actions = new GpuBoardActions(fixture.view.getClientState(), () -> fixture.panel,
                               fixture.source::isClosed, fixture.source::refresh);
                         Runnable action = actions.contextCommands(point).stream().filter(item -> item.id().equals(command))
                               .findFirst().orElseThrow().action();

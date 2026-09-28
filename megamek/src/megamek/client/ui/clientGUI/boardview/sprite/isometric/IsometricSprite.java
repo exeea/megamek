@@ -37,7 +37,7 @@ import java.awt.image.ImageObserver;
 
 import megamek.MMConstants;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.sprite.CraneOperationSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.HexSprite;
 import megamek.client.ui.util.EntityWreckHelper;
@@ -58,7 +58,7 @@ public class IsometricSprite extends HexSprite {
 
     private static final GUIPreferences GUIP = GUIPreferences.getInstance();
 
-    public IsometricSprite(BoardView boardView1, Entity entity, int secondaryPos, Image radarBlipImage) {
+    public IsometricSprite(BoardGlyphContext boardView1, Entity entity, int secondaryPos, Image radarBlipImage) {
         super(boardView1, secondaryPos == -1 ? entity.getPosition() : entity.getSecondaryPositions().get(secondaryPos));
         this.entity = entity;
         this.radarBlipImage = radarBlipImage;
@@ -67,12 +67,12 @@ public class IsometricSprite extends HexSprite {
         Font font = new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 10);
         Rectangle modelRect = new Rectangle(47,
               55,
-              bv.getPanel().getFontMetrics(font).stringWidth(shortName) + 1,
-              bv.getPanel().getFontMetrics(font).getAscent());
+              bv.getFontMetrics(font).stringWidth(shortName) + 1,
+              bv.getFontMetrics(font).getAscent());
 
         int altAdjust = 0;
         if (entity.isAirborne() || entity.isAirborneVTOLorWIGE()) {
-            altAdjust = (int) (bv.DROP_SHADOW_DISTANCE * bv.getScale());
+            altAdjust = (int) (bv.getDropShadowDistance() * bv.getScale());
         } else if ((entity.getElevation() != 0) && !(entity.isBuildingEntityOrGunEmplacement())) {
             altAdjust = (int) (entity.getElevation() * bv.getVerticalOffset() * bv.getScale());
         }
@@ -142,7 +142,7 @@ public class IsometricSprite extends HexSprite {
             // However, the unit is always drawn
             // opaque.
             if (makeTranslucent) {
-                g.drawImage(image, p.x, p.y - (int) (bv.DROP_SHADOW_DISTANCE * bv.getScale()), this);
+                g.drawImage(image, p.x, p.y - (int) (bv.getDropShadowDistance() * bv.getScale()), this);
             } else {
                 g.drawImage(shadow, p.x, p.y, this);
             }
@@ -221,7 +221,7 @@ public class IsometricSprite extends HexSprite {
             g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.5f));
         }
         // A unit the cranes are loading fades out as each turn of work is banked (TW p.90)
-        float craneLoadingOpacity = CraneOperationSprite.loadingOpacity(entity, bv.game);
+        float craneLoadingOpacity = CraneOperationSprite.loadingOpacity(entity, bv.getGame());
         if (craneLoadingOpacity < 1f) {
             g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, craneLoadingOpacity));
         }
@@ -239,7 +239,7 @@ public class IsometricSprite extends HexSprite {
             return false;
         }
 
-        IGameOptions opts = this.bv.game.getOptions();
+        IGameOptions opts = this.bv.getGame().getOptions();
         return opts.booleanOption(OptionsConstants.ADVANCED_DOUBLE_BLIND) &&
               ((e.getOwner().getId() == localPlayer.getId()) ||
                     (opts.booleanOption(OptionsConstants.ADVANCED_TEAM_VISION) &&
@@ -252,11 +252,11 @@ public class IsometricSprite extends HexSprite {
      *
      */
     private boolean onlyDetectedBySensors() {
-        boolean sensors = (bv.game.getOptions().booleanOption(OptionsConstants.ADVANCED_TAC_OPS_SENSORS) ||
-              bv.game.getOptions()
+        boolean sensors = (bv.getGame().getOptions().booleanOption(OptionsConstants.ADVANCED_TAC_OPS_SENSORS) ||
+              bv.getGame().getOptions()
                     .booleanOption(OptionsConstants.ADVANCED_AERO_RULES_STRATOPS_ADVANCED_SENSORS));
-        boolean sensorsDetectAll = bv.game.getOptions().booleanOption(OptionsConstants.ADVANCED_SENSORS_DETECT_ALL);
-        boolean doubleBlind = bv.game.getOptions().booleanOption(OptionsConstants.ADVANCED_DOUBLE_BLIND);
+        boolean sensorsDetectAll = bv.getGame().getOptions().booleanOption(OptionsConstants.ADVANCED_SENSORS_DETECT_ALL);
+        boolean doubleBlind = bv.getGame().getOptions().booleanOption(OptionsConstants.ADVANCED_DOUBLE_BLIND);
         boolean hasVisual = entity.hasSeenEntity(bv.getLocalPlayer());
         boolean hasDetected = entity.hasDetectedEntity(bv.getLocalPlayer());
 
@@ -272,4 +272,7 @@ public class IsometricSprite extends HexSprite {
     protected int getSpritePriority() {
         return entity.getSpriteDrawPriority() + 10;
     }
+    @Override
+    public boolean isUnitVisual() { return true; }
+
 }

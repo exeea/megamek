@@ -61,22 +61,21 @@ import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
-import javax.swing.ScrollPaneConstants;
 import javax.swing.JSpinner;
 import javax.swing.JToggleButton;
 import javax.swing.KeyStroke;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.WindowConstants;
 
+import megamek.MegaMek;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListenerAdapter;
-import megamek.MegaMek;
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
 import megamek.client.ui.preferences.JWindowPreference;
 import megamek.client.ui.preferences.PreferencesNode;
-import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
-import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Hex;
 import megamek.common.RangeType;
@@ -682,7 +681,7 @@ public class HexEditDialog extends JDialog {
      * phase as a move order.</p>
      */
     private void setPainting(boolean painting) {
-        clientGUI.boardViews().forEach(boardView -> {
+        clientGUI.boardStates().forEach(boardView -> {
             boardView.removeBoardViewListener(brushListener);
             if (painting) {
                 boardView.addBoardViewListener(brushListener);
@@ -821,12 +820,12 @@ public class HexEditDialog extends JDialog {
 
     /** Draws a highlight on every painted hex and takes away the ones no longer painted. */
     private void refreshHexHighlights() {
-        clientGUI.boardViews().stream().findFirst().ifPresent(boardView -> {
+        clientGUI.boardStates().stream().findFirst().ifPresent(boardView -> {
             boardView.removeSprites(hexHighlights.values());
             hexHighlights.clear();
             for (Coords coords : paintedHexes.keySet()) {
                 hexHighlights.put(coords,
-                      new FieldOfFireSprite((BoardView) boardView, RangeType.RANGE_SHORT, coords, ALL_HEX_BORDERS));
+                      new FieldOfFireSprite(boardView, RangeType.RANGE_SHORT, coords, ALL_HEX_BORDERS));
             }
             boardView.addSprites(hexHighlights.values());
         });
@@ -932,7 +931,7 @@ public class HexEditDialog extends JDialog {
     private void closeDialog() {
         clientGUI.getClient().getGame().removeGameListener(phaseListener);
         setPainting(false);
-        clientGUI.boardViews().stream().findFirst().ifPresent(boardView -> {
+        clientGUI.boardStates().stream().findFirst().ifPresent(boardView -> {
             boardView.removeSprites(hexHighlights.values());
             hexHighlights.clear();
         });

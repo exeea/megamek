@@ -40,7 +40,7 @@ import java.awt.Rectangle;
 import java.awt.image.ImageObserver;
 
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.StraightArrowPolygon;
 import megamek.common.board.Coords;
@@ -68,7 +68,7 @@ public class MovementSprite extends Sprite implements TacticalSprite {
 
     private static final GUIPreferences GUIP = GUIPreferences.getInstance();
 
-    public MovementSprite(BoardView boardView, Entity entity, int[] v, Color color, boolean isCurrent) {
+    public MovementSprite(BoardGlyphContext boardView, Entity entity, int[] v, Color color, boolean isCurrent) {
         super(boardView);
         // private MovementVector mv;
         // get the starting and ending position
@@ -92,7 +92,7 @@ public class MovementSprite extends Sprite implements TacticalSprite {
          * | (transparency << 24), true); }
          */
         // red if offboard
-        if (!this.bv.game.getBoard().contains(end)) {
+        if (!this.bv.getGame().getBoard().contains(end)) {
             int colour = 0xff0000; // red
             int transparency = GUIP.getAttackArrowTransparency();
             moveColor = new Color(colour | (transparency << 24), true);

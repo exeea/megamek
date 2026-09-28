@@ -42,8 +42,8 @@ import java.awt.Stroke;
 import java.awt.geom.AffineTransform;
 
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.StringDrawer;
 import megamek.client.ui.util.UIUtil;
@@ -91,7 +91,7 @@ public class FiringSolutionSprite extends HexSprite implements TacticalSprite {
     private final StringDrawer toHitModWriter;
     private final StringDrawer rangeWriter;
 
-    public FiringSolutionSprite(BoardView boardView1, final FiringSolution firingSolution) {
+    public FiringSolutionSprite(BoardGlyphContext boardView1, final FiringSolution firingSolution) {
         super(boardView1, firingSolution.getToHitData().getLocation());
         this.firingSolution = firingSolution;
 
@@ -111,7 +111,7 @@ public class FiringSolutionSprite extends HexSprite implements TacticalSprite {
         AffineTransform at = AffineTransform.getTranslateInstance(30, RANGE_AT.y);
         at.scale(0.17, 0.17);
         at.translate(-HEX_CENTER_X, -HEX_CENTER_Y);
-        rangeHexPolygon = at.createTransformedShape(BoardView.getHexPoly());
+        rangeHexPolygon = at.createTransformedShape(megamek.client.ui.clientGUI.boardview.HexDrawUtilities.rasterHex());
     }
 
     @Override
@@ -168,10 +168,10 @@ public class FiringSolutionSprite extends HexSprite implements TacticalSprite {
         if (firingSolution.targetSpotted()) {
             graph.setColor(INDIRECT_DASH_COLOR_1);
             graph.setStroke(INDIRECT_STROKE_1);
-            graph.draw(BoardView.getHexPoly());
+            graph.draw(megamek.client.ui.clientGUI.boardview.HexDrawUtilities.rasterHex());
             graph.setColor(INDIRECT_DASH_COLOR_2);
             graph.setStroke(INDIRECT_STROKE_2);
-            graph.draw(BoardView.getHexPoly());
+            graph.draw(megamek.client.ui.clientGUI.boardview.HexDrawUtilities.rasterHex());
         }
 
     }

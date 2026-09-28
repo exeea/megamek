@@ -51,8 +51,7 @@ import megamek.client.Client;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
-import megamek.client.ui.clientGUI.boardview.IBoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.dialogs.phaseDisplay.TargetChoiceDialog;
 import megamek.client.ui.util.KeyCommandBind;
@@ -274,8 +273,8 @@ public class PrephaseDisplay extends StatusBarPhaseDisplay implements ListSelect
                 }
             }
 
-            clientgui.boardViews().forEach(IBoardView::clearMarkedHexes);
-            clientgui.getBoardView(currentEntity()).highlight(currentEntity().getPosition());
+            clientgui.boardStates().forEach(BoardClientState::clearMarkedHexes);
+            clientgui.getBoardState(currentEntity()).highlight(currentEntity().getPosition());
 
             refreshAll();
 
@@ -382,8 +381,8 @@ public class PrephaseDisplay extends StatusBarPhaseDisplay implements ListSelect
         ghostTargetConfirmation = null;
         usedGhostTargetEquipment.clear();
         pendingGhostTargets.clear();
-        clientgui.boardViews().forEach(IBoardView::clearMarkedHexes);
-        clientgui.boardViews().forEach(bv -> ((BoardView) bv).clearMovementData());
+        clientgui.boardStates().forEach(BoardClientState::clearMarkedHexes);
+        clientgui.boardStates().forEach(bv -> bv.clearMovementData());
         clientgui.clearFieldOfFire();
         clientgui.clearTemporarySprites();
         clientgui.setSelectedEntityNum(Entity.NONE);
@@ -423,7 +422,7 @@ public class PrephaseDisplay extends StatusBarPhaseDisplay implements ListSelect
         if (currentEntity() == null) {
             return;
         }
-        clientgui.boardViews().forEach(bv -> ((BoardView) bv).redrawEntity(currentEntity()));
+        clientgui.boardStates().forEach(bv -> bv.redrawEntity(currentEntity()));
         clientgui.getUnitDisplay().displayEntity(currentEntity());
         if (GUIP.getFireDisplayTabDuringFiringPhases()) {
             clientgui.getUnitDisplay().showPanel(MekPanelTabStrip.WEAPONS);
@@ -459,9 +458,9 @@ public class PrephaseDisplay extends StatusBarPhaseDisplay implements ListSelect
         }
 
         if (b.getType() == BoardViewEvent.BOARD_HEX_DRAGGED) {
-            b.getBoardView().cursor(b.getCoords());
+            b.getBoardState().cursor(b.getCoords());
         } else if (b.getType() == BoardViewEvent.BOARD_HEX_CLICKED) {
-            b.getBoardView().select(b.getCoords());
+            b.getBoardState().select(b.getCoords());
 
             // In ghost target mode, pick a unit at the clicked hex (with a chooser for stacked units) and assign it
             if (ghostTargetMode && (b.getCoords() != null)) {
@@ -815,7 +814,7 @@ public class PrephaseDisplay extends StatusBarPhaseDisplay implements ListSelect
 
     @Override
     public void clear() {
-        clientgui.boardViews().forEach(IBoardView::clearMarkedHexes);
+        clientgui.boardStates().forEach(BoardClientState::clearMarkedHexes);
         refreshAll();
     }
 
@@ -866,7 +865,7 @@ public class PrephaseDisplay extends StatusBarPhaseDisplay implements ListSelect
     @Override
     public void removeAllListeners() {
         game().removeGameListener(this);
-        clientgui.boardViews().forEach(bv -> bv.removeBoardViewListener(this));
+        clientgui.boardStates().forEach(bv -> bv.removeBoardViewListener(this));
         clientgui.getUnitDisplay().wPan.weaponList.removeListSelectionListener(this);
     }
 

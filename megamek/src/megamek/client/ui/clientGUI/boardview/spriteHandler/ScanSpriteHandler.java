@@ -35,7 +35,7 @@ package megamek.client.ui.clientGUI.boardview.spriteHandler;
 import megamek.client.Client;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.sprite.ScanSprite;
 import megamek.common.Player;
 import megamek.common.actions.ScanAction;
@@ -74,7 +74,7 @@ public class ScanSpriteHandler extends BoardViewSpriteHandler {
     /** Rebuilds the sweeps from the scan orders currently standing on this player's units. */
     public void updateScanSprites() {
         clear();
-        if (clientGUI.boardViews().isEmpty()) {
+        if (clientGUI.boardStates().isEmpty()) {
             return;
         }
         Player localPlayer = client.getLocalPlayer();
@@ -93,7 +93,7 @@ public class ScanSpriteHandler extends BoardViewSpriteHandler {
                 continue;
             }
             BoardLocation location = BoardLocation.of(scanner.getPosition(), scanner.getBoardId());
-            BoardView boardView = (BoardView) clientGUI.getBoardView(location);
+            BoardClientState boardView = clientGUI.getBoardState(location);
             if (boardView == null) {
                 continue;
             }

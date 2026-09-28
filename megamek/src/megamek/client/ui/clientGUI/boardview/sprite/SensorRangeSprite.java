@@ -42,10 +42,10 @@ import java.awt.Shape;
 import java.awt.image.ImageObserver;
 
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.BoardRangeBorder;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.board.Coords;
 
@@ -78,7 +78,7 @@ public class SensorRangeSprite extends FieldOfFireSprite {
     // the board is zoomed
     private static Image[][] images = new Image[64][COLORS_MAX];
 
-    public SensorRangeSprite(BoardView boardView1, int sensorType, Coords l,
+    public SensorRangeSprite(BoardGlyphContext boardView1, int sensorType, Coords l,
           int borders) {
         // the color of the super doesn't matter
         super(boardView1, sensorType, l, borders);

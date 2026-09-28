@@ -59,7 +59,7 @@ import javax.swing.JScrollPane;
 
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.enums.VariableRangeTargetingMode;
 import megamek.common.game.Game;
@@ -286,7 +286,7 @@ public class VariableRangeTargetingDialog extends JDialog implements ActionListe
      * Highlights the specified entity on the board view.
      */
     private void highlightEntity(Entity entity) {
-        BoardView boardView = clientGUI.getBoardView();
+        BoardClientState boardView = clientGUI.getBoardState();
 
         // Highlight entity name tag
         boardView.highlightSelectedEntities(Collections.singletonList(entity));
@@ -303,7 +303,7 @@ public class VariableRangeTargetingDialog extends JDialog implements ActionListe
      * Clears all entity highlighting on the board view.
      */
     private void clearHighlighting() {
-        BoardView boardView = clientGUI.getBoardView();
+        BoardClientState boardView = clientGUI.getBoardState();
         boardView.highlightSelectedEntities(Collections.emptyList());
         boardView.setHighlightedEntityHexes(Collections.emptyList());
         boardView.repaint();

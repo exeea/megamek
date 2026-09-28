@@ -26,7 +26,7 @@ final class GpuBoardFixture implements AutoCloseable {
     final Player player = new Player(0, "GPU review");
     final AtomicInteger clicks = new AtomicInteger();
     final JButton button = new JButton("Hold position");
-    final BoardView view;
+    BoardView view;
     final Entity entity;
     final GpuBoardSource source;
     JComponent panel = new JPanel();
@@ -56,7 +56,7 @@ final class GpuBoardFixture implements AutoCloseable {
         view.setLocalPlayer(player.getId());
         button.addActionListener(event -> clicks.incrementAndGet());
         panel.add(button);
-        source = new GpuBoardSource(view, () -> panel);
+        source = new GpuBoardSource(view.getClientState(), () -> panel);
     }
 
     static GpuBoardFixture create() throws Exception {

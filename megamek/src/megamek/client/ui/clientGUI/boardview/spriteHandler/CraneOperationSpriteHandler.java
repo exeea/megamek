@@ -33,7 +33,7 @@
 package megamek.client.ui.clientGUI.boardview.spriteHandler;
 
 import megamek.client.ui.clientGUI.AbstractClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.sprite.CraneOperationSprite;
 import megamek.common.board.BoardLocation;
 import megamek.common.event.GamePhaseChangeEvent;
@@ -63,7 +63,7 @@ public class CraneOperationSpriteHandler extends BoardViewSpriteHandler {
     /** Rebuilds the crane work sprites from the crane operations of every carrier. */
     public void updateCraneOperationSprites() {
         clear();
-        if (clientGUI.boardViews().isEmpty()) {
+        if (clientGUI.boardStates().isEmpty()) {
             return;
         }
         for (Entity entity : game.getEntitiesVector()) {
@@ -78,7 +78,7 @@ public class CraneOperationSpriteHandler extends BoardViewSpriteHandler {
 
     private void addOperationSprite(SmallCraft carrier, CraneOperation operation) {
         Entity unit = game.getEntity(operation.getUnitId());
-        BoardView boardView = (BoardView) clientGUI.getBoardView(
+        BoardClientState boardView = clientGUI.getBoardState(
               BoardLocation.of(operation.getUnitPosition(), carrier.getBoardId()));
         if ((unit == null) || (boardView == null)) {
             LOGGER.debug("[Crane] {}: no sprite for {} (unit known {}, board shown {})", carrier.getDisplayName(),

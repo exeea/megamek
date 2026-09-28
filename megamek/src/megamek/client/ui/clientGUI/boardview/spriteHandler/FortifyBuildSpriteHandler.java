@@ -33,7 +33,7 @@
 package megamek.client.ui.clientGUI.boardview.spriteHandler;
 
 import megamek.client.ui.clientGUI.AbstractClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.sprite.FortifyBuildSprite;
 import megamek.common.board.BoardLocation;
 import megamek.common.event.GamePhaseChangeEvent;
@@ -65,7 +65,7 @@ public class FortifyBuildSpriteHandler extends BoardViewSpriteHandler {
      */
     public void updateFortifyBuildSprites() {
         clear();
-        if (clientGUI.boardViews().isEmpty()) {
+        if (clientGUI.boardStates().isEmpty()) {
             return;
         }
         for (Entity entity : game.getEntitiesVector()) {
@@ -74,7 +74,7 @@ public class FortifyBuildSpriteHandler extends BoardViewSpriteHandler {
                 continue;
             }
             BoardLocation location = BoardLocation.of(entity.getPosition(), entity.getBoardId());
-            BoardView boardView = (BoardView) clientGUI.getBoardView(location);
+            BoardClientState boardView = clientGUI.getBoardState(location);
             if (boardView != null) {
                 currentSprites.add(new FortifyBuildSprite(boardView, entity.getPosition(),
                       stage, fortifyTotalStagesOf(entity)));

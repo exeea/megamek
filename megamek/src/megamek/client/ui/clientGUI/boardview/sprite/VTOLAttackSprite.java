@@ -42,8 +42,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.HexDrawUtilities;
 import megamek.common.board.Coords;
 import megamek.common.units.Entity;
@@ -54,14 +54,14 @@ import megamek.common.units.VTOL;
  * @author Neoancient
  */
 public class VTOLAttackSprite extends Sprite implements TacticalSprite {
-    private final BoardView boardView;
+    private final BoardGlyphContext boardView;
     private final Entity entity;
     private List<Coords> targets;
     private final Color spriteColor;
 
-    public VTOLAttackSprite(BoardView boardView, Entity entity) {
+    public VTOLAttackSprite(BoardGlyphContext boardView, Entity entity) {
         super(boardView);
-        this.boardView = boardView;
+        this.boardView = bv;
         this.entity = entity;
         spriteColor = entity.getOwner().getColour().getColour();
         image = null;

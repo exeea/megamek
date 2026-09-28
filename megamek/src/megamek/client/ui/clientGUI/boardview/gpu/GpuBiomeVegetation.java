@@ -118,7 +118,8 @@ final class GpuBiomeVegetation implements Disposable {
                 if (x > maxX) { x = minX; y++; }
                 // Thin the same world-space lattice at every LOD, independently of wetland coverage and plant height.
                 // Reject before sampling support geometry, so omitted roots also avoid preparation and buffer cost.
-                if (BoardRelief.hash(ix + 379, iy - 827) >= (kind == BoardScene.Biome.FIELD ? .38f : .46f)) { continue; }
+                // Five-stalk crop cutouts cover the rows with one third of the former single-plant candidates.
+                if (BoardRelief.hash(ix + 379, iy - 827) >= (kind == BoardScene.Biome.FIELD ? .38f / 3 : .46f)) { continue; }
                 float seed = BoardRelief.hash(ix, iy);
                 if (seed >= DENSITY[tier] || (tier < 2 && seed < DENSITY[tier + 1])) { continue; }
                 float u = (ix + (BoardRelief.hash(ix + 37, iy) - .5f)
@@ -256,7 +257,7 @@ final class GpuBiomeVegetation implements Disposable {
     private int revision = -1, boardId = -1;
     private long generation;
     private boolean preparing;
-    private Texture sedge;
+    private Texture crop, sedge;
 
     static String vertex(String source) {
         String wind = GpuShaderSource.read("terrain-vegetation-wind.glsl");
@@ -329,12 +330,12 @@ final class GpuBiomeVegetation implements Disposable {
         }
         List<ModelInstance> result = new ArrayList<>();
         for (Batch batch : batches) {
-            if (!batch.crop && !batch.current.isEmpty() && sedge == null) {
-                sedge = sedgeTexture();
-                sedge.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
-                sedge.setWrap(Texture.TextureWrap.ClampToEdge, Texture.TextureWrap.ClampToEdge);
+            Texture texture = batch.crop ? crop : sedge;
+            if (!batch.current.isEmpty() && texture == null) {
+                texture = plantTexture(batch.crop ? "crop-clump" : "marsh-sedge");
+                if (batch.crop) { crop = texture; } else { sedge = texture; }
             }
-            ModelInstance instance = batch.upload(batch.crop ? null : sedge);
+            ModelInstance instance = batch.upload(texture);
             if (instance != null) { result.add(instance); }
         }
         var iterator = patches.entrySet().iterator();
@@ -355,77 +356,52 @@ final class GpuBiomeVegetation implements Disposable {
     boolean busy() { return preparing; }
     long uploads() { long total = 0; for (Batch batch : batches) { total += batch.uploads; } return total; }
 
-    /** One 512px cutout with mipmaps for the whole board; keep the full-resolution source as the editable asset. */
-    private static Texture sedgeTexture() {
+    /** One shared 512px cutout per plant kind; keep the full-resolution source as the editable asset. */
+    private static Texture plantTexture(String name) {
         var source = new Pixmap(new FileHandle(new File(Configuration.dataDir(),
-              "models/board/textures/foliage/marsh-sedge.png")));
+              "models/board/textures/foliage/" + name + ".png")));
         try {
             var pixels = new Pixmap(512, 512, Pixmap.Format.RGBA8888);
             try {
                 pixels.setBlending(Pixmap.Blending.None);
                 pixels.setFilter(Pixmap.Filter.BiLinear);
                 pixels.drawPixmap(source, 0, 0, source.getWidth(), source.getHeight(), 0, 0, 512, 512);
-                return new Texture(pixels, true);
+                var texture = new Texture(pixels, true);
+                texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
+                texture.setWrap(Texture.TextureWrap.ClampToEdge, Texture.TextureWrap.ClampToEdge);
+                return texture;
             } finally { pixels.dispose(); }
         } finally { source.dispose(); }
     }
 
-    /** Crops use solid leaves; marsh clumps use bent cutouts. Each tier reduces geometry and root density. */
+    /** Shared cutout cards: two bent surfaces nearby, two simpler surfaces at midrange, one billboard at distance. */
     private static Mesh template(boolean crop, int lod) {
         var mesh = new MeshBuilder();
         mesh.begin(VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal | VertexAttributes.Usage.ColorPacked
-              | (crop ? 0 : VertexAttributes.Usage.TextureCoordinates), GL20.GL_TRIANGLES);
-        if (!crop) {
-            marsh(mesh, lod);
-            return mesh.end();
-        }
-        Color leaf = new Color(.38f, .48f, .13f, 1), stem = new Color(.40f, .38f, .15f, 1);
-        if (lod == 2) {
-            // One tapered, camera-facing stalk at distance; the ground shader retains the cultivated rows.
-            strip(mesh, new Vector3(), new Vector3(0, 0, 1.04f), .052f, .006f, -(float) Math.PI / 2, leaf);
-            return mesh.end();
-        }
-        strip(mesh, new Vector3(), new Vector3(0, 0, 1), .011f, .004f, 0, stem);
-        int leaves = lod == 0 ? 3 : 1;
-        for (int j = 0; j < leaves; j++) {
-            float turn = j * 2.399963f, reach = .28f + .12f * BoardRelief.hash(j, 3);
-            Vector3 from = new Vector3(0, 0, .18f + j * .60f / leaves);
-            Vector3 tip = new Vector3(from).add((float) Math.cos(turn) * reach, (float) Math.sin(turn) * reach, .10f);
-            // A leaf is one tapered ribbon; the shared vertex shader supplies its wind motion.
-            strip(mesh, from, tip, .085f, .002f, turn, leaf);
-        }
-        strip(mesh, new Vector3(0, 0, .85f), new Vector3(0, 0, 1.04f),
-              .04f, .009f, 0, new Color(.57f, .45f, .19f, 1));
-        return mesh.end();
-    }
-
-    /** Crossed, bent surfaces retain volume from above; the alpha-tested cutout supplies individual curling leaves. */
-    private static void marsh(MeshPartBuilder mesh, int lod) {
+              | VertexAttributes.Usage.TextureCoordinates, GL20.GL_TRIANGLES);
         int cards = lod == 2 ? 1 : 2;
         int segments = lod == 0 ? 2 : 1;
+        float height = crop ? 1.04f : 1.1f, width = crop ? .43f : .58f;
         for (int card = 0; card < cards; card++) {
             float angle = card * (float) Math.PI / cards;
             Vector3 side = new Vector3((float) Math.cos(angle), (float) Math.sin(angle), 0);
             Vector3 outward = new Vector3(-side.y, side.x, 0);
             for (int row = 0; row < segments; row++) {
                 float low = row / (float) segments, high = (row + 1) / (float) segments;
-                Vector3 a = new Vector3(outward).scl((float) Math.sin(low * Math.PI) * .28f).add(0, 0, low * 1.1f);
-                Vector3 b = new Vector3(outward).scl((float) Math.sin(high * Math.PI) * .28f).add(0, 0, high * 1.1f);
+                // A small crop lean keeps even the middle tier visible from directly above in still weather.
+                Vector3 a = new Vector3(outward).scl((float) Math.sin(low * Math.PI) * (crop ? .14f : .28f)
+                      + (crop ? low * .12f : 0)).add(0, 0, low * height);
+                Vector3 b = new Vector3(outward).scl((float) Math.sin(high * Math.PI) * (crop ? .14f : .28f)
+                      + (crop ? high * .12f : 0)).add(0, 0, high * height);
                 Vector3 normal = new Vector3(side).crs(new Vector3(b).sub(a)).nor();
                 float bottom = .98f - low * .98f, top = .98f - high * .98f;
-                mesh.rect(vertex(new Vector3(a).mulAdd(side, -.58f), normal, Color.WHITE).setUV(0, bottom),
-                      vertex(new Vector3(a).mulAdd(side, .58f), normal, Color.WHITE).setUV(1, bottom),
-                      vertex(new Vector3(b).mulAdd(side, .58f), normal, Color.WHITE).setUV(1, top),
-                      vertex(new Vector3(b).mulAdd(side, -.58f), normal, Color.WHITE).setUV(0, top));
+                mesh.rect(vertex(new Vector3(a).mulAdd(side, -width), normal, Color.WHITE).setUV(0, bottom),
+                      vertex(new Vector3(a).mulAdd(side, width), normal, Color.WHITE).setUV(1, bottom),
+                      vertex(new Vector3(b).mulAdd(side, width), normal, Color.WHITE).setUV(1, top),
+                      vertex(new Vector3(b).mulAdd(side, -width), normal, Color.WHITE).setUV(0, top));
             }
         }
-    }
-
-    private static void strip(MeshPartBuilder mesh, Vector3 a, Vector3 b, float wa, float wb, float angle, Color color) {
-        Vector3 side = new Vector3(-(float) Math.sin(angle), (float) Math.cos(angle), 0);
-        Vector3 normal = new Vector3(side).crs(new Vector3(b).sub(a)).nor();
-        mesh.rect(vertex(new Vector3(a).mulAdd(side, -wa), normal, color), vertex(new Vector3(a).mulAdd(side, wa), normal, color),
-              vertex(new Vector3(b).mulAdd(side, wb), normal, color), vertex(new Vector3(b).mulAdd(side, -wb), normal, color));
+        return mesh.end();
     }
 
     private static MeshPartBuilder.VertexInfo vertex(Vector3 point, Vector3 normal, Color color) {
@@ -435,6 +411,7 @@ final class GpuBiomeVegetation implements Disposable {
     @Override
     public void dispose() {
         for (Batch batch : batches) { batch.dispose(); }
+        if (crop != null) { crop.dispose(); crop = null; }
         if (sedge != null) { sedge.dispose(); sedge = null; }
         patches.clear(); tiles = null; preparing = false;
     }

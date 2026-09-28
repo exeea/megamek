@@ -41,7 +41,7 @@ import java.util.Map;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.IBoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.dialogs.phaseDisplay.InfantryActionDeclarationDialog;
 import megamek.client.ui.dialogs.phaseDisplay.TargetChoiceDialog;
@@ -322,7 +322,7 @@ public class InfantryVsInfantryCombatDisplay extends AttackPhaseDisplay {
 
         // Update cursor position for hex info display
         //if (event.getCoords() != null) {
-        //    clientgui.getBoardView().cursor(event.getCoords());
+        //    clientgui.getBoardState().cursor(event.getCoords());
         //}
         // This display has no torso twist, so the shift key never suppresses the selection.
         applyHexMouseAction(event, false);
@@ -350,7 +350,7 @@ public class InfantryVsInfantryCombatDisplay extends AttackPhaseDisplay {
      */
     public void target(Targetable t) {
         setTarget(t);
-        //clientgui.getBoardView().select(t.getPosition());
+        //clientgui.getBoardState().select(t.getPosition());
     }
 
     /**
@@ -495,8 +495,8 @@ public class InfantryVsInfantryCombatDisplay extends AttackPhaseDisplay {
         }
         clientgui.setSelectedEntityNum(entityId);
         clientgui.getUnitDisplay().displayEntity(game.getEntity(entityId));
-        clientgui.getBoardView().highlight(game.getEntity(entityId).getPosition());
-        clientgui.getBoardView().centerOn(game.getEntity(entityId));
+        clientgui.getBoardState().highlight(game.getEntity(entityId).getPosition());
+        clientgui.getBoardState().centerOn(game.getEntity(entityId));
 
         updateButtons();
     }
@@ -526,7 +526,7 @@ public class InfantryVsInfantryCombatDisplay extends AttackPhaseDisplay {
         stopTimer();
         disableButtons();
         setTarget(null);
-        clientgui.onAllBoardViews(IBoardView::clearMarkedHexes);
+        clientgui.onAllBoardStates(BoardClientState::clearMarkedHexes);
     }
 
     /**

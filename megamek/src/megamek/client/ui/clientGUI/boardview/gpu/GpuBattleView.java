@@ -42,7 +42,7 @@ import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.BoardFocus;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
-import megamek.client.ui.clientGUI.boardview.sprite.EntitySprite;
+import megamek.client.ui.clientGUI.boardview.UnitAnnotations;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
@@ -320,7 +320,10 @@ class GpuBattleView extends ApplicationAdapter {
 
     @Override
     public void render() {
-        shaderEdits.run(this::renderBoard);
+        shaderEdits.run(() -> {
+            renderBoard();
+            shaderEdits.renderPreview();
+        });
     }
 
     private void renderBoard() {
@@ -450,6 +453,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (!fitted) { updateCameraFocus(scene, frame.centerRequest()); }
         var instantAction = playbackSpeed == UnitMotion.Speed.INSTANT ? playback.lastAction() : null;
         playback.advance(Gdx.graphics.getDeltaTime(), playbackSpeed, state -> preparePlaybackCamera(state, scene));
+        source.playbackState(frame, playback.busy());
         scene = playback.present(scene);
         camouflage.retain(scene.units());
         if (unitModels != null) {
@@ -1252,7 +1256,7 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     static float annotationScale(float displayScale) {
-        return 1.4f * Math.max(1, displayScale) / EntitySprite.ANNOTATION_RESOLUTION;
+        return 1.4f * Math.max(1, displayScale) / UnitAnnotations.ANNOTATION_RESOLUTION;
     }
 
     private void renderSelectionOutlines() {
@@ -1966,4 +1970,6 @@ class GpuBattleView extends ApplicationAdapter {
         hover.clear();
         unitPicking.clear();
     }
+    void cameraCommand(KeyCommandBind command) { boardInput.cameraCommand(-1, command); }
+
 }

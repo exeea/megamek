@@ -105,7 +105,7 @@ class GpuCaptureInvalidationTest {
                 BoardScene incremental = fixture.source.takeFrame().scene();
                 assertSame(before.tile(distant), incremental.tile(distant), "An edit must retain untouched tile snapshots");
                 assertEquals(4, incremental.tile(edited).elevation());
-                try (GpuBoardSource fresh = new GpuBoardSource(fixture.view, () -> fixture.panel)) {
+                try (GpuBoardSource fresh = new GpuBoardSource(fixture.view.getClientState(), () -> fixture.panel)) {
                     assertEquals(fresh.takeFrame().scene().tiles(), incremental.tiles(),
                           "Incremental artwork and neighbour captures must match a complete board capture");
                 }
@@ -140,7 +140,7 @@ class GpuCaptureInvalidationTest {
     }
 
     private static void assertCompleteCapture(GpuBoardFixture fixture) {
-        try (GpuBoardSource fresh = new GpuBoardSource(fixture.view, () -> fixture.panel)) {
+        try (GpuBoardSource fresh = new GpuBoardSource(fixture.view.getClientState(), () -> fixture.panel)) {
             assertEquals(fresh.takeFrame().scene().tiles(), fixture.source.takeFrame().scene().tiles(),
                   "Accumulated edits, undo and whole-board invalidation must match a complete capture");
         }

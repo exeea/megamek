@@ -74,7 +74,7 @@ public abstract class BoardViewSpriteHandler implements GameListener {
      * When overriding this, call super.clear() or remember to perform clean up in the overriding method.
      */
     public void clear() {
-        clientGUI.boardViews().forEach(boardView -> boardView.removeSprites(currentSprites));
+        clientGUI.boardStates().forEach(state -> state.removeSprites(currentSprites));
         currentSprites.clear();
     }
 

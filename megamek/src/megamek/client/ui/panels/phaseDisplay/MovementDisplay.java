@@ -53,9 +53,8 @@ import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.Messages;
 import megamek.client.ui.SharedUtility;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.CollapseWarning;
-import megamek.client.ui.clientGUI.boardview.IBoardView;
 import megamek.client.ui.clientGUI.boardview.overlay.AbstractBoardViewOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.clientGUI.boardview.sprite.CraneUnloadTargetSprite;
@@ -668,7 +667,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
         updateUnitDisplay(selectedEntity);
 
         gear = MovementDisplay.GEAR_LAND;
-        clientgui.boardViews().forEach(bv -> ((BoardView) bv).setHighlightColor(GUIP.getMoveDefaultColor()));
+        clientgui.boardStates().forEach(bv -> bv.setHighlightColor(GUIP.getMoveDefaultColor()));
 
         clear();
         updateButtonsLater();
@@ -677,9 +676,9 @@ public class MovementDisplay extends ActionPhaseDisplay {
                      selectedEntity.getDisplayName(), selectedEntity.isClimbing(),
                      selectedEntity.getElevation(), selectedEntity.getPosition(), selectedEntity.getFacing());
 
-        clientgui.boardViews().forEach(IBoardView::clearMarkedHexes);
+        clientgui.boardStates().forEach(BoardClientState::clearMarkedHexes);
         if (selectedEntity.getPosition() != null) {
-            clientgui.getBoardView(selectedEntity).highlight(selectedEntity.getPosition());
+            clientgui.getBoardState(selectedEntity).highlight(selectedEntity.getPosition());
         }
         if (!clientgui.isCurrentBoardViewShowingAnimation()) {
             if (selectedEntity.getPosition() != null) {
@@ -727,7 +726,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
      * @param entity the entity to mark the area. Null clears it
      */
     private void markDeploymentHexes(@Nullable Entity entity) {
-        clientgui.boardViews().forEach(bv -> ((BoardView) bv).markDeploymentHexesFor(entity));
+        clientgui.boardStates().forEach(bv -> bv.markDeploymentHexesFor(entity));
     }
 
     /**
@@ -886,7 +885,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
     }
 
     /**
-     * Sets buttons to their proper state, but let's Swing do this later after all the current BoardView repaints and
+     * Sets buttons to their proper state, but let's Swing do this later after all the current BoardClientState repaints and
      * updates are complete. This is done to prevent some buttons from painting correctly when the maps are zoomed way
      * out. See Issue: #4444
      */
@@ -1275,7 +1274,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
         if (redrawMovement &&
             (currentEntity != null) &&
             currentEntity.isDeployed()) {
-            clientgui.getBoardView(currentEntity).drawMovementData(currentEntity, cmd);
+            clientgui.getBoardState(currentEntity).drawMovementData(currentEntity, cmd);
         }
 
         // Check if the path ends with an illegal FORWARDS step that could have been a climb
@@ -1355,13 +1354,13 @@ public class MovementDisplay extends ActionPhaseDisplay {
                 // Recompile the path with the chosen level count
                 cmd.compile(game, currentEntity);
                 if (redrawMovement) {
-                    clientgui.getBoardView(currentEntity).drawMovementData(currentEntity, cmd);
+                    clientgui.getBoardState(currentEntity).drawMovementData(currentEntity, cmd);
                 }
             } else {
                 // Cancelled - remove the climbing step
                 cmd.removeLastStep();
                 if (redrawMovement) {
-                    clientgui.getBoardView(currentEntity).drawMovementData(currentEntity, cmd);
+                    clientgui.getBoardState(currentEntity).drawMovementData(currentEntity, cmd);
                 }
             }
         }
@@ -1558,7 +1557,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
                         cmd.removeLastStep();
                     }
                     if (redrawMovement) {
-                        clientgui.getBoardView(currentEntity).drawMovementData(currentEntity, cmd);
+                        clientgui.getBoardState(currentEntity).drawMovementData(currentEntity, cmd);
                     }
                 }
             }
@@ -1624,7 +1623,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
                             Messages.getString("MovementDisplay.ClimbingDialog.title"), warning)) {
                         cmd.removeLastStep();
                         if (redrawMovement) {
-                            clientgui.getBoardView(currentEntity).drawMovementData(currentEntity, cmd);
+                            clientgui.getBoardState(currentEntity).drawMovementData(currentEntity, cmd);
                         }
                     }
                 }
@@ -1858,10 +1857,10 @@ public class MovementDisplay extends ActionPhaseDisplay {
         }
         currentEntity = Entity.NONE;
         clearFlightPath();
-        clientgui.boardViews().forEach(IBoardView::clearMarkedHexes);
+        clientgui.boardStates().forEach(BoardClientState::clearMarkedHexes);
         markDeploymentHexes(null);
         // Return the highlight sprite back to its original color
-        clientgui.boardViews().forEach(bv -> ((BoardView) bv).setHighlightColor(Color.WHITE));
+        clientgui.boardStates().forEach(bv -> bv.setHighlightColor(Color.WHITE));
         clientgui.setSelectedEntityNum(Entity.NONE);
         clearMovementSprites();
         clientgui.clearFieldOfFire();
@@ -1871,7 +1870,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
 
     private void clearFlightPath() {
         if (flightPath != null) {
-            clientgui.onAllBoardViews(bv -> bv.removeSprite(flightPath));
+            clientgui.onAllBoardStates(bv -> bv.removeSprite(flightPath));
         }
         flightPathPosition = null;
         flightPath = null;
@@ -1992,7 +1991,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
         }
 
         // clear board cursors
-        clientgui.boardViews().forEach(IBoardView::clearMarkedHexes);
+        clientgui.boardStates().forEach(BoardClientState::clearMarkedHexes);
         // Needed to clear best move modifiers
         clientgui.clearTemporarySprites();
 
@@ -2043,12 +2042,12 @@ public class MovementDisplay extends ActionPhaseDisplay {
         } else if (wasWalkOn) {
             // Press escape twice
             if (currentlySelectedEntity.isDeployed()) {
-                clientgui.boardViews().forEach(bv -> bv.clearMarkedHexes());
+                clientgui.boardStates().forEach(bv -> bv.clearMarkedHexes());
                 clearMovementSprites();
                 markDeploymentHexes(currentlySelectedEntity);
                 currentlySelectedEntity.setDeployed(false);
                 currentlySelectedEntity.setPosition(null);
-                clientgui.boardViews().forEach(bv -> ((BoardView) bv).redrawEntity(currentlySelectedEntity));
+                clientgui.boardStates().forEach(bv -> bv.redrawEntity(currentlySelectedEntity));
                 refreshButtons();
             }
             return;
@@ -2061,7 +2060,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
         jumpSubGear = GEAR_SUB_STANDARD;
         clearFlightPath();
         Color walkColor = GUIP.getMoveDefaultColor();
-        clientgui.boardViews().forEach(bv -> ((BoardView) bv).setHighlightColor(walkColor));
+        clientgui.boardStates().forEach(bv -> bv.setHighlightColor(walkColor));
         initializeStatusBarText(currentlySelectedEntity);
 
         // update some GUI elements
@@ -2146,7 +2145,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
         if (cmd.getLastStep().getType() == MoveStepType.DEPLOY) {
             currentlySelectedEntity.setDeployed(false);
             currentlySelectedEntity.setPosition(null);
-            clientgui.boardViews().forEach(bv -> ((BoardView) bv).redrawEntity(currentlySelectedEntity));
+            clientgui.boardStates().forEach(bv -> bv.redrawEntity(currentlySelectedEntity));
             markDeploymentHexes(currentlySelectedEntity);
             cmd.removeLastStep();
             // The jump was declared ahead of the placement; with the placement gone it has nothing to apply to
@@ -2166,9 +2165,9 @@ public class MovementDisplay extends ActionPhaseDisplay {
             }
         } else {
             // clear board cursors
-            clientgui.getBoardView(currentEntity()).select(cmd.getFinalCoords());
-            clientgui.getBoardView(currentEntity()).cursor(cmd.getFinalCoords());
-            clientgui.getBoardView(currentEntity()).drawMovementData(currentlySelectedEntity, cmd);
+            clientgui.getBoardState(currentEntity()).select(cmd.getFinalCoords());
+            clientgui.getBoardState(currentEntity()).cursor(cmd.getFinalCoords());
+            clientgui.getBoardState(currentEntity()).drawMovementData(currentlySelectedEntity, cmd);
             clientgui.updateFiringArc(currentlySelectedEntity);
             clientgui.showSensorRanges(currentlySelectedEntity, cmd.getFinalCoords());
 
@@ -2838,7 +2837,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
             && (boardViewEvent.getBoardId() == flightPathTarget(currentlySelectedEntity))
             && (boardViewEvent.getType() == BoardViewEvent.BOARD_HEX_CLICKED)) {
             if (flightPath != null) {
-                boardViewEvent.getBoardView().removeSprite(flightPath);
+                boardViewEvent.getBoardState().removeSprite(flightPath);
             }
             clearFlightPath();
             flightPathPosition = boardViewEvent.getCoords();
@@ -2846,8 +2845,8 @@ public class MovementDisplay extends ActionPhaseDisplay {
                                                        flightPathPosition,
                                                        finalFacing());
             currentlySelectedEntity.setPassedThrough(new Vector<>(line));
-            flightPath = new FlyOverSprite(boardViewEvent.getBoardView(), currentlySelectedEntity);
-            boardViewEvent.getBoardView().addSprite(flightPath);
+            flightPath = new FlyOverSprite(boardViewEvent.getBoardState(), currentlySelectedEntity);
+            boardViewEvent.getBoardState().addSprite(flightPath);
             updateDonePanel();
             return;
         }
@@ -2915,10 +2914,10 @@ public class MovementDisplay extends ActionPhaseDisplay {
                                                     coords.getBoardNum());
                     clientgui.addToast(ToastLevel.ERROR, msg, currentlySelectedEntity);
                 }
-                clientgui.boardViews().forEach(bv -> ((BoardView) bv).redrawEntity(currentlySelectedEntity));
+                clientgui.boardStates().forEach(bv -> bv.redrawEntity(currentlySelectedEntity));
                 clientgui.updateFiringArc(currentlySelectedEntity);
                 clientgui.showSensorRanges(currentlySelectedEntity);
-                clientgui.boardViews().forEach(IBoardView::repaint);
+                clientgui.boardStates().forEach(BoardClientState::repaint);
                 refreshButtons();
                 return;
 
@@ -2952,7 +2951,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
 
         if ((boardViewEvent.getType() == BoardViewEvent.BOARD_HEX_DRAGGED) && !noPath) {
             if (!boardViewEvent.getCoords().equals(currPosition) || shiftHeld || (gear == MovementDisplay.GEAR_TURN)) {
-                boardViewEvent.getBoardView().cursor(boardViewEvent.getCoords());
+                boardViewEvent.getBoardState().cursor(boardViewEvent.getCoords());
                 // either turn or move
                 if (currentlySelectedEntity != null) {
                     currentMove(boardViewEvent.getCoords(), boardViewEvent.getBoardId());
@@ -2975,7 +2974,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
                     }
                 }
             } else {
-                boardViewEvent.getBoardView().select(boardViewEvent.getCoords());
+                boardViewEvent.getBoardState().select(boardViewEvent.getCoords());
             }
 
             if (gear == MovementDisplay.GEAR_RAM) {
@@ -5008,7 +5007,8 @@ public class MovementDisplay extends ActionPhaseDisplay {
         // Mark each hex on its own: the movement envelope outlines both edges of the band around a DropShip, which
         // reads as two rings
         clientgui.clearMovementEnvelope();
-        if (clientgui.getBoardView(carrier) instanceof BoardView boardView) {
+        BoardClientState boardView = clientgui.getBoardState(carrier);
+        if (boardView != null) {
             for (Coords coords : validUnloadHexes) {
                 unloadTargetSprites.add(new CraneUnloadTargetSprite(boardView, coords, GUIP.getMoveDefaultColor()));
             }
@@ -5096,7 +5096,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
     private void cancelUnloadHexSelection() {
         unloadHexUnit = null;
         validUnloadHexes.clear();
-        clientgui.boardViews().forEach(boardView -> boardView.removeSprites(unloadTargetSprites));
+        clientgui.boardStates().forEach(boardView -> boardView.removeSprites(unloadTargetSprites));
         unloadTargetSprites.clear();
         clientgui.clearMovementEnvelope();
     }
@@ -7110,7 +7110,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
                 clear();
             }
             Color walkColor = GUIP.getMoveDefaultColor();
-            clientgui.boardViews().forEach(bv -> ((BoardView) bv).setHighlightColor(walkColor));
+            clientgui.boardStates().forEach(bv -> bv.setHighlightColor(walkColor));
             gear = MovementDisplay.GEAR_LAND;
             computeMovementEnvelope(entity);
         } else if (actionCmd.equals(MoveCommand.MOVE_JUMP.getCmd())) {
@@ -7141,7 +7141,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
             }
             declareJumpForCurrentPath();
             Color jumpColor = GUIP.getMoveJumpColor();
-            clientgui.boardViews().forEach(bv -> ((BoardView) bv).setHighlightColor(jumpColor));
+            clientgui.boardStates().forEach(bv -> bv.setHighlightColor(jumpColor));
             computeMovementEnvelope(entity);
         } else if (actionCmd.equals(MoveCommand.MOVE_SWIM.getCmd())) {
             if (gear != MovementDisplay.GEAR_SWIM) {
@@ -7192,7 +7192,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
             }
             gear = MovementDisplay.GEAR_BACKUP; // on purpose...
             Color backColor = GUIP.getMoveBackColor();
-            clientgui.boardViews().forEach(bv -> ((BoardView) bv).setHighlightColor(backColor));
+            clientgui.boardStates().forEach(bv -> bv.setHighlightColor(backColor));
             computeMovementEnvelope(entity);
         } else if (actionCmd.equals(MoveCommand.MOVE_LONGEST_RUN.getCmd())) {
             if (gear == MovementDisplay.GEAR_JUMP) {
@@ -7640,7 +7640,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
                     initializeJumpMovePath();
                     gear = GEAR_JUMP;
                     Color jumpColor = GUIP.getMoveJumpColor();
-                    clientgui.boardViews().forEach(bv -> ((BoardView) bv).setHighlightColor(jumpColor));
+                    clientgui.boardStates().forEach(bv -> bv.setHighlightColor(jumpColor));
                     computeMovementEnvelope(entity);
                 }
                 addStepToMovePath(MoveStepType.LAY_MINE, i);
@@ -9426,7 +9426,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
         entity.setSecondaryFacing(entity.getFacing());
         cmd = new MovePath(game, entity);
         addDeploymentToMovePath();
-        clientgui.boardViews().forEach(bv -> ((BoardView) bv).redrawEntity(entity));
+        clientgui.boardStates().forEach(bv -> bv.redrawEntity(entity));
         clientgui.updateFiringArc(entity);
         clientgui.showSensorRanges(entity);
     }

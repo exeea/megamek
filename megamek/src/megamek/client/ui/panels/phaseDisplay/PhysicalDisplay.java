@@ -51,8 +51,7 @@ import javax.swing.JOptionPane;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
-import megamek.client.ui.clientGUI.boardview.IBoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.dialogs.phaseDisplay.CalledBlowDialog;
 import megamek.client.ui.dialogs.phaseDisplay.TargetChoiceDialog;
@@ -320,7 +319,7 @@ public class PhysicalDisplay extends AttackPhaseDisplay {
         showTargetChoice = false;
 
         clientgui.centerOnUnit(targ);
-        clientgui.getCurrentBoardView().ifPresent(bv -> bv.select(targ.getPosition()));
+        clientgui.getCurrentBoardState().ifPresent(bv -> bv.select(targ.getPosition()));
 
         // HACK : show the choice dialog again.
         showTargetChoice = true;
@@ -471,8 +470,8 @@ public class PhysicalDisplay extends AttackPhaseDisplay {
         } else {
             setTwistEnabled(false);
         }
-        clientgui.onAllBoardViews(IBoardView::clearMarkedHexes);
-        clientgui.getBoardView(currentEntity()).highlight(currentEntity().getPosition());
+        clientgui.onAllBoardStates(BoardClientState::clearMarkedHexes);
+        clientgui.getBoardState(currentEntity()).highlight(currentEntity().getPosition());
 
         clientgui.getUnitDisplay().displayEntity(entity);
         if (GUIP.getMoveDisplayTabDuringMovePhases()) {
@@ -594,7 +593,7 @@ public class PhysicalDisplay extends AttackPhaseDisplay {
             initDonePanelForNewTurn();
 
         }
-        clientgui.onAllBoardViews(bv -> bv.select(null));
+        clientgui.onAllBoardStates(bv -> bv.select(null));
 
         startTimer();
     }
@@ -615,8 +614,8 @@ public class PhysicalDisplay extends AttackPhaseDisplay {
         }
         currentEntity = Entity.NONE;
         target(null);
-        clientgui.onAllBoardViews(IBoardView::clearMarkedHexes);
-        clientgui.onAllBoardViews(BoardView::clearMovementData);
+        clientgui.onAllBoardStates(BoardClientState::clearMarkedHexes);
+        clientgui.onAllBoardStates(BoardClientState::clearMovementData);
         clientgui.setSelectedEntityNum(Entity.NONE);
         disableButtons();
     }
@@ -918,7 +917,7 @@ public class PhysicalDisplay extends AttackPhaseDisplay {
 
         // and add it into the game, temporarily
         game.addAction(saa);
-        clientgui.getBoardView(currentEntity()).addAttack(saa);
+        clientgui.getBoardState(currentEntity()).addAttack(saa);
 
         // and prevent duplicates
         setSearchlightEnabled(false);
@@ -2060,7 +2059,7 @@ public class PhysicalDisplay extends AttackPhaseDisplay {
         if (currentEntity() == null) {
             return;
         }
-        clientgui.boardViews().forEach(bv -> ((BoardView) bv).redrawEntity(currentEntity()));
+        clientgui.boardStates().forEach(bv -> bv.redrawEntity(currentEntity()));
         clientgui.getUnitDisplay().displayEntity(currentEntity());
         updateTarget();
         clientgui.updateFiringArc(currentEntity());
@@ -2085,7 +2084,7 @@ public class PhysicalDisplay extends AttackPhaseDisplay {
         if (shiftHeld == ((event.getModifiers() & InputEvent.SHIFT_DOWN_MASK) == 0)) {
             shiftHeld = (event.getModifiers() & InputEvent.SHIFT_DOWN_MASK) != 0;
         }
-        // Select the hex exactly once per click. BoardView.select() always fires a hex-selected event, even when
+        // Select the hex exactly once per click. BoardClientState.select() always fires a hex-selected event, even when
         // the hex has not changed, and hexSelected() answers it by asking the player which unit in the hex to
         // attack. A second select() for the same click therefore opens that target dialog a second time.
         if (event.getType() == BoardViewEvent.BOARD_HEX_DRAGGED) {

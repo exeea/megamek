@@ -48,7 +48,7 @@ import javax.swing.*;
 
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.board.Coords;
 import megamek.common.game.Game;
@@ -696,7 +696,7 @@ public class NovaNetworkDialog extends JDialog implements ActionListener {
      */
     private void updateEntityHighlighting() {
         List<Entity> selectedEntities = getSelectedEntities();
-        BoardView boardView = clientGUI.getBoardView();
+        BoardClientState boardView = clientGUI.getBoardState();
 
         // Highlight entity name tags
         boardView.highlightSelectedEntities(selectedEntities);
@@ -715,7 +715,7 @@ public class NovaNetworkDialog extends JDialog implements ActionListener {
      * highlights.
      */
     private void clearHighlighting() {
-        BoardView boardView = clientGUI.getBoardView();
+        BoardClientState boardView = clientGUI.getBoardState();
 
         // Clear entity name tag highlights
         boardView.highlightSelectedEntities(new ArrayList<>());

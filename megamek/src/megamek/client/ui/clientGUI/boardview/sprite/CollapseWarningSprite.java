@@ -35,8 +35,8 @@ package megamek.client.ui.clientGUI.boardview.sprite;
 import java.awt.Color;
 import java.awt.Graphics2D;
 
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.FontHandler;
 import megamek.client.ui.util.StringDrawer;
@@ -68,10 +68,10 @@ public class CollapseWarningSprite extends HexSprite {
           .absoluteCenter().outline(OUTLINE_COLOR, 2.5f);
 
     /**
-     * @param boardView1 - parent BoardView object this sprite will be displayed on.
+     * @param boardView1 - parent BoardGlyphContext object this sprite will be displayed on.
      * @param loc        - Hex location coordinates of building or bridge where warning will be visible.
      */
-    public CollapseWarningSprite(BoardView boardView1, Coords loc) {
+    public CollapseWarningSprite(BoardGlyphContext boardView1, Coords loc) {
         super(boardView1, loc);
     }
 

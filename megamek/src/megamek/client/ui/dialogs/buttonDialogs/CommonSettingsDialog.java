@@ -3340,8 +3340,8 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         CLIENT_PREFERENCES.setFavoritePrincessBehaviorSetting(
             (String) favoritePrincessBehaviorSetting.getSelectedItem());
         saveAdvancedSettingsControls();
-        if ((clientgui != null) && (clientgui.getBoardView() != null)) {
-            clientgui.getBoardView().updateEntityLabels();
+        if ((clientgui != null) && (clientgui.getBoardState() != null)) {
+            clientgui.getBoardState().updateEntityLabels();
         }
 
         CLIENT_PREFERENCES.setLocale(CommonSettingsDialog.LOCALE_CHOICES[displayLocale.getSelectedIndex()]);

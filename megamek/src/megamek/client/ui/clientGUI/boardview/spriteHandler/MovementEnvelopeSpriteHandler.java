@@ -36,16 +36,15 @@ import java.awt.Color;
 import java.util.Map;
 
 import megamek.client.ui.clientGUI.AbstractClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
-import megamek.client.ui.clientGUI.boardview.IBoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.sprite.MovementEnvelopeSprite;
 import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
 import megamek.common.board.Coords;
-import megamek.common.game.IGame;
 import megamek.common.event.GamePhaseChangeEvent;
+import megamek.common.game.IGame;
 
 /**
- * This class handles the sprites shown on an attached BoardView for the movement envelope (showing the hexes where a
+ * This class handles the sprites shown on an attached BoardClientState for the movement envelope (showing the hexes where a
  * currently selected unit can move to in the movement phase).
  */
 public class MovementEnvelopeSpriteHandler extends BoardViewSpriteHandler {
@@ -76,8 +75,8 @@ public class MovementEnvelopeSpriteHandler extends BoardViewSpriteHandler {
             return;
         }
 
-        IBoardView iBoardView = clientGUI.getBoardView(boardId);
-        if (!(iBoardView instanceof BoardView boardView)) {
+        BoardClientState boardView = clientGUI.getBoardState(boardId);
+        if (boardView == null) {
             return;
         }
 

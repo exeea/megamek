@@ -37,7 +37,7 @@ import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.Stroke;
 
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.board.Coords;
 
@@ -67,7 +67,7 @@ public class CraneUnloadTargetSprite extends HexSprite {
      * @param location       a hex the cranes can unload into
      * @param highlightColor the base colour of the marker; its opacity is replaced
      */
-    public CraneUnloadTargetSprite(BoardView boardView, Coords location, Color highlightColor) {
+    public CraneUnloadTargetSprite(BoardGlyphContext boardView, Coords location, Color highlightColor) {
         super(boardView, location);
         this.highlightColor = highlightColor;
     }
@@ -81,12 +81,12 @@ public class CraneUnloadTargetSprite extends HexSprite {
         graph.scale(bv.getScale(), bv.getScale());
 
         graph.setColor(withOpacity(FILL_OPACITY));
-        graph.fill(BoardView.getHexPoly());
+        graph.fill(megamek.client.ui.clientGUI.boardview.HexDrawUtilities.rasterHex());
 
         Stroke oldStroke = graph.getStroke();
         graph.setStroke(new BasicStroke(OUTLINE_WIDTH));
         graph.setColor(withOpacity(OUTLINE_OPACITY));
-        graph.draw(BoardView.getHexPoly());
+        graph.draw(megamek.client.ui.clientGUI.boardview.HexDrawUtilities.rasterHex());
         graph.setStroke(oldStroke);
         graph.dispose();
     }

@@ -37,6 +37,12 @@ final class GpuShaderManager {
     private long revision;
     /** EDT-owned, including creation and closing. */
     private GpuShaderEditor editor;
+    private volatile GpuShaderPreviewPanel previewPanel;
+    private GpuShaderPreview objectPreview;
+    private final GpuShaderInputs inputValues = new GpuShaderInputs();
+    private volatile GpuShaderInputPanel inputPanel;
+    private long lastInputSnapshot;
+    private boolean inputsChanged;
 
     record Sources(String name, String vertex, String fragment) { }
     record Result(boolean success, String message, Sources failure, int updated) { }
@@ -48,6 +54,7 @@ final class GpuShaderManager {
         Set<String> files();
         Change prepare();
         List<Sources> sources();
+        List<GpuShaderInputs.Program> uniformPrograms();
     }
 
     static GpuShaderManager current() { return CURRENT.get(); }
@@ -128,11 +135,13 @@ final class GpuShaderManager {
 
     /** Called once at the frame boundary; pending keystrokes coalesce to the newest complete editor snapshot. */
     boolean update() {
+        boolean changed = inputsChanged;
+        inputsChanged = false;
         Request request = pending.getAndSet(null);
-        if (request == null || closed) { return false; }
+        if (request == null || closed) { return changed; }
         Result result = apply(request.drafts());
         SwingUtilities.invokeLater(() -> { if (!closed) { request.completed().accept(result); } });
-        return result.success() && result.updated() > 0;
+        return changed || result.success() && result.updated() > 0;
     }
 
     void submit(Map<String, String> sources, Consumer<Result> completed) {
@@ -195,13 +204,85 @@ final class GpuShaderManager {
                           SwingUtilities.invokeLater(() -> { if (!closed) { callback.accept(snapshot); } });
                       })));
             }
+            previewPanel = editor.previewPanel();
+            inputPanel = editor.inputsPanel();
+            inputPanel.connect((edit, callback) -> application.postRunnable(() -> run(() -> {
+                if (closed) { return; }
+                String message;
+                try {
+                    editInput(edit);
+                    message = "Applied. Blank overrides use supplied values; overrides are kept for this board session.";
+                } catch (RuntimeException failure) { message = "Input unchanged: " + failure.getMessage(); }
+                String result = message;
+                SwingUtilities.invokeLater(() -> { if (!closed) { callback.accept(result); } });
+            })));
             editor.show();
         });
+    }
+
+    /** The board has finished its passes; the sample restores its framebuffer and viewport before returning. */
+    void renderPreview() {
+        var panel = previewPanel;
+        if (closed || panel == null) { return; }
+        var settings = panel.settings().withInputs(inputValues.sample());
+        if (objectPreview == null) {
+            if (!settings.visible()) { return; }
+            objectPreview = new GpuShaderPreview();
+        }
+        var frame = objectPreview.render(settings, System.nanoTime(), revision + inputValues.revision());
+        if (frame != null) { panel.receive(frame); }
+        publishInputs();
+    }
+
+    void configureInputs(String name, ShaderProgram shader) {
+        if (shader instanceof GpuShaderUniforms uniforms) { uniforms.overrides(inputValues.values(name)); }
+    }
+
+    private Map<String, GpuShaderUniforms> uniformPrograms(String file) {
+        Map<String, GpuShaderUniforms> programs = new LinkedHashMap<>();
+        for (var target : targets) {
+            if (file == null || target.files().contains(file)) {
+                target.uniformPrograms().forEach(program -> programs.put(program.name(), program.shader()));
+            }
+        }
+        return programs;
+    }
+
+    void editInput(GpuShaderInputs.Edit edit) {
+        List<GpuShaderInputs.Row> rows;
+        if (edit.program().equals(GpuShaderInputs.SAMPLE)) {
+            rows = previewPanel == null ? List.of() : inputValues.sampleRows(previewPanel.settings().resolved());
+        } else {
+            var program = uniformPrograms(null).get(edit.program());
+            rows = program == null ? List.of() : program.rows();
+        }
+        inputValues.edit(edit, rows);
+        for (var target : targets) { target.uniformPrograms().forEach(program -> configureInputs(program.name(), program.shader())); }
+        inputsChanged |= !edit.program().equals(GpuShaderInputs.SAMPLE);
+        lastInputSnapshot = 0;
+    }
+
+    private void publishInputs() {
+        var panel = inputPanel;
+        if (panel == null || !panel.request().visible() || System.nanoTime() - lastInputSnapshot < 250_000_000L) { return; }
+        lastInputSnapshot = System.nanoTime();
+        var request = panel.request();
+        var programs = request.file() == null ? Map.<String, GpuShaderUniforms>of() : uniformPrograms(request.file());
+        List<String> names = new ArrayList<>(programs.keySet());
+        var sampleRows = previewPanel == null ? List.<GpuShaderInputs.Row>of() : inputValues.sampleRows(previewPanel.settings().resolved());
+        if (!sampleRows.isEmpty()) { names.add(GpuShaderInputs.SAMPLE); }
+        String selected = names.contains(request.program()) ? request.program() : names.isEmpty() ? null : names.getFirst();
+        List<GpuShaderInputs.Row> rows = selected == null ? List.of()
+              : selected.equals(GpuShaderInputs.SAMPLE) ? sampleRows : programs.get(selected).rows();
+        panel.receive(new GpuShaderInputs.Snapshot(List.copyOf(names), selected, rows));
     }
 
     void close() {
         closed = true;
         pending.set(null);
+        if (objectPreview != null) { run(objectPreview::dispose); objectPreview = null; }
+        previewPanel = null;
+        inputPanel = null;
         targets.clear();
         programs.clear();
         drafts = Map.of();
@@ -248,6 +329,7 @@ final class GpuShaderManager {
             this.install = install;
             this.active = active;
             inputs = Inputs.of(active.value());
+            if (active.value() instanceof GpuShaderUniforms shader) { configureInputs(shader.name, shader); }
         }
 
         @Override
@@ -262,6 +344,7 @@ final class GpuShaderManager {
                 ShaderProgram old = active.value();
                 install.accept(next.value());
                 active = next;
+                if (next.value() instanceof GpuShaderUniforms shader) { configureInputs(shader.name, shader); }
                 programs.remove(old);
                 programs.put(next.value(), this);
                 old.dispose();
@@ -273,6 +356,11 @@ final class GpuShaderManager {
             ShaderProgram shader = active.value();
             return List.of(new Sources(String.join(", ", active.files().stream().sorted().toList()),
                   shader.getVertexShaderSource(), shader.getFragmentShaderSource()));
+        }
+
+        @Override
+        public List<GpuShaderInputs.Program> uniformPrograms() {
+            return active.value() instanceof GpuShaderUniforms shader ? List.of(new GpuShaderInputs.Program(shader.name, shader)) : List.of();
         }
     }
 }

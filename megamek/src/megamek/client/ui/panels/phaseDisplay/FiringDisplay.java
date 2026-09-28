@@ -44,8 +44,7 @@ import javax.swing.event.ListSelectionListener;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
-import megamek.client.ui.clientGUI.boardview.IBoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.dialogs.phaseDisplay.BombPayloadDialog;
 import megamek.client.ui.dialogs.phaseDisplay.SuicideImplantsDialog;
@@ -552,9 +551,9 @@ public class FiringDisplay extends AttackPhaseDisplay implements ListSelectionLi
                 target(t);
             }
 
-            clientgui.boardViews().forEach(IBoardView::clearMarkedHexes);
-            if (clientgui.getBoardView(currentEntity()) != null) {
-                clientgui.getBoardView(currentEntity()).highlight(currentEntity().getPosition());
+            clientgui.boardStates().forEach(BoardClientState::clearMarkedHexes);
+            if (clientgui.getBoardState(currentEntity()) != null) {
+                clientgui.getBoardState(currentEntity()).highlight(currentEntity().getPosition());
             }
 
             refreshAll();
@@ -649,7 +648,7 @@ public class FiringDisplay extends AttackPhaseDisplay implements ListSelectionLi
             }
             setFireCalledEnabled(game.getOptions()
                   .booleanOption(OptionsConstants.ADVANCED_COMBAT_TAC_OPS_CALLED_SHOTS));
-            clientgui.boardViews().forEach(bv -> bv.select(null));
+            clientgui.boardStates().forEach(bv -> bv.select(null));
             initDonePanelForNewTurn();
         }
 
@@ -673,7 +672,7 @@ public class FiringDisplay extends AttackPhaseDisplay implements ListSelectionLi
         target(null);
         clearMarkedHexes();
         clearMovementSprites();
-        clientgui.onAllBoardViews(BoardView::clearStrafingCoords);
+        clientgui.onAllBoardStates(BoardClientState::clearStrafingCoords);
         clientgui.clearFieldOfFire();
         clientgui.clearTemporarySprites();
         clientgui.setSelectedEntityNum(Entity.NONE);
@@ -954,8 +953,8 @@ public class FiringDisplay extends AttackPhaseDisplay implements ListSelectionLi
         showTargetChoice = false;
 
         clientgui.centerOnUnit(targ);
-        if (clientgui.getBoardView(targ) != null) {
-            clientgui.getBoardView(targ).select(targ.getPosition());
+        if (clientgui.getBoardState(targ) != null) {
+            clientgui.getBoardState(targ).select(targ.getPosition());
         }
         // HACK : show the choice dialog again.
         showTargetChoice = true;
@@ -1291,7 +1290,7 @@ public class FiringDisplay extends AttackPhaseDisplay implements ListSelectionLi
 
         // and add it into the game, temporarily
         game.addAction(saa);
-        clientgui.getBoardView(target).addAttack(saa);
+        clientgui.getBoardState(target).addAttack(saa);
 
         // refresh weapon panel, as bth will have changed
         updateTarget();
@@ -1698,7 +1697,7 @@ public class FiringDisplay extends AttackPhaseDisplay implements ListSelectionLi
         honorAcceptedTargetIds.clear();
         isStrafing = false;
         strafingCoords.clear();
-        clientgui.onAllBoardViews(BoardView::clearStrafingCoords);
+        clientgui.onAllBoardStates(BoardClientState::clearStrafingCoords);
 
         // We may not have an entity selected
         if (currentEntity() == null) {
@@ -1735,7 +1734,7 @@ public class FiringDisplay extends AttackPhaseDisplay implements ListSelectionLi
     protected void removeTempAttacks() {
         // remove temporary attacks from game & board
         game.removeActionsFor(currentEntity);
-        clientgui.onAllBoardViews(bv -> bv.removeAttacksFor(currentEntity()));
+        clientgui.onAllBoardStates(bv -> bv.removeAttacksFor(currentEntity()));
     }
 
     /**
@@ -1750,7 +1749,7 @@ public class FiringDisplay extends AttackPhaseDisplay implements ListSelectionLi
                 removeAttack(lastAction);
                 clientgui.getUnitDisplay().wPan.displayMek(currentEntity());
                 game.removeAction(lastAction);
-                clientgui.onAllBoardViews(BoardView::refreshAttacks);
+                clientgui.onAllBoardStates(BoardClientState::refreshAttacks);
             }
         }
     }
@@ -1762,7 +1761,7 @@ public class FiringDisplay extends AttackPhaseDisplay implements ListSelectionLi
         if (currentEntity() == null) {
             return;
         }
-        clientgui.onAllBoardViews(bv -> bv.redrawEntity(currentEntity()));
+        clientgui.onAllBoardStates(bv -> bv.redrawEntity(currentEntity()));
         clientgui.getUnitDisplay().displayEntity(currentEntity());
         if (GUIP.getFireDisplayTabDuringFiringPhases()) {
             clientgui.getUnitDisplay().showPanel(MekPanelTabStrip.WEAPONS);
@@ -1783,7 +1782,7 @@ public class FiringDisplay extends AttackPhaseDisplay implements ListSelectionLi
         if (currentEntity() == null) {
             return;
         }
-        clientgui.onAllBoardViews(bv -> bv.redrawEntity(currentEntity()));
+        clientgui.onAllBoardStates(bv -> bv.redrawEntity(currentEntity()));
         if (currentEntity().isMakingVTOLGroundAttack()) {
             updateVTOLGroundTarget();
         }
@@ -1832,8 +1831,8 @@ public class FiringDisplay extends AttackPhaseDisplay implements ListSelectionLi
             Targetable hexTarget = VehicularGrenadeLauncherWeapon.getTargetHex(weapon, weaponId);
             // Ignore events that will be generated by the select/cursor calls
             setIgnoringEvents(true);
-            if (clientgui.getBoardView(hexTarget) != null) {
-                clientgui.getBoardView(hexTarget).select(hexTarget.getPosition());
+            if (clientgui.getBoardState(hexTarget) != null) {
+                clientgui.getBoardState(hexTarget).select(hexTarget.getPosition());
             }
             setIgnoringEvents(false);
             target = hexTarget;
@@ -1853,8 +1852,8 @@ public class FiringDisplay extends AttackPhaseDisplay implements ListSelectionLi
             Coords targetPos = Compute.getClosestFlightPath(currentEntity,
                   currentEntity().getPosition(),
                   (Entity) target);
-            if (clientgui.getBoardView(currentEntity()) != null) {
-                clientgui.getBoardView(currentEntity()).cursor(targetPos);
+            if (clientgui.getBoardState(currentEntity()) != null) {
+                clientgui.getBoardState(currentEntity()).cursor(targetPos);
             }
         }
         ash.setAimingMode();
@@ -2010,7 +2009,7 @@ public class FiringDisplay extends AttackPhaseDisplay implements ListSelectionLi
      * phase.
      */
     void updateVTOLGroundTarget() {
-        clientgui.onAllBoardViews(BoardView::clearStrafingCoords);
+        clientgui.onAllBoardStates(BoardClientState::clearStrafingCoords);
         target(null);
         isStrafing = false;
         strafingCoords.clear();
@@ -2018,10 +2017,10 @@ public class FiringDisplay extends AttackPhaseDisplay implements ListSelectionLi
         if ((attacker instanceof IBomber bomber) && attacker.isBomber() && bomber.isVTOLBombing()) {
             // IBomber and isBomber are not equivalent; instanceof helps with pattern variable and null check
             target(bomber.getVTOLBombTarget());
-            clientgui.getBoardView(currentEntity()).addStrafingCoords(target.getPosition());
+            clientgui.getBoardState(currentEntity()).addStrafingCoords(target.getPosition());
         } else if ((attacker instanceof VTOL vtol) && !vtol.getStrafingCoords().isEmpty()) {
             strafingCoords.addAll(vtol.getStrafingCoords());
-            strafingCoords.forEach(c -> clientgui.getBoardView(vtol).addStrafingCoords(c));
+            strafingCoords.forEach(c -> clientgui.getBoardState(vtol).addStrafingCoords(c));
             isStrafing = true;
         }
     }
@@ -2119,7 +2118,7 @@ public class FiringDisplay extends AttackPhaseDisplay implements ListSelectionLi
                         strafingCoords.add(coords);
                         // Re-sync the board view from the authoritative list; setStrafingCoords repaints the
                         // strafing overlay, whereas addStrafingCoords would only append without a repaint.
-                        event.getBoardView().setStrafingCoords(strafingCoords);
+                        event.getBoardState().setStrafingCoords(strafingCoords);
                         updateStrafingTargets();
                     }
                 }
@@ -2859,7 +2858,7 @@ public class FiringDisplay extends AttackPhaseDisplay implements ListSelectionLi
 
         // If there aren't other targets, check for targets flying over pos
         if (targets.isEmpty()) {
-            List<Entity> flyovers = ((BoardView) clientgui.boardViews.get(boardId)).getEntitiesFlyingOver(pos);
+            List<Entity> flyovers = ((BoardClientState) clientgui.getBoardState(boardId)).getEntitiesFlyingOver(pos);
             for (Entity e : flyovers) {
                 if (!targets.contains(e)) {
                     targets.add(e);

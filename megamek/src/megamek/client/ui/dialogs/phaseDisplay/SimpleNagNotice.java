@@ -127,7 +127,7 @@ public abstract class SimpleNagNotice {
 
     /**
      * Shows this notice dialog unless there is a Client Preferences entry for it that says it should not be shown. In
-     * that case, this method returns without doing anything. Note that while the dialog is shown, BoardView tooltips
+     * that case, this method returns without doing anything. Note that while the dialog is shown, BoardClientState tooltips
      * are suspended so they don't overlap the dialog.
      */
     public void show() {

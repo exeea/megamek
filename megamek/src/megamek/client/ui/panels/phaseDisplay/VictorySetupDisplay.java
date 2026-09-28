@@ -376,7 +376,7 @@ public class VictorySetupDisplay extends StatusBarPhaseDisplay {
     @Override
     public void removeAllListeners() {
         game().removeGameListener(this);
-        clientgui.boardViews().forEach(boardView -> boardView.removeBoardViewListener(this));
+        clientgui.boardStates().forEach(boardView -> boardView.removeBoardViewListener(this));
     }
 
     private Game game() {

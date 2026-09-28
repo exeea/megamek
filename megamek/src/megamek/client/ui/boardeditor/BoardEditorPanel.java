@@ -286,7 +286,8 @@ public class BoardEditorPanel extends JPanel
         bvc = new JPanel();
         setupEditorPanel();
         setupFrame();
-        frame.setVisible(true);
+        // Keep the 2D window hidden while 3D starts, but create its peer so disposal still notifies the main menu.
+        frame.addNotify();
         if (GUIPreferences.getInstance().getNagForMapEdReadme()) {
             String title = Messages.getString("BoardEditor.readme.title");
             String body = Messages.getString("BoardEditor.readme.message");
@@ -307,7 +308,7 @@ public class BoardEditorPanel extends JPanel
         frame.remove(bvc);
         try {
             bv = new BoardView(game, controller, null, 0, tileset);
-            bv.addOverlay(new KeyBindingsOverlay(bv));
+            bv.addOverlay(new KeyBindingsOverlay(bv.getClientState()));
             bv.addOverlay(new TraceOverlay(bv));
             bv.setUseLosTool(false);
             bv.setDisplayInvalidFields(true);
@@ -467,7 +468,9 @@ public class BoardEditorPanel extends JPanel
         });
     }
 
-    private void handleExit() {
+    /** Close either editor view through the same unsaved-changes prompt. */
+    public void handleExit() {
+        finishBrushStroke();
         // When the board has changes, ask the user
         if (hasChanges && (showSavePrompt() == DialogResult.CANCELLED)) {
             return;

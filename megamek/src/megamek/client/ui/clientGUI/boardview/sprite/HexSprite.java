@@ -38,7 +38,7 @@ import java.awt.Image;
 import java.awt.Rectangle;
 import java.awt.Transparency;
 
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.common.board.Coords;
 
@@ -51,7 +51,7 @@ public abstract class HexSprite extends Sprite {
 
     protected Coords loc;
 
-    public HexSprite(BoardView boardView1, Coords loc) {
+    public HexSprite(BoardGlyphContext boardView1, Coords loc) {
         super(boardView1);
         this.loc = loc;
         updateBounds();

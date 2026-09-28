@@ -53,8 +53,7 @@ import megamek.client.ui.IDisplayable;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.BoardView;
-import megamek.client.ui.clientGUI.boardview.IBoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.util.UIUtil;
 import megamek.client.ui.widget.picmap.PMUtil;
@@ -299,19 +298,19 @@ public class UnitOverviewOverlay implements IDisplayable, IPreferenceChangeListe
         var client = clientgui.getClient();
         var player = client.getLocalPlayer();
         return player != null && entity.getOwner().isEnemyOf(player) && entity.getPosition() != null
-              && clientgui.getCurrentBoardView().filter(view -> view.getBoardId() == entity.getBoardId()).isPresent()
+              && clientgui.getCurrentBoardState().filter(view -> view.getBoardId() == entity.getBoardId()).isPresent()
               && EntityVisibilityUtils.detectedOrHasVisual(player, client.getGame(), entity);
     }
 
     private Card card(Entity entity) {
         if (enemies && EntityVisibilityUtils.onlyDetectedBySensors(clientgui.getClient().getLocalPlayer(), entity)) {
-            Image radar = clientgui.getCurrentBoardView().map(view -> ((BoardView) view).getRadarBlipImage()).orElse(null);
+            Image radar = clientgui.getCurrentBoardState().map(view -> view.getRadarBlipImage()).orElse(null);
             return new Card(radar,
                   List.of(outlinedText(adjustString(Messages.getString("BoardView1.sensorReturn"), fm), 3, 46)),
                   null, null, -1, GUIP.getEnemyUnitColor(), null);
         }
-        Image icon = clientgui.getCurrentBoardView()
-              .map(bv -> ((BoardView) bv).getTilesetManager().iconFor(entity)).orElse(null);
+        Image icon = clientgui.getCurrentBoardState()
+              .map(bv -> bv.getTilesetManager().iconFor(entity)).orElse(null);
         List<Text> texts = new ArrayList<>();
         texts.add(outlinedText(getIconName(entity, fm), 3, 46));
         texts.addAll(conditionStrings(entity));
@@ -400,8 +399,8 @@ public class UnitOverviewOverlay implements IDisplayable, IPreferenceChangeListe
                 Entity entity = clientgui.getClient().getGame().getEntity(unitIds[i]);
                 if (entity == null || enemies && !visibleEnemy(entity)) { return true; }
                 if (!enemies || !EntityVisibilityUtils.onlyDetectedBySensors(clientgui.getClient().getLocalPlayer(), entity)) {
-                    clientgui.getBoardView().processBoardViewEvent(new BoardViewEvent(
-                          clientgui.getBoardView(), BoardViewEvent.SELECT_UNIT, entity.getId()));
+                    clientgui.getBoardState().processBoardViewEvent(new BoardViewEvent(
+                          clientgui.getBoardState(), BoardViewEvent.SELECT_UNIT, entity.getId()));
                 }
                 // Navigation must work even when this phase cannot select the clicked unit to act.
                 clientgui.centerOnUnit(entity);
@@ -551,7 +550,7 @@ public class UnitOverviewOverlay implements IDisplayable, IPreferenceChangeListe
             if (scrollOffset < 0) {
                 scrollOffset = 0;
             }
-            clientgui.getCurrentBoardView().ifPresent(IBoardView::refreshDisplayables);
+            clientgui.getCurrentBoardState().ifPresent(BoardClientState::refreshDisplayables);
         }
     }
 
@@ -561,21 +560,21 @@ public class UnitOverviewOverlay implements IDisplayable, IPreferenceChangeListe
             if (scrollOffset > unitIds.length - actUnitsPerPage) {
                 scrollOffset = unitIds.length - actUnitsPerPage;
             }
-            clientgui.getCurrentBoardView().ifPresent(IBoardView::refreshDisplayables);
+            clientgui.getCurrentBoardState().ifPresent(BoardClientState::refreshDisplayables);
         }
     }
 
     private void scrollUp() {
         if (scrollOffset > 0) {
             scrollOffset--;
-            clientgui.getCurrentBoardView().ifPresent(IBoardView::refreshDisplayables);
+            clientgui.getCurrentBoardState().ifPresent(BoardClientState::refreshDisplayables);
         }
     }
 
     private void scrollDown() {
         if (scrollOffset < unitIds.length - actUnitsPerPage) {
             scrollOffset++;
-            clientgui.getCurrentBoardView().ifPresent(IBoardView::refreshDisplayables);
+            clientgui.getCurrentBoardState().ifPresent(BoardClientState::refreshDisplayables);
         }
     }
 
@@ -627,7 +626,10 @@ public class UnitOverviewOverlay implements IDisplayable, IPreferenceChangeListe
     @Override
     public void preferenceChange(PreferenceChangeEvent e) {
         if (e.getName().equals(GUIPreferences.SHOW_UNIT_OVERVIEW)) {
-            clientgui.getCurrentBoardView().ifPresent(IBoardView::refreshDisplayables);
+            clientgui.getCurrentBoardState().ifPresent(BoardClientState::refreshDisplayables);
         }
     }
+    @Override
+    public void dispose() { GUIP.removePreferenceChangeListener(this); }
+
 }

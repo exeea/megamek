@@ -47,7 +47,7 @@ import java.util.Objects;
 import megamek.client.ui.IDisplayable;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.util.StringDrawer;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.KeyBindParser;
@@ -73,7 +73,7 @@ public abstract class AbstractBoardViewOverlay implements IDisplayable, IPrefere
     /** The ClientGUI of the boardview. May be null! */
     protected final ClientGUI clientGui;
     protected static final GUIPreferences GUIP = GUIPreferences.getInstance();
-    protected final BoardView boardView;
+    protected final BoardClientState boardView;
 
     /** True when the overlay is displayed or fading in. */
     private boolean visible;
@@ -97,7 +97,7 @@ public abstract class AbstractBoardViewOverlay implements IDisplayable, IPrefere
     private int overlayWidth = 500;
     private int overlayHeight = 500;
 
-    public AbstractBoardViewOverlay(BoardView boardView, Font font) {
+    public AbstractBoardViewOverlay(BoardClientState boardView, Font font) {
         this.font = font;
         visible = getVisibilityGUIPreference();
         fade = new OverlayImage.Fade(0, visible ? 1 : 0, visible ? 1 : 0);
@@ -363,6 +363,7 @@ public abstract class AbstractBoardViewOverlay implements IDisplayable, IPrefere
 
     /** Makes the BoardView redraw, updating the overlay in the process. */
     protected void scheduleBoardViewRepaint() {
-        boardView.getPanel().repaint();
+        boardView.repaint();
     }
+
 }

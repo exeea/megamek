@@ -43,7 +43,7 @@ import java.awt.Stroke;
 import java.awt.geom.Arc2D;
 import java.awt.image.ImageObserver;
 
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.common.board.Coords;
 
@@ -94,7 +94,7 @@ public class ScanSprite extends Sprite {
      * @param targetPosition  the hex being read, which is the target unit's hex when a unit was picked
      * @param sweepColor      the colour to draw in, which is the same amber as the SCANNING label
      */
-    public ScanSprite(BoardView boardView, Coords scannerPosition, Coords targetPosition, Color sweepColor) {
+    public ScanSprite(BoardGlyphContext boardView, Coords scannerPosition, Coords targetPosition, Color sweepColor) {
         super(boardView);
         this.scannerPosition = scannerPosition;
         this.targetPosition = targetPosition;

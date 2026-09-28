@@ -2601,7 +2601,7 @@ public class WeaponPanel extends PicMap implements ListSelectionListener, Action
                 } else {
                     if (prevTarget != null) {
                         firingDisplay.target(prevTarget);
-                        unitDisplayPanel.getClientGUI().getBoardView()
+                        unitDisplayPanel.getClientGUI().getBoardState()
                               .select(prevTarget.getPosition());
                         prevTarget = null;
                     } else {

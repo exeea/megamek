@@ -58,7 +58,7 @@ import javax.swing.JScrollPane;
 
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.board.Board;
@@ -257,7 +257,7 @@ public class DetonateChargesDialog extends JDialog implements ActionListener {
                 selectedHexes.add(entry.getKey().pos);
             }
         }
-        BoardView boardView = clientGUI.getBoardView();
+        BoardClientState boardView = clientGUI.getBoardState();
         boardView.setDemolitionChargeHighlightHexes(selectedHexes);
         boardView.repaint();
     }
@@ -266,7 +266,7 @@ public class DetonateChargesDialog extends JDialog implements ActionListener {
      * Clears all highlighting from the board view.
      */
     private void clearHighlighting() {
-        BoardView boardView = clientGUI.getBoardView();
+        BoardClientState boardView = clientGUI.getBoardState();
         boardView.setDemolitionChargeHighlightHexes(Collections.emptyList());
         boardView.repaint();
     }

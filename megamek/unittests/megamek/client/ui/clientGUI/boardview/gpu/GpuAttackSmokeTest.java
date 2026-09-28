@@ -103,7 +103,7 @@ class GpuAttackSmokeTest {
                         fixture.game.addEntity(target, false);
                         target.addBeenSeenBy(fixture.player);
                         firing.get().selectEntity(fixture.entity.getId());
-                        source.set(new GpuBoardSource(view, firing::get));
+                        source.set(new GpuBoardSource(view.getClientState(), firing::get));
                     } catch (Exception error) {
                         throw new IllegalStateException(error);
                     }

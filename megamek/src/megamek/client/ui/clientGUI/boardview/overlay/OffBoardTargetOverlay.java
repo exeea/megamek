@@ -49,7 +49,6 @@ import megamek.client.ui.IDisplayable;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.dialogs.phaseDisplay.TargetChoiceDialog;
 import megamek.client.ui.panels.phaseDisplay.TargetingPhaseDisplay;
 import megamek.client.ui.util.UIUtil;
@@ -124,8 +123,8 @@ public class OffBoardTargetOverlay implements IDisplayable {
             return false;
         }
 
-        Mounted<?> selectedArtilleryWeapon = clientGUI.getCurrentBoardView()
-              .map(bv -> ((BoardView) bv).getSelectedArtilleryWeapon())
+        Mounted<?> selectedArtilleryWeapon = clientGUI.getCurrentBoardState()
+              .map(bv -> bv.getSelectedArtilleryWeapon())
               .orElse(null);
 
         // only relevant if we've got an artillery weapon selected for one of our own
@@ -216,8 +215,8 @@ public class OffBoardTargetOverlay implements IDisplayable {
             return false;
         }
 
-        point.x = (int) (point.getX() + clientGUI.getBoardView().getDisplayablesRect().getX());
-        point.y = (int) (point.getY() + clientGUI.getBoardView().getDisplayablesRect().getY());
+        point.x = (int) (point.getX() + clientGUI.getBoardState().getDisplayablesRect().getX());
+        point.y = (int) (point.getY() + clientGUI.getBoardState().getDisplayablesRect().getY());
 
         for (OffBoardDirection direction : OffBoardDirection.values()) {
             if (direction != OffBoardDirection.NONE) {
@@ -274,7 +273,7 @@ public class OffBoardTargetOverlay implements IDisplayable {
                 painter.dispose();
             }
         }
-        Mounted<?> weapon = clientGUI.getBoardView().getSelectedArtilleryWeapon();
+        Mounted<?> weapon = clientGUI.getBoardState().getSelectedArtilleryWeapon();
         List<OverlayImage> result = new ArrayList<>();
         for (OffBoardDirection direction : OffBoardDirection.values()) {
             if (direction == OffBoardDirection.NONE || !showDirectionalElement(direction, weapon)) {
@@ -383,13 +382,13 @@ public class OffBoardTargetOverlay implements IDisplayable {
                   choice.getTargetType(),
                   choice.getId(),
                   targetingPhaseDisplay.currentEntity()
-                        .getEquipmentNum(clientGUI.getBoardView().getSelectedArtilleryWeapon()),
+                        .getEquipmentNum(clientGUI.getBoardState().getSelectedArtilleryWeapon()),
                   clientGUI.getClient().getGame());
 
             // Only add if chance of success.
             // TODO: properly display any toHit "IMPOSSIBLE" reasons
             if (!weaponAttackAction.toHit(game(), true).cannotSucceed()) {
-                Mounted<?> selectedArtilleryWeapon = clientGUI.getBoardView().getSelectedArtilleryWeapon();
+                Mounted<?> selectedArtilleryWeapon = clientGUI.getBoardState().getSelectedArtilleryWeapon();
 
                 if (selectedArtilleryWeapon != null) {
                     targetingPhaseDisplay.updateDisplayForPendingAttack(selectedArtilleryWeapon, weaponAttackAction);

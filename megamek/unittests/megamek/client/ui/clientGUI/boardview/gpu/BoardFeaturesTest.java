@@ -12,8 +12,31 @@ import megamek.common.board.Coords;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardFeaturesTest {
+    @ParameterizedTest
+    @ValueSource(strings = { "", "desert", "snow", "volcano", "dirt", "lunar" })
+    void modeledBridgesKeepTheUnderlyingTerrainMaterial(String theme) {
+        Hex hex = new Hex(-2);
+        hex.setTheme(theme);
+        var surface = BoardFeatures.surface(hex);
+        hex.addTerrain(new Terrain(Terrains.BRIDGE, 1, true, 9));
+        hex.addTerrain(new Terrain(Terrains.BRIDGE_CF, 100));
+        hex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, 2));
+        hex.addTerrain(new Terrain(Terrains.BRIDGE_REPAIRED, 1));
+        assertTrue(BoardFeatures.detailedGround(hex, Map.of()), "Bridge geometry must not force the legacy ground artwork");
+        assertEquals(surface, BoardFeatures.surface(hex));
+        assertFalse(BoardLiquid.capture(hex).present(), "A suspended bridge does not imply liquid beneath it");
+        hex.addTerrain(new Terrain(Terrains.WATER, 2));
+        assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
+        assertTrue(BoardLiquid.capture(hex).present(), "Authored water beneath a bridge must remain water");
+        hex.removeTerrain(Terrains.WATER);
+        hex.addTerrain(new Terrain(Terrains.RUBBLE, 1));
+        assertFalse(BoardFeatures.detailedGround(hex, Map.of()), "Unmodeled ground markings still keep their artwork");
+    }
+
     @Test
     void modeledBuildingsUseTheConcreteEngineWithoutErasingOtherTerrainMarkings() {
         Hex hex = new Hex(0);

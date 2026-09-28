@@ -149,7 +149,8 @@ class BoardBiomeTest {
                     count++;
                 }
             }
-            assertTrue(count > (kind == BoardScene.Biome.FIELD ? 500 : 30), kind + " roots: " + count);
+            // Crop clumps need fewer roots, but still exercise many sites across the shared boundary.
+            assertTrue(count > (kind == BoardScene.Biome.FIELD ? 150 : 30), kind + " roots: " + count);
         }
     }
 

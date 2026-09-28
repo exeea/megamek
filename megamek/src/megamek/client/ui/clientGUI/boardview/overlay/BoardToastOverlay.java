@@ -47,7 +47,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import megamek.MMConstants;
 import megamek.client.ui.IDisplayable;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.util.StringDrawer;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.annotations.Nullable;
@@ -100,12 +100,12 @@ public class BoardToastOverlay implements IDisplayable {
         }
     }
 
-    private final BoardView boardView;
+    private final BoardClientState boardView;
     private final ClientGUI clientGui;
     private final ConcurrentLinkedQueue<ToastMessage> pendingToasts = new ConcurrentLinkedQueue<>();
     private final List<ToastMessage> activeToasts = new ArrayList<>();
 
-    public BoardToastOverlay(BoardView boardView, ClientGUI clientGui) {
+    public BoardToastOverlay(BoardClientState boardView, ClientGUI clientGui) {
         this.boardView = boardView;
         this.clientGui = clientGui;
     }
@@ -121,7 +121,7 @@ public class BoardToastOverlay implements IDisplayable {
     /** Enqueues a notification from any thread; Swing owns its artwork and animation schedule. */
     public void show(ToastLevel level, String text, @Nullable Entity entity, int durationMs) {
         pendingToasts.add(new ToastMessage(text, level, entity == null ? -1 : entity.getId(), durationMs));
-        boardView.getPanel().repaint();
+        boardView.repaint();
     }
 
     @Override
@@ -254,4 +254,5 @@ public class BoardToastOverlay implements IDisplayable {
             y += contentHeight + 2 * padY + toastGap;
         }
     }
+
 }

@@ -455,7 +455,7 @@ public class ChatLounge extends AbstractPhaseDisplay
             enableUnitAddButtons();
         }
         clientgui.getClient().getGame().addGameListener(this);
-        clientgui.boardViews().forEach(bv -> bv.addBoardViewListener(this));
+        clientgui.boardStates().forEach(bv -> bv.addBoardViewListener(this));
 
         loader = new ImageLoader();
         loader.execute();
@@ -1012,7 +1012,7 @@ public class ChatLounge extends AbstractPhaseDisplay
             previewBV = new BoardView(boardPreviewGame, null, null, 0);
             previewBV.setDisplayInvalidFields(false);
             previewBV.setUseLosTool(false);
-            previewBV.setTooltipProvider(new TWBoardViewTooltip(boardPreviewGame, clientgui, previewBV));
+            previewBV.setTooltipProvider(new TWBoardViewTooltip(boardPreviewGame, clientgui, previewBV.getClientState()));
 
             showPlayerDeployment.setSelected(true);
             showPlayerDeployment.addActionListener(e -> previewGameBoard());
@@ -1050,7 +1050,7 @@ public class ChatLounge extends AbstractPhaseDisplay
 
             RulerDialog.color1 = GUIP.getRulerColor1();
             RulerDialog.color2 = GUIP.getRulerColor2();
-            RulerDialog ruler = new RulerDialog(clientgui.getFrame(), previewBV, boardPreviewGame);
+            RulerDialog ruler = new RulerDialog(clientgui.getFrame(), previewBV.getClientState(), boardPreviewGame);
 
             // Most boards will be far too large on the standard zoom
             previewBV.zoomOut();
@@ -1935,7 +1935,7 @@ public class ChatLounge extends AbstractPhaseDisplay
             psd.dispose();
         }
 
-        psd = new PlayerSettingsDialog(clientgui, c, previewBV);
+        psd = new PlayerSettingsDialog(clientgui, c, previewBV == null ? null : previewBV.getClientState());
         psd.setModal(false);
         psd.showDialog();
     }
@@ -2855,7 +2855,7 @@ public class ChatLounge extends AbstractPhaseDisplay
     @Override
     public void removeAllListeners() {
         clientgui.getClient().getGame().removeGameListener(this);
-        clientgui.boardViews().forEach(bv -> bv.removeBoardViewListener(this));
+        clientgui.boardStates().forEach(bv -> bv.removeBoardViewListener(this));
         GUIP.removePreferenceChangeListener(this);
         PreferenceManager.getClientPreferences().removePreferenceChangeListener(this);
         MekSummaryCache.getInstance().removeListener(mekSummaryCacheListener);

@@ -40,6 +40,7 @@ final class BoardFeatures {
                       Terrains.CLIFF_TOP, Terrains.CLIFF_BOTTOM, Terrains.INCLINE_TOP, Terrains.INCLINE_BOTTOM,
                       Terrains.INCLINE_HIGH_TOP, Terrains.INCLINE_HIGH_BOTTOM, Terrains.METAL_CONTENT,
                       Terrains.DEPLOYMENT_ZONE, Terrains.IMPASSABLE, Terrains.FIRE, Terrains.SMOKE,
+                      Terrains.BRIDGE, Terrains.BRIDGE_CF, Terrains.BRIDGE_ELEV, Terrains.BRIDGE_REPAIRED,
                       Terrains.FIELDS, Terrains.SWAMP, Terrains.MUD -> true;
                 case Terrains.BUILDING, Terrains.BLDG_CF, Terrains.BLDG_ELEV, Terrains.BLDG_CLASS,
                       Terrains.BLDG_ARMOR, Terrains.BLDG_BASEMENT_TYPE, Terrains.BLDG_FLUFF -> concreteBuilding;

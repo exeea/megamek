@@ -60,7 +60,7 @@ import javax.swing.JScrollPane;
 import megamek.client.Client;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Player;
 import megamek.common.annotations.Nullable;
@@ -291,7 +291,7 @@ public class MinesweeperActivationDialog extends JDialog implements ActionListen
     }
 
     private void highlightEntity(Entity entity) {
-        BoardView boardView = clientGUI.getBoardView();
+        BoardClientState boardView = clientGUI.getBoardState();
         boardView.highlightSelectedEntities(Collections.singletonList(entity));
         if (entity.getPosition() != null) {
             boardView.setHighlightedEntityHexes(Collections.singletonList(entity.getPosition()));
@@ -300,7 +300,7 @@ public class MinesweeperActivationDialog extends JDialog implements ActionListen
     }
 
     private void clearHighlighting() {
-        BoardView boardView = clientGUI.getBoardView();
+        BoardClientState boardView = clientGUI.getBoardState();
         boardView.highlightSelectedEntities(Collections.emptyList());
         boardView.setHighlightedEntityHexes(Collections.emptyList());
         boardView.repaint();

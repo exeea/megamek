@@ -39,8 +39,7 @@ import java.util.List;
 import javax.swing.AbstractAction;
 
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
-import megamek.client.ui.clientGUI.boardview.IBoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.overlay.TurnDetailsOverlay;
 import megamek.client.ui.dialogs.ConfirmDialog;
 import megamek.client.ui.util.KeyCommandBind;
@@ -312,8 +311,9 @@ public abstract class ActionPhaseDisplay extends StatusBarPhaseDisplay {
             butSkipTurn.setEnabled(true);
         }
 
-        for (IBoardView ibv : clientgui.boardViews()) {
-            if (ibv instanceof BoardView bv) {
+        for (BoardClientState ibv : clientgui.boardStates()) {
+            BoardClientState bv = ibv;
+            if (bv != null) {
                 TurnDetailsOverlay turnDetailsOverlay = bv.getTurnDetailsOverlay();
                 if (turnDetailsOverlay != null) {
                     turnDetailsOverlay.setLines(turnDetails);
@@ -364,17 +364,17 @@ public abstract class ActionPhaseDisplay extends StatusBarPhaseDisplay {
     }
 
     protected void clearMovementSprites() {
-        clientgui.boardViews().forEach(bv -> ((BoardView) bv).clearMovementData());
+        clientgui.boardStates().forEach(bv -> bv.clearMovementData());
     }
 
     protected void clearMarkedHexes() {
-        clientgui.boardViews().forEach(IBoardView::clearMarkedHexes);
+        clientgui.boardStates().forEach(BoardClientState::clearMarkedHexes);
     }
 
     @Override
     public void removeAllListeners() {
         game.removeGameListener(this);
-        clientgui.boardViews().forEach(bv -> bv.removeBoardViewListener(this));
+        clientgui.boardStates().forEach(bv -> bv.removeBoardViewListener(this));
     }
 
     public int getCurrentEntity() {

@@ -139,7 +139,7 @@ class GpuOverlayCaptureTest {
                           "Floating metadata must preserve every original clipped XY contour and playback rule");
                     assertFresh(fixture.view, capture);
                     fixture.view.markDeploymentHexesFor(null);
-                    fixture.view.showAllDeployment = true;
+                    fixture.view.getClientState().setShowAllDeployment(true);
                     fixture.game.setPhase(GamePhase.SET_ARTILLERY_AUTO_HIT_HEXES);
                     BoardTactical allPlayers = fixture.view.captureTacticalGeometry();
                     assertEquals(7 * 6, allPlayers.fills().size());
@@ -277,9 +277,9 @@ class GpuOverlayCaptureTest {
 
     private static void setField(BoardView view, String name, Object value) {
         try {
-            Field field = BoardView.class.getDeclaredField(name);
+            Field field = view.getClientState().getClass().getDeclaredField(name);
             field.setAccessible(true);
-            field.set(view, value);
+            field.set(view.getClientState(), value);
         } catch (ReflectiveOperationException failure) {
             throw new AssertionError(failure);
         }

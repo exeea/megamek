@@ -35,9 +35,8 @@ package megamek.client.ui.clientGUI.tooltip;
 import static megamek.client.ui.util.UIUtil.DOT_SPACER;
 import static megamek.client.ui.util.UIUtil.uiWhite;
 
-import java.awt.Point;
-import java.util.List;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Vector;
 import java.util.stream.Collectors;
@@ -45,9 +44,8 @@ import java.util.stream.Collectors;
 import megamek.client.Client;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.BoardView;
-import megamek.client.ui.clientGUI.boardview.sprite.FlareSprite;
-import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
+import megamek.client.ui.panels.phaseDisplay.VictoryHexPropertiesPane;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Hex;
@@ -60,11 +58,10 @@ import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.enums.BasementType;
 import megamek.common.equipment.FuelTank;
-import megamek.common.equipment.ObjectiveMarker;
-import megamek.common.equipment.ObjectiveScoringScheme;
-import megamek.client.ui.panels.phaseDisplay.VictoryHexPropertiesPane;
 import megamek.common.equipment.ICarryable;
 import megamek.common.equipment.Minefield;
+import megamek.common.equipment.ObjectiveMarker;
+import megamek.common.equipment.ObjectiveScoringScheme;
 import megamek.common.game.Game;
 import megamek.common.planetaryConditions.IlluminationLevel;
 import megamek.common.units.BuildingTarget;
@@ -512,13 +509,12 @@ public final class HexTooltip {
         return UIUtil.tag("TABLE", attr, row);
     }
 
-    public static String getFlares(GUIPreferences GUIP, BoardView bv, Point point) {
+    public static String getFlares(GUIPreferences GUIP, BoardClientState bv, Coords coords) {
         String fontSizeAttr = String.format("class=%s", GUIP.getUnitToolTipFontSizeMod());
 
-        String result = bv.getAllSprites().stream()
-              .filter(sprite -> sprite instanceof FlareSprite)
-              .filter(sprite -> sprite.isInside(point))
-              .map(Sprite::getTooltip)
+        String result = bv.getGame().getFlares().stream()
+              .filter(flare -> flare.getBoardId() == bv.getBoardId() && flare.position.equals(coords))
+              .map(HexTooltip::flareText)
               .collect(Collectors.joining());
 
         result = UIUtil.tag("span", fontSizeAttr, result);
@@ -526,13 +522,13 @@ public final class HexTooltip {
         return result;
     }
 
-    public static String getWrecks(GUIPreferences GUIP, BoardView bv, Coords coords) {
+    public static String getWrecks(GUIPreferences GUIP, BoardClientState bv, Coords coords) {
         String result = "";
         String fontSizeAttr = String.format("class=%s", GUIP.getUnitToolTipFontSizeMod());
-        var wreckList = bv.getIsoWreckSprites();
-        for (var wSprite : wreckList) {
-            if (wSprite.getPosition().equals(coords)) {
-                String sWreck = wSprite.getTooltip().toString();
+        var wreckList = bv.getWrecks();
+        for (var entity : wreckList) {
+            if (entity.getPosition().equals(coords) || entity.getSecondaryPositions().containsValue(coords)) {
+                String sWreck = wreckText(entity);
                 String attr = String.format("FACE=Dialog COLOR=%s",
                       UIUtil.toColorHexString(GUIP.getUnitToolTipAltFGColor()));
                 sWreck = UIUtil.tag("FONT", attr, sWreck);
@@ -541,8 +537,8 @@ public final class HexTooltip {
                 String row = UIUtil.tag("TR", "", col);
                 String rows = row;
 
-                if (!wSprite.getEntity().getCrew().isEjected()) {
-                    String sPilot = PilotToolTip.getPilotTipShort(wSprite.getEntity(),
+                if (!entity.getCrew().isEjected()) {
+                    String sPilot = PilotToolTip.getPilotTipShort(entity,
                           GUIP.getShowPilotPortraitTT(), false).toString();
 
                     attr = String.format("FACE=Dialog COLOR=%s",
@@ -622,4 +618,17 @@ public final class HexTooltip {
         description.append("<BR>&nbsp;").append(VictoryHexPropertiesPane.describeScheme(scheme));
         return description.toString();
     }
+    public static String flareText(megamek.common.equipment.Flare flare) {
+        return Messages.getString("BoardView1.flare", flare.turnsToBurn);
+    }
+
+    public static String wreckText(megamek.common.units.Entity entity) {
+        String result = Messages.getString("BoardView1.Tooltip.Wreckof") + " " + entity.getChassis()
+              + java.text.MessageFormat.format(" ({0})", entity.getOwner().getName());
+        if (megamek.common.preference.PreferenceManager.getClientPreferences().getShowUnitId()) {
+            result += java.text.MessageFormat.format(" [ID: {0}]", entity.getId());
+        }
+        return result;
+    }
+
 }

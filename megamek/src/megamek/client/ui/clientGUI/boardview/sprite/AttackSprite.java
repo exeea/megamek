@@ -41,7 +41,7 @@ import java.awt.image.ImageObserver;
 import java.util.List;
 
 import megamek.client.ui.Messages;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.tooltip.EntityActionLog;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.StraightArrowPolygon;
@@ -62,7 +62,7 @@ import megamek.common.units.Targetable;
  * diagonal lines. Appears as angle arrow. Arrow becoming cut in half when two Meks attacking each other.
  */
 public class AttackSprite extends Sprite {
-    private final BoardView boardView1;
+    private final BoardGlyphContext boardView1;
 
     private Point attackingPoint;
 
@@ -94,17 +94,17 @@ public class AttackSprite extends Sprite {
     private final IdealHex targetHex;
 
 
-    public AttackSprite(BoardView boardView1, final AttackAction attack) {
+    public AttackSprite(BoardGlyphContext boardView1, final AttackAction attack) {
         super(boardView1);
 
-        attacks = new EntityActionLog(boardView1.game);
+        attacks = new EntityActionLog(boardView1.getGame());
         this.boardView1 = boardView1;
         entityId = attack.getEntityId();
         int targetType = attack.getTargetType();
         targetId = attack.getTargetId();
-        Entity weaponEntity = this.boardView1.game.getEntity(attack.getEntityId());
+        Entity weaponEntity = this.boardView1.getGame().getEntity(attack.getEntityId());
         attackingEntity = weaponEntity != null ? weaponEntity.getAttackingEntity() : null;
-        targetedEntity = this.boardView1.game.getTarget(targetType, targetId);
+        targetedEntity = this.boardView1.getGame().getTarget(targetType, targetId);
 
         if (attackingEntity == null) {
             throw new AttackingEntityIsNullException("AttackSprite");
@@ -306,7 +306,7 @@ public class AttackSprite extends Sprite {
 
     @Override
     public StringBuffer getTooltip() {
-        GamePhase phase = this.boardView1.game.getPhase();
+        GamePhase phase = this.boardView1.getGame().getPhase();
         String result;
         String sAttacherDesc;
 

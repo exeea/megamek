@@ -43,7 +43,7 @@ import java.awt.Transparency;
 import java.util.List;
 import java.util.Objects;
 
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
 import megamek.client.ui.util.StringDrawer;
 import megamek.client.ui.util.UIUtil;
@@ -71,7 +71,7 @@ public class SBFFormationSprite extends Sprite {
     private boolean isSelected;
 
 
-    public SBFFormationSprite(BoardView boardView, SBFFormation formation, Player owner, SBFGame game) {
+    public SBFFormationSprite(BoardGlyphContext boardView, SBFFormation formation, Player owner, SBFGame game) {
         super(boardView);
         this.formation = Objects.requireNonNull(formation);
         this.owner = owner;

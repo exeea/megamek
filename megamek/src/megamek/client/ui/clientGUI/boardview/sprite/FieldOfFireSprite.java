@@ -45,8 +45,8 @@ import java.awt.Stroke;
 import java.awt.image.ImageObserver;
 
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.RangeType;
 import megamek.common.board.Coords;
@@ -132,7 +132,7 @@ public class FieldOfFireSprite extends MovementEnvelopeSprite {
     /** {@code true} when this sprite draws its own colour and must not share the cached images. */
     private boolean usesOwnColor;
 
-    public FieldOfFireSprite(BoardView boardView1, int rangeBracket, Coords l,
+    public FieldOfFireSprite(BoardGlyphContext boardView1, int rangeBracket, Coords l,
           int borders) {
         // the color of the super doesn't matter
         super(boardView1, Color.BLACK, l, borders);
@@ -151,7 +151,7 @@ public class FieldOfFireSprite extends MovementEnvelopeSprite {
      * @param l          The hex this piece of the zone covers
      * @param borders    Bit field of which of the six edges lie on the zone's outside
      */
-    public FieldOfFireSprite(BoardView boardView1, Color zoneColor, Coords l, int borders) {
+    public FieldOfFireSprite(BoardGlyphContext boardView1, Color zoneColor, Coords l, int borders) {
         super(boardView1, Color.BLACK, l, borders);
         this.usesOwnColor = true;
         fillColor = new Color(zoneColor.getRed(), zoneColor.getGreen(), zoneColor.getBlue(),

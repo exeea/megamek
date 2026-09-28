@@ -43,8 +43,8 @@ import java.awt.RenderingHints;
 import java.io.File;
 import javax.swing.ImageIcon;
 
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Configuration;
@@ -83,7 +83,7 @@ public class DugInSprite extends HexSprite {
      * @param alpha     the opacity to draw the trench at (e.g. faint while digging in, full once dug in)
      * @param label     the status text to show in the hex (e.g. "Digging in" / "Dug in")
      */
-    public DugInSprite(BoardView boardView, Coords loc, float alpha, String label) {
+    public DugInSprite(BoardGlyphContext boardView, Coords loc, float alpha, String label) {
         super(boardView, loc);
         this.alpha = alpha;
         this.label = label;

@@ -28,8 +28,8 @@ import megamek.client.Client;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.LabelDisplayStyle;
+import megamek.client.ui.clientGUI.boardview.UnitAnnotations;
 import megamek.client.ui.clientGUI.boardview.overlay.UnitOverviewOverlay;
-import megamek.client.ui.clientGUI.boardview.sprite.EntitySprite;
 import megamek.common.Player;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
@@ -226,7 +226,7 @@ class GpuUnitHudTest {
                 try {
                     prefs.setTMMPipMode(1);
                     prefs.setUnitLabelStyle(LabelDisplayStyle.ABBREV);
-                    EntitySprite.Annotations first = fixture.view.captureUnitAnnotations(fixture.entity, -1, null);
+                    UnitAnnotations.Annotations first = fixture.view.captureUnitAnnotations(fixture.entity, -1, null);
                     fixture.entity.setPosition(new Coords(7, 7));
                     fixture.entity.setFacing(3);
                     fixture.entity.setSecondaryFacing(3);
@@ -306,7 +306,7 @@ class GpuUnitHudTest {
         }
     }
 
-    private static void assertChanged(EntitySprite.Annotations before, EntitySprite.Annotations after) {
+    private static void assertChanged(UnitAnnotations.Annotations before, UnitAnnotations.Annotations after) {
         assertNotSame(before.image(), after.image());
         assertNotEquals(new BoardScene.Pixels(before.image()), new BoardScene.Pixels(after.image()));
     }
@@ -319,8 +319,8 @@ class GpuUnitHudTest {
         ClientGUI gui = mock(ClientGUI.class);
         when(gui.getClient()).thenReturn(client);
         when(gui.getMainPanel()).thenReturn(new JPanel());
-        when(gui.getCurrentBoardView()).thenReturn(Optional.of(fixture.view));
-        when(gui.getBoardView()).thenReturn(fixture.view);
+        when(gui.getCurrentBoardState()).thenReturn(Optional.of(fixture.view.getClientState()));
+        when(gui.getBoardState()).thenReturn(fixture.view.getClientState());
         return gui;
     }
 

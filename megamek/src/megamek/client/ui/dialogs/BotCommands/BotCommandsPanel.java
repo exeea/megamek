@@ -63,7 +63,7 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.audio.AudioService;
 import megamek.client.ui.clientGUI.audio.SoundType;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.MegaMekController;
@@ -1164,11 +1164,9 @@ public class BotCommandsPanel extends JPanel {
      */
     private void pickTargetHexes(String orderDescription, boolean singleHex, int maxHexes, String fallbackPromptKey,
           Consumer<String> onTargetsSelected) {
-        BoardView boardView = null;
+        BoardClientState boardView = null;
         if (clientGUI != null) {
-            boardView = clientGUI.getCurrentBoardView()
-                  .filter(BoardView.class::isInstance)
-                  .map(BoardView.class::cast)
+            boardView = clientGUI.getCurrentBoardState()
                   .orElse(null);
         }
         if (boardView == null) {

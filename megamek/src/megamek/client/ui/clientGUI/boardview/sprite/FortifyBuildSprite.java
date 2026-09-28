@@ -43,8 +43,8 @@ import java.awt.RenderingHints;
 import java.io.File;
 import javax.swing.ImageIcon;
 
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Configuration;
@@ -88,7 +88,7 @@ public class FortifyBuildSprite extends HexSprite {
      * @param stage       the fortification stage currently reached (1 to {@code totalStages})
      * @param totalStages the total turns of work a finished fortified hex needs (the denominator)
      */
-    public FortifyBuildSprite(BoardView boardView, Coords loc, int stage, int totalStages) {
+    public FortifyBuildSprite(BoardGlyphContext boardView, Coords loc, int stage, int totalStages) {
         super(boardView, loc);
         this.stage = stage;
         this.totalStages = totalStages;

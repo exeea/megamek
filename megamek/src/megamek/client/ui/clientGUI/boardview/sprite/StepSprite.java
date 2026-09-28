@@ -46,8 +46,8 @@ import java.awt.image.BufferedImage;
 import megamek.MMConstants;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.HexDrawUtilities;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.UIUtil;
@@ -84,7 +84,7 @@ public class StepSprite extends Sprite implements TacticalSprite {
     private final boolean isLastStep;
     private Image baseScaleImage;
 
-    public StepSprite(BoardView boardView1, final MoveStep step,
+    public StepSprite(BoardGlyphContext boardView1, final MoveStep step,
           boolean isLastStep) {
         super(boardView1);
         this.step = step;
@@ -123,11 +123,10 @@ public class StepSprite extends Sprite implements TacticalSprite {
 
         paintTactical(g2D);
 
-        baseScaleImage = bv.getPanel().createImage(tempImage.getSource());
-        image = bv.getScaledImage(bv.getPanel().createImage(tempImage.getSource()), false);
+        baseScaleImage = tempImage;
+        image = bv.getScaledImage(tempImage, false);
 
         graph.dispose();
-        tempImage.flush();
     }
 
     @Override
@@ -174,7 +173,7 @@ public class StepSprite extends Sprite implements TacticalSprite {
 
         Color col = GUIP.getColorForMovement(movementType, isMASCOrSuperCharger, isBackwards);
 
-        if (bv.game.useVectorMove()) {
+        if (bv.getGame().useVectorMove()) {
             drawActiveVectors(step, graph);
         }
 
@@ -251,7 +250,7 @@ public class StepSprite extends Sprite implements TacticalSprite {
                     drawArrowShape(g2D, facingArrow, col);
                 }
 
-                if (bv.game.useVectorMove()) {
+                if (bv.getGame().useVectorMove()) {
                     drawMovementCost(step, isLastStep, new Point(0, 0), graph, col, false);
                 }
                 break;
@@ -350,7 +349,7 @@ public class StepSprite extends Sprite implements TacticalSprite {
         }
 
         if (isLastLegalStep) {
-            drawTMMAndRolls(step, jumped, bv.game, new Point(0, 0), graph, col, true);
+            drawTMMAndRolls(step, jumped, bv.getGame(), new Point(0, 0), graph, col, true);
         }
 
     }

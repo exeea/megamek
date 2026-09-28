@@ -56,6 +56,7 @@ final class GpuShaderProvider implements ShaderProvider, GpuShaderManager.Target
         } finally { renderable.shader = suggested; }
         var handle = new Handle(shader, renderable);
         handles.add(handle);
+        if (shader instanceof BaseShader base) { session.configureInputs(variantName(handles.size()), base.program); }
         return handle;
     }
 
@@ -76,7 +77,10 @@ final class GpuShaderProvider implements ShaderProvider, GpuShaderManager.Target
             }
         } catch (RuntimeException failure) { next.value().dispose(); throw failure; }
         return new GpuShaderManager.Change(() -> {
-            for (int i = 0; i < handles.size(); i++) { handles.get(i).shader = replacements.get(i); }
+            for (int i = 0; i < handles.size(); i++) {
+                handles.get(i).shader = replacements.get(i);
+                if (replacements.get(i) instanceof BaseShader base) { session.configureInputs(variantName(i + 1), base.program); }
+            }
             active.value().dispose();
             if (fallback != null) { fallback.dispose(); fallback = null; }
             active = next;
@@ -90,6 +94,19 @@ final class GpuShaderProvider implements ShaderProvider, GpuShaderManager.Target
             if (handles.get(i).shader instanceof BaseShader base) {
                 result.add(new GpuShaderManager.Sources(name + " / variant " + (i + 1),
                       base.program.getVertexShaderSource(), base.program.getFragmentShaderSource()));
+            }
+        }
+        return result;
+    }
+
+    private String variantName(int index) { return name + " / variant " + index; }
+
+    @Override
+    public List<GpuShaderInputs.Program> uniformPrograms() {
+        List<GpuShaderInputs.Program> result = new ArrayList<>();
+        for (int i = 0; i < handles.size(); i++) {
+            if (handles.get(i).shader instanceof BaseShader base && base.program instanceof GpuShaderUniforms shader) {
+                result.add(new GpuShaderInputs.Program(variantName(i + 1), shader));
             }
         }
         return result;

@@ -58,7 +58,7 @@ public abstract class SimpleConfirmDialog extends SimpleNagNotice {
     }
 
     /**
-     * Shows this confirm dialog. Note that while the dialog is shown, BoardView tooltips are suspended so they don't
+     * Shows this confirm dialog. Note that while the dialog is shown, BoardClientState tooltips are suspended so they don't
      * overlap the dialog.
      */
     @Override

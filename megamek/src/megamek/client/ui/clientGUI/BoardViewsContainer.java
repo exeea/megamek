@@ -42,7 +42,6 @@ import javax.swing.JPanel;
 import javax.swing.JTabbedPane;
 import javax.swing.event.ChangeEvent;
 
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.IBoardView;
 import megamek.common.board.Board;
 import megamek.common.game.IGame;
@@ -166,6 +165,11 @@ public class BoardViewsContainer {
      *
      * @return The currently shown {@link megamek.client.ui.clientGUI.boardview.BoardView}, if any
      */
+    public Optional<Integer> getCurrentBoardId() {
+        updateSelection();
+        return Optional.ofNullable(selectedBoardId);
+    }
+
     public Optional<IBoardView> getCurrentBoardView() {
         updateSelection();
         return Optional.ofNullable(clientGUI.boardViews.get(selectedBoardId));
@@ -176,7 +180,7 @@ public class BoardViewsContainer {
     }
 
     public void showBoardView(int boardId) {
-        if (!clientGUI.boardViews.containsKey(boardId)) {
+        if (!clientGUI.boardStates.containsKey(boardId)) {
             return;
         }
         selectedBoardId = boardId;
@@ -222,16 +226,12 @@ public class BoardViewsContainer {
     }
 
     private void updateSelection() {
-        if (!clientGUI.boardViews.containsKey(selectedBoardId)) {
-            selectedBoardId = clientGUI.boardViews.keySet().stream().min(Integer::compareTo).orElse(null);
+        if (!clientGUI.boardStates.containsKey(selectedBoardId)) {
+            selectedBoardId = clientGUI.boardStates.keySet().stream().min(Integer::compareTo).orElse(null);
         }
     }
 
     private void updateBoardViewKeyStatus() {
-        clientGUI.boardViews.forEach((id, view) -> {
-            if (view instanceof BoardView boardView) {
-                boardView.setShouldIgnoreKeys(!id.equals(selectedBoardId));
-            }
-        });
+        clientGUI.boardStates.forEach((id, state) -> state.setShouldIgnoreKeys(!id.equals(selectedBoardId)));
     }
 }

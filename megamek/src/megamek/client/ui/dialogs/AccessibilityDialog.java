@@ -253,9 +253,9 @@ public class AccessibilityDialog extends JDialog {
             selectedTarget = new Coords(MathUtility.parseInt(args[1], 1) - 1, MathUtility.parseInt(args[2], 1) - 1);
 
             // Cursor over the hex.
-            gui.getBoardView().mouseAction(selectedTarget, 3, InputEvent.BUTTON1_DOWN_MASK, MouseEvent.BUTTON1);
+            gui.getBoardState().mouseAction(selectedTarget, 3, InputEvent.BUTTON1_DOWN_MASK, MouseEvent.BUTTON1);
             // Click.
-            gui.getBoardView().mouseAction(selectedTarget, 1, InputEvent.BUTTON1_DOWN_MASK, MouseEvent.BUTTON1);
+            gui.getBoardState().mouseAction(selectedTarget, 1, InputEvent.BUTTON1_DOWN_MASK, MouseEvent.BUTTON1);
         }
     }
 

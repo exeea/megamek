@@ -107,6 +107,8 @@ interface BoardSource extends AutoCloseable {
     default void reportUnit(int entityId) { }
     /** Full play needs its tactical artwork prepared before interactive frames; map-only views do not. */
     default boolean isGameplay() { return false; }
+    /** Render-thread report about the timeline consumed with this frame; never a second animation clock. */
+    default void playbackState(Frame frame, boolean busy) { }
     default boolean isEditor() { return false; }
     default void paintEditor(Coords coords, int modifiers, long generation) { }
     default List<Coords> editorBrush(Coords coords, long generation) { return List.of(); }

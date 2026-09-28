@@ -28,12 +28,11 @@ import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardFieldOfView;
 import megamek.client.ui.clientGUI.boardview.BoardFocus;
-import megamek.client.ui.clientGUI.boardview.BoardView;
-import megamek.client.ui.clientGUI.boardview.overlay.ChatterBoxOverlay;
+import megamek.client.ui.clientGUI.boardview.UnitAnnotations;
 import megamek.client.ui.clientGUI.boardview.overlay.OverlayImage;
-import megamek.client.ui.clientGUI.boardview.sprite.EntitySprite;
 import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
 import megamek.client.ui.entityreadout.LiveReadoutDialog;
 import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
@@ -68,9 +67,9 @@ final class GpuBoardSource implements BoardSource {
     private final Map<Integer, BoardScene.Combat> removalAttempts = new HashMap<>();
     private final Set<Integer> voluntaryReleases = new java.util.HashSet<>();
 
-    private volatile BoardView view;
+    private volatile BoardClientState view;
     /** Swing-owned input intent, valid only for the selection and camera request produced by that mouse gesture. */
-    private record MouseSelection(BoardView view, Board board, int actorId, BoardFocus request) { }
+    private record MouseSelection(BoardClientState view, Board board, int actorId, BoardFocus request) { }
     private MouseSelection mouseSelection;
     private final Supplier<JComponent> phasePanel;
     private GpuBoardActions actions;
@@ -78,7 +77,7 @@ final class GpuBoardSource implements BoardSource {
     volatile PhaseStatus phaseStatus = new PhaseStatus("", false);
     private final Map<Image, BoardScene.Pixels> unitImages = new IdentityHashMap<>();
     private record AnnotationKey(int entityId, int part) { }
-    private final Map<AnnotationKey, EntitySprite.Annotations> unitAnnotations = new HashMap<>();
+    private final Map<AnnotationKey, UnitAnnotations.Annotations> unitAnnotations = new HashMap<>();
     private final Map<Image, BoardScene.Pixels> overlayImages = new IdentityHashMap<>();
     private final UnitCamouflage camouflage = new UnitCamouflage();
     private final GpuReportLog reports = new GpuReportLog();
@@ -103,7 +102,7 @@ final class GpuBoardSource implements BoardSource {
     /** Swing-owned artwork invalidation; neighbouring exits and terrain blends also change after a hex edit. */
     private Rectangle dirtyHexes;
     private volatile boolean closed;
-    /** Swing publishes chat focus for native camera/menu input; the BoardView owns the actual state. */
+    /** Swing publishes chat focus for native camera/menu input; the BoardClientState owns the actual state. */
     private volatile boolean chatActive;
     private boolean suppressChatCharacter;
     private Frame frame;
@@ -137,22 +136,22 @@ final class GpuBoardSource implements BoardSource {
         pointer = new Point(x, y);
     }
 
-    BoardView currentView() {
+    BoardClientState currentView() {
         return view;
     }
 
-    public GpuBoardSource(BoardView view, Supplier<JComponent> phasePanel) {
+    public GpuBoardSource(BoardClientState view, Supplier<JComponent> phasePanel) {
         requireSwingThread();
         this.view = view;
         this.phasePanel = phasePanel;
         atmosphere = new GpuAtmosphereControls(
-              () -> view.getClientgui() == null ? SwingUtilities.getWindowAncestor(view.getPanel())
+              () -> view.getClientgui() == null ? null
                     : view.getClientgui().getFrame(),
               () -> this.view.game.getBoard(this.view.getBoardId()), () -> this.view.game.getPlanetaryConditions(),
               () -> closed);
         GUIPreferences preferences = GUIPreferences.getInstance();
         uiPreferences = UiPreferences.capture();
-        actions = new GpuBoardActions(view, phasePanel, () -> closed || this.view != view, this::refresh);
+        actions = new GpuBoardActions(view, phasePanel, () -> closed || view.isClosed() || this.view != view, this::refresh);
         boardListener = new BoardListenerAdapter() {
             @Override
             public void boardNewBoard(BoardEvent event) {
@@ -192,9 +191,9 @@ final class GpuBoardSource implements BoardSource {
 
             @Override
             public void gameAttackResolved(megamek.common.event.GameAttackResolvedEvent event) {
-                BoardView eventView = GpuBoardSource.this.view;
+                BoardClientState eventView = GpuBoardSource.this.view;
                 onSwing(() -> {
-                    if (GpuBoardSource.this.view == eventView) {
+                    if (!closed && !eventView.isClosed() && GpuBoardSource.this.view == eventView) {
                         captureCombat(event);
                     }
                 });
@@ -202,8 +201,8 @@ final class GpuBoardSource implements BoardSource {
 
             @Override
             public void gameEntityChange(GameEntityChangeEvent event) {
-                BoardView eventView = GpuBoardSource.this.view;
-                // BoardView consumes the event's Vector during playback. Copy it before leaving the event callback.
+                BoardClientState eventView = GpuBoardSource.this.view;
+                // Snapshot the packet's path before leaving its callback; playback owns the immutable copy.
                 List<UnitLocation> path = event.getMovePath() == null ? List.of() : List.copyOf(event.getMovePath());
                 int entityId = event.getEntity().getId();
                 EntityMovementType type = event.getEntity().moved;
@@ -216,7 +215,7 @@ final class GpuBoardSource implements BoardSource {
                 Entity takeoff = old == null ? event.getEntity() : old;
                 int jumpMP = type == EntityMovementType.MOVE_JUMP ? takeoff.getAnyTypeMaxJumpMP() : 0;
                 onSwing(() -> {
-                    if (GpuBoardSource.this.view == eventView) {
+                    if (!closed && !eventView.isClosed() && GpuBoardSource.this.view == eventView) {
                         if (path.isEmpty()) {
                             refresh();
                         } else {
@@ -233,11 +232,11 @@ final class GpuBoardSource implements BoardSource {
 
             @Override
             public void gameEntityRemove(megamek.common.event.entity.GameEntityRemoveEvent event) {
-                BoardView eventView = GpuBoardSource.this.view;
+                BoardClientState eventView = GpuBoardSource.this.view;
                 int condition = event.getEntity().getRemovalCondition();
                 int id = event.getEntity().getId(), boardId = event.getEntity().getBoardId();
                 onSwing(() -> {
-                    if (closed || GpuBoardSource.this.view != eventView) { return; }
+                    if (closed || eventView.isClosed() || GpuBoardSource.this.view != eventView) { return; }
                     if (condition == megamek.common.interfaces.IEntityRemovalConditions.REMOVE_UNKNOWN) {
                         queueAnimation(new BoardScene.Concealed(id, boardId));
                     }
@@ -248,7 +247,7 @@ final class GpuBoardSource implements BoardSource {
         view.game.addGameListener(gameListener);
         PreferenceManager.getClientPreferences().addPreferenceChangeListener(preferenceListener);
         preferences.addPreferenceChangeListener(preferenceListener);
-        timer = new Timer(100, event -> refresh());
+        timer = new Timer(100, event -> { view.advanceOverlays(100); refresh(); });
         timer.setCoalesce(true);
         try {
             refresh();
@@ -288,7 +287,7 @@ final class GpuBoardSource implements BoardSource {
             return;
         }
         Entity entity = view.game.getEntity(entityId);
-        BoardView movingView = view;
+        BoardClientState movingView = view;
         if (entity == null || !visible(entity) || sensorContact(entity)
               || path.stream().anyMatch(p -> p.boardId() != view.getBoardId() || p.coords() == null)) {
             refresh();
@@ -451,10 +450,16 @@ final class GpuBoardSource implements BoardSource {
             pendingEvents.clear();
         }
         pendingEvents.add(animation);
+        if (!(animation instanceof BoardScene.SceneUpdate) && !(animation instanceof BoardScene.Concealed)) {
+            animationsQueued++;
+            view.setMovingUnits(true);
+        }
     }
 
     /** Consecutive captures share one checkpoint; animation boundaries are never coalesced. Swing owns capture. */
     private synchronized void publishScene(Frame next, boolean detectGear) {
+        if (next.scene() == null) { pendingEvents.clear(); frame = next; return; }
+        if (frame != null && frame.scene() == null) { frame = null; }
         if (detectGear && frame != null && frame.boardGeneration() == next.boardGeneration()) {
             Map<Integer, BoardScene.Unit> previous = new HashMap<>();
             frame.scene().units().stream().filter(unit -> !unit.sensorContact())
@@ -631,19 +636,21 @@ final class GpuBoardSource implements BoardSource {
               frame.hud(), frame.tooltip(), frame.centerRequest(), frame.boardGeneration(), frame.actorName(),
               frame.scenarioAtmosphere(), frame.attack(), frame.reports(), frame.keepSelectionCamera());
         pendingEvents.clear();
+        animationsTaken = animationsQueued;
         return result;
     }
 
     private Frame capture() {
         PhaseStatus nextPhaseStatus = GpuBoardActions.phaseStatus(phasePanel.get());
         if (view.getClientgui() != null) {
-            BoardView selectedView = view.getClientgui().getCurrentBoardView()
-                  .filter(BoardView.class::isInstance).map(BoardView.class::cast).orElse(view);
+            BoardClientState selectedView = view.getClientgui().getCurrentBoardState().orElse(view);
             if (selectedView != view) {
+                view.setMovingUnits(false);
+                view.setVisibleArea(() -> new double[] { 0, 0, 1, 1 });
                 view.releasePlanarCapture();
                 view = selectedView;
                 actions = new GpuBoardActions(selectedView, phasePanel,
-                      () -> closed || view != selectedView, this::refresh);
+                      () -> closed || selectedView.isClosed() || view != selectedView, this::refresh);
                 contextCoords = null;
                 unitImages.clear();
                 unitAnnotations.clear();
@@ -653,6 +660,19 @@ final class GpuBoardSource implements BoardSource {
                 }
             }
         }
+        if (view.isClosed() || view.getBoard() == null) {
+            phaseStatus = nextPhaseStatus;
+            return new Frame(null, List.of(), null, List.of(), new Hud(1, 1, List.of()), "",
+                  new BoardFocus(0, null), boardGeneration, "");
+        }
+        view.setVisibleArea(() -> {
+            Rectangle area = visibleArea;
+            Board currentBoard = view.getBoard();
+            return area == null ? new double[] { 0, 0, 1, 1 } : new double[] {
+                  area.x / (double) currentBoard.getWidth(), area.y / (double) currentBoard.getHeight(),
+                  (area.x + area.width) / (double) currentBoard.getWidth(),
+                  (area.y + area.height) / (double) currentBoard.getHeight() };
+        });
         int measurement = pendingMeasurementModifiers();
         if (measurement != 0 && !nextPhaseStatus.blocking()) {
             nextPhaseStatus = new PhaseStatus("Left-click an endpoint to complete the "
@@ -666,7 +686,7 @@ final class GpuBoardSource implements BoardSource {
         // A toggle starts on Swing. Publish its timeline before potentially expensive board/command capture,
         // so native rendering can already animate it while the rest of this scene snapshot is being prepared.
         synchronized (this) {
-            if (frame != null && frame.scene().boardId() == view.getBoardId()) {
+            if (frame != null && frame.scene() != null && frame.scene().boardId() == view.getBoardId()) {
                 frame = new Frame(frame.scene(), frame.timeline(), frame.context(), frame.globalCommands(), nextHud,
                       frame.tooltip(), frame.centerRequest(), frame.boardGeneration(), frame.actorName(),
                       frame.scenarioAtmosphere(), frame.attack(), frame.reports(), frame.keepSelectionCamera());
@@ -793,9 +813,9 @@ final class GpuBoardSource implements BoardSource {
             }
         }
         if (GpuUnitModels.ENABLED && GUIPreferences.getInstance().getShowWrecks()) {
-            // BoardView already owns which removed units leave wrecks, including infantry/CVEP exceptions.
+            // BoardClientState already owns which removed units leave wrecks, including infantry/CVEP exceptions.
             var live = units.stream().map(BoardScene.Unit::id).collect(Collectors.toSet());
-            view.getIsoWreckSprites().stream().map(sprite -> sprite.getEntity()).distinct()
+            view.getWrecks().stream()
                   .filter(entity -> !live.contains(entity.getId()) && visible(entity) && !sensorContact(entity))
                   .forEach(entity -> units.add(wreck(entity, usedImages)));
         }
@@ -809,7 +829,7 @@ final class GpuBoardSource implements BoardSource {
         List<BoardScene.Command> nextGlobal = new ArrayList<>(actions.globalCommands());
         if (view.getClientgui() != null) {
             var gui = view.getClientgui();
-            List<BoardScene.Command> boards = gui.boardViews().stream().map(boardView -> new BoardScene.Command(
+            List<BoardScene.Command> boards = gui.boardStates().stream().map(boardView -> new BoardScene.Command(
                   "Map " + boardView.getBoardId(), true, () -> SwingUtilities.invokeLater(() -> {
                       if (!closed) {
                           gui.showBoardView(boardView.getBoardId());
@@ -1010,7 +1030,7 @@ final class GpuBoardSource implements BoardSource {
         usedImages.put(image, true);
         BoardScene.Pixels pixels = unitImages.computeIfAbsent(image, BoardScene.Pixels::copy);
         AnnotationKey annotationKey = new AnnotationKey(entity.getId(), part);
-        EntitySprite.Annotations annotations = view.captureUnitAnnotations(entity, part, unitAnnotations.get(annotationKey));
+        UnitAnnotations.Annotations annotations = view.captureUnitAnnotations(entity, part, unitAnnotations.get(annotationKey));
         unitAnnotations.put(annotationKey, annotations);
         usedImages.put(annotations.image(), true);
         BoardScene.Pixels annotationPixels = unitImages.computeIfAbsent(annotations.image(), BoardScene.Pixels::copy);
@@ -1111,7 +1131,7 @@ final class GpuBoardSource implements BoardSource {
     /** Mouse selection and phase actions use the existing controllers without changing the camera. */
     public void primaryClick(Coords coords, int entityId, int modifiers, long generation) {
         SwingUtilities.invokeLater(() -> {
-            if (closed || generation != boardGeneration || board != view.game.getBoard(view.getBoardId())
+            if (closed || view.isClosed() || generation != boardGeneration || board != view.game.getBoard(view.getBoardId())
                   || coords != null && !board.contains(coords)
                   || view.getClientgui() != null && view.getClientgui().shouldIgnoreHotKeys()) {
                 return;
@@ -1139,7 +1159,7 @@ final class GpuBoardSource implements BoardSource {
 
     public void inspect(Coords coords) {
         SwingUtilities.invokeLater(() -> {
-            if (!closed) {
+            if (!closed && !view.isClosed()) {
                 contextCoords = coords;
                 refresh();
             }
@@ -1148,7 +1168,7 @@ final class GpuBoardSource implements BoardSource {
 
     public void overlayInput(int event, int x, int y, Runnable unhandled) {
         SwingUtilities.invokeLater(() -> {
-            if (closed) {
+            if (closed || view.isClosed()) {
                 return;
             }
             OverlayViewport overlayViewport = viewport;
@@ -1172,8 +1192,8 @@ final class GpuBoardSource implements BoardSource {
 
     public void key(int keyCode, boolean down, int modifiers) {
         SwingUtilities.invokeLater(() -> {
-            if (!closed && view.getClientgui() != null && !view.getClientgui().shouldIgnoreHotKeys()) {
-                KeyEvent event = new KeyEvent(view.getPanel(),
+            if (!closed && !view.isClosed() && view.getClientgui() != null && !view.getClientgui().shouldIgnoreHotKeys()) {
+                KeyEvent event = new KeyEvent(view.getClientgui().getFrame(),
                       down ? KeyEvent.KEY_PRESSED : KeyEvent.KEY_RELEASED, System.currentTimeMillis(), modifiers,
                       keyCode, KeyEvent.CHAR_UNDEFINED);
                 var controller = view.getClientgui().controller;
@@ -1200,11 +1220,11 @@ final class GpuBoardSource implements BoardSource {
 
     public void keyTyped(char character) {
         SwingUtilities.invokeLater(() -> {
-            if (!closed && !suppressChatCharacter && !Character.isISOControl(character)
+            if (!closed && !view.isClosed() && !suppressChatCharacter && !Character.isISOControl(character)
                   && view.getChatterBoxActive() && view.getClientgui() != null
                   && !view.getClientgui().shouldIgnoreHotKeys()) {
                 // ChatterBoxOverlay edits text in keyPressed; GLFW supplies Unicode separately from physical keys.
-                chatKey(new KeyEvent(view.getPanel(), KeyEvent.KEY_PRESSED, System.currentTimeMillis(), 0,
+                chatKey(new KeyEvent(view.getClientgui().getFrame(), KeyEvent.KEY_PRESSED, System.currentTimeMillis(), 0,
                       KeyEvent.VK_UNDEFINED, character));
                 refresh();
             }
@@ -1212,11 +1232,7 @@ final class GpuBoardSource implements BoardSource {
     }
 
     private void chatKey(KeyEvent event) {
-        for (var listener : view.getPanel().getKeyListeners()) {
-            if (listener instanceof ChatterBoxOverlay chat) {
-                chat.keyPressed(event);
-            }
-        }
+        view.chatKey(event);
     }
 
     public void stopKeys() {
@@ -1243,9 +1259,9 @@ final class GpuBoardSource implements BoardSource {
 
     public void click(Coords coords, boolean doubleClick, int modifiers) {
         SwingUtilities.invokeLater(() -> {
-            if (!closed && coords != null && (view.game.getPhase().isOnMap()
+            if (!closed && !view.isClosed() && coords != null && (view.game.getPhase().isOnMap()
                   || isMeasurement(modifiers))) {
-                view.mouseAction(coords, doubleClick ? BoardView.BOARD_HEX_DOUBLE_CLICK : BoardView.BOARD_HEX_CLICK,
+                view.mouseAction(coords, doubleClick ? BoardClientState.BOARD_HEX_DOUBLE_CLICK : BoardClientState.BOARD_HEX_CLICK,
                       modifiers, 1);
                 refresh();
             }
@@ -1254,8 +1270,8 @@ final class GpuBoardSource implements BoardSource {
 
     public void hover(Coords coords, int modifiers) {
         SwingUtilities.invokeLater(() -> {
-            if (!closed && coords != null && !isMeasurement(modifiers) && view.game.getPhase().isOnMap()) {
-                view.mouseAction(coords, BoardView.BOARD_HEX_DRAG, modifiers | InputEvent.BUTTON1_DOWN_MASK, 1);
+            if (!closed && !view.isClosed() && coords != null && !isMeasurement(modifiers) && view.game.getPhase().isOnMap()) {
+                view.mouseAction(coords, BoardClientState.BOARD_HEX_DRAG, modifiers | InputEvent.BUTTON1_DOWN_MASK, 1);
             }
         });
     }
@@ -1276,9 +1292,12 @@ final class GpuBoardSource implements BoardSource {
             SwingUtilities.invokeLater(this::close);
             return;
         }
+        if (closed) { return; }
         closed = true;
         atmosphere.close();
         timer.stop();
+        view.setMovingUnits(false);
+        view.setVisibleArea(() -> new double[] { 0, 0, 1, 1 });
         view.game.removeGameListener(gameListener);
         PreferenceManager.getClientPreferences().removePreferenceChangeListener(preferenceListener);
         GUIPreferences.getInstance().removePreferenceChangeListener(preferenceListener);
@@ -1296,4 +1315,26 @@ final class GpuBoardSource implements BoardSource {
             pendingEvents.clear();
         }
     }
+    private long animationsQueued;
+    private long animationsTaken;
+    private long reportedAnimationSerial = -1;
+    private long reportedGeneration = -1;
+    private boolean reportedBusy;
+
+    @Override
+    public void playbackState(Frame consumed, boolean busy) {
+        long serial = animationsTaken;
+        if (reportedGeneration == consumed.boardGeneration() && reportedAnimationSerial == serial && reportedBusy == busy) {
+            return;
+        }
+        reportedGeneration = consumed.boardGeneration();
+        reportedAnimationSerial = serial;
+        reportedBusy = busy;
+        SwingUtilities.invokeLater(() -> {
+            if (closed || view.isClosed() || consumed.boardGeneration() != boardGeneration) { return; }
+            // A later packet may already have queued movement that this GL frame has not consumed.
+            if (busy || serial == animationsQueued) { view.setMovingUnits(busy); }
+        });
+    }
+
 }

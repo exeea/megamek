@@ -46,8 +46,7 @@ import java.util.Map;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
-import megamek.client.ui.clientGUI.boardview.IBoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.UIUtil;
@@ -208,7 +207,7 @@ public class SelectArtyAutoHitHexDisplay extends StatusBarPhaseDisplay {
     private void endMyTurn() {
         stopTimer();
         disableButtons();
-        clientgui.boardViews().forEach(IBoardView::clearMarkedHexes);
+        clientgui.boardStates().forEach(BoardClientState::clearMarkedHexes);
     }
 
     /**
@@ -243,7 +242,7 @@ public class SelectArtyAutoHitHexDisplay extends StatusBarPhaseDisplay {
             plannedAutoHits.remove(location);
         }
         setArtyEnabled(allowedNumberOfHexes - plannedAutoHits.size());
-        clientgui.boardViews().forEach(IBoardView::refreshDisplayables);
+        clientgui.boardStates().forEach(BoardClientState::refreshDisplayables);
     }
 
     private boolean isValidArtyAutoLocation(BoardLocation location) {
@@ -340,11 +339,11 @@ public class SelectArtyAutoHitHexDisplay extends StatusBarPhaseDisplay {
     @Override
     public void removeAllListeners() {
         game().removeGameListener(this);
-        clientgui.boardViews().forEach(bv -> bv.removeBoardViewListener(this));
+        clientgui.boardStates().forEach(bv -> bv.removeBoardViewListener(this));
     }
 
     private void toggleShowDeployment() {
-        clientgui.onAllBoardViews(BoardView::toggleShowDeployment);
+        clientgui.onAllBoardStates(BoardClientState::toggleShowDeployment);
     }
 
     private void registerKeyCommands() {

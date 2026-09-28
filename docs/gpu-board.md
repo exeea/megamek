@@ -1075,6 +1075,21 @@ The path below each file shows where Save writes: an existing override, a checko
 `data/shaders/` override for a bundled resource. Saving refuses to overwrite a file changed by another editor.
 Closing the editor hides it and retains its drafts for that board window; closing the board ends the preview.
 
+The **Object / effect preview** below the file list selects a sample automatically for explosion, beam,
+projectile, missile, particle, ground fire/smoke, weather and unit material shaders. It loops the existing combat
+effect renderers against fixed demonstration objects; no matching battle or game orders are needed. The menu
+also selects laser, PPC, autocannon, missile salvo, flamethrower, rain, snow or a rotating material sphere manually,
+which is useful when inspecting a shared shader. **Play**, **Restart** and the speed selector control the sample;
+drag to orbit, use the wheel to zoom, and double-click to reset the view. Successful edits update both the sample
+and affected board programs, including when the sample is paused. Invalid edits keep the working programs.
+Scene-dependent shaders such as terrain, water, clouds and post-processing still need the live board.
+
+The board's GL thread owns the sample resources and renders a 384×240 offscreen image at most 30 times per second.
+Only finished images and immutable control settings cross between it and Swing. Hidden editors do no sample
+rendering; paused samples redraw only when their controls or shader revision change. Sample resources are released
+with the board window. The native shader smoke tests cover each sample, animation, paused draft changes, invalid
+edit retention, editor selection and shared GL state restoration.
+
 For SHADERed or another desktop GLSL editor, add `-Dmegamek.gpu.shaderExport=<directory>` to MegaMek's JVM options.
 Each compiled board program writes a complete `.vert`/`.frag` pair there, including the material defines, shared
 functions and any adapted libGDX source. Matching filenames identify a pair; the content-derived suffix keeps

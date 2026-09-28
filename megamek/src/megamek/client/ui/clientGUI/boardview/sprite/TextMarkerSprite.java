@@ -40,7 +40,7 @@ import java.awt.Point;
 import java.awt.geom.Rectangle2D;
 
 import megamek.MMConstants;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.util.StringDrawer;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.board.Coords;
@@ -51,16 +51,16 @@ public class TextMarkerSprite extends HexSprite {
     private final Color textColor;
     private final int rangeBracket;
 
-    public TextMarkerSprite(BoardView boardView1, Coords loc, String text, Color color) {
+    public TextMarkerSprite(BoardGlyphContext boardView1, Coords loc, String text, Color color) {
         this(boardView1, loc, text, color, -1);
     }
 
-    public TextMarkerSprite(BoardView boardView, Coords loc, int rangeBracket) {
+    public TextMarkerSprite(BoardGlyphContext boardView, Coords loc, int rangeBracket) {
         this(boardView, loc, FieldOfFireSprite.getRangeText(rangeBracket),
               FieldOfFireSprite.getFieldOfFireColor(rangeBracket), rangeBracket);
     }
 
-    private TextMarkerSprite(BoardView boardView1, Coords loc, String text, Color color, int rangeBracket) {
+    private TextMarkerSprite(BoardGlyphContext boardView1, Coords loc, String text, Color color, int rangeBracket) {
         super(boardView1, loc);
         spriteText = text;
         textColor = color;
