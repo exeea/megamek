@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -17,6 +18,8 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 import javax.swing.SwingUtilities;
 
 import megamek.client.ui.clientGUI.GUIPreferences;
@@ -26,6 +29,7 @@ import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.HexDrawUtilities;
 import megamek.client.ui.clientGUI.boardview.sprite.CursorSprite;
 import megamek.common.Hex;
+import megamek.common.SpecialHexDisplay;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
@@ -34,6 +38,68 @@ import org.junit.jupiter.api.Test;
 class GpuOverlayCaptureTest {
     private static final Coords EDITED = new Coords(0, 0), RETAINED = new Coords(0, 2);
     private static final Color RETAINED_COLOR = new Color(31, 107, 193, 91);
+
+    @Test
+    void dialogSelectionsAttackPreviewsHeatAndRulerEndpointsUseTheirOwnHexPlanes() throws Exception {
+        try (var options = new GpuHexOverlayTest.Options(); GpuBoardFixture fixture = GpuBoardFixture.create(board())) {
+            SwingUtilities.invokeAndWait(() -> {
+                List<Coords> hexes = List.of(EDITED, new Coords(6, 5));
+                fixture.view.setHighlightedEntityHexes(hexes);
+                assertPlanes(fixture.view.captureTacticalGeometry().fills(), hexes, BoardTactical.Playback.HIDE_DURING_MOVEMENT);
+                fixture.view.setHighlightedEntityHexes(List.of());
+
+                var preferences = GUIPreferences.getInstance();
+                boolean hazard = preferences.getDemolitionChargeHazardOutline();
+                try {
+                    fixture.view.setDemolitionChargeHighlightHexes(hexes);
+                    for (boolean stripes : List.of(true, false)) {
+                        preferences.setDemolitionChargeHazardOutline(stripes);
+                        var fills = fixture.view.captureTacticalGeometry().fills();
+                        assertEquals(hexes.size() * (stripes ? 2 : 1), fills.size());
+                        assertPlanes(fills, hexes, BoardTactical.Playback.LIVE);
+                        if (stripes) {
+                            assertTrue(fills.stream().filter(fill -> fill.argb() != Color.BLACK.getRGB())
+                                  .allMatch(fill -> fill.contours().size() > 1), "Hazard stripe gaps must survive capture");
+                        }
+                    }
+                } finally {
+                    preferences.setDemolitionChargeHazardOutline(hazard);
+                    fixture.view.setDemolitionChargeHighlightHexes(List.of());
+                }
+
+                fixture.game.setPhase(GamePhase.FIRING);
+                fixture.view.setStrafingCoords(hexes);
+                assertPlanes(fixture.view.captureTacticalGeometry().fills(), hexes, BoardTactical.Playback.HIDE_DURING_MOVEMENT);
+                fixture.view.setStrafingCoords(List.of());
+
+                fixture.view.drawRuler(hexes.getFirst(), hexes.getLast(), Color.RED, Color.CYAN);
+                var ruler = fixture.view.captureTacticalGeometry();
+                assertPlanes(ruler.fills().stream().filter(fill -> fill.argb() == Color.RED.getRGB()).toList(),
+                      List.of(hexes.getFirst()), BoardTactical.Playback.LIVE);
+                assertPlanes(ruler.fills().stream().filter(fill -> fill.argb() == Color.CYAN.getRGB()).toList(),
+                      List.of(hexes.getLast()), BoardTactical.Playback.LIVE);
+                var line = fill(ruler, Color.YELLOW);
+                assertNull(line.planeAnchor(), "The connecting line spans hexes and must retain terrain-following placement");
+                fixture.view.drawRuler(null, null, Color.RED, Color.CYAN);
+
+                fixture.game.getBoard().addSpecialHexDisplay(RETAINED, new SpecialHexDisplay(
+                      SpecialHexDisplay.Type.PLAYER_NOTE, SpecialHexDisplay.NO_ROUND, fixture.player,
+                      SpecialHexDisplay.HEAT_MAP_PREFIX + "1:2:P prediction"));
+                BoardTactical heat = fixture.view.captureTacticalGeometry();
+                assertPlanes(heat.fills(), List.of(RETAINED), BoardTactical.Playback.HOLD_DURING_PLAYBACK);
+                assertFalse(heat.labels().isEmpty(), "The turn label must accompany the predicted fill");
+                assertFresh(fixture.view, heat);
+            });
+        }
+    }
+
+    private static void assertPlanes(List<BoardTactical.Fill> fills, List<Coords> coords, BoardTactical.Playback playback) {
+        Set<BoardTactical.Point> owners = coords.stream().map(at ->
+              new BoardTactical.Point(at.getX() * 63 + 42, at.getY() * 72 + (at.getX() & 1) * 36 + 36))
+              .collect(Collectors.toSet());
+        assertEquals(owners, fills.stream().map(BoardTactical.Fill::planeAnchor).collect(Collectors.toSet()));
+        fills.forEach(fill -> assertEquals(playback, fill.playback()));
+    }
 
     @Test
     void deploymentBordersRemainFloatingAtEveryClippedBoardEdge() throws Exception {
@@ -58,7 +124,7 @@ class GpuOverlayCaptureTest {
                         for (int y = 0; y < 6; y++) {
                             BoardTactical.Fill border = borders.get(x * 6 + y);
                             assertNotNull(border.border(), "Deployment metadata at " + x + "," + y);
-                            assertTrue(border.border().floating(), "Deployment stays flat, including column/row zero");
+                            assertNotNull(border.planeAnchor(), "Deployment stays flat, including column/row zero");
                             assertTrue(border.border().zone(), "Only the selected deployer's legal hexes form a zone");
                             assertEquals(new BoardTactical.Point(x * 63 + 42, y * 72 + (x & 1) * 36 + 36),
                                   border.border().anchor());
@@ -80,7 +146,7 @@ class GpuOverlayCaptureTest {
                     for (var fill : allPlayers.fills()) {
                         assertEquals(fixture.player.getColour().getColour().getRGB(), fill.argb());
                         assertNotNull(fill.border());
-                        assertTrue(fill.border().floating());
+                        assertNotNull(fill.planeAnchor());
                         assertFalse(fill.border().zone(), "All-player deployment borders must remain individually styled");
                     }
                 } finally {

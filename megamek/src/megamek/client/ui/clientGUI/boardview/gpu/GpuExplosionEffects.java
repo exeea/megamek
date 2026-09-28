@@ -78,8 +78,7 @@ final class GpuExplosionEffects implements Disposable {
     void render(Camera camera, GpuEffectDepth snapshot) {
         if (count == 0) { return; }
         if (shader == null) {
-            String path = "megamek/client/ui/clientGUI/boardview/gpu/explosion";
-            shader = new ShaderProgram(Gdx.files.classpath(path + ".vert"), Gdx.files.classpath(path + ".frag"));
+            shader = new ShaderProgram(GpuShaderSource.read("explosion.vert"), GpuShaderSource.read("explosion.frag"));
             if (!shader.isCompiled()) {
                 String error = shader.getLog();
                 shader.dispose();

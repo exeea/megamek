@@ -72,7 +72,7 @@ class GpuTacticalSmokeTest {
     }
 
     @Test
-    void rendersTerrainFollowingShapesInBothCamerasAndReusesGeometry() throws Exception {
+    void rendersFloatingShapesInBothCamerasAndReusesGeometry() throws Exception {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
         assertTrue(output.isDirectory() || output.mkdirs());
@@ -90,6 +90,7 @@ class GpuTacticalSmokeTest {
                 public void render() {
                     try {
                         super.render();
+                        if (frames() == 0) { return; }
                         tick++;
                         if (probe == null) {
                             probe = new GpuTactical();

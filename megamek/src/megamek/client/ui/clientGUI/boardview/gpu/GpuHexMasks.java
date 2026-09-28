@@ -113,7 +113,7 @@ final class GpuHexMasks implements Disposable {
         for (int index = 0; index < commands.size(); index++) {
             BoardTactical.Fill fill = commands.get(index);
             BoardTactical.HexBorder border = fill.border();
-            if (border == null || border.floating() || fill.argb() >>> 24 != 255 || border.scale() != 1 || border.padding() < 0
+            if (border == null || fill.planeAnchor() != null || fill.argb() >>> 24 != 255 || border.scale() != 1 || border.padding() < 0
                   || border.width() <= 0 || border.padding() + border.width() >= BoardGeometry.TILE_WIDTH * Math.sqrt(3) / 4) {
                 return null;
             }
@@ -182,9 +182,7 @@ final class GpuHexMasks implements Disposable {
         private RenderContext context;
 
         MaskShader() {
-            String path = "megamek/client/ui/clientGUI/boardview/gpu/";
-            program = new ShaderProgram(Gdx.files.classpath(path + "hex-mask.vert").readString("UTF-8"),
-                  Gdx.files.classpath(path + "hex-mask.frag").readString("UTF-8"));
+            program = new ShaderProgram(GpuShaderSource.read("hex-mask.vert"), GpuShaderSource.read("hex-mask.frag"));
             if (!program.isCompiled()) {
                 String log = program.getLog();
                 program.dispose();

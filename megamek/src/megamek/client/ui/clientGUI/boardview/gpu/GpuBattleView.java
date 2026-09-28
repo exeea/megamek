@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
@@ -26,6 +27,7 @@ import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
+import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
@@ -154,6 +156,10 @@ class GpuBattleView extends ApplicationAdapter {
     private float layoutPreference;
     private long hoverCameraRevision;
     private int cameraTerrainRevision = -1;
+    private boolean reloadingAssets;
+    private boolean waitingForAssetCapture;
+    private boolean assetReloadFailed;
+    private boolean disposed;
 
     GpuBattleView(BoardSource source) {
         this.source = source;
@@ -210,20 +216,14 @@ class GpuBattleView extends ApplicationAdapter {
 
     private void createBoard() {
         boardCamera.setIsometric(true);
-        terrain = new GpuTerrain(unitModels, unitBounds);
-        boardCamera.flightCollision = (eye, movement) -> terrain.moveCamera(eye, movement, boardCamera.collisionRadius());
-        fireControl = new GpuFireControl();
-        tactical = new GpuTactical(terrain::tacticalSurface);
-        atmosphere = new GpuAtmosphere();
-        unitVisibility = new GpuUnitVisibility();
+        createSceneRenderers();
+        boardCamera.flightCollision = (eye, movement) -> {
+            if (terrain != null) { terrain.moveCamera(eye, movement, boardCamera.collisionRadius()); }
+        };
         markers = new GpuMarkers();
         if (source.isGameplay()) { markers.prepareModels(); }
         unitTextures = new GpuTextures<>();
         annotationTextures = new GpuTextures<>();
-        unitBatch = new ModelBatch(GpuUnitShader.provider(), new GpuOpaqueSorter());
-        annotationBatch = new SpriteBatch();
-        hexText = new GpuHexText();
-        lines = new ShapeRenderer();
         ui = new GpuBoardUi(source, boardCamera, () -> playbackSpeed = playbackSpeed.next(), playback::togglePaused,
               loadingTheme == null ? new GpuBoardSkin() : loadingTheme);
         loadingTheme = null; // Ownership transfers to the UI; the loading stage may still borrow it until terrain is ready.
@@ -250,6 +250,38 @@ class GpuBattleView extends ApplicationAdapter {
             }
         });
         resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+    }
+
+    /** Recreate every board shader owner; lazy effect programs compile again when their effects are drawn. */
+    private void createSceneRenderers() {
+        terrain = new GpuTerrain(unitModels, unitBounds);
+        fireControl = new GpuFireControl();
+        tactical = new GpuTactical(terrain::tacticalSurface);
+        atmosphere = new GpuAtmosphere();
+        unitVisibility = new GpuUnitVisibility();
+        unitBatch = new ModelBatch(GpuUnitShader.provider(), new GpuOpaqueSorter());
+        annotationBatch = new SpriteBatch();
+        hexText = new GpuHexText();
+        lines = new ShapeRenderer();
+    }
+
+    /** Render-thread only. Null released owners so a failed shader compile can be retried safely. */
+    private void disposeSceneRenderers() {
+        // Join the terrain worker before releasing the model buffers it borrows.
+        if (terrain != null) { terrain.dispose(); terrain = null; }
+        if (fireControl != null) { fireControl.dispose(); fireControl = null; }
+        if (tactical != null) { tactical.dispose(); tactical = null; }
+        if (atmosphere != null) { atmosphere.dispose(); atmosphere = null; }
+        if (unitVisibility != null) { unitVisibility.dispose(); unitVisibility = null; }
+        if (unitBatch != null) { unitBatch.dispose(); unitBatch = null; }
+        if (annotationBatch != null) { annotationBatch.dispose(); annotationBatch = null; }
+        if (hexText != null) { hexText.dispose(); hexText = null; }
+        if (lines != null) { lines.dispose(); lines = null; }
+        attackEffects.dispose();
+        terrainEffects.dispose();
+        jumpJets.dispose();
+        waterImpacts.dispose();
+        effectDepth.dispose();
     }
 
     @Override
@@ -283,9 +315,74 @@ class GpuBattleView extends ApplicationAdapter {
 
     @Override
     public void render() {
+        if (ui != null && ui.takeAssetReloadRequest()) { reloadAssets(); }
+        if (waitingForAssetCapture || assetReloadFailed) {
+            if (source.isClosed()) { Gdx.app.exit(); return; }
+            ScreenUtils.clear(.045f, .065f, .075f, 1, true);
+            resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+            ui.draw();
+            return;
+        }
         try (TerrainSettings.Scope settings = TerrainSettings.use(terrain == null ? null : terrain.settings())) {
             renderFrame(settings);
+        } catch (RuntimeException failure) {
+            if (!reloadingAssets) { throw failure; }
+            assetReloadFailed(failure);
         }
+    }
+
+    /** The EDT rereads artwork first; only its completion hands GPU disposal back to the render thread. */
+    private void reloadAssets() {
+        pause();
+        reloadingAssets = true;
+        waitingForAssetCapture = true;
+        assetReloadFailed = false;
+        var application = Gdx.app;
+        SwingUtilities.invokeLater(() -> {
+            try {
+                source.reloadAssets();
+                application.postRunnable(() -> {
+                    if (disposed || source.isClosed()) { return; }
+                    waitingForAssetCapture = false;
+                    try {
+                        disposeSceneRenderers();
+                        clearUnitInstances();
+                        spriteModels.values().forEach(GpuUnitModel::dispose);
+                        spriteModels.clear();
+                        if (unitModels != null) { unitModels.dispose(); }
+                        camouflage.dispose();
+                        damageDisplay.dispose();
+                        unitTextures.dispose();
+                        annotationTextures.dispose();
+                        unitIcons.dispose();
+                        groundSurfaces.clear();
+                        attachments.clear();
+                        BoardRocks.reload();
+                        BoardScatter.reload();
+                        createSceneRenderers();
+                        cameraTerrainRevision = -1;
+                    } catch (RuntimeException failure) {
+                        assetReloadFailed(failure);
+                    }
+                });
+            } catch (java.io.IOException | RuntimeException failure) {
+                application.postRunnable(() -> {
+                    if (!disposed && !source.isClosed()) { assetReloadFailed(failure); }
+                });
+            }
+        });
+    }
+
+    private void assetReloadFailed(Exception failure) {
+        LOGGER.error("Cannot reload GPU board assets", failure);
+        // Lazy programs can fail inside a scene/shadow pass. Keep the retry panel on the window framebuffer.
+        FrameBuffer.unbind();
+        Gdx.gl.glDepthMask(true);
+        Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
+        reloadingAssets = false;
+        waitingForAssetCapture = false;
+        assetReloadFailed = true;
+        ui.assetReloadFinished(false);
     }
 
     private void renderFrame(TerrainSettings.Scope settings) {
@@ -520,6 +617,10 @@ class GpuBattleView extends ApplicationAdapter {
         renderEntrance();
         try (TerrainSettings.Scope ignored = TerrainSettings.use(null)) { ui.draw(); }
         renderStage(null);
+        if (reloadingAssets) {
+            reloadingAssets = false;
+            ui.assetReloadFinished(true);
+        }
         frames++;
     }
 
@@ -1169,11 +1270,11 @@ class GpuBattleView extends ApplicationAdapter {
             if (source.isEditor() && editorModifiers() == InputEvent.CTRL_DOWN_MASK && ui.acceptsCameraKeys()) {
                 for (Coords coords : source.editorBrush(hovered, boardGeneration)) {
                     if (scene.tile(coords) != null) {
-                        ring(coords, scene.tile(coords).elevation());
+                        ring(coords);
                     }
                 }
             } else {
-                ring(hovered, scene.tile(hovered).elevation());
+                ring(hovered);
             }
         }
         lines.end();
@@ -1238,11 +1339,8 @@ class GpuBattleView extends ApplicationAdapter {
         lines.triangle(cx, cy, bx, by, dx, dy);
     }
 
-    private void ring(Coords coords, float elevation) {
-        // The outline stays inside the hex: on the shared edge it lies in the terrain's plane there, and the part
-        // that spills onto a neighbour reads at that neighbour's level.
-        float z = tactical.deploymentActive() ? BoardTacticalGeometry.floatingZ(scene, coords, terrain::tacticalSurface)
-              : elevation * BoardGeometry.level() + .5f;
+    private void ring(Coords coords) {
+        float z = BoardTacticalGeometry.floatingZ(scene, coords, terrain::tacticalSurface);
         Vector3 center = BoardGeometry.center(coords, 0);
         Vector3 first = new Vector3();
         Vector3 second = new Vector3();
@@ -1312,7 +1410,7 @@ class GpuBattleView extends ApplicationAdapter {
         }
 
         private Pick pickSelection(int x, int y) {
-            if (scene == null) {
+            if (scene == null || reloadingAssets || assetReloadFailed) {
                 return new Pick(null, Entity.NONE);
             }
             var ray = boardCamera.camera.getPickRay(x, y, 0, ui.bottomPixels(),
@@ -1360,6 +1458,7 @@ class GpuBattleView extends ApplicationAdapter {
 
         @Override
         public boolean touchDown(int x, int y, int pointer, int button) {
+            if (reloadingAssets || assetReloadFailed) { return true; }
             if (boardGesture || ui.hit(x, y)) {
                 return false;
             }
@@ -1482,6 +1581,7 @@ class GpuBattleView extends ApplicationAdapter {
 
         @Override
         public boolean scrolled(float amountX, float amountY) {
+            if (reloadingAssets || assetReloadFailed) { return true; }
             if (!ui.hit(Gdx.input.getX(), Gdx.input.getY())) {
                 if (source.isEditor() && editorModifiers() == InputEvent.CTRL_DOWN_MASK) {
                     if (!boardGesture && ui.acceptsCameraKeys() && !ui.isTextEditing()) {
@@ -1522,6 +1622,7 @@ class GpuBattleView extends ApplicationAdapter {
             if (!source.chatActive() && ui.key(key, true)) {
                 return true;
             }
+            if (reloadingAssets || assetReloadFailed) { return true; }
             if (!ui.acceptsCameraKeys() && !isWindowShortcut(key)) {
                 return true;
             }
@@ -1797,27 +1898,15 @@ class GpuBattleView extends ApplicationAdapter {
 
     @Override
     public void dispose() {
+        disposed = true;
         if (loadingStage != null) {
             loadingStage.dispose();
             if (loadingTheme != null) { loadingTheme.dispose(); }
         }
         playback.clear();
         groundSurfaces.clear();
-        animators.clear();
-        unitInstances.clear();
-        unitBounds.begin();
-        unitAnchors.clear();
-        unitTints.clear();
-        unitDamage.clear();
-        equipmentAppearance.clear();
-        upperBodyTurns.clear();
-        armFlips.clear();
-        unitFootprints.clear();
-        hover.clear();
-        unitPicking.clear();
-        if (hexText != null) {
-            hexText.dispose();
-        }
+        clearUnitInstances();
+        disposeSceneRenderers();
         if (ui != null) {
             ui.dispose();
         }
@@ -1831,48 +1920,35 @@ class GpuBattleView extends ApplicationAdapter {
         }
         camouflage.dispose();
         damageDisplay.dispose();
-        jumpJets.dispose();
         unitIcons.dispose();
-        attackEffects.dispose();
-        terrainEffects.dispose();
-        effectDepth.dispose();
-        waterImpacts.dispose();
-        if (unitBatch != null) {
-            unitBatch.dispose();
-        }
-        if (annotationBatch != null) {
-            annotationBatch.dispose();
-        }
         if (annotationTextures != null) {
             annotationTextures.dispose();
         }
         if (unitTextures != null) {
             unitTextures.dispose();
         }
-        if (terrain != null) {
-            terrain.dispose();
-        }
-        if (fireControl != null) {
-            fireControl.dispose();
-        }
-        if (tactical != null) {
-            tactical.dispose();
-        }
-        if (atmosphere != null) {
-            atmosphere.dispose();
-        }
-        if (unitVisibility != null) {
-            unitVisibility.dispose();
-        }
         if (markers != null) {
             markers.dispose();
-        }
-        if (lines != null) {
-            lines.dispose();
         }
         fieldOfView.dispose();
         if (source != null) {
             source.close();
         }
+    }
+
+    /** Instances borrow model buffers and textures, so drop them before either cache is disposed. */
+    private void clearUnitInstances() {
+        animators.clear();
+        unitInstances.clear();
+        unitBounds.begin();
+        unitAnchors.clear();
+        unitTints.clear();
+        unitDamage.clear();
+        equipmentAppearance.clear();
+        upperBodyTurns.clear();
+        armFlips.clear();
+        unitFootprints.clear();
+        hover.clear();
+        unitPicking.clear();
     }
 }

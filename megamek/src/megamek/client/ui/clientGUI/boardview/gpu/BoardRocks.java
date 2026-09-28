@@ -9,9 +9,12 @@ import java.util.Map;
 final class BoardRocks {
     static final int BLOCKS = 8;
     static final int BOULDERS = 8;
-    private static final Map<String, List<BoardShape>> ROCKS = loadRocks();
+    private static volatile Map<String, List<BoardShape>> rocks = loadRocks();
 
     private BoardRocks() { }
+
+    /** Publish complete immutable geometry; terrain workers never observe a partially reloaded kit. */
+    static void reload() { rocks = loadRocks(); }
 
     /** One geology rule for rough, rim, slope, cliff and scattered rocks. */
     static BoardShape rock(BoardScene.Surface surface, int variant, TerrainLod detail) {
@@ -29,7 +32,7 @@ final class BoardRocks {
     static BoardShape rock(boolean block, int variant, TerrainLod detail) {
         // Terrain's first two sampling levels share rock LOD0, preserving the existing transition distances.
         int level = Math.max(0, detail.ordinal() - 1);
-        return ROCKS.get(name(block, variant)).get(level);
+        return rocks.get(name(block, variant)).get(level);
     }
 
     static String name(boolean block, int variant) {

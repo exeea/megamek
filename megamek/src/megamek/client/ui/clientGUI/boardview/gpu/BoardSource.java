@@ -84,6 +84,8 @@ interface BoardSource extends AutoCloseable {
     record PhaseStatus(String text, boolean blocking) { }
     Frame takeFrame();
     void refresh();
+    /** EDT-only: discard file-backed artwork caches before publishing a fresh snapshot. */
+    default void reloadAssets() throws java.io.IOException { refresh(); }
     UiPreferences uiPreferences();
     PhaseStatus phaseStatus();
     GpuAtmosphereControls atmosphere();

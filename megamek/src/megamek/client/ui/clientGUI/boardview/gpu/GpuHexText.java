@@ -73,11 +73,10 @@ final class GpuHexText implements Disposable {
     private int tuning = -1;
 
     GpuHexText() {
-        String path = "megamek/client/ui/clientGUI/boardview/gpu/";
-        String vertex = Gdx.files.classpath(path + "hex-text.vert").readString("UTF-8");
-        String fragment = Gdx.files.classpath(path + "hex-text.frag").readString("UTF-8")
-              .replace("// GROUND_LAYER", Gdx.files.classpath(path + "ground-layer.glsl").readString("UTF-8"))
-              .replace("// CAMERA_DEPTH", Gdx.files.classpath(path + "camera-depth.glsl").readString("UTF-8"));
+        String vertex = GpuShaderSource.read("hex-text.vert");
+        String fragment = GpuShaderSource.read("hex-text.frag")
+              .replace("// GROUND_LAYER", GpuShaderSource.read("ground-layer.glsl"))
+              .replace("// CAMERA_DEPTH", GpuShaderSource.read("camera-depth.glsl"));
         shader = new ShaderProgram(vertex, fragment);
         if (!shader.isCompiled()) {
             String log = shader.getLog();

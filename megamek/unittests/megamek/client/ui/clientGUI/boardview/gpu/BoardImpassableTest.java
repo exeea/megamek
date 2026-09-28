@@ -109,7 +109,7 @@ class BoardImpassableTest {
                 var hover = BoardImpassable.fills(scene, a, false);
                 var planning = BoardImpassable.fills(scene, null, true);
                 assertEquals(Set.of(a, b), normal.stream()
-                      .map(fill -> BoardTacticalGeometry.borderCoords(scene, fill.border()))
+                      .map(fill -> BoardTacticalGeometry.anchorCoords(scene, fill.planeAnchor()))
                       .collect(java.util.stream.Collectors.toSet()));
                 assertEquals(normal.stream().map(BoardTactical.Fill::contours).toList(),
                       hover.stream().map(BoardTactical.Fill::contours).toList(), "Hover changes ink, never marker shape");
@@ -117,12 +117,12 @@ class BoardImpassableTest {
                       planning.stream().map(BoardTactical.Fill::contours).toList());
                 for (int i = 0; i < normal.size(); i++) {
                     assertTrue((planning.get(i).argb() >>> 24) > (normal.get(i).argb() >>> 24));
-                    if (BoardTacticalGeometry.borderCoords(scene, normal.get(i).border()).equals(b)) {
+                    if (BoardTacticalGeometry.anchorCoords(scene, normal.get(i).planeAnchor()).equals(b)) {
                         assertEquals(normal.get(i), hover.get(i), "Only the hovered hex is emphasized");
                     }
                 }
                 assertEquals(normal, BoardImpassable.fills(scene, new Coords(0, 0), false));
-                assertTrue(normal.stream().allMatch(fill -> fill.border().floating()));
+                assertTrue(normal.stream().allMatch(fill -> fill.planeAnchor() != null));
             }
         }
     }
@@ -175,7 +175,7 @@ class BoardImpassableTest {
         assertFalse(triangles.isEmpty());
         for (var triangle : triangles) {
             for (Vector3 vertex : List.of(triangle.a(), triangle.b(), triangle.c())) {
-                assertEquals(216 + .5f + GpuBattleView.SELECTION_BOB_HEIGHT_OFFSET, vertex.z, .001);
+                assertEquals(216 + BoardTacticalGeometry.HEX_PLANE_CLEARANCE, vertex.z, .001);
             }
         }
     }

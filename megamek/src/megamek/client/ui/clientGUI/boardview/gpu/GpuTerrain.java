@@ -117,14 +117,11 @@ final class GpuTerrain implements Disposable {
           GpuCloudShadow.vertex(GpuUnitShader.linearVertex(DefaultShader.getDefaultVertexShader())),
           GpuCloudShadow.fragment(GpuUnitShader.linearFragment(DefaultShader.getDefaultFragmentShader()), false)) {
         private final DefaultShader.Config groundShader = new DefaultShader.Config(GpuRoads.vertex(config.vertexShader),
-              rainFragment(GpuCloudShadow.fragment(Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-normal.frag")
-                    .readString(), true)));
+              rainFragment(GpuCloudShadow.fragment(GpuShaderSource.read("terrain-normal.frag"), true)));
         private final DefaultShader.Config corniceShader = new DefaultShader.Config(config.vertexShader,
-              rainFragment(GpuCloudShadow.fragment(Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-cornice.frag")
-                    .readString(), true)));
+              rainFragment(GpuCloudShadow.fragment(GpuShaderSource.read("terrain-cornice.frag"), true)));
         private final DefaultShader.Config cliffShader = new DefaultShader.Config(config.vertexShader,
-              rainFragment(GpuCloudShadow.fragment(Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-cliff.frag")
-                    .readString(), true)));
+              rainFragment(GpuCloudShadow.fragment(GpuShaderSource.read("terrain-cliff.frag"), true)));
         private final DefaultShader.Config sculptShader = new DefaultShader.Config(GpuSurfaceBlend.vertex(config.vertexShader),
               litFragment("terrain-sculpt.frag"));
         private final DefaultShader.Config foliageShader = new DefaultShader.Config(config.vertexShader,
@@ -132,13 +129,11 @@ final class GpuTerrain implements Disposable {
         private final DefaultShader.Config instancedFoliageShader = new DefaultShader.Config(
               GpuTreeInstances.vertex(config.vertexShader), foliageShader.fragmentShader);
         private final DefaultShader.Config vegetationShader = new DefaultShader.Config(GpuGroundCover.vertex(config.vertexShader),
-              rainFragment(GpuCloudShadow.fragment(Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-vegetation.frag")
-                    .readString(), true)));
+              rainFragment(GpuCloudShadow.fragment(GpuShaderSource.read("terrain-vegetation.frag"), true)));
         private final DefaultShader.Config biomeVegetationShader = new DefaultShader.Config(
               GpuBiomeVegetation.vertex(config.vertexShader), vegetationShader.fragmentShader);
         private final DefaultShader.Config waterShader = new DefaultShader.Config(
-              GpuWaterfall.vertex(config.vertexShader), rainFragment(GpuCloudShadow.fragment(Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/water-surface.frag")
-                    .readString(), true)));
+              GpuWaterfall.vertex(config.vertexShader), rainFragment(GpuCloudShadow.fragment(GpuShaderSource.read("water-surface.frag"), true)));
         private final DefaultShader.Config liquidShader = new DefaultShader.Config(config.vertexShader,
               GpuLiquidShader.fragment(config.fragmentShader));
         private final DefaultShader.Config waterLiquidShader = new DefaultShader.Config(config.vertexShader,
@@ -440,7 +435,7 @@ final class GpuTerrain implements Disposable {
         }
     }, terrainBatch);
     private final ModelBatch depthBatch = new ModelBatch(GpuTreeInstances.depthProvider(new DepthShader.Config(null,
-          Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/shadow-depth.frag").readString())),
+          GpuShaderSource.read("shadow-depth.frag"))),
           new GpuOpaqueSorter());
 
     record ShadingDetail(float ripple, float rain) { }
@@ -572,25 +567,24 @@ final class GpuTerrain implements Disposable {
 
     /** A custom lit surface's fragment shader: its source with cloud shadows and the shared functions. */
     private static String litFragment(String file) {
-        String source = Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/" + file).readString();
+        String source = GpuShaderSource.read(file);
         return rainFragment(GpuCloudShadow.fragment(source, true));
     }
 
     /** Every custom surface shares the light model, rain field, lighting, geometry shadows and water optics. */
     private static String rainFragment(String source) {
-        String functions = Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/light-model.glsl")
-              .readString();
-        functions += Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/rain-surface.glsl").readString();
-        functions += Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/surface-lighting.glsl").readString();
-        functions += Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-meadow.glsl").readString();
-        functions += Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-patterns.glsl").readString();
-        functions += Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/water-optics.glsl").readString();
+        String functions = GpuShaderSource.read("light-model.glsl");
+        functions += GpuShaderSource.read("rain-surface.glsl");
+        functions += GpuShaderSource.read("surface-lighting.glsl");
+        functions += GpuShaderSource.read("terrain-meadow.glsl");
+        functions += GpuShaderSource.read("terrain-patterns.glsl");
+        functions += GpuShaderSource.read("water-optics.glsl");
         if (source.contains("// sculpt-material-functions") || source.contains("// biome-water-functions")) {
-            functions += Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-biome-mask.glsl").readString();
+            functions += GpuShaderSource.read("terrain-biome-mask.glsl");
         }
         if (source.contains("// sculpt-material-functions")) {
-            functions += Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-materials.glsl").readString();
-            functions += Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-biome.glsl").readString();
+            functions += GpuShaderSource.read("terrain-materials.glsl");
+            functions += GpuShaderSource.read("terrain-biome.glsl");
         }
         return source.replace("void main() {", functions + "\nvoid main() {");
     }
@@ -1078,7 +1072,7 @@ final class GpuTerrain implements Disposable {
                 if (tiles != scene.tiles()) {
                     for (Coords chunk : updateMarkingsAtlas(scene)) {
                         buildMarkings(scene, chunks.get(chunk.getX() * chunkRows + chunk.getY()),
-                              chunk.getX() * CHUNK_SIZE, chunk.getY() * CHUNK_SIZE);
+                              chunk.getX() * CHUNK_SIZE, chunk.getY() * CHUNK_SIZE, floor);
                     }
                     tactical.publish();
                 }
@@ -1444,7 +1438,7 @@ final class GpuTerrain implements Disposable {
                 Chunk cached = detailCache.get(candidate);
                 if (cached != null && cached.lod == lod) {
                     detailCache.remove(candidate);
-                    buildMarkings(coverScene, cached, candidate / chunkRows * CHUNK_SIZE, candidate % chunkRows * CHUNK_SIZE);
+                    buildMarkings(coverScene, cached, candidate / chunkRows * CHUNK_SIZE, candidate % chunkRows * CHUNK_SIZE, floor);
                     replaceDetail(candidate, cached);
                     return true;
                 }
@@ -1555,7 +1549,7 @@ final class GpuTerrain implements Disposable {
             for (Coords at : markingChanges) {
                 int index = at.getX() * chunkRows + at.getY();
                 if (!rebuild.replacements.containsKey(index)) {
-                    buildMarkings(scene, chunks.get(index), at.getX() * CHUNK_SIZE, at.getY() * CHUNK_SIZE);
+                    buildMarkings(scene, chunks.get(index), at.getX() * CHUNK_SIZE, at.getY() * CHUNK_SIZE, plan.floor());
                 }
             }
         }
@@ -2156,8 +2150,8 @@ final class GpuTerrain implements Disposable {
             chunk.depthTerrain = new GpuTerrainDepth(chunk.opaque);
             if (chunk.waterField != null) { chunk.waterField.finish(); }
             // The floating markings remain visible when only their raised edge enters the viewport.
-            chunk.bounds.ext(chunk.bounds.max.x, chunk.bounds.max.y, chunk.bounds.max.z + BoardGeometry.level() / 3);
-            buildMarkings(scene, chunk, x, y);
+            chunk.bounds.ext(chunk.bounds.max.x, chunk.bounds.max.y, chunk.bounds.max.z + BoardTacticalGeometry.HEX_PLANE_CLEARANCE);
+            buildMarkings(scene, chunk, x, y, floor);
             // ModelInstance copies materials; animate those owned by the rendered instances.
             for (List<ModelInstance> layer : List.of(chunk.opaque, chunk.water)) {
                 for (ModelInstance instance : layer) {
@@ -2183,7 +2177,7 @@ final class GpuTerrain implements Disposable {
         }
     }
 
-    private void buildMarkings(BoardScene scene, Chunk chunk, int startX, int startY) {
+    private void buildMarkings(BoardScene scene, Chunk chunk, int startX, int startY, float bottom) {
         chunk.tactical.forEach(instance -> instance.model.dispose());
         chunk.tactical.clear();
         Layer marks = new Layer();
@@ -2195,8 +2189,11 @@ final class GpuTerrain implements Disposable {
                 }
                 TextureRegion art = tactical.region(tile.coords());
                 Material mark = material(art.getTexture(), true);
+                // A replacement chunk may not be installed yet; use its own completed surface and build settings.
+                float z = BoardTacticalGeometry.floatingZ(scene, tile.coords(),
+                      coords -> tacticalSurface(scene, chunk, coords, bottom));
                 // The shared blended material tests opaque depth without hiding later annotations.
-                marks.add(mark, mesh -> markingHex(mesh, tile, art));
+                marks.add(mark, mesh -> markingHex(mesh, tile.coords(), art, z));
             }
         }
         marks.finish(chunk.tactical);
@@ -2206,16 +2203,19 @@ final class GpuTerrain implements Disposable {
     BoardTacticalGeometry.Surface tacticalSurface(Coords coords) {
         if (coverScene == null || coverScene.tile(coords) == null) { return null; }
         Chunk chunk = chunks.get(coords.getX() / CHUNK_SIZE * chunkRows + coords.getY() / CHUNK_SIZE);
+        return installedSettings.call(() -> tacticalSurface(coverScene, chunk, coords, floor));
+    }
+
+    /** Borrow a specific chunk's support, including during construction or while restoring a cached detail level. */
+    private BoardTacticalGeometry.Surface tacticalSurface(BoardScene scene, Chunk chunk, Coords coords, float bottom) {
         TileMesh tile = chunk.tileMeshes.get(coords);
         BoardTacticalGeometry.Surface retained = tile.support == null ? null : tile.support.get();
         if (retained != null) { return retained; }
         CpuGeometry cached = cpuGeometry.get(tile);
         if (cached == null) {
-            cached = installedSettings.call(() -> {
-                BoardSurface surface = new BoardSurface(coverScene, coverScene.tile(coords), chunk.lod);
-                return new CpuGeometry(BoardTacticalGeometry.Surface.of(surface, coverScene, floor),
-                      surface.tile.liquid().present() ? surface.waterGeometry() : null);
-            });
+            BoardSurface surface = new BoardSurface(scene, scene.tile(coords), chunk.lod);
+            cached = new CpuGeometry(BoardTacticalGeometry.Surface.of(surface, scene, bottom),
+                  surface.tile.liquid().present() ? surface.waterGeometry() : null);
             rememberGeometry(tile, cached);
         }
         return cached.tactical();
@@ -2905,11 +2905,10 @@ final class GpuTerrain implements Disposable {
               region.getV() + v * (region.getV2() - region.getV()), color);
     }
 
-    /** One horizontal plane per hex; terrain and structures can occlude it, but cannot bend its outline. */
-    private static void markingHex(MeshPartBuilder mesh, BoardScene.Tile tile, TextureRegion region) {
-        Coords coords = tile.coords();
+    /** The same flat annotation plane as native shapes; structures can cut through its transparent artwork. */
+    private static void markingHex(MeshPartBuilder mesh, Coords coords, TextureRegion region, float z) {
         Vector3 center = BoardGeometry.center(coords, 0);
-        center.z = BoardGeometry.surfaceZ(tile) + BoardGeometry.level() / 3;
+        center.z = z;
         for (int edge = 0; edge < 6; edge++) {
             Vector3 a = BoardGeometry.corner(coords, 0, edge);
             Vector3 b = BoardGeometry.corner(coords, 0, edge + 1);

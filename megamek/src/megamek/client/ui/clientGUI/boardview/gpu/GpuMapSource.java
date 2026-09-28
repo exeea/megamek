@@ -170,6 +170,17 @@ final class GpuMapSource implements BoardSource {
               atmosphere.settings(game.getPlanetaryConditions(), board.isSpace()));
     }
 
+    @Override
+    public void reloadAssets() {
+        if (!SwingUtilities.isEventDispatchThread()) { throw new IllegalStateException("Map capture belongs to the EDT"); }
+        if (closed) { return; }
+        megamek.common.util.ImageUtil.reloadImages();
+        artwork.reload();
+        images.clear();
+        dirtyAll();
+        refresh();
+    }
+
     private void dirtyAll() { terrainDirty = true; artwork.clear(); }
     private static void onSwing(Runnable action) {
         if (SwingUtilities.isEventDispatchThread()) { action.run(); } else { SwingUtilities.invokeLater(action); }

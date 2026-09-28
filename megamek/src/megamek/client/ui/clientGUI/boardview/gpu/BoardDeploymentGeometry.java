@@ -44,7 +44,7 @@ final class BoardDeploymentGeometry {
             BoardTactical.Fill previous = result.get(coords);
             int argb = previous == null ? fill.argb() : over(fill.argb(), previous.argb());
             result.put(coords, argb == fill.argb() ? fill : new BoardTactical.Fill(fill.contours(), fill.winding(),
-                  argb, fill.playback(), fill.border()));
+                  argb, fill.playback(), fill.border(), fill.planeAnchor()));
         }
         return result;
     }
@@ -86,7 +86,7 @@ final class BoardDeploymentGeometry {
                 }
                 contours.add(new BoardTactical.Contour(points));
             }
-            var flat = new BoardTactical.HexBorder(border.anchor(), border.padding(), FLAT_BAND_WIDTH, border.scale(), false);
+            var flat = new BoardTactical.HexBorder(border.anchor(), border.padding(), FLAT_BAND_WIDTH, border.scale());
             result.add(new BoardTactical.Fill(contours, Path2D.WIND_NON_ZERO, fill.argb(), fill.playback(), flat));
         }
         return result;

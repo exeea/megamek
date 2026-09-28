@@ -487,6 +487,10 @@ final class GpuBoardUi implements Disposable {
 
     void terrainProgress(int percent) { tuning.terrainProgress(percent); }
 
+    boolean takeAssetReloadRequest() { return tuning.takeAssetReloadRequest(); }
+
+    void assetReloadFinished(boolean success) { tuning.assetReloadFinished(success); }
+
     float overviewHexPixels() { return tuning.overviewHexPixels(); }
 
     float buildingOpacity() {

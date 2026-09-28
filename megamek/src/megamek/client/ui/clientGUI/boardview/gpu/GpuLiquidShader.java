@@ -1,7 +1,6 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.Renderable;
@@ -27,8 +26,7 @@ final class GpuLiquidShader {
     private GpuLiquidShader() { }
 
     static String fragment(String source) {
-        String functions = Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/liquid-animation.glsl")
-              .readString("UTF-8");
+        String functions = GpuShaderSource.read("liquid-animation.glsl");
         return source.replace("texture2D(u_diffuseTexture, v_diffuseUV)", "liquidColor")
               .replace("texture2D(u_emissiveTexture, v_emissiveUV)", "liquidColor")
               .replace("void main() {", functions + "\nvoid main() {\nvec4 liquidColor = liquidSample(v_diffuseUV);\n");

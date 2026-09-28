@@ -182,7 +182,7 @@ class GpuHexMasksSmokeTest {
         var generic = new BoardTactical.Fill(fill.contours(), fill.winding(), fill.argb(), fill.playback());
         var border = fill.border();
         var floating = new BoardTactical.Fill(fill.contours(), fill.winding(), fill.argb(), fill.playback(),
-              new BoardTactical.HexBorder(border.anchor(), border.padding(), border.width(), border.scale(), true));
+              border, border.anchor());
         for (BoardTactical unsupported : List.of(new BoardTactical(List.of(fill, generic), List.of()),
               new BoardTactical(List.of(floating), List.of()),
               new BoardTactical(List.of(fill, fill, fill, fill, fill), List.of()),

@@ -29,6 +29,20 @@ This presentation is shared by both camera views and map previews. It does not c
 picking or movement legality. Geometry is retained across camera movement and updated when terrain
 or emphasis changes, without clipping the stripes to the terrain mesh.
 
+Flat hex annotations share `BoardTacticalGeometry.floatingZ`: the owning hex's highest finished
+ground/water surface plus `HEX_PLANE_CLEARANCE`. Movement envelopes and modifiers, path arrows,
+flight indicators, firing solutions, sensor/objective bands, and measurement/hover/editor cursors
+use that plane in both cameras. Strafing/VTOL/orbital footprints, Nova CEWS and demolition selections,
+predicted heat-map fills, ECM/ECCM source rings, embedded-board indicators and map-sheet borders
+also use it. The raster compatibility layer uses the same helper with its completed terrain chunk,
+including editor deployment/INVALID overlays and crane highlights, across terrain edits and detail changes.
+Camera-facing tactical labels use the same height. Shape painters opt in through
+`BoardTacticalGraphics.onHexPlane`; individual hex-border painters can request the same placement.
+Unit bands retain their animated unit support, range walls retain their upright/overhead presentations,
+and terrain tints still follow the ground. Ruler lines, drift arrows, C3 links and flyover routes span
+hexes and retain terrain-following placement. Ordinary hex text retains its roof/depth-aware placement;
+weapon-range letters retain their camera-dependent clearance.
+
 The map browser's **Preview in 3D** action uses a temporary board view. Editing instead reuses the
 editor's own `BoardView`. All changes run through the existing editor methods on the Swing thread;
 the render thread receives snapshots and submits picked hexes with their board generation. Picks

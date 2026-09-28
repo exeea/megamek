@@ -42,7 +42,7 @@ public final class BoardArtwork {
     private final Map<Coords, GroundArtwork> groundArtwork = new HashMap<>();
     private final Map<Coords, DecalArtwork> featureArtwork = new HashMap<>();
     private final Map<String, Image> groundNormals = new HashMap<>();
-    private final HexTileset gpuTileset;
+    private HexTileset gpuTileset;
     private Image hexMask;
     private static final Font LABEL_FONT = new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 10);
 
@@ -98,12 +98,22 @@ public final class BoardArtwork {
     }
 
     public BoardArtwork() {
-        gpuTileset = new HexTileset(new File(Configuration.dataDir(), "models/board/tileset"));
+        reload();
+    }
+
+    /** Reread the definitions and source images, including normal maps that ordinary hex invalidation retains. */
+    public void reload() {
+        var replacement = new HexTileset(new File(Configuration.dataDir(), "models/board/tileset"));
         try {
-            gpuTileset.loadFromFile("saxarba.tileset");
+            replacement.loadFromFile("saxarba.tileset");
         } catch (IOException exception) {
             throw new IllegalStateException("Cannot load the 3D board's Saxarba tileset", exception);
         }
+        if (gpuTileset != null) { gpuTileset.close(); }
+        gpuTileset = replacement;
+        clear();
+        groundNormals.clear();
+        hexMask = null;
     }
 
     public HexImage capture(Board board, Coords coords, boolean includeArtwork) {

@@ -1,7 +1,6 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.Shader;
@@ -11,7 +10,6 @@ import com.badlogic.gdx.graphics.g3d.utils.DefaultShaderProvider;
 
 /** Unit paint and damage over libGDX's lighting/shadows. The ModelBatch owns the provider and its shaders. */
 final class GpuUnitShader extends DefaultShader {
-    private static final String SHADERS = "megamek/client/ui/clientGUI/boardview/gpu/";
     private static final String MAIN = "void main() {";
 
     private final int rotation = register("u_camoRotation");
@@ -43,14 +41,14 @@ final class GpuUnitShader extends DefaultShader {
     // These four insertion points are the source contract with the pinned libGDX version.
     // Keep lighting/shadow code upstream, and fail explicitly if an upgrade changes this contract.
     static String vertexSource(String source) {
-        String declarations = Gdx.files.classpath(SHADERS + "unit-material.vert").readString("UTF-8");
+        String declarations = GpuShaderSource.read("unit-material.vert");
         source = replaceOnce(source, MAIN, declarations + "\n" + MAIN + "\n    unitMaterialCoordinates();\n", "vertex");
         return replaceOnce(source, "v_diffuseUV = u_diffuseUVTransform.xy + a_texCoord0 * u_diffuseUVTransform.zw;",
               "v_diffuseUV = unitDiffuseUV();", "vertex");
     }
 
     static String fragmentSource(String source) {
-        String declarations = Gdx.files.classpath(SHADERS + "unit-material.frag").readString("UTF-8");
+        String declarations = GpuShaderSource.read("unit-material.frag");
         source = replaceOnce(source, MAIN, declarations + "\n" + MAIN, "fragment");
         String emissive = "#if defined(emissiveTextureFlag) && defined(emissiveColorFlag)";
         return replaceOnce(source, emissive, "diffuse.rgb = unitOverlays(diffuse.rgb);\n" + emissive, "fragment");
@@ -86,7 +84,7 @@ final class GpuUnitShader extends DefaultShader {
     }
 
     private static String lightModel() {
-        return Gdx.files.classpath(SHADERS + "light-model.glsl").readString("UTF-8");
+        return GpuShaderSource.read("light-model.glsl");
     }
 
     private static String replaceOnce(String source, String anchor, String replacement, String stage) {

@@ -101,8 +101,7 @@ final class GpuEffectBatch implements Disposable {
     }
 
     private void create() {
-        String path = "megamek/client/ui/clientGUI/boardview/gpu/";
-        shader = new ShaderProgram(Gdx.files.classpath(path + "effects.vert"), Gdx.files.classpath(path + fragment + ".frag"));
+        shader = new ShaderProgram(GpuShaderSource.read("effects.vert"), GpuShaderSource.read(fragment + ".frag"));
         if (!shader.isCompiled()) {
             String log = shader.getLog();
             shader.dispose();

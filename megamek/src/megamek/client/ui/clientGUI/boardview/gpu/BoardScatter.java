@@ -21,7 +21,7 @@ final class BoardScatter {
 
     // Scene capture needs only placement; defer geometry loading until a renderer requests a shape.
     private static final class Kit {
-        static final Map<String, List<BoardShape>> SHAPES = load();
+        static volatile Map<String, List<BoardShape>> shapes = load();
 
         private static Map<String, List<BoardShape>> load() {
             Map<String, BoardShape> shapes = BoardShape.loadKit("scatter");
@@ -36,8 +36,11 @@ final class BoardScatter {
     }
 
     static BoardShape shape(String name) {
-        return Kit.SHAPES.get(name).getFirst();
+        return Kit.shapes.get(name).getFirst();
     }
+
+    /** Replace the complete immutable kit, including all authored levels of detail. */
+    static void reload() { Kit.shapes = Kit.load(); }
 
     /** Cosmetic stones always use the dedicated eight-triangle open-base meshes. */
     static BoardShape rock(BoardScene.Surface surface, int variant, boolean slab) {

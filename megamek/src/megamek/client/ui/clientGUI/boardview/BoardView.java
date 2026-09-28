@@ -1360,7 +1360,7 @@ public final class BoardView extends AbstractBoardView
         if (game.getPhase().isFiring() && (!gpuCapture || graphics2D instanceof BoardTacticalGraphics)) {
             BoardTacticalGraphics.draw(graphics2D, BoardTactical.Playback.HIDE_DURING_MOVEMENT, graphics -> {
                 for (Coords c : strafingCoords) {
-                    drawHexBorder(graphics, getHexLocation(c), Color.yellow, 0, 3);
+                    drawHexBorder(graphics, getHexLocation(c), Color.yellow, 0, 3, true);
                 }
             });
         }
@@ -1383,10 +1383,10 @@ public final class BoardView extends AbstractBoardView
                 graphics2D.setColor(Color.yellow);
                 graphics2D.drawLine(start.x, start.y, end.x, end.y);
 
-                drawRulerCrosshair(graphics2D, end, rulerEndColor);
+                drawRulerCrosshair(graphics2D, rulerEnd, rulerEndColor);
             }
 
-            drawRulerCrosshair(graphics2D, start, rulerStartColor);
+            drawRulerCrosshair(graphics2D, rulerStart, rulerStartColor);
         }
 
     }
@@ -1867,16 +1867,15 @@ public final class BoardView extends AbstractBoardView
         graphics.setColor(UIUtil.uiGreen());
         graphics.setStroke(new BasicStroke((float) (2.0 * scale)));
 
+        Shape border = AffineTransform.getScaleInstance(scale, scale)
+              .createTransformedShape(HexDrawUtilities.getHexFullBorderLine(0));
         for (Coords hex : highlightedEntityHexes) {
-            Point hexPos = getHexLocation(hex);
-            Shape hexBorder = HexDrawUtilities.getHexFullBorderLine(0);
-            Shape scaled = AffineTransform
-                  .getScaleInstance(scale, scale)
-                  .createTransformedShape(hexBorder);
-            Shape translated = AffineTransform
-                  .getTranslateInstance(hexPos.x, hexPos.y)
-                  .createTransformedShape(scaled);
-            graphics.draw(translated);
+            Graphics2D local = BoardTacticalGraphics.onHexPlane(graphics, getHexLocation(hex));
+            try {
+                local.draw(border);
+            } finally {
+                local.dispose();
+            }
         }
     }
 
@@ -1899,34 +1898,31 @@ public final class BoardView extends AbstractBoardView
             return;
         }
         boolean hazard = GUIP.getDemolitionChargeHazardOutline();
-        Stroke oldStroke = graphics.getStroke();
+        Shape border = AffineTransform.getScaleInstance(scale, scale)
+              .createTransformedShape(HexDrawUtilities.getHexFullBorderLine(0));
         for (Coords hex : demolitionChargeHighlightHexes) {
-            Point hexPos = getHexLocation(hex);
-            Shape hexBorder = HexDrawUtilities.getHexFullBorderLine(0);
-            Shape scaled = AffineTransform
-                  .getScaleInstance(scale, scale)
-                  .createTransformedShape(hexBorder);
-            Shape border = AffineTransform
-                  .getTranslateInstance(hexPos.x, hexPos.y)
-                  .createTransformedShape(scaled);
-            if (hazard) {
-                float boldWidth = (float) Math.max(3.0, 4.0 * scale);
-                // Black base pass, then a yellow dashed pass on top so the gaps show black underneath - a hazard stripe.
-                graphics.setColor(Color.BLACK);
-                graphics.setStroke(new BasicStroke(boldWidth, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER));
-                graphics.draw(border);
-                float dash = (float) Math.max(6.0, 10.0 * scale);
-                graphics.setColor(DEMO_CHARGE_HAZARD_COLOR);
-                graphics.setStroke(new BasicStroke(boldWidth, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER,
-                      10.0f, new float[] { dash, dash }, 0.0f));
-                graphics.draw(border);
-            } else {
-                graphics.setColor(UIUtil.uiGreen());
-                graphics.setStroke(new BasicStroke((float) (2.0 * scale)));
-                graphics.draw(border);
+            Graphics2D local = BoardTacticalGraphics.onHexPlane(graphics, getHexLocation(hex));
+            try {
+                if (hazard) {
+                    float boldWidth = (float) Math.max(3.0, 4.0 * scale);
+                    // Black base pass, then a yellow dashed pass on top so the gaps show black underneath - a hazard stripe.
+                    local.setColor(Color.BLACK);
+                    local.setStroke(new BasicStroke(boldWidth, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER));
+                    local.draw(border);
+                    float dash = (float) Math.max(6.0, 10.0 * scale);
+                    local.setColor(DEMO_CHARGE_HAZARD_COLOR);
+                    local.setStroke(new BasicStroke(boldWidth, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER,
+                          10.0f, new float[] { dash, dash }, 0.0f));
+                    local.draw(border);
+                } else {
+                    local.setColor(UIUtil.uiGreen());
+                    local.setStroke(new BasicStroke((float) (2.0 * scale)));
+                    local.draw(border);
+                }
+            } finally {
+                local.dispose();
             }
         }
-        graphics.setStroke(oldStroke);
     }
 
     /**
@@ -1961,10 +1957,10 @@ public final class BoardView extends AbstractBoardView
                     if (!(boardGraphics instanceof BoardTacticalGraphics)) {
                         continue;
                     }
-                    // Keep the blast footprint on the ground; only its centre symbol floats.
+                    // Each blast hex shares the flat annotation plane; the centre symbol remains a native marker.
                     for (Coords affected : coords.allAtDistanceOrLess(orbitalBombardment.getRadius())) {
                         drawHexBorder(boardGraphics, getHexLocation(affected),
-                              new Color(BoardMarker.Kind.ORBITAL_INCOMING.rgb()));
+                              new Color(BoardMarker.Kind.ORBITAL_INCOMING.rgb()), true);
                     }
                     continue;
                 }
@@ -3294,29 +3290,34 @@ public final class BoardView extends AbstractBoardView
     }
 
     /**
-     * Draws a crosshair-with-circle (bullseye) marker at the given point for the ruler tool. The marker scales with the
+     * Draws a crosshair-with-circle (bullseye) marker at the given hex for the ruler tool. The marker scales with the
      * current board zoom level so it remains visible at all zoom levels.
      */
-    private void drawRulerCrosshair(Graphics2D g2d, Point center, Color color) {
+    private void drawRulerCrosshair(Graphics2D graphics, Coords coords, Color color) {
         // Scale crosshair size to ~20% of hex width, with a minimum of 4px
         int radius = Math.max(4, (int) (HEX_W * scale * 0.10f));
         int crossLen = Math.max(6, (int) (HEX_W * scale * 0.15f));
-        Stroke oldStroke = g2d.getStroke();
-        g2d.setStroke(new BasicStroke(Math.max(1.5f, scale * 1.5f)));
+        Point origin = getHexLocation(coords);
+        Point center = getCentreHexLocation(coords);
+        center.translate(-origin.x, -origin.y);
+        Graphics2D local = BoardTacticalGraphics.onHexPlane(graphics, origin);
+        try {
+            local.setStroke(new BasicStroke(Math.max(1.5f, scale * 1.5f)));
 
-        // Outer circle
-        g2d.setColor(color);
-        g2d.drawOval(center.x - radius, center.y - radius, radius * 2, radius * 2);
+            // Outer circle
+            local.setColor(color);
+            local.drawOval(center.x - radius, center.y - radius, radius * 2, radius * 2);
 
-        // Crosshair lines extending beyond the circle
-        g2d.drawLine(center.x - crossLen, center.y, center.x + crossLen, center.y);
-        g2d.drawLine(center.x, center.y - crossLen, center.x, center.y + crossLen);
+            // Crosshair lines extending beyond the circle
+            local.drawLine(center.x - crossLen, center.y, center.x + crossLen, center.y);
+            local.drawLine(center.x, center.y - crossLen, center.x, center.y + crossLen);
 
-        // Center dot
-        int dotRadius = Math.max(1, (int) (scale * 1.5f));
-        g2d.fillOval(center.x - dotRadius, center.y - dotRadius, dotRadius * 2, dotRadius * 2);
-
-        g2d.setStroke(oldStroke);
+            // Center dot
+            int dotRadius = Math.max(1, (int) (scale * 1.5f));
+            local.fillOval(center.x - dotRadius, center.y - dotRadius, dotRadius * 2, dotRadius * 2);
+        } finally {
+            local.dispose();
+        }
     }
 
     public void drawRuler(Coords startCoords, Coords endCoords, Color startColor, Color endColor) {
@@ -5007,7 +5008,7 @@ public final class BoardView extends AbstractBoardView
                       .filter(marker -> marker.drawNow(game.getPhase(), game.getRoundCount(), getLocalPlayer(), GUIP))
                       .toList();
                 if (!heat.isEmpty()) {
-                    Graphics2D local = BoardTacticalGraphics.at(graphics, getHexLocation(entry.getKey()));
+                    Graphics2D local = BoardTacticalGraphics.onHexPlane(graphics, getHexLocation(entry.getKey()));
                     try {
                         BoardTacticalGraphics.draw(local, BoardTactical.Playback.HOLD_DURING_PLAYBACK, layer -> {
                             heat.stream().filter(this::isPredictedHeatMapMarker)
@@ -6225,6 +6226,14 @@ public final class BoardView extends AbstractBoardView
         this.shouldIgnoreKeys = shouldIgnoreKeys;
     }
 
+    /** EDT-only asset refresh shared by the native board and this view's artwork capture. */
+    public void reloadAssets() throws IOException {
+        tileManager.reloadAssets();
+        if (boardArtwork != null) { boardArtwork.reload(); }
+        scaledImageCache.clear();
+        clearHexImageCache();
+    }
+
     public void clearHexImageCache() {
         if (fovHighlightingAndDarkening != null) {
             fovHighlightingAndDarkening.invalidate();
@@ -6647,8 +6656,8 @@ public final class BoardView extends AbstractBoardView
         }
         if (graphics instanceof BoardTacticalGraphics) {
             int alpha = Math.min(255, tint.getAlpha() * 2);
-            drawHexBorder(graphics, new Color(0, 0, 0, Math.min(160, alpha)), 4, 6);
-            drawHexBorder(graphics, new Color(tint.getRed(), tint.getGreen(), tint.getBlue(), alpha), 5, 4);
+            drawHexBorder(graphics, new Point(), new Color(0, 0, 0, Math.min(160, alpha)), 4, 6, true);
+            drawHexBorder(graphics, new Point(), new Color(tint.getRed(), tint.getGreen(), tint.getBlue(), alpha), 5, 4, true);
         } else {
             drawHexBorder(graphics, tint.darker(), 5, 10);
         }
@@ -6684,7 +6693,7 @@ public final class BoardView extends AbstractBoardView
                 path.append(HexDrawUtilities.getHexBorderLine(direction), false);
             }
         }
-        Graphics2D local = (Graphics2D) graphics.create();
+        Graphics2D local = BoardTacticalGraphics.onHexPlane(graphics, new Point());
         try {
             local.scale(scale, scale);
             Color color = GUIP.getMapsheetColor();
@@ -6703,22 +6712,23 @@ public final class BoardView extends AbstractBoardView
     }
 
     /** Draws an embedded-board indicator using the same rectangle in both renderers. */
-    private void drawEmbeddedBoard(Graphics2D g) {
-        AffineTransform oldTransform = g.getTransform();
-        Stroke oldStroke = g.getStroke();
-        g.transform(AffineTransform.getScaleInstance(scale, scale));
-        g.setColor(new Color(0, 140, 0, 120));
-        g.fillRect(HEX_W / 4 + 1, 2, HEX_W / 2 - 2, HEX_H - 4);
-        if (g instanceof BoardTacticalGraphics) {
-            g.setColor(new Color(0, 0, 0, 150));
-            g.setStroke(new BasicStroke(3.5f));
-            g.drawRect(HEX_W / 4 + 1, 2, HEX_W / 2 - 2, HEX_H - 4);
+    private void drawEmbeddedBoard(Graphics2D graphics) {
+        Graphics2D local = BoardTacticalGraphics.onHexPlane(graphics, new Point());
+        try {
+            local.scale(scale, scale);
+            local.setColor(new Color(0, 140, 0, 120));
+            local.fillRect(HEX_W / 4 + 1, 2, HEX_W / 2 - 2, HEX_H - 4);
+            if (local instanceof BoardTacticalGraphics) {
+                local.setColor(new Color(0, 0, 0, 150));
+                local.setStroke(new BasicStroke(3.5f));
+                local.drawRect(HEX_W / 4 + 1, 2, HEX_W / 2 - 2, HEX_H - 4);
+            }
+            local.setColor(new Color(0, 140, 0));
+            local.setStroke(new BasicStroke(1.5f));
+            local.drawRect(HEX_W / 4 + 1, 2, HEX_W / 2 - 2, HEX_H - 4);
+        } finally {
+            local.dispose();
         }
-        g.setColor(new Color(0, 140, 0));
-        g.setStroke(new BasicStroke(1.5f));
-        g.drawRect(HEX_W / 4 + 1, 2, HEX_W / 2 - 2, HEX_H - 4);
-        g.setTransform(oldTransform);
-        g.setStroke(oldStroke);
     }
 
     @Override

@@ -48,7 +48,7 @@ class BoardTacticalGeometryTest {
                             assertEquals(1, queries[0], "One finished owner lookup, independent of triangle count");
                             assertEquals(flat.size(), actual.size());
                             float height = (Float.isNaN(top) ? BoardGeometry.surfaceZ(scene.tile(new Coords(1, 1))) : top)
-                                  + .5f + GpuBattleView.SELECTION_BOB_HEIGHT_OFFSET;
+                                  + BoardTacticalGeometry.HEX_PLANE_CLEARANCE;
                             for (int index = 0; index < flat.size(); index++) {
                                 var a = flat.get(index);
                                 var b = actual.get(index);

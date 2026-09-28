@@ -32,8 +32,7 @@ final class GpuWeatherParticles implements Disposable {
     private float top;
 
     GpuWeatherParticles() {
-        String path = "megamek/client/ui/clientGUI/boardview/gpu/weather-particles";
-        shader = new ShaderProgram(Gdx.files.classpath(path + ".vert"), Gdx.files.classpath(path + ".frag"));
+        shader = new ShaderProgram(GpuShaderSource.read("weather-particles.vert"), GpuShaderSource.read("weather-particles.frag"));
         if (!shader.isCompiled()) {
             String log = shader.getLog();
             shader.dispose();

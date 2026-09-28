@@ -4,6 +4,8 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Color;
@@ -12,24 +14,82 @@ import java.util.ArrayList;
 import java.util.List;
 import javax.swing.SwingUtilities;
 
+import com.badlogic.gdx.math.Vector3;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
 import megamek.client.ui.clientGUI.boardview.sprite.C3Sprite;
 import megamek.client.ui.clientGUI.boardview.sprite.CursorSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
+import megamek.client.ui.clientGUI.boardview.sprite.FiringSolutionSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.FlightPathIndicatorSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.MovementEnvelopeSprite;
+import megamek.client.ui.clientGUI.boardview.sprite.MovementModifierEnvelopeSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.SensorRangeSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
 import megamek.client.ui.clientGUI.boardview.sprite.StepSprite;
+import megamek.client.ui.clientGUI.boardview.sprite.VTOLAttackSprite;
+import megamek.common.ToHitData;
 import megamek.common.board.Coords;
 import megamek.common.enums.MoveStepType;
 import megamek.common.moves.MovePath;
 import megamek.common.units.EntityMovementType;
+import megamek.common.units.VTOL;
+import megamek.common.util.FiringSolution;
 import org.junit.jupiter.api.Test;
 
 class GpuTacticalTest {
+    @Test
+    void flatSpritePaintersShareTheOwnerPlaneWithoutTerrainClipping() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            SwingUtilities.invokeAndWait(() -> {
+                Coords coords = new Coords(4, 4);
+                var path = new MovePath(fixture.game, fixture.entity);
+                path.addStep(MoveStepType.FORWARDS);
+                var cursor = new CursorSprite(fixture.view, Color.WHITE);
+                cursor.setHexLocation(coords);
+                var toHit = new ToHitData(4, "Shared plane test");
+                toHit.setLocation(coords);
+                toHit.setRange(3);
+                var vtol = new VTOL();
+                vtol.setOwner(fixture.player);
+                vtol.getStrafingCoords().addAll(List.of(coords, coords.translated(3)));
+                List<Sprite> sprites = List.of(new MovementEnvelopeSprite(fixture.view, Color.MAGENTA, coords, 63),
+                      new MovementModifierEnvelopeSprite(fixture.view, path),
+                      new StepSprite(fixture.view, path.getStepVector().getFirst(), true),
+                      new FlightPathIndicatorSprite(fixture.view, path.getStepVector(), 0, true), cursor,
+                      new FiringSolutionSprite(fixture.view, new FiringSolution(toHit, false)),
+                      new SensorRangeSprite(fixture.view, SensorRangeSprite.SENSORS, coords, 63),
+                      new FieldOfFireSprite(fixture.view, Color.GREEN, coords, 63), new VTOLAttackSprite(fixture.view, vtol));
+                for (Sprite sprite : sprites) {
+                    fixture.view.addSprites(List.of(sprite));
+                    fixture.source.refresh();
+                    BoardScene scene = fixture.source.takeFrame().scene();
+                    assertFalse(scene.tactical().fills().isEmpty(), sprite.getClass().getSimpleName());
+                    var surfaces = BoardTacticalGeometry.surfaces(scene);
+                    for (var fill : scene.tactical().fills()) {
+                        assertNotNull(fill.planeAnchor(), sprite.getClass().getSimpleName());
+                        Coords owner = BoardTacticalGeometry.anchorCoords(scene, fill.planeAnchor());
+                        assertNotNull(owner);
+                        float z = BoardTacticalGeometry.floatingZ(scene, owner, surfaces);
+                        List<BoardTacticalGeometry.Triangle> triangles = new ArrayList<>();
+                        BoardTacticalGeometry.drape(scene, fill, 10000, triangles::add, queried -> {
+                            assertEquals(owner, queried, "No neighboring surfaces or slope clipping");
+                            return surfaces.apply(queried);
+                        }, new BoardTacticalGeometry.Clipper());
+                        assertEquals(BoardTacticalGeometry.flat(fill).size(), triangles.size());
+                        for (var triangle : triangles) {
+                            for (Vector3 point : List.of(triangle.a(), triangle.b(), triangle.c())) {
+                                assertEquals(z, point.z, .00001f);
+                            }
+                        }
+                    }
+                    fixture.view.removeSprites(List.of(sprite));
+                }
+            });
+        }
+    }
+
     @Test
     void visualRangeUsesStraightWallsAndRetainsSpriteVisibilityAndPlayback() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
@@ -43,6 +103,8 @@ class GpuTacticalTest {
                 assertEquals(before.fills(), captured.fills(), "The flat band and dashed line must be replaced");
                 assertEquals(2, captured.walls().size());
                 assertEquals(2, captured.flatWalls().size());
+                captured.flatWalls().forEach(fill -> assertNull(fill.planeAnchor(),
+                      "The top-view presentation of upright walls keeps its terrain-following footprint"));
                 for (var wall : captured.walls()) {
                     assertEquals(147, wall.a().x(), 0.001f);
                     assertEquals(147, wall.b().x(), 0.001f);

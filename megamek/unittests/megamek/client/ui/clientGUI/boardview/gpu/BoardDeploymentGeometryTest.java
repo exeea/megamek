@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -32,7 +33,7 @@ class BoardDeploymentGeometryTest {
         var yellow = fill(a, Color.YELLOW.getRGB());
         var warning = fill(a, 0x80FF0000);
         var ordinary = new BoardTactical.Fill(yellow.contours(), yellow.winding(), yellow.argb(), yellow.playback(),
-              new BoardTactical.HexBorder(yellow.border().anchor(), 0, 2, 1, true));
+              new BoardTactical.HexBorder(yellow.border().anchor(), 0, 2, 1), yellow.planeAnchor());
         var generic = new BoardTactical.Fill(yellow.contours(), yellow.winding(), Color.WHITE.getRGB());
         BoardScene scene = scene(9, 9, List.of(fill(b, 0x800000FF), yellow, ordinary, generic,
               fill(new Coords(20, 20), Color.YELLOW.getRGB()), warning));
@@ -194,7 +195,7 @@ class BoardDeploymentGeometryTest {
         Map<Integer, List<BoardTactical.Fill>> colors = new LinkedHashMap<>();
         for (var fill : result) {
             assertFalse(BoardDeploymentGeometry.isZone(fill), "A generated outline must not be converted again");
-            assertFalse(fill.border().floating(), "Overhead boundaries use the shared terrain-following range band");
+            assertNull(fill.planeAnchor(), "Overhead boundaries use the shared terrain-following range band");
             Coords owner = BoardTacticalGeometry.borderCoords(scene, fill.border());
             assertEquals(zones.get(owner).argb(), fill.argb());
             assertEquals(zones.get(owner).playback(), fill.playback());

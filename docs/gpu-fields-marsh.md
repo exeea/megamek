@@ -62,6 +62,24 @@ the bank uses the established grass/soil mantle, including its texture relief an
 normal. Biome margins use that same material-height competition rather than a
 broad colour tint. Wet peat can reach the toe without painting pools up the slope.
 
+Adjacent wetlands at different elevations now share peat across the intervening
+bank. The existing slope normals and continuous level grading still show the
+height change from above. Toward lower ordinary ground, sediment has an uneven,
+world-aligned drainage reach and fades through damp turf into the native surface;
+it does not end at a constant height contour. The bank retains partial coverage
+instead of amplifying every sediment patch to a solid mask. Soil colour and normal
+maps use the existing slope projection to avoid stretching down steep faces.
+Pools retreat irregularly before a downhill lip, remain confined to level ground,
+and retain the narrower uphill/underwater limits. These changes add no triangles,
+instances, textures, draw calls, or neighbour-mask fetches.
+
+There is no dedicated marsh ground bitmap. The ground shader borrows
+`data/models/board/textures/sculpt/earth.png` (colour/height) and `earth-normal.png`
+(normal/occlusion); peat, moss, saturated margins and pools are composed in
+`terrain-biome.glsl`. The plant cutout is owned by mm-data at
+`data/models/board/textures/foliage/marsh-sedge.png` and loaded from the configured
+game data directory after normal data staging.
+
 The reduced crop mesh has broader leaves, a more legible seed head and stronger
 lit leaf colour. Its row canopy is fuller and shades the furrows more strongly.
 This improves its silhouette without restoring the removed stalks or triangles;
@@ -148,6 +166,11 @@ Checked locally on 28 September 2026 using the actual OpenGL renderer at 1280x96
   directions, every fade boundary, and unchanged-surface handoffs. The strict image
   continuity check caught and verified the correction for mip flicker in cutout plants.
 - `GpuTerrainContactSmokeTest`: the earlier cliff and submerged-material regression.
+- `GpuMarshSlopeSmokeTest`: connected marsh levels, upper marsh draining to lower
+  grass, and lower marsh against an uphill bank, in top and isometric views across
+  all four terrain mesh tiers. A production-GLSL readback checks continuous peat,
+  uneven downhill reach, limited uphill reach and no pool support halfway down
+  the bank. The preceding shader fails the connected-peat regression.
 - `GpuTerrainBlendSmokeTest`: natural material rendering and local-edit versus
   clean-rebuild comparison. The comparison now waits for bounded grass preparation
   and uses the same animation time on both renderers.
@@ -206,6 +229,15 @@ work remained active. Raw reports/JFR and screenshots are under
 `megamek/build/biome-zoom-review/{baseline-captures,captures}`. Java and shader
 files were frozen together for this comparison; concurrent wind/scatter changes
 were outside the verified snapshot.
+
+The marsh-slope refinement passed four native cases (marsh slopes, biome materials
+and plant budgets, liquid mixing, and cliff/waterbed contacts), scoped test
+Checkstyle, and whitespace checks. Its current shaders and new test ran against
+the preserved application runtime to isolate concurrent Java work. The captures
+and metrics are under `megamek/build/marsh-slope-review/captures`. Plant counts
+remain the same as the table below. This verifies the shader change and existing
+geometry budgets, not a complete build or an FPS claim for the concurrently
+edited application.
 
 The 3x3 special-ground fixture produced these submitted plant counts, including
 the marsh fringe. These are triangles sent to the GPU, not whole-frame cost or

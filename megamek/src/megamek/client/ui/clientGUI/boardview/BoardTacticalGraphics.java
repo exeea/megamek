@@ -48,6 +48,7 @@ public final class BoardTacticalGraphics extends AbstractGraphics2D {
     /** Shared only within this capture, including graphics copies; styles contain no game state. */
     private final Map<BorderStyle, Shape> borderShapes;
     private BoardTactical.Point anchor;
+    private BoardTactical.Point planeAnchor;
     private BoardTactical.Playback playback = BoardTactical.Playback.LIVE;
     private boolean deploymentZone;
 
@@ -72,6 +73,7 @@ public final class BoardTacticalGraphics extends AbstractGraphics2D {
         metrics = (Graphics2D) parent.metrics.create();
         borderShapes = parent.borderShapes;
         anchor = parent.anchor;
+        planeAnchor = parent.planeAnchor;
         playback = parent.playback;
         deploymentZone = parent.deploymentZone;
     }
@@ -110,6 +112,7 @@ public final class BoardTacticalGraphics extends AbstractGraphics2D {
               .createTransformedShape(AffineTransform.getScaleInstance(scale, scale).createTransformedShape(border));
         AffineTransform transform = getTransform();
         BoardTactical.HexBorder metadata = null;
+        BoardTactical.Point owner = planeAnchor;
         double combinedScale = transform.getScaleX() * scale;
         if (transform.getShearX() == 0 && transform.getShearY() == 0
               && transform.getScaleX() == transform.getScaleY() && transform.getScaleX() > 0
@@ -118,11 +121,12 @@ public final class BoardTacticalGraphics extends AbstractGraphics2D {
             Point2D center = transform.transform(new Point2D.Double(point.x + HexTileset.HEX_W * scale / 2,
                   point.y + HexTileset.HEX_H * scale / 2), null);
             if (Float.isFinite((float) center.getX()) && Float.isFinite((float) center.getY())) {
-                metadata = new BoardTactical.HexBorder(new BoardTactical.Point((float) center.getX(), (float) center.getY()),
-                      padding, lineWidth, (float) combinedScale, floating, deploymentZone);
+                var position = new BoardTactical.Point((float) center.getX(), (float) center.getY());
+                metadata = new BoardTactical.HexBorder(position, padding, lineWidth, (float) combinedScale, deploymentZone);
+                if (floating) { owner = position; }
             }
         }
-        fill(shape, fills, metadata);
+        fill(shape, fills, metadata, argb(), owner);
     }
 
     /** Tags only the native capture; classic painters keep their existing graphics state and behavior. */
@@ -159,6 +163,18 @@ public final class BoardTacticalGraphics extends AbstractGraphics2D {
         return copy;
     }
 
+    /** Flat hex annotations share one owner plane in 3D; the classic painter still draws the same shapes. */
+    public static Graphics2D onHexPlane(Graphics2D graph, Point location) {
+        Graphics2D copy = at(graph, location);
+        if (copy instanceof BoardTacticalGraphics tactical) {
+            Point2D center = copy.getTransform().transform(new Point2D.Float(HexTileset.HEX_W / 2f,
+                  HexTileset.HEX_H / 2f), null);
+            tactical.planeAnchor = new BoardTactical.Point((float) center.getX(), (float) center.getY());
+            tactical.anchor = tactical.planeAnchor;
+        }
+        return copy;
+    }
+
     @Override
     public Graphics create() {
         return new BoardTacticalGraphics(this);
@@ -190,7 +206,7 @@ public final class BoardTacticalGraphics extends AbstractGraphics2D {
     }
 
     public void wall(Shape shape, Shape footprint, Coords coords, BoardRangeBorder border) {
-        fill(footprint, flatWalls, null, border.argb());
+        fill(footprint, flatWalls, null, border.argb(), null);
         border.append(coords, shape, getTransform(), playback, walls::add);
     }
 
@@ -204,18 +220,18 @@ public final class BoardTacticalGraphics extends AbstractGraphics2D {
     }
 
     private void fill(Shape shape, List<BoardTactical.Fill> destination, BoardTactical.HexBorder border) {
-        fill(shape, destination, border, argb());
+        fill(shape, destination, border, argb(), planeAnchor);
     }
 
-    private void fill(Shape shape, List<BoardTactical.Fill> destination, BoardTactical.HexBorder border, int color) {
+    private void fill(Shape shape, List<BoardTactical.Fill> destination, BoardTactical.HexBorder border, int color,
+          BoardTactical.Point owner) {
         if ((color >>> 24) == 0) {
             return;
         }
         Shape clip = getClip();
         if (clip != null && !clip.contains(shape.getBounds2D())) {
-            // Floating borders still draw the captured, clipped contours on their owner's plane. Only the
-            // terrain mask needs a complete regular ring; dropping the floating tag would drape map-edge hexes.
-            if (border != null && !border.floating()) { border = null; }
+            // A clipped ring cannot use the analytic mask. Its owner plane survives independently of that hint.
+            if (owner == null) { border = null; }
             Area clipped = new Area(shape);
             clipped.intersect(new Area(clip));
             shape = clipped;
@@ -240,7 +256,7 @@ public final class BoardTacticalGraphics extends AbstractGraphics2D {
             contours.add(new BoardTactical.Contour(points));
         }
         if (!contours.isEmpty()) {
-            destination.add(new BoardTactical.Fill(contours, winding, color, playback, border));
+            destination.add(new BoardTactical.Fill(contours, winding, color, playback, border, owner));
         }
     }
 

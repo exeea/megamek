@@ -24,7 +24,6 @@ import megamek.common.board.Coords;
 
 /** Persistent board fire/smoke: one half-resolution pass, sorted batches and three projected-size LODs. */
 final class GpuTerrainEffects implements Disposable {
-    private static final String SHADERS = "megamek/client/ui/clientGUI/boardview/gpu/";
     private static final int BATCH_SIZE = 256;
     private static final int STRIDE = 12;
     private static final float FLAME_LEVELS = 3;
@@ -222,8 +221,7 @@ final class GpuTerrainEffects implements Disposable {
     private void initialize() {
         if (shader != null) { return; }
         try {
-            shader = new ShaderProgram(Gdx.files.classpath(SHADERS + "terrain-effects.vert"),
-                  Gdx.files.classpath(SHADERS + "terrain-effects.frag"));
+            shader = new ShaderProgram(GpuShaderSource.read("terrain-effects.vert"), GpuShaderSource.read("terrain-effects.frag"));
             if (!shader.isCompiled()) { throw new IllegalStateException("Terrain fire/smoke shader: " + shader.getLog()); }
             composite = GpuAtmosphere.shader("terrain-effects-composite.frag");
             quad = GpuAtmosphere.screenQuad();

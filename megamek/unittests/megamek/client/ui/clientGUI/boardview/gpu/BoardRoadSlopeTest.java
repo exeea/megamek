@@ -12,9 +12,28 @@ import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardRoadSlopeTest {
+    @ParameterizedTest
+    @EnumSource(value = BoardScene.Surface.class, names = "CONCRETE", mode = EnumSource.Mode.EXCLUDE)
+    void nativeSlopesJoinRoadsAboveAndBelowInEveryNaturalFamily(BoardScene.Surface family) {
+        var at = BoardRoadTest.CENTER;
+        for (int rise : new int[] { -2, -1, 1, 2 }) {
+            var scene = BoardSurfaceBlendTest.scene(c -> BoardRoadTest.tile(c,
+                  c.equals(at) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE, c.equals(at) ? 9 : 0,
+                  c.equals(at.translated(2)) ? rise : 0, family));
+            assertClosed(scene, at);
+            var surface = new BoardSurface(scene, scene.tile(at));
+            for (var face : surface.groundFaces()) {
+                if (face.finish() != BoardSurface.Finish.TOP) { continue; }
+                var normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
+                assertTrue(normal.z > 0, family + " roadside top must never fold into the road");
+            }
+        }
+    }
+
     @Test
     void levelRoadsOnFlatGroundDoNotAddTerrainSubdivisions() {
         var at = BoardRoadTest.CENTER;

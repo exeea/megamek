@@ -27,6 +27,42 @@ import org.junit.jupiter.api.Test;
 
 class BoardTacticalGraphicsTest {
     @Test
+    void hexPlaneScopeSurvivesTransformsCopiesAndClippingWithoutLeakingIntoWallsOrParent() {
+        var graphics = new BoardTacticalGraphics();
+        try {
+            graphics.translate(126, 72);
+            graphics.scale(2, 2);
+            var local = (BoardTacticalGraphics) BoardTacticalGraphics.onHexPlane(graphics, new Point(63, 36));
+            try {
+                local.setClip(0, 0, 60, 72);
+                BoardTacticalGraphics.draw(local, BoardTactical.Playback.HIDE_DURING_MOVEMENT, copy -> {
+                    copy.setColor(new Color(20, 100, 200, 128));
+                    copy.fillRect(0, 0, 84, 72);
+                    copy.drawString("4", 42, 36);
+                });
+                local.wall(HexDrawUtilities.getHexBorderLine(0), HexDrawUtilities.getHexBorderArea(0, 0, 10),
+                      new Coords(1, 0), .5f, null);
+            } finally {
+                local.dispose();
+            }
+            graphics.fillRect(0, 0, 2, 2);
+            var captured = graphics.snapshot();
+            var fill = captured.fills().getFirst();
+            assertEquals(new BoardTactical.Point(336, 216), fill.planeAnchor());
+            assertEquals(fill.planeAnchor(), captured.labels().getFirst().anchor());
+            assertNull(fill.border(), "Arbitrary shapes need no fake hex-border metadata");
+            assertEquals(new Rectangle2D.Float(252, 144, 120, 144), fill.shape().getBounds2D());
+            assertEquals(128, fill.argb() >>> 24);
+            assertEquals(BoardTactical.Playback.HIDE_DURING_MOVEMENT, fill.playback());
+            assertNull(captured.fills().getLast().planeAnchor(), "The parent keeps its terrain-following scope");
+            assertFalse(captured.walls().isEmpty());
+            assertNull(captured.flatWalls().getFirst().planeAnchor(), "Wall footprints retain their draped presentation");
+        } finally {
+            graphics.dispose();
+        }
+    }
+
+    @Test
     void joiningUsesOnlyMatchingBoundaryOwnersAndMembershipInvalidatesTheCommand() {
         var yellow = new BoardRangeBorder(.5f, Color.YELLOW.getRGB(), null);
         var cyan = new BoardRangeBorder(.5f, Color.CYAN.getRGB(), null);
@@ -96,7 +132,7 @@ class BoardTacticalGraphicsTest {
         assertEquals(1.875f, actual.border().scale());
         assertEquals(1.5, actual.border().padding());
         assertEquals(3.25, actual.border().width());
-        assertTrue(actual.border().floating());
+        assertEquals(actual.border().anchor(), actual.planeAnchor());
         assertEquals(expected, new BoardTactical.Fill(actual.contours(), actual.winding(), actual.argb(), actual.playback()));
         assertEquals(93, actual.argb() >>> 24, "The painter's composite alpha remains part of the command");
         assertEquals(BoardTactical.Playback.HOLD_DURING_PLAYBACK, actual.playback());
@@ -105,7 +141,7 @@ class BoardTacticalGraphicsTest {
         try {
             graphics.fillHexBorder(new Point(0, 0), 1, 0, 1);
             assertNotNull(graphics.snapshot().fills().getFirst().border());
-            assertFalse(graphics.snapshot().fills().getFirst().border().floating(),
+            assertNull(graphics.snapshot().fills().getFirst().planeAnchor(),
                   "Existing callers retain terrain-following presentation unless explicitly changed");
         } finally {
             graphics.dispose();
@@ -126,7 +162,7 @@ class BoardTacticalGraphicsTest {
         for (Shape clip : List.of(new Rectangle2D.Float(0, 0, 50, 120), holes)) {
             var actual = capturedBorder(new AffineTransform(), clip, true);
             assertNotNull(actual.border(), "Clipping must not turn a floating border back into draped geometry");
-            assertTrue(actual.border().floating());
+            assertEquals(actual.border().anchor(), actual.planeAnchor());
             var expected = capturedBorder(new AffineTransform(), clip, false);
             assertEquals(expected,
                   new BoardTactical.Fill(actual.contours(), actual.winding(), actual.argb(), actual.playback()),

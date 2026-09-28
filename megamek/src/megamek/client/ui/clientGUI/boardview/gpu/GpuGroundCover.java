@@ -199,9 +199,9 @@ final class GpuGroundCover implements Disposable {
 
     static String vertex(String source) {
         String meadow = "uniform sampler2D u_rainNoise;\n"
-              + Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-meadow.glsl").readString();
-        String wind = Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-vegetation-wind.glsl").readString();
-        String blade = Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-grass.glsl").readString()
+              + GpuShaderSource.read("terrain-meadow.glsl");
+        String wind = GpuShaderSource.read("terrain-vegetation-wind.glsl");
+        String blade = GpuShaderSource.read("terrain-grass.glsl")
               .replace("@START_PIXELS@", Float.toString(START_PIXELS)).replace("@FULL_PIXELS@", Float.toString(FULL_PIXELS))
               .replace("@ROOTS_PER_HEX@", Float.toString(ROOTS_PER_HEX));
         return source.replace("void main() {", wind + meadow + blade + "\nvoid main() {\nvec3 coverPosition, coverNormal; vec4 coverColor;\n"

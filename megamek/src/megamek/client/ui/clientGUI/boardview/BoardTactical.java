@@ -80,19 +80,25 @@ public record BoardTactical(List<Fill> fills, List<Label> labels, List<Wall> wal
     }
 
     /** Anchor is the transformed hex center in board pixels; captured contours remain the generic fallback. */
-    public record HexBorder(Point anchor, double padding, double width, float scale, boolean floating, boolean zone) {
-        public HexBorder(Point anchor, double padding, double width, float scale, boolean floating) {
-            this(anchor, padding, width, scale, floating, false);
+    public record HexBorder(Point anchor, double padding, double width, float scale, boolean zone) {
+        public HexBorder(Point anchor, double padding, double width, float scale) {
+            this(anchor, padding, width, scale, false);
         }
     }
 
-    public record Fill(List<Contour> contours, int winding, int argb, Playback playback, HexBorder border) {
+    /** A plane anchor places any shape on its owner hex's flat annotation plane; null follows the terrain. */
+    public record Fill(List<Contour> contours, int winding, int argb, Playback playback, HexBorder border,
+          Point planeAnchor) {
         public Fill(List<Contour> contours, int winding, int argb) {
             this(contours, winding, argb, Playback.LIVE);
         }
 
         public Fill(List<Contour> contours, int winding, int argb, Playback playback) {
             this(contours, winding, argb, playback, null);
+        }
+
+        public Fill(List<Contour> contours, int winding, int argb, Playback playback, HexBorder border) {
+            this(contours, winding, argb, playback, border, null);
         }
 
         public Fill {

@@ -88,7 +88,7 @@ public class MovementEnvelopeSprite extends HexSprite implements TacticalSprite 
 
     @Override
     public void drawTactical(Graphics2D graphics) {
-        Graphics2D local = BoardTacticalGraphics.at(graphics, bv.getHexLocation(getPosition()));
+        Graphics2D local = BoardTacticalGraphics.onHexPlane(graphics, bv.getHexLocation(getPosition()));
         try {
             paintTactical(local);
         } finally {

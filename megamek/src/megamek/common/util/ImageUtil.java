@@ -49,8 +49,11 @@ import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.WeakHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import javax.imageio.ImageIO;
@@ -223,6 +226,23 @@ public final class ImageUtil {
 
     /** Image loaders */
     private static final List<ImageLoader> IMAGE_LOADERS;
+    /** Toolkit.getImage also caches files after the tileset's own image caches are discarded. */
+    private static final Set<Image> toolkitImages = Collections.newSetFromMap(new WeakHashMap<>());
+
+    private static synchronized Image toolkitImage(String filename) {
+        Image image = Toolkit.getDefaultToolkit().getImage(filename);
+        if (image != null) { toolkitImages.add(image); }
+        return image;
+    }
+
+    /** Reread image files and atlas mappings on the next load; callers also discard their derived artwork. */
+    public static synchronized void reloadImages() {
+        toolkitImages.forEach(Image::flush);
+        toolkitImages.clear();
+        for (ImageLoader loader : IMAGE_LOADERS) {
+            if (loader instanceof AtlasImageLoader atlas) { atlas.imgFileToAtlasMap = ImageAtlasMap.readFromFile(); }
+        }
+    }
 
     static {
         IMAGE_LOADERS = new ArrayList<>();
@@ -310,7 +330,7 @@ public final class ImageUtil {
                 return null;
             }
 
-            Image result = Toolkit.getDefaultToolkit().getImage(fileName);
+            Image result = toolkitImage(fileName);
 
             if (result == null) {
                 return null;
@@ -395,7 +415,7 @@ public final class ImageUtil {
             }
 
             LOGGER.info("Loading atlas: {}", baseFile);
-            Image base = Toolkit.getDefaultToolkit().getImage(baseFile.getPath());
+            Image base = toolkitImage(baseFile.getPath());
 
             if (base == null) {
                 return null;
@@ -426,7 +446,7 @@ public final class ImageUtil {
      * return an image from the corresponding key which includes an atlas and offset.
      */
     public static class AtlasImageLoader extends TileMapImageLoader {
-        ImageAtlasMap imgFileToAtlasMap;
+        volatile ImageAtlasMap imgFileToAtlasMap;
 
         public AtlasImageLoader() {
             imgFileToAtlasMap = ImageAtlasMap.readFromFile();
@@ -472,13 +492,14 @@ public final class ImageUtil {
             // Check to see if the base file is in an atlas
             File fn = new File(baseName);
             Path p = fn.toPath();
-            if ((imgFileToAtlasMap == null) || !imgFileToAtlasMap.containsKey(p)) {
+            ImageAtlasMap mapping = imgFileToAtlasMap;
+            if ((mapping == null) || !mapping.containsKey(p)) {
                 return null;
             }
 
             // Check to see if we need to flip the image
             if (tileAdjusting) {
-                Image img = super.loadImage(imgFileToAtlasMap.get(p));
+                Image img = super.loadImage(mapping.get(p));
                 BufferedImage result = ImageUtil.createAcceleratedImage(Math.abs(size.getX()), Math.abs(size.getY()));
                 Graphics2D g2d = result.createGraphics();
                 g2d.drawImage(img,
@@ -495,7 +516,7 @@ public final class ImageUtil {
                 return img;
             } else {
                 // Otherwise just return the image loaded from the atlas
-                return super.loadImage(imgFileToAtlasMap.get(p));
+                return super.loadImage(mapping.get(p));
             }
         }
     }

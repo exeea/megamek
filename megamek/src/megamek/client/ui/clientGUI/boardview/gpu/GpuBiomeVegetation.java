@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -9,7 +10,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 
-import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
@@ -31,6 +32,7 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.FloatArray;
 import com.badlogic.gdx.utils.IntArray;
+import megamek.common.Configuration;
 import megamek.common.board.Coords;
 
 /** World-aligned crop rows and clustered reeds, with six shared instanced batches and bounded root preparation. */
@@ -257,8 +259,8 @@ final class GpuBiomeVegetation implements Disposable {
     private Texture sedge;
 
     static String vertex(String source) {
-        String wind = Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-vegetation-wind.glsl").readString();
-        String plant = Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-biome-vegetation.glsl").readString();
+        String wind = GpuShaderSource.read("terrain-vegetation-wind.glsl");
+        String plant = GpuShaderSource.read("terrain-biome-vegetation.glsl");
         for (int lod = 0; lod < DENSITY.length; lod++) {
             plant = plant.replace("@START" + lod + "@", Float.toString(START_PIXELS[lod]))
                   .replace("@FULL" + lod + "@", Float.toString(FULL_PIXELS[lod]));
@@ -355,7 +357,8 @@ final class GpuBiomeVegetation implements Disposable {
 
     /** One 512px cutout with mipmaps for the whole board; keep the full-resolution source as the editable asset. */
     private static Texture sedgeTexture() {
-        var source = new Pixmap(Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/marsh-sedge.png"));
+        var source = new Pixmap(new FileHandle(new File(Configuration.dataDir(),
+              "models/board/textures/foliage/marsh-sedge.png")));
         try {
             var pixels = new Pixmap(512, 512, Pixmap.Format.RGBA8888);
             try {

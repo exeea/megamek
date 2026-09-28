@@ -63,7 +63,7 @@ class GpuTacticalIncrementalSmokeTest {
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
             public void create() {
-                try { verifyUpdates(); verifyFloatingUpdates(); }
+                try { verifyUpdates(); verifyFloatingUpdates(true); verifyFloatingUpdates(false); }
                 catch (Throwable error) { failure.set(error); }
                 finally { Gdx.app.exit(); }
             }
@@ -71,12 +71,18 @@ class GpuTacticalIncrementalSmokeTest {
         if (failure.get() != null) { throw new AssertionError("Incremental tactical geometry", failure.get()); }
     }
 
-    private static void verifyFloatingUpdates() throws Exception {
+    private static void verifyFloatingUpdates(boolean border) throws Exception {
         var graphics = new BoardTacticalGraphics();
         BoardTactical commands;
         try {
             graphics.setColor(java.awt.Color.ORANGE);
-            graphics.fillHexBorder(new Point(189, 36), 1, 1, 2, true);
+            if (border) {
+                graphics.fillHexBorder(new Point(189, 36), 1, 1, 2, true);
+            } else {
+                var local = BoardTacticalGraphics.onHexPlane(graphics, new Point(189, 36));
+                try { local.fillOval(15, 10, 54, 52); }
+                finally { local.dispose(); }
+            }
             commands = graphics.snapshot();
         } finally {
             graphics.dispose();
@@ -99,7 +105,7 @@ class GpuTacticalIncrementalSmokeTest {
             assertEquals(1, ranges(tactical).size());
             Renderable first = ranges(tactical).getFirst();
             float[] initialVertices = vertices(first);
-            float clearance = .5f + GpuBattleView.SELECTION_BOB_HEIGHT_OFFSET;
+            float clearance = BoardTacticalGeometry.HEX_PLANE_CLEARANCE;
             assertFloatingPlane(initialVertices, first, clearance);
             compareBulk(initial, ownerOnly, tactical);
 

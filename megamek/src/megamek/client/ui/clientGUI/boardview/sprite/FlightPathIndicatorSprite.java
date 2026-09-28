@@ -118,7 +118,7 @@ public class FlightPathIndicatorSprite extends HexSprite implements TacticalSpri
 
     @Override
     public void drawTactical(Graphics2D graphics) {
-        Graphics2D local = BoardTacticalGraphics.at(graphics, bv.getHexLocation(getPosition()));
+        Graphics2D local = BoardTacticalGraphics.onHexPlane(graphics, bv.getHexLocation(getPosition()));
         try {
             local.setFont(FontHandler.symbolFont());
             drawSprite(local);

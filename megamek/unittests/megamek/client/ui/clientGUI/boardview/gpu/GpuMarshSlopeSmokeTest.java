@@ -121,8 +121,8 @@ class GpuMarshSlopeSmokeTest {
             float metre = BoardRelief.metres(1), level = BoardGeometry.level() / metre;
             Vector3 edge = BoardGeometry.center(new Coords(4, 3), 0)
                   .lerp(BoardGeometry.center(new Coords(4, 4), 0), .5f).scl(1 / metre);
-            for (boolean connected : new boolean[] { true, false }) {
-                var scene = scene(connected ? "connected" : "downhill");
+            for (String contact : new String[] { "connected", "downhill", "uphill" }) {
+                var scene = scene(contact);
                 mask.update(scene);
                 float[] points = new float[32 * 3];
                 for (int i = 0; i < 32; i++) {
@@ -146,13 +146,17 @@ class GpuMarshSlopeSmokeTest {
                 try {
                     int minimum = 255, maximum = 0;
                     for (int i = 0; i < 32; i++) {
-                        int peat = pixels.getPixel(i, 0) >>> 16 & 255;
+                        int sample = pixels.getPixel(i, 0);
+                        assertEquals(0, sample >>> 24, "Connecting peat must not carry level pool support down the bank");
+                        int peat = sample >>> 16 & 255;
                         minimum = Math.min(minimum, peat); maximum = Math.max(maximum, peat);
                     }
-                    if (connected) {
+                    if (contact.equals("connected")) {
                         assertTrue(minimum > 225, "Adjacent marsh levels must retain peat across the intervening bank: " + minimum);
-                    } else {
+                    } else if (contact.equals("downhill")) {
                         assertTrue(maximum - minimum > 24, "A draining bank needs uneven seepage, not a constant height contour");
+                    } else {
+                        assertTrue(maximum < 20, "A lower marsh cannot saturate the higher bank like downhill drainage");
                     }
                 } finally { pixels.dispose(); }
             }

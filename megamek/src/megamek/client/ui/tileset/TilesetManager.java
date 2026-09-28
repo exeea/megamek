@@ -113,7 +113,7 @@ public class TilesetManager implements IPreferenceChangeListener {
     private boolean started = false;
 
     // mek images
-    private final MekTileset wreckTileset = new MekTileset(new MegaMekFile(Configuration.unitImagesDir(),
+    private MekTileset wreckTileset = new MekTileset(new MegaMekFile(Configuration.unitImagesDir(),
           DIR_NAME_WRECKS).getFile());
     private final List<EntityImage> mekImageList = new ArrayList<>();
     private final Map<ArrayList<Integer>, EntityImage> mekImages = new HashMap<>();
@@ -636,6 +636,33 @@ public class TilesetManager implements IPreferenceChangeListener {
 
     public synchronized void reloadUnitIcons() {
         mekImages.clear();
+    }
+
+    /** Reread tileset definitions and artwork after an artist edits the deployed files. */
+    public synchronized void reloadAssets() throws IOException {
+        HexTileset replacement = new HexTileset(game);
+        MekTileset wrecks = new MekTileset(new MegaMekFile(Configuration.unitImagesDir(), DIR_NAME_WRECKS).getFile());
+        try {
+            replacement.loadFromFile(PreferenceManager.getClientPreferences().getMapTileset());
+            wrecks.loadFromFile("wreckset.txt");
+        } catch (IOException | RuntimeException failure) {
+            replacement.close();
+            throw failure;
+        }
+        hexTileset.close();
+        hexTileset = replacement;
+        wreckTileset = wrecks;
+        wreckageDecals.clear();
+        wreckageDecalCount.put(FILENAME_SUFFIX_WRECKS_ULTRALIGHT, getULightDecalCount());
+        wreckageDecalCount.put(FILENAME_SUFFIX_WRECKS_ASSAULT_PLUS, getUHeavyDecalCount());
+        hexMask = null;
+        minefieldSign = null;
+        artilleryAutoHit = null;
+        artilleryAdjusted = null;
+        artilleryIncoming = null;
+        orbitalBombardmentIncoming = null;
+        EntityImage.reloadAssets();
+        reset();
     }
 
     /** Returns the number of available ultralight destroyed bottom decal images. */

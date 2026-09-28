@@ -32,15 +32,15 @@ final class BoardImpassable {
             float x = coords.getX() * BoardGeometry.TILE_WIDTH * .75f;
             float y = (coords.getY() + (coords.getX() & 1) * .5f) * BoardGeometry.TILE_HEIGHT;
             var anchor = new BoardTactical.Point(x + BoardGeometry.TILE_WIDTH / 2, y + BoardGeometry.TILE_HEIGHT / 2);
-            var floating = new BoardTactical.HexBorder(anchor, INSET, BORDER_WIDTH, 1, true);
             boolean emphasized = planning || coords.equals(hover);
             for (BoardTactical.Fill fill : TEMPLATE) {
                 var contours = fill.contours().stream().map(contour -> new BoardTactical.Contour(contour.points().stream()
                       .map(point -> new BoardTactical.Point(x + point.x(), y + point.y())).toList())).toList();
                 int color = emphasized ? ink(fill.border() == null ? 112 : 240) : fill.argb();
                 // Both the border and stripes use the existing floating-marker plane for this owner hex.
+                var border = fill.border() == null ? null : new BoardTactical.HexBorder(anchor, INSET, BORDER_WIDTH, 1);
                 result.add(new BoardTactical.Fill(contours, fill.winding(), color,
-                      BoardTactical.Playback.HOLD_DURING_PLAYBACK, floating));
+                      BoardTactical.Playback.HOLD_DURING_PLAYBACK, border, anchor));
             }
         }
         return List.copyOf(result);

@@ -50,7 +50,6 @@ import java.awt.image.RescaleOp;
 import java.io.File;
 import java.util.Iterator;
 import java.util.Objects;
-import javax.swing.ImageIcon;
 
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.util.PlayerColour;
@@ -101,7 +100,7 @@ public class EntityImage {
     private static final String PATH_CRIPPLED = "Crippled/";
 
     /** A transparent image used as a no-damage decal. */
-    private static final Image dmgEmpty;
+    private static Image dmgEmpty;
 
     private static final int[] X_POS = { 0, 0, 63, 63, 0, -63, -63 };
     private static final int[] Y_POS = { 0, -72, -36, 36, 72, 36, -36 };
@@ -130,21 +129,21 @@ public class EntityImage {
     /** How strongly the marker color is blended over the unit (0-255). */
     private static final int STRIPE_ALPHA = 200;
 
-    static {
+    /** All damage decal/fire/smoke files in DECAL_PATH. */
+    private static AbstractDirectory DecalImages;
+
+    static { reloadAssets(); }
+
+    /** Refresh the shared source art before TilesetManager rebuilds the unit icons. */
+    public static void reloadAssets() {
         try {
             for (int i = 0; i < 6; i++) {
-                var overlay = new ImageIcon(Configuration.miscImagesDir() + "/camo_overlay" + i + ".png");
-                grabImagePixels(overlay.getImage(), pOverlays[i]);
+                var overlay = ImageUtil.loadImageFromFile(Configuration.miscImagesDir() + "/camo_overlay" + i + ".png");
+                grabImagePixels(overlay, pOverlays[i]);
             }
         } catch (Exception e) {
             logger.error("Failed to grab pixels for the camo overlay.{}", e.getMessage());
         }
-    }
-
-    /** All damage decal/fire/smoke files in DECAL_PATH. */
-    private static AbstractDirectory DecalImages;
-
-    static {
         try {
             DecalImages = new DirectoryItems(DECAL_PATH, new ImageFileFactory());
         } catch (Exception e) {

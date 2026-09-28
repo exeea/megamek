@@ -39,7 +39,6 @@ final class GpuOcean implements Disposable {
     private static final float GRAVITY = 9.81f;
     /** Every frequency is a multiple of 2π over this many seconds, so the clock can wrap without a jump. */
     private static final float LOOP_SECONDS = 1000;
-    private static final String PATH = "megamek/client/ui/clientGUI/boardview/gpu/";
 
     private ShaderProgram spectrum;
     private ShaderProgram butterfly;
@@ -99,7 +98,7 @@ final class GpuOcean implements Disposable {
     }
 
     private void create() {
-        String vertex = Gdx.files.classpath(PATH + "ocean.vert").readString();
+        String vertex = GpuShaderSource.read("ocean.vert");
         spectrum = program(vertex, "ocean-spectrum.frag");
         butterfly = program(vertex, "ocean-fft.frag");
         finish = program(vertex, "ocean-finish.frag");
@@ -133,7 +132,7 @@ final class GpuOcean implements Disposable {
     }
 
     private static ShaderProgram program(String vertex, String fragment) {
-        ShaderProgram program = new ShaderProgram(vertex, Gdx.files.classpath(PATH + fragment).readString());
+        ShaderProgram program = new ShaderProgram(vertex, GpuShaderSource.read(fragment));
         if (!program.isCompiled()) {
             String log = program.getLog();
             program.dispose();

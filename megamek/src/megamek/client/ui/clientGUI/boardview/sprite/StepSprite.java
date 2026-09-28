@@ -132,7 +132,7 @@ public class StepSprite extends Sprite implements TacticalSprite {
 
     @Override
     public void drawTactical(Graphics2D graphics) {
-        Graphics2D local = BoardTacticalGraphics.at(graphics, bv.getHexLocation(step.getPosition()));
+        Graphics2D local = BoardTacticalGraphics.onHexPlane(graphics, bv.getHexLocation(step.getPosition()));
         try {
             paintTactical(local);
         } finally {

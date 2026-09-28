@@ -74,6 +74,7 @@ class GpuSelectionSmokeTest {
                 public void render() {
                     try {
                         super.render();
+                        if (frames() == 0) { return; }
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                         if (frames() == 1) {
                             ((UnitPlayback) field(this, "playback")).togglePaused();

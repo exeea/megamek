@@ -97,7 +97,6 @@ final class GpuAtmosphere implements Disposable {
         }
     }
 
-    private static final String SHADERS = "megamek/client/ui/clientGUI/boardview/gpu/";
     private final Mesh quad;
     private final ShaderProgram fogShader;
     private final ShaderProgram compositeShader;
@@ -172,23 +171,23 @@ final class GpuAtmosphere implements Disposable {
     }
 
     static ShaderProgram shader(String fragment) {
-        String source = Gdx.files.classpath(SHADERS + fragment).readString("UTF-8");
+        String source = GpuShaderSource.read(fragment);
         if (source.contains("// CLOUD_SHADOW")) {
-            source = source.replace("// CLOUD_SHADOW", Gdx.files.classpath(SHADERS + "cloud-shadow.glsl").readString("UTF-8"));
+            source = source.replace("// CLOUD_SHADOW", GpuShaderSource.read("cloud-shadow.glsl"));
         }
         if (source.contains("// SCATTERING_PHASE")) {
-            source = source.replace("// SCATTERING_PHASE", Gdx.files.classpath(SHADERS + "scattering-phase.glsl").readString("UTF-8"));
+            source = source.replace("// SCATTERING_PHASE", GpuShaderSource.read("scattering-phase.glsl"));
         }
         if (source.contains("// GROUND_LAYER")) {
-            source = source.replace("// GROUND_LAYER", Gdx.files.classpath(SHADERS + "ground-layer.glsl").readString("UTF-8"));
+            source = source.replace("// GROUND_LAYER", GpuShaderSource.read("ground-layer.glsl"));
         }
         if (source.contains("// CAMERA_DEPTH")) {
-            source = source.replace("// CAMERA_DEPTH", Gdx.files.classpath(SHADERS + "camera-depth.glsl").readString("UTF-8"));
+            source = source.replace("// CAMERA_DEPTH", GpuShaderSource.read("camera-depth.glsl"));
         }
-        String vertex = Gdx.files.classpath(SHADERS + "atmosphere.vert").readString("UTF-8");
+        String vertex = GpuShaderSource.read("atmosphere.vert");
         String prefix = "";
         if (source.contains("// SUN_VISIBILITY")) {
-            String visibility = Gdx.files.classpath(SHADERS + "sun-visibility.glsl").readString("UTF-8");
+            String visibility = GpuShaderSource.read("sun-visibility.glsl");
             vertex = vertex.replace("// SUN_VISIBILITY", visibility);
             source = source.replace("// SUN_VISIBILITY", visibility);
             var units = BufferUtils.newIntBuffer(1);

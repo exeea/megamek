@@ -1031,6 +1031,20 @@ board click. Menus retain scrolling and viewport clamping; disabled explanations
 appear in tooltips instead of expanding every unavailable row. Keyboard navigation skips disabled actions.
 Camera rotation, fitting, and menu interaction do not issue game orders.
 
+**GPU Tuning > Reload assets** rereads the running installation's textures, GLB meshes, model descriptors,
+tilesets and shaders. Save edited files in the active `data/models` or image directories, then press the button; the board
+rebuilds while keeping the camera, tuning settings and game state. The footer shows completion or a reload
+failure. After fixing an invalid file, press the button again. This is available during gameplay and in map
+previews and the 3D editor; rebuilding a large board can take time.
+
+Shader files (`.vert`, `.frag`, and shared `.glsl` includes) can be overridden individually in `data/shaders/`,
+using their existing filenames. When running from a checkout, edits under
+`megamek/resources/megamek/client/ui/clientGUI/boardview/gpu/` are also read directly, without a rebuild.
+The loader checks `data/shaders/` first, then the checkout resources, then the bundled defaults. Reload releases
+all board shader programs, including unit materials, atmosphere/clouds/weather, outlines, hex labels, terrain,
+water and combat effects. Inactive effects compile when next drawn. Shader compile errors during reload leave
+the tuning panel available for another attempt after correcting the file; diagnostics are written to the log.
+
 The Tuning panel has two tabs. **General** contains camera projection, geometry, family sizes, overview icons, visibility, field of view,
 sensor range and damage preview. **Atmosphere** contains planetary presets, lighting, planetary properties,
 weather and light/fog effects. Each tab retains its scroll position; the shared **Defaults** button resets
@@ -1415,8 +1429,9 @@ the classic board keeps its ground labels.
   Repaints, board changes and camera coverage invalidate tactical capture;
   unchanged frames reuse it, and offscreen markings are released.
 - `BoardView.captureTacticalGeometry` records the converted painters as immutable
-  vectors. `GpuTactical` renders these as terrain-following meshes shared by both
-  cameras. Ruler lines, endpoint crosshairs and LOS hex outlines use this path;
+  vectors. `GpuTactical` renders these as meshes shared by both cameras: flat hex
+  annotations use `BoardTacticalGeometry.floatingZ`, while area tints and lines
+  spanning several hexes follow the terrain. Ruler lines, endpoint crosshairs and LOS hex outlines use this path;
   changing or clearing them does not repaint their artwork into raster tiles.
 - `BoardGeometry` owns dimensions and terrain picking; `BoardSurface` defines
   the physical roads, banks, beds and exposed sides.
@@ -1437,9 +1452,11 @@ the classic board keeps its ground labels.
   and authored-mesh intersection code.
 - The draw order is opaque terrain/features, flat decals, units, transparent
   water/faded features, tactical marks, and screen annotations/UI.
-  Converted tactical geometry follows the shared terrain triangles, including
-  road approaches and water surfaces. Remaining raster marks use a flat plane
-  one-third of a level above each hex's surface. Both paths test opaque depth
+  Flat native annotations and raster marks share one horizontal plane per hex,
+  above its highest finished ground/water surface by `HEX_PLANE_CLEARANCE`.
+  Raster builds use their own completed chunk's support, including cached detail
+  changes and terrain edits. Terrain tints and multi-hex lines follow the shared
+  terrain triangles, including road approaches and water surfaces. Both paths test opaque depth
   without writing it, so buildings and higher terrain occlude them. Border
   colors and existing translucent fills are retained.
 - One 2048-pixel directional shadow map includes terrain, opaque features, and

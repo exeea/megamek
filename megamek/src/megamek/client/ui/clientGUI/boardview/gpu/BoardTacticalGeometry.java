@@ -22,6 +22,8 @@ import megamek.common.board.Coords;
 /** Tessellation and terrain clipping only; all tactical decisions are supplied by the client painters. */
 final class BoardTacticalGeometry {
     private static final float WALL_CLEARANCE = 0.6f;
+    /** Shared clearance in world units for flat hex annotations, independent of animated unit bands. */
+    static final float HEX_PLANE_CLEARANCE = .65f;
 
     record Triangle(Vector3 a, Vector3 b, Vector3 c, int argb) { }
     /** Only the finished triangles are retained; none of the terrain builder's scene or shoreline caches. */
@@ -162,17 +164,20 @@ final class BoardTacticalGeometry {
     }
 
     static Coords borderCoords(BoardScene scene, BoardTactical.HexBorder border) {
-        BoardScene.Tile tile = BoardGeometry.tile(scene, border.anchor().x() * BoardGeometry.hexScale(),
-              -border.anchor().y() * BoardGeometry.hexScale());
+        return anchorCoords(scene, border.anchor());
+    }
+
+    static Coords anchorCoords(BoardScene scene, BoardTactical.Point anchor) {
+        if (anchor == null) { return null; }
+        BoardScene.Tile tile = BoardGeometry.tile(scene, anchor.x() * BoardGeometry.hexScale(),
+              -anchor.y() * BoardGeometry.hexScale());
         return tile == null ? null : tile.coords();
     }
 
     /** A single horizontal plane clears its owner's finished top, without sampling neighboring cliffs or lake beds. */
     static boolean floating(BoardScene scene, BoardTactical.Fill fill, Consumer<Triangle> destination,
           Function<Coords, Surface> surfaces) {
-        BoardTactical.HexBorder border = fill.border();
-        if (border == null || !border.floating()) { return false; }
-        Coords coords = borderCoords(scene, border);
+        Coords coords = anchorCoords(scene, fill.planeAnchor());
         if (coords == null) { return false; }
         float z = floatingZ(scene, coords, surfaces);
         for (Triangle triangle : flat(fill)) {
@@ -183,10 +188,11 @@ final class BoardTacticalGeometry {
         return true;
     }
 
+    /** Authoritative plane for flat hex fills, labels and hover/editor cursors in either camera view. */
     static float floatingZ(BoardScene scene, Coords coords, Function<Coords, Surface> surfaces) {
         Surface surface = surfaces.apply(coords);
         float z = surface.top().isEmpty() ? BoardGeometry.surfaceZ(scene.tile(coords)) : surface.highestTop();
-        return z + .5f + GpuBattleView.SELECTION_BOB_HEIGHT_OFFSET;
+        return z + HEX_PLANE_CLEARANCE;
     }
 
     static float layerLift(int layer) {

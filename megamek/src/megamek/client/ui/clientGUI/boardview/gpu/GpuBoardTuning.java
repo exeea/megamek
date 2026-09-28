@@ -150,6 +150,9 @@ final class GpuBoardTuning {
     private BoardAtmosphere.Settings lastScenario;
     private boolean conditionsPreview;
     private boolean syncing;
+    private final TextButton reloadAssets;
+    private final Label assetReloadStatus;
+    private boolean assetReloadRequested;
 
     GpuBoardTuning(Skin skin) {
         this(skin, null);
@@ -581,6 +584,28 @@ final class GpuBoardTuning {
         panel.add(tabs).growX().padBottom(6).row();
         panel.add(new Stack(generalScroll, atmosphereScroll, terrainScroll)).minHeight(0).grow().row();
         panel.add(new Image(skin.getDrawable("rule"))).height(1).growX().padTop(6).row();
+        reloadAssets = new TextButton("Reload assets", skin, "menu-control");
+        reloadAssets.setName("tuning-reload-assets");
+        reloadAssets.setDisabled(source == null);
+        reloadAssets.setProgrammaticChangeEvents(false);
+        reloadAssets.addListener(new TextTooltip("Reload textures, GLB meshes, model descriptors, tilesets and shaders from disk. "
+              + "Save your edited files first. The board rebuilds with your current camera and tuning settings.", skin, "menu"));
+        assetReloadStatus = new Label("", skin, "small");
+        assetReloadStatus.setName("tuning-reload-status");
+        assetReloadStatus.setEllipsis(true);
+        reloadAssets.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                reloadAssets.setChecked(false);
+                reloadAssets.setDisabled(true);
+                assetReloadStatus.setText("Reloading...");
+                assetReloadRequested = true;
+            }
+        });
+        Table assets = new Table();
+        assets.add(reloadAssets).width(110).height(24);
+        assets.add(assetReloadStatus).minWidth(0).growX().left().padLeft(8);
+        panel.add(assets).growX().padTop(4).row();
         TextButton reset = new TextButton("Defaults", skin, "menu-control");
         reset.setName("tuning-defaults");
         reset.addListener(new TextTooltip("Restore all tabs: camera projection, geometry, terrain, water, geology, "
@@ -603,6 +628,17 @@ final class GpuBoardTuning {
         buttons.add(new Label("F9 to close", skin, "small")).right();
         panel.add(buttons).growX().padTop(4).row();
         restoreDefaults();
+    }
+
+    boolean takeAssetReloadRequest() {
+        boolean requested = assetReloadRequested;
+        assetReloadRequested = false;
+        return requested;
+    }
+
+    void assetReloadFinished(boolean success) {
+        reloadAssets.setDisabled(false);
+        assetReloadStatus.setText(success ? "Assets reloaded" : "Reload failed; see log. Retry after fixing files.");
     }
 
     private ScrollPane scroll(Skin skin, Table content, String name) {

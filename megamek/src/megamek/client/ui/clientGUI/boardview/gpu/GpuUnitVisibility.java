@@ -44,7 +44,7 @@ final class GpuUnitVisibility implements Disposable {
         DepthShader.Config config = new DepthShader.Config();
         config.defaultCullFace = GL20.GL_BACK;
         config.depthBufferOnly = true;
-        config.fragmentShader = Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/unit-color.frag").readString();
+        config.fragmentShader = GpuShaderSource.read("unit-color.frag");
         colorBatch = new ModelBatch(new DepthShaderProvider(config) {
             @Override
             protected Shader createShader(Renderable renderable) {

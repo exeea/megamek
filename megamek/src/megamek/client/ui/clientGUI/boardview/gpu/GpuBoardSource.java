@@ -610,6 +610,22 @@ final class GpuBoardSource implements BoardSource {
         }
     }
 
+    @Override
+    public void reloadAssets() throws java.io.IOException {
+        requireSwingThread();
+        if (closed) { return; }
+        megamek.common.util.ImageUtil.reloadImages();
+        MMStaticDirectoryManager.refreshMekTileset();
+        MMStaticDirectoryManager.refreshCamouflageDirectory();
+        view.reloadAssets();
+        unitImages.clear();
+        unitAnnotations.clear();
+        camouflage.clear();
+        terrainImages.clear();
+        terrainDirty = true;
+        refresh();
+    }
+
     public synchronized Frame takeFrame() {
         Frame result = new Frame(frame.scene(), List.copyOf(pendingEvents), frame.context(), frame.globalCommands(),
               frame.hud(), frame.tooltip(), frame.centerRequest(), frame.boardGeneration(), frame.actorName(),

@@ -1,7 +1,6 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.Attribute;
 import com.badlogic.gdx.graphics.g3d.Attributes;
@@ -52,8 +51,7 @@ final class GpuCloudShadow extends Attribute {
     }
 
     static String fragment(String source, boolean ground) {
-        String declarations = Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/cloud-shadow.glsl")
-              .readString("UTF-8");
+        String declarations = GpuShaderSource.read("cloud-shadow.glsl");
         // The libGDX shaders also dim the sunlit ground's share of their ambient (GpuUnitShader.linearVertex).
         source = insert(source, MAIN, declarations + "\n" + (ground ? "" : "varying vec3 v_groundBounce;\n") + MAIN);
         if (ground) {

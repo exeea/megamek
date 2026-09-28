@@ -42,6 +42,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.HexDrawUtilities;
 import megamek.common.board.Coords;
@@ -106,7 +107,12 @@ public class VTOLAttackSprite extends Sprite implements TacticalSprite {
     public void drawOnto(Graphics graphics, int x, int y, ImageObserver observer) {
         if (graphics instanceof Graphics2D graphics2D) {
             for (Coords c : targets) {
-                boardView.drawHexBorder(graphics2D, boardView.getHexLocation(c), spriteColor, 0, 3);
+                Graphics2D local = BoardTacticalGraphics.onHexPlane(graphics2D, boardView.getHexLocation(c));
+                try {
+                    boardView.drawHexBorder(local, spriteColor, 0, 3);
+                } finally {
+                    local.dispose();
+                }
             }
         }
     }

@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.image.BufferedImage;
 import java.lang.reflect.Field;
+import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -22,6 +23,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.utils.ScreenUtils;
@@ -29,7 +31,7 @@ import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Raster markings retain distant meshes, including when shared atlas artwork splits, merges or compacts. */
+/** Raster markings share the native annotation plane and retain unaffected meshes across atlas and terrain edits. */
 @Tag("on-demand")
 class GpuMarkingsSmokeTest {
     private static final Coords FIRST = new Coords(4, 4);
@@ -37,19 +39,105 @@ class GpuMarkingsSmokeTest {
     private static final Coords THIRD = new Coords(20, 4);
 
     @Test
-    void markingUpdatesRebuildOnlyChunksWhoseAtlasReferencesChanged() {
+    void markingUpdatesRetainUnaffectedChunksAndShareTheAnnotationPlane() {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         var configuration = GpuBoardWindow.configuration(false);
         configuration.setWindowedMode(1000, 700);
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
             public void create() {
-                try { check(); }
+                try { check(); checkPlaneUpdates(); }
                 catch (Throwable error) { failure.set(error); }
                 finally { Gdx.app.exit(); }
             }
         }, configuration);
         if (failure.get() != null) { throw new AssertionError("Native marking invalidation", failure.get()); }
+    }
+
+    private static void checkPlaneUpdates() throws Exception {
+        GpuTerrain terrain = new GpuTerrain();
+        var original = TerrainLod.tuning();
+        boolean enabled = TerrainLod.enabled();
+        try {
+            // Full rebuilds and local elevation/water/ice edits must use the chunk being installed, not the old one.
+            BoardScene scene = null;
+            for (int[] state : new int[][] { { 0, -1, 0 }, { 2, -1, 0 }, { 2, 4, 0 }, { 2, 8, 0 }, { 2, 8, 1 }, { -1, -1, 0 } }) {
+                scene = planeScene(state[0], state[1], state[2] != 0);
+                terrain.update(scene);
+                assertPlane(terrain, scene);
+            }
+
+            BoardCamera camera = new BoardCamera();
+            camera.resize(1000, 700);
+            camera.fit(scene);
+            TerrainLod.setEnabled(false);
+            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+            Object full = ((List<?>) field(terrain, "chunks")).getFirst();
+            assertEquals(TerrainLod.FULL, field(full, "lod"));
+            assertPlane(terrain, scene);
+
+            TerrainLod.setEnabled(true);
+            TerrainLod.tune(new TerrainLod.Tuning(100_000, 100_000));
+            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+            assertEquals(TerrainLod.DISTANT, field(((List<?>) field(terrain, "chunks")).getFirst(), "lod"));
+            assertPlane(terrain, scene);
+
+            // Simulate eviction of CPU support while the completed full-detail GPU chunk remains cached.
+            ((Map<?, ?>) field(terrain, "cpuGeometry")).clear();
+            for (Object tile : ((Map<?, ?>) field(full, "tileMeshes")).values()) {
+                ((WeakReference<?>) field(tile, "support")).clear();
+            }
+            TerrainLod.setEnabled(false);
+            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+            assertSame(full, ((List<?>) field(terrain, "chunks")).getFirst(), "Returning to full detail reuses the cached chunk");
+            assertPlane(terrain, scene);
+            assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+        } finally {
+            terrain.dispose();
+            TerrainLod.tune(original);
+            TerrainLod.setEnabled(enabled);
+        }
+    }
+
+    private static void assertPlane(GpuTerrain terrain, BoardScene scene) throws Exception {
+        float expected = BoardTacticalGeometry.floatingZ(scene, FIRST, terrain::tacticalSurface);
+        int count = 0;
+        for (Model model : models(terrain).getFirst()) {
+            for (var mesh : model.meshes) {
+                int stride = mesh.getVertexSize() / Float.BYTES;
+                int position = mesh.getVertexAttribute(VertexAttributes.Usage.Position).offset / Float.BYTES;
+                float[] vertices = new float[mesh.getNumVertices() * stride];
+                mesh.getVertices(vertices);
+                for (int vertex = 0; vertex < vertices.length; vertex += stride) {
+                    assertEquals(expected, vertices[vertex + position + 2], .00001f,
+                          "Raster markings must be coplanar with native annotations on the installed terrain");
+                    count++;
+                }
+            }
+        }
+        assertTrue(count >= 18, "Inspect all six triangles of the marked hex");
+    }
+
+    private static BoardScene planeScene(int elevation, int depth, boolean frozen) {
+        BoardScene.Pixels marking = art(84, 72, 0xa0ff3030);
+        BoardScene.Pixels ground = art(84, 72, 0xff707070);
+        List<BoardScene.Tile> tiles = new ArrayList<>();
+        for (int x = 0; x < 8; x++) {
+            for (int y = 0; y < 8; y++) {
+                Coords coords = new Coords(x, y);
+                boolean lake = coords.distance(FIRST) <= 1 && depth >= 0;
+                tiles.add(new BoardScene.Tile(coords, elevation + (x > 5 ? 1 : 0), lake ? depth : -1,
+                      lake && frozen, 0, BoardScene.Surface.GRASS, ground, null, coords.equals(FIRST) ? marking : null,
+                      List.of(), List.of()));
+            }
+        }
+        return new BoardScene(0, 8, 8, tiles, List.of(), List.of(), -1, "", List.of());
+    }
+
+    private static Object field(Object owner, String name) throws Exception {
+        Field field = owner.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(owner);
     }
 
     private static void check() throws Exception {
@@ -66,7 +154,7 @@ class GpuMarkingsSmokeTest {
             Texture stablePage = atlas.region(SECOND).getTexture();
 
             markings.put(THIRD, blue);
-            checkChange("in-place pixels", terrain, scene(markings, false), Set.of());
+            checkChange("replacement pixels", terrain, scene(markings, false), Set.of(2));
             assertSame(stablePage, atlas.region(SECOND).getTexture());
 
             markings.put(FIRST, art(64, 64, 0xffffe030));
@@ -122,8 +210,12 @@ class GpuMarkingsSmokeTest {
 
     private static void checkChange(String name, GpuTerrain terrain, BoardScene scene, Set<Integer> changed) throws Exception {
         List<List<Model>> before = models(terrain);
+        boolean retained = scene.tile(SECOND).tactical() != null && !before.get(1).isEmpty();
+        Texture page = retained ? atlas(terrain).region(SECOND).getTexture() : null;
         terrain.update(scene);
-        assertChanged(name, before, models(terrain), changed);
+        // Atlas revisions preserve displayed pixels; the discarded slots can also trigger compaction here.
+        boolean compacted = retained && page != atlas(terrain).region(SECOND).getTexture();
+        assertChanged(name, before, models(terrain), compacted ? Set.of(0, 1, 2) : changed);
         assertPixels(terrain, scene);
     }
 

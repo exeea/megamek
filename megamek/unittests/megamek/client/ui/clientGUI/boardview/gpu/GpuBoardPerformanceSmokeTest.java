@@ -595,7 +595,7 @@ class GpuBoardPerformanceSmokeTest {
         List<BoardTactical.Fill> fills = captured.fills().stream().map(fill -> {
             BoardTactical.HexBorder border = fill.border();
             return border == null ? fill : new BoardTactical.Fill(fill.contours(), fill.winding(), fill.argb(), fill.playback(),
-                  new BoardTactical.HexBorder(border.anchor(), border.padding(), border.width(), border.scale(), false));
+                  new BoardTactical.HexBorder(border.anchor(), border.padding(), border.width(), border.scale()));
         }).toList();
         return new BoardScene(scene.boardId(), scene.width(), scene.height(), scene.tiles(), scene.units(), scene.plannedPath(),
               scene.selectedId(), scene.phase(), scene.commands(), scene.light(), scene.firingLines(), scene.rangeBorders(),

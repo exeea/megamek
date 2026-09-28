@@ -91,6 +91,8 @@ final class GpuTactical implements Disposable {
     private final float outlineSpeed;
     private double scrollDistance;
     private final Function<Coords, BoardTacticalGeometry.Surface> terrain;
+    /** Render-owned support lookup for the current geometry; also anchors camera-facing hex labels. */
+    private Function<Coords, BoardTacticalGeometry.Surface> labelSurfaces;
 
     GpuTactical() {
         this(OUTLINE_SCROLL_SPEED);
@@ -219,6 +221,7 @@ final class GpuTactical implements Disposable {
         replacePages(groups);
         fills = nextFills;
         walls = nextWalls;
+        labelSurfaces = surfaces;
         builds++;
     }
 
@@ -230,8 +233,7 @@ final class GpuTactical implements Disposable {
         for (int layer = 0; layer < commands.size(); layer++) {
             BoardTactical.Fill command = commands.get(layer);
             if (BoardDeploymentGeometry.isZone(command)) { continue; }
-            FillKey key = new FillKey(command, command.border() != null && command.border().floating()
-                  ? 0 : Math.min(layer, 10000));
+            FillKey key = new FillKey(command, command.planeAnchor() != null ? 0 : Math.min(layer, 10000));
             FillGeometry geometry = retained.get(key);
             if (geometry == null) { geometry = reset ? null : fills.get(key); }
             int elevation = geometry == null || terrainChanged
@@ -251,8 +253,7 @@ final class GpuTactical implements Disposable {
     }
 
     private static int floatingElevation(BoardScene scene, BoardTactical.Fill fill) {
-        if (fill.border() == null || !fill.border().floating()) { return Integer.MIN_VALUE; }
-        Coords coords = BoardTacticalGeometry.borderCoords(scene, fill.border());
+        Coords coords = BoardTacticalGeometry.anchorCoords(scene, fill.planeAnchor());
         return coords == null ? Integer.MIN_VALUE : scene.tile(coords).elevation();
     }
 
@@ -534,7 +535,7 @@ final class GpuTactical implements Disposable {
                 continue;
             }
             Vector3 position = new Vector3(anchor.x() * BoardGeometry.hexScale(), -anchor.y() * BoardGeometry.hexScale(),
-                  BoardGeometry.surfaceZ(tile) + 2 * BoardGeometry.hexScale());
+                  BoardTacticalGeometry.floatingZ(previous, coords, labelSurfaces));
             if (!camera.frustum.sphereInFrustum(position, BoardGeometry.width())) {
                 continue;
             }
@@ -611,5 +612,6 @@ final class GpuTactical implements Disposable {
         textures.dispose();
         images.clear();
         labels.clear();
+        labelSurfaces = null;
     }
 }
