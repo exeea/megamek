@@ -698,9 +698,7 @@ final class GpuBoardSource implements BoardSource {
             for (int index = 0; index < tiles.size(); index++) {
                 BoardScene.Tile old = tiles.get(index);
                 if (old.tactical() != null && !area.contains(old.coords().getX(), old.coords().getY())) {
-                    painted.set(index, new BoardScene.Tile(old.coords(), old.elevation(), old.waterDepth(), old.frozen(),
-                          old.roadExits(), old.surface(), old.ground(), old.normals(), old.decals(), old.decalsWithoutLimbs(),
-                          null, old.features(), old.text(), old.liquid(), old.foliage(), old.detailedGround(), old.road(), old.fireSmoke(), old.biome()));
+                    painted.set(index, old.withTactical(null));
                 }
             }
             // A terrain edit repaints its changed hexes and newly exposed view only. Explicit painter/overlay
@@ -721,7 +719,7 @@ final class GpuBoardSource implements BoardSource {
                 BoardScene.Tile next = new BoardScene.Tile(old.coords(), old.elevation(), old.waterDepth(), old.frozen(),
                       old.roadExits(), old.surface(), old.ground(), old.normals(), old.decals(), old.decalsWithoutLimbs(),
                       terrainImages.capture(hex.tactical(), old.tactical()), old.features(), hex.text(), old.liquid(),
-                      old.foliage(), old.detailedGround(), old.road(), old.fireSmoke(), old.biome());
+                      old.foliage(), old.detailedGround(), old.road(), old.fireSmoke(), old.biome(), old.impassable());
                 if (!next.equals(old)) {
                     painted.set(index, next);
                 }

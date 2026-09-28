@@ -13,8 +13,6 @@ import megamek.common.units.Terrains;
 
 /** Copies terrain appearance on the Swing thread; no game objects cross into the renderer. */
 final class BoardFeatures {
-    /** Global scatter density: 0 disables it, 1 is the baseline, 3 triples each biome's placement chance. */
-    static final float SCATTER_DENSITY_MULTIPLIER = 3.0f;
     /** Width in tile pixels of a Rough boulder at feature scale one; placement and meshing share this size. */
     static final float ROUGH_BOULDER_WIDTH = 12;
     /** Tree species by where they grow; repeated names are the common ones. */
@@ -41,7 +39,8 @@ final class BoardFeatures {
                       Terrains.PAVEMENT, Terrains.SNOW, Terrains.WATER, Terrains.HAZARDOUS_LIQUID, Terrains.RAPIDS, Terrains.ROUGH,
                       Terrains.CLIFF_TOP, Terrains.CLIFF_BOTTOM, Terrains.INCLINE_TOP, Terrains.INCLINE_BOTTOM,
                       Terrains.INCLINE_HIGH_TOP, Terrains.INCLINE_HIGH_BOTTOM, Terrains.METAL_CONTENT,
-                      Terrains.DEPLOYMENT_ZONE, Terrains.FIRE, Terrains.SMOKE, Terrains.FIELDS, Terrains.SWAMP, Terrains.MUD -> true;
+                      Terrains.DEPLOYMENT_ZONE, Terrains.IMPASSABLE, Terrains.FIRE, Terrains.SMOKE,
+                      Terrains.FIELDS, Terrains.SWAMP, Terrains.MUD -> true;
                 case Terrains.BUILDING, Terrains.BLDG_CF, Terrains.BLDG_ELEV, Terrains.BLDG_CLASS,
                       Terrains.BLDG_ARMOR, Terrains.BLDG_BASEMENT_TYPE, Terrains.BLDG_FLUFF -> concreteBuilding;
                 case Terrains.ROAD -> BoardRoad.capture(hex) != BoardRoad.Kind.NONE
@@ -71,7 +70,10 @@ final class BoardFeatures {
         if (theme.contains("lunar") || theme.contains("rock") || theme.contains("volcan")) {
             return BoardScene.Surface.ROCK;
         }
-        if (hex.containsAnyTerrainOf(Terrains.MUD, Terrains.SWAMP, Terrains.FIELDS) || theme.contains("dirt") || theme.contains("mars")) {
+        // Fields and reed marshes replace the flat cover in the biome shader. Their banks retain the theme's
+        // grass/soil mantle; classifying the whole column as dirt leaves a bare cutout around every plantation.
+        if (hex.containsTerrain(Terrains.MUD) || hex.terrainLevel(Terrains.SWAMP) > 1
+              || theme.contains("dirt") || theme.contains("mars")) {
             return BoardScene.Surface.DIRT;
         }
         return BoardScene.Surface.GRASS;
@@ -151,7 +153,7 @@ final class BoardFeatures {
             }
         }
         rough(hex, coords, result);
-        scatter(hex, coords, result);
+        BoardScatter.capture(hex, coords, result);
         return List.copyOf(result);
     }
 
@@ -184,53 +186,6 @@ final class BoardFeatures {
             if (blocked) { continue; }
             result.add(new BoardScene.Feature("rough-boulder", x, y, random.nextFloat() * 360, size, height, 0,
                   BoardScene.FeatureKind.BOULDER));
-        }
-    }
-
-    /** Cosmetic clusters leave the unit centre clear; terrain updates never reshuffle neighboring details. */
-    private static void scatter(Hex hex, Coords coords, List<BoardScene.Feature> result) {
-        if (hex.containsAnyTerrainOf(Terrains.WATER, Terrains.ICE, Terrains.ROAD, Terrains.PAVEMENT,
-              Terrains.BRIDGE, Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL, Terrains.FIELDS,
-              Terrains.WOODS, Terrains.JUNGLE, Terrains.SPACE, Terrains.SKY, Terrains.MAGMA, Terrains.FIRE,
-              Terrains.GEYSER, Terrains.SWAMP, Terrains.MUD, Terrains.HAZARDOUS_LIQUID, Terrains.FORTIFIED, Terrains.ROUGH)) {
-            return;
-        }
-        BoardScene.Surface surface = surface(hex);
-        float density = switch (surface) {
-            case GRASS -> .16f;
-            case ROCK -> .18f;
-            case DIRT -> .12f;
-            case SAND -> .10f;
-            case SNOW -> .06f;
-            case CONCRETE -> 0;
-        };
-        Random random = new Random(coords.getX() * 0x9E3779B97F4A7C15L
-              ^ coords.getY() * 0xC2B2AE3D27D4EB4FL ^ 0x165667B19E3779F9L);
-        if (random.nextFloat() >= density * SCATTER_DENSITY_MULTIPLIER) {
-            return;
-        }
-        int count = 3 + random.nextInt(4);
-        String theme = hex.getTheme() == null ? "" : hex.getTheme().toLowerCase(Locale.ROOT);
-        boolean plants = !theme.contains("lunar") && !theme.contains("mars") && !theme.contains("volcan");
-        for (int index = 0; index < count; index++) {
-            int choice = random.nextInt(10);
-            String asset = choice % 2 == 0 ? "scatter-rock" : "scatter-slab";
-            if (plants && surface == BoardScene.Surface.GRASS) {
-                if (choice < 5 || hex.containsTerrain(Terrains.TUNDRA) && choice < 8) {
-                    asset = hex.containsTerrain(Terrains.TUNDRA) ? "scatter-dry-grass" : "scatter-grass";
-                } else if (choice < 8) {
-                    asset = "scatter-plant";
-                }
-            } else if (plants && surface == BoardScene.Surface.DIRT && choice < 4) {
-                asset = "scatter-dry-grass";
-            } else if (plants && surface == BoardScene.Surface.SAND && choice == 0) {
-                asset = "scatter-plant";
-            }
-            double angle = random.nextDouble() * Math.PI * 2;
-            float radius = 16 + 12 * (float) Math.sqrt(random.nextFloat());
-            result.add(new BoardScene.Feature(asset, (float) Math.cos(angle) * radius,
-                  (float) Math.sin(angle) * radius, random.nextFloat() * 360, .7f + random.nextFloat() * .5f,
-                  .10f + random.nextFloat() * .13f, 0, BoardScene.FeatureKind.SCATTER));
         }
     }
 

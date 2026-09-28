@@ -45,6 +45,12 @@ void terrainCoverage(vec3 world, float edge, float waterLevel, out vec4 cover, o
     // Soil/peat reaches onto the adjoining slope; crops and standing pools keep the narrower height support.
     // Both masks share this stencil, with no extra texture fetches.
     float edgeNoise = biomeNoise(world.xy / 3.2 + 41.0);
+    // Drainage below a wet plateau follows uneven peat fingers, not an equipotential waterline.
+    // Above it, keep the narrow bank fringe: standing water cannot climb into a higher hex.
+    float drainNoise = mix(edgeNoise, biomeNoise(world.xy / .85 + 9.0), .35 * fineMix);
+    float drainage = mix(1.4, max(3.6, u_levelHeight / u_metre * 1.4), smoothstep(.15, .85, drainNoise));
+    vec3 wetTiles = vec3(0.0);
+    float wetAbove = 0.0, wetBelow = 0.0;
     float total = 0.0, fieldTotal = 0.0, fringeTotal = 0.0;
     for (int dx = -1; dx <= 1; dx++) {
         int x = column + dx;
@@ -70,8 +76,15 @@ void terrainCoverage(vec3 world, float edge, float waterLevel, out vec4 cover, o
                 int kind = int(tile.r * 255.0 + .5);
                 vec4 kinds = vec4(kind == 1, kind == 2, kind == 3, kind == 4);
                 cover += kinds * vec4(fw, w, w, w) * (1.0 - smoothstep(.15, 1.25, abs(world.z - z)));
+                vec4 reach = vec4(2.0, 2.8, 2.8, 2.8) + edgeNoise * .8;
+                if (world.z < z) reach.yzw = vec3(drainage);
                 fringe += kinds * vec4(bw, w, w, w) * (1.0 - smoothstep(vec4(.15),
-                      vec4(2.0, 2.8, 2.8, 2.8) + edgeNoise * .8, vec4(abs(world.z - z))));
+                      reach, vec4(abs(world.z - z))));
+                vec3 wet = kinds.yzw * w;
+                wetTiles += wet;
+                float wetWeight = dot(wet, vec3(1.0));
+                wetAbove += wetWeight * step(world.z + .15, z);
+                wetBelow += wetWeight * step(z + .15, world.z);
                 int liquid = int(tile.g * 255.0 + .5);
                 liquids += vec4(liquid == 1, liquid == 2, liquid == 3, liquid == 4) * lw
                       * (1.0 - smoothstep(.05, .25, abs(waterLevel - level)));
@@ -80,6 +93,10 @@ void terrainCoverage(vec3 world, float edge, float waterLevel, out vec4 cover, o
     }
     cover /= max(vec4(fieldTotal, total, total, total), vec4(.0001));
     fringe /= max(vec4(fringeTotal, total, total, total), vec4(.0001));
+    // Wet neighbours on both sides of this height share a peat bank across the whole drop.
+    // Only sediment connects: the narrower cover mask still confines pools and plants to their supported level.
+    float connected = smoothstep(0.0, .18, min(wetAbove, wetBelow) / max(total, .0001));
+    fringe.yzw = max(fringe.yzw, wetTiles / max(total, .0001) * connected);
     liquids /= max(dot(liquids, vec4(1.0)), .0001);
 }
 

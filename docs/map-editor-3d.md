@@ -22,6 +22,13 @@ File operations remain available through the editor menus and palette.
 - Undo/redo shortcuts operate on the shared history. A brush drag is one undo step, including release
   over a toolbar, focus loss, or switching modes.
 
+Each impassable hex has a transparent, flat marker with a red border and broad red diagonal stripes.
+It uses the same floating plane as other hex markings; trees and other features may intersect it.
+Hover strengthens the marking; gameplay also strengthens it while a movement path is being planned.
+This presentation is shared by both camera views and map previews. It does not change elevation,
+picking or movement legality. Geometry is retained across camera movement and updated when terrain
+or emphasis changes, without clipping the stripes to the terrain mesh.
+
 The map browser's **Preview in 3D** action uses a temporary board view. Editing instead reuses the
 editor's own `BoardView`. All changes run through the existing editor methods on the Swing thread;
 the render thread receives snapshots and submits picked hexes with their board generation. Picks

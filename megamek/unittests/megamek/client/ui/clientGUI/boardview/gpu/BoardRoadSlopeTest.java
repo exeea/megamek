@@ -10,10 +10,20 @@ import java.util.Map;
 
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardRoadSlopeTest {
+    @Test
+    void levelRoadsOnFlatGroundDoNotAddTerrainSubdivisions() {
+        var at = BoardRoadTest.CENTER;
+        var scene = BoardSurfaceBlendTest.scene(c -> BoardRoadTest.tile(c, BoardRoad.Kind.PAVED, 9, 0,
+              BoardScene.Surface.SAND));
+        var surface = new BoardSurface(scene, scene.tile(at));
+        assertTrue(surface.faces.size() <= 6, "Flat road hexes use the existing small terrain carrier");
+    }
+
     @ParameterizedTest
     @ValueSource(ints = { 1, 2, 3 })
     void roadsBesideStepsKeepTheNativeSlopeOutsideTheirCorridor(int rise) {
@@ -44,7 +54,7 @@ class BoardRoadSlopeTest {
     private static BoardScene scene(Coords at, Coords low, int rise, boolean road) {
         return BoardSurfaceBlendTest.scene(c -> BoardRoadTest.tile(c,
               road && c.equals(low) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
-              road && c.equals(low) ? 1 : 0, c.equals(at) ? rise : 0, BoardScene.Surface.SAND));
+              road && c.equals(low) ? 3 : 0, c.equals(at) ? rise : 0, BoardScene.Surface.SAND));
     }
 
     @ParameterizedTest
@@ -58,7 +68,7 @@ class BoardRoadSlopeTest {
         assertClosed(scene, at);
     }
 
-    private record Segment(Vector3 a, Vector3 b) { }
+    private record Segment(Vector3 a, Vector3 b, Coords owner, BoardSurface.Finish finish, int side) { }
 
     @ParameterizedTest
     @ValueSource(ints = { 0, 1, 2 })
@@ -72,17 +82,15 @@ class BoardRoadSlopeTest {
     /** Check the emitted mesh, including T junctions, rather than just comparing the boundary helper to itself. */
     private static void assertClosed(BoardScene scene, Coords at) {
         Map<Coords, BoardSurface> surfaces = new HashMap<>();
-        surfaces.put(at, new BoardSurface(scene, scene.tile(at)));
-        for (int d = 0; d < 6; d++) {
-            var next = at.translated(d);
-            surfaces.put(next, new BoardSurface(scene, scene.tile(next)));
+        for (var tile : scene.tiles()) {
+            if (at.distance(tile.coords()) <= 2) { surfaces.put(tile.coords(), new BoardSurface(scene, tile)); }
         }
         Map<String, List<Segment>> edges = new HashMap<>();
         for (var surface : surfaces.values()) {
             var faces = new ArrayList<>(surface.groundFaces());
             faces.addAll(surface.walls(scene, BoardGeometry.floor(scene), surfaces));
             for (var face : faces) {
-                if (face.finish() == BoardSurface.Finish.DRESSING) { continue; }
+                if (face.finish() == BoardSurface.Finish.DRESSING || face.finish() == BoardSurface.Finish.OUTCROP) { continue; }
                 var points = List.of(face.a(), face.b(), face.c());
                 for (int i = 0; i < 3; i++) {
                     var a = points.get(i);
@@ -90,7 +98,8 @@ class BoardRoadSlopeTest {
                     if (a.dst2(b) < .000001f) { continue; }
                     String first = key(a), second = key(b);
                     String key = first.compareTo(second) < 0 ? first + "/" + second : second + "/" + first;
-                    edges.computeIfAbsent(key, ignored -> new ArrayList<>()).add(new Segment(a, b));
+                    edges.computeIfAbsent(key, ignored -> new ArrayList<>()).add(new Segment(a, b, surface.tile.coords(),
+                          face.finish(), face.landEdge()));
                 }
             }
         }

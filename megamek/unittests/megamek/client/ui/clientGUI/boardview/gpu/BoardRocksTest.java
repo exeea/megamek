@@ -52,13 +52,13 @@ class BoardRocksTest {
     void libraryRocksAreClosedOutwardSolids(TerrainLod detail) {
         // Blocks, boulders and the masses of shrubs.
         for (int kind = 0; kind < 3; kind++) {
-            int count = kind == 0 ? BoardRocks.BLOCKS : kind == 1 ? BoardRocks.BOULDERS : BoardRocks.BUSHES;
+            int count = kind == 0 ? BoardRocks.BLOCKS : kind == 1 ? BoardRocks.BOULDERS : BoardScatter.BUSHES;
             for (int variant = 0; variant < count; variant++) {
-                BoardRocks.Rock rock = kind == 2 ? BoardRocks.bush(variant) : BoardRocks.rock(kind == 0, variant, detail);
+                BoardShape rock = kind == 2 ? BoardScatter.bush(variant) : BoardRocks.rock(kind == 0, variant, detail);
                 Map<List<Key>, Integer> edges = new HashMap<>();
                 double volume = 0;
                 int triangles = 0;
-                for (BoardRocks.Polygon polygon : rock.polygons()) {
+                for (BoardShape.Polygon polygon : rock.polygons()) {
                     Vector3[] p = polygon.points();
                     for (int i = 0; i < p.length; i++) {
                         assertTrue(Float.isFinite(p[i].x) && Float.isFinite(p[i].y) && Float.isFinite(p[i].z));
@@ -99,11 +99,11 @@ class BoardRocksTest {
         for (BoardScene.Surface family : BoardScene.Surface.values()) {
             for (int variant = 0; variant < Math.max(BoardRocks.BLOCKS, BoardRocks.BOULDERS); variant++) {
                 for (boolean slab : new boolean[] { false, true }) {
-                    BoardRocks.Rock rock = BoardRocks.scatter(family, variant, slab);
+                    BoardShape rock = BoardScatter.rock(family, variant, slab);
                     Map<List<Key>, Integer> edges = new HashMap<>();
                     var crown = new HashSet<Key>();
                     int triangles = 0;
-                    for (BoardRocks.Polygon polygon : rock.polygons()) {
+                    for (BoardShape.Polygon polygon : rock.polygons()) {
                         Vector3[] p = polygon.points();
                         assertEquals(3, p.length);
                         assertNotNull(polygon.normal(), "Simplification must not collapse a face");
@@ -135,7 +135,7 @@ class BoardRocksTest {
         for (String family : new String[] { "block", "boulder" }) {
             for (int variant = 0; variant < 8; variant++) {
                 var points = new HashSet<Key>();
-                BoardRocks.scatter("stone-" + family + "-" + variant).polygons()
+                BoardScatter.shape("stone-" + family + "-" + variant).polygons()
                       .forEach(polygon -> { for (Vector3 point : polygon.points()) { points.add(Key.of(point)); } });
                 assertTrue(silhouettes.add(points), "Every stone variant must have distinct geometry");
             }

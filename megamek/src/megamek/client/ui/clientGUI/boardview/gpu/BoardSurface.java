@@ -466,7 +466,7 @@ final class BoardSurface {
             if (i < interiorFrom || i >= interiorTo) { edgeTopography.add(faces.get(i)); }
         }
         if (detailed) {
-            if (BoardRoad.rendered(tile) && tile.surface() != BoardScene.Surface.CONCRETE) {
+            if (BoardRoad.rendered(tile) && ramps != 0 && tile.surface() != BoardScene.Surface.CONCRETE) {
                 roadRelief();
                 simplifyRoad();
             }
@@ -1730,7 +1730,6 @@ final class BoardSurface {
         // The parabolic grade's chord error is rise / (3 * sections^2). Derive resolution from that error,
         // not a fixed dense grid. Shared counts keep the banks and hub joined, including six-way crossings.
         int sections = largestRise == 0 ? 1 : 2 * (int) Math.ceil(Math.sqrt(largestRise / (3 * .06f * BoardGeometry.hexScale())) / 2);
-        int bankSections = Math.clamp((int) Math.ceil(Math.sqrt(.75f * largestRise / (.2f * BoardGeometry.hexScale()))), 3, 8);
         var stations = new TreeSet<Float>();
         for (int i = 0; i <= sections; i++) { stations.add(i / (float) sections); }
         // Bridge approaches fit both vertical curves into one half-hex. Detail only their two flat joins.
@@ -1778,6 +1777,10 @@ final class BoardSurface {
             }
             float half = 9 * BoardGeometry.hexScale()
                   / (float) Math.hypot(corners[edge].x - corners[next].x, corners[edge].y - corners[next].y);
+            float rise = roadEdgeElevation(tile, neighbor, direction) * BoardGeometry.level() - center.z;
+            // Both sides derive the bank samples from this approach, independent of any other exits in their hex.
+            int bankSections = Math.clamp((int) Math.ceil(Math.sqrt(.75f * Math.abs(rise)
+                  / (.2f * BoardGeometry.hexScale()))), 3, 8);
             Vector3 left = new Vector3(corners[edge]).lerp(corners[next], 0.5f - half);
             Vector3 right = new Vector3(corners[edge]).lerp(corners[next], 0.5f + half);
             Vector3 innerLeft = new Vector3(hub[edge]).lerp(hub[next], 0.5f - half * 2);
@@ -1785,7 +1788,6 @@ final class BoardSurface {
             for (int i = 0; i < bankSections; i++) { hubRim.add(new Vector3(hub[edge]).lerp(innerLeft, i / (float) bankSections)); }
             hubRim.add(innerLeft);
             for (int i = 0; i < bankSections; i++) { hubRim.add(new Vector3(innerRight).lerp(hub[next], i / (float) bankSections)); }
-            float rise = roadEdgeElevation(tile, neighbor, direction) * BoardGeometry.level() - center.z;
             RoadRamp ramp = new RoadRamp(innerLeft, new Vector3(left).sub(innerLeft),
                   new Vector3(innerRight).sub(innerLeft), rise, connectingBridge(tile, neighbor, direction) != null);
             roadRamps.add(ramp);
@@ -1954,32 +1956,6 @@ final class BoardSurface {
                 faces.set(i + 1, d);
             }
             i++;
-        }
-        // At a ramp/bank join the two triangles of a concave quad need not have been emitted together.
-        // Flip only an inverted pair; keep every boundary vertex and do not add a covering skirt or more triangles.
-        for (int i = 0; i < faces.size(); i++) {
-            if (upward(faces.get(i)) > 0) { continue; }
-            Face face = faces.get(i);
-            List<Vector3> points = List.of(face.a(), face.b(), face.c());
-            boolean repaired = false;
-            for (int edge = 0; edge < 3 && !repaired; edge++) {
-                Vector3 a = points.get(edge), b = points.get((edge + 1) % 3), c = points.get((edge + 2) % 3);
-                for (int j = 0; j < faces.size() && !repaired; j++) {
-                    if (i == j) { continue; }
-                    Face other = faces.get(j);
-                    List<Vector3> opposite = List.of(other.a(), other.b(), other.c());
-                    for (int k = 0; k < 3; k++) {
-                        if (!b.equals(opposite.get(k)) || !a.equals(opposite.get((k + 1) % 3))) { continue; }
-                        Vector3 d = opposite.get((k + 2) % 3);
-                        Face first = new Face(c, a, d, Finish.TOP), second = new Face(c, d, b, Finish.TOP);
-                        if (upward(first) > .00001f && upward(second) > .00001f) {
-                            faces.set(i, first);
-                            faces.set(j, second);
-                            repaired = true;
-                        }
-                    }
-                }
-            }
         }
     }
 
@@ -2177,6 +2153,11 @@ final class BoardSurface {
         if (wallFaces == null || wallFloor != floor) {
             wallFaces = relief.walls(sides(scene, floor, neighbors));
             wallFaces.addAll(retainingWalls);
+            for (int d = 0; d < 6; d++) {
+                var lower = scene.tile(tile.coords().translated(d));
+                if (lower == null || lower.elevation() >= tile.elevation()) { continue; }
+                for (var tunnel : BoardTunnel.entrances(scene, lower)) { tunnel.cut(wallFaces, relief); }
+            }
             wallFloor = floor;
         }
         return wallFaces;
@@ -2228,6 +2209,7 @@ final class BoardSurface {
             }
             BoardSurface adjacent = neighbor == null ? null : neighbors.get(neighbor.coords());
             if (adjacent == null && neighbor != null) { adjacent = new BoardSurface(scene, neighbor, false, lod); }
+            boolean basin = crests[edge] != null && adjacent != null && adjacent.relief.waterfallFoot((edge + 3) % 6);
             TreeSet<Float> cuts = new TreeSet<>(List.of(0f, 1f));
             cuts(a, b, cuts);
             if (adjacent != null) {
@@ -2245,12 +2227,17 @@ final class BoardSurface {
                 }
                 Vector3 start = new Vector3(a).lerp(b, from);
                 Vector3 end = new Vector3(a).lerp(b, to);
-                Vector3 sampleA = new Vector3(start).lerp(end, 0.001f);
-                Vector3 sampleB = new Vector3(end).lerp(start, 0.001f);
+                boolean graded = ramps != 0 || adjacent != null && adjacent.ramps != 0;
+                boolean inset = !graded || crest == null
+                      && (tile.liquid().present() || neighbor != null && neighbor.liquid().present());
+                Vector3 sampleA = inset ? new Vector3(start).lerp(end, 0.001f) : start;
+                Vector3 sampleB = inset ? new Vector3(end).lerp(start, 0.001f) : end;
                 start.z = height(edgeTopography, sampleA.x, sampleA.y);
                 end.z = height(edgeTopography, sampleB.x, sampleB.y);
-                float lowA = adjacent == null ? floor : adjacent.height(adjacent.edgeTopography, sampleA.x, sampleA.y);
-                float lowB = adjacent == null ? floor : adjacent.height(adjacent.edgeTopography, sampleB.x, sampleB.y);
+                float lowA = adjacent == null ? floor : basin ? neighbor.elevation() * BoardGeometry.level()
+                      : adjacent.height(adjacent.edgeTopography, sampleA.x, sampleA.y);
+                float lowB = adjacent == null ? floor : basin ? neighbor.elevation() * BoardGeometry.level()
+                      : adjacent.height(adjacent.edgeTopography, sampleB.x, sampleB.y);
                 float dA = start.z - lowA, dB = end.z - lowB;
                 if (dA < -0.001f && dB > 0.001f) {
                     float t = -dA / (dB - dA);
@@ -2269,8 +2256,10 @@ final class BoardSurface {
                 for (int i = 0; i < SHORE_SEGMENTS; i++) {
                     Vector3 start = new Vector3(bedOutline[edge * SHORE_SEGMENTS + i]);
                     Vector3 end = new Vector3(bedOutline[(edge * SHORE_SEGMENTS + i + 1) % bedOutline.length]);
-                    float lowA = adjacent == null ? floor : adjacent.height(adjacent.edgeTopography, start.x, start.y);
-                    float lowB = adjacent == null ? floor : adjacent.height(adjacent.edgeTopography, end.x, end.y);
+                    float lowA = adjacent == null ? floor : basin ? neighbor.elevation() * BoardGeometry.level()
+                          : adjacent.height(adjacent.edgeTopography, start.x, start.y);
+                    float lowB = adjacent == null ? floor : basin ? neighbor.elevation() * BoardGeometry.level()
+                          : adjacent.height(adjacent.edgeTopography, end.x, end.y);
                     if (Math.max(start.z - lowA, end.z - lowB) > 0.01f) {
                         result.add(new Side(start, end, Math.min(start.z, lowA), Math.min(end.z, lowB), edge));
                     }

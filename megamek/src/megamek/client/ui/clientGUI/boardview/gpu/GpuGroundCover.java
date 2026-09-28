@@ -192,14 +192,19 @@ final class GpuGroundCover implements Disposable {
     private List<BoardScene.Tile> tiles;
     private long generation;
     private boolean preparing;
+    /** Render-owned submission snapshot. Support identities are checked even when the camera stays still. */
+    private record View(float[] projectionView, float viewportPixels, List<BoardScene.Tile> candidates,
+          Set<Coords> visible, List<ModelInstance> instances) { }
+    private View view;
 
     static String vertex(String source) {
         String meadow = "uniform sampler2D u_rainNoise;\n"
               + Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-meadow.glsl").readString();
+        String wind = Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-vegetation-wind.glsl").readString();
         String blade = Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-grass.glsl").readString()
               .replace("@START_PIXELS@", Float.toString(START_PIXELS)).replace("@FULL_PIXELS@", Float.toString(FULL_PIXELS))
               .replace("@ROOTS_PER_HEX@", Float.toString(ROOTS_PER_HEX));
-        return source.replace("void main() {", meadow + blade + "\nvoid main() {\nvec3 coverPosition, coverNormal; vec4 coverColor;\n"
+        return source.replace("void main() {", wind + meadow + blade + "\nvoid main() {\nvec3 coverPosition, coverNormal; vec4 coverColor;\n"
                     + "grassBlade(a_position, coverPosition, coverNormal, coverColor);\n")
               .replace("vec4 pos = u_worldTrans * vec4(a_position, 1.0);", "vec4 pos = vec4(coverPosition, 1.0);")
               .replace("vec3 normal = normalize(u_normalMatrix * a_normal);", "vec3 normal = coverNormal;")
@@ -227,6 +232,18 @@ final class GpuGroundCover implements Disposable {
         if (tiles != scene.tiles()) {
             tiles = scene.tiles();
             generation++;
+            view = null;
+        }
+        float viewportPixels = Gdx.graphics == null ? camera.viewportHeight
+              : camera.viewportHeight * Gdx.graphics.getBackBufferHeight() / Math.max(1f, Gdx.graphics.getHeight());
+        if (!preparing && view != null && view.viewportPixels() == viewportPixels
+              && Arrays.equals(view.projectionView(), camera.combined.val) && view.candidates().equals(candidates)) {
+            boolean current = true;
+            for (Coords coords : view.visible()) {
+                Cover cover = models.get(coords);
+                if (cover == null || cover.surface != surfaces.apply(coords)) { current = false; break; }
+            }
+            if (current) { return view.instances(); }
         }
         List<ModelInstance> result = new ArrayList<>();
         preparing = false;
@@ -289,6 +306,7 @@ final class GpuGroundCover implements Disposable {
             var entry = iterator.next();
             if (!visible.contains(entry.getKey())) { iterator.remove(); }
         }
+        view = new View(camera.combined.val.clone(), viewportPixels, List.copyOf(candidates), visible, result);
         return result;
     }
 
@@ -313,5 +331,6 @@ final class GpuGroundCover implements Disposable {
         models.clear();
         tiles = null;
         preparing = false;
+        view = null;
     }
 }

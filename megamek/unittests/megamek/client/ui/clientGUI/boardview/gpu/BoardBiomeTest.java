@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 
 import megamek.common.Hex;
 import megamek.common.board.Coords;
@@ -17,9 +18,55 @@ import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 
 class BoardBiomeTest {
+    @Test
+    void indexedRootsKeepThePublishedBankHeightIncludingTriangleEdges() {
+        var original = BoardGeometry.tuning();
+        try {
+            GpuRiverTerrainSmokeTest.tune(.94f, true);
+            var scene = BoardSurfaceBlendTest.scene(c -> c.getX() < 4
+                  ? BoardSurfaceBlendTest.tile(c, BoardScene.Surface.DIRT, 0, 0, 0) : tile(c, BoardScene.Biome.MARSH, 0));
+            var random = new Random(417);
+            for (var lod : TerrainLod.values()) {
+                var surface = new BoardSurface(scene, scene.tile(new Coords(3, 4)), lod);
+                var support = new GpuBiomeVegetation.Support(surface.faces);
+                for (var face : surface.faces) {
+                    assertEquals(BoardSurface.sampleHeight(surface.faces, face.a().x, face.a().y, Float.NaN),
+                          support.height(face.a().x, face.a().y), .00001f);
+                }
+                var center = BoardGeometry.center(new Coords(3, 4), 0);
+                for (int i = 0; i < 500; i++) {
+                    float x = center.x + (random.nextFloat() - .5f) * BoardGeometry.width();
+                    float y = center.y + (random.nextFloat() - .5f) * BoardGeometry.height();
+                    assertEquals(BoardSurface.sampleHeight(surface.faces, x, y, Float.NaN), support.height(x, y), .00001f);
+                }
+            }
+        } finally { BoardGeometry.tune(original); }
+    }
+
+    @Test
+    void distantPreparationExtendsToTheSameFullFieldWithoutDuplicateRoots() {
+        for (var kind : List.of(BoardScene.Biome.FIELD, BoardScene.Biome.MARSH)) {
+            var scene = BoardSurfaceBlendTest.scene(c -> tile(c, kind, 0));
+            var tile = scene.tile(new Coords(4, 4));
+            var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, -1);
+            var progressive = new GpuBiomeVegetation.Patch(scene, tile, surface, 0);
+            progressive.prepare(scene, tile, .08f, Long.MAX_VALUE);
+            assertFalse(progressive.busy());
+            for (int i = 3; i < progressive.roots.size; i += 4) { assertTrue(progressive.roots.items[i] < .08f); }
+            int distant = progressive.roots.size;
+            assertTrue(distant > 0);
+            progressive.prepare(scene, tile, .35f, Long.MAX_VALUE);
+            assertTrue(progressive.roots.size > distant);
+            progressive.prepare(scene, tile, 1, Long.MAX_VALUE);
+            var full = new GpuBiomeVegetation.Patch(scene, tile, surface, 0);
+            full.prepare(scene, tile, Long.MAX_VALUE);
+            assertEquals(full.roots, progressive.roots, "LOD preparation order must keep one deterministic lattice");
+        }
+    }
+
     static BoardScene.Tile tile(Coords coords, BoardScene.Biome kind, int elevation) {
-        var base = BoardSurfaceBlendTest.tile(coords, kind == BoardScene.Biome.NONE
-              ? BoardScene.Surface.GRASS : BoardScene.Surface.DIRT, elevation, -1, 0);
+        var base = BoardSurfaceBlendTest.tile(coords, kind == BoardScene.Biome.MUD || kind == BoardScene.Biome.QUICKSAND
+              ? BoardScene.Surface.DIRT : BoardScene.Surface.GRASS, elevation, -1, 0);
         return new BoardScene.Tile(coords, elevation, -1, false, 0, base.surface(), base.ground(), null, null, null, null,
               List.of(), List.of(), BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE, BoardFireSmoke.NONE, kind);
     }
@@ -30,7 +77,7 @@ class BoardBiomeTest {
         hex.addTerrain(new Terrain(Terrains.FIELDS, 1));
         assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
         assertEquals(BoardScene.Biome.FIELD, BoardFeatures.biome(hex));
-        assertEquals(BoardScene.Surface.DIRT, BoardFeatures.surface(hex));
+        assertEquals(BoardScene.Surface.GRASS, BoardFeatures.surface(hex), "Field banks retain the native grass mantle");
         assertTrue(BoardFeatures.capture(hex, new Coords(0, 0), Map.of()).stream().noneMatch(f -> f.asset().equals("field")));
         hex.addTerrain(new Terrain(Terrains.FORTIFIED, 1));
         assertFalse(BoardFeatures.detailedGround(hex, Map.of()));
@@ -40,6 +87,7 @@ class BoardBiomeTest {
             hex.addTerrain(new Terrain(Terrains.SWAMP, level));
             assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
             assertEquals(level == 1 ? BoardScene.Biome.MARSH : BoardScene.Biome.QUICKSAND, BoardFeatures.biome(hex));
+            assertEquals(level == 1 ? BoardScene.Surface.GRASS : BoardScene.Surface.DIRT, BoardFeatures.surface(hex));
             assertFalse(BoardLiquid.capture(hex).present(), "Shallow visual pools do not invent gameplay water");
         }
         hex.addTerrain(new Terrain(Terrains.WATER, 1));

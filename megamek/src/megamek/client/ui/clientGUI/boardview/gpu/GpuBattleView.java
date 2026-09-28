@@ -377,7 +377,7 @@ class GpuBattleView extends ApplicationAdapter {
             cameraTerrainRevision = BoardGeometry.revision();
         }
         fireControl.update(scene, HIDE_TARGET_ARROWS_DURING_ATTACKS && !playback.attacks().isEmpty());
-        tactical.update(scene, detailChanged);
+        tactical.update(scene, detailChanged, hovered);
         fieldOfView.update(scene.fieldOfView());
         fieldOfView.configure(ui.fovStyle(), ui.fovDarkness(), ui.sensorStyle(), ui.sensorDarkness());
         var atmosphereSettings = ui.atmosphere();

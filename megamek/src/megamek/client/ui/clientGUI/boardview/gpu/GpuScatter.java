@@ -1,18 +1,72 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.io.File;
+import java.nio.ByteOrder;
+
+import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.GL30;
+import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 
-/** Tiny untextured details, baked into a single opaque mesh per terrain chunk. */
+/** Tiny textured details, baked into a single opaque material per terrain chunk and shared prop page. */
 final class GpuScatter {
+    private static final int CELL = 256;
+    private static final int BORDER = 32;
+    private static final int SIZE = 2 * CELL;
+    private static final String[] MATERIALS = { "sculpt/granite", "sculpt/earth", "sculpt/sandstone", "foliage/fronds-palm" };
+
     private GpuScatter() { }
 
+    /** Uploaded once and owned by GpuAssets; source height/coverage alpha never makes scatter transparent. */
+    static Texture atlas(File root) {
+        Pixmap atlas = new Pixmap(SIZE, SIZE, Pixmap.Format.RGBA8888);
+        try {
+            var pixels = atlas.getPixels().duplicate().order(ByteOrder.BIG_ENDIAN);
+            for (int index = 0; index < MATERIALS.length; index++) {
+                Pixmap tile = new Pixmap(CELL - 2 * BORDER, CELL - 2 * BORDER, Pixmap.Format.RGBA8888);
+                try {
+                    FileHandle file = new FileHandle(new File(root, "textures/" + MATERIALS[index] + ".png"));
+                    tile.setBlending(Pixmap.Blending.None);
+                    if (file.exists()) {
+                        Pixmap source = new Pixmap(file);
+                        try {
+                            tile.setFilter(Pixmap.Filter.BiLinear);
+                            tile.drawPixmap(source, 0, 0, source.getWidth(), source.getHeight(),
+                                  0, 0, tile.getWidth(), tile.getHeight());
+                        } finally { source.dispose(); }
+                    } else {
+                        tile.setColor(index == 3 ? Color.WHITE : Color.GRAY);
+                        tile.fill();
+                    }
+                    for (int y = 0; y < CELL; y++) {
+                        pixels.position(((index / 2 * CELL + y) * SIZE + index % 2 * CELL) * Integer.BYTES);
+                        for (int x = 0; x < CELL; x++) {
+                            pixels.putInt(tile.getPixel(Math.clamp(x - BORDER, 0, tile.getWidth() - 1),
+                                  Math.clamp(y - BORDER, 0, tile.getHeight() - 1)) | 255);
+                        }
+                    }
+                } finally { tile.dispose(); }
+            }
+            Texture texture = new Texture(atlas, true);
+            texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
+            texture.setWrap(Texture.TextureWrap.ClampToEdge, Texture.TextureWrap.ClampToEdge);
+            // The 32-pixel extruded border still occupies a full texel at the last sampled mip level.
+            texture.bind();
+            Gdx.gl.glTexParameteri(GL20.GL_TEXTURE_2D, GL30.GL_TEXTURE_MAX_LEVEL, 5);
+            return texture;
+        } finally { atlas.dispose(); }
+    }
+
     /** Tiny stones use only the scatter kit's eight-triangle meshes. */
-    static BoardRocks.Rock rock(BoardScene.Tile tile, BoardScene.Feature feature) {
-        return BoardRocks.scatter(tile.surface(), Math.round(feature.rotation()), feature.asset().equals("scatter-slab"));
+    static BoardShape rock(BoardScene.Tile tile, BoardScene.Feature feature) {
+        return BoardScatter.rock(tile.surface(), Math.round(feature.rotation()), feature.asset().equals("scatter-slab"));
     }
 
     static float diameter(BoardScene.Feature feature) {
@@ -32,13 +86,15 @@ final class GpuScatter {
         Color color = color(tile.surface(), feature.asset());
         float shade = .88f + .24f * feature.rotation() / 360;
         color.mul(shade, shade, shade, 1);
-        BoardRocks.Rock shape;
+        int material = feature.asset().equals("scatter-rock") || feature.asset().equals("scatter-slab")
+              ? switch (tile.surface()) { case DIRT -> 1; case SAND -> 2; default -> 0; } : 3;
+        BoardShape shape;
         switch (feature.asset()) {
             case "scatter-grass", "scatter-dry-grass" -> {
-                shape = BoardRocks.scatter("grass");
+                shape = BoardScatter.shape("grass");
             }
             case "scatter-plant" -> {
-                shape = BoardRocks.scatter("plant");
+                shape = BoardScatter.shape("plant");
             }
             case "scatter-rock", "scatter-slab" -> {
                 shape = rock(tile, feature);
@@ -48,36 +104,59 @@ final class GpuScatter {
             }
             default -> throw new IllegalArgumentException("Unknown terrain scatter: " + feature.asset());
         }
-        for (BoardRocks.Polygon polygon : shape.polygons()) {
-            Vector3[] points = polygon.points();
-            triangle(mesh, points[0].cpy().mul(transform), points[1].cpy().mul(transform),
-                  points[2].cpy().mul(transform), color);
+        for (BoardShape.Polygon polygon : shape.polygons()) {
+            triangle(mesh, polygon, transform, color, material, shape.height());
         }
     }
 
     private static Color color(BoardScene.Surface surface, String asset) {
         if (asset.equals("scatter-dry-grass")) {
-            return new Color(.76f, .60f, .18f, 1);
+            return new Color(.88f, .71f, .24f, 1);
         }
         if (asset.equals("scatter-grass") || asset.equals("scatter-plant")) {
-            return surface == BoardScene.Surface.SAND ? new Color(.23f, .51f, .16f, 1)
-                  : asset.equals("scatter-grass") ? new Color(.32f, .47f, .16f, 1) : new Color(.12f, .32f, .10f, 1);
+            return surface == BoardScene.Surface.SAND ? new Color(.28f, .60f, .20f, 1)
+                  : asset.equals("scatter-grass") ? new Color(.39f, .56f, .20f, 1) : new Color(.16f, .40f, .13f, 1);
         }
+        // The atlas supplies the stone's colour; retain only a light biome tint in the vertices.
         return switch (surface) {
-            case SAND -> new Color(.61f, .49f, .33f, 1);
-            case DIRT -> new Color(.47f, .32f, .24f, 1);
-            case SNOW -> new Color(.65f, .66f, .67f, 1);
-            case ROCK -> new Color(.49f, .48f, .45f, 1);
-            default -> new Color(.43f, .45f, .38f, 1);
+            case SAND, DIRT -> new Color(.95f, .95f, .95f, 1);
+            case SNOW -> new Color(.95f, .98f, 1, 1);
+            case ROCK -> new Color(.95f, .94f, .91f, 1);
+            default -> new Color(.90f, .95f, .83f, 1);
         };
     }
 
-    private static void triangle(MeshPartBuilder mesh, Vector3 a, Vector3 b, Vector3 c, Color color) {
+    private static void triangle(MeshPartBuilder mesh, BoardShape.Polygon polygon, Matrix4 transform, Color color,
+          int material, float height) {
+        Vector3[] points = polygon.points();
+        Vector3 a = points[0].cpy().mul(transform), b = points[1].cpy().mul(transform), c = points[2].cpy().mul(transform);
         Vector3 normal = new Vector3(b).sub(a).crs(new Vector3(c).sub(a)).nor();
-        mesh.triangle(vertex(a, normal, color), vertex(b, normal, color), vertex(c, normal, color));
-    }
-
-    private static MeshPartBuilder.VertexInfo vertex(Vector3 point, Vector3 normal, Color color) {
-        return new MeshPartBuilder.VertexInfo().setPos(point).setNor(normal).setCol(color).setUV(0, 0);
+        // Project in object space, so turning a stone also turns its grain. Each blade spans the foliage swatch.
+        Vector3 face = polygon.normal();
+        boolean top = material != 3 && Math.abs(face.z) >= Math.max(Math.abs(face.x), Math.abs(face.y));
+        boolean alongY = !top && Math.abs(face.x) > Math.abs(face.y);
+        float low = -.5f, span = 1;
+        if (material == 3) {
+            low = Float.POSITIVE_INFINITY;
+            float high = Float.NEGATIVE_INFINITY;
+            for (Vector3 point : points) {
+                float u = alongY ? point.y : point.x;
+                low = Math.min(low, u);
+                high = Math.max(high, u);
+            }
+            span = Math.max(.0001f, high - low);
+        }
+        float interior = CELL - 2 * BORDER - 1;
+        Vector3[] world = { a, b, c };
+        MeshPartBuilder.VertexInfo[] vertices = new MeshPartBuilder.VertexInfo[3];
+        for (int i = 0; i < points.length; i++) {
+            Vector3 local = points[i];
+            float u = ((alongY ? local.y : local.x) - low) / span;
+            float v = top ? local.y + .5f : local.z / height;
+            vertices[i] = new MeshPartBuilder.VertexInfo().setPos(world[i]).setNor(normal).setCol(color).setUV(
+                  (material % 2 * CELL + BORDER + .5f + Math.clamp(u, 0, 1) * interior) / SIZE,
+                  (material / 2 * CELL + BORDER + .5f + Math.clamp(v, 0, 1) * interior) / SIZE);
+        }
+        mesh.triangle(vertices[0], vertices[1], vertices[2]);
     }
 }

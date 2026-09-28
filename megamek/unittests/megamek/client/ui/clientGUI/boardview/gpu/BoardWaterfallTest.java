@@ -37,24 +37,15 @@ class BoardWaterfallTest {
                 int adjacent = Math.floorMod(edge + (end == 0 ? -1 : 1), 6);
                 Vector3 corner = BoardGeometry.corner(surface.tile.coords(), 0, edge + end);
                 var cliff = walls.stream().filter(f -> f.landEdge() == adjacent).toList();
-                Map<Segment, Integer> counts = new HashMap<>();
-                for (var face : cliff) {
-                    Vector3[] points = { face.a(), face.b(), face.c() };
-                    for (int i = 0; i < 3; i++) {
-                        var a = points[i];
-                        var b = points[(i + 1) % 3];
-                        var reverse = new Segment(b, a);
-                        counts.merge(counts.containsKey(reverse) ? reverse : new Segment(a, b), 1, Integer::sum);
-                    }
-                }
+                Map<Segment, Integer> counts = segments(cliff);
                 int shared = 0;
                 float rounding = 0;
                 for (var segment : counts.entrySet()) {
                     if (segment.getValue() != 1) { continue; }
                     for (Vector3 p : List.of(segment.getKey().a(), segment.getKey().b())) {
                         float distance = (float) Math.hypot(p.x - corner.x, p.y - corner.y);
-                        if (distance > BoardGeometry.WIDTH * .2f || p.z < 2 * BoardGeometry.LEVEL
-                              || p.z > 4 * BoardGeometry.LEVEL) { continue; }
+                        if (distance > BoardGeometry.WIDTH * .2f || p.z < .1f * BoardGeometry.LEVEL
+                              || p.z >= 5 * BoardGeometry.LEVEL) { continue; }
                         Vector3 joined = fallShades.keySet().stream().filter(q -> q.epsilonEquals(p, .002f))
                               .findFirst().orElse(null);
                         assertTrue(joined != null, "The fall must share the cliff's corner rows: " + p + ", " + lod);
@@ -70,21 +61,154 @@ class BoardWaterfallTest {
                 }
                 assertTrue(shared > 2, "Both ends must exercise the common cliff boundary");
                 assertTrue(rounding > BoardRelief.metres(.1f), "The side must round into the cliff instead of a pillar");
+                // Below the dry bank's level, the same corner belongs to that bank's wall into the lower pool.
+                Coords bank = surface.tile.coords().translated(BoardGeometry.edgeDirection(adjacent));
+                Coords pool = surface.tile.coords().translated(direction);
+                var bankSurface = new BoardSurface(scene, scene.tile(bank), lod);
+                var lowerCliff = bankSurface.walls(scene, BoardGeometry.floor(scene)).stream()
+                      .filter(f -> f.landEdge() >= 0 && bank.translated(BoardGeometry.edgeDirection(f.landEdge())).equals(pool))
+                      .toList();
+                int lowerShared = 0;
+                for (var segment : segments(lowerCliff).entrySet()) {
+                    if (segment.getValue() != 1 || Math.abs(segment.getKey().a().z - segment.getKey().b().z) < .001f) { continue; }
+                    for (Vector3 p : List.of(segment.getKey().a(), segment.getKey().b())) {
+                        if (p.z <= -BoardGeometry.LEVEL || p.z >= 0
+                              || Math.hypot(p.x - corner.x, p.y - corner.y) > BoardGeometry.WIDTH * .2f) { continue; }
+                        assertTrue(fallShades.keySet().stream().anyMatch(q -> q.epsilonEquals(p, .002f)),
+                              "The lower three-way cliff join must stay closed: " + p + ", " + lod);
+                        lowerShared++;
+                    }
+                }
+                assertTrue(lowerShared > 2, "Exercise the side join immediately above the receiving pool");
             }
         }
     }
 
     private record Segment(Vector3 a, Vector3 b) { }
 
+    private static Map<Segment, Integer> segments(List<BoardSurface.Face> faces) {
+        Map<Segment, Integer> counts = new HashMap<>();
+        for (var face : faces) {
+            Vector3[] points = { face.a(), face.b(), face.c() };
+            for (int i = 0; i < 3; i++) {
+                var a = points[i];
+                var b = points[(i + 1) % 3];
+                var reverse = new Segment(b, a);
+                counts.merge(counts.containsKey(reverse) ? reverse : new Segment(a, b), 1, Integer::sum);
+            }
+        }
+        return counts;
+    }
+
+    @ParameterizedTest
+    @EnumSource(TerrainLod.class)
+    void waterfallRockAndWaterMeetTheReceivingBasin(TerrainLod lod) {
+        for (int direction = 0; direction < 6; direction++) {
+            for (int depth : new int[] { 1, 3 }) {
+                BoardScene scene = mesa(direction, depth);
+                Coords high = new Coords(3, 3), low = high.translated(direction);
+                var upper = new BoardSurface(scene, scene.tile(high), lod);
+                var lower = new BoardSurface(scene, scene.tile(low), lod);
+                int edge = upper.waterfalls.getFirst().edge(), receivingEdge = (edge + 3) % 6;
+                float contact = lower.tile.elevation() * BoardGeometry.level();
+                var cliff = upper.walls(scene, BoardGeometry.floor(scene), Map.of(low, lower)).stream()
+                      .filter(f -> f.landEdge() == edge).toList();
+                var submerged = lower.groundFaces().stream()
+                      .filter(f -> f.finish() == BoardSurface.Finish.WALL && f.landEdge() == receivingEdge).toList();
+                assertTrue(!submerged.isEmpty(), "The basin must close the rock down to its bed");
+                Map<Vector3, Vector3> normals = new HashMap<>();
+                for (var face : cliff) {
+                    for (Vector3 p : List.of(face.a(), face.b(), face.c())) {
+                        assertTrue(p.z >= contact - .001f, "The upper wall must not project a separate fin into the basin");
+                        if (Math.abs(p.z - contact) < .001f) {
+                            assertTrue(onSurface(p, submerged), "The cliff's foot must meet the basin: " + p);
+                        }
+                        if (p.z < 2 * BoardGeometry.level() || p.z > 4 * BoardGeometry.level()) { continue; }
+                        Vector3 normal = upper.relief.shade(p).normal();
+                        Vector3 previous = normals.putIfAbsent(p, normal);
+                        assertTrue(previous == null || previous.dot(normal) > .999f,
+                              "A continuous rock face must not have separate strip normals: " + p);
+                    }
+                }
+                var boundary = lower.waterBoundary(receivingEdge);
+                for (int i = 0; i + 1 < boundary.size(); i++) {
+                    for (float t : new float[] { .2f, .5f, .8f }) {
+                        Vector3 p = new Vector3(boundary.get(i)).lerp(boundary.get(i + 1), t);
+                        assertEquals(BoardGeometry.waterZ(lower.tile), p.z, .001f);
+                        assertTrue(onSurface(p, submerged), "The waterline must follow the actual rock triangles: " + p);
+                    }
+                }
+            }
+        }
+    }
+
+    private static boolean onSurface(Vector3 point, List<BoardSurface.Face> faces) {
+        Vector3 hit = new Vector3();
+        for (var face : faces) {
+            Vector3[] vertices = { face.a(), face.b(), face.c() };
+            for (int i = 0; i < 3; i++) {
+                Vector3 a = vertices[i], b = vertices[(i + 1) % 3], edge = new Vector3(b).sub(a);
+                float t = edge.len2() == 0 ? 0 : Math.clamp(new Vector3(point).sub(a).dot(edge) / edge.len2(), 0, 1);
+                if (new Vector3(a).mulAdd(edge, t).epsilonEquals(point, .002f)) { return true; }
+            }
+            Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
+            Ray ray = new Ray(new Vector3(point).mulAdd(normal, 1), new Vector3(normal).scl(-1));
+            if (Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit) && hit.epsilonEquals(point, .002f)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @ParameterizedTest
+    @EnumSource(TerrainLod.class)
+    void fallingWaterClearsTheRockLip(TerrainLod lod) {
+        for (int direction = 0; direction < 6; direction++) {
+            BoardScene scene = mesa(direction);
+            var upper = new BoardSurface(scene, scene.tile(new Coords(3, 3)), lod);
+            var solid = new ArrayList<>(upper.groundFaces().stream()
+                  .filter(f -> f.finish() != BoardSurface.Finish.OUTCROP && f.finish() != BoardSurface.Finish.DRESSING).toList());
+            solid.addAll(upper.walls(scene, BoardGeometry.floor(scene)));
+            Vector3[][] sheet = GpuWaterfall.grid(upper, upper.waterfalls.getFirst());
+            // Exercise the actual triangles as the sheet turns over the ledge, inside its frayed free sides.
+            // Vertex-only checks miss the rock cutting through between consecutive water rows.
+            for (int column = 3; column + 3 < sheet.length; column++) {
+                for (int row = 0; row < 4; row++) {
+                    assertAboveRock(sheet[column][row], sheet[column][row + 1], sheet[column + 1][row + 1], solid);
+                    assertAboveRock(sheet[column + 1][row + 1], sheet[column + 1][row], sheet[column][row], solid);
+                }
+            }
+        }
+    }
+
+    private static void assertAboveRock(Vector3 a, Vector3 b, Vector3 c, List<BoardSurface.Face> rock) {
+        Vector3 hit = new Vector3();
+        for (int i = 1; i < 10; i += 2) {
+            for (int j = 1; i + j < 10; j += 2) {
+                Vector3 p = new Vector3(a).scl(1 - (i + j) / 10f).mulAdd(b, i / 10f).mulAdd(c, j / 10f);
+                Ray ray = new Ray(new Vector3(p).add(0, 0, .002f), Vector3.Z);
+                for (var face : rock) {
+                    assertTrue(!Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit),
+                          () -> "The rock lip must stay below the falling water: water " + p + ", rock " + hit);
+                }
+            }
+        }
+    }
+
     /** A raised pool above land on five sides, with a six-level waterfall on the remaining side. */
     private static BoardScene mesa(int direction) {
+        return mesa(direction, 1);
+    }
+
+    private static BoardScene mesa(int direction, int depth) {
         Coords high = new Coords(3, 3), low = high.translated(direction);
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 7; x++) {
             for (int y = 0; y < 7; y++) {
                 Coords coords = new Coords(x, y);
                 boolean water = coords.equals(high) || coords.equals(low);
-                tiles.add(tile(coords, coords.equals(high) ? 5 : coords.equals(low) ? -1 : 0, water ? 1 : -1));
+                tiles.add(tile(coords, coords.equals(high) ? 5 : coords.equals(low) ? -1 : 0,
+                      coords.equals(low) ? depth : water ? 1 : -1));
             }
         }
         return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());

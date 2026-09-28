@@ -181,6 +181,7 @@ final class GpuTerrain implements Disposable {
                 private final int horizonUniform = register("u_rainHorizon");
                 private final int waterEffectsUniform = register("u_waterEffects");
                 private final int windUniform = register("u_wind");
+                private final int vegetationPhaseUniform = register("u_vegetationPhase");
                 private final int metreUniform = register("u_worldMetre");
                 private final int coverPixelsUniform = register("u_coverPixels");
                 private final int coverHexWidthUniform = register("u_coverHexWidth");
@@ -216,6 +217,7 @@ final class GpuTerrain implements Disposable {
                     set(perspectiveUniform, camera.projection.val[Matrix4.M33] == 0 ? 1f : 0f);
                     set(waterEffectsUniform, waterEffects ? 1f : 0f);
                     set(windUniform, wind);
+                    set(vegetationPhaseUniform, vegetationPhase);
                     set(metreUniform, BoardRelief.detailMetres(1));
                     set(coverHexWidthUniform, BoardGeometry.width());
                     set(coverPixelsUniform, BoardGeometry.width() * Math.abs(camera.projection.val[Matrix4.M11])
@@ -531,6 +533,7 @@ final class GpuTerrain implements Disposable {
     private boolean staticShadowValid;
     private boolean shadowDirty;
     private float clock;
+    private float vegetationPhase;
     private float floor;
     private int chunkRows;
     private float buildingOpacity = DEFAULT_BUILDING_OPACITY;
@@ -1721,7 +1724,6 @@ final class GpuTerrain implements Disposable {
         TerrainLod lod = chunk.lod;
         Layer solid = build.layers.get(0), scatter = build.layers.get(1), overlay = build.layers.get(2),
               trees = build.layers.get(3), liquid = build.layers.get(4);
-        Material scatterMaterial = build.scatterMaterial;
         Map<String, LiquidSurface> animations = build.animations;
         BoardSurface surface = surfaces.get(tile.coords());
         List<BoardSurface.Face> smoothTop = new ArrayList<>();
@@ -1926,6 +1928,15 @@ final class GpuTerrain implements Disposable {
                 }
             }
         }
+        for (var tunnel : BoardTunnel.entrances(scene, tile)) {
+            Model model = assets.model(BoardTunnel.ASSET);
+            if (model == null) { continue; }
+            ModelInstance instance = new ModelInstance(model);
+            instance.transform.set(tunnel.transform());
+            BoundingBox bounds = instance.calculateBoundingBox(new BoundingBox()).mul(instance.transform);
+            chunk.props.add(new Prop(tile.coords(), instance, bounds, null, false));
+            chunk.bounds.ext(bounds);
+        }
         for (BoardScene.Feature feature : tile.features()) {
             // Rough boulders are already part of the shared terrain mesh, shading and picking geometry.
             if (feature.kind() == BoardScene.FeatureKind.BOULDER) { continue; }
@@ -1933,7 +1944,11 @@ final class GpuTerrain implements Disposable {
                 // Road approaches can extend into a hex that has no road terrain of its own.
                 if (!tile.liquid().present() && surface.ramps == 0
                       && !(tile.detailedGround() && feature.asset().equals("scatter-grass"))) {
-                    scatter.add(scatterMaterial, mesh -> GpuScatter.build(mesh, tile, surface, feature));
+                    if (build.scatterMaterial == null) {
+                        build.scatterMaterial = new Material(ColorAttribute.createDiffuse(Color.WHITE),
+                              TextureAttribute.createDiffuse(assets.scatter()));
+                    }
+                    scatter.add(build.scatterMaterial, mesh -> GpuScatter.build(mesh, tile, surface, feature));
                     chunk.scatterDiameter = Math.max(chunk.scatterDiameter, GpuScatter.diameter(feature));
                     chunk.bounds.ext(BoardGeometry.centerX(tile.coords()), BoardGeometry.centerY(tile.coords()),
                           (tile.elevation() + feature.height()) * BoardGeometry.level());
@@ -2026,7 +2041,7 @@ final class GpuTerrain implements Disposable {
         final int x, y, width, height;
         final float floor;
         final List<Layer> layers = List.of(new Layer(), new Layer(), new Layer(), new Layer(), new Layer());
-        final Material scatterMaterial = new Material(ColorAttribute.createDiffuse(Color.WHITE));
+        Material scatterMaterial;
         final Map<String, LiquidSurface> animations = new HashMap<>();
         final Map<Material, Material> reusedMaterials = new java.util.IdentityHashMap<>();
         List<MeshBatch> meshes;
@@ -3082,6 +3097,8 @@ final class GpuTerrain implements Disposable {
         boolean changedOpacity = nextBuilding != buildingOpacity;
         buildingOpacity = nextBuilding;
         clock += delta;
+        // A shared, continuous gust clock: stronger wind moves faster without rephasing when the slider changes.
+        vegetationPhase = (vegetationPhase + delta * (.65f + 3.35f * wind.z)) % MathUtils.PI2;
         if (proceduralWater && chunks.stream().anyMatch(chunk -> chunk.waterField != null)) {
             ocean.update(clock, wind);
             waders.update(coverScene, units, units.stream().map(this::unitBounds).toList(), delta);

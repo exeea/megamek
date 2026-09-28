@@ -225,6 +225,22 @@ class GpuTerrainReliefSmokeTest {
             uploads = cover.uploads();
             for (int i = 0; i < 60; i++) { cover.visible(edited, camera.camera, edited.tiles(), editedSurfaces); }
             assertEquals(uploads, cover.uploads(), "A stationary camera must not rebuild or upload cover");
+            // A cached submission must still follow visibility, projection and installed support changes.
+            camera.pan(10000, 0);
+            assertTrue(prepareCover(cover, edited, camera, editedSurfaces).isEmpty(), "Panning away removes the blades");
+            camera.center(BoardGeometry.center(new Coords(0, 0), 1));
+            assertTrue(!prepareCover(cover, edited, camera, editedSurfaces).isEmpty());
+            camera.zoom(4);
+            assertTrue(prepareCover(cover, edited, camera, editedSurfaces).isEmpty(), "Distant grass uses ground coverage");
+            camera.zoom(.25f);
+            camera.setPerspective(true);
+            assertTrue(!prepareCover(cover, edited, camera, editedSurfaces).isEmpty());
+            assertTrue(cover.visible(edited, camera.camera, List.of(), editedSurfaces).isEmpty(),
+                  "A changed candidate list cannot reuse old submissions");
+            prepareCover(cover, edited, camera, editedSurfaces);
+            uploads = cover.uploads();
+            prepareCover(cover, edited, camera, BoardTacticalGeometry.surfaces(coverScene(pixels, pixels, 2)));
+            assertTrue(cover.uploads() > uploads, "New support at the same camera and scene must replace grass roots");
         } finally { cover.dispose(); }
     }
 

@@ -130,9 +130,10 @@ final class BoardRampMesh {
             replacement.add(t);
         }
         // Collinear ears may disappear only if the neighbours still meet exactly along the same 3D boundary.
-        for (var corner : ring) {
-            boolean covered = replacement.stream().anyMatch(t -> Math.abs(t.face().height(corner.point.x, corner.point.y)
-                  - corner.point.z) < .0001f);
+        for (int i = 0; i < ring.size(); i++) {
+            Vector3 a = ring.get(i).point, b = ring.get((i + 1) % ring.size()).point;
+            boolean covered = replacement.stream().anyMatch(t -> containsEdge(t.a.point, t.b.point, a, b)
+                  || containsEdge(t.b.point, t.c.point, a, b) || containsEdge(t.c.point, t.a.point, a, b));
             if (!covered) { return; }
         }
         float error = 0;
@@ -150,5 +151,16 @@ final class BoardRampMesh {
             error = Math.max(error, best);
         }
         pending.add(new Candidate(v, v.revision, error, replacement));
+    }
+
+    private static boolean containsEdge(Vector3 from, Vector3 to, Vector3 a, Vector3 b) {
+        Vector3 delta = new Vector3(to).sub(from);
+        float length2 = delta.len2();
+        if (length2 == 0) { return false; }
+        for (Vector3 point : List.of(a, b)) {
+            float t = Math.clamp(new Vector3(point).sub(from).dot(delta) / length2, 0, 1);
+            if (point.dst2(new Vector3(from).mulAdd(delta, t)) > .00000001f) { return false; }
+        }
+        return true;
     }
 }

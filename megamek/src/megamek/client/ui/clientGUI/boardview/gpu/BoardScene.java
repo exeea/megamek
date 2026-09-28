@@ -82,7 +82,8 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               terrainImages.capture(pixels.tactical(), previous == null ? null : previous.tactical()),
               BoardFeatures.capture(hex, pixels.coords(), pixels.structureModels()), pixels.text(), BoardLiquid.capture(hex),
               terrainImages.captureOverlay(pixels.foliage(), previous == null ? null : previous.foliage()),
-              BoardFeatures.detailedGround(hex, pixels.structureModels()), BoardRoad.capture(hex), BoardFireSmoke.capture(hex), BoardFeatures.biome(hex));
+              BoardFeatures.detailedGround(hex, pixels.structureModels()), BoardRoad.capture(hex), BoardFireSmoke.capture(hex),
+              BoardFeatures.biome(hex), hex.containsTerrain(Terrains.IMPASSABLE));
     }
 
     /** World-space shadow travel per elevation level; null means directional shadows are disabled. */
@@ -170,7 +171,15 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
     record Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
           Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
           Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels foliage,
-          boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome) {
+          boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable) {
+        Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
+              Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
+              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels foliage,
+              boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome) {
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
+                  tactical, features, text, liquid, foliage, detailedGround, road, fireSmoke, biome, false);
+        }
+
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
               Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels foliage,
@@ -225,7 +234,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         Tile withTactical(Pixels marking) {
             if (marking == tactical) { return this; }
             return new Tile(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals,
-                  decalsWithoutLimbs, marking, features, text, liquid, foliage, detailedGround, road, fireSmoke, biome);
+                  decalsWithoutLimbs, marking, features, text, liquid, foliage, detailedGround, road, fireSmoke, biome, impassable);
         }
 
         Tile {

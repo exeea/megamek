@@ -200,7 +200,7 @@ float coverPatch(vec3 world, float familyId) {
 
 void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float hardness, float sediment,
       float broad, float fine, float region,
-      inout vec3 color, inout vec3 normal, inout float cavity, inout float grass,
+      inout vec3 color, inout vec3 normal, inout float cavity, out float height, inout float grass,
       inout vec3 bounce, inout float response, inout float rainCover) {
     TerrainMaterial a = naturalMaterialFor(world, face, foot, rim, rock, hardness, broad, fine, region,
           u_coverFamilies.x, u_coverTiles0, u_coverLayers0, sediment);
@@ -218,6 +218,7 @@ void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float
     color = toDisplay(toLinear(a.color) * weights.x + toLinear(b.color) * weights.y + toLinear(c.color) * weights.z);
     normal = normalize(a.normal * weights.x + b.normal * weights.y + c.normal * weights.z);
     cavity = dot(vec3(a.cavity, b.cavity, c.cavity), weights);
+    height = dot(vec3(a.height, b.height, c.height), weights);
     grass = dot(vec3(1.0) - step(vec3(.5), abs(u_coverFamilies)), weights) * (1.0 - sediment);
     bounce = groundBounceFor(u_coverFamilies.x) * weights.x + groundBounceFor(u_coverFamilies.y) * weights.y
           + groundBounceFor(u_coverFamilies.z) * weights.z;

@@ -1,9 +1,6 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Injected into the lit vertex shader. Only roots/ranks are stored; blade shape and wind live on the GPU.
 layout(location = 14) in vec4 a_coverRoot;
-uniform vec3 u_wind;
-uniform float u_rainTime;
-uniform float u_worldMetre;
 uniform float u_coverPixels;
 uniform float u_coverHexWidth;
 varying vec2 v_coverData;
@@ -33,7 +30,7 @@ void grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
     // Fractional growth of the last blade keeps density transitions continuous, without shading invisible blades.
     float growth = clamp(density - a_coverRoot.w, 0.0, 1.0);
     float t = samplePoint.y;
-    float gust = sin(dot(root.xy / u_worldMetre, vec2(.11, .07)) - u_rainTime * 1.7);
+    float gust = vegetationGust(root.xy);
     vec3 rest = vec3(direction * mix(.25, .65, grassRandom(seed + 51u)), 1.0);
     float alongWind = dot(rest.xy, u_wind.xy);
     vec3 acrossWind = rest - vec3(u_wind.xy * alongWind, 0.0);

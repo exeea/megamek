@@ -58,7 +58,7 @@ class BoardScatterTest {
                 case "desert" -> .10;
                 default -> .06;
             };
-            double expected = Math.clamp(baseline * BoardFeatures.SCATTER_DENSITY_MULTIPLIER, 0, 1);
+            double expected = Math.clamp(baseline * BoardScatter.DENSITY_MULTIPLIER, 0, 1);
             assertEquals(expected, occupied / 4096.0, .03, theme + ": " + occupied + " occupied of 4096 hexes");
             if (occupied == 0) {
                 continue;
@@ -89,7 +89,7 @@ class BoardScatterTest {
                 scatter(hex, new Coords(x, y)).forEach(feature -> shapes.add(feature.asset()));
             }
         }
-        assertEquals(BoardFeatures.SCATTER_DENSITY_MULTIPLIER <= 0 ? Set.of()
+        assertEquals(BoardScatter.DENSITY_MULTIPLIER <= 0 ? Set.of()
               : Set.of("scatter-dry-grass", "scatter-rock", "scatter-slab"), shapes);
     }
 

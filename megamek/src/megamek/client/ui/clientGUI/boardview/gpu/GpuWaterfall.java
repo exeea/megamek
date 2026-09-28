@@ -16,9 +16,6 @@ import com.badlogic.gdx.math.Vector3;
  * sheets, patterns and spray carry on round it without a gap or a seam.
  */
 final class GpuWaterfall {
-    /** Where the water starts to drop, as a share of the lip behind the crest: close enough to the crest that the sheet
-     * still clears the ledge beneath it. */
-    private static final float CREST = .2f;
     /** How far out a fall lands per unit of drop, and the bounds of that throw at hex scale 1, in world units. */
     private static final float THROW = .16f;
     private static final float MIN_THROW = 1.5f;
@@ -115,10 +112,11 @@ final class GpuWaterfall {
     /** Horizontal distance down the same thrown path, with a lip that can taper into a free bank. */
     private static float offset(float lip, float height, float fillet, float thrown, int row) {
         if (row == 0) { return -lip; }
-        float crest = -CREST * lip, end = (float) Math.sqrt((height - fillet) / height);
-        if (row <= ROWS + 1) { return crest + (thrown - crest) * end * (row - 1) / ROWS; }
-        float px = crest + (thrown - crest) * end;
-        float control = px + fillet * (thrown - crest) / (2 * height * end);
+        // Stay level through the rock's shared crest. Descending behind it cuts the sheet through the ledge.
+        float end = (float) Math.sqrt((height - fillet) / height);
+        if (row <= ROWS + 1) { return thrown * end * (row - 1) / ROWS; }
+        float px = thrown * end;
+        float control = px + fillet * thrown / (2 * height * end);
         float v = (row - ROWS - 1) / 3f, w = 1 - v;
         return w * w * px + 2 * w * v * control + v * v * (control + .8f * fillet);
     }

@@ -182,6 +182,10 @@ final class GpuAssets implements Disposable {
         return texture(materialFile(name));
     }
 
+    Texture scatter() {
+        return materials.computeIfAbsent("scatter-atlas", key -> GpuScatter.atlas(root));
+    }
+
     Cliff cliff(String name) {
         return relief("cliffs", name.substring(name.lastIndexOf('/') + 1), name);
     }

@@ -281,6 +281,7 @@ void main() {
     vec3 albedo = vec3(.52);
     vec3 normal = face;
     float cavity = 1.0;
+    float materialHeight = .5;
     float caustic = 0.0;
     float grass = family(0.0) ? 1.0 : 0.0;
     vec3 bounce = groundBounce();
@@ -306,6 +307,7 @@ void main() {
             albedo = material.color;
             normal = material.normal;
             cavity = material.cavity;
+            materialHeight = material.height;
 #endif
             // Match a top to its slope at the same height; tactical level grading remains continuous.
             if (!shore) level = max(v_cloudPosition.z / u_levelHeight, -1.5);
@@ -496,11 +498,12 @@ void main() {
             float rock = ground ? rockiness(steps) : v_color.g;
             // A bank blend must use sediment below the waterline, never repaint the bed with neighbouring turf.
             blendCovers(materialWorld, face, foot, rim, rock, ground ? .5 : v_color.a, sediment,
-                  broad, fine, region, albedo, normal, cavity, grass, bounce, response, rainCover);
+                  broad, fine, region, albedo, normal, cavity, materialHeight, grass, bounce, response, rainCover);
         }
 #endif
         if (natural) {
             biomeSurface(world, face, shore, above, cliff ? v_diffuseUV.x : 0.0,
+                  cliff ? v_diffuseUV.y : v_diffuseUV.x, materialHeight,
                   albedo, normal, cavity, grass, bounce, biomePool, biomeDamp);
         }
         if (ground && grass > 0.0 && !shore && u_wind.z > 0.0) {

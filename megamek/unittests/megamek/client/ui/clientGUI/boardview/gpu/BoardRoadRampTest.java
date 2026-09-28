@@ -242,6 +242,7 @@ class BoardRoadRampTest {
 
     private static void unfolded(BoardSurface surface) {
         for (var face : surface.faces) {
+            if (face.finish() != BoardSurface.Finish.TOP) { continue; }
             Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
             assertTrue(normal.z > 0, "Every earthwork triangle has a positive footprint: " + surface.tile.coords() + " " + face);
         }

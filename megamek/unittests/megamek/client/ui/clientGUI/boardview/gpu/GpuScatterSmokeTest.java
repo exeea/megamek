@@ -6,7 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.File;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.SwingUtilities;
 
@@ -14,11 +16,16 @@ import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
+import com.badlogic.gdx.graphics.g3d.Renderable;
+import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.shaders.DepthShader;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
+import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.Hex;
 import megamek.common.board.Board;
@@ -31,7 +38,7 @@ import org.junit.jupiter.api.Test;
 class GpuScatterSmokeTest {
     @Test
     void batchesSparseDetailsAndCullsAllPassesWithoutChangingPicking() throws Exception {
-        assumeTrue(BoardFeatures.SCATTER_DENSITY_MULTIPLIER > 0, "Scatter is disabled");
+        assumeTrue(BoardScatter.DENSITY_MULTIPLIER > 0, "Scatter is disabled");
         Hex[] hexes = new Hex[16 * 16];
         String[] themes = { "grass", "dirt", "desert", "lunar" };
         for (int y = 0; y < 16; y++) {
@@ -64,10 +71,17 @@ class GpuScatterSmokeTest {
                     GpuTerrain terrain = new GpuTerrain();
                     GpuTerrain plain = new GpuTerrain();
                     ModelBatch depth = new ModelBatch(GpuTreeInstances.depthProvider(new DepthShader.Config()));
+                    GL20 rawGl20 = Gdx.gl20;
                     GLProfiler profiler = new GLProfiler(Gdx.graphics);
                     try {
                         terrain.update(scene);
                         plain.update(bare);
+                        var materials = scatterMaterials(terrain);
+                        assertTrue(!materials.isEmpty(), "The scatter layer must carry its atlas");
+                        assertEquals(1, materials.values().stream().map(value -> value.textureDescription.texture).distinct().count(),
+                              "Every scatter type and chunk borrows the same atlas");
+                        Texture atlas = materials.values().iterator().next().textureDescription.texture;
+                        assertEquals(Texture.TextureFilter.MipMapLinearLinear, atlas.getMinFilter());
                         var features = scene.tiles().stream().flatMap(tile -> tile.features().stream()).toList();
                         assertTrue(!features.isEmpty() && features.size() <= 1536,
                               "Clusters stay bounded regardless of the density multiplier");
@@ -104,8 +118,8 @@ class GpuScatterSmokeTest {
                             int[] background = count(profiler, () -> plain.render(camera.camera, false));
                             int[] decorated = count(profiler, () -> terrain.render(camera.camera, false));
                             assertEquals(vertices, decorated[0] - background[0], "Color pass at LoD step " + step);
-                            assertEquals(visible ? 4 : 0, decorated[1] - background[1],
-                                  "All scatter shares one draw call per visible chunk");
+                            assertEquals(visible ? 1 : 0, decorated[1] - background[1],
+                                  "All scatter shares one draw call across this fully visible prop page");
                             assertEquals(vertices,
                                   count(profiler, () -> terrain.renderDepth(camera.camera, List.of(), depth))[0]
                                         - count(profiler, () -> plain.renderDepth(camera.camera, List.of(), depth))[0],
@@ -134,7 +148,7 @@ class GpuScatterSmokeTest {
                               count(profiler, () -> terrain.render(camera.camera, false))[0],
                               "A sloped road approach into an unpaved hex must also suppress scatter");
                         terrain.update(scene);
-                        profiler.disable();
+                        GpuStageTimings.stopCounting(profiler, rawGl20);
                         camera.fit(scene);
                         preview(terrain, camera, "scatter-overview");
                         for (BoardScene.Surface surface : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.DIRT,
@@ -146,12 +160,23 @@ class GpuScatterSmokeTest {
                             preview(terrain, camera, "scatter-" + surface.name().toLowerCase(java.util.Locale.ROOT));
                         }
                         System.out.println("Scatter: " + features.size() + " objects, " + triangles
-                              + " triangles, 4 additional draws per visible pass on 256 hexes; 0 at overview cull.");
+                              + " triangles, 1 additional color draw on 256 hexes; 0 at overview cull.");
+                        if (Boolean.getBoolean("megamek.gpu.scatterBenchmark")) { benchmark(terrain, camera); }
+                        // Inspect the texture next to the actual sculpted ground as well as the isolated fixture.
+                        terrain.update(captured);
+                        var close = captured.tiles().stream().filter(tile -> tile.surface() == BoardScene.Surface.GRASS
+                              && tile.coords().getY() > 2 && tile.coords().getY() < 13
+                              && tile.features().stream().anyMatch(feature -> feature.asset().equals("scatter-rock"))
+                              && tile.features().stream().anyMatch(feature -> feature.asset().equals("scatter-plant")))
+                              .findFirst().orElseThrow();
+                        camera.camera.zoom = .06f;
+                        camera.center(BoardGeometry.center(close.coords(), close.elevation()));
+                        preview(terrain, camera, "scatter-textured-close");
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                     } catch (Throwable error) {
                         failure.set(error);
                     } finally {
-                        profiler.disable();
+                        GpuStageTimings.stopCounting(profiler, rawGl20);
                         depth.dispose();
                         plain.dispose();
                         terrain.dispose();
@@ -168,6 +193,57 @@ class GpuScatterSmokeTest {
         ScreenUtils.clear(.035f, .055f, .075f, 1, true);
         draw.run();
         return new int[] { (int) profiler.getVertexCount().total, profiler.getDrawCalls() };
+    }
+
+    private static Map<Material, TextureAttribute> scatterMaterials(GpuTerrain terrain) throws Exception {
+        Map<Material, TextureAttribute> result = new IdentityHashMap<>();
+        for (Object chunk : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "chunks")) {
+            for (Object part : (Array<?>) GpuMixedUnitBenchmarkSmokeTest.field(chunk, "scatterRenderables")) {
+                Material material = ((Renderable) part).material;
+                TextureAttribute atlas = material.get(TextureAttribute.class, TextureAttribute.Diffuse);
+                assertTrue(atlas != null, "Scatter must use the diffuse-only textured path");
+                result.put(material, atlas);
+            }
+        }
+        return result;
+    }
+
+    /** Same meshes, density, camera and lighting in alternating rounds; GPU pass cost, not application FPS. */
+    private static void benchmark(GpuTerrain terrain, BoardCamera camera) throws Exception {
+        var materials = scatterMaterials(terrain);
+        GpuPropBatch pages = (GpuPropBatch) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "propBatch");
+        System.out.println("SCATTER GPU: " + Gdx.gl.glGetString(GL20.GL_RENDERER) + "; "
+              + Gdx.graphics.getBackBufferWidth() + "x" + Gdx.graphics.getBackBufferHeight());
+        try (GpuStageTimings timings = new GpuStageTimings()) {
+            for (String view : new String[] { "overview", "normal", "close" }) {
+                camera.camera.zoom = switch (view) { case "overview" -> 2; case "normal" -> .5f; default -> .12f; };
+                camera.center(BoardGeometry.center(new Coords(7, 7), 0));
+                terrain.renderShadows(camera.camera, List.of());
+                for (int round = 0; round < 4; round++) {
+                    boolean textured = round % 2 == 1;
+                    materials.forEach((material, atlas) -> {
+                        if (textured) { material.set(atlas); }
+                        else { material.remove(TextureAttribute.Diffuse); }
+                    });
+                    // Materials are immutable in production; changing them for this probe needs fresh prop pages.
+                    pages.dispose();
+                    for (int i = 0; i < 390; i++) {
+                        ScreenUtils.clear(.035f, .055f, .075f, 1, true);
+                        timings.beginFrame(i >= 90);
+                        timings.stage("opaque");
+                        terrain.render(camera.camera, false);
+                        timings.stage(null);
+                        Gdx.gl.glFinish();
+                    }
+                    StringBuilder report = new StringBuilder();
+                    timings.appendReport(report, "SCATTER " + view + " round=" + round / 2 + " textured=" + textured);
+                    System.out.print(report);
+                }
+            }
+        } finally {
+            materials.forEach(Material::set);
+            pages.dispose();
+        }
     }
 
     private static BoardScene approach(BoardScene.Pixels ground, List<BoardScene.Feature> details) {

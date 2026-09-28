@@ -13,6 +13,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -62,7 +63,7 @@ final class GpuTactical implements Disposable {
     private record FillGeometry(Map<Coords, BoardTacticalGeometry.Surface> surfaces, float[] vertices, int elevation) { }
     private record WallGeometry(Map<Coords, BoardTacticalGeometry.Surface> surfaces, int[] levels,
           float[] body, float[] uprightOutline, float[] flatOutline) { }
-    /** Presentation 0 is always drawn; 1 and 2 are the upright and flat wall alternatives. */
+    /** Presentations 0 and 3 are always drawn; 1 and 2 are the upright and flat wall alternatives. */
     private record Group(int presentation, BasicStroke stroke) { }
     private record Span(float[] vertices, int start, int count) { }
     private final ModelBatch batch = new ModelBatch();
@@ -77,6 +78,9 @@ final class GpuTactical implements Disposable {
           new DepthTestAttribute(GL20.GL_LEQUAL, false), IntAttribute.createCullFace(GL20.GL_NONE));
     private final Material wallMaterial = material.copy();
     private BoardScene previous;
+    private List<BoardTactical.Fill> impassable = List.of();
+    private Coords impassableHover;
+    private boolean movementPlanning;
     private Map<FillKey, FillGeometry> fills = Map.of();
     private Map<BoardTactical.Wall, WallGeometry> walls = Map.of();
     private Map<Group, List<Page>> pages = Map.of();
@@ -115,10 +119,24 @@ final class GpuTactical implements Disposable {
     }
 
     void update(BoardScene scene, boolean detailChanged) {
+        update(scene, detailChanged, null);
+    }
+
+    void update(BoardScene scene, boolean detailChanged, Coords hover) {
         boolean boardChanged = previous == null || previous.boardId() != scene.boardId()
               || previous.width() != scene.width() || previous.height() != scene.height();
         boolean terrainChanged = detailChanged || boardChanged || !sameTerrain(scene);
-        if (tuning != BoardGeometry.revision() || terrainChanged
+        boolean planning = !scene.plannedPath().isEmpty();
+        Coords highlighted = !planning && hover != null && scene.tile(hover) != null && scene.tile(hover).impassable()
+              ? hover : null;
+        boolean markingChanged = boardChanged || !sameImpassable(scene) || planning != movementPlanning
+              || !Objects.equals(highlighted, impassableHover);
+        if (markingChanged) {
+            impassableHover = highlighted;
+            movementPlanning = planning;
+            impassable = BoardImpassable.fills(scene, highlighted, planning);
+        }
+        if (tuning != BoardGeometry.revision() || terrainChanged || markingChanged
               || !previous.tactical().fills().equals(scene.tactical().fills())
               || !previous.tactical().walls().equals(scene.tactical().walls())
               || !previous.tactical().flatWalls().equals(scene.tactical().flatWalls())) {
@@ -137,6 +155,14 @@ final class GpuTactical implements Disposable {
             textures.update(pixels);
         }
         previous = scene;
+    }
+
+    private boolean sameImpassable(BoardScene scene) {
+        if (previous.tiles() == scene.tiles()) { return true; }
+        for (int i = 0; i < scene.tiles().size(); i++) {
+            if (previous.tiles().get(i).impassable() != scene.tiles().get(i).impassable()) { return false; }
+        }
+        return true;
     }
 
     private boolean sameTerrain(BoardScene scene) {
@@ -168,6 +194,8 @@ final class GpuTactical implements Disposable {
         boolean masked = hexMasks.update(scene, surfaces, !iconsPresent);
         addFills(scene, masked ? List.of() : scene.tactical().fills(), new Group(0, null), groups, nextFills,
               surfaces, clipper, reset, terrainChanged);
+        // Keep map restrictions in their own retained pages, outside the sprite-mask fast path.
+        addFills(scene, impassable, new Group(3, null), groups, nextFills, surfaces, clipper, reset, terrainChanged);
         groups.put(new Group(1, null), new ArrayList<>());
         for (BoardTactical.Wall wall : commands) {
             WallGeometry geometry = reset ? null : walls.get(wall);
@@ -474,7 +502,7 @@ final class GpuTactical implements Disposable {
         hexMasks.submit(batch, camera);
         for (var entry : pages.entrySet()) {
             int presentation = entry.getKey().presentation();
-            if (presentation == 0 || presentation == (flat ? 2 : 1)) {
+            if (presentation == 0 || presentation == 3 || presentation == (flat ? 2 : 1)) {
                 for (Page page : entry.getValue()) {
                     var bounds = page.renderable.meshPart;
                     if (camera.frustum.boundsInFrustum(bounds.center.x, bounds.center.y, bounds.center.z,
@@ -577,6 +605,7 @@ final class GpuTactical implements Disposable {
         outlines = Map.of();
         fills = Map.of();
         walls = Map.of();
+        impassable = List.of();
         batch.dispose();
         textBatch.dispose();
         textures.dispose();

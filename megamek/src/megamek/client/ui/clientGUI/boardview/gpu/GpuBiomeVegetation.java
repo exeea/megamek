@@ -57,6 +57,8 @@ final class GpuBiomeVegetation implements Disposable {
         final List<BoardSurface.Face> ground;
         final Support support, water;
         final BoardScene.Biome kind;
+        final boolean uniform;
+        final float levelZ;
         final FloatArray roots = new FloatArray();
         final BoardRoad road;
         final float across, along;
@@ -76,6 +78,9 @@ final class GpuBiomeVegetation implements Disposable {
             water = tile.liquid().present() ? new Support(surface.water()) : null;
             this.generation = generation;
             kind = BoardBiome.plantKind(scene, tile);
+            levelZ = BoardGeometry.groundZ(tile);
+            uniform = key.sites().stream().allMatch(site -> site != null && site.biome() == kind
+                  && site.elevation() == tile.elevation());
             road = BoardRoad.rendered(tile) ? BoardRoad.of(scene, tile) : null;
             across = BoardBiome.ROW_METRES;
             along = kind == BoardScene.Biome.FIELD ? .63f : 1.15f;
@@ -123,7 +128,9 @@ final class GpuBiomeVegetation implements Disposable {
                 // Water's tactical top includes the water plane. Roots instead follow the actual bank/bar mesh.
                 float z = support.height(px, py);
                 if (!Float.isFinite(z)) { continue; }
-                float cover = BoardBiome.coverage(scene, kind, px, py, z);
+                // An interior plateau has unit coverage. Boundary and sloping samples still use the shared field.
+                float cover = uniform && Math.abs(z - levelZ) <= .15f * metre ? 1
+                      : BoardBiome.coverage(scene, kind, px, py, z);
                 if (kind == BoardScene.Biome.FIELD ? cover < .60f : seed > .88f * BoardRelief.smooth(cover)) { continue; }
                 if (water != null) {
                     if (z <= water.height(px, py) + .015f * metre) { continue; }
@@ -142,7 +149,7 @@ final class GpuBiomeVegetation implements Disposable {
     }
 
     /** Small CPU index of the published triangles, not a second height field. No per-root whole-mesh scan. */
-    private static final class Support {
+    static final class Support {
         private static final int SIDE = 8;
         final List<List<BoardSurface.Face>> cells = new ArrayList<>(SIDE * SIDE);
         final float minX, minY, scaleX, scaleY;
@@ -250,12 +257,13 @@ final class GpuBiomeVegetation implements Disposable {
     private Texture sedge;
 
     static String vertex(String source) {
+        String wind = Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-vegetation-wind.glsl").readString();
         String plant = Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-biome-vegetation.glsl").readString();
         for (int lod = 0; lod < DENSITY.length; lod++) {
             plant = plant.replace("@START" + lod + "@", Float.toString(START_PIXELS[lod]))
                   .replace("@FULL" + lod + "@", Float.toString(FULL_PIXELS[lod]));
         }
-        return source.replace("void main() {", plant + "\nvoid main() {\nvec3 coverPosition, coverNormal; vec4 coverColor;\n"
+        return source.replace("void main() {", wind + plant + "\nvoid main() {\nvec3 coverPosition, coverNormal; vec4 coverColor;\n"
                     + "biomePlant(a_position, a_normal, a_color, coverPosition, coverNormal, coverColor);\n")
               .replace("vec4 pos = u_worldTrans * vec4(a_position, 1.0);", "vec4 pos = vec4(coverPosition, 1.0);")
               .replace("vec3 normal = normalize(u_normalMatrix * a_normal);", "vec3 normal = coverNormal;")

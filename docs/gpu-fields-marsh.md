@@ -55,6 +55,13 @@ level ground; crop rows and moss growth fade off steeper faces. Deep submerged
 beds still keep their own material. The fringe adds no terrain geometry or mask
 texture fetches. Fields reuse the existing soil maps for the exposed earth.
 
+Fields and reed marshes now keep the underlying theme's natural surface family
+(grass on the default theme) instead of classifying the entire hex and its bank
+as dirt. Mud and quicksand remain dirt. Cultivation fades before the steep face;
+the bank uses the established grass/soil mantle, including its texture relief and
+normal. Biome margins use that same material-height competition rather than a
+broad colour tint. Wet peat can reach the toe without painting pools up the slope.
+
 The reduced crop mesh has broader leaves, a more legible seed head and stronger
 lit leaf colour. Its row canopy is fuller and shades the furrows more strongly.
 This improves its silhouette without restoring the removed stalks or triangles;
@@ -103,6 +110,15 @@ on ordinary boards with no special ground and only one water palette. Plant root
 are prepared within the existing frame-budget approach and uploaded only when
 their visible patch data changes. There are at most six plant batches: two plant
 types times three LODs. No per-hex material textures are generated.
+
+Root preparation starts with the LOD2 subset and extends the same deterministic
+lattice only when LOD1 or LOD0 is visible. A small 8x8 CPU index references the
+published support triangles; queries still use the existing triangle sampler and
+its edge tolerance. Both ground and water-plane rejection use it. Uniform biome
+interiors skip the neighbour stencil only where its coverage is necessarily one.
+Replacing a patch during a terrain LOD handoff now shares the 2 ms preparation
+budget, including patch construction. The budget is checked every eight candidate
+sites. These changes add no GPU geometry, textures or plant draw calls.
 The vegetation renderer owns one shared, mipmapped cutout texture and disposes it
 with its batches. It filters the original PNG to a 512x512 RGBA8 GPU upload:
 1,398,100 bytes (1.33 MiB) including mipmaps, versus approximately 8 MiB previously.
@@ -170,19 +186,40 @@ errors and concurrent builds replacing class files during a running test. It
 verifies this rendering change, not a complete build of the concurrently edited
 application. Native screenshots are actual renderer output, not generated references.
 
+The grass-bank/zoom follow-up passed seven CPU biome cases and six native cases
+(biome materials/budgets, both plant LOD continuity cases, actual terrain-LOD zoom,
+liquid mixing and cliff/waterbed contacts), plus scoped main/test Checkstyle.
+The CPU checks compare indexed support against the original triangle sampler at
+bank vertices and random positions across all four mesh tiers, and verify that
+progressive LOD preparation produces the same full root lattice. The native zoom
+test exercises separate grass, field and marsh 24x24 boards over three continuous
+zoom-in/out passes, with terrain LOD enabled, and records a JFR profile.
+
+On the RTX 4070 Laptop test machine, an old/new vegetation comparison with the
+same frozen application/shader snapshot recorded these CPU frame p95 ranges over
+the three passes: fields 8.05–15.05 ms before, 3.97–4.89 ms after; marsh
+7.30–7.50 ms before, 2.71–4.02 ms after. The original path was preparing plants
+in all 180 frames of each pass. The updated path needed 118/79/80 frames for
+fields and 64/35/83 for marsh. These are local render-thread submission timings,
+not whole-game FPS or a guarantee on other machines; builds and other native
+work remained active. Raw reports/JFR and screenshots are under
+`megamek/build/biome-zoom-review/{baseline-captures,captures}`. Java and shader
+files were frozen together for this comparison; concurrent wind/scatter changes
+were outside the verified snapshot.
+
 The 3x3 special-ground fixture produced these submitted plant counts, including
 the marsh fringe. These are triangles sent to the GPU, not whole-frame cost or
 counts of triangles ultimately visible on screen:
 
 | Plants | LOD0 triangles, before → after | LOD1 triangles, before → after | LOD2 triangles, before → after |
 | --- | ---: | ---: | ---: |
-| Crops | 135,040 → 26,140 | 29,100 → 5,790 | 4,448 → 420 |
+| Crops | 135,040 → 26,080 | 29,100 → 5,778 | 4,448 → 420 |
 | Marsh reeds/sedge, including its fringe | 20,952 → 9,248 | 5,020 → 2,164 | 630 → 272 |
 
 Compared with the preceding lightweight pass, marsh geometry falls by
 55.9%/56.9%/56.8%; crops by 80.6%/80.1%/90.6%. The near fixture submits 1,156 marsh
-clumps and 2,614 crop stalks. The middle/far tiers submit 541/136 clumps and
-965/210 crop stalks. Pure-tier fixture ceilings are
+clumps and 2,608 crop stalks. The middle/far tiers submit 541/136 clumps and
+963/210 crop stalks. Pure-tier fixture ceilings are
 10,476/2,510/314 marsh triangles and 30,000/6,000/500 crop triangles; these
 are regression budgets for this fixture, not hard caps for arbitrary maps.
 
@@ -191,7 +228,7 @@ none. During crossfades adjacent tiers overlap; a mixed board can use up to six
 plant draws. The native shader check observed at most 15 active texture samplers,
 within the existing 16-sampler budget.
 
-The surrounding ordinary grass submits 664,265/27,042/0 triangles at these three
+The surrounding ordinary grass submits 688,128/27,432/0 triangles at these three
 scales in both fixtures, far more than either special vegetation batch up close.
 That grass occupies the surrounding area, not the nine special hexes, so this is
 not an equal-area grass-versus-marsh benchmark. The fixture waits for both grass
