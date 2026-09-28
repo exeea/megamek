@@ -1,9 +1,11 @@
+#version 330 core
+layout(location = 0) out vec4 fragColor;
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 #ifdef GL_ES
 #extension GL_OES_standard_derivatives : enable
 precision highp float;
 #endif
-varying vec2 v_uv;
+in vec2 v_uv;
 uniform sampler2D u_depth;
 uniform vec3 u_fog;
 uniform float u_haze;
@@ -25,7 +27,7 @@ uniform float u_hasGeometryShadow;
 // GROUND_LAYER
 
 float depthAt(sampler2D map, vec2 uv) {
-    return dot(texture2D(map, uv), vec4(1.0, 1.0 / 255.0, 1.0 / 65025.0, 1.0 / 16581375.0));
+    return dot(texture(map, uv), vec4(1.0, 1.0 / 255.0, 1.0 / 65025.0, 1.0 / 16581375.0));
 }
 
 float sunlight(vec3 position) {
@@ -42,22 +44,22 @@ float sunlight(vec3 position) {
 
 void main() {
     if (outsideGroundLayer()) {
-        gl_FragColor = vec4(0, 0, 0, 1);
+        fragColor = vec4(0, 0, 0, 1);
         return;
     }
     vec3 origin = world(0.0);
     vec3 direction = normalize(world(1.0) - origin);
-    float surface = texture2D(u_depth, v_uv).r;
+    float surface = texture(u_depth, v_uv).r;
     // Fog occupies air above the board, including against sky, while leaving the solid plinth untouched.
     vec3 endpoint = world(surface);
     if (groundBaseSide(endpoint, surface, u_fog.z, u_fog.y * 0.001)) {
-        gl_FragColor = vec4(0, 0, 0, 1);
+        fragColor = vec4(0, 0, 0, 1);
         return;
     }
     vec2 segment = groundSegment(origin, endpoint, direction);
     float start = segment.x, end = segment.y;
     if (end <= start || u_fog.x + u_haze + u_rays <= 0.0) {
-        gl_FragColor = vec4(0, 0, 0, 1);
+        fragColor = vec4(0, 0, 0, 1);
         return;
     }
     // Keep fog/haze sampling independent of the taller cloud-shaft volume.
@@ -108,5 +110,5 @@ void main() {
         scattered += shaftLight * shaftOpacity;
         opacity += shaftOpacity;
     }
-    gl_FragColor = vec4(scattered, 1.0 - opacity);
+    fragColor = vec4(scattered, 1.0 - opacity);
 }

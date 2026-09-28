@@ -27,8 +27,8 @@ final class GpuLiquidShader {
 
     static String fragment(String source) {
         String functions = GpuShaderSource.read("liquid-animation.glsl");
-        return source.replace("texture2D(u_diffuseTexture, v_diffuseUV)", "liquidColor")
-              .replace("texture2D(u_emissiveTexture, v_emissiveUV)", "liquidColor")
+        return source.replace("texture(u_diffuseTexture, v_diffuseUV)", "liquidColor")
+              .replace("texture(u_emissiveTexture, v_emissiveUV)", "liquidColor")
               .replace("void main() {", functions + "\nvoid main() {\nvec4 liquidColor = liquidSample(v_diffuseUV);\n");
     }
 

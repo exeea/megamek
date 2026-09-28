@@ -13,10 +13,10 @@ uniform DirectionalLight u_dirLights[numDirectionalLights];
 uniform sampler2D u_shadowTexture;
 uniform float u_shadowPCFOffset;
 uniform mat4 u_shadowMapProjViewTrans;
-varying vec3 v_shadowMapUv;
+in vec3 v_shadowMapUv;
 
 float shadowSample(vec2 offset) {
-    vec4 depthChannels = texture2D(u_shadowTexture, v_shadowMapUv.xy + offset);
+    vec4 depthChannels = texture(u_shadowTexture, v_shadowMapUv.xy + offset);
     float depth = dot(depthChannels, vec4(1.0, 1.0 / 255.0, 1.0 / 65025.0, 1.0 / 16581375.0));
     return step(v_shadowMapUv.z, depth);
 }
@@ -87,7 +87,7 @@ float sculptShadow(vec3 normal, vec3 light) {
     float lit = 0.0;
     for (int i = 0; i < 12; i++) {
         vec2 offset = rotation * taps[i] * radius;
-        vec4 depthChannels = texture2D(u_shadowTexture, shadowUv.xy + offset);
+        vec4 depthChannels = texture(u_shadowTexture, shadowUv.xy + offset);
         float depth = dot(depthChannels, vec4(1.0, 1.0 / 255.0, 1.0 / 65025.0, 1.0 / 16581375.0));
         float receiver = shadowUv.z + clamp(dot(offset, slope), -.002, .002);
         lit += step(receiver, depth);

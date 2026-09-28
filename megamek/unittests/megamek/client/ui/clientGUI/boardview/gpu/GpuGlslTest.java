@@ -2,10 +2,21 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
 class GpuGlslTest {
+    @Test
+    void materialDefinesFollowTheRuntimeVersionWhenAnEditorPreservesCommentsBeforeTheVersion() {
+        String source = "// edited shader\r\n#version 330 core\r\nin vec3 a_position;\nvoid main() {}\n";
+        String compiled = GpuGlsl.source("#define colorFlag\n", source, 460);
+        assertTrue(compiled.startsWith("#version 460 core\n#define colorFlag\n// edited shader"));
+        assertEquals(1, compiled.split("#version", -1).length - 1);
+        assertTrue(compiled.contains("in vec3 a_position;"));
+        assertTrue(GpuGlsl.source("", "void main() {}", 330).startsWith("#version 330 core\nvoid main()"));
+    }
+
     @Test
     void shadersUseTheContextsOwnVersionBetweenTheBoardsLimits() {
         assertEquals(330, GpuGlsl.select(3, 3, GpuGlsl.MAXIMUM), "OpenGL 3.3, the least the board asks for");

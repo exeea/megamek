@@ -1,3 +1,5 @@
+#version 330 core
+layout(location = 0) out vec4 fragColor;
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 #ifdef GL_ES
 #extension GL_OES_standard_derivatives : enable
@@ -7,7 +9,7 @@ precision highp float;
 #else
 #define DEPTH gl_FragDepth
 #endif
-varying vec2 v_uv;
+in vec2 v_uv;
 uniform sampler2D u_scene;
 uniform sampler2D u_depth;
 uniform sampler2D u_fog;
@@ -24,7 +26,7 @@ uniform vec3 u_horizon;
 uniform vec4 u_sunGlare; // Angular screen position, strength, viewport aspect.
 uniform vec3 u_glareColor;
 #ifdef VERTEX_SUN_VISIBILITY
-varying float v_sunVisibility;
+in float v_sunVisibility;
 #else
 // SUN_VISIBILITY
 #endif
@@ -87,7 +89,7 @@ vec4 sandLayer(float depth) {
 
 vec4 fovAt(vec2 hex) {
     if (hex.x < 0.0 || hex.y < 0.0 || hex.x >= u_fovSize.x || hex.y >= u_fovSize.y) return vec4(0.0);
-    return texture2D(u_fov, (hex + 0.5) / u_fovSize);
+    return texture(u_fov, (hex + 0.5) / u_fovSize);
 }
 
 float fovState(vec4 value) {
@@ -177,7 +179,7 @@ vec3 shoulder(vec3 c) {
 }
 
 float depthAt(vec2 uv) {
-    return texture2D(u_depth, uv).r;
+    return texture(u_depth, uv).r;
 }
 
 vec3 sunGlare() {
@@ -222,7 +224,7 @@ vec3 sunGlare() {
 
 void main() {
     float depth = depthAt(v_uv);
-    vec4 scene = texture2D(u_scene, v_uv);
+    vec4 scene = texture(u_scene, v_uv);
     vec4 atmosphere = vec4(0, 0, 0, 1);
     bool solidBase = false;
     if (u_fogEnabled > 0.5) solidBase = groundBaseSide(world(depth), depth, u_sand.z, 0.01 / u_sand.w);
@@ -241,11 +243,11 @@ void main() {
                 vec2 bilinear = mix(1.0 - f, f, offset);
                 float difference = abs(cameraDepth(depth) - cameraDepth(depthAt(uv)));
                 float weight = bilinear.x * bilinear.y / (1.0 + difference * difference / (u_edgeScale * u_edgeScale));
-                atmosphere += texture2D(u_fog, uv) * weight;
+                atmosphere += texture(u_fog, uv) * weight;
                 weights += weight;
             }
         }
-        atmosphere = weights > 0.00001 ? atmosphere / weights : texture2D(u_fog, v_uv);
+        atmosphere = weights > 0.00001 ? atmosphere / weights : texture(u_fog, v_uv);
     }
     // Scene clear RGB contains u_sky. Replace its uncovered part with the sky gradient continuously;
     // treating any nonzero alpha as opaque leaves a hard sky-colored border around dissipating volumes.
@@ -266,7 +268,7 @@ void main() {
     vec2 edge = (v_uv - 0.5) * 2.0;
     color *= 1.0 - 0.09 * dot(edge, edge) * 0.5;
     if (u_fovEnabled > 0.5) color = fieldOfView(color, depth);
-    gl_FragColor = vec4(color, 1.0);
+    fragColor = vec4(color, 1.0);
     // Reuse the scene's hardware depth for weather and tactical occlusion in this same draw.
     DEPTH = depth;
 }

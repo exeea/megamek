@@ -96,8 +96,8 @@ final class GpuRoads {
     private GpuRoads() { }
 
     static String vertex(String source) {
-        return source.replace("void main()", "#ifdef roadMaskFlag\nattribute vec2 a_roadMaskUV;\n"
-                    + "varying vec2 v_roadMaskUV;\n#endif\nvoid main()")
+        return source.replace("void main()", "#ifdef roadMaskFlag\nin vec2 a_roadMaskUV;\n"
+                    + "out vec2 v_roadMaskUV;\n#endif\nvoid main()")
               .replace("void main() {", "void main() {\n#ifdef roadMaskFlag\nv_roadMaskUV = a_roadMaskUV;\n#endif\n");
     }
 

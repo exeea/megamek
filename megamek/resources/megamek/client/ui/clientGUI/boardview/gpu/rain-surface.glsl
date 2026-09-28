@@ -51,8 +51,8 @@ vec2 rainRipples(vec2 position) { return rainRippleField(position).xy; }
 
 float rainPuddle(vec2 position, float wet, float response) {
     // Broad basins keep a stable shape as rain enlarges their edges and joins nearby patches.
-    float field = texture2D(u_rainNoise, position / 72.0).r * 0.75
-          + texture2D(u_rainNoise, position / 24.0 + 0.37).r * 0.25;
+    float field = texture(u_rainNoise, position / 72.0).r * 0.75
+          + texture(u_rainNoise, position / 24.0 + 0.37).r * 0.25;
     float threshold = mix(0.80, 0.34, wet * mix(0.35, 1.0, response));
     return smoothstep(threshold, threshold + 0.08, field) * wet;
 }
@@ -61,7 +61,7 @@ vec3 rainReflection(vec3 ground, vec3 normal, float coverage) {
     vec3 reflected = reflect(viewDirection(), normal);
     float skyHeight = clamp(reflected.z, 0.0, 1.0);
     // Broad, blurred sky variation. Uses the current atmosphere palette, not a second scene render.
-    float cloud = texture2D(u_rainNoise, reflected.xy * 0.11 + vec2(0.31, 0.57)).r;
+    float cloud = texture(u_rainNoise, reflected.xy * 0.11 + vec2(0.31, 0.57)).r;
     vec3 sky = mix(u_rainHorizon, u_rainSky, sqrt(skyHeight)) * mix(0.8, 1.12, cloud);
     float grazing = 1.0 - clamp(dot(-viewDirection(), normal), 0.0, 1.0);
     // A small artistic floor keeps the soft reflection readable in the overhead board camera.

@@ -622,7 +622,6 @@ final class GpuBoardTuning {
         buttons.add(reset).width(76).height(24);
         buttons.add(reloadAssets).width(110).height(24).padLeft(8);
         buttons.add(assetReloadStatus).minWidth(0).growX().left().padLeft(8).padRight(8);
-        buttons.add(new Label("F9 to close", skin, "small")).right();
         panel.add(buttons).growX().padTop(4).row();
         restoreDefaults();
     }
@@ -635,7 +634,7 @@ final class GpuBoardTuning {
 
     void assetReloadFinished(boolean success) {
         reloadAssets.setDisabled(false);
-        assetReloadStatus.setText(success ? "Assets reloaded" : "Reload failed; see log. Retry after fixing files.");
+        assetReloadStatus.setText(success ? "OK" : "FAIL (logs)");
     }
 
     private ScrollPane scroll(Skin skin, Table content, String name) {

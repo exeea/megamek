@@ -125,7 +125,7 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
       float hardness, float broad, float fine, float region, float familyId, vec4 tiles, vec4 layers, float sediment) {
     MaterialProjection projection = materialProjection(world, face);
     float up = clamp(face.z, 0.0, 1.0);
-    float pockets = texture2D(u_rainNoise, (world.xy + world.z * vec2(.43, .27)) / 92.0 + .57).g;
+    float pockets = texture(u_rainNoise, (world.xy + world.z * vec2(.43, .27)) / 92.0 + .57).g;
     float variation = broad * .4 + fine * .25 + pockets * .35;
     float foot = exp(-max(aboveFoot, 0.0) / (1.5 + 6.0 * variation));
     float rim = 1.0 - smoothstep(.1, 1.0 + 2.0 * broad, belowRim);
@@ -194,8 +194,8 @@ TerrainMaterial naturalMaterial(vec3 world, vec3 face, float aboveFoot, float be
 float coverPatch(vec3 world, float familyId) {
     vec2 offset = familyId * vec2(.17, .31);
     vec2 contact = world.xy + world.z * vec2(.47, .29);
-    return texture2D(u_rainNoise, contact / 150.0 + offset).r * .65
-          + texture2D(u_rainNoise, contact / 43.0 - offset).b * .35;
+    return texture(u_rainNoise, contact / 150.0 + offset).r * .65
+          + texture(u_rainNoise, contact / 43.0 - offset).b * .35;
 }
 
 void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float hardness, float sediment,

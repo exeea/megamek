@@ -1,14 +1,15 @@
+#version 330 core
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
-attribute vec3 a_position;
-attribute vec4 a_origin; // world base and horizontal radius
-attribute vec4 a_shape; // height, flame, density, palette
-attribute float a_lod;
+in vec3 a_position;
+in vec4 a_origin; // world base and horizontal radius
+in vec4 a_shape; // height, flame, density, palette
+in float a_lod;
 uniform mat4 u_projView;
 uniform vec3 u_wind;
 uniform float u_spread;
-varying vec4 v_origin;
-varying vec4 v_shape;
-varying float v_lod;
+out vec4 v_origin;
+out vec4 v_shape;
+out float v_lod;
 void main() {
     v_origin = a_origin;
     v_shape = a_shape;

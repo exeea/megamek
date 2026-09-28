@@ -1,9 +1,8 @@
+#version 330 core
+layout(location = 0) out vec4 fragColor;
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
-#ifdef GL_ES
-precision mediump float;
-#endif
-varying vec2 v_uv;
-varying vec2 v_effect;
+in vec2 v_uv;
+in vec2 v_effect;
 // Integer kind: tracer, energy trail, plasma glow, flare, spray, screen, physical contact, impact spark.
 // Fractional phase and opacity come from the shared attack clock; no wall-clock animation.
 
@@ -57,5 +56,5 @@ void main() {
             alpha = max(core, halo * (0.15 + sparks * 0.6));
         }
     }
-    gl_FragColor = vec4(color, alpha * v_effect.y);
+    fragColor = vec4(color, alpha * v_effect.y);
 }

@@ -46,6 +46,16 @@ record BoardTunnel(Coords road, Vector3 origin, Vector3 along) {
         return new Vector3(x * along.y - y * along.x, x * along.x + y * along.y, (p.z - origin.z) / scale);
     }
 
+    /** Keep whole decorative rocks clear of the shell, wing walls and the road approaching the mouth. */
+    boolean obstructs(Vector3 base, float radius, float height) {
+        Vector3 p = local(base);
+        float scale = BoardGeometry.hexScale(), r = radius / scale;
+        if (p.z >= 20 || p.z + height / scale <= -1) { return false; }
+        boolean shell = Math.abs(p.x) < 18 + r && p.y > -7 - r && p.y < DEPTH + r;
+        boolean approach = Math.abs(p.x) < HALF_WIDTH + 1 + r && p.y > -36 - r && p.y < r;
+        return shell || approach;
+    }
+
     /** Remove only the portal's arch prism from the existing cliff mesh; its surrounding slope stays native. */
     void cut(List<BoardSurface.Face> faces, BoardRelief relief) {
         List<float[]> planes = new ArrayList<>();

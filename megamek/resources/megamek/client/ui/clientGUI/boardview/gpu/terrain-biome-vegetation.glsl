@@ -5,9 +5,9 @@ uniform float u_biomeLod;
 uniform float u_coverPixels;
 uniform float u_levelHeight;
 uniform float u_metre;
-varying vec2 v_coverData;
-varying vec2 v_coverRoot;
-varying vec2 v_coverFade;
+out vec2 v_coverData;
+out vec2 v_coverRoot;
+out vec2 v_coverFade;
 
 void biomePlant(vec3 point, vec3 sourceNormal, vec4 pigment, out vec3 position, out vec3 normal, out vec4 color) {
     float seed = a_coverRoot.w, angle = seed * 97.71;

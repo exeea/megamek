@@ -226,7 +226,7 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
      */
     static DepthShaderProvider depthProvider(DepthShader.Config plain) {
         DepthShader.Config trees = new DepthShader.Config(depthVertex(plain.vertexShader != null ? plain.vertexShader
-              : DepthShader.getDefaultVertexShader()), plain.fragmentShader);
+              : GpuGlsl.libGdx(DepthShader.getDefaultVertexShader(), true)), plain.fragmentShader);
         trees.defaultCullFace = plain.defaultCullFace;
         trees.defaultDepthFunc = plain.defaultDepthFunc;
         trees.depthBufferOnly = plain.depthBufferOnly;
@@ -238,8 +238,8 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
                 DepthShader.Config chosen = instanced ? trees : plain;
                 return new DepthShader(renderable, chosen, GpuGlsl.compile("GPU shadow depth",
                       DepthShader.createPrefix(renderable, chosen),
-                      chosen.vertexShader == null ? DepthShader.getDefaultVertexShader() : chosen.vertexShader,
-                      chosen.fragmentShader == null ? DepthShader.getDefaultFragmentShader() : chosen.fragmentShader)) {
+                      chosen.vertexShader == null ? GpuGlsl.libGdx(DepthShader.getDefaultVertexShader(), true) : chosen.vertexShader,
+                      chosen.fragmentShader == null ? GpuGlsl.libGdx(DepthShader.getDefaultFragmentShader(), false) : chosen.fragmentShader)) {
                     @Override
                     public boolean canRender(Renderable other) {
                         return instanced(other) == instanced && super.canRender(other);

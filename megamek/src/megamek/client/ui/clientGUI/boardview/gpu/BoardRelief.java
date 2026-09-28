@@ -273,6 +273,8 @@ final class BoardRelief {
     /** The edges a water hex falls over, as a bit mask by edge. */
     private int falls;
     private List<Site> candidates;
+    /** Nearby visual entrances, derived once when this mesh places its decorative rocks. */
+    private List<BoardTunnel> tunnels;
     /** The relief amplitude when all joined hexes around share one family; NaN until computed, negative if mixed. */
     private float uniformRelief = Float.NaN;
     private float[] seams;
@@ -1900,9 +1902,10 @@ final class BoardRelief {
             List<Float> innerParameters = new ArrayList<>(6 * per);
             for (int e = 0; e < 6; e++) {
                 int edgeCount = starts[e + 1] - starts[e];
-                for (int k = 0; k < per; k++) {
+                int edgeSamples = Math.min(per, edgeCount);
+                for (int k = 0; k < edgeSamples; k++) {
                     // Bearing of a boundary sample; radius below the band's minimum around that bearing.
-                    int sample = starts[e] + Math.round(k * edgeCount / (float) per);
+                    int sample = starts[e] + Math.round(k * edgeCount / (float) edgeSamples);
                     float minimum = Float.POSITIVE_INFINITY;
                     int window = Math.max(1, edgeCount / per);
                     for (int w = -window; w <= window; w++) {
@@ -2720,6 +2723,22 @@ final class BoardRelief {
         float c = (float) Math.cos(turn), s = (float) Math.sin(turn), m = metres(1);
         float tint = hash(Float.floatToIntBits(base.x), Float.floatToIntBits(base.y));
         float height = rock.height() * sz;
+        if (tunnels == null) {
+            tunnels = new ArrayList<>(BoardTunnel.entrances(scene, tile));
+            for (int direction = 0; direction < 6; direction++) {
+                var neighbor = scene.tile(tile.coords().translated(direction));
+                if (neighbor != null) { tunnels.addAll(BoardTunnel.entrances(scene, neighbor)); }
+            }
+        }
+        if (!tunnels.isEmpty()) {
+            float radius = 0;
+            for (var polygon : rock.polygons()) {
+                for (var p : polygon.points()) { radius = Math.max(radius, (float) Math.hypot(p.x * sx, p.y * sy)); }
+            }
+            for (var tunnel : tunnels) {
+                if (tunnel.obstructs(base, radius, height)) { return; }
+            }
+        }
         if (self.liquid() && kind == Kind.ROCK) {
             // A lip's nominal level and a pool's waterline are not foundations. Extend the closed rock down into
             // the actual bank/bed across its footprint, keeping its visible summit where it was placed.

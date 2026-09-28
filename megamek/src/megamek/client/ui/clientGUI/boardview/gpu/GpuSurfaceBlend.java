@@ -62,8 +62,8 @@ final class GpuSurfaceBlend extends Attribute {
     }
 
     static String vertex(String source) {
-        return source.replace("void main()", "#ifdef terrainBlendFlag\nattribute vec3 a_coverWeights;\n"
-                    + "varying vec3 v_coverWeights;\n#endif\nvoid main()")
+        return source.replace("void main()", "#ifdef terrainBlendFlag\nin vec3 a_coverWeights;\n"
+                    + "out vec3 v_coverWeights;\n#endif\nvoid main()")
               .replace("void main() {", "void main() {\n#ifdef terrainBlendFlag\nv_coverWeights = a_coverWeights;\n#endif\n");
     }
 

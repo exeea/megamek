@@ -201,18 +201,16 @@ class GpuHexSurfaceSmokeTest {
     }
 
     private static void render(GpuHexSurface carrier) {
-        ShaderProgram shader = new ShaderProgram("""
-              attribute vec3 a_position;
-              attribute vec2 a_texCoord0;
+        ShaderProgram shader = GpuGlsl.compile("hex carrier probe", """
+              in vec3 a_position;
+              in vec2 a_texCoord0;
               uniform mat4 u_projection;
-              varying vec2 v_owner;
+              out vec2 v_owner;
               void main() { v_owner = a_texCoord0; gl_Position = u_projection * vec4(a_position, 1.0); }
               """, """
-              #ifdef GL_ES
-              precision mediump float;
-              #endif
-              varying vec2 v_owner;
-              void main() { gl_FragColor = vec4(1.0, v_owner.x / 10.0, v_owner.y / 2.0, 1.0); }
+              layout(location = 0) out vec4 fragColor;
+              in vec2 v_owner;
+              void main() { fragColor = vec4(1.0, v_owner.x / 10.0, v_owner.y / 2.0, 1.0); }
               """);
         assertTrue(shader.isCompiled(), shader.getLog());
         GLProfiler profiler = new GLProfiler(Gdx.graphics);

@@ -61,9 +61,8 @@ class GpuSunGlareBenchmarkSmokeTest {
         StringBuilder images = new StringBuilder("Pixel errors against original glare, in 8-bit display levels\n");
         try {
             programs[3] = GpuAtmosphere.shader("atmosphere-composite.frag");
-            // libGDX keeps its prepended GLSL header in a program's source, and compile() prepends it again.
-            String vertex = withoutHeader(programs[3].getVertexShaderSource(), ShaderProgram.prependVertexCode);
-            String fragment = withoutHeader(programs[3].getFragmentShaderSource(), ShaderProgram.prependFragmentCode);
+            String vertex = programs[3].getVertexShaderSource();
+            String fragment = programs[3].getFragmentShaderSource();
             boolean vertexTextures = vertex.contains(VERTEX_VISIBILITY);
             timing.append("Vertex texture sampling: ").append(vertexTextures).append('\n');
             String original = Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/sun-glare-reference.glsl")
@@ -128,17 +127,7 @@ class GpuSunGlareBenchmarkSmokeTest {
     }
 
     private static ShaderProgram compile(String vertex, String fragment) {
-        var program = new ShaderProgram(vertex, fragment);
-        if (!program.isCompiled()) {
-            String log = program.getLog();
-            program.dispose();
-            throw new AssertionError(log);
-        }
-        return program;
-    }
-
-    private static String withoutHeader(String source, String header) {
-        return header != null && source.startsWith(header) ? source.substring(header.length()) : source;
+        return GpuGlsl.compile("sun glare comparison", vertex, fragment);
     }
 
     private static String replaceGlare(String fragment, String glare) {

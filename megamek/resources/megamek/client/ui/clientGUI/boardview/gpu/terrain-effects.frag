@@ -1,7 +1,6 @@
+#version 330 core
+layout(location = 0) out vec4 fragColor;
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
-#ifdef GL_ES
-precision highp float;
-#endif
 uniform sampler2D u_depth;
 uniform sampler2D u_noise;
 uniform mat4 u_inverseProjView;
@@ -12,16 +11,16 @@ uniform vec3 u_light;
 uniform vec3 u_sun;
 uniform vec2 u_heights; // Flame and smoke heights above the fuel, in world units.
 uniform float u_spread;
-varying vec4 v_origin;
-varying vec4 v_shape;
-varying float v_lod;
+in vec4 v_origin;
+in vec4 v_shape;
+in float v_lod;
 
 // Same periodic, two-channel 3D lookup used by board clouds: one filtered fetch per octave.
 float noise(vec3 p) {
     vec3 cell = floor(p), f = fract(p);
     f = f * f * (3.0 - 2.0 * f);
     vec2 uv = cell.xy + vec2(37.0, 17.0) * cell.z + f.xy;
-    vec2 pair = texture2D(u_noise, (uv + 0.5) / 256.0).rg;
+    vec2 pair = texture(u_noise, (uv + 0.5) / 256.0).rg;
     return mix(pair.x, pair.y, f.z);
 }
 
@@ -92,7 +91,7 @@ bool clipPlane(vec3 normal, float limit, vec3 origin, vec3 direction, inout vec2
 void main() {
     vec2 uv = gl_FragCoord.xy / u_size;
     vec4 nearPoint = u_inverseProjView * vec4(uv * 2.0 - 1.0, -1.0, 1.0);
-    vec4 endPoint = u_inverseProjView * vec4(uv * 2.0 - 1.0, texture2D(u_depth, uv).r * 2.0 - 1.0, 1.0);
+    vec4 endPoint = u_inverseProjView * vec4(uv * 2.0 - 1.0, texture(u_depth, uv).r * 2.0 - 1.0, 1.0);
     vec3 nearWorld = nearPoint.xyz / nearPoint.w;
     vec3 worldRay = endPoint.xyz / endPoint.w - nearWorld;
     float distance = length(worldRay);
@@ -145,5 +144,5 @@ void main() {
         radiance += transmission * absorption * source;
         transmission *= 1.0 - absorption;
     }
-    gl_FragColor = vec4(radiance, 1.0 - transmission);
+    fragColor = vec4(radiance, 1.0 - transmission);
 }

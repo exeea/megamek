@@ -60,7 +60,7 @@ float groundNoise(vec3 point) {
     vec3 cell = floor(point), f = fract(point);
     f = f * f * (3.0 - 2.0 * f);
     vec2 uv = cell.xy + vec2(37.0, 17.0) * cell.z + f.xy;
-    vec2 pair = texture2D(u_layerNoise, (uv + 0.5) / 256.0).rg;
+    vec2 pair = texture(u_layerNoise, (uv + 0.5) / 256.0).rg;
     return mix(pair.r, pair.g, f.z);
 }
 

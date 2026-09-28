@@ -61,7 +61,8 @@ final class GpuUnitShader extends DefaultShader {
      * ground's share also goes to v_groundBounce, so a cloud's shadow can dim it (GpuCloudShadow.fragment).
      */
     static String linearVertex(String source) {
-        source = replaceOnce(source, MAIN, lightModel() + "\nvarying vec3 v_groundBounce;\n" + MAIN, "vertex");
+        source = GpuGlsl.libGdx(source, true);
+        source = replaceOnce(source, MAIN, lightModel() + "\nout vec3 v_groundBounce;\n" + MAIN, "vertex");
         String ambient = "#endif // sphericalHarmonicsFlag";
         return replaceOnce(source, ambient, ambient + "\n#if defined(ambientFlag) && defined(normalFlag)\n"
               + "vec3 sunOnGround = vec3(0.0);\n#if numDirectionalLights > 0\n"
@@ -75,13 +76,14 @@ final class GpuUnitShader extends DefaultShader {
      * Emission stays display-encoded and is added after the encode, as authored; unlit draws are untouched.
      */
     static String linearFragment(String source) {
+        source = GpuGlsl.libGdx(source, false);
         source = replaceOnce(source, MAIN, lightModel() + "\n" + MAIN, "fragment");
         String lit = "#if (!defined(lightingFlag))";
         source = replaceOnce(source, lit, "#ifdef lightingFlag\nvec3 displayEmissive = emissive.rgb;\n"
               + "emissive.rgb = vec3(0.0);\ndiffuse.rgb = toLinear(diffuse.rgb);\n#endif\n" + lit, "fragment");
         String fog = "#endif // end fogFlag";
         return replaceOnce(source, fog, fog + "\n#ifdef lightingFlag\n"
-              + "gl_FragColor.rgb = toDisplay(gl_FragColor.rgb) + displayEmissive;\n#endif\n", "fragment");
+              + "fragColor.rgb = toDisplay(fragColor.rgb) + displayEmissive;\n#endif\n", "fragment");
     }
 
     private static String lightModel() {

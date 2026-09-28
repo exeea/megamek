@@ -212,7 +212,7 @@ class GpuTerrainScalingSmokeTest {
         String original = config.fragmentShader;
         config.fragmentShader = original.replaceFirst("void\\s+main\\s*\\(\\s*\\)\\s*\\{",
               "uniform float u_costProbe;\nvoid main() {\n"
-                    + "if (u_costProbe > .5) { gl_FragColor = vec4(.5, .5, .5, 1.0); return; }\n");
+                    + "if (u_costProbe > .5) { fragColor = vec4(.5, .5, .5, 1.0); return; }\n");
         assertTrue(!original.equals(config.fragmentShader), "The probe must wrap the sculpt fragment entry point");
     }
 

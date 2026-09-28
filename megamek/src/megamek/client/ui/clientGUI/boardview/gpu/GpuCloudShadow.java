@@ -45,7 +45,7 @@ final class GpuCloudShadow extends Attribute {
     }
 
     static String vertex(String source) {
-        source = insert(source, MAIN, "varying vec3 v_cloudPosition;\n" + MAIN);
+        source = insert(source, MAIN, "out vec3 v_cloudPosition;\n" + MAIN);
         String position = "gl_Position = u_projViewTrans * pos;";
         return insert(source, position, position + "\nv_cloudPosition = pos.xyz;\n");
     }
@@ -53,7 +53,7 @@ final class GpuCloudShadow extends Attribute {
     static String fragment(String source, boolean ground) {
         String declarations = GpuShaderSource.read("cloud-shadow.glsl");
         // The libGDX shaders also dim the sunlit ground's share of their ambient (GpuUnitShader.linearVertex).
-        source = insert(source, MAIN, declarations + "\n" + (ground ? "" : "varying vec3 v_groundBounce;\n") + MAIN);
+        source = insert(source, MAIN, declarations + "\n" + (ground ? "" : "in vec3 v_groundBounce;\n") + MAIN);
         if (ground) {
             return insert(source, "albedo *= ambient + direct;",
                   "#ifdef cloudShadowFlag\nfloat cloudLight = cloudTransmission(v_cloudPosition);\n"

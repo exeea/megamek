@@ -1,9 +1,8 @@
+#version 330 core
+layout(location = 0) out vec4 fragColor;
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
-#ifdef GL_ES
-precision mediump float;
-#endif
-varying vec2 v_uv;
-varying vec2 v_effect;
+in vec2 v_uv;
+in vec2 v_effect;
 uniform vec3 u_light;
 void main() {
     float radius = length(v_uv);
@@ -14,5 +13,5 @@ void main() {
     } else {
         alpha = 1.0 - smoothstep(0.25, 1.0, radius);
     }
-    gl_FragColor = vec4(vec3(0.65, 0.83, 0.9) * u_light, alpha * v_effect.y);
+    fragColor = vec4(vec3(0.65, 0.83, 0.9) * u_light, alpha * v_effect.y);
 }

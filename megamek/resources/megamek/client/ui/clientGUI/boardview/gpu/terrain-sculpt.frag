@@ -1,16 +1,15 @@
+#version 330 core
+layout(location = 0) out vec4 fragColor;
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Sculpted tops, cliffs and the rock kit. Geometry supplies the landforms; this shader layers each surface family's
 // four materials (ground, debris, wall, mantle), mapped in world space, and lights them with the board's one light
 // model (light-model.glsl, surface-lighting.glsl): linear albedo times linear light, encoded for display like every
 // other lit surface, so the atmosphere composite grades and tones the whole frame once.
-#ifdef GL_ES
-precision highp float;
-#endif
-varying vec2 v_diffuseUV;   // ground: rim / foot distance (drowned cliff: height above bed / foot distance);
+in vec2 v_diffuseUV;   // ground: rim / foot distance (drowned cliff: height above bed / foot distance);
                             // cliff: height above foot / depth below rim; rock: above root
                             // / below top. All in metres.
-varying vec3 v_normal;
-varying vec4 v_color;       // r: occlusion. g: game level (+64)/255, or for cliffs how much rock the face is (0
+in vec3 v_normal;
+in vec4 v_color;       // r: occlusion. g: game level (+64)/255, or for cliffs how much rock the face is (0
                             // bank, 1 cliff). b: kind (0 ground, .25 plant, .5 cliff, .75 tree pit, 1 rock). a: bed
                             // hardness (cliff), variation (rock, plant, a pit's earth below .5; its kerb is 1),
                             // nearest step height (.3 + .1 per level, dry ground), or below .25 on a water hex's banks
@@ -34,7 +33,7 @@ uniform vec3 u_wind;        // direction in xy, strength in z
 uniform float u_waterEffects;
 uniform float u_waterLine;  // world units the water surface lies below its hex's level
 #ifdef terrainBlendFlag
-varying vec3 v_coverWeights;
+in vec3 v_coverWeights;
 uniform vec3 u_coverFamilies;
 uniform vec3 u_coverResponses;
 uniform sampler2DArray u_terrainLayers; // interleaved colour/height and normal/AO, shared with ordinary materials
@@ -83,14 +82,14 @@ float farDetail;
 // A map on the ground plane at two repeats, mixed by a broad field, so no period shows. p is in metres with +V
 // pointing to world -Y, as the maps are authored. From afar it settles to the map's average (its last mip level).
 vec4 planar(sampler2D map, vec2 p, float tile, float mixer) {
-    vec4 near = mix(texture2D(map, p / tile), texture2D(map, TURN * p / (tile * 2.37) + .31), mixer);
-    return farDetail > 0.0 ? mix(near, texture2D(map, p / tile, 12.0), farDetail) : near;
+    vec4 near = mix(texture(map, p / tile), texture(map, TURN * p / (tile * 2.37) + .31), mixer);
+    return farDetail > 0.0 ? mix(near, texture(map, p / tile, 12.0), farDetail) : near;
 }
 
 // The matching tangent-space normal (x along +U, y along +V); the turned sample is turned back.
 vec4 planarNormal(sampler2D map, vec2 p, float tile, float mixer) {
-    vec4 near = texture2D(map, p / tile);
-    vec4 far = texture2D(map, TURN * p / (tile * 2.37) + .31);
+    vec4 near = texture(map, p / tile);
+    vec4 far = texture(map, TURN * p / (tile * 2.37) + .31);
     vec3 a = near.rgb * 2.0 - 1.0, b = far.rgb * 2.0 - 1.0;
     b.xy = b.xy * TURN;
     vec4 result = vec4(mix(a, b, mixer), mix(near.a, far.a, mixer));
@@ -105,7 +104,7 @@ vec3 upNormal(vec3 detail, vec3 face) {
 // A wall map's two vertical projections (U along the face, V down it), whiteout-blended with the face normal and
 // expressed in world space. side weights the projection onto the YZ plane.
 vec3 wallNormal(sampler2D map, vec2 uvx, vec2 uvy, vec3 face, float side) {
-    vec3 nx = texture2D(map, uvx).rgb * 2.0 - 1.0, ny = texture2D(map, uvy).rgb * 2.0 - 1.0;
+    vec3 nx = texture(map, uvx).rgb * 2.0 - 1.0, ny = texture(map, uvy).rgb * 2.0 - 1.0;
     vec3 wx = vec3(nx.z * face.x, nx.x * sign(face.x) + face.y, face.z - nx.y);
     vec3 wy = vec3(-ny.x * sign(face.y) + face.x, ny.z * face.y, face.z - ny.y);
     return normalize(mix(wy, wx, side));
@@ -116,7 +115,7 @@ vec4 wallSample(vec3 world, vec3 face, out vec2 uvx, out vec2 uvy, out float sid
     vec3 axes = pow(abs(face), vec3(4.0));
     uvx = vec2(world.y * sign(face.x), -world.z) / u_sculptTiles.z;
     uvy = vec2(-world.x * sign(face.y), -world.z) / u_sculptTiles.z + .37;
-    vec4 x = texture2D(u_wallColor, uvx), y = texture2D(u_wallColor, uvy);
+    vec4 x = texture(u_wallColor, uvx), y = texture(u_wallColor, uvy);
     side = clamp((axes.x / max(axes.x + axes.y, 1e-4) - .5) * 3.0 + (x.a - y.a) * 1.2 + .5, 0.0, 1.0);
     return mix(y, x, side);
 }
@@ -125,7 +124,7 @@ vec4 wallSample(vec3 world, vec3 face, out vec2 uvx, out vec2 uvy, out float sid
 // the wall maps where it is steep, so it never stretches down the slope. dx, dy are the side coordinates in metres.
 vec4 draped(sampler2D map, vec2 p, vec2 dx, vec2 dy, float side, float tile, float mixer, float lying) {
     if (lying >= 1.0) return planar(map, p, tile, mixer);
-    vec4 steep = mix(texture2D(map, dy / tile), texture2D(map, dx / tile), side);
+    vec4 steep = mix(texture(map, dy / tile), texture(map, dx / tile), side);
     if (lying <= 0.0) return steep;
     return mix(steep, planar(map, p, tile, mixer), lying);
 }
@@ -269,15 +268,15 @@ void main() {
         // (water-surface.frag), turned downwind and drifting like it.
         vec2 wind = length(u_wind.xy) > .01 ? normalize(u_wind.xy) : vec2(.8, .6);
         mat2 downwind = mat2(wind.x, -wind.y, wind.y, wind.x);
-        vec2 swell = (texture2D(u_waterDetail, downwind * v_cloudPosition.xy * u_rainScale * 1.65
+        vec2 swell = (texture(u_waterDetail, downwind * v_cloudPosition.xy * u_rainScale * 1.65
               + vec2(u_rainTime * .018, 0.0)).rg - .5) * downwind;
         float under = smoothstep(0.0, 1.0, depth * u_metre - u_waterLine) * min(depth, 2.0);
         p += vec2(swell.x, -swell.y) * (under * .3 * u_waterEffects * u_rainDetail);
     }
     // Smooth value fields from the shared 64-texel noise: broad has ~11 m cells, fine ~2.5 m, and region ~40 m.
-    float broad = texture2D(u_rainNoise, world.xy / 700.0).g * .6 + texture2D(u_rainNoise, world.xy / 430.0 + .19).b * .4;
-    float fine = texture2D(u_rainNoise, world.xy / 160.0 + .41).b;
-    float region = texture2D(u_rainNoise, world.xy / 2600.0 + .73).r;
+    float broad = texture(u_rainNoise, world.xy / 700.0).g * .6 + texture(u_rainNoise, world.xy / 430.0 + .19).b * .4;
+    float fine = texture(u_rainNoise, world.xy / 160.0 + .41).b;
+    float region = texture(u_rainNoise, world.xy / 2600.0 + .73).r;
     vec3 albedo = vec3(.52);
     vec3 normal = face;
     float cavity = 1.0;
@@ -345,7 +344,7 @@ void main() {
             albedo = groundTone(albedo, world, broad, fine, region, rim, foot);
         } else if (plant) {
             // Leafy mottling on each mass, browner and darker toward the root.
-            float leaf = texture2D(u_rainNoise, world.xy / 7.0 + world.z * .13).r;
+            float leaf = texture(u_rainNoise, world.xy / 7.0 + world.z * .13).r;
             albedo = plantColor(v_color.a) * mix(.78, 1.16, leaf) * mix(.7, 1.0, smoothstep(0.0, .5, v_diffuseUV.x));
         } else if (pit) {
             // A tree pit in the pavement: earth and bark mulch inside a kerb of paler, cleaner stone.
@@ -353,7 +352,7 @@ void main() {
                 albedo = planar(u_groundColor, p, u_sculptTiles.x, broad).rgb * 1.1;
             } else {
                 vec4 grit = planar(u_debrisColor, p, u_sculptTiles.y * .6, fine);
-                float mulch = texture2D(u_rainNoise, world.xy / 9.0 + v_color.a).r;
+                float mulch = texture(u_rainNoise, world.xy / 9.0 + v_color.a).r;
                 albedo = mix(vec3(.27, .19, .13), vec3(.42, .30, .19), mulch) * mix(.8, 1.2, grit.a);
                 if (u_normalMaps > .5) normal = upNormal(planarNormal(u_debrisNormal, p, u_sculptTiles.y * .6, fine).rgb, face);
             }
@@ -371,7 +370,7 @@ void main() {
             albedo = wall.rgb;
             if (u_normalMaps > .5) {
                 normal = wallNormal(u_wallNormal, uvx, uvy, face, side);
-                cavity = mix(texture2D(u_wallNormal, uvy).a, texture2D(u_wallNormal, uvx).a, side) * .5 + .5;
+                cavity = mix(texture(u_wallNormal, uvy).a, texture(u_wallNormal, uvx).a, side) * .5 + .5;
                 if (crown > 0.0) {
                     vec4 top = planarNormal(u_wallNormal, p, u_sculptTiles.z, fine);
                     normal = normalize(mix(normal, upNormal(top.rgb, face), crown));
@@ -388,7 +387,7 @@ void main() {
                 albedo = mix(albedo, albedo * vec3(1.08, 1.06, 1.03), cap * .6);
                 // Under a concrete slab the streaks run down from its underside.
                 float below = family(4.0) ? d - u_levelHeight / u_metre : d;
-                float streak = smoothstep(.55, .85, texture2D(u_rainNoise, vec2((world.x + world.y) / 7.0, world.z / 90.0)).r)
+                float streak = smoothstep(.55, .85, texture(u_rainNoise, vec2((world.x + world.y) / 7.0, world.z / 90.0)).r)
                       * (1.0 - smoothstep(2.0, 14.0, below)) * smoothstep(.5, 1.5, below);
                 if (family(2.0) || family(3.0) || family(4.0)) albedo = mix(albedo, albedo * vec3(.52, .45, .42), streak * .6);
 
@@ -427,12 +426,12 @@ void main() {
                         float shadeX, shadeY;
                         vec2 sx = slab(world.y * sign(face.x), world.z, h, d, 1.0, single, shadeX);
                         vec2 sy = slab(-world.x * sign(face.y), world.z, h, d, 0.0, single, shadeY);
-                        vec3 concrete = mix(texture2D(u_mantleColor, sy).rgb * shadeY,
-                              texture2D(u_mantleColor, sx).rgb * shadeX, along);
+                        vec3 concrete = mix(texture(u_mantleColor, sy).rgb * shadeY,
+                              texture(u_mantleColor, sx).rgb * shadeX, along);
                         albedo = mix(albedo, concrete, poured);
                         if (u_normalMaps > .5) {
                             normal = normalize(mix(normal, wallNormal(u_mantleNormal, sx, sy, face, along), poured));
-                            float pores = mix(texture2D(u_mantleNormal, sy).a, texture2D(u_mantleNormal, sx).a, along);
+                            float pores = mix(texture(u_mantleNormal, sy).a, texture(u_mantleNormal, sx).a, along);
                             cavity = mix(cavity, pores * .5 + .5, poured);
                         }
                     }
@@ -486,7 +485,7 @@ void main() {
                 albedo = mix(albedo, wall.rgb * bedTint(.5), rock);
                 if (u_normalMaps > .5) {
                     normal = normalize(mix(normal, wallNormal(u_wallNormal, uvx, uvy, face, side), rock));
-                    float relief = mix(texture2D(u_wallNormal, uvy).a, texture2D(u_wallNormal, uvx).a, side);
+                    float relief = mix(texture(u_wallNormal, uvy).a, texture(u_wallNormal, uvx).a, side);
                     cavity = mix(cavity, relief * .5 + .5, rock);
                 }
             }
@@ -576,7 +575,7 @@ void main() {
 #endif
     vec3 result = toDisplay(albedo);
     if (puddle > 0.0) result = rainReflection(result, normal, puddle);
-    gl_FragColor = vec4(result, 1.0);
+    fragColor = vec4(result, 1.0);
 }
 
 // Cast concrete comes in slabs. On walls of up to two levels they stand in courses one level tall with staggered
@@ -594,7 +593,7 @@ vec2 slab(float u, float z, float h, float d, float projection, bool single, out
     vec2 window = vec2(hash(id), hash(id + 17.3));
     // Each slab's own tone, grime settling toward its foot and run-off stains hanging from its top edge.
     shade = mix(.9, 1.07, hash(id + 5.1)) * mix(.84, 1.0, smoothstep(0.0, .3, up));
-    float runoff = smoothstep(.55, .85, texture2D(u_rainNoise, vec2(u / 3.1 + window.x * 7.0, z / 45.0)).r);
+    float runoff = smoothstep(.55, .85, texture(u_rainNoise, vec2(u / 3.1 + window.x * 7.0, z / 45.0)).r);
     shade *= 1.0 - .14 * runoff * smoothstep(.45, 1.0, up);
     float seam = joint(min(fract(along), 1.0 - fract(along)) * width, .03);
     if (!single) seam = max(seam, joint(min(up, 1.0 - up) * levelMetres, .03) * smoothstep(.1, .3, d) * smoothstep(.1, .3, h));

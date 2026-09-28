@@ -1,3 +1,5 @@
+#version 330 core
+layout(location = 0) out vec4 fragColor;
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // The ocean texture (GpuOcean): wave slopes along x and y in red and green; in blue, how tightly the choppy
 // horizontal displacement squeezes the surface at a crest; in alpha, foam where a crest folds over, which lingers and
@@ -26,5 +28,5 @@ void main() {
     float jacobian = (1.0 + xx) * (1.0 + yy) - xy * yx;
     float breaking = 1.0 - smoothstep(0.15, 0.7, jacobian);
     float foam = max(breaking, texelFetch(u_previous, texel, 0).a - u_fade);
-    gl_FragColor = vec4(here.xy, clamp(1.0 - jacobian, 0.0, 1.0), foam);
+    fragColor = vec4(here.xy, clamp(1.0 - jacobian, 0.0, 1.0), foam);
 }

@@ -1,26 +1,25 @@
+#version 330 core
+layout(location = 0) out vec4 fragColor;
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Trees: their models' own colours and detail maps, lit like the sculpted terrain they stand on (light-model.glsl,
 // surface-lighting.glsl): linear light, sky and ground bounce and soft shadows; the composite rolls off their
 // highlights. A canopy scatters light through its leaves, so the sun wraps around it instead of stopping at a hard
 // terminator.
-#ifdef GL_ES
-precision highp float;
-#endif
-varying vec3 v_normal;
+in vec3 v_normal;
 #ifdef colorFlag
-varying vec4 v_color;
+in vec4 v_color;
 #endif
 #ifdef diffuseTextureFlag
-varying vec2 v_diffuseUV;
+in vec2 v_diffuseUV;
 uniform sampler2D u_diffuseTexture;
 #endif
 #ifdef diffuseColorFlag
 uniform vec4 u_diffuseColor;
 #endif
 #ifdef blendedFlag
-varying float v_opacity;
+in float v_opacity;
 #ifdef alphaTestFlag
-varying float v_alphaTest;
+in float v_alphaTest;
 #endif
 #endif
 uniform float u_foliage; // the part: 0 solid (bark, cactus stems), 1 canopy (leaves, needles, fronds), 2 snow
@@ -30,7 +29,7 @@ void main() {
     vec3 face = normalize(v_normal);
     vec4 diffuse = vec4(1.0);
 #ifdef diffuseTextureFlag
-    diffuse = texture2D(u_diffuseTexture, v_diffuseUV);
+    diffuse = texture(u_diffuseTexture, v_diffuseUV);
 #endif
 #ifdef colorFlag
     diffuse *= v_color;
@@ -59,13 +58,13 @@ void main() {
     albedo *= ambient + direct;
     albedo += sheen;
 #endif
-    gl_FragColor.rgb = toDisplay(albedo);
+    fragColor.rgb = toDisplay(albedo);
 #ifdef blendedFlag
-    gl_FragColor.a = diffuse.a * v_opacity;
+    fragColor.a = diffuse.a * v_opacity;
 #ifdef alphaTestFlag
-    if (gl_FragColor.a <= v_alphaTest) discard;
+    if (fragColor.a <= v_alphaTest) discard;
 #endif
 #else
-    gl_FragColor.a = 1.0;
+    fragColor.a = 1.0;
 #endif
 }

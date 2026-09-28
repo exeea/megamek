@@ -1,7 +1,6 @@
+#version 330 core
+layout(location = 0) out vec4 fragColor;
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
-#ifdef GL_ES
-precision highp float;
-#endif
 uniform vec4 u_centerRadius;
 // Normalized attack age, fire amount, optical density and stable event/packet seed.
 uniform vec4 u_effect;
@@ -62,7 +61,7 @@ vec3 volumeVector(vec3 v) {
 
 void main() {
     vec2 uv = (gl_FragCoord.xy - u_viewport.xy) / u_viewport.zw;
-    float depth = texture2D(u_depth, uv).r;
+    float depth = texture(u_depth, uv).r;
     vec4 nearPoint = u_inverseProjView * vec4(uv * 2.0 - 1.0, -1.0, 1.0);
     vec4 surface = u_inverseProjView * vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
     vec3 nearWorld = nearPoint.xyz / nearPoint.w;
@@ -108,5 +107,5 @@ void main() {
         if (transmission < 0.02) break;
     }
     // Premultiplied output preserves both dark smoke absorption and emissive fire.
-    gl_FragColor = vec4(radiance, 1.0 - transmission);
+    fragColor = vec4(radiance, 1.0 - transmission);
 }

@@ -1,12 +1,11 @@
+#version 330 core
+layout(location = 0) out vec4 fragColor;
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Ground only. DefaultShader owns the uniforms, material binding and directional shadow map.
-#ifdef GL_ES
-precision mediump float;
-#endif
 
-varying vec2 v_diffuseUV;
-varying vec3 v_normal;
-varying vec4 v_color;
+in vec2 v_diffuseUV;
+in vec3 v_normal;
+in vec4 v_color;
 uniform sampler2D u_diffuseTexture;
 #ifdef normalTextureFlag
 uniform sampler2D u_normalTexture;
@@ -16,7 +15,7 @@ uniform float u_groundResponse;
 #ifdef roadMaskFlag
 uniform sampler2D u_roadMask;
 uniform vec4 u_roadMaskRegion;
-varying vec2 v_roadMaskUV;
+in vec2 v_roadMaskUV;
 #endif
 #ifdef bridgeDeckFlag
 uniform float u_worldMetre;
@@ -32,7 +31,7 @@ void main() {
 #ifdef roadMaskFlag
     vec2 maskUV = v_roadMaskUV;
     if (any(lessThan(maskUV, vec2(0.0))) || any(greaterThan(maskUV, vec2(1.0)))) { discard; }
-    roadColor = texture2D(u_roadMask, u_roadMaskRegion.xy + maskUV * u_roadMaskRegion.zw);
+    roadColor = texture(u_roadMask, u_roadMaskRegion.xy + maskUV * u_roadMaskRegion.zw);
     if (roadColor.a < .002) { discard; }
 #endif
     vec2 uv = v_diffuseUV;
@@ -44,16 +43,16 @@ void main() {
 #ifdef roadMapsFlag
     if (u_roadTransition > .5 || u_roadTransition < -1.5) { tint = vec3(1.0); }
 #endif
-    vec3 albedo = texture2D(u_diffuseTexture, uv).rgb * tint;
+    vec3 albedo = texture(u_diffuseTexture, uv).rgb * tint;
     vec3 normal = normalize(v_normal);
 #ifdef roadMapsFlag
-    vec4 properties = texture2D(u_roadSurface, uv);
+    vec4 properties = texture(u_roadSurface, uv);
     float roadCoverage = 1.0;
     // Reuse the shared, stable noise field. These masks describe use and loose material, not road width.
     float wearPatches = 0.0, loosePatches = 0.0, compaction = 0.0;
     if (abs(u_roadTransition) > .5) {
-        wearPatches = texture2D(u_rainNoise, uv / 18.0).g;
-        loosePatches = texture2D(u_rainNoise, uv / 5.0 + .37).b;
+        wearPatches = texture(u_rainNoise, uv / 18.0).g;
+        loosePatches = texture(u_rainNoise, uv / 5.0 + .37).b;
         albedo *= mix(.95, 1.05, wearPatches);
         if (u_roadTransition < -1.5) {
             vec2 heading = normalize((roadColor.rg * 255.0 - 128.0) / 127.0);
@@ -61,9 +60,9 @@ void main() {
                   * vec2(1.0 / 36.0, 1.0 / 3.0);
             // Averaging both directions gives neighbouring hexes identical wear even when their paths run
             // opposite ways. The pair's geometry fixes axle spacing; this only varies compaction within it.
-            loosePatches = .5 * (texture2D(u_rainNoise, scuff).b + texture2D(u_rainNoise, -scuff).b);
+            loosePatches = .5 * (texture(u_rainNoise, scuff).b + texture(u_rainNoise, -scuff).b);
             vec2 broken = scuff * vec2(3.5, 2.2);
-            float clods = .5 * (texture2D(u_rainNoise, broken).g + texture2D(u_rainNoise, -broken).g);
+            float clods = .5 * (texture(u_rainNoise, broken).g + texture(u_rainNoise, -broken).g);
             compaction = smoothstep(.28, .68, loosePatches) * smoothstep(.18, .6, wearPatches);
             // Repeated vehicle passes leave intermittent compaction, sometimes dusty, sometimes darker.
             // Broad feathered swaths replace the old continuously dark, narrow 'rails'.
@@ -77,7 +76,7 @@ void main() {
         float across = abs((roadColor.g - .5) * 2.0 * u_roadProfile.x);
         float rut = 1.0 - smoothstep(u_roadProfile.z * .5, u_roadProfile.z, abs(across - u_roadProfile.y));
         float grain = properties.r;
-        float broad = texture2D(u_roadSurface, uv * .21).r;
+        float broad = texture(u_roadSurface, uv * .21).r;
         // A full-width construction edge, chipped only at a small scale.
         float seam = along + (broad - .5) * .8 + (grain - .5) * .6;
         float body = smoothstep(-.7, .5, seam);
@@ -100,7 +99,7 @@ void main() {
     // The map's neutral texel is exactly (128,128,255), so paved surfaces retain their face normal.
 #ifdef normalTextureFlag
     if (u_normalMaps > 0.5) {
-        vec3 detail = (texture2D(u_normalTexture, uv).rgb * 255.0 - 128.0) / 127.0;
+        vec3 detail = (texture(u_normalTexture, uv).rgb * 255.0 - 128.0) / 127.0;
 #ifdef roadMapsFlag
         if (u_roadTransition < -1.5) { detail.xy *= mix(1.2, .35, compaction); }
 #endif
@@ -114,8 +113,8 @@ void main() {
     albedo *= 1.0 - wet * mix(0.175, 0.10, response); // This is the darkening of the terrain (the mix(min, max, ...))
 #ifdef roadSoilFlag
     // Compact soil holds patchy mud and shallow water; the basins stay put as rainfall changes.
-    float soilBasins = texture2D(u_rainNoise, uv / 22.0).r * .7
-          + texture2D(u_rainNoise, uv / 7.0 + .37).g * .3;
+    float soilBasins = texture(u_rainNoise, uv / 22.0).r * .7
+          + texture(u_rainNoise, uv / 7.0 + .37).g * .3;
     float mud = wet * smoothstep(.24, .68, soilBasins);
     albedo *= 1.0 - .30 * mud;
     properties.g = mix(properties.g, .55, mud);
@@ -159,7 +158,7 @@ void main() {
 #ifdef roadMapsFlag
     float grain = properties.r;
 #else
-    float grain = texture2D(u_diffuseTexture, uv * 2.3).r;
+    float grain = texture(u_diffuseTexture, uv * 2.3).r;
 #endif
     float alpha = clamp(roadColor.a + (grain - .5) * min(roadColor.a, 1.0 - roadColor.a) * .7, 0.0, 1.0);
 #ifdef roadMapsFlag
@@ -168,15 +167,15 @@ void main() {
     } else if (abs(u_roadTransition) > .5) {
         // The wide loose margin has no opaque shoulder underneath it. Clumps give way to isolated grains
         // and exposed ground; the compacted core remains continuous and at the authored road width.
-        float clumps = texture2D(u_rainNoise, uv / 32.0 + .19).r;
+        float clumps = texture(u_rainNoise, uv / 32.0 + .19).r;
         float threshold = .05 + .8 * clumps + .12 * loosePatches;
         float broken = smoothstep(threshold - .12, threshold + .12, roadColor.a + (grain - .5) * .32);
         alpha = mix(roadColor.a, broken, 4.0 * roadColor.a * (1.0 - roadColor.a));
         alpha *= roadCoverage;
     }
 #endif
-    gl_FragColor = vec4(albedo, alpha);
+    fragColor = vec4(albedo, alpha);
 #else
-    gl_FragColor = vec4(albedo, 1.0);
+    fragColor = vec4(albedo, 1.0);
 #endif
 }

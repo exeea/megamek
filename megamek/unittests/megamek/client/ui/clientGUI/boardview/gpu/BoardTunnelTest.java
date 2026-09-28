@@ -10,10 +10,31 @@ import java.util.List;
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardTunnelTest {
+    @Test
+    void minesBouldersLeaveBothTunnelMouthsAndTheirApproachesClear() throws Exception {
+        var scene = GpuRoadSourceTest.minesScene();
+        var tunnels = scene.tiles().stream().flatMap(t -> BoardTunnel.entrances(scene, t).stream()).toList();
+        assertEquals(2, tunnels.size());
+        int retained = 0;
+        for (var tunnel : tunnels) {
+            for (var tile : scene.tiles()) {
+                if (tile.coords().distance(tunnel.road()) > 1) { continue; }
+                for (var face : new BoardSurface(scene, tile).groundFaces()) {
+                    if (face.finish() != BoardSurface.Finish.OUTCROP) { continue; }
+                    var center = new Vector3(face.a()).add(face.b()).add(face.c()).scl(1f / 3);
+                    assertFalse(tunnel.obstructs(center, 0, 0), "Decorative rock blocks the portal at " + tunnel.road());
+                    retained++;
+                }
+            }
+        }
+        assertTrue(retained > 0, "The surrounding cliff formations remain");
+    }
+
     @ParameterizedTest
     @ValueSource(ints = { 0, 1, 2, 3, 4, 5 })
     void tallRoadEndsHaveAnOpenArchAndRetainTheSurroundingCliff(int direction) {

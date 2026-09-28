@@ -16,7 +16,6 @@ import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
-import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
@@ -98,7 +97,7 @@ class GpuMarshSlopeSmokeTest {
     /** Sample the real GLSL mask, independently of lighting and vegetation hiding the bank. */
     private static void coverageChecks() {
         String code = Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-biome-mask.glsl").readString();
-        var shader = new ShaderProgram("""
+        var shader = GpuGlsl.compile("marsh coverage probe", """
               in vec3 a_position;
               out vec3 world;
               void main() {
@@ -106,11 +105,11 @@ class GpuMarshSlopeSmokeTest {
                   gl_Position = vec4((float(gl_VertexID) + .5) / 32.0 * 2.0 - 1.0, 0.0, 0.0, 1.0);
                   gl_PointSize = 1.0;
               }
-              """, "uniform float u_levelHeight, u_metre;\nin vec3 world;\n" + code + """
+              """, "layout(location = 0) out vec4 fragColor;\nuniform float u_levelHeight, u_metre;\nin vec3 world;\n" + code + """
               void main() {
                   vec4 cover, fringe;
                   biomeCoverage(world, 14.0, cover, fringe);
-                  gl_FragColor = vec4(cover.y, fringe.y, 0.0, 1.0);
+                  fragColor = vec4(cover.y, fringe.y, 0.0, 1.0);
               }
               """);
         var mesh = new Mesh(true, 32, 0, VertexAttribute.Position());

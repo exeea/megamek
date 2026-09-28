@@ -201,9 +201,8 @@ final class GpuGroundCover implements Disposable {
         String meadow = "uniform sampler2D u_rainNoise;\n"
               + GpuShaderSource.read("terrain-meadow.glsl");
         String wind = GpuShaderSource.read("terrain-vegetation-wind.glsl");
-        String blade = GpuShaderSource.read("terrain-grass.glsl")
-              .replace("@START_PIXELS@", Float.toString(START_PIXELS)).replace("@FULL_PIXELS@", Float.toString(FULL_PIXELS))
-              .replace("@ROOTS_PER_HEX@", Float.toString(ROOTS_PER_HEX));
+        String blade = "#define GRASS_START_PIXELS " + START_PIXELS + "\n#define GRASS_FULL_PIXELS " + FULL_PIXELS
+              + "\n#define GRASS_ROOTS_PER_HEX " + ROOTS_PER_HEX + "\n" + GpuShaderSource.read("terrain-grass.glsl");
         return source.replace("void main() {", wind + meadow + blade + "\nvoid main() {\nvec3 coverPosition, coverNormal; vec4 coverColor;\n"
                     + "grassBlade(a_position, coverPosition, coverNormal, coverColor);\n")
               .replace("vec4 pos = u_worldTrans * vec4(a_position, 1.0);", "vec4 pos = vec4(coverPosition, 1.0);")

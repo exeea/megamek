@@ -1,15 +1,14 @@
+#version 330 core
+layout(location = 0) out vec4 fragColor;
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
-#ifdef GL_ES
-precision mediump float;
-#endif
-varying vec3 v_normal;
-varying vec4 v_color;
-varying vec2 v_coverData;
-varying vec2 v_coverRoot;
+in vec3 v_normal;
+in vec4 v_color;
+in vec2 v_coverData;
+in vec2 v_coverRoot;
 #ifdef biomeVegetationFlag
-varying vec2 v_coverFade;
+in vec2 v_coverFade;
 #ifdef diffuseTextureFlag
-varying vec2 v_diffuseUV;
+in vec2 v_diffuseUV;
 uniform sampler2D u_diffuseTexture;
 #endif
 #endif
@@ -17,7 +16,7 @@ uniform sampler2D u_diffuseTexture;
 void main() {
 #if defined(biomeVegetationFlag) && defined(diffuseTextureFlag)
     // Sample before any coverage discard: neighbouring fragments must agree on derivatives during an LOD fade.
-    vec4 plant = texture2D(u_diffuseTexture, v_diffuseUV);
+    vec4 plant = texture(u_diffuseTexture, v_diffuseUV);
 #endif
 #ifdef biomeVegetationFlag
     // Complementary coverage keeps overlapping LODs opaque without doubling leaves or changing depth ownership.
@@ -43,5 +42,5 @@ void main() {
     albedo *= ambient + direct;
     albedo = toDisplay(albedo);
 #endif
-    gl_FragColor = vec4(albedo * terrainGrid(v_coverRoot * .2), 1.0);
+    fragColor = vec4(albedo * terrainGrid(v_coverRoot * .2), 1.0);
 }

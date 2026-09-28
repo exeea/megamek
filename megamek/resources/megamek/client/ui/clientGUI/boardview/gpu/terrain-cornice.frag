@@ -1,14 +1,13 @@
+#version 330 core
+layout(location = 0) out vec4 fragColor;
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Skirt strips only. Their art is a mask tinted by the top layer they hang from, or its own authored color.
 // V stays inside the strip (see GpuAssets.cornice), so a mask's opposite edges are never blended together.
 // DefaultShader owns the uniforms, material binding and directional shadow map.
-#ifdef GL_ES
-precision mediump float;
-#endif
 
-varying vec2 v_diffuseUV;
-varying vec3 v_normal;
-varying vec4 v_color;
+in vec2 v_diffuseUV;
+in vec3 v_normal;
+in vec4 v_color;
 uniform sampler2D u_diffuseTexture;
 uniform float u_groundResponse;
 // Zero draws a mask tinted by the tile beneath it; one draws the art's own color, taken as it is.
@@ -19,7 +18,7 @@ const float RUNOFF_SPEED = 1.2;
 const float RUNOFF_DARKENING = 0.22;
 
 void main() {
-    vec4 art = texture2D(u_diffuseTexture, v_diffuseUV);
+    vec4 art = texture(u_diffuseTexture, v_diffuseUV);
     if (art.a < .02) discard;
     // Alpha is the strip's shape, including the fade at its lower end. On a mask, gray is lightness about mid
     // gray, so the tint arrives unchanged at 128, darkens into the shadowed rows and lightens on the lit ones;
@@ -37,8 +36,8 @@ void main() {
         // Rain drains down the wall as rivulets. The strip's own UV keeps them vertical whichever way the
         // edge faces, and the clock is the one the ground's ripples already use.
         vec2 flow = vec2(v_diffuseUV.x * RUNOFF_COLUMNS, v_diffuseUV.y - u_rainTime * RUNOFF_SPEED);
-        float broad = texture2D(u_rainNoise, flow).r;
-        float fine = texture2D(u_rainNoise, flow * vec2(2.1, 3.3) + 0.37).r;
+        float broad = texture(u_rainNoise, flow).r;
+        float fine = texture(u_rainNoise, flow * vec2(2.1, 3.3) + 0.37).r;
         runOff = smoothstep(0.52, 0.86, broad * 0.62 + fine * 0.38) * wet * u_rainDetail;
     }
     albedo *= 1.0 - wet * mix(0.175, 0.10, response) - runOff * RUNOFF_DARKENING;
@@ -53,5 +52,5 @@ void main() {
     albedo += sheen;
     albedo = toDisplay(albedo) * art.a;
 #endif
-    gl_FragColor = vec4(albedo * v_color.a, alpha);
+    fragColor = vec4(albedo * v_color.a, alpha);
 }

@@ -1,6 +1,7 @@
+#version 330 core
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
-attribute vec3 a_position;
-attribute vec2 a_texCoord0;
+in vec3 a_position;
+in vec2 a_texCoord0;
 uniform mat4 u_projView;
 uniform vec3 u_origin;
 uniform vec3 u_extent;
@@ -10,9 +11,9 @@ uniform vec2 u_wind;
 uniform float u_clock;
 uniform float u_level;
 uniform float u_kind;
-varying vec2 v_uv;
-varying float v_kind;
-varying float v_fade;
+out vec2 v_uv;
+out float v_kind;
+out float v_fade;
 
 void main() {
     bool rain = u_kind < 0.5;

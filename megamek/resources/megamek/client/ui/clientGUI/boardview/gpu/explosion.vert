@@ -1,5 +1,6 @@
+#version 330 core
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
-attribute vec3 a_position;
+in vec3 a_position;
 uniform mat4 u_projView;
 uniform vec4 u_centerRadius;
 uniform vec3 u_wind;

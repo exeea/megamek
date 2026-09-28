@@ -50,7 +50,7 @@ final class GpuUnitVisibility implements Disposable {
             protected Shader createShader(Renderable renderable) {
                 return new DepthShader(renderable, this.config, GpuGlsl.compile("GPU unit outline",
                       DepthShader.createPrefix(renderable, this.config),
-                      DepthShader.getDefaultVertexShader(), this.config.fragmentShader)) {
+                      GpuGlsl.libGdx(DepthShader.getDefaultVertexShader(), true), this.config.fragmentShader)) {
                     private final int outlineColor = register("u_outlineColor");
 
                     @Override

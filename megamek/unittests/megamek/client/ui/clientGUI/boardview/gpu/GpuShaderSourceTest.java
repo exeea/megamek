@@ -29,9 +29,11 @@ class GpuShaderSourceTest {
           "namespace", "using", "sampler3DRect");
     private static final Pattern COMMENT = Pattern.compile("//[^\\n]*|/\\*.*?\\*/", Pattern.DOTALL);
     private static final Pattern IDENTIFIER = Pattern.compile("\\b[A-Za-z_][A-Za-z0-9_]*\\b");
+    private static final Set<String> LEGACY = Set.of("attribute", "varying", "texture2D", "texture2DLod",
+          "textureCube", "gl_FragColor", "gl_FragData");
 
     @Test
-    void shadersAvoidKeywordsReservedForFutureUse() throws Exception {
+    void shadersUseCoreSyntaxWithoutLegacyAliasesOrReservedIdentifiers() throws Exception {
         Path folder = Path.of(GpuShaderSourceTest.class
               .getResource("/megamek/client/ui/clientGUI/boardview/gpu/terrain-sculpt.frag").toURI()).getParent();
         List<String> found = new ArrayList<>();
@@ -39,12 +41,19 @@ class GpuShaderSourceTest {
         try (var files = Files.list(folder)) {
             for (Path file : files.filter(f -> f.getFileName().toString().matches(".*\\.(frag|vert|glsl|comp|tesc|tese)")).toList()) {
                 shaders++;
-                String[] lines = COMMENT.matcher(Files.readString(file))
-                      .replaceAll(match -> match.group().replaceAll("[^\\n]", " ")).split("\n", -1);
+                String source = COMMENT.matcher(Files.readString(file))
+                      .replaceAll(match -> match.group().replaceAll("[^\\n]", " "));
+                if (source.contains("void main(")) {
+                    assertTrue(source.startsWith("#version 330 core"), "Standalone stage version: " + file);
+                    if (file.toString().endsWith(".frag")) {
+                        assertTrue(source.contains("layout(location = 0) out vec4 fragColor;"), "Explicit output: " + file);
+                    }
+                }
+                String[] lines = source.split("\n", -1);
                 for (int line = 0; line < lines.length; line++) {
                     Matcher word = IDENTIFIER.matcher(lines[line]);
                     while (word.find()) {
-                        if (RESERVED.contains(word.group())) {
+                        if (RESERVED.contains(word.group()) || LEGACY.contains(word.group())) {
                             found.add(file.getFileName() + ":" + (line + 1) + " '" + word.group() + "'");
                         }
                     }
@@ -52,6 +61,6 @@ class GpuShaderSourceTest {
             }
         }
         assertTrue(shaders > 10, "The shader resources were found: " + folder);
-        assertTrue(found.isEmpty(), "GLSL reserved words used in shader code: " + found);
+        assertTrue(found.isEmpty(), "Reserved or legacy GLSL identifiers in shader code: " + found);
     }
 }

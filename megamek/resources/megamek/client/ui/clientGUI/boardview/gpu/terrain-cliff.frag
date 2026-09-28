@@ -1,11 +1,10 @@
+#version 330 core
+layout(location = 0) out vec4 fragColor;
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Macro relief is real geometry. Two aligned material samples supply grain without per-pixel ray marching.
-#ifdef GL_ES
-precision highp float;
-#endif
-varying vec2 v_diffuseUV;
-varying vec3 v_normal;
-varying vec4 v_color;
+in vec2 v_diffuseUV;
+in vec3 v_normal;
+in vec4 v_color;
 uniform sampler2D u_diffuseTexture;
 uniform sampler2D u_normalTexture;
 uniform sampler2D u_cliffSurface;
@@ -22,7 +21,7 @@ vec2 materialOffset(float seed) {
     return fract(sin(vec2(seed * 127.1 + 23.4, seed * 269.5 + 71.3)) * 43758.5453) * 7.0;
 }
 vec4 cliffSample(sampler2D map) {
-    return mix(texture2D(map, materialA, materialBias), texture2D(map, materialB, materialBias), materialBlend);
+    return mix(texture(map, materialA, materialBias), texture(map, materialB, materialBias), materialBlend);
 }
 
 // The material's luminance retains its grain. Broad, saturated palettes read at strategy-camera distance.
@@ -83,7 +82,7 @@ void main() {
         materialBlend = abs(face.y) / max(abs(face.x) + abs(face.y), .001);
         footprint = max(length(dFdx(p)), length(dFdy(p)));
     } else {
-        float cell = texture2D(u_rainNoise, v_diffuseUV * .115).g * 8.0;
+        float cell = texture(u_rainNoise, v_diffuseUV * .115).g * 8.0;
         float index = floor(cell);
         vec2 warp = vec2(sin(world.y * .37 + world.x * .19), cos(world.x * .27 - world.y * .23)) * .11;
         materialA = v_diffuseUV + warp + materialOffset(index);
@@ -99,8 +98,8 @@ void main() {
     vec3 normal = face;
     if (u_normalMaps > .5 && !outcrop) {
         if (wall || steep) {
-            vec3 xMap = (texture2D(u_normalTexture, materialA).rgb * 255.0 - 128.0) / 127.0;
-            vec3 yMap = (texture2D(u_normalTexture, materialB).rgb * 255.0 - 128.0) / 127.0;
+            vec3 xMap = (texture(u_normalTexture, materialA).rgb * 255.0 - 128.0) / 127.0;
+            vec3 yMap = (texture(u_normalTexture, materialB).rgb * 255.0 - 128.0) / 127.0;
             vec3 perturb = mix(vec3(0.0, xMap.x, -xMap.y), vec3(yMap.x, 0.0, -yMap.y), materialBlend);
             perturb -= face * dot(face, perturb);
             normal = normalize(face + perturb * 1.4 * detail);
@@ -179,5 +178,5 @@ void main() {
     albedo = toDisplay(albedo);
     if (puddle > 0.0) albedo = rainReflection(albedo, normal, puddle);
 #endif
-    gl_FragColor = vec4(albedo, 1.0);
+    fragColor = vec4(albedo, 1.0);
 }

@@ -1,9 +1,9 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 float sunDepth(vec2 uv) {
     #ifdef VERTEX_SUN_VISIBILITY
-        return texture2DLod(u_depth, uv, 0.0).r;
+        return textureLod(u_depth, uv, 0.0).r;
     #else
-        return texture2D(u_depth, uv).r;
+        return texture(u_depth, uv).r;
     #endif
 }
 

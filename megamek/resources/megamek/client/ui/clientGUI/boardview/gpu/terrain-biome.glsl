@@ -128,7 +128,7 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
         vec2 wind = length(u_wind.xy) > .01 ? normalize(u_wind.xy) : vec2(.8, .6);
         vec2 drift = wind * u_rainTime * .015;
         float windStrength = u_wind.z * mix(3.0, 1.0, bare);
-        vec2 ripple = (texture2D(u_waterDetail, world.xy * .20 - drift).rg - .5) * (.025 + windStrength * .07)
+        vec2 ripple = (texture(u_waterDetail, world.xy * .20 - drift).rg - .5) * (.025 + windStrength * .07)
               + wind * sin(dot(world.xy, wind) * 5.0 - u_rainTime * 1.6) * windStrength * .018
               + rainRipples(world.xy * .03) * .035;
         ripple *= 1.0 - smoothstep(.15, .55, pixelMetres);

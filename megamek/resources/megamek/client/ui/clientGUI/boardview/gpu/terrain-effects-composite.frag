@@ -1,7 +1,6 @@
+#version 330 core
+layout(location = 0) out vec4 fragColor;
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
-#ifdef GL_ES
-precision highp float;
-#endif
 uniform sampler2D u_depth;
 uniform sampler2D u_effect;
 uniform vec2 u_size;
@@ -9,7 +8,7 @@ uniform vec4 u_viewport;
 uniform mat4 u_inverseProjView;
 
 vec3 position(vec2 uv) {
-    vec4 p = u_inverseProjView * vec4(uv * 2.0 - 1.0, texture2D(u_depth, uv).r * 2.0 - 1.0, 1.0);
+    vec4 p = u_inverseProjView * vec4(uv * 2.0 - 1.0, texture(u_depth, uv).r * 2.0 - 1.0, 1.0);
     return p.xyz / p.w;
 }
 
@@ -30,9 +29,9 @@ void main() {
             // Compare to the local opaque plane, preserving sloping ground without leaking over unit silhouettes.
             float separation = abs(dot(position(sampleUv) - surface, normal));
             float weight = blend.x * blend.y * exp(-separation / tolerance);
-            result += texture2D(u_effect, sampleUv) * weight;
+            result += texture(u_effect, sampleUv) * weight;
             total += weight;
         }
     }
-    gl_FragColor = total > 0.0001 ? result / total : vec4(0.0);
+    fragColor = total > 0.0001 ? result / total : vec4(0.0);
 }

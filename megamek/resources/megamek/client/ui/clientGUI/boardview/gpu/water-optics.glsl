@@ -44,8 +44,8 @@ vec3 waterTransmission(float palette, float levels) { return waterTransmission(w
 // Two drifting copies of one network; their minimum is a sharp web of focused light that keeps re-forming.
 float waterCaustics(vec2 position) {
     vec2 drift = vec2(0.021, 0.013) * u_rainTime;
-    float first = texture2D(u_waterDetail, position * 1.35 + drift).a;
-    float second = texture2D(u_waterDetail, position * 1.1 - drift.yx * 1.3 + 0.41).a;
+    float first = texture(u_waterDetail, position * 1.35 + drift).a;
+    float second = texture(u_waterDetail, position * 1.1 - drift.yx * 1.3 + 0.41).a;
     return min(first, second);
 }
 

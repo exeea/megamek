@@ -838,11 +838,12 @@ class GpuAtmosphereSmokeTest {
     private void checkScatteringPhase() {
         String root = "megamek/client/ui/clientGUI/boardview/gpu/";
         String phase = Gdx.files.classpath(root + "scattering-phase.glsl").readString("UTF-8");
-        ShaderProgram shader = new ShaderProgram(Gdx.files.classpath(root + "atmosphere.vert").readString("UTF-8"),
-              "varying vec2 v_uv;\n" + phase + "\nvoid main() {\n"
+        ShaderProgram shader = GpuGlsl.compile("scattering phase probe",
+              Gdx.files.classpath(root + "atmosphere.vert").readString("UTF-8"),
+              "in vec2 v_uv;\nlayout(location = 0) out vec4 fragColor;\n" + phase + "\nvoid main() {\n"
                     + "float cosine = v_uv.x * 2.0 - 1.0;\n"
                     + "float forward = scatteringPhase(cosine, 0.5);\n"
-                    + "gl_FragColor = vec4(forward / (1.0 + forward), scatteringPhase(cosine, 0.0) * 0.5, 0.0, 1.0);\n}");
+                    + "fragColor = vec4(forward / (1.0 + forward), scatteringPhase(cosine, 0.0) * 0.5, 0.0, 1.0);\n}");
         assertTrue(shader.isCompiled(), shader.getLog());
         var quad = GpuAtmosphere.screenQuad();
         var buffer = GpuAtmosphere.buffer(32, 1, false);

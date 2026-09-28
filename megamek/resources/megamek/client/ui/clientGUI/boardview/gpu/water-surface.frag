@@ -1,15 +1,14 @@
+#version 330 core
+layout(location = 0) out vec4 fragColor;
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Water surfaces, falls and spray. Output is premultiplied: the surface adds reflected and scattered light and
 // removes only what its column absorbs from whatever lies behind it, whose hue the bed shader already shifted.
 // One field sample supplies bank distance, depth and current, so every input is continuous across hexes; the wind
 // waves come from the ocean simulation (GpuOcean), the fine ripples and foam grain from the shared detail map.
-#ifdef GL_ES
-precision highp float;
-#endif
-varying vec2 v_diffuseUV;
-varying vec3 v_normal;
-varying vec4 v_color;
-varying float v_opacity;
+in vec2 v_diffuseUV;
+in vec3 v_normal;
+in vec4 v_color;
+in float v_opacity;
 uniform sampler2D u_diffuseTexture;
 #ifdef diffuseColorFlag
 uniform vec4 u_diffuseColor;
@@ -103,8 +102,8 @@ void main() {
         float age = v_color.r;
         float mist = step(0.75, v_color.a), droplet = step(0.25, v_color.a) - mist;
         vec2 corner = v_diffuseUV * 2.0 - 1.0;
-        float ragged = texture2D(u_waterDetail, v_diffuseUV * mix(0.45, 0.3, mist) + v_color.g * 7.31 + age * 0.15).b;
-        float grain = texture2D(u_waterDetail, v_diffuseUV * 1.3 + v_color.g * 3.7 - age * 0.3).b;
+        float ragged = texture(u_waterDetail, v_diffuseUV * mix(0.45, 0.3, mist) + v_color.g * 7.31 + age * 0.15).b;
+        float grain = texture(u_waterDetail, v_diffuseUV * 1.3 + v_color.g * 3.7 - age * 0.3).b;
         // Puffs and mist are ragged and soft; a droplet is a small, crisp streak along its flight.
         float soft = 1.0 - smoothstep(mix(0.15, 0.0, mist), 1.0, length(corner) + (ragged - 0.5) * 0.9);
         float bead = (1.0 - smoothstep(0.1, 1.0, length(corner))) * (0.45 + 0.55 * smoothstep(-1.0, 0.6, corner.y));
@@ -135,7 +134,7 @@ void main() {
         // ripples, foam and agitation at the same place, so the two join without a seam; only its curving lip then
         // turns into falling water.
         vec3 surfaceNormal = normalize(v_normal);
-        vec4 field = texture2D(u_waterField, v_cloudPosition.xy * u_waterFieldMap.xy + u_waterFieldMap.zw);
+        vec4 field = texture(u_waterField, v_cloudPosition.xy * u_waterFieldMap.xy + u_waterFieldMap.zw);
         float shore = (field.r * 2.0 - 1.0) * SHORE_RANGE;
         float depth = field.g * WATER_DEPTH_RANGE;
         float wetShore = falling ? 0.0 : clamp(dot(habitat.yzw, vec3(3.0)), 0.0, 1.0)
@@ -146,9 +145,9 @@ void main() {
         vec2 wind = length(u_wind.xy) > 0.01 ? normalize(u_wind.xy) : vec2(0.8, 0.6);
         // Broad noise, slow enough never to shear an advected pattern: G staggers the flow's restarts, B gathers
         // rapids foam into clusters a hex or two across, R varies the deep water's tone and the surf along a bank.
-        vec4 broad = texture2D(u_rainNoise, position * 0.008 + 0.29);
+        vec4 broad = texture(u_rainNoise, position * 0.008 + 0.29);
         // Gusts roll downwind in patches, so the wind never roughens a lake evenly.
-        float gust = texture2D(u_rainNoise, position * 0.035 - wind * (u_rainTime * 0.006)).r;
+        float gust = texture(u_rainNoise, position * 0.035 - wind * (u_rainTime * 0.006)).r;
         // Open water carries the full swell; shallows and the lee of a bank run calmer.
         float open = smoothstep(0.0, 0.7, depth) * smoothstep(0.0, 0.12, shore);
 
@@ -167,13 +166,13 @@ void main() {
         mat2 downwind = mat2(wind.x, -wind.y, wind.y, wind.x);
         mat2 crossing = CROSSING * downwind;
         vec2 driftB = vec2(0.37, -0.29) * (u_rainTime * 0.03);
-        vec4 small = ((texture2D(u_waterDetail, crossing * advectedA * 3.8 + driftB) - 0.5) * weightA
-              + (texture2D(u_waterDetail, crossing * advectedB * 3.8 + driftB) - 0.5) * weightB) * preserve;
+        vec4 small = ((texture(u_waterDetail, crossing * advectedA * 3.8 + driftB) - 0.5) * weightA
+              + (texture(u_waterDetail, crossing * advectedB * 3.8 + driftB) - 0.5) * weightB) * preserve;
         small.rg = small.rg * crossing;
         // Rapids churn in larger, faster-moving patches than the fine surface grain. Keep one clock and blend
         // their contribution by agitation: multiplying time by local agitation would shear the texture at joins.
-        vec4 rapidDetail = ((texture2D(u_waterDetail, crossing * advectedA * 0.65 + driftB * 4.0) - 0.5) * weightA
-              + (texture2D(u_waterDetail, crossing * advectedB * 0.65 + driftB * 4.0) - 0.5) * weightB) * preserve;
+        vec4 rapidDetail = ((texture(u_waterDetail, crossing * advectedA * 0.65 + driftB * 4.0) - 0.5) * weightA
+              + (texture(u_waterDetail, crossing * advectedB * 0.65 + driftB * 4.0) - 0.5) * weightB) * preserve;
         rapidDetail.rg = rapidDetail.rg * crossing;
 
         // Wind waves: every wave of the ocean simulation travels at its own speed, so the surface keeps changing
@@ -184,17 +183,17 @@ void main() {
         vec4 swell = vec4(0.0);
         float noise;
         if (u_waterOceanScale > 0.0) {
-            vec4 wide = texture2D(u_waterOcean, CROSSING * oceanUV * 0.43 + 0.57);
-            vec4 main = texture2D(u_waterOcean, oceanUV);
-            vec4 chop = texture2D(u_waterOcean, oceanUV * CROSSING * 2.37 + 0.31);
-            vec4 ripple = texture2D(u_waterOcean, oceanUV * CROSSING2 * 5.3 + 0.77);
+            vec4 wide = texture(u_waterOcean, CROSSING * oceanUV * 0.43 + 0.57);
+            vec4 main = texture(u_waterOcean, oceanUV);
+            vec4 chop = texture(u_waterOcean, oceanUV * CROSSING * 2.37 + 0.31);
+            vec4 ripple = texture(u_waterOcean, oceanUV * CROSSING2 * 5.3 + 0.77);
             swell.xy = (wide.xy * CROSSING) * 0.9 + main.xy + (chop.xy * CROSSING) * (0.5 + 0.2 * detail)
                   + (ripple.xy * CROSSING2) * (0.2 + 0.4 * detail);
             swell.z = max(main.z, max(wide.z * 0.8, chop.z * 0.5));
             swell.w = max(main.w, max(wide.w, chop.w * 0.6));
             noise = small.b + (main.z - 0.1) * 0.5;
         } else {
-            vec4 large = texture2D(u_waterDetail, downwind * position * 1.65 + vec2(u_rainTime * 0.018, 0.0)) - 0.5;
+            vec4 large = texture(u_waterDetail, downwind * position * 1.65 + vec2(u_rainTime * 0.018, 0.0)) - 0.5;
             swell.xy = large.rg * downwind * 0.5;
             noise = large.b * 0.6 + small.b * 0.4;
         }
@@ -209,11 +208,11 @@ void main() {
         // Surf: the swell feels the bottom near a bank and rolls in as bands whose crests march shoreward, broken up
         // along the bank. The bank's direction comes from the field itself, so the surf turns with every bay.
         vec2 fieldUV = v_cloudPosition.xy * u_waterFieldMap.xy + u_waterFieldMap.zw;
-        vec2 seaward = vec2(texture2D(u_waterField, fieldUV + vec2(u_waterFieldMap.x * 3.0, 0.0)).r,
-              texture2D(u_waterField, fieldUV + vec2(0.0, u_waterFieldMap.y * 3.0)).r) - field.r;
+        vec2 seaward = vec2(texture(u_waterField, fieldUV + vec2(u_waterFieldMap.x * 3.0, 0.0)).r,
+              texture(u_waterField, fieldUV + vec2(0.0, u_waterFieldMap.y * 3.0)).r) - field.r;
         seaward /= max(length(seaward), 1e-5);
         // Surf needs open water to build over: a narrow pool or channel, whose far bank is close, stays without it.
-        float beyond = (texture2D(u_waterField, fieldUV + seaward * u_waterFieldMap.xy * (0.35 / u_rainScale)).r
+        float beyond = (texture(u_waterField, fieldUV + seaward * u_waterFieldMap.xy * (0.35 / u_rainScale)).r
               * 2.0 - 1.0) * SHORE_RANGE;
         float fetch = smoothstep(0.12, 0.25, beyond - shore);
         float nearBank = (1.0 - smoothstep(0.05, 0.28, shore)) * smoothstep(0.0, 0.01, shore) * fetch;
@@ -290,8 +289,8 @@ void main() {
             vec2 drift = push * (0.06 / max(length(push), 1.0));
             vec2 bubbleA = position - drift * ((phase - 0.5) * FLOW_CYCLE);
             vec2 bubbleB = position - drift * ((fract(phase + 0.5) - 0.5) * FLOW_CYCLE) + 0.37;
-            bubbles = 0.5 + ((texture2D(u_waterDetail, bubbleA * 3.4 + 0.61).b - 0.5) * weightA
-                  + (texture2D(u_waterDetail, bubbleB * 3.4 + 0.61).b - 0.5) * weightB)
+            bubbles = 0.5 + ((texture(u_waterDetail, bubbleA * 3.4 + 0.61).b - 0.5) * weightA
+                  + (texture(u_waterDetail, bubbleB * 3.4 + 0.61).b - 0.5) * weightB)
                   * inversesqrt(weightA * weightA + weightB * weightB);
             // Solid white right below the fall, breaking into patches and then lace as the foam spreads.
             float settle = 1.0 - boil;
@@ -385,7 +384,7 @@ void main() {
             bodyAlpha = min(column, WATER_MAX_OPACITY);
         } else {
             bodyAlpha = 1.0;
-            body = texture2D(u_diffuseTexture, v_diffuseUV).rgb * tint * facets;
+            body = texture(u_diffuseTexture, v_diffuseUV).rgb * tint * facets;
         }
         // Suspended peat/silt joins shallow marsh pools and bare mud to open water over several metres.
         vec3 wetColor = mix(vec3(.105, .14, .072), vec3(.24, .195, .105),
@@ -426,15 +425,15 @@ void main() {
             float fallen = drop * metres;
             float flow = (sqrt(2.25 + 19.62 * fallen) - 1.5) / 9.81 - u_rainTime;
             // The streaks wander slowly across the sheet as they fall, by where they are, so neighbouring sheets agree.
-            float wander = texture2D(u_rainNoise, position * 1.4 + vec2(0.13, flow * 0.05)).r - 0.5;
+            float wander = texture(u_rainNoise, position * 1.4 + vec2(0.13, flow * 0.05)).r - 0.5;
             float x = uv.x + wander * 0.36;
             // Long ribbons and fine threads, stretched far along the flow so the white spreads as streaks rather than
             // blobs, and the clumps tumbling inside them, each at its own scale.
-            float ribbons = texture2D(u_waterDetail, vec2(x, flow * 0.07)).b;
-            float threads = texture2D(u_waterDetail, vec2(x * 3.0 + 0.71, flow * 0.22)).b;
-            float clumps = texture2D(u_waterDetail, vec2(x + 0.37, flow * 0.9)).b;
+            float ribbons = texture(u_waterDetail, vec2(x, flow * 0.07)).b;
+            float threads = texture(u_waterDetail, vec2(x * 3.0 + 0.71, flow * 0.22)).b;
+            float clumps = texture(u_waterDetail, vec2(x + 0.37, flow * 0.9)).b;
             // Toward the foot the sheet breaks up into tumbling, rounded billows.
-            float billows = texture2D(u_waterDetail, vec2(x + 0.19, flow * 1.8 + drop * 2.0)).b;
+            float billows = texture(u_waterDetail, vec2(x + 0.19, flow * 1.8 + drop * 2.0)).b;
             float foot = smoothstep(0.55, 0.95, drop);
             float foamy = mix(ribbons * 0.52 + threads * 0.36 + clumps * 0.12, billows * 0.6 + clumps * 0.4, foot);
             // Water leaves the crest clear and blue and gathers air all the way down: the white spreads from a few
@@ -453,7 +452,7 @@ void main() {
                   smoothstep(-0.1, 0.7, reflect(viewDirection(), surfaceNormal).z));
             // Clear water pouring over the crest shows the pool's blue, lit through and mirroring the sky.
             vec3 glass = procedural ? mix(waterShallows(palette), scatter, 0.35) * light * 1.1
-                  : texture2D(u_diffuseTexture, v_diffuseUV).rgb * tint * light;
+                  : texture(u_diffuseTexture, v_diffuseUV).rgb * tint * light;
             sheetFresnel = max(sheetFresnel, 0.3);
             glass = (glass * (1.0 - sheetFresnel) + sheetSky * sheetFresnel) * (0.85 + 0.35 * ribbons);
             vec3 fallLight = whiteLight;
@@ -486,5 +485,5 @@ void main() {
     color *= v_opacity;
     alpha *= v_opacity;
     if (alpha < 0.002 && max(color.r, max(color.g, color.b)) < 0.002) discard;
-    gl_FragColor = vec4(color, alpha);
+    fragColor = vec4(color, alpha);
 }

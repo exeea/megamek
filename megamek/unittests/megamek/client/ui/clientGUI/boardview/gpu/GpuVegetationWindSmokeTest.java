@@ -123,7 +123,6 @@ class GpuVegetationWindSmokeTest {
     private static int program(boolean grass) {
         String source = """
               #version 330 core
-              #define varying out
               uniform mat4 u_projViewTrans;
               uniform mat4 u_worldTrans;
               uniform mat3 u_normalMatrix;

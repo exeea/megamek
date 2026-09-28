@@ -1,3 +1,5 @@
+#version 330 core
+layout(location = 0) out vec4 fragColor;
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // One radix-2 stage of the ocean's inverse FFT (GpuOcean), along x or y, on two complex values per texel. The first
 // stage reads its input in bit-reversed order; each later stage joins two transforms of half its length.
@@ -37,5 +39,5 @@ void main() {
     float angle = 3.14159265 * float(top) / float(span);
     vec2 twiddle = vec2(cos(angle), sin(angle));
     vec4 turned = vec4(multiply(twiddle, odd.xy), multiply(twiddle, odd.zw));
-    gl_FragColor = upper ? even - turned : even + turned;
+    fragColor = upper ? even - turned : even + turned;
 }

@@ -3,8 +3,8 @@
 layout(location = 14) in vec4 a_coverRoot;
 uniform float u_coverPixels;
 uniform float u_coverHexWidth;
-varying vec2 v_coverData;
-varying vec2 v_coverRoot;
+out vec2 v_coverData;
+out vec2 v_coverRoot;
 
 float grassRandom(uint seed) {
     seed ^= seed >> 16;
@@ -26,7 +26,7 @@ void grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
     float height = u_coverHexWidth * mix(.018, .043, variation) * mix(.55, 1.0, meadow);
     float width = u_coverHexWidth * mix(.0015, .0028, grassRandom(seed + 37u)) * mix(.75, 1.0, meadow);
     float pixels = u_coverPixels / max(.001, abs((u_projViewTrans * vec4(root, 1.0)).w));
-    float density = smoothstep(@START_PIXELS@, @FULL_PIXELS@, pixels) * @ROOTS_PER_HEX@;
+    float density = smoothstep(GRASS_START_PIXELS, GRASS_FULL_PIXELS, pixels) * GRASS_ROOTS_PER_HEX;
     // Fractional growth of the last blade keeps density transitions continuous, without shading invisible blades.
     float growth = clamp(density - a_coverRoot.w, 0.0, 1.0);
     float t = samplePoint.y;

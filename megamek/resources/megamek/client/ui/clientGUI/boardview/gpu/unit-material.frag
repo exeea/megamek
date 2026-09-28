@@ -2,11 +2,11 @@
 // Inserted before libGDX's main; overlays modify diffuse color before lighting and emissive contribution.
 uniform sampler2D u_markerTexture;
 uniform float u_markerEnabled;
-varying vec3 v_paintPosition;
+in vec3 v_paintPosition;
 uniform sampler2D u_damageTexture;
 uniform float u_damageEnabled;
-varying vec2 v_damageUV;
-varying float v_damageMask;
+in vec2 v_damageUV;
+in float v_damageMask;
 
 // Smooth, non-periodic coordinate warping breaks the mirrored grid with one texture lookup.
 vec2 damageHash(vec2 cell) {
@@ -26,11 +26,11 @@ vec2 damageUV(vec2 uv) {
 
 vec3 unitOverlays(vec3 diffuse) {
     if (u_markerEnabled > 0.5) {
-        vec4 marker = texture2D(u_markerTexture, v_paintPosition.xy);
+        vec4 marker = texture(u_markerTexture, v_paintPosition.xy);
         diffuse = mix(diffuse, marker.rgb, marker.a);
     }
     if (u_damageEnabled > 0.5 && (u_damageEnabled > 1.5 || v_damageMask > 0.5)) {
-        vec4 damage = texture2D(u_damageTexture, damageUV(v_damageUV));
+        vec4 damage = texture(u_damageTexture, damageUV(v_damageUV));
         diffuse = mix(diffuse, damage.rgb, damage.a);
     }
     return diffuse;

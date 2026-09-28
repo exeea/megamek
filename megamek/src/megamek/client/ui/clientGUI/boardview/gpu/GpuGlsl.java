@@ -1,11 +1,16 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.io.File;
+import java.nio.charset.StandardCharsets;
 import java.util.Locale;
+import java.util.UUID;
+import java.util.regex.Pattern;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3NativesLoader;
+import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.utils.BufferUtils;
@@ -21,10 +26,10 @@ import org.lwjgl.opengl.GL30;
  * The board's shading language. The board asks for the newest core context the driver creates, from 4.6 down to 3.3,
  * the least it needs: some drivers (Intel's on Windows) return exactly the version asked for, so asking for 3.3 would
  * keep them there. Current Windows and Linux drivers give 4.6, every Mac 4.1. Once the context exists,
- * {@link #detect()} reads its version and every shader compiled afterwards is GLSL of it, up to 4.60. The board's own
- * shaders and libGDX's built-in ones are written in the GLSL 1.x spelling (attribute, varying, texture2D,
- * gl_FragColor); the prefixes map that spelling onto the chosen version, and the explicit {@code #version} makes every
- * driver check the same rules.
+ * {@link #detect()} reads its version and every shader compiled afterwards is GLSL of it, up to 4.60. Board shaders
+ * use GLSL 3.30 core syntax. Only libGDX's built-in shaders need the legacy spelling adapter; custom programs compile
+ * and export complete sources without it. All compilation, including the temporary libGDX prefix override, belongs
+ * to the application's render thread.
  */
 final class GpuGlsl {
     private static final MMLogger LOGGER = MMLogger.create(GpuGlsl.class);
@@ -33,6 +38,9 @@ final class GpuGlsl {
     static final int MAXIMUM = 460;
     /** A system property that caps the version, for troubleshooting a driver: {@code -Dmegamek.gpu.glsl=330}. */
     static final String CAP_PROPERTY = "megamek.gpu.glsl";
+    /** Optional directory for complete, editable shader pairs, including material defines and shared functions. */
+    static final String EXPORT_PROPERTY = "megamek.gpu.shaderExport";
+    private static final Pattern VERSION = Pattern.compile("(?m)^[\\t ]*#[\\t ]*version\\b[^\\r\\n]*(?:\\r?\\n|$)");
     private static final String VERTEX_DEFINES = """
           #define attribute in
           #define varying out
@@ -60,7 +68,26 @@ final class GpuGlsl {
     private GpuGlsl() { }
 
     static ShaderProgram compile(String name, String prefix, String vertex, String fragment) {
-        return compile(name, prefix + vertex, prefix + fragment);
+        return compilePrepared(name, source(prefix, vertex, version), source(prefix, fragment, version));
+    }
+
+    /** Resource stages declare their editor baseline; the runtime supplies the selected version and material flags. */
+    static String source(String prefix, String source, int glsl) {
+        return "#version " + glsl + " core\n" + prefix + VERSION.matcher(source).replaceFirst("");
+    }
+
+    /** Adapt upstream GLSL once, before inserting any board code. libGDX remains the owner of its lighting code. */
+    static String libGdx(String source, boolean vertex) {
+        source = source.replaceAll("\\battribute\\b", "in")
+              .replaceAll("\\bvarying\\b", vertex ? "out" : "in")
+              .replaceAll("\\btexture2DLod\\b", "textureLod")
+              .replaceAll("\\b(texture2D|textureCube)\\b", "texture")
+              .replaceAll("\\bgl_FragColor\\b", "fragColor");
+        return vertex ? source : "layout(location = 0) out vec4 fragColor;\n" + source;
+    }
+
+    static ShaderProgram compile(String name, String vertex, String fragment) {
+        return compile(name, "", vertex, fragment);
     }
 
     /**
@@ -68,14 +95,13 @@ final class GpuGlsl {
      * failed shader/link handles and attempts to delete -1 on dispose, so bad edits otherwise leak on every retry.
      * The successful sources are compiled again by libGDX to retain its normal uniform and context management.
      */
-    static ShaderProgram compile(String name, String vertex, String fragment) {
+    private static ShaderProgram compilePrepared(String name, String vertex, String fragment) {
+        export(name, vertex, fragment);
         int vertexHandle = 0, fragmentHandle = 0, program = 0;
         var gl = Gdx.gl20;
         try {
-            vertexHandle = validateStage(name + " vertex", GL20.GL_VERTEX_SHADER,
-                  ShaderProgram.prependVertexCode + vertex);
-            fragmentHandle = validateStage(name + " fragment", GL20.GL_FRAGMENT_SHADER,
-                  ShaderProgram.prependFragmentCode + fragment);
+            vertexHandle = validateStage(name + " vertex", GL20.GL_VERTEX_SHADER, vertex);
+            fragmentHandle = validateStage(name + " fragment", GL20.GL_FRAGMENT_SHADER, fragment);
             program = gl.glCreateProgram();
             if (program == 0) { throw new GdxRuntimeException(name + ": cannot create shader program"); }
             gl.glAttachShader(program, vertexHandle);
@@ -89,9 +115,32 @@ final class GpuGlsl {
             if (vertexHandle != 0) { gl.glDeleteShader(vertexHandle); }
             if (fragmentHandle != 0) { gl.glDeleteShader(fragmentHandle); }
         }
-        ShaderProgram result = new ShaderProgram(vertex, fragment);
-        if (!result.isCompiled()) { throw new GdxRuntimeException(name + ": " + result.getLog()); }
-        return result;
+        // SpriteBatch, ShapeRenderer and other unmodified libGDX programs still need the global legacy prefixes.
+        // Our sources already contain their version and outputs; restore the globals even when construction fails.
+        String vertexPrefix = ShaderProgram.prependVertexCode, fragmentPrefix = ShaderProgram.prependFragmentCode;
+        try {
+            ShaderProgram.prependVertexCode = "";
+            ShaderProgram.prependFragmentCode = "";
+            ShaderProgram result = new ShaderProgram(vertex, fragment);
+            if (!result.isCompiled()) { throw new GdxRuntimeException(name + ": " + result.getLog()); }
+            return result;
+        } finally {
+            ShaderProgram.prependVertexCode = vertexPrefix;
+            ShaderProgram.prependFragmentCode = fragmentPrefix;
+        }
+    }
+
+    private static void export(String name, String vertex, String fragment) {
+        String directory = System.getProperty(EXPORT_PROPERTY);
+        if (directory == null || directory.isBlank()) { return; }
+        String id = UUID.nameUUIDFromBytes((vertex + "\0" + fragment).getBytes(StandardCharsets.UTF_8)).toString();
+        String file = name.replaceAll("[^a-zA-Z0-9._-]", "-") + "-" + id;
+        try {
+            new FileHandle(new File(directory, file + ".vert")).writeString(vertex, false, "UTF-8");
+            new FileHandle(new File(directory, file + ".frag")).writeString(fragment, false, "UTF-8");
+        } catch (GdxRuntimeException failure) {
+            LOGGER.warn("Could not export shader {} to {}", name, directory, failure);
+        }
     }
 
     private static int validateStage(String name, int type, String source) {

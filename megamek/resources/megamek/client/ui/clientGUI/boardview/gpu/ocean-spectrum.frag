@@ -1,3 +1,5 @@
+#version 330 core
+layout(location = 0) out vec4 fragColor;
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // The ocean's spectrum at one instant (GpuOcean). Each wave of the initial spectrum turns at the frequency deep water
 // gives its length, so long swells outrun short chop. Out come two complex fields that the inverse FFT turns into
@@ -25,5 +27,5 @@ void main() {
     vec2 slopeX = rotated * k.x, slopeY = rotated * k.y;
     vec2 shiftX = -rotated * (k.x / magnitude), shiftY = -rotated * (k.y / magnitude);
     // a + ib packs two fields whose spectra are Hermitian: after the transform, a is the real part and b the imaginary.
-    gl_FragColor = vec4(slopeX.x - slopeY.y, slopeX.y + slopeY.x, shiftX.x - shiftY.y, shiftX.y + shiftY.x);
+    fragColor = vec4(slopeX.x - slopeY.y, slopeX.y + slopeY.x, shiftX.x - shiftY.y, shiftX.y + shiftY.x);
 }

@@ -1,8 +1,7 @@
+#version 330 core
+layout(location = 0) out vec4 fragColor;
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
-#ifdef GL_ES
-precision highp float;
-#endif
-varying vec2 v_uv;
+in vec2 v_uv;
 uniform sampler2D u_sceneDepth;
 uniform sampler2D u_unitDepth;
 uniform sampler2D u_unitColors;
@@ -15,7 +14,7 @@ uniform float u_levelHeight;
 // GROUND_LAYER
 
 float depthAt(sampler2D map, vec2 uv) {
-    return texture2D(map, uv).r;
+    return texture(map, uv).r;
 }
 
 vec3 worldAt(vec2 uv, float depth) {
@@ -24,7 +23,7 @@ vec3 worldAt(vec2 uv, float depth) {
 }
 
 float effectHiddenAt(vec2 uv, float unit) {
-    if (u_effectSize.x < 1.0 || texture2D(u_effectOpacity, uv).a < 0.5) return 0.0;
+    if (u_effectSize.x < 1.0 || texture(u_effectOpacity, uv).a < 0.5) return 0.0;
     // Use a sample that actually ended on this surface. A half-resolution ray beside a thin limb may hit smoky
     // background instead; its opacity must not outline the foreground limb.
     vec2 base = (floor(uv * u_effectSize - 0.5) + 0.5) / u_effectSize;
@@ -40,7 +39,7 @@ float effectHiddenAt(vec2 uv, float unit) {
             if (separation < nearest) { nearest = separation; sampleUV = candidate; }
         }
     }
-    return sampleUV.x < 0.0 ? 0.0 : step(0.6, texture2D(u_effectOpacity, sampleUV).a);
+    return sampleUV.x < 0.0 ? 0.0 : step(0.6, texture(u_effectOpacity, sampleUV).a);
 }
 
 // 1 where the scene hides the unit. The ground's own relief, grass and scatter in the hex the unit stands in never do:
@@ -52,7 +51,7 @@ float hiddenAt(vec2 uv) {
     if (unit >= 1.0) return 0.0;
     if (behind(scene, unit, u_bias) < 0.5) return effectHiddenAt(uv, unit);
     vec3 occluder = worldAt(uv, scene), surface = worldAt(uv, unit);
-    float groundTop = (texture2D(u_unitColors, uv).a * 255.0 - 128.0) * 0.25 * u_levelHeight;
+    float groundTop = (texture(u_unitColors, uv).a * 255.0 - 128.0) * 0.25 * u_levelHeight;
     bool own = boardHex(occluder.xy * vec2(1.0, -1.0) / u_groundBoard.zw)
           == boardHex(surface.xy * vec2(1.0, -1.0) / u_groundBoard.zw);
     return own && occluder.z <= groundTop ? effectHiddenAt(uv, unit) : 1.0;
@@ -87,11 +86,11 @@ void main() {
     float edge = nearMax - nearMin;
     if (nearMax > 0.5) {
         // Both the edge and faint interior follow the unit's team/player color.
-        gl_FragColor = vec4(texture2D(u_unitColors, colorUV).rgb,
+        fragColor = vec4(texture(u_unitColors, colorUV).rgb,
               u_intensity * mix(0.24, 1.0, edge));
     } else if (farMax > 0.5) {
         // A narrow dark halo retains contrast against snow, water and bright terrain artwork.
-        gl_FragColor = vec4(0.025, 0.055, 0.07, u_intensity * 0.65);
+        fragColor = vec4(0.025, 0.055, 0.07, u_intensity * 0.65);
     } else {
         discard;
     }
