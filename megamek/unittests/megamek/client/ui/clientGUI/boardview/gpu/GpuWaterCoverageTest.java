@@ -16,9 +16,53 @@ import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class GpuWaterCoverageTest {
+    @ParameterizedTest
+    @EnumSource(TerrainLod.class)
+    void raisedPoolDoesNotTintItsExposedCliffs(TerrainLod lod) {
+        var scene = raisedPool();
+        var pool = new BoardSurface(scene, scene.tile(new Coords(4, 4)), lod);
+        var lower = new BoardSurface(scene, scene.tile(new Coords(4, 3)), lod);
+        int exposed = 0;
+        for (var face : pool.walls(scene, BoardGeometry.floor(scene))) {
+            if (Math.min(face.a().z, Math.min(face.b().z, face.c().z))
+                  <= BoardGeometry.waterZ(lower.tile) + BoardGeometry.hexScale()) { continue; }
+            var mesh = mesh();
+            GpuTerrain.coveredFace(mesh, pool, face, List.of(pool, lower));
+            int stride = mesh.getAttributes().vertexSize / Float.BYTES;
+            int colorOffset = mesh.getAttributes().findByUsage(VertexAttributes.Usage.ColorPacked).offset / Float.BYTES;
+            float[] vertices = new float[mesh.getNumVertices() * stride];
+            mesh.getVertices(vertices, 0);
+            for (int i = 0; i < vertices.length; i += stride) {
+                var color = new Color();
+                Color.abgr8888ToColor(color, vertices[i + colorOffset]);
+                assertTrue(color.b >= .125f && color.b < .875f || color.a >= .25f,
+                      "The pool must not paint water down the outside of its supporting cliff at " + point(vertices, i));
+                exposed++;
+            }
+        }
+        assertTrue(exposed > 0, "The fixture must exercise the exposed cliff above the receiving pool");
+    }
+
+    /** The raised depth-one pool and lower receiving pool at 0505/0504 in test_board2.board. */
+    private static BoardScene raisedPool() {
+        List<BoardScene.Tile> tiles = new ArrayList<>();
+        for (int x = 0; x < 9; x++) {
+            for (int y = 0; y < 9; y++) {
+                Coords coords = new Coords(x, y);
+                boolean high = x == 4 && y == 4, low = x == 4 && y == 3;
+                int level = high ? 5 : low ? -1 : x == 3 && y == 3 ? 2 : y == 4 || y == 5 ? 1 : 0;
+                tiles.add(new BoardScene.Tile(coords, level, high || low ? 1 : -1, false, 0,
+                      BoardScene.Surface.GRASS, null, null, null, null, null, List.of(), List.of(),
+                      high || low ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
+            }
+        }
+        return new BoardScene(0, 9, 9, tiles, List.of(), List.of(), -1, "", List.of());
+    }
+
     @Test
     void verticalWaterbedWallsKeepTheirWaterMaterialAndBlendIntoTheBedAtTheirFoot() {
         var original = BoardRelief.tuning();

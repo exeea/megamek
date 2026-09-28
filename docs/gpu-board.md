@@ -20,8 +20,11 @@ shared client controls remain the same.
 Closing either board runs the same save-and-quit flow. Cancelling the prompt or
 cancelling a save keeps the current board open; closing never switches visualizations.
 Rendering failures offer an explicit retry, board switch or quit choice.
-The source adapter still reuses `BoardView`'s shared artwork, tactical state, overlays,
-and client commands; it does not need its classic component or a classic paint pass.
+Native map previews and the editor use `GpuMapSource` and shared `BoardArtwork` directly, without constructing
+`BoardView`. Gameplay's source adapter still reuses `BoardView` for tactical state, overlays and client commands;
+it does not need its classic component or a classic paint pass. See [renderer decoupling](board-renderer-decoupling.md)
+for the precise migration boundary, and [loading and shadow measurements](gpu-loading-and-shadows.md) for the latest
+performance work. Selecting another map in the same browser retains the native preview window and its GL assets.
 The bottom-right corner shows the measured rendering FPS, refreshed once per second.
 
 ## Terrain and assets
@@ -66,9 +69,10 @@ sections; struts are sparse, untextured boxes inside that footprint. Interior
 models are shared by asset and story count. Fuel tanks and industrial terrain
 do not receive building interiors.
 
-The asset directory also contains bridge-arm, crop-row and twenty-two authored tree
-models (thirteen species and nine snow-covered forms), plus three rendering detail
-levels for each tree. All are at or below 480 triangles.
+The asset directory also contains 64 complete bridge layouts, crop-row and twenty-two
+authored tree models (thirteen species and nine snow-covered forms), plus three
+rendering detail levels for each tree. The crop and tree models are at or below
+480 triangles; complete bridge junctions have larger meshes.
 Plant GLBs preserve their natural proportions at local height 30, with the base
 at zero. Placement divides the required foliage height by the model's actual
 Z extent; all LODs share that same placement transform. They can be inspected
@@ -202,13 +206,11 @@ four bearings at top-down, isometric and maximum 80-degree tilt. These are geome
 and image results, not an FPS benchmark. `GpuTreeLodSmokeTest` also checks submitted
 triangle counts, repeated transitions, fading, depth, shadows and stable picking.
 
-Bridge decks and rails use the copied Saxarba `bridges/bridge_09.png` artwork,
-oriented along each bridge arm. Deck and rail tops retain the plan-view UVs;
-vertical rail and fascia faces unwrap the original guardrail strip, including
-its bars and supports. The 36-triangle arm has no trim crossing the roadway at
-hex boundaries. A 0.16-world-unit deck clearance at default scale
-separates zero-elevation bridges from the riverbank and its road decals, avoiding
-coplanar depth flicker without changing the game's bridge elevation.
+Bridges load one complete external GLB for their exit mask, including turns and
+roundabouts. Decks share the road's asphalt material and surface clearance;
+rails and undersides use concrete. Geometry is authored in mm-data, with no
+built-in bridge generator or arm assembly. See
+[board asset proportions](board-asset-proportions.md) for dimensions and rebuilding.
 
 Dry hexes use [sculpted terrain](gpu-terrain-materials.md): a continuous landform of
 tops, cliffs with filleted corners, rim formations, talus and a small shared rock kit,
@@ -888,7 +890,11 @@ resetting that cache after animation every frame. See
 Scene color and 24-bit depth are captured in one geometry pass. The atmosphere composite writes both
 color and depth to the board viewport in one fullscreen draw. There is no separate camera-depth
 geometry pass or restoration shader. Shadow resolution and caster coverage are unchanged. Shadow transforms are reused,
-and changes only to light color, fog or exposure do not invalidate the cached shadow geometry.
+and changes only to light color, fog or exposure do not invalidate the cached shadow geometry. Moving gameplay units
+restore cached static terrain/feature depth before drawing unit shadows; camera/light/terrain changes invalidate it
+and use the original full pass. Cache creation waits until the view is stable, so panning adds no copy. Both packed
+depth and hardware depth are copied, preserving occlusion and erasing old unit shadows. Map-only
+views retain the original single framebuffer.
 
 `GpuMarkers` owns the raised symbol artwork, shared models, and one cosmetic
 animation clock. Symbols spin once every eight seconds in
@@ -1512,6 +1518,16 @@ both camera views and offscreen chunk culling. It records overview/closeup
 frame times and screenshots without coverage instrumentation. This constrains
 the Java heap, not total process memory or GPU memory; results depend on the
 board content, hardware and display settings.
+
+Road masks retain their full raster resolution and RGBA precision, with lossless
+run-length storage when it is smaller and exact sharing across chunks. The rim
+cache stores covered texels as bits instead of retaining the triangles that
+produced them. Finished CPU terrain used by queries and local edits is limited to
+256 recently used hexes; a miss reconstructs the same `BoardSurface` at the
+installed scene, settings and detail level. Uploaded meshes keep their original
+geometry. Unchanged water needed by an edit is reconstructed if its cached
+snapshot has been evicted. This bounds retained query geometry; it does not bound
+GPU memory or eliminate the temporary allocations made during terrain builds.
 
 `GpuAssetCatalogSmokeTest` renders actual Saxarba ground with the authored
 catalog, connected buildings at unequal heights, snow trees, bridges, ice,

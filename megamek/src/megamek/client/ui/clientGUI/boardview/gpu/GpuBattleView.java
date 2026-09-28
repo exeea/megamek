@@ -38,8 +38,8 @@ import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.ScreenUtils;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.boardview.BoardFocus;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.sprite.EntitySprite;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.ResolvedAttack;
@@ -79,7 +79,9 @@ class GpuBattleView extends ApplicationAdapter {
     private static final Color TETHER_COLOR = Color.valueOf("A9B8B8");
     private static final float TILT_DEGREES_PER_SECOND = 60;
     private static final MMLogger LOGGER = MMLogger.create(GpuBattleView.class);
-    private GpuBoardSource source;
+    void zoomEditor(int direction) { boardCamera.zoom(direction < 0 ? 1 / 1.2f : 1.2f); }
+
+    private BoardSource source;
     private Stage loadingStage;
     private GpuBoardSkin loadingTheme;
     private Label loadingLabel;
@@ -153,7 +155,7 @@ class GpuBattleView extends ApplicationAdapter {
     private long hoverCameraRevision;
     private int cameraTerrainRevision = -1;
 
-    GpuBattleView(GpuBoardSource source) {
+    GpuBattleView(BoardSource source) {
         this.source = source;
         fieldOfView = new GpuFieldOfView();
     }
@@ -163,7 +165,7 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     /** Attach the first map after the native loading window is already visible. Runs on the render thread. */
-    void attachSource(GpuBoardSource next) {
+    void attachSource(BoardSource next) {
         source = next;
         createBoard();
     }
@@ -215,13 +217,16 @@ class GpuBattleView extends ApplicationAdapter {
         atmosphere = new GpuAtmosphere();
         unitVisibility = new GpuUnitVisibility();
         markers = new GpuMarkers();
+        if (source.isGameplay()) { markers.prepareModels(); }
         unitTextures = new GpuTextures<>();
         annotationTextures = new GpuTextures<>();
         unitBatch = new ModelBatch(GpuUnitShader.provider(), new GpuOpaqueSorter());
         annotationBatch = new SpriteBatch();
         hexText = new GpuHexText();
         lines = new ShapeRenderer();
-        ui = new GpuBoardUi(source, boardCamera, () -> playbackSpeed = playbackSpeed.next(), playback::togglePaused);
+        ui = new GpuBoardUi(source, boardCamera, () -> playbackSpeed = playbackSpeed.next(), playback::togglePaused,
+              loadingTheme == null ? new GpuBoardSkin() : loadingTheme);
+        loadingTheme = null; // Ownership transfers to the UI; the loading stage may still borrow it until terrain is ready.
         Gdx.input.setInputProcessor(new InputMultiplexer(ui.stage, boardInput) {
             @Override
             public boolean touchDown(int x, int y, int pointer, int button) {
@@ -255,7 +260,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (ui == null || width <= 0 || height <= 0) {
             return;
         }
-        float preference = source.uiPreferences.scale();
+        float preference = source.uiPreferences().scale();
         float scale = displayScale.read(preference);
         int pixelWidth = Gdx.graphics.getBackBufferWidth();
         int pixelHeight = Gdx.graphics.getBackBufferHeight();
@@ -300,7 +305,7 @@ class GpuBattleView extends ApplicationAdapter {
         }
         // Moving to another monitor can change DPI without changing the window's dimensions.
         resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-        GpuBoardSource.Frame frame = source.takeFrame();
+        BoardSource.Frame frame = source.takeFrame();
         if (frame.scene() == null) {
             return;
         }
@@ -380,6 +385,7 @@ class GpuBattleView extends ApplicationAdapter {
         attackEffects.setWind(atmosphereSettings.effects());
         atmosphere.setOptions(ui.atmosphereOptions());
         terrain.setNormalMaps(ui.normalMaps());
+        terrain.setGrass(ui.grass());
         if (unitTextures.update(scene.units().stream().filter(unit -> !unit.sensorContact()
               && (unitModels == null || unitModels.get(unit.model(), unit.id()) == null)).map(BoardScene.Unit::image).distinct()
               .collect(Collectors.toMap(pixels -> pixels, pixels -> pixels)))) {
@@ -715,11 +721,11 @@ class GpuBattleView extends ApplicationAdapter {
     private float cameraWidth() { return ui == null ? boardCamera.camera.viewportWidth : ui.cameraWidth(); }
 
     /** Frame the presented action; selection changes during playback take effect after its final hold. */
-    void updateCameraFocus(BoardScene scene, BoardView.CenterRequest request) {
+    void updateCameraFocus(BoardScene scene, BoardFocus request) {
         updateCameraFocus(scene, request, null);
     }
 
-    void updateCameraFocus(BoardScene scene, BoardView.CenterRequest request, BoardScene.Animation instantAction) {
+    void updateCameraFocus(BoardScene scene, BoardFocus request, BoardScene.Animation instantAction) {
         if (!fitted) {
             boardCamera.fit(scene);
             fitted = true;

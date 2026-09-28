@@ -13,6 +13,11 @@ uniform sampler2D u_normalTexture;
 uniform float u_normalMaps;
 #endif
 uniform float u_groundResponse;
+#ifdef roadMaskFlag
+uniform sampler2D u_roadMask;
+uniform vec4 u_roadMaskRegion;
+varying vec2 v_roadMaskUV;
+#endif
 #ifdef bridgeDeckFlag
 uniform float u_worldMetre;
 #endif
@@ -23,12 +28,19 @@ uniform vec4 u_roadProfile;
 #endif
 
 void main() {
+    vec4 roadColor = v_color;
+#ifdef roadMaskFlag
+    vec2 maskUV = v_roadMaskUV;
+    if (any(lessThan(maskUV, vec2(0.0))) || any(greaterThan(maskUV, vec2(1.0)))) { discard; }
+    roadColor = texture2D(u_roadMask, u_roadMaskRegion.xy + maskUV * u_roadMaskRegion.zw);
+    if (roadColor.a < .002) { discard; }
+#endif
     vec2 uv = v_diffuseUV;
 #ifdef bridgeDeckFlag
     // A rotated bridge shares the adjacent road's scale, orientation and texture phase.
     uv = vec2(v_cloudPosition.x, -v_cloudPosition.y) / u_worldMetre;
 #endif
-    vec3 tint = v_color.rgb;
+    vec3 tint = roadColor.rgb;
 #ifdef roadMapsFlag
     if (u_roadTransition > .5 || u_roadTransition < -1.5) { tint = vec3(1.0); }
 #endif
@@ -44,7 +56,7 @@ void main() {
         loosePatches = texture2D(u_rainNoise, uv / 5.0 + .37).b;
         albedo *= mix(.95, 1.05, wearPatches);
         if (u_roadTransition < -1.5) {
-            vec2 heading = normalize((v_color.rg * 255.0 - 128.0) / 127.0);
+            vec2 heading = normalize((roadColor.rg * 255.0 - 128.0) / 127.0);
             vec2 scuff = vec2(dot(uv, heading), dot(uv, vec2(-heading.y, heading.x)))
                   * vec2(1.0 / 36.0, 1.0 / 3.0);
             // Averaging both directions gives neighbouring hexes identical wear even when their paths run
@@ -61,8 +73,8 @@ void main() {
         }
     }
     if (u_roadTransition > .5) {
-        float along = (v_color.r - .5) * 2.0 * u_roadProfile.x;
-        float across = abs((v_color.g - .5) * 2.0 * u_roadProfile.x);
+        float along = (roadColor.r - .5) * 2.0 * u_roadProfile.x;
+        float across = abs((roadColor.g - .5) * 2.0 * u_roadProfile.x);
         float rut = 1.0 - smoothstep(u_roadProfile.z * .5, u_roadProfile.z, abs(across - u_roadProfile.y));
         float grain = properties.r;
         float broad = texture2D(u_roadSurface, uv * .21).r;
@@ -149,7 +161,7 @@ void main() {
 #else
     float grain = texture2D(u_diffuseTexture, uv * 2.3).r;
 #endif
-    float alpha = clamp(v_color.a + (grain - .5) * min(v_color.a, 1.0 - v_color.a) * .7, 0.0, 1.0);
+    float alpha = clamp(roadColor.a + (grain - .5) * min(roadColor.a, 1.0 - roadColor.a) * .7, 0.0, 1.0);
 #ifdef roadMapsFlag
     if (u_roadTransition < -1.5) {
         alpha *= smoothstep(.16, .62, wearPatches) * mix(.35, 1.0, loosePatches);
@@ -158,8 +170,8 @@ void main() {
         // and exposed ground; the compacted core remains continuous and at the authored road width.
         float clumps = texture2D(u_rainNoise, uv / 32.0 + .19).r;
         float threshold = .05 + .8 * clumps + .12 * loosePatches;
-        float broken = smoothstep(threshold - .12, threshold + .12, v_color.a + (grain - .5) * .32);
-        alpha = mix(v_color.a, broken, 4.0 * v_color.a * (1.0 - v_color.a));
+        float broken = smoothstep(threshold - .12, threshold + .12, roadColor.a + (grain - .5) * .32);
+        alpha = mix(roadColor.a, broken, 4.0 * roadColor.a * (1.0 - roadColor.a));
         alpha *= roadCoverage;
     }
 #endif

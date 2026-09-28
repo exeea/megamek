@@ -182,6 +182,10 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
     private static final ClientPreferences CLIENT_PREFERENCES = PreferenceManager.getClientPreferences();
     private BufferedImage mapImage;
     private final BoardView bv;
+    private java.util.function.Consumer<Coords> hexClickHandler;
+    private GameListenerAdapter gameListener;
+
+    public void setHexClickHandler(java.util.function.Consumer<Coords> handler) { hexClickHandler = handler; }
     private final Game game;
     private Board board;
     private final int boardId;
@@ -332,7 +336,7 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
      * Registers the minimap as listener to the given game, board, {@link BoardView} (that are not null).
      */
     private void initializeListeners() {
-        game.addGameListener(new GameListenerAdapter() {
+        gameListener = new GameListenerAdapter() {
 
             @Override
             public void gamePhaseChange(GamePhaseChangeEvent e) {
@@ -447,7 +451,8 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
             public void gameNewAction(GameNewActionEvent e) {
                 refreshMap();
             }
-        });
+        };
+        game.addGameListener(gameListener);
 
         board.addBoardListener(boardListener);
         if (bv != null) {
@@ -465,6 +470,17 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
             });
         }
         GUIP.addPreferenceChangeListener(this);
+    }
+
+    /** Detach an editor/preview minimap when its window is disposed. */
+    public void dispose() {
+        if (gameListener != null) { game.removeGameListener(gameListener); gameListener = null; }
+        if (board != null) { board.removeBoardListener(boardListener); }
+        if (bv != null) { bv.removeBoardViewListener(boardViewListener); }
+        GUIP.removePreferenceChangeListener(this);
+        hexClickHandler = null;
+        if (ownsSummaryGif && gifWriterThread != null) { gifWriterThread.stopThread(true); }
+        releaseSummaryGifOwnership();
     }
 
     /**
@@ -2037,7 +2053,7 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
         if (!new Rectangle(getSize()).contains(x, y)) {
             return;
         }
-        if ((modifiers & InputEvent.CTRL_DOWN_MASK) != 0) {
+        if (bv != null && (modifiers & InputEvent.CTRL_DOWN_MASK) != 0) {
             bv.checkLOS(translateCoords(x - leftMargin, y - topMargin));
         }
         if (dragging) {
@@ -2116,6 +2132,11 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
      * Centers the BoardView connected to the Minimap on x, y in the Minimap's pixel coordinates.
      */
     private void centerOnPos(double x, double y) {
+        if (hexClickHandler != null) {
+            hexClickHandler.accept(translateCoords((int) x - leftMargin, (int) y - topMargin));
+            return;
+        }
+        if (bv == null) { return; }
         ShowThisBoardView();
         bv.centerOnPointRel(
               ((x - leftMargin)) / ((HEX_SIDE_BY_SIN30[zoom] + HEX_SIDE[zoom]) * board.getWidth()),

@@ -34,10 +34,14 @@ void grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
     float growth = clamp(density - a_coverRoot.w, 0.0, 1.0);
     float t = samplePoint.y;
     float gust = sin(dot(root.xy / u_worldMetre, vec2(.11, .07)) - u_rainTime * 1.7);
-    vec2 bend = direction * height * mix(.25, .65, grassRandom(seed + 51u));
-    bend += u_wind.xy * u_wind.z * height * (.25 + .18 * gust);
-    vec3 tip = vec3(bend, height);
-    tip *= height / max(height, length(tip));
+    vec3 rest = vec3(direction * mix(.25, .65, grassRandom(seed + 51u)), 1.0);
+    float alongWind = dot(rest.xy, u_wind.xy);
+    vec3 acrossWind = rest - vec3(u_wind.xy * alongWind, 0.0);
+    float acrossLength = length(acrossWind);
+    // Equal strength steps turn the blade through equal angles, retaining its length and both endpoint poses.
+    // Scaling displacement before normalizing used up most of the visible bend near zero strength.
+    float windAngle = mix(atan(alongWind, acrossLength), atan(alongWind + 12.5 + 9.0 * gust, acrossLength), u_wind.z);
+    vec3 tip = height * (acrossWind * (cos(windAngle) / acrossLength) + vec3(u_wind.xy * sin(windAngle), 0.0));
     vec3 control = vec3(0.0, 0.0, height * .65);
     vec3 curve = 2.0 * (1.0 - t) * t * control + t * t * tip;
     vec3 tangent = 2.0 * (1.0 - t) * control + 2.0 * t * (tip - control);

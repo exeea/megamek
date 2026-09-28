@@ -805,16 +805,6 @@ tasks.register('exportMekModelCatalog', JavaExec) {
     jvmArgs = ['-Xmx2048m', '-Djava.awt.headless=true']
 }
 
-tasks.register('exportBridgeShapes', JavaExec) {
-    dependsOn classes
-    description = 'Export all bridge exit outlines using the ground-road layout for offline GLB generation.'
-    group = 'utility'
-    classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'megamek.client.ui.clientGUI.boardview.gpu.BoardBridge'
-    args project.findProperty('bridgeShapesOutput') ?: "${mmDataDir}/tools/board-models/bridge-shapes.json"
-    jvmArgs = ['-Djava.awt.headless=true']
-}
-
 tasks.register('exportEquipmentModelCatalog', JavaExec) {
     dependsOn classes
     description = 'Export every registered equipment type and its modular-model visualization policy.'

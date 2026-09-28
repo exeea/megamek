@@ -90,7 +90,7 @@ class GpuFiringSmokeTest {
                         } else if (tick == 6) {
                             assertEquals(2, fixture.source.takeFrame().scene().firingLines().size());
                             assertEquals(borders.size(), fixture.source.takeFrame().scene().rangeBorders().size());
-                            if (!BoardView.GPU_SCROLLING_RANGE_LABELS) {
+                            if (!megamek.client.ui.clientGUI.boardview.BoardTactical.SCROLLING_RANGE_LABELS) {
                                 assertEquals(labels.size(), fixture.source.takeFrame().scene().rangeLabels().size());
                             }
                             GpuBoardTestUi.capture(new File(output, "firing-volumes-isometric.png"));

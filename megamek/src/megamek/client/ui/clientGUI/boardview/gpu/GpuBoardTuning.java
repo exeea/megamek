@@ -115,6 +115,7 @@ final class GpuBoardTuning {
     private final CheckBox transitions;
     private final List<Control> relief;
     private final List<Control> water;
+    private final CheckBox grass;
     private final CheckBox terrainLod;
     private final List<Control> terrainDetail;
     private final Label terrainProgress;
@@ -154,11 +155,11 @@ final class GpuBoardTuning {
         this(skin, null);
     }
 
-    GpuBoardTuning(Skin skin, GpuBoardSource source) {
+    GpuBoardTuning(Skin skin, BoardSource source) {
         this(skin, source, new BoardCamera());
     }
 
-    GpuBoardTuning(Skin skin, GpuBoardSource source, BoardCamera camera) {
+    GpuBoardTuning(Skin skin, BoardSource source, BoardCamera camera) {
         this.camera = camera;
         panel.setBackground(skin.getDrawable("menu-panel"));
         panel.setTouchable(Touchable.enabled);
@@ -508,6 +509,9 @@ final class GpuBoardTuning {
             }
         });
         section(skin, "Terrain detail");
+        grass = checkbox(skin, "Grass blades", "tuning-grass");
+        grass.addListener(new TextTooltip("Show wind-blown grass blades on the ground. Uncheck to remove the blades.",
+              skin, "menu"));
         terrainLod = checkbox(skin, "Terrain LoD", "tuning-terrain-lod");
         terrainLod.addListener(new TextTooltip("Adjust terrain detail with zoom. Off keeps the full-detail mesh at every distance.",
               skin, "menu"));
@@ -893,6 +897,7 @@ final class GpuBoardTuning {
         setValues(cameraFieldOfView, new float[] { BoardCamera.DEFAULT_FIELD_OF_VIEW });
         applyCamera();
         normalMaps.setChecked(true);
+        grass.setChecked(true);
         boolean fixedSunKept = fixedSun.isChecked();
         BoardGeometry.Tuning defaults = BoardGeometry.DEFAULTS;
         float[] values = { defaults.hexScale(), defaults.unitScale(), defaults.unitHeightScale(),
@@ -984,6 +989,10 @@ final class GpuBoardTuning {
 
     boolean normalMaps() {
         return normalMaps.isChecked();
+    }
+
+    boolean grass() {
+        return grass.isChecked();
     }
 
     boolean fixedSun() {

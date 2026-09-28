@@ -56,7 +56,15 @@ class GpuTerrainIncrementalSmokeTest {
 
                     scene = GpuTerrainReliefSmokeTest.scene(BoardScene.Surface.GRASS);
                     incremental.update(scene);
+                    Map<Coords, BoardTacticalGeometry.Surface> beforeEviction = new HashMap<>();
+                    for (var tile : scene.tiles()) { beforeEviction.put(tile.coords(), incremental.tacticalSurface(tile.coords())); }
+                    ((Map<?, ?>) field(incremental, "cpuGeometry")).clear();
+                    for (var tile : scene.tiles()) {
+                        assertEquals(beforeEviction.get(tile.coords()), incremental.tacticalSurface(tile.coords()),
+                              "Evicted query geometry must reproduce the installed surface at " + tile.coords());
+                    }
                     for (Coords at : List.of(new Coords(4, 4), new Coords(5, 5), new Coords(0, 3), new Coords(7, 7))) {
+                        ((Map<?, ?>) field(incremental, "cpuGeometry")).clear();
                         var tile = scene.tile(at);
                         scene = edit(scene, at, tile.elevation() + 1, tile.waterDepth(), BoardScene.Surface.SAND);
                         incremental.update(scene);

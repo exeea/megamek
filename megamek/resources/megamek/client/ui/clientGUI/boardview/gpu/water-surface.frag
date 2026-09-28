@@ -48,8 +48,9 @@ void main() {
     bool cut = !falling && v_color.b > 0.5;
     vec4 habitat = vec4(0.0), mixture = waterPalette(palette);
     if (!spray && !cut) {
-        vec4 connected;
-        terrainCoverage(v_cloudPosition / u_metre, 14.0, (v_cloudPosition.z + u_waterLine) / u_levelHeight, habitat, connected);
+        vec4 fringe, connected;
+        terrainCoverage(v_cloudPosition / u_metre, 14.0, (v_cloudPosition.z + u_waterLine) / u_levelHeight,
+              habitat, fringe, connected);
         if (dot(connected, vec4(1.0)) > .5) mixture = connected;
     }
     vec2 position = v_cloudPosition.xy * u_rainScale;

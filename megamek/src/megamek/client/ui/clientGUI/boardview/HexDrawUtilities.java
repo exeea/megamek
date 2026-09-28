@@ -40,6 +40,8 @@ import java.awt.geom.Path2D;
 import java.awt.geom.Point2D;
 
 import megamek.client.ui.tileset.HexTileset;
+import megamek.common.board.Board;
+import megamek.common.board.Coords;
 
 /**
  * Provides utility methods and constants for drawing hex-related shapes Internally all methods work as if the game hex
@@ -62,6 +64,20 @@ import megamek.client.ui.tileset.HexTileset;
  * @author Simon
  */
 public class HexDrawUtilities {
+
+    /** Pixel-aligned outline used by authored 84 x 72 raster tiles. */
+    public static java.awt.Polygon rasterHex() {
+        return new java.awt.Polygon(new int[] {21, 62, 83, 83, 62, 21, 0, 0},
+              new int[] {0, 0, 35, 36, 71, 71, 36, 35}, 8);
+    }
+
+    /** An elevation contour is shared by both cells; the map edge meets the zero-level backdrop. */
+    public static boolean hasElevationBorder(Board board, Coords coords, int direction) {
+        var source = board.getHex(coords);
+        var adjacent = board.getHexInDir(coords, direction);
+        return adjacent == null ? source.getLevel() != 0
+              : source.getLevel() != adjacent.getLevel() || source.floor() != adjacent.floor();
+    }
 
     public static final double HEX_WID = HexTileset.HEX_W;
     public static final double HEX_HGT = HEX_WID * Math.sqrt(3) / 2;

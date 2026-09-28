@@ -97,7 +97,9 @@ final class GpuMarkers implements Disposable {
     private Map<Coords, List<BoardMarker>> groups = Map.of();
     private float clock;
 
-    GpuMarkers() {
+    /** Full games prepare these during loading; map-only views skip the shared tactical artwork entirely. */
+    void prepareModels() {
+        if (!models.isEmpty()) { return; }
         Map<BoardMarker.Kind, BoardScene.Pixels> artwork = new EnumMap<>(BoardMarker.Kind.class);
         for (var kind : BoardMarker.Kind.values()) {
             artwork.put(kind, artwork(kind));
@@ -113,6 +115,7 @@ final class GpuMarkers implements Disposable {
     }
 
     GpuUnitModel model(BoardMarker.Kind kind) {
+        prepareModels();
         return models.get(kind);
     }
 

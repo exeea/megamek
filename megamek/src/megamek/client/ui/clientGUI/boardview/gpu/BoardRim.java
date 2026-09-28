@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -26,7 +27,7 @@ final class BoardRim {
         }
     }
     private record Patch(int edge, float from, float to, boolean high) { }
-    private record Key(Images ground, List<Triangle> faces, List<Patch> patches) { }
+    private record Key(Images ground, BitSet coverage, List<Patch> patches) { }
 
     private final Map<Key, Images> cache = new ConcurrentHashMap<>();
     private final Set<Key> used = ConcurrentHashMap.newKeySet();
@@ -44,12 +45,14 @@ final class BoardRim {
         List<BoardSurface.Side> sides = surface.sides(scene, floor);
         if (sides.isEmpty()) { return ground; }
         Vector3 center = BoardGeometry.center(tile.coords(), tile.elevation());
-        List<Triangle> faces = new ArrayList<>();
+        int width = Math.max(ground.color().width(), (int) BoardGeometry.TILE_WIDTH);
+        int height = Math.max(ground.color().height(), (int) BoardGeometry.TILE_HEIGHT);
+        BitSet coverage = new BitSet(width * height);
         for (BoardSurface.Face face : surface.faces) {
             if (face.finish() == BoardSurface.Finish.TOP) {
-                faces.add(new Triangle(local(face.a().x, center.x), local(face.a().y, center.y),
+                cover(coverage, new Triangle(local(face.a().x, center.x), local(face.a().y, center.y),
                       local(face.b().x, center.x), local(face.b().y, center.y),
-                      local(face.c().x, center.x), local(face.c().y, center.y)));
+                      local(face.c().x, center.x), local(face.c().y, center.y)), width, height);
             }
         }
         List<Patch> patches = new ArrayList<>();
@@ -64,7 +67,7 @@ final class BoardRim {
                   : quantize(new Vector3(side.b()).sub(a).dot(along) / BoardGeometry.hexScale());
             patches.add(new Patch(side.edge(), from, to, highDrop(scene, tile, side)));
         }
-        Key key = new Key(ground, List.copyOf(faces), List.copyOf(patches));
+        Key key = new Key(ground, coverage, List.copyOf(patches));
         used.add(key);
         return cache.computeIfAbsent(key,
               ignored -> compose(key, incline, highIncline));
@@ -106,6 +109,27 @@ final class BoardRim {
         return ax * by - ay * bx;
     }
 
+    /** Cache the exact painted texels, not thousands of ramp triangles that produced the same footprint. */
+    private static void cover(BitSet coverage, Triangle face, int width, int height) {
+        float minX = Math.min(face.ax(), Math.min(face.bx(), face.cx()));
+        float maxX = Math.max(face.ax(), Math.max(face.bx(), face.cx()));
+        float minY = Math.min(face.ay(), Math.min(face.by(), face.cy()));
+        float maxY = Math.max(face.ay(), Math.max(face.by(), face.cy()));
+        int fromX = Math.max(0, (int) Math.floor((minX * GROUND_UV_SCALE / BoardGeometry.TILE_WIDTH + .5f) * width - .5f));
+        int toX = Math.min(width - 1, (int) Math.ceil((maxX * GROUND_UV_SCALE / BoardGeometry.TILE_WIDTH + .5f) * width - .5f));
+        int fromY = Math.max(0, (int) Math.floor((.5f - maxY * GROUND_UV_SCALE / BoardGeometry.TILE_HEIGHT) * height - .5f));
+        int toY = Math.min(height - 1, (int) Math.ceil((.5f - minY * GROUND_UV_SCALE / BoardGeometry.TILE_HEIGHT) * height - .5f));
+        for (int y = fromY; y <= toY; y++) {
+            for (int x = fromX; x <= toX; x++) {
+                int pixel = y * width + x;
+                if (coverage.get(pixel)) { continue; }
+                float px = ((x + .5f) / width - .5f) * BoardGeometry.TILE_WIDTH / GROUND_UV_SCALE;
+                float py = (.5f - (y + .5f) / height) * BoardGeometry.TILE_HEIGHT / GROUND_UV_SCALE;
+                if (face.contains(px, py)) { coverage.set(pixel); }
+            }
+        }
+    }
+
     private static Images compose(Key key, BoardScene.Pixels incline, BoardScene.Pixels high) {
         BoardScene.Pixels ground = key.ground().color();
         int width = Math.max(ground.width(), (int) BoardGeometry.TILE_WIDTH);
@@ -133,11 +157,7 @@ final class BoardRim {
                 float red = rgba >>> 24, green = rgba >>> 16 & 255, blue = rgba >>> 8 & 255;
                 float px = ((x + 0.5f) / width - 0.5f) * BoardGeometry.TILE_WIDTH / GROUND_UV_SCALE;
                 float py = (0.5f - (y + 0.5f) / height) * BoardGeometry.TILE_HEIGHT / GROUND_UV_SCALE;
-                boolean inside = false;
-                for (Triangle face : key.faces()) {
-                    if (face.contains(px, py)) { inside = true; break; }
-                }
-                if (inside) {
+                if (key.coverage().get(y * width + x)) {
                     int coveredEdges = 0;
                     for (Patch patch : key.patches()) {
                         if ((coveredEdges & (1 << patch.edge())) != 0) { continue; }

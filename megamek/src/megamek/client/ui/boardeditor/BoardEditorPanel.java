@@ -75,6 +75,10 @@ import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.IMapSettingsObserver;
 import megamek.client.ui.clientGUI.RecentBoardList;
+import megamek.client.ui.clientGUI.boardview.BoardArtwork;
+import megamek.client.ui.clientGUI.boardview.BoardFocus;
+import megamek.client.ui.clientGUI.boardview.BoardHexText;
+import megamek.client.ui.clientGUI.boardview.BoardThemeDialog;
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.clientGUI.boardview.overlay.KeyBindingsOverlay;
@@ -94,6 +98,7 @@ import megamek.client.ui.dialogs.minimap.MinimapPanel;
 import megamek.client.ui.dialogs.randomMap.RandomMapDialog;
 import megamek.client.ui.dialogs.randomMap.ResizeMapDialog;
 import megamek.client.ui.enums.DialogResult;
+import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.tileset.TilesetManager;
 import megamek.client.ui.util.MegaMekController;
 import megamek.client.ui.util.UIUtil;
@@ -137,7 +142,7 @@ public class BoardEditorPanel extends JPanel
     private final JFrame frame = new JFrame();
     private final Game game = new Game();
     private Board board = game.getBoard();
-    BoardView bv;
+    private BoardView bv;
     boolean isDragging = false;
     private Component bvc;
     private final CommonMenuBar menuBar = CommonMenuBar.getMenuBarForBoardEditor();
@@ -261,7 +266,12 @@ public class BoardEditorPanel extends JPanel
      */
     private boolean ignoreHotKeys = false;
 
-    private final DeploymentZoneDrawPlugin deploymentZoneDrawer = new DeploymentZoneDrawPlugin();
+    private final TilesetManager tileset;
+    private MinimapPanel minimap;
+    private long overlayRevision;
+    private BoardFocus focusRequest = new BoardFocus(0, null);
+
+    private final DeploymentZonePainter deploymentZoneDrawer = new DeploymentZonePainter();
 
     /**
      * Creates and lays out a new Board Editor frame.
@@ -269,20 +279,48 @@ public class BoardEditorPanel extends JPanel
     public BoardEditorPanel(MegaMekController c) {
         controller = c;
         try {
-            bv = new BoardView(game, controller, null, 0);
+            tileset = new TilesetManager(game);
+        } catch (IOException failure) {
+            throw new IllegalStateException("Cannot initialize editor artwork", failure);
+        }
+        bvc = new JPanel();
+        setupEditorPanel();
+        setupFrame();
+        frame.setVisible(true);
+        if (GUIPreferences.getInstance().getNagForMapEdReadme()) {
+            String title = Messages.getString("BoardEditor.readme.title");
+            String body = Messages.getString("BoardEditor.readme.message");
+            ConfirmDialog confirm = new ConfirmDialog(frame, title, body, true);
+            confirm.setVisible(true);
+            if (!confirm.getShowAgain()) {
+                GUIPreferences.getInstance().setNagForMapEdReadme(false);
+            }
+            if (confirm.getAnswer()) {
+                showHelp();
+            }
+        }
+    }
+
+    /** Construct the compatibility viewport only when the user requests 2D. */
+    public void showClassicEditor() {
+        if (bv != null) { return; }
+        frame.remove(bvc);
+        try {
+            bv = new BoardView(game, controller, null, 0, tileset);
             bv.addOverlay(new KeyBindingsOverlay(bv));
             bv.addOverlay(new TraceOverlay(bv));
             bv.setUseLosTool(false);
             bv.setDisplayInvalidFields(true);
             bv.setTooltipProvider(new BoardEditorTooltip(bv));
             bvc = bv.getComponent(true);
-            bv.addHexDrawPlugin(deploymentZoneDrawer);
+            bv.addHexDrawPlugin((graphics, hex, game, coords, view) -> deploymentZoneDrawer.draw(graphics, hex, view.getScale()));
         } catch (IOException e) {
             JOptionPane.showMessageDialog(frame,
                   Messages.getString("BoardEditor.CouldNotInitialize") + e,
                   Messages.getString("BoardEditor.FatalError"),
                   JOptionPane.ERROR_MESSAGE);
             frame.dispose();
+            return;
         }
 
         // Add a mouse listener for mouse button release
@@ -298,105 +336,96 @@ public class BoardEditorPanel extends JPanel
         bv.addBoardViewListener(new BoardViewListenerAdapter() {
             @Override
             public void hexMoused(BoardViewEvent b) {
-                Coords c = b.getCoords();
-                // return if there are no or no valid coords or if we click the same hex again unless Raise/Lower
-                // Terrain is active which should let us click the same hex
-                if ((c == null) || (c.equals(lastClicked) && (paintMode() != PaintMode.LOWER_RAISE_HEX_LEVEL))
-                      || !board.contains(c)) {
-                    return;
-                }
-                lastClicked = c;
-                bv.cursor(c);
-                boolean isALT = (b.getModifiers() & InputEvent.ALT_DOWN_MASK) != 0;
-                boolean isSHIFT = (b.getModifiers() & InputEvent.SHIFT_DOWN_MASK) != 0;
-                boolean isCTRL = (b.getModifiers() & InputEvent.CTRL_DOWN_MASK) != 0;
-                boolean isLMB = (b.getButton() == MouseEvent.BUTTON1);
-
-                // Raise/Lower Terrain is selected
-                if (paintMode() == PaintMode.LOWER_RAISE_HEX_LEVEL) {
-                    // Mouse Button released
-                    if (b.getType() == BoardViewEvent.BOARD_HEX_CLICKED) {
-                        hexLevelToDraw = -1000;
-                        isDragging = false;
-                    }
-
-                    // Mouse Button clicked or dragged
-                    if ((b.getType() == BoardViewEvent.BOARD_HEX_DRAGGED) && isLMB) {
-                        if (!isDragging) {
-                            hexLevelToDraw = board.getHex(c).getLevel();
-                            if (isALT) {
-                                hexLevelToDraw--;
-                            } else if (isSHIFT) {
-                                hexLevelToDraw++;
-                            }
-                            isDragging = true;
-                        }
-                    }
-
-                    // CORRECTION, click outside the board then drag inside???
-                    if (hexLevelToDraw != -1000) {
-                        LinkedList<Coords> allBrushHexes = getBrushCoords(c);
-                        for (Coords h : allBrushHexes) {
-                            if (!buttonOOC.isSelected() || board.getHex(h).isClearHex()) {
-                                saveToUndo(h);
-                                relevelHex(h, hexLevelToDraw);
-                            }
-                        }
-                    }
-                    // ------- End Raise/Lower Terrain
-
-                } else if (paintMode() == PaintMode.DEPLOYMENT_ZONE) {
-                    if (isLMB || (b.getModifiers() & InputEvent.BUTTON1_DOWN_MASK) != 0) {
-                        for (Coords h : getBrushCoords(c)) {
-                            saveToUndo(h);
-                            if (isCTRL) {
-                                removeDeploymentZone(h, (int) deploymentZoneChooser.getValue());
-                            } else {
-                                addDeploymentZone(h, (int) deploymentZoneChooser.getValue());
-                            }
-                        }
-                    }
-
-                } else if (isLMB || (b.getModifiers() & InputEvent.BUTTON1_DOWN_MASK) != 0) {
-                    // 'isLMB' is true if a button 1 is associated to a click or release but not
-                    // while dragging.
-                    // The left button down mask is checked because we could be dragging.
-
-                    // Normal texture paint
-                    if (isALT) { // ALT-Click
-                        setCurrentHex(board.getHex(b.getCoords()));
-                    } else {
-                        for (Coords h : getBrushCoords(c)) {
-                            // test if texture overwriting is active
-                            if ((!buttonOOC.isSelected() || board.getHex(h).isClearHex()) && curHex.isValid(null)) {
-                                saveToUndo(h);
-                                if (isCTRL) { // CTRL-Click
-                                    paintHex(h);
-                                } else if (isSHIFT) { // SHIFT-Click
-                                    addToHex(h);
-                                } else { // Normal click
-                                    retextureHex(h);
-                                }
-                            }
-                        }
-                    }
-                }
+                bv.cursor(b.getCoords());
+                paintAt(b.getCoords(), b.getModifiers(), b.getButton(), b.getType());
             }
         });
 
-        setupEditorPanel();
-        setupFrame();
-        frame.setVisible(true);
-        if (GUIPreferences.getInstance().getNagForMapEdReadme()) {
-            String title = Messages.getString("BoardEditor.readme.title");
-            String body = Messages.getString("BoardEditor.readme.message");
-            ConfirmDialog confirm = new ConfirmDialog(frame, title, body, true);
-            confirm.setVisible(true);
-            if (!confirm.getShowAgain()) {
-                GUIPreferences.getInstance().setNagForMapEdReadme(false);
+        frame.add(bvc, BorderLayout.CENTER);
+        frame.revalidate();
+    }
+
+    /** Shared brush operation. Both input adapters use these same tools and undo history. */
+    private void paintAt(Coords c, int modifiers, int button, int eventType) {
+        // return if there are no or no valid coords or if we click the same hex again unless Raise/Lower
+        // Terrain is active which should let us click the same hex
+        if ((c == null) || (c.equals(lastClicked) && (paintMode() != PaintMode.LOWER_RAISE_HEX_LEVEL))
+              || !board.contains(c)) {
+            return;
+        }
+        lastClicked = c;
+        boolean isALT = (modifiers & InputEvent.ALT_DOWN_MASK) != 0;
+        boolean isSHIFT = (modifiers & InputEvent.SHIFT_DOWN_MASK) != 0;
+        boolean isCTRL = (modifiers & InputEvent.CTRL_DOWN_MASK) != 0;
+        boolean isLMB = (button == MouseEvent.BUTTON1);
+
+        // Raise/Lower Terrain is selected
+        if (paintMode() == PaintMode.LOWER_RAISE_HEX_LEVEL) {
+            // Mouse Button released
+            if (eventType == BoardViewEvent.BOARD_HEX_CLICKED) {
+                hexLevelToDraw = -1000;
+                isDragging = false;
             }
-            if (confirm.getAnswer()) {
-                showHelp();
+
+            // Mouse Button clicked or dragged
+            if ((eventType == BoardViewEvent.BOARD_HEX_DRAGGED) && isLMB) {
+                if (!isDragging) {
+                    hexLevelToDraw = board.getHex(c).getLevel();
+                    if (isALT) {
+                        hexLevelToDraw--;
+                    } else if (isSHIFT) {
+                        hexLevelToDraw++;
+                    }
+                    isDragging = true;
+                }
+            }
+
+            // CORRECTION, click outside the board then drag inside???
+            if (hexLevelToDraw != -1000) {
+                LinkedList<Coords> allBrushHexes = getBrushCoords(c);
+                for (Coords h : allBrushHexes) {
+                    if (!buttonOOC.isSelected() || board.getHex(h).isClearHex()) {
+                        saveToUndo(h);
+                        relevelHex(h, hexLevelToDraw);
+                    }
+                }
+            }
+            // ------- End Raise/Lower Terrain
+
+        } else if (paintMode() == PaintMode.DEPLOYMENT_ZONE) {
+            if (isLMB || (modifiers & InputEvent.BUTTON1_DOWN_MASK) != 0) {
+                for (Coords h : getBrushCoords(c)) {
+                    saveToUndo(h);
+                    if (isCTRL) {
+                        removeDeploymentZone(h, (int) deploymentZoneChooser.getValue());
+                    } else {
+                        addDeploymentZone(h, (int) deploymentZoneChooser.getValue());
+                    }
+                }
+            }
+
+        } else if (isLMB || (modifiers & InputEvent.BUTTON1_DOWN_MASK) != 0) {
+            // 'isLMB' is true if a button 1 is associated to a click or release but not
+            // while dragging.
+            // The left button down mask is checked because we could be dragging.
+
+            // Normal texture paint
+            if (isALT) { // ALT-Click
+                setCurrentHex(board.getHex(c));
+            } else {
+                for (Coords h : getBrushCoords(c)) {
+                    // test if texture overwriting is active
+                    if ((!buttonOOC.isSelected() || board.getHex(h).isClearHex()) && curHex.isValid(null)) {
+                        saveToUndo(h);
+                        if (isCTRL) { // CTRL-Click
+                            paintHex(h);
+                        } else if (isSHIFT) { // SHIFT-Click
+                            addToHex(h);
+                        } else { // Normal click
+                            retextureHex(h);
+                        }
+                    }
+                }
             }
         }
     }
@@ -443,13 +472,21 @@ public class BoardEditorPanel extends JPanel
         if (hasChanges && (showSavePrompt() == DialogResult.CANCELLED)) {
             return;
         }
-        // otherwise: exit the Map Editor
-        minimapW.setVisible(false);
+        dispose();
+    }
+
+    /** Release the editor session and any optional viewport. */
+    public void dispose() {
+        minimap.dispose();
+        minimapW.dispose();
         if (controller != null) {
             controller.removeAllActions();
             controller.boardEditor = null;
         }
-        bv.dispose();
+        GpuBoardWindow.closeEditor(this);
+        if (bv != null) { bv.dispose(); bv = null; }
+        tileset.close();
+        menuBar.die();
         frame.dispose();
     }
 
@@ -841,7 +878,7 @@ public class BoardEditorPanel extends JPanel
         FixedYPanel panlisHex = new FixedYPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
         butDelTerrain = prepareButton("buttonRemT", "Delete Terrain", null, BASE_ARROWBUTTON_ICON_WIDTH);
         butDelTerrain.setEnabled(false);
-        canHex = new HexCanvas(this);
+        canHex = new HexCanvas(this, tileset);
         panlisHex.add(butDelTerrain);
         panlisHex.add(new JScrollPane(lisTerrain));
         panlisHex.add(canHex);
@@ -962,7 +999,7 @@ public class BoardEditorPanel extends JPanel
         // Theme
         JPanel panTheme = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
         choTheme = new JComboBox<>();
-        TilesetManager tileMan = bv.getTilesetManager();
+        TilesetManager tileMan = tileset;
         Set<String> themes = tileMan.getThemes();
         for (String s : themes) {
             choTheme.addItem(s);
@@ -1072,7 +1109,12 @@ public class BoardEditorPanel extends JPanel
         add(panButtons, BorderLayout.PAGE_END);
 
         minimapW = new MinimapDialog(frame);
-        minimapW.add(new MinimapPanel(minimapW, game, bv, null, null, 0));
+        minimap = new MinimapPanel(minimapW, game, null, null, null, 0);
+        minimap.setHexClickHandler(coords -> {
+            focusRequest = new BoardFocus(focusRequest.sequence() + 1, coords);
+            if (bv != null) { bv.centerOnHex(coords); }
+        });
+        minimapW.add(minimap);
         minimapW.setVisible(guip.getMinimapEnabled());
     }
 
@@ -1258,7 +1300,7 @@ public class BoardEditorPanel extends JPanel
 
     private void repaintWorkingHex() {
         if (curHex != null) {
-            TilesetManager tm = bv.getTilesetManager();
+            TilesetManager tm = tileset;
             tm.clearHex(curHex);
         }
         canHex.repaint();
@@ -1467,7 +1509,7 @@ public class BoardEditorPanel extends JPanel
         boolean userCancel = false;
         if (showDialog) {
             RandomMapDialog rmd = new RandomMapDialog(frame, this, null, mapSettings);
-            userCancel = rmd.activateDialog(bv.getTilesetManager().getThemes());
+            userCancel = rmd.activateDialog(tileset.getThemes());
         }
         if (!userCancel) {
             board = BoardUtilities.generateRandom(mapSettings);
@@ -1482,7 +1524,7 @@ public class BoardEditorPanel extends JPanel
 
     public void boardResize() {
         ResizeMapDialog emd = new ResizeMapDialog(frame, this, null, mapSettings);
-        boolean userCancel = emd.activateDialog(bv.getTilesetManager().getThemes());
+        boolean userCancel = emd.activateDialog(tileset.getThemes());
         if (!userCancel) {
             board = BoardUtilities.generateRandom(mapSettings);
 
@@ -1613,9 +1655,9 @@ public class BoardEditorPanel extends JPanel
     /**
      * Saves the board in PNG image format.
      */
-    private void boardSaveImage(boolean ignoreUnits) {
+    private void boardSaveImage() {
         if (curFileImage == null) {
-            boardSaveAsImage(ignoreUnits);
+            boardSaveAsImage();
             return;
         }
         JDialog waitD = new JDialog(frame, Messages.getString("BoardEditor.waitDialog.title"));
@@ -1629,12 +1671,15 @@ public class BoardEditorPanel extends JPanel
         waitD.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
         // save!
         try {
-            ImageIO.write(bv.getEntireBoardImage(ignoreUnits, false), "png", curFileImage);
+            ImageIO.write(BoardArtwork.printable(board, tileset, this::captureOverlay), "png", curFileImage);
         } catch (IOException e) {
             LOGGER.error(e, "boardSaveImage");
+            JOptionPane.showMessageDialog(frame, e.getLocalizedMessage(),
+                  Messages.getString("BoardEditor.saveAsImage"), JOptionPane.ERROR_MESSAGE);
+        } finally {
+            waitD.dispose();
+            frame.setCursor(Cursor.getDefaultCursor());
         }
-        waitD.setVisible(false);
-        frame.setCursor(Cursor.getDefaultCursor());
     }
 
     /**
@@ -1704,7 +1749,7 @@ public class BoardEditorPanel extends JPanel
      * Opens a file dialog box to select a file to save as; saves the board to the file as an image. Useful for printing
      * boards.
      */
-    private void boardSaveAsImage(boolean ignoreUnits) {
+    private void boardSaveAsImage() {
         JFileChooser fc = new JFileChooser(".");
         setDialogSize(fc);
         fc.setLocation(frame.getLocation().x + 150, frame.getLocation().y + 100);
@@ -1737,7 +1782,7 @@ public class BoardEditorPanel extends JPanel
                 return;
             }
         }
-        boardSaveImage(ignoreUnits);
+        boardSaveImage();
     }
 
     //
@@ -1748,7 +1793,9 @@ public class BoardEditorPanel extends JPanel
         if (ie.getSource().equals(cheRoadsAutoExit)) {
             // Set the new value for the option, and refresh the board.
             board.setRoadsAutoExit(cheRoadsAutoExit.isSelected());
-            bv.updateBoard();
+            board.initializeAllAutomaticTerrain();
+            board.processBoardEvent(new megamek.common.event.board.BoardEvent(board, null,
+                  megamek.common.event.board.BoardEvent.BOARD_CHANGED_ALL_HEXES));
             repaintWorkingHex();
         } else if (ie.getSource().equals(cheArena)) {
             // Add or remove the Arena tag. Guard against no-op events fired during board load.
@@ -1919,7 +1966,7 @@ public class BoardEditorPanel extends JPanel
             ignoreHotKeys = false;
         } else if (ae.getActionCommand().equals(ClientGUI.BOARD_SAVE_AS_IMAGE)) {
             ignoreHotKeys = true;
-            boardSaveAsImage(false);
+            boardSaveAsImage();
             ignoreHotKeys = false;
         } else if (ae.getActionCommand().equals(ClientGUI.BOARD_SOURCE_FILE)) {
             if (curBoardFile != null) {
@@ -2031,13 +2078,16 @@ public class BoardEditorPanel extends JPanel
         } else if (ae.getActionCommand().equals(ClientGUI.VIEW_CLIENT_SETTINGS)) {
             showSettings();
         } else if (ae.getActionCommand().equals(ClientGUI.VIEW_ZOOM_IN)) {
-            bv.zoomIn();
+            if (bv != null) { bv.zoomIn(); } else { GpuBoardWindow.zoomEditor(this, -1); }
         } else if (ae.getActionCommand().equals(ClientGUI.VIEW_ZOOM_OUT)) {
-            bv.zoomOut();
+            if (bv != null) { bv.zoomOut(); } else { GpuBoardWindow.zoomEditor(this, 1); }
         } else if (ae.getActionCommand().equals(ClientGUI.VIEW_TOGGLE_ISOMETRIC)) {
             GUIPreferences.getInstance().setIsometricEnabled(!GUIPreferences.getInstance().getIsometricEnabled());
         } else if (ae.getActionCommand().equals(ClientGUI.VIEW_CHANGE_THEME)) {
-            String newTheme = bv.changeTheme();
+            String newTheme;
+            ignoreHotKeys = true;
+            try { newTheme = BoardThemeDialog.choose(frame, board, tileset.getThemes(), curHex.getTheme()); }
+            finally { ignoreHotKeys = false; }
             if (newTheme != null) {
                 choTheme.setSelectedItem(newTheme);
             }
@@ -2409,19 +2459,35 @@ public class BoardEditorPanel extends JPanel
         return frame;
     }
 
-    public BoardView getBoardView() {
-        return bv;
+    public Game getGame() { return game; }
+    public boolean hasClassicView() { return bv != null; }
+    public long overlayRevision() { return overlayRevision; }
+    public BoardFocus focusRequest() { return focusRequest; }
+
+    /** Local presentation only: no viewport repaint is needed for native editing. */
+    public java.awt.image.BufferedImage captureOverlay(Coords coords) {
+        Hex hex = board.getHex(coords);
+        if (!hex.containsTerrain(Terrains.DEPLOYMENT_ZONE) && hex.isValid(null)) { return null; }
+        var image = new java.awt.image.BufferedImage(HexTileset.HEX_W * 3, HexTileset.HEX_H * 3,
+              java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        var graphics = image.createGraphics();
+        try {
+            UIUtil.setHighQualityRendering(graphics);
+            deploymentZoneDrawer.draw(graphics, hex, 3);
+            if (!hex.isValid(null)) { BoardHexText.drawInvalid(graphics, new java.awt.Point(), 3); }
+        } finally { graphics.dispose(); }
+        return image;
     }
 
     public JMenuBar getMenuBar() {
         return menuBar;
     }
 
-    /** The native viewport feeds the same brush listener as a drag in the classic viewport. Runs on Swing. */
+    /** The native viewport invokes the same brush operation as the classic listener. Runs on the EDT. */
     public void paintIn3D(Coords coords, int modifiers) {
         if (coords != null && board.contains(coords) && !shouldIgnoreHotKeys()) {
-            bv.mouseAction(coords, BoardView.BOARD_HEX_DRAG, modifiers | InputEvent.BUTTON1_DOWN_MASK,
-                  MouseEvent.BUTTON1);
+            paintAt(coords, modifiers | InputEvent.BUTTON1_DOWN_MASK, MouseEvent.BUTTON1,
+                  BoardViewEvent.BOARD_HEX_DRAGGED);
         }
     }
 
@@ -2456,6 +2522,13 @@ public class BoardEditorPanel extends JPanel
     /** Move the existing tools to a palette; both view modes retain their controls and the same editor model. */
     public void enter3DEditor() {
         finishBrushStroke();
+        if (bv != null) {
+            bv.dispose();
+            bv = null;
+            frame.remove(bvc);
+            bvc = new JPanel();
+            frame.add(bvc, BorderLayout.CENTER);
+        }
         tools3D = new JDialog(frame, Messages.getString("BoardEditor.tools"), false);
         tools3D.setDefaultCloseOperation(WindowConstants.HIDE_ON_CLOSE);
         tools3D.setAlwaysOnTop(true);
@@ -2481,7 +2554,7 @@ public class BoardEditorPanel extends JPanel
     }
 
     /** Called after native rendering stops; the editor still owns its board view and undo history. */
-    public void leave3DEditor() {
+    public void leave3DEditor(boolean showClassic) {
         finishBrushStroke();
         if (tools3D != null) {
             frame.add(this, BorderLayout.EAST);
@@ -2490,6 +2563,7 @@ public class BoardEditorPanel extends JPanel
             frame.revalidate();
         }
         editorViewButton.setText(Messages.getString("BoardEditor.edit3D"));
+        if (showClassic) { showClassicEditor(); }
     }
 
     /**
@@ -2568,14 +2642,14 @@ public class BoardEditorPanel extends JPanel
 
     private void changeSelectedDeploymentZone() {
         deploymentZoneDrawer.setSelectedDeploymentZone((Integer) deploymentZoneChooser.getValue());
-        bv.clearHexImageCache();
-        bv.repaint();
+        overlayRevision++;
+        if (bv != null) { bv.clearHexImageCache(); bv.repaint(); }
     }
 
     private void deployZoneToggled() {
         deploymentZoneChooser.setEnabled(buttonDeployZone.isSelected());
         deploymentZoneDrawer.setDeploymentZoneMode(buttonDeployZone.isSelected());
-        bv.clearHexImageCache();
-        bv.repaint();
+        overlayRevision++;
+        if (bv != null) { bv.clearHexImageCache(); bv.repaint(); }
     }
 }

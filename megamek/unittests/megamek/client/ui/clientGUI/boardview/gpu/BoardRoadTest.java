@@ -4,11 +4,20 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Map;
 
+import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.VertexAttributes;
+import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.badlogic.gdx.graphics.g3d.Material;
+import com.badlogic.gdx.graphics.g3d.utils.MeshBuilder;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
@@ -323,7 +332,11 @@ class BoardRoadTest {
             for (var patch : GpuRoads.patches(tile, road)) {
                 for (var triangle : GpuRoads.drape(tile, surface, patch)) {
                     Vector3 p = new Vector3(triangle.a()).add(triangle.b()).add(triangle.c()).scl(1f / 3);
-                    assertEquals(surface.height(p.x, p.y) + patch.lift() * BoardGeometry.hexScale(), p.z, .002f);
+                    // A splat borrows whole faces; fragments outside its mask never appear.
+                    if (!patch.shape().contains((p.x - BoardGeometry.centerX(CENTER)) / BoardGeometry.hexScale(),
+                          (p.y - BoardGeometry.centerY(CENTER)) / BoardGeometry.hexScale())) { continue; }
+                    assertEquals(surface.height(p.x, p.y) + patch.lift() * BoardGeometry.hexScale(), p.z, .002f,
+                          "Carrier " + triangle + " direction " + direction + " patch " + patch.texture());
                     triangles++;
                 }
             }
@@ -334,13 +347,92 @@ class BoardRoadTest {
     }
 
     @Test
+    void flatRoadsKeepTheHexMeshAndUseMasksForEdgesAndMarkings() {
+        for (var kind : List.of(BoardRoad.Kind.PAVED, BoardRoad.Kind.DIRT, BoardRoad.Kind.GRAVEL)) {
+            var scene = BoardSurfaceBlendTest.scene(c -> tile(c, kind, 9, 0, BoardScene.Surface.GRASS));
+            var tile = scene.tile(CENTER);
+            var surface = new BoardSurface(scene, tile);
+            var road = BoardRoad.of(scene, tile);
+            assertEquals(6, surface.faces.size(), "A flat road must not subdivide the terrain");
+            float inside = 0, outside = 0;
+            for (var patch : GpuRoads.patches(tile, road)) {
+                assertTrue(GpuRoads.drape(tile, surface, patch).size() <= surface.faces.size(),
+                      "A dash, shoulder or tyre mark must not split terrain triangles");
+                var mask = GpuRoads.mask(road, patch);
+                inside = Math.max(inside, maskAlpha(mask, 6, 8));
+                outside = Math.max(outside, maskAlpha(mask, 11, 8));
+            }
+            assertTrue(inside > .4f, "The mask preserves the road's width for " + kind);
+            assertEquals(0, outside, "Borrowing terrain faces must not paint the surrounding hex");
+        }
+    }
+
+    private static float maskAlpha(GpuRoads.MaskData mask, float x, float y) {
+        int px = (int) Math.floor((x - mask.x()) / mask.width() * mask.pixels().width());
+        int py = (int) Math.floor((y - mask.y()) / mask.height() * mask.pixels().height());
+        if (px < 0 || py < 0 || px >= mask.pixels().width() || py >= mask.pixels().height()) { return 0; }
+        return (mask.pixels().rgba(py * mask.pixels().width() + px) & 255) / 255f;
+    }
+
+    @Test
+    void repeatedRoadsShareMaterialsWithoutSharingWorldCoordinates() {
+        Texture texture = mock(Texture.class);
+        when(texture.getWidth()).thenReturn(512);
+        when(texture.getHeight()).thenReturn(512);
+        var region = new TextureRegion(texture, 16, 32, 128, 96);
+        var scene = BoardSurfaceBlendTest.scene(c -> tile(c, BoardRoad.Kind.PAVED, 9, 0, BoardScene.Surface.GRASS));
+        var road = BoardRoad.of(scene, scene.tile(CENTER));
+        var patch = GpuRoads.patches(scene.tile(CENTER), road).stream()
+              .filter(p -> p.texture().equals("roads/asphalt") && p.fade() == null).findFirst().orElseThrow();
+        var data = GpuRoads.mask(road, patch);
+        var masks = new GpuRoads.Masks();
+        assertSame(data, masks.share(data));
+        assertSame(data, masks.share(GpuRoads.mask(road, patch)), "Identical roads in different chunks share mask storage");
+        var first = new Material("surface", new GpuRoads.Mask(region, data));
+        assertEquals(first, new Material("surface", new GpuRoads.Mask(region, data)), "Repeated roads share one material batch");
+        assertEquals(first, new Material(first), "Chunk rebuilds preserve the atlas region and mask coordinates");
+        assertEquals(first.hashCode(), new Material(first).hashCode());
+        float[] previous = null;
+        for (var coords : List.of(CENTER, CENTER.translated(0))) {
+            var tile = scene.tile(coords);
+            var surface = new BoardSurface(scene, tile);
+            var mesh = new MeshBuilder();
+            mesh.begin(GpuRoads.VERTICES, GL20.GL_TRIANGLES);
+            var triangles = GpuRoads.drape(tile, surface, patch);
+            GpuRoads.write(() -> mesh, triangles, patch, data, surface);
+            assertEquals(triangles.size() * 3, mesh.getNumIndices(), "Mask UVs do not require additional geometry");
+            int stride = mesh.getAttributes().vertexSize / Float.BYTES;
+            int maskOffset = mesh.getAttributes().findByUsage(VertexAttributes.Usage.Generic).offset / Float.BYTES;
+            float[] vertices = new float[mesh.getNumVertices() * stride];
+            mesh.getVertices(vertices, 0);
+            if (previous != null) {
+                assertEquals(previous.length, vertices.length);
+                assertNotEquals(previous[1], vertices[1], "The two carriers occupy different hexes");
+                for (int i = 0; i < vertices.length; i += stride) {
+                    assertEquals(previous[i + maskOffset], vertices[i + maskOffset], .00001f);
+                    assertEquals(previous[i + maskOffset + 1], vertices[i + maskOffset + 1], .00001f,
+                          "A shared atlas slot still maps the road onto each hex's own terrain");
+                }
+            }
+            previous = vertices;
+        }
+    }
+
+    @Test
     void roadKindsUseEngineGroundButUnknownArtworkAndSpecialCombinationsRemainVisible() {
         Hex hex = new Hex(0);
         for (int level = 1; level <= 4; level++) {
             hex.addTerrain(new Terrain(Terrains.ROAD, level, true, 9));
             assertNotEquals(BoardRoad.Kind.NONE, BoardRoad.capture(hex));
             assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
-            for (int special : new int[] { Terrains.ROAD_FLUFF, Terrains.RUBBLE, Terrains.WATER, Terrains.ICE }) {
+            hex.addTerrain(new Terrain(Terrains.ROAD_FLUFF, 1));
+            assertTrue(BoardFeatures.detailedGround(hex, Map.of()), "Standard bends use the native road and ground");
+            for (int fluff : new int[] { 2, 3 }) {
+                hex.addTerrain(new Terrain(Terrains.ROAD_FLUFF, fluff));
+                assertFalse(BoardFeatures.detailedGround(hex, Map.of()), "Preserve special road artwork " + fluff);
+            }
+            hex.removeTerrain(Terrains.ROAD_FLUFF);
+            for (int special : new int[] { Terrains.RUBBLE, Terrains.WATER, Terrains.ICE }) {
                 hex.addTerrain(new Terrain(special, 1));
                 assertFalse(BoardFeatures.detailedGround(hex, Map.of()), "Preserve unsupported combination " + special);
                 hex.removeTerrain(special);
@@ -349,6 +441,9 @@ class BoardRoadTest {
         hex.addTerrain(new Terrain(Terrains.ROAD, 17, true, 9));
         assertEquals(BoardRoad.Kind.NONE, BoardRoad.capture(hex));
         assertFalse(BoardFeatures.detailedGround(hex, Map.of()));
+        hex.removeTerrain(Terrains.ROAD);
+        hex.addTerrain(new Terrain(Terrains.ROAD_FLUFF, 1));
+        assertFalse(BoardFeatures.detailedGround(hex, Map.of()), "Standalone artwork is not a captured road");
     }
 
     @Test

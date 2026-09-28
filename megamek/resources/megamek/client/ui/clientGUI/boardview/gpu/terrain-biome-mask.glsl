@@ -29,8 +29,8 @@ float biomeHexDistance(vec2 p) {
 
 // One bounded stencil serves both the shoreline treatment and the connected liquid's optical mixture.
 // A negative waterLevel disables the liquid work for dry terrain. No additional textures or per-hex draws.
-void terrainCoverage(vec3 world, float edge, float waterLevel, out vec4 cover, out vec4 liquids) {
-    cover = vec4(0.0); liquids = vec4(0.0);
+void terrainCoverage(vec3 world, float edge, float waterLevel, out vec4 cover, out vec4 fringe, out vec4 liquids) {
+    cover = vec4(0.0); fringe = vec4(0.0); liquids = vec4(0.0);
     if (u_biomeBoard.x < 1.0) return;
     const float width = 30.0, height = 30.0 * 72.0 / 84.0;
     int column = int(floor(world.x / (width * .75)));
@@ -42,7 +42,10 @@ void terrainCoverage(vec3 world, float edge, float waterLevel, out vec4 cover, o
     }
     float filament = aqueous ? biomeNoise(mixed / 1.3) * 7.0 : 0.0;
     float fineMix = 1.0 - smoothstep(.08, .4, length(fwidth(world.xy)));
-    float total = 0.0;
+    // Soil/peat reaches onto the adjoining slope; crops and standing pools keep the narrower height support.
+    // Both masks share this stencil, with no extra texture fetches.
+    float edgeNoise = biomeNoise(world.xy / 3.2 + 41.0);
+    float total = 0.0, fieldTotal = 0.0, fringeTotal = 0.0;
     for (int dx = -1; dx <= 1; dx++) {
         int x = column + dx;
         float parity = mod(float(x), 2.0);
@@ -52,35 +55,41 @@ void terrainCoverage(vec3 world, float edge, float waterLevel, out vec4 cover, o
             vec2 center = vec2((3.0 * float(x) + 2.0) * width * .25, -(2.0 * float(y) + parity + 1.0) * height * .5);
             float distance = biomeHexDistance(world.xy - center);
             float w = 1.0 - smoothstep(-edge, edge, distance);
+            float fw = 1.0 - smoothstep(-2.2, 2.2, distance);
+            float bw = 1.0 - smoothstep(-4.5, 4.5, distance + (edgeNoise - .5) * 2.0);
             float lw = aqueous ? 1.0 - smoothstep(-5.0, 5.0, biomeHexDistance(mixed - center)) : 0.0;
             // Fold narrow pigment filaments through the mixing band; uniform interiors remain unchanged.
             lw = clamp(lw + 4.0 * lw * (1.0 - lw) * .13 * sin(lw * 42.0 + filament) * fineMix, 0.0, 1.0);
             total += w;
+            fieldTotal += fw;
+            fringeTotal += bw;
             if ((w > 0.0 || lw > 0.0) && x >= 0 && y >= 0 && float(x) < u_biomeBoard.x && float(y) < u_biomeBoard.y) {
                 vec4 tile = texelFetch(u_biomeHexes, ivec2(x, y), 0);
                 float level = tile.a * 255.0 - 64.0;
                 float z = level * u_levelHeight / u_metre;
                 int kind = int(tile.r * 255.0 + .5);
                 vec4 kinds = vec4(kind == 1, kind == 2, kind == 3, kind == 4);
-                cover += kinds * w * (1.0 - smoothstep(.15, 1.25, abs(world.z - z)));
+                cover += kinds * vec4(fw, w, w, w) * (1.0 - smoothstep(.15, 1.25, abs(world.z - z)));
+                fringe += kinds * vec4(bw, w, w, w) * (1.0 - smoothstep(vec4(.15),
+                      vec4(2.0, 2.8, 2.8, 2.8) + edgeNoise * .8, vec4(abs(world.z - z))));
                 int liquid = int(tile.g * 255.0 + .5);
                 liquids += vec4(liquid == 1, liquid == 2, liquid == 3, liquid == 4) * lw
                       * (1.0 - smoothstep(.05, .25, abs(waterLevel - level)));
             }
         }
     }
-    cover /= max(total, .0001);
+    cover /= max(vec4(fieldTotal, total, total, total), vec4(.0001));
+    fringe /= max(vec4(fringeTotal, total, total, total), vec4(.0001));
     liquids /= max(dot(liquids, vec4(1.0)), .0001);
 }
 
-vec4 biomeCoverage(vec3 world, float edge) {
-    vec4 cover, liquids;
-    terrainCoverage(world, edge, -10000.0, cover, liquids);
-    return cover;
+void biomeCoverage(vec3 world, float edge, out vec4 cover, out vec4 fringe) {
+    vec4 liquids;
+    terrainCoverage(world, edge, -10000.0, cover, fringe, liquids);
 }
 
 vec4 liquidCoverage(vec3 world, float level) {
-    vec4 cover, liquids;
-    terrainCoverage(world, .01, level, cover, liquids);
+    vec4 cover, fringe, liquids;
+    terrainCoverage(world, .01, level, cover, fringe, liquids);
     return liquids;
 }

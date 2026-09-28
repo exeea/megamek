@@ -46,6 +46,9 @@ final class BoardFeatures {
                       Terrains.BLDG_ARMOR, Terrains.BLDG_BASEMENT_TYPE, Terrains.BLDG_FLUFF -> concreteBuilding;
                 case Terrains.ROAD -> BoardRoad.capture(hex) != BoardRoad.Kind.NONE
                       && !hex.containsAnyTerrainOf(Terrains.WATER, Terrains.ICE);
+                // Fluff 1 selects the standard road bend, already represented by the captured road exits.
+                case Terrains.ROAD_FLUFF -> hex.terrainLevel(Terrains.ROAD_FLUFF) == 1
+                      && BoardRoad.capture(hex) != BoardRoad.Kind.NONE;
                 default -> false;
             };
             if (!base) { return false; }

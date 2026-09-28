@@ -165,7 +165,7 @@ final class GpuAttackPanel {
         return panel;
     }
 
-    void update(GpuBoardSource.Frame frame) {
+    void update(BoardSource.Frame frame) {
         BoardScene.Attack attack = frame.attack();
         commands = frame.scene().commands();
         if (attack == null) {

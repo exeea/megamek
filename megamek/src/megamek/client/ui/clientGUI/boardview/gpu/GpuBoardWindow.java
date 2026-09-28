@@ -54,12 +54,14 @@ public final class GpuBoardWindow {
     private final BoardView initialView;
     private final Supplier<JComponent> panel;
     private final Timer startupTimer;
-    private volatile GpuBoardSource source;
+    private volatile BoardSource source;
+    private volatile String previewTitle;
     private volatile String loadingMessage = Messages.getString("ClientGUI.waitingOnTheServer");
     private final Window classicWindow;
-    /** Preview windows own their temporary BoardView and leave the browser's modal session intact. */
+    /** Preview windows own their temporary game and leave the browser's modal session intact. */
     private final boolean preview;
     private final BoardEditorPanel editor;
+    private final Game mapGame;
     private final Map<Dialog, Boolean> dialogOnTop = new IdentityHashMap<>();
     /**
      * The classic window hides while the GPU view runs, so a Swing dialog owned by it (deployment elevation choices,
@@ -95,22 +97,21 @@ public final class GpuBoardWindow {
     private volatile GpuWindowBounds publishedBounds;
 
     private GpuBoardWindow(ClientGUI gui, BoardView view, Supplier<JComponent> panel) {
-        this(gui, view, panel, null);
-    }
-
-    private GpuBoardWindow(ClientGUI gui, BoardView view, Supplier<JComponent> panel, Window previewOwner) {
-        this(gui, view, panel, previewOwner, null);
+        this(gui, view, panel, null, null, null);
     }
 
     private GpuBoardWindow(ClientGUI gui, BoardView view, Supplier<JComponent> panel, Window previewOwner,
-          BoardEditorPanel editor) {
+          BoardEditorPanel editor, Game mapGame) {
         this.gui = gui;
         this.editor = editor;
+        this.mapGame = mapGame;
         initialView = view;
         this.panel = panel;
         preview = previewOwner != null;
+        if (preview) { previewTitle = previewTitle(mapGame.getBoard()); }
         classicWindow = preview ? previewOwner
-              : gui == null ? SwingUtilities.getWindowAncestor(view.getPanel()) : gui.getFrame();
+              : editor != null ? editor.getFrame()
+                    : gui == null ? SwingUtilities.getWindowAncestor(view.getPanel()) : gui.getFrame();
         if (editor != null) {
             loadingMessage = Messages.getString("BoardEditor.edit3DLoading");
         } else if (preview) {
@@ -140,14 +141,16 @@ public final class GpuBoardWindow {
         openPreview(owner, board);
     }
 
-    /** The preview owns a temporary game and view; the shared renderer supplies all terrain and camera controls. */
+    /** The preview owns a temporary game; the shared renderer supplies all terrain and camera controls. */
     public static synchronized void openPreview(Window owner, Board board) {
         if (!SwingUtilities.isEventDispatchThread()) {
             throw new IllegalStateException("Open the GPU preview on the Swing event thread");
         }
         Objects.requireNonNull(owner);
         if (active != null) {
-            if (active.preview || active.closing) {
+            if (active.preview && !active.closing && active.classicWindow == owner) {
+                active.replacePreview(board);
+            } else if (active.preview || active.closing) {
                 active.close(false);
                 active.afterClose = () -> {
                     if (owner.isShowing()) {
@@ -163,11 +166,8 @@ public final class GpuBoardWindow {
             Game game = new Game();
             game.setBoard(board);
             game.setPhase(GamePhase.LOUNGE);
-            BoardView view = new BoardView(game, null, null, 0);
-            view.setDisplayInvalidFields(false);
-            view.setUseLosTool(false);
-            start(new GpuBoardWindow(null, view, () -> null, owner));
-        } catch (IOException | RuntimeException | LinkageError failure) {
+            start(new GpuBoardWindow(null, null, () -> null, owner, null, game));
+        } catch (RuntimeException | LinkageError failure) {
             reportPreviewFailure(owner, failure);
         }
     }
@@ -200,7 +200,24 @@ public final class GpuBoardWindow {
             return;
         }
         editor.finishBrushStroke();
-        start(new GpuBoardWindow(null, editor.getBoardView(), () -> null, null, editor));
+        start(new GpuBoardWindow(null, null, () -> null, null, editor, editor.getGame()));
+    }
+
+    private static String previewTitle(Board board) {
+        return Messages.getString("GpuBoard.previewTitle") + " - " + board.getBoardName();
+    }
+
+    /** Browsing another map reuses the same context, artwork, shaders and UI, just like loading in the editor. */
+    private void replacePreview(Board board) {
+        previewTitle = previewTitle(board);
+        mapGame.setBoard(board); // The source's existing game listener captures and publishes the replacement.
+        Lwjgl3Application app = application;
+        if (app != null) {
+            app.postRunnable(() -> {
+                if (!closing) { ((Lwjgl3Graphics) app.getGraphics()).getWindow().setTitle(previewTitle); }
+            });
+        }
+        focus(false);
     }
 
     /** Start the chosen board window even before a scenario or server has delivered its first map. */
@@ -250,6 +267,8 @@ public final class GpuBoardWindow {
             Thread thread = new Thread(window::run, "MegaMek-GPU-board");
             thread.setDaemon(true);
             thread.start();
+            // Capture map data on its owning EDT while the native thread creates its context and loading UI.
+            if (window.mapGame != null) { SwingUtilities.invokeLater(window::initializeSource); }
         } catch (RuntimeException | LinkageError failure) {
             window.closing = true;
             window.finish(failure);
@@ -262,8 +281,7 @@ public final class GpuBoardWindow {
             // The native window owns startup; its first visible frame begins the entrance animation.
             Lwjgl3ApplicationConfiguration configuration = configuration(false);
             if (preview) {
-                configuration.setTitle(Messages.getString("GpuBoard.previewTitle") + " - "
-                      + initialView.game.getBoard().getBoardName());
+                configuration.setTitle(previewTitle);
             } else if (editor != null) {
                 configuration.setTitle(Messages.getString("BoardEditor.edit3D"));
             }
@@ -291,11 +309,14 @@ public final class GpuBoardWindow {
             });
             new Lwjgl3Application(new GpuBattleView(null) {
                 private boolean presentationRequested;
+                private boolean sourceAttached;
 
                 @Override
                 public void create() {
                     application = (Lwjgl3Application) Gdx.app;
                     super.create();
+                    // Another preview may have been selected before the native context finished opening.
+                    if (preview) { ((Lwjgl3Graphics) Gdx.graphics).getWindow().setTitle(previewTitle); }
                     prepareEntrance();
                     if (closing) {
                         application.exit();
@@ -306,6 +327,11 @@ public final class GpuBoardWindow {
 
                 @Override
                 public void render() {
+                    BoardSource next = GpuBoardWindow.this.source;
+                    if (!closing && presented && !sourceAttached && next != null) {
+                        attachSource(next);
+                        sourceAttached = true;
+                    }
                     setLoadingMessage(loadingMessage);
                     super.render();
                     if (presented && ++framesSinceBounds >= BOUNDS_POLL_FRAMES) {
@@ -393,8 +419,6 @@ public final class GpuBoardWindow {
         if (closing) {
             return;
         }
-        presented = true;
-        focus(true);
         if (!preview && classicWindow != null) {
             classicWindow.setVisible(false);
         }
@@ -405,7 +429,12 @@ public final class GpuBoardWindow {
             gui.setClassicBoardViewEnabled(false);
             gui.refreshAuxiliaryWindows();
         }
-        startupTimer.start();
+        // A source captured during native startup must publish the now-measured tools inset before camera fitting.
+        if (editor != null && source != null) { source.refresh(); }
+        initializeSource();
+        presented = true;
+        focus(true);
+        if (!closing && source == null) { startupTimer.start(); }
     }
 
     private void initializeSource() {
@@ -419,17 +448,11 @@ public final class GpuBoardWindow {
         }
         BoardView view = gui == null ? initialView : gui.getCurrentBoardView()
               .filter(BoardView.class::isInstance).map(BoardView.class::cast).orElse(null);
-        if (view == null) {
-            return;
-        }
+        if (mapGame == null && view == null) { return; }
+        if (mapGame != null && (mapGame.getBoard().getWidth() < 1 || mapGame.getBoard().getHeight() < 1)) { return; }
         try {
-            source = new GpuBoardSource(view, panel, editor);
+            source = mapGame == null ? new GpuBoardSource(view, panel) : new GpuMapSource(mapGame, classicWindow, editor);
             startupTimer.stop();
-            application.postRunnable(() -> {
-                if (!closing) {
-                    ((GpuBattleView) Gdx.app.getApplicationListener()).attachSource(source);
-                }
-            });
         } catch (RuntimeException | LinkageError failure) {
             startupFailure = failure;
             close(false);
@@ -484,15 +507,14 @@ public final class GpuBoardWindow {
             active = null;
         }
         if (preview) {
-            initialView.dispose();
             if (classicWindow.isShowing() && afterClose == null) {
                 classicWindow.toFront();
                 classicWindow.requestFocus();
             }
         }
         if (editor != null) {
-            editor.leave3DEditor();
             restoreClassic = (restoreClassic || failure != null) && classicWindow.isDisplayable();
+            editor.leave3DEditor(restoreClassic);
         }
         // The native window is already destroyed. Never resurrect a client that is shutting down.
         if (afterClose != null) {
@@ -639,8 +661,18 @@ public final class GpuBoardWindow {
         }
     }
 
+    public static synchronized void closeEditor(BoardEditorPanel editor) {
+        if (active != null && active.editor == editor) { active.close(false); }
+    }
+
+    public static synchronized void zoomEditor(BoardEditorPanel editor, int direction) {
+        if (active != null && active.editor == editor && active.application != null) {
+            active.application.postRunnable(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).zoomEditor(direction));
+        }
+    }
+
     public static synchronized void closeFor(BoardView view) {
-        if (active != null && (active.initialView == view || active.source != null && active.source.currentView() == view)) {
+        if (active != null && (active.initialView == view || active.source instanceof GpuBoardSource gameSource && gameSource.currentView() == view)) {
             active.close(false);
         }
     }

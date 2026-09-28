@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,6 +27,108 @@ import org.junit.jupiter.api.Test;
 
 @Tag("on-demand")
 class GpuRoadSmokeTest {
+    @Test
+    void keepsMinesRoadsVisibleAcrossTheRealBoard() throws Exception {
+        BoardScene scene = GpuRoadSourceTest.minesScene();
+        File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "roads");
+        Files.createDirectories(output.toPath());
+        var failure = new AtomicReference<Throwable>();
+        var original = BoardGeometry.tuning();
+        var config = GpuBoardWindow.configuration(false);
+        config.setWindowedMode(1280, 1440);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                var terrain = new GpuTerrain();
+                var frame = new GpuReviewFrame(weather(0));
+                try {
+                    GpuRiverTerrainSmokeTest.tune(.94f, true);
+                    BoardCamera camera = new BoardCamera();
+                    camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                    camera.setIsometric(false);
+                    camera.camera.zoom = 1;
+                    camera.center(BoardGeometry.center(new Coords(7, 8), 0));
+                    terrain.update(scene, camera.camera);
+                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    terrain.animate(.5f, List.of());
+                    frame.render(terrain, camera, scene);
+                    GpuReviewFrame.save(new File(output, "mines-roads-top.png"));
+                    checkMinesRoads(scene, camera);
+                    for (float zoom : new float[] { 2.5f, 1, .55f, 1 }) {
+                        camera.camera.zoom = zoom;
+                        camera.center(BoardGeometry.center(new Coords(7, 8), 0));
+                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        frame.render(terrain, camera, scene);
+                        GpuReviewFrame.save(new File(output, "mines-roads-zoom-" + zoom + ".png"));
+                        // At distant zoom the asphalt/paint/shoulder can share one pixel; check when inspecting it again.
+                        if (zoom <= 1) { checkMinesRoads(scene, camera); }
+                    }
+                    // A nearby ground edit replaces the chunk atlas while reusing its unchanged road meshes.
+                    var tiles = new ArrayList<>(scene.tiles());
+                    var before = scene.tile(new Coords(8, 11));
+                    tiles.set(tiles.indexOf(before), new BoardScene.Tile(before.coords(), before.elevation(), -1, false, 0,
+                          before.surface(), before.ground(), before.normals(), null, null, null, List.of(), List.of(),
+                          BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE, BoardFireSmoke.NONE, BoardScene.Biome.MUD));
+                    var edited = new BoardScene(scene.boardId(), scene.width(), scene.height(), tiles,
+                          List.of(), List.of(), -1, "", List.of());
+                    terrain.update(edited, camera.camera);
+                    GpuTerrainLodSmokeTest.settle(terrain, null, edited, camera);
+                    frame.render(terrain, camera, edited);
+                    GpuReviewFrame.save(new File(output, "mines-roads-edited.png"));
+                    checkMinesRoads(edited, camera);
+                    terrain.update(scene, camera.camera);
+                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    frame.render(terrain, camera, scene);
+                    checkMinesRoads(scene, camera);
+                    camera.camera.zoom = .2f;
+                    camera.center(BoardGeometry.center(new Coords(7, 14), 0));
+                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    frame.render(terrain, camera, scene);
+                    GpuReviewFrame.save(new File(output, "mines-road-fluff-sand-top.png"));
+                    checkMinesRoads(scene, camera);
+                    camera.setIsometric(true);
+                    camera.center(BoardGeometry.center(new Coords(7, 14), 0));
+                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    frame.render(terrain, camera, scene);
+                    GpuReviewFrame.save(new File(output, "mines-road-fluff-sand-oblique.png"));
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) {
+                    failure.set(error);
+                } finally {
+                    terrain.dispose();
+                    frame.dispose();
+                    BoardGeometry.tune(original);
+                    Gdx.app.exit();
+                }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Mines road coverage", failure.get()); }
+    }
+
+    private static void checkMinesRoads(BoardScene scene, BoardCamera camera) {
+        byte[] pixels = screen();
+        for (var tile : scene.tiles()) {
+            if (!BoardRoad.rendered(tile)) { continue; }
+            var surface = new BoardSurface(scene, tile);
+            Vector3 center = BoardGeometry.center(tile.coords(), tile.elevation());
+            for (int direction = 0; direction < 6; direction++) {
+                if ((tile.roadExits() & (1 << direction)) == 0) { continue; }
+                Vector3 along = BoardGeometry.center(tile.coords().translated(direction), 0)
+                      .sub(BoardGeometry.center(tile.coords(), 0)).nor();
+                Vector3 across = new Vector3(-along.y, along.x, 0);
+                Vector3 at = new Vector3(center).mulAdd(along, 24 * BoardGeometry.hexScale())
+                      .mulAdd(across, 3 * BoardGeometry.hexScale());
+                at.z = surface.height(at.x, at.y);
+                Vector3 point = camera.camera.project(at);
+                if (point.x < 3 || point.y < 3 || point.x >= Gdx.graphics.getBackBufferWidth() - 3
+                      || point.y >= Gdx.graphics.getBackBufferHeight() - 3) { continue; }
+                Vector3 color = pixelColor(pixels, point);
+                assertTrue(color.x - color.z < 35,
+                      "Mines road " + tile.coords().getBoardNum() + " exit " + direction + " is hidden: " + color);
+            }
+        }
+    }
+
     @Test
     void capturesConcreteRetainingWallsBesideRoadRamps() throws Exception {
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "roads");
@@ -251,6 +354,7 @@ class GpuRoadSmokeTest {
                             camera.center(BoardGeometry.center(BoardRoadTest.CENTER, 0));
                             frame.render(terrain, camera, junction);
                             GpuReviewFrame.save(new File(output, "roundabout-" + exits + "-" + kind + ".png"));
+                            if (kind == BoardRoad.Kind.PAVED) { checkEveryApproach(camera, exits); }
                         }
                     }
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
@@ -368,15 +472,41 @@ class GpuRoadSmokeTest {
     }
 
     private static float brightness(byte[] pixels, Vector3 point) {
-        long total = 0;
+        Vector3 color = pixelColor(pixels, point);
+        return (color.x + color.y + color.z) / 3;
+    }
+
+    private static Vector3 pixelColor(byte[] pixels, Vector3 point) {
+        Vector3 total = new Vector3();
         int width = Gdx.graphics.getBackBufferWidth();
         for (int y = Math.round(point.y) - 2; y <= Math.round(point.y) + 2; y++) {
             for (int x = Math.round(point.x) - 2; x <= Math.round(point.x) + 2; x++) {
                 int index = (y * width + x) * 4;
-                for (int channel = 0; channel < 3; channel++) { total += Byte.toUnsignedInt(pixels[index + channel]); }
+                total.add(Byte.toUnsignedInt(pixels[index]), Byte.toUnsignedInt(pixels[index + 1]),
+                      Byte.toUnsignedInt(pixels[index + 2]));
             }
         }
-        return total / 75f;
+        return total.scl(1 / 25f);
+    }
+
+    /** Repeated mask images may share an atlas slot, but every hex must still draw its own asphalt. */
+    private static void checkEveryApproach(BoardCamera camera, int exits) {
+        byte[] pixels = screen();
+        Vector3 center = BoardGeometry.center(BoardRoadTest.CENTER, 0);
+        float scale = BoardGeometry.hexScale();
+        for (int direction = 0; direction < 6; direction++) {
+            if ((exits & (1 << direction)) == 0) { continue; }
+            Vector3 along = BoardGeometry.center(BoardRoadTest.CENTER.translated(direction), 0).sub(center).nor();
+            Vector3 across = new Vector3(-along.y, along.x, 0);
+            for (float distance : new float[] { 32, 55 }) {
+                Vector3 at = new Vector3(center).mulAdd(along, distance * scale);
+                Vector3 asphalt = pixelColor(pixels, camera.camera.project(new Vector3(at).mulAdd(across, 4 * scale)));
+                Vector3 grass = pixelColor(pixels, camera.camera.project(new Vector3(at).mulAdd(across, 15 * scale)));
+                assertTrue(asphalt.y - asphalt.z < grass.y - grass.z - 6,
+                      "Asphalt must remain visible on approach " + direction + " at " + distance
+                      + ": asphalt=" + asphalt + ", grass=" + grass);
+            }
+        }
     }
 
     /** Central road pixels only: surrounding terrain also changes when normal mapping is toggled. */

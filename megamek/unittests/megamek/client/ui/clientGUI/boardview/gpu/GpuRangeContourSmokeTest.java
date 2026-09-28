@@ -56,7 +56,7 @@ class GpuRangeContourSmokeTest {
                     PixmapIO.writePNG(new FileHandle(new File(output, "range-contours-start.png")), before, -1, true);
                     after = draw(control, camera, 0.75f);
                     PixmapIO.writePNG(new FileHandle(new File(output, "range-contours-scrolled.png")), after, -1, true);
-                    if (BoardView.GPU_SCROLLING_RANGE_LABELS) {
+                    if (megamek.client.ui.clientGUI.boardview.BoardTactical.SCROLLING_RANGE_LABELS) {
                         assertTrue(changedPixels(before, after) > 500, "The contour glyphs must visibly move");
                     } else {
                         assertEquals(0, changedPixels(before, after), "Flat range letters must not spin or scroll");

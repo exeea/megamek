@@ -196,7 +196,7 @@ class GpuFiringCaptureTest {
                 assertEquals(before.tile(weaponHex).tactical(), withLabel.tile(weaponHex).tactical(),
                       "Camera-facing lettering must not also be baked into the terrain");
                 assertEquals(scene.tactical(), withLabel.tactical());
-                assertEquals(BoardView.GPU_SCROLLING_RANGE_LABELS ? List.of() : List.of(
+                assertEquals(megamek.client.ui.clientGUI.boardview.BoardTactical.SCROLLING_RANGE_LABELS ? List.of() : List.of(
                       new BoardScene.RangeLabel(weaponHex,
                             FieldOfFireSprite.getFieldOfFireColor(RangeType.RANGE_SHORT).getRGB(), "S")),
                       withLabel.rangeLabels());
@@ -211,7 +211,7 @@ class GpuFiringCaptureTest {
                 fixture.source.refresh();
                 assertTrue(fixture.source.takeFrame().scene().rangeBorders().isEmpty());
                 assertTrue(fixture.source.takeFrame().scene().rangeLabels().isEmpty());
-                assertEquals(BoardView.GPU_SCROLLING_RANGE_LABELS ? 0 : 1, withLabel.rangeLabels().size(),
+                assertEquals(megamek.client.ui.clientGUI.boardview.BoardTactical.SCROLLING_RANGE_LABELS ? 0 : 1, withLabel.rangeLabels().size(),
                       "Hiding the Swing sprite must not mutate an already published snapshot");
                 fixture.view.removeSprites(List.of(weapon, label, sensor, objective));
                 fixture.source.refresh();
@@ -238,7 +238,7 @@ class GpuFiringCaptureTest {
                     assertEquals(labels.get(bracket), captured.label());
                     int rgb = FieldOfFireSprite.getFieldOfFireColor(bracket).getRGB();
                     assertEquals(rgb, captured.rgb(), "Native contours must use the shared range color");
-                    if (!BoardView.GPU_SCROLLING_RANGE_LABELS) {
+                    if (!megamek.client.ui.clientGUI.boardview.BoardTactical.SCROLLING_RANGE_LABELS) {
                         var label = fixture.source.takeFrame().scene().rangeLabels().stream()
                               .filter(range -> range.coords().equals(coords)).findFirst().orElseThrow();
                         assertEquals(captured.label(), label.label());

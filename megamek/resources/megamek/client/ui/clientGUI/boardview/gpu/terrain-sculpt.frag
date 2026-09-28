@@ -415,6 +415,12 @@ void main() {
                     bool single = rock > .5;
                     float poured = 1.0 - smoothstep(-.02, .02, d - (single ? u_levelHeight / u_metre + .12 : drop + 1.0));
                     if (poured > 0.0) {
+                        // Flat panels need only boundary vertices. Evaluate contact shading per fragment so it
+                        // stays at the foot and under the rim instead of stretching across a large triangle.
+                        float shelterDistance = (d - 2.2) / 1.6;
+                        float shelter = max(0.0, 1.0 - shelterDistance * shelterDistance);
+                        float castOcclusion = (1.0 - .4 * exp(-h / 1.6)) * (1.0 - .25 * shelter * shelter);
+                        occlusion = mix(occlusion, castOcclusion, poured);
                         float along = clamp((axes.x / max(axes.x + axes.y, 1e-4) - .5) * 6.0 + .5, 0.0, 1.0);
                         float shadeX, shadeY;
                         vec2 sx = slab(world.y * sign(face.x), world.z, h, d, 1.0, single, shadeX);
@@ -462,6 +468,9 @@ void main() {
             normal = upNormal(detail.rgb, face);
             cavity = detail.a * .6 + .4;
         }
+        if (ground && !shore && family(4.0)) {
+            occlusion = 1.0 - .3 * exp(-v_diffuseUV.y / 3.5);
+        }
         if (shore && !natural) {
             // A drowned wall stays sheer: exposed rock above, then a broken transition into the bed's sediment
             // near its foot. Its height above that bed is supplied by the same vertices that form the wall.
@@ -490,8 +499,9 @@ void main() {
                   broad, fine, region, albedo, normal, cavity, grass, bounce, response, rainCover);
         }
 #endif
-        if (natural && ground) {
-            biomeSurface(world, face, shore, above, albedo, normal, cavity, grass, bounce, biomePool, biomeDamp);
+        if (natural) {
+            biomeSurface(world, face, shore, above, cliff ? v_diffuseUV.x : 0.0,
+                  albedo, normal, cavity, grass, bounce, biomePool, biomeDamp);
         }
         if (ground && grass > 0.0 && !shore && u_wind.z > 0.0) {
             // Gusts roll across a meadow: the grass leans with them and catches the light differently.
@@ -506,12 +516,15 @@ void main() {
             // Wet in a band just above the waterline and below it; beneath it the bed keeps the hue its column of
             // water passes and catches caustics (water-optics.glsl), while the surface above removes the brightness
             // the column absorbs.
-            albedo *= mix(1.0, .75, 1.0 - smoothstep(0.0, .12, above));
+            albedo *= 1.0 - .25 * (1.0 - smoothstep(0.0, .12, above)) * (1.0 - smoothstep(0.0, .20, biomeDamp));
             submerged = max(0.0, depth * u_metre - u_waterLine) / u_levelHeight;
             // Fine wetland sediment keeps its brown/olive tint in the thin shore wash; deeper bed optics are unchanged.
             vec4 mixture = liquidCoverage(world, level);
             if (dot(mixture, vec4(1.0)) < .5) mixture = waterPalette(palette);
-            albedo *= mix(waterBedTint(mixture, submerged), vec3(.92, .88, .73), clamp(biomeDamp * 2.0, 0.0, 1.0));
+            // Water-owned triangles include exposed bars. Apply suspended sediment only below the actual
+            // waterline, or the dry marsh changes colour at the straight boundary of the bed mesh.
+            vec3 bedTint = mix(waterBedTint(mixture, submerged), vec3(.92, .88, .73), clamp(biomeDamp * 2.0, 0.0, 1.0));
+            albedo *= mix(vec3(1.0), bedTint, smoothstep(0.0, .12, -above));
             if (u_rainDetail > 0.0 && u_waterEffects > 0.0) {
                 caustic = waterBedCaustics(v_cloudPosition.xy * u_rainScale, submerged) * u_rainDetail * u_waterEffects;
             }

@@ -17,8 +17,11 @@ void biomePlant(vec3 point, vec3 sourceNormal, vec4 pigment, out vec3 position, 
     mat2 turn = mat2(cos(angle), sin(angle), -sin(angle), cos(angle));
     bool crop = u_biomeKind < 1.5;
     float height = crop ? u_levelHeight * mix(.43, .52, seed) : u_metre * mix(.90, 1.65, fract(seed * 19.37));
-    // Most clumps are low sedge; emergent reeds gather among them. Basal leaves retain their full width.
-    if (!crop && pigment.a > .6 && fract(seed * 71.13) < .55) point *= vec3(.8, .8, .38);
+    // Vary the clump's proportions, with every root fixed to its supporting surface.
+    if (!crop && fract(seed * 71.13) < .55) {
+        point *= vec3(.8, .8, .60);
+        sourceNormal /= vec3(.8, .8, .60);
+    }
     vec3 root = a_coverRoot.xyz;
     float pixels = u_coverPixels / max(.001, abs((u_projViewTrans * vec4(root, 1.0)).w));
     vec3 coverage = smoothstep(vec3(@START0@, @START1@, @START2@), vec3(@FULL0@, @FULL1@, @FULL2@), vec3(pixels));
@@ -26,15 +29,24 @@ void biomePlant(vec3 point, vec3 sourceNormal, vec4 pigment, out vec3 position, 
           : u_biomeLod < 1.5 ? coverage.xy : coverage.yz;
     vec2 wind = length(u_wind.xy) > .01 ? normalize(u_wind.xy) : vec2(.8, .6);
     float gust = sin(dot(root.xy / u_metre, vec2(.21, .12)) - u_rainTime * 1.6);
-    vec2 flex = wind * (.012 + u_wind.z * ((crop ? .055 : .080) + .025 * gust));
+    vec2 flex = wind * (.012 + u_wind.z * (crop ? 5.0 : 1.0) * ((crop ? .055 : .080) + .025 * gust));
     vec2 bend = flex * point.z * point.z;
     position = root + vec3(turn * point.xy + bend, point.z) * height;
-    // A perspective tile can straddle a handoff. Collapse its invisible roots before rasterization.
-    if (v_coverFade.y <= v_coverFade.x) position = root;
     vec2 leaf = turn * sourceNormal.xy;
     normal = normalize(vec3(leaf, sourceNormal.z - dot(flex * 2.0 * point.z, leaf)));
+    if (u_biomeLod > 1.5) {
+        // At a few pixels a crop stalk or clump needs one quad. Face the camera so rotating or looking straight down
+        // cannot turn it edge-on. Keep the base horizontal and lift the top out of its supporting terrain.
+        vec3 right = normalize(vec3(u_projViewTrans[0].x, u_projViewTrans[1].x, 0.0));
+        vec3 up = normalize(vec3(u_projViewTrans[0].y, u_projViewTrans[1].y, u_projViewTrans[2].y));
+        up = normalize(vec3(up.xy, max(up.z, .35)));
+        position = root + (right * point.x + up * point.z + vec3(bend, 0.0)) * height;
+        normal = normalize(cross(right, up));
+    }
+    // A perspective tile can straddle a handoff. Collapse its invisible roots before rasterization.
+    if (v_coverFade.y <= v_coverFade.x) position = root;
     color = vec4(pigment.rgb * mix(.80, 1.17, fract(seed * 31.7)), 1.0);
-    if (!crop) color.rgb *= mix(.46, 1.08, smoothstep(0.0, .6, point.z));
+    if (!crop) color.rgb *= mix(.75, 1.04, smoothstep(0.0, .6, point.z));
     v_coverData = vec2(height, clamp(point.z, 0.0, 1.0));
     v_coverRoot = root.xy / u_worldMetre;
 }

@@ -45,8 +45,10 @@ final class GpuGroundCover implements Disposable {
     private static final float START_PIXELS = 120, FULL_PIXELS = 500;
     private static final long BUILD_NANOS = 2_000_000;
     private static final class Cover {
-        final BoardSurface.Key key;
-        final BoardTacticalGeometry.Surface surface;
+        final BoardVegetation.Key key;
+        BoardTacticalGeometry.Surface surface;
+        // Retain valid roots until a changed cover boundary or mesh LOD is fully prepared.
+        Cover previous;
         final List<BoardSurface.Face> ground;
         final float[] areas;
         final float total;
@@ -57,7 +59,7 @@ final class GpuGroundCover implements Disposable {
         int samples;
         long generation;
 
-        Cover(BoardScene scene, BoardScene.Tile tile, BoardSurface.Key key, BoardTacticalGeometry.Surface surface, long generation) {
+        Cover(BoardScene scene, BoardScene.Tile tile, BoardVegetation.Key key, BoardTacticalGeometry.Surface surface, long generation) {
             this.key = key;
             this.surface = surface;
             this.generation = generation;
@@ -247,22 +249,33 @@ final class GpuGroundCover implements Disposable {
             Cover cover = models.get(tile.coords());
             BoardTacticalGeometry.Surface surface = surfaces.apply(tile.coords());
             if (surface == null) { continue; }
+            int detail = pixels >= 280 ? 1 : 0;
             if (cover == null || cover.generation != generation || cover.surface != surface) {
-                if ((cover == null || cover.surface != surface) && System.nanoTime() >= deadline) {
-                    preparing = true; continue;
-                }
-                BoardSurface.Key key = BoardSurface.geometryKey(scene, tile);
-                if (cover == null || !cover.key.equals(key) || cover.surface != surface) {
-                    if (System.nanoTime() >= deadline) { preparing = true; continue; }
+                var key = BoardVegetation.key(scene, tile);
+                if (cover == null || !cover.key.equals(key) || !BoardVegetation.sameGround(cover.surface, surface, true)) {
+                    Cover previous = cover == null ? null : cover.previous == null ? cover : cover.previous;
+                    // Actual height changes cannot keep roots at the old elevation. Equal ground or a mesh LOD
+                    // handoff can retain complete cover while the replacement reaches its requested density.
+                    boolean retain = previous != null && (previous.key.equals(key)
+                          || BoardVegetation.sameGround(previous.surface, surface, true));
+                    if (System.nanoTime() >= deadline) {
+                        preparing = true;
+                        if (retain) { batches[detail].add(previous, previous.count(target)); }
+                        else { models.remove(tile.coords()); }
+                        continue;
+                    }
                     cover = new Cover(scene, tile, key, surface, generation);
+                    if (retain) { cover.previous = previous; }
                     models.put(tile.coords(), cover);
                 }
+                cover.surface = surface;
                 cover.generation = generation;
             }
             cover.prepare(scene, tile, target, deadline);
             preparing |= cover.samples < target;
-            int detail = pixels >= 280 ? 1 : 0;
-            batches[detail].add(cover, cover.count(target));
+            if (cover.samples >= target) { cover.previous = null; }
+            Cover displayed = cover.previous == null ? cover : cover.previous;
+            batches[detail].add(displayed, displayed.count(target));
         }
         for (Batch batch : batches) {
             ModelInstance instance = batch.upload();

@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.function.Predicate;
+import java.util.function.ToDoubleFunction;
 
 import com.badlogic.gdx.math.EarClippingTriangulator;
 import com.badlogic.gdx.math.Vector3;
@@ -31,18 +32,21 @@ final class BoardRampMesh {
         BoardSurface.Face face() { return new BoardSurface.Face(a.point, b.point, c.point, BoardSurface.Finish.TOP); }
     }
     private record Candidate(Vertex vertex, int revision, float error, List<Triangle> replacement) { }
+    private record Key(long x, long y, long z) { }
 
     private BoardRampMesh() { }
 
-    static void simplify(List<BoardSurface.Face> faces, Predicate<Vector3> pinned, float tolerance) {
-        Map<Vector3, Vertex> vertices = new HashMap<>();
+    static void simplify(List<BoardSurface.Face> faces, Vector3 center, Predicate<Vector3> road, Predicate<Vector3> curved) {
+        ToDoubleFunction<Vector3> tolerance = p -> (road.test(p) ? .0001 : .1) * BoardGeometry.hexScale();
+        Map<Key, Vertex> vertices = new HashMap<>();
         Set<Triangle> triangles = new LinkedHashSet<>();
         Map<Long, Integer> edges = new HashMap<>();
         for (var face : faces) {
-            Vertex a = vertices.computeIfAbsent(face.a(), p -> new Vertex(vertices.size(), p));
-            Vertex b = vertices.computeIfAbsent(face.b(), p -> new Vertex(vertices.size(), p));
-            Vertex c = vertices.computeIfAbsent(face.c(), p -> new Vertex(vertices.size(), p));
-            var triangle = new Triangle(a, b, c, List.of(a.point, b.point, c.point));
+            Vertex a = vertex(vertices, face.a()), b = vertex(vertices, face.b()), c = vertex(vertices, face.c());
+            if (a == b || b == c || c == a) { continue; }
+            var triangle = new Triangle(a, b, c, List.of(a.point, b.point, c.point,
+                  new Vector3(a.point).lerp(b.point, .5f), new Vector3(b.point).lerp(c.point, .5f),
+                  new Vector3(c.point).lerp(a.point, .5f)));
             triangles.add(triangle);
             for (var v : triangle.vertices()) { v.faces.add(triangle); }
             edges.merge(edge(a, b), 1, Integer::sum);
@@ -54,7 +58,7 @@ final class BoardRampMesh {
             for (int i = 0; i < 3; i++) {
                 var a = ring.get(i); var b = ring.get((i + 1) % 3);
                 if (edges.get(edge(a, b)) != 2) { a.pinned = b.pinned = true; }
-                if (pinned.test(a.point)) { a.pinned = true; }
+                if (a.point.epsilonEquals(center, .0001f) || curved.test(a.point)) { a.pinned = true; }
             }
         }
         var pending = new PriorityQueue<Candidate>(Comparator.comparingDouble(Candidate::error)
@@ -79,11 +83,19 @@ final class BoardRampMesh {
         for (var t : triangles) { faces.add(t.face()); }
     }
 
+    private static Vertex vertex(Map<Key, Vertex> vertices, Vector3 p) {
+        // Independent strips reach the same join with a few float ULPs of rounding. Weld that join before
+        // identifying the boundary; otherwise each strip is mistakenly preserved as a separate open mesh.
+        float unit = .001f * BoardGeometry.hexScale();
+        Key key = new Key(Math.round(p.x / unit), Math.round(p.y / unit), Math.round(p.z / unit));
+        return vertices.computeIfAbsent(key, unused -> new Vertex(vertices.size(), p));
+    }
+
     private static long edge(Vertex a, Vertex b) {
         return (long) Math.min(a.id, b.id) << 32 | Math.max(a.id, b.id);
     }
 
-    private static void offer(Vertex v, float tolerance, PriorityQueue<Candidate> pending) {
+    private static void offer(Vertex v, ToDoubleFunction<Vector3> tolerance, PriorityQueue<Candidate> pending) {
         if (v.pinned || v.faces.isEmpty()) { return; }
         // Follow the original fan's opposite edges. No angular sorting or geometric guessing at concave banks.
         Map<Vertex, Vertex> links = new HashMap<>();
@@ -112,8 +124,16 @@ final class BoardRampMesh {
         for (int i = 0; i < indices.size; i += 3) {
             var t = new Triangle(ring.get(indices.get(i)), ring.get(indices.get(i + 2)), ring.get(indices.get(i + 1)),
                   new ArrayList<>());
-            if (new Vector3(t.b.point).sub(t.a.point).crs(new Vector3(t.c.point).sub(t.a.point)).z <= 0) { return; }
+            float area = new Vector3(t.b.point).sub(t.a.point).crs(new Vector3(t.c.point).sub(t.a.point)).z;
+            if (area < -.00001f) { return; }
+            if (area <= .00001f) { continue; }
             replacement.add(t);
+        }
+        // Collinear ears may disappear only if the neighbours still meet exactly along the same 3D boundary.
+        for (var corner : ring) {
+            boolean covered = replacement.stream().anyMatch(t -> Math.abs(t.face().height(corner.point.x, corner.point.y)
+                  - corner.point.z) < .0001f);
+            if (!covered) { return; }
         }
         float error = 0;
         for (var p : samples) {
@@ -125,7 +145,7 @@ final class BoardRampMesh {
                     owner = t; best = Math.abs(height - p.z);
                 }
             }
-            if (owner == null || best > tolerance) { return; }
+            if (owner == null || best > tolerance.applyAsDouble(p)) { return; }
             owner.samples().add(p);
             error = Math.max(error, best);
         }

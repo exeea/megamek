@@ -69,26 +69,16 @@ class BoardRoadRampTest {
         });
     }
 
-    @org.junit.jupiter.api.Test
-    void recordRoadMeshReview() throws Exception {
-        var lines = new java.util.ArrayList<String>();
-        for (int layout = 0; layout < 3; layout++) {
-            var at = BoardRoadTest.CENTER;
-            int rise = layout + 1;
-            var scene = layout < 2 ? BoardSurfaceBlendTest.scene(c -> BoardRoadTest.tile(c,
-                  c.getX() == at.getX() ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE, c.getX() == at.getX() ? 9 : 0,
-                  c.getY() >= at.getY() ? rise : 0, BoardScene.Surface.GRASS)) : junction(at, new int[] { -2, 1, 2, -1, 0, 2 });
-            var surface = new BoardSurface(scene, scene.tile(at));
-            var center = BoardGeometry.center(at, 0);
-            lines.add("count," + layout + "," + surface.faces.size());
-            for (float x = -40; x <= 40; x += .75f) {
-                for (float y = -35; y <= 35; y += .75f) {
-                    float px = center.x + x * BoardGeometry.hexScale(), py = center.y + y * BoardGeometry.hexScale();
-                    if (BoardGeometry.contains(at, px, py)) { lines.add(layout + "," + px + "," + py + "," + surface.height(px, py)); }
-                }
-            }
-        }
-        java.nio.file.Files.writeString(java.nio.file.Path.of("../build/road-mesh-review.csv"), String.join("\n", lines));
+    @ParameterizedTest
+    @ValueSource(ints = { 1, 2, 6 })
+    void rampsStayWithinTheirTerrainTriangleBudgets(int layout) {
+        var at = BoardRoadTest.CENTER;
+        var scene = layout < 6 ? BoardSurfaceBlendTest.scene(c -> BoardRoadTest.tile(c,
+              c.getX() == at.getX() ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE, c.getX() == at.getX() ? 9 : 0,
+              c.getY() >= at.getY() ? layout : 0, BoardScene.Surface.GRASS)) : junction(at, new int[] { -2, 1, 2, -1, 0, 2 });
+        var surface = new BoardSurface(scene, scene.tile(at));
+        int budget = layout == 1 ? 1000 : layout == 2 ? 2000 : 4000;
+        assertTrue(surface.faces.size() < budget, "Count the entire terrain roof, including the earthworks: " + surface.faces.size());
     }
 
     @ParameterizedTest

@@ -27,7 +27,7 @@ import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.FloatArray;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardHexText;
 import megamek.common.board.Coords;
 
 /** Captured board labels stay legible over their own relief, with the scene's real depth everywhere else. */
@@ -94,7 +94,7 @@ final class GpuHexText implements Disposable {
         Map<Plane, Map<Coords, Chunk>> next = new HashMap<>();
         try {
             for (BoardScene.Tile tile : scene.tiles()) {
-                for (BoardView.HexText label : tile.text()) {
+                for (BoardHexText label : tile.text()) {
                     Plane plane = new Plane(tile.elevation() + label.elevation(), headroom(tile, label));
                     Coords cell = new Coords(tile.coords().getX() / GpuTerrain.CHUNK_SIZE,
                           tile.coords().getY() / GpuTerrain.CHUNK_SIZE);
@@ -209,7 +209,7 @@ final class GpuHexText implements Disposable {
         groups.clear();
     }
 
-    private static float headroom(BoardScene.Tile tile, BoardView.HexText label) {
+    private static float headroom(BoardScene.Tile tile, BoardHexText label) {
         if (label.elevation() > 0 || tile.liquid().present()) { return 0; }
         // Whole world units keep differently sized scatter in a small number of font batches.
         return (float) Math.ceil(BoardRelief.decoration(tile) / BoardGeometry.hexScale()) * BoardGeometry.hexScale();

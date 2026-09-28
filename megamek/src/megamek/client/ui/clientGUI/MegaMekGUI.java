@@ -965,6 +965,7 @@ public class MegaMekGUI implements IPreferenceChangeListener {
         controller.boardEditor = editor;
         launch(editor.getFrame());
         editor.boardNew(GUIPreferences.getInstance().getBoardEdRndStart());
+        megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.toggleEditor(editor);
     }
 
     /**
@@ -975,6 +976,7 @@ public class MegaMekGUI implements IPreferenceChangeListener {
         controller.boardEditor = editor;
         launch(editor.getFrame());
         editor.loadBoard(new File(boardFile));
+        megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.toggleEditor(editor);
     }
 
     void showSkinEditor() {
@@ -1000,6 +1002,7 @@ public class MegaMekGUI implements IPreferenceChangeListener {
         controller.boardEditor = editor;
         launch(editor.getFrame());
         editor.loadBoard();
+        megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.toggleEditor(editor);
     }
 
     /**

@@ -18,14 +18,16 @@ import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.utils.FloatArray;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 /** Zoom through both sides of every vegetation handoff using the real shaders and instance batches. */
 @Tag("on-demand")
 class GpuBiomeLodSmokeTest {
-    @Test
-    void zoomingDoesNotSwitchWholeFieldsAtLodBoundaries() throws Exception {
-        var output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "plantation-lod");
+    @ParameterizedTest
+    @EnumSource(value = BoardScene.Biome.class, names = { "FIELD", "MARSH" })
+    void zoomingDoesNotSwitchWholeFieldsAtLodBoundaries(BoardScene.Biome kind) throws Exception {
+        var output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "plantation-lod-" + kind);
         Files.createDirectories(output.toPath());
         var failure = new AtomicReference<Throwable>();
         var original = BoardGeometry.tuning();
@@ -46,7 +48,7 @@ class GpuBiomeLodSmokeTest {
                     camera.setIsometric(true);
                     var scene = BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c,
                           c.getX() >= 3 && c.getX() <= 5 && c.getY() >= 3 && c.getY() <= 5
-                                ? BoardScene.Biome.FIELD : BoardScene.Biome.MUD, 0));
+                                ? kind : BoardScene.Biome.MUD, 0));
                     var focus = BoardGeometry.center(new Coords(4, 4), 0);
                     camera.camera.zoom = .2f;
                     camera.center(focus);

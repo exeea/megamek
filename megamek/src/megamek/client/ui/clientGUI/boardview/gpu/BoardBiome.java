@@ -6,6 +6,7 @@ import megamek.common.board.Coords;
 /** Bounded visual fields in world metres, shared by vegetation placement and the ground shader. */
 final class BoardBiome {
     static final float EDGE_METRES = 2.2f;
+    static final float WET_EDGE_METRES = 14;
     static final float ROW_METRES = 1.15f;
     static final float ROW_X = .9396926f, ROW_Y = .3420201f;
 
@@ -15,6 +16,24 @@ final class BoardBiome {
         return tile != null && tile.detailedGround() && !tile.frozen() && !tile.liquid().present()
               && tile.features().stream().noneMatch(f -> f.kind() == BoardScene.FeatureKind.BUILDING)
               ? tile.biome() : BoardScene.Biome.NONE;
+    }
+
+    /** The exposed bank belongs to the wetland visually even when its mesh belongs to a neighbouring water hex. */
+    static BoardScene.Biome plantKind(BoardScene scene, BoardScene.Tile tile) {
+        var own = kind(tile);
+        if (own != BoardScene.Biome.NONE) { return own; }
+        if (tile == null || !tile.detailedGround() || tile.frozen() || tile.liquid().molten()
+              || tile.surface() == BoardScene.Surface.CONCRETE
+              || tile.features().stream().anyMatch(f -> f.kind() == BoardScene.FeatureKind.BUILDING)) {
+            return BoardScene.Biome.NONE;
+        }
+        for (int direction = 0; direction < 6; direction++) {
+            var next = scene.tile(tile.coords().translated(direction));
+            if (kind(next) == BoardScene.Biome.MARSH && next.elevation() == tile.elevation()) {
+                return BoardScene.Biome.MARSH;
+            }
+        }
+        return BoardScene.Biome.NONE;
     }
 
     static float row(float x, float y) { return (x * ROW_X + y * ROW_Y) / ROW_METRES; }
@@ -29,9 +48,11 @@ final class BoardBiome {
 
     /** All candidates, including ordinary land, compete. Adjacent matching tiles have no internal fade. */
     static float coverage(BoardScene scene, BoardScene.Biome kind, float x, float y, float z) {
-        float width = BoardRelief.metres(EDGE_METRES);
+        boolean marsh = kind == BoardScene.Biome.MARSH;
+        float width = BoardRelief.metres(marsh ? WET_EDGE_METRES : EDGE_METRES);
+        float fieldWidth = BoardRelief.metres(EDGE_METRES);
         int col = (int) Math.floor(x / (BoardGeometry.width() * .75f));
-        float sum = 0, covered = 0;
+        float sum = 0, covered = 0, wet = 0, field = 0, fieldSum = 0;
         for (int dx = -1; dx <= 1; dx++) {
             int cx = col + dx;
             int row = (int) Math.floor(-y / BoardGeometry.height() - (cx & 1) * .5f);
@@ -42,14 +63,25 @@ final class BoardBiome {
                 float distance = Math.max(py - a, (a * px + b * py - BoardGeometry.width() * BoardGeometry.height() / 4)
                       / (float) Math.sqrt(a * a + b * b));
                 float w = 1 - BoardRelief.smooth((distance + width) / (2 * width));
+                float fw = marsh ? 1 - BoardRelief.smooth((distance + fieldWidth) / (2 * fieldWidth)) : 0;
                 sum += w;
+                fieldSum += fw;
                 var tile = scene.tile(coords);
-                if (kind(tile) == kind && tile != null) {
+                var biome = kind(tile);
+                if (tile != null && biome != BoardScene.Biome.NONE) {
                     float height = Math.abs(z - BoardGeometry.groundZ(tile)) / BoardRelief.metres(1);
-                    covered += w * (1 - BoardRelief.smooth((height - .15f) / 1.1f));
+                    float sameLevel = 1 - BoardRelief.smooth((height - .15f) / 1.1f);
+                    if (biome == kind) { covered += w * sameLevel; }
+                    if (biome == BoardScene.Biome.FIELD) { field += fw * sameLevel; }
+                    else { wet += w * sameLevel; }
                 }
             }
         }
-        return sum > 0 ? covered / sum : 0;
+        float result = sum > 0 ? covered / sum : 0;
+        // Match the ground shader's wet-bank reach and its cultivated-row priority in the same bounded stencil.
+        if (marsh && wet > 0) {
+            result *= Math.min(3, sum / wet) * (1 - field / Math.max(fieldSum, .0001f));
+        }
+        return result;
     }
 }

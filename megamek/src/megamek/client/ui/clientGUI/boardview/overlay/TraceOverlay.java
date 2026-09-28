@@ -61,6 +61,9 @@ public class TraceOverlay implements IDisplayable, IPreferenceChangeListener {
     }
 
     @Override
+    public void dispose() { GUIP.removePreferenceChangeListener(this); }
+
+    @Override
     public void draw(Graphics graph, Rectangle clipBounds) {
         if (!visible || traceImage == null) {
             return;

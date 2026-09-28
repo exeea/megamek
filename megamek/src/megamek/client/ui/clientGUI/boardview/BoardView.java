@@ -82,15 +82,12 @@ import megamek.client.ui.clientGUI.boardview.sprite.isometric.IsometricSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.isometric.IsometricWreckSprite;
 import megamek.client.ui.clientGUI.boardview.toolTip.BoardViewTooltipProvider;
 import megamek.client.ui.dialogs.phaseDisplay.EntityChoiceDialog;
-import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.tileset.TilesetManager;
 import megamek.client.ui.util.EntityWreckHelper;
-import megamek.client.ui.util.FontHandler;
 import megamek.client.ui.util.ImageCache;
 import megamek.client.ui.util.KeyBindReceiver;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.MegaMekController;
-import megamek.client.ui.util.StringDrawer;
 import megamek.client.ui.util.UIUtil;
 import megamek.client.ui.widget.MegaMekBorder;
 import megamek.client.ui.widget.SkinSpecification;
@@ -224,7 +221,6 @@ public final class BoardView extends AbstractBoardView
      * keeps it from the tile's top edge, the level/depth/height/foliage stack from its bottom edge, so the text keeps
      * a visible margin instead of touching the hex border. The GPU board draws the same labels from these offsets.
      */
-    private static final int HEX_TEXT_MARGIN = 6;
 
     Dimension hex_size;
 
@@ -302,23 +298,13 @@ public final class BoardView extends AbstractBoardView
     private final ArrayList<FlyOverSprite> flyOverSprites = new ArrayList<>();
 
     TilesetManager tileManager;
-    private HexTileset gpuTileset;
+    private BoardArtwork boardArtwork;
+    private final boolean ownsTileset;
+    private final GameListener boardGameListener;
+    private final List<Runnable> keyRegistrations = new ArrayList<>();
 
     // polygons for a few things
-    private static final Polygon HEX_POLY;
-
-    static {
-        // hex polygon
-        HEX_POLY = new Polygon();
-        HEX_POLY.addPoint(21, 0);
-        HEX_POLY.addPoint(62, 0);
-        HEX_POLY.addPoint(83, 35);
-        HEX_POLY.addPoint(83, 36);
-        HEX_POLY.addPoint(62, 71);
-        HEX_POLY.addPoint(21, 71);
-        HEX_POLY.addPoint(0, 36);
-        HEX_POLY.addPoint(0, 35);
-    }
+    private static final Polygon HEX_POLY = HexDrawUtilities.rasterHex();
 
     Shape[] movementPolys;
     Shape[] facingPolys;
@@ -426,10 +412,6 @@ public final class BoardView extends AbstractBoardView
      * GPU hex layers, kept per hex so captures do not re-match the tileset every frame: the ground artwork
      * the hex paints, the same ground without its water, and the features drawn over both.
      */
-    private record GroundArtwork(BufferedImage color, BufferedImage normal) { }
-    private final Map<Coords, GroundArtwork> groundArtwork = new HashMap<>();
-    private final Map<String, Image> groundNormals = new HashMap<>();
-    private final Map<Coords, DecalArtwork> featureArtwork = new HashMap<>();
 
     private boolean showLobbyPlayerDeployment = false;
 
@@ -481,11 +463,6 @@ public final class BoardView extends AbstractBoardView
      */
     public boolean showAllDeployment = false;
 
-    private final StringDrawer invalidString =
-          new StringDrawer(Messages.getString("BoardEditor.INVALID")).color(GUIP.getWarningColor())
-                .font(FontHandler.notoFont().deriveFont(Font.BOLD))
-                .center();
-
     BoardViewTooltipProvider boardViewToolTip = (point, movementTarget) -> null;
     private boolean tooltipSuspended = false;
 
@@ -501,18 +478,25 @@ public final class BoardView extends AbstractBoardView
      */
     public BoardView(final Game game, final MegaMekController controller, @Nullable ClientGUI clientgui, int boardId)
           throws IOException {
+        this(game, controller, clientgui, boardId, null);
+    }
+
+    /** Editor tools can share their tileset with an explicitly opened compatibility viewport. */
+    public BoardView(Game game, MegaMekController controller, @Nullable ClientGUI clientgui, int boardId,
+          @Nullable TilesetManager sharedTileset) throws IOException {
         super(boardId);
         this.game = game;
         this.clientgui = clientgui;
 
         hexImageCache = new ImageCache<>();
-        tileManager = new TilesetManager(game);
+        ownsTileset = sharedTileset == null;
+        tileManager = ownsTileset ? new TilesetManager(game) : sharedTileset;
         ToolTipManager.sharedInstance().registerComponent(boardPanel);
         setVerticalOffset();
 
         // For Entities that have converted to another mode, check for a different sprite for units that have been
         // blown up, damaged or ejected, force a reload Clear some information regardless of what phase it is
-        GameListener gameListener = new GameListenerAdapter() {
+        boardGameListener = new GameListenerAdapter() {
 
             @Override
             public void gameEntityNew(GameEntityNewEvent gameEntityNewEvent) {
@@ -688,7 +672,7 @@ public final class BoardView extends AbstractBoardView
             }
         };
 
-        game.addGameListener(gameListener);
+        game.addGameListener(boardGameListener);
         game.getBoard(boardId).addBoardListener(this);
 
         redrawTimerTask = scheduleRedrawTimer(); // call only once
@@ -929,26 +913,26 @@ public final class BoardView extends AbstractBoardView
     }
 
     private void registerKeyboardCommands(final MegaMekController controller) {
-        controller.registerCommandAction(KeyCommandBind.TOGGLE_CHAT, this, this::performChat);
-        controller.registerCommandAction(KeyCommandBind.TOGGLE_CHAT_CMD, this, this::performChatCmd);
-        controller.registerCommandAction(KeyCommandBind.CENTER_ON_SELECTED, this, this::centerOnSelected);
+        keyRegistrations.add(controller.registerCommandAction(KeyCommandBind.TOGGLE_CHAT, this, this::performChat));
+        keyRegistrations.add(controller.registerCommandAction(KeyCommandBind.TOGGLE_CHAT_CMD, this, this::performChatCmd));
+        keyRegistrations.add(controller.registerCommandAction(KeyCommandBind.CENTER_ON_SELECTED, this, this::centerOnSelected));
 
-        controller.registerCommandAction(KeyCommandBind.SCROLL_NORTH,
+        keyRegistrations.add(controller.registerCommandAction(KeyCommandBind.SCROLL_NORTH,
               this::canScrollClassicView,
               this::scrollNorth,
-              this::pingMinimap);
-        controller.registerCommandAction(KeyCommandBind.SCROLL_SOUTH,
+              this::pingMinimap));
+        keyRegistrations.add(controller.registerCommandAction(KeyCommandBind.SCROLL_SOUTH,
               this::canScrollClassicView,
               this::scrollSouth,
-              this::pingMinimap);
-        controller.registerCommandAction(KeyCommandBind.SCROLL_EAST,
+              this::pingMinimap));
+        keyRegistrations.add(controller.registerCommandAction(KeyCommandBind.SCROLL_EAST,
               this::canScrollClassicView,
               this::scrollEast,
-              this::pingMinimap);
-        controller.registerCommandAction(KeyCommandBind.SCROLL_WEST,
+              this::pingMinimap));
+        keyRegistrations.add(controller.registerCommandAction(KeyCommandBind.SCROLL_WEST,
               this::canScrollClassicView,
               this::scrollWest,
-              this::pingMinimap);
+              this::pingMinimap));
     }
 
     private boolean canScrollClassicView() {
@@ -1486,8 +1470,7 @@ public final class BoardView extends AbstractBoardView
     public void clearShadowMap() {
         shadowMap = null;
         planarHexImageCache.clear();
-        groundArtwork.clear();
-        featureArtwork.clear();
+        if (boardArtwork != null) { boardArtwork.clear(); }
     }
 
     public @Nullable Point getTerrainLightDirection() {
@@ -2582,99 +2565,13 @@ public final class BoardView extends AbstractBoardView
         if (hex == null) {
             return;
         }
-        Image baseImage = gpuCapture ? gpuTileset.getBase(hex) : tileManager.baseFor(hex);
+        Image baseImage = tileManager.baseFor(hex);
         drawBaseTerrain(hex, graphics2D, baseImage);
     }
 
-    private void drawBaseTerrain(Hex hex, Graphics2D graphics2D, Image baseImage) {
-        Image scaledImage = getScaledImage(baseImage, true);
-
-        // check if this is a standard tile image 84x72 or something different
-        boolean standardTile = (baseImage.getHeight(null) == HEX_H) && (baseImage.getWidth(null) == HEX_W);
-        // do not make larger than hex images even when the input image is big
-        int origImgWidth = scaledImage.getWidth(null); // save for later, needed for large tiles
-        int origImgHeight = scaledImage.getHeight(null);
-
-        if (standardTile) { // is the image hex-sized, 84*72?
-            graphics2D.drawImage(scaledImage, 0, 0, boardPanel);
-            return;
-        }
-
-        // Draw image for a texture larger than a hex
-        Point p1SRC = getHexLocationLargeTile(hex.getCoords().getX(), hex.getCoords().getY());
-        p1SRC.x = p1SRC.x % origImgWidth;
-        p1SRC.y = p1SRC.y % origImgHeight;
-        Point p2SRC = new Point((int) (p1SRC.x + HEX_W * scale), (int) (p1SRC.y + HEX_H * scale));
-        Point p2DST = new Point((int) (HEX_W * scale), (int) (HEX_H * scale));
-
-        // hex mask to limit drawing to the hex shape
-        // TODO : this is not ideal yet but at least it draws without leaving gaps at any zoom
-        Image hexMask = getScaledImage(tileManager.getHexMask(), true);
-        graphics2D.drawImage(hexMask, 0, 0, boardPanel);
-        Composite svComp = graphics2D.getComposite();
-        graphics2D.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_ATOP, 1f));
-
-        // paint the right slice from the big pic
-        graphics2D.drawImage(scaledImage, 0, 0, p2DST.x, p2DST.y, p1SRC.x, p1SRC.y, p2SRC.x, p2SRC.y, null);
-
-        // Handle wrapping of the image
-        if (p2SRC.x > origImgWidth && p2SRC.y <= origImgHeight) {
-            graphics2D.drawImage(scaledImage,
-                  origImgWidth - p1SRC.x,
-                  0,
-                  p2DST.x,
-                  p2DST.y,
-                  0,
-                  p1SRC.y,
-                  p2SRC.x - origImgWidth,
-                  p2SRC.y,
-                  null); // paint additional slice on the left side
-        } else if (p2SRC.x <= origImgWidth && p2SRC.y > origImgHeight) {
-            graphics2D.drawImage(scaledImage,
-                  0,
-                  origImgHeight - p1SRC.y,
-                  p2DST.x,
-                  p2DST.y,
-                  p1SRC.x,
-                  0,
-                  p2SRC.x,
-                  p2SRC.y - origImgHeight,
-                  null); // paint additional slice on the top
-        } else if (p2SRC.x > origImgWidth) {
-            graphics2D.drawImage(scaledImage,
-                  origImgWidth - p1SRC.x,
-                  0,
-                  p2DST.x,
-                  p2DST.y,
-                  0,
-                  p1SRC.y,
-                  p2SRC.x - origImgWidth,
-                  p2SRC.y,
-                  null); // paint additional slice on the top
-            graphics2D.drawImage(scaledImage,
-                  0,
-                  origImgHeight - p1SRC.y,
-                  p2DST.x,
-                  p2DST.y,
-                  p1SRC.x,
-                  0,
-                  p2SRC.x,
-                  p2SRC.y - origImgHeight,
-                  null); // paint additional slice on the left side
-            // paint additional slice on the top left side
-            graphics2D.drawImage(scaledImage,
-                  origImgWidth - p1SRC.x,
-                  origImgHeight - p1SRC.y,
-                  p2DST.x,
-                  p2DST.y,
-                  0,
-                  0,
-                  p2SRC.x - origImgWidth,
-                  p2SRC.y - origImgHeight,
-                  null);
-        }
-
-        graphics2D.setComposite(svComp);
+    private void drawBaseTerrain(Hex hex, Graphics2D graphics, Image image) {
+        BoardArtwork.drawBaseTerrain(hex, graphics, image, getScaledImage(image, true),
+              getScaledImage(tileManager.getHexMask(), true), scale);
     }
 
     /**
@@ -3120,68 +3017,13 @@ public final class BoardView extends AbstractBoardView
         int hexX = hexLocation.x;
         int hexY = hexLocation.y;
         if (!gpuCapture) {
-            for (HexText label : hexText(coords, hex, board)) {
-                boardGraph.setColor(new Color(label.argb(), true));
-                // A label hanging from the tile's top edge is anchored by the top of its glyphs, so its baseline
-                // sits one ascent below the published offset.
-                int offset = label.baseline()
-                      + (label.fromTop() ? boardPanel.getFontMetrics(label.font()).getAscent() : 0);
-                drawCenteredString(label.text(), hexX, hexY + offset, label.font(), boardGraph);
-            }
+            BoardHexText.draw(boardGraph, hexLocation, hex_size.width,
+                  BoardHexText.capture(coords, hex, board, scale, font_hexNumber, font_elev));
         }
 
         if (displayInvalidHexInfo && !hex.isValid(null)) {
-            Point hexCenter = new Point(hexX + (int) (HEX_W / 2.0f * scale), hexY + (int) (HEX_H / 2.0f * scale));
-            invalidString.at(hexCenter).fontSize(14.0f * scale).outline(Color.WHITE, scale / 2).draw(boardGraph);
+            BoardHexText.drawInvalid(boardGraph, new Point(hexX, hexY), scale);
         }
-    }
-
-    /**
-     * One hex text label: its text, color, and font, plus the offset it keeps from the tile's top edge in tile
-     * artwork pixels. The offset carries the label's baseline, except for a label hanging from the tile's top edge
-     * ({@code fromTop}), where the glyphs rise from the offset instead: those are anchored by their top, so their
-     * baseline cannot be put at the offset without pushing them into the tile's top border.
-     */
-    public record HexText(String text, int baseline, Font font, int argb, boolean fromTop, int elevation) { }
-
-    private List<HexText> hexText(Coords coords, Hex hex, Board board) {
-        List<HexText> labels = new ArrayList<>();
-        Color color = board.isSpace() ? GUIP.getBoardSpaceTextColor() : GUIP.getBoardTextColor();
-        if (GUIP.getCoordsEnabled() && scale >= 0.5) {
-            labels.add(new HexText(coords.getBoardNum(), (int) (HEX_TEXT_MARGIN * scale), font_hexNumber,
-                  color.getRGB(), true, 0));
-        }
-        if (scale > 0.5f) {
-            int level = hex.getLevel();
-            int depth = hex.depth(false);
-            Terrain basement = hex.getTerrain(Terrains.BLDG_BASEMENT_TYPE);
-            if (basement != null) {
-                depth = 0;
-            }
-            int height = Math.max(hex.terrainLevel(Terrains.BLDG_ELEV), hex.terrainLevel(Terrains.BRIDGE_ELEV));
-            height = Math.max(height, hex.terrainLevel(Terrains.INDUSTRIAL));
-            int yPosition = HEX_H - HEX_TEXT_MARGIN;
-            if (level != 0) {
-                labels.add(new HexText(Messages.getString("BoardView1.LEVEL") + level,
-                      (int) (yPosition * scale), font_elev, color.getRGB(), false, 0));
-                yPosition -= 10;
-            }
-            if (depth != 0) {
-                labels.add(new HexText(Messages.getString("BoardView1.DEPTH") + depth,
-                      (int) (yPosition * scale), font_elev, color.getRGB(), false, 0));
-                yPosition -= 10;
-            }
-            if (height > 0) {
-                labels.add(new HexText(Messages.getString("BoardView1.HEIGHT") + height,
-                      (int) (yPosition * scale), font_elev, GUIP.getBuildingTextColor().getRGB(), false, height));
-                yPosition -= 10;
-            }
-            if (hex.terrainLevel(Terrains.FOLIAGE_ELEV) == 1) {
-                labels.add(new HexText(Messages.getString("BoardView1.LowFoliage"),
-                      (int) (yPosition * scale), font_elev, GUIP.getLowFoliageColor().getRGB(), false, 0));
-            }
-        }
-        return List.copyOf(labels);
     }
 
     /**
@@ -3298,17 +3140,7 @@ public final class BoardView extends AbstractBoardView
      * opposite direction as well.
      */
     private boolean drawElevationLine(Coords src, int direction) {
-        final Hex srcHex = game.getBoard(boardId).getHex(src);
-        final Hex destHex = game.getBoard(boardId).getHexInDir(src, direction);
-        if ((destHex == null) && (srcHex.getLevel() != 0)) {
-            return true;
-        } else if (destHex == null) {
-            return false;
-        } else if (srcHex.getLevel() != destHex.getLevel()) {
-            return true;
-        } else {
-            return (srcHex.floor() != destHex.floor());
-        }
+        return HexDrawUtilities.hasElevationBorder(game.getBoard(boardId), src, direction);
     }
 
     /**
@@ -3432,8 +3264,7 @@ public final class BoardView extends AbstractBoardView
      * incorrect for large tiles
      */
     static Point getHexLocationLargeTile(int x, int y, float tileScale) {
-        int yPosition = (int) (y * HEX_H * tileScale) + ((x & 1) == 1 ? (int) ((HEX_H / 2.0f) * tileScale) : 0);
-        return new Point((int) (x * HEX_WC * tileScale), yPosition);
+        return BoardArtwork.largeTileLocation(x, y, tileScale);
     }
 
     private Point getHexLocationLargeTile(int x, int y) {
@@ -3978,7 +3809,7 @@ public final class BoardView extends AbstractBoardView
         if (coords == null) {
             return;
         }
-        centerRequest = new CenterRequest(centerRequest.sequence() + 1, coords, entityId);
+        centerRequest = new BoardFocus(centerRequest.sequence() + 1, coords, entityId);
 
         // A native camera request must not construct or move the legacy viewport.
         if (scrollPane == null || (clientgui != null && GpuBoardWindow.isActiveFor(clientgui))) {
@@ -4863,15 +4694,7 @@ public final class BoardView extends AbstractBoardView
         return radarBlipImage;
     }
 
-    /** Flat terrain and decals; solid feature models are captured separately from the Hex. */
-    public record PlanarHex(Coords coords, BufferedImage terrain, BufferedImage normals, BufferedImage decals,
-          BufferedImage decalsWithoutLimbs, BufferedImage tactical, List<HexText> text,
-          Map<Integer, String> structureModels, BufferedImage foliage) { }
-
-    private record DecalArtwork(BufferedImage full, BufferedImage withoutLimbs, BufferedImage foliage) { }
-
     /** Use scrolling text on GPU range contours instead of flat, camera-facing range markers. */
-    public static final boolean GPU_SCROLLING_RANGE_LABELS = false;
     private static final int GPU_MARKING_SCALE = 3;
     private BufferedImage planarChunkImage;
     private final AtomicLong planarRevision = new AtomicLong();
@@ -4904,8 +4727,7 @@ public final class BoardView extends AbstractBoardView
     public void releasePlanarCapture() {
         planarChunkImage = null;
         planarHexImageCache.clear();
-        groundArtwork.clear();
-        featureArtwork.clear();
+        if (boardArtwork != null) { boardArtwork.clear(); }
         clearCapturedHexOverlays();
         capturedTacticalGeometry = BoardTactical.EMPTY;
     }
@@ -4918,15 +4740,9 @@ public final class BoardView extends AbstractBoardView
         capturedSheetColor = null;
     }
 
-    /** Immutable navigation intent from the client; a unit request retains its identity even in a stacked hex. */
-    public record CenterRequest(long sequence, Coords coords, int entityId) {
-        public CenterRequest(long sequence, Coords coords) {
-            this(sequence, coords, Entity.NONE);
-        }
-    }
-    private CenterRequest centerRequest = new CenterRequest(0, null);
+    private BoardFocus centerRequest = new BoardFocus(0, null);
 
-    public CenterRequest getCenterRequest() {
+    public BoardFocus getCenterRequest() {
         return centerRequest;
     }
 
@@ -5003,8 +4819,8 @@ public final class BoardView extends AbstractBoardView
         }
     }
 
-    public List<PlanarHex> capturePlanarHexes(Rectangle hexArea) {
-        List<PlanarHex> result = new ArrayList<>();
+    public List<BoardArtwork.HexImage> capturePlanarHexes(Rectangle hexArea) {
+        List<BoardArtwork.HexImage> result = new ArrayList<>();
         capturePlanarHexes(hexArea, true, hex -> {
             BufferedImage marking = hex.tactical();
             if (marking != null) {
@@ -5012,37 +4828,30 @@ public final class BoardView extends AbstractBoardView
                 copy.setData(marking.getData());
                 marking = copy;
             }
-            result.add(new PlanarHex(hex.coords(), hex.terrain(), hex.normals(), hex.decals(), hex.decalsWithoutLimbs(),
+            result.add(new BoardArtwork.HexImage(hex.coords(), hex.terrain(), hex.normals(), hex.decals(), hex.decalsWithoutLimbs(),
                   marking, hex.text(), hex.structureModels(), hex.foliage()));
         });
-        result.sort(Comparator.comparingInt((PlanarHex hex) -> hex.coords().getX())
+        result.sort(Comparator.comparingInt((BoardArtwork.HexImage hex) -> hex.coords().getX())
               .thenComparingInt(hex -> hex.coords().getY()));
         return result;
     }
 
     /** The consumer must copy pixels before returning: tactical images borrow the reusable capture buffer. */
-    public void capturePlanarHexes(Rectangle hexArea, boolean includeTactical, Consumer<PlanarHex> consumer) {
+    public void capturePlanarHexes(Rectangle hexArea, boolean includeTactical, Consumer<BoardArtwork.HexImage> consumer) {
         capturePlanarHexes(hexArea, true, includeTactical, consumer);
     }
 
     /** Refreshes markings and text without regenerating unchanged terrain artwork or feature models. */
-    public void capturePlanarTactical(Rectangle hexArea, Consumer<PlanarHex> consumer) {
+    public void capturePlanarTactical(Rectangle hexArea, Consumer<BoardArtwork.HexImage> consumer) {
         capturePlanarHexes(hexArea, false, true, consumer);
     }
 
     private void capturePlanarHexes(Rectangle hexArea, boolean includeArtwork, boolean includeTactical,
-          Consumer<PlanarHex> consumer) {
+          Consumer<BoardArtwork.HexImage> consumer) {
         if (!SwingUtilities.isEventDispatchThread()) {
             throw new IllegalStateException("Board layers must be captured on the Swing event thread");
         }
-        if (gpuTileset == null) {
-            gpuTileset = new HexTileset(game, new File(Configuration.dataDir(), "models/board/tileset"));
-            try {
-                gpuTileset.loadFromFile("saxarba.tileset");
-            } catch (IOException exception) {
-                throw new IllegalStateException("Cannot load the 3D board's Saxarba tileset", exception);
-            }
-        }
+        if (boardArtwork == null) { boardArtwork = new BoardArtwork(); }
         if (!tileManager.isStarted()) {
             tileManager.loadNeededImages(game);
         }
@@ -5103,27 +4912,17 @@ public final class BoardView extends AbstractBoardView
                     if (planarHexImageCache.size() > 256) {
                         planarHexImageCache.clear();
                     }
-                    if (groundArtwork.size() > 256) {
-                        groundArtwork.clear();
-                        featureArtwork.clear();
-                    }
                     Rectangle chunk = new Rectangle(column, row, Math.min(16, area.x + area.width - column),
                           Math.min(16, area.y + area.height - row));
                     scale = 1;
                     hex_size = new Dimension(HEX_W, HEX_H);
                     scaledImageCache = artworkScaledCache;
-                    Map<Coords, PlanarHex> artwork = new HashMap<>();
+                    Map<Coords, BoardArtwork.HexImage> artwork = new HashMap<>();
                     for (int x = chunk.x; x < chunk.x + chunk.width; x++) {
                         for (int y = chunk.y; y < chunk.y + chunk.height; y++) {
                             Coords coords = new Coords(x, y);
                             Hex hex = getBoard().getHex(coords);
-                            GroundArtwork ground = includeArtwork ? captureGroundArtwork(coords) : null;
-                            DecalArtwork decals = includeArtwork ? captureDecals(coords) : null;
-                            PlanarHex art = new PlanarHex(coords, ground == null ? null : ground.color(),
-                                  ground == null ? null : ground.normal(),
-                                  decals == null ? null : decals.full(), decals == null ? null : decals.withoutLimbs(),
-                                  null, hexText(coords, hex, getBoard()),
-                                  includeArtwork ? structureModels(hex) : Map.of(), decals == null ? null : decals.foliage());
+                            BoardArtwork.HexImage art = boardArtwork.capture(getBoard(), coords, includeArtwork);
                             if (includeTactical) {
                                 artwork.put(coords, art);
                             } else {
@@ -5239,7 +5038,7 @@ public final class BoardView extends AbstractBoardView
         }
     }
 
-    private void capturePlanarChunk(Rectangle area, Map<Coords, PlanarHex> artwork, Consumer<PlanarHex> consumer) {
+    private void capturePlanarChunk(Rectangle area, Map<Coords, BoardArtwork.HexImage> artwork, Consumer<BoardArtwork.HexImage> consumer) {
         Rectangle pixels = new Rectangle(area.x * HEX_WC * GPU_MARKING_SCALE, area.y * HEX_H * GPU_MARKING_SCALE,
               ((area.width - 1) * HEX_WC + HEX_W) * GPU_MARKING_SCALE,
               (area.height * HEX_H + HEX_H / 2) * GPU_MARKING_SCALE);
@@ -5278,8 +5077,8 @@ public final class BoardView extends AbstractBoardView
                 Point point = getHexLocation(coords);
                 int left = point.x - pixels.x;
                 int top = point.y - pixels.y;
-                PlanarHex art = artwork.get(coords);
-                consumer.accept(new PlanarHex(coords, art.terrain(), art.normals(), art.decals(),
+                BoardArtwork.HexImage art = artwork.get(coords);
+                consumer.accept(new BoardArtwork.HexImage(coords, art.terrain(), art.normals(), art.decals(),
                       art.decalsWithoutLimbs(), markingImage(tactical, left, top), art.text(), art.structureModels(), art.foliage()));
             }
         }
@@ -5297,136 +5096,6 @@ public final class BoardView extends AbstractBoardView
             }
         }
         return null;
-    }
-
-    private Map<Integer, String> structureModels(Hex hex) {
-        Map<Integer, String> models = new HashMap<>();
-        if (hex.containsAnyTerrainOf(Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL)) {
-            List<Image> images = new ArrayList<>(gpuTileset.getSupers(hex));
-            images.add(gpuTileset.getBase(hex));
-            for (Image image : images) {
-                String source = gpuTileset.imageSource(image).replace('\\', '/');
-                int extension = source.lastIndexOf('.');
-                if (extension > 0) {
-                    String model = "buildings/" + source.substring(0, extension);
-                    if (new File(Configuration.dataDir(), "models/board/" + model + ".glb").isFile()
-                          || new File(Configuration.dataDir(), "models/board/" + model + ".g3dj").isFile()) {
-                        for (int terrain : new int[] { Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL }) {
-                            if (hex.containsTerrain(terrain) && gpuTileset.imageHasTerrain(image, terrain)) {
-                                models.putIfAbsent(terrain, model);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        return Map.copyOf(models);
-    }
-
-    private GroundArtwork captureGroundArtwork(Coords coords) {
-        return groundArtwork.computeIfAbsent(coords, key -> {
-            Hex ground = game.getBoard(boardId).getHex(key).duplicate();
-            ground.removeAllTerrains();
-            Hex source = game.getBoard(boardId).getHex(key);
-            for (int terrain : GROUND_TERRAINS) {
-                if (source.containsTerrain(terrain)) {
-                    ground.addTerrain(source.getTerrain(terrain));
-                }
-            }
-            BufferedImage image = new BufferedImage(HEX_W, HEX_H, BufferedImage.TYPE_INT_ARGB);
-            BufferedImage normal = new BufferedImage(HEX_W, HEX_H, BufferedImage.TYPE_INT_ARGB);
-            Graphics2D graphics = image.createGraphics();
-            Graphics2D normalGraphics = normal.createGraphics();
-            try {
-                UIUtil.setHighQualityRendering(graphics);
-                UIUtil.setHighQualityRendering(normalGraphics);
-                Image base = gpuTileset.getBase(ground);
-                drawBaseTerrain(ground, graphics, base);
-                drawBaseTerrain(ground, normalGraphics, groundNormal(base));
-                // Select variants once, and use the same layering and large-image crop for their normal maps.
-                for (Image overlay : gpuTileset.getSupers(ground)) {
-                    if (overlay != null) {
-                        graphics.drawImage(getScaledImage(overlay, true), 0, 0, boardPanel);
-                        normalGraphics.drawImage(getScaledImage(groundNormal(overlay), true), 0, 0, boardPanel);
-                    }
-                }
-            } finally {
-                graphics.dispose();
-                normalGraphics.dispose();
-                // Filtered hexes are temporary, not board-owned tileset cache keys.
-                gpuTileset.clearHex(ground);
-            }
-            return new GroundArtwork(image, normal);
-        });
-    }
-
-    /** Normal assets are prepared offline from this exact source image; custom art without a map stays flat. */
-    private Image groundNormal(Image artwork) {
-        String source = gpuTileset.imageSource(artwork).replace('\\', '/');
-        return groundNormals.computeIfAbsent(source, key -> {
-            File file = new File(Configuration.dataDir(), "models/board/normals/" + key + ".png");
-            if (!key.isEmpty() && file.isFile()) {
-                Image normal = ImageUtil.loadImageFromFile(file.toString());
-                if (normal != null && normal.getWidth(null) == artwork.getWidth(null)
-                      && normal.getHeight(null) == artwork.getHeight(null)) {
-                    return normal;
-                }
-            }
-            BufferedImage flat = new BufferedImage(artwork.getWidth(null), artwork.getHeight(null), BufferedImage.TYPE_INT_ARGB);
-            Graphics2D graphics = flat.createGraphics();
-            try {
-                graphics.drawImage(artwork, 0, 0, null);
-                graphics.setComposite(AlphaComposite.SrcIn);
-                graphics.setColor(new Color(128, 128, 255));
-                graphics.fillRect(0, 0, flat.getWidth(), flat.getHeight());
-            } finally {
-                graphics.dispose();
-            }
-            return flat;
-        });
-    }
-
-    private DecalArtwork captureDecals(Coords coords) {
-        return featureArtwork.computeIfAbsent(coords, key -> {
-            Hex flat = game.getBoard(boardId).getHex(key).duplicate();
-            BufferedImage foliage = null;
-            if (flat.containsAnyTerrainOf(Terrains.WOODS, Terrains.JUNGLE)) {
-                Hex trees = flat.duplicate();
-                trees.removeAllTerrains();
-                for (int type : new int[] { Terrains.WOODS, Terrains.JUNGLE, Terrains.FOLIAGE_ELEV, Terrains.FLUFF }) {
-                    if (flat.containsTerrain(type)) { trees.addTerrain(flat.getTerrain(type)); }
-                }
-                foliage = drawDecals(trees);
-            }
-            for (int terrain : GROUND_TERRAINS) {
-                flat.removeTerrain(terrain);
-            }
-            for (int terrain : MODEL_TERRAINS) {
-                flat.removeTerrain(terrain);
-            }
-            BufferedImage full = drawDecals(flat);
-            BufferedImage withoutLimbs = null;
-            if (flat.containsAnyTerrainOf(Terrains.ARMS, Terrains.LEGS)) {
-                flat.removeTerrain(Terrains.ARMS);
-                flat.removeTerrain(Terrains.LEGS);
-                withoutLimbs = drawDecals(flat);
-            }
-            // The GPU chooses the filtered image only after successfully loading the replacement mesh.
-            return new DecalArtwork(full, withoutLimbs, foliage);
-        });
-    }
-
-    private BufferedImage drawDecals(Hex flat) {
-        BufferedImage image = new BufferedImage(HEX_W, HEX_H, BufferedImage.TYPE_INT_ARGB);
-        Graphics2D graphics = image.createGraphics();
-        try {
-            UIUtil.setHighQualityRendering(graphics);
-            drawSupers(flat, graphics);
-        } finally {
-            graphics.dispose();
-            gpuTileset.clearHex(flat);
-        }
-        return image;
     }
 
     /** Read after overlay capture, on Swing's thread, so hidden or empty unit strips reserve no space. */
@@ -5492,35 +5161,6 @@ public final class BoardView extends AbstractBoardView
         UIUtil.setHighQualityRendering(graphics);
         return graphics;
     }
-
-    /** Draws the tileset's super images for a hex, which it layers over the base terrain. */
-    private void drawSupers(Hex hex, Graphics2D graphics) {
-        if (hex == null) {
-            return;
-        }
-        List<Image> supers = gpuTileset.getSupers(hex);
-        if (supers == null) {
-            return;
-        }
-        for (Image image : supers) {
-            if (image != null) {
-                graphics.drawImage(getScaledImage(image, true), 0, 0, boardPanel);
-            }
-        }
-    }
-
-    private static final int[] GROUND_TERRAINS = { Terrains.ROAD, Terrains.ROAD_FLUFF, Terrains.PAVEMENT, Terrains.SAND,
-          Terrains.SNOW, Terrains.TUNDRA, Terrains.MUD, Terrains.SWAMP, Terrains.ICE, Terrains.MAGMA, Terrains.FIELDS,
-          Terrains.RUBBLE };
-
-    /** These have geometry in 3D; painted cliffs and slopes would duplicate the actual faces. */
-    private static final int[] MODEL_TERRAINS = { Terrains.WATER, Terrains.WATER_FLUFF, Terrains.RAPIDS, Terrains.HAZARDOUS_LIQUID,
-          Terrains.BUILDING, Terrains.BLDG_CF, Terrains.BLDG_ELEV, Terrains.BLDG_FLUFF, Terrains.BLDG_ARMOR,
-          Terrains.FUEL_TANK, Terrains.FUEL_TANK_CF, Terrains.FUEL_TANK_ELEV, Terrains.FUEL_TANK_MAGN,
-          Terrains.BRIDGE, Terrains.BRIDGE_CF, Terrains.BRIDGE_ELEV, Terrains.BRIDGE_REPAIRED,
-          Terrains.WOODS, Terrains.JUNGLE, Terrains.FOLIAGE_ELEV, Terrains.INDUSTRIAL, Terrains.ROUGH,
-          Terrains.CLIFF_TOP, Terrains.CLIFF_BOTTOM, Terrains.INCLINE_TOP, Terrains.INCLINE_BOTTOM,
-          Terrains.INCLINE_HIGH_TOP, Terrains.INCLINE_HIGH_BOTTOM, Terrains.FIRE, Terrains.SMOKE };
 
     /**
      * @param lastCursor The lastCursor to set.
@@ -6592,8 +6232,7 @@ public final class BoardView extends AbstractBoardView
         invalidatePlanarCapture();
         hexImageCache.clear();
         planarHexImageCache.clear();
-        groundArtwork.clear();
-        featureArtwork.clear();
+        if (boardArtwork != null) { boardArtwork.clear(); }
     }
 
     /**
@@ -6609,8 +6248,7 @@ public final class BoardView extends AbstractBoardView
         for (Coords coords : setCoords) {
             hexImageCache.remove(coords);
             planarHexImageCache.remove(coords);
-            groundArtwork.remove(coords);
-            featureArtwork.remove(coords);
+            if (boardArtwork != null) { boardArtwork.invalidate(coords); }
         }
     }
 
@@ -6641,39 +6279,11 @@ public final class BoardView extends AbstractBoardView
         if (game == null) {
             return null;
         }
-        Board board = game.getBoard(boardId);
-        if (board.isSpace()) {
-            return null;
-        }
-
-        Set<String> themes = tileManager.getThemes();
-
-        if (themes.remove("")) {
-            themes.add("(No Theme)");
-        }
-
-        themes.add("(Original Theme)");
-
         setShouldIgnoreKeys(true);
-        selectedTheme = (String) JOptionPane.showInputDialog(null,
-              "Choose the desired theme:",
-              "Theme Selection",
-              JOptionPane.PLAIN_MESSAGE,
-              null,
-              themes.toArray(),
-              selectedTheme);
-        setShouldIgnoreKeys(false);
-
-        if (selectedTheme == null) {
-            return null;
-        } else if (selectedTheme.equals("(Original Theme)")) {
-            selectedTheme = null;
-        } else if (selectedTheme.equals("(No Theme)")) {
-            selectedTheme = "";
-        }
-
-        board.setTheme(selectedTheme);
-        return selectedTheme;
+        try {
+            selectedTheme = BoardThemeDialog.choose(boardPanel, getBoard(), tileManager.getThemes(), selectedTheme);
+            return selectedTheme;
+        } finally { setShouldIgnoreKeys(false); }
     }
 
     public Rectangle getDisplayablesRect() {
@@ -6726,8 +6336,16 @@ public final class BoardView extends AbstractBoardView
         }
         overlays.stream().filter(UnitOverviewOverlay.class::isInstance).map(UnitOverviewOverlay.class::cast)
               .forEach(GUIP::removePreferenceChangeListener);
+        overlays.forEach(IDisplayable::dispose);
+        overlays.clear();
+        keyRegistrations.forEach(Runnable::run);
+        keyRegistrations.clear();
         super.dispose();
         redrawTimerTask.cancel();
+        game.removeGameListener(boardGameListener);
+        game.getBoards().values().forEach(board -> board.removeBoardListener(this));
+        if (ownsTileset) { tileManager.close(); }
+        releasePlanarCapture();
         fovHighlightingAndDarkening.die();
         KeyBindParser.removePreferenceChangeListener(this);
         GUIP.removePreferenceChangeListener(this);
@@ -6842,7 +6460,7 @@ public final class BoardView extends AbstractBoardView
 
     /** Preserve the handler's visible label positions; the GPU only changes their orientation. */
     public List<TextMarkerSprite> getWeaponRangeTextSprites() {
-        return GPU_SCROLLING_RANGE_LABELS ? List.of() : allSprites.stream()
+        return BoardTactical.SCROLLING_RANGE_LABELS ? List.of() : allSprites.stream()
               .filter(TextMarkerSprite.class::isInstance).map(TextMarkerSprite.class::cast)
               .filter(sprite -> sprite.isWeaponRange() && !sprite.isHidden()).toList();
     }

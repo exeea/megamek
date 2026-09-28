@@ -2,11 +2,15 @@
 
 Grass uses **zero draws when too small to resolve, one at a uniform orthographic scale, and at most two in perspective**. These counts cover the grass colour pass, not the whole board. Grass receives the existing lighting and shadows but does not add individual blade shadow draws.
 
+**GPU Tuning → Terrain → Terrain detail → Grass blades** shows or removes the animated grass immediately. It is enabled by default, and **Defaults** turns it back on. Disabling it skips grass root preparation and drawing; cached blades remain available for re-enabling. The ground material, crops, marsh plants and trees are unaffected.
+
 ## What changed
 
 `GpuGroundCover` previously built a separate expanded mesh for each nearby hex. A 65×65 test exposed a second problem: offscreen prefetch exceeded the 384-patch cache and repeatedly evicted and rebuilt patches. With a stationary camera at zoom 0.8, 178 patches were reconstructed in 30 frames.
 
 The replacement stores deterministic surface roots and draws two shared blade templates through OpenGL instancing. Each root uses four floats: position and stable sample rank. The vertex shader supplies curved shape, orientation, colour variation and coherent wind. The fragment shader supplies root darkening, wetness, lighting and shadow reception. Blade templates contain three or seven triangles; no transparent texture cards or new renderer backend are involved.
+
+Grass wind strength interpolates the blade tip's bend angle between its resting shape and the full-wind pose, including the coherent gust. Equal slider steps give equal angular changes throughout 0–1. The tip retains its length, roots stay fixed, and both endpoint poses are preserved. This avoids exhausting most of the visible bend below 0.2 by normalizing an increasingly large displacement; full strength retains the fiftyfold bend and gust inputs.
 
 Visual review exposed abrupt bare clearings from the old fragment shader's coverage cutoff. The shared meadow field now varies blade height and thickness continuously in the vertex shader. Grassy ground retains blades, including shorter growth in those patches. This also removes coverage texture samples and `discard` from the grass fragment shader. Ground colour and grass shape reuse `terrain-meadow.glsl` rather than maintaining two procedural patterns.
 

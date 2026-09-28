@@ -1,6 +1,8 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import megamek.client.ui.clientGUI.boardview.BoardFocus;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -79,7 +81,7 @@ class GpuTargetingSmokeTest {
             });
             new Lwjgl3Application(new GpuBattleView(fixture.source) {
                 @Override
-                void updateCameraFocus(BoardScene scene, BoardView.CenterRequest request) {
+                void updateCameraFocus(BoardScene scene, BoardFocus request) {
                     // Keep every target in view when switching actors; camera following is tested separately.
                     boardCamera.fit(scene);
                 }

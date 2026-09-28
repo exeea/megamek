@@ -35,9 +35,9 @@ class GpuFreeFlightSmokeTest {
         assertTrue(output.isDirectory() || output.mkdirs());
         AtomicReference<Throwable> failure = new AtomicReference<>();
         try (var fixture = GpuBoardFixture.create()) {
-            GpuBoardSource source = mock(GpuBoardSource.class);
-            source.uiPreferences = fixture.source.uiPreferences;
-            source.phaseStatus = fixture.source.phaseStatus;
+            BoardSource source = mock(BoardSource.class);
+            when(source.uiPreferences()).thenAnswer(invocation -> fixture.source.uiPreferences());
+            when(source.phaseStatus()).thenAnswer(invocation -> fixture.source.phaseStatus());
             when(source.takeFrame()).thenAnswer(invocation -> fixture.source.takeFrame());
             new Lwjgl3Application(new GpuBattleView(source) {
                 private Vector3 eye;

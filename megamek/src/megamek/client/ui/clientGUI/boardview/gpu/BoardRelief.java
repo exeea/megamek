@@ -734,6 +734,8 @@ final class BoardRelief {
         final boolean banded;
         /** Length of the corner's fillet along each edge, in world units; zero where the corner stays sharp. */
         final float fillet;
+        /** A free waterfall end shares its rock corner with the adjoining dry cliff. */
+        final boolean waterfall;
         /**
          * Fillet displacements (a sixth of the fillet length) toward the hex on the other side of the outline: the
          * lone high hex of a convex corner or the lone low hex of a concave one ({@code odd}); on a three-level
@@ -770,12 +772,20 @@ final class BoardRelief {
             variation = hash(ix * 7 + 3, iy * 13 - 5);
             boolean anyPinned = false;
             for (Site site : around) { anyPinned |= site == null || !site.sculpted(); }
-            // Where two water hexes step down to each other, the straight walls under a fall meet the corner: it keeps
-            // its place, as it does beside paving, special artwork and roads.
+            boolean waterStep = false, fallingWater = false, naturalBank = false;
             for (int i = 0; i < 3; i++) {
                 Site p = around[i], q = around[(i + 1) % 3];
-                anyPinned |= p != null && q != null && p.liquid() && q.liquid() && p.level() != q.level();
+                boolean step = p != null && q != null && p.liquid() && q.liquid() && p.level() != q.level();
+                waterStep |= step;
+                if (step) {
+                    BoardScene.Tile a = scene.tile(p.coords()), b = scene.tile(q.coords());
+                    fallingWater |= !a.frozen() && !b.frozen() && !BoardSurface.waterSlope(a, b);
+                }
+                naturalBank |= p != null && !p.liquid() && p.detailed() && !p.road() && p.family() != CONCRETE;
             }
+            waterfall = fallingWater && naturalBank && !anyPinned;
+            // Joined curtains keep their shared crest. Free ends can round into dry rock between contact levels.
+            anyPinned |= waterStep && !waterfall;
             pinned = anyPinned;
             if (pinned) {
                 low = mid = high = 0;
@@ -811,7 +821,7 @@ final class BoardRelief {
 
         /** Sets {@link #away} and {@link #want}. */
         private void wantShore() {
-            if (move != null) { return; }
+            if (move != null || waterfall) { return; }
             Site water = null, dry = null;
             int wet = 0;
             boolean flat = false;
@@ -873,6 +883,16 @@ final class BoardRelief {
             if (mid == low || mid == high) { return new int[] { low, high, 0 }; }
             return z >= mid * level ? new int[] { mid, high, 1 } : new int[] { low, mid, 2 };
         }
+
+        /** Keep the existing mouths and ground contacts while rounding the rock between them. */
+        float wallWeight(float z) {
+            if (!waterfall) { return 1; }
+            float distance = Float.POSITIVE_INFINITY;
+            for (Site site : around) {
+                if (site != null) { distance = Math.min(distance, Math.abs(z - site.level() * BoardGeometry.level())); }
+            }
+            return smooth(distance / metres(1.5f));
+        }
     }
 
     private Corner corner(Site site, int index) {
@@ -898,8 +918,9 @@ final class BoardRelief {
             return;
         }
         float[] cached = corner.offsets.computeIfAbsent(Float.floatToIntBits(z), key -> computeCornerOffset(corner, z));
-        out[0] = cached[0];
-        out[1] = cached[1];
+        float weight = corner.wallWeight(z);
+        out[0] = cached[0] * weight;
+        out[1] = cached[1] * weight;
     }
 
     private float[] computeCornerOffset(Corner corner, float z) {
@@ -937,6 +958,9 @@ final class BoardRelief {
         bandOffset(corner, z, band);
         float d = profile(corner.x + band[0], corner.y + band[1], z, bottom, top, drop, geology, footPinned, rimPinned,
               corner.banded) * pin;
+        // The bank must support the free end of a fall. Keep its rounded rock masses, but do not excavate the
+        // shared shoulder from underneath the mouth; the adjoining faces retain their own recesses.
+        if (corner.waterfall) { d = Math.max(0, d); }
         return new float[] { direction[0] * d, direction[1] * d };
     }
 
@@ -958,7 +982,7 @@ final class BoardRelief {
             return;
         }
         float[] cached = corner.bands.computeIfAbsent(Float.floatToIntBits(z), key -> computeBandOffset(corner, z));
-        float weight = wetFoot(corner, z);
+        float weight = wetFoot(corner, z) * corner.wallWeight(z);
         out[0] = cached[0] * weight;
         out[1] = cached[1] * weight;
     }
@@ -968,7 +992,7 @@ final class BoardRelief {
         float level = BoardGeometry.level(), reach = .35f * level, a11 = 0, a12 = 0, a22 = 0, b1 = 0, b2 = 0, widest = 0;
         for (int i = 0; i < 3; i++) {
             Site p = corner.around[i], q = corner.around[(i + 1) % 3];
-            if (joined(p, q)) { continue; }
+            if (p.level() == q.level() && p.detailed() && q.detailed() && !p.liquid() && !q.liquid()) { continue; }
             Site upper = p.level() >= q.level() ? p : q, lower = upper == p ? q : p;
             float bottom = lower.level() * level, top = upper.level() * level;
             boolean inside = z >= bottom - EPSILON * level && z <= top + EPSILON * level;
@@ -1019,6 +1043,9 @@ final class BoardRelief {
             out[0] = lerp(corner.towardMid[0], far[0], f);
             out[1] = lerp(corner.towardMid[1], far[1], f);
         }
+        float weight = corner.wallWeight(z);
+        out[0] *= weight;
+        out[1] *= weight;
     }
 
     /** Outward direction of the rock at a corner and height, or null where the corner line is pinned. */
@@ -1072,6 +1099,8 @@ final class BoardRelief {
         final float length;
         final boolean profiled;
         final boolean fixedSampling;
+        /** Both sides and incident corners can share a single straight, poured edge at every height. */
+        final boolean simpleConcrete;
         /** Water and concrete keep their outlines where they meet a step: no relief at their foot or rim. */
         final boolean footPinned;
         final boolean rimPinned;
@@ -1114,6 +1143,7 @@ final class BoardRelief {
             room = profiled ? room(upper, lower) : 0;
             footRoom = room > 0 ? band(upper, lower, bottom()) : 0;
             drop = upper != null && lower != null ? drop(upper, lower) : 0;
+            simpleConcrete = simpleConcreteCorner(a) && simpleConcreteCorner(b);
         }
 
         float bottom() { return lower == null ? Float.NEGATIVE_INFINITY : lower.level() * BoardGeometry.level(); }
@@ -1147,7 +1177,7 @@ final class BoardRelief {
             return new Vector3(lerp(edge.a.x, edge.b.x, canonical), lerp(edge.a.y, edge.b.y, canonical), z);
         }
         Vector3 p = edgePoint(edge, canonical, z);
-        if (edge.profiled && edge.lower != null) {
+        if (edge.profiled && edge.lower != null && roadCrossing(e)) {
             // Excavated ground follows the envelope between the cliff's foot and rim. Sampling every rock
             // ledge at the changing ramp height folds the shoulder sideways across those ledges.
             float bottom = edge.bottom(), top = edge.top();
@@ -1168,8 +1198,36 @@ final class BoardRelief {
 
     /** Canonical sample count of an edge: cliffs need finer columns than open ground. */
     private int samples(Edge edge) {
+        if (edge.simpleConcrete) { return 1; }
         int steps = edge.fixedSampling ? TerrainLod.FULL.steps : detail.steps;
         return edge.profiled ? 2 * steps : steps;
+    }
+
+    /** No natural relief, road gate, water contact or bedrock needs intermediate samples on this corner. */
+    private boolean simpleConcreteCorner(Corner corner) {
+        if (!BoardRelief.geology().get(CONCRETE).equals(GEOLOGY[CONCRETE])) { return false; }
+        if (corner.low < corner.mid && corner.mid < corner.high) { return false; }
+        int low = Integer.MAX_VALUE, high = Integer.MIN_VALUE;
+        for (Site site : corner.around) {
+            if (site == null) { continue; }
+            if (!planarConcrete(site)) { return false; }
+            low = Math.min(low, site.level());
+            high = Math.max(high, site.level());
+        }
+        return high - low <= 2;
+    }
+
+    /** Prove the whole top is level, including the relief blended in from adjacent surface families. */
+    private boolean planarConcrete(Site site) {
+        if (site.liquid() || site.road() || !site.sculpted() || site.family() != CONCRETE) { return false; }
+        if (!site.detailed()) { return true; }
+        if (BoardRelief.geology().get(CONCRETE).relief() != 0) { return false; }
+        for (int e = 0; e < 6; e++) {
+            Site other = neighbor(site, e);
+            if (other != null && other.detailed() && other.level() == site.level()
+                  && BoardRelief.geology().get(other.family()).relief() != 0) { return false; }
+        }
+        return true;
     }
 
     private float canonical(int index, int sample, int count) {
@@ -1259,27 +1317,36 @@ final class BoardRelief {
               py + ry + by + qy + dy * d * rest + scratchA[1] * wa + ta * ey * (sa - wa)
                     + scratchB[1] * wb + tb * ey * (sb - wb), z);
         // Natural rims keep their formations, but no neighbouring cliff may protrude through a carriageway.
-        float clearance = Float.POSITIVE_INFINITY;
+        float keep = 1;
         for (Corner end : new Corner[] { edge.a, edge.b }) {
             for (Site site : end.around) {
                 if (site == null || !site.road()) { continue; }
                 BoardRoad road = roads.computeIfAbsent(site.coords(), key -> BoardRoad.of(scene, scene.tile(key)));
-                clearance = Math.min(clearance, roadReliefRoom((road.distance((px - site.x()) / BoardGeometry.hexScale(),
-                      (py - site.y()) / BoardGeometry.hexScale()) - 3) * BoardGeometry.hexScale()));
+                keep = Math.min(keep, roadDisplacement(road, site.x(), site.y(), px, py, point.x - px, point.y - py));
             }
         }
-        float displacement = (float) Math.hypot(point.x - px, point.y - py);
-        if (displacement > 0 && clearance < displacement) {
-            float keep = Math.max(0, clearance) / displacement;
+        if (keep < 1) {
             point.x = lerp(px, point.x, keep);
             point.y = lerp(py, point.y, keep);
         }
         return point;
     }
 
-    /** Excavated ground leaves room for its shoulder instead of retaining overhanging cliff formations. */
-    static float roadReliefRoom(float clearance) {
-        return Math.max(0, Math.min(BoardGeometry.width() * .05f, clearance * .2f));
+    /** Keep the native slope unless its displacement actually enters a road's shoulder. */
+    static float roadDisplacement(BoardRoad road, float cx, float cy, float x, float y, float dx, float dy) {
+        float scale = BoardGeometry.hexScale();
+        float px = (x - cx) / scale, py = (y - cy) / scale;
+        dx /= scale;
+        dy /= scale;
+        if (road.distance(px, py) <= 3) { return 0; }
+        if (road.distance(px + dx, py + dy) >= 3) { return 1; }
+        float low = 0, high = 1;
+        for (int i = 0; i < 14; i++) {
+            float mid = (low + high) * .5f;
+            if (road.distance(px + dx * mid, py + dy * mid) >= 3) { low = mid; }
+            else { high = mid; }
+        }
+        return low;
     }
 
     // ---- Wall profile ----------------------------------------------------------------------------------------
@@ -1735,11 +1802,17 @@ final class BoardRelief {
         }
         center.z = groundHeight(center.x, center.y);
         shades.put(center, groundShade(center));
-        // At a few pixels per hex, the inner rim band is subpixel. Keep every seam vertex, but join directly
-        // to the center where the outline permits it. Deep notches still need the band to avoid folded triangles.
-        if (detail == TerrainLod.DISTANT && canFan(center, boundary)) {
+        // A planar slab needs no interior rings. At a few pixels per hex, natural ground can omit them too.
+        // Keep every required seam vertex; deep notches still need the band to avoid folded triangles.
+        boolean planar = planarConcrete(self);
+        if ((planar || detail == TerrainLod.DISTANT) && canFan(center, boundary)) {
             for (int j = 0; j < boundary.size(); j++) {
                 addTriangle(destination, center, boundary.get(j), boundary.get((j + 1) % boundary.size()), BoardSurface.Finish.TOP);
+            }
+            if (planar) {
+                rocks(destination, center);
+                field(destination, center);
+                pits(destination);
             }
             return;
         }
@@ -2527,6 +2600,19 @@ final class BoardRelief {
         return steps == 0 ? fallback : sum / steps;
     }
 
+    /** A free fall and its adjoining cliff share the corner's material, contact heights and ambient shade. */
+    private Shade waterfallCornerShade(Corner corner, Vector3 p, float weight, Shade own) {
+        if (!corner.waterfall || weight <= 0) { return own; }
+        int[] span = corner.span(p.z);
+        float m = metres(1), level = BoardGeometry.level();
+        float height = (p.z - span[0] * level) / m, depth = (span[1] * level - p.z) / m;
+        float contact = 1 - .4f * (float) Math.exp(-Math.max(0, height) / 1.6f);
+        float shelter = 1 - .25f * bump((depth - 2.2f) / 1.6f);
+        return new Shade(own.normal(), own.kind(), lerp(own.occlusion(), contact * shelter, weight),
+              lerp(own.level(), cornerRock(corner, own.level()), weight), lerp(own.rim(), height, weight),
+              lerp(own.foot(), depth, weight), own.tint());
+    }
+
     /**
      * The point nearest (x, y) on the way to the unit anchor that lies on this hex's own top at least {@code margin}
      * inside its outline, so trees and ground clutter stand on the ground, never over a receding rim or a step's slope.
@@ -2649,8 +2735,9 @@ final class BoardRelief {
         Vector3[] points = rims[e];
         int count = points.length - 1;
         boolean drop = edge.upper == self && edge.profiled;
+        boolean planar = planarConcrete(self);
         Vector3[] below = null;
-        if (drop) {
+        if (drop && !planar) {
             float[] rows = rows(edge.bottom(), edge.top());
             float next = rows[rows.length - 2];
             below = new Vector3[count + 1];
@@ -2660,7 +2747,9 @@ final class BoardRelief {
             Vector3 p = points[i];
             float[] seam = seamDistances(p.x, p.y);
             Vector3 normal;
-            if (drop) {
+            if (planar) {
+                normal = new Vector3(0, 0, 1);
+            } else if (drop) {
                 normal = gridNormal(edge, e, points, null, below, i, count).add(0, 0, 1.2f).nor();
             } else if (edge.upper == null || joined(self, neighbor(self, e))) {
                 normal = groundNormal(p);
@@ -2780,7 +2869,13 @@ final class BoardRelief {
                 canonicalWall(e, edge, result);
             } else if (edge != null && edge.upper == self && self.liquid()
                   && (edge.lower == null ? (falls & 1 << e) != 0 : edge.lower.liquid())) {
-                for (BoardSurface.Side side : entry.getValue()) { fallWall(side, result); }
+                float low = Float.POSITIVE_INFINITY, high = Float.NEGATIVE_INFINITY;
+                for (BoardSurface.Side side : entry.getValue()) {
+                    low = Math.min(low, Math.min(side.lowA(), side.lowB()));
+                    high = Math.max(high, Math.max(side.a().z, side.b().z));
+                }
+                float[] rows = rows(low, high);
+                for (BoardSurface.Side side : entry.getValue()) { fallWall(side, rows, result); }
             } else {
                 for (BoardSurface.Side side : entry.getValue()) { straightWall(side, result); }
             }
@@ -2883,17 +2978,13 @@ final class BoardRelief {
         shadeWall(side, result, from);
     }
 
-    /** Rows of every fall wall column, so the columns that neighbouring sides share match. */
-    private static final int FALL_ROWS = 8;
-
     /**
      * A wall under or beside a fall, where two water hexes step down to each other: rock of this hex's ground, its
-     * masses and joints relieved like a cliff's, but held to its line at the rim and the foot and fading out toward the
-     * corners, so it meets the banks, the crest, the pool below and the walls round the corners without a crack. Under
-     * the crest it only recedes, so it stays behind the sheet. Beside the crest its columns are the rim's own samples;
-     * under it, points along the crest.
+     * masses and joints relieved like a cliff's, but held to its line at the rim and the foot. Free ends blend into
+     * the adjoining cliff's canonical corners across the dry banks. Under the crest the rock only recedes, so it stays
+     * behind the sheet. Beside the crest its columns are the rim's own samples; under it, points along the crest.
      */
-    private void fallWall(BoardSurface.Side side, List<BoardSurface.Face> result) {
+    private void fallWall(BoardSurface.Side side, float[] rows, List<BoardSurface.Face> result) {
         int e = side.edge(), n = (e + 1) % 6;
         float m = metres(1);
         float ax = cornerX(self.ix() + CORNER_DX[e]), ay = cornerY(self.iy() + CORNER_DY[e]);
@@ -2931,41 +3022,68 @@ final class BoardRelief {
             }
         }
         Geology geology = BoardRelief.geology().get(self.family());
-        Vector3[][] grid = new Vector3[tops.size()][FALL_ROWS + 1];
-        float[][] depth = new float[tops.size()][FALL_ROWS + 1];
+        int last = rows.length - 1;
+        Vector3[][] grid = new Vector3[tops.size()][rows.length];
+        float[][] depth = new float[tops.size()][rows.length];
+        Corner startCorner = corner(self, e), endCorner = corner(self, n);
+        Edge edge = edge(e);
+        int segments = waterline == null ? 0 : waterline.length / 6;
+        float startBlend = waterline == null ? .3f : Math.clamp(along(e, waterline[e * segments]), .00001f, .3f);
+        float endBlend = waterline == null ? .3f : Math.clamp(1 - along(e, waterline[n * segments]), .00001f, .3f);
         for (int c = 0; c < tops.size(); c++) {
             Vector3 top = tops.get(c);
             float low = lows.get(c), drop = top.z - low;
             float along = (top.x - ax) * (bx - ax) / length + (top.y - ay) * (by - ay) / length;
             float fade = smooth(Math.min(along, length - along) / (2 * m));
-            for (int r = 0; r <= FALL_ROWS; r++) {
-                float z = low + drop * r / FALL_ROWS;
+            float t = Math.clamp(along / length, 0, 1);
+            float wa = startCorner.waterfall ? 1 - smooth(t / startBlend) : 0;
+            float wb = endCorner.waterfall ? 1 - smooth((1 - t) / endBlend) : 0;
+            float join = wa + wb;
+            float parameter = edge.a == startCorner ? t : 1 - t;
+            Vector3 foot = join > 0 ? edgePoint(edge, parameter, low) : null;
+            Vector3 rim = join > 0 ? edgePoint(edge, parameter, top.z) : null;
+            for (int r = 0; r <= last; r++) {
+                float z = Math.clamp(rows[r], low, top.z);
                 float d = drop > m * .5f ? profile(top.x, top.y, z, low, top.z, drop, geology, true, true, false) : 0;
                 // The bank and crest share their end columns. Both must use the same retreat there, otherwise
                 // a protruding bank column pulls away from the recessed wall behind the curtain.
                 d = ((falls & 1 << e) != 0 ? Math.min(0, d) : d) * fade;
                 depth[c][r] = d;
                 grid[c][r] = new Vector3(top.x + ox * d, top.y + oy * d, z);
+                if (join > 0) {
+                    // The adjoining cliff owns the corner's shape. Ease back to the crest's own wall toward the
+                    // curtain, preserving the exact bank, ledge and receiving-bed contacts at both ends of a column.
+                    Vector3 point = edgePoint(edge, parameter, z);
+                    Vector3 base = new Vector3(foot).lerp(rim, drop > 0 ? (z - low) / drop : 0);
+                    grid[c][r].add((point.x - base.x - ox * d) * join, (point.y - base.y - oy * d) * join, 0);
+                }
             }
         }
         int columns = tops.size() - 1;
         for (int c = 0; c <= columns; c++) {
             float low = lows.get(c), top = tops.get(c).z;
-            for (int r = 0; r <= FALL_ROWS; r++) {
+            float t = Math.clamp(along(e, tops.get(c)), 0, 1);
+            Corner end = t < .00001f ? startCorner : t > .99999f ? endCorner : null;
+            for (int r = 0; r <= last; r++) {
                 Vector3 p = grid[c][r];
                 Vector3 across = new Vector3(grid[Math.min(columns, c + 1)][r]).sub(grid[Math.max(0, c - 1)][r]);
-                Vector3 up = new Vector3(grid[c][Math.min(FALL_ROWS, r + 1)]).sub(grid[c][Math.max(0, r - 1)]);
+                Vector3 up = new Vector3(grid[c][Math.min(last, r + 1)]).sub(grid[c][Math.max(0, r - 1)]);
+                float[] direction = end == null ? null : cornerDirection(end, p.z);
+                if (direction != null) { across.set(-direction[1], direction[0], 0); }
                 Vector3 normal = across.crs(up).nor();
                 if (Float.isNaN(normal.x) || normal.len2() < .5f) { normal.set(ox, oy, 0); }
                 if (normal.x * ox + normal.y * oy < 0) { normal.scl(-1); }
                 // Recesses between standing masses see less of the sky.
                 float occlusion = 1 - .35f * smooth(-depth[c][r] / (m * 1.2f));
-                shades.put(p, new Shade(normal, Kind.CLIFF, occlusion, 1, (p.z - low) / m, (top - p.z) / m,
-                      bed(p, geology)));
+                Shade shade = new Shade(normal, Kind.CLIFF, occlusion, 1, (p.z - low) / m, (top - p.z) / m,
+                      bed(p, geology));
+                shade = waterfallCornerShade(startCorner, p, 1 - smooth(t / startBlend), shade);
+                shade = waterfallCornerShade(endCorner, p, 1 - smooth((1 - t) / endBlend), shade);
+                shades.put(p, shade);
             }
         }
         for (int c = 0; c < columns; c++) {
-            for (int r = 0; r < FALL_ROWS; r++) {
+            for (int r = 0; r < last; r++) {
                 addQuad(result, grid[c][r + 1], grid[c][r], grid[c + 1][r], grid[c + 1][r + 1],
                       BoardSurface.Finish.WALL, e);
             }
@@ -2984,7 +3102,7 @@ final class BoardRelief {
     /** Shared cliff geometry, also used to root Rough on either side of a step. */
     private Vector3[][] wallGrid(int e, Edge edge) {
         float bottom = edge.bottom(), top = edge.top();
-        float[] rows = rows(bottom, top);
+        float[] rows = edge.simpleConcrete ? new float[] { bottom, top } : rows(bottom, top);
         int columns = samples(edge), last = rows.length - 1;
         Vector3[][] grid = new Vector3[rows.length][];
         for (int r = 0; r < rows.length; r++) {
@@ -3011,8 +3129,9 @@ final class BoardRelief {
 
     private void canonicalWall(int e, Edge edge, List<BoardSurface.Face> result) {
         float bottom = edge.bottom(), top = edge.top();
-        float[] rows = rows(bottom, top);
         Vector3[][] grid = wallGrid(e, edge);
+        float[] rows = new float[grid.length];
+        for (int r = 0; r < rows.length; r++) { rows[r] = grid[r][0].z; }
         int columns = grid[0].length - 1, last = grid.length - 1;
         float m = metres(1);
         Geology geology = BoardRelief.geology().get(edge.upper.family());
@@ -3045,19 +3164,35 @@ final class BoardRelief {
                 if (edge.footRoom > 0) {
                     occlusion = lerp(footOcclusion(edge, grid[0][i]), occlusion, smooth((rows[r] - bottom) / (1.5f * m)));
                 }
-                shades.put(p, new Shade(normal, Kind.CLIFF, occlusion, rock[i], (rows[r] - bottom) / m, (top - rows[r]) / m,
-                      bed(p, geology)));
+                Shade shade = new Shade(normal, Kind.CLIFF, occlusion, rock[i], (rows[r] - bottom) / m, (top - rows[r]) / m,
+                      bed(p, geology));
+                float t = canonical(e, i, columns);
+                shade = waterfallCornerShade(edge.a, p, 1 - smooth(t / .3f), shade);
+                shade = waterfallCornerShade(edge.b, p, 1 - smooth((1 - t) / .3f), shade);
+                shades.put(p, shade);
             }
+        }
+        // Collapse only a verified rectangular poured panel. A tall platform keeps the bedrock grid below its
+        // slab, and the slab retains every sample along that shared boundary and the adjoining corner columns.
+        int wallTop = last;
+        if (self.family() == CONCRETE && own == atA && own == atB) {
+            int slabBottom = 0;
+            if (own > 0) {
+                while (slabBottom < last && rows[slabBottom] < underside) { slabBottom++; }
+            }
+            if (slabBottom < last && planarPanel(e, grid, slabBottom, result)) { wallTop = slabBottom; }
         }
         // Corner rows stay canonical even when adjacent cliffs span different levels or use different LoDs.
         // Interior columns skip rows and stitch to the complete corners without overlapping skirts.
         // Water contact solves against this canonical grid, so submerged cliffs retain their rows too.
         int stride = edge.lower != null && edge.lower.liquid() ? 1 : detail.rowStride;
+        int leftStride = simpleConcreteCorner(corner(self, e)) ? last : 1;
+        int rightStride = simpleConcreteCorner(corner(self, e + 1)) ? last : 1;
         for (int i = 0; i < columns; i++) {
-            int left = last, right = last;
+            int left = wallTop, right = wallTop;
             while (left > 0 || right > 0) {
-                int nextLeft = Math.max(0, left - (i == 0 ? 1 : stride));
-                int nextRight = Math.max(0, right - (i + 1 == columns ? 1 : stride));
+                int nextLeft = Math.max(0, left - (i == 0 ? leftStride : stride));
+                int nextRight = Math.max(0, right - (i + 1 == columns ? rightStride : stride));
                 BoardSurface.Finish finish = left == last || right == last ? BoardSurface.Finish.CAP : BoardSurface.Finish.WALL;
                 if (nextLeft == nextRight) {
                     addQuad(result, grid[left][i], grid[nextLeft][i], grid[nextRight][i + 1], grid[right][i + 1], finish, e);
@@ -3072,6 +3207,63 @@ final class BoardRelief {
                 }
             }
         }
+    }
+
+    /** A planar wall is triangulated from its perimeter; shared samples survive without an interior grid. */
+    private boolean planarPanel(int e, Vector3[][] grid, int first, List<BoardSurface.Face> result) {
+        int last = grid.length - 1, columns = grid[0].length - 1;
+        Vector3 a = grid[last][0], b = grid[first][0], c = grid[first][columns], d = grid[last][columns];
+        float tolerance = .0001f * BoardGeometry.hexScale();
+        // Testing the complete sampled panel also protects tuned geology and corners joining other landforms.
+        for (int r = first; r <= last; r++) {
+            float v = (grid[r][0].z - b.z) / (a.z - b.z);
+            for (int i = 0; i <= columns; i++) {
+                float u = i / (float) columns;
+                Vector3 expected = new Vector3(b).lerp(c, u).lerp(new Vector3(a).lerp(d, u), v);
+                if (!grid[r][i].epsilonEquals(expected, tolerance)) { return false; }
+            }
+        }
+        // The ruled panel must also be planar, not a twisted quad.
+        Vector3 normal = new Vector3(b).sub(a).crs(new Vector3(c).sub(a)).nor();
+        if (normal.len2() < .5f || Math.abs(new Vector3(d).sub(a).dot(normal)) > tolerance) { return false; }
+        List<Vector3> perimeter = new ArrayList<>();
+        int leftStride = simpleConcreteCorner(corner(self, e)) ? last - first : 1;
+        int rightStride = simpleConcreteCorner(corner(self, e + 1)) ? last - first : 1;
+        for (int r = last; r > first; r -= leftStride) { perimeter.add(grid[r][0]); }
+        int bottomStart = perimeter.size();
+        for (int i = 0; i < columns; i++) { perimeter.add(grid[first][i]); }
+        int rightStart = perimeter.size();
+        for (int r = first; r < last; r += rightStride) { perimeter.add(grid[r][columns]); }
+        int topStart = perimeter.size();
+        for (int i = columns; i > 0; i--) { perimeter.add(grid[last][i]); }
+        for (int i = 0; i < perimeter.size(); i++) {
+            Vector3 source = perimeter.get(i), p = new Vector3(source);
+            Shade shade = shades.get(source);
+            shades.put(p, new Shade(normal, shade.kind(), shade.occlusion(), shade.level(), shade.rim(), shade.foot(), shade.tint()));
+            perimeter.set(i, p);
+        }
+        if (perimeter.size() == 4) {
+            addQuad(result, perimeter.get(0), perimeter.get(1), perimeter.get(2), perimeter.get(3), BoardSurface.Finish.CAP, e);
+        } else {
+            // Split along a-c. Fan each half from its first horizontal sample, then its opposite corner:
+            // all collinear boundary vertices survive in n-2 triangles, even at the coarsest detail.
+            Vector3 root = perimeter.get(bottomStart + 1);
+            for (int i = 0; i < bottomStart; i++) {
+                addTriangle(result, root, perimeter.get(i), perimeter.get(i + 1), BoardSurface.Finish.WALL, e);
+            }
+            for (int i = bottomStart + 1; i < rightStart; i++) {
+                addTriangle(result, perimeter.get(0), perimeter.get(i), perimeter.get(i + 1), BoardSurface.Finish.WALL, e);
+            }
+            root = perimeter.get((topStart + 1) % perimeter.size());
+            for (int i = rightStart; i < topStart; i++) {
+                addTriangle(result, root, perimeter.get(i), perimeter.get(i + 1), BoardSurface.Finish.WALL, e);
+            }
+            for (int i = topStart + 1; i < perimeter.size(); i++) {
+                addTriangle(result, perimeter.get(rightStart), perimeter.get(i), perimeter.get((i + 1) % perimeter.size()),
+                      BoardSurface.Finish.CAP, e);
+            }
+        }
+        return true;
     }
 
     /**

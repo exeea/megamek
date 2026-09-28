@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -98,6 +99,7 @@ class GpuMarkersSmokeTest {
                     try {
                         super.render();
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                        if (frames() == 0) { return; }
                         checkOccupiedHex(this, scene);
                         tick++;
                         if (tick == 1) {
@@ -262,6 +264,7 @@ class GpuMarkersSmokeTest {
                     try {
                         super.render();
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                        if (frames() == 0) { return; }
                         tick++;
                         if (tick == 4) {
                             capture("markers-board-isometric.png");
@@ -285,7 +288,6 @@ class GpuMarkersSmokeTest {
     private void checkMarkers(BoardScene scene) {
         GpuMarkers markers = new GpuMarkers();
         GpuTerrain terrain = new GpuTerrain();
-        GpuAssets assets = new GpuAssets();
         GpuAtmosphere atmosphere = new GpuAtmosphere();
         GpuUnitVisibility visibility = new GpuUnitVisibility();
         ModelBatch batch = new ModelBatch();
@@ -304,12 +306,12 @@ class GpuMarkersSmokeTest {
             for (var marker : scene.markers()) {
                 ModelInstance coin = new ModelInstance(markers.model(marker.kind()).instance.model);
                 markers.place(coin, camera.camera, BoardGeometry.center(marker.coords(), marker.elevation()));
-                for (var feature : scene.tile(marker.coords()).features()) {
-                    var bounds = assets.model(feature.asset()).calculateBoundingBox(new com.badlogic.gdx.math.collision.BoundingBox());
-                    float roof = (scene.tile(marker.coords()).elevation() + feature.elevation()
-                          + bounds.max.z * feature.height()) * BoardGeometry.LEVEL;
-                    assertTrue(UnitBounds.world(coin).min.z > roof, "The whole coin must clear the actual roof/deck mesh");
-                }
+                // Intersect the placed roof/deck; imported asset coordinates need not be normalized to one level.
+                Vector3 origin = BoardGeometry.center(marker.coords(), marker.elevation() + 10);
+                var hit = terrain.hit(scene, new com.badlogic.gdx.math.collision.Ray(origin, new Vector3(0, 0, -1)));
+                assertNotNull(hit, "The marker must be above rendered terrain or a structure");
+                float roof = origin.z - (float) Math.sqrt(hit.distance());
+                assertTrue(UnitBounds.world(coin).min.z > roof, "The whole coin must clear the actual roof/deck mesh");
             }
             for (boolean top : new boolean[] { false, true }) {
                 camera.setIsometric(!top);
@@ -353,7 +355,6 @@ class GpuMarkersSmokeTest {
             batch.dispose();
             visibility.dispose();
             atmosphere.dispose();
-            assets.dispose();
             terrain.dispose();
             markers.dispose();
         }

@@ -50,20 +50,20 @@ final class GpuBoardUi implements Disposable {
     static final int TURN_HEIGHT = 100;
     private static final int MENU_WIDTH = 360;
     private static final int DROPDOWN_WIDTH = 300;
-    private final GpuBoardSource source;
+    private final BoardSource source;
     private final BoardCamera camera;
     private final GpuBoardTuning tuning;
     private final GpuAttackPanel attackPanel;
     private final GpuReportPanel reportPanel;
     private final GpuPanelDock dock;
-    private final GpuBoardSkin theme = new GpuBoardSkin();
-    private final Skin skin = theme.skin;
+    private final GpuBoardSkin theme;
+    private final Skin skin;
     private final GpuTextures<String> portraits = new GpuTextures<>();
     final Stage stage;
     private final Table hud = new Table();
     private record HudActor(Image image, GpuTextures<Integer> textures) { }
     private final List<HudActor> hudLayers = new ArrayList<>();
-    private GpuBoardSource.Hud hudFrame;
+    private BoardSource.Hud hudFrame;
     private final Table completion = new Table();
     private final Table menuBar = new Table();
     private final Table popup = new Table();
@@ -91,7 +91,7 @@ final class GpuBoardUi implements Disposable {
     private List<String> completionIds = List.of();
     private List<String> menuBarIds;
     private List<String> menuSignature = List.of();
-    private GpuBoardSource.Frame frame;
+    private BoardSource.Frame frame;
     private Coords context;
     private String menu = "";
     private String popupTitle = "";
@@ -105,11 +105,18 @@ final class GpuBoardUi implements Disposable {
     private String menuTriggerName;
     private boolean reportOpenedForPhase;
 
-    GpuBoardUi(GpuBoardSource source, BoardCamera camera, Runnable changeSpeed) {
+    GpuBoardUi(BoardSource source, BoardCamera camera, Runnable changeSpeed) {
         this(source, camera, changeSpeed, () -> { });
     }
 
-    GpuBoardUi(GpuBoardSource source, BoardCamera camera, Runnable changeSpeed, Runnable togglePlayback) {
+    GpuBoardUi(BoardSource source, BoardCamera camera, Runnable changeSpeed, Runnable togglePlayback) {
+        this(source, camera, changeSpeed, togglePlayback, new GpuBoardSkin());
+    }
+
+    /** Takes ownership of the loading screen's skin, including its existing font atlas. */
+    GpuBoardUi(BoardSource source, BoardCamera camera, Runnable changeSpeed, Runnable togglePlayback, GpuBoardSkin theme) {
+        this.theme = theme;
+        skin = theme.skin;
         this.source = source;
         this.camera = camera;
         stage = new Stage(new ScreenViewport()) {
@@ -401,7 +408,7 @@ final class GpuBoardUi implements Disposable {
 
     void resize(int width, int height, float displayScale) {
         scale = displayScale;
-        hudScale = scale / source.uiPreferences.scale();
+        hudScale = scale / source.uiPreferences().scale();
         ((ScreenViewport) stage.getViewport()).setUnitsPerPixel(1 / scale);
         stage.getViewport().update(width, height, true);
         resizePanels();
@@ -460,6 +467,10 @@ final class GpuBoardUi implements Disposable {
 
     boolean normalMaps() {
         return tuning.normalMaps();
+    }
+
+    boolean grass() {
+        return tuning.grass();
     }
 
     float damageOverride() {
@@ -526,7 +537,7 @@ final class GpuBoardUi implements Disposable {
         return Math.max(1, (dock.cameraRight(stage.getWidth(), sidebarInset()) - leftSidebarInset()) * scale);
     }
 
-    void updateHud(GpuBoardSource.Hud next, long now) {
+    void updateHud(BoardSource.Hud next, long now) {
         if (next == null) {
             return;
         }
@@ -557,7 +568,7 @@ final class GpuBoardUi implements Disposable {
         float scaleX = hud.getWidth() / next.width();
         float scaleY = hud.getHeight() / next.height();
         for (int index = 0; index < hudLayers.size(); index++) {
-            GpuBoardSource.HudLayer layer = next.layers().get(index);
+            BoardSource.HudLayer layer = next.layers().get(index);
             Image actor = hudLayers.get(index).image();
             actor.setBounds(layer.x() * scaleX,
                   hud.getHeight() - (layer.y() + layer.shiftY().value(now) + layer.pixels().height()) * scaleY,
@@ -573,7 +584,7 @@ final class GpuBoardUi implements Disposable {
         }
     }
 
-    void update(GpuBoardSource.Frame next, String speed) {
+    void update(BoardSource.Frame next, String speed) {
         tuning.useScenario(next.scenarioAtmosphere(), frame == null || frame.boardGeneration() != next.boardGeneration()
               || frame.scene().boardId() != next.scene().boardId());
         if (frame != null && (frame.scene().selectedId() != next.scene().selectedId()
@@ -594,16 +605,16 @@ final class GpuBoardUi implements Disposable {
         }
         attackPanel.update(frame);
         reportPanel.update(frame.reports(), frame.scene().selectedId());
-        reportPanel.updateKeywords(source.uiPreferences);
-        phaseMessage.setText(source.phaseStatus.text());
-        phaseNotice.setVisible(source.phaseStatus.blocking());
+        reportPanel.updateKeywords(source.uiPreferences());
+        phaseMessage.setText(source.phaseStatus().text());
+        phaseNotice.setVisible(source.phaseStatus().blocking());
         if (!source.isEditor()) {
             ((TextButton) stage.getRoot().findActor("battle-report-toggle")).setChecked(reportPanel.panel().isVisible());
         }
         ((TextButton) stage.getRoot().findActor("tuning")).setChecked(tuning.panel().isVisible());
         updateMenuBar();
         updateHud(frame.hud(), System.nanoTime());
-        phase.setText(source.isEditor() ? source.phaseStatus.text()
+        phase.setText(source.isEditor() ? source.phaseStatus().text()
               : frame.scene().phase().toUpperCase(Locale.ROOT) + "  /  PHASE");
         status.setText("MAP " + (frame.scene().boardId() + 1) + "  /  " + frame.scene().width() + " \u00d7 " + frame.scene().height());
         ((TextButton) stage.getRoot().findActor("top")).setChecked(camera.isTopDown());
@@ -628,8 +639,8 @@ final class GpuBoardUi implements Disposable {
         help.setText("Left-click: " + clickAction + "   \u00b7   Shift-click: facing   \u00b7   Right-click: menu"
               + "   \u00b7   Right-drag: pan   \u00b7   Middle-drag: orbit   \u00b7   Shift-drag: swap");
         help.setColor(Color.WHITE);
-        if (!source.phaseStatus.text().isBlank() && !source.phaseStatus.blocking()) {
-            help.setText(source.phaseStatus.text());
+        if (!source.phaseStatus().text().isBlank() && !source.phaseStatus().blocking()) {
+            help.setText(source.phaseStatus().text());
         }
         if (camera.firstPerson()) { help.setText(Messages.getString("GpuBoard.firstPersonHelp")); }
         List<BoardScene.Command> commits = frame.scene().commands().stream().filter(BoardScene.Command::commit).toList();

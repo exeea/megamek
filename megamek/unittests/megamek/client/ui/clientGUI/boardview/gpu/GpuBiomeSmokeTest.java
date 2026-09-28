@@ -20,6 +20,7 @@ import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
 import com.badlogic.gdx.graphics.g3d.utils.BaseShaderProvider;
+import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrains;
@@ -45,7 +46,7 @@ class GpuBiomeSmokeTest {
                 var terrain = new GpuTerrain();
                 var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
-                int maskHandle = 0;
+                int maskHandle = 0, sedgeHandle = 0;
                 try {
                     GpuRiverTerrainSmokeTest.tune(.94f, true);
                     TerrainLod.setEnabled(true);
@@ -54,6 +55,7 @@ class GpuBiomeSmokeTest {
                     var plants = (GpuBiomeVegetation) field(terrain, "biomeVegetation");
                     var mask = (GpuBiomeSurface) field(terrain, "biomes");
                     StringBuilder metrics = new StringBuilder("Native 1280x960 fields/marsh checks\n");
+                    metrics.append(Gdx.gl.glGetString(GL20.GL_RENDERER)).append('\n');
                     for (var kind : List.of(BoardScene.Biome.FIELD, BoardScene.Biome.MARSH, BoardScene.Biome.QUICKSAND, BoardScene.Biome.MUD)) {
                         var scene = scene(kind);
                         boolean vegetation = kind == BoardScene.Biome.FIELD || kind == BoardScene.Biome.MARSH;
@@ -81,6 +83,10 @@ class GpuBiomeSmokeTest {
                                 triangles += (long) mesh.getNumIndices() / 3 * instances;
                             }
                             assertEquals(vegetation ? 1 : 0, draws);
+                            // Budget the rendered 3x3 fixture (including its fringe), not just one template's indices.
+                            long budget = !vegetation ? 0 : (kind == BoardScene.Biome.FIELD
+                                  ? new long[] { 30_000, 6_000, 500 } : new long[] { 10_476, 2_510, 314 })[lod];
+                            assertTrue(triangles <= budget, kind + " LOD" + lod + " exceeds its plant triangle budget: " + triangles);
                             assertTrue(triangles < previousTriangles || !vegetation,
                                   kind + " LOD" + lod + ": " + triangles + " triangles after " + previousTriangles);
                             previousTriangles = triangles;
@@ -89,12 +95,51 @@ class GpuBiomeSmokeTest {
                             assertEquals(uploads, plants.uploads(), "Stationary views must not upload plant instances again");
                             metrics.append(kind).append(" LOD").append(lod).append(": ").append(draws).append(" draws, ")
                                   .append(roots).append(" instances, ").append(triangles).append(" triangles\n");
+                            if (vegetation) {
+                                grassMetrics(terrain, camera, metrics);
+                                try (var timings = new GpuStageTimings()) {
+                                    for (int i = 0; i < 60; i++) {
+                                        timings.beginFrame(i >= 12);
+                                        timings.stage("whole-frame");
+                                        frame.render(terrain, camera, scene);
+                                        timings.stage(null);
+                                        // Pace native queries without attributing the swap/wait to renderer time.
+                                        org.lwjgl.glfw.GLFW.glfwSwapBuffers(((com.badlogic.gdx.backends.lwjgl3.Lwjgl3Graphics)
+                                              Gdx.graphics).getWindow().getWindowHandle());
+                                    }
+                                    GpuReviewFrame.save(new File(output, kind + "-LOD" + lod + ".png"));
+                                    timings.appendReport(metrics, kind + " LOD" + lod);
+                                }
+                            }
                             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                            Files.writeString(new File(output, "metrics.txt").toPath(), metrics.toString());
+                        }
+                        if (vegetation) {
+                            // Distant single-card stalks/clumps must remain visible from above and after rotation.
+                            camera.setIsometric(false);
+                            camera.center(BoardGeometry.center(new Coords(4, 4), 0));
+                            settle(terrain, plants, frame, camera, scene);
+                            GpuReviewFrame.save(new File(output, kind + "-LOD2-top.png"));
+                            camera.orbit(135, 68);
+                            settle(terrain, plants, frame, camera, scene);
+                            GpuReviewFrame.save(new File(output, kind + "-LOD2-orbit.png"));
+                            camera.setIsometric(true);
                         }
                         camera.camera.zoom = .075f;
                         camera.center(BoardGeometry.center(new Coords(4, 4), 0));
                         settle(terrain, plants, frame, camera, scene);
                         GpuReviewFrame.save(new File(output, kind + "-close.png"));
+                        if (kind == BoardScene.Biome.MARSH) {
+                            camera.tilt(68);
+                            frame.configure(new BoardAtmosphere.Settings(16, 0, 0,
+                                  BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+                            frame.render(terrain, camera, scene);
+                            GpuReviewFrame.save(new File(output, "MARSH-oblique.png"));
+                            camera.setIsometric(true);
+                            frame.configure(new BoardAtmosphere.Settings(13, 0, 0,
+                                  BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+                            frame.render(terrain, camera, scene);
+                        }
                         if (vegetation) {
                             var before = Pixmap.createFromFrameBuffer(0, 0, 1280, 960);
                             long uploads = plants.uploads();
@@ -135,6 +180,16 @@ class GpuBiomeSmokeTest {
                         settle(terrain, plants, frame, camera, marsh);
                         assertEquals(lod, field(((List<?>) field(terrain, "chunks")).getFirst(), "lod"));
                         GpuReviewFrame.save(new File(output, "MARSH-terrain-" + lod + ".png"));
+                        for (var kind : List.of(BoardScene.Biome.FIELD, BoardScene.Biome.MARSH)) {
+                            for (boolean upper : new boolean[] { false, true }) {
+                                var slope = BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c,
+                                      (c.getY() < 4) == upper ? kind : BoardScene.Biome.NONE, c.getY() < 4 ? 1 : 0));
+                                camera.center(BoardGeometry.center(new Coords(4, 4), 0));
+                                settle(terrain, plants, frame, camera, slope);
+                                GpuReviewFrame.save(new File(output, kind + "-slope-" + (upper ? "upper-" : "lower-") + lod + ".png"));
+                                if (lod == TerrainLod.FULL && !upper) { slopeMaterialResponds(terrain, mask, frame, camera, slope); }
+                            }
+                        }
                     }
                     var clear = scene(BoardScene.Biome.NONE);
                     settle(terrain, plants, frame, camera, clear);
@@ -153,8 +208,25 @@ class GpuBiomeSmokeTest {
                             GpuReviewFrame.save(new File(output, "water-" + suffix + ".png"));
                             frame.render(terrain, camera, bank, false);
                             GpuReviewFrame.save(new File(output, "bed-" + suffix + ".png"));
+                            if (kind == BoardScene.Biome.MARSH && depth == 0) {
+                                for (int lod = 0; lod < 3; lod++) {
+                                    camera.camera.zoom = BoardGeometry.width() / new float[] { 560, 160, 48 }[lod];
+                                    camera.center(BoardGeometry.center(new Coords(4, 4), 0));
+                                    settle(terrain, plants, frame, camera, bank);
+                                    GpuReviewFrame.save(new File(output, "shore-MARSH-LOD" + lod + ".png"));
+                                    frame.render(terrain, camera, bank, false);
+                                    GpuReviewFrame.save(new File(output, "shore-bed-MARSH-LOD" + lod + ".png"));
+                                }
+                            }
                         }
                     }
+                    var contacts = BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c,
+                          c.getX() < 4 ? BoardScene.Biome.MARSH
+                                : c.getY() < 4 ? BoardScene.Biome.FIELD : BoardScene.Biome.MUD, 0));
+                    camera.camera.zoom = .12f;
+                    camera.center(BoardGeometry.center(new Coords(4, 4), 0));
+                    settle(terrain, plants, frame, camera, contacts);
+                    GpuReviewFrame.save(new File(output, "field-marsh-mud.png"));
                     var fire = fireAndIce();
                     var focus = fire.tiles().stream().filter(t -> t.biome() == BoardScene.Biome.MARSH)
                           .max(java.util.Comparator.comparingInt(t -> neighbors(fire, t.coords()))).orElseThrow();
@@ -168,14 +240,22 @@ class GpuBiomeSmokeTest {
                     GpuReviewFrame.save(new File(output, "Fire-And-Ice-2-top.png"));
                     metrics.append("Fire And Ice 2 swamp focus: ").append(focus.coords()).append('\n');
                     metrics.append("Maximum active texture samplers: ").append(samplerBudget(terrain)).append('\n');
+                    var sedge = (com.badlogic.gdx.graphics.Texture) field(plants, "sedge");
+                    assertTrue(sedge.getWidth() <= 512 && sedge.getHeight() <= 512, "The shared cutout has a bounded upload size");
+                    metrics.append("Shared cutout upload: ").append(sedge.getWidth()).append('x').append(sedge.getHeight())
+                          .append(" RGBA8 plus mipmaps (1,398,100 bytes at 512x512)\n");
                     Files.writeString(new File(output, "metrics.txt").toPath(), metrics.toString());
                     maskHandle = mask.texture().getTextureObjectHandle();
+                    sedgeHandle = ((com.badlogic.gdx.graphics.Texture) field(plants, "sedge")).getTextureObjectHandle();
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) { failure.set(error); }
                 finally {
                     terrain.dispose();
                     if (maskHandle != 0 && org.lwjgl.opengl.GL11.glIsTexture(maskHandle)) {
                         failure.compareAndSet(null, new AssertionError("Biome texture leaked after disposal"));
+                    }
+                    if (sedgeHandle != 0 && org.lwjgl.opengl.GL11.glIsTexture(sedgeHandle)) {
+                        failure.compareAndSet(null, new AssertionError("Sedge texture leaked after disposal"));
                     }
                     frame.dispose();
                     BoardGeometry.tune(original);
@@ -201,11 +281,13 @@ class GpuBiomeSmokeTest {
           BoardCamera camera, BoardScene scene) throws Exception {
         terrain.update(scene, camera.camera);
         GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+        var grass = (GpuGroundCover) field(terrain, "groundCover");
+        boolean grassVisible = GpuGroundCover.visibleAtScale(camera.camera);
         long end = System.nanoTime() + 30_000_000_000L;
         do {
             frame.render(terrain, camera, scene);
             assertTrue(System.nanoTime() < end, "Vegetation preparation must finish");
-        } while (plants.busy());
+        } while (plants.busy() || grassVisible && grass.busy());
         assertFalse(plants.busy());
     }
 
@@ -238,6 +320,66 @@ class GpuBiomeSmokeTest {
         var field = owner.getClass().getDeclaredField(name);
         field.setAccessible(true);
         return field.get(owner);
+    }
+
+    private static void grassMetrics(GpuTerrain terrain, BoardCamera camera, StringBuilder metrics) throws Exception {
+        int draws = 0, roots = 0;
+        long triangles = 0;
+        for (Object batch : (Object[]) field(field(terrain, "groundCover"), "batches")) {
+            // Terrain skips grass at distant scales without clearing the reusable instance buffers.
+            if (!GpuGroundCover.visibleAtScale(camera.camera)) { break; }
+            if (((List<?>) field(batch, "current")).isEmpty()) { continue; }
+            var mesh = (GpuInstancedMesh) field(batch, "mesh");
+            if (mesh == null) { continue; }
+            int count = ((com.badlogic.gdx.utils.FloatArray) field(batch, "data")).size / 4;
+            draws++; roots += count;
+            triangles += (long) mesh.getNumIndices() / 3 * count;
+        }
+        metrics.append("  ordinary grass elsewhere in this view: ").append(draws).append(" draws, ")
+              .append(roots).append(" blades, ").append(triangles).append(" triangles\n");
+    }
+
+    /** Removing only the biome mask must affect actual bank faces, not just their adjoining flat hexes. */
+    private static void slopeMaterialResponds(GpuTerrain terrain, GpuBiomeSurface mask, GpuReviewFrame frame,
+          BoardCamera camera, BoardScene scene) {
+        var before = Pixmap.createFromFrameBuffer(0, 0, 1280, 960);
+        var blank = new Pixmap(scene.width(), scene.height(), Pixmap.Format.RGBA8888);
+        try {
+            blank.setColor(0); blank.fill();
+            mask.texture().draw(blank, 0, 0);
+            frame.render(terrain, camera, scene);
+            var after = Pixmap.createFromFrameBuffer(0, 0, 1280, 960);
+            try {
+                var changed = new java.util.HashSet<Integer>();
+                float metre = BoardRelief.metres(1);
+                for (var tile : scene.tiles()) {
+                    var surface = terrain.tacticalSurface(tile.coords());
+                    if (surface == null) { continue; }
+                    for (var face : surface.faces()) {
+                        var normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
+                        if (Math.abs(normal.z) < .05f || Math.abs(normal.z) > .90f) { continue; }
+                        var bottom = face.a().z < face.b().z ? face.a() : face.b();
+                        if (face.c().z < bottom.z) { bottom = face.c(); }
+                        var middle = new Vector3(face.a()).add(face.b()).add(face.c()).scl(1f / 3);
+                        for (float along : new float[] { .2f, .5f, .8f }) {
+                            var point = new Vector3(bottom).lerp(middle, along);
+                            if (point.z < .1f * metre || point.z > 2 * metre) { continue; }
+                            camera.camera.project(point);
+                            int x = Math.round(point.x), y = Math.round(point.y);
+                            if (x < 0 || y < 0 || x >= before.getWidth() || y >= before.getHeight()) { continue; }
+                            int a = before.getPixel(x, y), b = after.getPixel(x, y);
+                            int difference = Math.abs((a >>> 24) - (b >>> 24)) + Math.abs((a >>> 16 & 255) - (b >>> 16 & 255))
+                                  + Math.abs((a >>> 8 & 255) - (b >>> 8 & 255));
+                            if (difference > 15) { changed.add(y * before.getWidth() + x); }
+                        }
+                    }
+                }
+                assertTrue(changed.size() > 12, "Biome soil must blend onto bank faces: " + changed.size());
+            } finally { after.dispose(); }
+        } finally {
+            before.dispose(); blank.dispose();
+            mask.dispose(); mask.update(scene);
+        }
     }
 
     private static int samplerBudget(GpuTerrain terrain) throws Exception {

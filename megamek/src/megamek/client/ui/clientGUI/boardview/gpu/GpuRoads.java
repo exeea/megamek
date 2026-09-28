@@ -4,14 +4,19 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.awt.geom.Area;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
+import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.WeakHashMap;
 import java.util.function.Supplier;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.VertexAttribute;
+import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
-import com.badlogic.gdx.graphics.g3d.Attribute;
 import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
@@ -19,44 +24,43 @@ import com.badlogic.gdx.math.Vector3;
 
 /** Road material masks splatted on existing terrain faces. Only the terrain owns the road's physical shape. */
 final class GpuRoads {
+    static final VertexAttributes VERTICES = new VertexAttributes(VertexAttribute.Position(), VertexAttribute.Normal(),
+          VertexAttribute.ColorPacked(), VertexAttribute.TexCoords(0),
+          new VertexAttribute(VertexAttributes.Usage.Generic, 2, "a_roadMaskUV"));
     record MaskData(BoardScene.Pixels pixels, float x, float y, float width, float height) { }
 
-    /** Borrowed chunk-atlas texture, with world-to-mask coordinates; the chunk owns its lifetime. */
+    /** Renderer-owned exact sharing across chunks/workers; only live materials keep masks in memory. */
+    static final class Masks {
+        private final Map<MaskData, WeakReference<MaskData>> masks = new WeakHashMap<>();
+
+        synchronized MaskData share(MaskData mask) {
+            WeakReference<MaskData> reference = masks.get(mask);
+            MaskData shared = reference == null ? null : reference.get();
+            if (shared != null) { return shared; }
+            masks.put(mask, new WeakReference<>(mask));
+            return mask;
+        }
+    }
+
+    /** Borrowed chunk-atlas region. Local mask UVs belong to vertices, so repeated roads share one material batch. */
     static final class Mask extends TextureAttribute {
         static final long TYPE = register("roadMask");
         static { TextureAttribute.Mask |= TYPE; }
         final MaskData data;
-        final float x, y, width, height;
 
-        Mask(TextureRegion region, MaskData data, BoardScene.Tile tile) {
-            this(region, data, BoardGeometry.centerX(tile.coords()) + data.x() * BoardGeometry.hexScale(),
-                  BoardGeometry.centerY(tile.coords()) + data.y() * BoardGeometry.hexScale(),
-                  data.width() * BoardGeometry.hexScale(), data.height() * BoardGeometry.hexScale());
-        }
-
-        private Mask(TextureRegion region, MaskData data, float x, float y, float width, float height) {
+        Mask(TextureRegion region, MaskData data) {
             super(TYPE, region);
-            this.data = data; this.x = x; this.y = y; this.width = width; this.height = height;
+            this.data = data;
         }
 
-        Mask withRegion(TextureRegion region) { return new Mask(region, data, x, y, width, height); }
+        Mask withRegion(TextureRegion region) { return new Mask(region, data); }
 
         @Override
         public Mask copy() {
-            var copy = new Mask(new TextureRegion(textureDescription.texture), data, x, y, width, height);
+            var copy = new Mask(new TextureRegion(textureDescription.texture), data);
+            copy.textureDescription.set(textureDescription);
             copy.offsetU = offsetU; copy.offsetV = offsetV; copy.scaleU = scaleU; copy.scaleV = scaleV;
             return copy;
-        }
-
-        @Override
-        public int compareTo(Attribute other) {
-            int order = super.compareTo(other);
-            if (order != 0) { return order; }
-            Mask mask = (Mask) other;
-            order = Float.compare(x, mask.x);
-            if (order == 0) { order = Float.compare(y, mask.y); }
-            if (order == 0) { order = Float.compare(width, mask.width); }
-            return order == 0 ? Float.compare(height, mask.height) : order;
         }
     }
     private static final class Surface extends FloatAttribute {
@@ -90,6 +94,12 @@ final class GpuRoads {
     }
 
     private GpuRoads() { }
+
+    static String vertex(String source) {
+        return source.replace("void main()", "#ifdef roadMaskFlag\nattribute vec2 a_roadMaskUV;\n"
+                    + "varying vec2 v_roadMaskUV;\n#endif\nvoid main()")
+              .replace("void main() {", "void main() {\n#ifdef roadMaskFlag\nv_roadMaskUV = a_roadMaskUV;\n#endif\n");
+    }
 
     static FloatAttribute attribute(Patch patch) {
         boolean transition = patch.fade() != null && patch.fade().join() != null;
@@ -186,6 +196,10 @@ final class GpuRoads {
         var bounds = patch.shape().getBounds2D();
         for (var face : surface.groundFaces()) {
             if (face.finish() != BoardSurface.Finish.TOP) { continue; }
+            float area = (face.b().x - face.a().x) * (face.c().y - face.a().y)
+                  - (face.b().y - face.a().y) * (face.c().x - face.a().x);
+            // Nearly vertical slivers can remain where terrain strips meet. They have no paintable footprint.
+            if (area <= .0001f * scale * scale) { continue; }
             float minX = (Math.min(face.a().x, Math.min(face.b().x, face.c().x)) - cx) / scale;
             float maxX = (Math.max(face.a().x, Math.max(face.b().x, face.c().x)) - cx) / scale;
             float minY = (Math.min(face.a().y, Math.min(face.b().y, face.c().y)) - cy) / scale;
@@ -224,21 +238,39 @@ final class GpuRoads {
             }
         }
         image.setRGB(0, 0, image.getWidth(), image.getHeight(), pixels, 0, image.getWidth());
-        return new MaskData(new BoardScene.Pixels(image), x, y, w, h);
+        return new MaskData(new BoardScene.Pixels(image).compact(), x, y, w, h);
     }
 
     static void write(Supplier<MeshPartBuilder> meshes, List<BoardTacticalGeometry.Triangle> triangles,
-          BoardScene.Tile tile, BoardRoad road, Patch patch, BoardSurface surface) {
+          Patch patch, MaskData mask, BoardSurface surface) {
+        Map<Vector3, Vector3> normals = new HashMap<>();
+        for (var face : surface.groundFaces()) {
+            if (face.finish() != BoardSurface.Finish.TOP) { continue; }
+            Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
+            for (var p : List.of(face.a(), face.b(), face.c())) {
+                normals.computeIfAbsent(normalKey(p, 0), unused -> new Vector3()).add(normal);
+            }
+        }
         for (var t : triangles) {
-            Vector3 normal = new Vector3(t.b()).sub(t.a()).crs(new Vector3(t.c()).sub(t.a())).nor();
             float repeat = BoardRelief.detailMetres(patch.repeat());
-            meshes.get().triangle(carrier(t.a(), surface.roadNormal(t.a(), normal), repeat),
-                  carrier(t.b(), surface.roadNormal(t.b(), normal), repeat), carrier(t.c(), surface.roadNormal(t.c(), normal), repeat));
+            float lift = patch.lift() * BoardGeometry.hexScale();
+            Vector3 fallback = new Vector3(t.b()).sub(t.a()).crs(new Vector3(t.c()).sub(t.a())).nor();
+            MeshPartBuilder mesh = meshes.get();
+            mesh.triangle(carrier(mesh, t.a(), surface.roadNormal(t.a(), normals.getOrDefault(normalKey(t.a(), lift), fallback)).nor(), repeat, mask, surface.tile),
+                  carrier(mesh, t.b(), surface.roadNormal(t.b(), normals.getOrDefault(normalKey(t.b(), lift), fallback)).nor(), repeat, mask, surface.tile),
+                  carrier(mesh, t.c(), surface.roadNormal(t.c(), normals.getOrDefault(normalKey(t.c(), lift), fallback)).nor(), repeat, mask, surface.tile));
         }
     }
 
-    private static MeshPartBuilder.VertexInfo carrier(Vector3 p, Vector3 normal, float repeat) {
-        return new MeshPartBuilder.VertexInfo().setPos(p).setNor(normal).setCol(Color.WHITE).setUV(p.x / repeat, -p.y / repeat);
+    private static Vector3 normalKey(Vector3 p, float lift) {
+        return new Vector3(p.x, p.y, Math.round((p.z - lift) / (.001f * BoardGeometry.hexScale())));
+    }
+
+    private static short carrier(MeshPartBuilder mesh, Vector3 p, Vector3 normal, float repeat, MaskData mask, BoardScene.Tile tile) {
+        float scale = BoardGeometry.hexScale();
+        float u = ((p.x - BoardGeometry.centerX(tile.coords())) / scale - mask.x()) / mask.width();
+        float v = ((p.y - BoardGeometry.centerY(tile.coords())) / scale - mask.y()) / mask.height();
+        return mesh.vertex(p.x, p.y, p.z, normal.x, normal.y, normal.z, Color.WHITE.toFloatBits(), p.x / repeat, -p.y / repeat, u, v);
     }
 
     static float coverage(BoardRoad road, Patch patch, float x, float y) {
@@ -262,7 +294,7 @@ final class GpuRoads {
             tint.a = coverage(road, patch, x, y);
         }
         if (patch.fade() != null && patch.fade().join() != null) {
-            // Transition vertices carry along/across coordinates in RG, separately from edge coverage in A.
+            // Transition masks carry along/across coordinates in RG, separately from edge coverage in A.
             // Their shader supplies white material tint. Neither coordinate can taper the road's footprint.
             tint.r = materialCoverage(patch, x, y);
             tint.g = Math.clamp(.5f + patch.fade().join().lateral(x, y) / (2 * BoardRoad.JOIN_REACH), 0, 1);

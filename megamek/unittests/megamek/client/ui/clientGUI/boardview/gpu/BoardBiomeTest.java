@@ -66,9 +66,10 @@ class BoardBiomeTest {
             }
             var single = BoardSurfaceBlendTest.scene(c -> tile(c, c.equals(center) ? kind : BoardScene.Biome.NONE, 1));
             var p = BoardGeometry.center(center, 1);
-            assertEquals(1, BoardBiome.coverage(single, kind, p.x, p.y, p.z));
+            assertEquals(1, BoardBiome.coverage(single, kind, p.x, p.y, p.z), .00001);
             p.lerp(BoardGeometry.center(center.translated(2), 1), .5f);
-            assertEquals(.5, BoardBiome.coverage(single, kind, p.x, p.y, p.z), .00001);
+            assertEquals(kind == BoardScene.Biome.MARSH ? 1 : .5,
+                  BoardBiome.coverage(single, kind, p.x, p.y, p.z), .00001);
         }
     }
 
@@ -111,5 +112,46 @@ class BoardBiomeTest {
         var after = BoardSurfaceBlendTest.scene(c -> tile(c, BoardScene.Biome.QUICKSAND, 0));
         assertFalse(before.tile(center).sameGeometry(after.tile(center)));
         assertNotEquals(BoardSurface.geometryKey(before, before.tile(center)), BoardSurface.geometryKey(after, after.tile(center)));
+    }
+
+    @Test
+    void marshReedsContinueAcrossExposedBanksButNeverUseTheWaterPlaneForSupport() {
+        var original = BoardGeometry.tuning();
+        try {
+            GpuRiverTerrainSmokeTest.tune(.94f, true);
+            var scene = BoardSurfaceBlendTest.scene(c -> c.getX() < 4
+                  ? BoardSurfaceBlendTest.tile(c, BoardScene.Surface.DIRT, 0, 0, 0) : tile(c, BoardScene.Biome.MARSH, 0));
+            var removed = BoardSurfaceBlendTest.scene(c -> c.getX() < 4
+                  ? BoardSurfaceBlendTest.tile(c, BoardScene.Surface.DIRT, 0, 0, 0) : tile(c, BoardScene.Biome.NONE, 0));
+            int bankRoots = 0, landRoots = 0;
+            var positions = new HashSet<String>();
+            float metre = BoardRelief.metres(1);
+            for (int x = 2; x <= 4; x++) {
+                for (int y = 2; y <= 6; y++) {
+                    var owner = scene.tile(new Coords(x, y));
+                    var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, owner), scene, -1);
+                    if (BoardBiome.plantKind(scene, owner) != BoardScene.Biome.MARSH) { continue; }
+                    var patch = new GpuBiomeVegetation.Patch(scene, owner, surface, 0);
+                    patch.prepare(scene, owner, Long.MAX_VALUE);
+                    for (int i = 0; i < patch.roots.size; i += 4) {
+                        float px = patch.roots.items[i], py = patch.roots.items[i + 1], z = patch.roots.items[i + 2] + .018f * metre;
+                        assertTrue(positions.add(px + ":" + py), "Each root has one owner across the shore join");
+                        assertEquals(BoardSurface.sampleHeight(patch.ground, px, py, Float.NaN), z, .0001);
+                        if (owner.liquid().present()) {
+                            float water = BoardSurface.sampleHeight(surface.water(), px, py, Float.NEGATIVE_INFINITY);
+                            assertTrue(z > water + .015f * metre, "No floating or submerged reed roots");
+                            bankRoots++;
+                        } else { landRoots++; }
+                    }
+                    if (owner.liquid().present()) {
+                        assertNotEquals(BoardVegetation.key(scene, owner), BoardVegetation.key(removed, removed.tile(owner.coords())),
+                              "Removing the neighbour's marsh must invalidate its bank reeds too");
+                        assertEquals(BoardScene.Biome.NONE, BoardBiome.plantKind(removed, removed.tile(owner.coords())));
+                    }
+                }
+            }
+            assertTrue(bankRoots > 20, "Reeds must cross onto the exposed bank: " + bankRoots);
+            assertTrue(landRoots > 20, "The same clumps continue into the marsh: " + landRoots);
+        } finally { BoardGeometry.tune(original); }
     }
 }

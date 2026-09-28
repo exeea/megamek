@@ -250,7 +250,7 @@ final class GpuReportLog {
     }
 
     private static String compact(String html) {
-        return GpuBoardActions.plainText(LINK.matcher(html).replaceAll("$3"))
+        return GpuMenuCommands.plainText(LINK.matcher(html).replaceAll("$3"))
               .replace("&quot;", "\"").replace("&#39;", "'")
               .replace("&apos;", "'").replaceAll("(?m)^\\s*-{3,}\\s*$", "")
               .replaceAll("[\\t\\x0B\\f\\r ]+", " ").replaceAll(" *\\n\\s*", "\n").strip();

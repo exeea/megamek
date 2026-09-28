@@ -1,6 +1,8 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import megamek.client.ui.clientGUI.boardview.BoardHexText;
+
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -303,7 +305,7 @@ class GpuHexTextSmokeTest {
         var color = new com.badlogic.gdx.graphics.Color(font.getColor());
         try {
             for (BoardScene.Tile tile : scene.tiles()) {
-                for (BoardView.HexText text : tile.text()) {
+                for (BoardHexText text : tile.text()) {
                     Coords cell = new Coords(tile.coords().getX() / GpuTerrain.CHUNK_SIZE,
                           tile.coords().getY() / GpuTerrain.CHUNK_SIZE);
                     LegacyChunk chunk = chunks.computeIfAbsent(cell,
@@ -327,10 +329,10 @@ class GpuHexTextSmokeTest {
 
     private static BoardScene textScene(int size, String text) {
         Font font = new Font(Font.SANS_SERIF, Font.PLAIN, GpuBoardUi.FONT_RESOLUTION);
-        List<BoardView.HexText> labels = text.isEmpty() ? List.of()
-              : List.of(new BoardView.HexText(text, 22, font, 0xafff70ff, true, 0));
-        List<BoardView.HexText> firstPage = text.isEmpty() ? List.of()
-              : List.of(new BoardView.HexText(text.replace('B', 'A'), 22, font, 0xafff70ff, true, 0));
+        List<BoardHexText> labels = text.isEmpty() ? List.of()
+              : List.of(new BoardHexText(text, 22, font, 0xafff70ff, true, 0));
+        List<BoardHexText> firstPage = text.isEmpty() ? List.of()
+              : List.of(new BoardHexText(text.replace('B', 'A'), 22, font, 0xafff70ff, true, 0));
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < size; x++) {
             for (int y = 0; y < size; y++) {
@@ -452,8 +454,8 @@ class GpuHexTextSmokeTest {
         graphics.dispose();
         BoardScene.Pixels ground = new BoardScene.Pixels(image);
         Font font = new Font(Font.SANS_SERIF, Font.PLAIN, 12);
-        List<BoardView.HexText> text = List.of(new BoardView.HexText("0404", 10, font, 0xffff00ff, true, 0),
-              new BoardView.HexText("LEVEL2", 60, font, 0xffff00ff, false, 0));
+        List<BoardHexText> text = List.of(new BoardHexText("0404", 10, font, 0xffff00ff, true, 0),
+              new BoardHexText("LEVEL2", 60, font, 0xffff00ff, false, 0));
         List<BoardScene.Feature> rocks = List.of(
               new BoardScene.Feature("scatter-rock", 0, 21, 0, 6, .6f, 0, BoardScene.FeatureKind.SCATTER),
               new BoardScene.Feature("scatter-rock", 0, -18, 0, 6, .6f, 0, BoardScene.FeatureKind.SCATTER));

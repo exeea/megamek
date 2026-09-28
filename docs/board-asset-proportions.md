@@ -48,12 +48,14 @@ the approach roads retain their width. No-exit and single-exit patterns have
 closed terminal edges. Construction/repair during play still allows exactly
 two exits, including turns; game rules were not changed.
 
-`gradlew :megamek:exportBridgeShapes` derives the authoring polygons from the
-existing `BoardRoad` curve/union implementation. Then mm-data's
-`blender --background --python tools/build_bridge_assets.py` bakes the GLBs.
+The saved authoring polygons are in mm-data's `tools/board-models/bridge-shapes.json`.
+`blender --background --python tools/build_bridge_assets.py` bakes the GLBs directly
+from that file; no MegaMek export task or Java geometry generator is required.
 The main board asset builder delegates bridge rebuilds to that same script.
 The roundabout variants include finer curves around the island and entrances. Geometry is loaded from GLB
-at runtime; textures remain shared.
+at runtime; textures remain shared. `BoardBridge` only selects the external model.
+If road dimensions change, update the saved outlines/assets and run the bridge
+geometry and approach checks to keep the two aligned.
 
 ## Original artwork beside each building
 
@@ -72,6 +74,10 @@ exporter embeds the processed input. Shared facade textures remain external.
 
 ## Verification
 
+- After removing the Java bridge exporter and Gradle task, all 64 external-model
+  `BoardBridgeTest` cases, the native `GpuBridgeSmokeTest` road-join/picking check,
+  and scoped main Checkstyle passed. The saved outlines and GLBs were unchanged;
+  this cleanup did not rerun the full project suite or Blender baking.
 - Before the bridge material/dimension redesign, compared every rescaled mesh:
   385,915 vertices and 221,763 triangles across
   3,296 GLBs. Footprints, normals, UVs, colors, indices, nodes and materials are
@@ -107,12 +113,13 @@ exporter embeds the processed input. Shared facade textures remain external.
 - The main board builder's bridge-only rebuild reproduced all 64 complete GLBs
   byte for byte. The complete catalog validator passed all 3,295 buildings,
   87 feature entries and 66 plant LODs after the bridge replacement.
-- Focused CPU checks: all 9 `BoardFeaturesTest` cases and all 65 `BoardSurfaceTest`
-  cases passed, including bridge approaches. `BoardRoadTest` passed 13 of 14 cases;
-  `allRoadLayersLieOnTheExistingRampAndDoNotChangeSupport` expected road height
-  35.576458 but found 35.464405. That check builds procedural ground/roads and
-  does not load building or bridge GLBs. It remains an issue in the ongoing road
-  geometry work, not a verified passing check for this change.
+- The road/concrete follow-up on 2026-09-28 fixed the previously failing road
+  contact and bridge-approach checks. All 17 `BoardRoadTest`, 66 `BoardSurfaceTest`
+  and 64 `BoardBridgeTest` cases passed, together with the native road/bridge
+  reviews. Concrete ramps retain flat slabs and vertical retaining walls, and
+  ordinary road materials use masks on the existing terrain faces. Triangle
+  measurements, complete targeted coverage and test-harness exclusions are
+  recorded in [GPU road surfaces](gpu-roads.md#verification).
 
 The broader `GpuResourcesSmokeTest` currently expects changing board scale to
 change picking before `terrain.update`. The ongoing terrain snapshot changes

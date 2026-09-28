@@ -68,7 +68,7 @@ final class GpuReportPanel implements Disposable {
     private final Map<GpuReportLog.Entry, Boolean> detailOverrides = new LinkedHashMap<>();
     private final Map<GpuReportLog.Entry, GpuReportLog.Link> detailLinks = new LinkedHashMap<>();
     private final Map<Integer, Table> eventRows = new LinkedHashMap<>();
-    private GpuBoardSource.UiPreferences keywordPreferences;
+    private BoardSource.UiPreferences keywordPreferences;
     private int keywordMatch = -1;
     private GpuReportLog.Snapshot snapshot = GpuReportLog.Snapshot.EMPTY;
     private List<GpuReportLog.Entry> filtered = List.of();
@@ -220,7 +220,7 @@ final class GpuReportPanel implements Disposable {
 
     Table panel() { return panel; }
 
-    void updateKeywords(GpuBoardSource.UiPreferences preferences) {
+    void updateKeywords(BoardSource.UiPreferences preferences) {
         if (keywordPreferences == preferences) {
             return;
         }

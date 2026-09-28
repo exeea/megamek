@@ -1712,14 +1712,30 @@ final class BoardSurface {
 
     private void road(BoardScene scene) {
         float largestRise = 0;
+        boolean flat = ramps == 0;
+        boolean bridge = false;
         for (int direction = 0; direction < 6; direction++) {
+            BoardScene.Tile neighbor = scene.tile(tile.coords().translated(direction));
+            flat &= neighbor == null || neighbor.elevation() == tile.elevation() && !neighbor.liquid().present();
+            bridge |= (ramps & 1 << direction) != 0 && connectingBridge(tile, neighbor, direction) != null;
             largestRise = Math.max(largestRise, Math.abs(roadEdgeElevation(tile,
-                  scene.tile(tile.coords().translated(direction)), direction) * BoardGeometry.level() - center.z));
+                  neighbor, direction) * BoardGeometry.level() - center.z));
+        }
+        if (flat) {
+            Vector3[] outline = new Vector3[6];
+            for (int i = 0; i < 6; i++) { outline[i] = moved(i); }
+            fan(outline, center.z, Finish.TOP);
+            return;
         }
         // The parabolic grade's chord error is rise / (3 * sections^2). Derive resolution from that error,
         // not a fixed dense grid. Shared counts keep the banks and hub joined, including six-way crossings.
         int sections = largestRise == 0 ? 1 : 2 * (int) Math.ceil(Math.sqrt(largestRise / (3 * .06f * BoardGeometry.hexScale())) / 2);
         int bankSections = Math.clamp((int) Math.ceil(Math.sqrt(.75f * largestRise / (.2f * BoardGeometry.hexScale()))), 3, 8);
+        var stations = new TreeSet<Float>();
+        for (int i = 0; i <= sections; i++) { stations.add(i / (float) sections); }
+        // Bridge approaches fit both vertical curves into one half-hex. Detail only their two flat joins.
+        if (bridge) { stations.add(.04f); stations.add(.96f); }
+        List<Float> runs = new ArrayList<>(stations);
         Vector3[] hub = new Vector3[6];
         for (int i = 0; i < 6; i++) {
             // A cut/fill mouth meets the third hex at its corner. Retaining the upper plateau there leaves
@@ -1751,11 +1767,11 @@ final class BoardSurface {
                     Vector3 outerA = new Vector3(corners[edge]).lerp(corners[next], a);
                     Vector3 outerB = new Vector3(corners[edge]).lerp(corners[next], b);
                     hubRim.add(innerA);
-                    for (int section = 0; section < sections; section++) {
-                        quad(new Vector3(innerA).lerp(outerA, section / (float) sections),
-                              new Vector3(innerA).lerp(outerA, (section + 1f) / sections),
-                              new Vector3(innerB).lerp(outerB, (section + 1f) / sections),
-                              new Vector3(innerB).lerp(outerB, section / (float) sections), Finish.TOP);
+                    for (int section = 1; section < runs.size(); section++) {
+                        quad(new Vector3(innerA).lerp(outerA, runs.get(section - 1)),
+                              new Vector3(innerA).lerp(outerA, runs.get(section)),
+                              new Vector3(innerB).lerp(outerB, runs.get(section)),
+                              new Vector3(innerB).lerp(outerB, runs.get(section - 1)), Finish.TOP);
                     }
                 }
                 continue;
@@ -1775,8 +1791,8 @@ final class BoardSurface {
             roadRamps.add(ramp);
             Vector3 a = innerLeft, b = innerRight;
             // Enough sections to round the actual silhouette, including when normal maps are disabled.
-            for (int section = 1; section <= sections; section++) {
-                float t = section / (float) sections;
+            for (int section = 1; section < runs.size(); section++) {
+                float t = runs.get(section);
                 Vector3 c = new Vector3(innerLeft).lerp(left, t);
                 Vector3 d = new Vector3(innerRight).lerp(right, t);
                 c.z = d.z = center.z + rise * ramp.progress(t);
@@ -1784,8 +1800,8 @@ final class BoardSurface {
                 a = c;
                 b = d;
             }
-            roadBank(ramp, innerLeft, left, hub[edge], corners[edge], true, sections, bankSections);
-            roadBank(ramp, innerRight, right, hub[next], corners[next], false, sections, bankSections);
+            roadBank(ramp, innerLeft, left, hub[edge], corners[edge], true, runs, bankSections);
+            roadBank(ramp, innerRight, right, hub[next], corners[next], false, runs, bankSections);
         }
         // Match the bank vertices at the hub, including six-way junctions. Each point has only one height.
         int rings = sections;
@@ -1812,8 +1828,10 @@ final class BoardSurface {
     }
 
     private void simplifyRoad() {
-        BoardRampMesh.simplify(faces, p -> p.epsilonEquals(center, .0001f)
-              || roadRamps.stream().anyMatch(ramp -> ramp.normal(p) != null), .025f * BoardGeometry.hexScale());
+        BoardRoad road = BoardRoad.clearance(tile.coords(), tile.roadExits() | ramps);
+        float scale = BoardGeometry.hexScale();
+        BoardRampMesh.simplify(faces, center, p -> road.distance((p.x - center.x) / scale, (p.y - center.y) / scale)
+              <= BoardRoad.SHOULDER, p -> roadRamps.stream().anyMatch(ramp -> ramp.curved(p)));
     }
 
     /** Concrete stays a flat slab outside the road corridor; retaining walls carry the cut/fill inside it. */
@@ -1960,7 +1978,7 @@ final class BoardSurface {
             Vector3 nominal = new Vector3(corners[edge]).lerp(corners[(edge + 1) % 6], t);
             Vector3 rim = relief.roadPoint(edge, t, height(edgeTopography, nominal.x, nominal.y));
             float mx = (rim.x - nominal.x) * radius, my = (rim.y - nominal.y) * radius;
-            float keep = Math.min(1, BoardRelief.roadReliefRoom(clearance) / Math.max(.00001f, (float) Math.hypot(mx, my)));
+            float keep = BoardRelief.roadDisplacement(road, center.x, center.y, p.x, p.y, mx, my);
             return new Vector3(p).add(mx * keep, my * keep, 0);
         }
         return new Vector3(p);
@@ -1968,10 +1986,9 @@ final class BoardSurface {
 
     /** Cut/fill grades occupy the ground beside the road, rather than closing the carriageway with vertical walls. */
     private void roadBank(RoadRamp ramp, Vector3 near, Vector3 far, Vector3 inner, Vector3 outer, boolean left,
-          int sections, int across) {
+          List<Float> runs, int across) {
         Vector3[] previous = null;
-        for (int section = 0; section <= sections; section++) {
-            float t = section / (float) sections;
+        for (float t : runs) {
             Vector3 shoulder = new Vector3(near).lerp(far, t);
             shoulder.z = center.z + ramp.rise() * ramp.progress(t);
             Vector3 ground = new Vector3(inner).lerp(outer, t);
@@ -2015,6 +2032,14 @@ final class BoardSurface {
             return progress(Math.clamp((t + extension()) / (1 + extension()), 0, 1));
         }
 
+        boolean curved(Vector3 p) {
+            if (normal(p) == null) { return false; }
+            float area = along.x * across.y - along.y * across.x;
+            float t = ((p.x - origin.x) * across.y - (p.y - origin.y) * across.x) / area;
+            t = (t + extension()) / (1 + extension());
+            return deck ? t <= .2501f || t >= .7499f : t <= .5001f;
+        }
+
         Vector3 normal(Vector3 p) {
             float dx = p.x - origin.x, dy = p.y - origin.y;
             float area = along.x * across.y - along.y * across.x;
@@ -2040,7 +2065,7 @@ final class BoardSurface {
             Vector3 normal = ramp.normal(p);
             if (normal != null) { return normal; }
         }
-        return new Vector3(groundNormal);
+        return new Vector3(groundNormal == null ? Vector3.Z : groundNormal);
     }
 
     /** The existing terrain materials expose soil on low earthworks and rock in deeper cuts. */

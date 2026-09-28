@@ -14,6 +14,8 @@ import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Mesh;
+import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.Material;
@@ -21,6 +23,7 @@ import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.IntAttribute;
+import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.MeshBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
@@ -40,7 +43,7 @@ final class GpuBiomeVegetation implements Disposable {
         public Kind copy() { return new Kind(value == 1); }
     }
 
-    private static final float[] DENSITY = { 1, .5f, .18f };
+    private static final float[] DENSITY = { 1, .35f, .08f };
     // Cumulative coverage: fine plants replace medium plants, which replace the distant stems.
     // The same intervals drive conservative CPU submission and the per-root GPU cross-fade.
     private static final float[] START_PIXELS = { 240, 64, 12 }, FULL_PIXELS = { 480, 128, 36 };
@@ -49,8 +52,9 @@ final class GpuBiomeVegetation implements Disposable {
 
     /** CPU-only roots are also useful for verifying ground contact, shared rows and pool/road exclusion. */
     static final class Patch {
-        final BoardSurface.Key key;
-        final BoardTacticalGeometry.Surface surface;
+        final BoardVegetation.Key key;
+        BoardTacticalGeometry.Surface surface;
+        final List<BoardSurface.Face> ground;
         final BoardScene.Biome kind;
         final FloatArray roots = new FloatArray();
         final BoardRoad road;
@@ -62,10 +66,11 @@ final class GpuBiomeVegetation implements Disposable {
         Patch previous;
 
         Patch(BoardScene scene, BoardScene.Tile tile, BoardTacticalGeometry.Surface surface, long generation) {
-            key = BoardSurface.geometryKey(scene, tile);
+            key = BoardVegetation.key(scene, tile);
             this.surface = surface;
+            ground = support(tile, surface);
             this.generation = generation;
-            kind = BoardBiome.kind(tile);
+            kind = BoardBiome.plantKind(scene, tile);
             road = BoardRoad.rendered(tile) ? BoardRoad.of(scene, tile) : null;
             across = BoardBiome.ROW_METRES;
             along = kind == BoardScene.Biome.FIELD ? .63f : 1.15f;
@@ -87,6 +92,9 @@ final class GpuBiomeVegetation implements Disposable {
                 if ((checked++ & 31) == 0 && System.nanoTime() >= deadline) { break; }
                 int ix = x++, iy = y;
                 if (x > maxX) { x = minX; y++; }
+                // Thin the same world-space lattice at every LOD, independently of wetland coverage and plant height.
+                // Reject before sampling support geometry, so omitted roots also avoid preparation and buffer cost.
+                if (BoardRelief.hash(ix + 379, iy - 827) >= (kind == BoardScene.Biome.FIELD ? .38f : .46f)) { continue; }
                 float seed = BoardRelief.hash(ix, iy);
                 float u = (ix + (BoardRelief.hash(ix + 37, iy) - .5f)
                       * (kind == BoardScene.Biome.FIELD ? .12f : .7f)) * across;
@@ -94,19 +102,31 @@ final class GpuBiomeVegetation implements Disposable {
                 float px = (u * BoardBiome.ROW_X - v * BoardBiome.ROW_Y) * metre;
                 float py = (u * BoardBiome.ROW_Y + v * BoardBiome.ROW_X) * metre;
                 if (BoardGeometry.tile(scene, px, py) != tile) { continue; }
-                float z = BoardSurface.sampleHeight(surface.top(), px, py, Float.NaN);
-                if (!Float.isFinite(z) || BoardBiome.coverage(scene, kind, px, py, z) < .60f) { continue; }
+                // Water's tactical top includes the water plane. Roots instead follow the actual bank/bar mesh.
+                float z = BoardSurface.sampleHeight(ground, px, py, Float.NaN);
+                if (!Float.isFinite(z)) { continue; }
+                float cover = BoardBiome.coverage(scene, kind, px, py, z);
+                if (kind == BoardScene.Biome.FIELD ? cover < .60f : seed > .88f * BoardRelief.smooth(cover)) { continue; }
+                if (tile.liquid().present()) {
+                    float water = BoardSurface.sampleHeight(surface.water(), px, py, Float.NEGATIVE_INFINITY);
+                    if (z <= water + .015f * metre) { continue; }
+                }
                 if (road != null && road.distance((px - BoardGeometry.centerX(tile.coords())) / BoardGeometry.hexScale(),
                       (py - BoardGeometry.centerY(tile.coords())) / BoardGeometry.hexScale()) < BoardRoad.SHOULDER + 1) { continue; }
                 if (kind == BoardScene.Biome.MARSH) {
                     float wet = BoardBiome.wetness(px / metre, py / metre);
-                    if (wet < .48f || wet > .80f || seed > .88f) { continue; }
+                    if (wet < .48f || wet > .80f) { continue; }
                 } else if (seed > .96f) { continue; }
                 roots.addAll(px, py, z - .018f * metre, seed);
             }
         }
 
         boolean busy() { return y <= maxY; }
+    }
+
+    private static List<BoardSurface.Face> support(BoardScene.Tile tile, BoardTacticalGeometry.Surface surface) {
+        return tile.liquid().present() ? surface.faces().stream().filter(face -> face.finish() == BoardSurface.Finish.TOP
+              || face.finish() == BoardSurface.Finish.SHORE || face.finish() == BoardSurface.Finish.BED).toList() : surface.top();
     }
 
     private static final class Batch implements Disposable {
@@ -124,7 +144,7 @@ final class GpuBiomeVegetation implements Disposable {
         void begin() { current.clear(); sizes.clear(); }
         void add(Patch patch) { if (patch.roots.size > 0) { current.add(patch); sizes.add(patch.roots.size); } }
 
-        ModelInstance upload() {
+        ModelInstance upload(Texture texture) {
             if (current.isEmpty()) { previous.clear(); previousSizes.clear(); return null; }
             if (current.equals(previous) && sizes.equals(previousSizes)) { return data.size == 0 ? null : instance; }
             data.clear();
@@ -141,9 +161,10 @@ final class GpuBiomeVegetation implements Disposable {
                 try { mesh = new GpuInstancedMesh(template); } finally { template.dispose(); }
                 var builder = new ModelBuilder();
                 builder.begin();
-                builder.part(crop ? "crop" : "reeds", mesh, GL20.GL_TRIANGLES,
-                      new Material(ColorAttribute.createDiffuse(Color.WHITE), IntAttribute.createCullFace(GL20.GL_NONE),
-                            new Kind(crop), new FloatAttribute(Kind.LOD, lod)));
+                var material = new Material(ColorAttribute.createDiffuse(Color.WHITE), IntAttribute.createCullFace(GL20.GL_NONE),
+                      new Kind(crop), new FloatAttribute(Kind.LOD, lod));
+                if (texture != null) { material.set(TextureAttribute.createDiffuse(texture)); }
+                builder.part(crop ? "crop" : "reeds", mesh, GL20.GL_TRIANGLES, material);
                 builder.manage(mesh);
                 instance = new ModelInstance(builder.end());
             }
@@ -173,6 +194,7 @@ final class GpuBiomeVegetation implements Disposable {
     private int revision = -1, boardId = -1;
     private long generation;
     private boolean preparing;
+    private Texture sedge;
 
     static String vertex(String source) {
         String plant = Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-biome-vegetation.glsl").readString();
@@ -198,7 +220,7 @@ final class GpuBiomeVegetation implements Disposable {
         preparing = false;
         long deadline = System.nanoTime() + BUILD_NANOS;
         for (var tile : candidates) {
-            var kind = BoardBiome.kind(tile);
+            var kind = BoardBiome.plantKind(scene, tile);
             if (kind != BoardScene.Biome.FIELD && kind != BoardScene.Biome.MARSH) { continue; }
             Vector3 center = BoardGeometry.center(tile.coords(), tile.elevation());
             float radius = BoardGeometry.width() * .8f;
@@ -213,13 +235,17 @@ final class GpuBiomeVegetation implements Disposable {
             Patch patch = patches.get(tile.coords());
             if (patch == null || patch.surface != surface || patch.generation != generation) {
                 if (patch == null && System.nanoTime() >= deadline) { preparing = true; continue; }
-                if (patch == null || patch.surface != surface || !patch.key.equals(BoardSurface.geometryKey(scene, tile))) {
+                var key = BoardVegetation.key(scene, tile);
+                if (patch == null || !patch.key.equals(key) || !patch.ground.equals(support(tile, surface))) {
                     Patch previous = patch == null ? null : patch.previous == null ? patch : patch.previous;
                     patch = new Patch(scene, tile, surface, generation);
-                    // Actual terrain edits must discard stale plants; a LOD-only surface change may retain them.
-                    if (previous != null && previous.key.equals(patch.key)) { patch.previous = previous; }
+                    // Keep complete roots while an unchanged floor's cover boundary or its mesh LOD updates.
+                    // Changed elevations discard old roots so plants cannot float over or through the new ground.
+                    if (previous != null && previous.kind == patch.kind && (previous.key.equals(key)
+                          || previous.ground.equals(support(tile, surface)))) { patch.previous = previous; }
                     patches.put(tile.coords(), patch);
                 }
+                patch.surface = surface;
                 patch.generation = generation;
             }
             patch.prepare(scene, tile, deadline);
@@ -234,7 +260,12 @@ final class GpuBiomeVegetation implements Disposable {
         }
         List<ModelInstance> result = new ArrayList<>();
         for (Batch batch : batches) {
-            ModelInstance instance = batch.upload();
+            if (!batch.crop && !batch.current.isEmpty() && sedge == null) {
+                sedge = sedgeTexture();
+                sedge.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
+                sedge.setWrap(Texture.TextureWrap.ClampToEdge, Texture.TextureWrap.ClampToEdge);
+            }
+            ModelInstance instance = batch.upload(batch.crop ? null : sedge);
             if (instance != null) { result.add(instance); }
         }
         var iterator = patches.entrySet().iterator();
@@ -247,90 +278,67 @@ final class GpuBiomeVegetation implements Disposable {
     boolean busy() { return preparing; }
     long uploads() { long total = 0; for (Batch batch : batches) { total += batch.uploads; } return total; }
 
-    /** Solid leaf strips, not texture cards; lower tiers reduce both leaves and the number of plants. */
+    /** One 512px cutout with mipmaps for the whole board; keep the full-resolution source as the editable asset. */
+    private static Texture sedgeTexture() {
+        var source = new Pixmap(Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/marsh-sedge.png"));
+        try {
+            var pixels = new Pixmap(512, 512, Pixmap.Format.RGBA8888);
+            try {
+                pixels.setBlending(Pixmap.Blending.None);
+                pixels.setFilter(Pixmap.Filter.BiLinear);
+                pixels.drawPixmap(source, 0, 0, source.getWidth(), source.getHeight(), 0, 0, 512, 512);
+                return new Texture(pixels, true);
+            } finally { pixels.dispose(); }
+        } finally { source.dispose(); }
+    }
+
+    /** Crops use solid leaves; marsh clumps use bent cutouts. Each tier reduces geometry and root density. */
     private static Mesh template(boolean crop, int lod) {
         var mesh = new MeshBuilder();
-        mesh.begin(VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal | VertexAttributes.Usage.ColorPacked, GL20.GL_TRIANGLES);
+        mesh.begin(VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal | VertexAttributes.Usage.ColorPacked
+              | (crop ? 0 : VertexAttributes.Usage.TextureCoordinates), GL20.GL_TRIANGLES);
         if (!crop) {
             marsh(mesh, lod);
             return mesh.end();
         }
-        Color leaf = new Color(.29f, .37f, .095f, 1), stem = new Color(.40f, .38f, .15f, 1);
-        int stems = crop ? 1 : new int[] { 7, 4, 2 }[lod];
-        for (int i = 0; i < stems; i++) {
-            float angle = i * 2.399963f;
-            Vector3 base = crop ? new Vector3() : new Vector3((float) Math.cos(angle), (float) Math.sin(angle), 0).scl(.22f);
-            float height = crop ? 1 : .63f + BoardRelief.hash(i, 12) * .37f;
-            strip(mesh, base, new Vector3(base).add(0, 0, height), crop ? .007f : .009f, .004f, angle, stem);
-            int leaves = crop ? new int[] { 8, 4, 2 }[lod] : lod == 0 ? 2 : 1;
-            for (int j = 0; j < leaves; j++) {
-                float turn = angle + j * 2.399963f;
-                float reach = crop ? .18f + .08f * BoardRelief.hash(j, 3) : .13f;
-                Vector3 from = new Vector3(base).add(0, 0, height * (.18f + j * .60f / leaves));
-                Vector3 tip = new Vector3(from).add((float) Math.cos(turn) * reach, (float) Math.sin(turn) * reach, .04f);
-                float width = crop ? .032f : .013f;
-                if (lod == 0) {
-                    Vector3 middle = new Vector3(from).lerp(tip, .5f).add(0, 0, .08f);
-                    strip(mesh, from, middle, width * .35f, width, turn, leaf);
-                    strip(mesh, middle, tip, width, .001f, turn, leaf);
-                } else { strip(mesh, from, tip, width, .001f, turn, leaf); }
-            }
-            if (crop || i % 3 == 0) {
-                strip(mesh, new Vector3(base).add(0, 0, height * .85f), new Vector3(base).add(0, 0, height * 1.04f),
-                      crop ? .023f : .014f, crop ? .009f : .014f, angle, new Color(.57f, .45f, .19f, 1));
-            }
-            if (!crop) {
-                Vector3 middle = new Vector3(base).add((float) Math.cos(angle) * .13f, (float) Math.sin(angle) * .13f, .32f);
-                Vector3 tip = new Vector3(base).add((float) Math.cos(angle) * .34f, (float) Math.sin(angle) * .34f, .16f);
-                strip(mesh, base, middle, .016f, .035f, angle, leaf);
-                if (lod < 2) { strip(mesh, middle, tip, .035f, .001f, angle, leaf); }
-            }
+        Color leaf = new Color(.38f, .48f, .13f, 1), stem = new Color(.40f, .38f, .15f, 1);
+        if (lod == 2) {
+            // One tapered, camera-facing stalk at distance; the ground shader retains the cultivated rows.
+            strip(mesh, new Vector3(), new Vector3(0, 0, 1.04f), .052f, .006f, -(float) Math.PI / 2, leaf);
+            return mesh.end();
         }
+        strip(mesh, new Vector3(), new Vector3(0, 0, 1), .011f, .004f, 0, stem);
+        int leaves = lod == 0 ? 3 : 1;
+        for (int j = 0; j < leaves; j++) {
+            float turn = j * 2.399963f, reach = .28f + .12f * BoardRelief.hash(j, 3);
+            Vector3 from = new Vector3(0, 0, .18f + j * .60f / leaves);
+            Vector3 tip = new Vector3(from).add((float) Math.cos(turn) * reach, (float) Math.sin(turn) * reach, .10f);
+            // A leaf is one tapered ribbon; the shared vertex shader supplies its wind motion.
+            strip(mesh, from, tip, .085f, .002f, turn, leaf);
+        }
+        strip(mesh, new Vector3(0, 0, .85f), new Vector3(0, 0, 1.04f),
+              .04f, .009f, 0, new Color(.57f, .45f, .19f, 1));
         return mesh.end();
     }
 
-    /** Dense basal sedge, bent dead leaves and a few emergent cattails share one opaque instanced mesh. */
+    /** Crossed, bent surfaces retain volume from above; the alpha-tested cutout supplies individual curling leaves. */
     private static void marsh(MeshPartBuilder mesh, int lod) {
-        int blades = new int[] { 42, 18, 7 }[lod];
-        for (int i = 0; i < blades; i++) {
-            float angle = i * 2.399963f;
-            float seed = BoardRelief.hash(i, 43), length = .32f + .42f * BoardRelief.hash(i, 71);
-            float radius = .06f + .18f * BoardRelief.hash(i, 91);
-            Vector3 base = new Vector3((float) Math.cos(angle) * radius, (float) Math.sin(angle) * radius, 0);
+        int cards = lod == 2 ? 1 : 2;
+        int segments = lod == 0 ? 2 : 1;
+        for (int card = 0; card < cards; card++) {
+            float angle = card * (float) Math.PI / cards;
             Vector3 side = new Vector3((float) Math.cos(angle), (float) Math.sin(angle), 0);
-            Color color = new Color(.26f, .31f, .095f, .3f).lerp(new Color(.49f, .40f, .21f, .3f), seed * .75f);
-            float width = .012f + .012f * seed;
-            Vector3 middle = new Vector3(base).mulAdd(side, length * .32f).add(0, 0, length * .7f);
-            Vector3 tip = new Vector3(base).mulAdd(side, length).add(0, 0, length * .22f);
-            strip(mesh, base, middle, width * .7f, width, angle, color);
-            if (lod < 2) {
-                Vector3 shoulder = new Vector3(base).mulAdd(side, length * .7f).add(0, 0, length * .60f);
-                strip(mesh, middle, shoulder, width, width * .6f, angle, color);
-                strip(mesh, shoulder, tip, width * .6f, .001f, angle, color);
-            } else { strip(mesh, middle, tip, width, .001f, angle, color); }
-        }
-        int stems = new int[] { 13, 6, 3 }[lod];
-        for (int i = 0; i < stems; i++) {
-            float angle = i * 2.399963f, seed = BoardRelief.hash(i, 127);
-            float height = .7f + .5f * seed, radius = .08f + .30f * BoardRelief.hash(i, 17);
-            Vector3 base = new Vector3((float) Math.cos(angle) * radius, (float) Math.sin(angle) * radius, 0);
-            Vector3 head = new Vector3(base).add((float) Math.cos(angle) * .08f, (float) Math.sin(angle) * .08f, height);
-            Color green = new Color(.23f, .30f, .10f, .8f).lerp(new Color(.43f, .39f, .20f, .8f), seed);
-            strip(mesh, base, head, .010f, .005f, angle, green);
-            int leaves = lod == 0 ? 3 : 1;
-            for (int j = 0; j < leaves; j++) {
-                float turn = angle + j * 2.399963f;
-                Vector3 from = new Vector3(base).add(0, 0, height * (.12f + j * .18f));
-                Vector3 bend = new Vector3(from).add((float) Math.cos(turn) * .14f, (float) Math.sin(turn) * .14f, height * .42f);
-                Vector3 tip = new Vector3(from).add((float) Math.cos(turn) * .34f, (float) Math.sin(turn) * .34f, height * .30f);
-                strip(mesh, from, bend, .018f, .022f, turn, green);
-                if (lod < 2) { strip(mesh, bend, tip, .022f, .001f, turn, green); }
-            }
-            if (i % 3 == 0) {
-                Color headColor = new Color(.27f, .18f, .075f, .8f);
-                for (int side = 0; side < 2; side++) {
-                    strip(mesh, new Vector3(head).add(0, 0, -.17f), head, .026f, .017f, angle + side * 1.570796f, headColor);
-                }
+            Vector3 outward = new Vector3(-side.y, side.x, 0);
+            for (int row = 0; row < segments; row++) {
+                float low = row / (float) segments, high = (row + 1) / (float) segments;
+                Vector3 a = new Vector3(outward).scl((float) Math.sin(low * Math.PI) * .28f).add(0, 0, low * 1.1f);
+                Vector3 b = new Vector3(outward).scl((float) Math.sin(high * Math.PI) * .28f).add(0, 0, high * 1.1f);
+                Vector3 normal = new Vector3(side).crs(new Vector3(b).sub(a)).nor();
+                float bottom = .98f - low * .98f, top = .98f - high * .98f;
+                mesh.rect(vertex(new Vector3(a).mulAdd(side, -.58f), normal, Color.WHITE).setUV(0, bottom),
+                      vertex(new Vector3(a).mulAdd(side, .58f), normal, Color.WHITE).setUV(1, bottom),
+                      vertex(new Vector3(b).mulAdd(side, .58f), normal, Color.WHITE).setUV(1, top),
+                      vertex(new Vector3(b).mulAdd(side, -.58f), normal, Color.WHITE).setUV(0, top));
             }
         }
     }
@@ -349,6 +357,7 @@ final class GpuBiomeVegetation implements Disposable {
     @Override
     public void dispose() {
         for (Batch batch : batches) { batch.dispose(); }
+        if (sedge != null) { sedge.dispose(); sedge = null; }
         patches.clear(); tiles = null; preparing = false;
     }
 }

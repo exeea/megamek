@@ -1,6 +1,6 @@
 # GPU road surfaces
 
-Ordinary road hexes now use the terrain engine for their ground and a separate road strip for their road. This replaces the full-hex road artwork for supported dry terrain combinations. Road connectivity, movement costs, tile elevations and bridge deck heights remain authoritative. Rendering, picking and unit support share the same ground mesh, including its curved road ramps.
+Ordinary roads are material splats on the terrain's existing faces. Asphalt, gravel, dirt, markings and tyre wear do not subdivide the ground or have a separate road-shaped mesh. This replaces the full-hex road artwork for supported dry terrain combinations. Road connectivity, movement costs, tile elevations and bridge deck heights remain authoritative. Rendering, picking and unit support share the same ground shape, including its curved road ramps.
 
 ## Representation
 
@@ -16,25 +16,29 @@ Ordinary road hexes now use the terrain engine for their ground and a separate r
 - Natural ground around the road retains the engine's material blending. Snow and sand influence the paved shoulder; unsealed margins expose the local ground directly. The road's surface remains continuous across biome borders.
 - Rough boulders and tree trunks use the same footprint for clearance. Woods keep their tree count, and grass tufts stay outside the verge.
 
-`BoardScene.Tile.road` captures the game's road level as an immutable visual kind. `roadExits` remains the authoritative exit mask. `BoardRoad` builds the footprint and clearance query; `GpuRoads` supplies the material patches and drapes them onto the existing `BoardSurface` triangles. It reuses `BoardTacticalGeometry`'s tessellator and triangle clipper. No second height field or road simulation is introduced. Repeating material maps come from `GpuAssets`; the existing ground shader supplies lighting, shadows, normal detail, and rain response.
+`BoardScene.Tile.road` captures the game's road level as an immutable visual kind. `roadExits` remains the authoritative exit mask. `BoardRoad` builds the footprint and clearance query; `GpuRoads` rasterizes material coverage into small masks and supplies whole existing `BoardSurface` triangles to carry them. The fragment shader draws the borders, dashes and tyre wear. No second height field or road simulation is introduced. Repeating material maps come from `GpuAssets`; the existing ground shader supplies lighting, shadows, normal detail, and rain response.
 
-Road kind survives tactical-only snapshots and participates in terrain invalidation. Changing kind, exits, or nearby geometry rebuilds the road together with its surroundings. Road geometry and textures are owned by the existing chunk and asset lifecycles.
+Masks contain coverage and transition controls at four pixels per logical board unit, cropped to each patch's bounds. They do not replace or lower the resolution of the repeating material textures. CPU workers prepare immutable masks; the render thread uploads a chunk-owned atlas. Local mask UVs are vertex data, allowing repeated roads to share a material batch. Reused geometry binds the replacement chunk's atlas before the old one is disposed. Road kind survives tactical-only snapshots and participates in terrain invalidation; changing kind, exits or nearby geometry rebuilds the affected road and ground together.
+
+These are additional material passes over copies of the terrain faces, with a small depth offset. They introduce no road-specific tessellation, but still submit triangles and consume fill rate. This implementation does not combine every road layer into a single terrain-shader pass.
 
 ## Ramp geometry
 
 `BoardSurface` rounds the change of grade between a flat tile centre and its road approach. A parabolic vertical curve leaves the plateau, followed by a constant grade through the shared hex edge. Both adjacent hexes agree on height and tangent there; the other half eases back onto the next plateau. A bridge approach contains both vertical curves within the road hex so it reaches the bridge deck level, with a horizontal tangent.
 
-Each half-ramp has 24 mesh sections. A two-level road climb starts near one hex centre and finishes near the other; a one-level climb uses a shorter run. Grades never propagate into additional hexes. The centres keep their authoritative elevation, including six-way junctions with mixed-height neighbours. The carriageway width stays fixed.
+Flat road hexes use six terrain triangles. Ramps derive their longitudinal and bank resolution from rise and geometric error instead of the former fixed 24 sections, eight bank divisions and twelve hub rings. Bridge approaches add samples at their flat departure and arrival. `BoardRampMesh` removes redundant interior vertices, retaining shared boundaries, curved carriageways and the tile centre, and checks retained height samples before accepting a change. A two-level climb starts near one hex centre and finishes near the other; a one-level climb uses a shorter run. Grades never propagate into additional hexes. The centres keep their authoritative elevation, including six-way junctions with mixed-height neighbours. The carriageway width stays fixed.
 
 The surrounding cut/fill is part of the ground mesh, with smooth lateral shoulders instead of vertical panels against the road. Shared mouth corners use the median of the three surrounding land elevations to avoid isolated cliff spikes. Excavated ground follows the envelope between a cliff's foot and rim, rather than folding sideways over each rock ledge. Wall joins retain the canonical corner profile. Asphalt, paint, tracks and shoulders drape onto the supporting triangles. Contact queries prefer a triangle that contains the point; their edge tolerance only recovers rounding gaps. Normal maps add detail, not replacement geometry. The slope is still limited by the available two-hex distance and chosen elevation scale.
+
+Concrete keeps level geometric slabs outside the road corridor. Its cut/fill uses vertical retaining walls, with wall-oriented material coordinates and continuous joins to the ramp. It does not receive the natural ground's weathered bank or displaced cliff profile. All three concrete boundary modes retain this engineered ramp geometry; the default remains Everywhere, None keeps sharp hex boundaries, and isolated concrete remains hexagonal.
 
 ## Road material maps
 
 `mm-data/data/models/board/textures/roads/` contains dedicated asphalt, compacted dirt and crushed-gravel materials. Each has 1024px albedo and tangent normals plus packed height/roughness/cavity-AO/range. Assets use mipmaps and the existing anisotropic filtering. The road shader uses roughness for the specular response, AO for small cavities, and height for grain coverage and preferential wetting. Color, normal and roughness follow the same material coverage through transitions. The existing normal-map toggle applies to roads too.
 
-Normal maps come from the same quantized height and relief range shipped in the surface texture. The relief is a shallow artistic estimate, not a scanned physical surface. It does not displace the terrain, change unit support, or encode road width. Markings and wheel spacing stay in the shared road geometry.
+Normal maps come from the same quantized height and relief range shipped in the surface texture. The relief is a shallow artistic estimate, not a scanned physical surface. It does not displace the terrain, change unit support, or encode road width. Markings and wheel spacing come from the shared road footprint and its masks.
 
-Transition vertices carry along/across coordinates in their red/green channels; alpha carries only road-edge coverage. Wheel-compaction vertices instead carry the path direction in those channels. The road shader interprets those coordinates instead of tinting the albedo. Keeping the controls separate prevents the material blend from narrowing the road. The transition's interior and its edge strip are tessellated separately so an interior triangle cannot disappear because all its vertices lie on a zero-opacity outer boundary. Dirt/gravel joins retain the same broad loose margin on both sides. Geometry supplies the shared transition reach, wheel spacing, wear width and deposit tint to the shader.
+Transition masks carry along/across coordinates in their red/green channels; alpha carries road-edge coverage. Wheel-compaction masks instead carry the path direction in those channels. The road shader interprets those coordinates instead of tinting the albedo. Keeping the controls separate prevents the material blend from narrowing the road. Coverage is sampled per fragment, so a triangle remains visible even when its vertices fall outside the road. Dirt/gravel joins retain the same broad loose margin on both sides. The shared road constants supply transition reach, wheel spacing, wear width and deposit tint to the shader.
 
 Sources, exact built-in ImageGen prompts, the transition reference, and baking instructions are in `mm-data/tools/road-sources/README.md`. `tools/prepare_road_materials.py --check` verifies deterministic outputs and normal/height alignment using the existing terrain-map helpers.
 
@@ -42,11 +46,40 @@ The later dirt/gravel margin studies and their exact prompts are in `mm-data/too
 
 ## Preserved fallbacks and limits
 
-Custom `ROAD_FLUFF`, unsupported road levels, submerged/frozen roads, and combinations whose other visible terrain still requires artwork keep the existing full-tile appearance. Bridge decks remain baked GLBs with shared road materials; their five/six-exit variants use the same roundabouts, with a solid raised concrete island and rails outside the carriageway. This changes presentation, not traffic rules or movement legality.
+`ROAD_FLUFF:1` selects a standard road bend and uses the native road over the tile's terrain material. Other custom `ROAD_FLUFF`, unsupported road levels, submerged/frozen roads, and combinations whose other visible terrain still requires artwork keep the existing full-tile appearance. Bridge decks remain baked GLBs with shared road materials; their five/six-exit variants use the same roundabouts, with a solid raised concrete island and rails outside the carriageway. This changes presentation, not traffic rules or movement legality.
 
 Rain uses the existing weather wetness input. Dirt darkens in uneven muddy patches and holds reflective water in shallow, nearly level basins. Wheel wear varies compaction, roughness, normals and coverage while retaining fixed track spacing. This is a material effect, not a new water simulation.
 
 ## Verification
+
+### Mines 1 road coverage (2026-09-28)
+
+The reported missing sections on `Deserts/16x17 Mines 1.board` did not reproduce with the current road-mask implementation, but nine bends with `ROAD_FLUFF:1` incorrectly fell back to legacy artwork with grass baked into it. They now use the native road renderer over desert sand. The source regression verifies all 30 authored road hexes, every exit and the sand surface, including those nine bends. Live capture checks adding a standard bend decoration and retaining the fallback for unsupported custom decoration.
+
+The native `GpuRoadSmokeTest.keepsMinesRoadsVisibleAcrossTheRealBoard` loads that same captured scene through the asynchronous terrain path, checks visible asphalt on each approach, zooms out and back through cached detail, and checks again after a nearby terrain edit and its reversal replace the mask atlas while reusing unchanged meshes. Distant views are captured for inspection; pixel assertions run at close zoom where asphalt and markings occupy separate pixels. Close top and oblique captures of 0815 confirm sand around the bend without the grass patch. This material fix does not address the separate cliff-corner gaps visible elsewhere in the captures.
+
+28 focused CPU/integration cases (`BoardRoadTest`, `BoardFeaturesTest`, `GpuRoadSourceTest`), the native Mines OpenGL case, and scoped main/test Checkstyle passed. Captures are in `build/road-review/megamek/gpu-board-review/roads/mines-roads-*.png` and `mines-road-fluff-sand-*.png`. The full project suite was not run.
+
+### Current road/concrete follow-up (2026-09-28)
+
+199 targeted CPU cases passed across the geometry and final mask runs: `BoardRoadTest` (17), `BoardRoadRampTest` (30), `BoardSurfaceTest` (66), `BoardConcreteShoreTest` (18), `BoardBridgeTest` (64), `UnitLandingSupportsTest` (3), and `GpuRoadSourceTest` (1). This includes the previously failing road contact case and six bridge approach cases. The final mask-only change reran the 17 road cases and three triangle-budget cases; the remaining geometry tests had passed before that material-only change.
+
+Both `GpuRoadSmokeTest` cases and `GpuBridgeSmokeTest` passed with native OpenGL. They cover visible asphalt on every roundabout approach, mask reuse during live edits, normal maps, wet surfaces, mixed road materials, concrete walls and all 64 bridge exit patterns. Captures were visually reviewed for the concrete retaining walls, two-level natural earthworks and mixed-height six-way junction. Scoped main/test Checkstyle and `git diff --check` passed.
+
+Measured terrain-roof triangles for one hex at the default test dimensions:
+
+| Fixture | Former fixed grid | Reduced mesh |
+| --- | ---: | ---: |
+| Flat road with flat surroundings | — | 6 |
+| One-level straight climb | 7,171 | 775 |
+| Two-level straight climb | 7,171 | 1,702 |
+| Six connected roads with mixed neighbouring heights | 6,887 | 3,516 |
+
+These counts include the earthworks and remaining land surface. They exclude cliff walls, bridge assets and the repeated triangles submitted by material passes. Complex junctions still cost substantially more than flat ground. Comparing 7,930 height samples per ramp fixture against the former grid gave RMS differences of 0.021, 0.019 and 0.024 board units; maximum differences were 0.146, 0.116 and 0.254 respectively (one level is 18 units in these fixtures). These are geometry measurements, not frame-rate or large-board memory benchmarks.
+
+The temporary isolated build harness excludes `GpuPropBatchSmokeTest` and `GpuBoardWindowSmokeTest` from compilation because other in-progress work changed their instancing/UI APIs. They were not reported as passing. No unrelated test sources were modified to unblock this review. Already-staged assets were used because the running application held a font file open. The full project suite was not run.
+
+### Earlier checks
 
 88 targeted CPU/integration tests passed: `BoardRoadTest` (6), `BoardFeaturesTest` (9), `BoardSurfaceBlendTest` (7), `BoardSurfaceTest` (65), and `GpuRoadSourceTest` (1). Coverage includes every exit mask, all six orientations and both column parities for mixed-width joins, draping on ramps, existing bridge support/movement, terrain capture/edit/removal, fallback retention, and Rough/woods clearance.
 

@@ -31,7 +31,10 @@ class GpuRoughCaptureTest {
                 var rocky = fixture.source.takeFrame().scene().tile(coords);
                 assertEquals(clear.ground(), rocky.ground(), "GPU base/road artwork contains no painted boulders");
                 assertEquals(clear.decals(), rocky.decals(), "Rough is not duplicated as a decal");
-                assertEquals(exits == 0, rocky.detailedGround(), "Plain Rough uses the engine; roads keep their markings");
+                assertTrue(rocky.detailedGround(), "Dry roads and Rough both support detailed ground");
+                assertEquals(exits == 0 ? BoardRoad.Kind.NONE : BoardRoad.Kind.PAVED, rocky.road(),
+                      "Adding Rough preserves the road type");
+                assertEquals(exits, rocky.roadExits(), "Adding Rough preserves the road exits");
                 assertTrue(rocky.features().stream().anyMatch(f -> f.kind() == BoardScene.FeatureKind.BOULDER));
                 assertFalse(clear.sameGeometry(rocky), "Adding Rough invalidates the shared terrain mesh");
                 assertTrue(fixture.game.getBoard().getHex(coords).containsTerrain(Terrains.ROUGH),

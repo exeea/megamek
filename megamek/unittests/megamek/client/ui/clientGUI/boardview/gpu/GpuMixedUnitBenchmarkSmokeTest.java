@@ -1,6 +1,8 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import megamek.client.ui.clientGUI.boardview.BoardFocus;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -112,7 +114,7 @@ class GpuMixedUnitBenchmarkSmokeTest {
                     boolean preparePlaybackCamera(UnitPlayback state, BoardScene scene) { return true; }
 
                     @Override
-                    void updateCameraFocus(BoardScene scene, BoardView.CenterRequest request, BoardScene.Animation action) {
+                    void updateCameraFocus(BoardScene scene, BoardFocus request, BoardScene.Animation action) {
                         if (frame == 0) { super.updateCameraFocus(scene, request, action); }
                     }
 

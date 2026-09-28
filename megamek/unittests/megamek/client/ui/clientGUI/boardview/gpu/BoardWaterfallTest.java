@@ -14,8 +14,82 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 class BoardWaterfallTest {
+    @ParameterizedTest
+    @EnumSource(TerrainLod.class)
+    void waterfallEndsShareTheAdjoiningCliffShapeAndShading(TerrainLod lod) {
+        for (int direction = 0; direction < 6; direction++) {
+            BoardScene scene = mesa(direction);
+            var surface = new BoardSurface(scene, scene.tile(new Coords(3, 3)), lod);
+            var walls = surface.walls(scene, BoardGeometry.floor(scene));
+            int edge = surface.waterfalls.getFirst().edge();
+            var fall = walls.stream().filter(f -> f.landEdge() == edge).toList();
+            Map<Vector3, BoardRelief.Shade> fallShades = new HashMap<>();
+            for (var face : fall) {
+                for (var p : List.of(face.a(), face.b(), face.c())) {
+                    fallShades.put(p, surface.relief.shade(p));
+                }
+            }
+            for (int end = 0; end < 2; end++) {
+                int adjacent = Math.floorMod(edge + (end == 0 ? -1 : 1), 6);
+                Vector3 corner = BoardGeometry.corner(surface.tile.coords(), 0, edge + end);
+                var cliff = walls.stream().filter(f -> f.landEdge() == adjacent).toList();
+                Map<Segment, Integer> counts = new HashMap<>();
+                for (var face : cliff) {
+                    Vector3[] points = { face.a(), face.b(), face.c() };
+                    for (int i = 0; i < 3; i++) {
+                        var a = points[i];
+                        var b = points[(i + 1) % 3];
+                        var reverse = new Segment(b, a);
+                        counts.merge(counts.containsKey(reverse) ? reverse : new Segment(a, b), 1, Integer::sum);
+                    }
+                }
+                int shared = 0;
+                float rounding = 0;
+                for (var segment : counts.entrySet()) {
+                    if (segment.getValue() != 1) { continue; }
+                    for (Vector3 p : List.of(segment.getKey().a(), segment.getKey().b())) {
+                        float distance = (float) Math.hypot(p.x - corner.x, p.y - corner.y);
+                        if (distance > BoardGeometry.WIDTH * .2f || p.z < 2 * BoardGeometry.LEVEL
+                              || p.z > 4 * BoardGeometry.LEVEL) { continue; }
+                        Vector3 joined = fallShades.keySet().stream().filter(q -> q.epsilonEquals(p, .002f))
+                              .findFirst().orElse(null);
+                        assertTrue(joined != null, "The fall must share the cliff's corner rows: " + p + ", " + lod);
+                        assertTrue(fallShades.get(joined).normal().dot(surface.relief.shade(p).normal()) > .995f,
+                              "The waterfall join must not have a lighting crease: " + p + ", " + lod);
+                        assertEquals(surface.relief.shade(p).level(), fallShades.get(joined).level(), .0001f,
+                              "Rock must blend into the adjoining bank material: " + p + ", " + lod);
+                        assertEquals(surface.relief.shade(p).occlusion(), fallShades.get(joined).occlusion(), .0001f,
+                              "The shared corner must not have an ambient lighting seam: " + p + ", " + lod);
+                        rounding = Math.max(rounding, distance);
+                        shared++;
+                    }
+                }
+                assertTrue(shared > 2, "Both ends must exercise the common cliff boundary");
+                assertTrue(rounding > BoardRelief.metres(.1f), "The side must round into the cliff instead of a pillar");
+            }
+        }
+    }
+
+    private record Segment(Vector3 a, Vector3 b) { }
+
+    /** A raised pool above land on five sides, with a six-level waterfall on the remaining side. */
+    private static BoardScene mesa(int direction) {
+        Coords high = new Coords(3, 3), low = high.translated(direction);
+        List<BoardScene.Tile> tiles = new ArrayList<>();
+        for (int x = 0; x < 7; x++) {
+            for (int y = 0; y < 7; y++) {
+                Coords coords = new Coords(x, y);
+                boolean water = coords.equals(high) || coords.equals(low);
+                tiles.add(tile(coords, coords.equals(high) ? 5 : coords.equals(low) ? -1 : 0, water ? 1 : -1));
+            }
+        }
+        return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
+    }
+
     @Test
     void rockBehindTheCurtainBlocksRaysFromObliqueAngles() {
         var original = BoardRelief.tuning();

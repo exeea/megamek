@@ -32,7 +32,7 @@ import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
 import megamek.MMConstants;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.sprite.TextMarkerSprite;
 
 /** Unlit, depth-tested tactical volumes shared by both cameras. Owns its meshes and batch on the GL thread. */
@@ -106,7 +106,7 @@ final class GpuFireControl implements Disposable {
                     range(frame, walls.get(i), color);
                 }
             }
-            if (!BoardView.GPU_SCROLLING_RANGE_LABELS) {
+            if (!BoardTactical.SCROLLING_RANGE_LABELS) {
                 continue;
             }
             float[] distances = new float[walls.size() + 1];
@@ -159,7 +159,7 @@ final class GpuFireControl implements Disposable {
     }
 
     private void updateLabels(BoardScene scene) {
-        List<BoardScene.RangeLabel> next = BoardView.GPU_SCROLLING_RANGE_LABELS ? List.of() : scene.rangeLabels();
+        List<BoardScene.RangeLabel> next = BoardTactical.SCROLLING_RANGE_LABELS ? List.of() : scene.rangeLabels();
         if (rangeLabels.equals(next)) {
             return;
         }
@@ -283,7 +283,7 @@ final class GpuFireControl implements Disposable {
         Vector3 shift = thickness(edge);
         Vector3 innerA = new Vector3(a).add(shift), innerB = new Vector3(b).add(shift);
         Vector3 innerC = new Vector3(c).add(shift), innerD = new Vector3(d).add(shift);
-        if (!BoardView.GPU_SCROLLING_RANGE_LABELS) {
+        if (!BoardTactical.SCROLLING_RANGE_LABELS) {
             quad(mesh, a, b, c, d, color);
             quad(mesh, innerB, innerA, innerD, innerC, color);
         }
@@ -331,11 +331,11 @@ final class GpuFireControl implements Disposable {
     }
 
     void render(Camera camera, float deltaSeconds) {
-        if (BoardView.GPU_SCROLLING_RANGE_LABELS) {
+        if (BoardTactical.SCROLLING_RANGE_LABELS) {
             scrollDistance += deltaSeconds * RANGE_SCROLL_SPEED * BoardGeometry.hexScale();
         }
         if (instance != null) {
-            if (BoardView.GPU_SCROLLING_RANGE_LABELS) {
+            if (BoardTactical.SCROLLING_RANGE_LABELS) {
                 for (Material face : instance.materials) {
                     TextureAttribute texture = face.get(TextureAttribute.class, TextureAttribute.Diffuse);
                     if (texture != null) {

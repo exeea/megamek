@@ -89,6 +89,9 @@ class GpuTerrainLodSmokeTest {
                     settle(terrain, tactical, scene, camera);
                     var distant = terrain.tacticalSurface(at);
                     assertEquals(TerrainLod.DISTANT, firstLod(terrain));
+                    ((java.util.Map<?, ?>) field(terrain, "cpuGeometry")).clear();
+                    assertEquals(distant, terrain.tacticalSurface(at), "Cold queries must use the installed distant detail");
+                    distant = terrain.tacticalSurface(at);
 
                     view(camera, .6f);
                     settle(terrain, tactical, scene, camera);

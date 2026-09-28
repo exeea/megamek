@@ -1,6 +1,8 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import megamek.client.ui.clientGUI.boardview.BoardArtwork;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -137,7 +139,7 @@ class GpuHexOverlayTest {
                 assertTrue(covers(eccm.tactical(), tint, sample, 42, 36));
                 assertTrue(eccm.tile(sample).tactical() == null, "ECCM needs no raster artwork");
 
-                BoardView.PlanarHex cached = artwork(fixture, sample);
+                BoardArtwork.HexImage cached = artwork(fixture, sample);
                 GUIPreferences.getInstance().setECMTransparency(48);
                 assertSame(cached.terrain(), artwork(fixture, sample).terrain(), "Opacity must not repaint terrain");
                 fixture.source.refresh();
@@ -189,8 +191,8 @@ class GpuHexOverlayTest {
         }
     }
 
-    private static BoardView.PlanarHex artwork(GpuBoardFixture fixture, Coords coords) {
-        List<BoardView.PlanarHex> result = new ArrayList<>();
+    private static BoardArtwork.HexImage artwork(GpuBoardFixture fixture, Coords coords) {
+        List<BoardArtwork.HexImage> result = new ArrayList<>();
         fixture.view.capturePlanarHexes(new Rectangle(coords.getX(), coords.getY(), 1, 1), false, result::add);
         return result.getFirst();
     }

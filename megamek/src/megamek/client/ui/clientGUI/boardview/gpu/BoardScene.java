@@ -15,12 +15,14 @@ import java.util.Set;
 import java.util.stream.Stream;
 import javax.swing.ImageIcon;
 
+import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.clientGUI.boardview.BoardFieldOfView;
+import megamek.client.ui.clientGUI.boardview.BoardHexText;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.common.board.Coords;
 import megamek.common.units.EntityMovementType;
+import megamek.common.units.Terrains;
 
 /** A presentation snapshot. Only the Swing thread reads the game; the GPU thread owns rendering. */
 record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Unit> units,
@@ -65,6 +67,22 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
     BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Unit> units,
           List<Waypoint> plannedPath, int selectedId, String phase, List<Command> commands) {
         this(boardId, width, height, tiles, units, plannedPath, selectedId, phase, commands, null);
+    }
+
+    static Tile captureTile(megamek.common.Hex hex, BoardArtwork.HexImage pixels, Tile previous, PixelPool terrainImages) {
+        return new BoardScene.Tile(pixels.coords(), hex.getLevel(),
+              hex.containsTerrain(Terrains.WATER) ? Math.max(0, hex.terrainLevel(Terrains.WATER)) : -1,
+              hex.containsTerrain(Terrains.ICE),
+              hex.containsTerrain(Terrains.ROAD) ? hex.getTerrain(Terrains.ROAD).getExits() & 63 : 0,
+              BoardFeatures.surface(hex),
+              terrainImages.capture(pixels.terrain(), previous == null ? null : previous.ground()),
+              terrainImages.capture(pixels.normals(), previous == null ? null : previous.normals()),
+              terrainImages.captureOverlay(pixels.decals(), previous == null ? null : previous.decals()),
+              terrainImages.capture(pixels.decalsWithoutLimbs(), previous == null ? null : previous.decalsWithoutLimbs()),
+              terrainImages.capture(pixels.tactical(), previous == null ? null : previous.tactical()),
+              BoardFeatures.capture(hex, pixels.coords(), pixels.structureModels()), pixels.text(), BoardLiquid.capture(hex),
+              terrainImages.captureOverlay(pixels.foliage(), previous == null ? null : previous.foliage()),
+              BoardFeatures.detailedGround(hex, pixels.structureModels()), BoardRoad.capture(hex), BoardFireSmoke.capture(hex), BoardFeatures.biome(hex));
     }
 
     /** World-space shadow travel per elevation level; null means directional shadows are disabled. */
@@ -151,18 +169,18 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
     /** Water depth -1 means dry. Ground and decals are independent from solid feature geometry. */
     record Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
           Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-          Pixels tactical, List<Feature> features, List<BoardView.HexText> text, BoardLiquid liquid, Pixels foliage,
+          Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels foliage,
           boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome) {
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-              Pixels tactical, List<Feature> features, List<BoardView.HexText> text, BoardLiquid liquid, Pixels foliage,
+              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels foliage,
               boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke) {
             this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
                   tactical, features, text, liquid, foliage, detailedGround, road, fireSmoke, Biome.NONE);
         }
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-              Pixels tactical, List<Feature> features, List<BoardView.HexText> text, BoardLiquid liquid, Pixels foliage,
+              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels foliage,
               boolean detailedGround, BoardRoad.Kind road) {
             this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
                   tactical, features, text, liquid, foliage, detailedGround, road, BoardFireSmoke.NONE);
@@ -170,38 +188,44 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
 
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-              Pixels tactical, List<Feature> features, List<BoardView.HexText> text, BoardLiquid liquid, Pixels foliage,
+              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels foliage,
               boolean detailedGround) {
             this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
                   tactical, features, text, liquid, foliage, detailedGround, BoardRoad.Kind.NONE);
         }
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-              Pixels tactical, List<Feature> features, List<BoardView.HexText> text, BoardLiquid liquid, Pixels foliage) {
+              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels foliage) {
             this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
                   tactical, features, text, liquid, foliage, false);
         }
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-              Pixels tactical, List<Feature> features, List<BoardView.HexText> text, BoardLiquid liquid) {
+              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid) {
             this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
                   tactical, features, text, liquid, null);
         }
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-              Pixels tactical, List<Feature> features, List<BoardView.HexText> text) {
+              Pixels tactical, List<Feature> features, List<BoardHexText> text) {
             this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
                   tactical, features, text, waterDepth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE);
         }
 
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
-              Pixels normals, Pixels decals, Pixels tactical, List<Feature> features, List<BoardView.HexText> text) {
+              Pixels normals, Pixels decals, Pixels tactical, List<Feature> features, List<BoardHexText> text) {
             this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, null, tactical, features, text);
         }
 
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
-              Pixels decals, Pixels tactical, List<Feature> features, List<BoardView.HexText> text) {
+              Pixels decals, Pixels tactical, List<Feature> features, List<BoardHexText> text) {
             this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, null, decals, tactical, features, text);
+        }
+
+        Tile withTactical(Pixels marking) {
+            if (marking == tactical) { return this; }
+            return new Tile(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals,
+                  decalsWithoutLimbs, marking, features, text, liquid, foliage, detailedGround, road, fireSmoke, biome);
         }
 
         Tile {
@@ -516,6 +540,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         private final int width;
         private final int height;
         private final int[] argb;
+        private final int[] runEnds;
         private final int hash;
 
         public Pixels(BufferedImage image) {
@@ -555,10 +580,32 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         }
 
         private Pixels(int width, int height, int[] argb) {
+            this(width, height, argb, null, 31 * (31 * width + height) + Arrays.hashCode(argb));
+        }
+
+        private Pixels(int width, int height, int[] argb, int[] runEnds, int hash) {
             this.width = width;
             this.height = height;
             this.argb = argb;
-            hash = 31 * (31 * width + height) + Arrays.hashCode(argb);
+            this.runEnds = runEnds;
+            this.hash = hash;
+        }
+
+        /** Lossless storage for sparse material masks, without reducing their resolution or color precision. */
+        Pixels compact() {
+            if (runEnds != null) { return this; }
+            int runs = 1;
+            for (int i = 1; i < argb.length; i++) { if (argb[i] != argb[i - 1]) { runs++; } }
+            if (runs * 2 >= argb.length) { return this; }
+            int[] colors = new int[runs], ends = new int[runs];
+            int run = 0;
+            for (int i = 1; i <= argb.length; i++) {
+                if (i == argb.length || argb[i] != argb[i - 1]) {
+                    colors[run] = argb[i - 1];
+                    ends[run++] = i;
+                }
+            }
+            return new Pixels(width, height, colors, ends, hash);
         }
 
         public static Pixels capture(BufferedImage image, Pixels previous) {
@@ -576,8 +623,15 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
 
         @Override
         public boolean equals(Object other) {
-            return this == other || other instanceof Pixels pixels && width == pixels.width && height == pixels.height
-                  && hash == pixels.hash && Arrays.equals(argb, pixels.argb);
+            if (this == other) { return true; }
+            if (!(other instanceof Pixels pixels) || width != pixels.width || height != pixels.height || hash != pixels.hash) {
+                return false;
+            }
+            if ((runEnds == null) == (pixels.runEnds == null)) {
+                return Arrays.equals(argb, pixels.argb) && Arrays.equals(runEnds, pixels.runEnds);
+            }
+            for (int i = 0; i < width * height; i++) { if (rgba(i) != pixels.rgba(i)) { return false; } }
+            return true;
         }
 
         public int width() {
@@ -589,6 +643,10 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         }
 
         public int rgba(int index) {
+            if (runEnds != null) {
+                int run = Arrays.binarySearch(runEnds, index + 1);
+                index = run < 0 ? -run - 1 : run;
+            }
             return (argb[index] << 8) | ((argb[index] >>> 24) & 0xff);
         }
     }

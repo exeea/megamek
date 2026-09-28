@@ -11,6 +11,8 @@ import megamek.common.board.Coords;
 
 /** Immutable drawing commands in unscaled board pixels; game state remains on the Swing thread. */
 public record BoardTactical(List<Fill> fills, List<Label> labels, List<Wall> walls, List<Fill> flatWalls) {
+    /** Range contour labels are a presentation choice shared by capture and rendering. */
+    public static final boolean SCROLLING_RANGE_LABELS = false;
     public static final BoardTactical EMPTY = new BoardTactical(List.of(), List.of());
 
     /** Measurement tools stay live, unit overlays hide, and map-state markings retain their last displayed state. */

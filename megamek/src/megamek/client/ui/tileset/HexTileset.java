@@ -76,7 +76,7 @@ import megamek.logging.MMLogger;
  *
  * @author Ben
  */
-public class HexTileset implements BoardListener {
+public class HexTileset implements BoardListener, AutoCloseable {
     private static final MMLogger logger = MMLogger.create(HexTileset.class);
 
     /** The image width of a hex image. */
@@ -92,6 +92,9 @@ public class HexTileset implements BoardListener {
     private final List<HexEntry> orthographic = new ArrayList<>();
     private final Set<String> themes = new TreeSet<>();
     private final File imageRoot;
+    private IGame observedGame;
+    private GameListener gameListener;
+    private final Set<Board> observedBoards = new java.util.HashSet<>();
     private record ImageSource(String filename, Hex terrain) { }
     private final Map<Image, ImageSource> imageSources = new IdentityHashMap<>();
     private ImageCache<Hex, Image> basesCache = new ImageCache<>();
@@ -115,14 +118,20 @@ public class HexTileset implements BoardListener {
         this(game, Configuration.hexesDir());
     }
 
+    /** Explicitly managed artwork cache, without game or board listeners. */
+    public HexTileset(File imageRoot) {
+        this.imageRoot = imageRoot;
+    }
+
     /** A separate artwork root lets the 3D board keep its own editable tileset. */
     public HexTileset(IGame game, File imageRoot) {
-        this.imageRoot = imageRoot;
+        this(imageRoot);
         // The Board and Game listeners
         // The HexTileSet caches images with the hex object as key. Therefore, it must listen to Board events to
         // clear changed (but not replaced) hexes from the cache. It must listen to Game events to catch when a board
         // is entirely replaced to be able to register itself to the new board.
-        GameListener gameListener = new GameListenerAdapter() {
+        observedGame = game;
+        gameListener = new GameListenerAdapter() {
 
             @Override
             public void gameBoardNew(GameBoardNewEvent e) {
@@ -138,6 +147,7 @@ public class HexTileset implements BoardListener {
         };
         game.addGameListener(gameListener);
         game.getBoard().addBoardListener(this);
+        observedBoards.add(game.getBoard());
     }
 
     /** Clears the image cache for the given hex. */
@@ -675,11 +685,21 @@ public class HexTileset implements BoardListener {
         }
     }
 
+    @Override
+    public void close() {
+        if (observedGame != null) { observedGame.removeGameListener(gameListener); }
+        observedBoards.forEach(board -> board.removeBoardListener(this));
+        observedBoards.clear();
+        clearAllHexes();
+    }
+
     private void replacedBoard(GameBoardNewEvent e) {
         if (e.getOldBoard() != null) {
             e.getOldBoard().removeBoardListener(this);
+            observedBoards.remove(e.getOldBoard());
         }
         e.getNewBoard().addBoardListener(this);
+        observedBoards.add(e.getNewBoard());
     }
 
     @Override

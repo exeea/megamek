@@ -35,9 +35,9 @@ class GpuKeyboardSmokeTest {
     void nativeInputForwardsConfiguredCommandsAndKeepsCameraAndTextFocusLocal() throws Exception {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            GpuBoardSource source = mock(GpuBoardSource.class);
-            source.uiPreferences = fixture.source.uiPreferences;
-            source.phaseStatus = fixture.source.phaseStatus;
+            BoardSource source = mock(BoardSource.class);
+            when(source.uiPreferences()).thenAnswer(invocation -> fixture.source.uiPreferences());
+            when(source.phaseStatus()).thenAnswer(invocation -> fixture.source.phaseStatus());
             when(source.takeFrame()).thenAnswer(invocation -> fixture.source.takeFrame());
             new Lwjgl3Application(new GpuBattleView(source) {
                 private int tick;
@@ -46,7 +46,7 @@ class GpuKeyboardSmokeTest {
                 public void render() {
                     try {
                         super.render();
-                        if (++tick != 3) {
+                        if (frames() < 3 || ++tick != 1) {
                             return;
                         }
                         Input realInput = Gdx.input;

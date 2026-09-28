@@ -67,9 +67,9 @@ class HexCanvas extends JPanel {
           .font(FontHandler.notoFont().deriveFont(Font.BOLD))
           .center();
 
-    public HexCanvas(BoardEditorPanel boardEditorPanel) {
+    public HexCanvas(BoardEditorPanel boardEditorPanel, TilesetManager tileset) {
         this.boardEditorPanel = boardEditorPanel;
-        tm = boardEditorPanel.bv.getTilesetManager();
+        tm = tileset;
     }
 
     /** Returns list or an empty list when list is null. */

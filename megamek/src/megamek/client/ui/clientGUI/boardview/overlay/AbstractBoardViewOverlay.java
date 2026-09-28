@@ -87,6 +87,7 @@ public abstract class AbstractBoardViewOverlay implements IDisplayable, IPrefere
     /** The current game phase. */
     protected GamePhase currentPhase;
     protected final Game currentGame;
+    private final GameListener gameListener;
 
     protected final Font font;
 
@@ -106,7 +107,7 @@ public abstract class AbstractBoardViewOverlay implements IDisplayable, IPrefere
         currentPhase = currentGame.getPhase();
         // Detects phase and turn changes to display
         // The active player has changed
-        GameListener gameListener = new GameListenerAdapter() {
+        gameListener = new GameListenerAdapter() {
             @Override
             public void gamePhaseChange(GamePhaseChangeEvent e) {
                 currentPhase = e.getNewPhase();
@@ -122,6 +123,13 @@ public abstract class AbstractBoardViewOverlay implements IDisplayable, IPrefere
         currentGame.addGameListener(gameListener);
         GUIPreferences.getInstance().addPreferenceChangeListener(this);
         KeyBindParser.addPreferenceChangeListener(this);
+    }
+
+    @Override
+    public void dispose() {
+        currentGame.removeGameListener(gameListener);
+        GUIPreferences.getInstance().removePreferenceChangeListener(this);
+        KeyBindParser.removePreferenceChangeListener(this);
     }
 
     protected void addHeader(List<String> lines) {

@@ -90,7 +90,7 @@ final class BoardRoad {
         };
     }
 
-    /** Authored road fluff and unimplemented coexisting terrain retain their original artwork. */
+    /** Unsupported road decoration and coexisting terrain retain their original artwork. */
     static boolean rendered(BoardScene.Tile tile) {
         return tile.road() != Kind.NONE && tile.detailedGround() && !tile.liquid().present() && !tile.frozen();
     }

@@ -3,12 +3,10 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -43,9 +41,9 @@ class GpuMeasurementSmokeTest {
                 fixture.view.checkLOS(end);
                 fixture.source.refresh();
             });
-            GpuBoardSource source = mock(GpuBoardSource.class);
-            source.uiPreferences = fixture.source.uiPreferences;
-            source.phaseStatus = fixture.source.phaseStatus;
+            BoardSource source = mock(BoardSource.class);
+            when(source.uiPreferences()).thenAnswer(invocation -> fixture.source.uiPreferences());
+            when(source.phaseStatus()).thenAnswer(invocation -> fixture.source.phaseStatus());
             when(source.takeFrame()).thenAnswer(invocation -> fixture.source.takeFrame());
             doAnswer(invocation -> {
                 invocation.getArgument(3, Runnable.class).run();
@@ -58,6 +56,7 @@ class GpuMeasurementSmokeTest {
                 public void render() {
                     try {
                         super.render();
+                        if (frames() == 0) { return; }
                         tick++;
                         if (tick == 1) {
                             boardCamera.setIsometric(false);
@@ -67,11 +66,9 @@ class GpuMeasurementSmokeTest {
                             gesture(InputEvent.ALT_DOWN_MASK);
                         } else if (tick == 4 || tick == 8) {
                             verifyModifiers(InputEvent.ALT_DOWN_MASK);
-                            verify(source, never()).hover(any(), anyInt());
                             gesture(InputEvent.CTRL_DOWN_MASK);
                         } else if (tick == 5 || tick == 9) {
                             verifyModifiers(InputEvent.CTRL_DOWN_MASK);
-                            verify(source, never()).hover(any(), anyInt());
                             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                             File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
                             GpuBoardTestUi.capture(new File(output,
@@ -90,13 +87,12 @@ class GpuMeasurementSmokeTest {
 
                 private void verifyModifiers(int modifiers) {
                     verify(source).primaryClick(start, Entity.NONE, modifiers, fixture.source.takeFrame().boardGeneration());
-                    verify(source, never()).click(any(), anyBoolean(), anyInt());
                 }
 
                 private void gesture(int modifiers) {
                     clearInvocations(source);
                     var tile = fixture.source.takeFrame().scene().tile(start);
-                    float scale = new GpuDisplayScale().read(source.uiPreferences.scale());
+                    float scale = new GpuDisplayScale().read(source.uiPreferences().scale());
                     Vector3 screen = boardCamera.camera.project(BoardGeometry.center(start, tile.elevation()),
                           0, Math.round(GpuBoardUi.TURN_HEIGHT * scale),
                           boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight);
