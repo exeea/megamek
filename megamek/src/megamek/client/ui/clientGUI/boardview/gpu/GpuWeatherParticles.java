@@ -32,12 +32,8 @@ final class GpuWeatherParticles implements Disposable {
     private float top;
 
     GpuWeatherParticles() {
-        shader = new ShaderProgram(GpuShaderSource.read("weather-particles.vert"), GpuShaderSource.read("weather-particles.frag"));
-        if (!shader.isCompiled()) {
-            String log = shader.getLog();
-            shader.dispose();
-            throw new IllegalStateException("GPU precipitation shader: " + log);
-        }
+        shader = GpuGlsl.compile("GPU precipitation",
+              GpuShaderSource.read("weather-particles.vert"), GpuShaderSource.read("weather-particles.frag"));
         float[] vertices = new float[PARTICLES * 4 * 5];
         short[] indices = new short[PARTICLES * 6];
         Random random = new Random(20260918);

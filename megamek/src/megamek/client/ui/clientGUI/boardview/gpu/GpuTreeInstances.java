@@ -235,7 +235,11 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
             @Override
             protected Shader createShader(Renderable renderable) {
                 boolean instanced = instanced(renderable);
-                return new DepthShader(renderable, instanced ? trees : plain) {
+                DepthShader.Config chosen = instanced ? trees : plain;
+                return new DepthShader(renderable, chosen, GpuGlsl.compile("GPU shadow depth",
+                      DepthShader.createPrefix(renderable, chosen),
+                      chosen.vertexShader == null ? DepthShader.getDefaultVertexShader() : chosen.vertexShader,
+                      chosen.fragmentShader == null ? DepthShader.getDefaultFragmentShader() : chosen.fragmentShader)) {
                     @Override
                     public boolean canRender(Renderable other) {
                         return instanced(other) == instanced && super.canRender(other);

@@ -3,9 +3,13 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.Locale;
 
+import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3NativesLoader;
+import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
+import com.badlogic.gdx.utils.BufferUtils;
+import com.badlogic.gdx.utils.GdxRuntimeException;
 import com.badlogic.gdx.utils.Os;
 import com.badlogic.gdx.utils.SharedLibraryLoader;
 import megamek.logging.MMLogger;
@@ -54,6 +58,58 @@ final class GpuGlsl {
     private static int[] newest;
 
     private GpuGlsl() { }
+
+    static ShaderProgram compile(String name, String prefix, String vertex, String fragment) {
+        return compile(name, prefix + vertex, prefix + fragment);
+    }
+
+    /**
+     * Validate editable programs with owned GL handles before handing them to libGDX. Its ShaderProgram loses
+     * failed shader/link handles and attempts to delete -1 on dispose, so bad edits otherwise leak on every retry.
+     * The successful sources are compiled again by libGDX to retain its normal uniform and context management.
+     */
+    static ShaderProgram compile(String name, String vertex, String fragment) {
+        int vertexHandle = 0, fragmentHandle = 0, program = 0;
+        var gl = Gdx.gl20;
+        try {
+            vertexHandle = validateStage(name + " vertex", GL20.GL_VERTEX_SHADER,
+                  ShaderProgram.prependVertexCode + vertex);
+            fragmentHandle = validateStage(name + " fragment", GL20.GL_FRAGMENT_SHADER,
+                  ShaderProgram.prependFragmentCode + fragment);
+            program = gl.glCreateProgram();
+            if (program == 0) { throw new GdxRuntimeException(name + ": cannot create shader program"); }
+            gl.glAttachShader(program, vertexHandle);
+            gl.glAttachShader(program, fragmentHandle);
+            gl.glLinkProgram(program);
+            var status = BufferUtils.newIntBuffer(1);
+            gl.glGetProgramiv(program, GL20.GL_LINK_STATUS, status);
+            if (status.get(0) == 0) { throw new GdxRuntimeException(name + " link: " + gl.glGetProgramInfoLog(program)); }
+        } finally {
+            if (program != 0) { gl.glDeleteProgram(program); }
+            if (vertexHandle != 0) { gl.glDeleteShader(vertexHandle); }
+            if (fragmentHandle != 0) { gl.glDeleteShader(fragmentHandle); }
+        }
+        ShaderProgram result = new ShaderProgram(vertex, fragment);
+        if (!result.isCompiled()) { throw new GdxRuntimeException(name + ": " + result.getLog()); }
+        return result;
+    }
+
+    private static int validateStage(String name, int type, String source) {
+        var gl = Gdx.gl20;
+        int handle = gl.glCreateShader(type);
+        if (handle == 0) { throw new GdxRuntimeException(name + ": cannot create shader"); }
+        try {
+            gl.glShaderSource(handle, source);
+            gl.glCompileShader(handle);
+            var status = BufferUtils.newIntBuffer(1);
+            gl.glGetShaderiv(handle, GL20.GL_COMPILE_STATUS, status);
+            if (status.get(0) == 0) { throw new GdxRuntimeException(name + ": " + gl.glGetShaderInfoLog(handle)); }
+            return handle;
+        } catch (RuntimeException failure) {
+            gl.glDeleteShader(handle);
+            throw failure;
+        }
+    }
 
     /**
      * Requests the newest core context this computer creates and compiles every shader as GLSL 3.30 until

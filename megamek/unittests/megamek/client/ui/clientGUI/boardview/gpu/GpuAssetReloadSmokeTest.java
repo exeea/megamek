@@ -99,7 +99,7 @@ class GpuAssetReloadSmokeTest {
                     try {
                         super.render();
                         assertTrue(System.nanoTime() < deadline, "Asset reload must finish");
-                        assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                        assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "GL state during reload step " + step);
                         var root = GpuBoardTestUi.stage().getRoot();
                         TextButton button = root.findActor("tuning-reload-assets");
                         Label status = root.findActor("tuning-reload-status");
@@ -242,7 +242,7 @@ class GpuAssetReloadSmokeTest {
                     return (Map<String, ModelInstance>) field(this, "unitInstances");
                 }
             }, GpuBoardWindow.configuration(false));
-            assertNull(failure.get(), () -> String.valueOf(failure.get()));
+            if (failure.get() != null) { throw new AssertionError("Asset/shader reload failed", failure.get()); }
         } finally {
             Configuration.setDataDir(data);
             Configuration.setImagesDir(images);

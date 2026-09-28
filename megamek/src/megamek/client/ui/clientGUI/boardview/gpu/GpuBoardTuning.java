@@ -602,10 +602,6 @@ final class GpuBoardTuning {
                 assetReloadRequested = true;
             }
         });
-        Table assets = new Table();
-        assets.add(reloadAssets).width(110).height(24);
-        assets.add(assetReloadStatus).minWidth(0).growX().left().padLeft(8);
-        panel.add(assets).growX().padTop(4).row();
         TextButton reset = new TextButton("Defaults", skin, "menu-control");
         reset.setName("tuning-defaults");
         reset.addListener(new TextTooltip("Restore all tabs: camera projection, geometry, terrain, water, geology, "
@@ -623,8 +619,9 @@ final class GpuBoardTuning {
             }
         });
         Table buttons = new Table();
-        buttons.add(reset).width(76).height(22);
-        buttons.add(new Label("Visual preview only", skin, "small")).padLeft(10).expandX().left();
+        buttons.add(reset).width(76).height(24);
+        buttons.add(reloadAssets).width(110).height(24).padLeft(8);
+        buttons.add(assetReloadStatus).minWidth(0).growX().left().padLeft(8).padRight(8);
         buttons.add(new Label("F9 to close", skin, "small")).right();
         panel.add(buttons).growX().padTop(4).row();
         restoreDefaults();

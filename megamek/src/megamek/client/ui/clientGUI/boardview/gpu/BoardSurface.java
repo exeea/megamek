@@ -1710,22 +1710,30 @@ final class BoardSurface {
         }
     }
 
-    private void road(BoardScene scene) {
-        float largestRise = 0;
-        boolean flat = ramps == 0;
-        boolean bridge = false;
+    /** A level road with level, dry neighbours needs only the six original terrain faces. */
+    static boolean flatRoadTop(BoardScene scene, BoardScene.Tile tile, int ramps) {
+        if (ramps != 0) { return false; }
         for (int direction = 0; direction < 6; direction++) {
             BoardScene.Tile neighbor = scene.tile(tile.coords().translated(direction));
-            flat &= neighbor == null || neighbor.elevation() == tile.elevation() && !neighbor.liquid().present();
-            bridge |= (ramps & 1 << direction) != 0 && connectingBridge(tile, neighbor, direction) != null;
-            largestRise = Math.max(largestRise, Math.abs(roadEdgeElevation(tile,
-                  neighbor, direction) * BoardGeometry.level() - center.z));
+            if (neighbor != null && (neighbor.elevation() != tile.elevation() || neighbor.liquid().present())) { return false; }
         }
-        if (flat) {
+        return true;
+    }
+
+    private void road(BoardScene scene) {
+        if (flatRoadTop(scene, tile, ramps)) {
             Vector3[] outline = new Vector3[6];
             for (int i = 0; i < 6; i++) { outline[i] = moved(i); }
             fan(outline, center.z, Finish.TOP);
             return;
+        }
+        float largestRise = 0;
+        boolean bridge = false;
+        for (int direction = 0; direction < 6; direction++) {
+            BoardScene.Tile neighbor = scene.tile(tile.coords().translated(direction));
+            bridge |= (ramps & 1 << direction) != 0 && connectingBridge(tile, neighbor, direction) != null;
+            largestRise = Math.max(largestRise, Math.abs(roadEdgeElevation(tile,
+                  neighbor, direction) * BoardGeometry.level() - center.z));
         }
         // The parabolic grade's chord error is rise / (3 * sections^2). Derive resolution from that error,
         // not a fixed dense grid. Shared counts keep the banks and hub joined, including six-way crossings.

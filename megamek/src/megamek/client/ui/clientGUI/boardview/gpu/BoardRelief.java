@@ -299,13 +299,8 @@ final class BoardRelief {
         this.detail = detail;
         self = site(scene, tile, ramps);
         sites.put(tile.coords(), self);
-        boolean slopedRoad = false;
-        if (self.road() && self.ramps() == 0 && self.family() != CONCRETE) {
-            for (int e = 0; e < 6; e++) {
-                Site other = neighbor(self, e);
-                slopedRoad |= other != null && (other.level() != self.level() || other.liquid());
-            }
-        }
+        boolean slopedRoad = self.road() && self.ramps() == 0 && self.family() != CONCRETE
+              && !BoardSurface.flatRoadTop(scene, tile, ramps);
         sculpted = self.sculpted() && (!self.road() || slopedRoad);
     }
 
@@ -1126,6 +1121,8 @@ final class BoardRelief {
         final boolean fixedSampling;
         /** Both sides and incident corners can share a single straight, poured edge at every height. */
         final boolean simpleConcrete;
+        /** Match the unsplit edge of a flat road carrier, avoiding raster cracks at collinear T junctions. */
+        final boolean flatRoad;
         /** Water and concrete keep their outlines where they meet a step: no relief at their foot or rim. */
         final boolean footPinned;
         final boolean rimPinned;
@@ -1169,6 +1166,7 @@ final class BoardRelief {
             footRoom = room > 0 ? band(upper, lower, bottom()) : 0;
             drop = upper != null && lower != null ? drop(upper, lower) : 0;
             simpleConcrete = simpleConcreteCorner(a) && simpleConcreteCorner(b);
+            flatRoad = flatRoad(one) || flatRoad(other);
         }
 
         float bottom() { return lower == null ? Float.NEGATIVE_INFINITY : lower.level() * BoardGeometry.level(); }
@@ -1223,9 +1221,13 @@ final class BoardRelief {
 
     /** Canonical sample count of an edge: cliffs need finer columns than open ground. */
     private int samples(Edge edge) {
-        if (edge.simpleConcrete) { return 1; }
+        if (edge.simpleConcrete || edge.flatRoad) { return 1; }
         int steps = edge.fixedSampling ? TerrainLod.FULL.steps : detail.steps;
         return edge.profiled ? 2 * steps : steps;
+    }
+
+    private boolean flatRoad(Site site) {
+        return site != null && site.road() && BoardSurface.flatRoadTop(scene, scene.tile(site.coords()), site.ramps());
     }
 
     /** No natural relief, road gate, water contact or bedrock needs intermediate samples on this corner. */

@@ -101,13 +101,7 @@ final class GpuEffectBatch implements Disposable {
     }
 
     private void create() {
-        shader = new ShaderProgram(GpuShaderSource.read("effects.vert"), GpuShaderSource.read(fragment + ".frag"));
-        if (!shader.isCompiled()) {
-            String log = shader.getLog();
-            shader.dispose();
-            shader = null;
-            throw new IllegalStateException(fragment + " shader: " + log);
-        }
+        shader = GpuGlsl.compile(fragment, GpuShaderSource.read("effects.vert"), GpuShaderSource.read(fragment + ".frag"));
         vertices = new float[capacity * 4 * STRIDE];
         short[] indices = new short[capacity * 6];
         int[] corners = { 0, 1, 2, 2, 3, 0 };

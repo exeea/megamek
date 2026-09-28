@@ -24,7 +24,8 @@ final class GpuUnitShader extends DefaultShader {
     private final int damageTransform = register("u_damageTransform");
 
     private GpuUnitShader(Renderable renderable, Config config) {
-        super(renderable, config, GpuCloudShadow.prefix(renderable, config));
+        super(renderable, config, GpuGlsl.compile("GPU unit material", GpuCloudShadow.prefix(renderable, config),
+              config.vertexShader, config.fragmentShader));
         GpuCloudShadow.register(this);
     }
 

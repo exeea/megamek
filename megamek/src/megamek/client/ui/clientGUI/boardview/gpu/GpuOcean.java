@@ -132,13 +132,7 @@ final class GpuOcean implements Disposable {
     }
 
     private static ShaderProgram program(String vertex, String fragment) {
-        ShaderProgram program = new ShaderProgram(vertex, GpuShaderSource.read(fragment));
-        if (!program.isCompiled()) {
-            String log = program.getLog();
-            program.dispose();
-            throw new GdxRuntimeException(fragment + ": " + log);
-        }
-        return program;
+        return GpuGlsl.compile(fragment, vertex, GpuShaderSource.read(fragment));
     }
 
     /**

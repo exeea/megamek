@@ -194,13 +194,7 @@ final class GpuAtmosphere implements Disposable {
             Gdx.gl.glGetIntegerv(GL20.GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS, units);
             if (units.get(0) > 0) { prefix = "#define VERTEX_SUN_VISIBILITY\n"; }
         }
-        ShaderProgram result = new ShaderProgram(prefix + vertex, prefix + source);
-        if (!result.isCompiled()) {
-            String log = result.getLog();
-            result.dispose();
-            throw new IllegalStateException("GPU atmosphere shader " + fragment + ": " + log);
-        }
-        return result;
+        return GpuGlsl.compile("GPU atmosphere " + fragment, prefix, vertex, source);
     }
 
     /** Periodic two-channel noise, used by clouds and ground weather. The caller owns the texture. */

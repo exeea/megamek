@@ -221,8 +221,8 @@ final class GpuTerrainEffects implements Disposable {
     private void initialize() {
         if (shader != null) { return; }
         try {
-            shader = new ShaderProgram(GpuShaderSource.read("terrain-effects.vert"), GpuShaderSource.read("terrain-effects.frag"));
-            if (!shader.isCompiled()) { throw new IllegalStateException("Terrain fire/smoke shader: " + shader.getLog()); }
+            shader = GpuGlsl.compile("GPU terrain fire/smoke",
+                  GpuShaderSource.read("terrain-effects.vert"), GpuShaderSource.read("terrain-effects.frag"));
             composite = GpuAtmosphere.shader("terrain-effects-composite.frag");
             quad = GpuAtmosphere.screenQuad();
             noise = GpuAtmosphere.noise();

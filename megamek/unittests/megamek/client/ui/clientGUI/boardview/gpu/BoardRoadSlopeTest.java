@@ -44,6 +44,33 @@ class BoardRoadSlopeTest {
     }
 
     @ParameterizedTest
+    @ValueSource(ints = { 0, 1, 2, 3, 4, 5 })
+    void nativeGroundMatchesTheUnsplitEdgeOfAFlatRoadAtEveryDetail(int edge) {
+        var at = BoardRoadTest.CENTER;
+        var scene = BoardSurfaceBlendTest.scene(c -> BoardRoadTest.tile(c,
+              c.equals(at) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE, c.equals(at) ? 9 : 0, 0,
+              BoardScene.Surface.SAND));
+        var neighbor = scene.tile(at.translated(BoardGeometry.edgeDirection(edge)));
+        var a = BoardGeometry.corner(at, 0, edge);
+        var b = BoardGeometry.corner(at, 0, (edge + 1) % 6);
+        for (var lod : TerrainLod.values()) {
+            var surface = new BoardSurface(scene, neighbor, lod);
+            boolean matched = false;
+            for (var face : surface.groundFaces()) {
+                if (face.finish() != BoardSurface.Finish.TOP) { continue; }
+                var points = List.of(face.a(), face.b(), face.c());
+                for (int i = 0; i < 3; i++) {
+                    var p = points.get(i);
+                    var q = points.get((i + 1) % 3);
+                    matched |= p.epsilonEquals(a, .0001f) && q.epsilonEquals(b, .0001f)
+                          || p.epsilonEquals(b, .0001f) && q.epsilonEquals(a, .0001f);
+                }
+            }
+            assertTrue(matched, lod + " must share the road's whole edge; collinear T junctions can leave sky pixels");
+        }
+    }
+
+    @ParameterizedTest
     @ValueSource(ints = { 1, 2, 3 })
     void roadsBesideStepsKeepTheNativeSlopeOutsideTheirCorridor(int rise) {
         var at = BoardRoadTest.CENTER;

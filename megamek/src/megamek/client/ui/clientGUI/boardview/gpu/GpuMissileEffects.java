@@ -225,13 +225,7 @@ final class GpuMissileEffects implements Disposable {
         for (var node : data.nodes) { body(data, node, new Matrix4(), points); }
         body = points.toArray();
         if (body.length == 0) { throw new IllegalArgumentException("Empty missile body"); }
-        shader = new ShaderProgram(GpuShaderSource.read("missile.vert"), GpuShaderSource.read("missile.frag"));
-        if (!shader.isCompiled()) {
-            String error = shader.getLog();
-            shader.dispose();
-            shader = null;
-            throw new IllegalStateException(error);
-        }
+        shader = GpuGlsl.compile("GPU missile", GpuShaderSource.read("missile.vert"), GpuShaderSource.read("missile.frag"));
         vertices = new float[MISSILES_PER_BATCH * body.length];
         mesh = new Mesh(false, vertices.length / STRIDE, 0, VertexAttribute.Position(), VertexAttribute.ColorUnpacked());
     }

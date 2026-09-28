@@ -182,12 +182,7 @@ final class GpuHexMasks implements Disposable {
         private RenderContext context;
 
         MaskShader() {
-            program = new ShaderProgram(GpuShaderSource.read("hex-mask.vert"), GpuShaderSource.read("hex-mask.frag"));
-            if (!program.isCompiled()) {
-                String log = program.getLog();
-                program.dispose();
-                throw new IllegalStateException("GPU hex mask shader: " + log);
-            }
+            program = GpuGlsl.compile("GPU hex mask", GpuShaderSource.read("hex-mask.vert"), GpuShaderSource.read("hex-mask.frag"));
         }
 
         @Override

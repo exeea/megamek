@@ -160,7 +160,8 @@ final class GpuTerrain implements Disposable {
                   + (renderable.material.has(GpuRoads.Soil.TYPE) ? "#define roadSoilFlag\n" : "")
                   + (renderable.material.has(BridgeDeck.TYPE) ? "#define bridgeDeckFlag\n" : "")
                   + (renderable.material.has(GpuRoads.Maps.TYPE) ? "#define roadMapsFlag\n" : "");
-            DefaultShader result = new DefaultShader(renderable, chosen, prefix) {
+            DefaultShader result = new DefaultShader(renderable, chosen,
+                  GpuGlsl.compile("GPU terrain", prefix, chosen.vertexShader, chosen.fragmentShader)) {
                 private final int normalMapsUniform = register("u_normalMaps");
                 private final int roadProfileUniform = register("u_roadProfile");
                 private final int wetnessUniform = register("u_wetness");

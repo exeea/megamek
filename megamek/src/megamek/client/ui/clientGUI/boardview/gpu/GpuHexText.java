@@ -77,12 +77,7 @@ final class GpuHexText implements Disposable {
         String fragment = GpuShaderSource.read("hex-text.frag")
               .replace("// GROUND_LAYER", GpuShaderSource.read("ground-layer.glsl"))
               .replace("// CAMERA_DEPTH", GpuShaderSource.read("camera-depth.glsl"));
-        shader = new ShaderProgram(vertex, fragment);
-        if (!shader.isCompiled()) {
-            String log = shader.getLog();
-            shader.dispose();
-            throw new IllegalStateException("GPU hex text shader: " + log);
-        }
+        shader = GpuGlsl.compile("GPU hex text", vertex, fragment);
     }
 
     /** The font and roof bounds are borrowed; labels are solely the existing board view's captured text. */
