@@ -1,5 +1,12 @@
 # GLB migration verification
 
+> Historical record, kept for reference. It is superseded by [unit-models.md](unit-models.md) here and, in mm-data,
+> by `tools/unit-models/MODELLING_GUIDE.md` and `data/models/units/README.md`: unit models are GLB files with
+> `-lod0`, `-lod1` and `-lod2` groups, and the budget is for the whole unit, 5,000 / 2,000 / 500 triangles per
+> level. Facts below describe the pipeline as it was on 2026-09-27, at the G3DJ to GLB conversion. Since then the historical and
+> verification reference meshes under `mm-data/tools/unit-models/references/` and the baked-model reference
+> exporter have been removed; that folder now holds only retired equipment pieces.
+
 The migration is applied in the sibling `mm-data` checkout. There are 4,056
 deployed GLBs and 475 authoring/reference GLBs. Neither `data/` nor `tools/`
 contains a G3DJ file. Temporary ignored work directories and migration backups

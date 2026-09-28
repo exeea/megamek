@@ -1,5 +1,12 @@
 # Unit meshes converted directly from Git HEAD
 
+> Historical record, kept for reference. It is superseded by [unit-models.md](unit-models.md) here and, in mm-data,
+> by `tools/unit-models/MODELLING_GUIDE.md` and `data/models/units/README.md`: unit models are GLB files with
+> `-lod0`, `-lod1` and `-lod2` groups, and the budget is for the whole unit, 5,000 / 2,000 / 500 triangles per
+> level. Facts below describe the pipeline as it was on 2026-09-27, at the G3DJ to GLB conversion. Since then the historical and
+> verification references counted below (all but the preserved Rifleman in `tools/unit-models/preserved/`), the
+> legacy generator and the PowerShell launcher (`build_unit_models.ps1`) have been removed from mm-data.
+
 Source revision in `mm-data`: `a0bb82f65a62cd325c4f137887180dbe50ba7d01`
 (`Seat MiniMek weapons on the outer skin`).
 
