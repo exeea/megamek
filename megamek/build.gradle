@@ -620,8 +620,6 @@ tasks.register('gpuBoardSmoke', Test) {
     systemProperty 'java.awt.headless', 'false'
     systemProperty 'megamek.gpu.referenceFoliage', new File(gradle.includedBuild('mm-data').projectDir,
             'tools/board-models/foliage').absolutePath
-    systemProperty 'megamek.gpu.referenceModels', new File(gradle.includedBuild('mm-data').projectDir,
-            'tools/unit-models/references/legacy').absolutePath
     systemProperty 'megamek.gpu.screenshots', layout.buildDirectory.dir('gpu-board-review').get().asFile.absolutePath
     outputs.upToDateWhen { false }
 }

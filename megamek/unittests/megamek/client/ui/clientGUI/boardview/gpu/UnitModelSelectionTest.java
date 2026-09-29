@@ -12,7 +12,6 @@ import static org.mockito.Mockito.when;
 
 import java.util.Set;
 
-import com.badlogic.gdx.utils.JsonReader;
 import megamek.client.ui.tileset.MekTileset;
 import megamek.common.battleArmor.BattleArmor;
 import megamek.common.units.ConvInfantry;
@@ -77,27 +76,6 @@ class UnitModelSelectionTest {
         selection = UnitModelSelection.capture(infantry, -1, false, tileset);
         assertEquals(movement.name(), selection.variant());
         assertEquals(3, selection.figures());
-    }
-
-    @Test
-    void movementFormationsRetainLegacyAndUnsupportedModeFallbacks() {
-        var descriptor = new JsonReader().parse("""
-              {"kind":"formation", "fallback":"one.g3dj",
-               "formations":{"0":"empty.g3dj", "3":"foot-three.g3dj", "6":"foot-six.g3dj"},
-               "movementFormations":{
-                 "TRACKED":{"0":"tracked-empty.g3dj", "3":"tracked-three.g3dj", "6":"tracked-six.g3dj"},
-                 "HOVER":{"6":"hover-six.g3dj"},
-                 "INF_JUMP":{"6":"jump-six.g3dj"}}}
-              """);
-        assertEquals("tracked-three.g3dj", GpuUnitModels.selectModel(descriptor, "TRACKED", 3));
-        assertEquals("tracked-six.g3dj", GpuUnitModels.selectModel(descriptor, "TRACKED", 6));
-        assertEquals("tracked-empty.g3dj", GpuUnitModels.selectModel(descriptor, "TRACKED", 0));
-        assertEquals("hover-six.g3dj", GpuUnitModels.selectModel(descriptor, "HOVER", 6));
-        assertEquals("jump-six.g3dj", GpuUnitModels.selectModel(descriptor, "INF_JUMP", 6));
-        assertEquals("empty.g3dj", GpuUnitModels.selectModel(descriptor, "HOVER", 0));
-        assertEquals("foot-six.g3dj", GpuUnitModels.selectModel(descriptor, "INF_UMU", 6));
-        assertEquals("foot-six.g3dj", GpuUnitModels.selectModel(descriptor, "Rifle Platoon", 6));
-        assertEquals("one.g3dj", GpuUnitModels.selectModel(descriptor, "HOVER", 8));
     }
 
     @Test
@@ -185,20 +163,5 @@ class UnitModelSelectionTest {
             when(mek.isLocationBlownOffThisPhase(location)).thenReturn(false);
         }
         assertEquals(damage, UnitModelSelection.damage(mek));
-    }
-
-    @Test
-    void unknownVariantsFallBackAndZeroStrengthHasAnEmptyFormation() {
-        var mek = new JsonReader().parse("""
-              {"kind":"mek", "fallback":"body.g3dj", "variants":{"Atlas AS7-D":"as7-d.g3dj"}}
-              """);
-        assertEquals("as7-d.g3dj", GpuUnitModels.selectModel(mek, "Atlas AS7-D", 0));
-        assertEquals("body.g3dj", GpuUnitModels.selectModel(mek, "Custom loadout", 0));
-        var infantry = new JsonReader().parse("""
-              {"kind":"formation", "fallback":"one.g3dj", "formations":{"0":"empty.g3dj", "6":"six.g3dj"}}
-              """);
-        assertEquals("empty.g3dj", GpuUnitModels.selectModel(infantry, "Rifle Platoon", 0));
-        assertEquals("six.g3dj", GpuUnitModels.selectModel(infantry, "Rifle Platoon", 6));
-        assertEquals("six.g3dj", GpuUnitModels.selectModel(infantry, "TRACKED", 6));
     }
 }

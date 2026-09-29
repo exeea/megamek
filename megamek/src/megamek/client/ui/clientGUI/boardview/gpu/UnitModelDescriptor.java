@@ -24,19 +24,20 @@ record UnitModelDescriptor(int schema, String kind, String family, String mesh, 
           Map<String, String> joints, Map<String, String> locations, List<Hardpoint> hardpoints, List<Emitter> emitters,
           List<LandingSupport> landingSupports, Map<String, String> legBends, @Nullable String detail) {
     private static final ObjectMapper JSON = new ObjectMapper();
-    /** Bare body/troop geometry only. Loadout modules have a separate measured cost. */
-    static final int TRIANGLE_LIMIT = 1500;
-    /** Equipment is reviewed separately: ideally under 100, always strictly under 150 triangles per module. */
-    static final int EQUIPMENT_TRIANGLE_LIMIT = 149;
     /**
-     * One battle armour suit. A squad is budgeted per suit, so six full suits may pass {@link #TRIANGLE_LIMIT}.
+     * A sanity ceiling for one asset level, not an art budget. With LOD levels the engine has no triangle budget of
+     * its own; the art budget per level ({@link #UNIT_TRIANGLE_BUDGETS}) is enforced for bodies and equipment pieces
+     * by the mm-data exporter that authors them, and only warned about here once a unit is assembled. An asset past
+     * this ceiling almost certainly came from a wrong export.
      */
-    static final int SUIT_TRIANGLE_LIMIT = 330;
+    static final int MAX_TRIANGLES = 1_000_000;
     /**
-     * The larger allowance for an explicitly marked LOD0 body. Authored LOD1 bodies keep {@link #TRIANGLE_LIMIT}.
+     * The art budget for one assembled unit (bare body plus every fitted weapon) at each level of detail, LOD0 first.
+     * Exceeding it only logs a warning: the unit is still drawn in full, so the log shows which bodies and loadouts
+     * need lighter geometry.
      */
-    static final int LOD0_BODY_TRIANGLE_LIMIT = 3000;
-    /** The {@code detail} value that grants a body the LOD0 triangle allowance. */
+    static final List<Integer> UNIT_TRIANGLE_BUDGETS = List.of(5000, 2000, 500);
+    /** The {@code detail} value that marks a body as the LOD0 level of its own LOD1 body. */
     static final String LOD0_DETAIL = "lod0";
 
     UnitModelDescriptor {
@@ -45,7 +46,7 @@ record UnitModelDescriptor(int schema, String kind, String family, String mesh, 
         require(schema == 2, "Unsupported modular model schema: " + schema);
         require(Set.of("body", "troop", "equipment").contains(kind), "Unknown model kind: " + kind);
         require((family != null) && !family.isBlank(), "Missing model family");
-        require((mesh != null) && (mesh.endsWith(".glb") || mesh.endsWith(".g3dj")), "Expected a GLB mesh or legacy G3DJ");
+        require((mesh != null) && mesh.endsWith(".glb"), "Expected a GLB mesh");
         require(bounds != null, "Missing rest bounds");
         require((rig != null) && !rig.isBlank(), "Missing rig identifier");
         joints = Map.copyOf(joints);
@@ -68,10 +69,10 @@ record UnitModelDescriptor(int schema, String kind, String family, String mesh, 
         require(landingSupports.stream().map(LandingSupport::id).distinct().count() == landingSupports.size(),
               "Duplicate landing support ID");
         require((detail == null) || (LOD0_DETAIL.equals(detail) && "body".equals(kind)),
-              "Only a body may request the lod0 triangle allowance: " + detail);
+              "Only a body may be marked as a LOD0 level: " + detail);
     }
 
-    /** @return whether this body explicitly uses the larger LOD0 triangle allowance */
+    /** @return whether this body is explicitly marked as a LOD0 level, so it cannot stand in as a LOD1 body */
     boolean lod0Detail() {
         return LOD0_DETAIL.equals(detail);
     }
@@ -143,8 +144,8 @@ record UnitModelDescriptor(int schema, String kind, String family, String mesh, 
         }
         int triangles = triangleCount(data);
         require(triangles > 0, "Empty modular asset");
-        int limit = level == 0 && lod0Detail() ? LOD0_BODY_TRIANGLE_LIMIT : triangleLimit(kind, family);
-        require(triangles <= limit, kind + " asset exceeds triangle hard cap " + limit + ": " + triangles);
+        require(triangles <= MAX_TRIANGLES, kind + " asset exceeds the " + MAX_TRIANGLES + " triangle ceiling: "
+              + triangles);
         for (var material : data.materials) {
             require(Set.of("paint", "detail", "bark").contains(material.id), "Unknown material role: " + material.id);
             // Authored diffuse maps may be embedded or shared. Runtime camouflage still owns the paint role.
@@ -156,27 +157,6 @@ record UnitModelDescriptor(int schema, String kind, String family, String mesh, 
             }
         }
         return triangles;
-    }
-
-    /** The hard cap for one asset: equipment modules and battle armour suits have budgets of their own. */
-    static int triangleLimit(String kind, String family) {
-        if ("equipment".equals(kind)) {
-            return EQUIPMENT_TRIANGLE_LIMIT;
-        }
-        boolean isBattleArmourSuit = "troop".equals(kind) && "battle-armor".equals(family);
-        return isBattleArmourSuit ? SUIT_TRIANGLE_LIMIT : TRIANGLE_LIMIT;
-    }
-
-    /**
-     * The hard cap for an assembled formation. Battle armour gets {@link #SUIT_TRIANGLE_LIMIT} per suit (never less
-     * than the ordinary cap), so a six-suit squad of detailed suits still draws; other formations keep
-     * {@link #TRIANGLE_LIMIT}.
-     *
-     * @param family  the formation's family, such as {@code battle-armor} or {@code infantry}
-     * @param members how many figures the formation shows
-     */
-    static int formationTriangleLimit(String family, int members) {
-        return "battle-armor".equals(family) ? Math.max(TRIANGLE_LIMIT, members * SUIT_TRIANGLE_LIMIT) : TRIANGLE_LIMIT;
     }
 
     /** Count repeated node references as rendered geometry, and unused mesh data as resident geometry. */

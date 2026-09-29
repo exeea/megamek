@@ -172,7 +172,7 @@ class UnitLegBendTest {
 
     private static UnitModelDescriptor descriptor(Map<String, String> bends) throws Exception {
         var document = (ObjectNode) JSON.readTree("""
-              {"schema":2,"kind":"body","family":"mek-biped","mesh":"synthetic.g3dj",
+              {"schema":2,"kind":"body","family":"mek-biped","mesh":"synthetic.glb",
                "bounds":{"min":[-20,-15,0],"max":[20,15,48]},"rig":"biped-v1",
                "joints":{"root":"root","hips":"pelvis","torso":"CT",
                  "leftLeg":"LL","leftShin":"LL-shin","leftFoot":"LL-foot",

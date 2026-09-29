@@ -268,8 +268,7 @@ public final class BoardArtwork implements AutoCloseable {
                 int extension = source.lastIndexOf('.');
                 if (extension > 0) {
                     String model = "buildings/" + source.substring(0, extension);
-                    boolean legacy = new File(Configuration.dataDir(), "models/board/" + model + ".glb").isFile()
-                          || new File(Configuration.dataDir(), "models/board/" + model + ".g3dj").isFile();
+                    boolean legacy = new File(Configuration.dataDir(), "models/board/" + model + ".glb").isFile();
                     boolean custom = customBuildingFile(model).isFile();
                     for (int terrain : new int[] { Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL }) {
                         if ((legacy || (custom && terrain == Terrains.BUILDING))

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -177,6 +178,16 @@ class RigidGlbTest {
         ((ObjectNode) moved.get("nodes").get(4)).putArray("translation").add(0).add(1).add(0);
         var translated = file(moved, false);
         assertThrows(IllegalArgumentException.class, () -> RigidGlb.loadLods(translated));
+    }
+
+    @Test
+    void refusesAFileWhoseLevelsAreNotNamedGroups() throws Exception {
+        // The same geometry as the grouped file, but without its <name>-lodN packaging groups.
+        var ungrouped = file(document(), false);
+        var error = assertThrows(IllegalArgumentException.class, () -> RigidGlb.loadLods(ungrouped));
+        assertTrue(error.getMessage().contains("-lod0"), error.getMessage());
+        // The single-level reader used for kits still reads it.
+        assertEquals("arm", RigidGlb.load(ungrouped).nodes.first().children[0].id);
     }
 
     @Test

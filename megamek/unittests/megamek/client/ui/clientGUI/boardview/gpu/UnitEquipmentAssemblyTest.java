@@ -114,6 +114,20 @@ class UnitEquipmentAssemblyTest {
     }
 
     @Test
+    void aUnitOverItsTriangleBudgetIsStillDrawnInFull() {
+        // Three 2,000-triangle guns take the unit past its 5,000 LOD0 budget: the assembly only warns, keeping every gun.
+        int perGun = 2000;
+        assertTrue(3 * perGun > UnitModelDescriptor.UNIT_TRIANGLE_BUDGETS.getFirst());
+        var anatomy = new UnitModelState.MekAnatomy("biped", List.of("LA", "RA"), List.of("LA", "RA"));
+        var model = assemble(anatomy, List.of(mount(1, "LT", ""), mount(2, "RT", ""), mount(3, "CT", "")), perGun);
+        try {
+            assertEquals(3, model.equipment().size());
+        } finally {
+            model.dispose();
+        }
+    }
+
+    @Test
     void aHeldGunLeavesTheMiddleOfItsGunBodyHoweverCrowdedTheArm() {
         // A big launcher packed into the same hand first used to shove the held barrel off the gun body's face.
         var anatomy = new UnitModelState.MekAnatomy("biped", List.of("RA"), List.of("RA"));
@@ -163,7 +177,7 @@ class UnitEquipmentAssemblyTest {
               """);
         assembled.calculateTransforms();
         var bounds = new UnitModelDescriptor.Bounds(List.of(-1f, 0f, -1f), List.of(1f, 2f, 1f));
-        var body = new UnitModelDescriptor(2, "body", "mek", "body.g3dj", bounds, "biped-v1",
+        var body = new UnitModelDescriptor(2, "body", "mek", "body.glb", bounds, "biped-v1",
               Map.of("root", "RA"), Map.of(), points, List.of(), List.of(), Map.of(), null);
         var structure = new UnitModelState.Structure(EntityMovementMode.BIPED, equipment, List.of(), 0, false, anatomy);
         var bindings = UnitEquipmentAssembly.attachAll(library, recipe, new GpuUnitModels.ModularAsset(body, List.of(assembled, assembled, assembled), List.of(1, 1, 1)),
@@ -182,7 +196,7 @@ class UnitEquipmentAssemblyTest {
         shape.nodes.add(root);
         var emitter = new UnitModelDescriptor.Emitter("muzzle", "barrel", List.of(0f, 2f, 0f), List.of(0f, 1f, 0f),
               "muzzle", "bullet");
-        var descriptor = new UnitModelDescriptor(2, "equipment", family, asset.replace(".json", ".g3dj"), bounds,
+        var descriptor = new UnitModelDescriptor(2, "equipment", family, asset.replace(".json", ".glb"), bounds,
               "rigid-v1",
               Map.of("root", "barrel"), Map.of(), List.of(), List.of(emitter), List.of(), Map.of(), null);
         when(library.modular(asset)).thenReturn(new GpuUnitModels.ModularAsset(descriptor, List.of(shape, shape, shape), List.of(1, 1, 1)));
@@ -194,6 +208,14 @@ class UnitEquipmentAssemblyTest {
     }
 
     private static GpuUnitModel assemble(UnitModelState.MekAnatomy anatomy, List<UnitModelEquipment.Mount> equipment) {
+        return assemble(anatomy, equipment, 1);
+    }
+
+    /**
+     * @param gunTriangles the triangle count each fitted gun module reports
+     */
+    private static GpuUnitModel assemble(UnitModelState.MekAnatomy anatomy, List<UnitModelEquipment.Mount> equipment,
+          int gunTriangles) {
         var library = mock(GpuUnitModels.class);
         when(library.descriptor("equipment.json")).thenReturn(new JsonReader().parse("""
               {"schema":2,"equipment":{"Gun":{"model":"gun.json"}},"fallbacks":{"weapon":"gun.json"}}
@@ -207,9 +229,10 @@ class UnitEquipmentAssemblyTest {
         gun.nodes.add(barrel);
         var emitter = new UnitModelDescriptor.Emitter("muzzle", "barrel", List.of(0f, 2f, 0f), List.of(0f, 1f, 0f),
               "muzzle", "bullet");
-        var weapon = new UnitModelDescriptor(2, "equipment", "ballistic", "gun.g3dj", bounds, "rigid-v1",
+        var weapon = new UnitModelDescriptor(2, "equipment", "ballistic", "gun.glb", bounds, "rigid-v1",
               Map.of("root", "barrel"), Map.of(), List.of(), List.of(emitter), List.of(), Map.of(), null);
-        when(library.modular("gun.json")).thenReturn(new GpuUnitModels.ModularAsset(weapon, List.of(gun, gun, gun), List.of(1, 1, 1)));
+        when(library.modular("gun.json")).thenReturn(new GpuUnitModels.ModularAsset(weapon, List.of(gun, gun, gun),
+              List.of(gunTriangles, gunTriangles, gunTriangles)));
 
         Model assembled = new Model();
         List<UnitModelDescriptor.Hardpoint> points = new ArrayList<>();
@@ -227,7 +250,7 @@ class UnitEquipmentAssemblyTest {
             }
         }
         assembled.calculateTransforms();
-        var body = new UnitModelDescriptor(2, "body", "mek", "body.g3dj", bounds, "biped-v1",
+        var body = new UnitModelDescriptor(2, "body", "mek", "body.glb", bounds, "biped-v1",
               Map.of("root", "CT"), Map.of(), points, List.of(), List.of(), Map.of(), null);
         var structure = new UnitModelState.Structure(EntityMovementMode.BIPED, equipment, List.of(), 0, false, anatomy);
         var bindings = UnitEquipmentAssembly.attachAll(library, recipe, new GpuUnitModels.ModularAsset(body, List.of(assembled, assembled, assembled), List.of(1, 1, 1)),

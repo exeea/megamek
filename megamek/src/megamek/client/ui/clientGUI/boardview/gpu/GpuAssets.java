@@ -25,7 +25,6 @@ import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.TextureArray;
 import com.badlogic.gdx.graphics.TextureArrayData;
 import com.badlogic.gdx.graphics.g3d.Model;
-import com.badlogic.gdx.graphics.g3d.loader.G3dModelLoader;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import com.badlogic.gdx.graphics.glutils.FileTextureData;
 import com.badlogic.gdx.utils.Disposable;
@@ -171,11 +170,7 @@ final class GpuAssets implements Disposable {
     }
 
     Model model(String name) {
-        if (new File(root, name + ".glb").isFile()) { return lodModel(name, 0); }
-        return models.computeIfAbsent(name, key -> {
-            var data = new G3dModelLoader(new JsonReader()).loadModelData(new FileHandle(new File(root, key + ".g3dj")));
-            return createModel(data);
-        });
+        return lodModel(name, 0);
     }
 
     /** The tileset remains authoritative: a custom kit overrides only its exact selected artwork path. */
@@ -202,8 +197,7 @@ final class GpuAssets implements Disposable {
         return modelLods.computeIfAbsent(name, shape -> {
             FileHandle file = new FileHandle(new File(root, shape + ".glb"));
             if (!file.exists()) {
-                return MeshLod.load(shape, TreeLod.LEVELS,
-                      asset -> new File(root, asset + ".g3dj").isFile() ? model(asset) : null);
+                throw new IllegalArgumentException("Missing board model " + file.path());
             }
             var data = RigidGlb.loadLods(file, root.toPath());
             List<Model> levels = new ArrayList<>();

@@ -30,6 +30,7 @@ import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
 import com.badlogic.gdx.math.Vector3;
+import megamek.common.Configuration;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -47,8 +48,9 @@ class GpuUnitModelBenchmarkSmokeTest {
                 Model module = null;
                 GLProfiler profiler = new GLProfiler(Gdx.graphics);
                 try {
-                    body = new Model(GpuUnitModels.meshData(new FileHandle(new File(
-                          System.getProperty("megamek.gpu.referenceModels"), "units/meks/warhammer/body.glb"))));
+                    // The deployed bare Warhammer body, the first level of its GLB.
+                    body = new Model(RigidGlb.loadLods(new FileHandle(new File(Configuration.dataDir(),
+                          "models/units/modular/bodies/warhammer.glb"))).getFirst());
                     // A twelve-triangle stand-in isolates instance/draw overhead from weapon artwork complexity.
                     module = new ModelBuilder().createBox(2, 4, 2,
                           new Material(ColorAttribute.createDiffuse(Color.GRAY)),
