@@ -3,6 +3,10 @@
 [Docs index](README.md) · [GPU architecture](gpu-board.md).
 Runtime classes are in `client/ui/clientGUI/boardview/gpu`.
 
+Units are assembled from a body and the captured equipment loadout. A stock Atlas
+and a custom refit can share the same body while drawing different fitted weapons.
+The sections below identify the selection, import, assembly and animation owners.
+
 ## Where to change what
 
 | Owner | Responsibility |
@@ -21,8 +25,19 @@ Runtime classes are in `client/ui/clientGUI/boardview/gpu`.
 ## Model selection and assembly
 
 `MekTileset` resolves model identity alongside sprite identity. The optional fourth
-field in `mm-data/data/images/units/mekset.txt` supplies a model reference, with
-type-specific defaults available for units without a dedicated asset.
+field in `mm-data/data/images/units/mekset.txt` names a recipe relative to
+`data/models`:
+
+```text
+chassis "Atlas" "meks/Atlas.png" "units/modular/meks/atlas.json"
+exact "default_medium" "defaults/default_medium.png" "units/modular/meks/fallback-biped-{weightClass}.json"
+```
+
+Exact model entries take precedence over chassis models; sprite-only overrides
+can still inherit the chassis model. Generic Mek recipes expand `{weightClass}`
+to light, medium, heavy, assault or superheavy. `GpuUnitModels.get` tries the
+selected recipe, then the type-specific fallback; if both fail, the flat sprite
+remains available.
 
 `UnitModelSelection` captures the selected model and the unit's visible appearance
 data: loadout, surviving personnel, facing and damage. A sensor-only contact has no
@@ -32,37 +47,70 @@ data reaches the renderer.
 [GpuUnitModels](../megamek/src/megamek/client/ui/clientGUI/boardview/gpu/GpuUnitModels.java)
 loads and caches the shared assets. `UnitModelDescriptor` reads the JSON contract;
 `UnitEquipmentAssembly` and `UnitEquipmentModels` assemble equipment using the
-captured loadout. Missing or failed assets follow the existing fallback path so an
-individual model does not prevent the board from opening.
+captured loadout. `MekVisual` filters the body for its actual anatomy and attaches
+alternate detail meshes to the same animated joints. Equipment uses the recipe
+and `equipment.json`, with weapon-family fallbacks for unmapped weapons.
+`FamilyVisual` selects the appropriate vehicle/aircraft form and removes absent
+turrets. Invalid descriptors or parts are logged and cached as failed for that
+asset library; a loadout-specific failure does not invalidate the shared recipe.
 `GpuUnitModels.ENABLED` controls authored models; disabling them retains the flat
 sprite path in both camera views. Raised sensor symbols use `GpuCutout`
 independently and do not reveal a concealed unit's model.
 
-## Asset format
+## Asset format and validation
 
-A component has a GLB containing named rigid geometry and a JSON descriptor describing
-rig roles, location ownership, hardpoints, emitters and assembly recipes. The renderer
-animates those rigid parts itself. Skins, baked animation clips and morph targets are
-outside the supported format.
+Unit recipes and part descriptors require `"schema": 2`. Older pre-built
+descriptor formats and G3DJ unit meshes are rejected.
 
-`RigidGlb` decodes geometry on the CPU and converts glTF's Y-up coordinates and linear
-colors to the board's Z-up/display-color convention. Preserve mesh/node names when
-editing a model: descriptors and damage/animation code use those names to find parts.
+- `GpuUnitModels.load` reads recipes whose `kind` is `mek`, `family`,
+  `squadron` or `formation`, delegating to the corresponding visual assembler.
+- `UnitModelDescriptor` validates parts whose `kind` is `body`, `troop` or
+  `equipment`; their `mesh` must name a GLB. Every detail level needs the
+  shared rig. LOD0 also owns the named locations, hardpoints, emitters and
+  landing-support nodes. Mesh data must contain position, normal, color and UVs;
+  accepted material roles are `paint`, `detail` and `bark`.
 
-LOD0 is required. Optional `<component>-lod1` and `-lod2` groups provide simpler meshes;
-`MeshLod` resolves missing levels toward an available higher-detail mesh when loading.
-The levels retain compatible rig names so switching meshes can retain the same pose.
-The `paint` material role receives runtime camouflage, while `detail` retains authored
-artwork. Textures may be embedded PNG/JPEG data or local relative images;
-`ModelTextures` shares them by image and sampler. Legacy custom G3DJ descriptors
-remain readable, although the deployed library uses GLB.
+`RigidGlb` decodes binary glTF 2.0 on the CPU through JglTF, before allocating
+GPU resources. It converts glTF's Y-up coordinates and linear colors to the
+board's Z-up/display-color convention. Preserve node and part names: descriptors,
+damage and animation use them to find rigid geometry.
+
+The importer rejects skins, animation clips, morph targets, external geometry
+buffers, required extensions and non-opaque or double-sided materials.
+Back faces must be explicit geometry. Diffuse textures may be embedded PNG/JPEG
+data or local relative images inside the permitted model directory.
+`ModelTextures` shares them by image and sampler; `paint` receives runtime
+camouflage while `detail` retains authored artwork.
+
+`RigidGlb.loadLods` requires top-level identity groups named after the component:
+`atlas.glb` contains `atlas-lod0`, optionally `atlas-lod1` and `atlas-lod2`.
+Each group contains child rig/mesh nodes rather than its own mesh. LOD0 is required;
+malformed declared levels produce an asset error. `MeshLod.load` resolves missing
+levels toward the preceding available mesh once at load time, sharing its buffers.
+A missing LOD1 does not prevent an authored LOD2 from being used. Separate-level
+references in older custom schema-2 recipes remain readable. The scatter kit's
+per-shape groups are handled separately by `BoardShape.loadKit`.
 
 The full format and authoring instructions are in
 [mm-data/data/models/units/README.md](../../mm-data/data/models/units/README.md).
-`MekModelCatalog` exports game data for authoring, and
-[build_unit_models.ps1](../../mm-data/tools/build_unit_models.ps1) drives the offline
-asset build. Python and Blender belong to that authoring workflow; gameplay loads the
-generated assets directly.
+The `:megamek:exportEquipmentModelCatalog` task exports the current equipment data;
+[build_modular_unit_models.py](../../mm-data/tools/build_modular_unit_models.py)
+builds the assets with Python from the mm-data root. Gameplay loads the generated
+assets directly. Data staging copies them from the sibling `mm-data` checkout.
+
+## Triangle budgets and hard limits
+
+`UnitModelDescriptor.UNIT_TRIANGLE_BUDGETS` defines the assembled-unit art budgets:
+5,000 triangles at LOD0, 2,000 at LOD1 and 500 at LOD2, including body and fitted
+equipment. After assembly, `UnitEquipmentAssembly.warnOverUnitBudget` checks
+the body's distinct authored levels and logs `[UnitBudget]` with the body and
+equipment counts. An over-budget unit is still drawn in full. This checks assembled
+bodies and equipment, rather than an aggregate formation or squadron budget.
+
+The separate `UnitModelDescriptor.MAX_TRIANGLES` sanity ceiling rejects an
+asset level above one million triangles. `RigidGlb` also limits each imported
+level's combined mesh to 65,535 vertices for its 16-bit indices. These checks
+catch invalid exports; they do not trim a loadout to its art budget.
 
 ## Scale and formation layout
 
@@ -143,8 +191,10 @@ visibility and the packet-order constraints for boarding, unloading and swarming
 `FormationLod` selects a unit's mesh level from projected size with hysteresis;
 formations measure an individual figure. Detail changes reuse the same animation
 state and shared buffers. Selected units and attack-playback participants retain
-the detailed representation. Current nominal LOD1/LOD2 boundaries are 96/32 pixels
-for Meks and 48/16 for individual formation members, with 10% hysteresis.
+the detailed representation. Meks and formations switch among LOD0, LOD1 and LOD2.
+Current nominal LOD1/LOD2 boundaries are 96/32 pixels for Meks and 48/16 for
+individual formation members, with 10% hysteresis. Vehicles and other bodies
+assembled through `FamilyVisual` retain their LOD0 path.
 Missing optional meshes fall back independently; a detail switch must retain
 lost parts and the current pose.
 

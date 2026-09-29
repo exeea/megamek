@@ -74,7 +74,9 @@ class GpuLoadingSmokeTest {
                             assertEquals(loading.getWidth(), content.getWidth(), .1f);
                             GpuBoardTestUi.assertHorizontalBounds(content, content);
                             assertTrue(details.getY() >= 0 && details.getTop() <= loading.getHeight());
-                            if (statuses.size() > 1 && !details.getText().isEmpty() && !captured) {
+                            boolean advancing = statuses.stream().anyMatch(status -> status.section() > 0
+                                  && status.step().percent() > 0 && status.step().percent() < 100);
+                            if (statuses.size() > 1 && advancing && !details.getText().isEmpty() && !captured) {
                                 assertTrue(details.getText().toString().contains("%"));
                                 File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
                                 assertTrue(output.isDirectory() || output.mkdirs());
