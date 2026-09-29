@@ -1,12 +1,12 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import static megamek.client.ui.clientGUI.boardview.gpu.BoardAtmosphereTest.assertSameColor;
+import static megamek.client.ui.clientGUI.boardview.gpu.BoardAtmosphereTest.assertSameLighting;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static megamek.client.ui.clientGUI.boardview.gpu.BoardAtmosphereTest.assertSameColor;
-import static megamek.client.ui.clientGUI.boardview.gpu.BoardAtmosphereTest.assertSameLighting;
 
 import java.util.HashSet;
 

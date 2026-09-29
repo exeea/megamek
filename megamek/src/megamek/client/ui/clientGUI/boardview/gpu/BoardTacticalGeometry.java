@@ -35,7 +35,7 @@ final class BoardTacticalGeometry {
             this(top, slopes, faces, water, walls, waterfalls, highest(top));
         }
 
-        /** Derived once with this immutable finished-surface snapshot; markers and border endpoints reuse it. */
+        /** Derived once with this immutable finished-surface snapshot; raised border endpoints reuse it. */
         private static float highest(List<BoardSurface.Face> faces) {
             float z = Float.NEGATIVE_INFINITY;
             for (BoardSurface.Face face : faces) {
@@ -141,7 +141,7 @@ final class BoardTacticalGeometry {
     /** A retained command uses its absolute painter position, including the original capped lift. */
     static void drape(BoardScene scene, BoardTactical.Fill fill, int layer, Consumer<Triangle> destination,
           Function<Coords, Surface> surfaces, Clipper clipper) {
-        if (floating(scene, fill, destination, surfaces)) { return; }
+        if (floating(scene, fill, destination)) { return; }
         float lift = layerLift(layer);
         for (Triangle triangle : flat(fill)) {
             int firstX = Math.max(0, (int) Math.floor(minX(triangle) / (BoardGeometry.TILE_WIDTH * 0.75f)) - 1);
@@ -174,12 +174,11 @@ final class BoardTacticalGeometry {
         return tile == null ? null : tile.coords();
     }
 
-    /** A single horizontal plane clears its owner's finished top, without sampling neighboring cliffs or lake beds. */
-    static boolean floating(BoardScene scene, BoardTactical.Fill fill, Consumer<Triangle> destination,
-          Function<Coords, Surface> surfaces) {
+    /** A single horizontal plane follows the owner's elevation, independently of ramps and sculpted relief. */
+    static boolean floating(BoardScene scene, BoardTactical.Fill fill, Consumer<Triangle> destination) {
         Coords coords = anchorCoords(scene, fill.planeAnchor());
         if (coords == null) { return false; }
-        float z = floatingZ(scene, coords, surfaces);
+        float z = floatingZ(scene, coords);
         for (Triangle triangle : flat(fill)) {
             Vector3 a = world(triangle.a()), b = world(triangle.b()), c = world(triangle.c());
             a.z = z; b.z = z; c.z = z;
@@ -188,11 +187,12 @@ final class BoardTacticalGeometry {
         return true;
     }
 
-    /** Authoritative plane for flat hex fills, labels and hover/editor cursors in either camera view. */
-    static float floatingZ(BoardScene scene, Coords coords, Function<Coords, Surface> surfaces) {
-        Surface surface = surfaces.apply(coords);
-        float z = surface.top().isEmpty() ? BoardGeometry.surfaceZ(scene.tile(coords)) : surface.highestTop();
-        return z + HEX_PLANE_CLEARANCE;
+    /**
+     * Shared plane for flat hex fills, labels and hover/editor cursors in either camera view. A climbing road must
+     * not lift the whole hex's annotations. Raised point symbols use {@link GpuMarkers#locationSupport} instead.
+     */
+    static float floatingZ(BoardScene scene, Coords coords) {
+        return BoardGeometry.surfaceZ(scene.tile(coords)) + HEX_PLANE_CLEARANCE;
     }
 
     static float layerLift(int layer) {

@@ -26,10 +26,11 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardFoliageTest {
     @Test
-    void cactusPadsFormOneClosedConnectedSurfaceAtEveryLod() {
+    void cactusPadsFormOneClosedConnectedSurfaceAtEveryMeshLod() {
         File root = new File(Configuration.dataDir(), "models/board");
         var levels = RigidGlb.loadLods(new FileHandle(new File(root, "foliage-desert.glb")), root.toPath());
-        for (var data : levels) {
+        // The last level is the impostor's open cards, not a cactus body.
+        for (var data : levels.subList(0, 3)) {
             // Hard normals and UV seams split render vertices; weld only positions for the topology check.
             var positions = new HashMap<List<Integer>, Integer>();
             var edges = new HashMap<List<Integer>, Integer>();
@@ -124,12 +125,13 @@ class BoardFoliageTest {
 
     @ParameterizedTest
     @ValueSource(strings = { "temperate", "highland", "rocky", "wetland", "desert", "jungle", "barren", "snow" })
-    void glbContainsThreeTexturedMeshesInTheSameRootCoordinates(String family) {
+    void glbContainsThreeTexturedMeshesAndAnImpostorInTheSameRootCoordinates(String family) {
         File root = new File(Configuration.dataDir(), "models/board");
         var levels = RigidGlb.loadLods(new FileHandle(new File(root, "foliage-" + family + ".glb")), root.toPath());
-        assertEquals(3, levels.size());
+        assertEquals(4, levels.size());
         assertNotSame(levels.get(0), levels.get(1));
         assertNotSame(levels.get(1), levels.get(2));
+        assertNotSame(levels.get(2), levels.get(3));
         int previous = Integer.MAX_VALUE;
         for (int lod = 0; lod < levels.size(); lod++) {
             var data = levels.get(lod);
@@ -143,13 +145,15 @@ class BoardFoliageTest {
                 }
             }
             assertTrue(triangles > 0 && triangles < previous);
-            assertTrue(triangles <= List.of(480, 240, 96).get(lod));
+            assertTrue(triangles <= List.of(480, 240, 96, 12).get(lod));
             assertEquals(0, low, .001f, "All detail levels remain grounded");
             assertTrue(high > 14 && high <= 19, "LOD changes must preserve the authored low silhouette");
             if (lod == 0) { assertEquals(18, high - low, .001f); }
+            // Every level lists the file's materials: the family's atlas for the meshes and its impostor cards' atlas.
             for (var material : data.materials) {
                 assertEquals(1, material.textures.size);
-                assertTrue(material.textures.first().fileName.replace('\\', '/').contains("/shrubs/" + family + ".png"));
+                String file = material.textures.first().fileName.replace('\\', '/');
+                assertTrue(file.contains("/shrubs/" + family + ".png") || file.contains("/impostors/foliage-" + family + ".png"));
             }
             previous = triangles;
         }

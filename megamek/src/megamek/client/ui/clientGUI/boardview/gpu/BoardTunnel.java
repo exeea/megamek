@@ -63,6 +63,12 @@ record BoardTunnel(Coords road, Vector3 origin, Vector3 along, BoardRoad.Kind ki
         return new Vector3(x * along.y - y * along.x, x * along.x + y * along.y, (p.z - origin.z) / scale);
     }
 
+    /** How far (x, y) lies to either side of the wing walls, in tile pixels; negative within them. */
+    float beside(float x, float y) {
+        Vector3 p = local(new Vector3(x, y, origin.z));
+        return p.y < -8 || p.y > DEPTH + 2 ? Float.POSITIVE_INFINITY : Math.abs(p.x) - (bridge ? 13.3f : 18);
+    }
+
     /** Keep whole decorative rocks clear of the shell, wing walls and the road approaching the mouth. */
     boolean obstructs(Vector3 base, float radius, float height) {
         Vector3 p = local(base);

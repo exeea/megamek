@@ -15,6 +15,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.profiling.GLProfiler;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.Hex;
@@ -41,6 +42,7 @@ class GpuIceSmokeTest {
             public void create() {
                 var terrain = new GpuTerrain();
                 var frame = new GpuReviewFrame(settings(13));
+                var tactical = new GpuTactical(terrain::tacticalSurface);
                 try {
                     var output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
                     assertTrue(output.isDirectory() || output.mkdirs());
@@ -67,6 +69,23 @@ class GpuIceSmokeTest {
                     assertTrue(normalChange > .05, "Ice normal maps must reach the GL shader: " + normalChange);
                     frame.render(terrain, camera, detected);
                     GpuReviewFrame.save(new File(output, "ice-lake-detail.png"));
+                    // Substitute two opaque backgrounds under the same sheet. A fake opaque ice texture
+                    // would give identical pixels, whereas actual transmission must reveal the difference.
+                    ScreenUtils.clear(.05f, .12f, .3f, 1, true);
+                    var profiler = new GLProfiler(Gdx.graphics);
+                    profiler.enable();
+                    terrain.renderTransparent(camera.camera);
+                    int iceDraws = profiler.getDrawCalls();
+                    profiler.disable();
+                    // Snow on the slab is opaque; its bare ice is not. Sample a wide area of the hex.
+                    int[] blue = read(camera, LAKE, 240);
+                    ScreenUtils.clear(.3f, .08f, .03f, 1, true);
+                    terrain.renderTransparent(camera.camera);
+                    double transmitted = difference(blue, read(camera, LAKE, 240));
+                    System.out.println("Lake ice transmission difference: " + transmitted);
+                    assertTrue(transmitted > .5, "Lake ice must transmit the scene behind it");
+                    assertEquals(1, iceDraws, "The connected lake in one chunk shares one ice draw call");
+                    System.out.println("Connected lake ice draw calls: " + iceDraws);
                     camera.center(BoardGeometry.center(ROAD, 0));
                     frame.render(terrain, camera, detected);
                     GpuReviewFrame.save(new File(output, "ice-road-detected.png"));
@@ -91,10 +110,23 @@ class GpuIceSmokeTest {
                     assertTrue(difference(beforeRemoval, restored) > 1, "Removing ice must remove the visible coat");
                     terrain.update(hidden);
                     assertArrayEquals(restored, sample(terrain, camera, ROAD), "Hidden ice retains the restored dry surface");
+                    var marker = BoardEditorTerrain.capture(new Hex(0, "black_ice:1;bldg_base_collapsed:1", ""), ROAD,
+                          java.util.Set.of());
+                    var marked = new BoardScene(hidden.boardId(), hidden.width(), hidden.height(), hidden.tiles(),
+                          hidden.units(), hidden.plannedPath(), hidden.selectedId(), hidden.phase(), hidden.commands(),
+                          hidden.light(), hidden.firingLines(), hidden.rangeBorders(), hidden.markers(), marker);
+                    camera.setIsometric(true);
+                    camera.camera.zoom = .10f;
+                    camera.center(BoardGeometry.center(ROAD, 0));
+                    frame.render(terrain, camera, marked);
+                    tactical.update(marked);
+                    tactical.render(camera.camera, 0);
+                    GpuReviewFrame.save(new File(output, "ice-editor-marker.png"));
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) {
                     failure.set(error);
                 } finally {
+                    tactical.dispose();
                     frame.dispose();
                     terrain.dispose();
                     Gdx.app.exit();
@@ -133,12 +165,22 @@ class GpuIceSmokeTest {
     private static int[] sample(GpuTerrain terrain, BoardCamera camera, Coords coords) {
         ScreenUtils.clear(.02f, .025f, .035f, 1, true);
         terrain.render(camera.camera, false);
+        terrain.renderTransparent(camera.camera);
+        return read(camera, coords);
+    }
+
+    private static int[] read(BoardCamera camera, Coords coords) {
+        return read(camera, coords, 48);
+    }
+
+    private static int[] read(BoardCamera camera, Coords coords, int size) {
         Vector3 screen = camera.camera.project(BoardGeometry.center(coords, 0));
-        Pixmap image = ScreenUtils.getFrameBufferPixmap(Math.round(screen.x) - 24, Math.round(screen.y) - 24, 48, 48);
+        Pixmap image = ScreenUtils.getFrameBufferPixmap(Math.round(screen.x) - size / 2, Math.round(screen.y) - size / 2,
+              size, size);
         try {
-            int[] result = new int[48 * 48];
-            for (int y = 0; y < 48; y++) {
-                for (int x = 0; x < 48; x++) { result[y * 48 + x] = image.getPixel(x, y); }
+            int[] result = new int[size * size];
+            for (int y = 0; y < size; y++) {
+                for (int x = 0; x < size; x++) { result[y * size + x] = image.getPixel(x, y); }
             }
             return result;
         } finally { image.dispose(); }

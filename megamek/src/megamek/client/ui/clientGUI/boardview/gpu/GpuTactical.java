@@ -60,7 +60,7 @@ final class GpuTactical implements Disposable {
     private record TextImage(BoardScene.Pixels pixels, float x, float y) { }
     private static final int PAGE_TRIANGLES = 10000;
     private record FillKey(BoardTactical.Fill fill, int layer) { }
-    private record FillGeometry(Map<Coords, BoardTacticalGeometry.Surface> surfaces, float[] vertices, int elevation) { }
+    private record FillGeometry(Map<Coords, BoardTacticalGeometry.Surface> surfaces, float[] vertices, float planeZ) { }
     private record WallGeometry(Map<Coords, BoardTacticalGeometry.Surface> surfaces, int[] levels,
           float[] body, float[] uprightOutline, float[] flatOutline) { }
     /** Presentations 0 and 3 are always drawn; 1 and 2 are the upright and flat wall alternatives. */
@@ -91,8 +91,6 @@ final class GpuTactical implements Disposable {
     private final float outlineSpeed;
     private double scrollDistance;
     private final Function<Coords, BoardTacticalGeometry.Surface> terrain;
-    /** Render-owned support lookup for the current geometry; also anchors camera-facing hex labels. */
-    private Function<Coords, BoardTacticalGeometry.Surface> labelSurfaces;
 
     GpuTactical() {
         this(OUTLINE_SCROLL_SPEED);
@@ -221,7 +219,6 @@ final class GpuTactical implements Disposable {
         replacePages(groups);
         fills = nextFills;
         walls = nextWalls;
-        labelSurfaces = surfaces;
         builds++;
     }
 
@@ -236,25 +233,25 @@ final class GpuTactical implements Disposable {
             FillKey key = new FillKey(command, command.planeAnchor() != null ? 0 : Math.min(layer, 10000));
             FillGeometry geometry = retained.get(key);
             if (geometry == null) { geometry = reset ? null : fills.get(key); }
-            int elevation = geometry == null || terrainChanged
-                  ? floatingElevation(scene, key.fill()) : geometry.elevation();
+            float planeZ = geometry == null || terrainChanged
+                  ? floatingHeight(scene, key.fill()) : geometry.planeZ();
             if (geometry == null || terrainChanged
-                  && (geometry.elevation() != elevation || !current(geometry.surfaces(), surfaces))) {
+                  && (geometry.planeZ() != planeZ || !current(geometry.surfaces(), surfaces))) {
                 Map<Coords, BoardTacticalGeometry.Surface> used = new HashMap<>();
                 FloatArray vertices = new FloatArray();
                 BoardTacticalGeometry.drape(scene, key.fill(), key.layer(), packed(vertices, null),
                       tracking(surfaces, used), clipper);
                 geometry = new FillGeometry(used.isEmpty() ? Map.of() : used,
-                      reuse(vertices, geometry == null ? null : geometry.vertices()), elevation);
+                      reuse(vertices, geometry == null ? null : geometry.vertices()), planeZ);
             }
             retained.put(key, geometry);
             add(groups, group, geometry.vertices());
         }
     }
 
-    private static int floatingElevation(BoardScene scene, BoardTactical.Fill fill) {
+    private static float floatingHeight(BoardScene scene, BoardTactical.Fill fill) {
         Coords coords = BoardTacticalGeometry.anchorCoords(scene, fill.planeAnchor());
-        return coords == null ? Integer.MIN_VALUE : scene.tile(coords).elevation();
+        return coords == null ? Float.NEGATIVE_INFINITY : BoardTacticalGeometry.floatingZ(scene, coords);
     }
 
     private static WallGeometry wallGeometry(BoardScene scene, BoardTactical.Wall wall,
@@ -535,7 +532,7 @@ final class GpuTactical implements Disposable {
                 continue;
             }
             Vector3 position = new Vector3(anchor.x() * BoardGeometry.hexScale(), -anchor.y() * BoardGeometry.hexScale(),
-                  BoardTacticalGeometry.floatingZ(previous, coords, labelSurfaces));
+                  BoardTacticalGeometry.floatingZ(previous, coords));
             if (!camera.frustum.sphereInFrustum(position, BoardGeometry.width())) {
                 continue;
             }
@@ -612,6 +609,5 @@ final class GpuTactical implements Disposable {
         textures.dispose();
         images.clear();
         labels.clear();
-        labelSurfaces = null;
     }
 }

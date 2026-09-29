@@ -285,7 +285,6 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     public Board getBoard() { return game.getBoard(boardId); }
     public Entity getDisplayedEntity() { return clientgui == null ? null : clientgui.getDisplayedUnit(); }
     public Coords getSelected() { return selected; }
-    public BoardFocus getFocus() { return focus; }
     public long getRevision() { return revision; }
     public FovHighlightingAndDarkening getFieldOfView() { return fieldOfView; }
 
@@ -386,9 +385,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     public void setLocalPlayer(Player player) { localPlayer = player; visibilityChanged(); }
     public void setLocalPlayer(int id) { setLocalPlayer(game.getPlayer(id)); }
     public Entity getSelectedEntity() { return getDisplayedEntity(); }
-    public TilesetManager getTileManager() { return tileManager; }
     public TilesetManager getTilesetManager() { return tileManager; }
-    public FovHighlightingAndDarkening getFovHighlighting() { return fieldOfView; }
     public float getScale() { return gpuCapture || projection == null ? captureScale : projection.getScale(); }
     public Dimension getHexSize() { return new Dimension((int) (HEX_W * getScale()), (int) (HEX_H * getScale())); }
     public int getVerticalOffset() { return gpuCapture || projection == null ? 0 : projection.getVerticalOffset(); }
@@ -3184,6 +3181,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
 
     private boolean tooltipSuspended;
     private String selectedTheme;
+    public boolean isTooltipSuspended() { return tooltipSuspended; }
     public void suspendTooltip() { tooltipSuspended = true; }
     public void activateTooltip() { tooltipSuspended = false; }
     public @Nullable String changeTheme() {

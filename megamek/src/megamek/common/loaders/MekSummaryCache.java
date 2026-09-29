@@ -111,9 +111,10 @@ public class MekSummaryCache {
     /** Battlefield Support Assets keyed by the UUID of the base unit they link to. */
     private final Map<String, MekSummary> assetByLinkedUnitId;
     private Map<String, String> failedFiles;
-    private int cacheCount;
-    private int fileCount;
-    private int zipCount;
+    // Written by the loader thread and polled by the loading dialog on the EDT.
+    private volatile int cacheCount;
+    private volatile int fileCount;
+    private volatile int zipCount;
 
     private final List<Listener> listeners = new ArrayList<>();
 

@@ -98,8 +98,9 @@ class BoardSurfaceCacheTest {
         assertSame(scene.tile(neighbor), edited.tile(neighbor));
         assertTrue(BoardSurface.ramps(edited, edited.tile(neighbor)) != 0);
         BoardSurface changed = cache.get(edited, edited.tile(CENTER));
-        assertNotSame(first, changed, "The neighbor stops sculpting when a road approaches it from the second ring");
-        assertEquals(0, changed.height(edge.x, edge.y), .003f);
+        assertNotSame(first, changed, "A road approaching the neighbor from the second ring grades the neighbor");
+        // Ground a road only approaches keeps its natural rim, so the join with it keeps its height.
+        assertEquals(first.height(edge.x, edge.y), changed.height(edge.x, edge.y), .003f);
     }
 
     @Test

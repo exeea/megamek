@@ -6,11 +6,13 @@ import java.awt.geom.Area;
 import java.awt.geom.Path2D;
 import java.awt.geom.PathIterator;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.TreeSet;
 
 import com.badlogic.gdx.math.EarClippingTriangulator;
@@ -319,6 +321,11 @@ final class BoardSurface {
     final List<Face> faces = new ArrayList<>();
     /** Rough cover is part of the drawn mesh; ordinary units may clip it, infantry can seek footing on it. */
     final List<Face> rough = new ArrayList<>();
+    /**
+     * A frozen lake as drawn: its slab; the broken pieces round it (cut edges, the ragged margin over open water,
+     * floes and shore rubble); and the open leads along ice-free shores. Support and picking use the ICE faces.
+     */
+    final List<Face> iceSlab = new ArrayList<>(), iceBroken = new ArrayList<>(), iceLeads = new ArrayList<>();
     private List<BoardRough.Placement> roughModels = List.of();
 
     List<BoardRough.Placement> roughModels() { return roughModels; }
@@ -343,6 +350,8 @@ final class BoardSurface {
     private final List<RoadRamp> roadRamps = new ArrayList<>();
     /** Engineered walls inside a concrete hex, between its level slab and a cut or raised road. */
     final List<Face> retainingWalls = new ArrayList<>();
+    /** Precast walls retaining a slope's toe that the road beside it cuts back (BoardRelief#retainingWalls). */
+    final List<Face> retainingPanels = new ArrayList<>();
     final BoardRelief relief;
     private final TerrainLod lod;
     private final List<Face> edgeTopography = new ArrayList<>();
@@ -393,7 +402,8 @@ final class BoardSurface {
     record WaterGeometry(Coords coords, TerrainLod lod, int ramps, List<Face> faces, List<Vector3> water,
           List<Face> cliffWater, List<Vector3> outline, List<Face> waterFaces, Map<Integer, List<Vector3>> contacts,
           List<Face> cutFaces, List<Side> waterfalls, List<Face> edgeTopography, int offBoard, int openMouths,
-          List<Face> rough, List<BoardRough.Placement> roughModels,
+          List<Face> rough, List<BoardRough.Placement> roughModels, List<Face> iceSlab, List<Face> iceBroken,
+          List<Face> iceLeads,
           boolean graded, Vector3[] joinsA, Vector3[] joinsB, Crest[] crests, Vector3[] bedOutline,
           Vector3[] waterline, Vector3[] crestLine, Vector3[] shoreCorners) {
         BoardSurface surface(BoardScene scene) { return new BoardSurface(scene, this); }
@@ -403,8 +413,8 @@ final class BoardSurface {
         return new WaterGeometry(tile.coords(), lod, ramps, List.copyOf(faces), List.copyOf(water),
               List.copyOf(cliffWater), List.copyOf(outline), List.copyOf(waterFaces), Map.copyOf(waterContacts),
               List.copyOf(cutFaces), List.copyOf(waterfalls), List.copyOf(edgeTopography), offBoard, openMouths,
-              List.copyOf(rough), roughModels, gradedWater, joinA.clone(), joinB.clone(), crests.clone(),
-              bedOutline, waterline, crestLine, shoreCorners);
+              List.copyOf(rough), roughModels, List.copyOf(iceSlab), List.copyOf(iceBroken), List.copyOf(iceLeads),
+              gradedWater, joinA.clone(), joinB.clone(), crests.clone(), bedOutline, waterline, crestLine, shoreCorners);
     }
 
     /** Fresh query context around unchanged finished water; rebuilding its many bed/cliff triangles is unnecessary. */
@@ -419,6 +429,9 @@ final class BoardSurface {
         faces.addAll(geometry.faces());
         rough.addAll(geometry.rough());
         roughModels = geometry.roughModels();
+        iceSlab.addAll(geometry.iceSlab());
+        iceBroken.addAll(geometry.iceBroken());
+        iceLeads.addAll(geometry.iceLeads());
         water.addAll(geometry.water());
         cliffWater.addAll(geometry.cliffWater());
         outline.addAll(geometry.outline());
@@ -473,7 +486,7 @@ final class BoardSurface {
             if (i < interiorFrom || i >= interiorTo) { edgeTopography.add(faces.get(i)); }
         }
         if (detailed) {
-            if (BoardRoad.rendered(tile) && ramps != 0 && tile.surface() != BoardScene.Surface.CONCRETE) {
+            if (ramps != 0 && relief.graded() && tile.surface() != BoardScene.Surface.CONCRETE) {
                 roadRelief();
                 simplifyRoad();
             }
@@ -482,6 +495,7 @@ final class BoardSurface {
             // Banks meet the actual ground rim, including emerged shallow bars, while the water keeps its level.
             relief.top(faces, bedOutline, openMouths, crestLine, falls);
             meetWetCliffs();
+            relief.retainingWalls(retainingPanels);
             int roughStart = faces.size();
             relief.boulders(faces);
             roughModels = BoardRough.place(this);
@@ -785,18 +799,8 @@ final class BoardSurface {
             }
         }
         if (tile.frozen()) {
-            // Freeze the actual water footprint, not the outer bank polygon: covering the bank as well
-            // produces coplanar shards along its sculpted lip. Reuse the water polygon triangulation.
             outline.addAll(List.of(waterline));
-            // Interior water edges are straight: retain their corners, not the shoreline's redundant samples.
-            List<Vector3> iceEdge = new ArrayList<>();
-            for (int i = 0; i < waterline.length; i++) {
-                Vector3 a = waterline[(i + waterline.length - 1) % waterline.length];
-                Vector3 b = waterline[i], c = waterline[(i + 1) % waterline.length];
-                float turn = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
-                if (Math.abs(turn) > .00001f * BoardGeometry.hexScale() * BoardGeometry.hexScale()) { iceEdge.add(b); }
-            }
-            polygon(iceEdge.toArray(Vector3[]::new), Finish.ICE, faces);
+            freeze(scene, shore);
         } else {
             // The water recedes from each crest; the sheet's lip curves back down over it.
             Vector3[] surface = pulledBack(crestLine, lip);
@@ -817,6 +821,259 @@ final class BoardSurface {
                 }
             }
         }
+    }
+
+    /** Tile pixels a lake slab reaches below open water; its freeboard is the pixel between the water and its level. */
+    private static final float ICE_DRAFT = 1.5f;
+    /** Tile pixels a frozen edge breaks out over open water at most. */
+    private static final float ICE_MARGIN = 6;
+    /** Tile pixels a slab breaks off short of an ice-free shore at most, opening a lead along it. */
+    private static final float ICE_LEAD = 4;
+
+    /**
+     * A frozen lake's slab. Its top is the level units stand on, one pixel of freeboard above open water. It runs on
+     * through mouths into frozen neighbours at its level and up banks into frozen land. Toward open water it breaks
+     * out raggedly over the neighbour's water; along an ice-free shore it breaks off short of the waterline, leaving
+     * a lead with rubble. It shows its thickness wherever it ends. All of that is drawn only: support and picking
+     * keep the waterline.
+     */
+    private void freeze(BoardScene scene, float[] shore) {
+        float scale = BoardGeometry.hexScale(), top = BoardGeometry.surfaceZ(tile), water = BoardGeometry.waterZ(tile);
+        float bottom = water - ICE_DRAFT * scale;
+        int n = waterline.length;
+        Vector3[] slab = new Vector3[n];
+        float area = 0;
+        for (int i = 0; i < n; i++) {
+            slab[i] = new Vector3(waterline[i].x, waterline[i].y, top);
+            Vector3 next = waterline[(i + 1) % n];
+            area += waterline[i].x * next.y - next.x * waterline[i].y;
+        }
+        // Outward is to the right of the contour's direction when it runs counter-clockwise.
+        float outward = Math.signum(area);
+        boolean[] ragged = new boolean[6], continuous = new boolean[6], iced = new boolean[6], broken = new boolean[6];
+        for (int edge = 0; edge < 6; edge++) {
+            BoardScene.Tile other = neighbor(scene, edge);
+            boolean level = shore[edge] == 0 && other != null && other.elevation() == tile.elevation();
+            continuous[edge] = level && other.frozen();
+            ragged[edge] = level && !other.frozen();
+            // Frozen land's ice runs down the bank to the slab; a cut edge there would split the sheet.
+            iced[edge] = shore[edge] > 0 && other != null && other.frozen() && !other.liquid().present();
+            // The board's edge cuts the slab straight, as it cuts all water.
+            broken[edge] = other != null && !continuous[edge] && !ragged[edge] && !iced[edge];
+        }
+        // Support: the waterline, straight edges by their corners alone.
+        List<Vector3> support = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            if (turns(slab[(i + n - 1) % n], slab[i], slab[(i + 1) % n])) { support.add(slab[i]); }
+        }
+        polygon(support.toArray(Vector3[]::new), Finish.ICE, faces);
+        // Drawn: the waterline's samples, which the ragged margins share, and twice as many along broken shores.
+        List<Vector3> base = new ArrayList<>();
+        List<Integer> edges = new ArrayList<>();
+        List<Boolean> onShore = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            int edge = i / SHORE_SEGMENTS;
+            base.add(slab[i]);
+            edges.add(edge);
+            onShore.add(broken[edge] && (i % SHORE_SEGMENTS != 0 || broken[(edge + 5) % 6]));
+            if (broken[edge]) {
+                base.add(new Vector3(slab[i]).lerp(slab[(i + 1) % n], .5f));
+                edges.add(edge);
+                onShore.add(true);
+            }
+        }
+        int m = base.size();
+        float[] recess = shoreBreak(onShore, scale);
+        Vector3[] drawn = new Vector3[m];
+        for (int k = 0; k < m; k++) {
+            Vector3 before = base.get((k + m - 1) % m), after = base.get((k + 1) % m);
+            Vector3 inward = new Vector3(before.y - after.y, after.x - before.x, 0).nor().scl(outward);
+            drawn[k] = recess[k] == 0 ? base.get(k) : new Vector3(base.get(k)).mulAdd(inward, recess[k]);
+        }
+        List<Vector3> outline = new ArrayList<>();
+        for (int k = 0; k < m; k++) {
+            if (ragged[edges.get(k)] || recess[k] > 0 || turns(drawn[(k + m - 1) % m], drawn[k], drawn[(k + 1) % m])) {
+                outline.add(drawn[k]);
+            }
+        }
+        polygon(outline.toArray(Vector3[]::new), Finish.ICE, iceSlab);
+        Random random = new Random(tile.coords().getX() * 0x9E3779B97F4A7C15L ^ tile.coords().getY() * 0xC2B2AE3D27D4EB4FL);
+        for (int k = 0; k < m; k++) {
+            int edge = edges.get(k), next = (k + 1) % m;
+            if (continuous[edge] || iced[edge] || ragged[edge]) { continue; }
+            iceSkirt(iceBroken, drawn[k], drawn[next], bottom, outward);
+            if (recess[k] > 0 || recess[next] > 0) {
+                Vector3 a = new Vector3(drawn[k].x, drawn[k].y, water), b = new Vector3(drawn[next].x, drawn[next].y, water);
+                Vector3 c = new Vector3(base.get(next).x, base.get(next).y, water);
+                Vector3 d = new Vector3(base.get(k).x, base.get(k).y, water);
+                iceFace(iceLeads, a, b, c, Vector3.Z);
+                iceFace(iceLeads, a, c, d, Vector3.Z);
+            }
+            // Rubble of the broken edge floats in the wider stretches of the lead.
+            if (recess[k] > 2.2f * scale && random.nextFloat() < .4f) {
+                Vector3 centre = new Vector3(drawn[k]).lerp(base.get(k), .5f);
+                piece(centre, Math.min(.3f * recess[k], 1.4f * scale) * (.6f + .4f * random.nextFloat()),
+                      water + .35f * scale, water - .8f * scale, random);
+            }
+        }
+        for (int edge = 0; edge < 6; edge++) {
+            if (!ragged[edge]) { continue; }
+            int first = edge * SHORE_SEGMENTS;
+            Vector3 start = slab[first], end = slab[(first + SHORE_SEGMENTS) % n];
+            Vector3 out = new Vector3(end.y - start.y, start.x - end.x, 0).nor().scl(outward);
+            Vector3 opening = cornerBreak(scene, edge, edge, ragged, continuous);
+            Vector3 closing = cornerBreak(scene, edge, edge + 1, ragged, continuous);
+            // A fracture line: straight runs between irregular breaks.
+            Random front = new Random(Float.floatToIntBits(start.x + end.x) * 0x9E3779B97F4A7C15L
+                  ^ Float.floatToIntBits(start.y + end.y));
+            int breaks = 7;
+            float[] at = new float[breaks + 1], reach = new float[breaks + 1];
+            for (int k = 0; k <= breaks; k++) {
+                at[k] = k == 0 || k == breaks ? k / (float) breaks : (k + (front.nextFloat() - .5f) * .7f) / breaks;
+                reach[k] = ICE_MARGIN * scale * (.2f + .8f * front.nextFloat());
+            }
+            // Two margin samples per waterline sample carry the breaks. Near each corner the line eases into the
+            // point it shares with the front beyond that corner, or into the corner itself where the front ends.
+            Vector3[] margin = new Vector3[2 * SHORE_SEGMENTS + 1];
+            for (int j = 0, k = 0; j < margin.length; j++) {
+                float t = j / (float) (margin.length - 1);
+                Vector3 point = j % 2 == 0 ? slab[(first + j / 2) % n]
+                      : new Vector3(slab[(first + j / 2) % n]).lerp(slab[(first + j / 2 + 1) % n], .5f);
+                while (k < breaks - 1 && at[k + 1] < t) { k++; }
+                float along = Math.clamp((t - at[k]) / Math.max(at[k + 1] - at[k], 1e-4f), 0, 1);
+                float from = 1 - smooth(t / .3f), to = 1 - smooth((1 - t) / .3f);
+                margin[j] = new Vector3(point).mulAdd(out, BoardRelief.lerp(reach[k], reach[k + 1], along) * (1 - from - to))
+                      .mulAdd(opening, from).mulAdd(closing, to);
+            }
+            for (int i = 0; i < SHORE_SEGMENTS; i++) {
+                Vector3 a = slab[(first + i) % n], b = slab[(first + i + 1) % n];
+                iceFace(iceBroken, a, margin[2 * i], margin[2 * i + 1], Vector3.Z);
+                iceFace(iceBroken, a, margin[2 * i + 1], b, Vector3.Z);
+                iceFace(iceBroken, b, margin[2 * i + 1], margin[2 * i + 2], Vector3.Z);
+            }
+            for (int j = 0; j + 1 < margin.length; j++) { iceSkirt(iceBroken, margin[j], margin[j + 1], bottom, outward); }
+            floes(margin, out, front);
+        }
+    }
+
+    private static boolean turns(Vector3 a, Vector3 b, Vector3 c) {
+        float turn = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+        return Math.abs(turn) > .00001f * BoardGeometry.hexScale() * BoardGeometry.hexScale();
+    }
+
+    /**
+     * How far the slab breaks off short of each drawn point on an ice-free shore: straight runs between irregular
+     * breaks, easing onto the waterline over three points wherever the shore meets another kind of edge.
+     */
+    private float[] shoreBreak(List<Boolean> onShore, float scale) {
+        int m = onShore.size();
+        Random random = new Random(tile.coords().getX() * 0xC2B2AE3D27D4EB4FL ^ tile.coords().getY() * 0x165667B19E3779F9L);
+        float[] knots = new float[m], recess = new float[m];
+        for (int k = 0; k < m; k++) { knots[k] = ICE_LEAD * scale * (.1f + .9f * random.nextFloat()); }
+        // Points along the ring to the nearest point off the shore, both ways round.
+        int[] away = new int[m];
+        Arrays.fill(away, m);
+        for (int pass = 0; pass < 2; pass++) {
+            for (int step = 0; step < 2 * m; step++) {
+                int k = pass == 0 ? step % m : (2 * m - 1 - step) % m;
+                int previous = pass == 0 ? (k + m - 1) % m : (k + 1) % m;
+                away[k] = onShore.get(k) ? Math.min(away[k], away[previous] + 1) : 0;
+            }
+        }
+        for (int k = 0; k < m; k++) {
+            if (!onShore.get(k)) { continue; }
+            int from = k - k % 3, span = Math.min(3, m - from);
+            recess[k] = BoardRelief.lerp(knots[from], knots[(from + span) % m], (k - from) / (float) span)
+                  * Math.min(1, away[k] / 3f);
+        }
+        return recess;
+    }
+
+    /**
+     * A few broken floes drifting just off a ragged front, riding lower than the slab. They keep to the middle of the
+     * edge, clear of the corners where the fronts of other slabs break out.
+     */
+    private void floes(Vector3[] margin, Vector3 out, Random random) {
+        float scale = BoardGeometry.hexScale(), water = BoardGeometry.waterZ(tile);
+        List<Vector3> centres = new ArrayList<>();
+        List<Float> radii = new ArrayList<>();
+        int count = 1 + random.nextInt(4);
+        for (int f = 0; f < count; f++) {
+            float along = (.2f + .6f * random.nextFloat()) * (margin.length - 1);
+            float size = random.nextFloat();
+            float radius = (1.2f + 4.5f * size * size) * scale;
+            float gap = (1 + 7 * random.nextFloat()) * scale;
+            int j = (int) along;
+            Vector3 centre = new Vector3(margin[j]).lerp(margin[j + 1], along - j).mulAdd(out, gap + radius);
+            boolean clear = true;
+            for (int k = 0; clear && k < centres.size(); k++) {
+                clear = Math.hypot(centres.get(k).x - centre.x, centres.get(k).y - centre.y) > radii.get(k) + radius + scale;
+            }
+            if (!clear) { continue; }
+            centres.add(centre);
+            radii.add(radius);
+            piece(centre, radius, water + .5f * scale, water - scale, random);
+        }
+    }
+
+    /** One broken piece of ice, an irregular polygon round centre with its own cut edge. */
+    private void piece(Vector3 centre, float radius, float top, float bottom, Random random) {
+        int sides = 5 + random.nextInt(3);
+        double turn = random.nextDouble() * 2 * Math.PI;
+        Vector3[] ring = new Vector3[sides];
+        for (int s = 0; s < sides; s++) {
+            double angle = turn + (s + (random.nextDouble() - .5) * .5) * 2 * Math.PI / sides;
+            float r = radius * (.7f + .3f * random.nextFloat());
+            ring[s] = new Vector3(centre.x + (float) Math.cos(angle) * r, centre.y + (float) Math.sin(angle) * r, top);
+        }
+        Vector3 middle = new Vector3(centre.x, centre.y, top);
+        for (int s = 0; s < sides; s++) {
+            iceFace(iceBroken, middle, ring[s], ring[(s + 1) % sides], Vector3.Z);
+            // The ring runs counter-clockwise, so each side faces out to the right of its direction.
+            iceSkirt(iceBroken, ring[s], ring[(s + 1) % sides], bottom, 1);
+        }
+    }
+
+    /**
+     * Where a ragged front reaches a corner, the break every slab at that corner shares: out round this hex's own
+     * corner where the front turns it, or on into the open water where the front continues along a frozen neighbour.
+     * A front that ends at the corner stays on it.
+     */
+    private Vector3 cornerBreak(BoardScene scene, int edge, int corner, boolean[] ragged, boolean[] continuous) {
+        int beside = corner == edge ? (edge + 5) % 6 : (edge + 1) % 6;
+        Vector3 point = corners[corner % 6];
+        Vector3 direction;
+        if (ragged[beside]) {
+            direction = new Vector3(point).sub(center);
+        } else if (continuous[beside]) {
+            direction = BoardGeometry.center(neighbor(scene, edge).coords(), 0).sub(point);
+        } else {
+            return new Vector3();
+        }
+        direction.z = 0;
+        // Corners come from the shared lattice, so both slabs derive the same break from identical coordinates.
+        long bits = Float.floatToIntBits(point.x) * 0x9E3779B97F4A7C15L ^ Float.floatToIntBits(point.y) * 0xC2B2AE3D27D4EB4FL;
+        float shared = ((bits ^ bits >>> 31) & 0xFFFFFF) / (float) 0x1000000;
+        return direction.nor().scl(ICE_MARGIN * BoardGeometry.hexScale() * (.3f + .7f * shared));
+    }
+
+    private static float smooth(float x) {
+        float t = Math.clamp(x, 0, 1);
+        return t * t * (3 - 2 * t);
+    }
+
+    /** The ice's exposed edge below a to b, facing out of it. */
+    private static void iceSkirt(List<Face> into, Vector3 a, Vector3 b, float bottom, float outward) {
+        Vector3 facing = new Vector3(b.y - a.y, a.x - b.x, 0).scl(outward);
+        Vector3 lowA = new Vector3(a.x, a.y, bottom), lowB = new Vector3(b.x, b.y, bottom);
+        iceFace(into, a, b, lowB, facing);
+        iceFace(into, a, lowB, lowA, facing);
+    }
+
+    private static void iceFace(List<Face> into, Vector3 a, Vector3 b, Vector3 c, Vector3 facing) {
+        Vector3 normal = new Vector3(b).sub(a).crs(new Vector3(c).sub(a));
+        if (normal.len2() <= 0.000001f) { return; }
+        into.add(normal.dot(facing) >= 0 ? new Face(a, b, c, Finish.ICE) : new Face(a, c, b, Finish.ICE));
     }
 
     /** Connected liquid steps, including lava, use surface levels, never the depths of their beds. */
@@ -1780,18 +2037,9 @@ final class BoardSurface {
         List<Float> runs = new ArrayList<>(stations);
         Vector3[] hub = new Vector3[6];
         for (int i = 0; i < 6; i++) {
-            // A cut/fill mouth meets the third hex at its corner. Retaining the upper plateau there leaves
-            // a pointed cliff between the road's two banks, even though their gates meet correctly.
-            BoardScene.Tile a = scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(i)));
-            BoardScene.Tile b = scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(i - 1)));
-            if (tile.surface() != BoardScene.Surface.CONCRETE && BoardRoad.rendered(tile)
-                  && a != null && b != null && !a.liquid().present() && !b.liquid().present()
-                  && (hasRoadApproach(tile, a, BoardGeometry.edgeDirection(i))
-                        || hasRoadApproach(tile, b, BoardGeometry.edgeDirection(i - 1)))) {
-                int low = Math.min(tile.elevation(), Math.min(a.elevation(), b.elevation()));
-                int high = Math.max(tile.elevation(), Math.max(a.elevation(), b.elevation()));
-                corners[i].z = (tile.elevation() + a.elevation() + b.elevation() - low - high) * BoardGeometry.level();
-            }
+            // Both sides of a gate meet at one height along the whole mouth (see BoardRelief#gateCorner).
+            float gate = relief.gateCorner(i);
+            if (!Float.isNaN(gate)) { corners[i].z = gate; }
             hub[i] = new Vector3(corners[i]).lerp(center, 0.5f);
             hub[i].z = center.z;
         }
@@ -1982,12 +2230,14 @@ final class BoardSurface {
     /** Keep the carriageway, but give its surrounding ground the same rim as neighbouring natural terrain. */
     private void roadRelief() {
         Map<Vector3, Vector3> moved = new HashMap<>();
-        BoardRoad road = BoardRoad.of(scene, tile);
+        for (Face face : faces) {
+            for (Vector3 p : List.of(face.a(), face.b(), face.c())) { moved.computeIfAbsent(p, this::roadPoint); }
+        }
+        untangle(moved);
         for (int i = 0; i < faces.size(); i++) {
             Face face = faces.get(i);
-            faces.set(i, new Face(moved.computeIfAbsent(face.a(), p -> roadPoint(p, road)),
-                  moved.computeIfAbsent(face.b(), p -> roadPoint(p, road)),
-                  moved.computeIfAbsent(face.c(), p -> roadPoint(p, road)), face.finish(), face.landEdge()));
+            faces.set(i, new Face(moved.get(face.a()), moved.get(face.b()), moved.get(face.c()), face.finish(),
+                  face.landEdge()));
         }
         // A rounded rim can make a quad concave. Use its interior diagonal, as the natural top's rim band does.
         for (int i = 0; i + 1 < faces.size(); i++) {
@@ -2002,32 +2252,118 @@ final class BoardSurface {
         }
     }
 
-    private static float upward(Face face) {
-        return (face.b().x - face.a().x) * (face.c().y - face.a().y)
-              - (face.b().y - face.a().y) * (face.c().x - face.a().x);
+    /**
+     * A rim that bends faster than the lattice is fine can still flip a few small triangles, mostly at corners. Each
+     * flipped triangle's free corners move to the middle of their neighbours, a few times over; the outline and the
+     * graded ramps stay where the warp put them.
+     */
+    private void untangle(Map<Vector3, Vector3> moved) {
+        Map<Vector3, List<Vector3>> ring = new HashMap<>();
+        for (Face face : faces) {
+            List<Vector3> corner = List.of(face.a(), face.b(), face.c());
+            for (int k = 0; k < 3; k++) {
+                List<Vector3> around = ring.computeIfAbsent(corner.get(k), key -> new ArrayList<>());
+                for (Vector3 q : List.of(corner.get((k + 1) % 3), corner.get((k + 2) % 3))) {
+                    if (!around.contains(q)) { around.add(q); }
+                }
+            }
+        }
+        for (int pass = 0; pass < UNTANGLE; pass++) {
+            List<Vector3> free = new ArrayList<>();
+            for (Face face : faces) {
+                if (face.finish() != Finish.TOP || upward(moved.get(face.a()), moved.get(face.b()), moved.get(face.c())) >= 0) {
+                    continue;
+                }
+                for (Vector3 p : List.of(face.a(), face.b(), face.c())) {
+                    if (!free.contains(p) && !onOutline(p) && rampKeep(p) > 0) { free.add(p); }
+                }
+            }
+            if (free.isEmpty()) { return; }
+            for (Vector3 p : free) {
+                Vector3 middle = new Vector3();
+                for (Vector3 q : ring.get(p)) { middle.add(moved.get(q)); }
+                middle.scl(1f / ring.get(p).size());
+                moved.put(p, new Vector3(middle.x, middle.y, p.z));
+            }
+        }
     }
 
-    private Vector3 roadPoint(Vector3 p, BoardRoad road) {
-        float dx = p.x - center.x, dy = p.y - center.y;
-        float clearance = (road.distance(dx / BoardGeometry.hexScale(), dy / BoardGeometry.hexScale()) - 3)
-              * BoardGeometry.hexScale();
-        if (clearance <= 0) { return new Vector3(p); }
+    /** Passes of {@link #untangle}. */
+    private static final int UNTANGLE = 16;
+
+    private boolean onOutline(Vector3 p) {
         for (int edge = 0; edge < 6; edge++) {
-            Vector3 a = new Vector3(corners[edge]).sub(center), b = new Vector3(corners[(edge + 1) % 6]).sub(center);
-            float determinant = a.x * b.y - a.y * b.x;
-            float u = (dx * b.y - dy * b.x) / determinant, v = (a.x * dy - a.y * dx) / determinant;
-            if (u < -.00001f || v < -.00001f) { continue; }
-            float radius = u + v;
-            if (radius <= .00001f) { return new Vector3(p); }
-            float t = Math.clamp(v / radius, 0, 1);
-            Vector3 nominal = new Vector3(corners[edge]).lerp(corners[(edge + 1) % 6], t);
-            Vector3 rim = relief.roadPoint(edge, t, height(edgeTopography, nominal.x, nominal.y));
-            float mx = (rim.x - nominal.x) * radius, my = (rim.y - nominal.y) * radius;
-            float keep = ramps == 0 ? 1 : BoardRelief.roadDisplacement(road, center.x, center.y, p.x, p.y, mx, my);
-            return new Vector3(p).add(mx * keep, my * keep, 0);
+            if (edgeDistance(p, edge) < OUTLINE * BoardGeometry.hexScale()) { return true; }
         }
-        return new Vector3(p);
+        return false;
     }
+
+    private static float upward(Face face) { return upward(face.a(), face.b(), face.c()); }
+
+    private static float upward(Vector3 a, Vector3 b, Vector3 c) {
+        return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    }
+
+    /**
+     * The outline takes the relief's rim exactly. Inside, each edge's move reaches in along the edge's normal, fading
+     * out at {@link #RIM_REACH} of the way to the centre, and the edges blend by inverse square distance. A rim that
+     * recedes into the hex then compresses the ground without shearing it, as radial spokes would. Only the graded
+     * ramps stay put: flat ground, including a level carriageway, may follow the rim without changing its height.
+     */
+    private Vector3 roadPoint(Vector3 p) {
+        float mx = 0, my = 0, weights = 0, keep = -1;
+        for (int edge = 0; edge < 6; edge++) {
+            Vector3 a = corners[edge], b = corners[(edge + 1) % 6];
+            float ex = b.x - a.x, ey = b.y - a.y, length = (float) Math.hypot(ex, ey);
+            float t = Math.clamp(((p.x - a.x) * ex + (p.y - a.y) * ey) / (length * length), 0, 1);
+            float distance = edgeDistance(p, edge);
+            float fade = 1 - distance / (RIM_REACH * edgeDistance(center, edge));
+            boolean outline = distance < OUTLINE * BoardGeometry.hexScale();
+            if (!outline) {
+                float weight = 1 / (distance * distance);
+                weights += weight;
+                if (fade <= 0) { continue; }
+                if (keep < 0) { keep = rampKeep(p); }
+                if (keep <= 0) { return new Vector3(p); }
+                fade *= weight;
+            }
+            Vector3 nominal = new Vector3(a).lerp(b, t);
+            Vector3 rim = relief.roadPoint(edge, t, height(edgeTopography, nominal.x, nominal.y));
+            if (outline) { return new Vector3(rim.x, rim.y, p.z); }
+            mx += fade * (rim.x - nominal.x);
+            my += fade * (rim.y - nominal.y);
+        }
+        return keep <= 0 ? new Vector3(p) : new Vector3(p).add(mx / weights * keep, my / weights * keep, 0);
+    }
+
+    /** How far towards the hex centre an edge's rim move reaches, as a share of the edge's distance from it. */
+    private static final float RIM_REACH = .8f;
+    /** Lattice points this close to an edge's line are on the outline, where they take the rim exactly. */
+    private static final float OUTLINE = .0001f;
+
+    private float edgeDistance(Vector3 p, int edge) {
+        Vector3 a = corners[edge], b = corners[(edge + 1) % 6];
+        float ex = b.x - a.x, ey = b.y - a.y;
+        return Math.abs((p.x - a.x) * ey - (p.y - a.y) * ex) / (float) Math.hypot(ex, ey);
+    }
+
+    /** Zero on a ramp, including its extension towards the centre, easing to one within {@link #RAMP_FADE}. */
+    private float rampKeep(Vector3 p) {
+        float keep = 1;
+        for (RoadRamp ramp : roadRamps) {
+            float dx = p.x - ramp.origin().x, dy = p.y - ramp.origin().y;
+            float area = ramp.along().x * ramp.across().y - ramp.along().y * ramp.across().x;
+            float t = (dx * ramp.across().y - dy * ramp.across().x) / area;
+            float side = (ramp.along().x * dy - ramp.along().y * dx) / area;
+            float lateral = Math.max(0, Math.max(-side, side - 1)) * ramp.across().len();
+            float behind = Math.max(0, -ramp.extension() - t) * ramp.along().len();
+            keep = Math.min(keep, BoardRelief.smooth((float) Math.hypot(lateral, behind) / (RAMP_FADE * BoardGeometry.hexScale())));
+        }
+        return keep;
+    }
+
+    /** Hex-scale distance over which ground beside a ramp returns to following the relief's rim. */
+    private static final float RAMP_FADE = 6;
 
     /** Cut/fill grades occupy the ground beside the road, rather than closing the carriageway with vertical walls. */
     private void roadBank(RoadRamp ramp, Vector3 near, Vector3 far, Vector3 inner, Vector3 outer, boolean left,
@@ -2240,6 +2576,22 @@ final class BoardSurface {
         return sides(scene, floor, Map.of());
     }
 
+    /** A cut has two heights at its shoulder. Select the interval's roof inside it, then use that roof's endpoint. */
+    private float edgeHeight(Vector3 point, Vector3 interval) {
+        if (interval == null) { return height(edgeTopography, point.x, point.y); }
+        float x = interval.x + (center.x - interval.x) * .0001f;
+        float y = interval.y + (center.y - interval.y) * .0001f;
+        float highest = Float.NEGATIVE_INFINITY, result = Float.NEGATIVE_INFINITY;
+        for (Face face : edgeTopography) {
+            float sample = face.height(x, y, 0);
+            if (sample > highest) {
+                float endpoint = face.height(point.x, point.y);
+                if (Float.isFinite(endpoint)) { highest = sample; result = endpoint; }
+            }
+        }
+        return Float.isFinite(result) ? result : height(edgeTopography, point.x, point.y);
+    }
+
     /** The build's completed surfaces save reconstructing neighbouring tops; the lookup is not retained. */
     List<Side> sides(BoardScene scene, float floor, Map<Coords, BoardSurface> neighbors) {
         List<Side> result = new ArrayList<>();
@@ -2263,11 +2615,13 @@ final class BoardSurface {
             float spanA = crest == null ? 2 : joinA[edge] != null ? 0 : along(a, b, crest.a());
             float spanB = crest == null ? 2 : joinB[edge] != null ? 1 : along(a, b, crest.b());
             List<Float> points = new ArrayList<>(cuts);
+            int previous = 0;
             for (int i = 1; i < points.size(); i++) {
-                float from = points.get(i - 1), to = points.get(i);
-                if (to - from < 0.0001f || from > spanA - 0.0001f && to < spanB + 0.0001f) {
-                    continue;
-                }
+                float from = points.get(previous), to = points.get(i);
+                // Merge nearly coincident cuts into the next interval instead of leaving a slit in the wall.
+                if (to - from < 0.0001f) { continue; }
+                previous = i;
+                if (from > spanA - 0.0001f && to < spanB + 0.0001f) { continue; }
                 Vector3 start = new Vector3(a).lerp(b, from);
                 Vector3 end = new Vector3(a).lerp(b, to);
                 boolean graded = ramps != 0 || adjacent != null && adjacent.ramps != 0;
@@ -2277,12 +2631,14 @@ final class BoardSurface {
                       && (tile.liquid().present() || neighbor != null && neighbor.liquid().present()));
                 Vector3 sampleA = inset ? new Vector3(start).lerp(end, 0.001f) : start;
                 Vector3 sampleB = inset ? new Vector3(end).lerp(start, 0.001f) : end;
-                start.z = height(edgeTopography, sampleA.x, sampleA.y);
-                end.z = height(edgeTopography, sampleB.x, sampleB.y);
+                // A road cut is discontinuous; both endpoints must come from this interval's own roof.
+                Vector3 interval = graded ? new Vector3(start).lerp(end, .5f) : null;
+                start.z = edgeHeight(sampleA, interval);
+                end.z = edgeHeight(sampleB, interval);
                 float lowA = adjacent == null ? floor : basin ? neighbor.elevation() * BoardGeometry.level()
-                      : adjacent.height(adjacent.edgeTopography, sampleA.x, sampleA.y);
+                      : adjacent.edgeHeight(sampleA, interval);
                 float lowB = adjacent == null ? floor : basin ? neighbor.elevation() * BoardGeometry.level()
-                      : adjacent.height(adjacent.edgeTopography, sampleB.x, sampleB.y);
+                      : adjacent.edgeHeight(sampleB, interval);
                 float dA = start.z - lowA, dB = end.z - lowB;
                 if (dA < -0.001f && dB > 0.001f) {
                     float t = -dA / (dB - dA);

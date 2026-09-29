@@ -1,5 +1,19 @@
 # 2D and 3D map editing
 
+[Docs index](README.md) · [Complete class responsibilities](gpu-code-map.md)
+
+## What does what
+
+| Owner | Responsibility |
+| --- | --- |
+| `BoardEditorPanel` | Own the editable Board, brush operations, file commands and undo transactions. |
+| `GpuMapSource` | Capture editor state, dispatch picks/wheel actions and reject input from older board generations. |
+| `BoardArtwork` | Resolve native artwork and whole-board printable output independently of the viewport. |
+| `BoardTacticalGeometry / BoardEditorTerrain` | Place brush/deployment/terrain annotations using shared marker geometry. |
+| `GpuBoardWindow` | Own native window startup, switching and restoration after failure/close. |
+
+## Switching views and controls
+
 The bottom-right **3D Editor** button switches the current map to the native board renderer.
 The existing editor controls move into a floating **Tools** palette. Both modes use the same board,
 selected terrain, brush settings, file commands, and undo/redo history. Unsaved changes do not need
@@ -22,6 +36,8 @@ File operations remain available through the editor menus and palette.
 - Undo/redo shortcuts operate on the shared history. A brush drag is one undo step, including release
   over a toolbar, focus loss, or switching modes.
 
+## Markers and overlay placement
+
 Each impassable hex has a transparent, flat marker with a red border and broad red diagonal stripes.
 It uses the same floating plane as other hex markings; trees and other features may intersect it.
 Hover strengthens the marking; gameplay also strengthens it while a movement path is being planned.
@@ -29,12 +45,14 @@ This presentation is shared by both camera views and map previews. It does not c
 picking or movement legality. Geometry is retained across camera movement and updated when terrain
 or emphasis changes, without clipping the stripes to the terrain mesh.
 
-Flat hex annotations share `BoardTacticalGeometry.floatingZ`: the owning hex's highest finished
-ground/water surface plus `HEX_PLANE_CLEARANCE`. Movement envelopes and modifiers, path arrows,
+Flat hex annotations share `BoardTacticalGeometry.floatingZ`: the owning hex's nominal
+ground/water level plus `HEX_PLANE_CLEARANCE`, independent of ramps and sculpted relief.
+Raised point symbols separately use `GpuMarkers.locationSupport` above the hex ceiling and units.
+Movement envelopes and modifiers, path arrows,
 flight indicators, firing solutions, sensor/objective bands, and measurement/hover/editor cursors
 use that plane in both cameras. Strafing/VTOL/orbital footprints, Nova CEWS and demolition selections,
 predicted heat-map fills, ECM/ECCM source rings, embedded-board indicators and map-sheet borders
-also use it. The raster compatibility layer uses the same helper with its completed terrain chunk,
+also use it. The raster compatibility layer uses the same helper with its scene's hex elevation,
 including editor deployment/INVALID overlays and crane highlights, across terrain edits and detail changes.
 Camera-facing tactical labels use the same height. Shape painters opt in through
 `BoardTacticalGraphics.onHexPlane`; individual hex-border painters can request the same placement.
@@ -43,19 +61,26 @@ and terrain tints still follow the ground. Ruler lines, drift arrows, C3 links a
 hexes and retain terrain-following placement. Ordinary hex text retains its roof/depth-aware placement;
 weapon-range letters retain their camera-dependent clearance.
 
-The map browser's **Preview in 3D** action uses a temporary board view. Editing instead reuses the
-editor's own `BoardView`. All changes run through the existing editor methods on the Swing thread;
+## Hidden terrain flags
+
+`BoardEditorTerrain` captures authoring annotations for black ice, collapsed
+basements and metal deposits. It also marks basement/fluff flags when their
+selected artwork is transparent; cached alpha checks avoid scanning the same
+image repeatedly. Any visible match for a flag takes precedence. Only the editor
+receives these markers, and its tooltip lists all flags when a marker is compacted.
+
+Visible ground-fluff gradients remain artwork. Saxarba families 1–5 represent
+desert, grass, tropical, Mars and lunar ground; selectors 1–5 encode strength.
+For example, `ground_fluff:4` is blank, while `:4:1` through `:4:5` are visible.
+Do not suppress those overlays merely because the unqualified family is blank.
+
+## State and thread ownership
+
+Native previews and the native editor use `GpuMapSource` and `BoardArtwork` without constructing
+`BoardView`. The editor creates the classic renderer only when that mode is selected.
+All changes run through the existing editor methods on the Swing thread;
 the render thread receives snapshots and submits picked hexes with their board generation. Picks
 from an old board are ignored after New, Open, or Resize replaces it.
 
 The tools palette is a separate Swing window alongside the native viewport. Only one native board
 window can run at a time. A renderer startup failure restores the existing 2D editor.
-
-The on-demand `GpuBoardWindowSmokeTest.editorSwitchSharesBrushesUndoHistoryAndBoardAndRejectsStalePicks`
-test exercises native picking, brush modifiers, Ctrl+wheel (including Tools focus, all brush sizes,
-fractional scrolling and the only-on-clear filter), local scene updates, shared undo/redo, focus/UI boundaries, mode switching,
-new-board input invalidation, and native-close restoration. Run it with:
-
-```text
-gradlew :megamek:gpuBoardSmoke --tests "*GpuBoardWindowSmokeTest.editorSwitch*"
-```

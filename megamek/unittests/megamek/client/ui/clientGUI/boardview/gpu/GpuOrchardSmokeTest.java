@@ -67,15 +67,16 @@ class GpuOrchardSmokeTest {
                                   ground, null, null, List.of(tree), List.of());
                             BoardScene scene = scene(List.of(tile), 1, 1);
                             terrain.update(scene);
-                            int[] triangles = new int[3];
+                            int[] triangles = new int[TreeLod.LEVELS];
                             Texture atlas = null;
-                            for (int lod = 0; lod < 3; lod++) {
+                            for (int lod = 0; lod < TreeLod.LEVELS; lod++) {
                                 var model = assets.lodModel(name, lod);
                                 for (var part : model.meshParts) { triangles[lod] += part.size / 3; }
                                 for (var material : model.materials) {
                                     var map = material.get(TextureAttribute.class, TextureAttribute.Diffuse);
                                     assertNotNull(map);
-                                    if (material.id.equals("snow")) { continue; }
+                                    // Snow has its own map, and the impostor cards their own rendered atlas.
+                                    if (material.id.equals("snow") || material.id.equals("impostor")) { continue; }
                                     if (atlas == null) { atlas = map.textureDescription.texture; }
                                     assertSame(atlas, map.textureDescription.texture, "LOD borrows the shared atlas");
                                 }
@@ -87,9 +88,9 @@ class GpuOrchardSmokeTest {
                             var hit = terrain.hit(scene, ray);
                             assertNotNull(hit);
                             int nearColour = 0, nearDepth = 0;
-                            for (int lod : new int[] { 0, 1, 2, 0 }) {
+                            for (int lod : new int[] { 0, 1, 2, 3, 0 }) {
                                 camera.camera.zoom = diameter * Gdx.graphics.getBackBufferHeight()
-                                      / Gdx.graphics.getHeight() / (lod == 0 ? 220 : lod == 1 ? 50 : 12);
+                                      / Gdx.graphics.getHeight() / GpuTreeLodSmokeTest.PIXELS[lod];
                                 camera.update();
                                 terrain.animate(0, List.of(), 1);
                                 int shadow = count(profiler, () -> terrain.renderShadows(camera.camera, List.of()));

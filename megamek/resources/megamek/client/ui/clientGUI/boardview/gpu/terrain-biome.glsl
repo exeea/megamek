@@ -53,7 +53,10 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
         vec2 soilUV = vec2(world.x, -world.y);
         vec4 soil = planar(u_biomeSoil, soilUV, u_biomeSoilTile, broad);
         vec3 earth = mix(vec3(.20, .14, .075), vec3(.33, .255, .14), soil.a) * mix(.78, 1.20, grain);
-        vec3 crop = mix(vec3(.30, .39, .09), vec3(.49, .46, .18), broad * .7) * mix(.85, 1.15, grain);
+        // Under nearby plants the rows are in their shade. Where plants dissolve at distance, the ground takes the crop
+        // artwork's own range, from its leaves to its golden heads, so a field keeps its colour.
+        vec3 crop = mix(mix(vec3(.30, .39, .09), vec3(.49, .46, .18), broad * .7),
+              mix(vec3(.40, .44, .17), vec3(.58, .54, .25), broad * .7), 1.0 - visible) * mix(.85, 1.15, grain);
         float amount = materialWeights(vec4(1.0 - fringe.x, fringe.x, 0.0, 0.0),
               vec4(materialHeight, soil.a, 0.0, 0.0)).y;
         color = mix(color, mix(earth, crop, canopy * planted * .95), amount);

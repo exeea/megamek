@@ -51,7 +51,6 @@ import java.util.*;
 import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Consumer;
 import javax.swing.*;
 import javax.swing.plaf.metal.DefaultMetalTheme;
 import javax.swing.plaf.metal.MetalTheme;
@@ -67,7 +66,6 @@ import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.clientGUI.boardview.overlay.ChatterBoxOverlay;
-import megamek.client.ui.clientGUI.boardview.overlay.OverlayImage;
 import megamek.client.ui.clientGUI.boardview.overlay.TurnDetailsOverlay;
 import megamek.client.ui.clientGUI.boardview.sprite.*;
 import megamek.client.ui.clientGUI.boardview.sprite.isometric.IsometricSprite;
@@ -182,12 +180,6 @@ public final class BoardView extends AbstractBoardView
     private static final Font FONT_18 = new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 18);
     private static final Font FONT_24 = new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 24);
 
-    /**
-     * Distance hex text labels keep from the tile edge they hang from, in tile artwork pixels: the coordinate label
-     * keeps it from the tile's top edge, the level/depth/height/foliage stack from its bottom edge, so the text keeps
-     * a visible margin instead of touching the hex border. The GPU board draws the same labels from these offsets.
-     */
-
     Dimension hex_size;
 
     private final Font font_note = FONT_10;
@@ -235,20 +227,6 @@ public final class BoardView extends AbstractBoardView
      */
     private Map<ArrayList<Integer>, IsometricSprite> isometricSpriteIds = new HashMap<>();
 
-    // sprites for the three selection cursors
-
-    // sprite for current movement
-
-
-    // vector of sprites for all firing lines
-
-    // vector of sprites for all movement paths (using vectored movement)
-
-    // vector of sprites for C3 network lines
-
-    // list of sprites for declared VTOL/AirMek bombing/strafing targets
-
-    // vector of sprites for aero flyover lines
 
     TilesetManager tileManager;
     private final boolean ownsClientState;
@@ -267,12 +245,6 @@ public final class BoardView extends AbstractBoardView
 
     // Image to hold the complete board shadow map
     BufferedImage shadowMap;
-
-    /**
-     * Stores the currently deploying entity, used for highlighting deployment hexes.
-     */
-
-    // should be able to turn it off(board editor)
 
     // Initial scale factor for sprites and map
     float scale = 1.00f;
@@ -295,23 +267,12 @@ public final class BoardView extends AbstractBoardView
     private ArrayList<WreckSprite> wreckSprites = new ArrayList<>();
     private ArrayList<IsometricWreckSprite> isometricWreckSprites = new ArrayList<>();
 
-    // highlighted entity hexes (for Nova CEWS network dialog)
-
-    // highlighted demolition charge hexes (selected in the Detonate Charges dialog) - drawn with a bold yellow/black
-    // hazard outline, separate from the plain entity highlight above
-
 
     private Board observedBoard;
     private boolean disposed;
     private final BoardClientState clientState;
 
     /** stores the theme last selected to override all hex themes */
-    private String selectedTheme = null;
-
-    // hexes with ECM effect
-    // hexes that are teh centers of ECM effects
-    // hexes with ECM effect
-    // hexes that are teh centers of ECCM effects
 
     // reference to our timer task for redraw
     private final TimerTask redrawTimerTask;
@@ -397,7 +358,6 @@ public final class BoardView extends AbstractBoardView
      */
 
     BoardViewTooltipProvider boardViewToolTip = (point, movementTarget) -> null;
-    private boolean tooltipSuspended = false;
 
     // Part of the sprites need specialized treatment; as there can be many sprites, filtering them on the spot is a
     // noticeable performance hit (in iso mode), therefore the sprites are copied to specialized lists when created
@@ -418,7 +378,7 @@ public final class BoardView extends AbstractBoardView
     }
 
     public BoardView(BoardClientState state, MegaMekController controller, @Nullable ClientGUI clientgui) throws IOException {
-        this(state.getGame(), controller, clientgui, state.getBoardId(), state.getTileManager(), state);
+        this(state.getGame(), controller, clientgui, state.getBoardId(), state.getTilesetManager(), state);
     }
 
     private BoardView(Game game, MegaMekController controller, @Nullable ClientGUI clientgui, int boardId,
@@ -429,7 +389,7 @@ public final class BoardView extends AbstractBoardView
         ownsClientState = sharedState == null;
         clientState = ownsClientState ? new BoardClientState(game, controller, clientgui, boardId, sharedTileset) : sharedState;
         hexImageCache = new ImageCache<>();
-        tileManager = clientState.getTileManager();
+        tileManager = clientState.getTilesetManager();
         clientState.setEntityRenderer(entity -> {
             if (entity == null) { redrawAllEntitySprites(); } else { redrawEntitySprites(entity); }
         });
@@ -579,7 +539,7 @@ public final class BoardView extends AbstractBoardView
 
                 final Coords mcoords = getCoordsAt(point);
                 if (!mcoords.equals(lastCoords) && game.getBoard(boardId).contains(mcoords)) {
-                    if (tooltipSuspended) {
+                    if (clientState.isTooltipSuspended()) {
                         boardPanel.setToolTipText(null);
                     } else {
                         lastCoords = mcoords;
@@ -694,11 +654,10 @@ public final class BoardView extends AbstractBoardView
         KeyBindParser.addPreferenceChangeListener(this);
 
 
-
         fovHighlightingAndDarkening = clientState.getFieldOfView();
         clientState.setChanged(() -> {
             hexImageCache.clear();
-            BoardFocus request = clientState.getFocus();
+            BoardFocus request = clientState.getCenterRequest();
             if (request.sequence() != appliedFocus) {
                 appliedFocus = request.sequence();
                 if (request.coords() != null) { applyCenterRequest(request.coords()); }
@@ -757,9 +716,6 @@ public final class BoardView extends AbstractBoardView
         horizontalBar.setValue((int) (horizontalBar.getValue() - (HEX_W * scale)));
         stopSoftCentering();
     }
-
-
-
 
 
     @Override
@@ -1308,7 +1264,6 @@ public final class BoardView extends AbstractBoardView
     }
 
 
-
     /**
      * Draws hex borders for highlighted entity hexes (Nova CEWS network dialog).
      *
@@ -1344,13 +1299,9 @@ public final class BoardView extends AbstractBoardView
     /** The same owner-visible attacks and selected-weapon modifiers feed both views. */
 
 
-
-
     /**
      * Writes "MINEFIELD" in minefield hexes...
      */
-
-
 
 
     /**
@@ -1359,8 +1310,6 @@ public final class BoardView extends AbstractBoardView
      *
      * @param graphics2D the graphics context to draw on
      */
-
-
 
 
     private static final Color DEMO_CHARGE_OUTLINE_COLOR = new Color(0, 0, 0, 200);
@@ -2868,9 +2817,6 @@ public final class BoardView extends AbstractBoardView
     @Override
     public int getDropShadowDistance() { return DROP_SHADOW_DISTANCE; }
 
-    public TilesetManager getTileManager() {
-        return tileManager;
-    }
 
     public Shape[] getFacingPolys() {
         return clientState.getFacingPolys();
@@ -2903,12 +2849,6 @@ public final class BoardView extends AbstractBoardView
         return clientState.getDeployingEntity();
     }
 
-    /**
-     * add a fly over path to the sprite list
-     */
-    public void addFlyOverPath(Entity entity) {
-        clientState.addFlyOverPath(entity);
-    }
 
     /**
      * @param coords the given coords
@@ -2919,12 +2859,6 @@ public final class BoardView extends AbstractBoardView
         return clientState.getEntitiesFlyingOver(coords);
     }
 
-    /**
-     * Adds a c3 line to the sprite list.
-     */
-    public void addC3Link(Entity entity) {
-        clientState.addC3Link(entity);
-    }
 
     /**
      * Adds an attack to the sprite list.
@@ -2933,13 +2867,6 @@ public final class BoardView extends AbstractBoardView
         clientState.addAttack(attackAction);
     }
 
-    /**
-     * adding a new EntityAction may affect the ToHits of other attacks so rebuild. The underlying data is cached when
-     * possible, so the should o the minimum amount of work needed
-     */
-    void rebuildAllSpriteDescriptions(int attackerId) {
-        clientState.rebuildAllSpriteDescriptions(attackerId);
-    }
 
     /**
      * Removes all attack sprites from a certain entity
@@ -2955,38 +2882,10 @@ public final class BoardView extends AbstractBoardView
         clientState.refreshAttacks();
     }
 
-    public void refreshMoveVectors() {
-        clientState.refreshMoveVectors();
-    }
-
-    public void refreshMoveVectors(Entity entity, MovePath movePath, Color color) {
-        clientState.refreshMoveVectors(entity, movePath, color);
-    }
 
     public void clearC3Networks() {
         clientState.clearC3Networks();
     }
-
-    public void clearFlyOverPaths() {
-        clientState.clearFlyOverPaths();
-    }
-
-    /**
-     * Clears out all attacks that were being drawn
-     */
-    public void clearAllAttacks() {
-        clientState.clearAllAttacks();
-    }
-
-    /**
-     * Clears out all movement vectors that were being drawn
-     */
-    public void clearAllMoveVectors() {
-        clientState.clearAllMoveVectors();
-    }
-
-
-
 
 
     /**
@@ -2999,7 +2898,6 @@ public final class BoardView extends AbstractBoardView
         upArrow = clientState.getUpArrow();
         downArrow = clientState.getDownArrow();
     }
-
 
 
     synchronized boolean doMoveUnits(long idleTime) {
@@ -3179,9 +3077,6 @@ public final class BoardView extends AbstractBoardView
         clientState.invalidatePlanarCapture();
     }
 
-    public long getPlanarRevision() {
-        return clientState.getPlanarRevision();
-    }
 
     /** Releases capture-only working memory when the native view closes or switches boards. */
     public void releasePlanarCapture() {
@@ -3191,22 +3086,9 @@ public final class BoardView extends AbstractBoardView
     }
 
 
-
     public BoardClientState getClientState() { return clientState; }
     @Override public BoardGlyphContext glyphContext() { return clientState; }
 
-    public BoardFocus getCenterRequest() {
-        return clientState.getFocus();
-    }
-
-    /** Screen-anchored board widgets use their existing painters and input handlers in either window. */
-    public BufferedImage captureOverlayImage(Dimension size, Dimension pixels) {
-        return clientState.captureOverlayImage(size, pixels);
-    }
-
-    public boolean overlayInput(int event, Point point, Dimension size, Dimension pixels) {
-        return clientState.overlayInput(event, point, size, pixels);
-    }
 
     /** Uses the existing tooltip provider with the GPU's picked hex, regardless of classic camera occlusion. */
     public String getHexTooltip(Coords coords) {
@@ -3224,77 +3106,6 @@ public final class BoardView extends AbstractBoardView
         }
     }
 
-    public BufferedImage captureUnitAnnotations(Entity entity, int part) {
-        return captureUnitAnnotations(entity, part, null).image();
-    }
-
-    public UnitAnnotations.Annotations captureUnitAnnotations(Entity entity, int part, UnitAnnotations.Annotations previous) {
-        return clientState.captureUnitAnnotations(entity, part, previous);
-    }
-
-    public List<BoardArtwork.HexImage> capturePlanarHexes(Rectangle hexArea) {
-        return clientState.capturePlanarHexes(hexArea);
-    }
-
-    /** The consumer must copy pixels before returning: tactical images borrow the reusable capture buffer. */
-    public void capturePlanarHexes(Rectangle hexArea, boolean includeTactical, Consumer<BoardArtwork.HexImage> consumer) {
-        clientState.capturePlanarHexes(hexArea, includeTactical, consumer);
-    }
-
-    /** Refreshes markings and text without regenerating unchanged terrain artwork or feature models. */
-    public void capturePlanarTactical(Rectangle hexArea, Consumer<BoardArtwork.HexImage> consumer) {
-        clientState.capturePlanarTactical(hexArea, consumer);
-    }
-
-
-
-    /** Captures rule results only. The GPU owns their presentation, independently of per-hex raster artwork. */
-    public BoardFieldOfView captureFieldOfView(Rectangle requestedArea) {
-        return clientState.captureFieldOfView(requestedArea);
-    }
-
-    /** Captures shared tactical shapes without preparing sprites or touching a board-sized bitmap. */
-    public BoardTactical captureTacticalGeometry() {
-        return clientState.captureTacticalGeometry();
-    }
-
-
-
-
-
-    /** Read after overlay capture, on Swing's thread, so hidden or empty unit strips reserve no space. */
-    public int sidePanelInset() {
-        return clientState.sidePanelInset();
-    }
-
-    public int leftPanelInset() {
-        return clientState.leftPanelInset();
-    }
-
-
-
-    /** Preserves painter order while keeping cached text and its fade separate for native compositing. */
-    public List<OverlayImage> captureOverlayLayers(Dimension size, Dimension pixels) {
-        return clientState.captureOverlayLayers(size, pixels);
-    }
-
-    private static Graphics2D overlayGraphics(BufferedImage image, Dimension size, Dimension pixels) {
-        return BoardClientState.overlayGraphics(image, size, pixels);
-    }
-
-    /**
-     * @param clientState.lastCursor The clientState.lastCursor to set.
-     */
-    public void setLastCursor(Coords lastCursor) {
-        clientState.setLastCursor(lastCursor);
-    }
-
-    /**
-     * @return Returns the clientState.lastCursor.
-     */
-    public Coords getLastCursor() {
-        return clientState.getLastCursor();
-    }
 
     /**
      * @param selected The selected to set.
@@ -3311,14 +3122,14 @@ public final class BoardView extends AbstractBoardView
     }
 
     /**
-     * @param clientState.firstLOS The clientState.firstLOS to set.
+     * @param firstLOS The firstLOS to set.
      */
     public void setFirstLOS(Coords firstLOS) {
         clientState.setFirstLOS(firstLOS);
     }
 
     /**
-     * @return Returns the clientState.firstLOS.
+     * @return Returns the firstLOS.
      */
     public Coords getFirstLOS() {
         return clientState.getFirstLOS();
@@ -3548,18 +3359,9 @@ public final class BoardView extends AbstractBoardView
      */
     public synchronized void selectEntity(Entity entity) {
         checkFoVHexImageCacheClear();
-        updateEcmList();
+        clientState.updateEcmList();
         highlightSelectedEntity(entity);
     }
-
-    /**
-     * Updates maps that determine how to shade hexes affected by E(C)CM. This is expensive, so precalculate only when
-     * entity changes occur
-     **/
-    public void updateEcmList() {
-        clientState.updateEcmList();
-    }
-
 
 
     /**
@@ -4031,7 +3833,7 @@ public final class BoardView extends AbstractBoardView
     }
 
     /**
-     * @param clientState.chatterBoxActive whether the BoardView has an active chatter box or not.
+     * @param chatterBoxActive whether the BoardView has an active chatter box or not.
      */
     public void setChatterBoxActive(boolean chatterBoxActive) {
         clientState.setChatterBoxActive(chatterBoxActive);
@@ -4096,19 +3898,6 @@ public final class BoardView extends AbstractBoardView
         return HEX_POLY;
     }
 
-    /**
-     * Displays a dialog and changes the theme of all board hexes to the user-chosen theme.
-     */
-    public @Nullable String changeTheme() {
-        if (game == null) {
-            return null;
-        }
-        setShouldIgnoreKeys(true);
-        try {
-            selectedTheme = BoardThemeDialog.choose(boardPanel, getBoard(), tileManager.getThemes(), selectedTheme);
-            return selectedTheme;
-        } finally { setShouldIgnoreKeys(false); }
-    }
 
     public Rectangle getDisplayablesRect() {
         return clientState.displayablesRect;
@@ -4196,12 +3985,9 @@ public final class BoardView extends AbstractBoardView
      */
     @Nullable
     public Entity getSelectedEntity() {
-        return clientgui != null ? clientgui.getDisplayedUnit() : null;
+        return clientState.getSelectedEntity();
     }
 
-    public FovHighlightingAndDarkening getFovHighlighting() {
-        return fovHighlightingAndDarkening;
-    }
 
     public ArrayList<IsometricWreckSprite> getIsoWreckSprites() {
         return isometricWreckSprites;
@@ -4211,13 +3997,6 @@ public final class BoardView extends AbstractBoardView
         return clientState.getAttackSprites();
     }
 
-    private static boolean hasNativeVolume(Sprite sprite) {
-        return BoardClientState.hasNativeVolume(sprite);
-    }
-
-    private static boolean hasMarkerTerrain(Sprite sprite) {
-        return BoardClientState.hasMarkerTerrain(sprite);
-    }
 
     /** Used by mixed terrain/status sprites to leave only their terrain artwork in the planar capture. */
     public boolean isGpuCapture() {
@@ -4236,7 +4015,6 @@ public final class BoardView extends AbstractBoardView
     public List<BoardMarker> getBoardMarkers() {
         return clientState.getBoardMarkers();
     }
-
 
 
     /** Existing handler output, including its arc, range and preference filtering. Swing thread only. */
@@ -4299,17 +4077,7 @@ public final class BoardView extends AbstractBoardView
     /** Capture only affected hexes, in stable order, using the same painters as the classic board. */
 
 
-
-
-    private static Color colorAt(Map<Coords, Color> colors, Coords coords) {
-        return BoardClientState.colorAt(colors, coords);
-    }
-
     /** Shared authoritative colors; only the static texture remains in native raster capture. */
-
-
-
-
 
 
     private void drawMapSheetBorders(Graphics2D graphics, Coords coords) {
@@ -4324,18 +4092,6 @@ public final class BoardView extends AbstractBoardView
         return isMovingUnits();
     }
 
-    public void suspendTooltip() {
-        tooltipSuspended = true;
-        boardPanel.setToolTipText(null);
-    }
-
-    public void activateTooltip() {
-        tooltipSuspended = false;
-    }
-
-    public void toggleShowDeployment() {
-        clientState.toggleShowDeployment();
-    }
 
     public void addHexDrawPlugin(HexDrawPlugin plugin) {
         clientState.addHexDrawPlugin(plugin);

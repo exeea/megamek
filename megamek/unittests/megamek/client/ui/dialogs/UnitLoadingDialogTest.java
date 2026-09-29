@@ -35,8 +35,31 @@ package megamek.client.ui.dialogs;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+import java.awt.Component;
+import java.awt.GraphicsEnvironment;
+import java.awt.event.WindowEvent;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import javax.swing.JLabel;
+import javax.swing.SwingUtilities;
+
+import megamek.common.loaders.MekSummaryCache;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class UnitLoadingDialogTest {
 
@@ -49,5 +72,111 @@ class UnitLoadingDialogTest {
     void waitsForExplicitRefreshOrRebuildToBegin() {
         assertFalse(UnitLoadingDialog.shouldFinishMonitoringAfterRegistration(true, true));
         assertFalse(UnitLoadingDialog.shouldFinishMonitoringAfterRegistration(false, false));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    void keepsUpdatingWhileStartupWaitsForCacheCompletion(boolean upcomingLoad) throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless());
+        MekSummaryCache cache = mock(MekSummaryCache.class);
+        AtomicBoolean initialized = new AtomicBoolean(upcomingLoad);
+        AtomicInteger zipCount = new AtomicInteger();
+        AtomicReference<MekSummaryCache.Listener> listener = new AtomicReference<>();
+        when(cache.isInitialized()).thenAnswer(invocation -> initialized.get());
+        when(cache.getZipCount()).thenAnswer(invocation -> zipCount.get());
+        doAnswer(invocation -> {
+            listener.set(invocation.getArgument(0));
+            return null;
+        }).when(cache).addListener(any());
+
+        CountDownLatch progressUpdated = new CountDownLatch(1);
+        UnitLoadingDialog dialog = onEdt(() -> {
+            UnitLoadingDialog loading = new UnitLoadingDialog(null, cache, "Loading units...", upcomingLoad);
+            for (Component component : loading.getContentPane().getComponents()) {
+                if (component instanceof JLabel label) {
+                    label.addPropertyChangeListener("text", event -> {
+                        if ("11026".equals(event.getNewValue())) {
+                            progressUpdated.countDown();
+                        }
+                    });
+                }
+            }
+            return loading;
+        });
+        FutureTask<Void> showDialog = new FutureTask<>(() -> {
+            dialog.setVisible(true);
+            return null;
+        });
+
+        try {
+            initialized.set(false);
+            SwingUtilities.invokeLater(showDialog);
+            onEdt(() -> {
+                assertTrue(dialog.isShowing());
+                assertFalse(showDialog.isDone(), "Cache-dependent startup must wait for the load to finish");
+                // Closing the progress window must not release startup into blocking cache lookups.
+                dialog.dispatchEvent(new WindowEvent(dialog, WindowEvent.WINDOW_CLOSING));
+                assertTrue(dialog.isShowing());
+                return null;
+            });
+            zipCount.set(11026);
+            assertTrue(progressUpdated.await(5, TimeUnit.SECONDS), "Swing must keep processing progress updates");
+            assertFalse(showDialog.isDone());
+
+            initialized.set(true);
+            listener.get().doneLoading(); // The real cache sends this from its worker thread.
+            showDialog.get(5, TimeUnit.SECONDS);
+            onEdt(() -> {
+                assertFalse(dialog.isDisplayable(), "Completion must release the dialog's native resources");
+                return null;
+            });
+            verify(cache).removeListener(listener.get());
+        } finally {
+            onEdt(() -> {
+                dialog.dispose();
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void doesNotOpenWhenTheLoadFinishesDuringListenerRegistration() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless());
+        MekSummaryCache cache = mock(MekSummaryCache.class);
+        when(cache.isInitialized()).thenReturn(false, true);
+        assertDoesNotOpen(cache);
+        verify(cache).removeListener(any());
+    }
+
+    @Test
+    void doesNotOpenOrRegisterAListenerWhenCacheIsAlreadyLoaded() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless());
+        MekSummaryCache cache = mock(MekSummaryCache.class);
+        when(cache.isInitialized()).thenReturn(true);
+        assertDoesNotOpen(cache);
+        verify(cache, never()).addListener(any());
+    }
+
+    private static void assertDoesNotOpen(MekSummaryCache cache) throws Exception {
+        UnitLoadingDialog dialog = onEdt(() -> new UnitLoadingDialog(null, cache));
+        try {
+            onEdt(() -> {
+                dialog.setVisible(true);
+                assertFalse(dialog.isVisible());
+                assertFalse(dialog.isDisplayable());
+                return null;
+            });
+        } finally {
+            onEdt(() -> {
+                dialog.dispose();
+                return null;
+            });
+        }
+    }
+
+    private static <T> T onEdt(Callable<T> action) throws Exception {
+        FutureTask<T> task = new FutureTask<>(action);
+        SwingUtilities.invokeLater(task);
+        return task.get(5, TimeUnit.SECONDS);
     }
 }

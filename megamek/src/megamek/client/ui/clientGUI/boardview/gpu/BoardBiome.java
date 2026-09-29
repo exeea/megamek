@@ -46,6 +46,11 @@ final class BoardBiome {
               + .30f * BoardRelief.noise(px / 2 + 19, py / 2 - 7) + .15f * BoardRelief.noise(px / .65f, py / .65f);
     }
 
+    /** How fully ground at height {@code z} belongs to a biome floor at {@code floor}; banks and steps fade it out. */
+    static float sameLevel(float z, float floor) {
+        return 1 - BoardRelief.smooth((Math.abs(z - floor) / BoardRelief.metres(1) - .15f) / 1.1f);
+    }
+
     /** All candidates, including ordinary land, compete. Adjacent matching tiles have no internal fade. */
     static float coverage(BoardScene scene, BoardScene.Biome kind, float x, float y, float z) {
         boolean marsh = kind == BoardScene.Biome.MARSH;
@@ -69,8 +74,7 @@ final class BoardBiome {
                 var tile = scene.tile(coords);
                 var biome = kind(tile);
                 if (tile != null && biome != BoardScene.Biome.NONE) {
-                    float height = Math.abs(z - BoardGeometry.groundZ(tile)) / BoardRelief.metres(1);
-                    float sameLevel = 1 - BoardRelief.smooth((height - .15f) / 1.1f);
+                    float sameLevel = sameLevel(z, BoardGeometry.groundZ(tile));
                     if (biome == kind) { covered += w * sameLevel; }
                     if (biome == BoardScene.Biome.FIELD) { field += fw * sameLevel; }
                     else { wet += w * sameLevel; }

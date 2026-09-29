@@ -110,7 +110,7 @@ public abstract class AbstractWreckSprite extends Sprite {
         boolean displayDestroyedDecal = EntityWreckHelper.displayDestroyedDecal(entity);
 
         if (displayDestroyedDecal) {
-            Image destroyed = bv.getTileManager().bottomLayerWreckMarkerFor(entity, 0);
+            Image destroyed = bv.getTilesetManager().bottomLayerWreckMarkerFor(entity, 0);
             if (destroyed != null) {
                 graph.drawImage(destroyed, 0, 0, this);
             }
@@ -120,7 +120,7 @@ public abstract class AbstractWreckSprite extends Sprite {
         boolean drawFuelLeak = EntityWreckHelper.displayFuelLeak(entity);
 
         if (drawFuelLeak) {
-            Image fuelLeak = bv.getTileManager().bottomLayerFuelLeakMarkerFor(entity);
+            Image fuelLeak = bv.getTilesetManager().bottomLayerFuelLeakMarkerFor(entity);
             if (fuelLeak != null) {
                 graph.drawImage(fuelLeak, 0, 0, this);
             }
@@ -130,7 +130,7 @@ public abstract class AbstractWreckSprite extends Sprite {
         boolean drawMotiveWreckage = EntityWreckHelper.displayMotiveDamage(entity);
 
         if (drawMotiveWreckage) {
-            Image motiveWreckage = bv.getTileManager().bottomLayerMotiveMarkerFor(entity);
+            Image motiveWreckage = bv.getTilesetManager().bottomLayerMotiveMarkerFor(entity);
             if (motiveWreckage != null) {
                 graph.drawImage(motiveWreckage, 0, 0, this);
             }
@@ -142,12 +142,12 @@ public abstract class AbstractWreckSprite extends Sprite {
         if (EntityWreckHelper.displayDevastation(entity)) {
             // objects in space should not have craters
             wreck = entity.isSpaceborne() ?
-                  bv.getTileManager().wreckMarkerFor(entity, secondaryPos) :
-                  bv.getTileManager().getCraterFor(entity, secondaryPos);
+                  bv.getTilesetManager().wreckMarkerFor(entity, secondaryPos) :
+                  bv.getTilesetManager().getCraterFor(entity, secondaryPos);
         } else {
             wreck = EntityWreckHelper.useExplicitWreckImage(entity) ?
-                  bv.getTileManager().wreckMarkerFor(entity, secondaryPos) :
-                  bv.getTileManager().imageFor(entity, secondaryPos);
+                  bv.getTilesetManager().wreckMarkerFor(entity, secondaryPos) :
+                  bv.getTilesetManager().imageFor(entity, secondaryPos);
         }
 
         if (wreck != null) {

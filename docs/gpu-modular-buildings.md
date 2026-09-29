@@ -1,5 +1,17 @@
 # Modular buildings
 
+[Docs index](README.md) · [Complete class responsibilities](gpu-code-map.md)
+
+## What does what
+
+| Owner | Responsibility |
+| --- | --- |
+| `BoardArtwork.customBuildingFile` | Map selected tileset artwork to the custom building catalog. |
+| `GpuAssets.building` | Choose custom kit or legacy fallback and own shared loaded assets. |
+| `GpuBuilding` | Validate named modules, choose stable floor/roof recipes, assemble them and expose picking geometry. |
+| `GpuBuildingInterior` | Generate shared floor sheets and supports from the roof's occupied footprint. |
+| `GpuTreeInstances / GpuTerrain` | Instance module ranges; install chunks and retire unused recipes/interior buffers. |
+
 The board's tileset still chooses building artwork. `BoardArtwork.customBuildingFile` maps the selected legacy
 asset to `data/models/buildings/<family>/<name>.glb`, removing the `saxarba/` provenance directory. For example,
 `buildings/saxarba/fortress_light/fortress_light_a_52` selects
@@ -79,66 +91,3 @@ triangles for every possible building combination. Picking is independent of the
 
 Adding or replacing a GLB in an already-open viewport requires the existing asset reload or reopening the view;
 missing kits and loaded kits are cached for that renderer's lifetime. Editing a building's height uses the cache.
-
-## First asset and provenance
-
-The census uses `Board.load` and the actual Saxarba `HexTileset` matching rules on the current map collection.
-It scanned 2,409 boards and 152,095 building hexes with at least one level. The largest count is
-`fortress_light_a_52`: 2,441 placements, with 41 at level 1 and 2,400 at level 10. These are concentrated on
-`unofficial/VictorMorson/152x176 Tian-Tan Industrial Center.board`; this is the most frequent placement,
-not the most geographically distributed design. `building_light_42` is next with 2,077 placements on 15 maps.
-
-Triangle counts in the final GLB (excluding the generated interior):
-
-| Module | LOD0 | LOD1 |
-| --- | ---: | ---: |
-| floor0 | 14,560 | 162 |
-| floor1 | 11,192 | 162 |
-| floor2 | 11,612 | 162 |
-| roof0 | 550 | 202 |
-| Entire kit | 37,914 | 688 |
-
-A five-level LOD1 building uses 1,012 triangles; ten levels use 1,822. Distant floors retain hollow walls,
-planar window/door accents and a story band. Roof openings keep their silhouettes with simplified top accents.
-LOD0 retains recessed windows, panel joints, door ribs/canopies, service details and roof repairs.
-
-Reproducible census, exact image prompts, generated reference/albedos, the Blender source, authoring script and
-renders live in `mm-data/tools/buildings/`. The concept and two bitmap materials used the built-in ImageGen tool.
-The outline is an interpretation of Saxarba's original roof tile, preserving its front notch and diagonal row
-of roof openings. The mm-data repository's asset license and source attribution still apply.
-
-From mm-data, regenerate with:
-
-```
-blender --background --python tools/buildings/build_modular_fortress.py -- --render
-blender --background --python tools/buildings/review_modular_fortress.py
-```
-
-The GLB is the runtime deliverable. `modular-fortress.blend` contains only the asset's two scenes, with packed
-textures. `fortress-three-floors.png` is the source studio render; `fortress-glb.png` renders the exported GLB.
-The importer currently consumes albedo and vertex colors, not PBR normal/roughness maps. Blender's source
-studio adds fine bump and different roughness; game lighting also differs. Those previews are not a promise
-that the game uses the same shading.
-
-## Verification
-
-`GpuBuildingTest` covers deterministic variants, five-level semantics, malformed roles, single-LOD and additional-authored-LOD support,
-and the shipped GLB's visibly stacked modules. `RigidGlbTest` covers the shared importer. The on-demand
-`GpuModularBuildingSmokeTest` exercises actual GPU import with translated origins and baked vertex offsets;
-1/5/10-level assembly; shared buffers; recipe/interior eviction; legacy fallback and courtyard generation;
-cutaway rendering; LOD-independent roof picking; height edits; and changed board level spacing. It checks that
-an unchanged frame creates no additional instance uploads or buffers. `GpuTreeLodSmokeTest` checks the shared
-instancing backend's existing tree behavior. Native screenshots are written under
-`megamek/build/gpu-board-review/modular-buildings/`.
-
-Run from megamek_temp:
-
-```
-./gradlew.bat :megamek:test --tests '*GpuBuildingTest' --tests '*RigidGlbTest'
-./gradlew.bat :megamek:gpuBoardSmoke --tests '*GpuModularBuildingSmokeTest' --tests '*GpuTreeLodSmokeTest'
-./gradlew.bat :megamek:checkstyleMain :megamek:checkstyleTest
-```
-
-Broader checks in the current shared checkout also report bridge and terrain assertions: the resource smoke's
-500-triangle cap for `bridges/bridge-exits-31`, a bridge-bounds assertion in `GpuBuildingMaterialsSmokeTest`, and
-a BLDG_BASE_COLLAPSED ground-marking assertion in `BoardFeaturesTest`. These were not weakened for this change.

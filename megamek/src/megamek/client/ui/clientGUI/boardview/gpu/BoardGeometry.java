@@ -183,11 +183,6 @@ final class BoardGeometry {
               point.y + (center.y - point.y) * fraction, point.z);
     }
 
-    /** One point of a native tactical marker, kept clear of the shared hex edges. */
-    static Vector3 markerPoint(Vector3 point, Vector3 center) {
-        return inset(point, center, MARKER_INSET);
-    }
-
     /** Liquid beds include a two-world-unit visual recess even without positive game water depth. */
     static float groundZ(BoardScene.Tile tile) {
         return tile.elevation() * level() - (tile.liquid().present() ? Math.max(2 * hexScale(), tile.waterDepth() * level()) : 0);

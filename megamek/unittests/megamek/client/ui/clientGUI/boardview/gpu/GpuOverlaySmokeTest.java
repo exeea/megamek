@@ -28,7 +28,7 @@ import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.overlay.KeyBindingsOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.OverlayImage;
 import megamek.client.ui.clientGUI.boardview.overlay.PlanetaryConditionsOverlay;
@@ -152,10 +152,10 @@ class GpuOverlaySmokeTest {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             SwingUtilities.invokeAndWait(() -> {
                 preferences.setValue(GUIPreferences.GUI_SCALE, 1f);
-                BoardView painterView = spy(fixture.view);
+                BoardClientState painterView = spy(fixture.view);
                 doReturn(mock(ClientGUI.class)).when(painterView).getClientgui();
-                KeyBindingsOverlay keys = new KeyBindingsOverlay(painterView.getClientState());
-                PlanetaryConditionsOverlay conditions = new PlanetaryConditionsOverlay(painterView.getClientState());
+                KeyBindingsOverlay keys = new KeyBindingsOverlay(painterView);
+                PlanetaryConditionsOverlay conditions = new PlanetaryConditionsOverlay(painterView);
                 keys.setVisible(true);
                 conditions.setVisible(true);
                 fixture.view.addOverlay(keys);

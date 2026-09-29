@@ -9,15 +9,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.TextureArray;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.utils.MeshBuilder;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
@@ -392,6 +396,10 @@ class BoardRoadTest {
         assertEquals(first, new Material("surface", new GpuRoads.Mask(region, data)), "Repeated roads share one material batch");
         assertEquals(first, new Material(first), "Chunk rebuilds preserve the atlas region and mask coordinates");
         assertEquals(first.hashCode(), new Material(first).hashCode());
+        var moved = new Material("surface", new GpuRoads.Mask(new TextureRegion(texture, 160, 200, 128, 96), data));
+        assertNotEquals(first, moved, "Edit metadata retains each mask's placement");
+        assertEquals(GpuRoads.batchMaterial(first), GpuRoads.batchMaterial(moved), "Regions on one page share a draw");
+        assertEquals(GpuRoads.batchMaterial(first).hashCode(), GpuRoads.batchMaterial(moved).hashCode());
         float[] previous = null;
         for (var coords : List.of(CENTER, CENTER.translated(0))) {
             var tile = scene.tile(coords);
@@ -399,7 +407,8 @@ class BoardRoadTest {
             var mesh = new MeshBuilder();
             mesh.begin(GpuRoads.VERTICES, GL20.GL_TRIANGLES);
             var triangles = GpuRoads.drape(tile, surface, patch);
-            GpuRoads.write(() -> mesh, triangles, patch, data, surface);
+            GpuRoads.write(() -> mesh, triangles, patch, new GpuRoads.Mask(region, data), surface, false,
+                  Color.WHITE.toFloatBits());
             assertEquals(triangles.size() * 3, mesh.getNumIndices(), "Mask UVs do not require additional geometry");
             int stride = mesh.getAttributes().vertexSize / Float.BYTES;
             int maskOffset = mesh.getAttributes().findByUsage(VertexAttributes.Usage.Generic).offset / Float.BYTES;
@@ -419,6 +428,32 @@ class BoardRoadTest {
     }
 
     @Test
+    void allCoatsOnAMaskPageShareOneDrawAndCarryTheirOwnAppearanceInTheirVertices() {
+        Texture page = mock(Texture.class);
+        when(page.getWidth()).thenReturn(512);
+        when(page.getHeight()).thenReturn(512);
+        var scene = BoardSurfaceBlendTest.scene(c -> tile(c, BoardRoad.Kind.PAVED, 9, 0, BoardScene.Surface.GRASS));
+        var road = BoardRoad.of(scene, scene.tile(CENTER));
+        var coats = new GpuRoads.Coats(mock(TextureArray.class), mock(TextureArray.class));
+        var patches = GpuRoads.patches(scene.tile(CENTER), road);
+        List<Material> batches = new ArrayList<>();
+        for (int i = 0; i < patches.size(); i++) {
+            var mask = new GpuRoads.Mask(new TextureRegion(page, 64 * i, 0, 64, 64), GpuRoads.mask(road, patches.get(i)));
+            batches.add(GpuRoads.batchMaterial(new Material("surface", coats, GpuRoads.attribute(patches.get(i)), mask)));
+        }
+        assertTrue(patches.stream().map(GpuRoads::attribute).distinct().count() > 2, "A paved road has several distinct coats");
+        assertEquals(1, batches.stream().distinct().count(), "One draw holds every coat on a mask page");
+        for (var patch : patches) {
+            // The shader reads back exact bytes; the packed colour only loses alpha's lowest bit.
+            var color = new Color();
+            Color.abgr8888ToColor(color, GpuRoads.coat(4, patch, .15f));
+            assertEquals(4, Math.round(color.r * 255));
+            assertEquals(GpuRoads.attribute(patch).value + 4, Math.round(color.g * 255));
+            assertEquals(38, Math.round(color.b * 255));
+        }
+    }
+
+    @Test
     void roadKindsUseEngineGroundButUnknownArtworkAndSpecialCombinationsRemainVisible() {
         Hex hex = new Hex(0);
         for (int level = 1; level <= 4; level++) {
@@ -432,11 +467,14 @@ class BoardRoadTest {
                 assertFalse(BoardFeatures.detailedGround(hex, Map.of()), "Preserve special road artwork " + fluff);
             }
             hex.removeTerrain(Terrains.ROAD_FLUFF);
-            for (int special : new int[] { Terrains.RUBBLE, Terrains.WATER, Terrains.ICE }) {
+            for (int special : new int[] { Terrains.RUBBLE, Terrains.WATER }) {
                 hex.addTerrain(new Terrain(special, 1));
                 assertFalse(BoardFeatures.detailedGround(hex, Map.of()), "Preserve unsupported combination " + special);
                 hex.removeTerrain(special);
             }
+            hex.addTerrain(new Terrain(Terrains.ICE, 1));
+            assertTrue(BoardFeatures.detailedGround(hex, Map.of()), "The native ice material supports roads on dry ground");
+            hex.removeTerrain(Terrains.ICE);
         }
         hex.addTerrain(new Terrain(Terrains.ROAD, 17, true, 9));
         assertEquals(BoardRoad.Kind.NONE, BoardRoad.capture(hex));
@@ -475,6 +513,68 @@ class BoardRoadTest {
                 assertTrue(road.distance(feature.x(), feature.y()) >= BoardRoad.SHOULDER + radius);
             }
         }
+    }
+
+    @Test
+    void plainRoadsRunStraightThroughAZigzagOfHexesAndBothSidesAgreeOnEveryCrossing() {
+        // A road running east on this lattice alternates north-east and south-east exits.
+        Map<Coords, Integer> chain = Map.of(new Coords(2, 4), 18, new Coords(3, 3), 20, new Coords(4, 4), 34,
+              new Coords(5, 3), 20, new Coords(6, 4), 34);
+        var scene = BoardSurfaceBlendTest.scene(c -> tile(c, chain.containsKey(c) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
+              chain.getOrDefault(c, 0), 0, BoardScene.Surface.GRASS));
+        int crossings = 0;
+        for (var at : chain.keySet()) {
+            var bends = BoardRoad.bends(at, c -> BoardRoad.Node.of(scene.tile(c)));
+            for (int d = 0; d < 6; d++) {
+                var next = at.translated(d);
+                if (!chain.containsKey(next) || (chain.get(at) & 1 << d) == 0) { continue; }
+                var out = bends.apply(d);
+                var in = BoardRoad.bends(next, c -> BoardRoad.Node.of(scene.tile(c))).apply((d + 3) % 6);
+                assertTrue(out != null && in != null, "Plain roads at one level bend through their shared border");
+                assertTrue(out.epsilonEquals(new Vector2(in).scl(-1), 1e-5f),
+                      "Both hexes cross their border along one direction: " + out + " / " + in);
+                int before = Integer.numberOfTrailingZeros(chain.get(at) & ~(1 << d));
+                int after = Integer.numberOfTrailingZeros(chain.get(next) & ~(1 << (d + 3) % 6));
+                if (chain.containsKey(at.translated(before)) && chain.containsKey(next.translated(after))) {
+                    assertEquals(0, out.y, 1e-4f, "An eastward zigzag of hexes is one straight road");
+                }
+                crossings++;
+            }
+        }
+        assertEquals(8, crossings);
+    }
+
+    @Test
+    void theLastHexBeforeASquareCrossingTurnsIntoItsCorridorAlongOneWideArc() {
+        // As before the Fire and Ice 2 bridge: a plain road turns in its last hex towards a crossing that stays square,
+        // here a junction. Its turn must not be left until the mouth of that crossing's straight corridor.
+        Map<Coords, Integer> chain = Map.of(new Coords(2, 4), 18, new Coords(3, 3), 20, new Coords(4, 4), 34,
+              new Coords(5, 3), 21);
+        var scene = BoardSurfaceBlendTest.scene(c -> tile(c, chain.containsKey(c) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
+              chain.getOrDefault(c, 0), 0, BoardScene.Surface.GRASS));
+        var at = new Coords(4, 4);
+        var road = BoardRoad.of(scene, scene.tile(at));
+        float west = gate(at, 5).x + 1, east = gate(at, 1).x - 1, apothem = gate(at, 0).len();
+        int samples = (int) (east - west);
+        float[] y = new float[samples + 1];
+        for (int i = 0; i <= samples; i++) {
+            // The centre line crosses each vertical line once; the edge distance is smallest on it.
+            float x = west + i, low = -apothem, high = apothem;
+            for (int step = 0; step < 60; step++) {
+                float a = high - .618f * (high - low), b = low + .618f * (high - low);
+                if (road.distance(x, a) < road.distance(x, b)) { high = b; } else { low = a; }
+            }
+            y[i] = (low + high) / 2;
+        }
+        float sharpest = Float.POSITIVE_INFINITY;
+        int window = 8;
+        for (int i = 0; i + window < samples; i++) {
+            float turn = Math.abs((float) (Math.atan2(y[i + window + 1] - y[i + window], 1) - Math.atan2(y[i + 1] - y[i], 1)));
+            float length = 0;
+            for (int j = i; j < i + window; j++) { length += (float) Math.hypot(1, y[j + 1] - y[j]); }
+            sharpest = Math.min(sharpest, length / Math.max(turn, 1e-6f));
+        }
+        assertTrue(sharpest > apothem / 2, "The road turns along a wide arc, not a kink: radius " + sharpest);
     }
 
     private static Vector3 gate(Coords at, int d) {

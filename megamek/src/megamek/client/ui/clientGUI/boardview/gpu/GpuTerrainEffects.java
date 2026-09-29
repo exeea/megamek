@@ -112,7 +112,7 @@ final class GpuTerrainEffects implements Disposable {
     Texture opacityTexture() { return drawCalls == 0 || buffer == null ? null : buffer.getColorBufferTexture(); }
 
     /** Uses the existing three-level board-prop thresholds/hysteresis; geometry and gameplay do not change with LOD. */
-    static int lod(float pixels, int previous) { return TreeLod.level(pixels, previous); }
+    static int lod(float pixels, int previous) { return TreeLod.level(TreeLod.PROPS, pixels, previous); }
 
     void render(Camera camera, GpuEffectDepth depth, Color light, Vector3 lightDirection) {
         visible.clear();

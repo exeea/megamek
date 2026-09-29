@@ -1,25 +1,29 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import java.awt.geom.Area;
 import java.awt.RenderingHints;
+import java.awt.geom.Area;
 import java.awt.image.BufferedImage;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
-import java.util.List;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
 import java.util.function.Supplier;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.TextureArray;
 import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.badlogic.gdx.graphics.g3d.Attribute;
+import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
+import com.badlogic.gdx.graphics.g3d.utils.TextureDescriptor;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
 
@@ -27,7 +31,8 @@ import megamek.common.board.Coords;
 final class GpuRoads {
     static final VertexAttributes VERTICES = new VertexAttributes(VertexAttribute.Position(), VertexAttribute.Normal(),
           VertexAttribute.ColorPacked(), VertexAttribute.TexCoords(0),
-          new VertexAttribute(VertexAttributes.Usage.Generic, 2, "a_roadMaskUV"));
+          new VertexAttribute(VertexAttributes.Usage.Generic, 2, "a_roadMaskUV"),
+          new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_roadMaskRegion", 1));
     record MaskData(BoardScene.Pixels pixels, float x, float y, float width, float height) { }
 
     /** Renderer-owned exact sharing across chunks/workers; only live materials keep masks in memory. */
@@ -43,7 +48,7 @@ final class GpuRoads {
         }
     }
 
-    /** Borrowed chunk-atlas region. Local mask UVs belong to vertices, so repeated roads share one material batch. */
+    /** Borrowed chunk-atlas region, retained per tile range so an edit can relocate unchanged road vertices. */
     static final class Mask extends TextureAttribute {
         static final long TYPE = register("roadMask");
         static { TextureAttribute.Mask |= TYPE; }
@@ -66,7 +71,15 @@ final class GpuRoads {
     }
     private static final class Surface extends FloatAttribute {
         static final long TYPE = register("roadSurface");
-        Surface(float transition) { super(TYPE, transition); }
+        final float lift;
+        Surface(float transition, float lift) { super(TYPE, transition); this.lift = lift; }
+        @Override public Surface copy() { return new Surface(value, lift); }
+        @Override public int hashCode() { return 31 * super.hashCode() + Float.floatToIntBits(lift); }
+        @Override public int compareTo(Attribute other) {
+            if (type != other.type) { return Long.compare(type, other.type); }
+            int transition = Float.compare(value, ((Surface) other).value);
+            return transition != 0 ? transition : Float.compare(lift, ((Surface) other).lift);
+        }
     }
     static final class Maps extends TextureAttribute {
         static final long TYPE = register("roadMaterialMaps");
@@ -78,6 +91,35 @@ final class GpuRoads {
     static final class Soil extends FloatAttribute {
         static final long TYPE = register("roadSoil");
         Soil() { super(TYPE, 1); }
+    }
+    /** Road materials, in the order of their maps in {@link GpuAssets#roadArray}. */
+    static final List<String> MATERIALS = List.of("asphalt", "dirt", "gravel");
+    /**
+     * The road and sculpt map arrays that merged coats sample. Each coat's own maps, finish and wet response travel in
+     * its vertices ({@link #coat}), so all coats of a chunk share one material and one draw.
+     */
+    static final class Coats extends Attribute {
+        static final long TYPE = register("roadCoats");
+        final TextureDescriptor<TextureArray> roads, sculpt;
+
+        Coats(TextureArray roads, TextureArray sculpt) {
+            super(TYPE);
+            this.roads = new TextureDescriptor<>(roads);
+            this.sculpt = new TextureDescriptor<>(sculpt);
+        }
+
+        @Override
+        public Coats copy() { return new Coats(roads.texture, sculpt.texture); }
+
+        @Override
+        public int compareTo(Attribute other) {
+            if (type != other.type) { return Long.compare(type, other.type); }
+            int result = roads.compareTo(((Coats) other).roads);
+            return result != 0 ? result : sculpt.compareTo(((Coats) other).sculpt);
+        }
+
+        @Override
+        public int hashCode() { return java.util.Objects.hash(super.hashCode(), roads, sculpt); }
     }
     static final long TYPE = Surface.TYPE;
     /** Pavement and bridge decks share this small clearance above their supporting elevation. */
@@ -104,13 +146,53 @@ final class GpuRoads {
               GpuShaderSource.read("road-mask.vert") + "\nvoid main() {\nroadMaskCoordinates();\n");
     }
 
-    static FloatAttribute attribute(Patch patch) {
+    static FloatAttribute attribute(Patch patch) { return new Surface(finish(patch), patch.lift()); }
+
+    private static float finish(Patch patch) {
         boolean transition = patch.fade() != null && patch.fade().join() != null;
         // Positive: material joins. Negative: loose (-1), wheels (-2), landing asphalt (-3) or aggregate/soil (-4).
         float finish = patch.fade() != null && patch.fade().wheels() ? -2
               : patch.fade() != null && patch.fade().landing() ? patch.texture().equals("roads/asphalt") ? -3 : -4
               : patch.texture().equals("roads/dirt") || patch.texture().equals("roads/gravel") ? -1 : 0;
-        return new Surface(transition ? patch.texture().equals("roads/dirt") ? 2 : 1 : finish);
+        return transition ? patch.texture().equals("roads/dirt") ? 2 : 1 : finish;
+    }
+
+    /**
+     * A merged coat's vertex colour: its maps (a {@link #MATERIALS} index, or 3 plus a sculpt material's index), its
+     * finish offset by 4, and its wet response in 255ths. Unmerged coats keep white.
+     */
+    static float coat(int maps, Patch patch, float response) {
+        return Color.toFloatBits(maps, Math.round(finish(patch)) + 4, Math.round(response * 255), 255);
+    }
+
+    /** Region placement is vertex data; only the atlas page and actual surface state split draw calls. */
+    static Material batchMaterial(Material material) {
+        Mask mask = material.get(Mask.class, Mask.TYPE);
+        if (mask == null) { return material; }
+        Material shared = new Material(material);
+        shared.set(new TextureAttribute(Mask.TYPE, mask.textureDescription));
+        // A merged coat's finish is in its vertices, and its lift orders it within the chunk's one draw.
+        if (shared.has(Coats.TYPE)) { shared.set(new Surface(0, 0)); }
+        return shared;
+    }
+
+    /** A merged draw's continuation in another mesh starts at the given coat's lift, which orders it after the first. */
+    static Material lifted(Material batch, Material coat) {
+        Material continued = new Material(batch);
+        continued.set(new Surface(0, layer(coat)));
+        return continued;
+    }
+
+    static float layer(Material material) { return material.get(Surface.class, TYPE).lift; }
+
+    /** Atlas replacements must update every reused vertex, even when different masks now share a draw. */
+    static void relocate(float[] vertices, Mask mask) {
+        int stride = VERTICES.vertexSize / Float.BYTES;
+        int region = VERTICES.get(VERTICES.size() - 1).offset / Float.BYTES;
+        for (int i = region; i < vertices.length; i += stride) {
+            vertices[i] = mask.offsetU; vertices[i + 1] = mask.offsetV;
+            vertices[i + 2] = mask.scaleU; vertices[i + 3] = mask.scaleV;
+        }
     }
 
     static String texture(BoardRoad.Kind kind) {
@@ -153,7 +235,7 @@ final class GpuRoads {
             Area head = new Area(patch.shape());
             if (patch.texture().equals("concrete")) {
                 head.subtract(road.endZone(apron
-                      + BoardRelief.metres(BoardBridgeFooting.RAIL_TAPER_METRES + .3f) / BoardGeometry.hexScale()));
+                      + BoardBridgeFooting.terminalLength() + BoardRelief.metres(.3f) / BoardGeometry.hexScale()));
                 result.add(new Patch(head, patch.texture(), patch.tint(), patch.repeat(), patch.lift(), patch.fade()));
                 continue;
             }
@@ -348,12 +430,7 @@ final class GpuRoads {
     }
 
     static void write(Supplier<MeshPartBuilder> meshes, List<BoardTacticalGeometry.Triangle> triangles,
-          Patch patch, MaskData mask, BoardSurface surface) {
-        write(meshes, triangles, patch, mask, surface, false);
-    }
-
-    static void write(Supplier<MeshPartBuilder> meshes, List<BoardTacticalGeometry.Triangle> triangles,
-          Patch patch, MaskData mask, BoardSurface surface, boolean flat) {
+          Patch patch, Mask mask, BoardSurface surface, boolean flat, float coat) {
         Map<Vector3, Vector3> normals = new HashMap<>();
         for (var face : flat ? List.<BoardSurface.Face>of() : surface.groundFaces()) {
             if (face.finish() != BoardSurface.Finish.TOP) { continue; }
@@ -370,8 +447,9 @@ final class GpuRoads {
             Vector3 b = flat ? fallback : surface.roadNormal(t.b(), normals.getOrDefault(normalKey(t.b(), lift), fallback)).nor();
             Vector3 c = flat ? fallback : surface.roadNormal(t.c(), normals.getOrDefault(normalKey(t.c(), lift), fallback)).nor();
             MeshPartBuilder mesh = meshes.get();
-            mesh.triangle(carrier(mesh, t.a(), a, repeat, mask, surface.tile),
-                  carrier(mesh, t.b(), b, repeat, mask, surface.tile), carrier(mesh, t.c(), c, repeat, mask, surface.tile));
+            mesh.triangle(carrier(mesh, t.a(), a, repeat, mask, surface.tile, coat),
+                  carrier(mesh, t.b(), b, repeat, mask, surface.tile, coat),
+                  carrier(mesh, t.c(), c, repeat, mask, surface.tile, coat));
         }
     }
 
@@ -379,11 +457,13 @@ final class GpuRoads {
         return new Vector3(p.x, p.y, Math.round((p.z - lift) / (.001f * BoardGeometry.hexScale())));
     }
 
-    private static short carrier(MeshPartBuilder mesh, Vector3 p, Vector3 normal, float repeat, MaskData mask, BoardScene.Tile tile) {
+    private static short carrier(MeshPartBuilder mesh, Vector3 p, Vector3 normal, float repeat, Mask mask, BoardScene.Tile tile,
+          float coat) {
         float scale = BoardGeometry.hexScale();
-        float u = ((p.x - BoardGeometry.centerX(tile.coords())) / scale - mask.x()) / mask.width();
-        float v = ((p.y - BoardGeometry.centerY(tile.coords())) / scale - mask.y()) / mask.height();
-        return mesh.vertex(p.x, p.y, p.z, normal.x, normal.y, normal.z, Color.WHITE.toFloatBits(), p.x / repeat, -p.y / repeat, u, v);
+        float u = ((p.x - BoardGeometry.centerX(tile.coords())) / scale - mask.data.x()) / mask.data.width();
+        float v = ((p.y - BoardGeometry.centerY(tile.coords())) / scale - mask.data.y()) / mask.data.height();
+        return mesh.vertex(p.x, p.y, p.z, normal.x, normal.y, normal.z, coat, p.x / repeat, -p.y / repeat, u, v,
+              mask.offsetU, mask.offsetV, mask.scaleU, mask.scaleV);
     }
 
     static float coverage(BoardRoad road, Patch patch, float x, float y) {

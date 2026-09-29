@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Set;
+import java.util.function.Consumer;
 
 import com.badlogic.gdx.graphics.g3d.Environment;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
@@ -59,9 +60,14 @@ final class GpuMeshPage implements Disposable {
     }
 
     void render(ModelBatch batch, Environment environment) {
+        forEachVisible(part -> submit(batch, environment, part));
+    }
+
+    /** The exact same culled ranges can feed a depth pass without copying or rebuilding the page. */
+    void forEachVisible(Consumer<Renderable> submit) {
         if (visible.isEmpty()) { return; }
-        if (cached.isEmpty()) { submit(batch, environment, visible); return; }
-        if (visible.size == current.size) { submit(batch, environment, cached); return; }
+        if (cached.isEmpty()) { visible.forEach(submit); return; }
+        if (visible.size == current.size) { cached.forEach(submit); return; }
 
         // A partial page keeps only visible sources. Adjacent ranges of the same material/mesh form one draw.
         // Reuse the small renderable pool; no vertex or index buffers change during a pan.
@@ -81,11 +87,7 @@ final class GpuMeshPage implements Disposable {
                 run.meshPart.size = range.size();
             }
         }
-        for (int i = 0; i < used; i++) { submit(batch, environment, runs.get(i)); }
-    }
-
-    private static void submit(ModelBatch batch, Environment environment, Array<Renderable> parts) {
-        for (Renderable part : parts) { submit(batch, environment, part); }
+        for (int i = 0; i < used; i++) { submit.accept(runs.get(i)); }
     }
 
     private static void submit(ModelBatch batch, Environment environment, Renderable part) {

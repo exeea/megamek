@@ -271,7 +271,7 @@ public final class BoardArtwork implements AutoCloseable {
                     boolean legacy = new File(Configuration.dataDir(), "models/board/" + model + ".glb").isFile();
                     boolean custom = customBuildingFile(model).isFile();
                     for (int terrain : new int[] { Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL }) {
-                        if ((legacy || (custom && terrain == Terrains.BUILDING))
+                        if ((legacy || custom)
                               && hex.containsTerrain(terrain) && gpuTileset.imageHasTerrain(image, terrain)) {
                             models.putIfAbsent(terrain, model);
                         }

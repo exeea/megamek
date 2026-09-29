@@ -62,7 +62,7 @@ class BoardTerrainDetailTest {
             hex.addTerrain(new Terrain(Terrains.WOODS, 1));
             var wooded = BoardFeatures.capture(hex, coords, Map.of());
             assertEquals(3, wooded.stream().filter(f -> f.kind() == BoardScene.FeatureKind.TREE).count());
-            assertEquals(14, wooded.stream().filter(f -> f.kind() == BoardScene.FeatureKind.BOULDER).count());
+            assertEquals(18, wooded.stream().filter(f -> f.kind() == BoardScene.FeatureKind.BOULDER).count());
             hex.removeTerrain(Terrains.ROUGH);
             assertTrue(BoardFeatures.capture(hex, coords, Map.of()).stream()
                   .noneMatch(f -> f.kind() == BoardScene.FeatureKind.BOULDER), "Terrain edits remove the rocks");

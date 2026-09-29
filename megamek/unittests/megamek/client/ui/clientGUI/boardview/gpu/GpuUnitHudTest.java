@@ -319,8 +319,8 @@ class GpuUnitHudTest {
         ClientGUI gui = mock(ClientGUI.class);
         when(gui.getClient()).thenReturn(client);
         when(gui.getMainPanel()).thenReturn(new JPanel());
-        when(gui.getCurrentBoardState()).thenReturn(Optional.of(fixture.view.getClientState()));
-        when(gui.getBoardState()).thenReturn(fixture.view.getClientState());
+        when(gui.getCurrentBoardState()).thenReturn(Optional.of(fixture.view));
+        when(gui.getBoardState()).thenReturn(fixture.view);
         return gui;
     }
 

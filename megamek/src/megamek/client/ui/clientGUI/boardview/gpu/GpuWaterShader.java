@@ -35,7 +35,7 @@ final class GpuWaterShader extends Attribute {
     static final float SURFACE_OPACITY = 0.48f;
     static final long TYPE = register("boardWaterSurface");
     /** Separate programs; palette and colour source remain material parameters within each mode. */
-    enum Mode { SURFACE, FALL, SPRAY, CUT }
+    enum Mode { SURFACE, FALL, SPRAY, CUT, DEPTH }
     /** Palette indices shared with water-optics.glsl and the submerged bed's vertex color. */
     static final int CLEAR = 0, MARS = 1, VOLCANO = 2, HAZARDOUS = 3;
     /** Depth encoded by the field and by the bed's vertex color, in levels; deeper water is uniformly deep. */
@@ -144,6 +144,11 @@ final class GpuWaterShader extends Attribute {
 
     /** Unchanged vertices in a replacement chunk must sample that chunk's newly owned field. */
     GpuWaterShader withField(Field field) { return new GpuWaterShader(this, mode, field); }
+
+    /** Authored animations and local waterfall impacts retain their individual materials. */
+    Field batchField() { return procedural && mode == Mode.SURFACE && impacts.isEmpty() ? field : null; }
+
+    GpuWaterShader depth() { return new GpuWaterShader(this, Mode.DEPTH); }
 
     /** The same water's spray, thrown up where its falls land. */
     GpuWaterShader spray() { return new GpuWaterShader(this, Mode.SPRAY); }
@@ -414,21 +419,34 @@ final class GpuWaterShader extends Attribute {
     static final class Field implements Disposable {
         final Texture texture;
         final float scaleX, scaleY, offsetX, offsetY;
+        final Prepared image;
         private Pools pools;
 
-        private Field(Texture texture, float scaleX, float scaleY, float offsetX, float offsetY, Pools pools) {
+        private Field(Texture texture, float scaleX, float scaleY, float offsetX, float offsetY, Prepared source, boolean retainPixels) {
             this.texture = texture;
             this.scaleX = scaleX;
             this.scaleY = scaleY;
             this.offsetX = offsetX;
             this.offsetY = offsetY;
-            this.pools = pools;
+            pools = source.pools();
+            // Retain only compact pixels for page atlases, never the sampled terrain graph.
+            image = retainPixels ? new Prepared(source.width(), source.height(), source.spacing(), source.firstX(), source.firstY(),
+                  source.pixels(), null) : null;
         }
 
         /** Null when the chunk has no open water; surfaces of the chunk's own tiles are reused, not rebuilt. */
         record Prepared(int width, int height, float spacing, int firstX, int firstY, byte[] pixels, Pools pools) {
+            boolean samePixels(Prepared other) {
+                return width == other.width && height == other.height && spacing == other.spacing
+                      && firstX == other.firstX && firstY == other.firstY && Arrays.equals(pixels, other.pixels);
+            }
+
             /** Only the small texture upload needs a GL context; field sampling is pure CPU work. */
             Field upload() {
+                return upload(true);
+            }
+
+            Field upload(boolean retainPixels) {
                 Pixmap image = new Pixmap(width, height, Pixmap.Format.RGBA8888);
                 try {
                     image.getPixels().put(pixels).flip();
@@ -436,7 +454,7 @@ final class GpuWaterShader extends Attribute {
                     texture.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
                     texture.setWrap(Texture.TextureWrap.ClampToEdge, Texture.TextureWrap.ClampToEdge);
                     return new Field(texture, 1 / (spacing * width), 1 / (spacing * height),
-                          -firstX / (float) width, -firstY / (float) height, pools);
+                          -firstX / (float) width, -firstY / (float) height, this, retainPixels);
                 } finally {
                     image.dispose();
                 }
@@ -446,6 +464,36 @@ final class GpuWaterShader extends Attribute {
         static Prepared prepare(BoardScene scene, Map<Coords, BoardFlow.Current> currents,
               Map<Coords, BoardSurface> surfaces) {
             return prepare(scene, currents, surfaces, false);
+        }
+
+        /** Stitch the existing world-aligned fields. Padding overlaps use the sample furthest inside its source. */
+        static Prepared atlas(List<Prepared> sources) {
+            if (sources.isEmpty()) { throw new IllegalArgumentException("Empty water atlas"); }
+            int x = Integer.MAX_VALUE, y = Integer.MAX_VALUE, right = Integer.MIN_VALUE, top = Integer.MIN_VALUE;
+            float spacing = sources.getFirst().spacing();
+            for (Prepared source : sources) {
+                if (source.spacing() != spacing) { throw new IllegalArgumentException("Mismatched water field spacing"); }
+                x = Math.min(x, source.firstX()); y = Math.min(y, source.firstY());
+                right = Math.max(right, source.firstX() + source.width());
+                top = Math.max(top, source.firstY() + source.height());
+            }
+            int width = right - x, height = top - y;
+            byte[] pixels = new byte[width * height * 4];
+            short[] margins = new short[width * height];
+            Arrays.fill(margins, (short) -1);
+            for (Prepared source : sources) {
+                for (int row = 0; row < source.height(); row++) {
+                    for (int col = 0; col < source.width(); col++) {
+                        int target = (source.firstY() - y + row) * width + source.firstX() - x + col;
+                        int margin = Math.min(Math.min(row, source.height() - 1 - row),
+                              Math.min(col, source.width() - 1 - col));
+                        if (margin <= margins[target]) { continue; }
+                        System.arraycopy(source.pixels(), (row * source.width() + col) * 4, pixels, target * 4, 4);
+                        margins[target] = (short) margin;
+                    }
+                }
+            }
+            return new Prepared(width, height, spacing, x, y, pixels, null);
         }
 
         static Prepared prepare(BoardScene scene, Map<Coords, BoardFlow.Current> currents,

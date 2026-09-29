@@ -5,15 +5,68 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import megamek.common.Configuration;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class BoardBridgeFootingTest {
+    @Test
+    void reloadingAnEditedGlbChangesTheBankExtension(@TempDir Path directory) throws Exception {
+        var scene = BoardNaturalBridgeTest.scene(BoardScene.Surface.GRASS, false, true);
+        var tile = scene.tile(BoardNaturalBridgeTest.CENTER);
+        var surfaces = new HashMap<Coords, BoardSurface>();
+        var before = BoardBridgeFooting.build(scene, tile, TerrainLod.FULL, surfaces);
+        float length = BoardBridgeFooting.terminalLength();
+        var originalData = Configuration.dataDir();
+        var source = originalData.toPath().resolve("models/board");
+        var target = Files.createDirectories(directory.resolve("models/board"));
+        Files.createDirectories(target.resolve("textures/sculpt"));
+        Files.copy(source.resolve("textures/sculpt/concrete.png"), target.resolve("textures/sculpt/concrete.png"));
+        byte[] bytes = Files.readAllBytes(source.resolve("bridge-terminal.glb"));
+        int jsonLength = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getInt(12);
+        var mapper = new ObjectMapper();
+        var document = mapper.readTree(new String(bytes, 20, jsonLength, StandardCharsets.UTF_8));
+        for (var node : document.get("nodes")) {
+            // glTF Z is the block's longitudinal board axis; both LODs retain the same footprint.
+            ((ObjectNode) node).set("scale", mapper.createArrayNode().add(1).add(1).add(1.5));
+        }
+        byte[] json = mapper.writeValueAsBytes(document);
+        int padded = (json.length + 3) & ~3;
+        var output = ByteBuffer.allocate(bytes.length - jsonLength + padded).order(ByteOrder.LITTLE_ENDIAN);
+        output.putInt(0x46546c67).putInt(2).putInt(output.capacity()).putInt(padded).putInt(0x4e4f534a).put(json);
+        while (output.position() < 20 + padded) { output.put((byte) ' '); }
+        output.put(bytes, 20 + jsonLength, bytes.length - 20 - jsonLength);
+        Files.write(target.resolve("bridge-terminal.glb"), output.array());
+        try {
+            Configuration.setDataDir(directory.toFile());
+            BoardBridgeFooting.reload();
+            assertEquals(length * 1.5f, BoardBridgeFooting.terminalLength(), .001f);
+            for (var lod : TerrainLod.values()) {
+                var after = BoardBridgeFooting.build(scene, tile, lod, surfaces);
+                for (int d : new int[] { 0, 3 }) {
+                    assertEquals(before.lengths().get(d) + length * .5f, after.lengths().get(d), .001f,
+                          "Actual GLB dimensions, including after reload, determine the placed block and footing");
+                }
+            }
+        } finally {
+            Configuration.setDataDir(originalData);
+            BoardBridgeFooting.reload();
+        }
+    }
+
     @Test
     void everyTerminalReachesSolidBankAtAllOrientationsAndLods() {
         for (int x : new int[] { 3, 4 }) {

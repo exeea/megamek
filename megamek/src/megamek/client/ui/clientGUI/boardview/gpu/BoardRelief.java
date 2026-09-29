@@ -246,8 +246,7 @@ final class BoardRelief {
      * {@link #waterFamily}).
      */
     record Site(Coords coords, int level, boolean sculpted, boolean detailed, int family, boolean liquid, boolean molten,
-          int depth, boolean road,
-          int ramps, int ix, int iy) {
+          int depth, boolean road, int ramps, float roadLow, int ix, int iy) {
         float x() { return cornerX(ix); }
 
         float y() { return cornerY(iy); }
@@ -262,6 +261,7 @@ final class BoardRelief {
     private final boolean sculpted;
     private final Map<Coords, Site> sites = new HashMap<>();
     private final Map<Coords, BoardRoad> roads = new HashMap<>();
+    private final Map<Coords, List<BoardTunnel>> portals = new HashMap<>();
     private final Map<Long, Corner> corners = new HashMap<>();
     private final Edge[] edges = new Edge[6];
     private final Map<Vector3, Shade> shades = new IdentityHashMap<>();
@@ -305,7 +305,8 @@ final class BoardRelief {
         sites.put(tile.coords(), self);
         boolean slopedRoad = self.road() && self.ramps() == 0 && self.family() != CONCRETE
               && !BoardSurface.flatRoadTop(scene, tile, ramps);
-        sculpted = self.sculpted() && (!self.road() || slopedRoad);
+        // BoardSurface builds every graded top itself, including ground a road only approaches.
+        sculpted = self.sculpted() && self.ramps() == 0 && (!self.road() || slopedRoad);
     }
 
     /**
@@ -316,10 +317,19 @@ final class BoardRelief {
     private static Site site(BoardScene scene, BoardScene.Tile tile, int ramps) {
         boolean liquid = tile.liquid().present();
         boolean road = !liquid && BoardRoad.rendered(tile);
-        boolean shaped = liquid || road || ramps == 0 && tile.roadExits() == 0 && tile.road() == BoardRoad.Kind.NONE;
+        // Ground a road only approaches is natural ground too: its graded mesh follows the same rim.
+        boolean shaped = liquid || road || tile.roadExits() == 0 && tile.road() == BoardRoad.Kind.NONE;
         BoardScene.Surface family = liquid ? waterFamily(scene, tile) : tile.surface();
+        float roadLow = tile.elevation();
+        for (int direction = 0; road && direction < 6; direction++) {
+            if ((ramps & 1 << direction) == 0) { continue; }
+            BoardScene.Tile neighbor = scene.tile(tile.coords().translated(direction));
+            // Include the whole approach and its corner grades, or the bridge deck rather than its ground.
+            roadLow = Math.min(roadLow, BoardSurface.hasRoadApproach(tile, neighbor, direction) ? neighbor.elevation()
+                  : BoardSurface.roadEdgeElevation(tile, neighbor, direction));
+        }
         return new Site(tile.coords(), tile.elevation(), shaped, shaped && tile.detailedGround(), family.ordinal(),
-              liquid, tile.liquid().molten(), liquid ? Math.max(0, tile.waterDepth()) : 0, road, ramps,
+              liquid, tile.liquid().molten(), liquid ? Math.max(0, tile.waterDepth()) : 0, road, ramps, roadLow,
               centerIx(tile.coords()), centerIy(tile.coords()));
     }
 
@@ -1127,6 +1137,8 @@ final class BoardRelief {
         final float ny;
         final float length;
         final boolean profiled;
+        /** Two graded roads meet across this edge; see {@link #gate(Site, Site)}. */
+        final boolean gate;
         final boolean fixedSampling;
         /** Both sides and incident corners can share a single straight, poured edge at every height. */
         final boolean simpleConcrete;
@@ -1173,7 +1185,8 @@ final class BoardRelief {
             ny = py;
             footPinned = lower == null || !lower.sculpted() || lower.liquid() || lower.family() == CONCRETE;
             rimPinned = upper != null && (upper.liquid() || upper.family() == CONCRETE);
-            profiled = upper != null && lower != null && upper.sculpted() && (lower.sculpted() || lower.liquid());
+            gate = upper != null && lower != null && gate(upper, lower) && dry(first) && dry(second);
+            profiled = upper != null && lower != null && upper.sculpted() && (lower.sculpted() || lower.liquid()) && !gate;
             room = profiled ? room(upper, lower) : 0;
             footRoom = room > 0 ? band(upper, lower, bottom()) : 0;
             drop = upper != null && lower != null ? drop(upper, lower) : 0;
@@ -1198,10 +1211,46 @@ final class BoardRelief {
 
     boolean naturalEdge(int e) { return self.sculpted() && edge(e).profiled; }
 
-    private boolean roadCrossing(int e) {
-        int direction = BoardGeometry.edgeDirection(e);
-        BoardScene.Tile other = scene.tile(tile.coords().translated(direction));
-        return other != null && tile.elevation() != other.elevation() && BoardSurface.hasRoadApproach(tile, other, direction);
+    /** Whether this hex's outline follows the relief's rim, rather than keeping its lattice edges. */
+    boolean graded() { return self.sculpted(); }
+
+    /**
+     * The height at which this road hex's top meets corner {@code index}, or NaN where it keeps its own level. Both
+     * sides of a gate meet at one height along the whole mouth, including its corners: the middle of the three levels
+     * there. That stays within every step through the corner, so each keeps its natural slope down to it.
+     */
+    float gateCorner(int index) {
+        return edge(index).gate || edge(index - 1).gate ? gateLevel(corner(self, index)) : Float.NaN;
+    }
+
+    /** See {@link #gateCorner}. */
+    private static float gateLevel(Corner corner) {
+        int a = corner.around[0].level(), b = corner.around[1].level(), c = corner.around[2].level();
+        return (a + b + c - Math.min(a, Math.min(b, c)) - Math.max(a, Math.max(b, c))) * BoardGeometry.level();
+    }
+
+    /**
+     * Two hexes graded to each other across their shared edge: a road, or the ground it approaches. Neither may be
+     * poured concrete, whose slab keeps its own outline.
+     */
+    private static boolean gate(Site one, Site other) {
+        if (!one.sculpted() || !other.sculpted() || one.liquid() || other.liquid()
+              || one.family() == CONCRETE || other.family() == CONCRETE) {
+            return false;
+        }
+        for (int direction = 0; direction < 6; direction++) {
+            if (one.coords().translated(direction).equals(other.coords())) {
+                return (one.ramps() & 1 << direction) != 0 && (other.ramps() & 1 << (direction + 3) % 6) != 0;
+            }
+        }
+        return false;
+    }
+
+    private static boolean dry(Corner corner) {
+        for (Site site : corner.around) {
+            if (site == null || site.liquid()) { return false; }
+        }
+        return true;
     }
 
     /** A road keeps its shared gate, while its banks return to the normal terrain's canonical edge and corners. */
@@ -1211,24 +1260,7 @@ final class BoardRelief {
         if (self.family() == CONCRETE && self.road()) {
             return new Vector3(lerp(edge.a.x, edge.b.x, canonical), lerp(edge.a.y, edge.b.y, canonical), z);
         }
-        Vector3 p = edgePoint(edge, canonical, z);
-        if (edge.profiled && edge.lower != null && (edge.upper.ramps() != 0 || edge.lower.ramps() != 0)) {
-            // Excavated ground follows the envelope between the cliff's foot and rim. Sampling every rock
-            // ledge at the changing ramp height folds the shoulder sideways across those ledges.
-            float bottom = edge.bottom(), top = edge.top();
-            Vector3 graded = edgePoint(edge, canonical, bottom).lerp(edgePoint(edge, canonical, top),
-                  Math.clamp((z - bottom) / (top - bottom), 0, 1));
-            // Every wall incident on a three-height corner must still share that corner's canonical profile.
-            p.lerp(graded, smooth(t * 4) * smooth((1 - t) * 4));
-            p.z = z;
-        }
-        if (roadCrossing(e)) {
-            float distance = Math.abs(t - .5f) * edge.length;
-            float natural = smooth((distance - 9 * BoardGeometry.hexScale()) / (6 * BoardGeometry.hexScale()));
-            p.x = lerp(edge.a.x + (edge.b.x - edge.a.x) * canonical, p.x, natural);
-            p.y = lerp(edge.a.y + (edge.b.y - edge.a.y) * canonical, p.y, natural);
-        }
-        return p;
+        return edgePoint(edge, canonical, z);
     }
 
     /** Canonical sample count of an edge: cliffs need finer columns than open ground. */
@@ -1282,6 +1314,23 @@ final class BoardRelief {
      * corner's canonical relief, which every edge through that corner shares.
      */
     private Vector3 edgePoint(Edge edge, float t, float z) {
+        if (!edge.gate) { return reliefPoint(edge, t, z); }
+        // The roads' banks meet along a gate, so it has no relief of its own and keeps its lattice line under the
+        // carriageway. Each corner still moves as the steps through it do, at the height both roads give it, and
+        // that move runs out before the shoulder, independent of the grades in between.
+        float clear = .5f - 9 * BoardGeometry.hexScale() / edge.length;
+        Vector3 a = reliefPoint(edge, 0, gateLevel(edge.a)), b = reliefPoint(edge, 1, gateLevel(edge.b));
+        float fa = Math.max(0, 1 - t / clear), fb = Math.max(0, 1 - (1 - t) / clear);
+        return new Vector3(lerp(edge.a.x, edge.b.x, t) + (a.x - edge.a.x) * fa + (b.x - edge.b.x) * fb,
+              lerp(edge.a.y, edge.b.y, t) + (a.y - edge.a.y) * fa + (b.y - edge.b.y) * fb, z);
+    }
+
+    private Vector3 reliefPoint(Edge edge, float t, float z) {
+        return cutForRoads(edge, t, naturalPoint(edge, t, z));
+    }
+
+    /** The relief before any road cuts it back; see {@link #cutForRoads}. */
+    private Vector3 naturalPoint(Edge edge, float t, float z) {
         float lx = edge.b.x - edge.a.x, ly = edge.b.y - edge.a.y;
         float px = edge.a.x + lx * t, py = edge.a.y + ly * t;
         float along = t * edge.length;
@@ -1351,11 +1400,16 @@ final class BoardRelief {
         float[] ma = edge.a.move(), mb = edge.b.move();
         float qx = ma[0] * (1 - t) + mb[0] * t, qy = ma[1] * (1 - t) + mb[1] * t;
         // Written so that at a corner (weights exactly one) every edge through it adds the identical offset.
-        Vector3 point = new Vector3(px + rx + bx + qx + dx * d * rest + scratchA[0] * wa + ta * ex * (sa - wa)
+        return new Vector3(px + rx + bx + qx + dx * d * rest + scratchA[0] * wa + ta * ex * (sa - wa)
                     + scratchB[0] * wb + tb * ex * (sb - wb),
               py + ry + by + qy + dy * d * rest + scratchA[1] * wa + ta * ey * (sa - wa)
                     + scratchB[1] * wb + tb * ey * (sb - wb), z);
-        // Natural rims keep their formations, but no neighbouring cliff may protrude through a carriageway.
+    }
+
+    /** Natural rims keep their formations, but no neighbouring cliff may protrude through a carriageway. */
+    private Vector3 cutForRoads(Edge edge, float t, Vector3 point) {
+        float lx = edge.b.x - edge.a.x, ly = edge.b.y - edge.a.y, z = point.z;
+        float px = edge.a.x + lx * t, py = edge.a.y + ly * t;
         float keep = 1;
         for (Corner end : new Corner[] { edge.a, edge.b }) {
             for (Site site : end.around) {
@@ -1363,9 +1417,15 @@ final class BoardRelief {
                 BoardRoad road = roads.computeIfAbsent(site.coords(), key -> BoardRoad.of(scene, scene.tile(key)));
                 float weight = site == edge.upper || site == edge.lower || site == edge.shoreRoad ? 1
                       : 1 - smooth((end == edge.a ? t : 1 - t) / .3f);
-                float allowed = site.ramps() != 0
-                      ? roadDisplacement(road, site.x(), site.y(), px, py, point.x - px, point.y - py)
-                      : roadClearance(road, site.x(), site.y(), px, py, point.x - px, point.y - py);
+                // No rock above the road may overhang its carriageway; the cliff beneath the road keeps its profile.
+                weight *= 1 - smooth((site.roadLow() * BoardGeometry.level() - z) / metres(1.5f));
+                // A tunnel portal's wings stand on the lattice line: the face it is set into stays flat to its top.
+                for (BoardTunnel portal : portals.computeIfAbsent(site.coords(), key -> BoardTunnel.entrances(scene, scene.tile(key)))) {
+                    float above = (z - portal.origin().z) / BoardGeometry.hexScale();
+                    keep = Math.min(keep, Math.max(smooth(portal.beside(px, py) / 2), smooth((above - 22) / 3)));
+                }
+                if (weight <= 0) { continue; }
+                float allowed = roadClearance(road, site.x(), site.y(), px, py, point.x - px, point.y - py);
                 keep = Math.min(keep, lerp(1, allowed, weight));
             }
         }
@@ -1376,31 +1436,28 @@ final class BoardRelief {
         return point;
     }
 
-    /** Carved ramp banks return to the native slope outside the road corridor. */
-    static float roadDisplacement(BoardRoad road, float cx, float cy, float x, float y, float dx, float dy) {
-        float scale = BoardGeometry.hexScale();
-        float px = (x - cx) / scale, py = (y - cy) / scale;
-        float clearance = Math.max(0, road.distance(px, py) - 3);
-        float room = Math.min(BoardGeometry.width() * .05f, clearance * scale * .2f);
-        return Math.min(1, room / Math.max(.00001f, (float) Math.hypot(dx, dy)));
-    }
-
-    /** Level roads cut only material entering their shoulder; slopes receding away from them keep their full width. */
-    private static float roadClearance(BoardRoad road, float cx, float cy, float x, float y, float dx, float dy) {
-        float scale = BoardGeometry.hexScale();
+    /**
+     * Cut only material entering the shoulder and its verge (see {@link #ROAD_MARGIN}); slopes receding away from the
+     * road, and all rock clear of it, keep their full natural relief.
+     */
+    static float roadClearance(BoardRoad road, float cx, float cy, float x, float y, float dx, float dy) {
+        float scale = BoardGeometry.hexScale(), clear = BoardRoad.SHOULDER + ROAD_MARGIN;
         float px = (x - cx) / scale, py = (y - cy) / scale;
         dx /= scale;
         dy /= scale;
-        if (road.distance(px, py) <= 3) { return 0; }
-        if (road.distance(px + dx, py + dy) >= 3) { return 1; }
+        if (road.distance(px, py) <= clear) { return 0; }
+        if (road.distance(px + dx, py + dy) >= clear) { return 1; }
         float low = 0, high = 1;
         for (int i = 0; i < 14; i++) {
             float mid = (low + high) * .5f;
-            if (road.distance(px + dx * mid, py + dy * mid) >= 3) { low = mid; }
+            if (road.distance(px + dx * mid, py + dy * mid) >= clear) { low = mid; }
             else { high = mid; }
         }
         return low;
     }
+
+    /** Hex-scale verge beyond a road's shoulder that no neighbouring rock may enter. */
+    private static final float ROAD_MARGIN = 1;
 
     // ---- Wall profile ----------------------------------------------------------------------------------------
 
@@ -2742,8 +2799,9 @@ final class BoardRelief {
                 if (neighbor != null) { tunnels.addAll(BoardTunnel.entrances(scene, neighbor)); }
             }
         }
+        boolean road = BoardRoad.rendered(tile);
         float radius = 0;
-        if (!tunnels.isEmpty() || kind == Kind.ROCK && !bridgeApproaches.isEmpty()) {
+        if (road || !tunnels.isEmpty() || !bridgeApproaches.isEmpty()) {
             for (var polygon : rock.polygons()) {
                 for (var p : polygon.points()) { radius = Math.max(radius, (float) Math.hypot(p.x * sx, p.y * sy)); }
             }
@@ -2751,7 +2809,17 @@ final class BoardRelief {
         for (var tunnel : tunnels) {
             if (tunnel.obstructs(base, radius, height)) { return; }
         }
-        if (kind == Kind.ROCK && !bridgeApproaches.isEmpty()) { base = besideBridge(destination, base, radius, height); }
+        if (!bridgeApproaches.isEmpty()) {
+            base = besideBridge(destination, base, radius, height);
+            if (base == null) { return; }
+        }
+        // Rocks and shrubs may stand beside the road, never on its carriageway or shoulder.
+        if (road) {
+            float scale = BoardGeometry.hexScale();
+            BoardRoad course = roads.computeIfAbsent(tile.coords(), key -> BoardRoad.of(scene, tile));
+            float x = (base.x - BoardGeometry.centerX(tile.coords())) / scale, y = (base.y - BoardGeometry.centerY(tile.coords())) / scale;
+            if (course.distance(x, y) < BoardRoad.SHOULDER + radius / scale) { return; }
+        }
         if (self.liquid() && kind == Kind.ROCK) {
             // A lip's nominal level and a pool's waterline are not foundations. Extend the closed rock down into
             // the actual bank/bed across its footprint, keeping its visible summit where it was placed.
@@ -2799,7 +2867,10 @@ final class BoardRelief {
         }
     }
 
-    /** Keep every rock, moving its complete footprint to the nearest supported side of a bridge entrance. */
+    /**
+     * Move a rock's or shrub's complete footprint to the nearest supported side of a bridge passage; null where neither
+     * side has room, as on a narrow promontory, since nothing may stand on the deck or its approach.
+     */
     private Vector3 besideBridge(List<BoardSurface.Face> destination, Vector3 base, float radius, float height) {
         if (bridgeApproaches.stream().noneMatch(approach -> approach.obstructs(base, radius, height))) { return base; }
         Vector3 nearest = null;
@@ -2820,7 +2891,7 @@ final class BoardRelief {
                 }
             }
         }
-        if (nearest == null) { return base; }
+        if (nearest == null) { return null; }
         var ground = destination.stream().filter(face -> face.finish() != BoardSurface.Finish.OUTCROP
               && face.finish() != BoardSurface.Finish.DRESSING && face.finish() != BoardSurface.Finish.ICE).toList();
         float oldGround = BoardSurface.sampleHeight(ground, base.x, base.y, groundHeight(base.x, base.y));
@@ -2965,9 +3036,10 @@ final class BoardRelief {
             // canonical grid, or a straight fallback pulls away from the adjoining sculpted cliff and its bank.
             if (edge != null && edge.profiled && edge.lower != null
                   && (edge.upper.ramps() != 0 || edge.lower.ramps() != 0)
-                  && entry.getValue().stream().anyMatch(side -> Math.abs(side.a().z - edge.top()) > .01f
+                  && (!spans(entry.getValue(), e, edge.bottom())
+                        || entry.getValue().stream().anyMatch(side -> Math.abs(side.a().z - edge.top()) > .01f
                         || Math.abs(side.b().z - edge.top()) > .01f || Math.abs(side.lowA() - edge.bottom()) > .01f
-                        || Math.abs(side.lowB() - edge.bottom()) > .01f)) {
+                        || Math.abs(side.lowB() - edge.bottom()) > .01f))) {
                 // A road only clips this same cliff grid to its cut/fill boundary. It must not replace
                 // native slopes, corner shading or LOD with a separate retaining-wall implementation.
                 canonicalWall(e, edge, entry.getValue(), result);
@@ -3057,6 +3129,108 @@ final class BoardRelief {
         addQuad(result, topA, lowA, lowB, topB, BoardSurface.Finish.WALL, -1);
     }
 
+    /**
+     * Engineered walls retaining the toe of a slope that a road beside this hex cuts back (see {@link #cutForRoads}):
+     * straight precast panels on a footing, each capped in steps just above the cut, standing in front of the cut face.
+     * The rock above keeps its relief, and at most a level of it is walled; a slope beneath a road never carries one.
+     */
+    void retainingWalls(List<BoardSurface.Face> result) {
+        if (!self.road() || self.liquid()) { return; }
+        float m = metres(1);
+        for (int e = 0; e < 6; e++) {
+            Edge edge = edge(e);
+            // Earth slopes get walls; a taller cliff is simply cut back as rock. Nothing walls off a road's own exit.
+            if (!edge.profiled || edge.lower != self || edge.upper.liquid() || edge.drop > 2 * BoardGeometry.level()
+                  || (tile.roadExits() & 1 << BoardGeometry.edgeDirection(e)) != 0) {
+                continue;
+            }
+            int count = samples(edge);
+            float[] rows = rows(edge.bottom(), Math.min(edge.top(), edge.bottom() + BoardGeometry.level()));
+            List<Vector3> foot = new ArrayList<>();
+            List<Float> tops = new ArrayList<>();
+            for (int i = 0; i <= count; i++) {
+                float t = canonical(e, i, count), top = Float.NaN;
+                Vector3 base = null;
+                // The wall retains the cut rising from the toe; rock cut higher up is only trimmed.
+                for (float z : rows) {
+                    Vector3 natural = naturalPoint(edge, t, z), cut = cutForRoads(edge, t, new Vector3(natural));
+                    if (base == null) { base = cut; }
+                    if (natural.dst2(cut) <= .09f * m * m) { break; }
+                    top = z;
+                }
+                if (!Float.isNaN(top)) {
+                    foot.add(base);
+                    tops.add(Math.min(top + .3f * m, edge.bottom() + BoardGeometry.level()));
+                    if (i < count) { continue; }
+                }
+                if (foot.size() > 1 && foot.getFirst().dst(foot.getLast()) >= 3 * m) {
+                    panels(foot, tops, edge.nx, edge.ny, e, result);
+                }
+                foot.clear();
+                tops.clear();
+            }
+        }
+    }
+
+    /** Panels along a cut foot, facing (nx, ny) into the road's hex; see {@link #retainingWalls}. */
+    private static void panels(List<Vector3> foot, List<Float> tops, float nx, float ny, int edge,
+          List<BoardSurface.Face> result) {
+        float m = metres(1), width = 2.5f * m, joint = .05f * m, thick = .2f * m, step = .5f * m;
+        float footing = .3f * m, toe = .3f * m, cap = .25f * m, lip = .08f * m, bottom = foot.getFirst().z;
+        float[] along = new float[foot.size()];
+        for (int i = 1; i < foot.size(); i++) { along[i] = along[i - 1] + foot.get(i).dst(foot.get(i - 1)); }
+        float length = along[along.length - 1];
+        int count = Math.max(1, Math.round(length / width));
+        for (int k = 0; k < count; k++) {
+            float from = k * length / count + (k == 0 ? 0 : joint / 2);
+            float to = (k + 1) * length / count - (k + 1 == count ? 0 : joint / 2);
+            float top = 0;
+            for (int i = 0; i < foot.size(); i++) {
+                if (along[i] >= from - width / 4 && along[i] <= to + width / 4) { top = Math.max(top, tops.get(i)); }
+            }
+            top = bottom + (float) Math.ceil((top - bottom) / step) * step;
+            // A straight panel stands in front of the cut, from the footing to its stepped top, closed at its ends.
+            Vector3 a = at(foot, along, from).add(nx * thick, ny * thick, 0);
+            Vector3 b = at(foot, along, to).add(nx * thick, ny * thick, 0);
+            if (nx * (b.y - a.y) - ny * (b.x - a.x) < 0) {
+                Vector3 swap = a;
+                a = b;
+                b = swap;
+            }
+            Vector3 backA = new Vector3(a).sub(nx * thick, ny * thick, 0), backB = new Vector3(b).sub(nx * thick, ny * thick, 0);
+            box(result, a, b, backA, backB, bottom + footing, top, edge);
+            // The cap overhangs the panel's face a little; the footing runs on under the joints.
+            box(result, new Vector3(a).add(nx * lip, ny * lip, 0), new Vector3(b).add(nx * lip, ny * lip, 0), backA, backB,
+                  top, top + cap, edge);
+            box(result, new Vector3(a).add(nx * toe, ny * toe, 0), new Vector3(b).add(nx * toe, ny * toe, 0),
+                  backA, backB, bottom - .5f * m, bottom + footing, edge);
+        }
+    }
+
+    /** The point at a distance along a polyline with the given cumulative lengths. */
+    private static Vector3 at(List<Vector3> points, float[] along, float distance) {
+        for (int i = 1; i < points.size(); i++) {
+            if (distance <= along[i] || i == points.size() - 1) {
+                float u = Math.clamp((distance - along[i - 1]) / Math.max(1e-6f, along[i] - along[i - 1]), 0, 1);
+                return new Vector3(points.get(i - 1)).lerp(points.get(i), u);
+            }
+        }
+        return new Vector3(points.getFirst());
+    }
+
+    /** A box between two front and two back corners and two heights: its front, top and both ends. */
+    private static void box(List<BoardSurface.Face> result, Vector3 a, Vector3 b, Vector3 backA, Vector3 backB,
+          float low, float high, int edge) {
+        Vector3 la = new Vector3(a.x, a.y, low), lb = new Vector3(b.x, b.y, low);
+        Vector3 ha = new Vector3(a.x, a.y, high), hb = new Vector3(b.x, b.y, high);
+        Vector3 ra = new Vector3(backA.x, backA.y, high), rb = new Vector3(backB.x, backB.y, high);
+        Vector3 qa = new Vector3(backA.x, backA.y, low), qb = new Vector3(backB.x, backB.y, low);
+        addQuad(result, la, lb, hb, ha, BoardSurface.Finish.WALL, edge);
+        addQuad(result, ha, hb, rb, ra, BoardSurface.Finish.WALL, edge);
+        addQuad(result, qa, la, ha, ra, BoardSurface.Finish.WALL, edge);
+        addQuad(result, lb, qb, rb, hb, BoardSurface.Finish.WALL, edge);
+    }
+
     /** The top of a straight face: this hex's own canonical boundary point where one exists, else the side's point. */
     private Vector3 rimPoint(BoardSurface.Side side, float t, Vector3 fallback) {
         if (!sculpted) { return new Vector3(fallback); }
@@ -3130,7 +3304,7 @@ final class BoardRelief {
             for (int r = 0; r <= last; r++) {
                 // Ordinary cliffs retain their exact rim. A water mouth only constrains this same rock surface.
                 Vector3 point = side != null ? self.liquid() ? waterWallPoint(e, edge, parameter, t, rows[r], side)
-                      : gradedWallPoint(e, t, rows[r], side)
+                      : gradedWallPoint(e, edge, parameter, t, rows[r], side)
                       : contour.isEmpty() && r == last && edge.upper == self && rims[e] != null
                             ? new Vector3(rims[e][i]) : edgePoint(edge, parameter, rows[r]);
                 if (side == null && !contour.isEmpty()) { point.z = bottom; }
@@ -3140,12 +3314,23 @@ final class BoardRelief {
         return grid;
     }
 
-    /** The road supplies only the exposed vertical span; the relief engine still owns its profile. */
-    private Vector3 gradedWallPoint(int e, float t, float z, BoardSurface.Side side) {
+    /** The road constrains the contacts, while the exposed face keeps the canonical cliff profile. */
+    private Vector3 gradedWallPoint(int e, Edge edge, float parameter, float t, float z, BoardSurface.Side side) {
         float a = along(e, side.a()), b = along(e, side.b());
         float u = Math.clamp((t - a) / Math.max(.00001f, b - a), 0, 1);
         float low = lerp(side.lowA(), side.lowB(), u), high = lerp(side.a().z, side.b().z, u);
-        return roadPoint(e, t, Math.clamp(z, low, high));
+        z = Math.clamp(z, low, high);
+        float contact = Math.min(metres(1.5f), (high - low) * .5f);
+        if (contact < EPSILON) { return roadPoint(e, t, z); }
+        Vector3 point = edgePoint(edge, parameter, z);
+        // The two contact bands never overlap, even where the exposed wall tapers to nothing.
+        float boundary = z - low < high - z ? low : high;
+        float weight = 1 - smooth(Math.abs(z - boundary) / contact);
+        if (weight > 0) {
+            Vector3 offset = roadPoint(e, t, boundary).sub(edgePoint(edge, parameter, boundary));
+            point.mulAdd(offset, weight);
+        }
+        return point;
     }
 
     /** Clip the shared cliff to the mouth's rim and bed; recess only rock that would enter the falling sheet. */
@@ -3154,8 +3339,9 @@ final class BoardRelief {
         float u = Math.clamp((t - a) / Math.max(.00001f, b - a), 0, 1);
         Vector3 rim = new Vector3(side.a()).lerp(side.b(), u);
         float low = lerp(side.lowA(), side.lowB(), u), m = metres(1);
-        z = Math.clamp(z, low, rim.z);
+        // A bank with no height left can round its low end a hair above the rim.
         if (rim.z - low < .0001f * m) { return rim; }
+        z = Math.clamp(z, low, rim.z);
         // Narrow bank ends can be shorter than the two contact blends. Keep those blends disjoint:
         // applying both offsets at the same endpoint moves the wall away from its rim and opens a hole.
         float contact = Math.min(1.5f * m, (rim.z - low) * .5f);

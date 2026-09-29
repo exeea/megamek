@@ -34,7 +34,7 @@ class GpuCaptureInvalidationTest {
                     graphics.setColor(new Color(coords.getX() * 5, coords.getY() * 5, 50));
                     graphics.fillRect(90, 90, 20, 20);
                 });
-                fixture.view.clearHexImageCache();
+                fixture.view.clearArtwork();
                 Rectangle previous = new Rectangle(1, 1, 20, 20);
                 fixture.source.setVisibleArea(previous);
                 fixture.source.refresh();
@@ -69,7 +69,7 @@ class GpuCaptureInvalidationTest {
                     previous = next;
                 }
                 painted.clear();
-                fixture.view.clearHexImageCache();
+                fixture.view.clearArtwork();
                 fixture.source.refresh();
                 assertEquals(previous.width * previous.height, painted.size(), "Invalidation repaints the entire view");
             });
@@ -105,7 +105,7 @@ class GpuCaptureInvalidationTest {
                 BoardScene incremental = fixture.source.takeFrame().scene();
                 assertSame(before.tile(distant), incremental.tile(distant), "An edit must retain untouched tile snapshots");
                 assertEquals(4, incremental.tile(edited).elevation());
-                try (GpuBoardSource fresh = new GpuBoardSource(fixture.view.getClientState(), () -> fixture.panel)) {
+                try (GpuBoardSource fresh = new GpuBoardSource(fixture.view, () -> fixture.panel)) {
                     assertEquals(fresh.takeFrame().scene().tiles(), incremental.tiles(),
                           "Incremental artwork and neighbour captures must match a complete board capture");
                 }
@@ -140,7 +140,7 @@ class GpuCaptureInvalidationTest {
     }
 
     private static void assertCompleteCapture(GpuBoardFixture fixture) {
-        try (GpuBoardSource fresh = new GpuBoardSource(fixture.view.getClientState(), () -> fixture.panel)) {
+        try (GpuBoardSource fresh = new GpuBoardSource(fixture.view, () -> fixture.panel)) {
             assertEquals(fresh.takeFrame().scene().tiles(), fixture.source.takeFrame().scene().tiles(),
                   "Accumulated edits, undo and whole-board invalidation must match a complete capture");
         }
@@ -156,13 +156,13 @@ class GpuCaptureInvalidationTest {
                     graphics.setColor(Color.RED);
                     graphics.fillRect(90, 90, 20, 20);
                 });
-                fixture.view.clearHexImageCache();
+                fixture.view.clearArtwork();
                 fixture.source.refresh();
                 int first = paints.get();
                 assertTrue(first > 0);
                 fixture.source.refresh();
                 assertEquals(first, paints.get(), "The timer must not repaint an unchanged board");
-                fixture.view.clearHexImageCache();
+                fixture.view.clearArtwork();
                 fixture.source.refresh();
                 assertTrue(paints.get() > first, "Shared painter invalidation must reach the GPU snapshot");
                 fixture.source.setVisibleArea(new Rectangle(0, 16, 1, 1));

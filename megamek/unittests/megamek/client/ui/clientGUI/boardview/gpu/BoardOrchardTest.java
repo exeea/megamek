@@ -104,15 +104,16 @@ class BoardOrchardTest {
 
     @ParameterizedTest
     @ValueSource(booleans = { false, true })
-    void shippedOrchardsHaveDistinctGeometryAndThreeTexturedLods(boolean snow) {
+    void shippedOrchardsHaveDistinctGeometryAndTexturedLods(boolean snow) {
         File root = new File(Configuration.dataDir(), "models/board");
         var shapes = new HashSet<Integer>();
         for (String form : FORMS) {
             String name = "orchard-" + form + (snow ? "-snow" : "");
             var levels = RigidGlb.loadLods(new FileHandle(new File(root, name + ".glb")), root.toPath());
-            assertEquals(3, levels.size(), name);
+            assertEquals(4, levels.size(), name);
             assertNotSame(levels.get(0), levels.get(1));
             assertNotSame(levels.get(1), levels.get(2));
+            assertNotSame(levels.get(2), levels.get(3));
             shapes.add(java.util.Arrays.hashCode(levels.getFirst().meshes.first().vertices));
             int previous = Integer.MAX_VALUE;
             for (int lod = 0; lod < 3; lod++) {

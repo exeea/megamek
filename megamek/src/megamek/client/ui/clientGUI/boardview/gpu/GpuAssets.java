@@ -26,7 +26,6 @@ import com.badlogic.gdx.graphics.TextureArray;
 import com.badlogic.gdx.graphics.TextureArrayData;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
-import com.badlogic.gdx.graphics.glutils.FileTextureData;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.JsonReader;
 import com.badlogic.gdx.utils.JsonValue;
@@ -45,6 +44,7 @@ final class GpuAssets implements Disposable {
     private final Map<Boolean, Magma> magmas = new HashMap<>();
     private final Map<String, Sculpt> sculpts = new HashMap<>();
     private TextureArray sculptArray;
+    private TextureArray roadArray;
     private JsonValue sculptManifest;
     private Texture flatColor;
     private Texture flatNormal;
@@ -90,7 +90,7 @@ final class GpuAssets implements Disposable {
                 files.add(materialFile("sculpt/" + name));
                 files.add(materialFile("sculpt/" + name + "-normal"));
             }
-            sculptArray = new TextureArray(new SculptArrayData(files));
+            sculptArray = new TextureArray(new SculptArrayData(files, 2));
             sculptArray.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
             sculptArray.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
             sculptArray.setAnisotropicFilter(8);
@@ -98,14 +98,38 @@ final class GpuAssets implements Disposable {
         return sculptArray;
     }
 
+    /**
+     * Colour, normal and surface maps of every road material, three layers each in {@link GpuRoads#MATERIALS} order,
+     * so that one draw holds all of a chunk's road coats. Null while a data set lacks any of them: its roads then keep
+     * their original materials.
+     */
+    TextureArray roadArray() {
+        if (roadArray == null) {
+            var files = new ArrayList<FileHandle>();
+            for (String name : GpuRoads.MATERIALS) {
+                for (String map : List.of("", "-normal", "-surface")) { files.add(materialFile("roads/" + name + map)); }
+            }
+            if (!files.stream().allMatch(FileHandle::exists)) { return null; }
+            roadArray = new TextureArray(new SculptArrayData(files, 3));
+            roadArray.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
+            roadArray.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
+            roadArray.setAnisotropicFilter(8);
+        }
+        return roadArray;
+    }
+
     /** Uploaded once per renderer; missing maps get the same neutral fallback as ordinary sculpt materials. */
     private static final class SculptArrayData implements TextureArrayData {
+        /** Neutral colour, flat normal and middling surface, by a layer's place in its material's set of maps. */
+        private static final int[] FALLBACKS = { 0xa0a0a0ff, 0x8080ffff, 0x808080ff };
         private final List<FileHandle> files;
+        private final int maps;
         private boolean prepared;
         private int width = 2, height = 2;
 
-        SculptArrayData(List<FileHandle> files) {
+        SculptArrayData(List<FileHandle> files, int maps) {
             this.files = List.copyOf(files);
+            this.maps = maps;
             // TextureArray allocates storage before calling prepare(), so its dimensions must already be known.
             for (var file : files) {
                 if (!file.exists()) { continue; }
@@ -136,7 +160,7 @@ final class GpuAssets implements Disposable {
                         try { pixels.drawPixmap(source, 0, 0, source.getWidth(), source.getHeight(), 0, 0, width, height); }
                         finally { source.dispose(); }
                     } else {
-                        pixels.setColor(layer % 2 == 0 ? 0xa0a0a0ff : 0x8080ffff);
+                        pixels.setColor(FALLBACKS[layer % maps]);
                         pixels.fill();
                     }
                     Gdx.gl30.glTexSubImage3D(GL30.GL_TEXTURE_2D_ARRAY, 0, 0, 0, layer, width, height, 1,
@@ -173,7 +197,7 @@ final class GpuAssets implements Disposable {
         return lodModel(name, 0);
     }
 
-    /** The tileset remains authoritative: a custom kit overrides only its exact selected artwork path. */
+    /** Custom kits override the exact tileset path for buildings, fuel tanks and industrial structures. */
     GpuBuilding.Assembly building(String asset, int levels, long seed) {
         if (!asset.startsWith("buildings/")) { return null; }
         if (!buildings.containsKey(asset)) {
@@ -278,38 +302,6 @@ final class GpuAssets implements Disposable {
             flatColor = solid(0xa0a0a0ff);
             flatNormal = solid(0x8080ffff);
         }
-    }
-
-    /**
-     * A skirt strip covers V from zero at the cliff top to one at its lower edge, so it tiles only along U.
-     * Clamping there stops the sampler from wrapping the last row into the first one and ringing its edge.
-     * Associate color with coverage before filtering and mip generation, so transparent black cannot make
-     * dark fringes. Keep file-backed texture data so context restoration performs the same conversion.
-     */
-    Texture cornice(String name) {
-        FileHandle file = materialFile(name);
-        return materials.computeIfAbsent("cornice:" + file.file().toPath().normalize(), key -> {
-            Texture texture = new Texture(new FileTextureData(file, null, Pixmap.Format.RGBA8888, true) {
-                @Override
-                public Pixmap consumePixmap() {
-                    Pixmap pixels = super.consumePixmap();
-                    pixels.setBlending(Pixmap.Blending.None);
-                    for (int y = 0; y < pixels.getHeight(); y++) {
-                        for (int x = 0; x < pixels.getWidth(); x++) {
-                            int rgba = pixels.getPixel(x, y), alpha = rgba & 255;
-                            int red = ((rgba >>> 24) * alpha + 127) / 255;
-                            int green = ((rgba >>> 16 & 255) * alpha + 127) / 255;
-                            int blue = ((rgba >>> 8 & 255) * alpha + 127) / 255;
-                            pixels.drawPixel(x, y, red << 24 | green << 16 | blue << 8 | alpha);
-                        }
-                    }
-                    return pixels;
-                }
-            });
-            texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
-            texture.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.ClampToEdge);
-            return texture;
-        });
     }
 
     private FileHandle materialFile(String name) {
@@ -545,6 +537,7 @@ final class GpuAssets implements Disposable {
         magmas.clear();
         sculpts.clear();
         if (sculptArray != null) { sculptArray.dispose(); sculptArray = null; }
+        if (roadArray != null) { roadArray.dispose(); roadArray = null; }
         sculptManifest = null;
         if (flatColor != null) {
             flatColor.dispose();

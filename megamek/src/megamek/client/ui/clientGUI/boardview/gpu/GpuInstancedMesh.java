@@ -1,12 +1,25 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Mesh;
+import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
+import com.badlogic.gdx.utils.IntArray;
 
-/** Instanced meshes must disable their instance attributes before unbinding the VAO in a core GL context. */
+/**
+ * Instanced mesh that can draw part of its uploaded instances: a prefix, or several ranges. Ground cover and trees
+ * keep a whole chunk's, or the whole board's, instances uploaded and select per frame, so changing density or view
+ * never uploads again. Instance attributes must be disabled before unbinding the VAO in a core GL context.
+ */
 final class GpuInstancedMesh extends Mesh {
+    // Instances to draw, or -1 for all uploaded ones; ignored while ranges are set.
+    int drawInstances = -1;
+    // (first instance, count) pairs to draw instead, with one bind for all of them.
+    private IntArray ranges;
+
     GpuInstancedMesh(int vertices, int indices, VertexAttributes attributes) {
         super(true, vertices, indices, attributes);
     }
@@ -19,6 +32,49 @@ final class GpuInstancedMesh extends Mesh {
         short[] indexData = new short[source.getNumIndices()];
         source.getIndices(indexData);
         setIndices(indexData);
+    }
+
+    /** Draw only these (first instance, count) ranges of the uploaded instances. */
+    void drawRanges(IntArray ranges) { this.ranges = ranges; }
+
+    /** Back to drawing every uploaded instance, or the prefix in {@link #drawInstances}. */
+    void clearRanges() { ranges = null; }
+
+    @Override
+    public void render(ShaderProgram shader, int primitiveType, int offset, int count, boolean autoBind) {
+        if (ranges == null && (drawInstances < 0 || !isInstanced)) {
+            super.render(shader, primitiveType, offset, count, autoBind);
+            return;
+        }
+        if (count == 0 || ranges == null && drawInstances == 0) { return; }
+        if (autoBind) { bind(shader); }
+        if (ranges != null) {
+            // The bind left the instance buffer bound and its attributes pointed at instance 0. Pointing them at
+            // each range's first instance draws that range alone, with plain instanced draws on any OpenGL 3.3.
+            VertexAttributes attributes = instances.getAttributes();
+            int stride = attributes.vertexSize;
+            int[] locations = new int[attributes.size()];
+            for (int i = 0; i < locations.length; i++) { locations[i] = shader.getAttributeLocation(attributes.get(i).alias); }
+            for (int r = 0; r < ranges.size; r += 2) {
+                if (ranges.items[r + 1] <= 0) { continue; }
+                point(attributes, locations, ranges.items[r] * stride);
+                Gdx.gl30.glDrawElementsInstanced(primitiveType, count, GL20.GL_UNSIGNED_SHORT, offset * 2, ranges.items[r + 1]);
+            }
+            point(attributes, locations, 0);
+        } else {
+            Gdx.gl30.glDrawElementsInstanced(primitiveType, count, GL20.GL_UNSIGNED_SHORT, offset * 2,
+                  Math.min(drawInstances, instances.getNumInstances()));
+        }
+        if (autoBind) { unbind(shader); }
+    }
+
+    private static void point(VertexAttributes attributes, int[] locations, int bytes) {
+        for (int i = 0; i < locations.length; i++) {
+            if (locations[i] < 0) { continue; }
+            VertexAttribute attribute = attributes.get(i);
+            Gdx.gl30.glVertexAttribPointer(locations[i], attribute.numComponents, attribute.type, attribute.normalized,
+                  attributes.vertexSize, attribute.offset + bytes);
+        }
     }
 
     @Override

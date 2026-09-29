@@ -1126,7 +1126,7 @@ public abstract class AbstractUnitSelectorDialog extends JDialog implements Runn
         // This prevents the UI from freezing, and allows the
         // "Please wait..." dialog to behave properly on various Java VMs.
         meks = condenseLinkedAssets(mscInstance.getAllMeks());
-        unitLoadingDialog.setVisible(false);
+        SwingUtilities.invokeLater(() -> unitLoadingDialog.setVisible(false));
 
         // break out if there are no units to filter
         if (meks == null) {

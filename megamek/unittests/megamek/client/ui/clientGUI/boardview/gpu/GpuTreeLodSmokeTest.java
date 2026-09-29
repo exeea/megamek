@@ -42,6 +42,8 @@ class GpuTreeLodSmokeTest {
           "pine-tall", "palm", "palm-bent", "tree-snow", "tree-broad-snow", "tree-slender-snow", "birch-snow",
           "willow-snow", "pine-snow", "pine-tall-snow", "pine-broad", "pine-broad-snow", "tree-dead",
           "tree-dead-snow", "cactus", "cactus-flowers");
+    /** A projected diameter within each level's band, past the hysteresis of the thresholds on both sides. */
+    static final float[] PIXELS = { 200, 60, 32, 12 };
 
     @Test
     void changesSubmittedGeometryWithoutChangingPickingOpacityOrShadows() {
@@ -67,15 +69,15 @@ class GpuTreeLodSmokeTest {
                     for (String name : TREES) {
                         BoardScene scene = scene(name);
                         terrain.update(scene);
-                        int[] triangles = new int[3];
-                        for (int level = 0; level < 3; level++) {
+                        int[] triangles = new int[TreeLod.LEVELS];
+                        for (int level = 0; level < TreeLod.LEVELS; level++) {
                             Model model = assets.lodModel(name, level);
                             for (var part : model.meshParts) {
                                 triangles[level] += part.size / 3;
                             }
                             assertEquals(name.contains("snow"), model.getMaterial("snow") != null, name);
                         }
-                        assertTrue(triangles[1] <= 240 && triangles[2] <= 96, name);
+                        assertTrue(triangles[1] <= 240 && triangles[2] <= 96 && triangles[3] <= 12, name);
                         BoundingBox bounds = assets.model(name).calculateBoundingBox(new BoundingBox());
                         assertEquals(30, bounds.getDepth(), .001f, "Plant GLBs must not contain flattened geometry: " + name);
                         float diameter = bounds.getDimensions(new Vector3()).scl(1, 1, 36 / bounds.getDepth()).len();
@@ -83,8 +85,8 @@ class GpuTreeLodSmokeTest {
                               new Vector3(0, 0, -1)));
                         int nearCount = 0;
                         int nearShadowCount = 0;
-                        for (int level : new int[] { 0, 1, 2, 0, 2, 1, 0 }) {
-                            camera.camera.zoom = level == 0 ? 0.1f : zoomForSize(diameter, level == 1 ? 50 : 12);
+                        for (int level : new int[] { 0, 1, 2, 3, 0, 3, 2, 1, 0 }) {
+                            camera.camera.zoom = level == 0 ? 0.1f : zoomForSize(diameter, PIXELS[level]);
                             camera.update();
                             terrain.animate(0, List.of(), 1);
                             int shadowCount = count(profiler, () -> terrain.renderShadows(camera.camera, List.of()));
@@ -108,8 +110,8 @@ class GpuTreeLodSmokeTest {
                         }
                         // An occupied tree stays opaque through both LoD thresholds, including camera depth
                         // for the unit outline. The same selected geometry casts its shadow.
-                        for (int level : new int[] { 1, 2, 0 }) {
-                            camera.camera.zoom = level == 0 ? 0.1f : zoomForSize(diameter, level == 1 ? 50 : 12);
+                        for (int level : new int[] { 1, 2, 3, 0 }) {
+                            camera.camera.zoom = level == 0 ? 0.1f : zoomForSize(diameter, PIXELS[level]);
                             camera.update();
                             assertEquals(nearShadowCount - 3 * (triangles[0] - triangles[level]),
                                   count(profiler, () -> terrain.renderShadows(camera.camera, List.of())));
@@ -222,12 +224,14 @@ class GpuTreeLodSmokeTest {
 
     /** Native pixel scale at the largest size each coarse mesh can retain through hysteresis. */
     private static void compareDistantLevels(GpuAssets assets, ModelBatch batch, Environment environment) throws Exception {
-        BufferedImage sheet = new BufferedImage(704, TREES.size() * 132 + 32, BufferedImage.TYPE_INT_RGB);
+        String[] labels = { "Near / 150px", "Medium / 150px", "Near / 88px", "Medium / 88px", "Far / 52px", "Far / 26px", "Impostor / 26px", "Impostor / 12px" };
+        int[] levels = { 0, 1, 0, 1, 2, 2, 3, 3 };
+        float[] sizes = { 150, 150, 88, 88, 52.8f, 26.4f, 26.4f, 12 };
+        BufferedImage sheet = new BufferedImage(192 + labels.length * 128, TREES.size() * 132 + 32, BufferedImage.TYPE_INT_RGB);
         var graphics = sheet.createGraphics();
         try {
             graphics.setColor(java.awt.Color.WHITE);
-            String[] labels = { "Near / 88px", "Medium / 88px", "Medium / 26px", "Far / 26px" };
-            for (int column = 0; column < 4; column++) {
+            for (int column = 0; column < labels.length; column++) {
                 graphics.drawString(labels[column], 192 + column * 128, 20);
             }
             for (int row = 0; row < TREES.size(); row++) {
@@ -239,11 +243,10 @@ class GpuTreeLodSmokeTest {
                 camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                 camera.setIsometric(true);
                 camera.center(new Vector3(0, 0, 18));
-                for (int column = 0; column < 4; column++) {
-                    int level = column == 0 ? 0 : column == 3 ? 2 : 1;
-                    camera.camera.zoom = zoomForSize(diameter, column < 2 ? 88 : 26.4f);
+                for (int column = 0; column < labels.length; column++) {
+                    camera.camera.zoom = zoomForSize(diameter, sizes[column]);
                     camera.update();
-                    BufferedImage frame = render(batch, environment, assets.lodModel(name, level), camera);
+                    BufferedImage frame = render(batch, environment, assets.lodModel(name, levels[column]), camera);
                     graphics.drawImage(frame.getSubimage(frame.getWidth() / 2 - 64, frame.getHeight() / 2 - 64, 128, 128),
                           192 + column * 128, row * 132 + 32, null);
                 }

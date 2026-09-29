@@ -5,16 +5,48 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.Mockito.mock;
 
+import java.awt.geom.Area;
+
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.OrthographicCamera;
+import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.Shader;
 import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
+import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.DefaultRenderableSorter;
 import com.badlogic.gdx.utils.Array;
 import org.junit.jupiter.api.Test;
 
 class GpuOpaqueSorterTest {
+    @Test
+    void roadCoatsFollowTheirSurfaceOrderWithOtherTransparencyAndGroundCover() {
+        var camera = new OrthographicCamera();
+        var sorter = new GpuOpaqueSorter();
+        Shader a = mock(Shader.class), b = mock(Shader.class);
+        Renderable base = part(a, 1), paint = part(b, 20), ground = part(a, 2);
+        base.material.set(new BlendingAttribute(true, 1), new TextureAttribute(GpuRoads.Mask.TYPE, mock(Texture.class)),
+              GpuRoads.attribute(new GpuRoads.Patch(new Area(), "roads/asphalt", Color.WHITE, 1, .04f, null)));
+        paint.material.set(new BlendingAttribute(true, 1), new TextureAttribute(GpuRoads.Mask.TYPE, mock(Texture.class)),
+              GpuRoads.attribute(new GpuRoads.Patch(new Area(), "concrete", Color.WHITE, 1, .065f, null)));
+        // ModelInstance copies must retain coat ordering as well as the shader's transition value.
+        paint.material = new Material(paint.material);
+        Renderable near = part(a, 3), far = part(b, 30);
+        near.material.set(new BlendingAttribute(true, .5f));
+        far.material.set(new BlendingAttribute(true, .5f));
+        for (boolean grass : new boolean[] { false, true }) {
+            if (grass) { ground.material.set(new GpuGroundCover.Wind()); }
+            var parts = new Array<>(new Renderable[] { near, paint, ground, base, far });
+            sorter.sort(camera, parts);
+            assertSame(ground, parts.get(0));
+            assertSame(base, parts.get(1), "A distant coat cannot be drawn before its own base");
+            assertSame(paint, parts.get(2));
+            assertSame(far, parts.get(3), "Other transparency keeps its back-to-front ordering");
+            assertSame(near, parts.get(4));
+        }
+    }
+
     @Test
     void recreatingProgramsPreservesDrawOrderAndDepthTies() {
         var camera = new OrthographicCamera();

@@ -71,6 +71,7 @@ import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommandBarPanel;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.BoardViewPanel;
 import megamek.client.ui.clientGUI.boardview.RulerDialog;
@@ -248,7 +249,7 @@ class GpuBoardWindowSmokeTest {
                     await(() -> onSwing(() -> display.getCurrentEntity() == second));
                     awaitNavigation();
                     assertEquals(second.getId(), source.takeFrame().scene().selectedId());
-                    assertEquals(second.getId(), onSwing(() -> ui.view().getCenterRequest().entityId()));
+                    assertEquals(second.getId(), onSwing(() -> ui.view().getClientState().getCenterRequest().entityId()));
                     assertNotEquals(unselectedBorder, onSwing(() -> sidebarBorderColor(ui.overview(), 1)),
                           "The sidebar highlights selection without a turn");
                     assertNotEquals(beforeSidebar, onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).boardCamera.focus.cpy()),
@@ -1126,7 +1127,7 @@ class GpuBoardWindowSmokeTest {
             try {
                 onSwing(() -> {
                     ui.view().centerOn(fixture.entity);
-                    assertEquals(fixture.entity.getId(), ui.view().getCenterRequest().entityId());
+                    assertEquals(fixture.entity.getId(), ui.view().getClientState().getCenterRequest().entityId());
                     assertNull(ui.view().getPanel().getParent());
                     return null;
                 });
@@ -1210,7 +1211,7 @@ class GpuBoardWindowSmokeTest {
             });
             try {
                 openNative(ui);
-                await(() -> onSwing(() -> ui.view().sidePanelInset() > 0));
+                await(() -> onSwing(() -> ui.view().getClientState().sidePanelInset() > 0));
                 input(() -> GpuBoardTestUi.click("battle-report-toggle"));
                 pressShortcut(KeyCommandBind.UNIT_DISPLAY);
                 await(() -> onSwing(() -> unit.isShowing() && unit.isAlwaysOnTop()));
@@ -1237,7 +1238,7 @@ class GpuBoardWindowSmokeTest {
                 pressShortcut(KeyCommandBind.UNIT_OVERVIEW);
                 onSwing(() -> {
                     assertFalse(preferences.getShowUnitOverview());
-                    assertTrue(ui.view().sidePanelInset() > 0);
+                    assertTrue(ui.view().getClientState().sidePanelInset() > 0);
                     GpuBoardWindow.showClassic(gui);
                     return null;
                 });
@@ -1245,7 +1246,7 @@ class GpuBoardWindowSmokeTest {
                 onSwing(() -> {
                     assertFalse(unit.isAlwaysOnTop());
                     assertFalse(force.isAlwaysOnTop());
-                    assertEquals(0, ui.view().sidePanelInset(), "2D retains its hidden overview preference");
+                    assertEquals(0, ui.view().getClientState().sidePanelInset(), "2D retains its hidden overview preference");
                     return null;
                 });
             } finally {
@@ -1323,6 +1324,7 @@ class GpuBoardWindowSmokeTest {
                     BoardView view = new BoardView(fixture.game, null, gui, 0);
                     view.setLocalPlayer(fixture.player);
                     ui.view().dispose();
+                    fixture.view.close();
                     doReturn(Optional.of(view.getClientState())).when(gui).getCurrentBoardState();
                     return view;
                 });
@@ -1711,7 +1713,7 @@ class GpuBoardWindowSmokeTest {
                     };
                     input(sidebarClick);
                     onSwing(() -> {
-                        assertEquals(fixture.entity.getId(), ui.view().getCenterRequest().entityId());
+                        assertEquals(fixture.entity.getId(), ui.view().getClientState().getCenterRequest().entityId());
                         return null;
                     });
                     awaitNavigation();
@@ -1842,15 +1844,16 @@ class GpuBoardWindowSmokeTest {
         when(client.getLocalPlayer()).thenReturn(fixture.player);
         when(gui.getFrame()).thenReturn(frame);
         when(gui.getMainPanel()).thenReturn(new JPanel());
-        fixture.view.dispose();
-        fixture.view = new BoardView(fixture.game, null, gui, 0);
+        fixture.view.close();
+        fixture.view = new BoardClientState(fixture.game, null, gui, 0, null);
         fixture.view.setLocalPlayer(fixture.player);
+        BoardView renderer = new BoardView(fixture.view, null, gui);
         if (classic) {
-            frame.add(fixture.view.getComponent());
+            frame.add(renderer.getComponent());
         }
-        BoardView view = spy(fixture.view);
+        BoardView view = spy(renderer);
         // BoardViewPanel retains its original owner; let that owner create its viewport on demand too.
-        doAnswer(invocation -> fixture.view.getComponent()).when(view).getComponent();
+        doAnswer(invocation -> renderer.getComponent()).when(view).getComponent();
         doReturn(gui).when(view).getClientgui();
         when(gui.getClient()).thenReturn(client);
         when(client.getGame()).thenReturn(fixture.game);
@@ -1861,19 +1864,19 @@ class GpuBoardWindowSmokeTest {
             if (invocation.getArgument(0, Boolean.class)) {
                 frame.add(view.getComponent());
             } else {
-                fixture.view.releaseClassicView();
+                renderer.releaseClassicView();
                 view.releaseClassicView();
             }
             frame.validate();
             return null;
         }).when(gui).setClassicBoardViewEnabled(anyBoolean());
         when(gui.getMenuBar()).thenReturn(menus);
-        doReturn(Optional.of(view.getClientState())).when(gui).getCurrentBoardState();
+        doReturn(Optional.of(fixture.view)).when(gui).getCurrentBoardState();
         when(gui.boardViews()).thenReturn(List.of(view));
-        doReturn(List.of(view.getClientState())).when(gui).boardStates();
-        doReturn(view.getClientState()).when(gui).getBoardState();
-        doReturn(view.getClientState()).when(gui).getBoardState(any(BoardLocation.class));
-        doReturn(view.getClientState()).when(gui).getBoardState(any(Entity.class));
+        doReturn(List.of(fixture.view)).when(gui).boardStates();
+        doReturn(fixture.view).when(gui).getBoardState();
+        doReturn(fixture.view).when(gui).getBoardState(any(BoardLocation.class));
+        doReturn(fixture.view).when(gui).getBoardState(any(Entity.class));
         when(gui.getBoardView()).thenReturn(view);
         when(gui.getBoardView(any(BoardLocation.class))).thenReturn(view);
         when(gui.getMainPanel()).thenReturn(new JPanel());
@@ -1889,7 +1892,7 @@ class GpuBoardWindowSmokeTest {
         menus.addActionListener(event -> {
             if (event.getActionCommand().equals(ClientGUI.VIEW_GPU_BOARD)) {
                 GUIPreferences.getInstance().setUse3DBoard(true);
-                GpuBoardWindow.open(view.getClientState(), () -> fixture.panel);
+                GpuBoardWindow.open(fixture.view, () -> fixture.panel);
             } else if (event.getActionCommand().equals(ClientGUI.VIEW_CLASSIC_BOARD)) {
                 GUIPreferences.getInstance().setUse3DBoard(false);
                 GpuBoardWindow.showClassic(gui);

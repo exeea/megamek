@@ -738,7 +738,8 @@ final class GpuBoardSource implements BoardSource {
             Rectangle area = terrainDirty ? new Rectangle(0, 0, board.getWidth(), board.getHeight()) : dirtyHexes;
             view.capturePlanarHexes(area, false, hex -> {
                 int index = hex.coords().getX() * board.getHeight() + hex.coords().getY();
-                nextTiles.set(index, BoardScene.captureTile(board.getHex(hex.coords()), hex, nextTiles.get(index), terrainImages));
+                nextTiles.set(index, BoardScene.captureTile(board.getHex(hex.coords()), hex, nextTiles.get(index), terrainImages,
+                      board::getHex));
             });
             tiles = List.copyOf(nextTiles);
             terrainDirty = false;
@@ -906,7 +907,7 @@ final class GpuBoardSource implements BoardSource {
         if (entity == null) {
             return null;
         }
-        Image image = view.getTileManager().imageFor(entity);
+        Image image = view.getTilesetManager().imageFor(entity);
         return image == null ? null : BoardScene.Pixels.copy(image);
     }
 
@@ -1036,7 +1037,7 @@ final class GpuBoardSource implements BoardSource {
                     pose.armsFlipped(), pose.hullDown()));
         model = model == null ? new BoardScene.UnitModel("", "", "", 1, 0, BoardScene.LocationDamage.NONE, dead)
               : new BoardScene.UnitModel(model.asset(), model.fallback(), model.variant(), model.figures(), model.twist(), model.damage(), dead);
-        Image image = view.getTileManager().wreckMarkerFor(entity, -1);
+        Image image = view.getTilesetManager().wreckMarkerFor(entity, -1);
         usedImages.put(image, true);
         var pixels = unitImages.computeIfAbsent(image, BoardScene.Pixels::copy);
         return new BoardScene.Unit(captured.id(), -1, captured.name(), captured.location(), pixels, false, null,
@@ -1045,7 +1046,7 @@ final class GpuBoardSource implements BoardSource {
 
     private BoardScene.Unit unit(Entity entity, int part, Coords coords, boolean sensor,
           Map<Image, Boolean> usedImages) {
-        Image image = sensor ? view.getRadarBlipImage() : view.getTileManager().textureFor(entity, part);
+        Image image = sensor ? view.getRadarBlipImage() : view.getTilesetManager().textureFor(entity, part);
         usedImages.put(image, true);
         BoardScene.Pixels pixels = unitImages.computeIfAbsent(image, BoardScene.Pixels::copy);
         AnnotationKey annotationKey = new AnnotationKey(entity.getId(), part);
@@ -1053,7 +1054,7 @@ final class GpuBoardSource implements BoardSource {
         unitAnnotations.put(annotationKey, annotations);
         usedImages.put(annotations.image(), true);
         BoardScene.Pixels annotationPixels = unitImages.computeIfAbsent(annotations.image(), BoardScene.Pixels::copy);
-        int facing = sensor ? 0 : view.getTileManager().facingFor(entity);
+        int facing = sensor ? 0 : view.getTilesetManager().facingFor(entity);
         boolean airborne = !sensor && airborne(entity);
         List<Coords> footprint = !sensor && part < 0 ? entity.getOccupiedCoords().stream()
               .sorted(java.util.Comparator.comparingInt(Coords::getX).thenComparingInt(Coords::getY)).toList() : List.of(coords);

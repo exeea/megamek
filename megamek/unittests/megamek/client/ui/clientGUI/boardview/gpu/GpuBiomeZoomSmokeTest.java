@@ -70,7 +70,6 @@ class GpuBiomeZoomSmokeTest {
                             try (var timings = new GpuStageTimings()) {
                                 for (int pass = 0; pass < 3; pass++) {
                                     long uploads = plants.uploads(), grassUploads = grass.uploads();
-                                    int preparing = 0;
                                     for (int step = 0; step < 180; step++) {
                                         float t = (step < 90 ? step : 179 - step) / 89f;
                                         float pixels = (float) (24 * Math.pow(560.0 / 24, t));
@@ -82,7 +81,6 @@ class GpuBiomeZoomSmokeTest {
                                         timings.stage("frame");
                                         frame.render(terrain, camera, scene);
                                         timings.stage(null);
-                                        if (plants.busy()) { preparing++; }
                                         // Swap/query waits are excluded from render-thread submission and GPU timings.
                                         GLFW.glfwSwapBuffers(GLFW.glfwGetCurrentContext());
                                         Gdx.gl.glFinish();
@@ -90,7 +88,7 @@ class GpuBiomeZoomSmokeTest {
                                     }
                                     report.append(kind).append(" pass ").append(pass).append(": plant uploads=")
                                           .append(plants.uploads() - uploads).append(", grass uploads=")
-                                          .append(grass.uploads() - grassUploads).append(", preparing frames=").append(preparing).append('\n');
+                                          .append(grass.uploads() - grassUploads).append('\n');
                                     timings.appendReport(report, kind + " zoom " + pass);
                                     Files.writeString(new File(output, "timings.txt").toPath(), report.toString());
                                 }

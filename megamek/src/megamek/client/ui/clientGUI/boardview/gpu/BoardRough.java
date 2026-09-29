@@ -29,7 +29,7 @@ public final class BoardRough {
             Map<String, BoardShape> result = new HashMap<>();
             for (String name : List.of("dragon-tooth", "felled-trunk", "charred-stump", "fallen-stump")) {
                 String asset = "rough/" + name;
-                result.put(asset, BoardShape.loadKit(asset).get(name));
+                result.put(asset, BoardShape.loadModel(asset));
             }
             return Map.copyOf(result);
         }

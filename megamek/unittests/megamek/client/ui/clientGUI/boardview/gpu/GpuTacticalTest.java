@@ -18,6 +18,7 @@ import com.badlogic.gdx.math.Vector3;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
+import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.sprite.C3Sprite;
 import megamek.client.ui.clientGUI.boardview.sprite.CursorSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
@@ -66,16 +67,14 @@ class GpuTacticalTest {
                     fixture.source.refresh();
                     BoardScene scene = fixture.source.takeFrame().scene();
                     assertFalse(scene.tactical().fills().isEmpty(), sprite.getClass().getSimpleName());
-                    var surfaces = BoardTacticalGeometry.surfaces(scene);
                     for (var fill : scene.tactical().fills()) {
                         assertNotNull(fill.planeAnchor(), sprite.getClass().getSimpleName());
                         Coords owner = BoardTacticalGeometry.anchorCoords(scene, fill.planeAnchor());
                         assertNotNull(owner);
-                        float z = BoardTacticalGeometry.floatingZ(scene, owner, surfaces);
+                        float z = BoardTacticalGeometry.floatingZ(scene, owner);
                         List<BoardTacticalGeometry.Triangle> triangles = new ArrayList<>();
                         BoardTacticalGeometry.drape(scene, fill, 10000, triangles::add, queried -> {
-                            assertEquals(owner, queried, "No neighboring surfaces or slope clipping");
-                            return surfaces.apply(queried);
+                            throw new AssertionError("A flat sprite must not query terrain at " + queried);
                         }, new BoardTacticalGeometry.Clipper());
                         assertEquals(BoardTacticalGeometry.flat(fill).size(), triangles.size());
                         for (var triangle : triangles) {
@@ -284,11 +283,16 @@ class GpuTacticalTest {
                 assertFalse(captured.tactical().labels().isEmpty(), "Movement costs must remain readable labels");
                 assertEquals(before.tiles().stream().map(BoardScene.Tile::tactical).toList(),
                       captured.tiles().stream().map(BoardScene.Tile::tactical).toList());
-                fixture.view.getComponent();
-                fixture.view.zoomOut();
-                float zoom = fixture.view.getScale();
-                assertEquals(captured.tactical(), fixture.view.captureTacticalGeometry());
-                assertEquals(zoom, fixture.view.getScale());
+                BoardView classic = fixture.classicView();
+                try {
+                    classic.getComponent();
+                    classic.zoomOut();
+                    float zoom = classic.getScale();
+                    assertEquals(captured.tactical(), fixture.view.captureTacticalGeometry());
+                    assertEquals(zoom, classic.getScale());
+                } finally {
+                    classic.dispose();
+                }
                 sprites.forEach(sprite -> sprite.setHidden(true));
                 BoardTactical hidden = fixture.view.captureTacticalGeometry();
                 assertNotEquals(captured.tactical(), hidden);

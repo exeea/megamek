@@ -147,7 +147,7 @@ final class GpuMapSource implements BoardSource {
                     BoardScene.Tile tile = previous;
                     if (changed) {
                         var pixels = artwork.capture(board, coords, true);
-                        tile = BoardScene.captureTile(board.getHex(coords), pixels, previous, images);
+                        tile = BoardScene.captureTile(board.getHex(coords), pixels, previous, images, board::getHex);
                         if (editor != null) {
                             var markers = BoardEditorTerrain.capture(board.getHex(coords), coords, pixels.blankTerrains());
                             if (markers == BoardTactical.EMPTY) { terrainMarkers.remove(coords); }

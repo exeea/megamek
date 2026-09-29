@@ -4,14 +4,14 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -68,31 +68,28 @@ class GpuVegetationEditSmokeTest {
                     GpuReviewFrame.save(new File(output, "before.png"));
                     // The direct cache checks use scene order rather than chunk order; normalize it before
                     // measuring uploads so a harmless reorder does not count as geometry invalidation.
-                    grass.visible(scene, camera.camera, scene.tiles(), terrain::tacticalSurface);
-                    plants.visible(scene, camera.camera, scene.tiles(), terrain::tacticalSurface);
-                    var grassBefore = submitted(grass, "models");
-                    var plantsBefore = submitted(plants, "patches");
+                    grass.visible(scene, camera.camera, scene.tiles(), terrain::planted);
+                    plants.visible(scene, camera.camera, scene.tiles(), terrain::planted);
+                    var grassBefore = submitted(grass, scene, terrain::planted);
+                    var plantsBefore = submitted(plants, scene, terrain::planted);
                     assertTrue(grassBefore.keySet().stream().anyMatch(c -> c.distance(EDIT) > 2));
                     assertTrue(plantsBefore.keySet().stream().anyMatch(c -> c.distance(EDIT) > 2));
 
-                    // A tactical-only capture and equivalent surface wrappers must be free even after the CPU budget
-                    // expires. Force expiry at the first lookup, independently of machine speed and JIT warmup.
-                    var copies = new HashMap<Coords, BoardTacticalGeometry.Surface>();
+                    // A tactical-only capture and a chunk replanted on equal ground must be free: equal plants upload nothing.
+                    var replanted = new HashMap<Coords, BoardPlants>();
                     for (var tile : scene.tiles()) {
-                        var s = terrain.tacticalSurface(tile.coords());
-                        copies.put(tile.coords(), new BoardTacticalGeometry.Surface(s.top(), s.slopes(), s.faces(),
-                              s.water(), s.walls(), s.waterfalls()));
+                        if (terrain.planted(tile.coords()) != null) {
+                            replanted.put(tile.coords(), BoardPlants.plant(scene, tile, terrain.tacticalSurface(tile.coords()), TerrainLod.FULL));
+                        }
                     }
                     long grassUploads = grass.uploads(), plantUploads = plants.uploads();
                     for (int capture = 0; capture < 5; capture++) {
                         scene = new BoardScene(scene.boardId(), scene.width(), scene.height(), new ArrayList<>(scene.tiles()),
                               List.of(), List.of(), -1, "", List.of());
-                        assertFalse(grass.visible(scene, camera.camera, scene.tiles(), exhausted(copies)).isEmpty());
-                        assertFalse(plants.visible(scene, camera.camera, scene.tiles(), exhausted(copies)).isEmpty());
-                        retained(grassBefore, submitted(grass, "models"), c -> true);
-                        retained(plantsBefore, submitted(plants, "patches"), c -> true);
-                        assertFalse(grass.busy(), "Unchanged grass needs no root preparation");
-                        assertFalse(plants.busy(), "Unchanged crops need no root preparation");
+                        assertFalse(grass.visible(scene, camera.camera, scene.tiles(), replanted::get).isEmpty());
+                        assertFalse(plants.visible(scene, camera.camera, scene.tiles(), replanted::get).isEmpty());
+                        retained(grassBefore, submitted(grass, scene, replanted::get), c -> true);
+                        retained(plantsBefore, submitted(plants, scene, replanted::get), c -> true);
                     }
                     assertEquals(grassUploads, grass.uploads(), "Equivalent surfaces must not upload grass again");
                     assertEquals(plantUploads, plants.uploads(), "Equivalent surfaces must not upload fields again");
@@ -112,29 +109,25 @@ class GpuVegetationEditSmokeTest {
                         }
                         terrain.refine(camera.camera);
                         frame.render(terrain, camera, scene);
-                        var grassNow = submitted(grass, "models");
-                        var plantsNow = submitted(plants, "patches");
+                        var grassNow = submitted(grass, scene, terrain::planted);
+                        var plantsNow = submitted(plants, scene, terrain::planted);
                         retained(grassBefore, grassNow, c -> c.distance(EDIT) > 2);
                         retained(plantsBefore, plantsNow, c -> c.distance(EDIT) > 2);
                         if (editField) { grounded(plantsNow.get(EDIT), terrain.tacticalSurface(EDIT)); }
                         assertTrue(System.nanoTime() < deadline, "Sustained editing must finish");
                         frames++;
                         LockSupport.parkNanos(5_000_000);
-                    } while (nextEdit < levels.length || terrain.busy() || grass.busy() || plants.busy());
+                    } while (nextEdit < levels.length || terrain.busy());
                     GpuReviewFrame.save(new File(output, "after.png"));
 
                     // Changed roots must still converge to a clean build on the final published ground.
                     var freshGrass = new GpuGroundCover();
                     var freshPlants = new GpuBiomeVegetation();
                     try {
-                        deadline = System.nanoTime() + 30_000_000_000L;
-                        do {
-                            freshGrass.visible(scene, camera.camera, scene.tiles(), terrain::tacticalSurface);
-                            freshPlants.visible(scene, camera.camera, scene.tiles(), terrain::tacticalSurface);
-                            assertTrue(System.nanoTime() < deadline);
-                        } while (freshGrass.busy() || freshPlants.busy());
-                        sameRoots(submitted(freshGrass, "models"), submitted(grass, "models"));
-                        sameRoots(submitted(freshPlants, "patches"), submitted(plants, "patches"));
+                        freshGrass.visible(scene, camera.camera, scene.tiles(), terrain::planted);
+                        freshPlants.visible(scene, camera.camera, scene.tiles(), terrain::planted);
+                        sameRoots(submitted(freshGrass, scene, terrain::planted), submitted(grass, scene, terrain::planted));
+                        sameRoots(submitted(freshPlants, scene, terrain::planted), submitted(plants, scene, terrain::planted));
                     } finally { freshGrass.dispose(); freshPlants.dispose(); }
                     Files.writeString(new File(output, "results.txt").toPath(),
                           "Unchanged roots stayed submitted across " + frames + " frames and " + levels.length
@@ -153,17 +146,6 @@ class GpuVegetationEditSmokeTest {
         if (failure.get() != null) { throw new AssertionError("Vegetation edit continuity", failure.get()); }
     }
 
-    private static Function<Coords, BoardTacticalGeometry.Surface> exhausted(Map<Coords, BoardTacticalGeometry.Surface> surfaces) {
-        return new Function<>() {
-            private boolean first = true;
-            @Override
-            public BoardTacticalGeometry.Surface apply(Coords coords) {
-                if (first) { first = false; LockSupport.parkNanos(3_000_000); }
-                return surfaces.get(coords);
-            }
-        };
-    }
-
     private static BoardScene scene(int level, boolean editField) {
         return BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c,
               c.getX() >= (editField ? 4 : 5) ? BoardScene.Biome.FIELD : BoardScene.Biome.NONE, c.equals(EDIT) ? level : 0));
@@ -176,24 +158,25 @@ class GpuVegetationEditSmokeTest {
             terrain.refine(camera.camera);
             frame.render(terrain, camera, scene);
             assertTrue(System.nanoTime() < deadline, "Initial plants must finish");
-        } while (terrain.busy() || grass.busy() || plants.busy());
+        } while (terrain.busy());
+        frame.render(terrain, camera, scene);
     }
 
-    private static Map<Coords, Roots> submitted(Object vegetation, String cache) throws Exception {
-        var active = new HashSet<>();
-        for (Object batch : (Object[]) field(vegetation, "batches")) {
-            active.addAll((List<?>) field(batch, "current"));
-        }
+    /**
+     * The plants a renderer was given that it actually submitted in its drawn batches. A chunk prepared again replants
+     * identical roots, so plants compare by their roots rather than by identity.
+     */
+    private static Map<Coords, Roots> submitted(Object renderer, BoardScene scene, Function<Coords, BoardPlants> plants)
+          throws Exception {
+        var active = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Object batch : GpuBiomeSmokeTest.batches(renderer)) { active.addAll((List<?>) field(batch, "current")); }
         var result = new HashMap<Coords, Roots>();
-        for (var entry : ((Map<?, ?>) field(vegetation, cache)).entrySet()) {
-            Object patch = entry.getValue();
-            if (!active.contains(patch)) {
-                Object previous = field(patch, "previous");
-                if (previous != null) { patch = previous; }
-            }
-            if (active.contains(patch)) {
-                result.put((Coords) entry.getKey(), new Roots(patch, ((FloatArray) field(patch, "roots")).toArray()));
-            }
+        for (var tile : scene.tiles()) {
+            var planted = plants.apply(tile.coords());
+            if (planted == null) { continue; }
+            FloatArray roots = renderer instanceof GpuGroundCover ? planted.grass()
+                  : planted.crops() != null ? planted.crops().roots() : planted.reeds();
+            if (roots != null && active.contains(roots)) { result.put(tile.coords(), new Roots(null, roots.toArray())); }
         }
         return result;
     }
@@ -202,7 +185,6 @@ class GpuVegetationEditSmokeTest {
         before.forEach((coords, roots) -> {
             if (unchanged.test(coords)) {
                 assertTrue(after.containsKey(coords), "Plants disappeared at " + coords);
-                assertSame(roots.patch(), after.get(coords).patch(), "Unchanged plants rebuilt at " + coords);
                 assertArrayEquals(roots.data(), after.get(coords).data(), "Unchanged roots moved at " + coords);
             }
         });

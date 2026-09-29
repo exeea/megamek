@@ -8,8 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.image.BufferedImage;
-import java.lang.reflect.Field;
 import java.lang.ref.WeakReference;
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -100,7 +100,7 @@ class GpuMarkingsSmokeTest {
     }
 
     private static void assertPlane(GpuTerrain terrain, BoardScene scene) throws Exception {
-        float expected = BoardTacticalGeometry.floatingZ(scene, FIRST, terrain::tacticalSurface);
+        float expected = BoardTacticalGeometry.floatingZ(scene, FIRST);
         int count = 0;
         for (Model model : models(terrain).getFirst()) {
             for (var mesh : model.meshes) {

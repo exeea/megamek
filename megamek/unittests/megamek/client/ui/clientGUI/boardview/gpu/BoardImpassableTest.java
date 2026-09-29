@@ -59,7 +59,6 @@ class BoardImpassableTest {
                 boolean showTerrain = preferences.getShowMapHexPopup();
                 try {
                     preferences.setShowMapHexPopup(true);
-                    fixture.view.setTooltipProvider(new TWBoardViewTooltip(fixture.game, null, fixture.view.getClientState()));
                     Coords coords = new Coords(0, 16);
                     Hex hex = new Hex(2);
                     hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1));
@@ -170,12 +169,12 @@ class BoardImpassableTest {
                 lookups[0]++;
                 return surface;
             }, clipper);
-            assertEquals(1, lookups[0], "One support height replaces all per-triangle terrain clipping");
+            assertEquals(0, lookups[0], "The flat plane is independent of the finished terrain");
         }
         assertFalse(triangles.isEmpty());
         for (var triangle : triangles) {
             for (Vector3 vertex : List.of(triangle.a(), triangle.b(), triangle.c())) {
-                assertEquals(216 + BoardTacticalGeometry.HEX_PLANE_CLEARANCE, vertex.z, .001);
+                assertEquals(BoardTacticalGeometry.HEX_PLANE_CLEARANCE, vertex.z, .001);
             }
         }
     }

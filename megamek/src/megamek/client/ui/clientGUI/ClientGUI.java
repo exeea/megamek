@@ -4722,7 +4722,6 @@ public class ClientGUI extends AbstractClientGUI
 
     public void suspendBoardTooltips() {
         onAllBoardStates(BoardClientState::suspendTooltip);
-        onAllBoardViews(BoardView::suspendTooltip);
         // hide any currently shown tooltip, but don't disable tooltips entirely:
         ToolTipManager.sharedInstance().setEnabled(false);
         ToolTipManager.sharedInstance().setEnabled(true);
@@ -4730,7 +4729,6 @@ public class ClientGUI extends AbstractClientGUI
 
     public void activateBoardTooltips() {
         onAllBoardStates(BoardClientState::activateTooltip);
-        onAllBoardViews(BoardView::activateTooltip);
     }
 
     public TilesetManager getTilesetManager() {

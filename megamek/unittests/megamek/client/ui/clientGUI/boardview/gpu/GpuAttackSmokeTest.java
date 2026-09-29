@@ -33,7 +33,7 @@ import megamek.client.Client;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.MegaMekGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayDialog;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
 import megamek.client.ui.panels.phaseDisplay.FiringDisplay;
@@ -84,7 +84,7 @@ class GpuAttackSmokeTest {
                         when(gui.getMenuBar()).thenReturn(menu);
                         when(gui.getDisplayedUnit()).thenReturn(fixture.entity);
                         when(gui.getUnitDisplayDialog()).thenReturn(mock(UnitDisplayDialog.class));
-                        BoardView view = spy(fixture.view);
+                        BoardClientState view = spy(fixture.view);
                         doReturn(gui).when(view).getClientgui();
                         display.set(new UnitDisplayPanel(gui, null));
                         when(gui.getUnitDisplay()).thenReturn(display.get());
@@ -103,7 +103,7 @@ class GpuAttackSmokeTest {
                         fixture.game.addEntity(target, false);
                         target.addBeenSeenBy(fixture.player);
                         firing.get().selectEntity(fixture.entity.getId());
-                        source.set(new GpuBoardSource(view.getClientState(), firing::get));
+                        source.set(new GpuBoardSource(view, firing::get));
                     } catch (Exception error) {
                         throw new IllegalStateException(error);
                     }

@@ -23,9 +23,9 @@ import java.util.stream.Collectors;
 import javax.swing.SwingUtilities;
 
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.HexDrawUtilities;
 import megamek.client.ui.clientGUI.boardview.sprite.CursorSprite;
 import megamek.common.Hex;
@@ -139,7 +139,7 @@ class GpuOverlayCaptureTest {
                           "Floating metadata must preserve every original clipped XY contour and playback rule");
                     assertFresh(fixture.view, capture);
                     fixture.view.markDeploymentHexesFor(null);
-                    fixture.view.getClientState().setShowAllDeployment(true);
+                    fixture.view.setShowAllDeployment(true);
                     fixture.game.setPhase(GamePhase.SET_ARTILLERY_AUTO_HIT_HEXES);
                     BoardTactical allPlayers = fixture.view.captureTacticalGeometry();
                     assertEquals(7 * 6, allPlayers.fills().size());
@@ -268,18 +268,18 @@ class GpuOverlayCaptureTest {
         return tactical.fills().stream().filter(fill -> fill.argb() == color.getRGB()).findFirst().orElseThrow();
     }
 
-    private static void assertFresh(BoardView view, BoardTactical incremental) {
+    private static void assertFresh(BoardClientState view, BoardTactical incremental) {
         view.releasePlanarCapture();
         BoardTactical fresh = view.captureTacticalGeometry();
         assertNotSame(incremental, fresh, "Release must discard the previously published snapshot");
         assertEquals(incremental, fresh, "Reused commands must match an uncached capture");
     }
 
-    private static void setField(BoardView view, String name, Object value) {
+    private static void setField(BoardClientState view, String name, Object value) {
         try {
-            Field field = view.getClientState().getClass().getDeclaredField(name);
+            Field field = BoardClientState.class.getDeclaredField(name);
             field.setAccessible(true);
-            field.set(view.getClientState(), value);
+            field.set(view, value);
         } catch (ReflectiveOperationException failure) {
             throw new AssertionError(failure);
         }

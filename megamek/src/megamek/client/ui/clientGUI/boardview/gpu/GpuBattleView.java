@@ -36,6 +36,7 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.ui.Value;
 import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.ScreenUtils;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
@@ -57,6 +58,8 @@ class GpuBattleView extends ApplicationAdapter {
     static final float HOVER_PERIOD_SECONDS = UnitAnimator.HOVER_PERIOD_SECONDS;
     /** Height of that wave in terrain levels, so a floating token drifts off its flight height. */
     static final float HOVER_LEVELS = UnitAnimator.HOVER_LEVELS;
+    /** Hover and editor-brush outline inset as a fraction of the hex radius: 0 is the border, .1 keeps 90%. */
+    static final float HOVER_HEX_INSET = .1f;
     /** Width of the flat selection band as a fraction of the hex radius, extending inward from MARKER_INSET. */
     static final float SELECTION_BAND_WIDTH = .08f;
     /** Seconds for a complete rise and fall, on the shared animation clock. */
@@ -87,6 +90,7 @@ class GpuBattleView extends ApplicationAdapter {
     private Stage loadingStage;
     private GpuBoardSkin loadingTheme;
     private Label loadingLabel;
+    private Label loadingDetails;
     private volatile String loadingMessage = Messages.getString("ClientGUI.waitingOnTheServer");
     private final GpuDisplayScale displayScale = new GpuDisplayScale();
     final BoardCamera boardCamera = new BoardCamera();
@@ -214,8 +218,13 @@ class GpuBattleView extends ApplicationAdapter {
         loadingLabel.setName("board-loading-message");
         loadingLabel.setWrap(true);
         loadingLabel.setAlignment(Align.center);
+        loadingDetails = new Label("", skin);
+        loadingDetails.setName("board-loading-details");
+        loadingDetails.setWrap(true);
+        loadingDetails.setAlignment(Align.center);
         content.add(new Label("MEGAMEK", skin, "kicker")).padBottom(18).row();
-        content.add(loadingLabel).width(600);
+        content.add(loadingLabel).width(Value.percentWidth(.9f, content)).maxWidth(900).row();
+        content.add(loadingDetails).width(Value.percentWidth(.9f, content)).maxWidth(900).padTop(18);
         loadingStage.addActor(content);
     }
 
@@ -373,6 +382,7 @@ class GpuBattleView extends ApplicationAdapter {
                         BoardRocks.reload();
                         BoardRough.reload();
                         BoardScatter.reload();
+                        BoardBridgeFooting.reload();
                         createSceneRenderers();
                         cameraTerrainRevision = -1;
                     } catch (RuntimeException failure) {
@@ -470,7 +480,9 @@ class GpuBattleView extends ApplicationAdapter {
         if (!terrain.ready(scene)) {
             ScreenUtils.clear(.045f, .065f, .075f, 1, true);
             createLoadingStage();
-            loadingLabel.setText(Messages.getString("GpuBoard.preparingTerrain", Math.max(0, terrain.buildProgress())));
+            loadingLabel.setText(Messages.getString("GpuBoard.loadingOverall", Math.max(0, terrain.buildProgress())));
+            loadingDetails.setText(terrain.buildDetails().stream().map(TerrainLoadProgress.Status::text)
+                  .collect(Collectors.joining("\n\n")));
             loadingStage.act(Math.min(Gdx.graphics.getDeltaTime(), .1f));
             loadingStage.draw();
             renderStage(null);
@@ -1355,13 +1367,13 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     private void ring(Coords coords) {
-        float z = BoardTacticalGeometry.floatingZ(scene, coords, terrain::tacticalSurface);
+        float z = BoardTacticalGeometry.floatingZ(scene, coords);
         Vector3 center = BoardGeometry.center(coords, 0);
         Vector3 first = new Vector3();
         Vector3 second = new Vector3();
         for (int edge = 0; edge < 6; edge++) {
-            lines.line(BoardGeometry.markerPoint(BoardGeometry.corner(first, coords, 0, edge), center).add(0, 0, z),
-                  BoardGeometry.markerPoint(BoardGeometry.corner(second, coords, 0, edge + 1), center).add(0, 0, z));
+            lines.line(BoardGeometry.inset(BoardGeometry.corner(first, coords, 0, edge), center, HOVER_HEX_INSET).add(0, 0, z),
+                  BoardGeometry.inset(BoardGeometry.corner(second, coords, 0, edge + 1), center, HOVER_HEX_INSET).add(0, 0, z));
         }
     }
 

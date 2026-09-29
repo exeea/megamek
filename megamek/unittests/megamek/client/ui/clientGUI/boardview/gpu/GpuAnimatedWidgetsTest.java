@@ -36,7 +36,7 @@ class GpuAnimatedWidgetsTest {
                 when(gui.getMainPanel()).thenReturn(new JPanel());
                 ChatterBox history = mock(ChatterBox.class);
                 history.history = new LinkedList<>();
-                ChatterBoxOverlay chat = new ChatterBoxOverlay(gui, fixture.view.getClientState(), null, history);
+                ChatterBoxOverlay chat = new ChatterBoxOverlay(gui, fixture.view, null, history);
                 try {
                     fixture.view.addOverlay(chat);
                     Dimension size = new Dimension(800, 600);
@@ -68,7 +68,7 @@ class GpuAnimatedWidgetsTest {
     void toastSnapshotIncludesItsWholeLifetimeAndStackReflowKeepsCachedArtwork() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             SwingUtilities.invokeAndWait(() -> {
-                BoardToastOverlay toasts = new BoardToastOverlay(fixture.view.getClientState(), null);
+                BoardToastOverlay toasts = new BoardToastOverlay(fixture.view, null);
                 fixture.view.addOverlay(toasts);
                 fixture.source.setViewport(1200, 800, 1200, 800);
                 toasts.show(ToastLevel.INFO, "Short notification", null, 0);

@@ -33,7 +33,6 @@ public interface BoardGlyphContext {
     Board getBoard();
     Player getLocalPlayer();
     Entity getSelectedEntity();
-    TilesetManager getTileManager();
     TilesetManager getTilesetManager();
     float getScale();
     Dimension getHexSize();

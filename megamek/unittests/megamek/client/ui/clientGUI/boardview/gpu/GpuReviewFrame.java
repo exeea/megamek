@@ -53,6 +53,26 @@ final class GpuReviewFrame implements Disposable {
         atmosphere.renderWeather(camera.camera, scene);
     }
 
+    /** The same frame with its stages marked on a native benchmark's timings. */
+    void render(GpuTerrain terrain, BoardCamera camera, BoardScene scene, GpuStageTimings timings) {
+        timings.stage("light and shadows");
+        atmosphere.updateLight(camera.camera);
+        terrain.setAtmosphere(atmosphere.lighting());
+        terrain.renderShadows(camera.camera, List.of());
+        timings.stage("clouds");
+        atmosphere.prepareClouds(terrain, scene, 0);
+        timings.stage("opaque terrain and plants");
+        atmosphere.begin((int) camera.camera.viewportWidth, (int) camera.camera.viewportHeight, 0);
+        terrain.render(camera.camera, false);
+        timings.stage("transparent");
+        terrain.renderTransparent(camera.camera);
+        timings.stage("atmosphere composite");
+        atmosphere.end(camera.camera, terrain, scene, 0);
+        timings.stage("weather");
+        atmosphere.renderWeather(camera.camera, scene);
+        timings.stage(null);
+    }
+
     /** Saves the screen as an opaque PNG. */
     static void save(File file) {
         int width = Gdx.graphics.getBackBufferWidth(), height = Gdx.graphics.getBackBufferHeight();

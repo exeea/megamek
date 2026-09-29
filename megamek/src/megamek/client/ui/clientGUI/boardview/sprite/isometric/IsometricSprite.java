@@ -134,7 +134,7 @@ public class IsometricSprite extends HexSprite {
                 g.drawImage(blipImage, x, y, observer);
             }
         } else if (entity.isAirborne() || entity.isAirborneVTOLorWIGE()) {
-            Image shadow = bv.createShadowMask(bv.getTileManager().imageFor(entity, entity.getFacing(), secondaryPos));
+            Image shadow = bv.createShadowMask(bv.getTilesetManager().imageFor(entity, entity.getFacing(), secondaryPos));
             shadow = bv.getScaledImage(shadow, true);
             // Draw airborne units in 2 passes. Shadow is rendered
             // during the opaque pass, and the
@@ -147,7 +147,7 @@ public class IsometricSprite extends HexSprite {
                 g.drawImage(shadow, p.x, p.y, this);
             }
         } else if ((entity.getElevation() != 0) && !(entity.isBuildingEntityOrGunEmplacement())) {
-            Image shadow = bv.createShadowMask(bv.getTileManager().imageFor(entity, entity.getFacing(), secondaryPos));
+            Image shadow = bv.createShadowMask(bv.getTilesetManager().imageFor(entity, entity.getFacing(), secondaryPos));
             shadow = bv.getScaledImage(shadow, true);
 
             // Entities on a bridge hex or submerged in water.
@@ -185,7 +185,7 @@ public class IsometricSprite extends HexSprite {
         boolean drawFuelLeak = EntityWreckHelper.displayFuelLeak(entity);
 
         if (drawFuelLeak) {
-            Image fuelLeak = bv.getScaledImage(bv.getTileManager().bottomLayerFuelLeakMarkerFor(entity), true);
+            Image fuelLeak = bv.getScaledImage(bv.getTilesetManager().bottomLayerFuelLeakMarkerFor(entity), true);
             if (fuelLeak != null) {
                 graph.drawImage(fuelLeak, x, y, observer);
             }
@@ -225,7 +225,7 @@ public class IsometricSprite extends HexSprite {
         if (craneLoadingOpacity < 1f) {
             g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, craneLoadingOpacity));
         }
-        g.drawImage(bv.getScaledImage(bv.getTileManager().imageFor(entity, secondaryPos), true), 0, 0, this);
+        g.drawImage(bv.getScaledImage(bv.getTilesetManager().imageFor(entity, secondaryPos), true), 0, 0, this);
         g.dispose();
     }
 

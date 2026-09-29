@@ -12,11 +12,12 @@ uniform sampler2D u_waterField;  // R signed bank distance, G optical depth, BA 
 uniform vec4 u_waterFieldMap;    // world XY to field UV: scale XY, offset XY
 uniform vec2 u_waterMaterial;    // palette, procedural color; the program selects the geometry mode
 uniform float u_waterEffects;
+uniform float u_wavePixels;
 uniform vec3 u_wind;
 uniform int u_splashCount;
 uniform vec4 u_splashLines[12];  // where falls land nearby: from XY, to XY, the pool to the right; hex widths
 uniform float u_splashRadii[12]; // radius of each landing's boil, hex widths
-uniform sampler2D u_waterOcean;  // GpuOcean: RG wave slope, B crest compression, A foam; tiles
+uniform sampler2D u_waterOcean;  // GpuOcean: RG wave slope, B height in metres, A persistent breaking foam
 uniform float u_waterOceanScale; // world XY to ocean UV; zero without the simulation
 uniform float u_metre;           // world units per metre
 uniform float u_levelHeight;     // world units per level
@@ -29,5 +30,3 @@ const float FLOW_CYCLE = 2.4;    // seconds per two-phase advection cycle
 const float OCEAN_SIZE = 128.0;  // texels along a side of the ocean texture
 // A fixed turn of the finer layer, so its wave trains cross the swell's. Being constant, it cannot shear.
 const mat2 CROSSING = mat2(0.52, 0.85, -0.85, 0.52);
-const mat2 CROSSING2 = mat2(-0.46, 0.888, -0.888, -0.46);
-

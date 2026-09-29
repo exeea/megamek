@@ -24,11 +24,10 @@ import com.badlogic.gdx.utils.GdxRuntimeException;
 /**
  * Wind waves simulated on the GPU after Tessendorf's FFT ocean. A wind-driven spectrum is evolved every frame with
  * the deep-water dispersion relation, so every wave travels at its own speed and the surface keeps changing instead
- * of sliding, and an inverse FFT in fragment passes turns it into wave slopes and whitecaps. The result is one small
- * texture that tiles in both directions: red and green hold the slope along world x and y, blue how tightly the crest
- * there is compressed and alpha foam, which lingers after a crest folds. It is mipmapped, so distant water averages
- * its waves instead of aliasing them. Fragment passes need only OpenGL 3.3, so this also runs where compute shaders
- * do not, such as on macOS.
+ * of sliding. Water produces two mipmapped textures in one finish pass: slope XY/height/foam for shading, and choppy
+ * displacement XY/height/compression for geometry. Both come from the same transform. Foam drifts, disperses and
+ * fades after a crest breaks. Lava retains its separate slope/displacement output. These fragment passes target
+ * OpenGL 3.3 without requiring compute shaders.
  */
 final class GpuOcean implements Disposable {
     /** Texels along each side of the simulation. */
@@ -69,6 +68,11 @@ final class GpuOcean implements Disposable {
     /** The latest waves, or null where the context cannot simulate them. */
     Texture texture() {
         return result[latest] == null ? null : result[latest].getColorBufferTexture();
+    }
+
+    /** Choppy XY displacement, height in metres, and crest compression from the same transform as the normals. */
+    Texture displacement() {
+        return lava || result[latest] == null ? null : result[latest].getTextureAttachments().get(1);
     }
 
     /** World-space scale of the texture: multiply a world position by it to get texture coordinates. */
@@ -114,12 +118,15 @@ final class GpuOcean implements Disposable {
         for (int i = 0; i < 2; i++) {
             work[i] = new GLFrameBuffer.FrameBufferBuilder(SIZE, SIZE)
                   .addFloatAttachment(GL30.GL_RGBA32F, GL30.GL_RGBA, GL30.GL_FLOAT, true).build();
-            result[i] = new GLFrameBuffer.FrameBufferBuilder(SIZE, SIZE)
-                  .addFloatAttachment(GL30.GL_RGBA16F, GL30.GL_RGBA, GL30.GL_FLOAT, true).build();
-            Texture waves = result[i].getColorBufferTexture();
-            waves.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
-            waves.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
-            waves.setAnisotropicFilter(8);
+            var output = new GLFrameBuffer.FrameBufferBuilder(SIZE, SIZE)
+                  .addFloatAttachment(GL30.GL_RGBA16F, GL30.GL_RGBA, GL30.GL_FLOAT, true);
+            if (!lava) { output.addFloatAttachment(GL30.GL_RGBA16F, GL30.GL_RGBA, GL30.GL_FLOAT, true); }
+            result[i] = output.build();
+            for (Texture waves : result[i].getTextureAttachments()) {
+                waves.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
+                waves.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
+                waves.setAnisotropicFilter(8);
+            }
         }
         initial = Gdx.gl.glGenTexture();
         Gdx.gl.glBindTexture(GL20.GL_TEXTURE_2D, initial);
@@ -131,8 +138,10 @@ final class GpuOcean implements Disposable {
             target.bind();
             Gdx.gl.glClearColor(0, 0, 0, 0);
             Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
-            target.getColorBufferTexture().bind(0);
-            Gdx.gl.glGenerateMipmap(GL20.GL_TEXTURE_2D);
+            for (Texture waves : target.getTextureAttachments()) {
+                waves.bind(0);
+                Gdx.gl.glGenerateMipmap(GL20.GL_TEXTURE_2D);
+            }
         }
         Gdx.gl.glBindTexture(GL20.GL_TEXTURE_2D, 0);
         restoreState(state);
@@ -160,7 +169,8 @@ final class GpuOcean implements Disposable {
 
     static float[] initialSpectrum(float windX, float windY, float strength, boolean lava) {
         // The spectrum's shape: its peak stays well inside the patch, so no single wave spans the whole tile.
-        float speed = 2 + 5 * strength;
+        // A quiet exposed lake retains a gentle residual swell; it does not snap to a mirror when wind stops.
+        float speed = lava ? 2 + 5 * strength : 4 + 5 * strength;
         float largest = lava ? 3.5f : speed * speed / GRAVITY;
         float smallest = lava ? 1.3f : PATCH_METRES / SIZE / 2;
         float[] real = new float[SIZE * SIZE], imaginary = new float[SIZE * SIZE];
@@ -186,7 +196,7 @@ final class GpuOcean implements Disposable {
             }
         }
         // Root-mean-square slope: glassy at a whisper of wind, steep and breaking in a gale.
-        float slope = lava ? .12f : .07f + .2f * strength;
+        float slope = lava ? .12f : .035f + .21f * strength;
         float scale = (float) (slope / Math.sqrt(Math.max(variance, 1e-20)));
         float[] data = new float[SIZE * SIZE * 4];
         for (int m = 0; m < SIZE; m++) {
@@ -228,6 +238,7 @@ final class GpuOcean implements Disposable {
         spectrum.setUniformf("u_loop", MathUtils.PI2 / LOOP_SECONDS);
         spectrum.setUniformf("u_patch", PATCH_METRES);
         spectrum.setUniformi("u_size", SIZE);
+        spectrum.setUniformi("u_water", lava ? 0 : 1);
         pass(spectrum, work[0]);
         // Inverse transform: first along x, then along y, one radix-2 stage per pass.
         int source = 0;
@@ -243,7 +254,7 @@ final class GpuOcean implements Disposable {
                 source = 1 - source;
             }
         }
-        // Water retains crest compression and fading foam; lava retains horizontal displacement.
+        // One MRT pass derives water's shape, normals and persistent foam; lava retains its own output format.
         int next = 1 - latest;
         work[source].getColorBufferTexture().bind(0);
         finish.bind();
@@ -253,16 +264,18 @@ final class GpuOcean implements Disposable {
             result[latest].getColorBufferTexture().bind(1);
             finish.setUniformi("u_previous", 1);
             finish.setUniformf("u_texel", PATCH_METRES / SIZE);
-            finish.setUniformf("u_choppiness", .8f + 1.2f * windStrength);
-            finish.setUniformf("u_fade", delta / 2.5f);
+            finish.setUniformf("u_choppiness", .55f + .7f * windStrength);
+            finish.setUniformf("u_delta", delta);
+            finish.setUniformf("u_drift", windX * delta * .22f / PATCH_METRES, windY * delta * .22f / PATCH_METRES);
         }
         pass(finish, result[next]);
         Gdx.gl.glActiveTexture(GL20.GL_TEXTURE1);
         Gdx.gl.glBindTexture(GL20.GL_TEXTURE_2D, 0);
         Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
-        Texture waves = result[next].getColorBufferTexture();
-        waves.bind(0);
-        Gdx.gl.glGenerateMipmap(GL20.GL_TEXTURE_2D);
+        for (Texture waves : result[next].getTextureAttachments()) {
+            waves.bind(0);
+            Gdx.gl.glGenerateMipmap(GL20.GL_TEXTURE_2D);
+        }
         Gdx.gl.glBindTexture(GL20.GL_TEXTURE_2D, 0);
         latest = next;
         enable(GL20.GL_DEPTH_TEST, depthTest);

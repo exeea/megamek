@@ -91,7 +91,7 @@ public class MovingEntitySprite extends Sprite {
     public void drawOnto(Graphics graphics, int x, int y, ImageObserver observer) {
         // If this is an airborne unit, render the shadow.
         if (entity.isAirborne() || entity.isAirborneVTOLorWIGE()) {
-            Image shadow = bv.createShadowMask(bv.getTileManager().imageFor(entity, facing, -1));
+            Image shadow = bv.createShadowMask(bv.getTilesetManager().imageFor(entity, facing, -1));
             shadow = bv.getScaledImage(shadow, true);
 
             graphics.drawImage(shadow, x, y + (int) (bv.getDropShadowDistance() * bv.getScale()), observer);
@@ -113,7 +113,7 @@ public class MovingEntitySprite extends Sprite {
         }
         // If this is a submerged unit, render the shadow after the unit.
         if (elevation < 0) {
-            Image shadow = bv.createShadowMask(bv.getTileManager().imageFor(entity, facing, -1));
+            Image shadow = bv.createShadowMask(bv.getTilesetManager().imageFor(entity, facing, -1));
             shadow = bv.getScaledImage(shadow, true);
 
             graphics.drawImage(shadow, x, y, observer);

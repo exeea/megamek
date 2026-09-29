@@ -115,6 +115,7 @@ class GpuTerrainBlendSmokeTest {
 
             private void compareRebuild(BoardScene scene, GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera) throws Exception {
                 byte[] edited = screen();
+                GpuReviewFrame.save(new File(output, "island-sand-edited.png"));
                 var fresh = new GpuTerrain();
                 try {
                     fresh.update(scene);
@@ -123,6 +124,7 @@ class GpuTerrainBlendSmokeTest {
                     fresh.animate(clock.getFloat(terrain), List.of());
                     renderSettled(fresh, frame, camera, scene);
                     byte[] rebuilt = screen();
+                    GpuReviewFrame.save(new File(output, "island-sand-rebuilt.png"));
                     long error = 0;
                     int large = 0;
                     for (int i = 0; i < edited.length; i++) {
@@ -138,14 +140,9 @@ class GpuTerrainBlendSmokeTest {
             }
 
             private void renderSettled(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera, BoardScene scene) throws Exception {
-                var field = GpuTerrain.class.getDeclaredField("groundCover");
-                field.setAccessible(true);
-                var cover = (GpuGroundCover) field.get(terrain);
-                long deadline = System.nanoTime() + 30_000_000_000L;
-                do {
-                    frame.render(terrain, camera, scene);
-                    assertTrue(System.nanoTime() < deadline, "Ground cover preparation must finish before pixel comparison");
-                } while (cover.busy());
+                // Ground cover is planted with the terrain: once the terrain is installed, one frame shows it completely.
+                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                frame.render(terrain, camera, scene);
             }
 
             private byte[] screen() {

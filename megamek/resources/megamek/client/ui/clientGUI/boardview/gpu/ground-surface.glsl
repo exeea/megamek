@@ -1,17 +1,26 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Shared mapped normal, rain film and lighting for authored ground and road materials.
-vec3 groundNormal(vec2 uv, float strength) {
+#if defined(normalTextureFlag) || defined(roadCoatFlag)
+// A normal map texel applied to the surface normal, when normal maps are on.
+vec3 mappedNormal(vec4 texel, float strength) {
     vec3 normal = normalize(v_normal);
-#ifdef normalTextureFlag
     if (u_normalMaps > 0.5) {
         // Neutral is exactly (128,128,255); world X/right and -Y/down also cover slopes.
-        vec3 detail = (texture(u_normalTexture, uv).rgb * 255.0 - 128.0) / 127.0;
+        vec3 detail = (texel.rgb * 255.0 - 128.0) / 127.0;
         detail.xy *= strength;
         vec3 tangent = normalize(vec3(normal.z, 0.0, -normal.x));
         normal = normalize(tangent * detail.x - cross(normal, tangent) * detail.y + normal * detail.z);
     }
-#endif
     return normal;
+}
+#endif
+
+vec3 groundNormal(vec2 uv, float strength) {
+#ifdef normalTextureFlag
+    return mappedNormal(texture(u_normalTexture, uv), strength);
+#else
+    return normalize(v_normal);
+#endif
 }
 
 float groundPuddle(float wet, float response) {

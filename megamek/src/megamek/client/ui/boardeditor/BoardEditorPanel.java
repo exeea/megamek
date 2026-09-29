@@ -385,7 +385,7 @@ public class BoardEditorPanel extends JPanel
             if (hexLevelToDraw != -1000) {
                 LinkedList<Coords> allBrushHexes = getBrushCoords(c);
                 for (Coords h : allBrushHexes) {
-                    if (!buttonOOC.isSelected() || board.getHex(h).isClearHex()) {
+                    if (canPaint(h)) {
                         saveToUndo(h);
                         relevelHex(h, hexLevelToDraw);
                     }
@@ -416,7 +416,7 @@ public class BoardEditorPanel extends JPanel
             } else {
                 for (Coords h : getBrushCoords(c)) {
                     // test if texture overwriting is active
-                    if ((!buttonOOC.isSelected() || board.getHex(h).isClearHex()) && curHex.isValid(null)) {
+                    if (canPaint(h) && curHex.isValid(null)) {
                         saveToUndo(h);
                         if (isCTRL) { // CTRL-Click
                             paintHex(h);
@@ -2499,8 +2499,12 @@ public class BoardEditorPanel extends JPanel
         if (center == null || !board.contains(center) || isEditingBlocked()) {
             return List.of();
         }
-        return getBrushCoords(center).stream()
-              .filter(c -> !buttonOOC.isSelected() || board.getHex(c).isClearHex()).toList();
+        return getBrushCoords(center).stream().filter(this::canPaint).toList();
+    }
+
+    /** The only-on-clear option limits every brush operation to hexes without terrain. */
+    private boolean canPaint(Coords coords) {
+        return !buttonOOC.isSelected() || board.getHex(coords).isClearHex();
     }
 
     /** Changes each hex relative to its own height without selecting a tool or replacing its terrain. Runs on Swing. */

@@ -55,17 +55,8 @@ class GpuBiomeLodSmokeTest {
                     terrain.update(scene, camera.camera);
                     GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                     var plants = (GpuBiomeVegetation) field(terrain, "biomeVegetation");
-                    long deadline = System.nanoTime() + 30_000_000_000L;
-                    do {
-                        frame.render(terrain, camera, scene);
-                        assertTrue(System.nanoTime() < deadline, "Plant preparation must finish");
-                    } while (plants.busy());
-                    unchangedSurfaceKeepsItsPlants(terrain, plants, camera, scene);
-                    deadline = System.nanoTime() + 30_000_000_000L;
-                    do {
-                        frame.render(terrain, camera, scene);
-                        assertTrue(System.nanoTime() < deadline, "Original surface roots must finish preparing");
-                    } while (plants.busy());
+                    frame.render(terrain, camera, scene);
+                    unchangedTerrainKeepsItsPlants(terrain, plants, camera, scene);
                     var metrics = new StringBuilder("Perspective, boundary, direction, changed pixels, field area fraction\n");
                     boolean continuous = true;
                     for (boolean perspective : new boolean[] { false, true }) {
@@ -127,30 +118,28 @@ class GpuBiomeLodSmokeTest {
         if (failure.get() != null) { throw new AssertionError("Plantation zoom continuity", failure.get()); }
     }
 
-    private static void unchangedSurfaceKeepsItsPlants(GpuTerrain terrain, GpuBiomeVegetation plants,
+    private static void unchangedTerrainKeepsItsPlants(GpuTerrain terrain, GpuBiomeVegetation plants,
           BoardCamera camera, BoardScene scene) throws Exception {
-        // A chunk handoff publishes new surface snapshots even where the field's ground is unchanged.
-        var replacement = new HashMap<Coords, BoardTacticalGeometry.Surface>();
+        // A chunk prepared again replants equal rows on equal ground: the buffers must not upload or change.
+        var replanted = new HashMap<Coords, BoardPlants>();
         for (var tile : scene.tiles()) {
-            var surface = terrain.tacticalSurface(tile.coords());
-            if (surface != null) {
-                replacement.put(tile.coords(), new BoardTacticalGeometry.Surface(surface.top(), surface.slopes(),
-                      surface.faces(), surface.water(), surface.walls(), surface.waterfalls()));
+            var planted = terrain.planted(tile.coords());
+            if (planted != null) {
+                replanted.put(tile.coords(), BoardPlants.plant(scene, tile, terrain.tacticalSurface(tile.coords()), TerrainLod.FULL));
             }
         }
-        plants.visible(scene, camera.camera, scene.tiles(), terrain::tacticalSurface);
-        Object[] batches = (Object[]) field(plants, "batches");
-        float[][] roots = new float[batches.length][];
-        for (int i = 0; i < batches.length; i++) { roots[i] = ((FloatArray) field(batches[i], "data")).toArray(); }
-        long deadline = System.nanoTime() + 30_000_000_000L;
-        do {
-            plants.visible(scene, camera.camera, scene.tiles(), replacement::get);
-            for (int i = 0; i < batches.length; i++) {
-                assertArrayEquals(roots[i], ((FloatArray) field(batches[i], "data")).toArray(),
-                      "A surface handoff must not clear or partially repopulate the visible field");
-            }
-            assertTrue(System.nanoTime() < deadline, "Replacement roots must finish preparing");
-        } while (plants.busy());
+        plants.visible(scene, camera.camera, scene.tiles(), terrain::planted);
+        var batches = GpuBiomeSmokeTest.batches(plants);
+        float[][] roots = new float[batches.size()][];
+        for (int i = 0; i < batches.size(); i++) { roots[i] = ((FloatArray) field(batches.get(i), "data")).toArray(); }
+        long uploads = plants.uploads();
+        plants.visible(scene, camera.camera, scene.tiles(), replanted::get);
+        assertEquals(uploads, plants.uploads(), "Equal replanted rows must not upload again");
+        assertEquals(batches, GpuBiomeSmokeTest.batches(plants), "A chunk handoff must keep the chunk batches");
+        for (int i = 0; i < batches.size(); i++) {
+            assertArrayEquals(roots[i], ((FloatArray) field(batches.get(i), "data")).toArray(),
+                  "A chunk handoff must not clear or partially repopulate the visible field");
+        }
     }
 
     private static Object field(Object owner, String name) throws ReflectiveOperationException {

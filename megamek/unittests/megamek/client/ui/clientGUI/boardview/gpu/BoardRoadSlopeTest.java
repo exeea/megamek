@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -16,6 +17,41 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardRoadSlopeTest {
+    @ParameterizedTest
+    @ValueSource(ints = { 0, 1, 2, 3, 4, 5 })
+    void aGradedRimKeepsTheNativeCliffBelowTheRoadContact(int direction) {
+        var at = BoardRoadTest.CENTER;
+        var approach = at.translated(direction);
+        var continuation = at.translated((direction + 1) % 6);
+        var scene = BoardSurfaceBlendTest.scene(c -> BoardRoadTest.tile(c,
+              c.equals(at) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
+              c.equals(at) ? (1 << direction) | (1 << ((direction + 1) % 6)) : 0,
+              c.equals(at) || c.equals(continuation) ? 6 : c.equals(approach) ? 5 : 0, BoardScene.Surface.SAND));
+        var natural = BoardSurfaceBlendTest.scene(c -> BoardRoadTest.tile(c, BoardRoad.Kind.NONE, 0,
+              scene.tile(c).elevation(), BoardScene.Surface.SAND));
+        int edge = Math.floorMod(2 - direction, 6);
+        for (var lod : TerrainLod.values()) {
+            var surface = new BoardSurface(scene, scene.tile(at), lod);
+            var nativeSurface = new BoardSurface(natural, natural.tile(at), lod);
+            var walls = surface.walls(scene, BoardGeometry.floor(scene));
+            var rendered = GpuTerrain.prepareWalls(scene, surface, BoardGeometry.floor(scene), Map.of());
+            assertEquals(walls.stream().filter(face -> face.landEdge() == edge).toList(), rendered.entrySet().stream()
+                  .filter(entry -> entry.getKey().edge() == edge).flatMap(entry -> entry.getValue().stream()).toList(),
+                  "Rendering must reuse the completed cliff, without rebuilding overlapping walls per road segment");
+            for (int level : new int[] { 2, 3, 4 }) {
+                var nativePoint = nativeSurface.relief.wetCliffContact(edge, .5f, level * BoardGeometry.level());
+                float nearest = Float.POSITIVE_INFINITY;
+                for (var face : walls) {
+                    if (face.landEdge() != edge) { continue; }
+                    for (var p : List.of(face.a(), face.b(), face.c())) {
+                        nearest = Math.min(nearest, nativePoint.dst(p));
+                    }
+                }
+                assertTrue(nearest < .01f, lod + " graded cliff lost its native relief by " + nearest);
+            }
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(ints = { 0, 1, 2, 3, 4, 5 })
     void aGradedExitKeepsTheSharedCliffProfileOnAnUnchangedEdge(int direction) {

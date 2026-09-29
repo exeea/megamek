@@ -177,7 +177,7 @@ class BoardNaturalBridgeTest {
             var after = new BoardSurface(scene, tile, lod);
             var oldRocks = rockFaces(before);
             var rocks = rockFaces(after);
-            assertEquals(oldRocks.size(), rocks.size(), "Keep every rock and its original geometry");
+            assertEquals(oldRocks.size(), rocks.size(), "An open bank has room beside the entrance for every rock it moves");
             var approaches = BoardBridge.approaches(scene, tile);
             for (int i = 0; i < rocks.size(); i++) {
                 var old = oldRocks.get(i);

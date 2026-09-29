@@ -3,20 +3,25 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.io.File;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
+import java.util.stream.Stream;
 import javax.swing.JFrame;
 import javax.swing.JMenuBar;
 import javax.swing.SwingUtilities;
 
+import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.Ray;
 import megamek.client.ui.boardeditor.BoardEditorPanel;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
@@ -93,6 +98,63 @@ class BoardIceTest {
                 board.setHex(coords, new Hex(0));
                 source.refresh();
                 assertEquals(BoardTactical.EMPTY, source.takeFrame().scene().tactical());
+            }
+            return null;
+        });
+    }
+
+    @Test
+    void flatLakeInteriorsUseOnlyFourIceTrianglesAndLandIceRetainsMarkerSupport() throws Exception {
+        onEdt(() -> {
+            var game = new Game();
+            var board = Board.createEmptyBoard(3, 3);
+            for (int x = 0; x < 3; x++) {
+                for (int y = 0; y < 3; y++) { board.setHex(new Coords(x, y), new Hex(0, "water:2;ice:1", "")); }
+            }
+            game.setBoard(board);
+            try (var source = new GpuMapSource(game, null, null)) {
+                var scene = source.takeFrame().scene();
+                var center = new Coords(1, 1);
+                var surface = new BoardSurface(scene, scene.tile(center));
+                assertEquals(4, surface.faces.stream().filter(face -> face.finish() == BoardSurface.Finish.ICE).count());
+                assertTrue(surface.iceBroken.isEmpty() && surface.iceLeads.isEmpty(),
+                      "Frozen neighbours continue one slab without cut edges");
+                board.setHex(center, new Hex(0, "ice:1", ""));
+                source.refresh();
+                scene = source.takeFrame().scene();
+                surface = new BoardSurface(scene, scene.tile(center));
+                assertFalse(BoardTacticalGeometry.Surface.of(surface, scene, -10).top().isEmpty());
+            }
+            return null;
+        });
+    }
+
+    @Test
+    void lakeSlabCarriesUnitsAtItsLevelAndBreaksOutOverOpenWaterOnlyForRendering() throws Exception {
+        onEdt(() -> {
+            var game = new Game();
+            var board = Board.createEmptyBoard(4, 3);
+            for (int x = 0; x < 4; x++) {
+                for (int y = 0; y < 3; y++) {
+                    board.setHex(new Coords(x, y), new Hex(0, x == 1 ? "water:1;ice:1" : x > 1 ? "water:1" : "", ""));
+                }
+            }
+            game.setBoard(board);
+            try (var source = new GpuMapSource(game, null, null)) {
+                var scene = source.takeFrame().scene();
+                var frozen = scene.tile(new Coords(1, 1));
+                var surface = new BoardSurface(scene, frozen);
+                surface.faces.stream().filter(face -> face.finish() == BoardSurface.Finish.ICE)
+                      .flatMap(face -> Stream.of(face.a(), face.b(), face.c()))
+                      .forEach(p -> assertEquals(BoardGeometry.surfaceZ(frozen), p.z, 1e-4f, "Units stand on the slab"));
+                Vector3 centre = BoardGeometry.center(frozen.coords(), 0);
+                Vector3 farthest = surface.iceBroken.stream().flatMap(face -> Stream.of(face.a(), face.b(), face.c()))
+                      .max(Comparator.comparingDouble(p -> Math.hypot(p.x - centre.x, p.y - centre.y))).orElseThrow();
+                assertTrue(Math.hypot(farthest.x - centre.x, farthest.y - centre.y) > BoardGeometry.width() / 2,
+                      "The ice breaks out over open water, beyond even the hex's corners");
+                var hit = BoardGeometry.hit(scene, new Ray(new Vector3(farthest.x, farthest.y, 200), new Vector3(0, 0, -1)));
+                assertNotNull(hit);
+                assertNotEquals(frozen.coords(), hit.coords(), "Picking keeps the hex outline under the render-only margin");
             }
             return null;
         });

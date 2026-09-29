@@ -139,7 +139,7 @@ final class BoardBridge {
               && Math.abs(tile.elevation() + bridge.elevation() - next.elevation()) <= 1;
     }
 
-    /** The bank-side passage only. Ground and dressing below an elevated span do not belong to its approach. */
+    /** A bridge's passage at deck height, through a bank or along the deck; what lies well below it is no obstruction. */
     record Approach(float x, float y, float nx, float ny, float length, float width, float level) {
         float lateral(Vector3 point) { return (point.y - y) * nx - (point.x - x) * ny; }
 
@@ -155,19 +155,22 @@ final class BoardBridge {
         }
     }
 
+    /** The passages through this hex: towards each bridge it is a bank of, and along its own bridge's deck. */
     static List<Approach> approaches(BoardScene scene, BoardScene.Tile tile) {
         var result = new ArrayList<Approach>();
         var center = BoardGeometry.center(tile.coords(), tile.elevation());
+        var own = feature(tile);
         for (int d = 0; d < 6; d++) {
-            var bridge = scene.tile(tile.coords().translated(d));
-            if (!bank(bridge, tile, (d + 3) % 6)) { continue; }
-            var direction = BoardGeometry.center(bridge.coords(), tile.elevation()).sub(center);
+            boolean span = own != null && (own.bridgeExits() & (1 << d)) != 0;
+            if (!span && !bank(scene.tile(tile.coords().translated(d)), tile, (d + 3) % 6)) { continue; }
+            var direction = BoardGeometry.center(tile.coords().translated(d), tile.elevation()).sub(center);
             float length = direction.len();
             direction.scl(1 / length);
             // Both styles reserve the widest mouth. A distant road edit must not change the bank's ground mesh.
             float width = Math.max(BoardRelief.metres(NATURAL_HALF_WIDTH * 1.04f),
                   (BoardRoad.Kind.PAVED.halfWidth + BoardRoad.SHOULDER) * BoardGeometry.hexScale());
-            result.add(new Approach(center.x, center.y, direction.x, direction.y, length, width, center.z));
+            float level = span ? (tile.elevation() + own.elevation()) * BoardGeometry.level() : center.z;
+            result.add(new Approach(center.x, center.y, direction.x, direction.y, length, width, level));
         }
         return List.copyOf(result);
     }

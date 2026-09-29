@@ -28,6 +28,7 @@ import megamek.client.event.BoardViewListenerAdapter;
 import megamek.client.ui.IDisplayable;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.ECMEffects;
 import megamek.client.ui.clientGUI.boardview.sprite.CursorSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.MovementEnvelopeSprite;
@@ -59,19 +60,24 @@ class GpuBoardSourceTest {
     void minimapNavigationAndViewportRecreationDoNotDependOnAnInactiveRenderer() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             SwingUtilities.invokeAndWait(() -> {
-                assertNull(fixture.view.getPanel().getParent());
-                fixture.view.centerOnPointRel(1, 1);
-                Coords corner = new Coords(fixture.game.getBoard().getWidth() - 1,
-                      fixture.game.getBoard().getHeight() - 1);
-                assertEquals(corner, fixture.view.getCenterRequest().coords());
-                fixture.source.refresh();
-                assertEquals(fixture.view.getCenterRequest(), fixture.source.takeFrame().centerRequest());
-                assertNull(fixture.view.getPanel().getParent());
-                var classic = fixture.view.getComponent();
-                fixture.view.releaseClassicView();
-                assertNull(fixture.view.getPanel().getParent());
-                assertEquals(corner, fixture.view.getCenterRequest().coords());
-                assertNotSame(classic, fixture.view.getComponent(), "Switching back creates a new classic viewport");
+                BoardView classic = fixture.classicView();
+                try {
+                    assertNull(classic.getPanel().getParent());
+                    classic.centerOnPointRel(1, 1);
+                    Coords corner = new Coords(fixture.game.getBoard().getWidth() - 1,
+                          fixture.game.getBoard().getHeight() - 1);
+                    assertEquals(corner, fixture.view.getCenterRequest().coords());
+                    fixture.source.refresh();
+                    assertEquals(fixture.view.getCenterRequest(), fixture.source.takeFrame().centerRequest());
+                    assertNull(classic.getPanel().getParent());
+                    var viewport = classic.getComponent();
+                    classic.releaseClassicView();
+                    assertNull(classic.getPanel().getParent());
+                    assertEquals(corner, fixture.view.getCenterRequest().coords());
+                    assertNotSame(viewport, classic.getComponent(), "Switching back creates a new classic viewport");
+                } finally {
+                    classic.dispose();
+                }
             });
         }
     }
@@ -82,8 +88,6 @@ class GpuBoardSourceTest {
         boolean softCenter = preferences.getSoftCenter();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             SwingUtilities.invokeAndWait(() -> {
-                assertNull(fixture.view.getPanel().getParent());
-                assertFalse(fixture.view.getPanel().isDisplayable());
                 for (boolean smooth : new boolean[] { false, true }) {
                     preferences.setSoftCenter(smooth);
                     fixture.view.centerOn(fixture.entity);
@@ -94,10 +98,8 @@ class GpuBoardSourceTest {
                     assertFalse(frame.scene().tiles().isEmpty());
                     assertFalse(frame.scene().units().isEmpty());
                 }
-                BufferedImage image = fixture.view.getEntireBoardImage(false, true);
+                BufferedImage image = fixture.view.getEntireBoardImage(false);
                 assertTrue(image.getWidth() > 0 && image.getHeight() > 0);
-                assertNull(fixture.view.getPanel().getParent());
-                assertFalse(fixture.view.getPanel().isDisplayable());
             });
         } finally {
             SwingUtilities.invokeAndWait(() -> preferences.setSoftCenter(softCenter));
@@ -289,13 +291,18 @@ class GpuBoardSourceTest {
             BoardScene.Tile tile = fixture.source.takeFrame().scene().tile(new Coords(0, 0));
             assertTrue(before.height() >= 80);
             SwingUtilities.invokeAndWait(() -> {
-                fixture.view.getComponent();
-                fixture.view.zoomOut();
-                float scale = fixture.view.getScale();
-                Dimension size = new Dimension(fixture.view.getHexSize());
-                fixture.source.refresh();
-                assertEquals(scale, fixture.view.getScale());
-                assertEquals(size, fixture.view.getHexSize());
+                BoardView classic = fixture.classicView();
+                try {
+                    classic.getComponent();
+                    classic.zoomOut();
+                    float scale = classic.getScale();
+                    Dimension size = new Dimension(classic.getHexSize());
+                    fixture.source.refresh();
+                    assertEquals(scale, classic.getScale());
+                    assertEquals(size, classic.getHexSize());
+                } finally {
+                    classic.dispose();
+                }
             });
             assertSame(before, fixture.source.takeFrame().scene().units().getFirst().annotations());
             BoardScene.Tile after = fixture.source.takeFrame().scene().tile(new Coords(0, 0));
@@ -649,14 +656,14 @@ class GpuBoardSourceTest {
             SwingUtilities.invokeAndWait(() -> {
                 Hex hex = fixture.game.getBoard().getHex(coords);
                 hex.setTheme("desert");
-                fixture.view.clearHexImageCache();
+                fixture.view.clearArtwork();
                 plain.set(groundArt(fixture, coords));
                 hex.addTerrain(new Terrain(Terrains.ROUGH, 1));
-                fixture.view.clearHexImageCache();
+                fixture.view.clearArtwork();
                 rough.set(groundArt(fixture, coords));
                 hex.removeTerrain(Terrains.ROUGH);
                 hex.addTerrain(new Terrain(Terrains.RUBBLE, 1));
-                fixture.view.clearHexImageCache();
+                fixture.view.clearArtwork();
                 rubble.set(groundArt(fixture, coords));
                 hex.removeTerrain(Terrains.RUBBLE);
             });
@@ -802,7 +809,7 @@ class GpuBoardSourceTest {
                 fixture.source.refresh();
             });
             BoardScene.Unit after = fixture.source.takeFrame().scene().units().getFirst();
-            assertEquals(fixture.view.getTileManager().facingFor(fixture.entity), after.location().facing());
+            assertEquals(fixture.view.getTilesetManager().facingFor(fixture.entity), after.location().facing());
             assertEquals(1, after.location().facing());
             assertSame(before.image(), after.image());
         }

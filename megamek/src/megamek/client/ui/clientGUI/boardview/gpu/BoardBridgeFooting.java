@@ -2,18 +2,53 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
 
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.BoundingBox;
 import megamek.common.board.Coords;
 
 /** Short continuations of the authored deck and rails, ending on the actual bank rather than a nominal hex edge. */
 record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bareExits) {
-    static final float RAIL_TAPER_METRES = 1.5f;
     static final float APRON_METRES = 7;
-    private static final float BLOCK_OUTSET_METRES = .3f;
+
+    private record Block(BoardShape shape, Vector3 size) { }
+
+    /** Publish the complete immutable kit together; terrain workers retain one snapshot while building. */
+    private static final class Kit {
+        static volatile List<Block> blocks = load();
+
+        private static List<Block> load() {
+            var shapes = BoardShape.loadKit("bridge-terminal");
+            for (String name : shapes.keySet()) {
+                if (!name.matches("bridge-terminal-lod[01]")) {
+                    throw new IllegalArgumentException("Unexpected bridge terminal mesh: " + name);
+                }
+            }
+            var blocks = MeshLod.load("bridge-terminal", 2, name -> {
+                var shape = shapes.get(name);
+                if (shape == null) { return null; }
+                var bounds = new BoundingBox().inf();
+                shape.polygons().forEach(face -> { for (var p : face.points()) { bounds.ext(p); } });
+                var size = bounds.getDimensions(new Vector3());
+                if (!bounds.min.isZero(.001f) || size.x <= 0 || size.y <= 0) {
+                    throw new IllegalArgumentException("Bridge terminal must start at the inner rail/deck origin: " + name);
+                }
+                return new Block(shape, size);
+            });
+            if (!blocks.getFirst().size().epsilonEquals(blocks.getLast().size(), .001f)) {
+                throw new IllegalArgumentException("Bridge terminal LODs must retain the same bank footprint and height");
+            }
+            return blocks;
+        }
+    }
+
+    static void reload() { Kit.blocks = Kit.load(); }
+
+    static float terminalLength() { return Kit.blocks.getFirst().size().y; }
 
     /** Paint extends onto the existing bank after the structural footing has ended. */
     BoardRoad road(BoardBridge.Deck deck, Coords coords) {
@@ -29,6 +64,7 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
     static BoardBridgeFooting build(BoardScene scene, BoardScene.Tile tile, TerrainLod lod, Map<Coords, BoardSurface> surfaces) {
         float level = tile.elevation() + BoardBridge.feature(tile).elevation();
         float scale = BoardGeometry.hexScale();
+        var block = Kit.blocks.get(lod == TerrainLod.FULL || lod == TerrainLod.MEDIUM ? 0 : 1);
         var center = BoardGeometry.center(tile.coords(), level).add(0, 0, GpuRoads.SURFACE_LIFT * scale);
         var faces = new ArrayList<BoardBridge.Facet>();
         var lengths = new ArrayList<Float>();
@@ -51,7 +87,7 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
                 boolean supported = true;
                 for (int i = -4; i <= 4; i++) {
                     var p = new Vector3(gate).mulAdd(along, reach)
-                          .mulAdd(across, (width + BoardRelief.metres(BLOCK_OUTSET_METRES)) * i / 4);
+                          .mulAdd(across, (lane + block.size().x * scale) * i / 4);
                     supported &= bank.relief.clearance(p.x, p.y) >= BoardRelief.metres(.5f)
                           && Float.isFinite(BoardSurface.sampleHeight(ground, p.x, p.y, Float.NaN));
                 }
@@ -60,7 +96,7 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
             float supportedAt = reach;
             boolean bare = !BoardBridge.road(tile, next, d);
             if (bare) { bareExits |= 1 << d; }
-            reach += BoardRelief.metres(RAIL_TAPER_METRES);
+            reach += block.size().y * scale;
             lengths.add(reach / scale);
             int edge = Math.floorMod(1 - d, 6);
             var corner = BoardGeometry.corner(tile.coords(), level, edge);
@@ -93,66 +129,50 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
                 }
                 previous = row;
             }
-            var stations = new Vector3[][] { row(start, end, terminal),
-                  row(start, end, (supportedAt + BoardRelief.metres(.32f)) / reach), end };
             for (int side : new int[] { -1, 1 }) {
-                terminal(faces, stations, side, ground, lod);
+                terminal(faces, block.shape(), start, end, supportedAt, reach, side, ground);
             }
         }
         return new BoardBridgeFooting(BoardBridge.shape(BoardScene.Surface.CONCRETE, level, faces), List.copyOf(lengths), bareExits);
     }
 
     private static Vector3[] row(Vector3[] start, Vector3[] end, float t) {
-        float grade = t * t * (3 - 2 * t);
         var row = new Vector3[start.length];
         for (int i = 0; i < row.length; i++) {
-            row[i] = new Vector3(start[i]).lerp(end[i], t);
-            row[i].z = start[i].z + (end[i].z - start[i].z) * grade;
+            row[i] = point(start[i], end[i], t);
         }
         return row;
     }
 
-    /** Raised cap, outward-thickened body and sloping nose; the inner face never enters the carriageway. */
-    private static void terminal(List<BoardBridge.Facet> faces, Vector3[][] stations, int side,
-          List<BoardSurface.Face> ground, TerrainLod lod) {
-        float bevel = lod == TerrainLod.FULL || lod == TerrainLod.MEDIUM ? BoardRelief.metres(.035f) : 0;
-        var rings = new ArrayList<Vector3[]>();
-        for (int s = 0; s < stations.length; s++) {
-            var station = stations[s];
-            var inner = station[side < 0 ? 1 : 2];
-            var outward = new Vector3(station[side < 0 ? 0 : 3]).sub(inner);
-            outward.z = 0;
-            float width = outward.len() + BoardRelief.metres(BLOCK_OUTSET_METRES);
-            outward.nor();
-            float height = s == stations.length - 1 ? BoardRelief.metres(.08f)
-                  : 2.5f * BoardGeometry.hexScale() + BoardRelief.metres(.1f);
-            float[][] profile = bevel == 0 ? new float[][] { { 0, 0 }, { width, 0 }, { width, height }, { 0, height } }
-                  : new float[][] { { 0, 0 }, { width, 0 }, { width, height - bevel },
-                        { width - bevel, height }, { bevel, height }, { 0, height - bevel } };
-            var ring = new Vector3[profile.length];
-            for (int i = 0; i < profile.length; i++) {
-                var p = new Vector3(inner).mulAdd(outward, profile[i][0]).add(0, 0, profile[i][1]);
-                if (i < 2) {
-                    p.z = Math.min(inner.z, BoardSurface.sampleHeight(ground, p.x, p.y, inner.z)) - BoardRelief.metres(.025f);
-                }
-                ring[side < 0 ? profile.length - 1 - i : i] = p;
+    private static Vector3 point(Vector3 start, Vector3 end, float t) {
+        var point = new Vector3(start).lerp(end, t);
+        point.z = start.z + (end.z - start.z) * t * t * (3 - 2 * t);
+        return point;
+    }
+
+    /** Place the authored block outside the lane, grade it with the slab, and seat only its bottom on the bank. */
+    private static void terminal(List<BoardBridge.Facet> faces, BoardShape block, Vector3[] start, Vector3[] end,
+          float supportedAt, float reach, int side, List<BoardSurface.Face> ground) {
+        float scale = BoardGeometry.hexScale();
+        int inner = side < 0 ? 1 : 2;
+        var outward = new Vector3(end[side < 0 ? 0 : 3]).sub(end[inner]);
+        outward.z = 0;
+        outward.nor();
+        var placed = new IdentityHashMap<Vector3, Vector3>();
+        for (var face : block.polygons()) {
+            var points = new Vector3[3];
+            for (int i = 0; i < 3; i++) {
+                points[i] = placed.computeIfAbsent(face.points()[i], source -> {
+                    var p = point(start[inner], end[inner], (supportedAt + source.y * scale) / reach)
+                          .mulAdd(outward, source.x * scale);
+                    p.z = Math.abs(source.z) < .001f
+                          ? Math.min(p.z, BoardSurface.sampleHeight(ground, p.x, p.y, p.z)) - BoardRelief.metres(.025f)
+                          : p.z + source.z * scale;
+                    return p;
+                });
             }
-            rings.add(ring);
-        }
-        int n = rings.getFirst().length;
-        for (int s = 1; s < rings.size(); s++) {
-            var a = rings.get(s - 1);
-            var b = rings.get(s);
-            for (int i = 0; i < n; i++) {
-                int next = (i + 1) % n;
-                quad(faces, a[i], a[next], b[next], b[i], BoardBridge.Part.STRUCTURE);
-            }
-        }
-        for (int i = 1; i < n - 1; i++) {
-            var first = rings.getFirst();
-            var last = rings.getLast();
-            BoardBridge.triangle(faces, first[0], first[i + 1], first[i], BoardBridge.Part.STRUCTURE);
-            BoardBridge.triangle(faces, last[0], last[i], last[i + 1], BoardBridge.Part.STRUCTURE);
+            // Mirroring to the opposite rail must preserve outward-facing triangles.
+            BoardBridge.triangle(faces, points[0], points[side < 0 ? 1 : 2], points[side < 0 ? 2 : 1], BoardBridge.Part.STRUCTURE);
         }
     }
 

@@ -2,11 +2,14 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.function.Predicate;
 
 import megamek.common.Hex;
 import megamek.common.board.Coords;
@@ -16,6 +19,10 @@ import megamek.common.units.Terrains;
 final class BoardFeatures {
     /** Width in tile pixels of a Rough boulder at feature scale one; placement and meshing share this size. */
     static final float ROUGH_BOULDER_WIDTH = 12;
+    /** Half-diagonal in tile pixels of the 6.4-pixel square dragon-tooth footprint; clears roads and hex edges. */
+    private static final float DRAGON_TOOTH_RADIUS = 4.6f;
+    /** Ultra rough's tooth spacing in tile pixels, the closest that still reads as separate teeth. */
+    private static final float CLOSE_TEETH_SPACING = 11;
     /** Tree species by where they grow; repeated names are the common ones. */
     private static final List<String> TEMPERATE = List.of("tree", "pine", "tree-broad", "birch", "tree-slender",
           "pine-tall", "pine-broad");
@@ -119,6 +126,12 @@ final class BoardFeatures {
 
     static List<BoardScene.Feature> capture(Hex hex, Coords coords, Map<Integer, String> structureModels,
           Set<Integer> blankTerrains) {
+        return capture(hex, coords, structureModels, blankTerrains, neighbor -> null);
+    }
+
+    /** The board supplies the neighbouring roads, whose course through this hex scenery keeps clear of. */
+    static List<BoardScene.Feature> capture(Hex hex, Coords coords, Map<Integer, String> structureModels,
+          Set<Integer> blankTerrains, Function<Coords, Hex> board) {
         List<BoardScene.Feature> result = new ArrayList<>();
         int variant = Math.floorMod(coords.getX() * 31 + coords.getY() * 17, 4);
         // Terrain levels are the game's collectable limb counts, not damage inferred from nearby units.
@@ -153,7 +166,7 @@ final class BoardFeatures {
         }
         boolean jungle = hex.containsTerrain(Terrains.JUNGLE);
         BoardRoad road = BoardRoad.capture(hex) == BoardRoad.Kind.NONE ? null
-              : BoardRoad.clearance(coords, hex.getTerrain(Terrains.ROAD).getExits());
+              : BoardRoad.clearance(coords, hex, board);
         if (jungle || hex.containsTerrain(Terrains.WOODS)) {
             boolean orchard = orchard(hex);
             int density = hex.terrainLevel(jungle ? Terrains.JUNGLE : Terrains.WOODS);
@@ -191,25 +204,92 @@ final class BoardFeatures {
                       height * (1f + (index % 3) * 0.05f), 0, BoardScene.FeatureKind.TREE));
             }
         }
-        rough(hex, coords, result);
+        rough(hex, coords, result, board);
         BoardScatter.capture(hex, coords, result);
         return List.copyOf(result);
     }
 
     /** Rough is actual terrain cover, independent of cosmetic scatter density, with larger cover for ultra rough. */
-    private static void rough(Hex hex, Coords coords, List<BoardScene.Feature> result) {
+    private static void rough(Hex hex, Coords coords, List<BoardScene.Feature> result, Function<Coords, Hex> board) {
         if (!hex.containsTerrain(Terrains.ROUGH)
               || hex.containsAnyTerrainOf(Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL,
                     Terrains.SPACE, Terrains.SKY, Terrains.MAGMA)) { return; }
-        Random random = new Random(coords.getX() * 73_856_093L ^ coords.getY() * 19_349_663L ^ 0xb01deL);
         boolean teeth = BoardRough.variant(hex) == 1;
         boolean felled = BoardRough.variant(hex) == 2;
         boolean ultra = hex.terrainLevel(Terrains.ROUGH) == 2;
-        int count = teeth ? (ultra ? 25 : 15) : ultra ? 14 : 9;
+        int count = teeth ? (ultra ? 24 : 10) : felled ? (ultra ? 12 : 9) : ultra ? 18 : 9;
         BoardRoad road = hex.containsTerrain(Terrains.ROAD)
-              ? BoardRoad.clearance(coords, hex.getTerrain(Terrains.ROAD).getExits()) : null;
+              ? BoardRoad.clearance(coords, hex, board) : null;
         int exits = hex.containsTerrain(Terrains.BRIDGE) ? hex.getTerrain(Terrains.BRIDGE).getExits() : 0;
         BoardRoad bridge = hex.containsTerrain(Terrains.BRIDGE) ? BoardRoad.clearance(coords, exits) : null;
+        Predicate<BoardScene.Feature> clear = feature -> {
+            float x = feature.x(), y = feature.y();
+            float clearance = BoardRoad.SHOULDER + feature.scale() * switch (feature.asset()) {
+                case "rough/charred-stump" -> 3;
+                case "rough/dragon-tooth" -> DRAGON_TOOTH_RADIUS;
+                default -> ROUGH_BOULDER_WIDTH / 2;
+            };
+            // Bridge decks follow the complete road footprint, including dead ends and solid roundabout islands.
+            return (road == null || road.distance(x, y) >= clearance) && (bridge == null
+                  || bridge.distance(x, y) >= clearance
+                        && !(BoardRoad.roundabout(exits) && Math.hypot(x, y) < BoardRoad.ROUNDABOUT_RADIUS));
+        };
+        // A route removes the cover on its line. Keep the authoritative count beside it, as woods do: teeth close
+        // their spacing, and other cover packs its spiral up to three times as densely.
+        if (teeth) {
+            // Standard teeth spread across the hex; ultra rough fills it at the closest spacing.
+            result.addAll(dragonTeeth(count, ultra ? CLOSE_TEETH_SPACING : 20, clear));
+            return;
+        }
+        List<BoardScene.Feature> placed = List.of();
+        for (int spread = count; placed.size() < count && spread <= 3 * count; spread++) {
+            List<BoardScene.Feature> pieces = roughSpiral(coords, felled, ultra, spread).stream().filter(clear)
+                  .limit(count).toList();
+            if (pieces.size() > placed.size()) { placed = pieces; }
+        }
+        result.addAll(placed);
+    }
+
+    /**
+     * Identical concrete teeth in staggered rows, nearest the centre first, wherever a whole tooth lies inside the
+     * hex on clear ground. Until that ground holds the count, the rows shift sideways to straddle a route and the
+     * spacing closes, down to ultra rough's.
+     */
+    private static List<BoardScene.Feature> dragonTeeth(int count, float spacing, Predicate<BoardScene.Feature> clear) {
+        List<BoardScene.Feature> teeth = List.of();
+        for (float pitch = spacing; teeth.size() < count && pitch >= CLOSE_TEETH_SPACING; pitch -= .5f) {
+            for (float shift = 0; teeth.size() < count && shift < 1; shift += .25f) {
+                List<BoardScene.Feature> slots = new ArrayList<>();
+                int reach = (int) (BoardGeometry.TILE_WIDTH / 2 / pitch) + 1;
+                for (int row = -reach; row <= reach; row++) {
+                    for (int column = -reach; column <= reach; column++) {
+                        // Alternate rows sit halfway between each other's teeth; the centre row straddles the centre.
+                        float x = (column + .5f + (row & 1) * .5f - shift) * pitch, y = row * pitch;
+                        var tooth = new BoardScene.Feature("rough/dragon-tooth", x, y, 0, 1, .28f, 0,
+                              BoardScene.FeatureKind.ROUGH);
+                        if (hexMargin(x, y) >= DRAGON_TOOTH_RADIUS && clear.test(tooth)) { slots.add(tooth); }
+                    }
+                }
+                slots.sort(Comparator.comparingDouble(tooth -> Math.hypot(tooth.x(), tooth.y())));
+                if (slots.size() > teeth.size()) { teeth = slots.subList(0, Math.min(count, slots.size())); }
+            }
+        }
+        return teeth;
+    }
+
+    /** Distance in tile pixels from an offset about the hex centre to the nearest hex edge. */
+    private static float hexMargin(float x, float y) {
+        float w = BoardGeometry.TILE_WIDTH / 2, h = BoardGeometry.TILE_HEIGHT / 2;
+        float slope = (h * (w - Math.abs(x)) - w / 2 * Math.abs(y)) / (float) Math.hypot(h, w / 2);
+        return Math.min(h - Math.abs(y), slope);
+    }
+
+    /** Boulders or fallen timber on an equal-area spiral of {@code count} pieces. */
+    private static List<BoardScene.Feature> roughSpiral(Coords coords, boolean felled, boolean ultra, int count) {
+        // Every third piece is a large stump; in ultra rough, every second.
+        int stumps = ultra ? 2 : 3;
+        Random random = new Random(coords.getX() * 73_856_093L ^ coords.getY() * 19_349_663L ^ 0xb01deL);
+        List<BoardScene.Feature> result = new ArrayList<>();
         for (int i = 0; i < count; i++) {
             double angle = i * 2.399963 + random.nextFloat() * .45 + random.nextFloat();
             // Equal-area cover includes the centre and the slopes; units do not reserve an empty ring in Rough.
@@ -218,38 +298,29 @@ final class BoardFeatures {
             float size = .55f + random.nextFloat() * .55f;
             float height = .22f + random.nextFloat() * .32f;
             String asset = "rough-boulder";
-            if (teeth) {
-                // Identical concrete teeth, with alternate rows staggered by half a tooth spacing.
-                x = (i % 5 - 2) * 11 + (i / 5 % 2 == 0 ? -2.75f : 2.75f);
-                y = (i / 5 - (count / 5 - 1) * .5f) * 11;
-                size = 1;
-                height = .28f;
-                asset = "rough/dragon-tooth";
-            } else if (felled) {
+            if (felled) {
                 asset = "rough/felled-trunk";
-                // Alternate large standing and toppled stumps among the smaller broken branches.
-                if (i % 3 == 0) {
-                    boolean fallen = i / 3 % 2 != 0;
+                // Large standing stumps, every third one toppled, among the smaller broken branches.
+                if (i % stumps == 0) {
+                    boolean fallen = i / stumps % 3 == 1;
                     asset = fallen ? "rough/fallen-stump" : "rough/charred-stump";
                     size = 3 + random.nextFloat() * .4f;
                     height = (1.8f + random.nextFloat() * .3f) * (fallen ? .5f : 1);
-                    // Lay long pieces around the centre, leaving room for the standing trunk there.
-                    if (fallen) { x = (float) Math.cos(angle) * 20; y = (float) Math.sin(angle) * 20; }
+                    // Lay long pieces around the centre, leaving room for the standing trunk there. A standing
+                    // trunk keeps its whole footprint, three pixels per unit of size, inside the hex.
+                    float reach = fallen ? 20 : Math.min(radius, BoardGeometry.TILE_HEIGHT / 2 - 3 * size);
+                    x = (float) Math.cos(angle) * reach;
+                    y = (float) Math.sin(angle) * reach;
                 } else {
                     height = .10f + random.nextFloat() * .07f;
                 }
             }
-            float clearance = size * (asset.equals("rough/charred-stump") ? 3 : ROUGH_BOULDER_WIDTH / 2);
-            boolean blocked = road != null && road.distance(x, y) < BoardRoad.SHOULDER + clearance;
-            // Bridge decks follow the complete road footprint, including dead ends and solid roundabout islands.
-            blocked |= bridge != null && (bridge.distance(x, y) < BoardRoad.SHOULDER + clearance
-                  || BoardRoad.roundabout(exits) && Math.hypot(x, y) < BoardRoad.ROUNDABOUT_RADIUS);
-            if (blocked) { continue; }
-            float rotation = teeth ? 0 : random.nextFloat() * 360;
+            float rotation = random.nextFloat() * 360;
             if (asset.equals("rough/fallen-stump")) { rotation = (float) Math.toDegrees(angle) + 90; }
             result.add(new BoardScene.Feature(asset, x, y, rotation, size, height, 0,
-                  teeth || felled ? BoardScene.FeatureKind.ROUGH : BoardScene.FeatureKind.BOULDER));
+                  felled ? BoardScene.FeatureKind.ROUGH : BoardScene.FeatureKind.BOULDER));
         }
+        return result;
     }
 
     /**

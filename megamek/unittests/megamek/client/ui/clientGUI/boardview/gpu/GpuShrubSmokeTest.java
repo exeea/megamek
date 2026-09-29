@@ -65,13 +65,15 @@ class GpuShrubSmokeTest {
                             }
                         }
                         Texture atlas = null;
-                        int[] triangles = new int[3];
-                        for (int lod = 0; lod < 3; lod++) {
+                        int[] triangles = new int[TreeLod.LEVELS];
+                        for (int lod = 0; lod < TreeLod.LEVELS; lod++) {
                             var model = assets.lodModel(name, lod);
                             for (var part : model.meshParts) { triangles[lod] += part.size / 3; }
                             for (var material : model.materials) {
                                 var map = material.get(TextureAttribute.class, TextureAttribute.Diffuse);
                                 assertNotNull(map);
+                                // The impostor cards carry their own rendered atlas.
+                                if (material.id.equals("impostor")) { continue; }
                                 if (atlas == null) { atlas = map.textureDescription.texture; }
                                 assertSame(atlas, map.textureDescription.texture, "Every LOD and part borrows one atlas");
                             }
@@ -80,9 +82,9 @@ class GpuShrubSmokeTest {
                               .getDimensions(new Vector3()).len() * 1.1f;
                         camera.center(BoardGeometry.center(new Coords(0, 0), 0).add(0, 0, 9));
                         int nearColour = 0, nearDepth = 0;
-                        for (int lod : new int[] { 0, 1, 2, 0 }) {
+                        for (int lod : new int[] { 0, 1, 2, 3, 0 }) {
                             camera.camera.zoom = diameter * Gdx.graphics.getBackBufferHeight()
-                                  / Gdx.graphics.getHeight() / (lod == 0 ? 220 : lod == 1 ? 50 : 12);
+                                  / Gdx.graphics.getHeight() / GpuTreeLodSmokeTest.PIXELS[lod];
                             camera.update();
                             terrain.animate(0, List.of(), 1);
                             int shadow = count(profiler, () -> terrain.renderShadows(camera.camera, List.of()));

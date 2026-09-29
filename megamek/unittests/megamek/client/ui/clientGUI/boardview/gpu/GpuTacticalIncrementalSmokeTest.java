@@ -101,7 +101,7 @@ class GpuTacticalIncrementalSmokeTest {
             BoardScene initial = floatingScene(commands, 0, -1, false, 0);
             support.set(floatingSurface(initial.tile(owner), 0));
             tactical.update(initial);
-            assertEquals(1, queries[0], "One owner lookup builds every triangle of this border");
+            assertEquals(0, queries[0], "Flat annotations do not depend on finished terrain");
             assertEquals(1, ranges(tactical).size());
             Renderable first = ranges(tactical).getFirst();
             float[] initialVertices = vertices(first);
@@ -138,14 +138,14 @@ class GpuTacticalIncrementalSmokeTest {
             Renderable moved = ranges(tactical).getFirst();
             assertFloatingPlane(initialVertices, moved, 2 * BoardGeometry.LEVEL + clearance);
 
-            // A real tile-geometry change triggers dependency validation while the logical level stays unchanged.
+            // Finished relief changes must not move flat annotations at the same logical elevation.
             BoardScene rough = floatingScene(commands, 2, -1, false, 25);
             support.set(floatingSurface(rough.tile(owner), 6.25f));
             tactical.update(rough);
             Renderable lifted = ranges(tactical).getFirst();
-            assertNotSame(moved.meshPart.mesh, lifted.meshPart.mesh,
-                  "A new finished owner surface invalidates the cached height even at the same logical elevation");
-            assertFloatingPlane(initialVertices, lifted, 2 * BoardGeometry.LEVEL + 6.25f + clearance);
+            assertSame(moved.meshPart.mesh, lifted.meshPart.mesh,
+                  "Changing relief at the same elevation must retain the owner's horizontal plane");
+            assertFloatingPlane(initialVertices, lifted, 2 * BoardGeometry.LEVEL + clearance);
             compareBulk(rough, ownerOnly, tactical);
             int calls = queries[0];
             tactical.update(rough);
@@ -163,7 +163,7 @@ class GpuTacticalIncrementalSmokeTest {
         for (int i = 0; i < vertices.length; i += 4) {
             assertEquals(original[i], vertices[i]);
             assertEquals(original[i + 1], vertices[i + 1]);
-            assertEquals(height, vertices[i + 2], .00001f, "Every vertex shares the owner's highest-top plane");
+            assertEquals(height, vertices[i + 2], .00001f, "Every vertex shares the owner's elevation plane");
             assertEquals(original[i + 3], vertices[i + 3]);
         }
     }

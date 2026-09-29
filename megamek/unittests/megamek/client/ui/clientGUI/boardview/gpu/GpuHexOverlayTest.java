@@ -1,8 +1,6 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import megamek.client.ui.clientGUI.boardview.BoardArtwork;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -18,6 +16,7 @@ import java.util.List;
 import javax.swing.SwingUtilities;
 
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.ECMEffects;
@@ -91,11 +90,16 @@ class GpuHexOverlayTest {
                 assertTrue(triangles.stream().filter(t -> t.argb() == new Color(0, 140, 0, 120).getRGB())
                       .allMatch(t -> t.a().z > 3 * BoardGeometry.LEVEL && t.b().z > 3 * BoardGeometry.LEVEL
                             && t.c().z > 3 * BoardGeometry.LEVEL));
-                fixture.view.getComponent();
-                fixture.view.zoomOut();
-                float scale = fixture.view.getScale();
-                assertEquals(marked.tactical(), fixture.view.captureTacticalGeometry());
-                assertEquals(scale, fixture.view.getScale());
+                BoardView classic = fixture.classicView();
+                try {
+                    classic.getComponent();
+                    classic.zoomOut();
+                    float scale = classic.getScale();
+                    assertEquals(marked.tactical(), fixture.view.captureTacticalGeometry());
+                    assertEquals(scale, classic.getScale());
+                } finally {
+                    classic.dispose();
+                }
                 prefs.setMapSheetColor(Color.YELLOW);
                 fixture.source.refresh();
                 assertTrue(covers(fixture.source.takeFrame().scene().tactical(), Color.YELLOW, new Coords(8, 17), 42, 0));

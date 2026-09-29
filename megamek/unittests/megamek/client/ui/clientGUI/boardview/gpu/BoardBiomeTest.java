@@ -49,21 +49,20 @@ class BoardBiomeTest {
             var scene = BoardSurfaceBlendTest.scene(c -> tile(c, kind, 0));
             var tile = scene.tile(new Coords(4, 4));
             var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, -1);
-            var progressive = new GpuBiomeVegetation.Patch(scene, tile, surface, 0);
-            progressive.prepare(scene, tile, .08f, Long.MAX_VALUE);
-            assertFalse(progressive.busy());
+            var progressive = new GpuBiomeVegetation.Patch(scene, tile, surface);
+            progressive.prepare(scene, tile, .08f);
             if (kind == BoardScene.Biome.MARSH) {
                 for (int i = 3; i < progressive.roots.size; i += 4) { assertTrue(progressive.roots.items[i] < .08f); }
             }
             int distant = progressive.roots.size;
             assertTrue(distant > 0);
-            progressive.prepare(scene, tile, .35f, Long.MAX_VALUE);
+            progressive.prepare(scene, tile, .35f);
             if (kind == BoardScene.Biome.FIELD) {
                 assertEquals(distant, progressive.roots.size, "Zooming must not fill holes left by missing crop strips");
             } else { assertTrue(progressive.roots.size > distant); }
-            progressive.prepare(scene, tile, 1, Long.MAX_VALUE);
-            var full = new GpuBiomeVegetation.Patch(scene, tile, surface, 0);
-            full.prepare(scene, tile, Long.MAX_VALUE);
+            progressive.prepare(scene, tile, 1);
+            var full = new GpuBiomeVegetation.Patch(scene, tile, surface);
+            full.prepare(scene, tile);
             assertEquals(full.roots, progressive.roots, "LOD preparation order must keep one deterministic lattice");
             if (kind == BoardScene.Biome.FIELD) {
                 assertEquals(distant, full.roots.size, "Distant crops retain every supported row segment");
@@ -139,9 +138,8 @@ class BoardBiomeTest {
             for (var coords : List.of(center, center.translated(2))) {
                 var tile = scene.tile(coords);
                 var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, -1);
-                var patch = new GpuBiomeVegetation.Patch(scene, tile, surface, 0);
-                patch.prepare(scene, tile, Long.MAX_VALUE);
-                assertFalse(patch.busy());
+                var patch = new GpuBiomeVegetation.Patch(scene, tile, surface);
+                patch.prepare(scene, tile);
                 for (int i = 0; i < patch.roots.size; i += 4) {
                     float x = patch.roots.items[i], y = patch.roots.items[i + 1], z = patch.roots.items[i + 2];
                     assertTrue(all.add(x + ":" + y), "Shared edges cannot duplicate roots");
@@ -184,8 +182,8 @@ class BoardBiomeTest {
             });
             var tile = scene.tile(center);
             var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, -1);
-            var patch = new GpuBiomeVegetation.Patch(scene, tile, surface, 0);
-            patch.prepare(scene, tile, Long.MAX_VALUE);
+            var patch = new GpuBiomeVegetation.Patch(scene, tile, surface);
+            patch.prepare(scene, tile);
             assertTrue(patch.roots.size > 0);
             assertEquals(patch.roots.size, patch.rowSpans.size);
             boolean trimmed = false;
@@ -218,6 +216,39 @@ class BoardBiomeTest {
     }
 
     @Test
+    void distantCanopyRunsCoverTheSameFurrowsAsTheStripsWithFewerInstances() {
+        float metre = BoardRelief.metres(1);
+        var scene = BoardSurfaceBlendTest.scene(c -> tile(c, BoardScene.Biome.FIELD, c.getX() >= 5 ? 1 : 0));
+        // A level interior hex and a hex above a one-level bank, where strips split and stop before the slope.
+        for (var coords : List.of(new Coords(3, 4), new Coords(5, 4))) {
+            var tile = scene.tile(coords);
+            var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, -1);
+            var crops = GpuBiomeVegetation.plant(scene, tile, surface);
+            assertTrue(crops.canopy().size * 3 < crops.roots().size, coords + ": runs must replace several strips each");
+            float strips = 0, runs = 0;
+            for (int i = 0; i < crops.spans().size; i += 4) { strips += crops.spans().items[i]; }
+            for (int i = 0; i < crops.canopySpans().size; i += 4) {
+                float length = crops.canopySpans().items[i], rise = crops.canopySpans().items[i + 1];
+                float from = crops.canopySpans().items[i + 2], to = crops.canopySpans().items[i + 3];
+                runs += length;
+                assertTrue(from >= 0 && from < 1, "A run starts within its first strip's artwork");
+                assertEquals(length / metre, (to - from) * GpuBiomeVegetation.ROW_LENGTH, .001f,
+                      "Runs repeat the strip artwork at its own scale");
+                for (int step = 0; step <= 10; step++) {
+                    float t = -.4999f + .9998f * step / 10;
+                    float x = crops.canopy().items[i] - BoardBiome.ROW_Y * length * t;
+                    float y = crops.canopy().items[i + 1] + BoardBiome.ROW_X * length * t;
+                    float floor = BoardSurface.sampleHeight(surface.top(), x, y, Float.NaN);
+                    assertTrue(Float.isFinite(floor), "A canopy run stays over published ground");
+                    assertEquals(floor, crops.canopy().items[i + 2] + rise * t + .018f * metre, .06f * metre,
+                          "A canopy run follows its ground within the distant tolerance");
+                }
+            }
+            assertEquals(strips, runs, .001f * metre, coords + ": distant runs cover exactly the near strips");
+        }
+    }
+
+    @Test
     void marshReedsContinueAcrossExposedBanksButNeverUseTheWaterPlaneForSupport() {
         var original = BoardGeometry.tuning();
         try {
@@ -234,8 +265,8 @@ class BoardBiomeTest {
                     var owner = scene.tile(new Coords(x, y));
                     var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, owner), scene, -1);
                     if (BoardBiome.plantKind(scene, owner) != BoardScene.Biome.MARSH) { continue; }
-                    var patch = new GpuBiomeVegetation.Patch(scene, owner, surface, 0);
-                    patch.prepare(scene, owner, Long.MAX_VALUE);
+                    var patch = new GpuBiomeVegetation.Patch(scene, owner, surface);
+                    patch.prepare(scene, owner);
                     for (int i = 0; i < patch.roots.size; i += 4) {
                         float px = patch.roots.items[i], py = patch.roots.items[i + 1], z = patch.roots.items[i + 2] + .018f * metre;
                         assertTrue(positions.add(px + ":" + py), "Each root has one owner across the shore join");

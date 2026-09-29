@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.io.File;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -20,7 +21,10 @@ import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.math.collision.Ray;
+import megamek.common.Hex;
 import megamek.common.board.Coords;
+import megamek.common.units.Terrain;
+import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -117,23 +121,31 @@ class GpuModularBuildingSmokeTest {
         }
     }
 
-    private static BoardScene scene(int middleHeight) {
+    private static BoardScene scene(int middleHeight, String asset) {
         return BoardSurfaceBlendTest.scene(coords -> {
             int levels = coords.equals(new Coords(2, 4)) ? 1 : coords.equals(new Coords(4, 4)) ? middleHeight
                   : coords.equals(new Coords(6, 4)) ? 10 : 0;
             var tile = BoardSurfaceBlendTest.tile(coords, BoardScene.Surface.CONCRETE, 0, -1, 0);
+            int type = coords.getX() == 2 ? Terrains.INDUSTRIAL
+                  : coords.getX() == 4 ? Terrains.BUILDING : Terrains.FUEL_TANK;
+            var hex = new Hex(0);
+            hex.addTerrain(new Terrain(type, type == Terrains.INDUSTRIAL ? levels : 1));
+            if (type != Terrains.INDUSTRIAL) {
+                hex.addTerrain(new Terrain(type == Terrains.BUILDING ? Terrains.BLDG_ELEV : Terrains.FUEL_TANK_ELEV, levels));
+            }
             return new BoardScene.Tile(coords, 0, -1, false, 0, tile.surface(), tile.ground(), null, null, null, null,
-                  levels == 0 ? List.of() : List.of(new BoardScene.Feature(GpuBuildingTest.ASSET, 0, 0, 0, 1,
-                        levels, 0, BoardScene.FeatureKind.BUILDING)),
+                  levels == 0 ? List.of() : BoardFeatures.capture(hex, coords, Map.of(type, asset)),
                   List.of(), BoardLiquid.NONE, null, true);
         });
     }
 
     private static void checkTerrain() {
+        String fallback = "buildings/saxarba/building_light/building_light_42";
         GpuAssets assets = new GpuAssets();
         try {
-            assertNull(assets.building("buildings/saxarba/building_light/building_light_42", 5, 4));
-            assertNotNull(assets.model("buildings/saxarba/building_light/building_light_42"), "Legacy fallback still loads");
+            assertNull(assets.building(fallback, 5, 4));
+            assertNotNull(assets.model(fallback), "Legacy fallback still loads");
+            assertNotNull(assets.model(GpuBuildingTest.ASSET), "The custom kit must win even when a board model exists");
         } finally { assets.dispose(); }
         var terrain = new GpuTerrain();
         var settings = new BoardAtmosphere.Settings(13, 0, 0, BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT,
@@ -141,9 +153,16 @@ class GpuModularBuildingSmokeTest {
         var frame = new GpuReviewFrame(settings);
         var camera = new BoardCamera();
         camera.resize(1280, 960);
-        BoardScene scene = scene(5);
+        BoardScene scene = scene(5, GpuBuildingTest.ASSET);
         var tuning = BoardGeometry.tuning();
         try {
+            BoardScene legacy = scene(5, fallback);
+            terrain.update(legacy);
+            for (int x : new int[] { 2, 4, 6 }) {
+                var coords = new Coords(x, 4);
+                assertEquals(legacy.tile(coords).features().getFirst().height() * BoardGeometry.level(),
+                      terrain.roofBounds(coords).getDepth(), .02f, "All structure types keep their board-model fallback");
+            }
             terrain.update(scene);
             camera.setIsometric(true);
             camera.fit(scene);
@@ -174,7 +193,7 @@ class GpuModularBuildingSmokeTest {
                 for (int i = 0; i < 3; i++) { frame.render(terrain, camera, scene); }
                 GpuReviewFrame.save(new File(output, "interior-cutaway.png"));
             } finally { marker.dispose(); }
-            scene = scene(3);
+            scene = scene(3, GpuBuildingTest.ASSET);
             terrain.update(scene);
             checkPicking(terrain, scene);
             BoardGeometry.tune(new BoardGeometry.Tuning(tuning.hexScale(), tuning.unitScale(), tuning.unitHeightScale(),
@@ -204,4 +223,3 @@ class GpuModularBuildingSmokeTest {
         }
     }
 }
-

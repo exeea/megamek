@@ -2,14 +2,14 @@
 layout(location = 0) out vec4 fragColor;
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // The ocean's spectrum at one instant (GpuOcean). Each wave of the initial spectrum turns at the frequency deep water
-// gives its length, so long swells outrun short chop. Out come two complex fields that the inverse FFT turns into
-// four real ones: the slopes along x and y in red and green, the horizontal displacement along x and y in blue and
-// alpha.
+// gives its length, so long swells outrun short chop. Water packs height + i*displacementX, then displacementY;
+// lava retains slopeX + i*slopeY, then displacementX + i*displacementY. The same inverse transform handles both.
 uniform sampler2D u_initial; // h0(k) in red and green, conj(h0(-k)) in blue and alpha
 uniform float u_time;
 uniform float u_loop;        // every frequency is a multiple of this, so the clock can wrap without a jump
 uniform float u_patch;       // metres the waves repeat over
 uniform int u_size;
+uniform bool u_water;
 
 vec2 multiply(vec2 a, vec2 b) {
     return vec2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
@@ -27,5 +27,6 @@ void main() {
     vec2 slopeX = rotated * k.x, slopeY = rotated * k.y;
     vec2 shiftX = -rotated * (k.x / magnitude), shiftY = -rotated * (k.y / magnitude);
     // a + ib packs two fields whose spectra are Hermitian: after the transform, a is the real part and b the imaginary.
-    fragColor = vec4(slopeX.x - slopeY.y, slopeX.y + slopeY.x, shiftX.x - shiftY.y, shiftX.y + shiftY.x);
+    fragColor = u_water ? vec4(height.x - shiftX.y, height.y + shiftX.x, shiftY)
+          : vec4(slopeX.x - slopeY.y, slopeX.y + slopeY.x, shiftX.x - shiftY.y, shiftX.y + shiftY.x);
 }

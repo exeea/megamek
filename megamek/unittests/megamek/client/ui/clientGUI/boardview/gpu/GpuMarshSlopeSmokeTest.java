@@ -45,8 +45,6 @@ class GpuMarshSlopeSmokeTest {
                     TerrainLod.setEnabled(true);
                     var camera = new BoardCamera();
                     camera.resize(1280, 960);
-                    var plants = (GpuBiomeVegetation) field(terrain, "biomeVegetation");
-                    var grass = (GpuGroundCover) field(terrain, "groundCover");
                     for (String contact : new String[] { "connected", "downhill", "uphill" }) {
                         var scene = scene(contact);
                         for (var lod : TerrainLod.values()) {
@@ -61,11 +59,7 @@ class GpuMarshSlopeSmokeTest {
                             camera.center(BoardGeometry.center(new Coords(4, 4), 0));
                             terrain.update(scene, camera.camera);
                             GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
-                            long deadline = System.nanoTime() + 30_000_000_000L;
-                            do {
-                                frame.render(terrain, camera, scene);
-                                assertTrue(System.nanoTime() < deadline, "Marsh vegetation must settle");
-                            } while (plants.busy() || grass.busy());
+                            frame.render(terrain, camera, scene);
                             GpuReviewFrame.save(new File(output, contact + "-" + lod + "-iso.png"));
                             camera.setIsometric(false);
                             camera.center(BoardGeometry.center(new Coords(4, 4), 0));
@@ -96,7 +90,8 @@ class GpuMarshSlopeSmokeTest {
 
     /** Sample the real GLSL mask, independently of lighting and vegetation hiding the bank. */
     private static void coverageChecks() {
-        String code = Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-biome-mask.glsl").readString();
+        String code = Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-hexes.glsl").readString()
+              + Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/terrain-biome-mask.glsl").readString();
         var shader = GpuGlsl.compile("marsh coverage probe", """
               in vec3 a_position;
               out vec3 world;

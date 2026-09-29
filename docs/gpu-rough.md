@@ -1,5 +1,16 @@
 # Rough terrain variants
 
+[Docs index](README.md) · [Complete class responsibilities](gpu-code-map.md)
+
+## What does what
+
+| Owner | Responsibility |
+| --- | --- |
+| `BoardFeatures` | Capture rough/fluff appearance and remove duplicate legacy decals when native geometry represents it. |
+| `BoardRough` | Choose deterministic variant placements; supply the same occupied geometry to drawing, picking and support. |
+| `BoardRelief / BoardRocks` | Build ordinary rough boulders and their terrain contact. |
+| `GpuAssets` | Own the variant GLBs and shared textures; snapshots retain only placement data. |
+
 The 3D board reads the existing rough terrain and its `fluff` value:
 
 | Terrain | Appearance |
@@ -21,6 +32,7 @@ approaches clear. Unsupported fluff values retain ordinary rough boulders and
 the existing artwork fallback. Fluff alone does not create rough terrain.
 Bridge clearance follows the complete shared road footprint, including dead
 ends and the solid islands inside bridge roundabouts.
+Cover displaced by a route moves onto the verges, keeping the hex's count where it fits.
 
 `BoardRough.variant` supplies the appearance decision to scene capture and artwork
 filtering. The two modeled variants keep detailed ground shading and remove the
@@ -41,21 +53,3 @@ footprint radii are three board units for standing stumps and six for the other 
 before placement scaling, matching capture's route clearance. No GL resources
 are retained in scene snapshots; GPU models and
 textures remain owned by `GpuAssets`.
-
-`BoardRoughTest` checks appearance, uniform tooth dimensions, mixed stump poses on
-level ground, deterministic placement, clearance, exact mesh agreement with
-picking/footing, and water snapshot reuse. `GpuRoughCaptureTest`
-checks live source edits and duplicate decal removal. `GpuRoughSmokeTest` renders
-ordinary rough beside both variants, captures top/oblique and close views, checks
-picking, and replaces a variant through the terrain update path.
-
-Verified on 2026-09-28: all 57 selected tests in `BoardRoughTest`,
-`GpuRoughCaptureTest`, `BoardFeaturesTest`, `BoardRocksTest`, `RigidGlbTest` and
-`BoardGeometryPickingTest` passed, along with `checkstyleMain`. The native
-`GpuRoughSmokeTest` passed on this Windows machine; its top, oblique and close
-renders were inspected with uniformly sized, staggered teeth and the large
-standing/fallen stump mixture.
-The asset generator's triangle counts and footprint bounds were also checked.
-Verification used an isolated Gradle project cache and build directory because
-other builds shared this checkout. Existing staged assets were verified against
-their sources and reused after an open application locked a staged font file.

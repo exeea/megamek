@@ -114,10 +114,10 @@ public class TWBoardViewTooltip {
                 int minSensorRange = 0;
 
                 if (game.getOptions().booleanOption(OptionsConstants.ADVANCED_TAC_OPS_SENSORS)) {
-                    LosEffects los = bv.getFovHighlighting().getCachedLosEffects(selectedEntity.getPosition(),
+                    LosEffects los = bv.getFieldOfView().getCachedLosEffects(selectedEntity.getPosition(),
                           coords, bv.getBoardId());
                     int bracket = Compute.getSensorRangeBracket(selectedEntity, null,
-                          bv.getFovHighlighting().getCachedECMInfo());
+                          bv.getFieldOfView().getCachedECMInfo());
                     int range = Compute.getSensorRangeByBracket(game, selectedEntity, null, los);
 
                     maxSensorRange = bracket * range;

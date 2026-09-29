@@ -73,7 +73,7 @@ class GpuWaterProgramsSmokeTest {
             environment.set(ColorAttribute.createAmbientLight(.4f, .4f, .4f, 1));
             environment.add(new DirectionalLight().set(1, 1, 1, -.4f, -.3f, -1));
             var parts = new ArrayList<Renderable>();
-            for (var water : List.of(pool, fall, fall.spray(), pool.cut())) {
+            for (var water : List.of(pool, fall, fall.spray(), pool.cut(), pool.depth())) {
                 var part = new ModelInstance(model).getRenderable(new Renderable());
                 part.material = new Material(material);
                 part.material.set(water);

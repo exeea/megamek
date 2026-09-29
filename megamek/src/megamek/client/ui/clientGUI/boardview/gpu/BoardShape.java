@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.badlogic.gdx.files.FileHandle;
+import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import com.badlogic.gdx.math.Matrix3;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
@@ -20,7 +21,18 @@ record BoardShape(List<BoardShape.Polygon> polygons, float height) {
 
     static Map<String, BoardShape> loadKit(String asset) {
         File root = new File(Configuration.dataDir(), "models/board");
-        var data = RigidGlb.load(new FileHandle(new File(root, asset + ".glb")), root.toPath());
+        return shapes(RigidGlb.load(new FileHandle(new File(root, asset + ".glb")), root.toPath()));
+    }
+
+    /** CPU support uses the same finest authored level as the visible rigid model. */
+    static BoardShape loadModel(String asset) {
+        File root = new File(Configuration.dataDir(), "models/board");
+        var shapes = shapes(RigidGlb.loadLods(new FileHandle(new File(root, asset + ".glb")), root.toPath()).getFirst());
+        if (shapes.size() != 1) { throw new IllegalArgumentException("Expected one shape in " + asset); }
+        return shapes.values().iterator().next();
+    }
+
+    private static Map<String, BoardShape> shapes(ModelData data) {
         var mesh = data.meshes.first();
         Map<String, short[]> indices = new HashMap<>();
         for (var part : mesh.parts) { indices.put(part.id, part.indices); }

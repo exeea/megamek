@@ -11,7 +11,11 @@ void waterHabitat(out vec4 habitat, out vec4 mixture) {
 
 vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authored, WaterLighting illumination) {
     bool procedural = u_waterMaterial.y > 0.5;
-    vec2 position = v_cloudPosition.xy * u_rainScale;
+    vec2 rest = v_cloudPosition.xy;
+#ifdef waterSurfaceFlag
+    rest = v_waterRest;
+#endif
+    vec2 position = rest * u_rainScale;
     float effects = u_waterEffects;
     float detail = u_rainDetail * effects;
     float churn = mix(0.55, 1.0, u_rainDetail) * effects;
@@ -22,7 +26,7 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     // ripples, foam and agitation at the same place, so the two join without a seam; only its curving lip then
     // turns into falling water.
     vec3 surfaceNormal = normalize(v_normal);
-    vec4 field = texture(u_waterField, v_cloudPosition.xy * u_waterFieldMap.xy + u_waterFieldMap.zw);
+    vec4 field = texture(u_waterField, rest * u_waterFieldMap.xy + u_waterFieldMap.zw);
     float shore = (field.r * 2.0 - 1.0) * SHORE_RANGE;
     float depth = field.g * WATER_DEPTH_RANGE;
     float wetShore = falling ? 0.0 : clamp(dot(habitat.yzw, vec3(3.0)), 0.0, 1.0)
@@ -36,8 +40,6 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     vec4 broad = texture(u_rainNoise, position * 0.008 + 0.29);
     // Gusts roll downwind in patches, so the wind never roughens a lake evenly.
     float gust = texture(u_rainNoise, position * 0.035 - wind * (u_rainTime * 0.006)).r;
-    // Open water carries the full swell; shallows and the lee of a bank run calmer.
-    float open = smoothstep(0.0, 0.7, depth) * smoothstep(0.0, 0.12, shore);
 
     // Foam grain and, in rapids, fine chop. A current advects them in two phases, each restarting only while
     // its weight is zero, however weak the current, so no restart ever shows; in still water both phases read
@@ -63,39 +65,35 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
           + (texture(u_waterDetail, crossing * advectedB * 0.65 + driftB * 4.0) - 0.5) * weightB) * preserve;
     rapidDetail.rg = rapidDetail.rg * crossing;
 
-    // Wind waves: every wave of the ocean simulation travels at its own speed, so the surface keeps changing
-    // instead of sliding. Four scales, each turned against the others: long swells a few hexes across, the
-    // simulated waves, a chop and, seen up close, ripples; together they never show the simulation's tile.
-    // Without the simulation the static ripple map stands in.
-    vec2 oceanUV = v_cloudPosition.xy * u_waterOceanScale;
+    // Shape, normals, crest light and foam share one spectrum at the undisplaced position. Fine capillary
+    // ripples add surface detail without inventing unrelated broad crests or repeating bright plastic facets.
+    vec2 oceanUV = rest * u_waterOceanScale;
     vec4 swell = vec4(0.0);
     float noise;
     if (u_waterOceanScale > 0.0) {
-        vec4 wide = texture(u_waterOcean, CROSSING * oceanUV * 0.43 + 0.57);
-        vec4 main = texture(u_waterOcean, oceanUV);
-        vec4 chop = texture(u_waterOcean, oceanUV * CROSSING * 2.37 + 0.31);
-        vec4 ripple = texture(u_waterOcean, oceanUV * CROSSING2 * 5.3 + 0.77);
-        swell.xy = (wide.xy * CROSSING) * 0.9 + main.xy + (chop.xy * CROSSING) * (0.5 + 0.2 * detail)
-              + (ripple.xy * CROSSING2) * (0.2 + 0.4 * detail);
-        swell.z = max(main.z, max(wide.z * 0.8, chop.z * 0.5));
-        swell.w = max(main.w, max(wide.w, chop.w * 0.6));
-        noise = small.b + (main.z - 0.1) * 0.5;
+        swell = texture(u_waterOcean, oceanUV);
+        vec4 longWave = texture(u_waterOcean, WATER_SWELL_TURN * oceanUV * WATER_SWELL_SCALE + .37);
+        swell.xy += (longWave.xy * WATER_SWELL_TURN) * (WATER_SWELL_WEIGHT * WATER_SWELL_SCALE);
+        swell.z += longWave.z * WATER_SWELL_WEIGHT;
+        swell.w = max(swell.w, longWave.w * WATER_SWELL_WEIGHT);
+        noise = small.b;
     } else {
         vec4 large = texture(u_waterDetail, downwind * position * 1.65 + vec2(u_rainTime * 0.018, 0.0)) - 0.5;
         swell.xy = large.rg * downwind * 0.5;
         noise = large.b * 0.6 + small.b * 0.4;
     }
-    float waves = (mix(0.75, 1.35, gust) * mix(0.45, 1.0, open) + 0.9 * agitation) * effects;
+    float waves = waterWaveEnergy(rest, field) * effects;
     float marshShare = habitat.y / max(dot(habitat.yzw, vec3(1.0)), .0001);
     waves *= 1.0 - wetShore * mix(.75, .25, marshShare);
     // Slopes are the surface's gradient: the normal leans away from the way the water rises.
-    vec2 slope = swell.xy * waves + (small.rg * 0.06 + rapidDetail.rg * (0.4 * agitation)) * effects;
+    vec2 slope = swell.xy * waves + (small.rg * (0.015 + 0.035 * u_wind.z) * detail
+          + rapidDetail.rg * (0.4 * agitation)) * effects;
     vec3 ripples = rainRippleField(position) * effects;
     slope += ripples.xy;
 
     // Surf: the swell feels the bottom near a bank and rolls in as bands whose crests march shoreward, broken up
     // along the bank. The bank's direction comes from the field itself, so the surf turns with every bay.
-    vec2 fieldUV = v_cloudPosition.xy * u_waterFieldMap.xy + u_waterFieldMap.zw;
+    vec2 fieldUV = rest * u_waterFieldMap.xy + u_waterFieldMap.zw;
     vec2 seaward = vec2(texture(u_waterField, fieldUV + vec2(u_waterFieldMap.x * 3.0, 0.0)).r,
           texture(u_waterField, fieldUV + vec2(0.0, u_waterFieldMap.y * 3.0)).r) - field.r;
     seaward /= max(length(seaward), 1e-5);
@@ -104,8 +102,9 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
           * 2.0 - 1.0) * SHORE_RANGE;
     float fetch = smoothstep(0.12, 0.25, beyond - shore);
     float nearBank = (1.0 - smoothstep(0.05, 0.28, shore)) * smoothstep(0.0, 0.01, shore) * fetch;
-    float march = shore * 95.0 + u_rainTime * 1.6 + broad.r * 11.0 + gust * 5.0;
-    slope += seaward * (cos(march) * 0.5 * nearBank * mix(0.6, 1.0, gust) * effects * (1.0 - wetShore * .9));
+    float march = shore * 65.0 + u_rainTime * 1.6 + broad.r * 11.0 + gust * 5.0;
+    float surfEnergy = mix(.08, 1.0, u_wind.z) * fetch;
+    slope += seaward * (cos(march) * 0.16 * nearBank * surfEnergy * effects * (1.0 - wetShore * .9));
 
     float wading = waterUnitWakes(v_cloudPosition.xy, noise, effects, slope);
     WaterImpact landing = waterFallImpacts(position, shore, noise, phase, vec2(weightA, weightB), effects, slope);
@@ -122,10 +121,10 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     float surge = 0.5 + 0.5 * sin(u_rainTime * 1.1 + broad.r * 13.0 + gust * 6.0);
     float width = mix(0.045, 0.11, gust) * (0.6 + 0.4 * surge) * (0.7 + 0.6 * broad.b) * mix(0.45, 1.0, fetch);
     float grainy = noise + 0.5;
-    float coverage = exp(-shore / width) + 0.45 * smoothstep(0.55, 0.95, sin(march)) * nearBank;
+    float coverage = exp(-shore / width) + 0.3 * smoothstep(0.55, 0.95, sin(march)) * nearBank * surfEnergy;
     float surf = smoothstep(1.0 - coverage, 1.2 - coverage, grainy) * smoothstep(0.0, 0.003, shore);
     // Whitecaps where the simulated crests fold over, in open water only, grained by the ripple foam.
-    float whitecap = smoothstep(0.3, 0.85, swell.w * (0.5 + grainy)) * open;
+    float whitecap = smoothstep(0.3, 0.85, swell.w * (0.5 + grainy)) * waves;
     // Strong rapids increase motion and the number of broken foam patches, while leaving water between them.
     // The fine grain frays their edges; the caustic network must not turn the entire reach into a white web.
     float threshold = 0.70 - 0.16 * agitation + 0.16 * (0.5 - broad.b);
@@ -133,7 +132,7 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
           * smoothstep(0.05, 0.3, agitation);
     // The foam round a unit breaks up like any other: dense where the water piles up, in drifts further out.
     float stirred = smoothstep(1.0 - 1.25 * wading, 1.15 - 1.25 * wading, grainy);
-    float foam = clamp(max(max(max(contact, surf * 0.9), max(whitecap, stirred)), max(rapids, impact)) * churn,
+    float foam = clamp(max(max(max(contact * .55, surf * mix(.25, .85, surfEnergy)), max(whitecap, stirred)), max(rapids, impact)) * churn,
           0.0, 1.0);
     // A thin wash over sand is mostly clear, with only a trace of foam. Use the actual water column so the
     // effect fades around emerging bars and rocks instead of painting the old hex-shaped shoreline white.
@@ -143,9 +142,8 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
 
     vec3 kept = waterTransmission(mixture, depth);
     float facing = clamp(dot(normal, view), 0.0, 1.0);
-    // Reflection rises more gently than Fresnel's law toward grazing: waves tilted away from the steep board
-    // camera catch the sky while those facing it show the water, which is what makes waves read from above.
-    float fresnel = 0.03 + 0.97 * pow(1.0 - facing, 3.0);
+    // Air/water Fresnel: clear from above, reflective at grazing angles.
+    float fresnel = 0.02037 + 0.97963 * pow(1.0 - facing, 5.0);
     vec3 reflected = reflect(viewDirection(), normal);
     // A brighter band low in the sky, so waves reflecting lower show lighter.
     vec3 sky = mix(u_rainHorizon * 1.15, u_rainSky, smoothstep(0.0, 1.0, reflected.z));
@@ -166,10 +164,10 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     vec3 toSun = -u_dirLights[0].direction;
     key = normalize(toSun.xy + vec2(0.0, 0.001));
     // Wave faces turned toward the sun catch more of it: the waves read even where nothing reflects.
-    facets += illumination.sunlight * (max(dot(normal, toSun), 0.0) - toSun.z) * 1.4;
+    facets += illumination.sunlight * (max(dot(normal, toSun), 0.0) - toSun.z) * 0.45;
     // The sun's glitter, from facets as rough as the waves a pixel averages: close up each wave flashes, far off
     // their spread becomes a broad path of glitter instead of aliasing into lines.
-    vec2 texels = fwidth(u_waterOceanScale > 0.0 ? oceanUV * 2.37 : position * 2.0) * OCEAN_SIZE;
+    vec2 texels = fwidth(u_waterOceanScale > 0.0 ? oceanUV : position * 2.0) * OCEAN_SIZE;
     float roughness = clamp(0.12 + 0.06 * log2(1.0 + max(texels.x, texels.y)), 0.12, 0.45);
     float a2 = roughness * roughness * roughness * roughness;
     vec3 halfway = normalize(view + toSun);
@@ -180,11 +178,12 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
           / (4.0 * max(facing, 0.1)) * 0.6 * effects;
     // Thin crests let the sun through, brightest when the viewer looks toward it: they glow like the shallows.
     float behind = max(dot(normalize(viewDirection().xy + 1e-5), normalize(toSun.xy + 1e-5)), 0.0);
-    glow = waterShallows(mixture) * illumination.sunlight * (smoothstep(0.02, 0.35, swell.z) * (0.35 + 0.65 * behind)
-          * 0.5 * effects);
+    float crest = smoothstep(.12, .8, swell.z) * smoothstep(.02, .25, length(swell.xy));
+    glow = waterShallows(mixture) * illumination.sunlight * (crest * (0.12 + 0.88 * behind)
+          * 0.18 * waves);
 #endif
     // The brighter side of the sky lights the faces tilted toward it, even overcast or seen from straight above.
-    facets *= 1.0 - dot(slope, key) * 0.6;
+    facets *= clamp(1.0 - dot(slope, key) * 0.25, 0.7, 1.3);
     vec3 body;
     float bodyAlpha;
     if (procedural) {

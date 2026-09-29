@@ -1,52 +1,78 @@
 # Natural bridges and bank connections
 
-A connected bridge span without an attached road is a natural rock formation. `BoardBridge` follows reciprocal bridge exits at a common deck elevation and uses the existing road-to-bridge height checks for approaches. A road beneath the deck remains a ground road. If an approach exists anywhere along the span, the manufactured bridge inherits its best surface: marked asphalt, unmarked asphalt, gravel, then dirt.
+[Docs index](README.md) · [Complete class responsibilities](gpu-code-map.md)
 
-Natural spans choose the most frequent material family among their distinct connected dry banks: grass, dirt, sand, rock or snow. Ties follow the existing family order. With no eligible bank, the bridge hex supplies the family; concrete falls back to rock. All sections of a connected span use the same bank vote. An edit that changes the chosen surface or switches between natural and manufactured geometry rebuilds the affected span and its adjoining banks, including across chunk boundaries.
+## What does what
+
+| Owner | Responsibility |
+| --- | --- |
+| `BoardBridge` | Traverse connected spans; choose manufactured road material or a natural span from their approaches. |
+| `BoardNaturalBridge` | Construct the natural arch, top, underside and bank contact facets. |
+| `BoardBridgeFooting` | Extend manufactured slab/rails onto actual supporting banks. |
+| `BoardRelief` | Reserve entrances and move obstructing decorative rocks onto supported bank positions. |
+| `GpuRoads / GpuTerrain` | Apply deck/apron materials and own the installed bridge geometry used for drawing and picking. |
+
+A connected bridge span without an attached road is a natural rock formation. `BoardBridge` follows
+reciprocal bridge exits at a common deck elevation and uses the existing road-to-bridge height checks for
+approaches. A road beneath the deck remains a ground road. If an approach exists anywhere along the span,
+the manufactured bridge inherits its best surface: marked asphalt, unmarked asphalt, gravel, then dirt.
+
+Natural spans choose the most frequent material family among their distinct connected dry banks: grass,
+dirt, sand, rock or snow. Ties follow the existing family order. With no eligible bank, the bridge hex
+supplies the family; concrete falls back to rock. All sections of a connected span use the same bank
+vote. An edit that changes the chosen surface or switches between natural and manufactured geometry
+rebuilds the affected span and its adjoining banks, including across chunk boundaries.
 
 ## Geometry and existing terrain
 
-`BoardNaturalBridge` builds a separate hollow shell, with a nearly level usable top, chipped lips, broad rock strata and a shallow arch underneath. It reuses the surface engine's photographic albedo, normals, geology, weather response and material batches. It adds no texture asset, per-bridge GPU resource or pillars through the lower hex. Fine cracks come from the existing material maps.
+`BoardNaturalBridge` builds a separate hollow shell, with a nearly level usable top, chipped lips, broad
+rock strata and a shallow arch underneath. It reuses the surface engine's photographic albedo, normals,
+geology, weather response and material batches. It adds no texture asset, per-bridge GPU resource or
+pillars through the lower hex. Fine cracks come from the existing material maps.
 
-The top's centre remains at the authoritative deck elevation. The underside reserves the last whole level beneath that deck and respects lower feature tops. Ground, roads, water and unit landing supports below remain independently constructed. This is presentation geometry; it does not change movement rules, terrain elevations, bridge CF or exits.
+The top's centre remains at the authoritative deck elevation. The underside reserves the last whole level
+beneath that deck and respects lower feature tops. Ground, roads, water and unit landing supports below
+remain independently constructed. This is presentation geometry; it does not change movement rules,
+terrain elevations, bridge CF or exits.
 
-Natural mouths fit the actual bank across their width, retaining five contact points at every LOD. They overlap the bank's finished top and ignore decorative boulders when sampling its height. This avoids the opening left when a straight two-corner end meets a scalloped cliff. Connected natural sections share mouth corners and omit internal end walls, including across mixed LODs.
+Natural mouths fit the actual bank across their width, retaining five contact points at every LOD. They
+overlap the bank's finished top and ignore decorative boulders when sampling its height. This avoids the
+opening left when a straight two-corner end meets a scalloped cliff. Connected natural sections share
+mouth corners and omit internal end walls, including across mixed LODs.
 
-Manufactured bridges use `BoardBridgeFooting` to extend each terminal at least one metre into its bank hex. If the rim has receded, the extension grows until the full slab width has ground underneath, with an inset from the rim. The extension keeps the authored slab thickness and rail width. Its short grade reaches the bank's ground height; asphalt, gravel, dirt, dashes and wheel wear use the same road helpers as the original deck. Lower-grade road approaches keep their existing fade. Bridge-to-bridge joints retain their original position. No foundation is grown down through a lower crossing.
+Manufactured bridges use `BoardBridgeFooting` to extend each terminal at least one metre into its bank
+hex. If the rim has receded, the extension grows until the full slab width has ground underneath, with an
+inset from the rim. The extension keeps the authored slab thickness and rail width. Its short grade
+reaches the bank's ground height; asphalt, gravel, dirt, dashes and wheel wear use the same road helpers
+as the original deck. Lower-grade road approaches keep their existing fade. Bridge-to-bridge joints
+retain their original position. No foundation is grown down through a lower crossing.
 
-A manufactured terminal without an attached road keeps full-height rails over the void, then slopes them down over 1.5 metres of supported bank. Lane markings stop before that taper. Beyond the solid slab, a seven-metre material apron follows the existing bank triangles. Asphalt breaks into smaller fragments over a wider fan of gravel and compacted soil; gravel remains visible beyond the asphalt before thinning into the bank's own ground. Gravel and dirt decks blend their own material into that ground. The shader uses the existing height/grain maps to break the material into fragments, with derivative filtering and the existing texture mipmaps. These masks never fade the physical span or add fill below it. Connected road ends retain their full coverage and existing material transitions. The [ImageGen bank reference and exact prompt](bridge-bank-fade-concept.md) guided the rail taper, layered material breakup and gravel fan.
+A manufactured terminal without an attached road keeps full-height rails over the void, then slopes them
+down over 1.5 metres of supported bank. Lane markings stop before that taper. Beyond the solid slab, a
+seven-metre material apron follows the existing bank triangles. Asphalt breaks into smaller fragments
+over a wider fan of gravel and compacted soil; gravel remains visible beyond the asphalt before thinning
+into the bank's own ground. Gravel and dirt decks blend their own material into that ground. The shader
+uses the existing height/grain maps to break the material into fragments, with derivative filtering and
+the existing texture mipmaps. These masks never fade the physical span or add fill below it. Connected
+road ends retain their full coverage and existing material transitions.
 
-`BoardRelief` moves obstructing cliff-rim and field rocks beside bridge entrances. It keeps each rock's mesh, scale and original tint, checks its whole footprint, then seats it on the bank at its new position. Both bridge styles reserve the same conservative passage width, so changing a distant road material does not change the bank's ground mesh. Rocks below the entrance elevation remain below it. Existing tunnel clearance also applies to candidate positions. If an exceptionally crowded bank offers no valid side position in the bounded search, the rock remains at its original position rather than being deleted.
+`BoardRelief` moves obstructing cliff-rim and field rocks and shrubs beside bridge passages: through each
+bank towards the bridge, and along the bridge hex's own deck. It keeps each rock's mesh, scale and
+original tint, checks its whole footprint, then seats it on the bank at its new position. Both bridge
+styles reserve the same conservative passage width, so changing a distant road material does not change
+the bank's ground mesh. Rocks below the deck elevation remain below it. Existing tunnel clearance also
+applies to candidate positions. Where the bounded search finds no valid side position, as on a narrow
+promontory whose rims close in on the deck, the rock is left out: nothing stands on a deck or its approach.
 
-The immutable bridge facets belong to the installed terrain chunk. Rendering and picking share those facets and their bounds; an extended section is picked in the hex its visible contact occupies. Chunk reuse carries this geometry with the material batches. Manufactured assets retain their original mesh and are supplemented only at their bank ends.
+The immutable bridge facets belong to the installed terrain chunk. Rendering and picking share those
+facets and their bounds; an extended section is picked in the hex its visible contact occupies. Chunk
+reuse carries this geometry with the material batches. Manufactured assets retain their original mesh and
+are supplemented only at their bank ends.
 
-## Detail and limits
+## Limits
 
-The straight natural test fixture submits 624 / 360 / 168 / 112 triangles at Full / Medium / Coarse / Distant. Bank contacts and connected seams remain present in every tier. A manufactured road-connected terminal adds 144 triangles at Full/Medium or 72 at Coarse/Distant, including its slab, rails and internal section caps. A bare-bank terminal retains an extra station at the start of its rail taper, giving bounds of 180 or 108 triangles respectively before degenerate faces are discarded. The apron reuses existing ground faces and material textures; it adds no individual pebble meshes or new texture assets. Materials retain the engine's existing texture filtering and distance-dependent normal detail. These are geometry bounds, not a frame-rate, memory or large-board benchmark.
-
-The natural silhouette is a procedural interpretation of the existing bridge exits, not a geology simulation or a new designer-authored bridge class. The current board format has no unambiguous explicit deck-surface override; a co-located road can belong underneath. Adding an override would require its own persisted field and editor control. Existing unsupported or malformed terrain combinations are not normalized by this renderer.
-
-## Verification (2026-09-29)
-
-41 focused CPU cases passed: `BoardNaturalBridgeTest` 11, `BoardBridgeFootingTest` 5, `BoardBridgeMaterialsTest` 8 and `BoardRoadTest` 17. Coverage includes the five natural material families, all 64 natural exit masks, mixed-LOD connected seams, bank contact across the passage at every LOD, preserved lower ground/road/water geometry and unit support, and natural/manufactured appearance changes. The boulder checks exercise both column parities and every orientation on grass, rock and sand banks at both dressing LODs; rock triangle counts and dimensions remain unchanged while their vertices clear the entrance. Footing checks cover both parities, all orientations and LODs, minimum bank overlap, full-width support before the rail taper, unchanged bridge-to-bridge joins, solid asphalt through the footing, paint ending before the taper, and one-level bank height differences. Mask checks exercise asphalt, alley, gravel and dirt landings, gravel beyond the asphalt, visible coverage continuing to connected roads, and apron carriers confined to the upper bank.
-
-Three native OpenGL cases passed: `GpuNaturalBridgeSmokeTest`, Forests End's real-map approach/marking regression, and the bridge material/distant-edit regression. The natural review captures grass, sand, snow and a river crossing, then adds/removes a paved approach and checks LOD return, picking and the clear lower passage. The manufactured extension is picked at deck height beyond the old edge, in its bank hex. A rendered pixel comparison confirms gravel remains visible after the asphalt ends. Top and oblique captures of the repaired natural and manufactured bank joins were visually inspected, including close views of the tapered rails and material apron. Captures are under `build/forests-end-markings-review/megamek/gpu-board-review/natural-bridges/`, with `bridge-landing-top.png` and `bridge-landing-oblique.png` for the landing.
-
-Scoped main/test Checkstyle and whitespace checks passed. As with the earlier Forests End work, concurrent changes required frozen sources/resources from `accf86ad61` plus this bridge work, separate build output and a separate Gradle cache. The landing shader changes were mirrored into the snapshot's pre-split road shader. Overlapping unrelated changes were preserved in the checkout and excluded from that snapshot. A migration of the shared scatter kit removed the snapshot's expected `scatter.glb`; verification now uses a private copy under `build/road-review/bridge-assets/`, without restoring that file into the shared data. This is not a whole-checkout build or full-suite result. Final passing logs are `build/road-review/bridge-bank-fade-final.log` and `bridge-bank-fade-capture.log`; earlier footing-only logs remain under the same directory. The previously documented unrelated broad bridge-height baseline failure remains outside these passing cases.
-
-## Visual reference
-
-![Natural rock arch concept](images/natural-bridge-concept.png)
-
-Generated with the built-in ImageGen tool as a design reference. The image is not loaded by the renderer. The implementation follows its continuous rock mass, bank contact, grass/soil cover, broad strata and visibly open lower crossing. Its procedural silhouette is simpler than the concept.
-
-Exact generation prompt:
-
-```text
-Use case: stylized-concept
-Asset type: visual design reference for a photorealistic, efficient real-time hex terrain renderer, not a runtime texture.
-Primary request: a believable natural rock bridge with no attached roads. Make one wide landscape image with a large three-quarter overview on the left and two smaller matching side/top views on the right. Show the same geological formation in a temperate rocky grassland setting.
-Subject: a weathered, horizontally bedded stone arch naturally spanning a narrow ravine, broad enough for traversal on top. The top is nearly level and blends naturally into the rocky soil and sparse grass of both banks. Its sides and exposed soffit have irregular fractured rock strata, subtle warm gray and brown mineral colors, and sparse moss in sheltered cracks. It is a single coherent eroded rock mass, not masonry, stacked boulders, concrete or a man-made bridge. Avoid railing, asphalt, paint, pillars, cables and decorative clutter.
-Essential clearance constraint: show a narrow gravel track crossing the ravine floor UNDER the arch, clearly visible with generous open headroom. The rock bridge must not fill or seal the ravine, obstruct the track, or alter the ground underneath. The arch springs into the banks outside that crossing. Keep the underside visibly hollow and readable from the side.
-Style and implementation guidance: photorealistic PBR game terrain with restrained natural lighting. Readable silhouette from top and oblique cameras; broad faceted rock forms that can survive coarse LOD; most fissure detail in repeating albedo/normal textures rather than thousands of stones. No close-up microgeometry, cinematic haze, people, vehicles, buildings, text, logos or wireframe. Consistent geometry and scale between views.
-```
+The natural silhouette is a procedural interpretation of the existing bridge exits, not a geology
+simulation or a new designer-authored bridge class. The current board format has no unambiguous explicit
+deck-surface override; a co-located road can belong underneath. Adding an override would require its own
+persisted field and editor control. Existing unsupported or malformed terrain combinations are not
+normalized by this renderer.

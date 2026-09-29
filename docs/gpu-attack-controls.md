@@ -1,5 +1,16 @@
 # Attack controls in the GPU board
 
+[Docs index](README.md) · [Complete class responsibilities](gpu-code-map.md)
+
+## What does what
+
+| Owner | Responsibility |
+| --- | --- |
+| `FiringDisplay / PhysicalDisplay / TargetingPhaseDisplay` | Own selected weapons, ammo, target calculations, queued orders and completion actions. |
+| `GpuBoardActions` | Capture attack-panel data and dispatch commands after checking the live phase/selection. |
+| `GpuAttackPanel` | Lay out and display the native weapon/physical controls. |
+| `BoardFiringGeometry / GpuFireControl` | Build and draw range boundaries and queued-attack geometry from client-supplied tactical data. |
+
 The GPU board shows an attack console on the right during an acting unit's attack
 phase. It uses the same fonts and frame as the rest of the board UI, with flat
 weapon rows and an amber firing control. The information area scrolls on small
@@ -43,17 +54,4 @@ Indirect orders use a curved visual trajectory above intervening terrain and str
 curve illustrates the order; it does not simulate projectile physics or change
 LOS or attack legality. Multiple weapons share a line, with separate straight
 and curved lines when both modes attack the same target. These graphics are
-excluded from the per-hex ground textures, so they no longer jump between levels.
-
-`GpuBoardActionsTest` covers presentation ownership and stale selections.
-`GpuAttackSmokeTest` exercises the real firing display through native input,
-including target selection, firing, clearing, and layouts in both camera views.
-Run the latter with `:megamek:gpuBoardSmoke --tests '*GpuAttackSmokeTest'` on a
-machine with a desktop OpenGL context; it saves screenshots under
-`megamek/build/gpu-board-review`.
-
-`BoardFiringGeometryTest` checks terrain clearance, exact endpoints and ridge
-joins. `GpuFiringCaptureTest` checks attack modes, elevation, clearing and planar
-layer separation. `GpuFiringSmokeTest` captures the native volumes on a stepped
-board in both cameras, and can be run with
-`:megamek:gpuBoardSmoke --tests '*GpuFiringSmokeTest'`.
+drawn separately from per-hex ground textures so their height remains continuous.

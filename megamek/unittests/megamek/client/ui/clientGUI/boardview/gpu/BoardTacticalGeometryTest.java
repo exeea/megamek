@@ -25,7 +25,33 @@ import org.junit.jupiter.api.Test;
 
 class BoardTacticalGeometryTest {
     @Test
-    void floatingBordersKeepOnePlaneAboveTheFinishedOwnerWithoutQueryingNeighbors() {
+    void mines0708RoadRampDoesNotRaiseTheFlatMarkerPlane() throws Exception {
+        BoardScene scene = GpuRoadSourceTest.minesScene();
+        Coords coords = new Coords(6, 7);
+        var tile = scene.tile(coords);
+        assertEquals(-1, tile.elevation());
+        assertEquals(0, scene.tile(new Coords(7, 7)).elevation());
+        var fill = hexBorder(coords, true);
+        float expected = -BoardGeometry.level() + BoardTacticalGeometry.HEX_PLANE_CLEARANCE;
+        for (var lod : TerrainLod.values()) {
+            var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile, lod), scene, BoardGeometry.floor(scene));
+            assertTrue(surface.highestTop() > -BoardGeometry.level() + BoardGeometry.level() * .25f,
+                  "The actual road ramp must climb above the hex's own level at " + lod);
+            List<BoardTacticalGeometry.Triangle> triangles = new ArrayList<>();
+            BoardTacticalGeometry.drape(scene, fill, 0, triangles::add, owner -> surface,
+                  new BoardTacticalGeometry.Clipper());
+            assertFalse(triangles.isEmpty());
+            for (var triangle : triangles) {
+                for (var vertex : List.of(triangle.a(), triangle.b(), triangle.c())) {
+                    assertEquals(expected, vertex.z, .00001f,
+                          "0708 must keep its level -1 marker plane despite the road to level 0 at " + lod);
+                }
+            }
+        }
+    }
+
+    @Test
+    void floatingBordersKeepTheOwnerElevationWithoutQueryingTerrain() {
         var fill = hexBorder(new Coords(1, 1), true);
         var flat = BoardTacticalGeometry.flat(fill);
         assertFalse(flat.isEmpty());
@@ -34,33 +60,25 @@ class BoardTacticalGeometryTest {
                 for (boolean frozen : new boolean[] { false, true }) {
                     BoardScene scene = borderScene(fill, level, depth, frozen);
                     assertEquals(new Coords(1, 1), BoardTacticalGeometry.borderCoords(scene, fill.border()));
-                    for (float top : new float[] { Float.NaN, level * BoardGeometry.LEVEL - BoardGeometry.HEX_SCALE,
-                          level * BoardGeometry.LEVEL, level * BoardGeometry.LEVEL + 3.25f }) {
-                        var support = floatingSupport(level * BoardGeometry.LEVEL, top);
-                        for (int layer : new int[] { 0, 10000, 10001 }) {
-                            int[] queries = { 0 };
-                            List<BoardTacticalGeometry.Triangle> actual = new ArrayList<>();
-                            BoardTacticalGeometry.drape(scene, fill, layer, actual::add, coords -> {
-                                assertEquals(new Coords(1, 1), coords, "Only the owner's finished top is relevant");
-                                queries[0]++;
-                                return support;
-                            }, new BoardTacticalGeometry.Clipper());
-                            assertEquals(1, queries[0], "One finished owner lookup, independent of triangle count");
-                            assertEquals(flat.size(), actual.size());
-                            float height = (Float.isNaN(top) ? BoardGeometry.surfaceZ(scene.tile(new Coords(1, 1))) : top)
-                                  + BoardTacticalGeometry.HEX_PLANE_CLEARANCE;
-                            for (int index = 0; index < flat.size(); index++) {
-                                var a = flat.get(index);
-                                var b = actual.get(index);
-                                assertEquals(a.argb(), b.argb());
-                                List<Vector3> source = List.of(a.a(), a.b(), a.c());
-                                List<Vector3> result = List.of(b.a(), b.b(), b.c());
-                                for (int vertex = 0; vertex < 3; vertex++) {
-                                    assertEquals(source.get(vertex).x * BoardGeometry.HEX_SCALE, result.get(vertex).x);
-                                    assertEquals(-source.get(vertex).y * BoardGeometry.HEX_SCALE, result.get(vertex).y);
-                                    assertEquals(height, result.get(vertex).z, .00001f,
-                                          "Keep one plane above the owner; ignore beds, slopes, neighbors and painter order");
-                                }
+                    for (int layer : new int[] { 0, 10000, 10001 }) {
+                        List<BoardTacticalGeometry.Triangle> actual = new ArrayList<>();
+                        BoardTacticalGeometry.drape(scene, fill, layer, actual::add, coords -> {
+                            throw new AssertionError("A flat annotation must not query terrain at " + coords);
+                        }, new BoardTacticalGeometry.Clipper());
+                        assertEquals(flat.size(), actual.size());
+                        float height = level * BoardGeometry.LEVEL + BoardTacticalGeometry.HEX_PLANE_CLEARANCE
+                              - (depth >= 0 && !frozen ? BoardGeometry.HEX_SCALE : 0);
+                        for (int index = 0; index < flat.size(); index++) {
+                            var a = flat.get(index);
+                            var b = actual.get(index);
+                            assertEquals(a.argb(), b.argb());
+                            List<Vector3> source = List.of(a.a(), a.b(), a.c());
+                            List<Vector3> result = List.of(b.a(), b.b(), b.c());
+                            for (int vertex = 0; vertex < 3; vertex++) {
+                                assertEquals(source.get(vertex).x * BoardGeometry.HEX_SCALE, result.get(vertex).x);
+                                assertEquals(-source.get(vertex).y * BoardGeometry.HEX_SCALE, result.get(vertex).y);
+                                assertEquals(height, result.get(vertex).z, .00001f,
+                                      "Keep the owner's level; ignore beds, slopes, neighbors and painter order");
                             }
                         }
                     }
@@ -87,23 +105,12 @@ class BoardTacticalGeometryTest {
         assertEquals(expected, actual, "A nonfloating hint must leave the existing drape path unchanged");
 
         actual.clear();
-        assertFalse(BoardTacticalGeometry.floating(scene, generic, actual::add, surfaces));
-        assertFalse(BoardTacticalGeometry.floating(scene, ordinary, actual::add, surfaces));
+        assertFalse(BoardTacticalGeometry.floating(scene, generic, actual::add));
+        assertFalse(BoardTacticalGeometry.floating(scene, ordinary, actual::add));
         var outside = hexBorder(new Coords(3, 1), true);
         assertNull(BoardTacticalGeometry.borderCoords(scene, outside.border()));
-        assertFalse(BoardTacticalGeometry.floating(scene, outside, actual::add, surfaces));
+        assertFalse(BoardTacticalGeometry.floating(scene, outside, actual::add));
         assertTrue(actual.isEmpty());
-    }
-
-    private static BoardTacticalGeometry.Surface floatingSupport(float nominal, float height) {
-        var bed = new BoardSurface.Face(new Vector3(0, 0, nominal - 100), new Vector3(1, 0, nominal - 100),
-              new Vector3(0, 1, nominal - 100), BoardSurface.Finish.TOP);
-        var slope = new BoardSurface.Face(new Vector3(0, 0, nominal + 100), new Vector3(1, 0, nominal + 100),
-              new Vector3(0, 1, nominal + 100), BoardSurface.Finish.TOP);
-        List<BoardSurface.Face> top = Float.isNaN(height) ? List.of() : List.of(new BoardSurface.Face(
-              new Vector3(0, 0, height - 1), new Vector3(1, 0, height), new Vector3(0, 1, height - .25f),
-              BoardSurface.Finish.TOP));
-        return new BoardTacticalGeometry.Surface(top, List.of(slope), List.of(bed), List.of(), List.of(), List.of());
     }
 
     private static BoardTactical.Fill hexBorder(Coords coords, boolean floating) {

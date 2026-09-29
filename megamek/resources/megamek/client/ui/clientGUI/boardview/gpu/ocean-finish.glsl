@@ -1,6 +1,6 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Shared inverse-FFT centering; the power-of-two texture wraps at every neighbour lookup.
-uniform sampler2D u_source; // slopes XY, horizontal displacement XY, each times the centering sign
+uniform sampler2D u_source; // packed spatial fields from ocean-spectrum, each times the centering sign
 uniform int u_size;
 
 vec4 oceanSample(ivec2 texel) {

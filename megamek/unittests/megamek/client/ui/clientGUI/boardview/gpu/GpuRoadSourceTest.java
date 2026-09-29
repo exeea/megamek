@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.SwingUtilities;
 
@@ -95,6 +96,64 @@ class GpuRoadSourceTest {
         }
         assertEquals(30, roads);
         assertEquals(9, decorated);
+    }
+
+    @Test
+    void referenceRoadsClearTheirTreesWallOnlySlopesTheyCutAndNeverFoldTheirGround() throws Exception {
+        var scene = scene("unofficial/Drewbacca/16x17 Fire And Ice 2.board");
+        for (var tile : scene.tiles()) {
+            if (!BoardRoad.rendered(tile)) { continue; }
+            // Capture places scenery clear of the same bent course the scene gives the road.
+            var road = BoardRoad.of(scene, tile);
+            for (var feature : tile.features()) {
+                if (feature.kind() != BoardScene.FeatureKind.TREE) { continue; }
+                assertTrue(road.distance(feature.x(), feature.y()) >= BoardRoad.SHOULDER + 2 - .01f,
+                      "A tree stands off the road in " + tile.coords().getBoardNum());
+            }
+            var surface = new BoardSurface(scene, tile);
+            for (var face : surface.retainingPanels) {
+                var neighbor = scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(face.landEdge())));
+                assertTrue(neighbor.elevation() > tile.elevation(),
+                      "A road only walls a slope it cuts into, never one it runs along the top of: " + tile.coords().getBoardNum());
+            }
+            for (var face : surface.groundFaces()) {
+                if (face.finish() != BoardSurface.Finish.TOP) { continue; }
+                float up = (face.b().x - face.a().x) * (face.c().y - face.a().y) - (face.b().y - face.a().y) * (face.c().x - face.a().x);
+                float rise = Math.max(face.a().z, Math.max(face.b().z, face.c().z))
+                      - Math.min(face.a().z, Math.min(face.b().z, face.c().z));
+                // A folded slope stands up as a fin. Small slivers can still fold where two rims meet at a corner;
+                // they stay well below a visible fin (see docs/gpu-road-slopes-tunnels.md).
+                assertTrue(up > -1e-4f || rise < BoardRelief.metres(.3f),
+                      "Graded ground never folds into a fin in " + tile.coords().getBoardNum() + ": " + face);
+            }
+        }
+    }
+
+    @Test
+    void rocksAndShrubsStandBesideRoadsAndBridgesNeverOnThem() throws Exception {
+        // MesaCity's promontory 3725 once kept a rim boulder on its bridge deck, where neither side had room for it.
+        var scene = scene("unofficial/SimonLandmine/64x51/64x51 MesaCity1 N - Mesas.board");
+        float scale = BoardGeometry.hexScale();
+        int checked = 0;
+        for (var tile : scene.tiles()) {
+            var passages = BoardBridge.approaches(scene, tile);
+            var road = BoardRoad.rendered(tile) ? BoardRoad.of(scene, tile) : null;
+            if (road == null && passages.isEmpty()) { continue; }
+            float cx = BoardGeometry.centerX(tile.coords()), cy = BoardGeometry.centerY(tile.coords());
+            for (var face : new BoardSurface(scene, tile).faces) {
+                if (face.finish() != BoardSurface.Finish.OUTCROP) { continue; }
+                for (var p : List.of(face.a(), face.b(), face.c())) {
+                    checked++;
+                    assertTrue(road == null || road.distance((p.x - cx) / scale, (p.y - cy) / scale) >= BoardRoad.SHOULDER - .01f,
+                          "Rocks and shrubs stand beside the road of " + tile.coords().getBoardNum() + ", never on it: " + p);
+                    for (var passage : passages) {
+                        assertFalse(passage.obstructs(p, 0, 0),
+                              "Nothing stands on a bridge's deck or approach in " + tile.coords().getBoardNum() + ": " + p);
+                    }
+                }
+            }
+        }
+        assertTrue(checked > 0, "The board's roads and bridge banks carry rocks and shrubs to check");
     }
 
     static BoardScene minesScene() throws Exception {

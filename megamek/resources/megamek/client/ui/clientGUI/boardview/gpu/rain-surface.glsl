@@ -4,8 +4,14 @@ uniform sampler2D u_rainNoise;
 uniform float u_wetness;
 uniform float u_rainScale;
 uniform float u_rainTime;
+#ifdef waterSurfaceFlag
+// A water page spans many chunks. Use each pixel's projected scale, never the page centre's distance.
+#define u_rippleDetail clamp((u_wavePixels * gl_FragCoord.w * abs(u_viewDirection.z) - 28.0) / 60.0, 0.0, 1.0)
+#define u_rainDetail clamp((u_wavePixels * gl_FragCoord.w - 12.0) / 28.0, 0.0, 1.0)
+#else
 uniform float u_rippleDetail;
 uniform float u_rainDetail;
+#endif
 uniform vec3 u_viewDirection;
 uniform vec3 u_viewPosition;
 uniform float u_perspective;

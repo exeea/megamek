@@ -11,8 +11,8 @@ import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
@@ -80,7 +80,7 @@ class GpuOverlayCapturePerformanceSmokeTest {
         }
     }
 
-    private static void measure(String name, BoardView view, IntConsumer change) {
+    private static void measure(String name, BoardClientState view, IntConsumer change) {
         var standard = ManagementFactory.getThreadMXBean();
         com.sun.management.ThreadMXBean allocation = standard instanceof com.sun.management.ThreadMXBean extended
               && extended.isThreadAllocatedMemorySupported() ? extended : null;
@@ -111,8 +111,8 @@ class GpuOverlayCapturePerformanceSmokeTest {
               result.fills().size(), result.labels().size(), result.walls().size(), result.flatWalls().size());
     }
 
-    private static void set(BoardView view, String name, Object value) throws ReflectiveOperationException {
-        var field = BoardView.class.getDeclaredField(name);
+    private static void set(BoardClientState view, String name, Object value) throws ReflectiveOperationException {
+        var field = BoardClientState.class.getDeclaredField(name);
         field.setAccessible(true);
         field.set(view, value);
     }

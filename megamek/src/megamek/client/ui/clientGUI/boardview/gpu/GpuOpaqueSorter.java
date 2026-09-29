@@ -38,6 +38,19 @@ final class GpuOpaqueSorter extends DefaultRenderableSorter {
     public int compare(Renderable left, Renderable right) {
         var a = left.material.get(BlendingAttribute.class, BlendingAttribute.Type);
         var b = right.material.get(BlendingAttribute.class, BlendingAttribute.Type);
+        if (a != null && a.blended && b != null && b.blended) {
+            boolean roadA = left.material.has(GpuRoads.Mask.TYPE), roadB = right.material.has(GpuRoads.Mask.TYPE);
+            // Road coats lie on opaque support: draw their base before wear/paint, then other transparency.
+            // Chunk mesh centres cannot order overlapping coats reliably, especially after batching masks.
+            if (roadA != roadB) { return roadA ? -1 : 1; }
+            if (roadA) {
+                int layer = Float.compare(GpuRoads.layer(left.material), GpuRoads.layer(right.material));
+                if (layer != 0) { return layer; }
+            }
+            // A lake slab's margin floats over the open water beside it: blend the ice after that water.
+            boolean iceA = GpuIceShader.floating(left.material), iceB = GpuIceShader.floating(right.material);
+            if (iceA != iceB) { return iceA ? 1 : -1; }
+        }
         if (groupShaders && (a == null || !a.blended) && (b == null || !b.blended)) {
             int shader = Integer.compare(shaderOrder.get(left.shader), shaderOrder.get(right.shader));
             if (shader != 0) { return shader; }

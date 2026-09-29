@@ -18,8 +18,8 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.math.Vector3;
-import megamek.common.board.Coords;
 import megamek.common.Hex;
+import megamek.common.board.Coords;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Tag;
@@ -93,18 +93,9 @@ class GpuRoadSmokeTest {
                     GpuReviewFrame.save(new File(output, "mines-road-fluff-sand-oblique.png"));
                     // This interior plateau fills the upper four fifths of the close view. Blue there is exposed sky,
                     // not the board's outer silhouette: catch the actual corner holes from the Mines report.
-                    byte[] pixels = screen();
-                    int width = Gdx.graphics.getBackBufferWidth(), height = Gdx.graphics.getBackBufferHeight();
-                    int holes = 0;
-                    for (int y = height / 5; y < height * 9 / 10; y++) {
-                        for (int x = 2; x < width - 2; x++) {
-                            int index = (y * width + x) * 4;
-                            int red = Byte.toUnsignedInt(pixels[index]), green = Byte.toUnsignedInt(pixels[index + 1]);
-                            int blue = Byte.toUnsignedInt(pixels[index + 2]);
-                            if (blue > red + 35 && blue > green + 15) { holes++; }
-                        }
-                    }
-                    assertEquals(0, holes, "No sky may show through the Mines plateau, cliff feet or roadside slopes");
+                    int height = Gdx.graphics.getBackBufferHeight();
+                    assertEquals(0, skyPixels(height / 5, height * 9 / 10),
+                          "No sky may show through the Mines plateau, cliff feet or roadside slopes");
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) {
                     failure.set(error);
@@ -124,14 +115,21 @@ class GpuRoadSmokeTest {
         for (var tile : scene.tiles()) {
             if (!BoardRoad.rendered(tile)) { continue; }
             var surface = new BoardSurface(scene, tile);
+            var road = BoardRoad.of(scene, tile);
             Vector3 center = BoardGeometry.center(tile.coords(), tile.elevation());
             for (int direction = 0; direction < 6; direction++) {
                 if ((tile.roadExits() & (1 << direction)) == 0) { continue; }
                 Vector3 along = BoardGeometry.center(tile.coords().translated(direction), 0)
                       .sub(BoardGeometry.center(tile.coords(), 0)).nor();
                 Vector3 across = new Vector3(-along.y, along.x, 0);
+                // A road may bend through its border like a real road: sample beside its actual centre line.
+                float offset = 0, nearest = Float.POSITIVE_INFINITY;
+                for (float side = -9; side <= 9; side += .25f) {
+                    float distance = road.distance(along.x * 24 + across.x * side, along.y * 24 + across.y * side);
+                    if (distance < nearest) { nearest = distance; offset = side; }
+                }
                 Vector3 at = new Vector3(center).mulAdd(along, 24 * BoardGeometry.hexScale())
-                      .mulAdd(across, 3 * BoardGeometry.hexScale());
+                      .mulAdd(across, (offset + 3) * BoardGeometry.hexScale());
                 at.z = surface.height(at.x, at.y);
                 Vector3 point = camera.camera.project(at);
                 if (point.x < 3 || point.y < 3 || point.x >= Gdx.graphics.getBackBufferWidth() - 3
@@ -183,6 +181,8 @@ class GpuRoadSmokeTest {
                         camera.center(BoardGeometry.center(BoardRoadTest.CENTER, 2));
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(output, "concrete-roundabout-" + exits + ".png"));
+                        assertEquals(0, skyPixels(0, Gdx.graphics.getBackBufferHeight(), true),
+                              "Open road gates cannot leave sky seams");
                     }
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) {
@@ -458,6 +458,31 @@ class GpuRoadSmokeTest {
             kinds.putIfAbsent(next, kind);
             at = next;
         }
+    }
+
+    private static int skyPixels(int fromY, int toY) {
+        return skyPixels(fromY, toY, false);
+    }
+
+    private static int skyPixels(int fromY, int toY, boolean connected) {
+        byte[] pixels = screen();
+        int width = Gdx.graphics.getBackBufferWidth(), holes = 0;
+        int first = Math.max(fromY, 1), last = Math.min(toY, Gdx.graphics.getBackBufferHeight() - 1);
+        for (int y = first; y < last; y++) {
+            for (int x = 2; x < width - 2; x++) {
+                int index = (y * width + x) * 4;
+                // Concrete's baseline has isolated rasterization pinholes; connected sky pixels expose an open join.
+                if (sky(pixels, index) && (!connected || sky(pixels, index - 4) || sky(pixels, index + 4)
+                      || sky(pixels, index - width * 4) || sky(pixels, index + width * 4))) { holes++; }
+            }
+        }
+        return holes;
+    }
+
+    private static boolean sky(byte[] pixels, int index) {
+        int red = Byte.toUnsignedInt(pixels[index]), green = Byte.toUnsignedInt(pixels[index + 1]);
+        int blue = Byte.toUnsignedInt(pixels[index + 2]);
+        return blue > red + 35 && blue > green + 15;
     }
 
     private static byte[] screen() {

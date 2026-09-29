@@ -25,6 +25,8 @@ class GpuRoadSlopeSmokeTest {
         var mines = GpuRoadSourceTest.minesScene();
         var streets = GpuRoadSourceTest.scene("unofficial/DarkISI/16x17 Strassengitter 3.board");
         var lava = GpuRoadSourceTest.scene("Map Pack Volcanic/16x17 Lava Tubes 1.board");
+        var mesa = GpuRoadSourceTest.scene("unofficial/SimonLandmine/96x51/96x51 MesaCity1 N - Mesas.board");
+        var fireIce = GpuRoadSourceTest.scene("unofficial/Drewbacca/16x17 Fire And Ice 2.board");
         File output = new File(System.getProperty("megamek.gpu.screenshots"), "road-slopes");
         Files.createDirectories(output.toPath());
         var failure = new AtomicReference<Throwable>();
@@ -40,16 +42,20 @@ class GpuRoadSlopeSmokeTest {
                 try {
                     var camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-                    for (var scene : List.of(mines, streets, lava)) {
-                        String map = scene == mines ? "mines" : scene == lava ? "lava-tubes" : "strassengitter";
+                    for (var scene : List.of(mines, streets, lava, fireIce, mesa)) {
+                        String map = scene == fireIce ? "fire-and-ice-2" : scene == mesa ? "mesa-city1" : scene == mines ? "mines"
+                              : scene == lava ? "lava-tubes" : "strassengitter";
                         terrain.update(scene);
                         terrain.animate(.5f, List.of());
-                        for (var at : scene == mines ? List.of(new Coords(7, 14), new Coords(2, 5))
+                        for (var at : scene == mesa ? List.of(new Coords(42, 20), new Coords(47, 20), new Coords(44, 20))
+                              : scene == fireIce ? List.of(new Coords(4, 8), new Coords(8, 8))
+                              : scene == mines ? List.of(new Coords(7, 14), new Coords(2, 5))
                               : scene == lava ? List.of(new Coords(5, 5), new Coords(9, 9))
                                     : List.of(new Coords(7, 8), new Coords(6, 9))) {
                             for (boolean oblique : new boolean[] { false, true }) {
                                 camera.setIsometric(oblique);
-                                camera.camera.zoom = .22f;
+                                if ((scene == mesa || scene == fireIce) && oblique) { camera.orbit(150, 10); }
+                                camera.camera.zoom = scene == mesa && at.getX() == 44 ? .4f : .22f;
                                 camera.center(BoardGeometry.center(at, scene.tile(at).elevation()));
                                 GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                                 frame.render(terrain, camera, scene);

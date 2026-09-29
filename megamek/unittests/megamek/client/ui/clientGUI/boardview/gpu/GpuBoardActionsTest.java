@@ -64,7 +64,7 @@ class GpuBoardActionsTest {
                 Client client = mock(Client.class);
                 when(gui.getClient()).thenReturn(client);
                 when(client.isMyTurn()).thenReturn(true);
-                BoardClientState view = spy(fixture.view.getClientState());
+                BoardClientState view = spy(fixture.view);
                 doReturn(gui).when(view).getClientgui();
                 MovementDisplay movement = mock(MovementDisplay.class);
                 when(movement.currentEntity()).thenReturn(fixture.entity);
@@ -123,7 +123,7 @@ class GpuBoardActionsTest {
                 when(client.getGame()).thenReturn(fixture.game);
                 when(client.getLocalPlayer()).thenReturn(fixture.player);
                 when(client.isMyTurn()).thenReturn(true);
-                BoardClientState view = spy(fixture.view.getClientState());
+                BoardClientState view = spy(fixture.view);
                 doReturn(gui).when(view).getClientgui();
                 when(gui.boardStates()).thenReturn(List.of(view));
                 when(gui.getBoardState(any(Entity.class))).thenReturn(view);
@@ -199,7 +199,7 @@ class GpuBoardActionsTest {
                 menus.get().addActionListener(event -> clicks.incrementAndGet());
                 ClientGUI gui = mock(ClientGUI.class);
                 when(gui.getMenuBar()).thenReturn(menus.get());
-                BoardClientState view = spy(fixture.view.getClientState());
+                BoardClientState view = spy(fixture.view);
                 doReturn(gui).when(view).getClientgui();
                 commands.set(new GpuBoardActions(view, () -> fixture.panel, () -> false, () -> { }).globalCommands());
                 fixture.game.setPhase(GamePhase.MOVEMENT_REPORT);
@@ -256,7 +256,7 @@ class GpuBoardActionsTest {
             when(client.getLocalPlayer()).thenReturn(fixture.player);
             when(client.isMyTurn()).thenReturn(true);
             when(client.getMyTurn()).thenReturn(new GameTurn(fixture.player.getId()));
-            BoardClientState view = spy(fixture.view.getClientState());
+            BoardClientState view = spy(fixture.view);
             doReturn(gui).when(view).getClientgui();
             FiringDisplay phase = mock(FiringDisplay.class);
             when(phase.currentEntity()).thenReturn(fixture.entity);

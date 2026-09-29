@@ -25,7 +25,7 @@ import com.badlogic.gdx.math.Vector3;
 import megamek.client.Client;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.MegaMekGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.panels.phaseDisplay.DeploymentDisplay;
 import megamek.client.ui.util.MegaMekController;
 import megamek.common.Hex;
@@ -87,17 +87,17 @@ class GpuDeploymentFacingSmokeTest {
                     when(client.getGame()).thenReturn(fixture.game);
                     when(client.getLocalPlayer()).thenReturn(fixture.player);
                     when(client.isMyTurn()).thenReturn(true);
-                    BoardView view = spy(fixture.view);
+                    BoardClientState view = spy(fixture.view);
                     doReturn(gui).when(view).getClientgui();
-                    doReturn(List.of(view.getClientState())).when(gui).boardStates();
-                    doReturn(view.getClientState()).when(gui).getBoardState(any(Entity.class));
+                    doReturn(List.of(view)).when(gui).boardStates();
+                    doReturn(view).when(gui).getBoardState(any(Entity.class));
                     try (var keys = mockStatic(MegaMekGUI.class)) {
                         keys.when(MegaMekGUI::getKeyDispatcher).thenReturn(gui.controller);
                         phase.set(spy(new DeploymentDisplay(gui)));
                     }
                     doAnswer(ignored -> actor.get()).when(phase.get()).currentEntity();
                     view.addBoardViewListener(phase.get());
-                    source.set(new GpuBoardSource(view.getClientState(), phase::get));
+                    source.set(new GpuBoardSource(view, phase::get));
                 });
                 new Lwjgl3Application(new GpuBattleView(source.get()) {
                     // Four cases per vessel: both cameras, with Shift released before or after the mouse.

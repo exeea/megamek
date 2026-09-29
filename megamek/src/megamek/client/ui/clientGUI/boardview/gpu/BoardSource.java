@@ -52,17 +52,9 @@ interface BoardSource extends AutoCloseable {
         public Frame(BoardScene scene, List<BoardScene.Animation> animations, BoardScene.Context context,
               List<BoardScene.Command> globalCommands, Hud hud, String tooltip,
               BoardFocus centerRequest, long boardGeneration, String actorName,
-              BoardAtmosphere.Settings scenarioAtmosphere, BoardScene.Attack attack) {
-            this(scene, animations, context, globalCommands, hud, tooltip, centerRequest, boardGeneration, actorName,
-                  scenarioAtmosphere, attack, GpuReportLog.Snapshot.EMPTY);
-        }
-
-        public Frame(BoardScene scene, List<BoardScene.Animation> animations, BoardScene.Context context,
-              List<BoardScene.Command> globalCommands, Hud hud, String tooltip,
-              BoardFocus centerRequest, long boardGeneration, String actorName,
               BoardAtmosphere.Settings scenarioAtmosphere) {
             this(scene, animations, context, globalCommands, hud, tooltip, centerRequest, boardGeneration, actorName,
-                  scenarioAtmosphere, null);
+                  scenarioAtmosphere, null, GpuReportLog.Snapshot.EMPTY);
         }
 
         public Frame(BoardScene scene, List<BoardScene.Animation> animations, BoardScene.Context context,

@@ -45,7 +45,7 @@ class GpuOffBoardOverlayTest {
                     fixture.entity.setOffBoard(20, OffBoardDirection.SOUTH);
                     var artillery = fixture.entity.addEquipment(new LongTom(), Mek.LOC_LEFT_ARM);
                     var gui = GpuUnitHudTest.gui(fixture);
-                    var widgetView = spy(fixture.view.getClientState());
+                    var widgetView = spy(fixture.view);
                     doReturn(artillery).when(widgetView).getSelectedArtilleryWeapon();
                     doReturn(new Rectangle(800, 600)).when(widgetView).getDisplayablesRect();
                     when(gui.getBoardState()).thenReturn(widgetView);

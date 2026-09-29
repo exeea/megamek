@@ -5,15 +5,54 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.HashMap;
 import java.util.List;
 
+import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
+import megamek.common.board.Coords;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import megamek.common.board.Coords;
 
 class BoardRoadRampTest {
+    @ParameterizedTest
+    @ValueSource(ints = { 9, 31, 63 })
+    void concreteRoadGatesHaveNoWallAcrossTheCarriageway(int exits) {
+        var scene = concreteJunction(exits);
+        var at = BoardRoadTest.CENTER;
+        for (var lod : TerrainLod.values()) {
+            var surfaces = new HashMap<Coords, BoardSurface>();
+            for (var tile : scene.tiles()) { surfaces.put(tile.coords(), new BoardSurface(scene, tile, lod)); }
+            var surface = surfaces.get(at);
+            for (int d = 0; d < 6; d++) {
+                if ((exits & 1 << d) == 0) { continue; }
+                var adjacent = surfaces.get(at.translated(d));
+                Vector3 center = BoardGeometry.center(at, 0), next = BoardGeometry.center(at.translated(d), 0);
+                Vector3 along = new Vector3(next).sub(center).nor();
+                Vector3 across = new Vector3(-along.y, along.x, 0);
+                Vector3 gate = new Vector3(center).lerp(next, .5f);
+                for (float offset : new float[] { -4, 0, 4 }) {
+                    Vector3 a = new Vector3(gate).mulAdd(across, offset * BoardGeometry.hexScale())
+                          .mulAdd(along, -BoardGeometry.hexScale());
+                    Vector3 b = new Vector3(gate).mulAdd(across, offset * BoardGeometry.hexScale())
+                          .mulAdd(along, BoardGeometry.hexScale());
+                    a.z = surface.height(a.x, a.y) + BoardGeometry.hexScale();
+                    b.z = adjacent.height(b.x, b.y) + BoardGeometry.hexScale();
+                    Ray ray = new Ray(a, new Vector3(b).sub(a).nor());
+                    Vector3 hit = new Vector3();
+                    for (var owner : List.of(surface, adjacent)) {
+                        for (var wall : owner.walls(scene, BoardGeometry.floor(scene), surfaces)) {
+                            boolean blocked = Intersector.intersectRayTriangle(ray, wall.a(), wall.b(), wall.c(), hit)
+                                  && hit.dst2(a) < a.dst2(b);
+                            assertTrue(!blocked, lod + " exit " + d + " wall blocks the road at " + hit);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(ints = { 9, 31, 63 })
     void concreteKeepsLevelSlabsAndVerticalRetainingWallsOutsideItsRoads(int exits) {
@@ -244,12 +283,20 @@ class BoardRoadRampTest {
         for (var face : surface.faces) {
             if (face.finish() != BoardSurface.Finish.TOP) { continue; }
             Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
-            assertTrue(normal.z > 0, "Every earthwork triangle has a positive footprint: " + surface.tile.coords() + " " + face);
+            float rise = Math.max(face.a().z, Math.max(face.b().z, face.c().z))
+                  - Math.min(face.a().z, Math.min(face.b().z, face.c().z));
+            // A folded slope would stand up as a fin. Small slivers can still fold where two rims meet at a corner;
+            // they stay well below a visible fin (see docs/gpu-road-slopes-tunnels.md).
+            assertTrue(normal.z > 0 || rise < BoardRelief.metres(.3f),
+                  "Every earthwork triangle has a positive footprint: " + surface.tile.coords() + " " + face);
         }
         for (int corner = 0; corner < 6; corner++) {
+            // A gate has no wall; its corner only has to meet the others where both roads' banks meet it.
+            float gate = surface.relief.gateCorner(corner);
             for (float level = 0; level <= 4; level += .25f) {
-                var a = surface.relief.roadPoint(corner, 0, level * BoardGeometry.level());
-                var b = surface.relief.roadPoint(Math.floorMod(corner - 1, 6), 1, level * BoardGeometry.level());
+                float z = Float.isNaN(gate) ? level * BoardGeometry.level() : gate;
+                var a = surface.relief.roadPoint(corner, 0, z);
+                var b = surface.relief.roadPoint(Math.floorMod(corner - 1, 6), 1, z);
                 assertTrue(a.epsilonEquals(b, .0001f), "The walls beside an earthwork must close at shared corners");
             }
         }

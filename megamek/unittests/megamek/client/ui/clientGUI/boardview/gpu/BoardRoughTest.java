@@ -40,27 +40,48 @@ class BoardRoughTest {
                   new HashSet<>(features.stream().map(BoardScene.Feature::asset).toList()));
             assertEquals(features, BoardFeatures.capture(hex, coords, Map.of()));
             assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
-            if (fluff == 1) {
-                assertEquals(1, features.stream().map(BoardScene.Feature::rotation).distinct().count());
-                var rows = features.stream().map(BoardScene.Feature::y).distinct().sorted().toList();
-                for (int row = 1; row < rows.size(); row++) {
-                    float previousY = rows.get(row - 1), currentY = rows.get(row);
-                    var previous = features.stream().filter(f -> f.y() == previousY)
-                          .map(BoardScene.Feature::x).sorted().toList();
-                    var current = features.stream().filter(f -> f.y() == currentY).map(BoardScene.Feature::x).toList();
-                    assertEquals(5, previous.size());
-                    assertEquals(5, current.size());
-                    for (float x : current) {
-                        assertEquals((previous.get(1) - previous.get(0)) / 2,
-                              previous.stream().mapToDouble(p -> Math.abs(p - x)).min().orElseThrow(), .001,
-                              "Adjacent rows put their teeth halfway between each other's teeth");
-                    }
-                }
-            }
+            if (fluff == 1) { staggeredSpacing(features); }
             hex.removeTerrain(Terrains.ROUGH);
             assertTrue(BoardFeatures.capture(hex, coords, Map.of()).stream().noneMatch(f -> f.kind() == BoardScene.FeatureKind.ROUGH));
             assertFalse(BoardFeatures.detailedGround(hex, Map.of()), "Unrelated fluff keeps its original artwork");
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = { 0, 1, 2 })
+    void roadsMoveRoughCoverOntoTheVergesInsteadOfRemovingIt(int fluff) {
+        Coords coords = new Coords(2, 2);
+        int standard = BoardFeatures.capture(hex(fluff, 1), coords, Map.of()).size();
+        var ultraTeeth = BoardFeatures.capture(hex(1, 2), coords, Map.of());
+        for (int level : new int[] { 1, 2 }) {
+            int open = BoardFeatures.capture(hex(fluff, level), coords, Map.of()).size();
+            // Ultra teeth already stand at the closest spacing and ultra stumps are large; beside these roads not
+            // every piece fits, but they keep the standard count.
+            int expected = fluff != 0 && level == 2 ? standard : open;
+            for (int exits : new int[] { 1, 9, 3 }) {
+                Hex hex = hex(fluff, level);
+                hex.addTerrain(new Terrain(Terrains.ROAD, 1, true, exits));
+                var features = BoardFeatures.capture(hex, coords, Map.of());
+                assertTrue(features.size() >= expected,
+                      "Road exits " + exits + " keep " + features.size() + " of " + open + " pieces");
+                if (fluff == 1) {
+                    assertTrue(staggeredSpacing(features) >= staggeredSpacing(ultraTeeth) - .001f,
+                          "Relocated teeth never stand closer than ultra rough's");
+                    BoardScene scene = scene(hex, 0, false, BoardScene.Surface.GRASS);
+                    assertEquals(features.size(), new BoardSurface(scene, scene.tile(coords)).roughModels().size(),
+                          "Every captured tooth lies wholly inside its hex");
+                }
+            }
+        }
+    }
+
+    @Test
+    void standardTeethSpreadAcrossTheHexMoreSparselyThanUltraTeeth() {
+        Coords coords = new Coords(2, 2);
+        var standard = BoardFeatures.capture(hex(1, 1), coords, Map.of());
+        var ultra = BoardFeatures.capture(hex(1, 2), coords, Map.of());
+        assertTrue(staggeredSpacing(standard) > staggeredSpacing(ultra));
+        assertTrue(standard.stream().map(BoardScene.Feature::y).distinct().count() >= 3, "Not a strip of two lines");
     }
 
     @Test
@@ -99,7 +120,7 @@ class BoardRoughTest {
                 List<BoardSurface.Face> deck = type == Terrains.BRIDGE ? bridgeDeck(exits) : List.of();
                 for (var feature : BoardFeatures.capture(hex, coords, Map.of())) {
                     if (feature.kind() != BoardScene.FeatureKind.ROUGH) { continue; }
-                    var shape = BoardShape.loadKit(feature.asset()).values().iterator().next();
+                    var shape = BoardShape.loadModel(feature.asset());
                     double turn = Math.toRadians(feature.rotation());
                     for (var polygon : shape.polygons()) {
                         for (Vector3 p : polygon.points()) {
@@ -130,10 +151,8 @@ class BoardRoughTest {
         }
         Set<Vector3> rendered = new HashSet<>();
         for (var placement : surface.roughModels()) {
-            for (var shape : BoardShape.loadKit(placement.asset()).values()) {
-                for (var polygon : shape.polygons()) {
-                    for (Vector3 point : polygon.points()) { rendered.add(new Vector3(point).mul(placement.transform())); }
-                }
+            for (var polygon : BoardShape.loadModel(placement.asset()).polygons()) {
+                for (Vector3 point : polygon.points()) { rendered.add(new Vector3(point).mul(placement.transform())); }
             }
         }
         Set<Vector3> support = new HashSet<>();
@@ -177,7 +196,9 @@ class BoardRoughTest {
     void horizontalRayCanHitTeethAboveThePavedGroundBounds() {
         BoardScene scene = scene(1, 0, false, BoardScene.Surface.CONCRETE);
         Coords coords = new Coords(2, 2);
-        Vector3 origin = BoardGeometry.center(coords, 0).add(BoardGeometry.width(), 0, 3);
+        // Aim along a row of teeth.
+        float row = scene.tile(coords).features().getFirst().y() * BoardGeometry.hexScale();
+        Vector3 origin = BoardGeometry.center(coords, 0).add(BoardGeometry.width(), row, 3);
         var hit = BoardGeometry.hit(scene, new Ray(origin, new Vector3(-1, 0, 0)),
               List.of(scene.tile(coords)), BoardGeometry.floor(scene));
         assertNotNull(hit, "Picking bounds must include the obstacles above a flat slab");
@@ -216,12 +237,37 @@ class BoardRoughTest {
         return scene(fluff, step, water, BoardScene.Surface.GRASS);
     }
 
+    /**
+     * Asserts identical teeth rotations, on one lattice whose alternate rows sit halfway between each other's teeth,
+     * and returns its spacing.
+     */
+    private static float staggeredSpacing(List<BoardScene.Feature> teeth) {
+        assertEquals(1, teeth.stream().map(BoardScene.Feature::rotation).distinct().count());
+        var rowsY = teeth.stream().map(BoardScene.Feature::y).distinct().sorted().toList();
+        float pitch = Float.POSITIVE_INFINITY;
+        for (int row = 1; row < rowsY.size(); row++) { pitch = Math.min(pitch, rowsY.get(row) - rowsY.get(row - 1)); }
+        for (var a : teeth) {
+            for (var b : teeth) {
+                double rows = (b.y() - a.y()) / pitch;
+                assertEquals(Math.rint(rows), rows, .001, "Rows are one tooth spacing apart");
+                double columns = (b.x() - a.x()) / pitch + Math.abs(Math.rint(rows) % 2) / 2;
+                assertEquals(Math.rint(columns), columns, .001,
+                      "Adjacent rows put their teeth halfway between each other's teeth: " + a + " " + b);
+            }
+        }
+        return pitch;
+    }
+
     private static BoardScene scene(int fluff, int step, boolean water, BoardScene.Surface family) {
+        return scene(hex(fluff, 1), step, water, family);
+    }
+
+    private static BoardScene scene(Hex centre, int step, boolean water, BoardScene.Surface family) {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 5; x++) {
             for (int y = 0; y < 5; y++) {
                 Coords coords = new Coords(x, y);
-                Hex hex = x == 2 && y == 2 ? hex(fluff, 1) : new Hex(0);
+                Hex hex = x == 2 && y == 2 ? centre : new Hex(0);
                 tiles.add(new BoardScene.Tile(coords, x > 2 ? step : 0, water ? 1 : -1, false, 0,
                       family, null, null, null, null, null,
                       BoardFeatures.capture(hex, coords, Map.of()), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));

@@ -35,9 +35,9 @@ import de.javagl.jgltf.model.AccessorFloatData;
 import de.javagl.jgltf.model.AccessorIntData;
 import de.javagl.jgltf.model.AccessorModel;
 import de.javagl.jgltf.model.AccessorShortData;
+import de.javagl.jgltf.model.GltfModel;
 import de.javagl.jgltf.model.MaterialModel;
 import de.javagl.jgltf.model.MeshModel;
-import de.javagl.jgltf.model.GltfModel;
 import de.javagl.jgltf.model.MeshPrimitiveModel;
 import de.javagl.jgltf.model.NodeModel;
 import de.javagl.jgltf.model.TextureModel;
@@ -76,6 +76,9 @@ final class RigidGlb {
         return convert(file, file.nameWithoutExtension(), asset, source.getSceneModels().get(asset.scene()).getNodeModels());
     }
 
+    /** Levels a file may hold: the near mesh, two simpler meshes and a plant's impostor cards. */
+    static final int LEVELS = 4;
+
     /** One file per component, identity groups named <component>-lodN. Missing levels reuse the preceding data. */
     static List<ModelData> loadLods(FileHandle file) {
         return loadLods(file, file.file().toPath().toAbsolutePath().getParent());
@@ -88,18 +91,18 @@ final class RigidGlb {
         String shape = file.nameWithoutExtension();
         Map<String, NodeModel> groups = new HashMap<>();
         // Every level is named, so which mesh draws at a given size is always visible in the file itself.
-        boolean grouped = roots.stream().anyMatch(node -> node.getName() != null && node.getName().matches(".*-lod[0-2]"));
+        boolean grouped = roots.stream().anyMatch(node -> node.getName() != null && node.getName().matches(".*-lod[0-3]"));
         require(grouped, "Name the levels of " + file.name() + " as groups " + MeshLod.name(shape, 0)
-              + " (and optionally " + MeshLod.name(shape, 1) + ", " + MeshLod.name(shape, 2) + ")");
+              + " (and optionally " + MeshLod.name(shape, 1) + " to " + MeshLod.name(shape, LEVELS - 1) + ")");
         for (var group : roots) {
-            require(Set.of(MeshLod.name(shape, 0), MeshLod.name(shape, 1), MeshLod.name(shape, 2))
+            require(Set.of(MeshLod.name(shape, 0), MeshLod.name(shape, 1), MeshLod.name(shape, 2), MeshLod.name(shape, 3))
                   .contains(group.getName()), "Unexpected LOD group: " + group.getName());
             require(groups.put(group.getName(), group) == null, "Duplicate LOD group: " + group.getName());
             require(group.getMeshModels().isEmpty() && !group.getChildren().isEmpty(), "LOD groups contain child nodes");
             require(java.util.Arrays.equals(new Matrix4().val, group.computeLocalTransform(null)),
                   "LOD group transforms must be identity; transform the child rig instead");
         }
-        return MeshLod.load(shape, 3, name -> groups.containsKey(name)
+        return MeshLod.load(shape, LEVELS, name -> groups.containsKey(name)
               ? convert(file, name, asset, groups.get(name).getChildren()) : null);
     }
 
