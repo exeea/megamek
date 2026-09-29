@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 
 import megamek.common.Hex;
@@ -13,6 +15,7 @@ import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardFeaturesTest {
@@ -37,26 +40,48 @@ class BoardFeaturesTest {
         assertFalse(BoardFeatures.detailedGround(hex, Map.of()), "Unmodeled ground markings still keep their artwork");
     }
 
-    @Test
-    void modeledBuildingsUseTheConcreteEngineWithoutErasingOtherTerrainMarkings() {
+    @ParameterizedTest
+    @EnumSource(BoardScene.Surface.class)
+    void modeledStructuresKeepTheirGroundWithoutErasingOtherTerrainMarkings(BoardScene.Surface surface) {
         Hex hex = new Hex(0);
-        hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1));
+        hex.setTheme(surface.name().toLowerCase(Locale.ROOT));
+        if (surface == BoardScene.Surface.CONCRETE) { hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1)); }
+        assertEquals(surface, BoardFeatures.surface(hex));
         assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
         for (int terrain : new int[] { Terrains.BUILDING, Terrains.BLDG_CF, Terrains.BLDG_ELEV,
-              Terrains.BLDG_CLASS, Terrains.BLDG_ARMOR, Terrains.BLDG_BASEMENT_TYPE, Terrains.BLDG_FLUFF }) {
+              Terrains.BLDG_CLASS, Terrains.BLDG_ARMOR, Terrains.BLDG_BASEMENT_TYPE, Terrains.BLDG_FLUFF,
+              Terrains.FUEL_TANK, Terrains.FUEL_TANK_CF, Terrains.FUEL_TANK_ELEV, Terrains.FUEL_TANK_MAGN,
+              Terrains.INDUSTRIAL }) {
             hex.addTerrain(new Terrain(terrain, 1));
         }
-        var models = Map.of(Terrains.BUILDING, "building");
-        assertFalse(BoardFeatures.detailedGround(hex, Map.of()), "An unmodeled building still needs its artwork");
-        assertTrue(BoardFeatures.detailedGround(hex, models), "The model stands on the normal concrete material");
-        for (int terrain : new int[] { Terrains.ROAD_FLUFF, Terrains.RUBBLE, Terrains.BLDG_BASE_COLLAPSED,
-              Terrains.FORTIFIED }) {
+        var models = new HashMap<>(Map.of(Terrains.BUILDING, "building",
+              Terrains.FUEL_TANK, "tank", Terrains.INDUSTRIAL, "industrial"));
+        for (int type : new int[] { Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL }) {
+            String model = models.remove(type);
+            assertFalse(BoardFeatures.detailedGround(hex, models), "Every structure needs a replacement model: " + type);
+            models.put(type, model);
+        }
+        assertTrue(BoardFeatures.detailedGround(hex, models), "Models must retain the native " + surface + " ground");
+        assertEquals(surface, BoardFeatures.surface(hex));
+        for (int terrain : new int[] { Terrains.ROAD_FLUFF, Terrains.RUBBLE,
+              Terrains.FORTIFIED, Terrains.GROUND_FLUFF, Terrains.FLUFF }) {
             hex.addTerrain(new Terrain(terrain, 1));
             assertFalse(BoardFeatures.detailedGround(hex, models), "Keep separate terrain markings: " + terrain);
             hex.removeTerrain(terrain);
         }
-        hex.removeTerrain(Terrains.PAVEMENT);
-        assertFalse(BoardFeatures.detailedGround(hex, models), "This change is specific to concrete ground");
+    }
+
+    @Test
+    void waterDecorationDoesNotChangeTheBedMaterialOrInventWater() {
+        Hex hex = new Hex(-2);
+        hex.setTheme("volcano");
+        hex.addTerrain(new Terrain(Terrains.WATER_FLUFF, 1));
+        assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
+        assertEquals(BoardScene.Surface.ROCK, BoardFeatures.surface(hex));
+        assertFalse(BoardLiquid.capture(hex).present());
+        hex.addTerrain(new Terrain(Terrains.WATER, 2));
+        assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
+        assertTrue(BoardLiquid.capture(hex).present());
     }
 
     @Test
@@ -88,6 +113,7 @@ class BoardFeaturesTest {
         Coords coords = new Coords(2, 3);
         hex.addTerrain(new Terrain(Terrains.ARMS, 2));
         hex.addTerrain(new Terrain(Terrains.LEGS, 1));
+        assertTrue(BoardFeatures.detailedGround(hex, Map.of()), "A dropped limb must not replace the grass ground");
         var before = BoardFeatures.capture(hex, coords, Map.of()).stream()
               .filter(feature -> feature.kind() == BoardScene.FeatureKind.LIMB).toList();
         assertEquals(3, before.size());

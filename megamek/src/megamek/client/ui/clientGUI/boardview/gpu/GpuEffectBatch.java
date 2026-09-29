@@ -102,7 +102,7 @@ final class GpuEffectBatch implements Disposable {
 
     private void create() {
         shader = GpuShaderManager.program(() -> GpuGlsl.compile(fragment,
-              GpuShaderSource.read("effects.vert"), GpuShaderSource.read(fragment + ".frag")), next -> shader = next);
+              GpuShaderSource.read("effects.vert"), fragment(fragment + ".frag")), next -> shader = next);
         vertices = new float[capacity * 4 * STRIDE];
         short[] indices = new short[capacity * 6];
         int[] corners = { 0, 1, 2, 2, 3, 0 };
@@ -111,6 +111,15 @@ final class GpuEffectBatch implements Disposable {
         }
         mesh = new Mesh(false, capacity * 4, indices.length, VertexAttribute.Position(), VertexAttribute.TexCoords(0), VertexAttribute.TexCoords(1));
         mesh.setIndices(indices);
+    }
+
+    static String fragment(String file) {
+        String source = GpuShaderSource.read(file);
+        if (source.contains("// PARTICLE_APPEARANCE")) {
+            source = source.replace("// PARTICLE_APPEARANCE", GpuShaderSource.read("particles-smoke.glsl") + "\n"
+                  + GpuShaderSource.read("particles-fire.glsl") + "\n" + GpuShaderSource.read("particles-jet.glsl"));
+        }
+        return source;
     }
 
     @Override

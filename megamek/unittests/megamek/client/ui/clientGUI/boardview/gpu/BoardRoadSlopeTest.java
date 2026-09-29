@@ -17,6 +17,36 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardRoadSlopeTest {
     @ParameterizedTest
+    @ValueSource(ints = { 0, 1, 2, 3, 4, 5 })
+    void aGradedExitKeepsTheSharedCliffProfileOnAnUnchangedEdge(int direction) {
+        var at = BoardRoadTest.CENTER;
+        var approach = at.translated(direction);
+        var continuation = at.translated((direction + 1) % 6);
+        for (var lod : TerrainLod.values()) {
+            var paved = BoardSurfaceBlendTest.scene(c -> BoardRoadTest.tile(c,
+                  c.equals(at) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
+                  c.equals(at) ? (1 << direction) | (1 << ((direction + 1) % 6)) : 0,
+                  c.equals(at) || c.equals(continuation) ? 3 : c.equals(approach) ? 2 : 0, BoardScene.Surface.GRASS));
+            var roadSurface = new BoardSurface(paved, paved.tile(at), lod);
+            var actual = roadSurface.walls(paved, BoardGeometry.floor(paved));
+            int opposite = Math.floorMod(1 - direction - 3, 6);
+            for (int level : new int[] { 1, 2 }) {
+                // Sample the shared relief engine, including its road clearance. An unrelated road grade
+                // must not replace its rock ledges with a straight foot-to-rim retaining wall.
+                var p = roadSurface.relief.wetCliffContact(opposite, .5f, level * BoardGeometry.level());
+                float nearest = Float.POSITIVE_INFINITY;
+                for (var face : actual) {
+                    if (face.landEdge() != opposite) { continue; }
+                    for (var q : List.of(face.a(), face.b(), face.c())) {
+                        nearest = Math.min(nearest, p.dst(q));
+                    }
+                }
+                assertTrue(nearest < .01f, lod + " road wall departed from shared relief by " + nearest + " at " + p);
+            }
+        }
+    }
+
+    @ParameterizedTest
     @EnumSource(value = BoardScene.Surface.class, names = "CONCRETE", mode = EnumSource.Mode.EXCLUDE)
     void nativeSlopesJoinRoadsAboveAndBelowInEveryNaturalFamily(BoardScene.Surface family) {
         var at = BoardRoadTest.CENTER;

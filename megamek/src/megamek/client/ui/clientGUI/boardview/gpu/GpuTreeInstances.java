@@ -6,6 +6,8 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.WeakHashMap;
 import java.util.function.BiFunction;
 
 import com.badlogic.gdx.graphics.Mesh;
@@ -21,15 +23,17 @@ import com.badlogic.gdx.graphics.g3d.model.Node;
 import com.badlogic.gdx.graphics.g3d.model.NodePart;
 import com.badlogic.gdx.graphics.g3d.shaders.DepthShader;
 import com.badlogic.gdx.graphics.g3d.utils.DepthShaderProvider;
+import com.badlogic.gdx.graphics.g3d.utils.MeshBuilder;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.FloatArray;
 import com.badlogic.gdx.utils.Pool;
+import com.badlogic.gdx.utils.ShortArray;
 
 /**
- * Trees drawn with OpenGL instancing. Each tree model at each detail level is held once per draw pass; a tree adds
- * only its place, turn and size. Every pass gathers the trees of the chunks it draws and submits one draw per model
+ * Trees and modular building parts drawn with OpenGL instancing. Each model/range at each detail level is held once
+ * per draw pass; a placement adds only its place, turn and size. Every pass gathers the trees of the chunks it draws and submits one draw per model
  * part, so the geometry in memory no longer grows with the number of trees and a change of detail rebuilds nothing.
  * A pass whose trees are the same as in its previous frame uploads nothing.
  */
@@ -70,6 +74,27 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
             mesh = new GpuInstancedMesh(model.meshes.first());
             mesh.enableInstancedRendering(false, capacity, attributes());
             for (Node node : model.nodes) { collect(node); }
+        }
+
+        /** A shared building module part; only this indexed range needs an instanced vertex buffer. */
+        Batch(Renderable source) {
+            FloatArray vertices = new FloatArray();
+            ShortArray indices = new ShortArray();
+            GpuPropBatch.copyVertices(source.meshPart.mesh, source.meshPart.offset, source.meshPart.size, vertices, indices);
+            // Parts share a GLB vertex buffer; compact the indexed range instead of copying unrelated variants.
+            MeshBuilder builder = new MeshBuilder();
+            builder.begin(source.meshPart.mesh.getVertexAttributes(), source.meshPart.primitiveType);
+            builder.addMesh(vertices.items, indices.items, 0, indices.size);
+            mesh = new GpuInstancedMesh(builder.getNumVertices(), builder.getNumIndices(), builder.getAttributes());
+            builder.end(mesh);
+            mesh.enableInstancedRendering(false, capacity, attributes());
+            Renderable part = new Renderable();
+            part.meshPart.set(source.meshPart);
+            part.meshPart.mesh = mesh;
+            part.meshPart.offset = 0;
+            part.material = new Material(source.material);
+            part.material.set(new Instanced());
+            parts.add(part);
         }
 
         private void collect(Node node) {
@@ -117,16 +142,17 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
 
         /** A tree's transform is a translation, a turn about z and a scale that is equal along x and y. */
         void add(String species, Matrix4 transform) {
-            float[] m = transform.val;
-            float horizontal = (float) Math.hypot(m[Matrix4.M00], m[Matrix4.M10]);
-            trees.computeIfAbsent(species, key -> new FloatArray()).addAll(m[Matrix4.M03], m[Matrix4.M13], m[Matrix4.M23],
-                  horizontal, m[Matrix4.M00] / horizontal, m[Matrix4.M10] / horizontal, m[Matrix4.M22], 0);
+            append(trees.computeIfAbsent(species, key -> new FloatArray()), transform);
         }
     }
 
     private final BiFunction<String, Integer, Model> models;
     private static final int BATCHES_PER_SPECIES = Pass.values().length * TreeLod.LEVELS;
     private final Map<String, Batch[]> batches = new HashMap<>();
+    private record Part(Mesh mesh, int offset, int size, Material material) { }
+    private final Map<Part, Batch[]> sharedParts = new HashMap<>();
+    // Persistent chunk snapshots need no per-frame material/range keys; values do not retain their weak keys.
+    private final Map<Renderable, Batch[]> sharedLookups = new WeakHashMap<>();
     private final List<Batch> gathered = new ArrayList<>();
     private Pass pass = Pass.COLOUR;
     private long uploads;
@@ -155,6 +181,38 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         }
     }
 
+    /** Static building ranges borrow module meshes; placements add only transforms, using the same draw path as trees. */
+    void add(Array<Renderable> parts) {
+        for (Renderable source : parts) {
+            Batch[] passes = sharedLookups.computeIfAbsent(source, value -> sharedParts.computeIfAbsent(
+                  new Part(value.meshPart.mesh, value.meshPart.offset, value.meshPart.size, value.material),
+                  ignored -> new Batch[Pass.values().length]));
+            Batch batch = passes[pass.ordinal()];
+            if (batch == null) { passes[pass.ordinal()] = batch = new Batch(source); }
+            if (batch.data.isEmpty()) { gathered.add(batch); }
+            append(batch.data, source.worldTransform);
+        }
+    }
+
+    private static void append(FloatArray data, Matrix4 transform) {
+        float[] m = transform.val;
+        float horizontal = (float) Math.hypot(m[Matrix4.M00], m[Matrix4.M10]);
+        data.addAll(m[Matrix4.M03], m[Matrix4.M13], m[Matrix4.M23], horizontal,
+              m[Matrix4.M00] / horizontal, m[Matrix4.M10] / horizontal, m[Matrix4.M22], 0);
+    }
+
+    /** Evict buffers for retired building interiors/modules at the scene commit boundary. */
+    void retainParts(Set<Mesh> live) {
+        sharedLookups.clear();
+        sharedParts.entrySet().removeIf(entry -> {
+            if (live.contains(entry.getKey().mesh())) { return false; }
+            for (Batch batch : entry.getValue()) {
+                if (batch != null) { gathered.remove(batch); batch.dispose(); }
+            }
+            return true;
+        });
+    }
+
     /** Uploads what this pass gathered and supplies one renderable per part of every model in use. */
     @Override
     public void getRenderables(Array<Renderable> renderables, Pool<Renderable> pool) {
@@ -172,10 +230,10 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     /** Instance buffer uploads so far; a pass whose trees did not change adds none. */
     long uploads() { return uploads; }
 
-    /** Bytes of the shared tree meshes and of their instance buffers. */
+    /** Bytes of the shared tree/building meshes and of their instance buffers. */
     long bytes() {
         long total = 0;
-        for (Batch[] species : batches.values()) {
+        for (Batch[] species : java.util.stream.Stream.concat(batches.values().stream(), sharedParts.values().stream()).toList()) {
             for (Batch batch : species) {
                 if (batch == null) { continue; }
                 total += (long) batch.mesh.getNumVertices() * batch.mesh.getVertexSize()
@@ -190,6 +248,7 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         for (Batch[] species : batches.values()) {
             for (Batch batch : species) { if (batch != null) { batch.dispose(); } }
         }
+        retainParts(Set.of());
         batches.clear();
         gathered.clear();
     }

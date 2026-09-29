@@ -39,6 +39,8 @@ final class GpuOcean implements Disposable {
     private static final float GRAVITY = 9.81f;
     /** Every frequency is a multiple of 2π over this many seconds, so the clock can wrap without a jump. */
     private static final float LOOP_SECONDS = 1000;
+    /** The same FFT with a slowly evolving, short-wave-damped spectrum and displacement output for lava. */
+    private final boolean lava;
 
     private ShaderProgram spectrum;
     private ShaderProgram butterfly;
@@ -54,6 +56,10 @@ final class GpuOcean implements Disposable {
     private float windY;
     private float windStrength;
     private float previousTime = Float.NaN;
+
+    GpuOcean() { this(false); }
+
+    GpuOcean(boolean lava) { this.lava = lava; }
 
     /** Whether this context can run the simulation: it needs OpenGL 3 for float targets and integer shaders. */
     static boolean supported() {
@@ -78,17 +84,18 @@ final class GpuOcean implements Disposable {
         if (failed || !supported()) { return; }
         try {
             if (quad == null) { create(); }
-            float strength = MathUtils.clamp(wind.z, 0, 1);
-            float x = wind.x, y = wind.y;
+            // Lava's convection is internal. Weather must not start or stop its motion.
+            float strength = lava ? .35f : MathUtils.clamp(wind.z, 0, 1);
+            float x = lava ? .8f : wind.x, y = lava ? .6f : wind.y;
             float length = (float) Math.hypot(x, y);
             if (length < .01f) { x = .8f; y = .6f; } else { x /= length; y /= length; }
             if (Math.abs(x - windX) > .02f || Math.abs(y - windY) > .02f || Math.abs(strength - windStrength) > .02f) {
                 windX = x;
                 windY = y;
                 windStrength = strength;
-                upload(initialSpectrum(x, y, strength));
+                upload(initialSpectrum(x, y, strength, lava));
             }
-            simulate(time);
+            simulate(lava ? time * .12f : time);
         } catch (GdxRuntimeException error) {
             // A driver that cannot compile or attach these leaves the water on its static ripples.
             failed = true;
@@ -100,7 +107,8 @@ final class GpuOcean implements Disposable {
     private void create() {
         spectrum = GpuShaderManager.program(() -> program("ocean-spectrum.frag"), next -> spectrum = next);
         butterfly = GpuShaderManager.program(() -> program("ocean-fft.frag"), next -> butterfly = next);
-        finish = GpuShaderManager.program(() -> program("ocean-finish.frag"), next -> finish = next);
+        finish = GpuShaderManager.program(() -> program(lava ? "ocean-lava-finish.frag" : "ocean-water-finish.frag"),
+              next -> finish = next);
         quad = new Mesh(true, 4, 0, new VertexAttribute(VertexAttributes.Usage.Position, 2, "a_position"));
         quad.setVertices(new float[] { -1, -1, 1, -1, -1, 1, 1, 1 });
         for (int i = 0; i < 2; i++) {
@@ -130,8 +138,14 @@ final class GpuOcean implements Disposable {
         restoreState(state);
     }
 
-    private static ShaderProgram program(String fragment) {
-        return GpuGlsl.compile(fragment, GpuShaderSource.read("ocean.vert"), GpuShaderSource.read(fragment));
+    static ShaderProgram program(String file) {
+        return GpuGlsl.compile(file, GpuShaderSource.read("ocean.vert"), fragment(file));
+    }
+
+    static String fragment(String file) {
+        String source = GpuShaderSource.read(file);
+        return source.contains("// OCEAN_FINISH")
+              ? source.replace("// OCEAN_FINISH", GpuShaderSource.read("ocean-finish.glsl")) : source;
     }
 
     /**
@@ -141,10 +155,14 @@ final class GpuOcean implements Disposable {
      * steepens into breaking crests.
      */
     static float[] initialSpectrum(float windX, float windY, float strength) {
+        return initialSpectrum(windX, windY, strength, false);
+    }
+
+    static float[] initialSpectrum(float windX, float windY, float strength, boolean lava) {
         // The spectrum's shape: its peak stays well inside the patch, so no single wave spans the whole tile.
         float speed = 2 + 5 * strength;
-        float largest = speed * speed / GRAVITY;
-        float smallest = PATCH_METRES / SIZE / 2;
+        float largest = lava ? 3.5f : speed * speed / GRAVITY;
+        float smallest = lava ? 1.3f : PATCH_METRES / SIZE / 2;
         float[] real = new float[SIZE * SIZE], imaginary = new float[SIZE * SIZE];
         Random random = new Random(0x6f6365616eL);
         double variance = 0;
@@ -157,7 +175,7 @@ final class GpuOcean implements Disposable {
                 // The Nyquist rows have no conjugate partner; leaving them empty keeps the result real.
                 if (k < 1e-6f || n == 0 || m == 0) { continue; }
                 float along = (kx * windX + ky * windY) / k;
-                float spread = along * along * (along < 0 ? .07f : 1) * .85f + .15f;
+                float spread = lava ? 1 : along * along * (along < 0 ? .07f : 1) * .85f + .15f;
                 double phillips = Math.exp(-1 / (k * largest * k * largest)) / (k * k * k * k) * spread
                       * Math.exp(-k * k * smallest * smallest);
                 double amplitude = Math.sqrt(phillips / 2);
@@ -168,7 +186,7 @@ final class GpuOcean implements Disposable {
             }
         }
         // Root-mean-square slope: glassy at a whisper of wind, steep and breaking in a gale.
-        float slope = .07f + .2f * strength;
+        float slope = lava ? .12f : .07f + .2f * strength;
         float scale = (float) (slope / Math.sqrt(Math.max(variance, 1e-20)));
         float[] data = new float[SIZE * SIZE * 4];
         for (int m = 0; m < SIZE; m++) {
@@ -225,17 +243,19 @@ final class GpuOcean implements Disposable {
                 source = 1 - source;
             }
         }
-        // Slopes, crest compression and foam, which fades over a few seconds after its crest has passed.
+        // Water retains crest compression and fading foam; lava retains horizontal displacement.
         int next = 1 - latest;
         work[source].getColorBufferTexture().bind(0);
-        result[latest].getColorBufferTexture().bind(1);
         finish.bind();
         finish.setUniformi("u_source", 0);
-        finish.setUniformi("u_previous", 1);
         finish.setUniformi("u_size", SIZE);
-        finish.setUniformf("u_texel", PATCH_METRES / SIZE);
-        finish.setUniformf("u_choppiness", .8f + 1.2f * windStrength);
-        finish.setUniformf("u_fade", delta / 2.5f);
+        if (!lava) {
+            result[latest].getColorBufferTexture().bind(1);
+            finish.setUniformi("u_previous", 1);
+            finish.setUniformf("u_texel", PATCH_METRES / SIZE);
+            finish.setUniformf("u_choppiness", .8f + 1.2f * windStrength);
+            finish.setUniformf("u_fade", delta / 2.5f);
+        }
         pass(finish, result[next]);
         Gdx.gl.glActiveTexture(GL20.GL_TEXTURE1);
         Gdx.gl.glBindTexture(GL20.GL_TEXTURE_2D, 0);

@@ -67,7 +67,11 @@ final class RigidGlb {
     }
 
     static ModelData load(FileHandle file) {
-        var asset = read(file, file.file().toPath().toAbsolutePath().getParent());
+        return load(file, file.file().toPath().toAbsolutePath().getParent());
+    }
+
+    static ModelData load(FileHandle file, Path textureRoot) {
+        var asset = read(file, textureRoot);
         var source = asset.model();
         return convert(file, file.nameWithoutExtension(), asset, source.getSceneModels().get(asset.scene()).getNodeModels());
     }

@@ -383,6 +383,7 @@ public final class HexTooltip {
 
         // cycle through the terrains and report types found
         for (int terType : mhex.getTerrainTypes()) {
+            if (terType == Terrains.BLACK_ICE && !mhex.getTerrain(terType).isBlackIceDetected()) { continue; }
             int tf = mhex.getTerrain(terType).getTerrainFactor();
             int ttl = mhex.getTerrain(terType).getLevel();
             if (typesThatNeedAltitudeChecked.contains(terType)) {

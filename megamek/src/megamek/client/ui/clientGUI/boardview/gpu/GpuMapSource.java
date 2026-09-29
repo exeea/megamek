@@ -17,6 +17,7 @@ import megamek.client.ui.boardeditor.BoardEditorPanel;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.clientGUI.boardview.BoardFocus;
+import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.toolTip.BoardEditorTooltipContent;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
@@ -76,6 +77,9 @@ final class GpuMapSource implements BoardSource {
     });
     private Board board;
     private List<BoardScene.Tile> tiles = List.of();
+    /** EDT-owned derived editor annotations; never supplied to map previews or gameplay. */
+    private final Map<Coords, BoardTactical> terrainMarkers = new HashMap<>();
+    private BoardTactical editorTerrain = BoardTactical.EMPTY;
     private boolean terrainDirty = true;
     private Rectangle dirtyHexes;
     private long overlayRevision = -1;
@@ -123,11 +127,13 @@ final class GpuMapSource implements BoardSource {
             boardGeneration++;
             contextCoords = null;
             images.clear();
+            terrainMarkers.clear();
             dirtyAll();
             atmosphere.reset();
         }
         boolean overlaysChanged = editor != null && overlayRevision != editor.overlayRevision();
         if (terrainDirty || dirtyHexes != null || overlaysChanged) {
+            if (terrainDirty) { terrainMarkers.clear(); }
             Rectangle area = terrainDirty || overlaysChanged ? new Rectangle(0, 0, board.getWidth(), board.getHeight())
                   : dirtyHexes.intersection(new Rectangle(0, 0, board.getWidth(), board.getHeight()));
             List<BoardScene.Tile> next = terrainDirty
@@ -138,9 +144,16 @@ final class GpuMapSource implements BoardSource {
                     int index = x * board.getHeight() + y;
                     BoardScene.Tile previous = tiles.size() == next.size() ? tiles.get(index) : null;
                     boolean changed = terrainDirty || dirtyHexes != null && dirtyHexes.contains(x, y);
-                    BoardScene.Tile tile = changed
-                          ? BoardScene.captureTile(board.getHex(coords), artwork.capture(board, coords, true), previous, images)
-                          : previous;
+                    BoardScene.Tile tile = previous;
+                    if (changed) {
+                        var pixels = artwork.capture(board, coords, true);
+                        tile = BoardScene.captureTile(board.getHex(coords), pixels, previous, images);
+                        if (editor != null) {
+                            var markers = BoardEditorTerrain.capture(board.getHex(coords), coords, pixels.blankTerrains());
+                            if (markers == BoardTactical.EMPTY) { terrainMarkers.remove(coords); }
+                            else { terrainMarkers.put(coords, markers); }
+                        }
+                    }
                     if (editor != null) {
                         tile = tile.withTactical(images.captureOverlay(editor.captureOverlay(coords),
                               previous == null ? null : previous.tactical()));
@@ -149,6 +162,9 @@ final class GpuMapSource implements BoardSource {
                 }
             }
             tiles = List.copyOf(next);
+            editorTerrain = editor == null ? BoardTactical.EMPTY : new BoardTactical(
+                  terrainMarkers.values().stream().flatMap(value -> value.fills().stream()).toList(),
+                  terrainMarkers.values().stream().flatMap(value -> value.labels().stream()).toList());
             images.retain(tiles);
             terrainDirty = false;
             dirtyHexes = null;
@@ -161,7 +177,7 @@ final class GpuMapSource implements BoardSource {
         String tooltip = inspected == null || !board.contains(inspected) ? ""
               : GpuMenuCommands.plainText(BoardEditorTooltipContent.format(board, inspected));
         BoardScene scene = new BoardScene(0, board.getWidth(), board.getHeight(), tiles, List.of(), List.of(),
-              Entity.NONE, "", List.of());
+              Entity.NONE, "", List.of(), null, List.of(), List.of(), List.of(), editorTerrain);
         java.awt.Dimension size = viewport;
         frame = new Frame(scene, List.of(), contextCoords == null ? null : new BoardScene.Context(contextCoords, List.of()),
               editor == null ? List.of() : menus.capture(editor.getMenuBar(), editor::getMenuBar, () -> true),

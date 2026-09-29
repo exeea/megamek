@@ -95,6 +95,7 @@ final class GpuBoardTestUi {
             if (!parent.isVisible() && "tuning-terrain-scroll".equals(parent.getName())) { click("tuning-tab-terrain"); }
         }
         // Controls can move below the fold as the tuning panel grows. Scroll them into view before real input.
+        stage().draw(); // Validate the newly selected page before reading its controls' positions.
         for (Actor parent = actor.getParent(); parent != null; parent = parent.getParent()) {
             if (parent instanceof ScrollPane scroll) {
                 Vector2 position = actor.localToAscendantCoordinates(scroll.getWidget(), new Vector2());

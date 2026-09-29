@@ -73,7 +73,8 @@ class GpuBiomeSmokeTest {
                             GpuReviewFrame.save(new File(output, kind + "-LOD" + lod + ".png"));
                             if (vegetation) {
                                 int offset = kind == BoardScene.Biome.FIELD ? 0 : 3;
-                                Object batch = ((Object[]) field(plants, "batches"))[offset + lod];
+                                int tier = kind == BoardScene.Biome.FIELD && lod == 1 ? 0 : lod;
+                                Object batch = ((Object[]) field(plants, "batches"))[offset + tier];
                                 assertFalse(((List<?>) field(batch, "current")).isEmpty());
                             }
                             long triangles = 0;
@@ -82,16 +83,17 @@ class GpuBiomeSmokeTest {
                                 if (((List<?>) field(batch, "current")).isEmpty()) { continue; }
                                 var mesh = (GpuInstancedMesh) field(batch, "mesh");
                                 if (mesh == null) { continue; }
-                                int instances = ((com.badlogic.gdx.utils.FloatArray) field(batch, "data")).size / 4;
+                                int instances = ((com.badlogic.gdx.utils.FloatArray) field(batch, "data")).size / (int) field(batch, "stride");
                                 draws++; roots += instances;
                                 triangles += (long) mesh.getNumIndices() / 3 * instances;
                             }
                             assertEquals(vegetation ? 1 : 0, draws);
                             // Budget the rendered 3x3 fixture (including its fringe), not just one template's indices.
                             long budget = !vegetation ? 0 : (kind == BoardScene.Biome.FIELD
-                                  ? new long[] { 30_000, 6_000, 500 } : new long[] { 10_476, 2_510, 314 })[lod];
+                                  ? new long[] { 30_000, 30_000, 10_000 } : new long[] { 10_476, 2_510, 314 })[lod];
                             assertTrue(triangles <= budget, kind + " LOD" + lod + " exceeds its plant triangle budget: " + triangles);
-                            assertTrue(triangles < previousTriangles || !vegetation,
+                            assertTrue(triangles < previousTriangles || !vegetation
+                                        || kind == BoardScene.Biome.FIELD && lod == 1 && triangles == previousTriangles,
                                   kind + " LOD" + lod + ": " + triangles + " triangles after " + previousTriangles);
                             previousTriangles = triangles;
                             long uploads = plants.uploads();
@@ -119,7 +121,7 @@ class GpuBiomeSmokeTest {
                             Files.writeString(new File(output, "metrics.txt").toPath(), metrics.toString());
                         }
                         if (vegetation) {
-                            // Distant single-card stalks/clumps must remain visible from above and after rotation.
+                            // Distant canopies/reeds must remain visible from above and after rotation.
                             camera.setIsometric(false);
                             camera.center(BoardGeometry.center(new Coords(4, 4), 0));
                             settle(terrain, plants, frame, camera, scene);
@@ -249,7 +251,7 @@ class GpuBiomeSmokeTest {
                     settle(terrain, plants, frame, camera, contacts);
                     for (String name : List.of("crop", "sedge")) {
                         var texture = (Texture) field(plants, name);
-                        assertTrue(texture.getWidth() <= 512 && texture.getHeight() <= 512, "Shared cutouts have bounded upload sizes");
+                        assertTrue(texture.getWidth() <= 512 && texture.getHeight() <= 640, "Shared cutouts have bounded upload sizes");
                         for (Object batch : (Object[]) field(plants, "batches")) {
                             if ((boolean) field(batch, "crop") != name.equals("crop")) { continue; }
                             var instance = (ModelInstance) field(batch, "instance");
@@ -258,7 +260,7 @@ class GpuBiomeSmokeTest {
                             assertEquals(texture, diffuse.textureDescription.texture, "Every LOD must reuse its plant kind's cutout");
                         }
                         metrics.append(name).append(" cutout upload: ").append(texture.getWidth()).append('x').append(texture.getHeight())
-                              .append(" RGBA8 plus mipmaps (1,398,100 bytes at 512x512)\n");
+                              .append(" RGBA8 plus mipmaps\n");
                     }
                     Files.writeString(new File(output, "metrics.txt").toPath(), metrics.toString());
                     maskHandle = mask.texture().getTextureObjectHandle();

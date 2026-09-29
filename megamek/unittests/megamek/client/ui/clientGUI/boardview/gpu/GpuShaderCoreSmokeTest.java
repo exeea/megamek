@@ -63,11 +63,12 @@ class GpuShaderCoreSmokeTest {
         for (String fragment : List.of("particles", "beams", "projectiles", "water-splash")) {
             compile("effects", fragment);
         }
-        for (String pair : List.of("explosion", "missile", "weather-particles", "terrain-effects", "hex-mask")) {
+        for (String pair : List.of("explosion", "missile", "terrain-effects", "hex-mask")) {
             compile(pair, pair);
         }
-        for (String fragment : List.of("ocean-spectrum", "ocean-fft", "ocean-finish")) {
-            compile("ocean", fragment);
+        for (var kind : GpuWeatherParticles.Kind.values()) { GpuWeatherParticles.shader(kind).dispose(); }
+        for (String fragment : List.of("ocean-spectrum", "ocean-fft", "ocean-water-finish", "ocean-lava-finish")) {
+            GpuOcean.program(fragment + ".frag").dispose();
         }
         for (String fragment : List.of("atmosphere-composite", "atmosphere-fog", "cloud-transmission",
               "terrain-effects-composite", "unit-visibility")) {
@@ -116,6 +117,6 @@ class GpuShaderCoreSmokeTest {
     }
 
     private static void compile(String vertex, String fragment) {
-        GpuGlsl.compile(fragment, GpuShaderSource.read(vertex + ".vert"), GpuShaderSource.read(fragment + ".frag")).dispose();
+        GpuGlsl.compile(fragment, GpuShaderSource.read(vertex + ".vert"), GpuEffectBatch.fragment(fragment + ".frag")).dispose();
     }
 }

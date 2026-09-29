@@ -74,6 +74,8 @@ public class Terrain implements Serializable {
     private final boolean exitsSpecified;
     private int exits;
     private int terrainFactor;
+    /** Server-owned discovery state. Board files author hidden ice; saved games and hex updates retain discovery. */
+    private boolean blackIceDetected;
     //endregion Variable Declarations
 
     //region Constructors
@@ -95,6 +97,7 @@ public class Terrain implements Serializable {
         exitsSpecified = other.hasExitsSpecified();
         exits = other.getExits();
         terrainFactor = other.getTerrainFactor();
+        blackIceDetected = other.blackIceDetected;
     }
 
     /**
@@ -138,6 +141,16 @@ public class Terrain implements Serializable {
 
     public int getTerrainFactor() {
         return terrainFactor;
+    }
+
+    public boolean isBlackIceDetected() {
+        return type == BLACK_ICE && blackIceDetected;
+    }
+
+    /** Reveal the existing hazard without turning it into ordinary ice or changing its movement rules. */
+    public void detectBlackIce() {
+        if (type != BLACK_ICE) { throw new IllegalStateException("Only black ice has discovery state"); }
+        blackIceDetected = true;
     }
 
     public void setTerrainFactor(int tf) {

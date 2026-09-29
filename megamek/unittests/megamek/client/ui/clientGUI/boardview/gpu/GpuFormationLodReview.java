@@ -26,6 +26,7 @@ final class GpuFormationLodReview {
         tileset.loadFromFile("mekset.txt");
         int fullSuit = library.modular(ROOT + "troops/elemental-standing.json").triangles();
         int lod1Suit = library.modular(ROOT + "troops/elemental-standing.json").triangles(1);
+        int lod2Suit = library.modular(ROOT + "troops/elemental-standing.json").triangles(2);
         for (int squad : new int[] { 5, 6 }) {
             var armor = new BattleArmor();
             armor.setId(300 + squad);
@@ -47,6 +48,9 @@ final class GpuFormationLodReview {
             instance.bodyDetail(small, false);
             assertEquals(1, instance.detailLevel());
             assertEquals(squad * lod1Suit, drawnTriangles(instance.nodes));
+            instance.bodyDetail(10 / squadModel.figureHeight(), false);
+            assertEquals(squadModel.detailLevels().resolvedLevel(2), instance.detailLevel());
+            assertEquals(squad * lod2Suit, drawnTriangles(instance.nodes));
             // Zoomed in again, the full suits return.
             instance.bodyDetail(10, false);
             assertEquals(0, instance.detailLevel());

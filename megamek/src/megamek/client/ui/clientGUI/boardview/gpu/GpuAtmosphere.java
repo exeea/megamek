@@ -171,7 +171,22 @@ final class GpuAtmosphere implements Disposable {
     }
 
     static ShaderProgram shader(String fragment) {
-        String source = GpuShaderSource.read(fragment);
+        String source = fragment(fragment);
+        String vertex = GpuShaderSource.read("atmosphere.vert");
+        String prefix = "";
+        if (source.contains("// SUN_VISIBILITY")) {
+            String visibility = GpuShaderSource.read("sun-visibility.glsl");
+            vertex = vertex.replace("// SUN_VISIBILITY", visibility);
+            source = source.replace("// SUN_VISIBILITY", visibility);
+            var units = BufferUtils.newIntBuffer(1);
+            Gdx.gl.glGetIntegerv(GL20.GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS, units);
+            if (units.get(0) > 0) { prefix = "#define VERTEX_SUN_VISIBILITY\n"; }
+        }
+        return GpuGlsl.compile("GPU atmosphere " + fragment, prefix, vertex, source);
+    }
+
+    static String fragment(String file) {
+        String source = GpuShaderSource.read(file);
         if (source.contains("// CLOUD_SHADOW")) {
             source = source.replace("// CLOUD_SHADOW", GpuShaderSource.read("cloud-shadow.glsl"));
         }
@@ -184,17 +199,19 @@ final class GpuAtmosphere implements Disposable {
         if (source.contains("// CAMERA_DEPTH")) {
             source = source.replace("// CAMERA_DEPTH", GpuShaderSource.read("camera-depth.glsl"));
         }
-        String vertex = GpuShaderSource.read("atmosphere.vert");
-        String prefix = "";
-        if (source.contains("// SUN_VISIBILITY")) {
-            String visibility = GpuShaderSource.read("sun-visibility.glsl");
-            vertex = vertex.replace("// SUN_VISIBILITY", visibility);
-            source = source.replace("// SUN_VISIBILITY", visibility);
-            var units = BufferUtils.newIntBuffer(1);
-            Gdx.gl.glGetIntegerv(GL20.GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS, units);
-            if (units.get(0) > 0) { prefix = "#define VERTEX_SUN_VISIBILITY\n"; }
+        if (source.contains("// WEATHER_SAND")) {
+            source = source.replace("// WEATHER_SAND", GpuShaderSource.read("weather-sand.glsl"));
         }
-        return GpuGlsl.compile("GPU atmosphere " + fragment, prefix, vertex, source);
+        if (source.contains("// ATMOSPHERE_FOV")) {
+            source = source.replace("// ATMOSPHERE_FOV", GpuShaderSource.read("atmosphere-fov.glsl"));
+        }
+        if (source.contains("// ATMOSPHERE_GRADE")) {
+            source = source.replace("// ATMOSPHERE_GRADE", GpuShaderSource.read("atmosphere-grade.glsl"));
+        }
+        if (source.contains("// ATMOSPHERE_GLARE")) {
+            source = source.replace("// ATMOSPHERE_GLARE", GpuShaderSource.read("atmosphere-glare.glsl"));
+        }
+        return source;
     }
 
     /** Periodic two-channel noise, used by clouds and ground weather. The caller owns the texture. */

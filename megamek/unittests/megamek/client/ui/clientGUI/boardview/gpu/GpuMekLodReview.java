@@ -10,6 +10,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import com.badlogic.gdx.graphics.g3d.model.Node;
@@ -69,7 +70,7 @@ final class GpuMekLodReview {
             int weapons = drawnTriangles(instance.nodes) - bodyTriangles;
             assertTrue(weapons > 0);
             // Small on screen: the far body replaces the near one, and the weapons stay.
-            float small = 20 / mek.figureHeight();
+            float small = 64 / mek.figureHeight();
             instance.bodyDetail(small, false);
             assertEquals(1, instance.detailLevel());
             assertEquals(bodyTriangles + weapons, drawnTriangles(instance.nodes));
@@ -85,7 +86,7 @@ final class GpuMekLodReview {
             for (String asset : new String[] { "atlas-near-only.json", "atlas-missing-lod1.json" }) {
                 GpuUnitModel fallback = library.get(selection(captured, MEKS + asset, atlas), atlas.getId() + 1);
                 assertNotNull(fallback, "Missing optional LOD1 retains the same unit's LOD0 body");
-                assertTrue(fallback.detailLevels().lod1().isEmpty());
+                assertEquals(fallback.detailLevels().lod0(), fallback.detailLevels().lod1());
                 var fallbackInstance = new GpuUnitInstance(fallback);
                 fallbackInstance.bodyDetail(small, false);
                 assertEquals(0, fallbackInstance.detailLevel());
@@ -113,14 +114,24 @@ final class GpuMekLodReview {
         int lod1 = meshTriangles(instance.nodes, model.detailLevels().lod1());
         assertTrue(lod0 > lod1 && lod1 > 0);
         int equipment = drawnTriangles(instance.nodes) - lod0;
-        assertTrue(equipment > 0);
-        instance.bodyDetail(20 / model.figureHeight(), false);
+        instance.bodyDetail(64 / model.figureHeight(), false);
         assertEquals(1, instance.detailLevel());
         assertEquals(lod1 + equipment, drawnTriangles(instance.nodes));
         assertNoNearPartDrawn(instance.nodes, model.detailLevels());
         instance.bodyDetail(20 / model.figureHeight(), true);
         assertEquals(0, instance.detailLevel());
         assertEquals(lod0 + equipment, drawnTriangles(instance.nodes));
+        int lod2 = meshTriangles(instance.nodes, model.detailLevels().lod2());
+        instance.bodyDetail(20 / model.figureHeight(), false);
+        assertEquals(model.detailLevels().resolvedLevel(2), instance.detailLevel());
+        assertEquals(lod2 + equipment, drawnTriangles(instance.nodes));
+
+        // A severed arm, including its equipment and every LOD, stays absent across zoom and focus changes.
+        UnitDamageDisplay.show(instance, new BoardScene.LocationDamage(Set.of("RA"), Set.of()));
+        for (boolean focused : new boolean[] { true, false }) {
+            instance.bodyDetail(20 / model.figureHeight(), focused);
+            for (var part : UnitDamageDisplay.locationParts(instance, "RA")) { assertFalse(part.enabled); }
+        }
     }
 
     private static int meshTriangles(Iterable<Node> nodes, java.util.Set<com.badlogic.gdx.graphics.Mesh> meshes) {
@@ -155,7 +166,8 @@ final class GpuMekLodReview {
     private static void assertNoNearPartDrawn(Iterable<Node> nodes, GpuUnitModel.DetailLevels levels) {
         for (Node node : nodes) {
             for (var part : node.parts) {
-                assertFalse(part.enabled && levels.lod0().contains(part.meshPart.mesh), node.id);
+                assertFalse(part.enabled && levels.lod0().contains(part.meshPart.mesh)
+                      && !levels.lod1().contains(part.meshPart.mesh), node.id);
             }
             assertNoNearPartDrawn(node.getChildren(), levels);
         }
@@ -164,7 +176,8 @@ final class GpuMekLodReview {
     private static void assertNoFarPartDrawn(Iterable<Node> nodes, GpuUnitModel.DetailLevels levels) {
         for (Node node : nodes) {
             for (var part : node.parts) {
-                assertFalse(part.enabled && levels.lod1().contains(part.meshPart.mesh), node.id);
+                assertFalse(part.enabled && levels.lod1().contains(part.meshPart.mesh)
+                      && !levels.lod0().contains(part.meshPart.mesh), node.id);
             }
             assertNoFarPartDrawn(node.getChildren(), levels);
         }
@@ -182,4 +195,5 @@ final class GpuMekLodReview {
         }
         return total;
     }
+
 }

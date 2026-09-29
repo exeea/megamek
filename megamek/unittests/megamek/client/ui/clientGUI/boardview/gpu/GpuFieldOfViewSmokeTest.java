@@ -51,6 +51,8 @@ class GpuFieldOfViewSmokeTest {
                     expected = mask;
                     new Lwjgl3Application(new GpuBattleView(fixture.source) {
                         private int tick;
+                        private final long readyDeadline = System.nanoTime() + 60_000_000_000L;
+                        private GpuTerrain renderedTerrain;
                         private GpuFieldOfView probe;
                         private Appearance noDarkening;
 
@@ -58,6 +60,15 @@ class GpuFieldOfViewSmokeTest {
                         public void render() {
                             try {
                                 super.render();
+                                if (renderedTerrain == null) {
+                                    var field = GpuBattleView.class.getDeclaredField("terrain");
+                                    field.setAccessible(true);
+                                    renderedTerrain = (GpuTerrain) field.get(this);
+                                }
+                                if (!renderedTerrain.ready(fixture.source.takeFrame().scene())) {
+                                    assertTrue(System.nanoTime() < readyDeadline, "Wait for actual terrain before comparing FoV pixels");
+                                    return;
+                                }
                                 tick++;
                                 if (tick == 1) {
                                     boardCamera.setIsometric(false);

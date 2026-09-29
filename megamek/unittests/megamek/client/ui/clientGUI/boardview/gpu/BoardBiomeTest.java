@@ -44,7 +44,7 @@ class BoardBiomeTest {
     }
 
     @Test
-    void distantPreparationExtendsToTheSameFullFieldWithoutDuplicateRoots() {
+    void cropRowsStayCompleteAtEveryDensityWhileReedsExtendWithoutDuplicateRoots() {
         for (var kind : List.of(BoardScene.Biome.FIELD, BoardScene.Biome.MARSH)) {
             var scene = BoardSurfaceBlendTest.scene(c -> tile(c, kind, 0));
             var tile = scene.tile(new Coords(4, 4));
@@ -52,15 +52,22 @@ class BoardBiomeTest {
             var progressive = new GpuBiomeVegetation.Patch(scene, tile, surface, 0);
             progressive.prepare(scene, tile, .08f, Long.MAX_VALUE);
             assertFalse(progressive.busy());
-            for (int i = 3; i < progressive.roots.size; i += 4) { assertTrue(progressive.roots.items[i] < .08f); }
+            if (kind == BoardScene.Biome.MARSH) {
+                for (int i = 3; i < progressive.roots.size; i += 4) { assertTrue(progressive.roots.items[i] < .08f); }
+            }
             int distant = progressive.roots.size;
             assertTrue(distant > 0);
             progressive.prepare(scene, tile, .35f, Long.MAX_VALUE);
-            assertTrue(progressive.roots.size > distant);
+            if (kind == BoardScene.Biome.FIELD) {
+                assertEquals(distant, progressive.roots.size, "Zooming must not fill holes left by missing crop strips");
+            } else { assertTrue(progressive.roots.size > distant); }
             progressive.prepare(scene, tile, 1, Long.MAX_VALUE);
             var full = new GpuBiomeVegetation.Patch(scene, tile, surface, 0);
             full.prepare(scene, tile, Long.MAX_VALUE);
             assertEquals(full.roots, progressive.roots, "LOD preparation order must keep one deterministic lattice");
+            if (kind == BoardScene.Biome.FIELD) {
+                assertEquals(distant, full.roots.size, "Distant crops retain every supported row segment");
+            }
         }
     }
 
@@ -142,6 +149,7 @@ class BoardBiomeTest {
                     if (kind == BoardScene.Biome.FIELD) {
                         float row = BoardBiome.row(x / metre, y / metre);
                         assertTrue(Math.abs(row - Math.round(row)) < .061, "Rows have no tile-local rotation/phase");
+                        assertEquals(0, Math.floorMod(Math.round(row), 2), "Alternate furrows stay open across hex boundaries");
                     } else {
                         float wet = BoardBiome.wetness(x / metre, y / metre);
                         assertTrue(wet >= .48f && wet <= .80f, "Reeds grow on wet edges and hummocks, leaving the pools open");
@@ -161,6 +169,52 @@ class BoardBiomeTest {
         var after = BoardSurfaceBlendTest.scene(c -> tile(c, BoardScene.Biome.QUICKSAND, 0));
         assertFalse(before.tile(center).sameGeometry(after.tile(center)));
         assertNotEquals(BoardSurface.geometryKey(before, before.tile(center)), BoardSurface.geometryKey(after, after.tile(center)));
+    }
+
+    @Test
+    void cropStripsKeepTheirTextureScaleAndStayOnTheirSideOfRoadsAndFieldEdges() {
+        float metre = BoardRelief.metres(1);
+        Coords center = new Coords(4, 4);
+        for (boolean road : new boolean[] { false, true }) {
+            var scene = BoardSurfaceBlendTest.scene(c -> {
+                var base = tile(c, c.getX() <= 4 ? BoardScene.Biome.FIELD : BoardScene.Biome.NONE, c.getY() < 4 ? 1 : 0);
+                return new BoardScene.Tile(c, base.elevation(), -1, false, road ? 9 : 0, base.surface(), base.ground(),
+                      null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true,
+                      road ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE, BoardFireSmoke.NONE, base.biome());
+            });
+            var tile = scene.tile(center);
+            var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, -1);
+            var patch = new GpuBiomeVegetation.Patch(scene, tile, surface, 0);
+            patch.prepare(scene, tile, Long.MAX_VALUE);
+            assertTrue(patch.roots.size > 0);
+            assertEquals(patch.roots.size, patch.rowSpans.size);
+            boolean trimmed = false;
+            for (int i = 0; i < patch.roots.size; i += 4) {
+                float length = patch.rowSpans.items[i], rise = patch.rowSpans.items[i + 1];
+                float from = patch.rowSpans.items[i + 2], to = patch.rowSpans.items[i + 3];
+                assertTrue(from >= 0 && to <= 1 && from < to);
+                assertEquals(length / metre, (to - from) * GpuBiomeVegetation.ROW_LENGTH, .0001f,
+                      "Trimming must crop the image, not squeeze ten plants into a short end piece");
+                trimmed |= to - from < .9f;
+                for (int step = 0; step <= 10; step++) {
+                    float t = -.4999f + .9998f * step / 10;
+                    float x = patch.roots.items[i] - BoardBiome.ROW_Y * length * t;
+                    float y = patch.roots.items[i + 1] + BoardBiome.ROW_X * length * t;
+                    float floor = BoardSurface.sampleHeight(surface.top(), x, y, Float.NaN);
+                    assertTrue(Float.isFinite(floor), "The whole strip must have published ground support");
+                    assertEquals(floor, patch.roots.items[i + 2] + rise * t + .018f * metre, .02f * metre);
+                    assertEquals(Math.round(BoardBiome.row(x / metre, y / metre)), BoardBiome.row(x / metre, y / metre), .0001f);
+                    assertTrue(BoardBiome.coverage(scene, BoardScene.Biome.FIELD, x, y, floor) >= .599f);
+                    if (road) {
+                        float distance = patch.road.distance((x - BoardGeometry.centerX(center)) / BoardGeometry.hexScale(),
+                              (y - BoardGeometry.centerY(center)) / BoardGeometry.hexScale());
+                        assertTrue(distance >= BoardRoad.SHOULDER + GpuBiomeVegetation.ROW_HALF_WIDTH * metre
+                              / BoardGeometry.hexScale(), "Even the overhead foliage must clear the road");
+                    }
+                }
+            }
+            assertTrue(trimmed, "Field/road boundaries must produce cropped end pieces");
+        }
     }
 
     @Test

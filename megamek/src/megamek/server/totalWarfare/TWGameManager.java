@@ -3893,6 +3893,11 @@ public class TWGameManager extends AbstractGameManager {
         return unloadUnit(unloader, unloaded, pos, facing, elevation, false, false);
     }
 
+    /** The movement handler publishes the carrier with its resolved route after processing the unload step. */
+    boolean unloadUnitDuringMovement(Entity unloader, Targetable unloaded, Coords pos, int facing, int elevation) {
+        return unloadUnit(unloader, unloaded, pos, facing, elevation, false, false, false);
+    }
+
     /**
      * Have the unloader unload the indicated unit. The unit being unloaded may or may not gain a turn
      *
@@ -3910,6 +3915,11 @@ public class TWGameManager extends AbstractGameManager {
      */
     boolean unloadUnit(Entity unloader, Targetable unloaded, Coords pos, int facing, int elevation, boolean evacuation,
           boolean duringDeployment) {
+        return unloadUnit(unloader, unloaded, pos, facing, elevation, evacuation, duringDeployment, true);
+    }
+
+    private boolean unloadUnit(Entity unloader, Targetable unloaded, Coords pos, int facing, int elevation,
+          boolean evacuation, boolean duringDeployment, boolean updateCarrier) {
 
         // We can only unload Entities.
         Entity unit;
@@ -4082,8 +4092,10 @@ public class TWGameManager extends AbstractGameManager {
 
         // Update the unloaded unit.
         entityUpdate(unit.getId());
-        // Try to update the unloader too?
-        entityUpdate(unloader.getId());
+        // During movement, an early carrier packet would release exterior riders before its route arrives.
+        if (updateCarrier) {
+            entityUpdate(unloader.getId());
+        }
 
         // Unloaded successfully.
         return true;

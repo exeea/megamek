@@ -130,6 +130,7 @@ import megamek.common.moves.MoveStep;
 import megamek.common.options.OptionsConstants;
 import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.IPreferenceChangeListener;
+import megamek.common.preference.PreferenceChangeEvent;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.rolls.TargetRoll;
 import megamek.common.units.AbstractBuildingEntity;
@@ -150,17 +151,16 @@ import megamek.server.props.OrbitalBombardment;
 public final class BoardClientState implements BoardGlyphContext, AutoCloseable {
     public final Game game;
     private final int boardId;
-    private final Supplier<Entity> displayedEntity;
     private final FovHighlightingAndDarkening fieldOfView;
-    private ClientGUI clientgui;
+    private final ClientGUI clientgui;
     private Player localPlayer;
-    private TilesetManager tileManager;
+    private final TilesetManager tileManager;
     private BoardArtwork artwork;
     private BufferedImage tacticalChunk;
     private final Map<Font, FontMetrics> fontMetrics = new HashMap<>();
     private BoardGlyphContext projection;
     private Consumer<Graphics2D> drawMovingUnits;
-    public void setMovingUnitPainter(Consumer<Graphics2D> painter) { drawMovingUnits = painter; }
+    void setMovingUnitPainter(Consumer<Graphics2D> painter) { drawMovingUnits = painter; }
     private boolean gpuCapture;
     private float captureScale = 1;
     private static final GUIPreferences GUIP = GUIPreferences.getInstance();
@@ -227,26 +227,70 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     private BoardFocus focus = new BoardFocus(0, null);
     private Runnable changed = () -> { };
     private long revision;
+    private boolean closed;
+    private final boolean ownsTileset;
+    private Board observedBoard;
+    private Consumer<Entity> entityRenderer = entity -> { };
+    private Supplier<Boolean> inputEnabled = () -> true;
+    private final List<Runnable> keyRegistrations = new ArrayList<>();
+    private boolean movingUnits;
 
-    public BoardClientState(Game game, int boardId, Supplier<Entity> displayedEntity) {
+    public BoardClientState(Game game, MegaMekController controller, @Nullable ClientGUI gui, int boardId,
+          @Nullable TilesetManager tileset) throws IOException {
         this.game = Objects.requireNonNull(game);
         this.boardId = boardId;
-        this.displayedEntity = Objects.requireNonNull(displayedEntity);
+        clientgui = gui;
+        ownsTileset = tileset == null;
         fieldOfView = new FovHighlightingAndDarkening(this);
         initPolys();
+        try {
+            tileManager = ownsTileset ? new TilesetManager(game) : tileset;
+        } catch (IOException | RuntimeException failure) {
+            fieldOfView.die();
+            throw failure;
+        }
+        showAllDeployment = GUIP.getBoolean(GUIPreferences.SHOW_DEPLOY_ZONES_ARTY_AUTO);
+        if (controller != null) {
+            keyRegistrations.add(controller.registerCommandAction(KeyCommandBind.TOGGLE_CHAT,
+                  this::shouldReceiveKeyCommands, () -> openChat(false)));
+            keyRegistrations.add(controller.registerCommandAction(KeyCommandBind.TOGGLE_CHAT_CMD,
+                  this::shouldReceiveKeyCommands, () -> openChat(true)));
+            keyRegistrations.add(controller.registerCommandAction(KeyCommandBind.CENTER_ON_SELECTED,
+                  this::shouldReceiveKeyCommands, this::centerOnSelected));
+        }
+        SpecialHexDisplay.Type.ARTILLERY_MISS.init();
+        SpecialHexDisplay.Type.ARTILLERY_HIT.init();
+        SpecialHexDisplay.Type.ARTILLERY_DRIFT.init();
+        SpecialHexDisplay.Type.ARTILLERY_INCOMING.init();
+        SpecialHexDisplay.Type.ARTILLERY_TARGET.init();
+        SpecialHexDisplay.Type.ARTILLERY_ADJUSTED.init();
+        SpecialHexDisplay.Type.ARTILLERY_AUTO_HIT.init();
+        SpecialHexDisplay.Type.BOMB_MISS.init();
+        SpecialHexDisplay.Type.BOMB_HIT.init();
+        SpecialHexDisplay.Type.BOMB_DRIFT.init();
+        SpecialHexDisplay.Type.PLAYER_NOTE.init();
+        SpecialHexDisplay.Type.ORBITAL_BOMBARDMENT.init();
+        SpecialHexDisplay.Type.ORBITAL_BOMBARDMENT_INCOMING.init();
+        SpecialHexDisplay.Type.NUKE_HIT.init();
+        SpecialHexDisplay.Type.NUKE_INCOMING.init();
+        game.addGameListener(gameListener);
+        GUIP.addPreferenceChangeListener(preferenceListener);
+        PreferenceManager.getClientPreferences().addPreferenceChangeListener(preferenceListener);
+        observedBoard = getBoard();
+        if (observedBoard != null) { observedBoard.addBoardListener(boardListener); }
     }
 
     public Game getGame() { return game; }
     public int getBoardId() { return boardId; }
     public Board getBoard() { return game.getBoard(boardId); }
-    public Entity getDisplayedEntity() { return displayedEntity.get(); }
+    public Entity getDisplayedEntity() { return clientgui == null ? null : clientgui.getDisplayedUnit(); }
     public Coords getSelected() { return selected; }
     public BoardFocus getFocus() { return focus; }
     public long getRevision() { return revision; }
     public FovHighlightingAndDarkening getFieldOfView() { return fieldOfView; }
 
     /** A renderer may subscribe to invalidation; it does not own the state or calculate visibility. */
-    public void setChanged(Runnable changed) { this.changed = Objects.requireNonNull(changed); }
+    void setChanged(Runnable changed) { this.changed = Objects.requireNonNull(changed); }
 
     public void setSelected(Coords coords) {
         if (!Objects.equals(selected, coords)) {
@@ -315,6 +359,10 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         closed = true;
         changed = () -> { };
         entityRenderer = entity -> { };
+        projection = null;
+        drawMovingUnits = null;
+        inputEnabled = () -> false;
+        visibleArea = () -> new double[] { 0, 0, 1, 1 };
         fieldOfView.die();
         game.removeGameListener(gameListener);
         if (observedBoard != null) { observedBoard.removeBoardListener(boardListener); observedBoard = null; }
@@ -324,6 +372,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         keyRegistrations.clear();
         overlays.forEach(IDisplayable::dispose);
         overlays.clear();
+        hexDrawPlugins.clear();
         listeners.clear();
         releasePlanarCapture();
         if (artwork != null) { artwork.close(); artwork = null; }
@@ -331,8 +380,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     }
 
     /** Optional drawing projection of an attached renderer; absent in a native gameplay session. */
-    public void setProjection(BoardGlyphContext projection) { this.projection = projection; }
-    private void configure(ClientGUI gui, TilesetManager tileset) { clientgui = gui; tileManager = tileset; }
+    void setProjection(BoardGlyphContext projection) { this.projection = projection; }
     public ClientGUI getClientgui() { return clientgui; }
     public Player getLocalPlayer() { return localPlayer; }
     public void setLocalPlayer(Player player) { localPlayer = player; visibilityChanged(); }
@@ -345,6 +393,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     public Dimension getHexSize() { return new Dimension((int) (HEX_W * getScale()), (int) (HEX_H * getScale())); }
     public int getVerticalOffset() { return gpuCapture || projection == null ? 0 : projection.getVerticalOffset(); }
     public Point getHexLocation(Coords coords) {
+        if (coords == null) { return null; }
         if (!gpuCapture && projection != null) { return projection.getHexLocation(coords); }
         return new Point((int) (coords.getX() * HEX_WC * getScale()),
               (int) ((coords.getY() * HEX_H + (coords.isXOdd() ? HEX_H / 2 : 0)) * getScale()));
@@ -388,6 +437,11 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     public void removeBoardViewListener(BoardViewListener listener) { listeners.remove(listener); }
     public void addOverlay(IDisplayable overlay) { overlays.add(overlay); }
     public void removeOverlay(IDisplayable overlay) { overlays.remove(overlay); }
+    private final List<HexDrawPlugin> hexDrawPlugins = new ArrayList<>();
+    public void addHexDrawPlugin(HexDrawPlugin plugin) { hexDrawPlugins.add(plugin); repaint(); }
+    public void drawHexPlugins(Graphics2D graphics, Coords coords) {
+        for (HexDrawPlugin plugin : hexDrawPlugins) { plugin.draw(graphics, getBoard().getHex(coords), game, coords, this); }
+    }
     public void addSprite(Sprite sprite) { addSprites(List.of(sprite)); }
     public void removeSprite(Sprite sprite) { removeSprites(List.of(sprite)); }
     public Set<Sprite> getAllSprites() { return Collections.unmodifiableSet(allSprites); }
@@ -450,7 +504,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     }
 
     public void drawSprite(Graphics2D graphics2D, Sprite sprite) {
-        if (gpuCapture && hasNativeVolume(sprite)) {
+        if (gpuCapture && (sprite.isUnitVisual() || hasNativeVolume(sprite))) {
             return;
         }
         if (graphics2D instanceof BoardTacticalGraphics) {
@@ -1959,12 +2013,14 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         this.shouldIgnoreKeys = shouldIgnoreKeys;
     }
 
+    /** Finds a presentation overlay owned by this board, without keeping a second registry in the GUI. */
+    public <T extends IDisplayable> @Nullable T getOverlay(Class<T> type) {
+        return overlays.stream().filter(type::isInstance).map(type::cast).findFirst().orElse(null);
+    }
+
     @Nullable
     public TurnDetailsOverlay getTurnDetailsOverlay() {
-        return (TurnDetailsOverlay) overlays.stream()
-              .filter(o -> o instanceof TurnDetailsOverlay)
-              .findFirst()
-              .orElse(null);
+        return getOverlay(TurnDetailsOverlay.class);
     }
 
     public ArrayList<AttackSprite> getAttackSprites() {
@@ -2344,7 +2400,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         }
 
         // In iso mode, some sprites are drawn in drawHexes so they can go behind terrain; draw only the others here
-          drawSprites(graphics2D, includeUnits ? overTerrainSprites : overTerrainSprites.stream()
+        drawSprites(graphics2D, includeUnits ? overTerrainSprites : overTerrainSprites.stream()
               .filter(sprite -> !sprite.isUnitVisual()).toList());
 
         // draw movement, if valid
@@ -2726,8 +2782,16 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         clearCapturedHexOverlays();
         capturedTacticalGeometry = BoardTactical.EMPTY;
     }
-    public void clearArtwork() { if (artwork != null) { artwork.clear(); } repaint(); }
-    public void invalidateArtwork(Coords coords) { if (artwork != null) { artwork.invalidate(coords); } }
+    public void clearArtwork() {
+        fieldOfView.invalidate();
+        if (artwork != null) { artwork.clear(); }
+        repaint();
+    }
+    public void invalidateArtwork(Coords coords) {
+        // A terrain blocker changes LOS beyond the artwork's local neighborhood, with or without a renderer.
+        fieldOfView.invalidate();
+        if (artwork != null) { artwork.invalidate(coords); }
+    }
     public void reloadArtwork() { if (artwork != null) { artwork.reload(); } repaint(); }
     public List<BoardArtwork.HexImage> capturePlanarHexes(Rectangle area) {
         List<BoardArtwork.HexImage> result = new ArrayList<>();
@@ -2802,7 +2866,11 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
                 for (int y = area.y; y < area.y + area.height; y++) {
                     Coords coords = new Coords(x, y); Point point = getHexLocation(coords);
                     Graphics2D local = (Graphics2D) graphics.create(point.x, point.y, HEX_W * 3, HEX_H * 3);
-                    try { drawHexEffects(local, coords); drawSpecialHexes(local, coords); } finally { local.dispose(); }
+                    try {
+                        drawHexEffects(local, coords);
+                        drawSpecialHexes(local, coords);
+                        drawHexPlugins(local, coords);
+                    } finally { local.dispose(); }
                 }
             }
             drawSprites(graphics, behindTerrainHexSprites);
@@ -2915,7 +2983,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         highlightSelectedEntity(getSelectedEntity());
         entityRenderer.accept(entity);
         repaint();
-        }
+    }
 
     public void redrawAllEntities() {
         clearC3Networks();
@@ -2959,61 +3027,17 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
 
         allSprites.clear();
         repaint();
-        }
+    }
 
-    private boolean closed;
-    private boolean ownsTileset;
-    private Board observedBoard;
-    private Consumer<Entity> entityRenderer = entity -> { };
-    private Supplier<Boolean> inputEnabled = () -> true;
-    private final List<Runnable> keyRegistrations = new ArrayList<>();
-    private boolean movingUnits;
     public boolean isClosed() { return closed; }
-    public void setEntityRenderer(Consumer<Entity> renderer) { entityRenderer = renderer; }
-    public void setInputEnabled(Supplier<Boolean> enabled) { inputEnabled = enabled; }
+    void setEntityRenderer(Consumer<Entity> renderer) { entityRenderer = renderer; }
+    void setInputEnabled(Supplier<Boolean> enabled) { inputEnabled = enabled; }
     public boolean isMovingUnits() { return movingUnits; }
     public boolean isShowingAnimation() { return movingUnits; }
     public void setMovingUnits(boolean moving) {
         if (movingUnits == moving) { return; }
         movingUnits = moving;
         if (!moving) { processBoardViewEvent(new BoardViewEvent(this, BoardViewEvent.FINISHED_MOVING_UNITS)); }
-    }
-
-    public BoardClientState(Game game, MegaMekController controller, @Nullable ClientGUI gui, int boardId,
-          @Nullable TilesetManager tileset) throws IOException {
-        this(game, boardId, () -> gui == null ? null : gui.getDisplayedUnit());
-        ownsTileset = tileset == null;
-        try { configure(gui, ownsTileset ? new TilesetManager(game) : tileset); }
-        catch (IOException | RuntimeException failure) { fieldOfView.die(); throw failure; }
-        showAllDeployment = GUIP.getBoolean(GUIPreferences.SHOW_DEPLOY_ZONES_ARTY_AUTO);
-        if (controller != null) {
-            keyRegistrations.add(controller.registerCommandAction(KeyCommandBind.TOGGLE_CHAT,
-                  this::shouldReceiveKeyCommands, () -> openChat(false)));
-            keyRegistrations.add(controller.registerCommandAction(KeyCommandBind.TOGGLE_CHAT_CMD,
-                  this::shouldReceiveKeyCommands, () -> openChat(true)));
-            keyRegistrations.add(controller.registerCommandAction(KeyCommandBind.CENTER_ON_SELECTED,
-                  this::shouldReceiveKeyCommands, this::centerOnSelected));
-        }
-        SpecialHexDisplay.Type.ARTILLERY_MISS.init();
-        SpecialHexDisplay.Type.ARTILLERY_HIT.init();
-        SpecialHexDisplay.Type.ARTILLERY_DRIFT.init();
-        SpecialHexDisplay.Type.ARTILLERY_INCOMING.init();
-        SpecialHexDisplay.Type.ARTILLERY_TARGET.init();
-        SpecialHexDisplay.Type.ARTILLERY_ADJUSTED.init();
-        SpecialHexDisplay.Type.ARTILLERY_AUTO_HIT.init();
-        SpecialHexDisplay.Type.BOMB_MISS.init();
-        SpecialHexDisplay.Type.BOMB_HIT.init();
-        SpecialHexDisplay.Type.BOMB_DRIFT.init();
-        SpecialHexDisplay.Type.PLAYER_NOTE.init();
-        SpecialHexDisplay.Type.ORBITAL_BOMBARDMENT.init();
-        SpecialHexDisplay.Type.ORBITAL_BOMBARDMENT_INCOMING.init();
-        SpecialHexDisplay.Type.NUKE_HIT.init();
-        SpecialHexDisplay.Type.NUKE_INCOMING.init();
-        game.addGameListener(gameListener);
-        GUIP.addPreferenceChangeListener(preferenceListener);
-        PreferenceManager.getClientPreferences().addPreferenceChangeListener(preferenceListener);
-        observedBoard = getBoard();
-        if (observedBoard != null) { observedBoard.addBoardListener(boardListener); }
     }
 
     public boolean shouldReceiveKeyCommands() {
@@ -3124,28 +3148,39 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     }
 
     private final megamek.common.event.board.BoardListenerAdapter boardListener = new megamek.common.event.board.BoardListenerAdapter() {
-        @Override public void boardChangedHex(BoardEvent event) { onClientThread(() -> { invalidateArtwork(event.getCoords()); repaint(); }); }
+        @Override public void boardChangedHex(BoardEvent event) {
+            onClientThread(() -> {
+                if (event.getSource() != observedBoard) { return; }
+                invalidateArtwork(event.getCoords());
+                // The native source tracks the local edit; changing the tactical revision would repaint the whole view.
+                changed.run();
+            });
+        }
         @Override public void boardChangedAllHexes(BoardEvent event) { onClientThread(BoardClientState.this::clearArtwork); }
         @Override public void boardNewBoard(BoardEvent event) { onClientThread(BoardClientState.this::clearArtwork); }
     };
-    private final IPreferenceChangeListener preferenceListener = event -> onClientThread(() -> {
-        switch (event.getName()) {
-            case GUIPreferences.SHOW_DEPLOY_ZONES_ARTY_AUTO -> showAllDeployment = (boolean) event.getNewValue();
-            case ClientPreferences.MAP_TILESET -> clearArtwork();
-            case GUIPreferences.BOARD_ECM_TRANSPARENCY -> updateEcmList();
-            case GUIPreferences.USE_CAMO_OVERLAY -> tileManager.reloadUnitIcons();
-            case GUIPreferences.INCLINES -> getBoard().initializeAllAutomaticTerrain();
-            case GUIPreferences.UNIT_LABEL_STYLE -> {
-                if (clientgui != null) {
-                    clientgui.systemMessage("Label style changed to " + GUIP.getUnitLabelStyle().description);
+    private final IPreferenceChangeListener preferenceListener = this::preferenceChanged;
+
+    private void preferenceChanged(PreferenceChangeEvent event) {
+        onClientThread(() -> {
+            switch (event.getName()) {
+                case GUIPreferences.SHOW_DEPLOY_ZONES_ARTY_AUTO -> showAllDeployment = (boolean) event.getNewValue();
+                case ClientPreferences.MAP_TILESET -> clearArtwork();
+                case GUIPreferences.BOARD_ECM_TRANSPARENCY -> updateEcmList();
+                case GUIPreferences.USE_CAMO_OVERLAY -> tileManager.reloadUnitIcons();
+                case GUIPreferences.INCLINES -> getBoard().initializeAllAutomaticTerrain();
+                case GUIPreferences.UNIT_LABEL_STYLE -> {
+                    if (clientgui != null) {
+                        clientgui.systemMessage("Label style changed to " + GUIP.getUnitLabelStyle().description);
+                    }
+                    updateEntityLabels();
                 }
-                updateEntityLabels();
+                case GUIPreferences.UNIT_LABEL_BORDER, GUIPreferences.TEAM_COLORING,
+                      GUIPreferences.SHOW_DAMAGE_DECAL, GUIPreferences.SHOW_DAMAGE_LEVEL -> updateEntityLabels();
             }
-            case GUIPreferences.UNIT_LABEL_BORDER, GUIPreferences.TEAM_COLORING,
-                  GUIPreferences.SHOW_DAMAGE_DECAL, GUIPreferences.SHOW_DAMAGE_LEVEL -> updateEntityLabels();
-        }
-        repaint();
-    });
+            repaint();
+        });
+    }
 
     private boolean tooltipSuspended;
     private String selectedTheme;
@@ -3196,7 +3231,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
                 try {
                     g.setComposite(AlphaComposite.Clear); g.fillRect(0, 0, HEX_W, HEX_H);
                     g.setComposite(AlphaComposite.SrcOver);
-                    drawHexEffects(g, coords); drawSpecialHexes(g, coords);
+                    drawHexEffects(g, coords); drawSpecialHexes(g, coords); drawHexPlugins(g, coords);
                 } finally { g.dispose(); }
                 return overlay;
             });
@@ -3205,7 +3240,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
                 UIUtil.setHighQualityRendering(graphics);
                 graphics.setClip(0, 0, result.getWidth(), result.getHeight());
                 glyphs.forEach(Sprite::prepare);
-                drawSprites(graphics, behindTerrainHexSprites);
+                drawSprites(graphics, behindTerrainHexSprites.stream().filter(sprite -> !sprite.isUnitVisual()).toList());
                 if (!ignoreUnits) {
                     if (GUIP.getShowWrecks()) {
                         for (Entity wreck : getWrecks()) {

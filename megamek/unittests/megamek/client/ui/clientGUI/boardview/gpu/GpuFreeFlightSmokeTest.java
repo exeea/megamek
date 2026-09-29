@@ -65,14 +65,10 @@ class GpuFreeFlightSmokeTest {
                             GpuBoardTestUi.capture(new File(output, "free-flight-fov-100.png"));
                             setFov(60);
                             GpuBoardTestUi.click("tuning");
-                            var processor = Gdx.input.getInputProcessor();
-                            Vector3 direction = boardCamera.camera.direction.cpy();
-                            processor.touchDown(300, 300, 0, Input.Buttons.RIGHT);
-                            processor.touchDragged(360, 340, 0);
-                            processor.touchUp(360, 340, 0, Input.Buttons.RIGHT);
-                            assertEquals(eye, boardCamera.camera.position, "Mouse look rotates around the eye");
-                            assertFalse(direction.epsilonEquals(boardCamera.camera.direction, .001f));
-                            assertFalse(GpuBoardTestUi.stage().getRoot().<Table>findActor("tactical-menu").isVisible());
+                            assertDrag(Input.Buttons.RIGHT, false, false);
+                            assertDrag(Input.Buttons.MIDDLE, false, true);
+                            assertDrag(Input.Buttons.RIGHT, true, true);
+                            assertDrag(Input.Buttons.MIDDLE, true, false);
                             boardCamera.look(0, 90 - boardCamera.tilt());
                         } else if (frames() == 34) {
                             GpuBoardTestUi.capture(new File(output, "free-flight-horizon.png"));
@@ -136,6 +132,34 @@ class GpuFreeFlightSmokeTest {
                 private void setFov(float degrees) {
                     GpuBoardTestUi.stage().getRoot().<Slider>findActor("tuning-camera-fov").setValue(degrees);
                     assertEquals(degrees, boardCamera.fieldOfView());
+                }
+
+                private void assertDrag(int button, boolean shift, boolean pan) {
+                    Vector3 position = boardCamera.camera.position.cpy();
+                    Vector3 direction = boardCamera.camera.direction.cpy();
+                    Input original = Gdx.input;
+                    Input input = mock(Input.class);
+                    var processor = original.getInputProcessor();
+                    when(input.getInputProcessor()).thenReturn(processor);
+                    when(input.isKeyPressed(Input.Keys.SHIFT_LEFT)).thenReturn(shift);
+                    Gdx.input = input;
+                    try {
+                        processor.touchDown(300, 300, 0, button);
+                        processor.touchDragged(360, 340, 0);
+                        processor.touchUp(360, 340, 0, button);
+                    } finally {
+                        Gdx.input = original;
+                    }
+                    String gesture = "Button " + button + ", Shift " + shift;
+                    if (pan) {
+                        assertTrue(position.dst(boardCamera.camera.position) > .01f, gesture + " must pan the eye");
+                        assertEquals(direction, boardCamera.camera.direction, gesture + " must preserve the viewing angle");
+                    } else {
+                        assertEquals(position, boardCamera.camera.position, gesture + " must rotate around the eye");
+                        assertFalse(direction.epsilonEquals(boardCamera.camera.direction, .001f), gesture + " must look around");
+                    }
+                    assertFalse(GpuBoardTestUi.stage().getRoot().<Table>findActor("tactical-menu").isVisible(),
+                          gesture + " must not open the context menu");
                 }
             }, GpuBoardWindow.configuration(false));
             if (failure.get() != null) { throw new AssertionError(failure.get()); }

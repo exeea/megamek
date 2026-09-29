@@ -1,7 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 import com.badlogic.gdx.graphics.Mesh;
@@ -32,14 +32,23 @@ final class MekVisual {
                 filterAnatomy(node, structure.anatomy());
                 assembled.nodes.add(node);
             }
-            // Before the weapons: detaching an unused hand or gun body must also detach its LOD1 parts.
-            var levels = attachLod1Body(library, descriptor, body, structure.anatomy(), assembled);
+            // Before the weapons: detaching an unused hand or gun body must detach all its detail levels.
+            var meshes = attachBodyLevels(library, descriptor, body, structure.anatomy(), assembled);
             assembled.calculateTransforms();
             var bindings = UnitEquipmentAssembly.attachAll(library, descriptor, body, structure, assembled);
+            for (var binding : bindings) {
+                Node placement = assembled.getNode(binding.node(), true);
+                if (binding.embedded() || placement == null || !placement.hasChildren()) { continue; }
+                var module = library.modular(binding.asset());
+                var equipment = GpuUnitModels.attachDetailLevels(List.of(module.model(), module.model(), module.model(2)),
+                      id -> assembled.getNode(binding.node() + "-" + id, true), node -> { }, binding.asset());
+                for (int level = 0; level < 3; level++) { meshes.get(level).addAll(equipment.get(level)); }
+            }
             assembled.calculateTransforms();
             return new GpuUnitModel(assembled, body.descriptor().joints().get("torso"), true, bindings, null,
                   java.util.List.of(new UnitRig(body.descriptor())), UnitFamilyScale.forFamily(body.descriptor().family()))
-                  .detailLevels(levels);
+                  .detailLevels(new GpuUnitModel.DetailLevels(meshes.get(0), meshes.get(1), meshes.get(2),
+                        FormationLod.MEK_LOD1_PIXELS, FormationLod.MEK_LOD2_PIXELS));
         } catch (RuntimeException error) {
             assembled.dispose();
             throw error;
@@ -47,44 +56,27 @@ final class MekVisual {
     }
 
     /**
-     * Adds optional LOD1 parts, switched off, to the LOD0 joints. Missing LOD1 keeps the LOD0 body at every distance.
-     *
-     * @return both levels, or {@link GpuUnitModel.DetailLevels#NONE} when LOD0 is the only usable body
+     * Adds optional detail parts to the LOD0 joints, preserving legacy separate LOD1 descriptors.
      */
-    private static GpuUnitModel.DetailLevels attachLod1Body(GpuUnitModels library, JsonValue descriptor,
+    private static List<Set<Mesh>> attachBodyLevels(GpuUnitModels library, JsonValue descriptor,
           GpuUnitModels.ModularAsset body, @Nullable UnitModelState.MekAnatomy anatomy, Model assembled) {
-        String lod1Asset = descriptor.getString("body");
-        Model lod1Model = body.model(1);
-        int lod1Triangles = body.triangles(1);
-        if (lod1Model == body.model()) {
+        List<Model> models = new java.util.ArrayList<>(body.levels());
+        if (body.model(1) == body.model()) {
             // Older custom recipes may still refer to a separate component.
-            lod1Asset = descriptor.getString("bodyLod1", descriptor.getString("farBody", null));
-            if (lod1Asset == null) { return GpuUnitModel.DetailLevels.NONE; }
-            var lod1 = library.modular(lod1Asset);
-            String problem = lod1BodyProblem(body, lod1);
-            if (problem != null) {
-                LOGGER.warn("[MekLod] LOD1 body {} is unusable ({}); this Mek keeps LOD0", lod1Asset, problem);
-                return GpuUnitModel.DetailLevels.NONE;
+            String asset = descriptor.getString("bodyLod1", descriptor.getString("farBody", null));
+            if (asset != null) {
+                var lod1 = library.modular(asset);
+                String problem = lod1BodyProblem(body, lod1);
+                if (problem == null) {
+                    models.set(1, lod1.model());
+                    if (body.model(2) == body.model(1)) { models.set(2, lod1.model()); }
+                } else {
+                    LOGGER.warn("[MekLod] LOD1 body {} is unusable ({}); retaining LOD0 at this level", asset, problem);
+                }
             }
-            lod1Model = lod1.model();
-            lod1Triangles = lod1.triangles();
         }
-        Set<Mesh> lod1Meshes = new HashSet<>();
-        var lod1Nodes = new ModelInstance(lod1Model).nodes;
-        for (Node node : lod1Nodes) {
-            filterAnatomy(node, anatomy);
-        }
-        GpuUnitModels.attachLod1Parts(lod1Nodes, id -> assembled.getNode(id, true), "[MekLod] LOD1 body " + lod1Asset,
-              lod1Meshes);
-        if (lod1Meshes.isEmpty()) {
-            LOGGER.warn("[MekLod] LOD1 body {} shares no node with LOD0; this Mek keeps LOD0", lod1Asset);
-            return GpuUnitModel.DetailLevels.NONE;
-        }
-        Set<Mesh> lod0Meshes = new HashSet<>();
-        body.model().meshes.forEach(lod0Meshes::add);
-        LOGGER.debug("[MekLod] {} carries LOD1 body {} ({} LOD0 triangles, {} LOD1)", descriptor.getString("body"),
-              lod1Asset, body.triangles(), lod1Triangles);
-        return new GpuUnitModel.DetailLevels(lod0Meshes, lod1Meshes, FormationLod.MEK_LOD1_PIXELS);
+        return GpuUnitModels.attachDetailLevels(models, id -> assembled.getNode(id, true),
+              node -> filterAnatomy(node, anatomy), descriptor.getString("body"));
     }
 
     /** @return why {@code lod1} cannot stand in for {@code lod0}, or {@code null} when it can */

@@ -76,7 +76,15 @@ class GpuShaderReloadTest {
     private static Stream<Arguments> shaderFiles() {
         return Stream.of("resources", "megamek/resources").flatMap(root -> Stream.of("light-model.glsl",
               "tree-instances.glsl", "water-spray.glsl", "cloud-lighting.glsl", "cloud-surface.glsl",
-              "linear-ambient.glsl", "linear-material.glsl", "linear-output.glsl", "road-mask.vert", "terrain-blend.vert")
+              "linear-ambient.glsl", "linear-material.glsl", "linear-output.glsl", "road-mask.vert", "terrain-blend.vert",
+              "ground-surface.glsl", "water-uniforms.glsl", "water-lighting.glsl", "water-pool.glsl", "water-interactions.glsl",
+              "terrain-road.frag", "water-fall.frag", "water-spray.frag", "water-cut.frag",
+              "weather-particles.vert", "weather-particles.frag", "weather-rain.glsl", "weather-snow.glsl",
+              "weather-hail.glsl", "weather-sand.glsl", "particles-smoke.glsl", "particles-fire.glsl", "particles-jet.glsl",
+              "terrain-projection.glsl", "terrain-concrete.glsl", "atmosphere-fov.glsl", "atmosphere-grade.glsl",
+              "atmosphere-glare.glsl", "terrain-magma.glsl", "magma-solid.glsl", "magma-flow.glsl", "magma-lighting.glsl",
+              "terrain-magma-solid.frag", "terrain-magma-flow.frag", "ocean-finish.glsl",
+              "ocean-water-finish.frag", "ocean-lava-finish.frag")
               .map(name -> Arguments.of(root, name)));
     }
 
@@ -88,7 +96,23 @@ class GpuShaderReloadTest {
             case "terrain-blend.vert" -> GpuSurfaceBlend.vertex(unitVertex());
             case "cloud-lighting.glsl" -> GpuCloudShadow.fragment(
                   GpuUnitShader.linearFragment(DefaultShader.getDefaultFragmentShader()), false);
-            case "cloud-surface.glsl" -> GpuCloudShadow.fragment(GpuShaderSource.read("terrain-normal.frag"), true);
+            case "cloud-surface.glsl", "ground-surface.glsl" -> GpuTerrain.litFragment("terrain-normal.frag");
+            case "water-uniforms.glsl", "water-lighting.glsl", "water-pool.glsl", "water-interactions.glsl" ->
+                  GpuTerrain.litFragment("water-surface.frag");
+            case "terrain-road.frag", "water-fall.frag", "water-spray.frag", "water-cut.frag" -> GpuTerrain.litFragment(name);
+            case "weather-particles.vert", "weather-particles.frag" -> GpuWeatherParticles.source(name, "weather-rain.glsl");
+            case "weather-rain.glsl", "weather-snow.glsl", "weather-hail.glsl" ->
+                  GpuWeatherParticles.source("weather-particles.vert", name) + GpuWeatherParticles.source("weather-particles.frag", name);
+            case "weather-sand.glsl", "atmosphere-fov.glsl", "atmosphere-grade.glsl", "atmosphere-glare.glsl" ->
+                  GpuAtmosphere.fragment("atmosphere-composite.frag");
+            case "particles-smoke.glsl", "particles-fire.glsl", "particles-jet.glsl" -> GpuEffectBatch.fragment("particles.frag");
+            case "terrain-projection.glsl", "terrain-concrete.glsl" -> GpuTerrain.litFragment("terrain-sculpt.frag");
+            case "terrain-magma.glsl", "magma-solid.glsl" -> GpuTerrain.litFragment("terrain-sculpt.frag")
+                  + GpuTerrain.litFragment("terrain-magma-solid.frag");
+            case "magma-flow.glsl", "magma-lighting.glsl" -> GpuTerrain.litFragment("terrain-magma-flow.frag");
+            case "terrain-magma-solid.frag", "terrain-magma-flow.frag" -> GpuTerrain.litFragment(name);
+            case "ocean-finish.glsl" -> GpuOcean.fragment("ocean-water-finish.frag") + GpuOcean.fragment("ocean-lava-finish.frag");
+            case "ocean-water-finish.frag", "ocean-lava-finish.frag" -> GpuOcean.fragment(name);
             case "linear-material.glsl", "linear-output.glsl" ->
                   GpuUnitShader.linearFragment(DefaultShader.getDefaultFragmentShader());
             default -> unitVertex();

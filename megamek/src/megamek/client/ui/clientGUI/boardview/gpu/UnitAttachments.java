@@ -79,8 +79,10 @@ final class UnitAttachments {
                         }
                         var flight = transition.flights.get(memberKey);
                         if (flight == null) {
-                            Matrix4 origin = previous.containsKey(memberKey) ? previous.get(memberKey).cpy()
-                                  : transition.boarding() ? ground.get(rig.container()).cpy() : socket.cpy();
+                            // Travel/landing may finish in this tick. Release from the carrier's current pose,
+                            // not a cached world position drawn partway through that earlier movement.
+                            Matrix4 origin = !transition.boarding() ? socket.cpy()
+                                  : previous.containsKey(memberKey) ? previous.get(memberKey).cpy() : ground.get(rig.container()).cpy();
                             if (transition.boarding() && !previous.containsKey(memberKey)) {
                                 var before = transition.event.before().location();
                                 origin.trn(BoardGeometry.center(before.coords(), before.elevation())

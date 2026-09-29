@@ -1,5 +1,6 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 layout(location = 14) in vec4 a_coverRoot;
+layout(location = 15) in vec4 a_coverRow;
 uniform float u_biomeKind;
 uniform float u_biomeLod;
 uniform float u_coverPixels;
@@ -13,8 +14,26 @@ void biomePlant(vec3 point, vec3 sourceNormal, vec4 pigment, out vec3 position, 
     float seed = a_coverRoot.w, angle = seed * 97.71;
     mat2 turn = mat2(cos(angle), sin(angle), -sin(angle), cos(angle));
     bool crop = u_biomeKind < 1.5;
-    float height = crop ? u_levelHeight * mix(.43, .52, seed) : u_metre * mix(.90, 1.65, fract(seed * 19.37));
+    bool row = crop && a_coverRow.x > 0.0;
+    vec2 across = vec2(@ROW_X@, @ROW_Y@), along = vec2(-across.y, across.x);
+    // Every segment of a furrow shares its height and wind field, including clipped segments on a hex boundary.
+    if (row) {
+        float rowNumber = round(dot(a_coverRoot.xy / u_metre, across) / @ROW_METRES@);
+        seed = fract(sin(rowNumber * 12.9898) * 43758.5453);
+        turn = mat2(along, -across);
+    }
+    float height = crop ? u_levelHeight * mix(.43, .52, seed) * @CROP_SCALE@
+          : u_metre * mix(.90, 1.65, fract(seed * 19.37));
     float top = crop ? 1.04 : 1.1;
+    if (row && abs(sourceNormal.z) < .5) {
+        // Cross the complete row faces instead of leaving an isolated end card between edge-on strips.
+        // Global UV keeps clipped fragments aligned. Tapering to zero at the base keeps stems on their support.
+        float side = point.y;
+        float rowU = mix(a_coverRow.z, a_coverRow.w, point.x + .5);
+        point.y *= (2.0 * rowU - 1.0) * point.z / top;
+        sourceNormal = vec3(2.0 * side * u_metre * (a_coverRow.w - a_coverRow.z)
+              / a_coverRow.x * point.z / top, -1.0, side * (2.0 * rowU - 1.0) * u_metre / (top * height));
+    }
     // Vary the clump's proportions, with every root fixed to its supporting surface.
     if (!crop && fract(seed * 71.13) < .55) {
         point *= vec3(.8, .8, .60);
@@ -24,13 +43,15 @@ void biomePlant(vec3 point, vec3 sourceNormal, vec4 pigment, out vec3 position, 
     vec3 root = a_coverRoot.xyz;
     float pixels = u_coverPixels / max(.001, abs((u_projViewTrans * vec4(root, 1.0)).w));
     vec3 coverage = smoothstep(vec3(@START0@, @START1@, @START2@), vec3(@FULL0@, @FULL1@, @FULL2@), vec3(pixels));
-    v_coverFade = u_biomeLod < .5 ? vec2(0.0, coverage.x)
+    v_coverFade = crop ? (u_biomeLod < 1.5 ? vec2(0.0, coverage.y) : coverage.yz)
+          : u_biomeLod < .5 ? vec2(0.0, coverage.x)
           : u_biomeLod < 1.5 ? coverage.xy : coverage.yz;
     vec2 wind = length(u_wind.xy) > .01 ? normalize(u_wind.xy) : vec2(.8, .6);
-    float gust = vegetationGust(root.xy);
+    vec2 anchor = root.xy + (row ? along * point.x * a_coverRow.x : vec2(0.0));
+    float gust = vegetationGust(anchor);
     // Stiffer crops bow less than flexible marsh leaves. Strength scales both lean and angular excursion.
     float flex = u_wind.z * (crop ? .78 + .22 * gust : 1.0 + .28 * gust);
-    // Crop cards share one stalk angle, preserving the plant image through every mesh LOD.
+    // Crop stems remain straight while swaying; row segments sample the same world-space gust at shared endpoints.
     // Marsh leaves form a flexible arch, with no displacement at the grounded base.
     float angleAtHeight = crop ? flex : flex * point.z / top;
     float sine = sin(angleAtHeight), cosine = cos(angleAtHeight);
@@ -38,12 +59,16 @@ void biomePlant(vec3 point, vec3 sourceNormal, vec4 pigment, out vec3 position, 
     float lifted = cosine * point.z;
     // Bend the centreline without stretching its tip away from the root; retain the clump's cross-section.
     position = root + vec3(turn * point.xy + bend, lifted) * height;
+    if (row) {
+        position = vec3(anchor - across * point.y * u_metre + bend * height,
+              root.z + point.x * a_coverRow.y + lifted * height);
+    }
     vec2 leaf = turn * sourceNormal.xy;
     float curvature = crop ? 0.0 : angleAtHeight;
     vec2 tangentXY = wind * (sine + curvature * cosine);
     float tangentZ = cosine - curvature * sine;
     normal = vec3(leaf * tangentZ, sourceNormal.z - dot(tangentXY, leaf));
-    if (u_biomeLod > 1.5) {
+    if (u_biomeLod > 1.5 && !row) {
         // At a few pixels a crop stalk or clump needs one quad. Face the camera so rotating or looking straight down
         // cannot turn it edge-on. Keep the base horizontal and lift the top out of its supporting terrain.
         vec3 right = normalize(vec3(u_projViewTrans[0].x, u_projViewTrans[1].x, 0.0));

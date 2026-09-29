@@ -21,9 +21,11 @@ import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Material contacts on cliffs and below water, using the production meshes, shaders and LOD cache. */
+/** Actual material palettes across height changes, including concrete foundations and emissive volcanic contacts. */
 @Tag("on-demand")
 class GpuTerrainContactSmokeTest {
+    private static final String[] NAMES = { "grass", "dirt", "sand", "rock", "concrete", "snow", "magma", "lava" };
+
     @Test
     void cliffsAndSubmergedContactsKeepTheirMaterialsAcrossLods() throws Exception {
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "terrain-contact");
@@ -169,5 +171,64 @@ class GpuTerrainContactSmokeTest {
         var field = owner.getClass().getDeclaredField(name);
         field.setAccessible(true);
         return field.get(owner);
+    }
+
+    @Test
+    void allFamiliesRenderAtSlopeAndCliffFeet() {
+        var failure = new AtomicReference<Throwable>();
+        var config = GpuBoardWindow.configuration(false);
+        config.setWindowedMode(1280, 900);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                var terrain = new GpuTerrain();
+                var frame = new GpuReviewFrame(settings(13));
+                try {
+                    var output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "terrain-contacts");
+                    assertTrue(output.isDirectory() || output.mkdirs());
+                    var camera = new BoardCamera();
+                    camera.resize(1280, 900);
+                    for (int family = 0; family < NAMES.length; family++) {
+                        int upper = family;
+                        int lower = switch (family) { case 0, 4 -> 1; case 1 -> 0; case 3 -> 2; default -> 3; };
+                        for (int rise : family == BoardScene.Surface.CONCRETE.ordinal()
+                              ? new int[] { 0, 1, 2, 3, 4 } : new int[] { 0, 1, 4 }) {
+                            var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+                                  c.getY() < 4 ? upper : lower, c.getY() < 4 ? rise : 0));
+                            // Keep one renderer while changing family/elevation to exercise invalidation and rebinding.
+                            terrain.update(scene);
+                            terrain.animate(.5f, List.of());
+                            camera.setPerspective(false);
+                            camera.setIsometric(true);
+                            camera.camera.zoom = .18f;
+                            camera.center(BoardGeometry.center(new Coords(4, 4), rise == 4 ? 1 : 0));
+                            frame.configure(settings(13));
+                            frame.render(terrain, camera, scene);
+                            GpuReviewFrame.save(new File(output, NAMES[family] + "-rise" + rise + ".png"));
+                            if (rise == 4) {
+                                camera.setPerspective(true);
+                                camera.camera.zoom = .28f;
+                                camera.update();
+                                frame.configure(settings(0));
+                                frame.render(terrain, camera, scene);
+                                GpuReviewFrame.save(new File(output, NAMES[family] + "-cliff-night-perspective.png"));
+                            }
+                            assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), NAMES[family] + " rise " + rise);
+                        }
+                    }
+                } catch (Throwable error) {
+                    failure.set(error);
+                } finally {
+                    terrain.dispose();
+                    frame.dispose();
+                    Gdx.app.exit();
+                }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Terrain foot contacts", failure.get()); }
+    }
+
+    private static BoardAtmosphere.Settings settings(float hour) {
+        return new BoardAtmosphere.Settings(hour, 0, 0, BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0);
     }
 }

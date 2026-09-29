@@ -1166,7 +1166,7 @@ public final class UnitAnnotations {
     }
 
     /**
-     * @return determine if this {@link EntitySprite} is only detected by an enemies sensor and hence should only be a
+     * @return determine if this unit is only detected by an enemies sensor and hence should only be a
      *       sensor return.
      */
     public boolean onlyDetectedBySensors() {

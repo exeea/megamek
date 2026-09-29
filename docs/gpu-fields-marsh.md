@@ -80,10 +80,17 @@ There is no dedicated marsh ground bitmap. The ground shader borrows
 `data/models/board/textures/foliage/marsh-sedge.png` and loaded from the configured
 game data directory after normal data staging.
 
-The reduced crop mesh has broader leaves, a more legible seed head and stronger
-lit leaf colour. Its row canopy is fuller and shades the furrows more strongly.
-This improves its silhouette without restoring the removed stalks or triangles;
-plant height, lighting and shader wind remain shared with the existing vegetation.
+Fields use [ten-stalk crossed row strips with overhead cards](crop-row-assets.md),
+owned by mm-data at `data/models/board/textures/foliage/crop-row-side.png` and
+`crop-row-top.png`. Plants are scaled by
+1.4: each strip is 4.2 m long and 1.008 m wide, with ten stalks at nominal 0.42 m
+spacing. Alternate 1.15 m furrows are planted, giving 2.3 m between crop rows and
+about 1.29 m between canopies. The strips crop their UVs at edges
+and roads, and split to follow the published ground. Two row faces cross above
+their grounded centreline, retaining side coverage when looking along a furrow.
+Both images share one atlas and draw batch per LOD. The earlier single plant and
+`crop-clump.png` remain available for benchmark comparisons. Lighting and ground
+shading are preserved.
 
 Clear, Mars-tinted, volcano-tinted, and hazardous green waters share a continuous
 world-space optical mixture. Both surface and submerged bed use the same weights
@@ -107,13 +114,16 @@ it does not reproduce the generated reference's individual plant reflections or
 fine ground relief. The reference remains an art target, not a description of the
 renderer's present fidelity.
 
-Plant LOD0/LOD1/LOD2 reduce both geometry and deterministic subsets of roots, using
-the existing projected-size crossfades. Crops use 10/6/2 triangles per stalk; their
-distant tier is one tapered camera-facing stalk. A stable world-space selection
-retains 38% of crop candidates and 46% of marsh candidates before support sampling.
-It is independent of wetland coverage and plant height, and shared by every LOD,
-so density reductions do not move rows or create tile boundaries. Middle and
-distant tiers retain smaller nested subsets of these roots. At very distant
+Reed LOD0/LOD1/LOD2 reduce both geometry and deterministic subsets of roots, using
+the existing projected-size crossfades. Crops submit 6/6/2 triangles per row fragment;
+marsh uses 8/4/2 per clump. Distant crops keep their canopy; distant marsh uses a
+camera-facing card. Near fields retain supported segments on alternate furrows. A stable
+world-space selection retains about 46% of marsh candidates before support sampling.
+Middle and distant reed tiers retain nested 35% and 8% subsets of the prepared roots.
+Crop strips instead retain their complete row coverage: thinning whole strips made
+large checkerboard gaps during zoom. One six-triangle crossed-row/canopy batch covers
+near and middle distances, fading to continuous two-triangle canopies over 64–128
+pixels per hex. At very distant
 scales plants fade away entirely, leaving
 the ground shader. Per-root complementary coverage is shared
 by perspective and orthographic views. Cutout textures are sampled before coverage
@@ -126,25 +136,35 @@ It updates on the render thread when the captured tile data changes and is dispo
 with the terrain. The stencil is bounded to nine candidate hexes. It is disabled
 on ordinary boards with no special ground and only one water palette. Plant roots
 are prepared within the existing frame-budget approach and uploaded only when
-their visible patch data changes. There are at most six plant batches: two plant
-types times three LODs. No per-hex material textures are generated.
+their visible patch data changes. At most five plant batches are active: two crop
+tiers and three reed tiers. No per-hex material textures are generated.
 
-Root preparation starts with the LOD2 subset and extends the same deterministic
-lattice only when LOD1 or LOD0 is visible. A small 8x8 CPU index references the
+Reed preparation starts with the LOD2 subset and extends the same deterministic
+lattice only when LOD1 or LOD0 is visible. Crops prepare their complete strip lattice
+once within the same bounded preparation budget. A small 8x8 CPU index references the
 published support triangles; queries still use the existing triangle sampler and
 its edge tolerance. Both ground and water-plane rejection use it. Uniform biome
 interiors skip the neighbour stencil only where its coverage is necessarily one.
 Replacing a patch during a terrain LOD handoff now shares the 2 ms preparation
 budget, including patch construction. The budget is checked every eight candidate
-sites. These changes add no GPU geometry, textures or plant draw calls.
-The vegetation renderer owns one shared, mipmapped cutout texture and disposes it
-with its batches. It filters the original PNG to a 512x512 RGBA8 GPU upload:
-1,398,100 bytes (1.33 MiB) including mipmaps, versus approximately 8 MiB previously.
-The full-resolution source asset is retained. Wetland soil maps are borrowed from
-the existing asset cache.
+sites. The support-index and caching changes add no GPU geometry, textures or plant
+draw calls. Continuous crop coverage increases distant instance counts; the
+[follow-up profile](mesa-city1-fps-2026-09-29.md) records that tradeoff.
+The MesaCity1 follow-up derives plant-kind membership once per captured tile list
+and reuses stationary submissions while camera and installed support are unchanged.
+Cold support lookups are checked against the same preparation budget before they
+start. This render-owned snapshot invalidates on edits and terrain replacement;
+shader wind continues every frame. See the [full-map profile](mesa-city1-profile.md).
+The vegetation renderer owns one shared, mipmapped cutout texture per plant kind
+and disposes them with its batches. Marsh uses a 512x512 RGBA8 GPU upload:
+1,398,100 bytes (1.33 MiB) including mipmaps. Crops pack two views into one
+512x640 atlas (about 1.67 MiB including mipmaps). Textures load only when that
+kind is rendered. Full-resolution source assets are retained. Wetland
+soil maps are borrowed from the existing asset cache.
 
 Like ordinary grass, plants use small shared meshes, GPU instancing and shader
-wind; each instance stores just its root and seed (16 bytes). Marsh cards additionally
+wind; marsh instances store a root and seed (16 bytes); crop instances also carry
+length, rise and source UV endpoints (32 bytes total). Both crop and marsh cards
 sample the cutout, so overlapping cards still have a fragment-shading cost. The wet
 ground, pools and field furrows shade the existing terrain and add no terrain triangles.
 Ordinary grass uses 7/3 triangles per individual blade; a marsh instance depicts a

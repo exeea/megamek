@@ -151,16 +151,16 @@ final class GpuBoardSource implements BoardSource {
               () -> closed);
         GUIPreferences preferences = GUIPreferences.getInstance();
         uiPreferences = UiPreferences.capture();
-        actions = new GpuBoardActions(view, phasePanel, () -> closed || view.isClosed() || this.view != view, this::refresh);
         boardListener = new BoardListenerAdapter() {
             @Override
             public void boardNewBoard(BoardEvent event) {
-                dirtyTerrain();
+                boardChangedAllHexes(event);
             }
 
             @Override
             public void boardChangedHex(BoardEvent event) {
                 onSwing(() -> {
+                    if (closed || event.getSource() != board) { return; }
                     Coords coords = event.getCoords();
                     if (coords == null) {
                         terrainDirty = true;
@@ -173,7 +173,9 @@ final class GpuBoardSource implements BoardSource {
 
             @Override
             public void boardChangedAllHexes(BoardEvent event) {
-                dirtyTerrain();
+                onSwing(() -> {
+                    if (!closed && event.getSource() == board) { terrainDirty = true; }
+                });
             }
         };
         gameListener = new GameListenerAdapter() {
@@ -193,7 +195,7 @@ final class GpuBoardSource implements BoardSource {
             public void gameAttackResolved(megamek.common.event.GameAttackResolvedEvent event) {
                 BoardClientState eventView = GpuBoardSource.this.view;
                 onSwing(() -> {
-                    if (!closed && !eventView.isClosed() && GpuBoardSource.this.view == eventView) {
+                    if (isCurrentView(eventView)) {
                         captureCombat(event);
                     }
                 });
@@ -215,7 +217,7 @@ final class GpuBoardSource implements BoardSource {
                 Entity takeoff = old == null ? event.getEntity() : old;
                 int jumpMP = type == EntityMovementType.MOVE_JUMP ? takeoff.getAnyTypeMaxJumpMP() : 0;
                 onSwing(() -> {
-                    if (!closed && !eventView.isClosed() && GpuBoardSource.this.view == eventView) {
+                    if (isCurrentView(eventView)) {
                         if (path.isEmpty()) {
                             refresh();
                         } else {
@@ -236,7 +238,7 @@ final class GpuBoardSource implements BoardSource {
                 int condition = event.getEntity().getRemovalCondition();
                 int id = event.getEntity().getId(), boardId = event.getEntity().getBoardId();
                 onSwing(() -> {
-                    if (closed || eventView.isClosed() || GpuBoardSource.this.view != eventView) { return; }
+                    if (!isCurrentView(eventView)) { return; }
                     if (condition == megamek.common.interfaces.IEntityRemovalConditions.REMOVE_UNKNOWN) {
                         queueAnimation(new BoardScene.Concealed(id, boardId));
                     }
@@ -247,7 +249,10 @@ final class GpuBoardSource implements BoardSource {
         view.game.addGameListener(gameListener);
         PreferenceManager.getClientPreferences().addPreferenceChangeListener(preferenceListener);
         preferences.addPreferenceChangeListener(preferenceListener);
-        timer = new Timer(100, event -> { view.advanceOverlays(100); refresh(); });
+        timer = new Timer(100, event -> {
+            this.view.advanceOverlays(100);
+            refresh();
+        });
         timer.setCoalesce(true);
         try {
             refresh();
@@ -274,11 +279,14 @@ final class GpuBoardSource implements BoardSource {
     }
 
     private void dirtyTerrain() {
-        if (SwingUtilities.isEventDispatchThread()) {
-            terrainDirty = true;
-        } else {
-            SwingUtilities.invokeLater(() -> terrainDirty = true);
-        }
+        onSwing(() -> { if (!closed) { terrainDirty = true; } });
+    }
+
+    /** Selection is authoritative immediately, even before the next source timer publishes the new board. */
+    private boolean isCurrentView(BoardClientState expected) {
+        return !closed && !expected.isClosed() && view == expected && board != null && board == expected.getBoard()
+              && (expected.getClientgui() == null
+                    || expected.getClientgui().getCurrentBoardState().orElse(null) == expected);
     }
 
     private void captureMovement(int entityId, UnitLocation start, List<UnitLocation> path, EntityMovementType type,
@@ -642,15 +650,15 @@ final class GpuBoardSource implements BoardSource {
 
     private Frame capture() {
         PhaseStatus nextPhaseStatus = GpuBoardActions.phaseStatus(phasePanel.get());
+        boolean changedState = false;
         if (view.getClientgui() != null) {
             BoardClientState selectedView = view.getClientgui().getCurrentBoardState().orElse(view);
             if (selectedView != view) {
+                changedState = true;
                 view.setMovingUnits(false);
                 view.setVisibleArea(() -> new double[] { 0, 0, 1, 1 });
                 view.releasePlanarCapture();
                 view = selectedView;
-                actions = new GpuBoardActions(selectedView, phasePanel,
-                      () -> closed || selectedView.isClosed() || view != selectedView, this::refresh);
                 contextCoords = null;
                 unitImages.clear();
                 unitAnnotations.clear();
@@ -660,7 +668,35 @@ final class GpuBoardSource implements BoardSource {
                 }
             }
         }
-        if (view.isClosed() || view.getBoard() == null) {
+        Board current = view.isClosed() ? null : view.getBoard();
+        if (changedState || current != board) {
+            if (board != null) { board.removeBoardListener(boardListener); }
+            board = current;
+            boardGeneration++;
+            BoardClientState owner = view;
+            long generation = boardGeneration;
+            actions = new GpuBoardActions(owner, phasePanel,
+                  () -> !isCurrentView(owner) || generation != boardGeneration, this::refresh);
+            view.setMovingUnits(false);
+            atmosphere.reset();
+            synchronized (this) {
+                pendingEvents.clear();
+                receivedAttacks.clear();
+                removalAttempts.clear();
+                voluntaryReleases.clear();
+            }
+            if (board != null) { board.addBoardListener(boardListener); }
+            terrainDirty = true;
+            dirtyHexes = null;
+        }
+        if (board == null) {
+            tiles = List.of();
+            terrainImages.clear();
+            unitImages.clear();
+            unitAnnotations.clear();
+            overlayImages.clear();
+            fieldOfView = BoardFieldOfView.EMPTY;
+            chatActive = false;
             phaseStatus = nextPhaseStatus;
             return new Frame(null, List.of(), null, List.of(), new Hud(1, 1, List.of()), "",
                   new BoardFocus(0, null), boardGeneration, "");
@@ -691,23 +727,6 @@ final class GpuBoardSource implements BoardSource {
                       frame.tooltip(), frame.centerRequest(), frame.boardGeneration(), frame.actorName(),
                       frame.scenarioAtmosphere(), frame.attack(), frame.reports(), frame.keepSelectionCamera());
             }
-        }
-        Board current = view.game.getBoard(view.getBoardId());
-        if (current != board) {
-            if (board != null) {
-                board.removeBoardListener(boardListener);
-            }
-            board = current;
-            boardGeneration++;
-            atmosphere.reset();
-            synchronized (this) {
-                pendingEvents.clear();
-                receivedAttacks.clear();
-                removalAttempts.clear();
-                voluntaryReleases.clear();
-            }
-            board.addBoardListener(boardListener);
-            terrainDirty = true;
         }
         boolean allTerrain = terrainDirty;
         Rectangle changedHexes = dirtyHexes;
@@ -755,7 +774,7 @@ final class GpuBoardSource implements BoardSource {
                 BoardScene.Tile next = new BoardScene.Tile(old.coords(), old.elevation(), old.waterDepth(), old.frozen(),
                       old.roadExits(), old.surface(), old.ground(), old.normals(), old.decals(), old.decalsWithoutLimbs(),
                       terrainImages.capture(hex.tactical(), old.tactical()), old.features(), hex.text(), old.liquid(),
-                      old.foliage(), old.detailedGround(), old.road(), old.fireSmoke(), old.biome(), old.impassable());
+                      old.foliage(), old.detailedGround(), old.road(), old.fireSmoke(), old.biome(), old.impassable(), old.blackIce());
                 if (!next.equals(old)) {
                     painted.set(index, next);
                 }
@@ -1131,7 +1150,7 @@ final class GpuBoardSource implements BoardSource {
     /** Mouse selection and phase actions use the existing controllers without changing the camera. */
     public void primaryClick(Coords coords, int entityId, int modifiers, long generation) {
         SwingUtilities.invokeLater(() -> {
-            if (closed || view.isClosed() || generation != boardGeneration || board != view.game.getBoard(view.getBoardId())
+            if (!isCurrentView(view) || generation != boardGeneration
                   || coords != null && !board.contains(coords)
                   || view.getClientgui() != null && view.getClientgui().shouldIgnoreHotKeys()) {
                 return;
@@ -1331,7 +1350,7 @@ final class GpuBoardSource implements BoardSource {
         reportedAnimationSerial = serial;
         reportedBusy = busy;
         SwingUtilities.invokeLater(() -> {
-            if (closed || view.isClosed() || consumed.boardGeneration() != boardGeneration) { return; }
+            if (!isCurrentView(view) || consumed.boardGeneration() != boardGeneration) { return; }
             // A later packet may already have queued movement that this GL frame has not consumed.
             if (busy || serial == animationsQueued) { view.setMovingUnits(busy); }
         });

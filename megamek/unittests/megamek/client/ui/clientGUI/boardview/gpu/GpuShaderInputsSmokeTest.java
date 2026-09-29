@@ -10,12 +10,15 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.JButton;
 import javax.swing.JPanel;
 import javax.swing.JTabbedPane;
+import javax.swing.JTable;
 import javax.swing.SwingUtilities;
+import javax.swing.Timer;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
@@ -149,6 +152,9 @@ class GpuShaderInputsSmokeTest {
             submitted.set(drafts); callback.accept(new GpuShaderManager.Result(true, "Applied", null, 1));
         }, callback -> { });
         try {
+            checkInputTable(editor.inputsPanel());
+            editor.reloadAllFromDisk();
+            assertEquals("original unopened.frag", submitted.get().get("unopened.frag"), "Reload also works before opening any tab");
             editor.open("first.frag");
             var tabs = (JTabbedPane) field(editor, "tabs");
             var documents = (Map<?, ?>) field(editor, "documents");
@@ -171,6 +177,34 @@ class GpuShaderInputsSmokeTest {
             assertEquals(1, tabs.getTabCount(), "Reload does not reopen closed tabs");
             editor.open("closed.frag");
             assertEquals("changed closed.frag", closed.getText());
+            var lastSubmitted = submitted.get();
+            Files.writeString(directory.resolve("first.frag"), "must not replace the open document after another read fails");
+            Files.delete(directory.resolve("unopened.frag"));
+            editor.reloadAllFromDisk();
+            assertEquals("changed first.frag", first.getText(), "A failed read retains all documents");
+            assertEquals(lastSubmitted, submitted.get(), "A failed read does not compile a partial reload");
         } finally { editor.close(); }
+    }
+
+    private static void checkInputTable(GpuShaderInputPanel panel) throws Exception {
+        var table = (JTable) field(panel, "table");
+        var timer = (Timer) field(panel, "refresh");
+        Runnable refresh = () -> Arrays.stream(timer.getActionListeners()).forEach(listener -> listener.actionPerformed(null));
+        panel.select("weather-particles.frag");
+        var original = new GpuShaderInputs.Row("u_clock", GpuShaderValue.Type.FLOAT, "1.0", "1.0", "", null, null, "");
+        panel.receive(new GpuShaderInputs.Snapshot(panel.request(), List.of("Weather"), "Weather", List.of(original)));
+        refresh.run();
+        table.changeSelection(0, 4, false, false);
+        var updated = new GpuShaderInputs.Row("u_clock", GpuShaderValue.Type.FLOAT, "2.0", "2.0", "", null, null, "");
+        var snapshot = new GpuShaderInputs.Snapshot(panel.request(), List.of("Weather"), "Weather", List.of(updated));
+        panel.receive(snapshot);
+        refresh.run();
+        assertEquals("2.0", table.getValueAt(0, 3));
+        assertEquals(0, table.getSelectedRow(), "Live value refresh keeps keyboard navigation on the selected input");
+        assertEquals(4, table.getSelectedColumn());
+        panel.select("beams.frag");
+        panel.receive(snapshot);
+        refresh.run();
+        assertEquals(0, table.getRowCount(), "A delayed snapshot from the previous file cannot replace the current inputs");
     }
 }

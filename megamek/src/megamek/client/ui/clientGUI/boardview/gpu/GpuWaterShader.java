@@ -34,6 +34,8 @@ final class GpuWaterShader extends Attribute {
     /** Opacity of the authored GIF color; procedural water derives its opacity from the depth of each pixel. */
     static final float SURFACE_OPACITY = 0.48f;
     static final long TYPE = register("boardWaterSurface");
+    /** Separate programs; palette and colour source remain material parameters within each mode. */
+    enum Mode { SURFACE, FALL, SPRAY, CUT }
     /** Palette indices shared with water-optics.glsl and the submerged bed's vertex color. */
     static final int CLEAR = 0, MARS = 1, VOLCANO = 2, HAZARDOUS = 3;
     /** Depth encoded by the field and by the bed's vertex color, in levels; deeper water is uniformly deep. */
@@ -55,10 +57,8 @@ final class GpuWaterShader extends Attribute {
     static final int MAX_IMPACTS = 12;
 
     private final int palette;
-    private final boolean falling;
+    final Mode mode;
     private final boolean procedural;
-    /** Spray thrown up where falls land: particles the vertex shader launches, not a surface (GpuWaterfall). */
-    private final boolean spray;
     private final Field field;
     final List<Impact> impacts;
 
@@ -66,9 +66,8 @@ final class GpuWaterShader extends Attribute {
         super(TYPE);
         BoardScene.Tile tile = surface.tile;
         palette = palette(tile.liquid());
-        this.falling = falling;
+        mode = falling ? Mode.FALL : Mode.SURFACE;
         this.procedural = procedural;
-        spray = false;
         this.field = field;
         impacts = falling || field == null ? List.of() : impacts(scene, tile, field::surface);
     }
@@ -129,26 +128,28 @@ final class GpuWaterShader extends Attribute {
         return (float) Math.hypot(a.x + dx * t - p.x, a.y + dy * t - p.y);
     }
 
-    private GpuWaterShader(GpuWaterShader original, boolean spray) {
-        this(original, spray, original.field);
+    private GpuWaterShader(GpuWaterShader original, Mode mode) {
+        this(original, mode, original.field);
     }
 
-    private GpuWaterShader(GpuWaterShader original, boolean spray, Field field) {
+    private GpuWaterShader(GpuWaterShader original, Mode mode, Field field) {
         super(TYPE);
         // The impacts are immutable and the chunk owns the field; copied materials share both.
         palette = original.palette;
-        falling = original.falling;
+        this.mode = mode;
         procedural = original.procedural;
-        this.spray = spray;
         this.field = field;
-        impacts = original.impacts;
+        impacts = mode == Mode.SURFACE ? original.impacts : List.of();
     }
 
     /** Unchanged vertices in a replacement chunk must sample that chunk's newly owned field. */
-    GpuWaterShader withField(Field field) { return new GpuWaterShader(this, spray, field); }
+    GpuWaterShader withField(Field field) { return new GpuWaterShader(this, mode, field); }
 
     /** The same water's spray, thrown up where its falls land. */
-    GpuWaterShader spray() { return new GpuWaterShader(this, true); }
+    GpuWaterShader spray() { return new GpuWaterShader(this, Mode.SPRAY); }
+
+    /** Optical section at the board edge, without waves or authored animation frames. */
+    GpuWaterShader cut() { return new GpuWaterShader(this, Mode.CUT); }
 
     static int palette(BoardLiquid liquid) {
         if (liquid.kind() == BoardLiquid.Kind.HAZARDOUS) { return HAZARDOUS; }
@@ -165,8 +166,7 @@ final class GpuWaterShader extends Attribute {
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                 var water = attributes.get(GpuWaterShader.class, TYPE);
                 if (water != null) {
-                    target.set(id, (float) water.palette, water.falling ? 1f : 0f, water.procedural ? 1f : 0f,
-                          water.spray ? 1f : 0f);
+                    target.set(id, (float) water.palette, water.procedural ? 1f : 0f);
                 }
             }
         });
@@ -221,12 +221,13 @@ final class GpuWaterShader extends Attribute {
     }
 
     @Override
-    public GpuWaterShader copy() { return new GpuWaterShader(this, spray); }
+    public GpuWaterShader copy() { return new GpuWaterShader(this, mode); }
 
     @Override
     public int hashCode() {
         int result = 31 * super.hashCode() + palette;
-        result = 31 * result + (falling ? 1 : 0) + (procedural ? 2 : 0) + (spray ? 4 : 0);
+        result = 31 * result + mode.ordinal();
+        result = 31 * result + (procedural ? 1 : 0);
         result = 31 * result + System.identityHashCode(field);
         return 31 * result + impacts.hashCode();
     }
@@ -236,9 +237,8 @@ final class GpuWaterShader extends Attribute {
         if (type != other.type) { return Long.compare(type, other.type); }
         GpuWaterShader water = (GpuWaterShader) other;
         int comparison = Integer.compare(palette, water.palette);
-        if (comparison == 0) { comparison = Boolean.compare(falling, water.falling); }
+        if (comparison == 0) { comparison = mode.compareTo(water.mode); }
         if (comparison == 0) { comparison = Boolean.compare(procedural, water.procedural); }
-        if (comparison == 0) { comparison = Boolean.compare(spray, water.spray); }
         if (comparison == 0) {
             comparison = Integer.compare(System.identityHashCode(field), System.identityHashCode(water.field));
         }
@@ -445,7 +445,12 @@ final class GpuWaterShader extends Attribute {
 
         static Prepared prepare(BoardScene scene, Map<Coords, BoardFlow.Current> currents,
               Map<Coords, BoardSurface> surfaces) {
-            Pools pools = new Pools(scene, currents, surfaces);
+            return prepare(scene, currents, surfaces, false);
+        }
+
+        static Prepared prepare(BoardScene scene, Map<Coords, BoardFlow.Current> currents,
+              Map<Coords, BoardSurface> surfaces, boolean molten) {
+            Pools pools = new Pools(scene, currents, surfaces, molten);
             float minX = Float.POSITIVE_INFINITY, minY = Float.POSITIVE_INFINITY;
             float maxX = Float.NEGATIVE_INFINITY, maxY = Float.NEGATIVE_INFINITY;
             for (BoardSurface surface : surfaces.values()) {
@@ -561,12 +566,13 @@ final class GpuWaterShader extends Attribute {
         public void dispose() { texture.dispose(); }
     }
 
-    /** Open water around one chunk, derived lazily from the shared topology; frozen and molten hexes are banks. */
+    /** One liquid family around a chunk; separate fields prevent water and lava currents crossing their banks. */
     static final class Pools {
         private final BoardScene scene;
         private final Map<Coords, BoardFlow.Current> currents;
         private final Map<Coords, BoardSurface> surfaces;
         private final Map<Coords, Pool> pools = new HashMap<>();
+        private final boolean molten;
         /** Open water of the hex nearest the last sample and of its neighbours; lattice rows revisit each hex often. */
         private final Pool[] candidates = new Pool[7];
         private int count, nearColumn, nearRow = Integer.MIN_VALUE;
@@ -575,16 +581,21 @@ final class GpuWaterShader extends Attribute {
         private final Vector2 acceleration = new Vector2();
 
         Pools(BoardScene scene, Map<Coords, BoardFlow.Current> currents, Map<Coords, BoardSurface> surfaces) {
+            this(scene, currents, surfaces, false);
+        }
+
+        Pools(BoardScene scene, Map<Coords, BoardFlow.Current> currents, Map<Coords, BoardSurface> surfaces, boolean molten) {
             this.scene = scene;
             this.currents = currents;
             this.surfaces = surfaces;
+            this.molten = molten;
         }
 
         Pool get(Coords coords) {
             if (pools.containsKey(coords)) { return pools.get(coords); }
             BoardScene.Tile tile = scene.tile(coords);
             Pool pool = null;
-            if (tile != null && tile.liquid().present() && !tile.liquid().molten() && !tile.frozen()) {
+            if (tile != null && tile.liquid().present() && tile.liquid().molten() == molten && !tile.frozen()) {
                 BoardSurface surface = surfaces.get(coords);
                 pool = new Pool(surface == null ? new BoardSurface(scene, tile) : surface,
                       currents.getOrDefault(coords, BoardFlow.Current.STILL));
@@ -636,6 +647,7 @@ final class GpuWaterShader extends Attribute {
                 }
                 // Several descents can meet at a junction. Keep their combined visual current inside the field's
                 // encoding range, while the ordinary flat-reach current and agitation remain independently blended.
+                if (molten) { acceleration.scl(.2f); }
                 acceleration.limit(.5f);
                 acceleration.add(result[1], result[2]).limit(CURRENT_RANGE);
                 result[1] = acceleration.x;

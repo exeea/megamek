@@ -48,7 +48,7 @@ final class BoardRoad {
 
     /** Both sides of a connected material change meet at half coverage on their shared edge. */
     record Join(int direction, Kind kind, End edge) {
-        Area area() { return edge.band(-JOIN_REACH, 4); }
+        Area area() { return edge.band(-JOIN_REACH, 128); }
         float coverage(float x, float y) {
             return Math.clamp((edge.distance(x, y) + JOIN_REACH) / (2 * JOIN_REACH), 0, 1);
         }
@@ -92,12 +92,15 @@ final class BoardRoad {
 
     /** Unsupported road decoration and coexisting terrain retain their original artwork. */
     static boolean rendered(BoardScene.Tile tile) {
-        return tile.road() != Kind.NONE && tile.detailedGround() && !tile.liquid().present() && !tile.frozen();
+        return tile.road() != Kind.NONE && tile.detailedGround() && !tile.liquid().present();
     }
 
     static BoardRoad of(BoardScene scene, BoardScene.Tile tile) {
         return layout(tile.coords(), tile.roadExits(), tile.road(), direction -> {
             var neighbor = scene.tile(tile.coords().translated(direction));
+            if (neighbor != null && BoardSurface.connectingBridge(tile, neighbor, direction) != null) {
+                return BoardBridge.kind(scene, neighbor);
+            }
             return neighbor != null && (neighbor.roadExits() & (1 << ((direction + 3) % 6))) != 0
                   ? neighbor.road() : Kind.NONE;
         });
@@ -108,7 +111,7 @@ final class BoardRoad {
         return layout(coords, exits, Kind.PAVED, direction -> Kind.PAVED);
     }
 
-    private static BoardRoad layout(Coords coords, int exits, Kind kind, IntFunction<Kind> neighbors) {
+    static BoardRoad layout(Coords coords, int exits, Kind kind, IntFunction<Kind> neighbors) {
         List<Point> ends = new ArrayList<>();
         List<Join> joins = new ArrayList<>();
         for (int direction = 0; direction < 6; direction++) {
@@ -198,6 +201,42 @@ final class BoardRoad {
     }
 
     private static Point scale(Point p, float scale, float width) { return new Point(p.x * scale, p.y * scale, width); }
+
+    /** Continue bridge paint and wear in world space through bank extensions, preserving the central junction. */
+    BoardRoad extended(List<Float> lengths) {
+        return extended(lengths, 0);
+    }
+
+    BoardRoad extended(List<Float> lengths, int terminalExits) {
+        List<List<Point>> extended = new ArrayList<>();
+        for (var path : paths) {
+            var points = new ArrayList<>(path);
+            for (int d = 0; d < 6; d++) {
+                if (lengths.get(d) <= 0) { continue; }
+                Coords next = coords.translated(d);
+                float x = (BoardGeometry.centerX(next) - BoardGeometry.centerX(coords)) / (2 * BoardGeometry.hexScale());
+                float y = (BoardGeometry.centerY(next) - BoardGeometry.centerY(coords)) / (2 * BoardGeometry.hexScale());
+                float length = (float) Math.hypot(x, y), reach = lengths.get(d) + .25f;
+                for (int end : new int[] { 0, points.size() - 1 }) {
+                    var p = points.get(end);
+                    if (Math.hypot(p.x - x * 1.06f, p.y - y * 1.06f) < .01f) {
+                        points.set(end, new Point(x * (1 + reach / length), y * (1 + reach / length), p.width));
+                    }
+                }
+            }
+            extended.add(List.copyOf(points));
+        }
+        var terminals = new ArrayList<>(ends);
+        for (int d = 0; d < 6; d++) {
+            if ((terminalExits & (1 << d)) == 0) { continue; }
+            Coords next = coords.translated(d);
+            float x = (BoardGeometry.centerX(next) - BoardGeometry.centerX(coords)) / (2 * BoardGeometry.hexScale());
+            float y = (BoardGeometry.centerY(next) - BoardGeometry.centerY(coords)) / (2 * BoardGeometry.hexScale());
+            float length = (float) Math.hypot(x, y), reach = 1 + lengths.get(d) / length;
+            terminals.add(new End(new Point(x * reach, y * reach, Kind.PAVED.halfWidth), x / length, y / length));
+        }
+        return new BoardRoad(coords, extended, terminals, joins, roundabout);
+    }
 
     static boolean roundabout(int exits) { return Integer.bitCount(exits & 63) >= 5; }
 
@@ -292,6 +331,7 @@ final class BoardRoad {
         return distance;
     }
 
+    Coords coords() { return coords; }
     List<Join> joins() { return joins; }
 
     /** Symmetric feathering changes tyre wear intensity, never the axle spacing or tyre width. */

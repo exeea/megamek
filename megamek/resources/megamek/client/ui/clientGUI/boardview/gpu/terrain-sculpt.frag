@@ -33,17 +33,13 @@ uniform vec3 u_wind;        // direction in xy, strength in z
 uniform float u_waterEffects;
 uniform float u_waterLine;  // world units the water surface lies below its hex's level
 #ifdef terrainBlendFlag
-in vec3 v_coverWeights;
-uniform vec3 u_coverFamilies;
-uniform vec3 u_coverResponses;
+in vec4 v_coverWeights;
+uniform vec4 u_coverFamilies;
+uniform vec4 u_coverResponses;
 uniform sampler2DArray u_terrainLayers; // interleaved colour/height and normal/AO, shared with ordinary materials
-uniform vec4 u_coverTiles0, u_coverTiles1, u_coverTiles2;
-uniform vec4 u_coverLayers0, u_coverLayers1, u_coverLayers2;
+uniform vec4 u_coverTiles0, u_coverTiles1, u_coverTiles2, u_coverTiles3;
+uniform vec4 u_coverLayers0, u_coverLayers1, u_coverLayers2, u_coverLayers3;
 #endif
-
-// The second repeat of every map is 2.37 times larger and turned by 34 degrees.
-const mat2 TURN = mat2(.8253, .5646, -.5646, .8253);
-
 
 // Per-level identity, so every level reads from straight above; saturation, lightness and contrast in percent per
 // level. Higher ground turns lighter and paler toward cream, as drier, sun-bleached ground; lower ground darker and a
@@ -65,74 +61,7 @@ vec3 levelGrade(vec3 c, float level) {
     return clamp(c, 0.0, 1.0);
 }
 
-// ---- Material sampling -------------------------------------------------------------------------------------------
-
-// Height-based blend: where both layers are wanted, the one whose relief stands higher shows.
-float heightBlend(float lower, float upper, float want) {
-    float a = lower + 1.0 - want, b = upper + want;
-    float top = max(a, b) - .2;
-    float wa = max(a - top, 0.0), wb = max(b - top, 0.0);
-    return wb / (wa + wb);
-}
-
-// How far ground detail has faded towards its average colour: from about 18 cm per pixel, where a map's repeats
-// would start to beat against each other, to 60 cm; a fifth of the detail remains. Set once per fragment in main().
-float farDetail;
-
-// A map on the ground plane at two repeats, mixed by a broad field, so no period shows. p is in metres with +V
-// pointing to world -Y, as the maps are authored. From afar it settles to the map's average (its last mip level).
-vec4 planar(sampler2D map, vec2 p, float tile, float mixer) {
-    vec4 near = mix(texture(map, p / tile), texture(map, TURN * p / (tile * 2.37) + .31), mixer);
-    return farDetail > 0.0 ? mix(near, texture(map, p / tile, 12.0), farDetail) : near;
-}
-
-// The matching tangent-space normal (x along +U, y along +V); the turned sample is turned back.
-vec4 planarNormal(sampler2D map, vec2 p, float tile, float mixer) {
-    vec4 near = texture(map, p / tile);
-    vec4 far = texture(map, TURN * p / (tile * 2.37) + .31);
-    vec3 a = near.rgb * 2.0 - 1.0, b = far.rgb * 2.0 - 1.0;
-    b.xy = b.xy * TURN;
-    vec4 result = vec4(mix(a, b, mixer), mix(near.a, far.a, mixer));
-    return mix(result, vec4(0.0, 0.0, 1.0, result.a), farDetail);
-}
-
-// Tangent-space detail on a surface facing up: U is world +X, V is world -Y.
-vec3 upNormal(vec3 detail, vec3 face) {
-    return normalize(vec3(detail.x + face.x, face.y - detail.y, detail.z * face.z));
-}
-
-// A wall map's two vertical projections (U along the face, V down it), whiteout-blended with the face normal and
-// expressed in world space. side weights the projection onto the YZ plane.
-vec3 wallNormal(sampler2D map, vec2 uvx, vec2 uvy, vec3 face, float side) {
-    vec3 nx = texture(map, uvx).rgb * 2.0 - 1.0, ny = texture(map, uvy).rgb * 2.0 - 1.0;
-    vec3 wx = vec3(nx.z * face.x, nx.x * sign(face.x) + face.y, face.z - nx.y);
-    vec3 wy = vec3(-ny.x * sign(face.y) + face.x, ny.z * face.y, face.z - ny.y);
-    return normalize(mix(wy, wx, side));
-}
-
-// Cliffs and rocks share the same world-space projections.
-vec4 wallSample(vec3 world, vec3 face, out vec2 uvx, out vec2 uvy, out float side) {
-    vec3 axes = pow(abs(face), vec3(4.0));
-    uvx = vec2(world.y * sign(face.x), -world.z) / u_sculptTiles.z;
-    uvy = vec2(-world.x * sign(face.y), -world.z) / u_sculptTiles.z + .37;
-    vec4 x = texture(u_wallColor, uvx), y = texture(u_wallColor, uvy);
-    side = clamp((axes.x / max(axes.x + axes.y, 1e-4) - .5) * 3.0 + (x.a - y.a) * 1.2 + .5, 0.0, 1.0);
-    return mix(y, x, side);
-}
-
-// A ground or debris map on a sloping face: seen from above where the face lies back (lying 1), and from the side like
-// the wall maps where it is steep, so it never stretches down the slope. dx, dy are the side coordinates in metres.
-vec4 draped(sampler2D map, vec2 p, vec2 dx, vec2 dy, float side, float tile, float mixer, float lying) {
-    if (lying >= 1.0) return planar(map, p, tile, mixer);
-    vec4 steep = mix(texture(map, dy / tile), texture(map, dx / tile), side);
-    if (lying <= 0.0) return steep;
-    return mix(steep, planar(map, p, tile, mixer), lying);
-}
-
-vec3 drapedNormal(sampler2D map, vec2 p, vec2 dx, vec2 dy, vec3 face, float side, float tile, float mixer, float lying) {
-    vec3 steep = wallNormal(map, dx / tile, dy / tile, face, side);
-    return normalize(mix(steep, upNormal(planarNormal(map, p, tile, mixer).rgb, face), lying));
-}
+// terrain-projection-functions
 
 // ---- Surface families --------------------------------------------------------------------------------------------
 
@@ -175,6 +104,7 @@ vec3 groundBounceFor(float f) {
     if (abs(f - 2.0) < .5) return vec3(.42, .28, .16);
     if (abs(f - 3.0) < .5) return vec3(.22, .21, .19);
     if (abs(f - 4.0) < .5) return vec3(.30, .29, .27);
+    if (f > 5.5) return vec3(.04, .025, .018);
     return vec3(.75, .78, .82);
 }
 
@@ -220,20 +150,6 @@ vec3 groundToneFor(float f, vec3 albedo, vec3 world, float broad, float fine, fl
 vec3 groundTone(vec3 albedo, vec3 world, float broad, float fine, float region, float rim, float foot) {
     return groundToneFor(u_sculptFamily, albedo, world, broad, fine, region, rim, foot);
 }
-
-// The surface length one pixel covers, in metres. Set once per fragment in main().
-float pixelMetres;
-
-float hash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
-
-// Darkening of a joint of half-width w at distance x (metres) from its centre line. A joint narrower than a pixel
-// darkens it only by the share it covers, so distant joints neither vanish nor flicker.
-float joint(float x, float w) {
-    return (1.0 - smoothstep(w - .5 * pixelMetres, w + .5 * pixelMetres, x)) * min(1.0, 2.0 * w / pixelMetres);
-}
-
-// Defined after main(): it uses declarations the renderer inserts before main().
-vec2 slab(float u, float z, float h, float d, float projection, bool single, out float shade);
 
 // sculpt-material-functions
 void main() {
@@ -281,6 +197,8 @@ void main() {
     vec3 normal = face;
     float cavity = 1.0;
     float materialHeight = .5;
+    vec3 emission = vec3(0.0);
+    float roughness = .9, volcanic = 0.0;
     float caustic = 0.0;
     float grass = family(0.0) ? 1.0 : 0.0;
     vec3 bounce = groundBounce();
@@ -307,6 +225,9 @@ void main() {
             normal = material.normal;
             cavity = material.cavity;
             materialHeight = material.height;
+            emission = material.emission;
+            roughness = material.roughness;
+            volcanic = material.volcanic;
 #endif
             // Match a top to its slope at the same height; tactical level grading remains continuous.
             if (!shore) level = max(v_cloudPosition.z / u_levelHeight, -1.5);
@@ -411,30 +332,7 @@ void main() {
                     }
                 }
                 if (family(4.0)) {
-                    // Cast concrete: the whole face of a step of up to two levels, and from three levels the slab of
-                    // the top level (its underside included) above the bedrock that carries it.
-                    bool single = rock > .5;
-                    float poured = 1.0 - smoothstep(-.02, .02, d - (single ? u_levelHeight / u_metre + .12 : drop + 1.0));
-                    if (poured > 0.0) {
-                        // Flat panels need only boundary vertices. Evaluate contact shading per fragment so it
-                        // stays at the foot and under the rim instead of stretching across a large triangle.
-                        float shelterDistance = (d - 2.2) / 1.6;
-                        float shelter = max(0.0, 1.0 - shelterDistance * shelterDistance);
-                        float castOcclusion = (1.0 - .4 * exp(-h / 1.6)) * (1.0 - .25 * shelter * shelter);
-                        occlusion = mix(occlusion, castOcclusion, poured);
-                        float along = clamp((axes.x / max(axes.x + axes.y, 1e-4) - .5) * 6.0 + .5, 0.0, 1.0);
-                        float shadeX, shadeY;
-                        vec2 sx = slab(world.y * sign(face.x), world.z, h, d, 1.0, single, shadeX);
-                        vec2 sy = slab(-world.x * sign(face.y), world.z, h, d, 0.0, single, shadeY);
-                        vec3 concrete = mix(texture(u_mantleColor, sy).rgb * shadeY,
-                              texture(u_mantleColor, sx).rgb * shadeX, along);
-                        albedo = mix(albedo, concrete, poured);
-                        if (u_normalMaps > .5) {
-                            normal = normalize(mix(normal, wallNormal(u_mantleNormal, sx, sy, face, along), poured));
-                            float pores = mix(texture(u_mantleNormal, sy).a, texture(u_mantleNormal, sx).a, along);
-                            cavity = mix(cavity, pores * .5 + .5, poured);
-                        }
-                    }
+                    concreteSlab(world, face, h, d, rock, albedo, normal, occlusion, cavity);
                 }
             }
             // Broad ledges collect the ground cover (sand, snow, moss on alpine rock); on the rock kit only snow and
@@ -491,13 +389,14 @@ void main() {
             }
         }
 #ifdef terrainBlendFlag
-        if (natural) {
+        if (ground || cliff) {
             float foot = shore || cliff ? v_diffuseUV.x : v_diffuseUV.y;
             float rim = shore || cliff ? v_diffuseUV.y : v_diffuseUV.x;
             float rock = ground ? rockiness(steps) : v_color.g;
             // A bank blend must use sediment below the waterline, never repaint the bed with neighbouring turf.
             blendCovers(materialWorld, face, foot, rim, rock, ground ? .5 : v_color.a, sediment,
-                  broad, fine, region, albedo, normal, cavity, materialHeight, grass, bounce, response, rainCover);
+                  broad, fine, region, albedo, normal, cavity, materialHeight, grass, bounce, response, rainCover,
+                  emission, roughness, volcanic);
         }
 #endif
         if (natural) {
@@ -513,7 +412,7 @@ void main() {
             albedo *= 1.0 + sway * .05 * u_wind.z * grass;
             normal = normalize(normal + vec3(gust * sway * .12 * u_wind.z * grass, 0.0));
         }
-        albedo = levelGrade(albedo, level);
+        albedo = mix(levelGrade(albedo, level), albedo, volcanic);
         if (waterCovered) {
             // Wet in a band just above the waterline and below it; beneath it the bed keeps the hue its column of
             // water passes and catches caustics (water-optics.glsl), while the surface above removes the brightness
@@ -534,7 +433,7 @@ void main() {
     }
     // 1 above the water, 0 on a submerged bed: the water surface draws the grid and takes the rain for it.
     float exposed = waterCovered ? 1.0 - smoothstep(0.0, 1.0, depth * u_metre - u_waterLine) : 1.0;
-    if (ground) albedo *= mix(1.0, terrainGrid(v_cloudPosition.xy * u_rainScale), exposed);
+    if (ground) albedo *= mix(1.0, terrainGrid(v_cloudPosition.xy * u_rainScale), exposed * (1.0 - volcanic));
     // Rain darkens exposed ground and rock, and gathers in puddles on level ground.
     float wet = u_wetness * rainCover * exposed;
     float film = max(wet * max(0.0, response), max(biomeDamp, biomePool));
@@ -564,6 +463,13 @@ void main() {
         sheen = sun * incidence * film * fresnel * pow(max(0.0, dot(normal, halfVector)), exponent) * (exponent + 2.0) / 8.0;
     }
 #endif
+    if (volcanic > 0.0) {
+        vec3 hotAmbient, hotDirect, hotSheen;
+        surfaceLighting(normal, film, roughness, hotAmbient, hotDirect, hotSheen);
+        ambient = mix(ambient, hotAmbient * cavity, volcanic);
+        direct = mix(direct, hotDirect, volcanic);
+        sheen = mix(sheen, hotSheen, volcanic);
+    }
     // Cloud shadows attenuate direct light and sheen here (inserted by GpuCloudShadow).
     vec3 pigment = albedo;
     albedo *= ambient + direct;
@@ -573,30 +479,7 @@ void main() {
         albedo = submergedLight(albedo, pigment, scattered, submerged);
     }
 #endif
-    vec3 result = toDisplay(albedo);
+    vec3 result = toDisplay(albedo + emission);
     if (puddle > 0.0) result = rainReflection(result, normal, puddle);
     fragColor = vec4(result, 1.0);
-}
-
-// Cast concrete comes in slabs. On walls of up to two levels they stand in courses one level tall with staggered
-// joints; from three levels one slab spans the top level, jointed every 12 m. Each slab samples its own window of the
-// map and takes its own tone and grime, so the map's repeat never shows. u runs along the face and z up it; h and d
-// are the height above the wall's foot and the depth below its rim, all in metres. Returns the map coordinates (V down
-// the face) and writes the slab's colour factor, joints included, to shade.
-vec2 slab(float u, float z, float h, float d, float projection, bool single, out float shade) {
-    float levelMetres = u_levelHeight / u_metre;
-    float course = floor(z / levelMetres + .001);
-    float up = z / levelMetres + .001 - course;
-    float width = single ? 12.0 : 4.8;
-    float along = u / width + (single ? 0.0 : .5 * mod(course, 2.0)) + projection * .37;
-    vec3 id = vec3(floor(along), course, projection);
-    vec2 window = vec2(hash(id), hash(id + 17.3));
-    // Each slab's own tone, grime settling toward its foot and run-off stains hanging from its top edge.
-    shade = mix(.9, 1.07, hash(id + 5.1)) * mix(.84, 1.0, smoothstep(0.0, .3, up));
-    float runoff = smoothstep(.55, .85, texture(u_rainNoise, vec2(u / 3.1 + window.x * 7.0, z / 45.0)).r);
-    shade *= 1.0 - .14 * runoff * smoothstep(.45, 1.0, up);
-    float seam = joint(min(fract(along), 1.0 - fract(along)) * width, .03);
-    if (!single) seam = max(seam, joint(min(up, 1.0 - up) * levelMetres, .03) * smoothstep(.1, .3, d) * smoothstep(.1, .3, h));
-    shade *= 1.0 - .55 * seam;
-    return vec2(u, -z) / u_sculptTiles.w + window;
 }

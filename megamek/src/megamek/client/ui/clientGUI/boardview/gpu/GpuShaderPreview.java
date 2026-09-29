@@ -47,8 +47,8 @@ final class GpuShaderPreview implements Disposable {
     enum Preset {
         AUTO("Automatic", ""), EXPLOSION("Explosion", ""), LASER("Laser", "ISMediumLaser"), PPC("PPC", "ISPPC"),
         PROJECTILE("Autocannon", "ISAC5"), IMPACT("Ballistic impact", "ISAC5"),
-        MISSILE("Missile salvo", "ISSRM6"), FLAME("Flamethrower", "ISFlamer"),
-        FIRE("Ground fire / smoke", ""), RAIN("Rain", ""), SNOW("Snow", ""), MATERIAL("Material sphere", ""),
+        MISSILE("Missile salvo", "ISSRM6"), FLAME("Flamethrower", "ISFlamer"), SMOKE("Smoke particles", ""), JET("Jet flame", ""),
+        FIRE("Ground fire / smoke", ""), RAIN("Rain", ""), SNOW("Snow", ""), HAIL("Hail", ""), MATERIAL("Material sphere", ""),
         NONE("Live board", "");
 
         final String title, weapon;
@@ -56,6 +56,7 @@ final class GpuShaderPreview implements Disposable {
         @Override
         public String toString() { return title; }
         boolean ballistic() { return this == PROJECTILE || this == IMPACT; }
+        boolean precipitation() { return this == RAIN || this == SNOW || this == HAIL; }
 
         static Preset forFile(String name) {
             if (name == null) { return NONE; }
@@ -63,9 +64,13 @@ final class GpuShaderPreview implements Disposable {
             if (name.equals("beams.frag") || name.equals("effects.vert")) { return LASER; }
             if (name.startsWith("missile.")) { return MISSILE; }
             if (name.equals("projectiles.frag")) { return IMPACT; }
-            if (name.equals("particles.frag")) { return FLAME; }
+            if (name.equals("particles.frag") || name.equals("particles-fire.glsl")) { return FLAME; }
+            if (name.equals("particles-smoke.glsl")) { return SMOKE; }
+            if (name.equals("particles-jet.glsl")) { return JET; }
             if (name.startsWith("terrain-effects") || name.equals("camera-depth.glsl")) { return FIRE; }
-            if (name.startsWith("weather-particles.")) { return RAIN; }
+            if (name.startsWith("weather-particles.") || name.equals("weather-rain.glsl")) { return RAIN; }
+            if (name.equals("weather-snow.glsl")) { return SNOW; }
+            if (name.equals("weather-hail.glsl")) { return HAIL; }
             if (name.startsWith("unit-material.") || name.startsWith("linear-") || name.equals("light-model.glsl")) { return MATERIAL; }
             return NONE;
         }
@@ -100,6 +105,8 @@ final class GpuShaderPreview implements Disposable {
     private Texture checker;
     private GpuTerrainEffects groundFire;
     private GpuWeatherParticles weather;
+    private final GpuEffectBatch sampleParticles = new GpuEffectBatch(3);
+    private final Vector3 particleOrigin = new Vector3(), particleEnd = new Vector3();
     private BoardScene sampleScene;
     private UnitAttack attack;
     private Settings previous;
@@ -163,10 +170,24 @@ final class GpuShaderPreview implements Disposable {
                 if (groundFire == null) { groundFire = new GpuTerrainEffects(); }
                 groundFire.update(sampleScene, surfaces, BoardAtmosphere.Effects.NONE, settings.playing() ? dt * settings.speed() : 0);
                 groundFire.render(camera, depth, Color.WHITE, new Vector3(-.3f, .5f, -1).nor());
-            } else if (preset == Preset.RAIN || preset == Preset.SNOW) {
+            } else if (preset == Preset.SMOKE || preset == Preset.JET) {
+                sampleParticles.begin();
+                if (preset == Preset.SMOKE) {
+                    for (int i = 0; i < 3; i++) {
+                        float age = (seconds * .3f + i / 3f) % 1;
+                        particleOrigin.set(0, 0, 8 + age * 45);
+                        sampleParticles.billboard(camera, particleOrigin, 9 + age * 12, 0, (1 - age) * .75f);
+                    }
+                } else {
+                    particleOrigin.set(0, 0, 55);
+                    particleEnd.set(0, 0, 8 + 3 * MathUtils.sin(seconds * 13));
+                    sampleParticles.ribbon(camera, particleOrigin, particleEnd, 7, 1, .85f);
+                }
+                sampleParticles.render(camera, preset == Preset.SMOKE ? sampleParticles.size() : 0);
+            } else if (preset.precipitation()) {
                 if (weather == null) { weather = new GpuWeatherParticles(); }
                 var effects = new BoardAtmosphere.Effects(preset == Preset.RAIN ? .7f : 0,
-                      preset == Preset.SNOW ? .7f : 0, 0, 0, 0, .15f, 90);
+                      preset == Preset.SNOW ? .7f : 0, preset == Preset.HAIL ? .7f : 0, 0, 0, .15f, 90);
                 weather.render(camera, sampleScene, effects, Color.WHITE, seconds);
             } else if (attack != null) {
                 attacks.update(attack, null, preset == Preset.EXPLOSION ? Map.of()
@@ -224,21 +245,22 @@ final class GpuShaderPreview implements Disposable {
 
     private void positionCamera(Settings settings) {
         float span = switch (preset) {
-            case MATERIAL -> 92;
+            case MATERIAL, SMOKE, JET -> 92;
             case IMPACT -> 65;
             case EXPLOSION -> 95;
             case FIRE -> BoardGeometry.width() * 3;
-            case RAIN, SNOW -> 200;
+            case RAIN, SNOW, HAIL -> 200;
             default -> 170;
         };
         focus.set(0, 0, switch (preset) {
             case MATERIAL, EXPLOSION -> 18;
+            case SMOKE, JET -> 30;
             case FIRE -> BoardGeometry.level() * 3;
-            case RAIN, SNOW -> 40;
+            case RAIN, SNOW, HAIL -> 40;
             default -> 10;
         });
         if (preset == Preset.IMPACT) { focus.set(55, 0, 12); }
-        if (preset == Preset.EXPLOSION || preset == Preset.FIRE || preset == Preset.RAIN || preset == Preset.SNOW) {
+        if (preset == Preset.EXPLOSION || preset == Preset.FIRE || preset.precipitation()) {
             focus.x = BoardGeometry.centerX(new Coords(0, 0));
             focus.y = BoardGeometry.centerY(new Coords(0, 0));
         }
@@ -348,6 +370,7 @@ final class GpuShaderPreview implements Disposable {
     @Override
     public void dispose() {
         attacks.dispose();
+        sampleParticles.dispose();
         depth.dispose();
         if (groundFire != null) { groundFire.dispose(); }
         if (weather != null) { weather.dispose(); }

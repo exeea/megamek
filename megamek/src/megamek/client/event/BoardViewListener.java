@@ -35,12 +35,12 @@ package megamek.client.event;
 
 import java.util.EventListener;
 
-import megamek.client.ui.clientGUI.boardview.IBoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.common.board.Coords;
 
 /**
  * Classes which implement this interface provide methods that deal with the events that are generated when the
- * BoardView is changed.
+ * shared board presentation changes.
  * <p>
  * After creating an instance of a class that implements this interface it can be added to a Board using the
  * addBoardViewListener method and removed using the removeBoardViewListener method. When BoardView is changed the
@@ -78,7 +78,7 @@ public interface BoardViewListener extends EventListener {
      *
      * @param b The select event
      *
-     * @see IBoardView#select(Coords)
+     * @see BoardClientState#select(Coords)
      */
     void hexSelected(BoardViewEvent b);
 

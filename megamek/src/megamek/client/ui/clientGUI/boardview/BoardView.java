@@ -101,6 +101,7 @@ import megamek.common.event.GameListenerAdapter;
 import megamek.common.event.board.BoardEvent;
 import megamek.common.event.board.BoardListener;
 import megamek.common.event.board.GameBoardChangeEvent;
+import megamek.common.event.board.GameBoardNewEvent;
 import megamek.common.event.entity.GameEntityChangeEvent;
 import megamek.common.game.Game;
 import megamek.common.moves.MovePath;
@@ -129,9 +130,6 @@ public final class BoardView extends AbstractBoardView
     public static final int BOARD_HEX_DOUBLE_CLICK = 2;
     public static final int BOARD_HEX_DRAG = 3;
     private static final int BOARD_HEX_POPUP = 4;
-
-    // the dimensions of MegaMek's hex images
-    public static final int HEX_DIAG = (int) Math.round(Math.sqrt(HEX_W * HEX_W + HEX_H * HEX_H));
 
     static final int HEX_WC = HEX_W - (HEX_W / 4);
 
@@ -303,7 +301,8 @@ public final class BoardView extends AbstractBoardView
     // hazard outline, separate from the plain entity highlight above
 
 
-    private final Board observedBoard;
+    private Board observedBoard;
+    private boolean disposed;
     private final BoardClientState clientState;
 
     /** stores the theme last selected to override all hex themes */
@@ -403,7 +402,6 @@ public final class BoardView extends AbstractBoardView
     // Part of the sprites need specialized treatment; as there can be many sprites, filtering them on the spot is a
     // noticeable performance hit (in iso mode), therefore the sprites are copied to specialized lists when created
 
-    private final List<HexDrawPlugin> hexDrawPlugins = new ArrayList<>();
 
     /**
      * Construct a new board view for the specified game
@@ -461,6 +459,23 @@ public final class BoardView extends AbstractBoardView
             @Override
             public void gameBoardChanged(GameBoardChangeEvent event) {
                 clearHexImageCache();
+            }
+
+            @Override
+            public void gameBoardNew(GameBoardNewEvent event) {
+                if (!disposed && (event.getBoardId() == boardId)) {
+                    if (observedBoard != null) {
+                        observedBoard.removeBoardListener(BoardView.this);
+                    }
+                    observedBoard = event.getNewBoard();
+                    if (observedBoard != null) {
+                        observedBoard.addBoardListener(BoardView.this);
+                        updateBoard();
+                    }
+                    clearHexImageCache();
+                    clearShadowMap();
+                    boardPanel.repaint();
+                }
             }
         };
 
@@ -1112,8 +1127,6 @@ public final class BoardView extends AbstractBoardView
 
     public void clearShadowMap() {
         shadowMap = null;
-
-        clientState.clearArtwork();
     }
 
     public @Nullable Point getTerrainLightDirection() {
@@ -1875,9 +1888,7 @@ public final class BoardView extends AbstractBoardView
             }
         }
 
-        for (var plugin : hexDrawPlugins) {
-            plugin.draw(graphics2D, hex, game, coords, this);
-        }
+        clientState.drawHexPlugins(graphics2D, coords);
         graphics2D.dispose();
 
         cacheEntry = new HexImageCacheEntry(hexImage);
@@ -3456,8 +3467,8 @@ public final class BoardView extends AbstractBoardView
 
     @Override
     public void boardChangedHex(BoardEvent boardEvent) {
-        // A changed blocker can affect LOS far beyond this hex and its immediate neighbors.
-        checkFoVHexImageCacheClear();
+        // Shared state has invalidated LOS. Only the classic raster embeds FoV into its hex images.
+        if (shouldFovDarken() || shouldFovHighlight()) { hexImageCache.clear(); }
         Coords coords = boardEvent.getCoords();
         Hex hex = game.getBoard(boardId).getHex(coords);
         // An elevator changes its terrain overlay level, which the isometric view can draw beyond the immediate
@@ -3466,7 +3477,7 @@ public final class BoardView extends AbstractBoardView
         boolean hasIndustrialElevator = (hex != null) && hex.containsTerrain(Terrains.INDUSTRIAL_ELEVATOR);
         boolean hasSolarisElevator = (hex != null) && hex.containsTerrain(Terrains.SOLARIS_ELEVATOR);
         if (hasIndustrialElevator || hasSolarisElevator) {
-            clearHexImageCache();
+            hexImageCache.clear();
         } else {
             hexImageCache.remove(coords);
             // Also repaint the surrounding hexes because of shadows, border etc.
@@ -4143,15 +4154,22 @@ public final class BoardView extends AbstractBoardView
 
     @Override
     public void dispose() {
+        if (disposed) {
+            return;
+        }
+        disposed = true;
         // The native window belongs to the client, so replacing a map must not close it.
         if (getClientgui() == null) {
             GpuBoardWindow.closeFor(clientState);
         }
         keyRegistrations.forEach(Runnable::run);
         keyRegistrations.clear();
+        ToolTipManager.sharedInstance().unregisterComponent(boardPanel);
         redrawTimerTask.cancel();
         game.removeGameListener(boardGameListener);
-        observedBoard.removeBoardListener(this);
+        if (observedBoard != null) {
+            observedBoard.removeBoardListener(this);
+        }
         removeSprites(entitySprites);
         removeSprites(isometricSprites);
         clientState.setChanged(() -> { });
@@ -4320,8 +4338,7 @@ public final class BoardView extends AbstractBoardView
     }
 
     public void addHexDrawPlugin(HexDrawPlugin plugin) {
-        hexDrawPlugins.add(plugin);
-        invalidatePlanarCapture();
+        clientState.addHexDrawPlugin(plugin);
     }
 
     /**

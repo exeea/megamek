@@ -60,6 +60,29 @@ final class BoardConcrete {
 
     Shift shift(long corner) { return shifts.getOrDefault(corner, ZERO); }
 
+    /** Signed distance to the fitted footprint; NaN means this hex still uses its original outline. */
+    float distance(Coords coords, float x, float y) {
+        if (shifts.isEmpty()) { return Float.NaN; }
+        Vector3 corner = new Vector3();
+        float nearest = Float.POSITIVE_INFINITY, ax = 0, ay = 0;
+        boolean inside = false, moved = false;
+        for (int k = 0; k <= 6; k++) {
+            BoardGeometry.corner(corner, coords, 0, k);
+            Shift delta = shift(key(corner));
+            moved |= delta.x() != 0 || delta.y() != 0;
+            float bx = corner.x + delta.x(), by = corner.y + delta.y();
+            if (k > 0) {
+                float dx = bx - ax, dy = by - ay;
+                float t = Math.clamp(((x - ax) * dx + (y - ay) * dy) / Math.max(dx * dx + dy * dy, .00001f), 0, 1);
+                nearest = Math.min(nearest, (float) Math.hypot(x - ax - t * dx, y - ay - t * dy));
+                if ((ay > y) != (by > y) && x < ax + (y - ay) * dx / dy) { inside = !inside; }
+            }
+            ax = bx;
+            ay = by;
+        }
+        return moved ? inside ? -nearest : nearest : Float.NaN;
+    }
+
     List<Shift> corners(Coords coords) {
         List<Shift> result = new ArrayList<>(6);
         for (int k = 0; k < 6; k++) { result.add(shift(key(BoardGeometry.corner(coords, 0, k)))); }

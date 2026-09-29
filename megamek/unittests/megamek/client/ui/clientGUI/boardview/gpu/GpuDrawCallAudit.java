@@ -232,15 +232,13 @@ final class GpuDrawCallAudit implements RenderableSorter, AutoCloseable {
     private static String family(Renderable part) {
         for (Attribute attribute : part.material) {
             String alias = Attribute.getAttributeAlias(attribute.type);
-            if (("boardSculpt".equals(alias) || "boardTerrainDetail".equals(alias))
-                  && attribute instanceof FloatAttribute value) {
+            if ("boardSculpt".equals(alias) && attribute instanceof FloatAttribute value) {
                 int family = (int) value.value;
                 return family >= 0 && family < BoardScene.Surface.values().length
                       ? BoardScene.Surface.values()[family].name() : "bed-" + family;
             }
-            if (attribute instanceof GpuWaterShader) {
-                return "water-" + field(attribute, "palette") + (Boolean.TRUE.equals(field(attribute, "falling")) ? "-fall" : "")
-                      + (Boolean.TRUE.equals(field(attribute, "spray")) ? "-spray" : "");
+            if (attribute instanceof GpuWaterShader water) {
+                return "water-" + field(water, "palette") + "-" + water.mode.name().toLowerCase(java.util.Locale.ROOT);
             }
         }
         return "-";

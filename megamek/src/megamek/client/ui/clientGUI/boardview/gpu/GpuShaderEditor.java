@@ -121,6 +121,9 @@ final class GpuShaderEditor {
         toolbar.add(button("Reload all files", "Reread all shader files from disk, including closed files", this::reloadAll));
         toolbar.add(button("Compiled sources", "Inspect complete active shader variants and their generated line numbers",
               () -> compiled.accept(this::showSources)));
+        failedSource.setEnabled(false);
+        failedSource.addActionListener(event -> { if (failure != null) { showSources(List.of(failure)); } });
+        toolbar.add(failedSource);
         live.addActionListener(event -> {
             if (live.isSelected() || savePending) { debounce.restart(); }
             else { debounce.stop(); status.setText("Live preview paused. Apply with Ctrl+Enter."); }
@@ -173,23 +176,16 @@ final class GpuShaderEditor {
         diagnostics.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 13));
         diagnostics.setText("Edits preview after a 0.5 second pause. Save all writes to the paths shown below each file.\n"
               + "Compile errors keep the last working preview. Closing this window keeps your drafts until the board closes.");
-        JPanel output = new JPanel(new BorderLayout());
-        JPanel outputBar = new JPanel(new BorderLayout(8, 0));
-        outputBar.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));
-        outputBar.add(status, BorderLayout.CENTER);
-        failedSource.setEnabled(false);
-        failedSource.addActionListener(event -> { if (failure != null) { showSources(List.of(failure)); } });
-        outputBar.add(failedSource, BorderLayout.EAST);
-        output.add(outputBar, BorderLayout.NORTH);
         JTabbedPane details = new JTabbedPane();
         details.addTab("Inputs", inputEditor);
         details.addTab("Diagnostics", new JScrollPane(diagnostics));
-        output.add(details, BorderLayout.CENTER);
-        JSplitPane vertical = new JSplitPane(JSplitPane.VERTICAL_SPLIT, horizontal, output);
+        JSplitPane vertical = new JSplitPane(JSplitPane.VERTICAL_SPLIT, horizontal, details);
         vertical.setResizeWeight(0.82);
         vertical.setDividerLocation(580);
         window.add(toolbar, BorderLayout.NORTH);
         window.add(vertical, BorderLayout.CENTER);
+        status.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));
+        window.add(status, BorderLayout.SOUTH);
         shortcut(window.getRootPane(), "ctrl ENTER", "apply", () -> apply(false));
         shortcut(window.getRootPane(), "ctrl S", "save", () -> apply(true));
         shortcut(window.getRootPane(), "ctrl F", "find", () -> { find.requestFocusInWindow(); find.selectAll(); });
@@ -303,7 +299,7 @@ final class GpuShaderEditor {
 
     void apply(boolean save) {
         debounce.stop();
-        if (closed || documents.isEmpty()) { return; }
+        if (closed || sources.isEmpty()) { return; }
         // Keep an explicit save requested while keystrokes supersede an in-flight compilation.
         savePending |= save;
         long submittedVersion = version;
@@ -376,11 +372,11 @@ final class GpuShaderEditor {
     }
 
     void reloadAllFromDisk() {
+        Map<String, GpuShaderSource.FileSource> loaded = new LinkedHashMap<>();
         try {
             var names = new java.util.TreeSet<>(sources.keySet());
             var discovered = GpuShaderSource.files();
             names.addAll(discovered);
-            Map<String, GpuShaderSource.FileSource> loaded = new LinkedHashMap<>();
             for (String name : names) {
                 if (discovered.contains(name)) { loaded.put(name, GpuShaderSource.file(name)); }
                 else {
@@ -388,22 +384,23 @@ final class GpuShaderEditor {
                     loaded.put(name, new GpuShaderSource.FileSource(Files.readString(old.destination()), old.destination(), true));
                 }
             }
-            savePending = false;
-            version++;
-            sources.clear(); sources.putAll(loaded);
-            documents.forEach((name, document) -> {
-                document.saved = loaded.get(name);
-                document.text.setText(document.saved.text());
-                document.text.setCaretPosition(0);
-                title(document);
-            });
-            refreshTree();
-            showLocation();
-            apply(false);
         } catch (IOException | RuntimeException failure) {
             status.setText("Could not reload all files; existing documents were retained.");
             diagnostics.setText(failure.getMessage());
+            return;
         }
+        savePending = false;
+        version++;
+        sources.clear(); sources.putAll(loaded);
+        documents.forEach((name, document) -> {
+            document.saved = loaded.get(name);
+            document.text.setText(document.saved.text());
+            document.text.setCaretPosition(0);
+            title(document);
+        });
+        refreshTree();
+        showLocation();
+        apply(false);
     }
 
     private void search(boolean forward, boolean replaceMatch, boolean all) {

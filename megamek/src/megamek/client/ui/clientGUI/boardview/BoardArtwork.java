@@ -18,10 +18,12 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 
 import megamek.MMConstants;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.gpu.BoardRough;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.tileset.TilesetManager;
 import megamek.client.ui.util.UIUtil;
@@ -36,7 +38,14 @@ import megamek.common.util.ImageUtil;
 public final class BoardArtwork implements AutoCloseable {
     public record HexImage(Coords coords, BufferedImage terrain, BufferedImage normals, BufferedImage decals,
           BufferedImage decalsWithoutLimbs, BufferedImage tactical, List<BoardHexText> text,
-          Map<Integer, String> structureModels, BufferedImage foliage) { }
+          Map<Integer, String> structureModels, BufferedImage foliage, Set<Integer> blankTerrains) {
+        public HexImage(Coords coords, BufferedImage terrain, BufferedImage normals, BufferedImage decals,
+              BufferedImage decalsWithoutLimbs, BufferedImage tactical, List<BoardHexText> text,
+              Map<Integer, String> structureModels, BufferedImage foliage) {
+            this(coords, terrain, normals, decals, decalsWithoutLimbs, tactical, text, structureModels, foliage, Set.of());
+        }
+        public HexImage { blankTerrains = Set.copyOf(blankTerrains); }
+    }
     private record GroundArtwork(BufferedImage color, BufferedImage normal) { }
     private record DecalArtwork(BufferedImage full, BufferedImage withoutLimbs, BufferedImage foliage) { }
     private final Map<Coords, GroundArtwork> groundArtwork = new HashMap<>();
@@ -123,11 +132,12 @@ public final class BoardArtwork implements AutoCloseable {
         GroundArtwork ground = includeArtwork ? captureGroundArtwork(board, coords) : null;
         DecalArtwork decals = includeArtwork ? captureDecals(board, coords) : null;
         Map<Integer, String> models = includeArtwork ? structureModels(hex) : Map.of();
+        Set<Integer> blank = includeArtwork ? gpuTileset.blankTerrainTypes(hex) : Set.of();
         gpuTileset.clearHex(hex);
         return new HexImage(coords, ground == null ? null : ground.color(), ground == null ? null : ground.normal(),
               decals == null ? null : decals.full(), decals == null ? null : decals.withoutLimbs(), null,
               BoardHexText.capture(coords, hex, board, 1, LABEL_FONT, LABEL_FONT),
-              models, decals == null ? null : decals.foliage());
+              models, decals == null ? null : decals.foliage(), blank);
     }
 
     public void invalidate(Coords coords) {
@@ -241,6 +251,13 @@ public final class BoardArtwork implements AutoCloseable {
         graphics2D.setComposite(svComp);
     }
 
+    /** New kits use family/name paths; the selected legacy asset keeps its tileset provenance for fallback. */
+    public static File customBuildingFile(String asset) {
+        String relative = asset.substring("buildings/".length());
+        if (relative.startsWith("saxarba/")) { relative = relative.substring("saxarba/".length()); }
+        return new File(Configuration.dataDir(), "models/buildings/" + relative + ".glb");
+    }
+
     private Map<Integer, String> structureModels(Hex hex) {
         Map<Integer, String> models = new HashMap<>();
         if (hex.containsAnyTerrainOf(Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL)) {
@@ -251,12 +268,13 @@ public final class BoardArtwork implements AutoCloseable {
                 int extension = source.lastIndexOf('.');
                 if (extension > 0) {
                     String model = "buildings/" + source.substring(0, extension);
-                    if (new File(Configuration.dataDir(), "models/board/" + model + ".glb").isFile()
-                          || new File(Configuration.dataDir(), "models/board/" + model + ".g3dj").isFile()) {
-                        for (int terrain : new int[] { Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL }) {
-                            if (hex.containsTerrain(terrain) && gpuTileset.imageHasTerrain(image, terrain)) {
-                                models.putIfAbsent(terrain, model);
-                            }
+                    boolean legacy = new File(Configuration.dataDir(), "models/board/" + model + ".glb").isFile()
+                          || new File(Configuration.dataDir(), "models/board/" + model + ".g3dj").isFile();
+                    boolean custom = customBuildingFile(model).isFile();
+                    for (int terrain : new int[] { Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL }) {
+                        if ((legacy || (custom && terrain == Terrains.BUILDING))
+                              && hex.containsTerrain(terrain) && gpuTileset.imageHasTerrain(image, terrain)) {
+                            models.putIfAbsent(terrain, model);
                         }
                     }
                 }
@@ -340,6 +358,7 @@ public final class BoardArtwork implements AutoCloseable {
                 }
                 foliage = drawDecals(trees);
             }
+            if (BoardRough.variant(flat) != 0) { flat.removeTerrain(Terrains.FLUFF); }
             for (int terrain : GROUND_TERRAINS) {
                 flat.removeTerrain(terrain);
             }

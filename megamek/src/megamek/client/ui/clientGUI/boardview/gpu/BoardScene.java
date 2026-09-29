@@ -6,11 +6,13 @@ import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferInt;
 import java.awt.image.Raster;
 import java.awt.image.SinglePixelPackedSampleModel;
+import java.nio.IntBuffer;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Stream;
 import javax.swing.ImageIcon;
@@ -80,10 +82,11 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               terrainImages.captureOverlay(pixels.decals(), previous == null ? null : previous.decals()),
               terrainImages.capture(pixels.decalsWithoutLimbs(), previous == null ? null : previous.decalsWithoutLimbs()),
               terrainImages.capture(pixels.tactical(), previous == null ? null : previous.tactical()),
-              BoardFeatures.capture(hex, pixels.coords(), pixels.structureModels()), pixels.text(), BoardLiquid.capture(hex),
+              BoardFeatures.capture(hex, pixels.coords(), pixels.structureModels(), pixels.blankTerrains()), pixels.text(), BoardLiquid.capture(hex),
               terrainImages.captureOverlay(pixels.foliage(), previous == null ? null : previous.foliage()),
-              BoardFeatures.detailedGround(hex, pixels.structureModels()), BoardRoad.capture(hex), BoardFireSmoke.capture(hex),
-              BoardFeatures.biome(hex), hex.containsTerrain(Terrains.IMPASSABLE));
+              BoardFeatures.detailedGround(hex, pixels.structureModels(), pixels.blankTerrains()), BoardRoad.capture(hex),
+              BoardFireSmoke.capture(hex), BoardFeatures.biome(hex), hex.containsTerrain(Terrains.IMPASSABLE),
+              hex.containsTerrain(Terrains.BLACK_ICE) && hex.getTerrain(Terrains.BLACK_ICE).isBlackIceDetected());
     }
 
     /** World-space shadow travel per elevation level; null means directional shadows are disabled. */
@@ -149,7 +152,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         }
     }
 
-    enum FeatureKind { PROP, BUILDING, TREE, LIMB, SCATTER, BOULDER }
+    enum FeatureKind { PROP, BUILDING, TREE, LIMB, SCATTER, BOULDER, ROUGH }
 
     /** Captured visual ground treatment; movement and cover modifiers remain in the game terrain. */
     enum Biome { NONE, FIELD, MARSH, QUICKSAND, MUD }
@@ -171,7 +174,15 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
     record Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
           Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
           Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels foliage,
-          boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable) {
+          boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable,
+          boolean blackIce) {
+        Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
+              Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
+              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels foliage,
+              boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable) {
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
+                  tactical, features, text, liquid, foliage, detailedGround, road, fireSmoke, biome, impassable, false);
+        }
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
               Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels foliage,
@@ -234,7 +245,8 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         Tile withTactical(Pixels marking) {
             if (marking == tactical) { return this; }
             return new Tile(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals,
-                  decalsWithoutLimbs, marking, features, text, liquid, foliage, detailedGround, road, fireSmoke, biome, impassable);
+                  decalsWithoutLimbs, marking, features, text, liquid, foliage, detailedGround, road, fireSmoke, biome,
+                  impassable, blackIce);
         }
 
         Tile {
@@ -656,7 +668,23 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
                 int run = Arrays.binarySearch(runEnds, index + 1);
                 index = run < 0 ? -run - 1 : run;
             }
-            return (argb[index] << 8) | ((argb[index] >>> 24) & 0xff);
+            return Integer.rotateLeft(argb[index], 8);
+        }
+
+        /** Sequential atlas upload decodes each compressed run once, without expanding a second image on the heap. */
+        void writeRgba(IntBuffer target, int offset, int length) {
+            Objects.checkFromIndexSize(offset, length, width * height);
+            int end = offset + length;
+            if (runEnds == null) {
+                for (int i = offset; i < end; i++) { target.put(Integer.rotateLeft(argb[i], 8)); }
+                return;
+            }
+            int run = Arrays.binarySearch(runEnds, offset + 1);
+            if (run < 0) { run = -run - 1; }
+            while (offset < end) {
+                int stop = Math.min(end, runEnds[run]), color = Integer.rotateLeft(argb[run++], 8);
+                while (offset < stop) { target.put(color); offset++; }
+            }
         }
     }
 

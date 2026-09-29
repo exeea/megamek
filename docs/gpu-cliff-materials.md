@@ -1,10 +1,28 @@
 # Cliff materials
 
-These 1024 by 1024 rock, sandstone, compacted soil, concrete and snow materials now
-serve only the exposed sides that are not sculpted: edges of water, road and ramp
-hexes. Dry terrain uses the sculpted landform and its own procedural materials; see
-[Sculpted terrain](gpu-terrain-materials.md). Both camera views and picking use the
-same wall mesh in either case.
+All geological terrain now uses the shared materials described in
+[Sculpted terrain](gpu-terrain-materials.md), including roadside boulders,
+road/ramp side walls and submerged cliffs. `terrain-sculpt.frag` receives the
+canonical surface kind, normal and material family even when the hex's ground
+keeps a flat road mesh or authored artwork. Both camera views and picking retain
+the same geometry.
+
+The September 2026 shader audit found that these surfaces still selected an older
+cliff shader. Its outcrop branch muted texture grain and explicitly skipped normal
+maps, making roadside boulders look untextured. That shader, its material tags,
+uniform bindings and unused ground/cliff map accessors have been removed.
+Submerged walls now share the water-triangle clipping used by the rest of the
+terrain, so only covered portions receive water tint.
+
+Road paint/artwork, cornices, foliage, vegetation, water and magma retain their
+dedicated shaders: their texture coordinates, transparency, animation or lighting
+data differ from geological terrain. The audit checked these material selectors
+and their live resource references.
+
+## Legacy texture sources
+
+The older 1024 by 1024 rock, sandstone, compacted soil, concrete and snow sets are
+retained as asset sources, but are no longer loaded by the terrain renderer.
 
 Each family has three aligned repeating textures under
 `mm-data/data/models/board/textures/cliffs/`:
@@ -21,32 +39,10 @@ normal slopes are baked using that exact same, quantized range. Rock and sand ha
 the deepest relief; concrete has shallow pores. Normals retain the renderer's
 existing 128-centered encoding.
 
-`GpuAssets` lazily owns and shares the maps across hexes and disposes them with the
-other board assets. A family missing any of the three maps uses its original
-`textures/terrain/` color material. The dedicated cliff directory bypasses the
-legacy 128-texel base-mip restriction. Trilinear mipmaps and up to 8x supported
-anisotropic filtering handle distant and oblique surfaces.
-
-`terrain-cliff.frag` blends two continuous world-space wall projections, with
-normal perturbations transformed into the same frame. Their aligned color,
-normal and cavity samples cross hex edges without switching UV orientation.
-Real mesh relief replaces the previous 12–24-step parallax and six-step light
-traversal. Normal detail fades at small projected sizes; the larger sculpted
-relief remains in the shared terrain geometry. Broad, smooth wall normals avoid
-highlighting every tessellation diagonal.
-
-Ambient cavity shading, directional
-light, geometry shadows and cloud transmission share the existing board lighting.
-Rain darkens the exposed material and adds a sheen according to its existing
-water-film response; snow does not receive liquid rain film. The existing Normal
-maps control also disables mapped normals and cavity shading, without rebuilding
-meshes or texture allocations. No additional wall draw pass is added.
-
-The five material sets occupy approximately 67 MiB of uncompressed RGB8/RGBA8
-texture payload including mipmaps if all families are used. This is calculated
-storage, not measured driver memory; drivers may expand RGB to RGBA. Texture files
-are loaded only for families present on a board. Rendering cost increases for
-large visible cliff faces; no FPS or hardware compatibility claim is implied.
+The active sculpt maps remain lazily owned, shared and disposed by `GpuAssets`.
+They use world-space projections with mapped normals, cavity shading, board
+lighting and weather. Missing sculpt maps retain their existing neutral fallback.
+This consolidation makes no measured performance or memory claim.
 
 ## Authoring and rebuilding
 
@@ -78,10 +74,18 @@ whole renderer's color-management pipeline.
 
 ## Verification
 
-`GpuCliffMaterialsSmokeTest` opens a hidden native OpenGL context and checks all
-six wall orientations for every terrain family, live normal/relief toggling,
-rain and snow response, texture sharing and legacy fallback. It captures flat,
-relief and wet close-ups under the configured GPU screenshot directory. Existing
-terrain normals, cornices, upper rims and field-of-view cliff tests cover the
-neighboring render paths. Offline checks cover periodic seams, tangent normal
-direction, map alignment, normal lengths and deterministic regeneration.
+`GpuCliffMaterialsSmokeTest` checks all six wall orientations for every terrain
+family on both sculpted terrain and retained road/artwork geometry. It measures
+normal-map and rain/snow response, checks shared sculpt textures and fallback,
+and captures close-ups. `GpuRoughSmokeTest` checks that actual uploaded roadside
+boulder vertices bind the common rock color/normal maps and carry the rock tag.
+`GpuWaterCoverageTest`, `GpuWetCliffSmokeTest` and `GpuWaterShaderSmokeTest` cover
+water tint boundaries and water shader behavior; `GpuRoadSlopeSmokeTest` captures
+road approaches and retaining faces.
+
+Verified on 2026-09-28 on Windows: 44 tests across `BoardRocksTest`,
+`BoardRoadSlopeTest`, `BoardWetCliffTest` and `GpuWaterCoverageTest`, all seven
+native checks in the five smoke-test classes above, and `checkstyleMain` passed.
+The roadside boulders, road walls and underwater cliff captures were inspected.
+No references to the removed shader or its material tags remain in runtime code
+or tests, and the processed verification resources exclude the deleted shader.

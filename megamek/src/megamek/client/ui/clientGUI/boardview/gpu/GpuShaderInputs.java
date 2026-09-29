@@ -13,7 +13,7 @@ final class GpuShaderInputs {
     record Row(String name, GpuShaderValue.Type type, String supplied, String effective, String override,
           Double minimum, Double maximum, String note) { }
     record Request(String file, String program, boolean visible) { }
-    record Snapshot(List<String> programs, String program, List<Row> rows) { }
+    record Snapshot(Request request, List<String> programs, String program, List<Row> rows) { }
     record Edit(String program, String name, String text) { }
 
     private final Map<String, Map<String, GpuShaderValue>> overrides = new HashMap<>();
@@ -37,7 +37,7 @@ final class GpuShaderInputs {
             next.put(edit.name(), value);
         }
         if (edit.program().equals(SAMPLE)) {
-            int missiles = integer(next, "missiles", 6), hits = integer(next, "missileHits", missiles);
+            int missiles = integer(next, "missiles", GpuShaderPreview.Inputs.DEFAULT.missiles()), hits = integer(next, "missileHits", missiles);
             if (hits > missiles) { throw new IllegalArgumentException("Missile hits cannot exceed missiles. Clear or lower the hits override first."); }
         }
         if (next.isEmpty()) { overrides.remove(edit.program()); }
@@ -47,9 +47,10 @@ final class GpuShaderInputs {
 
     GpuShaderPreview.Inputs sample() {
         var values = values(SAMPLE);
-        int missiles = integer(values, "missiles", 6);
-        return new GpuShaderPreview.Inputs(integer(values, "rackSize", 5), integer(values, "shots", 1), missiles,
-              integer(values, "missileHits", missiles), integer(values, "hit", 1) != 0);
+        var defaults = GpuShaderPreview.Inputs.DEFAULT;
+        int missiles = integer(values, "missiles", defaults.missiles());
+        return new GpuShaderPreview.Inputs(integer(values, "rackSize", defaults.rackSize()), integer(values, "shots", defaults.shots()), missiles,
+              integer(values, "missileHits", missiles), integer(values, "hit", defaults.hit() ? 1 : 0) != 0);
     }
 
     private static int integer(Map<String, GpuShaderValue> values, String name, int fallback) {
@@ -59,16 +60,18 @@ final class GpuShaderInputs {
 
     List<Row> sampleRows(GpuShaderPreview.Preset preset) {
         List<Row> rows = new ArrayList<>();
+        var defaults = GpuShaderPreview.Inputs.DEFAULT;
         if (preset.ballistic()) {
-            rows.add(sampleRow("rackSize", GpuShaderValue.Type.INT, "5", 1, 100, "Calibre controls spark geometry and projectile size before shading."));
-            rows.add(sampleRow("shots", GpuShaderValue.Type.INT, "1", 1, 16, "Rounds in the sample attack."));
+            rows.add(sampleRow("rackSize", GpuShaderValue.Type.INT, Integer.toString(defaults.rackSize()), 1, 100,
+                  "Calibre controls spark geometry and projectile size before shading."));
+            rows.add(sampleRow("shots", GpuShaderValue.Type.INT, Integer.toString(defaults.shots()), 1, 16, "Rounds in the sample attack."));
         }
         if (preset == GpuShaderPreview.Preset.MISSILE) {
-            rows.add(sampleRow("missiles", GpuShaderValue.Type.INT, "6", 1, 100, "Missiles launched in the sample salvo."));
+            rows.add(sampleRow("missiles", GpuShaderValue.Type.INT, Integer.toString(defaults.missiles()), 1, 100, "Missiles launched in the sample salvo."));
             rows.add(sampleRow("missileHits", GpuShaderValue.Type.INT, Integer.toString(sample().missiles()), 0, sample().missiles(),
                   "Defaults to all sample missiles hitting."));
         } else if (!preset.weapon.isEmpty()) {
-            rows.add(sampleRow("hit", GpuShaderValue.Type.BOOL, "true", 0, 1, "Resolved target hit or miss in the sample."));
+            rows.add(sampleRow("hit", GpuShaderValue.Type.BOOL, Boolean.toString(defaults.hit()), 0, 1, "Resolved target hit or miss in the sample."));
         }
         return rows;
     }

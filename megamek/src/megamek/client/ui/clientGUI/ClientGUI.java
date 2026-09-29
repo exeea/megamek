@@ -390,8 +390,6 @@ public class ClientGUI extends AbstractClientGUI
     /** Open the default board once per game; later phase changes preserve a manual choice or rendering fallback. */
     private boolean boardViewChosen;
     public ChatLounge chatlounge;
-    private OffBoardTargetOverlay offBoardOverlay;
-    private BoardToastOverlay toastOverlay;
 
     private final ConcurrentLinkedQueue<Runnable> toastDripQueue = new ConcurrentLinkedQueue<>();
     private javax.swing.Timer toastDripTimer;
@@ -572,7 +570,7 @@ public class ClientGUI extends AbstractClientGUI
 
     @Deprecated(since = "0.51.0", forRemoval = true)
     public BoardToastOverlay getToastOverlay() {
-        return toastOverlay;
+        return getCurrentBoardState().map(state -> state.getOverlay(BoardToastOverlay.class)).orElse(null);
     }
 
     /**
@@ -603,6 +601,7 @@ public class ClientGUI extends AbstractClientGUI
         // Gate before normalizing: normalizeToastText is regex-heavy and only the shown path needs the
         // cleaned text. On the suppressed paths log the raw text so switching toasts off does not pay the
         // normalization cost for every would-be toast.
+        BoardToastOverlay toastOverlay = getToastOverlay();
         if (toastOverlay == null) {
             logger.debug("[Toast] suppressed [{}] ({}) - overlay not initialized yet: {}",
                   level, entityLabel, text);
@@ -681,6 +680,7 @@ public class ClientGUI extends AbstractClientGUI
      * back on part way through the same phase.</p>
      */
     private void showReportAsToasts(String defaultPrefix, String report) {
+        BoardToastOverlay toastOverlay = getToastOverlay();
         if (toastOverlay == null) {
             logger.debug("[Toast] report burst suppressed - overlay not initialized yet");
             return;
@@ -1750,6 +1750,9 @@ public class ClientGUI extends AbstractClientGUI
 
         // Tell all the displays to remove themselves as listeners.
         GpuBoardWindow.closeFor(this);
+        if (chatlounge != null) {
+            chatlounge.killPreviewBV();
+        }
         client.getGame().removeGameListener(gameListener);
         boolean reportHandled = false;
         boardViews().forEach(IBoardView::dispose);
@@ -1844,7 +1847,7 @@ public class ClientGUI extends AbstractClientGUI
                 ChatLounge cl = (ChatLounge) phaseComponents.get(String.valueOf(GamePhase.LOUNGE));
                 cb.setDoneButton(cl.getButDone());
                 cl.setBottom(cb.getComponent());
-                boardStates().forEach(bv -> bv.getTilesetManager().reset());
+                tilesetManager.reset();
                 break;
             case POINTBLANK_SHOT:
             case VICTORY_SETUP:
@@ -2044,7 +2047,6 @@ public class ClientGUI extends AbstractClientGUI
                 }
                 currPhaseDisplay = (StatusBarPhaseDisplay) component;
                 panSecondary.add(component, secondary);
-                offBoardOverlay.setTargetingPhaseDisplay((TargetingPhaseDisplay) component);
                 break;
             case PREMOVEMENT:
                 component = new PrephaseDisplay(this, GamePhase.PREMOVEMENT);
@@ -3452,7 +3454,7 @@ public class ClientGUI extends AbstractClientGUI
             if (oldMinimap != null) { oldMinimap.dispose(); }
             if (e.getNewBoard() != null) {
                 try {
-                    BoardClientState state = new BoardClientState(client.getGame(), controller, ClientGUI.this, boardId, null);
+                    BoardClientState state = new BoardClientState(client.getGame(), controller, ClientGUI.this, boardId, tilesetManager);
                     boardStates.put(boardId, state);
                     state.setLocalPlayer(client.getLocalPlayer());
                     state.addBoardViewListener(ClientGUI.this);
@@ -3460,13 +3462,11 @@ public class ClientGUI extends AbstractClientGUI
                     state.addOverlay(new ChatterBoxOverlay(ClientGUI.this, state, controller, cb));
                     state.addOverlay(new UnitOverviewOverlay(ClientGUI.this));
                     state.addOverlay(new UnitOverviewOverlay(ClientGUI.this, true));
-                    offBoardOverlay = new OffBoardTargetOverlay(ClientGUI.this);
-                    state.addOverlay(offBoardOverlay);
+                    state.addOverlay(new OffBoardTargetOverlay(ClientGUI.this));
                     state.addOverlay(new KeyBindingsOverlay(state));
                     state.addOverlay(new PlanetaryConditionsOverlay(state));
                     state.addOverlay(new TurnDetailsOverlay(state));
-                    toastOverlay = new BoardToastOverlay(state, ClientGUI.this);
-                    state.addOverlay(toastOverlay);
+                    state.addOverlay(new BoardToastOverlay(state, ClientGUI.this));
                     state.redrawAllEntities();
                     state.refreshAttacks();
                     if (boardViewsContainer.isClassicViewEnabled()) { createClassicBoardView(state); }

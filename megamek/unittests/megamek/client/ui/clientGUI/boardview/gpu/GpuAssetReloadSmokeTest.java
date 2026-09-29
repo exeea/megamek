@@ -75,7 +75,7 @@ class GpuAssetReloadSmokeTest {
                 Texture originalTexture;
                 GpuUnitModels.ModularAsset originalUnit;
                 ModelInstance originalInstance;
-                float treeHeight, rockHeight, scatterHeight, unitHeight;
+                float treeHeight, rockHeight, scatterHeight, otherScatterHeight, unitHeight;
                 BoardGeometry.Tuning tuning;
                 Path tileset = directory.resolve("models/board/tileset/saxarba.tileset");
                 byte[] tilesetBytes;
@@ -109,6 +109,7 @@ class GpuAssetReloadSmokeTest {
                             treeHeight = assets().model("tree").calculateBoundingBox(new BoundingBox()).getHeight();
                             rockHeight = BoardRocks.rock(true, 0).height();
                             scatterHeight = BoardScatter.bush(0).height();
+                            otherScatterHeight = BoardScatter.bush(1).height();
                             originalUnit = library().modular("reload/component.json");
                             assertNotNull(originalUnit);
                             unitHeight = originalUnit.model().calculateBoundingBox(new BoundingBox()).getHeight();
@@ -131,7 +132,7 @@ class GpuAssetReloadSmokeTest {
                             GpuAssetReloadTest.png(directory.resolve("models/board/textures/terrain/rock.png"), 0xff0000ff);
                             scaleMesh(directory.resolve("models/board/tree.glb"));
                             scaleMesh(directory.resolve("models/board/rocks/block-0.glb"));
-                            scaleMesh(directory.resolve("models/board/scatter.glb"));
+                            scaleMesh(directory.resolve("models/board/scatter/bush-0.glb"));
                             scaleMesh(glb.directory.resolve("mesh.glb"));
                             GpuBoardTestUi.click("tuning");
                             GpuBoardTestUi.stage().draw();
@@ -160,6 +161,8 @@ class GpuAssetReloadSmokeTest {
                             assertEquals(treeHeight * 2, assets().model("tree").calculateBoundingBox(new BoundingBox()).getHeight(), .001f);
                             assertEquals(rockHeight * 2, BoardRocks.rock(true, 0).height(), .001f);
                             assertEquals(scatterHeight * 2, BoardScatter.bush(0).height(), .001f);
+                            assertEquals(otherScatterHeight, BoardScatter.bush(1).height(),
+                                  "Editing one scatter file leaves the other variants unchanged");
                             var unit = library().modular("reload/component.json");
                             assertNotSame(originalUnit, unit);
                             assertNotNull(unit);

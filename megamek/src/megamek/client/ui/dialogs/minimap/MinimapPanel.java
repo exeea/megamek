@@ -70,6 +70,7 @@ import javax.swing.*;
 
 import megamek.MMConstants;
 import megamek.client.Client;
+import megamek.client.CloseClientListener;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListener;
 import megamek.client.event.BoardViewListenerAdapter;
@@ -191,6 +192,7 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
     private final int boardId;
     private final JDialog dialog;
     private Client client;
+    private CloseClientListener closeClientListener;
     private final IClientGUI clientGui;
     /**
      * Game UUIDs that already have a {@link MinimapPanel} writing the summary GIF. A multi-board game creates one
@@ -428,18 +430,21 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
 
             @Override
             public void gameBoardNew(GameBoardNewEvent e) {
-                if (e.getBoardId() == boardId) {
-                    Board b = e.getOldBoard();
-                    if (b != null) {
-                        b.removeBoardListener(boardListener);
-                    }
-                    b = e.getNewBoard();
-                    if (b != null) {
-                        b.addBoardListener(boardListener);
-                    }
-                    board = b;
-                    initializeMap();
+                if (gameListener == null || e.getBoardId() != boardId) {
+                    return;
                 }
+                if (e.getNewBoard() == null) {
+                    dispose();
+                    return;
+                }
+                // A newly created panel can receive the same event that created it. Move its actual subscription,
+                // not the event's old board, or the new board receives this listener twice.
+                if (board != e.getNewBoard()) {
+                    board.removeBoardListener(boardListener);
+                    board = e.getNewBoard();
+                    board.addBoardListener(boardListener);
+                }
+                initializeMap();
             }
 
             @Override
@@ -459,7 +464,7 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
             bv.addBoardViewListener(boardViewListener);
         }
         if (client != null) {
-            client.addCloseClientListener(() -> {
+            closeClientListener = () -> {
                 GIF_RECORDING_DECISIONS.remove(game.getUUIDString());
                 if (ownsSummaryGif && (gifWriterThread != null)) {
                     if (gifWriterThread.isAlive()) {
@@ -467,13 +472,18 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
                     }
                     releaseSummaryGifOwnership();
                 }
-            });
+            };
+            client.addCloseClientListener(closeClientListener);
         }
         GUIP.addPreferenceChangeListener(this);
     }
 
-    /** Detach an editor/preview minimap when its window is disposed. */
+    /** Detach the minimap and release its recording when its owning window is disposed. */
     public void dispose() {
+        if (client != null && closeClientListener != null) {
+            client.removeCloseClientListener(closeClientListener);
+            closeClientListener = null;
+        }
         if (gameListener != null) { game.removeGameListener(gameListener); gameListener = null; }
         if (board != null) { board.removeBoardListener(boardListener); }
         if (bv != null) { bv.removeBoardViewListener(boardViewListener); }

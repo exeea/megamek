@@ -31,6 +31,7 @@ import com.badlogic.gdx.graphics.glutils.FileTextureData;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.JsonReader;
 import com.badlogic.gdx.utils.JsonValue;
+import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Configuration;
 
 /** GL-thread ownership of shared models, repeating terrain materials, and animated liquid frames. */
@@ -39,8 +40,10 @@ final class GpuAssets implements Disposable {
     private final Map<String, Model> models = new HashMap<>();
     private final Map<String, List<Model>> modelLods = new HashMap<>();
     private final Map<Interior, Model> interiors = new HashMap<>();
+    private final Map<String, GpuBuilding> buildings = new HashMap<>();
     private final Map<String, Texture> materials = new HashMap<>();
     private final Map<String, Cliff> cliffs = new HashMap<>();
+    private final Map<Boolean, Magma> magmas = new HashMap<>();
     private final Map<String, Sculpt> sculpts = new HashMap<>();
     private TextureArray sculptArray;
     private JsonValue sculptManifest;
@@ -54,6 +57,25 @@ final class GpuAssets implements Disposable {
 
     /** Three aligned, repeating maps. Surface channels are height, roughness, occlusion and relief range. */
     record Cliff(Texture color, Texture normal, Texture surface) { }
+
+    /** Standard relief maps plus R heat, GB signed flow and A heat bleeding onto crack walls. */
+    record Magma(Cliff relief, Texture heat) { }
+
+    Magma magma(boolean molten) {
+        if (magmas.containsKey(molten)) { return magmas.get(molten); }
+        String name = molten ? "lava" : "crust";
+        String key = "magma/" + name;
+        // Preserve the legacy artwork/GIF path for older or partial data packs.
+        for (String suffix : List.of("", "-normal", "-surface", "-heat")) {
+            if (!materialFile(key + suffix).exists()) {
+                magmas.put(molten, null);
+                return null;
+            }
+        }
+        Magma maps = new Magma(relief("magma", name, "terrain/rock"), material(key + "-heat"));
+        magmas.put(molten, maps);
+        return maps;
+    }
 
     /**
      * A sculpted-terrain material from {@code textures/sculpt}: albedo with height in alpha, a tangent-space normal
@@ -156,6 +178,22 @@ final class GpuAssets implements Disposable {
         });
     }
 
+    /** The tileset remains authoritative: a custom kit overrides only its exact selected artwork path. */
+    GpuBuilding.Assembly building(String asset, int levels, long seed) {
+        if (!asset.startsWith("buildings/")) { return null; }
+        if (!buildings.containsKey(asset)) {
+            File customRoot = new File(Configuration.dataDir(), "models/buildings");
+            FileHandle file = new FileHandle(BoardArtwork.customBuildingFile(asset));
+            buildings.put(asset, file.file().isFile() ? new GpuBuilding(file, customRoot.toPath(), this::createModel) : null);
+        }
+        GpuBuilding building = buildings.get(asset);
+        return building == null ? null : building.assemble(levels, seed);
+    }
+
+    void retainBuildings(java.util.Set<GpuBuilding.Assembly> live) {
+        buildings.values().stream().filter(java.util.Objects::nonNull).forEach(building -> building.retain(live));
+    }
+
     private Model createModel(ModelData data) {
         return ModelTextures.create(data, materials, filename -> texture(new FileHandle(filename)));
     }
@@ -186,16 +224,15 @@ final class GpuAssets implements Disposable {
         return materials.computeIfAbsent("scatter-atlas", key -> GpuScatter.atlas(root));
     }
 
-    Cliff cliff(String name) {
-        return relief("cliffs", name.substring(name.lastIndexOf('/') + 1), name);
-    }
-
-    Cliff ground(String family) {
-        return relief("ground", family, "terrain/" + (family.equals("grass") ? "dirt" : family));
-    }
-
     Cliff road(String name) {
         return relief("roads", name, "terrain/" + (name.equals("asphalt") ? "concrete" : name.equals("gravel") ? "rock" : "dirt"));
+    }
+
+    Cliff ice() {
+        Cliff maps = relief("ice", "sheet", "terrain/snow");
+        if (maps.normal() != null) { return maps; }
+        flatMaps();
+        return new Cliff(maps.color(), flatNormal, flatColor);
     }
 
     private Cliff relief(String folder, String family, String fallback) {
@@ -222,10 +259,7 @@ final class GpuAssets implements Disposable {
             if (sculptManifest == null && manifest.exists()) { sculptManifest = new JsonReader().parse(manifest); }
             JsonValue entry = sculptManifest == null ? null : sculptManifest.get("materials").get(key);
             if (!color.exists() || !normal.exists() || entry == null) {
-                if (flatColor == null) {
-                    flatColor = solid(0xa0a0a0ff);
-                    flatNormal = solid(0x8080ffff);
-                }
+                flatMaps();
                 return new Sculpt(flatColor, flatNormal, 4);
             }
             return new Sculpt(texture(color), texture(normal), entry.getFloat("tile"));
@@ -242,6 +276,13 @@ final class GpuAssets implements Disposable {
             return texture;
         } finally {
             pixels.dispose();
+        }
+    }
+
+    private void flatMaps() {
+        if (flatColor == null) {
+            flatColor = solid(0xa0a0a0ff);
+            flatNormal = solid(0x8080ffff);
         }
     }
 
@@ -314,7 +355,8 @@ final class GpuAssets implements Disposable {
             Texture.TextureWrap wrap = repeating ? Texture.TextureWrap.Repeat : Texture.TextureWrap.ClampToEdge;
             texture.setWrap(wrap, wrap);
             if (repeating && (file.parent().name().equals("cliffs") || file.parent().name().equals("ground")
-                  || file.parent().name().equals("sculpt") || file.parent().name().equals("roads"))) {
+                  || file.parent().name().equals("sculpt") || file.parent().name().equals("roads")
+                  || file.parent().name().equals("magma") || file.parent().name().equals("ice"))) {
                 // Cliff relief needs its full resolution; mipmaps and supported anisotropy handle distance.
                 texture.setAnisotropicFilter(8);
             } else if (repeating) {
@@ -495,6 +537,8 @@ final class GpuAssets implements Disposable {
 
     @Override
     public void dispose() {
+        buildings.values().stream().filter(java.util.Objects::nonNull).forEach(GpuBuilding::dispose);
+        buildings.clear();
         interiors.values().forEach(Model::dispose);
         interiors.clear();
         models.values().forEach(Model::dispose);
@@ -504,6 +548,7 @@ final class GpuAssets implements Disposable {
         modelLods.clear();
         materials.clear();
         cliffs.clear();
+        magmas.clear();
         sculpts.clear();
         if (sculptArray != null) { sculptArray.dispose(); sculptArray = null; }
         sculptManifest = null;

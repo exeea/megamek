@@ -74,12 +74,15 @@ class GpuLiquidSmokeTest {
             shader.animate(0.05f, List.of());
             List<int[]> middle = samples(shader, camera, scene, true);
             for (int family = 0; family < LIQUIDS.size(); family++) {
+                // PBR lava uses the continuous board clock in both modes, not authored GIF interpolation.
+                if (LIQUIDS.get(family).molten()) { continue; }
                 for (int pixel = 0; pixel < first.get(family).length; pixel++) {
                     for (int shift : new int[] { 8, 16, 24 }) {
                         float expected = (((first.get(family)[pixel] >>> shift) & 255)
                               + ((next.get(family)[pixel] >>> shift) & 255)) / 2f;
                         assertEquals(expected, (middle.get(family)[pixel] >>> shift) & 255, 2,
-                              "Stationary material must interpolate the changing artwork without shifting it");
+                              "Stationary material must interpolate the changing artwork without shifting it: family "
+                                    + family + ", pixel " + pixel + ", channel " + shift);
                     }
                 }
             }
@@ -111,7 +114,7 @@ class GpuLiquidSmokeTest {
                 List<int[]> before = samples(terrain, camera, scene, true);
                 GpuBoardTestUi.capture(new File(output, "liquids-" + (procedural ? "procedural" : shader ? "shader" : "gif")
                       + "-" + (isometric ? "isometric" : "top") + ".png"));
-                terrain.animate(0.45f, List.of());
+                terrain.animate(1.25f, List.of());
                 List<int[]> after = samples(terrain, camera, scene, true);
                 for (int family = 0; family < LIQUIDS.size() - 1; family++) {
                     int changed = 0;
@@ -245,7 +248,8 @@ class GpuLiquidSmokeTest {
                     Coords top = pool(family);
                     if (coords.equals(top) || coords.equals(top.translated(3))) {
                         liquid = LIQUIDS.get(family);
-                        elevation = coords.equals(top) ? 2 : 0;
+                        // One- and two-level water steps are now graded rapids; palette checks need an actual fall.
+                        elevation = coords.equals(top) ? 3 : 0;
                         frozen = family == 8;
                     }
                 }

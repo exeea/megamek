@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -11,7 +12,7 @@ import megamek.common.Hex;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrains;
 
-/** Cosmetic scatter placement and the stones, shrubs and blades in scatter.glb. */
+/** Cosmetic scatter placement and the independently editable LOD0 meshes in scatter/*.glb. */
 final class BoardScatter {
     /** 0 disables scatter, 1 is the baseline, 3 triples each biome's placement chance. */
     static final float DENSITY_MULTIPLIER = 3.0f;
@@ -21,25 +22,34 @@ final class BoardScatter {
 
     // Scene capture needs only placement; defer geometry loading until a renderer requests a shape.
     private static final class Kit {
-        static volatile Map<String, List<BoardShape>> shapes = load();
+        static volatile Map<String, BoardShape> shapes = load();
 
-        private static Map<String, List<BoardShape>> load() {
-            Map<String, BoardShape> shapes = BoardShape.loadKit("scatter");
-            Map<String, List<BoardShape>> levels = new HashMap<>();
-            for (String name : shapes.keySet()) {
-                if (!name.matches(".+-lod[0-2]")) { throw new IllegalArgumentException("Invalid kit LOD name: " + name); }
-                String shape = name.substring(0, name.lastIndexOf("-lod"));
-                levels.computeIfAbsent(shape, key -> MeshLod.load(key, 3, shapes::get));
+        private static Map<String, BoardShape> load() {
+            List<String> names = new ArrayList<>(List.of("grass", "plant"));
+            for (int variant = 0; variant < BUSHES; variant++) { names.add("bush-" + variant); }
+            for (boolean block : new boolean[] { true, false }) {
+                for (int variant = 0; variant < (block ? BoardRocks.BLOCKS : BoardRocks.BOULDERS); variant++) {
+                    names.add("stone-" + BoardRocks.name(block, variant));
+                }
             }
-            return Map.copyOf(levels);
+            Map<String, BoardShape> shapes = new HashMap<>();
+            for (String name : names) {
+                Map<String, BoardShape> mesh = BoardShape.loadKit("scatter/" + name);
+                String node = name + "-lod0";
+                if (mesh.size() != 1 || !mesh.containsKey(node)) {
+                    throw new IllegalArgumentException("Scatter " + name + " must contain only " + node);
+                }
+                shapes.put(name, mesh.get(node));
+            }
+            return Map.copyOf(shapes);
         }
     }
 
     static BoardShape shape(String name) {
-        return Kit.shapes.get(name).getFirst();
+        return Kit.shapes.get(name);
     }
 
-    /** Replace the complete immutable kit, including all authored levels of detail. */
+    /** Replace the complete immutable LOD0 kit. */
     static void reload() { Kit.shapes = Kit.load(); }
 
     /** Cosmetic stones always use the dedicated eight-triangle open-base meshes. */

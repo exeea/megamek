@@ -232,10 +232,11 @@ eight angular blocks with broad crowns and eight boulders with offset ridges.
 Their outlines and proportions vary, with an open base buried below ground.
 `BoardRelief` owns terrain placement
 and ground contact. Each variant has an editable GLB under `mm-data/data/models/board/rocks/`,
-with root nodes `<variant>-lod0`, `-lod1` and `-lod2`. `scatter.glb` holds the tiny
-stones, shrub masses, six-triangle grass and sixteen-triangle plant, each named
-`<shape>-lod0`. LOD0 is required; missing optional levels reuse the preceding
-level at load time. Scatter never falls back to a terrain rock. The shared CPU
+with root nodes `<variant>-lod0`, `-lod1` and `-lod2`; missing optional levels reuse
+the preceding level at load time. `mm-data/data/models/board/scatter/` holds one
+editable GLB per tiny stone, shrub mass, six-triangle grass or sixteen-triangle plant.
+Each scatter file contains only its `<shape>-lod0` root mesh; scatter has no additional
+levels and never falls back to a terrain rock. The shared CPU
 geometry also supplies placement and picking; rendering remains batched per chunk.
 
 **Tuning > General > Hex transitions** (off by default) gives each step between two
@@ -517,11 +518,15 @@ world-space noise that fades to nothing at its ends, and sheet, pulled-back surf
 ledge and wall all follow it. The bed reaches out to the crest in a ledge one
 world unit under the water, and the wall beneath the fall follows the crest down to
 the pool below, so it closes up to just under the sheet. Walls under and beside a
-fall are rock of the hex's family (`BoardRelief.fallWall`): eight rows per column,
+fall are rock of the hex's family on the shared cliff grid (`BoardRelief.canonicalWall`),
 relieved like a cliff but held to their line at the rim and the foot and fading out
 toward the corners, and only receding under the crest so they stay behind the sheet.
 Corners where two water hexes step down to each other keep their place, so the
-walls round them meet without a gap. Rocks of the family mark the fall: two
+walls round them meet without a gap. Where joined crests curve away from a hex
+corner, the backing rock still reaches that shared corner using the nearest crest
+endpoint. Clearance behind a falling sheet fades out at the shared corner; moving
+each wall along its own normal would separate their edges. This applies to both
+water and magma. Rocks of the family mark the fall: two
 shoulder blocks where the lip meets its banks, a few breakers on the ledge just
 behind the lip, and boulders in the pool at its foot. Below a fall the pool opens
 nearly to both corners of the mouth, so the whole sheet lands in water, and widens
@@ -656,7 +661,7 @@ and refinements that followed raised the `GpuWaterShaderSmokeTest` and
 `GpuRainSurfaceSmokeTest` medians by about 9-12% there, and one ocean update took
 about 4.8 ms. Hardware GPUs have not been measured.
 
-For magma and the optional water GIF path, `GpuLiquidShader.USE_SHADER_ANIMATION`
+For the legacy magma fallback and optional water GIF path, `GpuLiquidShader.USE_SHADER_ANIMATION`
 defaults to `true`: retain all authored
 animation frames and blend the current and next frame in the shader, respecting
 their delays and the loop boundary. Ripples, foam, and molten shapes change in
@@ -695,13 +700,16 @@ Without WATER, it uses the shallow visual recess and changes no game depth.
 Static hazardous-liquid overlays are excluded from 3D decals. Ordinary, themed,
 and hazardous water can share open mouths and falls.
 
-MAGMA level 2 uses `base/base_magma_anim_-3.gif` through
-`base/base_magma_anim_10.gif`, selected by clamped surface elevation. It shares
-the pool and fall geometry with water, with rocky bed/bank materials, opaque
-depth writes, and emissive color. Magma mouths connect only to magma; a rocky
-shore separates it from water. Emission keeps magma visible at night; it does
-not cast additional light onto nearby objects. MAGMA level 1 (crust), mud,
-swamp, and quicksand retain their existing solid surfaces and static artwork.
+MAGMA levels 1 and 2 now share the [volcanic material](gpu-magma.md): solid basalt
+crust with glowing cracks, and flowing lava with cooling rafts. Both use aligned
+albedo, normal, height, roughness, AO, heat and flow maps, sampled with varied patches
+and smooth projection across slopes. Lava shares the graded pool and fall geometry,
+current sampler and inverse FFT engine with water, using a slower spectrum with
+short waves suppressed; it writes opaque depth. Magma mouths connect only to
+magma; a rocky shore separates it from water. Both retain their emission at night,
+with local fissure glow; they do not add dynamic illumination to nearby objects.
+Older data packs without the maps keep crust artwork and the
+`base/base_magma_anim_-3.gif` through `base/base_magma_anim_10.gif` lava fallback.
 
 Water renders after units with depth testing and no depth writes. Procedural water
 takes its opacity from the depth under each pixel, with a floor that keeps even
@@ -1063,14 +1071,18 @@ clocks remain in their existing owners; shader edits do not invoke Reload assets
 Invalid compilation/linking or incompatible existing input types leave all current programs working. Errors
 appear in the editor; **Show failed source** exposes the complete stages with the driver's line numbers, and
 **Compiled sources** inspects the currently active variants. Inactive effects are checked when first drawn;
-an invalid draft then falls back to its original shader and reports the failure. New uniforms or vertex inputs
-still require bindings in the renderer. Compilation can briefly stall a frame, particularly for shared files
-with many material variants; the debounce is not a guarantee of compiler latency.
+an invalid draft then falls back to its original shader and reports the failure. New uniforms can use GLSL initializers
+or editor overrides; live game values and new vertex inputs require bindings in the renderer. Compilation can briefly
+stall a frame, particularly for shared files with many material variants; the debounce is not a guarantee of compiler latency.
 
 Typing changes an in-memory preview. **Apply / Ctrl+Enter** compiles immediately; **Save all / Ctrl+S** applies
 and saves edited files, and **Revert file** restores the selected file's last saved text. **Ctrl+F** focuses search.
 If typing continues during a requested save, it waits for the latest edit to compile successfully; a compilation
 failure cancels that save. **Reload file** rereads the selected file after edits outside MegaMek.
+**Reload all files** rereads every shader, including unopened and closed documents, refreshes the file list and
+compiles the resulting sources together. It asks before replacing unsaved drafts. Each source tab has an **×**;
+**Ctrl+W** also closes the selected tab. Closing a tab retains its draft, undo history and pending live edits;
+reopening the file restores them, and **Save all** includes drafts in closed tabs.
 The path below each file shows where Save writes: an existing override, a checkout resource, or a new
 `data/shaders/` override for a bundled resource. Saving refuses to overwrite a file changed by another editor.
 Closing the editor hides it and retains its drafts for that board window; closing the board ends the preview.
@@ -1078,17 +1090,60 @@ Closing the editor hides it and retains its drafts for that board window; closin
 The **Object / effect preview** below the file list selects a sample automatically for explosion, beam,
 projectile, missile, particle, ground fire/smoke, weather and unit material shaders. It loops the existing combat
 effect renderers against fixed demonstration objects; no matching battle or game orders are needed. The menu
-also selects laser, PPC, autocannon, missile salvo, flamethrower, rain, snow or a rotating material sphere manually,
+also selects laser, PPC, autocannon, missile salvo, flamethrower, smoke particles, jet flame, rain, snow, hail or a rotating material sphere manually,
 which is useful when inspecting a shared shader. **Play**, **Restart** and the speed selector control the sample;
 drag to orbit, use the wheel to zoom, and double-click to reset the view. Successful edits update both the sample
 and affected board programs, including when the sample is paused. Invalid edits keep the working programs.
 Scene-dependent shaders such as terrain, water, clouds and post-processing still need the live board.
+
+Weather conditions have their own editing files: `weather-rain.glsl`, `weather-snow.glsl`, `weather-hail.glsl` and
+`weather-sand.glsl`. Each precipitation file contains its motion and appearance and selects its matching sample.
+The `weather-particles` stages keep wind, camera alignment, fading and lighting shared. Sand remains in the existing
+atmosphere composite; enable Blowing sand on the live board to preview its file. Fog stays in `atmosphere-fog.frag`,
+and rain wetness/ripples stay in `rain-surface.glsl` for terrain and water.
+
+Water's unit collars/wakes and waterfall landing boils/bubbles live in `water-interactions.glsl`. Pools and
+waterfall crests share these helpers; `water-pool.glsl` keeps waves, foam mixing, reflection and opacity together.
+
+Particle appearances live in `particles-smoke.glsl`, `particles-fire.glsl` and `particles-jet.glsl`, with matching
+automatic samples. They share the existing particle program, geometry and smoke/emission blend order.
+Concrete slabs use `terrain-concrete.glsl`; common terrain projections and normal reconstruction use
+`terrain-projection.glsl`. The atmosphere keeps one composite pass with separate `atmosphere-glare.glsl`,
+`atmosphere-fov.glsl` and `atmosphere-grade.glsl` helpers. Magma's `magma-solid.glsl` and `magma-flow.glsl` own its
+solid and moving treatments; `terrain-magma.glsl` shares texture sampling and projection. The ocean finish uses
+`ocean-water-finish.frag` for foam/compression and `ocean-lava-finish.frag` for displacement. Preview these
+scene-dependent files on the live board. The complete source map is in [the shader split audit](gpu-shader-split-audit.md).
+
+The **Inputs** tab beneath the source editor inspects the selected file's compiled programs. The rows are discovered
+from active GLSL uniforms, including uniforms shared by the vertex and fragment stages, material variants and array
+elements. For example, `weather-rain.glsl` exposes the rain program's wind, clock, extent, light and
+camera uniforms. New active uniforms appear after a successful shader edit; inputs optimized out by the compiler
+do not appear. Programs not yet drawn appear when their board effect or preview sample first renders.
+
+Each row shows **Supplied**, **Effective**, and **Override**. Leave Override blank to use the renderer's latest value
+(or the GLSL initializer for an input the renderer does not supply). Type a value and press Enter to override it;
+clearing the cell restores the supplied value, and **Clear overrides** resets the selected program. Scalars,
+booleans, integer/float vectors, matrices and array elements are supported. Enter vector components separated by
+commas or spaces; matrices use column-major order. Sampler values select an existing texture unit, not a new texture.
+Unrecognized types are read-only. Invalid entries leave the previous value working and report the error below the
+table. Values are snapshots of the last draw; one material program can serve several objects with different values.
+Overrides affect matching programs on the board and in the sample, survive recompilation and stay in memory for
+that board window. **Save all** saves source files, not input overrides.
+
+Inputs used before shading cannot be discovered as uniforms. For these, the program menu includes **Preview setup
+(CPU inputs)** when the selected sample has exposed inputs: ballistic `rackSize` and `shots`, missile count/hits and
+target hit/miss. They follow the same blank/override contract and affect only the sample. Opening `projectiles.frag`
+selects **Ballistic impact**, a close view that loops the contact sparks; **Autocannon** shows the full shot. Changing
+rack size while paused preserves the impact phase for comparison. The existing attack renderer still generates the
+spark count and geometry; the editor does not duplicate that calculation.
 
 The board's GL thread owns the sample resources and renders a 384×240 offscreen image at most 30 times per second.
 Only finished images and immutable control settings cross between it and Swing. Hidden editors do no sample
 rendering; paused samples redraw only when their controls or shader revision change. Sample resources are released
 with the board window. The native shader smoke tests cover each sample, animation, paused draft changes, invalid
 edit retention, editor selection and shared GL state restoration.
+The input tests exercise dynamic weather uniforms, renderer-value restoration, new uniforms after recompilation,
+scalar/vector/matrix/array uploads, ballistic rack-size comparisons, tab reopening and reloading closed/unopened files.
 
 For SHADERed or another desktop GLSL editor, add `-Dmegamek.gpu.shaderExport=<directory>` to MegaMek's JVM options.
 Each compiled board program writes a complete `.vert`/`.frag` pair there, including the material defines, shared
@@ -1109,8 +1164,8 @@ both. Longer help text is available in tooltips.
 **Free Flight** replaces the former **Perspective** choice, available in **Camera** and
 **Tuning > General > Camera**. It uses a first-person perspective eye: WASD moves forward/back along
 the gaze and strafes, Q/E moves down/up, and Shift makes travel four times faster. These reuse the
-configured pan and rotate keys. Right or middle drag looks around; Shift with either drag slides
-the eye sideways/up. Page Up/Down looks up/down. The wheel and zoom buttons move forward/back.
+configured pan and rotate keys. Right drag looks around; middle drag pans the eye sideways/up.
+Shift swaps the two drags. Page Up/Down looks up/down. The wheel and zoom buttons move forward/back.
 The cursor stays available for normal selection and menus. Camera movement keys work with Tuning,
 Report and menus open in both modes; focused text fields retain their typing keys.
 
@@ -1520,7 +1575,7 @@ the classic board keeps its ground labels.
   terrain triangles, including road approaches and water surfaces. Both paths test opaque depth
   without writing it, so buildings and higher terrain occlude them. Border
   colors and existing translucent fills are retained.
-- One 2048-pixel directional shadow map includes terrain, opaque features, and
+- One 2304-pixel directional shadow map includes terrain, opaque features, and
   units. Its coverage follows the camera's visible receivers, keeping closeup
   detail independent of map size while including offscreen shadow casters.
   Packed shadow depth uses each face's slope in shadow texels for its bias, and the
@@ -1529,8 +1584,12 @@ the classic board keeps its ground labels.
   `GpuShadowSmokeTest` checks the sunlit faces of a two-level concrete step across
   orbits, tilts and zooms, and verifies that their cast shadows remain attached at
   the foot of the cliff.
-  The light grid aligns to texels to stabilize panning. Geometry, lighting,
-  occupancy, unit transforms and camera changes invalidate the cached map.
+  The light grid aligns to texels to stabilize panning. A 10% coverage margin lets
+  small camera movements reuse it; the extra texels preserve the former 2048-map's
+  world-space detail. Leaving that coverage or needing finer detail refreshes the
+  projection. Geometry, lighting and caster changes still update shadows; moving
+  units can reuse the separate static-depth cache. See
+  [MesaCity shadow profiling](gpu-camera-shadows.md) for measurements and memory cost.
 - GL resources are created and disposed on the render thread. Shared assets own
   their textures; instance material changes do not transfer ownership.
 - `GpuBoardActions` adapts real phase buttons, menus, weapon lists, and ammunition

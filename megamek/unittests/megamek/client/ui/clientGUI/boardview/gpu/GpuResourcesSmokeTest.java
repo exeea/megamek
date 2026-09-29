@@ -164,7 +164,7 @@ class GpuResourcesSmokeTest {
         }
     }
 
-    private void checkInteriorCourtyard(float height) {
+    static void checkInteriorCourtyard(float height) {
         ModelBuilder builder = new ModelBuilder();
         builder.begin();
         var mesh = builder.part("roof", GL20.GL_TRIANGLES,

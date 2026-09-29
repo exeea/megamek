@@ -91,6 +91,7 @@ public class HexTileset implements BoardListener, AutoCloseable {
     private final List<HexEntry> superimposed = new ArrayList<>();
     private final List<HexEntry> orthographic = new ArrayList<>();
     private final Set<String> themes = new TreeSet<>();
+    private final Map<Image, Boolean> blankImages = new IdentityHashMap<>();
     private final File imageRoot;
     private IGame observedGame;
     private GameListener gameListener;
@@ -146,8 +147,11 @@ public class HexTileset implements BoardListener, AutoCloseable {
 
         };
         game.addGameListener(gameListener);
-        game.getBoard().addBoardListener(this);
-        observedBoards.add(game.getBoard());
+        for (Board board : game.getBoards().values()) {
+            if (board != null && observedBoards.add(board)) {
+                board.addBoardListener(this);
+            }
+        }
     }
 
     /** Clears the image cache for the given hex. */
@@ -294,6 +298,32 @@ public class HexTileset implements BoardListener, AutoCloseable {
         return o;
     }
 
+    /** Terrain consumed by an actually transparent selected overlay, never an assumed fluff number. */
+    public synchronized Set<Integer> blankTerrainTypes(Hex hex) {
+        Set<Integer> blank = new TreeSet<>(), visible = new TreeSet<>();
+        List<Image> layers = new ArrayList<>(getSupers(hex));
+        layers.addAll(getOrthographic(hex));
+        layers.add(getBase(hex));
+        for (Image layer : layers) {
+            ImageSource source = imageSources.get(layer);
+            if (source == null) { continue; }
+            boolean empty = blankImages.computeIfAbsent(layer, image -> {
+                var pixels = ImageUtil.convertToBufferedImage(image);
+                for (int y = 0; y < pixels.getHeight(); y++) {
+                    for (int x = 0; x < pixels.getWidth(); x++) {
+                        if ((pixels.getRGB(x, y) >>> 24) != 0) { return false; }
+                    }
+                }
+                return true;
+            });
+            for (int type : source.terrain().getTerrainTypes()) {
+                if (hex.containsTerrain(type)) { (empty ? blank : visible).add(type); }
+            }
+        }
+        blank.removeAll(visible);
+        return Set.copyOf(blank);
+    }
+
     /**
      * Returns a list of orthographic images to be tiled above the hex. As noted above, all matches must be 1.0, and if
      * such a match is achieved, all terrain elements from the tileset hex are removed from the hex. Thus, you want to
@@ -345,16 +375,15 @@ public class HexTileset implements BoardListener, AutoCloseable {
      * removed.
      */
     private HexEntry baseFor(Hex hex) {
+        // A hazard with no dedicated artwork must never force the first unrelated base as a zero-score fallback.
+        // Keep it available to explicit super rules; remove it only from the remaining base match.
+        hex.removeTerrain(Terrains.BLACK_ICE);
+        hex.removeTerrain(Terrains.METAL_CONTENT);
         HexEntry bestMatch = null;
         double match = -1;
 
         // match a base image to the hex
         for (HexEntry entry : bases) {
-
-            // Metal deposits don't count for visual
-            if (entry.getHex().containsTerrain(Terrains.METAL_CONTENT)) {
-                hex.removeTerrain(Terrains.METAL_CONTENT);
-            }
 
             double thisMatch = baseMatch(hex, entry.getHex());
             // stop if perfect match
@@ -687,19 +716,26 @@ public class HexTileset implements BoardListener, AutoCloseable {
 
     @Override
     public void close() {
-        if (observedGame != null) { observedGame.removeGameListener(gameListener); }
+        if (observedGame != null) {
+            observedGame.removeGameListener(gameListener);
+            observedGame = null;
+        }
         observedBoards.forEach(board -> board.removeBoardListener(this));
         observedBoards.clear();
         clearAllHexes();
     }
 
     private void replacedBoard(GameBoardNewEvent e) {
-        if (e.getOldBoard() != null) {
+        if (observedGame == null) {
+            return;
+        }
+        if (e.getOldBoard() != null && !observedGame.getBoards().containsValue(e.getOldBoard())) {
             e.getOldBoard().removeBoardListener(this);
             observedBoards.remove(e.getOldBoard());
         }
-        e.getNewBoard().addBoardListener(this);
-        observedBoards.add(e.getNewBoard());
+        if (e.getNewBoard() != null && observedBoards.add(e.getNewBoard())) {
+            e.getNewBoard().addBoardListener(this);
+        }
     }
 
     @Override

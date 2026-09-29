@@ -9,6 +9,9 @@ import java.io.File;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.SwingUtilities;
 
+import com.badlogic.gdx.math.Intersector;
+import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
@@ -17,6 +20,49 @@ import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 
 class GpuRoadSourceTest {
+    @Test
+    void forestsEndRoadsReachBothEndsOfTheBridgeAtEveryDetail() throws Exception {
+        var scene = scene("unofficial/Strategoslevel3/32x17 (CW) Forests End  - Road.board");
+        var bridge = scene.tile(new Coords(8, 8));
+        assertEquals(36, bridge.features().stream().filter(f -> f.asset().equals("bridge"))
+              .findFirst().orElseThrow().bridgeExits());
+        for (int direction : new int[] { 2, 5 }) {
+            var tile = scene.tile(bridge.coords().translated(direction));
+            assertTrue(BoardRoad.rendered(tile));
+            assertEquals(36, tile.roadExits());
+            var center = BoardGeometry.center(tile.coords(), tile.elevation());
+            var gate = BoardGeometry.center(bridge.coords(), bridge.elevation()).lerp(center, .5f);
+            var inward = new Vector3(center).sub(gate).nor();
+            var across = new Vector3(-inward.y, inward.x, 0);
+            int edge = Math.floorMod(1 - direction, 6);
+            var step = BoardGeometry.corner(bridge.coords(), 0, edge + 1)
+                  .sub(BoardGeometry.corner(bridge.coords(), 0, edge));
+            step.scl(1 / step.dot(across));
+            var road = BoardRoad.of(scene, tile);
+            var pavement = GpuRoads.patches(tile, road).stream()
+                  .filter(p -> p.texture().equals("roads/asphalt") && !p.blended()).findFirst().orElseThrow();
+            for (var lod : TerrainLod.values()) {
+                var triangles = GpuRoads.drape(tile, new BoardSurface(scene, tile, lod), pavement);
+                for (float lateral : new float[] { -7, -6, 0, 6, 7 }) {
+                    for (float distance : new float[] { .05f, 1, 3, 6, 10 }) {
+                        var point = new Vector3(gate).mulAdd(step, lateral).mulAdd(inward, distance);
+                        assertTrue(pavement.shape().contains((point.x - center.x) / BoardGeometry.hexScale(),
+                              (point.y - center.y) / BoardGeometry.hexScale()));
+                        var ray = new Ray(new Vector3(point.x, point.y, 200), new Vector3(0, 0, -1));
+                        var hit = new Vector3();
+                        assertTrue(triangles.stream().anyMatch(t -> Intersector.intersectRayTriangle(ray,
+                              t.a(), t.b(), t.c(), hit)),
+                              tile.coords().getBoardNum() + " " + lod + " road missing at " + point);
+                        if (distance == .05f) {
+                            assertEquals(GpuRoads.SURFACE_LIFT, hit.z, .001f,
+                                  tile.coords().getBoardNum() + " " + lod + " road must meet the level deck");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     @Test
     void lavaTubesBridgeFloorsUseNativeRockInsteadOfTheVioletLegacyTile() throws Exception {
         var scene = scene("Map Pack Volcanic/16x17 Lava Tubes 1.board");

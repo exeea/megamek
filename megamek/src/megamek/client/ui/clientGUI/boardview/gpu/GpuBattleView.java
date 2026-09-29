@@ -371,6 +371,7 @@ class GpuBattleView extends ApplicationAdapter {
                         groundSurfaces.clear();
                         attachments.clear();
                         BoardRocks.reload();
+                        BoardRough.reload();
                         BoardScatter.reload();
                         createSceneRenderers();
                         cameraTerrainRevision = -1;
@@ -1487,7 +1488,8 @@ class GpuBattleView extends ApplicationAdapter {
             dragged = false;
             panning = button == Input.Buttons.RIGHT || button == Input.Buttons.MIDDLE;
             boolean shiftDown = (gestureModifiers & InputEvent.SHIFT_DOWN_MASK) != 0;
-            orbiting = panning && (boardCamera.firstPerson() ? !shiftDown : (button == Input.Buttons.MIDDLE) != shiftDown);
+            int orbitButton = boardCamera.firstPerson() ? Input.Buttons.RIGHT : Input.Buttons.MIDDLE;
+            orbiting = panning && (button == orbitButton) != shiftDown;
             if (panning) {
                 ui.closeMenu();
             }

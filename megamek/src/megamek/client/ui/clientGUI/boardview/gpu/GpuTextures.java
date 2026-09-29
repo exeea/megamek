@@ -1,7 +1,6 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -262,11 +261,17 @@ final class GpuTextures<K> implements Disposable {
         Pixmap result = new Pixmap(image.width() + 2 * border, image.height() + 2 * border, Pixmap.Format.RGBA8888);
         result.setBlending(Pixmap.Blending.None);
         // One direct-buffer write loop instead of one JNI call per pixel. RGBA bytes have fixed order.
-        ByteBuffer buffer = result.getPixels().duplicate().order(ByteOrder.BIG_ENDIAN);
-        for (int y = -border; y < image.height() + border; y++) {
-            int row = Math.clamp(y, 0, image.height() - 1) * image.width();
-            for (int x = -border; x < image.width() + border; x++) {
-                buffer.putInt(flatNormal ? 0x8080ffff : image.rgba(row + Math.clamp(x, 0, image.width() - 1)));
+        var buffer = result.getPixels().duplicate().order(ByteOrder.BIG_ENDIAN).asIntBuffer();
+        if (flatNormal) {
+            while (buffer.hasRemaining()) { buffer.put(0x8080ffff); }
+        } else if (border == 0) {
+            image.writeRgba(buffer, 0, image.width() * image.height());
+        } else {
+            for (int y = -border; y < image.height() + border; y++) {
+                int row = Math.clamp(y, 0, image.height() - 1) * image.width();
+                for (int x = 0; x < border; x++) { buffer.put(image.rgba(row)); }
+                image.writeRgba(buffer, row, image.width());
+                for (int x = 0; x < border; x++) { buffer.put(image.rgba(row + image.width() - 1)); }
             }
         }
         return result;

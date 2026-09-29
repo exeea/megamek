@@ -38,11 +38,11 @@ final class GpuUnitInstance extends ModelInstance {
     }
     private static final MMLogger LOGGER = MMLogger.create(GpuUnitInstance.class);
     private final RenderableProvider depth = this::depthParts;
-    /** The parts each level of detail draws; both empty for a unit with only one level. */
-    private final List<NodePart> lod0Parts = new ArrayList<>();
-    private final List<NodePart> lod1Parts = new ArrayList<>();
+    /** Only parts participating in LOD selection; other assembly geometry stays visible. */
+    private final List<NodePart> detailParts = new ArrayList<>();
+    private GpuUnitModel.DetailLevels levels = GpuUnitModel.DetailLevels.NONE;
     private float figureHeight;
-    private float lod1Pixels;
+    private int requestedLevel;
     private int detailLevel;
     private final Map<Node, Attachment> attachments = new IdentityHashMap<>();
     private final Vector3 detailPosition = new Vector3();
@@ -60,23 +60,18 @@ final class GpuUnitInstance extends ModelInstance {
                 attachments.put(node, new Attachment(UnitBounds.subtree(node).getDimensions(new Vector3()).len()));
             }
         }
-        var levels = model.detailLevels();
-        if (!levels.lod1().isEmpty()) {
-            figureHeight = model.figureHeight();
-            lod1Pixels = levels.lod1Pixels();
-            sortDetailParts(nodes, levels);
-        }
+        levels = model.detailLevels();
+        figureHeight = model.figureHeight();
+        sortDetailParts(nodes, levels);
     }
 
-    /** Parts that belong to neither level, such as a Mek's weapons, are left alone and show at both. */
+    /** A reused mesh can belong to several levels, without duplicated buffers or parts. */
     private void sortDetailParts(Iterable<Node> nodes, GpuUnitModel.DetailLevels levels) {
         for (Node node : nodes) {
             for (NodePart part : node.parts) {
                 Mesh mesh = part.meshPart.mesh;
-                if (levels.lod1().contains(mesh)) {
-                    lod1Parts.add(part);
-                } else if (levels.lod0().isEmpty() || levels.lod0().contains(mesh)) {
-                    lod0Parts.add(part);
+                if (levels.lod0().contains(mesh) || levels.lod1().contains(mesh) || levels.lod2().contains(mesh)) {
+                    detailParts.add(part);
                 }
             }
             sortDetailParts(node.getChildren(), levels);
@@ -85,10 +80,10 @@ final class GpuUnitInstance extends ModelInstance {
 
     /**
      * Render selection only: rigs, emitters, picking, damage flags and shared mesh buffers stay intact. Small
-     * equipment is hidden, and a unit with an authored LOD1 body or suit switches to it once small on screen.
+     * equipment is hidden, and authored LOD1/LOD2 geometry is selected once the unit is small on screen.
      */
     void equipmentDetail(Camera camera, boolean forceFull) {
-        if (attachments.isEmpty() && lod1Parts.isEmpty()) { return; }
+        if (attachments.isEmpty() && detailParts.isEmpty()) { return; }
         float pixels = BoardCamera.pixelsPerUnit(camera, transform.getTranslation(detailPosition))
               * Math.max(transform.getScaleX(), Math.max(transform.getScaleY(), transform.getScaleZ()));
         if (pixels == detailPixels && forceFull == forcedDetail) { return; }
@@ -108,20 +103,20 @@ final class GpuUnitInstance extends ModelInstance {
     int hiddenEquipment() { return (int) attachments.values().stream().filter(attachment -> attachment.hidden).count(); }
 
     /**
-     * Shows LOD1 below the model's screen-height threshold, LOD0 otherwise. Missing LOD1 and units in focus use LOD0.
+     * Selects detail from screen height. Missing mesh levels reuse preceding ones; units in focus use LOD0.
      *
      * @param pixelsPerModelUnit framebuffer pixels per model unit at the instance's current scale
      * @param forceFull          {@code true} for the selected unit or one in an attack
      */
     void bodyDetail(float pixelsPerModelUnit, boolean forceFull) {
-        if (lod1Parts.isEmpty()) { return; }
+        if (detailParts.isEmpty()) { return; }
         float unitPixels = figureHeight * pixelsPerModelUnit;
-        int next = forceFull ? 0 : FormationLod.level(unitPixels, detailLevel, lod1Pixels);
+        requestedLevel = forceFull ? 0 : FormationLod.level(unitPixels, requestedLevel, levels.lod1Pixels(), levels.lod2Pixels());
+        int next = levels.resolvedLevel(requestedLevel);
         if (next == detailLevel) { return; }
         detailLevel = next;
-        boolean lod1 = next == 1;
-        lod0Parts.forEach(part -> part.enabled = !lod1);
-        lod1Parts.forEach(part -> part.enabled = lod1);
+        var visible = levels.meshes(next);
+        detailParts.forEach(part -> part.enabled = visible.contains(part.meshPart.mesh));
         detailRevision++;
         LOGGER.debug("[FormationLod] unit now shows LOD{} ({} pixels tall{})", next,
               Math.round(unitPixels), forceFull ? ", held at LOD0 while in focus" : "");
@@ -131,6 +126,11 @@ final class GpuUnitInstance extends ModelInstance {
     int detailLevel() { return detailLevel; }
 
     int detailRevision() { return detailRevision; }
+
+    /** Removed locations no longer participate in detail switching; repairs already rebuild the instance. */
+    void removeDetailParts(List<NodePart> removed) {
+        if (detailParts.removeAll(removed)) { detailRevision++; }
+    }
 
     @Override
     protected void getRenderables(Node node, Array<Renderable> renderables, Pool<Renderable> pool) {

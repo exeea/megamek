@@ -16,7 +16,6 @@ import javax.swing.SwingUtilities;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.TextMarkerSprite;
 import megamek.common.Hex;
@@ -82,6 +81,7 @@ class GpuFiringSmokeTest {
                 public void render() {
                     try {
                         super.render();
+                        if (frames() == 0) { return; }
                         tick++;
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                         if (tick == 1) {

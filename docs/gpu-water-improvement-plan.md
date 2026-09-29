@@ -36,7 +36,7 @@ The current implementation already has substantial useful infrastructure:
 | Existing behaviour | Evidence and implication |
 | --- | --- |
 | GPU FFT wind waves | `GpuOcean` runs a 128 by 128 simulation over a 64 m patch. Its final texture contains slopes, crest compression and persistent foam. Reuse this simulation. |
-| No animated lake height | `ocean-spectrum.frag` computes spectral height but transforms slopes and horizontal offsets. `ocean-finish.frag` exposes neither height nor offsets to the water mesh. `GpuWaterfall.vertex()` moves spray only. Lake geometry therefore has no travelling crests or troughs. |
+| No animated lake height | `ocean-spectrum.frag` computes spectral height but transforms slopes and horizontal offsets. `ocean-water-finish.frag` exposes neither height nor offsets to the water mesh. `GpuWaterfall.vertex()` moves spray only. Lake geometry therefore has no travelling crests or troughs. |
 | Static water topology | `BoardSurface.river()` triangulates ordinary water polygons. Graded river surfaces already have static slopes. Neither is a mesh designed to resolve animated broad waves. |
 | Several scales of surface shading | `water-surface.frag` samples the same ocean at 0.43, 1, 2.37 and 5.3 scales. These add normal detail, but they are not independent physical wave bands: spatial rescaling also changes their apparent travel speed. |
 | A local water field | `GpuWaterShader.Field` stores bank distance, optical depth and current on a world-aligned lattice. At the default scale it samples every 4.5 world units. Bank distance saturates at 0.4 hex widths, and optical depth at four levels. It cannot describe basin-scale exposure. |

@@ -274,7 +274,8 @@ final class GpuShaderManager {
         String selected = names.contains(request.program()) ? request.program() : names.isEmpty() ? null : names.getFirst();
         List<GpuShaderInputs.Row> rows = selected == null ? List.of()
               : selected.equals(GpuShaderInputs.SAMPLE) ? sampleRows : programs.get(selected).rows();
-        panel.receive(new GpuShaderInputs.Snapshot(List.copyOf(names), selected, rows));
+        if (request.program() == null && rows.isEmpty() && !sampleRows.isEmpty()) { selected = GpuShaderInputs.SAMPLE; rows = sampleRows; }
+        panel.receive(new GpuShaderInputs.Snapshot(request, List.copyOf(names), selected, rows));
     }
 
     void close() {

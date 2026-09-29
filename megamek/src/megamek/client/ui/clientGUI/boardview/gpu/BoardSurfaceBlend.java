@@ -3,117 +3,141 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import megamek.common.board.Coords;
 
-/** Natural cover at a world position. Rendering and grass placement query the same immutable board snapshot. */
+/** Surface cover at a world position. Rendering and grass placement query the same immutable board snapshot. */
 final class BoardSurfaceBlend {
     static final float WIDTH_METRES = 4.5f;
-    private static final BoardScene.Surface[] FAMILIES = BoardScene.Surface.values();
+    static final float FOOT_METRES = .9f;
+    // Render-only covers derived from BoardLiquid; the board's terrain families and rules remain unchanged.
+    static final int CRUST = BoardScene.Surface.values().length, BANK = CRUST + 1, FAMILIES = BANK + 1;
 
-    record Cover(float grass, float dirt, float sand, float rock, float concrete, float snow) {
-        float weight(BoardScene.Surface family) {
+    record Cover(float grass, float dirt, float sand, float rock, float concrete, float snow, float crust, float bank) {
+        float weight(BoardScene.Surface family) { return weight(family.ordinal()); }
+
+        float weight(int family) {
             return switch (family) {
-                case GRASS -> grass;
-                case DIRT -> dirt;
-                case SAND -> sand;
-                case ROCK -> rock;
-                case CONCRETE -> concrete;
-                case SNOW -> snow;
+                case 0 -> grass;
+                case 1 -> dirt;
+                case 2 -> sand;
+                case 3 -> rock;
+                case 4 -> concrete;
+                case 5 -> snow;
+                case 6 -> crust;
+                case 7 -> bank;
+                default -> throw new IllegalArgumentException("Surface cover " + family);
             };
         }
 
         int mask() {
             int mask = 0;
-            for (var family : FAMILIES) {
-                if (weight(family) > 0) { mask |= 1 << family.ordinal(); }
+            for (int family = 0; family < FAMILIES; family++) {
+                if (weight(family) > 0) { mask |= 1 << family; }
             }
             return mask;
         }
     }
 
     private static final Cover[] SOLID = {
-          new Cover(1, 0, 0, 0, 0, 0), new Cover(0, 1, 0, 0, 0, 0), new Cover(0, 0, 1, 0, 0, 0),
-          new Cover(0, 0, 0, 1, 0, 0), new Cover(0, 0, 0, 0, 1, 0), new Cover(0, 0, 0, 0, 0, 1)
+          new Cover(1, 0, 0, 0, 0, 0, 0, 0), new Cover(0, 1, 0, 0, 0, 0, 0, 0), new Cover(0, 0, 1, 0, 0, 0, 0, 0),
+          new Cover(0, 0, 0, 1, 0, 0, 0, 0), new Cover(0, 0, 0, 0, 1, 0, 0, 0), new Cover(0, 0, 0, 0, 0, 1, 0, 0),
+          new Cover(0, 0, 0, 0, 0, 0, 1, 0), new Cover(0, 0, 0, 0, 0, 0, 0, 1)
     };
 
     private BoardSurfaceBlend() { }
 
     static Cover solid(BoardScene.Surface family) { return SOLID[family.ordinal()]; }
+    static Cover solid(int family) { return SOLID[family]; }
+
+    static int family(BoardScene.Tile tile) {
+        return tile.liquid().volcanic() ? tile.liquid().molten() ? BANK : CRUST : tile.surface().ordinal();
+    }
 
     static boolean natural(BoardScene.Tile tile) {
-        return tile != null && tile.detailedGround() && !tile.liquid().present() && !tile.frozen()
+        return tile != null && tile.detailedGround() && !tile.liquid().present() && !tile.liquid().volcanic() && !tile.frozen()
               && (tile.roadExits() == 0 || BoardRoad.rendered(tile)) && tile.surface() != BoardScene.Surface.CONCRETE
+              && tile.features().stream().noneMatch(feature -> feature.kind() == BoardScene.FeatureKind.BUILDING);
+    }
+
+    private static boolean blendable(BoardScene.Tile tile) {
+        return tile != null && tile.detailedGround() && (!tile.liquid().present() || tile.liquid().volcanic())
+              && !tile.frozen() && (tile.roadExits() == 0 || BoardRoad.rendered(tile))
               && tile.features().stream().noneMatch(feature -> feature.kind() == BoardScene.FeatureKind.BUILDING);
     }
 
     /** Uniform interiors retain the ordinary family material and incur no extra maps or vertex attributes. */
     static boolean boundary(BoardScene scene, BoardScene.Tile tile) {
-        if (!natural(tile)) { return false; }
+        if (!blendable(tile)) { return false; }
         for (int direction = 0; direction < 6; direction++) {
             var next = scene.tile(tile.coords().translated(direction));
-            if (contact(tile, next) && next.surface() != tile.surface()) { return true; }
+            if (contact(tile, next) && family(next) != family(tile)) { return true; }
         }
         return false;
     }
 
     private static boolean contact(BoardScene.Tile a, BoardScene.Tile b) {
-        return natural(b) && (a.elevation() == b.elevation()
-              || BoardGeometry.tuning().stepsBetweenTops() && Math.abs(a.elevation() - b.elevation()) == 1);
-    }
-
-    static boolean cliffBoundary(BoardScene scene, BoardScene.Tile tile) {
-        if (!natural(tile)) { return false; }
-        for (int direction = 0; direction < 6; direction++) {
-            var next = scene.tile(tile.coords().translated(direction));
-            if (natural(next) && next.surface() != tile.surface()) { return true; }
+        if (!blendable(b)) { return false; }
+        if (a.liquid().present() && !a.liquid().volcanic()) {
+            return natural(b) && (a.elevation() == b.elevation()
+                  || BoardGeometry.tuning().stepsBetweenTops() && Math.abs(a.elevation() - b.elevation()) == 1);
         }
-        return false;
+        // Concrete steps of one/two levels are complete slabs. Only the rock beneath taller slabs joins the ground.
+        return a == b || a.surface() != BoardScene.Surface.CONCRETE && b.surface() != BoardScene.Surface.CONCRETE
+              || Math.abs(a.elevation() - b.elevation()) >= 3;
     }
 
-    /** A cliff samples the columns that reach its height, not the covers of the valley floor below it. */
+    static boolean cliffBoundary(BoardScene scene, BoardScene.Tile tile) { return boundary(scene, tile); }
+
+    /** Cliff and ground agree at the foot. The lower cover reaches only a short way up the exposed column. */
     static Cover sampleCliff(BoardScene scene, BoardScene.Tile owner, float x, float y, float z) {
-        if (!natural(owner)) { return solid(owner.surface()); }
+        if (!blendable(owner)) { return solid(family(owner)); }
         var at = BoardGeometry.tile(scene, x, y);
-        if (at == null) { return solid(owner.surface()); }
+        if (at == null) { return solid(family(owner)); }
+        if (!at.liquid().present() || at.liquid().volcanic()) { return sample(scene, owner, x, y, z); }
         BoardScene.Tile column = null;
         float nearest = Float.POSITIVE_INFINITY;
         for (int direction = -1; direction < 6; direction++) {
             var candidate = direction < 0 ? at : scene.tile(at.coords().translated(direction));
             if (!reaches(candidate, z)) { continue; }
-            float distance = distance(candidate.coords(), x, y);
+            float distance = distance(scene, candidate.coords(), x, y);
             if (distance < nearest) { column = candidate; nearest = distance; }
         }
-        return column == null ? solid(owner.surface()) : sampleAt(scene, column, column.surface(), x, y, z, true);
+        return column == null ? solid(family(owner)) : sampleAt(scene, column, family(column), x, y, z, true);
     }
 
     private static boolean reaches(BoardScene.Tile tile, float z) {
-        return natural(tile) && BoardGeometry.groundZ(tile) + BoardRelief.metres(.05f) >= z;
+        return blendable(tile) && BoardGeometry.groundZ(tile) + BoardRelief.metres(.05f) >= z;
     }
 
     /** The footprint, rather than the emitting mesh, owns the query; shared positions therefore agree. */
     static Cover sample(BoardScene scene, BoardScene.Tile owner, float x, float y, float z) {
-        if (!natural(owner)) { return solid(owner.surface()); }
+        if (!blendable(owner)) { return solid(family(owner)); }
         var at = BoardGeometry.tile(scene, x, y);
-        if (at == null || !natural(at) && (!at.liquid().present() || at.frozen())) { return solid(owner.surface()); }
-        return sampleAt(scene, at, owner.surface(), x, y, z, false);
+        if (at == null || !blendable(at) && (!at.liquid().present() || at.frozen())) { return solid(family(owner)); }
+        if ((!at.liquid().present() || at.liquid().volcanic() || owner.surface() == BoardScene.Surface.CONCRETE)
+              && !contact(owner, at)) {
+            return solid(family(owner));
+        }
+        return sampleAt(scene, at, family(owner), x, y, z, false);
     }
 
-    private static Cover sampleAt(BoardScene scene, BoardScene.Tile at, BoardScene.Surface fallback,
+    private static Cover sampleAt(BoardScene scene, BoardScene.Tile at, int fallback,
           float x, float y, float z, boolean cliff) {
-        float[] weights = new float[FAMILIES.length];
+        float[] weights = new float[FAMILIES];
         float total = 0;
         float width = BoardRelief.metres(WIDTH_METRES);
         float mx = x / BoardRelief.metres(1), my = y / BoardRelief.metres(1);
         float offset = 0;
         float bed = 0;
         int bedFamily = 0;
-        if (at.liquid().present()) {
+        boolean water = at.liquid().present() && !at.liquid().volcanic();
+        if (water) {
             // Extend the neighbouring cover fields to the curved bank. Absolute hex distance would end the blend
             // before the waterline at a recessed corner, leaving the two banks with a hard radial seam.
             float nearest = Float.POSITIVE_INFINITY;
-            int[] banks = new int[FAMILIES.length];
+            int[] banks = new int[FAMILIES];
             for (int direction = 0; direction < 6; direction++) {
                 var land = scene.tile(at.coords().translated(direction));
                 if (contact(at, land)) {
-                    nearest = Math.min(nearest, distance(land.coords(), x, y));
+                    nearest = Math.min(nearest, distance(scene, land.coords(), x, y));
                     banks[land.surface().ordinal()]++;
                 }
             }
@@ -127,31 +151,39 @@ final class BoardSurfaceBlend {
             // A shallow pond can expose its bed. Let neighbouring bank covers meet a common central sediment,
             // chosen from those banks, instead of converging as six differently painted wedges at one point.
             bed = 1 - BoardRelief.smooth(radial / .5f);
-            if (bed >= .9999f) { return solid(FAMILIES[bedFamily]); }
+            if (bed >= .9999f) { return solid(bedFamily); }
             // Keep the contact's angular reach bounded as the bank runs inward: distant shores must not bleed in.
             width *= Math.min(1, radial);
         }
         for (int direction = -1; direction < 6; direction++) {
             var tile = direction < 0 ? at : scene.tile(at.coords().translated(direction));
             if (cliff ? !reaches(tile, z) : !contact(at, tile)) { continue; }
-            float distance = distance(tile.coords(), x, y) - offset;
             // A contact spreads and meanders down the exposed column; it starts at the plateau's own cover.
             // The bounded world-metre field is identical at every mesh LOD.
-            float below = cliff ? Math.max(0, (BoardGeometry.groundZ(tile) - z) / BoardRelief.metres(1)) : 0;
+            float below = water ? 0 : Math.max(0, (BoardGeometry.groundZ(tile) - z) / BoardRelief.metres(1));
+            // The cliff's talus projects beyond its plateau footprint. Carry its broken material out with it,
+            // so the receiving floor does not cut off the contact before the protruding foot is reached.
+            float toe = BoardRelief.metres(Math.min(2.4f, below * .3f));
+            float distance = distance(scene, tile.coords(), x, y) - offset - toe;
             float contactWidth = width * (1 + .35f * BoardRelief.smooth(below / 4));
-            float strength = cliff ? .9f + .7f * BoardRelief.smooth(below / 3) : .9f;
+            float strength = .9f + .7f * BoardRelief.smooth(below / 3);
             if (distance >= contactWidth * (1 + strength * .5f)) { continue; }
-            int family = tile.surface().ordinal();
+            int family = family(tile);
             // Family-anchored patches continue through neighbouring hexes of that family.
             float px = mx + below * .65f, py = my + below * .4f;
             float patch = .7f * BoardRelief.noise(px / 5.3f + family * 19.7f, py / 5.3f - family * 11.3f)
                   + .3f * BoardRelief.noise(px / 1.7f - family * 7.1f, py / 1.7f + family * 23.9f);
             float warp = (patch - .5f) * contactWidth * strength;
             float weight = 1 - BoardRelief.smooth((distance + contactWidth - warp) / (2 * contactWidth));
-            // On a gentle step, cover follows the actual height. Tall cliffs cannot paint the ground below them.
-            float height = at.liquid().present() ? Math.max(z, BoardGeometry.groundZ(at)) : z;
-            float dz = Math.abs(height - BoardGeometry.groundZ(tile)) / BoardGeometry.level();
-            if (!cliff) { weight *= 1 - BoardRelief.smooth((dz - .35f) / .65f); }
+            // A column's material reaches the foot and nearby talus. The receiving ground creeps a bounded
+            // distance up that column, then disappears; it cannot paint the whole cliff or the upper plateau.
+            if (water) {
+                float dz = Math.abs(Math.max(z, BoardGeometry.groundZ(at)) - BoardGeometry.groundZ(tile)) / BoardGeometry.level();
+                weight *= 1 - BoardRelief.smooth((dz - .35f) / .65f);
+            } else {
+                float above = Math.max(0, (z - BoardGeometry.groundZ(tile)) / BoardRelief.metres(1));
+                weight *= 1 - BoardRelief.smooth(above / FOOT_METRES);
+            }
             if (weight < .0001f) { continue; }
             weights[family] += weight;
             total += weight;
@@ -162,11 +194,13 @@ final class BoardSurfaceBlend {
             weights[bedFamily] += bed * total;
         }
         return new Cover(weights[0] / total, weights[1] / total, weights[2] / total,
-              weights[3] / total, weights[4] / total, weights[5] / total);
+              weights[3] / total, weights[4] / total, weights[5] / total, weights[6] / total, weights[7] / total);
     }
 
     /** Signed distance to the hex's supporting edges, using the board's actual short/long dimensions. */
-    private static float distance(Coords coords, float x, float y) {
+    private static float distance(BoardScene scene, Coords coords, float x, float y) {
+        float fitted = BoardConcrete.of(scene).distance(coords, x, y);
+        if (Float.isFinite(fitted)) { return fitted; }
         float dx = Math.abs(x - BoardGeometry.centerX(coords)), dy = Math.abs(y - BoardGeometry.centerY(coords));
         float a = BoardGeometry.height() / 2, b = BoardGeometry.width() / 4;
         return Math.max(dy - a, (a * dx + b * dy - BoardGeometry.width() * BoardGeometry.height() / 4)

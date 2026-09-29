@@ -4214,13 +4214,7 @@ class MovePathHandler extends AbstractTWRuleHandler {
             boolean goodTemp = getGame().getPlanetaryConditions().getTemperature() <= minTemp;
             boolean goodWeather = getGame().getPlanetaryConditions().getWeather().isIceStorm();
             if (isPavementStep && ((useBlackIce && goodTemp) || goodWeather)) {
-                if (!curHex.containsTerrain(Terrains.BLACK_ICE)) {
-                    int blackIceChance = Compute.d6(1);
-                    if (blackIceChance > 4) {
-                        curHex.addTerrain(new Terrain(Terrains.BLACK_ICE, 1));
-                        gameManager.sendChangedHex(curPos);
-                    }
-                }
+                ServerHelper.checkEnteringBlackIce(gameManager, curPos, curHex, useBlackIce, goodTemp, goodWeather);
             }
 
             // Handle loading units.
@@ -4524,7 +4518,7 @@ class MovePathHandler extends AbstractTWRuleHandler {
                           step.getAdditionalData(MoveStep.UNLOAD_FACING_KEY));
                 }
 
-                if (!gameManager.unloadUnit(entity, unloaded, unloadPos, unloadFacing, step.getElevation())) {
+                if (!gameManager.unloadUnitDuringMovement(entity, unloaded, unloadPos, unloadFacing, step.getElevation())) {
                     logger.error("Server was told to unload {} from {} into {}",
                                  unloaded.getDisplayName(),
                                  entity.getDisplayName(),

@@ -47,7 +47,7 @@ final class BoardTacticalGeometry {
         static Surface of(BoardSurface surface, BoardScene scene, float floor) {
             List<BoardSurface.Face> top = new ArrayList<>();
             for (BoardSurface.Face face : surface.faces) {
-                if (surface.tile.frozen() ? face.finish() == BoardSurface.Finish.ICE
+                if (surface.tile.frozen() && surface.tile.water() ? face.finish() == BoardSurface.Finish.ICE
                       : face.finish() == BoardSurface.Finish.TOP || face.finish() == BoardSurface.Finish.SHORE) {
                     top.add(face);
                 }

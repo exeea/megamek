@@ -38,6 +38,7 @@ class GpuTerrainTextureBindingSmokeTest {
             public void create() {
                 GpuTextures<String> atlas = new GpuTextures<>();
                 try {
+                    checkPixmapRows();
                     var pixels = new java.awt.image.BufferedImage(2, 2, java.awt.image.BufferedImage.TYPE_INT_ARGB);
                     pixels.setRGB(0, 0, 0xffff0000);
                     atlas.retainReplacedPages();
@@ -164,6 +165,30 @@ class GpuTerrainTextureBindingSmokeTest {
             }
         }, config);
         if (failure.get() != null) { throw new AssertionError("Water texture lifetime", failure.get()); }
+    }
+
+    private static void checkPixmapRows() {
+        var image = new java.awt.image.BufferedImage(12, 3, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < 3; y++) {
+            for (int x = 0; x < 12; x++) { image.setRGB(x, y, y == 1 && x > 4 ? 0x80abcdef : 0x00345678); }
+        }
+        var source = new BoardScene.Pixels(image);
+        for (var pixels : List.of(source, source.compact())) {
+            for (int border = 0; border <= 2; border++) {
+                for (boolean flat : new boolean[] { false, true }) {
+                    var pixmap = GpuTextures.pixmap(pixels, border, flat);
+                    try {
+                        for (int y = 0; y < pixmap.getHeight(); y++) {
+                            for (int x = 0; x < pixmap.getWidth(); x++) {
+                                int argb = image.getRGB(Math.clamp(x - border, 0, 11), Math.clamp(y - border, 0, 2));
+                                assertEquals(flat ? 0x8080ffff : Integer.rotateLeft(argb, 8), pixmap.getPixel(x, y),
+                                      "Atlas uploads must preserve RGBA channels and duplicate the complete border");
+                            }
+                        }
+                    } finally { pixmap.dispose(); }
+                }
+            }
+        }
     }
 
     private static void assertTexture(ShaderProgram program, String name, Texture expected) {

@@ -10,7 +10,10 @@ import java.awt.Image;
 import java.awt.Point;
 import java.awt.Shape;
 import java.awt.image.BufferedImage;
+import java.util.List;
 
+import megamek.client.ui.clientGUI.boardview.sprite.AttackSprite;
+import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
 import megamek.client.ui.tileset.TilesetManager;
 import megamek.common.Player;
 import megamek.common.board.Board;
@@ -23,8 +26,8 @@ public interface BoardGlyphContext {
     default BoardGlyphContext glyphContext() { return this; }
     int C3_LINE_WIDTH = 1;
     int FLY_OVER_LINE_WIDTH = 3;
-    void addSprite(megamek.client.ui.clientGUI.boardview.sprite.Sprite sprite);
-    java.util.List<megamek.client.ui.clientGUI.boardview.sprite.AttackSprite> getAttackSprites();
+    void addSprite(Sprite sprite);
+    List<AttackSprite> getAttackSprites();
     void drawHexBorder(Graphics2D graphics, Point point, Color color, double padding, double lineWidth);
     Game getGame();
     Board getBoard();

@@ -43,7 +43,7 @@ import megamek.common.board.Coords;
 import megamek.common.units.Entity;
 
 /**
- * Instances of this class are sent as a result of changes in BoardView
+ * Shared board interactions emitted by either renderer.
  *
  * @see BoardViewListener
  */

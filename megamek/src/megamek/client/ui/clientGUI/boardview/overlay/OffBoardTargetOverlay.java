@@ -80,7 +80,6 @@ public class OffBoardTargetOverlay implements IDisplayable {
     private boolean isHit = false;
     private final ClientGUI clientGUI;
     private final Map<OffBoardDirection, Rectangle> buttons = new HashMap<>();
-    private TargetingPhaseDisplay targetingPhaseDisplay;
     private final Image offBoardTargetImage;
     private BufferedImage buttonImage;
 
@@ -92,13 +91,6 @@ public class OffBoardTargetOverlay implements IDisplayable {
 
     private Player getCurrentPlayer() {
         return clientGUI.getClient().getLocalPlayer();
-    }
-
-    /**
-     * Sets a reference to a TargetingPhaseDisplay. Used to communicate a generated attack to it.
-     */
-    public void setTargetingPhaseDisplay(TargetingPhaseDisplay tpd) {
-        targetingPhaseDisplay = tpd;
     }
 
     public OffBoardTargetOverlay(ClientGUI clientGUI) {
@@ -159,6 +151,10 @@ public class OffBoardTargetOverlay implements IDisplayable {
      * Logic that determines whether to show a specific directional indicator
      */
     private boolean showDirectionalElement(OffBoardDirection direction, Mounted<?> selectedArtilleryWeapon) {
+        if (!(clientGUI.getCurrentPanel() instanceof TargetingPhaseDisplay targetingPhaseDisplay)) {
+            return false;
+        }
+
         for (Entity entity : game().getAllOffboardEnemyEntities(getCurrentPlayer())) {
             if (entity.isOffBoardObserved(getCurrentPlayer().getTeam()) &&
                   (entity.getOffBoardDirection() == direction) &&
@@ -351,6 +347,10 @@ public class OffBoardTargetOverlay implements IDisplayable {
      * popup Generates an artillery attack action that is fed back to the targeting display.
      */
     private void handleButtonClick(OffBoardDirection direction) {
+        if (!(clientGUI.getCurrentPanel() instanceof TargetingPhaseDisplay targetingPhaseDisplay)) {
+            return;
+        }
+
         List<Targetable> eligibleTargets = new ArrayList<>();
 
         for (Entity ent : this.game().getAllOffboardEnemyEntities(getCurrentPlayer())) {

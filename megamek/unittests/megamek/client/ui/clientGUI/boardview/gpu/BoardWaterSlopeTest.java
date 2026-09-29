@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -15,6 +16,41 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 class BoardWaterSlopeTest {
+    @ParameterizedTest
+    @EnumSource(TerrainLod.class)
+    void descendingDomeVentBanksMeetBothEndsOfTheirWalls(TerrainLod lod) {
+        BoardScene lava = BoardCliffSeamTest.scene(new File("data/boards/Map Pack Volcanic/16x17 Dome Vent 2.board"));
+        for (BoardScene scene : List.of(lava, BoardWaterfallTest.withWater(lava))) {
+            for (boolean transitions : new boolean[] { false, true }) {
+                BoardSculptTest.withTransitions(transitions, () -> checkDescendingBankContacts(scene, lod));
+            }
+        }
+    }
+
+    private static void checkDescendingBankContacts(BoardScene scene, TerrainLod lod) {
+        float floor = BoardGeometry.floor(scene);
+        int checked = 0;
+        for (var tile : scene.tiles()) {
+            if (!tile.liquid().present()) { continue; }
+            BoardSurface surface = new BoardSurface(scene, tile, lod);
+            var walls = surface.walls(scene, floor);
+            for (var side : surface.sides(scene, floor)) {
+                var lower = scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(side.edge())));
+                if (!BoardSurface.waterSlope(tile, lower) || lower.elevation() >= tile.elevation()) { continue; }
+                for (var point : List.of(side.a(), side.b(), new Vector3(side.a().x, side.a().y, side.lowA()),
+                      new Vector3(side.b().x, side.b().y, side.lowB()))) {
+                    float distance = Float.POSITIVE_INFINITY;
+                    for (var face : walls) { distance = Math.min(distance, distanceToFace(point, face)); }
+                    assertTrue(distance < .004f, "A descending bank's wall must reach its rim and foot: "
+                          + tile.coords() + ", " + tile.liquid().kind() + ", " + lod + ", transitions="
+                          + BoardGeometry.tuning().transitions() + ", point=" + point + ", gap=" + distance);
+                    checked++;
+                }
+            }
+        }
+        assertTrue(checked >= 16, "Exercise several narrow banks on Dome Vent 2");
+    }
+
     @ParameterizedTest
     @EnumSource(value = TerrainLod.class, names = { "FULL", "MEDIUM", "COARSE" })
     void descendingWaterReachesTheCliffFaceAboveItsBed(TerrainLod lod) {
@@ -75,14 +111,21 @@ class BoardWaterSlopeTest {
 
     /** A normal projection avoids grazing-ray misses at the refined contour's wall-edge vertices. */
     private static float distanceToFace(Vector3 point, BoardSurface.Face face) {
+        float boundary = Float.POSITIVE_INFINITY;
+        Vector3[] vertices = { face.a(), face.b(), face.c() };
+        for (int i = 0; i < 3; i++) {
+            Vector3 a = vertices[i], edge = new Vector3(vertices[(i + 1) % 3]).sub(a);
+            float t = edge.len2() == 0 ? 0 : Math.clamp(new Vector3(point).sub(a).dot(edge) / edge.len2(), 0, 1);
+            boundary = Math.min(boundary, new Vector3(a).mulAdd(edge, t).dst(point));
+        }
         Vector3 ab = new Vector3(face.b()).sub(face.a()), ac = new Vector3(face.c()).sub(face.a());
         Vector3 ap = new Vector3(point).sub(face.a());
         float aa = ab.dot(ab), bb = ac.dot(ac), cross = ab.dot(ac), pa = ap.dot(ab), pb = ap.dot(ac);
         float determinant = aa * bb - cross * cross;
-        if (determinant < 1e-8f) { return Float.POSITIVE_INFINITY; }
+        if (determinant < 1e-8f) { return boundary; }
         float u = (bb * pa - cross * pb) / determinant, v = (aa * pb - cross * pa) / determinant;
-        if (u < -.0001f || v < -.0001f || u + v > 1.0001f) { return Float.POSITIVE_INFINITY; }
-        return Math.abs(ab.crs(ac).nor().dot(ap));
+        if (u < 0 || v < 0 || u + v > 1) { return boundary; }
+        return Math.min(boundary, Math.abs(ab.crs(ac).nor().dot(ap)));
     }
 
     @Test

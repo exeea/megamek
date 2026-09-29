@@ -53,7 +53,9 @@ final class GpuCloudShadow extends Attribute {
     static String fragment(String source, boolean ground) {
         String declarations = GpuShaderSource.read("cloud-shadow.glsl");
         // The libGDX shaders also dim the sunlit ground's share of their ambient (GpuUnitShader.linearVertex).
-        source = insert(source, MAIN, declarations + "\n" + (ground ? "" : "in vec3 v_groundBounce;\n") + MAIN);
+        // Shared terrain functions can sample clouds before main; declare their inputs before those helpers.
+        String anchor = ground && source.contains("// terrain-lighting-functions") ? "// terrain-lighting-functions" : MAIN;
+        source = insert(source, anchor, declarations + "\n" + (ground ? "" : "in vec3 v_groundBounce;\n") + anchor);
         if (ground) {
             return insert(source, "albedo *= ambient + direct;",
                   GpuShaderSource.read("cloud-surface.glsl") + "\nalbedo *= ambient + direct;");

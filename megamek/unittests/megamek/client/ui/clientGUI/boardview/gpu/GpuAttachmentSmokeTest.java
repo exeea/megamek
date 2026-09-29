@@ -75,6 +75,7 @@ class GpuAttachmentSmokeTest {
             var baModel = library.get(passenger.model(), armor.getId());
             assertNotNull(hostModel);
             assertEquals(6, baModel.rigs().size());
+            verifyReleaseAfterArrival(library, camera, hostUnit, passenger, landed);
             var host = new ModelInstance(hostModel.instance.model);
             var ba = new ModelInstance(baModel.instance.model);
             var hostAnimator = new UnitAnimator();
@@ -166,6 +167,33 @@ class GpuAttachmentSmokeTest {
             }
         }
         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+    }
+
+    private static void verifyReleaseAfterArrival(GpuUnitModels library, OrthographicCamera camera,
+          BoardScene.Unit carrier, BoardScene.Unit passenger, BoardScene.Unit landed) {
+        var hostModel = library.get(carrier.model(), carrier.id());
+        var suitModel = library.get(passenger.model(), passenger.id());
+        var host = new ModelInstance(hostModel.instance.model);
+        var suits = new ModelInstance(suitModel.instance.model);
+        var hostAnimator = new UnitAnimator();
+        var suitAnimator = new UnitAnimator();
+        var instances = Map.of(carrier.id() + ":-1", host, passenger.id() + ":-1", suits);
+        var animators = Map.of(carrier.id() + ":-1", hostAnimator, passenger.id() + ":-1", suitAnimator);
+        for (var kind : List.of(BoardScene.Release.CLIMB_DOWN, BoardScene.Release.THROWN, BoardScene.Release.JUMP)) {
+            var attachments = new UnitAttachments();
+            reset(hostAnimator, hostModel, host, carrier, camera, Vector3.Zero, 0);
+            reset(suitAnimator, suitModel, suits, passenger, camera, Vector3.Zero, 0);
+            attachments.place(scene(carrier, passenger), library, instances, animators, null, camera, new HashMap<>(), 0);
+            var relative = host.transform.cpy().inv().mul(world(suits, "trooper-1"));
+            // Playback may finish travel and start release in one tick, without drawing the arrival attachment.
+            host.transform.trn(0, BoardGeometry.height(), 0).rotate(Vector3.Z, 30);
+            var expected = host.transform.cpy().mul(relative);
+            reset(suitAnimator, suitModel, suits, landed, camera, new Vector3(0, BoardGeometry.height(), 0), 1);
+            var release = new UnitAttachmentMotion(new BoardScene.AttachmentChange(0, passenger, landed, carrier, kind));
+            attachments.place(scene(carrier, landed), library, instances, animators, release, camera, new HashMap<>(), 1);
+            assertArrayEquals(expected.val, world(suits, "trooper-1").val, .002f,
+                  "Release must start on the arrived carrier, never fly from an earlier frame: " + kind);
+        }
     }
 
     private static void verifySharedCarrier(GpuUnitModels library, ModelBatch batch, OrthographicCamera camera,

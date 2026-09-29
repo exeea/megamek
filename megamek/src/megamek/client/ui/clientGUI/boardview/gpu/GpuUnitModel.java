@@ -53,18 +53,30 @@ final class GpuUnitModel implements Disposable {
     private DetailLevels detailLevels = DetailLevels.NONE;
 
     /**
-     * The meshes a unit with two levels of detail swaps between.
+     * Resolved mesh sets at each detail level. Sets overlap when a component reuses a preceding level.
      *
-     * @param lod0       the most detailed meshes; empty means every part outside LOD1, as for battle armour suits
-     * @param lod1       the simpler meshes; empty when LOD1 is absent and LOD0 must remain visible
+     * @param lod0       the most detailed meshes
+     * @param lod1       the middle-distance meshes, including components which retain LOD0
+     * @param lod2       the distant meshes, including components which retain LOD1 or LOD0
      * @param lod1Pixels the height on screen, in framebuffer pixels, below which LOD1 shows
+     * @param lod2Pixels the height on screen, in framebuffer pixels, below which LOD2 shows
      */
-    record DetailLevels(Set<Mesh> lod0, Set<Mesh> lod1, float lod1Pixels) {
-        static final DetailLevels NONE = new DetailLevels(Set.of(), Set.of(), 0);
+    record DetailLevels(Set<Mesh> lod0, Set<Mesh> lod1, Set<Mesh> lod2, float lod1Pixels, float lod2Pixels) {
+        static final DetailLevels NONE = new DetailLevels(Set.of(), Set.of(), Set.of(), 0, 0);
 
         DetailLevels {
             lod0 = Set.copyOf(lod0);
             lod1 = Set.copyOf(lod1);
+            lod2 = Set.copyOf(lod2);
+        }
+
+        Set<Mesh> meshes(int level) {
+            return level == 2 ? lod2 : level == 1 ? lod1 : lod0;
+        }
+
+        int resolvedLevel(int requested) {
+            while (requested > 0 && meshes(requested).equals(meshes(requested - 1))) { requested--; }
+            return requested;
         }
     }
 
@@ -150,7 +162,7 @@ final class GpuUnitModel implements Disposable {
     }
 
     /**
-     * Marks the far detail by its meshes, a battle armour squad's far suits or a Mek's far body: their parts start
+     * Marks the detail levels by their meshes, a formation's figures or a Mek's body/equipment: optional parts start
      * hidden and {@link GpuUnitInstance} swaps them in for the near ones while the unit is small on screen.
      *
      * @return this model

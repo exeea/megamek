@@ -21,8 +21,9 @@ import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.math.Vector3;
+import megamek.common.board.Coords;
 
-/** Road material masks splatted on existing terrain faces. Only the terrain owns the road's physical shape. */
+/** Road material masks on terrain or bridge decks; the supporting surfaces own their physical shape. */
 final class GpuRoads {
     static final VertexAttributes VERTICES = new VertexAttributes(VertexAttribute.Position(), VertexAttribute.Normal(),
           VertexAttribute.ColorPacked(), VertexAttribute.TexCoords(0),
@@ -85,8 +86,11 @@ final class GpuRoads {
     private static final float FEATHER = .45f;
     private static final float LOOSE_FEATHER = 3;
 
-    record Fade(float outer, float inner, float end, boolean wheels, BoardRoad.Join join) {
-        Fade(float outer, float inner, float end) { this(outer, inner, end, false, null); }
+    record Fade(float outer, float inner, float end, boolean wheels, BoardRoad.Join join, float setback, boolean landing) {
+        Fade(float outer, float inner, float end) { this(outer, inner, end, false, null, 0, false); }
+        Fade(float outer, float inner, float end, boolean wheels, BoardRoad.Join join) {
+            this(outer, inner, end, wheels, join, 0, false);
+        }
     }
     record Patch(Area shape, String texture, Color tint, float repeat, float lift, Fade fade) {
         boolean blended() { return fade != null; }
@@ -102,8 +106,9 @@ final class GpuRoads {
 
     static FloatAttribute attribute(Patch patch) {
         boolean transition = patch.fade() != null && patch.fade().join() != null;
-        // Positive: material joins. Negative: loose surface (-1), or patchy wheel compaction (-2).
+        // Positive: material joins. Negative: loose (-1), wheels (-2), landing asphalt (-3) or aggregate/soil (-4).
         float finish = patch.fade() != null && patch.fade().wheels() ? -2
+              : patch.fade() != null && patch.fade().landing() ? patch.texture().equals("roads/asphalt") ? -3 : -4
               : patch.texture().equals("roads/dirt") || patch.texture().equals("roads/gravel") ? -1 : 0;
         return new Surface(transition ? patch.texture().equals("roads/dirt") ? 2 : 1 : finish);
     }
@@ -117,22 +122,71 @@ final class GpuRoads {
     }
 
     static List<Patch> patches(BoardScene.Tile tile, BoardRoad road) {
-        var family = tile.surface();
+        return patches(tile.coords(), tile.surface(), tile.road(), tile.roadExits(), road, false);
+    }
+
+    static List<Patch> deckPatches(BoardScene.Tile tile, BoardBridge.Deck deck, BoardRoad road) {
+        return patches(tile.coords(), tile.surface(), deck.kind(), deck.exits(), road, true);
+    }
+
+    /** A bare bank gets a grounded material apron after the solid deck and its tapered rails have ended. */
+    static List<Patch> deckPatches(BoardScene.Tile tile, BoardBridge.Deck deck, BoardRoad road, BoardBridgeFooting footing) {
+        var patches = deckPatches(tile, deck, road);
+        if (footing.bareExits() == 0) { return patches; }
+        boolean paved = deck.kind() == BoardRoad.Kind.PAVED || deck.kind() == BoardRoad.Kind.ALLEY;
+        float apron = BoardBridgeFooting.apronLength();
+        float setback = paved ? BoardRelief.metres(2.5f) / BoardGeometry.hexScale() : 0;
+        Area landing = road.endZone(apron);
+        var result = new ArrayList<Patch>();
+        if (paved) {
+            float shoulder = BoardRoad.SHOULDER * 3;
+            Area earth = road.footprint(shoulder + 1);
+            earth.intersect(landing);
+            result.add(new Patch(earth, "roads/dirt", Color.WHITE, 1, .02f,
+                  new Fade(shoulder + 1, -1, apron, false, null, 0, true)));
+            Area gravel = road.footprint(shoulder);
+            gravel.intersect(landing);
+            result.add(new Patch(gravel, "roads/gravel", Color.WHITE, 1, .025f,
+                  new Fade(shoulder, -1, apron, false, null, 0, true)));
+        }
+        for (var patch : patches) {
+            Area head = new Area(patch.shape());
+            if (patch.texture().equals("concrete")) {
+                head.subtract(road.endZone(apron
+                      + BoardRelief.metres(BoardBridgeFooting.RAIL_TAPER_METRES + .3f) / BoardGeometry.hexScale()));
+                result.add(new Patch(head, patch.texture(), patch.tint(), patch.repeat(), patch.lift(), patch.fade()));
+                continue;
+            }
+            Area tail = new Area(patch.shape());
+            tail.intersect(landing);
+            head.subtract(tail);
+            result.add(new Patch(head, patch.texture(), patch.tint(), patch.repeat(), patch.lift(), patch.fade()));
+            if (tail.isEmpty()) { continue; }
+            var fade = patch.fade();
+            result.add(new Patch(tail, patch.texture(), patch.tint(), patch.repeat(), patch.lift(),
+                  new Fade(0, paved ? -FEATHER : -LOOSE_FEATHER, apron - setback,
+                        fade != null && fade.wheels(), fade == null ? null : fade.join(), setback, true)));
+        }
+        return result;
+    }
+
+    private static List<Patch> patches(Coords coords, BoardScene.Surface family, BoardRoad.Kind kind,
+          int exits, BoardRoad road, boolean deck) {
         boolean sand = family == BoardScene.Surface.SAND;
         boolean snow = family == BoardScene.Surface.SNOW;
-        boolean paved = tile.road() == BoardRoad.Kind.PAVED || tile.road() == BoardRoad.Kind.ALLEY;
+        boolean paved = kind == BoardRoad.Kind.PAVED || kind == BoardRoad.Kind.ALLEY;
         // The route's compacted soil continues across biome borders; only its loose verge takes the local cover.
-        String texture = texture(tile.road());
+        String texture = texture(kind);
         Color tint = Color.WHITE;
         float repeat = 1;
-        float endFade = paved || Integer.bitCount(tile.roadExits()) > 1 ? 0 : tile.road() == BoardRoad.Kind.DIRT ? 17 : 7;
+        float endFade = deck || paved || Integer.bitCount(exits) > 1 ? 0 : kind == BoardRoad.Kind.DIRT ? 17 : 7;
         List<Patch> patches = new ArrayList<>();
-        float feather = paved ? FEATHER : LOOSE_FEATHER;
+        float feather = deck ? 0 : paved ? FEATHER : LOOSE_FEATHER;
         Area core = road.footprint(-feather);
         Area tail = new Area(core);
         tail.intersect(road.endZone(endFade));
         core.subtract(tail);
-        if (paved) {
+        if (paved && !deck) {
             Area verge = road.footprint(BoardRoad.SHOULDER);
             verge.subtract(road.footprint(-FEATHER));
             patches.add(new Patch(verge, snow ? "snow" : sand ? "sand" : "roads/gravel", Color.WHITE,
@@ -142,7 +196,7 @@ final class GpuRoads {
         if (!tail.isEmpty()) {
             patches.add(new Patch(tail, texture, tint, repeat, SURFACE_LIFT, new Fade(0, 0, endFade)));
         }
-        float outer = paved ? 0 : BoardRoad.SHOULDER;
+        float outer = deck || paved ? 0 : BoardRoad.SHOULDER;
         Area edge = road.footprint(outer);
         edge.subtract(road.footprint(-feather));
         patches.add(new Patch(edge, texture, tint, repeat, .045f, new Fade(outer, -feather, endFade)));
@@ -150,8 +204,8 @@ final class GpuRoads {
             String next = texture(join.kind());
             if (texture.equals(next)) { continue; }
             boolean looseJoin = !paved && (join.kind() == BoardRoad.Kind.DIRT || join.kind() == BoardRoad.Kind.GRAVEL);
-            float joinOuter = looseJoin ? BoardRoad.SHOULDER : 0;
-            float joinFeather = looseJoin ? LOOSE_FEATHER : FEATHER;
+            float joinOuter = !deck && looseJoin ? BoardRoad.SHOULDER : 0;
+            float joinFeather = deck ? 0 : looseJoin ? LOOSE_FEATHER : FEATHER;
             Area change = road.footprint(joinOuter);
             change.intersect(join.area());
             core.subtract(change);
@@ -170,11 +224,10 @@ final class GpuRoads {
             patches.add(new Patch(baseCore, cover, tint, repeat, .075f, new Fade(0, 0, 0, false, join)));
             patches.add(new Patch(baseEdge, cover, tint, repeat, .075f, new Fade(joinOuter, -joinFeather, 0, false, join)));
         }
-        if (tile.road() == BoardRoad.Kind.PAVED) {
-            patches.add(new Patch(road.markings(tile.coords(), tile.roadExits()), "concrete",
-                  new Color(1, .93f, .70f, 1), 1.5f, .065f, null));
+        if (kind == BoardRoad.Kind.PAVED) {
+            patches.add(markings(road, coords, exits));
         } else if (!paved) {
-            Area tracks = road.tracks(tile.roadExits());
+            Area tracks = road.tracks(exits);
             Area worn = new Area(tracks);
             worn.intersect(road.endZone(6));
             tracks.subtract(worn);
@@ -184,7 +237,55 @@ final class GpuRoads {
                 patches.add(new Patch(worn, texture, wornSoil, repeat, .065f, new Fade(0, 0, 6, true, null)));
             }
         }
+        // Rails bound a deck: loose margins and wear must never float outside its carriageway.
+        if (deck) {
+            Area carriageway = road.footprint(0);
+            for (var patch : patches) { patch.shape().intersect(carriageway); }
+        }
         return patches;
+    }
+
+    static Patch markings(BoardRoad road, Coords coords, int exits) {
+        return new Patch(road.markings(coords, exits), "concrete", new Color(1, .93f, .70f, 1), 1.5f, .065f, null);
+    }
+
+    /** Flat carriers clip deck materials at the hex edges without draping them onto the riverbed. */
+    static List<BoardTacticalGeometry.Triangle> deck(BoardScene.Tile tile, BoardScene.Feature bridge, Patch patch) {
+        return deck(tile, bridge, patch, null);
+    }
+
+    static List<BoardTacticalGeometry.Triangle> deck(BoardScene.Tile tile, BoardScene.Feature bridge, Patch patch,
+          BoardBridge.Shape footing) {
+        List<BoardTacticalGeometry.Triangle> result = new ArrayList<>();
+        float elevation = tile.elevation() + bridge.elevation();
+        // Keep the base coat above the authored deck while preserving the ordinary road layer order.
+        float lift = (patch.lift() + .01f) * BoardGeometry.hexScale();
+        Vector3 center = BoardGeometry.center(tile.coords(), elevation).add(0, 0, lift);
+        for (int i = 0; i < 6; i++) {
+            result.add(new BoardTacticalGeometry.Triangle(center,
+                  BoardGeometry.corner(tile.coords(), elevation, i).add(0, 0, lift),
+                  BoardGeometry.corner(tile.coords(), elevation, i + 1).add(0, 0, lift), -1));
+        }
+        if (footing != null) {
+            float offset = (patch.lift() + .01f - SURFACE_LIFT) * BoardGeometry.hexScale();
+            for (var face : footing.facets()) {
+                if (face.part() != BoardBridge.Part.TOP) { continue; }
+                result.add(new BoardTacticalGeometry.Triangle(new Vector3(face.a()).add(0, 0, offset),
+                      new Vector3(face.b()).add(0, 0, offset), new Vector3(face.c()).add(0, 0, offset), -1));
+            }
+        }
+        return result;
+    }
+
+    static List<BoardTacticalGeometry.Triangle> deck(BoardScene.Tile tile, BoardScene.Feature bridge, Patch patch,
+          BoardBridgeFooting footing, Map<Coords, BoardSurface> surfaces) {
+        var result = deck(tile, bridge, patch, footing.shape());
+        for (int d = 0; d < 6; d++) {
+            if ((footing.bareExits() & (1 << d)) == 0) { continue; }
+            // Only the existing dry bank carries the apron. Never drape it onto the surface under the span.
+            result.addAll(drape(tile, surfaces.get(tile.coords().translated(d)), patch));
+        }
+        return result;
     }
 
     /** Whole terrain triangles carry the splat. Road borders, paint and tyre wear do not split them. */
@@ -212,11 +313,17 @@ final class GpuRoads {
 
     /** Shape/coverage data only: repeating albedo, normals and roughness keep their original full resolution. */
     static MaskData mask(BoardRoad road, Patch patch) {
+        return mask(road, patch, true);
+    }
+
+    static MaskData mask(BoardRoad road, Patch patch, boolean clipToHex) {
         var bounds = patch.shape().getBounds2D();
-        int x = (int) Math.floor(Math.max(-BoardGeometry.TILE_WIDTH / 2f, bounds.getMinX())) - 1;
-        int y = (int) Math.floor(Math.max(-BoardGeometry.TILE_HEIGHT / 2f, bounds.getMinY())) - 1;
-        int w = Math.max(1, (int) Math.ceil(Math.min(BoardGeometry.TILE_WIDTH / 2f, bounds.getMaxX())) - x + 1);
-        int h = Math.max(1, (int) Math.ceil(Math.min(BoardGeometry.TILE_HEIGHT / 2f, bounds.getMaxY())) - y + 1);
+        double halfWidth = clipToHex ? BoardGeometry.TILE_WIDTH / 2f : Double.POSITIVE_INFINITY;
+        double halfHeight = clipToHex ? BoardGeometry.TILE_HEIGHT / 2f : Double.POSITIVE_INFINITY;
+        int x = (int) Math.floor(Math.max(-halfWidth, bounds.getMinX())) - 1;
+        int y = (int) Math.floor(Math.max(-halfHeight, bounds.getMinY())) - 1;
+        int w = Math.max(1, (int) Math.ceil(Math.min(halfWidth, bounds.getMaxX())) - x + 1);
+        int h = Math.max(1, (int) Math.ceil(Math.min(halfHeight, bounds.getMaxY())) - y + 1);
         int density = 4;
         var image = new BufferedImage(w * density, h * density, BufferedImage.TYPE_INT_ARGB);
         var graphics = image.createGraphics();
@@ -242,8 +349,13 @@ final class GpuRoads {
 
     static void write(Supplier<MeshPartBuilder> meshes, List<BoardTacticalGeometry.Triangle> triangles,
           Patch patch, MaskData mask, BoardSurface surface) {
+        write(meshes, triangles, patch, mask, surface, false);
+    }
+
+    static void write(Supplier<MeshPartBuilder> meshes, List<BoardTacticalGeometry.Triangle> triangles,
+          Patch patch, MaskData mask, BoardSurface surface, boolean flat) {
         Map<Vector3, Vector3> normals = new HashMap<>();
-        for (var face : surface.groundFaces()) {
+        for (var face : flat ? List.<BoardSurface.Face>of() : surface.groundFaces()) {
             if (face.finish() != BoardSurface.Finish.TOP) { continue; }
             Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
             for (var p : List.of(face.a(), face.b(), face.c())) {
@@ -254,10 +366,12 @@ final class GpuRoads {
             float repeat = BoardRelief.detailMetres(patch.repeat());
             float lift = patch.lift() * BoardGeometry.hexScale();
             Vector3 fallback = new Vector3(t.b()).sub(t.a()).crs(new Vector3(t.c()).sub(t.a())).nor();
+            Vector3 a = flat ? fallback : surface.roadNormal(t.a(), normals.getOrDefault(normalKey(t.a(), lift), fallback)).nor();
+            Vector3 b = flat ? fallback : surface.roadNormal(t.b(), normals.getOrDefault(normalKey(t.b(), lift), fallback)).nor();
+            Vector3 c = flat ? fallback : surface.roadNormal(t.c(), normals.getOrDefault(normalKey(t.c(), lift), fallback)).nor();
             MeshPartBuilder mesh = meshes.get();
-            mesh.triangle(carrier(mesh, t.a(), surface.roadNormal(t.a(), normals.getOrDefault(normalKey(t.a(), lift), fallback)).nor(), repeat, mask, surface.tile),
-                  carrier(mesh, t.b(), surface.roadNormal(t.b(), normals.getOrDefault(normalKey(t.b(), lift), fallback)).nor(), repeat, mask, surface.tile),
-                  carrier(mesh, t.c(), surface.roadNormal(t.c(), normals.getOrDefault(normalKey(t.c(), lift), fallback)).nor(), repeat, mask, surface.tile));
+            mesh.triangle(carrier(mesh, t.a(), a, repeat, mask, surface.tile),
+                  carrier(mesh, t.b(), b, repeat, mask, surface.tile), carrier(mesh, t.c(), c, repeat, mask, surface.tile));
         }
     }
 
@@ -275,6 +389,26 @@ final class GpuRoads {
     static float coverage(BoardRoad road, Patch patch, float x, float y) {
         Fade fade = patch.fade();
         if (fade == null) { return 1; }
+        if (fade.landing()) {
+            float t = Math.clamp((-road.endDistance(x, y) - fade.setback()) / fade.end(), 0, 1);
+            float metre = BoardRelief.metres(1) / BoardGeometry.hexScale();
+            float wx = (x + BoardGeometry.centerX(road.coords()) / BoardGeometry.hexScale()) / metre;
+            float wy = (y + BoardGeometry.centerY(road.coords()) / BoardGeometry.hexScale()) / metre;
+            float wear = .7f * BoardRelief.noise(wx * 1.3f, wy * 1.3f)
+                  + .3f * BoardRelief.noise(wx * 3.7f + 17, wy * 3.7f - 9) - .5f;
+            t = Math.clamp(t + wear * .55f * t * (1 - t), 0, 1);
+            // The landing fans out, then returns to the bank. The shader resolves actual chips and aggregate
+            // from the surface's grain, instead of stretching a few large noise blobs into fingers.
+            float fan = .35f + .65f * (float) Math.sin(Math.PI * t);
+            float outer = fade.outer() * fan;
+            boolean asphalt = patch.texture().equals("roads/asphalt");
+            float inner = fade.inner() - (asphalt ? (1 - t) * 4 : 0);
+            float edge = Math.clamp((outer - road.distance(x, y)) / (outer - inner), 0, 1);
+            // Aggregate remains substantial beyond the last asphalt fragments, then separates into grains.
+            if (!asphalt) { t = Math.min(1, t / .6f); }
+            float alpha = t * t * (3 - 2 * t) * edge;
+            return fade.wheels() ? alpha * road.wheelCoverage(x, y) : alpha;
+        }
         float alpha = fade.outer() > fade.inner()
               ? Math.clamp((fade.outer() - road.distance(x, y)) / (fade.outer() - fade.inner()), 0, 1) : 1;
         if (fade.wheels()) { alpha *= road.wheelCoverage(x, y); }

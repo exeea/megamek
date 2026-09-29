@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -119,6 +120,35 @@ class BoardGeometryTest {
         Ray ray = new Ray(new Vector3(center).add(200, 0, 0), new Vector3(-1, 0, 0));
         assertEquals(raised, BoardGeometry.pick(scene, ray));
         assertNull(BoardGeometry.pick(scene, new Ray(new Vector3(-500, 500, 100), new Vector3(0, 0, -1))));
+    }
+
+    @Test
+    void lowAnglePickingDoesNotPrepareTerrainBehindTheNearestCliff() {
+        var tiles = new ArrayList<BoardScene.Tile>();
+        for (int x = 0; x < 12; x++) {
+            for (int y = 0; y < 5; y++) {
+                tiles.add(new BoardScene.Tile(new Coords(x, y), 2, -1, false, 0, BoardScene.Surface.GRASS,
+                      null, null, null, List.of(), List.of()));
+            }
+        }
+        var board = new BoardScene(0, 12, 5, tiles, List.of(), List.of(), -1, "", List.of());
+        float floor = BoardGeometry.floor(board);
+        for (boolean reverse : new boolean[] { false, true }) {
+            var candidates = reverse ? tiles.reversed() : tiles;
+            for (int column : new int[] { 0, 11 }) {
+                var target = new Coords(column, 2);
+                int direction = column == 0 ? 1 : -1;
+                var ray = new Ray(BoardGeometry.center(target, 1).add(-200 * direction, 0, 0), new Vector3(direction, 0, 0));
+                var queried = new ArrayList<Coords>();
+                var hit = BoardGeometry.hit(board, ray, candidates, floor, coords -> {
+                    queried.add(coords);
+                    return BoardTacticalGeometry.Surface.of(new BoardSurface(board, board.tile(coords)), board, floor);
+                });
+                assertEquals(target, hit.coords(), "Candidate order must not change the nearest rendered cliff");
+                assertFalse(queried.contains(new Coords(11 - column, 2)), "Occluded distant surfaces must not be rebuilt");
+                assertTrue(queried.size() < 6, "A nearby cliff must bound the expensive surface queries");
+            }
+        }
     }
 
     @Test

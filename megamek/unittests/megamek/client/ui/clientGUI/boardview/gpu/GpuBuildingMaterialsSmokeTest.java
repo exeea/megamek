@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.util.List;
@@ -152,6 +153,8 @@ class GpuBuildingMaterialsSmokeTest {
             for (var tile : scene.tiles()) {
                 for (var feature : tile.features()) {
                     if (!feature.asset().startsWith("buildings/")) { continue; }
+                    assertTrue(tile.detailedGround(), "Structures must not replace the native ground: " + tile.coords());
+                    assertEquals(BoardScene.Surface.GRASS, tile.surface());
                     String family = tile.coords().getY() == 6
                           ? tile.coords().getX() == 5 ? "industrial" : "tank"
                           : tile.coords().getY() == 4 ? "fortress" : tile.coords().getY() == 2 ? "hangar"

@@ -22,7 +22,7 @@ final class BoardBiome {
     static BoardScene.Biome plantKind(BoardScene scene, BoardScene.Tile tile) {
         var own = kind(tile);
         if (own != BoardScene.Biome.NONE) { return own; }
-        if (tile == null || !tile.detailedGround() || tile.frozen() || tile.liquid().molten()
+        if (tile == null || !tile.detailedGround() || tile.frozen() || tile.liquid().volcanic()
               || tile.surface() == BoardScene.Surface.CONCRETE
               || tile.features().stream().anyMatch(f -> f.kind() == BoardScene.FeatureKind.BUILDING)) {
             return BoardScene.Biome.NONE;

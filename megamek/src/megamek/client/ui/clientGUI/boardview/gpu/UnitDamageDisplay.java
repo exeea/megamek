@@ -294,6 +294,7 @@ final class UnitDamageDisplay implements Disposable {
             for (NodePart part : parts) {
                 part.enabled = false;
             }
+            if (instance instanceof GpuUnitInstance unit) { unit.removeDetailParts(parts); }
         }
         for (String location : damage.wrecked()) {
             List<NodePart> parts = locationParts(instance, location);

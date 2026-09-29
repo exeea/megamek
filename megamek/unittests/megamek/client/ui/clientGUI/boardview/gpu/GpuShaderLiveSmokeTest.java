@@ -317,9 +317,9 @@ class GpuShaderLiveSmokeTest {
                 void checkRejectedChanges() {
                     manager.run(() -> {
                         int programs = ShaderProgram.getNumManagedShaderPrograms();
-                        String wrongType = composite.replace("u_exposure", "u_exposure.x")
-                              .replace("uniform float u_exposure.x", "uniform vec2 u_exposure");
-                        var type = manager.apply(Map.of("atmosphere-composite.frag", wrongType));
+                        String wrongType = GpuShaderSource.readDisk("atmosphere-grade.glsl").replace("u_saturation", "u_saturation.x")
+                              .replace("uniform float u_saturation.x", "uniform vec2 u_saturation");
+                        var type = manager.apply(Map.of("atmosphere-grade.glsl", wrongType));
                         assertFalse(type.success());
                         assertTrue(type.message().contains("uniform type"), type.message());
                         var link = manager.apply(Map.of("atmosphere.vert", """

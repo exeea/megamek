@@ -22,8 +22,27 @@ Phoenix Hawk IIC is a separate component with its own levels. Recipes refer only
 to the component's `body`/`trooper` descriptor. The importer resolves missing
 optional levels toward LOD0 once and the library shares the resulting buffers.
 LOD0 is required; malformed declared levels report an asset error. Unit drawing
-currently switches between LOD0 and LOD1. `detail: lod0` grants the detailed-body
+switches between LOD0, LOD1 and LOD2. `detail: lod0` grants the detailed-body
 triangle allowance. Older custom separate-level references remain readable.
+
+Detail selection measures standing height in framebuffer pixels at the unit's camera
+depth and current scale. Formations measure one figure's height. Both camera views
+use the same selection and posed meshes for drawing, picking, outlines and shadows.
+
+| Unit | LOD1 nominal boundary | LOD2 nominal boundary | Enter LOD2 when shrinking | Leave LOD2 when enlarging |
+|---|---:|---:|---:|---:|
+| Mek | 96 px | 32 px | Below 28.8 px | At least 35.2 px |
+| Infantry / battle armor formation | 48 px | 16 px | Below 14.4 px | At least 17.6 px |
+
+Both boundaries have a 10% hysteresis margin; within the band the previous requested
+level remains active. Large zoom changes may switch directly between LOD0 and LOD2.
+Selected units and attack-playback participants retain LOD0. Each component without
+an optional level keeps its preceding mesh, including mixed formations. Missing
+LOD1 does not prevent an authored LOD2 from being used. Mek equipment shares the
+unit's distant boundary while retaining the existing small-attachment visibility rule.
+Changing LOD does not restore removed limbs or create a separate animation rig.
+These changes select authored meshes; they do not generate unit geometry or enforce
+new triangle budgets. Existing units without LOD2 continue using their earlier meshes.
 
 Authored diffuse textures may be embedded PNG/JPEG images or local relative image
 references inside the model directory. The library caches textures by image and

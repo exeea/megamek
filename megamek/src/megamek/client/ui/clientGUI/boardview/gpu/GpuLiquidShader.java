@@ -27,9 +27,11 @@ final class GpuLiquidShader {
 
     static String fragment(String source) {
         String functions = GpuShaderSource.read("liquid-animation.glsl");
+        // Ice wraps the original surface in a helper. Its authored samples must stay in that helper's scope.
+        String entry = source.contains("void iceBaseSurface() {") ? "void iceBaseSurface() {" : "void main() {";
         return source.replace("texture(u_diffuseTexture, v_diffuseUV)", "liquidColor")
               .replace("texture(u_emissiveTexture, v_emissiveUV)", "liquidColor")
-              .replace("void main() {", functions + "\nvoid main() {\nvec4 liquidColor = liquidSample(v_diffuseUV);\n");
+              .replace(entry, functions + "\n" + entry + "\nvec4 liquidColor = liquidSample(v_diffuseUV);\n");
     }
 
     static void register(DefaultShader shader) {

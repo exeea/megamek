@@ -111,10 +111,11 @@ The kit has eight jointed blocks, eight boulders and eight shrub masses (boxes w
 every corner cut away: 43 triangles on average against a boulder's 64). The original
 seeded rocks are stored in sixteen GLBs under `mm-data/data/models/board/rocks/`,
 one file per block or boulder variant, with `-lod0`, `-lod1` and `-lod2` root nodes.
-`scatter.glb` contains shrub masses, dedicated four-triangle open-base stones and
-the grass/plant meshes. Its 26 nodes currently have LOD0 only. Missing optional
-levels reuse the preceding level, resolved once when loading each shape; a scatter
-stone never borrows a terrain boulder. Terrain rocks remain closed solids.
+`mm-data/data/models/board/scatter/` contains 26 separate GLBs for shrub masses,
+dedicated eight-triangle open-base stones and the grass/plant meshes. Each contains
+only its `<shape>-lod0` root mesh. Scatter uses no additional levels and never borrows
+a terrain boulder. Missing optional terrain-rock levels reuse the preceding level,
+resolved once when loading each shape. Terrain rocks remain closed solids.
 The importer restores shared corner identity across flat-shaded triangles,
 so placement, picking and rendering continue to consume one geometry source.
 `BoardRelief` places them canonically per edge:

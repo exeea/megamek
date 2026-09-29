@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -18,6 +19,61 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 class BoardWaterfallTest {
+    @ParameterizedTest
+    @EnumSource(TerrainLod.class)
+    void domeVentWaterfallWallsAreClosedForLavaAndWater(TerrainLod lod) {
+        BoardScene lava = BoardCliffSeamTest.scene(new File("data/boards/Map Pack Volcanic/16x17 Dome Vent 2.board"));
+        for (BoardScene scene : List.of(lava, withWater(lava))) {
+            for (boolean transitions : new boolean[] { false, true }) {
+                BoardSculptTest.withTransitions(transitions, () -> checkDomeVentCliffEnds(scene, lod));
+            }
+        }
+    }
+
+    /** Exercise ordinary water with exactly the same drops, adjoining cliffs and connected mouths as the lava map. */
+    static BoardScene withWater(BoardScene scene) {
+        var tiles = scene.tiles().stream().map(t -> !t.liquid().molten() ? t
+              : new BoardScene.Tile(t.coords(), t.elevation(), 1, t.frozen(), t.roadExits(), t.surface(),
+                    t.ground(), t.normals(), t.decals(), t.decalsWithoutLimbs(), t.tactical(), t.features(), t.text(),
+                    BoardLiquid.WATER, t.foliage(), t.detailedGround(), t.road(), t.fireSmoke(), t.biome(), t.impassable())).toList();
+        return new BoardScene(scene.boardId(), scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
+    }
+
+    private static void checkDomeVentCliffEnds(BoardScene scene, TerrainLod lod) {
+        Map<Coords, BoardSurface> surfaces = new HashMap<>();
+        for (var tile : scene.tiles()) { surfaces.put(tile.coords(), new BoardSurface(scene, tile, lod)); }
+        float floor = BoardGeometry.floor(scene);
+        int checked = 0;
+        for (var surface : surfaces.values()) {
+            for (var fall : surface.waterfalls) {
+                int edge = fall.edge();
+                var walls = surface.walls(scene, floor, surfaces);
+                var cliff = walls.stream().filter(f -> f.landEdge() == edge).toList();
+                List<BoardSurface.Face> joined = new ArrayList<>(surface.groundFaces());
+                joined.addAll(walls.stream().filter(f -> f.landEdge() != edge).toList());
+                for (int direction = 0; direction < 6; direction++) {
+                    BoardSurface neighbor = surfaces.get(surface.tile.coords().translated(direction));
+                    if (neighbor == null) { continue; }
+                    joined.addAll(neighbor.groundFaces());
+                    joined.addAll(neighbor.walls(scene, floor, surfaces));
+                }
+                joined.removeIf(f -> f.finish() == BoardSurface.Finish.OUTCROP || f.finish() == BoardSurface.Finish.DRESSING);
+                for (var entry : segments(cliff).entrySet()) {
+                    Segment segment = entry.getKey();
+                    if (entry.getValue() != 1 || Math.abs(segment.a().z - segment.b().z) < .001f) { continue; }
+                    Vector3 p = new Vector3(segment.a()).lerp(segment.b(), .5f);
+                    if (p.z <= fall.lowA() + .1f * BoardGeometry.level()
+                          || p.z >= BoardGeometry.waterZ(surface.tile) - .1f * BoardGeometry.level()) { continue; }
+                    assertTrue(onSurface(p, joined), () -> "Open waterfall wall at " + surface.tile.coords()
+                          + ", edge " + edge + ", " + surface.tile.liquid().kind() + ", " + lod
+                          + ", transitions " + BoardGeometry.tuning().transitions() + ": " + p);
+                    checked++;
+                }
+            }
+        }
+        assertTrue(checked > 10, "Exercise the exposed cliff joins behind the Dome Vent falls");
+    }
+
     @ParameterizedTest
     @EnumSource(TerrainLod.class)
     void waterfallEndsShareTheAdjoiningCliffShapeAndShading(TerrainLod lod) {

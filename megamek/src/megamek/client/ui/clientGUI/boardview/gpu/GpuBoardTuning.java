@@ -174,7 +174,7 @@ final class GpuBoardTuning {
         section(skin, "Camera");
         firstPerson = checkbox(skin, "Free Flight", "tuning-free-flight");
         firstPerson.addListener(new TextTooltip("Fly freely: WASD moves, Q/E lowers/raises, Shift speeds up, "
-              + "right or middle drag looks around, and the wheel moves forward/back. "
+              + "right drag looks around, middle drag pans, Shift swaps the drags, and the wheel moves forward/back. "
               + "Turn off to restore the tactical view.", skin, "menu"));
         cameraFieldOfView = controls(skin, List.of(new Knob("Camera FOV", BoardCamera.MIN_FIELD_OF_VIEW,
               BoardCamera.MAX_FIELD_OF_VIEW, 1, "%.0f\u00b0")), this::applyCamera, 0);

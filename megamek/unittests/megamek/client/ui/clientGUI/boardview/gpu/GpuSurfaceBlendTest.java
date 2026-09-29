@@ -93,6 +93,7 @@ class GpuSurfaceBlendTest {
                         float represented = point.cover().weight(palette.base());
                         if (palette.first() != palette.base()) { represented += point.cover().weight(palette.first()); }
                         if (palette.second() != palette.base()) { represented += point.cover().weight(palette.second()); }
+                        if (palette.third() != palette.base()) { represented += point.cover().weight(palette.third()); }
                         assertEquals(1, represented, .00001f, "Cliff junctions must not drop a material");
                     }
                 }
@@ -129,6 +130,7 @@ class GpuSurfaceBlendTest {
                         float represented = point.cover().weight(palette.base());
                         if (palette.first() != palette.base()) { represented += point.cover().weight(palette.first()); }
                         if (palette.second() != palette.base()) { represented += point.cover().weight(palette.second()); }
+                        if (palette.third() != palette.base()) { represented += point.cover().weight(palette.third()); }
                         assertEquals(1, represented, .00001f, "No contributing material may be dropped at a junction");
                     }
                 }

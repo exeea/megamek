@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -24,6 +25,65 @@ import org.junit.jupiter.api.Test;
 
 class GpuAttachmentSourceTest {
     @Test
+    void mountedArmorRidesTheCarrierRouteBeforeUnloadingAndTheCarrierStaysAtArrival() throws Exception {
+        try (var fixture = GpuBoardFixture.create()) {
+            var armor = armor(fixture);
+            var handles = org.mockito.Mockito.mock(BattleArmorHandles.class);
+            SwingUtilities.invokeAndWait(() -> {
+                org.mockito.Mockito.when(handles.getExternalUnits()).thenReturn(List.of(armor));
+                fixture.entity.addTransporter(handles);
+                armor.setTransportId(fixture.entity.getId());
+                armor.setPosition(null);
+                fixture.source.refresh();
+            });
+            var attached = fixture.source.takeFrame();
+            var playback = new UnitPlayback();
+            playback.accept(attached.timeline(), attached.scene(), ignored -> false);
+            playback.advance(0, UnitMotion.Speed.INSTANT);
+            var start = fixture.entity.getPosition();
+            var arrival = start.translated(0, 2);
+            var destination = arrival.translated(1);
+            SwingUtilities.invokeAndWait(() -> {
+                armor.setTransportId(Entity.NONE);
+                armor.setPosition(destination);
+                fixture.game.fireGameEvent(new GameEntityChangeEvent(fixture.game, armor));
+            });
+            var early = fixture.source.takeFrame();
+            assertTrue(early.animations().isEmpty());
+            playback.accept(early.timeline(), early.scene(), ignored -> false);
+            SwingUtilities.invokeAndWait(() -> {
+                org.mockito.Mockito.when(handles.getExternalUnits()).thenReturn(List.of());
+                fixture.entity.setPosition(arrival);
+                fixture.entity.moved = EntityMovementType.MOVE_WALK;
+                fixture.game.fireGameEvent(new GameEntityChangeEvent(fixture.game, fixture.entity, new Vector<>(List.of(
+                      new UnitLocation(1, start.translated(0), 0, 0, 0), new UnitLocation(1, arrival, 0, 0, 0)))));
+            });
+            var moved = fixture.source.takeFrame();
+            assertEquals(2, moved.animations().size());
+            assertTrue(moved.animations().getFirst() instanceof BoardScene.Movement);
+            assertTrue(moved.animations().getLast() instanceof BoardScene.AttachmentChange);
+            playback.accept(moved.timeline(), moved.scene(), ignored -> false);
+            playback.advance(0, UnitMotion.Speed.NORMAL);
+            var motion = playback.motions.get(fixture.entity.getId());
+            playback.advance(motion.remainingSeconds() / (2 * UnitMotion.Speed.NORMAL.rate), UnitMotion.Speed.NORMAL);
+            assertTrue(motion.isMoving());
+            assertEquals(EntityMovementType.MOVE_WALK, motion.sample().type());
+            assertNull(playback.attachment());
+            var riding = playback.present(moved.scene()).units().stream().filter(unit -> unit.id() == armor.getId())
+                  .findFirst().orElseThrow();
+            assertEquals(new BoardScene.Attachment(fixture.entity.getId(), false), riding.attachment());
+            playback.advance(motion.remainingSeconds() / UnitMotion.Speed.NORMAL.rate, UnitMotion.Speed.NORMAL);
+            assertEquals(arrival, playback.attachment().event.carrier().location().coords());
+            assertEquals(destination, playback.attachment().event.destination().coords());
+            assertFalse(motion.isMoving());
+            playback.advance(20, UnitMotion.Speed.NORMAL);
+            assertFalse(playback.busy(), "The carrier must not replay its movement after unloading");
+            assertEquals(arrival, playback.present(moved.scene()).units().stream()
+                  .filter(unit -> unit.id() == fixture.entity.getId()).findFirst().orElseThrow().location().coords());
+        }
+    }
+
+    @Test
     void nullPositionExteriorPassengersAreCapturedAndAnUnloadKeepsBothEndpoints() throws Exception {
         try (var fixture = GpuBoardFixture.create()) {
             var armor = armor(fixture);
@@ -40,6 +100,20 @@ class GpuAttachmentSourceTest {
             assertEquals(new BoardScene.Attachment(fixture.entity.getId(), false), passenger.attachment());
             assertEquals(fixture.entity.getPosition(), passenger.location().coords());
             assertTrue(frame.animations().stream().anyMatch(BoardScene.AttachmentChange.class::isInstance));
+            var start = fixture.entity.getPosition();
+            var arrival = start.translated(0);
+            SwingUtilities.invokeAndWait(() -> {
+                fixture.entity.setPosition(arrival);
+                fixture.entity.moved = EntityMovementType.MOVE_WALK;
+                fixture.game.fireGameEvent(new GameEntityChangeEvent(fixture.game, fixture.entity, new Vector<>(List.of(
+                      new UnitLocation(1, start, 0, 0, 0), new UnitLocation(1, arrival, 0, 0, 0)))));
+            });
+            var moved = fixture.source.takeFrame();
+            assertEquals(1, moved.animations().size(), "Mounted armor must not interrupt capture of the carrier's path");
+            assertEquals(EntityMovementType.MOVE_WALK, moved.movements().getFirst().type());
+            passenger = moved.scene().units().stream().filter(unit -> unit.id() == armor.getId()).findFirst().orElseThrow();
+            assertEquals(new BoardScene.Attachment(fixture.entity.getId(), false), passenger.attachment());
+            assertEquals(arrival, passenger.location().coords());
             var destination = fixture.entity.getPosition().translated(0);
             SwingUtilities.invokeAndWait(() -> {
                 org.mockito.Mockito.when(handles.getExternalUnits()).thenReturn(List.of());

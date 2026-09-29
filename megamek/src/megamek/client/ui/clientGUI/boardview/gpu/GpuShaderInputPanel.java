@@ -62,7 +62,11 @@ final class GpuShaderInputPanel extends JPanel {
         refresh = new Timer(150, event -> {
             if (table.isEditing()) { return; }
             var snapshot = incoming.getAndSet(null);
-            if (snapshot == null) { return; }
+            if (snapshot == null || !requested.equals(snapshot.request())) { return; }
+            boolean sameRows = Objects.equals(programs.getSelectedItem(), snapshot.program()) && rows.size() == snapshot.rows().size();
+            for (int i = 0; sameRows && i < rows.size(); i++) {
+                sameRows = rows.get(i).name().equals(snapshot.rows().get(i).name()) && rows.get(i).type() == snapshot.rows().get(i).type();
+            }
             updating = true;
             boolean same = programs.getItemCount() == snapshot.programs().size();
             for (int i = 0; same && i < programs.getItemCount(); i++) { same = programs.getItemAt(i).equals(snapshot.programs().get(i)); }
@@ -70,7 +74,9 @@ final class GpuShaderInputPanel extends JPanel {
             programs.setSelectedItem(snapshot.program());
             updating = false;
             rows = snapshot.rows();
-            model.fireTableDataChanged();
+            if (sameRows) {
+                if (!rows.isEmpty()) { model.fireTableRowsUpdated(0, rows.size() - 1); }
+            } else { model.fireTableDataChanged(); }
             publish();
         });
         addHierarchyListener(event -> {

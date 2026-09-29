@@ -288,9 +288,8 @@ final class GpuWaterfall {
     }
 
     /**
-     * The water's vertex shader with the spray's launch added: for spray particles ({@code u_waterMaterial.w}), each
-     * vertex flies its particle along its arc and opens the camera-facing quad around it; everything else is left as
-     * the source has it. The particle's age replaces its vertex colour on the way to the fragment shader.
+     * The spray's dedicated vertex shader: each vertex flies its particle along its arc and opens the camera-facing
+     * quad around it. The particle's age replaces its vertex colour on the way to the fragment shader.
      */
     static String vertex(String source) {
         String spray = GpuShaderSource.read("water-spray.glsl").replace("@SPRAY_SPEED@", Float.toString(SPRAY_SPEED));

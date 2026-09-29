@@ -9,6 +9,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 import com.badlogic.gdx.files.FileHandle;
@@ -294,7 +295,7 @@ final class GpuUnitModels implements Disposable {
         // This Model owns only the assembly tree. NodeParts borrow mesh buffers from the shared asset library.
         Model assembled = new Model();
         List<UnitRig> rigs = new java.util.ArrayList<>();
-        Set<Mesh> lod1Meshes = new HashSet<>();
+        List<Set<Mesh>> meshes = List.of(new HashSet<>(), new HashSet<>(), new HashSet<>());
         try {
             int bodyTriangles = 0;
             for (var part : parts) {
@@ -307,12 +308,16 @@ final class GpuUnitModels implements Disposable {
                 }
                 ModelInstance member = new ModelInstance(asset.model());
                 String lod1Suit = lod1Suits.get(part.asset());
-                if (asset.model(1) != asset.model()) {
-                    attachLod1Parts(new ModelInstance(asset.model(1)).nodes, id -> member.getNode(id, true),
-                          "[FormationLod] " + part.id(), lod1Meshes);
-                } else if (lod1Suit != null) {
-                    attachLod1Suit(member, lod1Suit, part.id(), lod1Meshes);
+                List<Model> models = new java.util.ArrayList<>(asset.levels());
+                if (models.get(1) == models.getFirst() && lod1Suit != null) {
+                    var far = modular(lod1Suit);
+                    if (far != null) {
+                        models.set(1, far.model());
+                        if (asset.model(2) == asset.model(1)) { models.set(2, far.model()); }
+                    }
                 }
+                var memberLevels = attachDetailLevels(models, id -> member.getNode(id, true), node -> { }, part.asset());
+                for (int level = 0; level < 3; level++) { meshes.get(level).addAll(memberLevels.get(level)); }
                 Node placement = new Node();
                 placement.id = part.id();
                 placement.translation.set(part.x(), part.y(), 0);
@@ -330,8 +335,8 @@ final class GpuUnitModels implements Disposable {
             }
             assembled.calculateTransforms();
             // Troops and transports are authored at canonical size in the Mek standard, like every other body.
-            var levels = lod1Meshes.isEmpty() ? GpuUnitModel.DetailLevels.NONE
-                  : new GpuUnitModel.DetailLevels(Set.of(), lod1Meshes, FormationLod.LOD1_PIXELS);
+            var levels = new GpuUnitModel.DetailLevels(meshes.get(0), meshes.get(1), meshes.get(2),
+                  FormationLod.LOD1_PIXELS, FormationLod.LOD2_PIXELS);
             return new GpuUnitModel(assembled, null, true, List.of(), null, rigs, familyScale).detailLevels(levels);
         } catch (RuntimeException error) {
             assembled.dispose();
@@ -339,17 +344,29 @@ final class GpuUnitModels implements Disposable {
         }
     }
 
-    /**
-     * Adds LOD1 parts, switched off, to matching LOD0 joints. Both levels follow the same animated rig.
-     */
-    private void attachLod1Suit(ModelInstance member, String lod1Suit, String partId, Set<Mesh> lod1Meshes) {
-        ModularAsset far = modular(lod1Suit);
-        if (far == null) {
-            LOGGER.warn("[FormationLod] {}: LOD1 suit {} did not load; this figure keeps LOD0", partId, lod1Suit);
-            return;
+    /** Attach each distinct mesh once to the original rig, retaining the loader's per-component fallback. */
+    static List<Set<Mesh>> attachDetailLevels(List<Model> models, Function<String, Node> fullNodes,
+          Consumer<Node> prepare, String asset) {
+        List<Set<Mesh>> result = new java.util.ArrayList<>();
+        for (int level = 0; level < models.size(); level++) {
+            Model model = models.get(level);
+            int previous = models.indexOf(model);
+            if (previous < level) {
+                result.add(new HashSet<>(result.get(previous)));
+                continue;
+            }
+            Set<Mesh> meshes = new HashSet<>();
+            if (level == 0) {
+                model.meshes.forEach(meshes::add);
+            } else {
+                var nodes = new ModelInstance(model).nodes;
+                nodes.forEach(prepare);
+                attachDetailParts(nodes, fullNodes, "[UnitLod] " + asset + " LOD" + level, meshes);
+                if (meshes.isEmpty()) { meshes.addAll(result.get(level - 1)); }
+            }
+            result.add(meshes);
         }
-        attachLod1Parts(new ModelInstance(far.model()).nodes, id -> member.getNode(id, true),
-              "[FormationLod] " + partId + ": LOD1 suit " + lod1Suit, lod1Meshes);
+        return result;
     }
 
     /**
@@ -359,10 +376,10 @@ final class GpuUnitModels implements Disposable {
      * @param farNodes  the far model's top nodes, already trimmed to the arm forms this unit uses
      * @param fullNodes finds a node of the full model by its name, or gives {@code null} when it has none
      * @param logPrefix the feature tag and model named in a warning
-     * @param lod1Meshes collects the far parts' meshes, so the instance can tell them from the full ones
+     * @param meshes collects the far parts' meshes, so the instance can tell them from the full ones
      */
-    static void attachLod1Parts(Iterable<Node> farNodes, Function<String, Node> fullNodes, String logPrefix,
-          Set<Mesh> lod1Meshes) {
+    private static void attachDetailParts(Iterable<Node> farNodes, Function<String, Node> fullNodes, String logPrefix,
+          Set<Mesh> meshes) {
         List<Node> nodes = new java.util.ArrayList<>();
         collectNodes(farNodes, nodes);
         for (Node farNode : nodes) {
@@ -378,7 +395,7 @@ final class GpuUnitModels implements Disposable {
                 NodePart hidden = farPart.copy();
                 hidden.enabled = false;
                 joint.parts.add(hidden);
-                lod1Meshes.add(hidden.meshPart.mesh);
+                meshes.add(hidden.meshPart.mesh);
             }
         }
     }

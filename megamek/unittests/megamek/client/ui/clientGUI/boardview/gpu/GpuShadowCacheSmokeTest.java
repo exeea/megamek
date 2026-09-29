@@ -71,6 +71,18 @@ class GpuShadowCacheSmokeTest {
             terrain.setAtmosphere(lighting);
             terrain.renderShadows(camera.camera, List.of());
             assertNull(field(terrain, "staticShadow"), "Map-only views keep one shadow framebuffer");
+            camera.zoom(.6f);
+            terrain.renderShadows(camera.camera, List.of());
+            byte[] stationary = depth(terrain);
+            for (int pan = 0; pan < 5; pan++) {
+                camera.pan(1, 0);
+                profiler.reset();
+                terrain.renderShadows(camera.camera, List.of());
+                assertEquals(0, profiler.getDrawCalls(), "Small camera pans reuse the existing shadow map");
+                assertArrayEquals(stationary, depth(terrain), "Camera reuse preserves the shadow texture and projection");
+                fullPass(terrain, List.of());
+                assertArrayEquals(stationary, depth(terrain), "A fresh pass at the reused projection remains exact");
+            }
             ModelInstance unit = new ModelInstance(model);
             Coords at = scene.tiles().stream().filter(t -> t.elevation() == 0 && !t.liquid().present()).skip(30).findFirst().orElseThrow().coords();
             var center = BoardGeometry.center(at, 0);
@@ -79,6 +91,7 @@ class GpuShadowCacheSmokeTest {
             for (int step = 0; step < 9; step++) {
                 List<ModelInstance> units = (step == 4 || step == 8) ? List.of() : List.of(unit);
                 unit.transform.setToTranslation(center.x + step * 3, center.y, step == 3 ? 0 : 10);
+                if (step == 1 || step == 2) { camera.pan(1, -1); }
                 if (step == 5) { camera.zoom(.7f); camera.pan(30, 15); }
                 if (step == 6) { terrain.setAtmosphere(BoardAtmosphere.lighting(new BoardAtmosphere.Settings(9, 0, 0, 0, 0, 1))); }
                 if (step == 7) {

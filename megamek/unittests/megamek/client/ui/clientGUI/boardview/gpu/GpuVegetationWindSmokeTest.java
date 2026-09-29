@@ -107,6 +107,28 @@ class GpuVegetationWindSmokeTest {
                     }
                 }
             }
+            GL20.glUseProgram(plants);
+            GL20.glUniform1f(GL20.glGetUniformLocation(plants, "u_biomeKind"), 1);
+            GL20.glUniform1f(GL20.glGetUniformLocation(plants, "u_coverPixels"), 600);
+            GL20.glUniform1f(GL20.glGetUniformLocation(plants, "u_biomeLod"), 0);
+            // Adjacent full and clipped strips must meet throughout a gust, not sway as detached billboards.
+            Vector3 along = new Vector3(-BoardBiome.ROW_Y, BoardBiome.ROW_X, 0);
+            Vector3 first = new Vector3(0, 0, .1f), second = new Vector3(first).mulAdd(along, 2);
+            for (float phase : new float[] { 0, 1, 2, 3 }) {
+                for (float height : new float[] { 0, .72f, 1.04f }) {
+                    GL20.glVertexAttrib4f(15, 3, 0, 0, 1);
+                    Vector3 a = sample(plants, first, 1, phase, new Vector3(.5f, 0, height)).add(first);
+                    GL20.glVertexAttrib4f(15, 1, 0, 0, 1f / 3);
+                    Vector3 b = sample(plants, second, 1, phase, new Vector3(-.5f, 0, height)).add(second);
+                    assertTrue(a.dst(b) < .00001f, "Clipped strip endpoints must share the same height and gust");
+                    if (height == 0) {
+                        assertTrue(a.dst(new Vector3(first).mulAdd(along, 1.5f)) < .00001f,
+                              "Wind must leave every base point along the strip on the ground");
+                    }
+                }
+            }
+            checkRowFaces(plants, along, first);
+            GL20.glVertexAttrib4f(15, 0, 0, 0, 1);
             assertEquals(GL11.GL_NO_ERROR, GL11.glGetError());
         } finally {
             GL11.glDisable(GL30.GL_RASTERIZER_DISCARD);
@@ -117,6 +139,41 @@ class GpuVegetationWindSmokeTest {
             GL30.glBindVertexArray(0);
             GL30.glDeleteVertexArrays(vao);
             GL20.glDeleteProgram(grass); GL20.glDeleteProgram(plants);
+        }
+    }
+
+    private static void checkRowFaces(int shader, Vector3 along, Vector3 root) {
+        float length = GpuBiomeVegetation.ROW_LENGTH, rise = .42f;
+        Vector3 across = new Vector3(BoardBiome.ROW_X, BoardBiome.ROW_Y, 0);
+        for (int lod = 0; lod < 2; lod++) {
+            GL20.glUniform1f(GL20.glGetUniformLocation(shader, "u_biomeLod"), lod);
+            GL20.glUniform1f(GL20.glGetUniformLocation(shader, "u_coverPixels"), lod == 0 ? 600 : 160);
+            for (float phase : new float[] { 0, 1, 2, 3 }) {
+                for (float side : new float[] { -GpuBiomeVegetation.ROW_HALF_WIDTH, GpuBiomeVegetation.ROW_HALF_WIDTH }) {
+                    for (float[] interval : new float[][] { { 0, .37f }, { .37f, 1 } }) {
+                        float middle = (interval[0] + interval[1]) / 2 - .5f, span = interval[1] - interval[0];
+                        Vector3 fragment = new Vector3(root).mulAdd(along, middle * length).add(0, 0, middle * rise);
+                        for (float end : new float[] { -.5f, .5f }) {
+                            float u = middle + end * span;
+                            for (float height : new float[] { 0, .72f, 1.04f }) {
+                                GL20.glVertexAttrib4f(15, length, rise, 0, 1);
+                                Vector3 whole = sample(shader, root, 1, phase, new Vector3(u, side, height)).add(root);
+                                GL20.glVertexAttrib4f(15, length * span, rise * span, interval[0], interval[1]);
+                                Vector3 split = sample(shader, fragment, 1, phase, new Vector3(end, side, height)).add(fragment);
+                                assertTrue(whole.dst(split) < .00002f, "Clipped row faces must join throughout a gust");
+                                if (height == 0) {
+                                    assertTrue(whole.dst(new Vector3(root).mulAdd(along, u * length).add(0, 0, u * rise))
+                                          < .00002f, "Both row faces must keep their entire base on the slope");
+                                }
+                            }
+                        }
+                    }
+                }
+                GL20.glVertexAttrib4f(15, length, rise, 0, 1);
+                Vector3 a = sample(shader, root, 1, phase, new Vector3(.5f, -GpuBiomeVegetation.ROW_HALF_WIDTH, 1.04f));
+                Vector3 b = sample(shader, root, 1, phase, new Vector3(.5f, GpuBiomeVegetation.ROW_HALF_WIDTH, 1.04f));
+                assertTrue(Math.abs(a.sub(b).dot(across)) > .9f, "Looking along the row must retain its full cross-section");
+            }
         }
     }
 
@@ -160,12 +217,20 @@ class GpuVegetationWindSmokeTest {
     }
 
     private static Vector3 sample(int program, Vector3 root, float strength, float phase, float height) {
+        return sample(program, root, strength, phase,
+              GL20.glGetUniformLocation(program, "u_biomeKind") >= 0 ? new Vector3(0, 0, height) : new Vector3(0, height, 0));
+    }
+
+    private static Vector3 sample(int program, Vector3 root, float strength, float phase, Vector3 point) {
+        return sample(program, root, strength, phase, point, new Vector3(0, -1, 0));
+    }
+
+    private static Vector3 sample(int program, Vector3 root, float strength, float phase, Vector3 point, Vector3 normal) {
         GL20.glUniform3f(GL20.glGetUniformLocation(program, "u_wind"), .8f, .6f, strength);
         GL20.glUniform1f(GL20.glGetUniformLocation(program, "u_vegetationPhase"), phase);
         GL20.glVertexAttrib4f(14, root.x, root.y, root.z, .33f);
-        GL20.glVertexAttrib3f(0, 0, height, 0);
-        if (GL20.glGetUniformLocation(program, "u_biomeKind") >= 0) { GL20.glVertexAttrib3f(0, 0, 0, height); }
-        GL20.glVertexAttrib3f(1, .8f, .6f, 0);
+        GL20.glVertexAttrib3f(0, point.x, point.y, point.z);
+        GL20.glVertexAttrib3f(1, normal.x, normal.y, normal.z);
         GL20.glVertexAttrib4f(2, 1, 1, 1, 1);
         GL30.glBeginTransformFeedback(GL11.GL_POINTS);
         GL11.glDrawArrays(GL11.GL_POINTS, 0, 1);

@@ -77,6 +77,7 @@ class GpuShaderPreviewSmokeTest {
                 var settings = settings(preset, true, ++restart);
                 var first = preview.render(settings, now += 100_000_000, manager.revision());
                 assertImage(first);
+                assertEquals(preset, first.preset(), "Condition files select the matching automatic preview");
                 var later = preview.render(settings, now += 100_000_000, manager.revision());
                 assertImage(later);
                 assertFalse(Arrays.equals(pixels(first.image()), pixels(later.image())), preset + " must animate");
@@ -104,6 +105,16 @@ class GpuShaderPreviewSmokeTest {
                 assertEquals(later.seconds(), paused.seconds());
                 assertNull(preview.render(settings(preset, false, restart), now += 100_000_000, manager.revision()), "Pause skips readback");
             }
+            var small = preview.render(settings(GpuShaderPreview.Preset.IMPACT, false, ++restart,
+                  new GpuShaderPreview.Inputs(2, 1, 6, 6, true)), now += 100_000_000, manager.revision());
+            var large = preview.render(settings(GpuShaderPreview.Preset.IMPACT, false, restart,
+                  new GpuShaderPreview.Inputs(20, 1, 6, 6, true)), now += 100_000_000, manager.revision());
+            assertImage(small); assertImage(large);
+            assertEquals(small.seconds(), large.seconds(), "Changing rack size preserves the paused impact phase");
+            assertFalse(Arrays.equals(pixels(small.image()), pixels(large.image())), "rackSize reaches the real impact geometry");
+            var restored = preview.render(settings(GpuShaderPreview.Preset.IMPACT, false, restart,
+                  new GpuShaderPreview.Inputs(2, 1, 6, 6, true)), now += 100_000_000, manager.revision());
+            assertTrue(Arrays.equals(pixels(small.image()), pixels(restored.image())), "Input comparisons use a stable sample seed and clock");
             var laser = settings(GpuShaderPreview.Preset.LASER, false, ++restart);
             var original = preview.render(laser, now += 100_000_000, manager.revision());
             assertImage(original);
@@ -149,7 +160,17 @@ class GpuShaderPreviewSmokeTest {
     }
 
     private static GpuShaderPreview.Settings settings(GpuShaderPreview.Preset preset, boolean play, int restart, GpuShaderPreview.Inputs inputs) {
-        return new GpuShaderPreview.Settings("", preset, true, play, 1, -75, 18, 1, restart, inputs);
+        String file = switch (preset) {
+            case SMOKE -> "particles-smoke.glsl";
+            case JET -> "particles-jet.glsl";
+            case FLAME -> "particles-fire.glsl";
+            case RAIN -> "weather-rain.glsl";
+            case SNOW -> "weather-snow.glsl";
+            case HAIL -> "weather-hail.glsl";
+            default -> "";
+        };
+        return new GpuShaderPreview.Settings(file, file.isEmpty() ? preset : GpuShaderPreview.Preset.AUTO,
+              true, play, 1, -75, 18, 1, restart, inputs);
     }
 
     private static int[] pixels(BufferedImage image) { return ((DataBufferInt) image.getRaster().getDataBuffer()).getData(); }

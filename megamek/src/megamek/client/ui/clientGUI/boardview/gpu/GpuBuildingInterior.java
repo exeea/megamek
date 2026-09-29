@@ -25,20 +25,34 @@ final class GpuBuildingInterior {
     private GpuBuildingInterior() { }
 
     static Model build(Model shell, int levels) {
-        List<Vector3> roof = new ArrayList<>();
-        List<Vector3> triangles = GpuTerrain.triangles(shell);
         float height = shell.calculateBoundingBox(new BoundingBox()).max.z;
-        BoundingBox bounds = new BoundingBox().inf();
+        return build(plane(GpuTerrain.triangles(shell), height, true), height, levels);
+    }
+
+    /** Horizontal cap faces delimit occupied volume; roof furniture and bounding boxes cannot fill courtyards. */
+    static List<Vector3> plane(List<Vector3> triangles, float z, boolean upward) {
+        List<Vector3> result = new ArrayList<>();
         for (int index = 0; index < triangles.size(); index += 3) {
             Vector3 a = triangles.get(index), b = triangles.get(index + 1), c = triangles.get(index + 2);
-            // Authored structures stand at Z=0 with a flat roof at their actual local height.
-            if (a.z == height && b.z == height && c.z == height) {
-                roof.add(a);
-                roof.add(b);
-                roof.add(c);
-                bounds.ext(a).ext(b).ext(c);
+            float normal = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+            if (Math.abs(a.z - z) < .001f && Math.abs(b.z - z) < .001f && Math.abs(c.z - z) < .001f
+                  && (upward ? normal > .0001f : normal < -.0001f)) {
+                // Always return upward-facing triangles for the shared interior generator.
+                result.add(a);
+                result.add(upward ? b : c);
+                result.add(upward ? c : b);
             }
         }
+        return List.copyOf(result);
+    }
+
+    /** The roof underside extruded through the wall stack is the interior volume for a modular building. */
+    static Model build(List<Vector3> roof, float height, int levels) {
+        if (roof.isEmpty() || height <= 0 || levels < 1) {
+            throw new IllegalArgumentException("Building interior needs a footprint and positive height");
+        }
+        BoundingBox bounds = new BoundingBox().inf();
+        roof.forEach(bounds::ext);
         List<Vector3> columns = new ArrayList<>();
         int across = Math.max(1, (int) (bounds.getWidth() / SPACING));
         int along = Math.max(1, (int) (bounds.getHeight() / SPACING));
@@ -51,7 +65,8 @@ final class GpuBuildingInterior {
         // Small or disconnected wings can miss the grid. Give uncovered roof sections a nearby support.
         for (int index = 0; index < roof.size(); index += 3) {
             Vector3 center = new Vector3(roof.get(index)).add(roof.get(index + 1)).add(roof.get(index + 2)).scl(1f / 3);
-            if (columns.stream().noneMatch(column -> column.dst2(center) < SPACING * SPACING)) {
+            if (columns.stream().noneMatch(column -> (column.x - center.x) * (column.x - center.x)
+                  + (column.y - center.y) * (column.y - center.y) < SPACING * SPACING)) {
                 addColumn(columns, roof, center.x, center.y, height);
             }
         }

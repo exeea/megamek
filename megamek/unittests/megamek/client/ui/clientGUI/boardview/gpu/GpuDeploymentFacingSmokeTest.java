@@ -89,8 +89,8 @@ class GpuDeploymentFacingSmokeTest {
                     when(client.isMyTurn()).thenReturn(true);
                     BoardView view = spy(fixture.view);
                     doReturn(gui).when(view).getClientgui();
-                    when(gui.boardViews()).thenReturn(List.of(view));
-                    when(gui.getBoardView(any(Entity.class))).thenReturn(view);
+                    doReturn(List.of(view.getClientState())).when(gui).boardStates();
+                    doReturn(view.getClientState()).when(gui).getBoardState(any(Entity.class));
                     try (var keys = mockStatic(MegaMekGUI.class)) {
                         keys.when(MegaMekGUI::getKeyDispatcher).thenReturn(gui.controller);
                         phase.set(spy(new DeploymentDisplay(gui)));

@@ -13,6 +13,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockConstruction;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
@@ -71,6 +72,7 @@ import megamek.client.ui.clientGUI.CommandBarPanel;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardViewPanel;
 import megamek.client.ui.clientGUI.boardview.RulerDialog;
 import megamek.client.ui.clientGUI.boardview.overlay.UnitOverviewOverlay;
 import megamek.client.ui.dialogs.BotCommands.BotCommandsDialog;
@@ -123,6 +125,61 @@ class GpuBoardWindowSmokeTest {
     }
     private record ClientWindow(JFrame frame, CommonMenuBar menus, BoardView view, JMenuItem gpuChoice,
           UnitOverviewOverlay overview) { }
+
+    @Test
+    void nativeGameplayRendersWithoutConstructingAClassicBoard() throws Exception {
+        var classic = onSwing(() -> mockConstruction(BoardView.class));
+        var panels = onSwing(() -> mockConstruction(BoardViewPanel.class));
+        var session = onSwing(GpuGameplayStateTest.Session::create);
+        JFrame owner = onSwing(JFrame::new);
+        CommonMenuBar menus = onSwing(CommonMenuBar::getMenuBarForGame);
+        ClientGUI gui = session.state().getClientgui();
+        try {
+            Application previous = Gdx.app;
+            onSwing(() -> {
+                session.source().close();
+                when(gui.getFrame()).thenReturn(owner);
+                when(gui.getMenuBar()).thenReturn(menus);
+                menus.setPhase(GamePhase.MOVEMENT);
+                GpuBoardWindow.open(session.state(), gui::getMainPanel);
+                return null;
+            });
+            await(() -> Gdx.app != null && Gdx.app != previous);
+            await(() -> onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames() > 3));
+            for (boolean isometric : new boolean[] { false, true }) {
+                onGl(() -> {
+                    GpuBattleView battle = (GpuBattleView) Gdx.app.getApplicationListener();
+                    battle.boardCamera.setIsometric(isometric);
+                    return null;
+                });
+                awaitNavigation();
+                onGl(() -> {
+                    File directory = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
+                    assertTrue(directory.isDirectory() || directory.mkdirs());
+                    GpuBoardTestUi.capture(new File(directory, "native-state-" + (isometric ? "iso" : "top") + ".png"));
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                    return null;
+                });
+            }
+            onSwing(() -> {
+                assertTrue(classic.constructed().isEmpty());
+                assertTrue(panels.constructed().isEmpty());
+                assertFalse(session.state().isClosed());
+                return null;
+            });
+        } finally {
+            onSwing(() -> { GpuBoardWindow.closeFor(gui); return null; });
+            await(() -> !GpuBoardWindow.isActiveFor(gui));
+            onSwing(() -> {
+                session.close();
+                owner.dispose();
+                menus.die();
+                panels.close();
+                classic.close();
+                return null;
+            });
+        }
+    }
 
     @Test
     void initialBoardAndSidebarClicksSelectWithoutOpeningAUnitMenuFirst() throws Exception {
@@ -1245,7 +1302,7 @@ class GpuBoardWindowSmokeTest {
                     return message.getText().toString().equals(Messages.getString("ClientGUI.waitingOnTheServer"));
                 }));
                 onSwing(() -> {
-                    when(gui.getCurrentBoardState()).thenReturn(Optional.of(ui.view().getClientState()));
+                    doReturn(Optional.of(ui.view().getClientState())).when(gui).getCurrentBoardState();
                     return null;
                 });
                 await(() -> onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames() >= 5));
@@ -1266,7 +1323,7 @@ class GpuBoardWindowSmokeTest {
                     BoardView view = new BoardView(fixture.game, null, gui, 0);
                     view.setLocalPlayer(fixture.player);
                     ui.view().dispose();
-                    when(gui.getCurrentBoardState()).thenReturn(Optional.of(view.getClientState()));
+                    doReturn(Optional.of(view.getClientState())).when(gui).getCurrentBoardState();
                     return view;
                 });
                 try {
@@ -1811,12 +1868,12 @@ class GpuBoardWindowSmokeTest {
             return null;
         }).when(gui).setClassicBoardViewEnabled(anyBoolean());
         when(gui.getMenuBar()).thenReturn(menus);
-        when(gui.getCurrentBoardState()).thenReturn(Optional.of(view.getClientState()));
+        doReturn(Optional.of(view.getClientState())).when(gui).getCurrentBoardState();
         when(gui.boardViews()).thenReturn(List.of(view));
-        when(gui.boardStates()).thenReturn(List.of(view.getClientState()));
-        when(gui.getBoardState()).thenReturn(view.getClientState());
-        when(gui.getBoardState(any(BoardLocation.class))).thenReturn(view.getClientState());
-        when(gui.getBoardState(any(Entity.class))).thenReturn(view.getClientState());
+        doReturn(List.of(view.getClientState())).when(gui).boardStates();
+        doReturn(view.getClientState()).when(gui).getBoardState();
+        doReturn(view.getClientState()).when(gui).getBoardState(any(BoardLocation.class));
+        doReturn(view.getClientState()).when(gui).getBoardState(any(Entity.class));
         when(gui.getBoardView()).thenReturn(view);
         when(gui.getBoardView(any(BoardLocation.class))).thenReturn(view);
         when(gui.getMainPanel()).thenReturn(new JPanel());

@@ -220,7 +220,7 @@ final class BoardSurface {
         BoardGeometry.terrainChanged();
     }
     /** DRESSING is thin detail on the ground, such as tree pits: drawn and picked, never raising what stands there. */
-    enum Finish { TOP, RIM, CAP, WALL, OUTCROP, SHORE, BED, BANK, ICE, DRESSING }
+    enum Finish { TOP, RIM, CAP, WALL, OUTCROP, SHORE, BED, BANK, ICE, DRESSING, ROUGH }
     /** landEdge is the edge a bank or wall face stands on (bank artwork takes the hex across it); else -1. */
     record Face(Vector3 a, Vector3 b, Vector3 c, Finish finish, int landEdge) {
         Face(Vector3 a, Vector3 b, Vector3 c, Finish finish) {
@@ -319,6 +319,9 @@ final class BoardSurface {
     final List<Face> faces = new ArrayList<>();
     /** Rough cover is part of the drawn mesh; ordinary units may clip it, infantry can seek footing on it. */
     final List<Face> rough = new ArrayList<>();
+    private List<BoardRough.Placement> roughModels = List.of();
+
+    List<BoardRough.Placement> roughModels() { return roughModels; }
     final List<Vector3> water = new ArrayList<>();
     /** The surface overlap inside cliff recesses; these same faces also belong to waterFaces. */
     final List<Face> cliffWater = new ArrayList<>();
@@ -390,6 +393,7 @@ final class BoardSurface {
     record WaterGeometry(Coords coords, TerrainLod lod, int ramps, List<Face> faces, List<Vector3> water,
           List<Face> cliffWater, List<Vector3> outline, List<Face> waterFaces, Map<Integer, List<Vector3>> contacts,
           List<Face> cutFaces, List<Side> waterfalls, List<Face> edgeTopography, int offBoard, int openMouths,
+          List<Face> rough, List<BoardRough.Placement> roughModels,
           boolean graded, Vector3[] joinsA, Vector3[] joinsB, Crest[] crests, Vector3[] bedOutline,
           Vector3[] waterline, Vector3[] crestLine, Vector3[] shoreCorners) {
         BoardSurface surface(BoardScene scene) { return new BoardSurface(scene, this); }
@@ -399,7 +403,8 @@ final class BoardSurface {
         return new WaterGeometry(tile.coords(), lod, ramps, List.copyOf(faces), List.copyOf(water),
               List.copyOf(cliffWater), List.copyOf(outline), List.copyOf(waterFaces), Map.copyOf(waterContacts),
               List.copyOf(cutFaces), List.copyOf(waterfalls), List.copyOf(edgeTopography), offBoard, openMouths,
-              gradedWater, joinA.clone(), joinB.clone(), crests.clone(), bedOutline, waterline, crestLine, shoreCorners);
+              List.copyOf(rough), roughModels, gradedWater, joinA.clone(), joinB.clone(), crests.clone(),
+              bedOutline, waterline, crestLine, shoreCorners);
     }
 
     /** Fresh query context around unchanged finished water; rebuilding its many bed/cliff triangles is unnecessary. */
@@ -412,6 +417,8 @@ final class BoardSurface {
         for (int edge = 0; edge < 6; edge++) { corners[edge] = BoardGeometry.corner(tile.coords(), tile.elevation(), edge); }
         relief = new BoardRelief(scene, tile, ramps, lod);
         faces.addAll(geometry.faces());
+        rough.addAll(geometry.rough());
+        roughModels = geometry.roughModels();
         water.addAll(geometry.water());
         cliffWater.addAll(geometry.cliffWater());
         outline.addAll(geometry.outline());
@@ -477,6 +484,7 @@ final class BoardSurface {
             meetWetCliffs();
             int roughStart = faces.size();
             relief.boulders(faces);
+            roughModels = BoardRough.place(this);
             rough.addAll(faces.subList(roughStart, faces.size()));
         }
     }
@@ -689,7 +697,7 @@ final class BoardSurface {
               || ((exit || continuation) && Math.abs(tile.elevation() - neighbor.elevation()) <= 2);
     }
 
-    private static BoardScene.Feature connectingBridge(BoardScene.Tile road, BoardScene.Tile bridge, int direction) {
+    static BoardScene.Feature connectingBridge(BoardScene.Tile road, BoardScene.Tile bridge, int direction) {
         if (road.liquid().present() || (road.roadExits() & (1 << direction)) == 0) {
             return null;
         }
@@ -777,8 +785,18 @@ final class BoardSurface {
             }
         }
         if (tile.frozen()) {
-            // The ice covers the hex as the shore moves its corners.
-            fan(shoreCorners, center.z, Finish.ICE);
+            // Freeze the actual water footprint, not the outer bank polygon: covering the bank as well
+            // produces coplanar shards along its sculpted lip. Reuse the water polygon triangulation.
+            outline.addAll(List.of(waterline));
+            // Interior water edges are straight: retain their corners, not the shoreline's redundant samples.
+            List<Vector3> iceEdge = new ArrayList<>();
+            for (int i = 0; i < waterline.length; i++) {
+                Vector3 a = waterline[(i + waterline.length - 1) % waterline.length];
+                Vector3 b = waterline[i], c = waterline[(i + 1) % waterline.length];
+                float turn = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+                if (Math.abs(turn) > .00001f * BoardGeometry.hexScale() * BoardGeometry.hexScale()) { iceEdge.add(b); }
+            }
+            polygon(iceEdge.toArray(Vector3[]::new), Finish.ICE, faces);
         } else {
             // The water recedes from each crest; the sheet's lip curves back down over it.
             Vector3[] surface = pulledBack(crestLine, lip);
@@ -801,16 +819,16 @@ final class BoardSurface {
         }
     }
 
-    /** Water steps use surface levels, never the depths of their beds. */
+    /** Connected liquid steps, including lava, use surface levels, never the depths of their beds. */
     static boolean waterSlope(BoardScene.Tile a, BoardScene.Tile b) {
-        return a != null && b != null && !a.frozen() && !b.frozen() && !a.liquid().molten()
+        return a != null && b != null && !a.frozen() && !b.frozen()
               && a.liquid().present() && a.liquid().connects(b.liquid())
               && Math.abs(a.elevation() - b.elevation()) <= 2;
     }
 
     /** Both halves of an open mouth share its height and ease back to their own centre's water level. */
     private void gradeWaterline(BoardScene scene, float[] shore) {
-        if (tile.frozen() || tile.liquid().molten()) { return; }
+        if (tile.frozen()) { return; }
         float base = BoardGeometry.waterZ(tile);
         float[] ends = new float[6];
         for (int k = 0; k < 6; k++) {
@@ -1213,7 +1231,24 @@ final class BoardSurface {
     }
 
     /** The caller owns the supplied bed list; canonical faces remain available for normal and depth sampling. */
-    List<Face> renderBed(List<Face> canonical) { return renderBed == null ? canonical : new ArrayList<>(renderBed); }
+    List<Face> renderBed(List<Face> canonical) {
+        if (renderBed != null) { return new ArrayList<>(renderBed); }
+        if (tile.liquid().molten() && !tile.frozen()) {
+            // Lava is opaque. Remove only triangles wholly below one drawn lava triangle; retain the shoreline
+            // and crest geometry outside it. The canonical bed remains available for picking and support.
+            List<Face> visible = new ArrayList<>(canonical);
+            visible.removeIf(face -> {
+                for (Face top : waterFaces) {
+                    if (top.height(face.a().x, face.a().y, 0) > face.a().z
+                          && top.height(face.b().x, face.b().y, 0) > face.b().z
+                          && top.height(face.c().x, face.c().y, 0) > face.c().z) { return true; }
+                }
+                return false;
+            });
+            return visible;
+        }
+        return canonical;
+    }
 
     private static float shallowBed(float bed, float x, float y, float weight) {
         float bar = BoardRelief.smooth((meander(x, y, 9.7f) + .15f) / .5f);
@@ -2236,8 +2271,10 @@ final class BoardSurface {
                 Vector3 start = new Vector3(a).lerp(b, from);
                 Vector3 end = new Vector3(a).lerp(b, to);
                 boolean graded = ramps != 0 || adjacent != null && adjacent.ramps != 0;
-                boolean inset = !graded || crest == null
-                      && (tile.liquid().present() || neighbor != null && neighbor.liquid().present());
+                // Gentle liquid mouths share continuous bank/bed endpoints. Sampling inside the interval instead
+                // leaves their wall a fraction short of both banks, visible as pinholes at close camera distances.
+                boolean inset = !waterSlope(tile, neighbor) && (!graded || crest == null
+                      && (tile.liquid().present() || neighbor != null && neighbor.liquid().present()));
                 Vector3 sampleA = inset ? new Vector3(start).lerp(end, 0.001f) : start;
                 Vector3 sampleB = inset ? new Vector3(end).lerp(start, 0.001f) : end;
                 start.z = height(edgeTopography, sampleA.x, sampleA.y);

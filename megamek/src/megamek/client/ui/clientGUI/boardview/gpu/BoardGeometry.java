@@ -1,10 +1,13 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.function.Function;
 
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.math.collision.Ray;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.common.board.Coords;
@@ -308,48 +311,66 @@ final class BoardGeometry {
         return owner;
     }
 
+    private record PickCandidate(BoardScene.Tile tile, float entry, int order) { }
+
     private static Hit nearest(BoardScene scene, Ray ray, Iterable<BoardScene.Tile> candidates, float floor,
           BoardSurface.Cache cache, Function<Coords, BoardTacticalGeometry.Surface> surfaces) {
         Coords result = null;
         float nearest = Float.POSITIVE_INFINITY;
         boolean hardSurface = false;
         Vector3 hit = new Vector3();
+        var ordered = new ArrayList<PickCandidate>();
+        var bounds = new BoundingBox();
+        int order = 0, nearestOrder = Integer.MAX_VALUE;
         for (BoardScene.Tile tile : candidates) {
             float high = tile.elevation() * level();
             for (int direction = 0; direction < 6; direction++) {
                 BoardScene.Tile neighbor = scene.tile(tile.coords().translated(direction));
                 high = Math.max(high, BoardSurface.roadEdgeElevation(tile, neighbor, direction) * level());
             }
-            high += BoardRelief.headroom(tile);
+            high += BoardRelief.decoration(tile);
             // Sculpted cliffs, talus and rim lips can reach slightly beyond the logical footprint.
             float reach = 2 * BoardRelief.overhang();
-            if (!Intersector.intersectRayBoundsFast(ray,
-                  new Vector3(centerX(tile.coords()), centerY(tile.coords()), (floor + high) / 2),
-                  new Vector3(width() + reach, height() + reach, high - floor + 0.01f))) {
-                continue;
+            bounds.set(new Vector3(centerX(tile.coords()) - (width() + reach) / 2,
+                        centerY(tile.coords()) - (height() + reach) / 2, floor - .005f),
+                  new Vector3(centerX(tile.coords()) + (width() + reach) / 2,
+                        centerY(tile.coords()) + (height() + reach) / 2, high + .005f));
+            if (Intersector.intersectRayBounds(ray, bounds, hit)) {
+                ordered.add(new PickCandidate(tile, ray.origin.dst2(hit), order));
             }
+            order++;
+        }
+        ordered.sort(Comparator.comparingDouble(PickCandidate::entry));
+        for (PickCandidate candidate : ordered) {
+            // A low camera ray may cross the entire board. Do not reconstruct surfaces hidden behind the first hit.
+            if (candidate.entry() > nearest) { break; }
+            BoardScene.Tile tile = candidate.tile();
             BoardSurface surface = surfaces != null ? null
                   : cache == null ? new BoardSurface(scene, tile) : cache.get(scene, tile);
             BoardTacticalGeometry.Surface finished = surfaces == null ? null : surfaces.apply(tile.coords());
             for (BoardSurface.Face face : finished == null ? surface.faces : finished.faces()) {
                 if (Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit)
-                      && ray.origin.dst2(hit) < nearest) {
+                      && nearer(ray.origin.dst2(hit), nearest, candidate.order(), nearestOrder)) {
                     nearest = ray.origin.dst2(hit);
+                    nearestOrder = candidate.order();
                     result = footprint(scene, tile.coords(), hit);
                     hardSurface = hardSurface(tile, face);
                 }
             }
             for (BoardSurface.Face face : finished == null ? surface.waterFaces : finished.water()) {
-                if (Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit) && ray.origin.dst2(hit) < nearest) {
+                if (Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit)
+                      && nearer(ray.origin.dst2(hit), nearest, candidate.order(), nearestOrder)) {
                     nearest = ray.origin.dst2(hit);
+                    nearestOrder = candidate.order();
                     result = footprint(scene, tile.coords(), hit);
                     hardSurface = false;
                 }
             }
             for (BoardSurface.Face face : finished == null ? surface.walls(scene, floor) : finished.walls()) {
                 if (Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit)
-                      && ray.origin.dst2(hit) < nearest) {
+                      && nearer(ray.origin.dst2(hit), nearest, candidate.order(), nearestOrder)) {
                     nearest = ray.origin.dst2(hit);
+                    nearestOrder = candidate.order();
                     // A rock face belongs to the higher hex that owns it; the scree at its foot, which spreads
                     // past the logical edge, lies on the lower hex whose footprint contains it.
                     result = foot(scene, tile.coords(), hit);
@@ -366,14 +387,20 @@ final class BoardGeometry {
                 if (Intersector.intersectRayTriangle(ray, side.a(), lowerB, side.b(), hit)) {
                     distance = Math.min(distance, ray.origin.dst2(hit));
                 }
-                if (distance < nearest) {
+                if (Float.isFinite(distance) && nearer(distance, nearest, candidate.order(), nearestOrder)) {
                     nearest = distance;
+                    nearestOrder = candidate.order();
                     result = tile.coords();
                     hardSurface = false;
                 }
             }
         }
         return result == null ? null : new Hit(result, nearest, hardSurface);
+    }
+
+    /** Preserve the original candidate order when shared-edge triangles have exactly the same hit distance. */
+    private static boolean nearer(float distance, float nearest, int order, int nearestOrder) {
+        return distance < nearest || distance == nearest && order < nearestOrder;
     }
 
     private static boolean hardSurface(BoardScene.Tile tile, BoardSurface.Face face) {

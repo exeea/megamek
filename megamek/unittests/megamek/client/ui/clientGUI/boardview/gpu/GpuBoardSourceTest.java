@@ -189,8 +189,9 @@ class GpuBoardSourceTest {
         }
     }
 
-    @Test
-    void coexistingStructuresUseTheirSelectedSaxarbaArtworkAndOwnHeights() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = { "", "desert", "snow", "volcano", "dirt", "lunar" })
+    void coexistingStructuresUseTheirSelectedSaxarbaArtworkAndOwnHeights(String theme) throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             SwingUtilities.invokeAndWait(() -> {
                 Coords coords = new Coords(2, 2);
@@ -203,10 +204,12 @@ class GpuBoardSourceTest {
                 hex.addTerrain(new Terrain(Terrains.FUEL_TANK_CF, 40));
                 hex.addTerrain(new Terrain(Terrains.FUEL_TANK_MAGN, 100));
                 hex.addTerrain(new Terrain(Terrains.INDUSTRIAL, 3));
+                hex.setTheme(theme);
                 fixture.game.getBoard().setHex(coords, hex);
                 fixture.source.refresh();
                 var tile = fixture.source.takeFrame().scene().tile(coords);
                 assertEquals(3, tile.features().size());
+                assertTrue(tile.detailedGround(), "Modeled structures must preserve native ground in theme: " + theme);
                 // Default single-hex buildings may select a prefab rather than the connected-building family.
                 HexTileset tileset = new HexTileset(fixture.game, new File(Configuration.dataDir(), "models/board/tileset"));
                 try {

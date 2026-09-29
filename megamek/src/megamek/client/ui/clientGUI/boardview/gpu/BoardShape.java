@@ -19,7 +19,8 @@ record BoardShape(List<BoardShape.Polygon> polygons, float height) {
     record Polygon(Vector3[] points, Vector3 normal) { }
 
     static Map<String, BoardShape> loadKit(String asset) {
-        var data = RigidGlb.load(new FileHandle(new File(Configuration.dataDir(), "models/board/" + asset + ".glb")));
+        File root = new File(Configuration.dataDir(), "models/board");
+        var data = RigidGlb.load(new FileHandle(new File(root, asset + ".glb")), root.toPath());
         var mesh = data.meshes.first();
         Map<String, short[]> indices = new HashMap<>();
         for (var part : mesh.parts) { indices.put(part.id, part.indices); }

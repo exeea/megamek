@@ -20,8 +20,17 @@ import com.badlogic.gdx.utils.Disposable;
 final class GpuWeatherParticles implements Disposable {
     private static final int BASE_PARTICLES = 768;
     private static final int PARTICLES = BASE_PARTICLES * 6;
-    private static final int[] DENSITY_MULTIPLIERS = { 6, 6, 4 };
-    private ShaderProgram shader;
+    enum Kind {
+        RAIN("weather-rain.glsl", 6), SNOW("weather-snow.glsl", 6), HAIL("weather-hail.glsl", 4);
+
+        final String source;
+        final int density;
+
+        Kind(String source, int density) { this.source = source; this.density = density; }
+    }
+
+    private static final Kind[] KINDS = Kind.values();
+    private final ShaderProgram[] shaders = new ShaderProgram[KINDS.length];
     private final Mesh mesh;
     private final Vector3 right = new Vector3();
     private final Vector3 origin = new Vector3();
@@ -32,8 +41,6 @@ final class GpuWeatherParticles implements Disposable {
     private float top;
 
     GpuWeatherParticles() {
-        shader = GpuShaderManager.program(() -> GpuGlsl.compile("GPU precipitation",
-              GpuShaderSource.read("weather-particles.vert"), GpuShaderSource.read("weather-particles.frag")), next -> shader = next);
         float[] vertices = new float[PARTICLES * 4 * 5];
         short[] indices = new short[PARTICLES * 6];
         Random random = new Random(20260918);
@@ -55,6 +62,23 @@ final class GpuWeatherParticles implements Disposable {
         mesh = new Mesh(true, PARTICLES * 4, indices.length, VertexAttribute.Position(), VertexAttribute.TexCoords(0));
         mesh.setVertices(vertices);
         mesh.setIndices(indices);
+        try {
+            for (Kind kind : KINDS) {
+                shaders[kind.ordinal()] = GpuShaderManager.program(() -> shader(kind), next -> shaders[kind.ordinal()] = next);
+            }
+        } catch (RuntimeException failure) {
+            dispose();
+            throw failure;
+        }
+    }
+
+    static ShaderProgram shader(Kind kind) {
+        return GpuGlsl.compile("GPU precipitation " + kind, source("weather-particles.vert", kind.source),
+              source("weather-particles.frag", kind.source));
+    }
+
+    static String source(String stage, String condition) {
+        return GpuShaderSource.read(stage).replace("// WEATHER_CONDITION", GpuShaderSource.read(condition));
     }
 
     void render(Camera camera, BoardScene scene, BoardAtmosphere.Effects effects, Color light, float clock) {
@@ -69,35 +93,33 @@ final class GpuWeatherParticles implements Disposable {
         Gdx.gl.glEnable(GL20.GL_BLEND);
         Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
         try {
-            shader.bind();
-            shader.setUniformMatrix("u_projView", camera.combined);
-            shader.setUniformf("u_origin", origin);
-            shader.setUniformf("u_extent", extent);
-            shader.setUniformf("u_right", right);
-            shader.setUniformf("u_up", camera.up);
-            shader.setUniformf("u_clock", clock);
-            shader.setUniformf("u_level", BoardGeometry.level());
-            shader.setUniformf("u_light", light.r, light.g, light.b);
             float windX = MathUtils.sinDeg(effects.windDirection());
             float windY = MathUtils.cosDeg(effects.windDirection());
-            mesh.bind(shader);
-            for (int kind = 0; kind < DENSITY_MULTIPLIERS.length; kind++) {
+            float wind = effects.wind() * 5;
+            for (Kind kind : KINDS) {
                 float strength = switch (kind) {
-                    case 0 -> effects.rain();
-                    case 1 -> effects.snow();
-                    default -> effects.hail();
+                    case RAIN -> effects.rain();
+                    case SNOW -> effects.snow();
+                    case HAIL -> effects.hail();
                 };
                 if (strength > 0) {
-                    shader.setUniformf("u_kind", kind);
-                    float wind = effects.wind() * 5;
+                    ShaderProgram shader = shaders[kind.ordinal()];
+                    shader.bind();
+                    shader.setUniformMatrix("u_projView", camera.combined);
+                    shader.setUniformf("u_origin", origin);
+                    shader.setUniformf("u_extent", extent);
+                    shader.setUniformf("u_right", right);
+                    shader.setUniformf("u_up", camera.up);
+                    shader.setUniformf("u_clock", clock);
+                    shader.setUniformf("u_level", BoardGeometry.level());
+                    shader.setUniformf("u_light", light.r, light.g, light.b);
                     shader.setUniformf("u_wind", windX * wind, windY * wind);
-                    float density = strength * (1 + (DENSITY_MULTIPLIERS[kind] - 1) * strength * strength);
+                    float density = strength * (1 + (kind.density - 1) * strength * strength);
                     int count = Math.max(1, Math.round(BASE_PARTICLES * density));
-                    mesh.render(shader, GL20.GL_TRIANGLES, 0, count * 6, false);
+                    mesh.render(shader, GL20.GL_TRIANGLES, 0, count * 6);
                 }
             }
         } finally {
-            mesh.unbind(shader);
             Gdx.gl.glDepthMask(true);
             Gdx.gl.glDisable(GL20.GL_BLEND);
         }
@@ -132,6 +154,6 @@ final class GpuWeatherParticles implements Disposable {
     @Override
     public void dispose() {
         mesh.dispose();
-        GpuShaderManager.dispose(shader);
+        for (ShaderProgram shader : shaders) { GpuShaderManager.dispose(shader); }
     }
 }

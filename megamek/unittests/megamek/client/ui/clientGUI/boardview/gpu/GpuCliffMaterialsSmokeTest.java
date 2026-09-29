@@ -3,7 +3,6 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -28,15 +27,17 @@ import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /** Native rendering of full-resolution materials, relief toggling and all six cliff orientations. */
 @Tag("on-demand")
 class GpuCliffMaterialsSmokeTest {
     private static final Coords RAISED = new Coords(3, 3);
 
-    @Test
-    void lightsEveryCliffOrientationAndPreservesMaterialOwnership() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    void lightsEveryCliffOrientationAndPreservesMaterialOwnership(boolean road) throws Exception {
         BoardScene review = reviewScene();
         AtomicReference<Throwable> failure = new AtomicReference<>();
         var configuration = GpuBoardWindow.configuration(false);
@@ -46,7 +47,7 @@ class GpuCliffMaterialsSmokeTest {
             public void create() {
                 try {
                     checkMaterials();
-                    checkRendering(review);
+                    checkRendering(review, road);
                 } catch (Throwable error) {
                     failure.set(error);
                 } finally {
@@ -60,31 +61,36 @@ class GpuCliffMaterialsSmokeTest {
     private static void checkMaterials() {
         GpuAssets assets = new GpuAssets();
         try {
-            for (BoardScene.Surface family : BoardScene.Surface.values()) {
-                GpuAssets.Cliff maps = assets.cliff(family.wall);
-                assertNotNull(maps.normal(), family.name());
-                assertNotNull(maps.surface(), family.name());
-                assertSame(maps, assets.cliff(family.wall), "All hexes borrow one material set");
-                for (Texture texture : List.of(maps.color(), maps.normal(), maps.surface())) {
-                    assertEquals(1024, texture.getWidth());
-                    assertEquals(1024, texture.getHeight());
+            for (String name : List.of("grass", "dirt", "sand", "rock", "concrete", "snow", "scree", "gravel",
+                  "pavement", "granite-contact", "sandstone", "soil-contact", "cast")) {
+                GpuAssets.Sculpt maps = assets.sculpt(name);
+                assertNotNull(maps.normal(), name);
+                assertSame(maps, assets.sculpt(name), "All hexes borrow one material set");
+                for (Texture texture : List.of(maps.color(), maps.normal())) {
+                    assertEquals(512, texture.getWidth());
+                    assertEquals(512, texture.getHeight());
                     assertEquals(Texture.TextureWrap.Repeat, texture.getUWrap());
                     assertEquals(Texture.TextureFilter.MipMapLinearLinear, texture.getMinFilter());
                 }
             }
-            assertNull(assets.cliff("terrain/water_bed").normal(), "Older/custom art retains its color fallback");
+            assertEquals(2, assets.sculpt("missing-material").color().getWidth(), "Missing maps retain a neutral fallback");
+            assertNotNull(assets.sculpt("missing-material").normal());
         } finally {
             assets.dispose();
         }
     }
 
-    private static void checkRendering(BoardScene review) throws Exception {
+    private static void checkRendering(BoardScene review, boolean road) throws Exception {
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
+        if (road) { output = new File(output, "road-walls"); }
         assertTrue(output.isDirectory() || output.mkdirs());
         GpuTerrain terrain = new GpuTerrain();
         try {
             for (BoardScene.Surface family : BoardScene.Surface.values()) {
-                terrain.update(scene(family));
+                BoardScene scene = scene(family, road);
+                assertEquals(!road, new BoardSurface(scene, scene.tile(RAISED)).relief.sculpted(),
+                      "Exercise both the sculpted cliff and the retained artwork/road wall path");
+                terrain.update(scene);
                 for (int edge = 0; edge < 6; edge++) {
                     Vector3 a = BoardGeometry.corner(RAISED, 6, edge);
                     Vector3 b = BoardGeometry.corner(RAISED, 6, edge + 1);
@@ -110,6 +116,12 @@ class GpuCliffMaterialsSmokeTest {
                     terrain.setNormalMaps(true);
                     int[] relief = samples(terrain, camera, a, b);
                     double difference = difference(flat, relief);
+                    if (difference <= .5) {
+                        GpuBoardTestUi.capture(new File(output, "failed-" + family + "-" + edge + "-relief.png"));
+                        terrain.setNormalMaps(false);
+                        samples(terrain, camera, a, b);
+                        GpuBoardTestUi.capture(new File(output, "failed-" + family + "-" + edge + "-flat.png"));
+                    }
                     assertTrue(difference > .5, family + " edge " + edge + " must respond to mapped relief: " + difference);
                     if (edge == 4) {
                         GpuBoardTestUi.capture(new File(output, "cliff-" + family + "-relief.png"));
@@ -203,7 +215,7 @@ class GpuCliffMaterialsSmokeTest {
         return total / (a.length * 3.0);
     }
 
-    private static BoardScene scene(BoardScene.Surface family) {
+    private static BoardScene scene(BoardScene.Surface family, boolean road) {
         BufferedImage image = new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB);
         int color = switch (family) {
             case GRASS -> 0xff7c9262;
@@ -221,7 +233,9 @@ class GpuCliffMaterialsSmokeTest {
         for (int y = 0; y < 7; y++) {
             for (int x = 0; x < 7; x++) {
                 Coords coords = new Coords(x, y);
-                tiles.add(new BoardScene.Tile(coords, coords.equals(RAISED) ? 6 : 0, -1, false, 0,
+                // End the artwork road on the plateau so a connected ramp cannot cover the wall being sampled.
+                tiles.add(new BoardScene.Tile(coords, coords.equals(RAISED) ? 6 : 0, -1, false,
+                      road && coords.equals(RAISED) ? 18 : 0,
                       family, pixels, null, null, List.of(), List.of()));
             }
         }

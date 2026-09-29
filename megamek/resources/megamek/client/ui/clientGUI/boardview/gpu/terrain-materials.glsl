@@ -6,6 +6,9 @@ struct TerrainMaterial {
     vec3 normal;
     float cavity;
     float height;
+    vec3 emission;
+    float roughness;
+    float volcanic;
 };
 
 float materialBlendWidth() { return .13 + min(.2, pixelMetres * .16); }
@@ -123,6 +126,13 @@ vec4 materialNormal(MaterialMap normalMap, float tile, float weight, MaterialPro
 
 TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float belowRim, float rock,
       float hardness, float broad, float fine, float region, float familyId, vec4 tiles, vec4 layers, float sediment) {
+#ifdef volcanicFlag
+    if (familyId > 5.5) {
+        Volcanic material = magmaSurface(world, face, -viewDirection(), vec3(0.0), 1.0, vec4(0.0));
+        return TerrainMaterial(material.albedo, material.normal, material.surface.b, material.surface.r,
+              magmaEmission(material.heat, familyId > 6.5 ? .1 : 1.0), material.surface.g, 1.0);
+    }
+#endif
     MaterialProjection projection = materialProjection(world, face);
     float up = clamp(face.z, 0.0, 1.0);
     float pockets = texture(u_rainNoise, (world.xy + world.z * vec2(.43, .27)) / 92.0 + .57).g;
@@ -133,8 +143,11 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
     float deposit = foot * smoothstep(.28, .64, variation) * smoothstep(.1, .6, up);
     float cover = smoothstep(.4, .96, up + (variation - .5) * .55);
     float soil = 0.0;
+    // Break a bank-to-cliff contact into soil pockets and exposed rock. Both sides use the same world field;
+    // pure banks/cliffs stay pure, and distance filtering already controls the final height blend.
+    float exposure = clamp(rock + (variation - .5) * 1.2 * (4.0 * rock * (1.0 - rock)), 0.0, 1.0);
     if (abs(familyId) < .5) {
-        soil = (1.0 - cover) * ((1.0 - rock) * .9 + rim * .5 * smoothstep(.25, .7, variation));
+        soil = (1.0 - cover) * ((1.0 - exposure) * .9 + rim * .5 * smoothstep(.25, .7, variation));
         deposit *= mix(.25, 1.0, rock);
     } else if (abs(familyId - 5.0) < .5) {
         cover = smoothstep(.36, .92, up + (variation - .5) * .5 + deposit * .18);
@@ -144,11 +157,15 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
         deposit *= .55;
     } else if (abs(familyId - 1.0) < .5) {
         cover = smoothstep(.28, .9, up + (variation - .5) * .16);
+        soil = (1.0 - cover) * (1.0 - exposure);
         deposit *= .6;
     }
     soil = clamp(soil, 0.0, 1.0 - cover);
     vec4 roles = vec4(cover, soil, deposit, max(0.0, 1.0 - cover - soil));
     roles.xyw *= 1.0 - deposit;
+    // Concrete transported onto another surface is loose aggregate, never a second paved slab.
+    // The constructed face itself keeps the existing panel material, supplied by blendCovers below.
+    if (abs(familyId - 4.0) < .5) roles = vec4(0.0, 0.0, 1.0, 0.0);
     // Submerged contacts exchange bed sediment and exposed stone, never living turf or windblown surface sand.
     float bedRock = rock * (1.0 - smoothstep(.2, .8, up)) * smoothstep(.05, 2.2, aboveFoot);
     roles = mix(roles, vec4(0.0, 0.0, 1.0 - bedRock, bedRock), sediment);
@@ -176,6 +193,9 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
     result.normal = normalize(na.rgb * weights.x + nb.rgb * weights.y + nc.rgb * weights.z + nd.rgb * weights.w);
     result.cavity = dot(vec4(na.a, nb.a, nc.a, nd.a), weights);
     result.height = dot(vec4(a.a, b.a, c.a, d.a), weights);
+    result.emission = vec3(0.0);
+    result.roughness = .9;
+    result.volcanic = 0.0;
     return result;
 }
 
@@ -194,35 +214,49 @@ TerrainMaterial naturalMaterial(vec3 world, vec3 face, float aboveFoot, float be
 float coverPatch(vec3 world, float familyId) {
     vec2 offset = familyId * vec2(.17, .31);
     vec2 contact = world.xy + world.z * vec2(.47, .29);
-    return texture(u_rainNoise, contact / 150.0 + offset).r * .65
-          + texture(u_rainNoise, contact / 43.0 - offset).b * .35;
+    return texture(u_rainNoise, contact / 37.0 + offset).r * .65
+          + texture(u_rainNoise, contact / 9.5 - offset).b * .35;
 }
 
 void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float hardness, float sediment,
       float broad, float fine, float region,
       inout vec3 color, inout vec3 normal, inout float cavity, out float height, inout float grass,
-      inout vec3 bounce, inout float response, inout float rainCover) {
-    TerrainMaterial a = naturalMaterialFor(world, face, foot, rim, rock, hardness, broad, fine, region,
-          u_coverFamilies.x, u_coverTiles0, u_coverLayers0, sediment);
+      inout vec3 bounce, inout float response, inout float rainCover,
+      out vec3 emission, out float roughness, out float volcanic) {
+    TerrainMaterial a;
+    if (abs(u_coverFamilies.x - 4.0) < .5) {
+        a = TerrainMaterial(color, normal, cavity, .5, vec3(0.0), .9, 0.0);
+    } else {
+        a = naturalMaterialFor(world, face, foot, rim, rock, hardness, broad, fine, region,
+              u_coverFamilies.x, u_coverTiles0, u_coverLayers0, sediment);
+    }
     TerrainMaterial b = naturalMaterialFor(world, face, foot, rim, rock, hardness, broad, fine, region,
           u_coverFamilies.y, u_coverTiles1, u_coverLayers1, sediment);
     TerrainMaterial c = naturalMaterialFor(world, face, foot, rim, rock, hardness, broad, fine, region,
           u_coverFamilies.z, u_coverTiles2, u_coverLayers2, sediment);
-    vec3 raw = max(v_coverWeights, vec3(0.0));
+    TerrainMaterial d = a;
+    if (u_coverFamilies.w != u_coverFamilies.x) {
+        d = naturalMaterialFor(world, face, foot, rim, rock, hardness, broad, fine, region,
+              u_coverFamilies.w, u_coverTiles3, u_coverLayers3, sediment);
+    }
+    vec4 raw = max(v_coverWeights, vec4(0.0));
     // Broad coverage is shared with vegetation. Height adds small interlocking edges, never a new family.
-    vec3 patches = vec3(coverPatch(world, u_coverFamilies.x), coverPatch(world, u_coverFamilies.y),
-          coverPatch(world, u_coverFamilies.z));
-    float patchStrength = mix(2.2, 4.0, 1.0 - smoothstep(.35, .85, face.z));
-    vec3 weights = materialWeights(vec4(raw, 0.0),
-          vec4(vec3(a.height, b.height, c.height) * .45 + patches * patchStrength, 0.0)).xyz;
-    color = toDisplay(toLinear(a.color) * weights.x + toLinear(b.color) * weights.y + toLinear(c.color) * weights.z);
-    normal = normalize(a.normal * weights.x + b.normal * weights.y + c.normal * weights.z);
-    cavity = dot(vec3(a.cavity, b.cavity, c.cavity), weights);
-    height = dot(vec3(a.height, b.height, c.height), weights);
-    grass = dot(vec3(1.0) - step(vec3(.5), abs(u_coverFamilies)), weights) * (1.0 - sediment);
+    vec4 patches = vec4(coverPatch(world, u_coverFamilies.x), coverPatch(world, u_coverFamilies.y),
+          coverPatch(world, u_coverFamilies.z), coverPatch(world, u_coverFamilies.w));
+    float patchStrength = mix(1.5, 2.4, 1.0 - smoothstep(.35, .85, face.z));
+    vec4 weights = materialWeights(raw, vec4(a.height, b.height, c.height, d.height) * .45 + patches * patchStrength);
+    color = toDisplay(toLinear(a.color) * weights.x + toLinear(b.color) * weights.y
+          + toLinear(c.color) * weights.z + toLinear(d.color) * weights.w);
+    normal = normalize(a.normal * weights.x + b.normal * weights.y + c.normal * weights.z + d.normal * weights.w);
+    cavity = dot(vec4(a.cavity, b.cavity, c.cavity, d.cavity), weights);
+    height = dot(vec4(a.height, b.height, c.height, d.height), weights);
+    emission = a.emission * weights.x + b.emission * weights.y + c.emission * weights.z + d.emission * weights.w;
+    roughness = dot(vec4(a.roughness, b.roughness, c.roughness, d.roughness), weights);
+    volcanic = dot(vec4(a.volcanic, b.volcanic, c.volcanic, d.volcanic), weights);
+    grass = dot(vec4(1.0) - step(vec4(.5), abs(u_coverFamilies)), weights) * (1.0 - sediment);
     bounce = groundBounceFor(u_coverFamilies.x) * weights.x + groundBounceFor(u_coverFamilies.y) * weights.y
-          + groundBounceFor(u_coverFamilies.z) * weights.z;
-    response = dot(max(u_coverResponses, vec3(0.0)), weights);
-    rainCover = dot(step(vec3(0.0), u_coverResponses), weights);
+          + groundBounceFor(u_coverFamilies.z) * weights.z + groundBounceFor(u_coverFamilies.w) * weights.w;
+    response = dot(max(u_coverResponses, vec4(0.0)), weights);
+    rainCover = dot(step(vec4(0.0), u_coverResponses), weights);
 }
 #endif
