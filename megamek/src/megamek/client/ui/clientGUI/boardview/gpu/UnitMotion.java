@@ -285,7 +285,7 @@ final class UnitMotion {
                 return unit;
             }
             return new BoardScene.Unit(unit.id(), unit.part(), unit.name(), gear.ground(), unit.image(), unit.sensorContact(),
-                  unit.annotations(), unit.height(), false, unit.model(), unit.outlineRgb(), gear.ground().footprint());
+                  unit.annotations(), unit.height(), false, unit.model(), unit.outlineRgb(), gear.ground().footprint(), unit.attachment(), unit.heat());
         }
 
         BoardScene.AeroState aeroState(BoardScene.Unit unit) {

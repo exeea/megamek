@@ -480,7 +480,7 @@ final class UnitPlayback {
             var before = change.before();
             shown.put(before.id(), new BoardScene.Unit(before.id(), before.part(), before.name(), endpoint, before.image(),
                   false, before.annotations(), before.height(), false, before.model(), before.outlineRgb(),
-                  List.of(endpoint.coords()), attachment.boarding() ? change.after().attachment() : null));
+                  List.of(endpoint.coords()), attachment.boarding() ? change.after().attachment() : null, before.heat()));
         }
         List<BoardScene.Unit> units = new ArrayList<>();
         for (var unit : scene.units()) {
@@ -528,7 +528,7 @@ final class UnitPlayback {
                   ? playing ? unit.footprint() : List.of(location.coords()) : location.footprint();
             shown.putIfAbsent(unit.id(), new BoardScene.Unit(unit.id(), unit.part(), appearance.name(), location, appearance.image(),
                   false, appearance.annotations(), unit.height(), unit.airborne(), appearance.model(), unit.outlineRgb(), footprint,
-                  appearance.attachment()));
+                  appearance.attachment(), appearance.heat()));
         } else if (event instanceof BoardScene.AttachmentChange change) {
             shown.putIfAbsent(change.entityId(), change.before());
             shown.putIfAbsent(change.carrier().id(), change.carrier());

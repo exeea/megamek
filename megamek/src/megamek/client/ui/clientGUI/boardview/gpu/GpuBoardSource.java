@@ -390,7 +390,7 @@ final class GpuBoardSource implements BoardSource {
     private BoardScene.Unit inForm(BoardScene.Unit unit, Entity entity, BoardScene.Waypoint location, UnitLocation.Form form) {
         var model = UnitModelSelection.inForm(unit.model(), entity, unit.part(), MMStaticDirectoryManager.getMekTileset(), form);
         return new BoardScene.Unit(unit.id(), unit.part(), unit.name(), location, unit.image(), false, unit.annotations(),
-              unit.height(), form == null ? unit.airborne() : form.airborne(), model, unit.outlineRgb(), unit.footprint(), unit.attachment());
+              unit.height(), form == null ? unit.airborne() : form.airborne(), model, unit.outlineRgb(), unit.footprint(), unit.attachment(), unit.heat());
     }
 
     /** Copy authorized, then-visible appearance once; no Entity reaches the GL thread. */
@@ -1041,7 +1041,7 @@ final class GpuBoardSource implements BoardSource {
         usedImages.put(image, true);
         var pixels = unitImages.computeIfAbsent(image, BoardScene.Pixels::copy);
         return new BoardScene.Unit(captured.id(), -1, captured.name(), captured.location(), pixels, false, null,
-              captured.height(), captured.airborne(), model, captured.outlineRgb(), captured.footprint());
+              captured.height(), captured.airborne(), model, captured.outlineRgb(), captured.footprint(), null, captured.heat());
     }
 
     private BoardScene.Unit unit(Entity entity, int part, Coords coords, boolean sensor,
@@ -1086,7 +1086,7 @@ final class GpuBoardSource implements BoardSource {
               GpuUnitModels.ENABLED
                     ? camouflage.resolve(UnitModelSelection.capture(entity, part, sensor, MMStaticDirectoryManager.getMekTileset(),
                           sensor ? 0 : UnitModelSelection.twist(entity.getFacing(), facing))) : null,
-              outline.getRGB(), footprint);
+              outline.getRGB(), footprint, null, sensor || !entity.tracksHeat() ? -1 : Math.max(0, entity.heat));
     }
 
     private BoardScene.Waypoint waypoint(Coords coords, float relativeElevation, int facing) {

@@ -84,7 +84,7 @@ final class GpuUnitShader extends DefaultShader {
         return GpuShaderSource.read("light-model.glsl");
     }
 
-    private static String replaceOnce(String source, String anchor, String replacement, String stage) {
+    static String replaceOnce(String source, String anchor, String replacement, String stage) {
         int index = source.indexOf(anchor);
         if (index < 0 || source.indexOf(anchor, index + anchor.length()) >= 0) {
             throw new IllegalStateException("Incompatible libGDX unit " + stage

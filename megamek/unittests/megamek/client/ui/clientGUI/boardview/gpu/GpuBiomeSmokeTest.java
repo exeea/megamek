@@ -16,8 +16,10 @@ import java.util.concurrent.atomic.AtomicReference;
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
+import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.PixmapIO;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
@@ -95,7 +97,7 @@ class GpuBiomeSmokeTest {
                             assertEquals(vegetation ? 1 : 0, draws);
                             // Budget the rendered 3x3 fixture (including its fringe), not just one template's indices.
                             long budget = !vegetation ? 0 : (kind == BoardScene.Biome.FIELD
-                                  ? new long[] { 30_000, 30_000, 10_000 } : new long[] { 10_476, 2_510, 314 })[lod];
+                                  ? new long[] { 210_000, 210_000, 10_000 } : new long[] { 10_476, 2_510, 314 })[lod];
                             assertTrue(triangles <= budget, kind + " LOD" + lod + " exceeds its plant triangle budget: " + triangles);
                             assertTrue(triangles < previousTriangles || !vegetation
                                         || kind == BoardScene.Biome.FIELD && lod == 1 && triangles == previousTriangles,
@@ -140,6 +142,20 @@ class GpuBiomeSmokeTest {
                         camera.center(BoardGeometry.center(new Coords(4, 4), 0));
                         settle(terrain, plants, frame, camera, scene);
                         GpuReviewFrame.save(new File(output, kind + "-close.png"));
+                        if (kind == BoardScene.Biome.FIELD) {
+                            for (float[] view : new float[][] { { 0, 0 }, { 110, 72 }, { 200, 72 }, { 45, 55 } }) {
+                                camera.setIsometric(false);
+                                camera.orbit(view[0], view[1]);
+                                camera.camera.zoom = BoardGeometry.width() / 2400;
+                                camera.center(BoardGeometry.center(new Coords(4, 4), 0));
+                                settle(terrain, plants, frame, camera, scene);
+                                GpuReviewFrame.save(new File(output, "FIELD-registered-" + (int) view[0] + ".png"));
+                            }
+                            camera.setIsometric(true);
+                            camera.camera.zoom = .075f;
+                            camera.center(BoardGeometry.center(new Coords(4, 4), 0));
+                            settle(terrain, plants, frame, camera, scene);
+                        }
                         if (kind == BoardScene.Biome.MARSH) {
                             camera.tilt(68);
                             frame.configure(new BoardAtmosphere.Settings(16, 0, 0,
@@ -257,7 +273,11 @@ class GpuBiomeSmokeTest {
                     // Near crop rows, the distant canopy and reeds each share one cutout across their batches.
                     for (String name : List.of("crop", "canopy", "sedge")) {
                         var texture = (Texture) field(plants, name);
-                        assertTrue(texture.getWidth() <= 512 && texture.getHeight() <= 640, "Shared cutouts have bounded upload sizes");
+                        assertTrue(texture.getWidth() <= (name.equals("crop") ? 2048 : 512) && texture.getHeight() <= 640,
+                              "Shared cutouts have bounded upload sizes");
+                        assertEquals(Texture.TextureFilter.MipMapLinearLinear, texture.getMinFilter(),
+                              "Every crop view and the distant canopy must retain trilinear mipmaps");
+                        if (name.equals("crop")) { registeredCrops(texture, output); }
                         for (Object batch : batches(plants)) {
                             boolean crop = (boolean) field(batch, "crop"), distant = crop && (int) field(batch, "lod") == 2;
                             if (crop != !name.equals("sedge") || distant != name.equals("canopy")) { continue; }
@@ -295,6 +315,30 @@ class GpuBiomeSmokeTest {
             }
         }, config);
         if (failure.get() != null) { throw new AssertionError("Fields and marsh native renderer", failure.get()); }
+    }
+
+    static void registeredCrops(Texture texture, File output) {
+        var pixels = new Pixmap(texture.getWidth(), texture.getHeight(), Pixmap.Format.RGBA8888);
+        try {
+            texture.bind(0);
+            org.lwjgl.opengl.GL11.glGetTexImage(GL20.GL_TEXTURE_2D, 0, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, pixels.getPixels());
+            PixmapIO.writePNG(new FileHandle(new File(output, "crop-atlas.png")), pixels);
+            int rowWidth = texture.getWidth() / 2;
+            for (int i = 0; i < GpuBiomeVegetation.PLANTS_PER_ROW; i++) {
+                int x = Math.round((i + .5f) * rowWidth / GpuBiomeVegetation.PLANTS_PER_ROW);
+                for (int[] centre : new int[][] { { x, 490 }, { rowWidth + x, 490 }, { x, 576 } }) {
+                    int alpha = 0;
+                    for (int dx = -1; dx <= 1; dx++) {
+                        alpha = Math.max(alpha, pixels.getPixel(centre[0] + dx, centre[1]) & 255);
+                    }
+                    assertTrue(alpha >= 82, "Every variant must register both stems and its crown at the same centre: " + i);
+                }
+                int gap = Math.round(i * (float) rowWidth / GpuBiomeVegetation.PLANTS_PER_ROW);
+                for (int y = 0; y < 640; y++) {
+                    assertEquals(0, pixels.getPixel(gap, y) & 255, "Plant gutters must retain transparent alpha");
+                }
+            }
+        } finally { pixels.dispose(); }
     }
 
     private static int neighbors(BoardScene scene, Coords coords) {

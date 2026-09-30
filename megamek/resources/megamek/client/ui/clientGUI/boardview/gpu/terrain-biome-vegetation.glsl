@@ -9,6 +9,7 @@ uniform float u_metre;
 out vec2 v_coverData;
 out vec2 v_coverRoot;
 out vec2 v_coverFade;
+float cropU;
 
 // False when the plant cannot contribute to this template: the caller skips the rest of the vertex program.
 bool biomePlant(vec3 point, vec3 sourceNormal, vec4 pigment, out vec3 position, out vec3 normal, out vec4 color) {
@@ -16,6 +17,19 @@ bool biomePlant(vec3 point, vec3 sourceNormal, vec4 pigment, out vec3 position, 
     bool crop = u_biomeKind < 1.5;
     bool row = crop && a_coverRow.x > 0.0;
     vec2 across = vec2(@ROW_X@, @ROW_Y@), along = vec2(-across.y, across.x);
+    float plantX = point.x;
+    cropU = mix(a_coverRow.z, a_coverRow.w, point.x + .5);
+    if (row && u_biomeLod < 1.5) {
+        // The template addresses the original seven-plant strip. Clip its side/top edges without stretching the
+        // plants, and give a perpendicular front face to exactly one supported interval.
+        float sourceU = point.x + .5;
+        if (abs(sourceNormal.x) > .5 && (sourceU < a_coverRow.z || sourceU >= a_coverRow.w)) return false;
+        cropU = clamp(sourceU, a_coverRow.z, a_coverRow.w);
+        float span = a_coverRow.w - a_coverRow.z;
+        point.x = (cropU - a_coverRow.z) / span - .5;
+        float centre = (min(@PLANTS_PER_ROW@ - 1.0, floor(sourceU * @PLANTS_PER_ROW@)) + .5) / @PLANTS_PER_ROW@;
+        plantX = (centre - a_coverRow.z) / span - .5;
+    }
     // A crop strip or distant canopy run spans from one end to the other; a reed clump stands at its root.
     vec3 halfRow = row ? vec3(along * (.5 * a_coverRow.x), .5 * a_coverRow.y) : vec3(0.0);
     vec4 first = u_projViewTrans * vec4(root - halfRow, 1.0), last = u_projViewTrans * vec4(root + halfRow, 1.0);
@@ -29,7 +43,8 @@ bool biomePlant(vec3 point, vec3 sourceNormal, vec4 pigment, out vec3 position, 
     // Beyond one clip plane by more than a plant's reach (half a row's width plus its height) at both ends of its
     // row, nothing of it can enter the view: a clip coordinate changes by at most its matrix row's length per unit
     // moved, and a row is convex.
-    float reach = 3.0 * u_metre + u_levelHeight;
+    float reach = crop ? max(@ROW_HALF_WIDTH@, @ROW_METRES@) * u_metre + .55 * @CROP_SCALE@ * u_levelHeight
+          : 3.0 * u_metre + u_levelHeight;
     float perspective = length(vec3(u_projViewTrans[0].w, u_projViewTrans[1].w, u_projViewTrans[2].w));
     vec2 margin = reach * (perspective + vec2(length(vec3(u_projViewTrans[0].x, u_projViewTrans[1].x, u_projViewTrans[2].x)),
           length(vec3(u_projViewTrans[0].y, u_projViewTrans[1].y, u_projViewTrans[2].y))));
@@ -55,15 +70,6 @@ bool biomePlant(vec3 point, vec3 sourceNormal, vec4 pigment, out vec3 position, 
     float height = crop ? u_levelHeight * mix(.43, .52, seed) * @CROP_SCALE@
           : u_metre * mix(.90, 1.65, fract(seed * 19.37));
     float top = crop ? 1.04 : 1.1;
-    if (row && abs(sourceNormal.z) < .5) {
-        // Cross the complete row faces instead of leaving an isolated end card between edge-on strips.
-        // Global UV keeps clipped fragments aligned. Tapering to zero at the base keeps stems on their support.
-        float side = point.y;
-        float rowU = mix(a_coverRow.z, a_coverRow.w, point.x + .5);
-        point.y *= (2.0 * rowU - 1.0) * point.z / top;
-        sourceNormal = vec3(2.0 * side * u_metre * (a_coverRow.w - a_coverRow.z)
-              / a_coverRow.x * point.z / top, -1.0, side * (2.0 * rowU - 1.0) * u_metre / (top * height));
-    }
     if (row && u_biomeLod > 1.5) {
         // Seen at an angle, rows as tall as these hide the furrows between them; only from overhead does the ground show.
         // Widen the distant canopy from its own width to the full row spacing as the view leaves the vertical.
@@ -79,10 +85,12 @@ bool biomePlant(vec3 point, vec3 sourceNormal, vec4 pigment, out vec3 position, 
     }
     vec2 wind = length(u_wind.xy) > .01 ? normalize(u_wind.xy) : vec2(.8, .6);
     vec2 anchor = root.xy + (row ? along * point.x * a_coverRow.x : vec2(0.0));
-    float gust = vegetationGust(anchor);
+    // Every plane of one plant shares its stem's gust, including pieces split at terrain or hex boundaries.
+    vec2 windAnchor = row && u_biomeLod < 1.5 ? root.xy + along * plantX * a_coverRow.x : anchor;
+    float gust = vegetationGust(windAnchor);
     // Stiffer crops bow less than flexible marsh leaves. Strength scales both lean and angular excursion.
     float flex = u_wind.z * (crop ? .78 + .22 * gust : 1.0 + .28 * gust);
-    // Crop stems remain straight while swaying; row segments sample the same world-space gust at shared endpoints.
+    // Crop stems remain straight while swaying; all three planes sample the gust at their shared stem.
     // Marsh leaves form a flexible arch, with no displacement at the grounded base.
     float angleAtHeight = crop ? flex : flex * point.z / top;
     float sine = sin(angleAtHeight), cosine = cos(angleAtHeight);

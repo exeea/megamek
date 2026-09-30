@@ -258,12 +258,22 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         }
     }
 
-    /** Stand/flight elevation and occupied levels come from the game, including the unit's current stance. */
+    /**
+     * Stand/flight elevation, occupied levels and heat come from the game. Heat -1 means this unit does not track
+     * heat or is only a sensor contact; zero is a valid captured heat for an identified unit.
+     */
     public record Unit(int id, int part, String name, Waypoint location, Pixels image, boolean sensorContact,
           Pixels annotations, int height, boolean airborne, UnitModel model, int outlineRgb, List<Coords> footprint,
-          Attachment attachment) {
+          Attachment attachment, int heat) {
         public Unit {
             footprint = List.copyOf(footprint);
+        }
+
+        Unit(int id, int part, String name, Waypoint location, Pixels image, boolean sensorContact,
+              Pixels annotations, int height, boolean airborne, UnitModel model, int outlineRgb, List<Coords> footprint,
+              Attachment attachment) {
+            this(id, part, name, location, image, sensorContact, annotations, height, airborne, model, outlineRgb,
+                  footprint, attachment, -1);
         }
 
         Unit(int id, int part, String name, Waypoint location, Pixels image, boolean sensorContact,
@@ -273,12 +283,12 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
 
         Unit withAttachment(Attachment value) {
             return new Unit(id, part, name, location, image, sensorContact, annotations, height, airborne, model, outlineRgb,
-                  footprint, value);
+                  footprint, value, heat);
         }
 
         Unit at(Waypoint point) {
             return new Unit(id, part, name, point, image, sensorContact, annotations, height, airborne, model, outlineRgb,
-                  point.footprint().isEmpty() ? List.of(point.coords()) : point.footprint(), attachment);
+                  point.footprint().isEmpty() ? List.of(point.coords()) : point.footprint(), attachment, heat);
         }
 
         Unit(int id, int part, String name, Waypoint location, Pixels image, boolean sensorContact,

@@ -37,6 +37,7 @@ class GpuUnitShaderTest {
     void composesTheBundledLibGdxShadersWithTheShippedResources() {
         assertDoesNotThrow(() -> unitVertex(DefaultShader.getDefaultVertexShader()));
         assertDoesNotThrow(() -> unitFragment(DefaultShader.getDefaultFragmentShader()));
+        assertDoesNotThrow(() -> GpuThermalUnits.vertexSource(DefaultShader.getDefaultVertexShader()));
     }
 
     @ParameterizedTest

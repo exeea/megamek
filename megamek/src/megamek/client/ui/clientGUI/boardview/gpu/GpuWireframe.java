@@ -14,10 +14,11 @@ import org.lwjgl.opengl.GL11;
 
 /**
  * The board without its units as green lines on a dark ground: the camera depth pass's own triangles and levels of
- * detail, first as a hidden-line depth fill, then in line mode. Units keep their shaded models. Water surfaces, roads,
+ * detail, first as a hidden-line depth fill, then in line mode. Units show thermal signatures. Water surfaces, roads,
  * decals, ground cover and cut-away buildings are outside that pass and draw no lines.
  */
 final class GpuWireframe implements Disposable {
+    final GpuThermalUnits units = new GpuThermalUnits();
     private final ModelBatch batch = new ModelBatch(GpuShaderManager.provider("Wireframe", () ->
           GpuTreeInstances.depthProvider(new DepthShader.Config(null, GpuShaderSource.read("wireframe.frag")))),
           new GpuOpaqueSorter());
@@ -63,6 +64,7 @@ final class GpuWireframe implements Disposable {
 
     @Override
     public void dispose() {
+        units.dispose();
         batch.dispose();
     }
 }

@@ -5,21 +5,37 @@ import static megamek.client.ui.clientGUI.boardview.gpu.GpuCamouflageReview.fiel
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuCamouflageReview.renderReady;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.awt.image.BufferedImage;
 import java.io.File;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
+import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
+import com.badlogic.gdx.utils.ScreenUtils;
+import megamek.common.board.Coords;
+import megamek.common.loaders.MekFileParser;
+import megamek.common.units.ConvInfantry;
+import megamek.common.units.Entity;
+import megamek.common.units.EntityMovementMode;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -27,15 +43,32 @@ import org.junit.jupiter.api.Test;
 @Tag("on-demand")
 class GpuWireframeSmokeTest {
     @Test
-    void cameraToggleDrawsBoardAsGreenLinesAroundShadedUnits() throws Exception {
+    void cameraToggleDrawsThermalUnitsAndRestoresShadedUnits() throws Exception {
         var failure = new AtomicReference<Throwable>();
         try (var fixture = GpuBoardFixture.create()) {
+            var infantry = new ConvInfantry();
+            infantry.setId(2);
+            infantry.setChassis("Thermal infantry");
+            infantry.setMovementMode(EntityMovementMode.INF_LEG);
+            infantry.initializeInternal(28, ConvInfantry.LOC_INFANTRY);
+            Entity armor = new MekFileParser(new File("testresources/megamek/common/units/Elemental BA [Laser] (Sqd5).blk")).getEntity();
+            armor.setId(3);
+            SwingUtilities.invokeAndWait(() -> {
+                for (var troopers : List.of(infantry, armor)) {
+                    troopers.setOwner(fixture.player);
+                    troopers.setPosition(new Coords(7, troopers.getId() + 3));
+                    troopers.setDeployed(true);
+                    fixture.game.addEntity(troopers, false);
+                }
+                fixture.source.refresh();
+            });
             new Lwjgl3Application(new ApplicationAdapter() {
                 @Override public void create() {
                     var view = new GpuBattleView(fixture.source);
                     try {
                         view.create();
-                        verify(view);
+                        verify(view, fixture);
+                        verifySprite();
                     } catch (Throwable error) { failure.set(error); }
                     finally { view.dispose(); Gdx.app.exit(); }
                 }
@@ -45,12 +78,14 @@ class GpuWireframeSmokeTest {
     }
 
     @SuppressWarnings("unchecked")
-    private static void verify(GpuBattleView view) throws Exception {
+    private static void verify(GpuBattleView view, GpuBoardFixture fixture) throws Exception {
         var ui = (GpuBoardUi) field(view, "ui");
         assertTrue(GpuWireframe.supported(), "Desktop OpenGL has polygon line mode");
         Mix shaded = render(view, "wireframe-off.png");
         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Shaded frames");
         assertTrue(shaded.other > .6, "The shaded board is neither dark nor line green: " + shaded);
+        assertNull(field(((GpuWireframe) field(view, "wireframe")).units, "batch"),
+              "Normal startup must not create the thermal batch or compile its shaders");
 
         toggle("camera-wireframe");
         assertTrue(ui.wireframe());
@@ -60,20 +95,52 @@ class GpuWireframeSmokeTest {
         assertTrue(wire.dark > .25, "The hidden-line fill leaves a dark ground between edges: " + wire);
         assertTrue(wire.other < .15, "Only units and overlays keep other colors: " + wire);
 
-        // Units keep their shaded models. A polygon mode left in line mode would also outline the next frame's
-        // composite quad, and the unit would never reach the window.
+        // The same posed model must change temperature without corrupting its team-color outline or paint.
         var unit = ((Map<String, ModelInstance>) field(view, "unitInstances")).get("1:-1");
         Vector3 body = unit.calculateBoundingBox(new BoundingBox()).mul(unit.transform).getCenter(new Vector3());
         view.boardCamera.center(body);
-        view.boardCamera.zoom(.25f);
+        float originalZoom = view.boardCamera.camera.zoom;
+        view.boardCamera.zoom(.08f);
         render(view, "wireframe-unit.png");
         Vector3 point = view.boardCamera.camera.project(new Vector3(body), 0, ui.bottomPixels(),
               view.boardCamera.camera.viewportWidth, view.boardCamera.camera.viewportHeight);
         float density = (float) Gdx.graphics.getBackBufferWidth() / Gdx.graphics.getWidth();
         int x = Math.round(point.x * density), y = Math.round(point.y * density);
         Mix atUnit = classify(x - 4, y - 4, x + 5, y + 5, 1);
-        assertTrue(atUnit.other > .6, "The unit is shaded, not drawn in lines: " + atUnit);
-        view.boardCamera.zoom(4);
+        assertTrue(atUnit.other > .6, "The unit fills its silhouette: " + atUnit);
+        Color cold = colorAt(x, y);
+        assertTrue(cold.b > cold.r + .2f, "Zero tracked heat must look blue/violet: " + cold);
+        Object outline = unit.userData;
+        toggle("camera-wireframe");
+        render(view, "wireframe-unit-shaded.png");
+        Color shadedUnit = colorAt(x, y);
+        toggle("camera-wireframe");
+        SwingUtilities.invokeAndWait(() -> { fixture.entity.heat = 30; fixture.source.refresh(); });
+        render(view, "wireframe-unit-hot.png");
+        Color hot = colorAt(x, y);
+        assertTrue(hot.r > cold.r + .3f && hot.g > cold.g + .2f,
+              "Actual game heat must change the model toward yellow/white: " + hot);
+        assertSame(outline, unit.userData, "Thermal rendering must restore the outline data");
+        assertSame(unit, ((Map<String, ModelInstance>) field(view, "unitInstances")).get("1:-1"),
+              "Changing heat reuses the posed model");
+        toggle("camera-wireframe");
+        render(view, "wireframe-unit-shaded-restored.png");
+        Color restoredUnit = colorAt(x, y);
+        assertEquals(shadedUnit.r, restoredUnit.r, .08f);
+        assertEquals(shadedUnit.g, restoredUnit.g, .08f);
+        assertEquals(shadedUnit.b, restoredUnit.b, .08f);
+        toggle("camera-wireframe");
+
+        for (int id : new int[] { 2, 3 }) {
+            var instance = ((Map<String, ModelInstance>) field(view, "unitInstances")).get(id + ":-1");
+            view.boardCamera.center(UnitBounds.world(instance).getCenter(new Vector3()));
+            view.boardCamera.zoom((id == 2 ? .06f : .10f) / view.boardCamera.camera.zoom);
+            render(view, id == 2 ? "wireframe-infantry.png" : "wireframe-battle-armor.png");
+            assertEquals(-1, ((BoardScene) field(view, "scene")).units().stream().filter(value -> value.id() == id)
+                  .findFirst().orElseThrow().heat());
+            assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Thermal troopers");
+        }
+        view.boardCamera.zoom(originalZoom / view.boardCamera.camera.zoom);
 
         view.boardCamera.setIsometric(false);
         toggle("camera-overview-icons");
@@ -100,6 +167,62 @@ class GpuWireframeSmokeTest {
     }
 
     private record Mix(double line, double dark, double other) { }
+
+    /** Flat fallback artwork must retain its alpha cutout and respond to heat despite having no vertical extent. */
+    private static void verifySprite() {
+        var pixels = new Pixmap(2, 2, Pixmap.Format.RGBA8888);
+        pixels.setColor(Color.WHITE);
+        pixels.fillRectangle(0, 0, 1, 2);
+        var texture = new Texture(pixels);
+        pixels.dispose();
+        var model = GpuUnitModel.sprite(new BoardScene.Pixels(new BufferedImage(2, 2, BufferedImage.TYPE_INT_ARGB)),
+              new TextureRegion(texture));
+        var thermal = new GpuThermalUnits();
+        var buffer = new FrameBuffer(Pixmap.Format.RGBA8888, 64, 64, true);
+        try {
+            var camera = new OrthographicCamera(2, 2);
+            camera.position.set(0, 0, 2);
+            camera.lookAt(0, 0, 0);
+            camera.near = .1f;
+            camera.far = 10;
+            camera.update();
+            var point = new BoardScene.Waypoint(new Coords(0, 0), 0, 0);
+            var unit = new BoardScene.Unit(1, -1, "Sprite", point, null, false, null, 1, false, null, 0,
+                  List.of(point.coords()), null, 30);
+            buffer.begin();
+            ScreenUtils.clear(0, 0, 0, 0, true);
+            thermal.add(model.instance, unit, UnitBounds.world(model.instance));
+            thermal.render(camera);
+            Pixmap rendered = Pixmap.createFromFrameBuffer(0, 0, 64, 64);
+            try {
+                Color body = new Color(rendered.getPixel(16, 32));
+                assertTrue(body.r > .7f && body.g > .3f, "A hot flat sprite uses warm colors: " + body);
+                assertEquals(0, rendered.getPixel(48, 32), "Transparent sprite pixels must leave the target untouched");
+            } finally { rendered.dispose(); buffer.end(); }
+            assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Thermal sprite fallback");
+        } finally {
+            buffer.dispose();
+            thermal.dispose();
+            model.dispose();
+            texture.dispose();
+        }
+    }
+
+    private static Color colorAt(int x, int y) {
+        Pixmap image = Pixmap.createFromFrameBuffer(x - 4, y - 4, 9, 9);
+        try {
+            float r = 0, g = 0, b = 0;
+            for (int row = 0; row < 9; row++) {
+                for (int column = 0; column < 9; column++) {
+                    int pixel = image.getPixel(column, row);
+                    r += pixel >>> 24;
+                    g += (pixel >>> 16) & 255;
+                    b += (pixel >>> 8) & 255;
+                }
+            }
+            return new Color(r / (81 * 255), g / (81 * 255), b / (81 * 255), 1);
+        } finally { image.dispose(); }
+    }
 
     /** Settle the board, then classify the board area outside the HUD bands, as {@link GpuBoardTestUi#capture} samples it. */
     private static Mix render(GpuBattleView view, String name) throws Exception {

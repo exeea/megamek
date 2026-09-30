@@ -24,6 +24,23 @@ import org.junit.jupiter.api.Test;
 
 class UnitPlaybackTest {
     @Test
+    void movementPresentationRetainsTheCapturedHeat() {
+        var start = unit(1, 0);
+        var target = unit(1, 4);
+        var hot = new BoardScene.Unit(target.id(), target.part(), target.name(), target.location(), target.image(), false,
+              target.annotations(), target.height(), target.airborne(), target.model(), target.outlineRgb(),
+              target.footprint(), target.attachment(), 23);
+        var move = new BoardScene.Movement(1, 0, List.of(start.location(), hot.location()), EntityMovementType.MOVE_WALK, 0, 4, hot);
+        var playback = new UnitPlayback();
+        playback.accept(List.of(move), scene(hot), ignored -> false);
+        assertEquals(23, playback.present(scene(hot)).units().getFirst().heat());
+        playback.advance(.1, UnitMotion.Speed.NORMAL);
+        assertEquals(23, playback.present(scene(hot)).units().getFirst().heat());
+        playback.finish();
+        assertEquals(23, playback.present(scene(hot)).units().getFirst().heat());
+    }
+
+    @Test
     void cameraHoldStopsEveryShotAndSoundAtEachVolleyBoundaryEvenWithALargeFastFrame() {
         var attacker = unit(1, 0);
         var firstTarget = unit(2, 8);

@@ -89,6 +89,14 @@ lowest terrain level. Cloud altitude is separate. Spatial density/height
 variation forms banks, and an integrated wind/calm-drift offset moves them
 without a phase jump when wind changes. Ground fog's opacity is capped.
 
+The board's display plinth stays clear of fog and sand. `groundBaseSide` in
+`ground-layer.glsl` treats a surface as plinth when its derivative normal is
+steep and it lies outside the hex footprint, or deeper below the lowest level
+than any sculpted hollow (`BoardRelief.headroom`). Grass blades and silhouette
+edges also give steep derivative normals. With a smaller allowance, blades in
+hollows below the lowest level lost their fog and flickered as dark specks in
+wind (`GpuGrassFogSmokeTest`).
+
 Sun shafts sample the cloud field and captured geometry depth along the light
 direction. They reuse the scene depth rather than drawing the board into a
 second camera-depth pass. The composite combines scene color, fog, shafts,

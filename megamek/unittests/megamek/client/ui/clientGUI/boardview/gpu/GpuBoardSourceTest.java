@@ -46,6 +46,7 @@ import megamek.common.loaders.MekFileParser;
 import megamek.common.options.OptionsConstants;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.units.Aero;
+import megamek.common.units.ConvInfantry;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementType;
 import megamek.common.units.Terrain;
@@ -56,6 +57,47 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class GpuBoardSourceTest {
+    @Test
+    void heatSnapshotsFollowGameHeatOnlyForUnitsThatTrackIt() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            Entity fighter = new MekFileParser(new File("testresources/megamek/common/units/Cheetah F-11.blk")).getEntity();
+            Entity supportFighter = new MekFileParser(new File("testresources/megamek/common/units/Mosquito Light Fighter.blk")).getEntity();
+            var infantry = new ConvInfantry();
+            infantry.setChassis("Thermal infantry");
+            fighter.setId(2);
+            infantry.setId(3);
+            supportFighter.setId(4);
+            infantry.initializeInternal(28, ConvInfantry.LOC_INFANTRY);
+            SwingUtilities.invokeAndWait(() -> {
+                for (Entity entity : List.of(fighter, infantry, supportFighter)) {
+                    entity.setOwner(fixture.player);
+                    entity.setPosition(new Coords(entity.getId() + 3, 6));
+                    entity.setDeployed(true);
+                    fixture.game.addEntity(entity, false);
+                }
+            });
+            assertTrue(fixture.entity.tracksHeat());
+            assertTrue(fighter.tracksHeat());
+            assertFalse(infantry.tracksHeat());
+            assertFalse(supportFighter.tracksHeat());
+            for (int heat : new int[] { 0, 17, 35 }) {
+                SwingUtilities.invokeAndWait(() -> {
+                    fixture.entity.heat = fighter.heat = infantry.heat = supportFighter.heat = heat;
+                    fixture.source.refresh();
+                });
+                BoardScene scene = fixture.source.takeFrame().scene();
+                for (int id : new int[] { 1, 2 }) {
+                    var captured = unit(scene, id);
+                    assertEquals(heat, captured.heat());
+                    assertEquals(heat, captured.at(captured.location()).heat());
+                    assertEquals(heat, captured.withAttachment(null).heat());
+                }
+                assertEquals(-1, unit(scene, 3).heat(), "A non-tracking unit's heat field must not drive its appearance");
+                assertEquals(-1, unit(scene, 4).heat(), "Non-tracking aircraft also use the fixed signature");
+            }
+        }
+    }
+
     @Test
     void minimapNavigationAndViewportRecreationDoNotDependOnAnInactiveRenderer() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
@@ -885,6 +927,7 @@ class GpuBoardSourceTest {
             });
             BoardScene.Unit contact = fixture.source.takeFrame().scene().units().getFirst();
             assertTrue(contact.sensorContact());
+            assertEquals(-1, contact.heat(), "A sensor blip must not reveal heat");
             assertEquals(1, contact.height());
             assertEquals(Messages.getString("BoardView1.sensorReturn"), contact.name());
             assertEquals(0, contact.location().facing());

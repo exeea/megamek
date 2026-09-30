@@ -52,13 +52,28 @@ Runtime cutouts live in `mm-data/data/models/board/textures/foliage`:
 | Files | Use |
 | --- | --- |
 | `marsh-sedge.png` | Sedge/cattail clumps on bent crossed cards, reduced to a camera-facing card at distance. |
-| `crop-row-side.png`, `crop-row-top.png` | Ten-stalk row strips with crossed side faces and an overhead canopy. |
+| `crop-row-side.png`, `crop-row-front.png`, `crop-row-top.png` | Seven distinct wheat variants, with matching upright and overhead views. |
+| `crop-row.json` | Pixel-space stem bases and crown centers for registering the three views. |
 
-Crop strips are 4.2 m long and 1.008 m wide, with nominal 0.42 m stalk spacing.
+Crop strips are 8.4 m long and 1.008 m wide, with seven plants at 1.2 m intervals.
 Alternate 1.15 m furrows are planted, giving 2.3 m between crop rows. Strips crop
 their UVs at edges and roads and split to follow the published ground. Their
-centerlines stay grounded while the crossed faces preserve coverage along a row.
-Both crop views share one atlas.
+centerlines stay grounded. Each plant has a side plane through its stem, a
+perpendicular front plane, and an overhead plane through the grain head. The
+three views share one atlas and the same registered plant center. Individual
+sprites fill 35% of their cell along the row and 70% across it, leaving space
+between plants; the near geometry omits those empty gutters. All seven variants
+are retained in every strip.
+Pixel anchors belong to the artwork metadata, rather than independently cropping
+the three sheets and shifting their plants. Source prompts are recorded in
+`mm-data/tools/crop-texture-prompts.json`.
+
+The adjacent `CROP_SCALE` and `PLANT_GAP` constants in `GpuBiomeVegetation`
+control uniform plant size and the clear distance between leaf spans along a row.
+At scale 1.4, the 0.42 m leaf span plus a 0.78 m gap gives a 1.2 m plant pitch.
+Strip length and atlas occupancy derive from that pitch. Every other planted row
+is shifted by half the pitch (currently 0.6 m), derived from both controls. Near
+plants and distant canopy runs share this world-space stagger across hex boundaries.
 
 Marsh clumps use deterministic candidate selection and smaller nested subsets
 at distance. Crops retain continuous rows: thinning whole strips would leave
@@ -82,7 +97,7 @@ above fixed roots and adjusts normals without rebuilding instance buffers.
 The shared phase and bend contract are described in [grass](gpu-grass-rendering.md).
 
 Marsh uses 8/4/2 triangles per clump; middle and distant tiers use nested 35% and
-8% subsets of prepared roots. Crops use a six-triangle crossed-row/canopy strip
+8% subsets of prepared roots. Crops use seven six-triangle plants per instanced strip
 nearby and a two-triangle canopy at distance, crossfading over 64–128 projected
 pixels per hex. The distant canopy is planted as runs: adjoining strips of one
 furrow merge while every strip end stays within 5 cm of the run's line, and the
@@ -94,14 +109,19 @@ from an oblique view, so the canopy widens from its own width to the full row
 spacing as the view leaves the vertical. At very small scale only ground shading
 remains; its crop tint spans the same leaf-to-head range.
 
-Plant cutouts are uploaded with colour premultiplied by coverage (their empty
-texels are already black), so mipmaps average what a pixel of plants and gaps
-shows and near rows keep their shaded gaps. The distant canopy stands for rows
-deep enough to fill their own gaps: it divides coverage back out to show the
-plants' own colour, and scales its alpha with the sampled mip level so
-box-filtered alpha cannot thin a row below the cut-off. The field ground is
-shaded olive under nearby plants and takes the golden crop tint only where
-plants dissolve at distance.
+All three planes sample wind at their shared plant center. Clipping a strip to
+another hex or supporting triangle retains that original center, texture phase,
+and gust. Front planes belong to one half-open support interval, preventing
+duplicate faces at a split. Trilinear mipmaps remain enabled for both the near
+atlas and distant canopy. Crops use opaque alpha cutouts with depth writes;
+the extra near geometry trades vertex work for less shading of empty gutters,
+not an assumed performance improvement.
+
+Nearly transparent crop texels retain a region's average plant colour, preventing
+dark fringes when mipmaps average colour and alpha separately. The distant canopy
+scales its alpha with the sampled mip level so box-filtered alpha cannot thin a
+row below the cut-off. The field ground is shaded olive under nearby plants and
+takes the golden crop tint only where plants dissolve at distance.
 
 Complementary per-root coverage is shared by both camera projections.
 Cutout sampling occurs before coverage discard to preserve texture derivatives
@@ -183,6 +203,7 @@ submission. Shader wind still advances every frame.
 
 The vegetation renderer owns shared mipmapped cutouts and disposes them with
 its batches; soil maps are borrowed from the terrain asset cache. Marsh uses a
-512-square upload, crops a 512×640 atlas. Instances store roots/seeds and, for
-crop strips, length, rise and source UV endpoints. These cutout cards still have
-fragment cost where they overlap; ground pools and furrows add no terrain geometry.
+512-square upload, crops a 2048×640 atlas with a 512×256 distant canopy. Instances
+store roots/seeds and, for crop strips, length, rise and source UV endpoints.
+These cutout cards still have fragment cost where they overlap; ground pools and
+furrows add no terrain geometry.

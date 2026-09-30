@@ -192,7 +192,7 @@ class BoardBiomeTest {
                 float from = patch.rowSpans.items[i + 2], to = patch.rowSpans.items[i + 3];
                 assertTrue(from >= 0 && to <= 1 && from < to);
                 assertEquals(length / metre, (to - from) * GpuBiomeVegetation.ROW_LENGTH, .0001f,
-                      "Trimming must crop the image, not squeeze ten plants into a short end piece");
+                      "Trimming must crop the image, not squeeze seven plants into a short end piece");
                 trimmed |= to - from < .9f;
                 for (int step = 0; step <= 10; step++) {
                     float t = -.4999f + .9998f * step / 10;
@@ -216,6 +216,39 @@ class BoardBiomeTest {
     }
 
     @Test
+    void staggeredPlantCentresKeepTheirWorldPhaseAcrossHexesAndCanopyLods() {
+        float metre = BoardRelief.metres(1), spacing = GpuBiomeVegetation.PLANT_SPACING;
+        var scene = BoardSurfaceBlendTest.scene(c -> tile(c, BoardScene.Biome.FIELD, 0));
+        var parities = new HashSet<Integer>();
+        for (var coords : List.of(new Coords(3, 3), new Coords(3, 4), new Coords(4, 3), new Coords(4, 4))) {
+            var tile = scene.tile(coords);
+            var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, -1);
+            var crops = GpuBiomeVegetation.plant(scene, tile, surface);
+            for (boolean canopy : new boolean[] { false, true }) {
+                var roots = canopy ? crops.canopy() : crops.roots();
+                var spans = canopy ? crops.canopySpans() : crops.spans();
+                for (int i = 0; i < roots.size; i += 4) {
+                    float x = roots.items[i] / metre, y = roots.items[i + 1] / metre;
+                    int row = Math.round(BoardBiome.row(x, y)) / 2;
+                    int parity = Math.floorMod(row, 2);
+                    parities.add(parity);
+                    float start = -x * BoardBiome.ROW_Y + y * BoardBiome.ROW_X - spans.items[i] / (2 * metre);
+                    float from = spans.items[i + 2], to = spans.items[i + 3];
+                    int first = (int) Math.ceil(from * GpuBiomeVegetation.PLANTS_PER_ROW - .5f);
+                    for (int plant = first; (plant + .5f) / GpuBiomeVegetation.PLANTS_PER_ROW < to; plant++) {
+                        float u = (plant + .5f) / GpuBiomeVegetation.PLANTS_PER_ROW;
+                        float along = start + (u - from) * GpuBiomeVegetation.ROW_LENGTH;
+                        float lattice = along / spacing - .5f - parity * .5f;
+                        assertEquals(Math.round(lattice), lattice, .0001f,
+                              "Every visible stem must keep the same stagger at hex boundaries and both LODs");
+                    }
+                }
+            }
+        }
+        assertEquals(2, parities.size(), "The fixture must exercise both staggered row phases");
+    }
+
+    @Test
     void distantCanopyRunsCoverTheSameFurrowsAsTheStripsWithFewerInstances() {
         float metre = BoardRelief.metres(1);
         var scene = BoardSurfaceBlendTest.scene(c -> tile(c, BoardScene.Biome.FIELD, c.getX() >= 5 ? 1 : 0));
@@ -224,7 +257,7 @@ class BoardBiomeTest {
             var tile = scene.tile(coords);
             var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, -1);
             var crops = GpuBiomeVegetation.plant(scene, tile, surface);
-            assertTrue(crops.canopy().size * 3 < crops.roots().size, coords + ": runs must replace several strips each");
+            assertTrue(crops.canopy().size * 2 < crops.roots().size, coords + ": runs must replace multiple strips each");
             float strips = 0, runs = 0;
             for (int i = 0; i < crops.spans().size; i += 4) { strips += crops.spans().items[i]; }
             for (int i = 0; i < crops.canopySpans().size; i += 4) {

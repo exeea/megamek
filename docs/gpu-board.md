@@ -48,6 +48,29 @@ are currently displayed. Terrain changes go through `GpuTerrain`; unchanged chun
 shared assets can stay installed. Camera movement changes the view and visible detail
 without asking the game to construct another scene.
 
+## Wireframe and thermal signatures
+
+The Camera menu's Wireframe toggle draws terrain, buildings and trees as green lines,
+and units with a separate thermal shader. The unit pass borrows the same posed models,
+visible parts, sprite alpha cutouts and scene depth as the shaded view. Sensor contacts
+and tactical overview icons retain their existing presentation.
+
+`GpuBoardSource` captures `Entity.heat` only when `tracksHeat()` is true. The value stays
+in `BoardScene.Unit` and follows the displayed movement/combat snapshots; the render
+thread never reads live entities. A value of -1 selects a fixed warm signature for
+infantry, battle armor, vehicles and other units that do not track heat. Sensor contacts
+also carry -1 and never enter the thermal pass.
+
+The display palette runs from blue/violet at zero heat through magenta, red, orange and
+yellow to white at high heat, saturating at 30. This is a visual range, independent of
+heat rules or capacity. Body gradients and facets are stylized variation, not measured
+temperatures of individual weapons, limbs or troopers. Formation bounds vary with poses
+and ground support, so their vertical gradient is an approximation across the formation.
+
+`GpuThermalUnits` creates its batch and programs on first use. Normal rendering does not
+run the thermal shader or queue thermal draws. Turning Wireframe off retains the shader
+cache until renderer disposal; no additional unit meshes or full-screen buffers are made.
+
 ## Threads and update ownership
 
 The Swing event thread owns access to live client presentation state and captures the

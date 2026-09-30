@@ -649,7 +649,7 @@ class GpuBattleView extends ApplicationAdapter {
             terrain.render(boardCamera.camera, false);
         }
         renderStage("units");
-        renderUnits();
+        renderUnits(wireframeView);
         renderStage("transparent effects");
         if (!unitIcons.active()) { renderTethers(); }
         if (!wireframeView) { terrain.renderTransparent(boardCamera.camera); }
@@ -1173,7 +1173,7 @@ class GpuBattleView extends ApplicationAdapter {
         return turn.targetDegrees();
     }
 
-    private void renderUnits() {
+    private void renderUnits(boolean thermal) {
         unitBatch.begin(boardCamera.camera);
         if (!unitIcons.active()) {
             for (BoardScene.Unit unit : unitAnchors.keySet()) {
@@ -1181,6 +1181,8 @@ class GpuBattleView extends ApplicationAdapter {
                 if (boardCamera.camera.frustum.boundsInFrustum(unitBounds.get(instance))) {
                     if (unit.sensorContact()) {
                         unitBatch.render(instance);
+                    } else if (thermal) {
+                        wireframe.units.add(instance, unit, unitBounds.get(instance));
                     } else {
                         unitBatch.render(instance, terrain.environment());
                     }
@@ -1190,6 +1192,7 @@ class GpuBattleView extends ApplicationAdapter {
         // Every marker writes normal scene depth, independently of its optional see-through outline.
         markers.instances().forEach(unitBatch::render);
         unitBatch.end();
+        if (thermal) { wireframe.units.render(boardCamera.camera); }
     }
 
     private void renderAnnotations() {

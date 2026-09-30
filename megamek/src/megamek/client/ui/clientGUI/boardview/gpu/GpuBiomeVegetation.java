@@ -33,6 +33,8 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.FloatArray;
 import com.badlogic.gdx.utils.IntArray;
+import com.badlogic.gdx.utils.JsonReader;
+import com.badlogic.gdx.utils.JsonValue;
 import megamek.common.Configuration;
 import megamek.common.board.Coords;
 
@@ -54,9 +56,18 @@ final class GpuBiomeVegetation implements Disposable {
     // The same intervals drive conservative CPU submission and the per-root GPU cross-fade.
     private static final float[] START_PIXELS = { 240, 64, 12 }, FULL_PIXELS = { 480, 128, 36 };
     private static final int STRIDE = 4;
-    // Scale ten stalks from a 3 m strip; lengths stay in world metres, independent of per-row height variation.
+    // Seven registered plants per strip; lengths stay in world metres, independent of per-row height variation.
+    static final int PLANTS_PER_ROW = 7;
+    // Appearance controls: uniform plant size, and clear metres between neighbouring leaf spans along a row.
     static final float CROP_SCALE = 1.4f;
-    static final float ROW_LENGTH = 3 * CROP_SCALE, ROW_HALF_WIDTH = .36f * CROP_SCALE;
+    static final float PLANT_GAP = .78f;
+    private static final float PLANT_WIDTH = .30f * CROP_SCALE;
+    static final float PLANT_SPACING = PLANT_WIDTH + PLANT_GAP;
+    static final float ROW_LENGTH = PLANTS_PER_ROW * PLANT_SPACING, ROW_HALF_WIDTH = .36f * CROP_SCALE;
+    static final float CANOPY_HEIGHT = .88f;
+    private static final float PLANT_FILL = .70f;
+    private static final float ALONG_FILL = PLANT_WIDTH / PLANT_SPACING;
+    private static final int ROW_PIXELS = 1024;
 
     /**
      * One field hex's crops: near strips and distant canopy runs, each as roots with parallel supported length, rise
@@ -245,13 +256,15 @@ final class GpuBiomeVegetation implements Disposable {
                 }
                 if (!(high - low >= .03f)) { continue; }
                 furrow.clear();
-                for (int iy = (int) Math.floor(low / ROW_LENGTH); iy * ROW_LENGTH < high; iy++) {
-                    float start = Math.max(low, iy * ROW_LENGTH), end = Math.min(high, (iy + 1) * ROW_LENGTH);
+                // Alternate planted rows offset their stems by half a plant interval, in world space across hexes.
+                float offset = ((ix / 2) & 1) * PLANT_SPACING / 2;
+                for (int iy = (int) Math.floor((low - offset) / ROW_LENGTH); iy * ROW_LENGTH + offset < high; iy++) {
+                    float start = Math.max(low, iy * ROW_LENGTH + offset), end = Math.min(high, (iy + 1) * ROW_LENGTH + offset);
                     if (end - start >= .03f) {
-                        strip(scene, tile, pieces, px, py, (iy + .5f) * ROW_LENGTH, start, end, BoardRelief.hash(ix, iy));
+                        strip(scene, tile, pieces, px, py, (iy + .5f) * ROW_LENGTH + offset, start, end, BoardRelief.hash(ix, iy));
                     }
                 }
-                canopy(px, py, metre, BoardRelief.hash(ix, 0));
+                canopy(px, py, metre, BoardRelief.hash(ix, 0), offset);
             }
         }
 
@@ -259,7 +272,7 @@ final class GpuBiomeVegetation implements Disposable {
          * Distant canopy runs: adjoining strips of one furrow merge while every strip end stays within 5 cm of the
          * run's line. At the distant tier a metre covers at most a few pixels, and one run replaces several strips.
          */
-        private void canopy(float px, float py, float metre, float seed) {
+        private void canopy(float px, float py, float metre, float seed, float offset) {
             float[] s = furrow.items;
             float gap = .001f * BoardGeometry.hexScale() / metre;
             var line = new FloatArray();
@@ -272,7 +285,7 @@ final class GpuBiomeVegetation implements Disposable {
                         // The run follows its chord, which every strip end lies close to.
                         float from = p[2 * i], to = p[2 * j], middle = (from + to) / 2;
                         float x = px - middle * BoardBiome.ROW_Y * metre, y = py + middle * BoardBiome.ROW_X * metre;
-                        float u = from / ROW_LENGTH - (float) Math.floor(from / ROW_LENGTH);
+                        float u = (from - offset) / ROW_LENGTH - (float) Math.floor((from - offset) / ROW_LENGTH);
                         canopy.addAll(x, y, (p[2 * i + 1] + p[2 * j + 1]) / 2 - .018f * metre, seed);
                         canopySpans.addAll((to - from) * metre, p[2 * j + 1] - p[2 * i + 1], u, u + (to - from) / ROW_LENGTH);
                         i = j;
@@ -645,6 +658,8 @@ final class GpuBiomeVegetation implements Disposable {
         plant = plant.replace("@ROW_X@", Float.toString(BoardBiome.ROW_X))
               .replace("@ROW_Y@", Float.toString(BoardBiome.ROW_Y))
               .replace("@ROW_METRES@", Float.toString(BoardBiome.ROW_METRES))
+              .replace("@ROW_HALF_WIDTH@", Float.toString(ROW_HALF_WIDTH))
+              .replace("@PLANTS_PER_ROW@", Float.toString(PLANTS_PER_ROW))
               .replace("@CROP_SCALE@", Float.toString(CROP_SCALE));
         // A plant outside this template's band or the view leaves every vertex of its triangles outside the clip volume.
         return source.replace("void main() {", wind + plant + "\nvoid main() {\nvec3 coverPosition, coverNormal; vec4 coverColor;\n"
@@ -652,8 +667,8 @@ final class GpuBiomeVegetation implements Disposable {
                     + "gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }\n")
               .replace("v_diffuseUV = u_diffuseUVTransform.xy + a_texCoord0 * u_diffuseUVTransform.zw;",
                     "v_diffuseUV = u_diffuseUVTransform.xy + a_texCoord0 * u_diffuseUVTransform.zw;\n"
-                          + "if (u_biomeKind < 1.5 && a_coverRow.x > 0.0) "
-                          + "v_diffuseUV.x = mix(a_coverRow.z, a_coverRow.w, a_texCoord0.x);")
+                          + "if (u_biomeKind < 1.5 && a_coverRow.x > 0.0 && abs(a_normal.x) < .5) {\n"
+                          + "v_diffuseUV.x = u_biomeLod > 1.5 ? cropU : cropU * .5;\n}")
               .replace("vec4 pos = u_worldTrans * vec4(a_position, 1.0);", "vec4 pos = vec4(coverPosition, 1.0);")
               .replace("vec3 normal = normalize(u_normalMatrix * a_normal);", "vec3 normal = coverNormal;")
               .replace("v_color = a_color;", "v_color = coverColor;");
@@ -773,57 +788,104 @@ final class GpuBiomeVegetation implements Disposable {
     long uploads() { return uploads; }
 
     /**
-     * The near rows' atlas (side artwork above the overhead crowns, as photographed) and the distant canopy's texture
-     * (the rows' golden head band above their crowns), from one read of each source.
+     * Register seven variants around their authored stems/crowns. Side and front occupy the upper atlas, with the
+     * overhead row below the side. All three views retain matching plant centres; cropping cannot shift them.
      */
     private static Texture[] cropTextures() {
-        var side = Artwork.load("crop-row-side");
-        var crowns = Artwork.load("crop-row-top");
-        var rows = new Pixmap(512, 640, Pixmap.Format.RGBA8888);
+        var registration = new JsonReader().parse(new FileHandle(new File(Configuration.dataDir(),
+              "models/board/textures/foliage/crop-row.json")));
+        var artwork = new ArrayList<Artwork>();
+        var rows = new Pixmap(2 * ROW_PIXELS, 640, Pixmap.Format.RGBA8888);
         var canopy = new Pixmap(512, 256, Pixmap.Format.RGBA8888);
         try {
-            side.draw(rows, 0, 1, 0, 512);
-            crowns.draw(rows, 0, 1, 512, 128);
+            for (String view : List.of("side", "front", "top")) {
+                var source = Artwork.load("crop-row-" + view, registration.get(view));
+                artwork.add(source);
+                boolean top = view.equals("top");
+                boolean front = view.equals("front");
+                source.draw(rows, front ? ROW_PIXELS : 0, top ? 512 : 0, top ? 128 : 512, top,
+                      front ? PLANT_FILL : ALONG_FILL);
+            }
             // The heads fill roughly the top quarter of the stalks.
-            side.draw(canopy, .02f, .26f, 0, 128);
-            crowns.draw(canopy, 0, 1, 128, 128);
+            canopy.setBlending(Pixmap.Blending.None);
+            canopy.setFilter(Pixmap.Filter.BiLinear);
+            canopy.drawPixmap(rows, 0, 10, ROW_PIXELS, 123, 0, 0, 512, 128);
+            canopy.drawPixmap(rows, 0, 512, ROW_PIXELS, 128, 0, 128, 512, 128);
+            fill(rows, 0, 512);
+            fill(rows, 512, 640);
             fill(canopy, 0, 128);
             fill(canopy, 128, 256);
-            return new Texture[] { filteredTexture(rows), filteredTexture(canopy) };
+            var near = filteredTexture(rows);
+            try { return new Texture[] { near, filteredTexture(canopy) }; }
+            catch (RuntimeException error) { near.dispose(); throw error; }
         } finally {
-            rows.dispose(); canopy.dispose(); side.pixels().dispose(); crowns.pixels().dispose();
+            rows.dispose(); canopy.dispose();
+            for (var source : artwork) { source.pixels().dispose(); }
         }
     }
 
-    /** Foliage artwork and its opaque bounds: removing empty margins lets photographed root bases meet a card's edge. */
-    private record Artwork(Pixmap pixels, int left, int top, int width, int height) {
-        static Artwork load(String name) {
+    /** Pixel-space registration belongs to the artwork; world spacing belongs to the shared row template. */
+    private record CropSprite(int left, int top, int right, int bottom, int x, int y) { }
+
+    private record Artwork(Pixmap pixels, List<CropSprite> plants) {
+        static Artwork load(String name, JsonValue anchors) {
+            if (anchors == null || anchors.size != PLANTS_PER_ROW) {
+                throw new IllegalArgumentException(name + " requires seven registered variants");
+            }
             var source = new Pixmap(new FileHandle(new File(Configuration.dataDir(),
                   "models/board/textures/foliage/" + name + ".png")));
-            int left = source.getWidth(), right = 0, top = source.getHeight(), bottom = 0;
-            for (int y = 0; y < source.getHeight(); y++) {
-                for (int x = 0; x < source.getWidth(); x++) {
-                    if ((source.getPixel(x, y) & 255) < 32) { continue; }
-                    left = Math.min(left, x); right = Math.max(right, x);
-                    top = Math.min(top, y); bottom = Math.max(bottom, y);
+            try {
+                var plants = new ArrayList<CropSprite>();
+                for (int i = 0; i < PLANTS_PER_ROW; i++) {
+                    int start = Math.round(i * source.getWidth() / (float) PLANTS_PER_ROW);
+                    int end = Math.round((i + 1) * source.getWidth() / (float) PLANTS_PER_ROW);
+                    int left = end, right = start, top = source.getHeight(), bottom = 0;
+                    for (int y = 0; y < source.getHeight(); y++) {
+                        for (int x = start; x < end; x++) {
+                            if ((source.getPixel(x, y) & 255) < 82) { continue; }
+                            left = Math.min(left, x); right = Math.max(right, x);
+                            top = Math.min(top, y); bottom = Math.max(bottom, y);
+                        }
+                    }
+                    int x = anchors.get(i).getInt(0), y = anchors.get(i).getInt(1);
+                    if (left > right || top > bottom || x < start || x >= end || y < top || y > bottom) {
+                        throw new IllegalArgumentException(name + " has invalid registration for variant " + i);
+                    }
+                    plants.add(new CropSprite(left, top, right, bottom, x, y));
                 }
+                return new Artwork(source, plants);
+            } catch (RuntimeException error) {
+                source.dispose();
+                throw error;
             }
-            return new Artwork(source, left, top, right - left + 1, bottom - top + 1);
         }
 
-        /** Scale a horizontal band of the opaque artwork, from one fraction of its height to another, across the target. */
-        void draw(Pixmap target, float from, float to, int y, int height) {
+        void draw(Pixmap target, int x, int y, int height, boolean overhead, float fill) {
             target.setBlending(Pixmap.Blending.None);
             target.setFilter(Pixmap.Filter.BiLinear);
-            target.drawPixmap(pixels, left, top + Math.round(from * this.height), width, Math.round((to - from) * this.height),
-                  0, y, target.getWidth(), height);
+            for (int i = 0; i < plants.size(); i++) {
+                var plant = plants.get(i);
+                float centre = x + (i + .5f) * ROW_PIXELS / PLANTS_PER_ROW;
+                float sx = (ROW_PIXELS / (float) PLANTS_PER_ROW) * fill
+                      / (2 * Math.max(plant.x - plant.left, plant.right - plant.x) + 1);
+                float sy = overhead ? height * PLANT_FILL
+                      / (2 * Math.max(plant.y - plant.top, plant.bottom - plant.y) + 1)
+                      : (height - 1f) / (plant.y - plant.top);
+                int left = Math.round(centre + (plant.left - plant.x) * sx);
+                int top = overhead ? Math.round(y + height / 2f + (plant.top - plant.y) * sy) : y;
+                int width = Math.max(1, Math.round((plant.right - plant.left + 1) * sx));
+                int drawnHeight = overhead ? Math.max(1, Math.round((plant.bottom - plant.top + 1) * sy)) : height;
+                target.drawPixmap(pixels, plant.left, plant.top, plant.right - plant.left + 1,
+                      overhead ? plant.bottom - plant.top + 1 : plant.y - plant.top + 1,
+                      left, top, width, drawnHeight);
+            }
         }
     }
 
     /**
      * Give empty texels a region's average plant colour. The cutouts' empty texels are nearly black, and mipmaps average
      * colour and coverage separately: without this the distant canopy would turn dark olive and lose its golden heads.
-     * Near rows keep their photographed artwork, whose dark fringes shade the gaps between stalks.
+     * Near rows also need clean empty texels now that the views have registered transparent gutters.
      */
     private static void fill(Pixmap pixels, int top, int bottom) {
         long red = 0, green = 0, blue = 0, count = 0;
@@ -866,27 +928,43 @@ final class GpuBiomeVegetation implements Disposable {
         } finally { source.dispose(); }
     }
 
-    /** Two crossed row faces and a canopy cover crops from every side; reeds retain their bent crossed cards. */
+    /** Three registered, tightly bounded planes per plant; the distant tier keeps one repeated canopy per run. */
     private static Mesh template(boolean crop, int lod) {
         var mesh = new MeshBuilder();
         mesh.begin(VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal | VertexAttributes.Usage.ColorPacked
               | VertexAttributes.Usage.TextureCoordinates, GL20.GL_TRIANGLES);
         if (crop) {
-            // The shader opens both row faces above their grounded centreline. Far strips retain only the canopy.
             if (lod < 2) {
-                Vector3 normal = new Vector3(0, -1, 0);
-                for (float side : new float[] { -ROW_HALF_WIDTH, ROW_HALF_WIDTH }) {
-                    mesh.rect(vertex(new Vector3(-.5f, side, 0), normal, Color.WHITE).setUV(0, 511.5f / 640),
-                          vertex(new Vector3(.5f, side, 0), normal, Color.WHITE).setUV(1, 511.5f / 640),
-                          vertex(new Vector3(.5f, side, 1.04f), normal, Color.WHITE).setUV(1, .5f / 640),
-                          vertex(new Vector3(-.5f, side, 1.04f), normal, Color.WHITE).setUV(0, .5f / 640));
+                float half = ALONG_FILL / (2 * PLANTS_PER_ROW), width = ROW_HALF_WIDTH * PLANT_FILL;
+                for (int i = 0; i < PLANTS_PER_ROW; i++) {
+                    float centre = (i + .5f) / PLANTS_PER_ROW, left = centre - half, right = centre + half;
+                    Vector3 normal = new Vector3(0, -1, 0);
+                    mesh.rect(vertex(new Vector3(left - .5f, 0, 0), normal, Color.WHITE).setUV(left, 511.5f / 640),
+                          vertex(new Vector3(right - .5f, 0, 0), normal, Color.WHITE).setUV(right, 511.5f / 640),
+                          vertex(new Vector3(right - .5f, 0, 1.04f), normal, Color.WHITE).setUV(right, .5f / 640),
+                          vertex(new Vector3(left - .5f, 0, 1.04f), normal, Color.WHITE).setUV(left, .5f / 640));
+                    normal.set(1, 0, 0);
+                    float frontLeft = .5f + (centre - PLANT_FILL / (2 * PLANTS_PER_ROW)) / 2;
+                    float frontRight = .5f + (centre + PLANT_FILL / (2 * PLANTS_PER_ROW)) / 2;
+                    mesh.rect(vertex(new Vector3(centre - .5f, -width, 0), normal, Color.WHITE).setUV(frontLeft, 511.5f / 640),
+                          vertex(new Vector3(centre - .5f, width, 0), normal, Color.WHITE).setUV(frontRight, 511.5f / 640),
+                          vertex(new Vector3(centre - .5f, width, 1.04f), normal, Color.WHITE).setUV(frontRight, .5f / 640),
+                          vertex(new Vector3(centre - .5f, -width, 1.04f), normal, Color.WHITE).setUV(frontLeft, .5f / 640));
+                    normal.set(0, 0, 1);
+                    float top = (512 + 128 * (1 - PLANT_FILL) / 2) / 640;
+                    float bottom = (512 + 128 * (1 + PLANT_FILL) / 2) / 640;
+                    mesh.rect(vertex(new Vector3(left - .5f, -width, CANOPY_HEIGHT), normal, Color.WHITE).setUV(left, top),
+                          vertex(new Vector3(right - .5f, -width, CANOPY_HEIGHT), normal, Color.WHITE).setUV(right, top),
+                          vertex(new Vector3(right - .5f, width, CANOPY_HEIGHT), normal, Color.WHITE).setUV(right, bottom),
+                          vertex(new Vector3(left - .5f, width, CANOPY_HEIGHT), normal, Color.WHITE).setUV(left, bottom));
                 }
+            } else {
+                Vector3 normal = new Vector3(0, 0, 1);
+                mesh.rect(vertex(new Vector3(-.5f, -ROW_HALF_WIDTH, CANOPY_HEIGHT), normal, Color.WHITE).setUV(0, 512.5f / 640),
+                      vertex(new Vector3(.5f, -ROW_HALF_WIDTH, CANOPY_HEIGHT), normal, Color.WHITE).setUV(1, 512.5f / 640),
+                      vertex(new Vector3(.5f, ROW_HALF_WIDTH, CANOPY_HEIGHT), normal, Color.WHITE).setUV(1, 639.5f / 640),
+                      vertex(new Vector3(-.5f, ROW_HALF_WIDTH, CANOPY_HEIGHT), normal, Color.WHITE).setUV(0, 639.5f / 640));
             }
-            Vector3 normal = new Vector3(0, 0, 1);
-            mesh.rect(vertex(new Vector3(-.5f, -ROW_HALF_WIDTH, .72f), normal, Color.WHITE).setUV(0, 512.5f / 640),
-                  vertex(new Vector3(.5f, -ROW_HALF_WIDTH, .72f), normal, Color.WHITE).setUV(1, 512.5f / 640),
-                  vertex(new Vector3(.5f, ROW_HALF_WIDTH, .72f), normal, Color.WHITE).setUV(1, 639.5f / 640),
-                  vertex(new Vector3(-.5f, ROW_HALF_WIDTH, .72f), normal, Color.WHITE).setUV(0, 639.5f / 640));
             return mesh.end();
         }
         int cards = lod == 2 ? 1 : 2;

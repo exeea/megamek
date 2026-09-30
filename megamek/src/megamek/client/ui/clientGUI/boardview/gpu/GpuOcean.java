@@ -47,7 +47,7 @@ final class GpuOcean implements Disposable {
      * gets. A board-sized patch of sea has a few hundred waves, whose tallest are about 1.6 times its significant
      * height; lighter winds scale down from here, and calm water keeps its physical ripples and swell.
      */
-    static final float MAX_WAVE_HEIGHT = 7;
+    static final float MAX_WAVE_HEIGHT = 9;
     /** Seconds a change of wind takes to reshape the sea: the old waves run on while the new ones build. */
     static final float TRANSITION_SECONDS = 8;
     private static final int BITS = Integer.numberOfTrailingZeros(SIZE);
