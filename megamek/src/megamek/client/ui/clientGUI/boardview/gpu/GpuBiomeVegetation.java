@@ -59,7 +59,7 @@ final class GpuBiomeVegetation implements Disposable {
     // Seven registered plants per strip; lengths stay in world metres, independent of per-row height variation.
     static final int PLANTS_PER_ROW = 7;
     // Appearance controls: uniform plant size, and clear metres between neighbouring leaf spans along a row.
-    static final float CROP_SCALE = 1.4f;
+    static final float CROP_SCALE = 2f;
     static final float PLANT_GAP = .78f;
     private static final float PLANT_WIDTH = .30f * CROP_SCALE;
     static final float PLANT_SPACING = PLANT_WIDTH + PLANT_GAP;
