@@ -180,12 +180,10 @@ void main() {
     float above = waterCovered ? u_waterLine / u_metre - depth : 99.0;
     vec2 p = vec2(world.x, -world.y);
     if (shore && u_rainDetail > 0.0 && u_waterEffects > 0.0) {
-        // The rippling surface bends the view of a submerged bed, so its detail sways with the swell above
-        // (water-surface.frag), turned downwind and drifting like it.
-        vec2 wind = length(u_wind.xy) > .01 ? normalize(u_wind.xy) : vec2(.8, .6);
-        mat2 downwind = mat2(wind.x, -wind.y, wind.y, wind.x);
-        vec2 swell = (texture(u_waterDetail, downwind * v_cloudPosition.xy * u_rainScale * 1.65
-              + vec2(u_rainTime * .018, 0.0)).rg - .5) * downwind;
+        // The rippling surface bends the view of a submerged bed, so its detail sways with ripples above it. The bed
+        // cannot tell whether a current or the wind moves the water, so this sway follows neither.
+        vec2 swell = (texture(u_waterDetail, CROSSING * v_cloudPosition.xy * u_rainScale * 1.65
+              + vec2(u_rainTime * .018, 0.0)).rg - .5) * CROSSING;
         float under = smoothstep(0.0, 1.0, depth * u_metre - u_waterLine) * min(depth, 2.0);
         p += vec2(swell.x, -swell.y) * (under * .3 * u_waterEffects * u_rainDetail);
     }

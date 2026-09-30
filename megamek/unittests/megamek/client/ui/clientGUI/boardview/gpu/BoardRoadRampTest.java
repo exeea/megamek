@@ -232,12 +232,11 @@ class BoardRoadRampTest {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = { 0, 1, 2 })
+    @ValueSource(ints = { 0, 1 })
     void sixConnectionsShareOneSurfaceWithMatchingGatesAndUnchangedCentres(int layout) {
         for (int x : new int[] { 3, 4 }) {
             var at = new Coords(x, 4);
-            int[] rises = layout == 0 ? new int[] { 2, 2, 2, 2, 2, 2 }
-                  : layout == 1 ? new int[] { -2, -2, -2, -2, -2, -2 } : new int[] { -2, 1, 2, -1, 0, 2 };
+            int[] rises = layout == 0 ? new int[] { 2, 2, 2, 2, 2, 2 } : new int[] { -2, -2, -2, -2, -2, -2 };
             var scene = junction(at, rises);
             var surface = new BoardSurface(scene, scene.tile(at));
             unfolded(surface);

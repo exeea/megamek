@@ -7,6 +7,7 @@ precision highp float;
 #endif
 in vec2 v_uv;
 uniform sampler2D u_depth;
+uniform sampler2D u_waterDepth; // GpuWaterDepth: the nearest wave, where fog stops over water; else the scene depth
 uniform vec3 u_fog;
 uniform float u_haze;
 uniform float u_noiseScale;
@@ -49,10 +50,11 @@ void main() {
     }
     vec3 origin = world(0.0);
     vec3 direction = normalize(world(1.0) - origin);
-    float surface = texture(u_depth, v_uv).r;
+    // Fog fills the air down to the water surface, not the column beneath it to the bed.
+    float surface = min(texture(u_depth, v_uv).r, texture(u_waterDepth, v_uv).r);
     // Fog occupies air above the board, including against sky, while leaving the solid plinth untouched.
     vec3 endpoint = world(surface);
-    if (groundBaseSide(endpoint, surface, u_fog.z, u_fog.y * 0.001)) {
+    if (groundBaseSide(endpoint, surface, u_fog.z)) {
         fragColor = vec4(0, 0, 0, 1);
         return;
     }

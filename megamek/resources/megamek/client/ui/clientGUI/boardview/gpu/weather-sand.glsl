@@ -10,7 +10,7 @@ vec4 sandLayer(float depth) {
     if (u_sand.x <= 0.0 || outsideGroundLayer()) return vec4(0.0, 0.0, 0.0, 1.0);
     vec3 origin = world(0.0), surface = world(depth);
     vec3 direction = normalize(world(1.0) - origin);
-    if (groundBaseSide(surface, depth, u_sand.z, 0.01 / u_sand.w)) return vec4(0.0, 0.0, 0.0, 1.0);
+    if (groundBaseSide(surface, depth, u_sand.z)) return vec4(0.0, 0.0, 0.0, 1.0);
     vec2 segment = groundSegment(origin, surface, direction);
     if (segment.y <= segment.x) return vec4(0.0, 0.0, 0.0, 1.0);
     vec3 first = origin + direction * segment.x;

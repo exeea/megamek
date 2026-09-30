@@ -14,6 +14,15 @@ vec4 waterFetch(vec2 world) {
     return textureLod(u_waterExposure, world * u_waterExposureMap.xy + u_waterExposureMap.zw, 0.0) * WATER_FETCH;
 }
 
+// How much of the wind's waves the water carries for its current (field BA, hex widths per second): all of them on
+// still water. Running water in calm or light air shows only its own current-borne ripples, so a river never seems to
+// run backwards under a gentle opposing wind; a strong wind roughens it too, most of the way in a gale. The lower edge
+// clears the field's 8-bit rounding of zero.
+float waterWindShare(vec4 field) {
+    float flowing = smoothstep(.008, .03, length(field.ba * 2.0 - 1.0));
+    return mix(1.0, .85 * smoothstep(.25, .85, u_waterWind.z), flowing);
+}
+
 // Swell, chop and ripple shares, each 0..1.
 vec3 waterWaveEnergy(vec2 world, vec4 field, vec4 fetch) {
     float bank = (field.r * 2.0 - 1.0) * SHORE_RANGE * HEX_METRES;
@@ -25,5 +34,5 @@ vec3 waterWaveEnergy(vec2 world, vec4 field, vec4 fetch) {
     return smoothstep(vec3(1.0, .3, 0.0), vec3(10.0, 4.0, 1.0), vec3(bank))
           * smoothstep(vec3(.5, .1, 0.0), vec3(6.0, 1.5, .25), vec3(depth))
           * smoothstep(vec3(25.0, 4.0, 0.0), vec3(110.0, 30.0, 4.0), vec3(across))
-          * smoothstep(vec3(40.0, 5.0, 0.0), vec3(450.0, 90.0, 10.0), vec3(upwind));
+          * smoothstep(vec3(40.0, 5.0, 0.0), vec3(450.0, 90.0, 10.0), vec3(upwind)) * waterWindShare(field);
 }

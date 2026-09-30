@@ -120,6 +120,8 @@ class GpuResourcesSmokeTest {
             }
             Coords moved = new Coords(16, 16);
             BoardGeometry.Tuning previousTuning = BoardGeometry.tuning();
+            // The corner hex where the installed terrain draws it.
+            Ray drawn = new Ray(BoardGeometry.center(moved, 0).add(0, 0, 1000), new Vector3(0, 0, -1));
             try {
                 BoardGeometry.tune(new BoardGeometry.Tuning(previousTuning.hexScale() * 2,
                       previousTuning.unitScale(), previousTuning.unitHeightScale(), previousTuning.levelHeight(),
@@ -129,10 +131,17 @@ class GpuResourcesSmokeTest {
                 BoardGeometry.Hit expected = BoardGeometry.hit(scene, ray);
                 assertNotNull(expected);
                 assertEquals(moved, expected.coords());
+                // Picking follows the terrain on screen: until update installs a build with the new tuning, the
+                // installed coordinate system applies (TerrainSettings), so the pointer picks the hex it is over.
+                BoardGeometry.Hit onScreen = terrain.hit(scene, drawn);
+                assertNotNull(onScreen, "Before terrain.update, the drawn corner hex must stay pickable");
+                assertEquals(moved, onScreen.coords(), "Before terrain.update, picking must follow the drawn terrain");
+                terrain.update(scene);
                 assertEquals(expected, terrain.hit(scene, ray),
-                      "New tuning must pick beyond the installed chunk bounds before terrain.update");
+                      "Once installed, terrain built with the new tuning must pick as the board geometry does");
             } finally {
                 BoardGeometry.tune(previousTuning);
+                terrain.update(scene);
             }
             List<BoardScene.Tile> elevated = new ArrayList<>(tiles);
             elevated.set(tiles.indexOf(scene.tile(moved)), new BoardScene.Tile(moved, 6, -1, false, 0,

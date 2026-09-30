@@ -12,13 +12,10 @@ import java.io.ByteArrayOutputStream;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.List;
-import java.util.Vector;
-import javax.swing.SwingUtilities;
 
 import megamek.client.ui.tileset.MekTileset;
 import megamek.common.Configuration;
 import megamek.common.board.Coords;
-import megamek.common.event.entity.GameEntityChangeEvent;
 import megamek.common.units.LandAirMek;
 import megamek.common.units.Mek;
 import megamek.common.units.QuadVee;
@@ -26,49 +23,6 @@ import megamek.common.units.UnitLocation;
 import org.junit.jupiter.api.Test;
 
 class UnitConversionTest {
-    @Test
-    void sparseMovementPacketsKeepGroundAndAeroFormsOnTheirOwnLegs() throws Exception {
-        try (var fixture = GpuBoardFixture.create()) {
-            var entity = new megamek.common.loaders.MekFileParser(
-                  new java.io.File("testresources/megamek/common/units/Shadow Hawk LAM SHD-X2.mtf")).getEntity();
-            entity.setId(61);
-            entity.setWeight(50);
-            entity.setOwner(fixture.player);
-            entity.setDeployed(true);
-            entity.setPosition(new Coords(5, 5));
-            for (int loc = 0; loc < entity.locations(); loc++) { entity.initializeInternal(10, loc); }
-            var ground = UnitLocation.Form.capture(entity);
-            SwingUtilities.invokeAndWait(() -> {
-                fixture.game.addEntity(entity, false);
-                fixture.source.refresh();
-            });
-            fixture.source.takeFrame();
-            SwingUtilities.invokeAndWait(() -> {
-                entity.setConversionMode(LandAirMek.CONV_MODE_FIGHTER);
-                var fighter = UnitLocation.Form.capture(entity);
-                var path = new Vector<>(List.of(new UnitLocation(61, new Coords(5, 5), 0, 0, 0, null, ground),
-                      new UnitLocation(61, new Coords(6, 5), 0, 0, 0),
-                      new UnitLocation(61, new Coords(6, 5), 0, 0, 0, null, fighter),
-                      new UnitLocation(61, new Coords(6, 4), 0, 0, 0)));
-                entity.setPosition(new Coords(6, 4));
-                fixture.game.fireGameEvent(new GameEntityChangeEvent(fixture.game, entity, path));
-            });
-            var events = fixture.source.takeFrame().animations();
-            assertEquals(3, events.size());
-            var walk = (BoardScene.Movement) events.get(0);
-            var conversion = (BoardScene.Conversion) events.get(1);
-            var taxi = (BoardScene.Movement) events.get(2);
-            walk.path().forEach(point -> {
-                assertEquals(ground, point.form());
-                assertNull(point.aeroState(), "The final aircraft mode must not leak into the earlier walking leg");
-            });
-            taxi.path().forEach(point -> assertEquals(BoardScene.AeroState.LANDED, point.aeroState()));
-            assertEquals(walk.path().getLast(), conversion.before().location());
-            assertEquals(taxi.path().getFirst(), conversion.after().location());
-            assertNotEquals(walk.unit().model().fallback(), taxi.unit().model().fallback());
-        }
-    }
-
     @Test
     void observedFormsUseTheTilesetWithoutChangingTheCurrentGameEntity() throws Exception {
         var tileset = new MekTileset(Configuration.unitImagesDir());

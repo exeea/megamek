@@ -187,7 +187,7 @@ class GpuBoardUiSmokeTest {
                             assertFalse(boardCamera.animateOnSelectionChange);
                             assertFalse(boardCamera.animateCombatPlayback);
                             assertFalse(boardCamera.animateOnMove);
-                            for (int row = 0; row < 8; row++) { press(Input.Keys.DOWN); }
+                            for (int row = 0; row < 10; row++) { press(Input.Keys.DOWN); }
                             assertFalse(boardCamera.animateOnSelectionChange, "Keyboard focus must not change a checkbox");
                             press(Input.Keys.ENTER);
                             assertTrue(boardCamera.animateOnSelectionChange);

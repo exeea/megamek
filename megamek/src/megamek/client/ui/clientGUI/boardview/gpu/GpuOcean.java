@@ -42,18 +42,26 @@ final class GpuOcean implements Disposable {
     static final float[] PATCHES = { 250, 55, 12.5f };
     /** Lava's single patch. */
     static final float LAVA_PATCH = 64;
+    /**
+     * Crest-to-trough height, in metres, of the tallest waves at full wind: the one control for how rough the sea
+     * gets. A board-sized patch of sea has a few hundred waves, whose tallest are about 1.6 times its significant
+     * height; lighter winds scale down from here, and calm water keeps its physical ripples and swell.
+     */
+    static final float MAX_WAVE_HEIGHT = 7;
     /** Seconds a change of wind takes to reshape the sea: the old waves run on while the new ones build. */
     static final float TRANSITION_SECONDS = 8;
     private static final int BITS = Integer.numberOfTrailingZeros(SIZE);
     private static final float GRAVITY = 9.81f;
     /** Every frequency is a multiple of 2π over this many seconds, so the clock can wrap without a jump. */
     private static final float LOOP_SECONDS = 1000;
-    /** The finish pass's previous result of each water cascade, for foam that outlives its crest. */
-    private static final String[] PREVIOUS = { "u_previous0", "u_previous1", "u_previous2" };
+    /** The finish pass's previous result of the swell and chop, for foam that outlives its crest. */
+    private static final String[] PREVIOUS = { "u_previous0", "u_previous1" };
     /** Effective open-sea fetch. Enclosed water carries less of it through the exposure map, never more. */
     private static final float FETCH_METRES = 60_000;
     /** A calm swell ~110 m long, from a steady quarter to the wind. */
     private static final float SWELL_METRES = 110, SWELL_TURN = .45f;
+    /** How much higher than its fetch would raise it a full gale is drawn; see {@link #storm}. */
+    private static final double GALE_GAIN = MAX_WAVE_HEIGHT / 1.6 / significantHeight(1);
     /** Smaller changes of wind leave the spectrum alone. */
     private static final float WIND_EPSILON = .001f;
     /** The same FFT with a slowly evolving, short-wave-damped spectrum and displacement output for lava. */
@@ -143,7 +151,7 @@ final class GpuOcean implements Disposable {
      * any model batch; it restores the framebuffer and viewport it found.
      */
     void update(float time, Vector3 wind) {
-        if (failed || !supported()) { return; }
+        if (!supported()) { return; }
         float delta = Float.isNaN(previousTime) ? 0 : Math.clamp(time - previousTime, 0, .25f);
         previousTime = time;
         // Lava's convection is internal. Weather must not start or stop its motion.
@@ -151,6 +159,11 @@ final class GpuOcean implements Disposable {
         float length = (float) Math.hypot(x, y);
         if (length < .01f) { x = .8f; y = .6f; } else { x /= length; y /= length; }
         target.set(x, y, lava ? .35f : MathUtils.clamp(wind.z, 0, 1));
+        if (failed) {
+            // The static ripple fallback still rolls its gusts downwind.
+            drift.set((drift.x + x * delta) % LOOP_SECONDS, (drift.y + y * delta) % LOOP_SECONDS);
+            return;
+        }
         retarget = seeded && !target.epsilonEquals(toWind, WIND_EPSILON);
         try {
             if (quad == null) { create(); }
@@ -168,7 +181,10 @@ final class GpuOcean implements Disposable {
         butterfly = GpuShaderManager.program(() -> program("ocean-fft.frag"), next -> butterfly = next);
         finish = GpuShaderManager.program(() -> program(lava ? "ocean-lava-finish.frag" : "ocean-water-finish.frag"),
               next -> finish = next);
-        if (!lava) { seed = GpuShaderManager.program(() -> program("ocean-initial.frag"), next -> seed = next); }
+        // A live edit of the generator regenerates the spectrum, so the change shows at once.
+        if (!lava) {
+            seed = GpuShaderManager.program(() -> program("ocean-initial.frag"), next -> { seed = next; seeded = false; });
+        }
         quad = new Mesh(true, 4, 0, new VertexAttribute(VertexAttributes.Usage.Position, 2, "a_position"));
         quad.setVertices(new float[] { -1, -1, 1, -1, -1, 1, 1, 1 });
         for (int i = 0; i < (lava ? 1 : spectra.length); i++) { spectra[i] = floatTarget(SIZE * cascades); }
@@ -300,6 +316,26 @@ final class GpuOcean implements Disposable {
         return data;
     }
 
+    /**
+     * Significant height in metres of the sea the spectrum describes before any storm scaling: 4√m0, with JONSWAP's
+     * m0 ≈ 1.52 αg²/(5ωp⁴) at a peak enhancement of 3.3, for the wind sea and the swell alike.
+     */
+    static double significantHeight(float strength) {
+        float[] sea = sea(strength);
+        double swell = Math.sqrt(GRAVITY * MathUtils.PI2 / SWELL_METRES);
+        double m0 = 1.52 * GRAVITY * GRAVITY / 5 * (sea[1] / Math.pow(sea[0], 4) + sea[2] / Math.pow(swell, 4));
+        return 4 * Math.sqrt(m0);
+    }
+
+    /**
+     * Art direction, not physics: how much higher than its fetch would raise it the sea is drawn, so that at full wind
+     * its tallest waves reach {@link #MAX_WAVE_HEIGHT} and storm crests fold and foam visibly from a tactical camera.
+     * Calm water stays physical.
+     */
+    static float storm(float strength) {
+        return (float) (1 + (GALE_GAIN - 1) * strength * strength);
+    }
+
     /** Heads the sea for {@link #target}: first seeding, or from wherever a transition has got to. */
     private void steer() {
         if (!seeded) {
@@ -350,9 +386,7 @@ final class GpuOcean implements Disposable {
         seed.setUniformf("u_patches", PATCHES[0], PATCHES[1], PATCHES[2]);
         seed.setUniformf("u_directions", wind, wind + SWELL_TURN);
         seed.setUniformf("u_sea", sea[0], sea[1], (float) Math.sqrt(GRAVITY * MathUtils.PI2 / SWELL_METRES), sea[2]);
-        // Art direction, not physics: storm seas are drawn up to 1.5 times higher than this fetch would raise them,
-        // so their crests read, fold and foam from a tactical camera as they do at sea level. Calm water stays physical.
-        seed.setUniformf("u_storm", 1 + .5f * target.z * target.z);
+        seed.setUniformf("u_storm", storm(target.z));
         pass(seed, spectra[into]);
     }
 
@@ -361,7 +395,12 @@ final class GpuOcean implements Disposable {
         for (int i = 0; ; i++) { if (i != a && i != b) { return i; } }
     }
 
-    private static float ease(float t) { return t * t * (3 - 2 * t); }
+    /**
+     * Eases out, never in: a transition leaves at full pace and settles gently, so a wind that keeps changing (a dragged
+     * slider) keeps the sea moving instead of restarting each step from rest. Every stage uses this one curve, so a
+     * frozen transition matches what was on screen.
+     */
+    private static float ease(float t) { return t * (2 - t); }
 
     /** The wind between where the sea came from and where it is heading, turning the short way round. */
     private void easeWind(float delta) {
@@ -423,13 +462,14 @@ final class GpuOcean implements Disposable {
         finish.setUniformi("u_size", SIZE);
         if (!lava) {
             var previous = result[latest].getTextureAttachments();
-            for (int cascade = 0; cascade < cascades; cascade++) {
+            for (int cascade = 0; cascade < PREVIOUS.length; cascade++) {
                 previous.get(cascade).bind(1 + cascade);
                 finish.setUniformi(PREVIOUS[cascade], 1 + cascade);
             }
             finish.setUniformf("u_texels", PATCHES[0] / SIZE, PATCHES[1] / SIZE, PATCHES[2] / SIZE);
-            // Horizontal displacement sharpens crests and broadens troughs; a gale folds the steepest over.
-            finish.setUniformf("u_choppiness", .75f + .5f * eased.z, 1f, .6f);
+            // Horizontal displacement sharpens crests and broadens troughs, the more so the stronger the wind; a gale
+            // brings the steepest to the point of folding over.
+            finish.setUniformf("u_choppiness", 1 + .8f * eased.z, 1.1f, .6f);
             finish.setUniformf("u_delta", delta);
             // Foam drifts downwind at about 3 % of the wind's speed and spreads along it into streaks.
             float travel = (.05f + .55f * eased.z) * delta;
@@ -438,7 +478,7 @@ final class GpuOcean implements Disposable {
             finish.setUniformf("u_patches", PATCHES[0], PATCHES[1], PATCHES[2]);
         }
         pass(finish, result[next]);
-        for (int unit = 1; unit <= cascades; unit++) {
+        for (int unit = 1; unit <= PREVIOUS.length; unit++) {
             Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0 + unit);
             Gdx.gl.glBindTexture(GL20.GL_TEXTURE_2D, 0);
         }

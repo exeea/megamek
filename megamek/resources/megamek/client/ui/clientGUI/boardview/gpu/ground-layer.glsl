@@ -6,6 +6,7 @@ uniform vec3 u_boundsMin;
 uniform vec3 u_boundsMax;
 uniform sampler2D u_layerNoise;
 uniform vec4 u_groundBoard; // Board width/height in hexes and world hex width/height.
+uniform float u_groundHollow; // Deepest sculpted ground below its hex level (BoardRelief.headroom).
 uniform vec4 u_layerScreenBounds;
 
 bool outsideGroundLayer() {
@@ -72,13 +73,15 @@ float groundEdge(vec3 position, float width) {
 
 // The board's display plinth is solid, not part of the atmospheric volume.
 // Keep horizontal water beds eligible: their opaque depth lies below the water surface.
-bool groundBaseSide(vec3 surface, float depth, float base, float tolerance) {
+// Sculpted hollows sink the lowest ground below the baseline, and grass blades or silhouette edges standing there
+// give steep derivative normals: only surfaces deeper than any hollow can be the plinth by height alone.
+bool groundBaseSide(vec3 surface, float depth, float base) {
     vec3 normal = cross(dFdx(surface), dFdy(surface));
     float lengthSquared = dot(normal, normal);
     if (depth >= 1.0 || normal.z * normal.z >= lengthSquared * 0.25) return false;
     normal /= max(sqrt(lengthSquared), 0.000001);
     vec2 outside = surface.xy + normal.xy * min(u_groundBoard.z, u_groundBoard.w) * 0.004;
     vec2 hex = boardHex(outside * vec2(1.0, -1.0) / u_groundBoard.zw);
-    return surface.z < base - tolerance || hex.x < 0.0 || hex.y < 0.0
+    return surface.z < base - u_groundHollow || hex.x < 0.0 || hex.y < 0.0
           || hex.x >= u_groundBoard.x || hex.y >= u_groundBoard.y;
 }

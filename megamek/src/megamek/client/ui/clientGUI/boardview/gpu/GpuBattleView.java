@@ -135,6 +135,7 @@ class GpuBattleView extends ApplicationAdapter {
     private final GpuFieldOfView fieldOfView;
     private GpuAtmosphere atmosphere;
     private GpuUnitVisibility unitVisibility;
+    private GpuWireframe wireframe;
     private GpuMarkers markers;
     private GpuTextures<BoardScene.Pixels> unitTextures;
     private GpuTextures<String> annotationTextures;
@@ -297,6 +298,7 @@ class GpuBattleView extends ApplicationAdapter {
         tactical = new GpuTactical(terrain::tacticalSurface);
         atmosphere = new GpuAtmosphere();
         unitVisibility = new GpuUnitVisibility();
+        wireframe = new GpuWireframe();
         unitBatch = new ModelBatch(GpuShaderManager.provider("Units", GpuUnitShader::provider), new GpuOpaqueSorter());
         annotationBatch = new SpriteBatch();
         hexText = new GpuHexText();
@@ -311,6 +313,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (tactical != null) { tactical.dispose(); tactical = null; }
         if (atmosphere != null) { atmosphere.dispose(); atmosphere = null; }
         if (unitVisibility != null) { unitVisibility.dispose(); unitVisibility = null; }
+        if (wireframe != null) { wireframe.dispose(); wireframe = null; }
         if (unitBatch != null) { unitBatch.dispose(); unitBatch = null; }
         if (annotationBatch != null) { annotationBatch.dispose(); annotationBatch = null; }
         if (hexText != null) { hexText.dispose(); hexText = null; }
@@ -627,6 +630,7 @@ class GpuBattleView extends ApplicationAdapter {
         outlined.addAll(markers.outlinedInstances());
         outlined.removeIf(instance -> instance == null || !boardCamera.camera.frustum.boundsInFrustum(unitBounds.get(instance)));
         float seeThrough = ui.seeThrough();
+        boolean wireframeView = ui.wireframe() && GpuWireframe.supported();
         renderStage("cutaways and light");
         atmosphere.updateLight(boardCamera.camera);
         terrain.setAtmosphere(atmosphere.lighting());
@@ -639,12 +643,16 @@ class GpuBattleView extends ApplicationAdapter {
         ScreenUtils.clear(0.035f, 0.055f, 0.075f, 1, true);
         atmosphere.begin((int) boardCamera.camera.viewportWidth, (int) boardCamera.camera.viewportHeight,
               Gdx.graphics.getDeltaTime());
-        terrain.render(boardCamera.camera, false);
+        if (wireframeView) {
+            wireframe.fill(boardCamera.camera, terrain);
+        } else {
+            terrain.render(boardCamera.camera, false);
+        }
         renderStage("units");
         renderUnits();
         renderStage("transparent effects");
         if (!unitIcons.active()) { renderTethers(); }
-        terrain.renderTransparent(boardCamera.camera);
+        if (!wireframeView) { terrain.renderTransparent(boardCamera.camera); }
         Color smokeLight = atmosphere.particleLight();
         terrainEffects.update(scene, groundSurfaces, atmosphereSettings.effects(), animationSeconds());
         effectDepth.begin();
@@ -657,6 +665,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (!unitIcons.active()) { waterImpacts.render(boardCamera.camera, scene, motions, unitInstances, smokeLight, playback.attachment()); }
         renderStage("atmosphere composite");
         atmosphere.end(boardCamera.camera, terrain, scene, ui.bottomPixels(), fieldOfView);
+        if (wireframeView) { wireframe.lines(boardCamera.camera, terrain); }
         renderStage("weather particles");
         atmosphere.renderWeather(boardCamera.camera, scene);
         renderStage("unit outlines");

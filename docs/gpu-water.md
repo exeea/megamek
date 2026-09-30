@@ -115,12 +115,15 @@ with Donelan-Banner spreading, cross-faded in power with its neighbours, plus a
 low, narrow swell so calm open water keeps moving. Amplitudes are in metres: the
 spectrum of a full gale (wind 1, about 20 m/s) gives roughly 3 m significant
 height with 70 m crests, a moderate wind about 1.7 m, calm about 0.3 m of swell.
-As art direction, storm seas are drawn up to 1.5 times higher (`u_storm` in
-`ocean-initial.frag`) so their crests fold and foam visibly from a tactical camera;
-calm water stays physical. Waves travel downwind at their deep-water speed; the
-smoke test checks the direction. The choppy displacement gathers the surface
-towards each crest, so crests are sharp and troughs broad; the smoke test checks
-that compression, and therefore foam, sits on crests.
+As art direction, a full gale is drawn so its tallest waves, crest to trough, reach
+`GpuOcean.MAX_WAVE_HEIGHT` (7 m, about 1.5 times the physical sea), so its crests
+fold and foam visibly from a tactical camera. The gain grows with the square of
+the wind (`GpuOcean.storm`, `u_storm` in `ocean-initial.frag`); calm water stays
+physical. Waves travel downwind at their deep-water speed; the smoke test checks
+the direction. The choppy displacement gathers the surface towards each crest, the
+more so the stronger the wind, so crests are sharp and troughs broad; the smoke
+test checks that compression, and therefore foam, sits on crests and that a gale
+reaches the configured height.
 
 A change of wind never replaces the sea. `ocean-initial.frag` generates the new
 spectrum on the GPU in one draw, from normal deviates fixed for the session, and
@@ -170,11 +173,14 @@ their existing current-driven patches. Disabled water effects skip the
 simulation. If setup fails, water keeps its static ripple fallback. Game
 elevation, picking and unit support remain canonical.
 
-Water first establishes the nearest displaced surface in a depth-only pass,
-then blends its colour over the already-rendered bed and units. Both passes
-use the same displacement program (`invariant gl_Position`) and cached mesh
-ranges, preventing rear waves from blending through foreground crests at grazing
-angles. Reflections still sample sky/cloud lighting; this pass does not add
+Water first establishes the nearest displaced surface in a depth-only pass into a
+target of its own (`GpuWaterDepth`), then blends its colour over the
+already-rendered bed and units, discarding any fragment behind that nearest
+surface. Both passes use the same displacement program (`invariant gl_Position`)
+and cached mesh ranges, preventing rear waves from blending through foreground
+crests at grazing angles. Fog stops at the nearer of the scene depth and that
+surface. The scene depth itself keeps the bed and units, so unit outlines,
+tactical overlays and weather never see the moving waves. Reflections still sample sky/cloud lighting; this pass does not add
 screen-space scene reflections, refracted scene captures, wave collision or
 buoyancy.
 
@@ -210,7 +216,7 @@ through edits or LOD invalidates its page. At most one page is built per frame;
 the original meshes draw while others await preparation. Partially visible
 pages preserve chunk culling and may require several contiguous draw ranges.
 
-Level pools are resampled on a world-aligned triangular lattice, 3/6/12 metres
+Level pools are resampled on a world-aligned triangular lattice, 2.5/6/12 metres
 at full/medium/coarse LOD, retaining every boundary sample so neighbours share
 their edges. Concave bays keep only triangles inside their outline and fall back
 to the canonical faces if the triangulation does not follow it. Sloping surfaces

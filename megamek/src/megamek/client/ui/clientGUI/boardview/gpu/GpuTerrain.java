@@ -101,6 +101,8 @@ final class GpuTerrain implements Disposable {
     /** Wind waves for every open water surface, advanced once per frame. */
     private final GpuOcean ocean = new GpuOcean();
     private final GpuWaterExposure waterExposure = new GpuWaterExposure();
+    /** The nearest wave of this frame; the scene's depth keeps the beds and units beneath it. */
+    private final GpuWaterDepth waterDepth = new GpuWaterDepth();
     /** The shared FFT engine with a viscous lava spectrum, independent of wind. */
     private final GpuOcean lavaOcean = new GpuOcean(true);
     /** Units standing partly in open water, which the water laps against. */
@@ -230,6 +232,7 @@ final class GpuTerrain implements Disposable {
                 private final int wavePixelsUniform = register("u_wavePixels");
                 private final int waveFadeUniform = register("u_waveFade");
                 private final int waterExposureUniform = register("u_waterExposure");
+                private final int waterNearestUniform = register("u_waterNearest");
                 private final int waterExposureMapUniform = register("u_waterExposureMap");
                 private final int waterOceanScaleUniform = register("u_waterOceanScale");
                 private final int waderCountUniform = register("u_waderCount");
@@ -252,6 +255,7 @@ final class GpuTerrain implements Disposable {
                 private int magmaOceanUnit = -1;
                 private int waterShapeUnit = -1;
                 private int waterExposureUnit = -1;
+                private int waterNearestUnit = -1;
                 private long globalsPass = -1;
 
                 @Override
@@ -352,6 +356,9 @@ final class GpuTerrain implements Disposable {
                     }
                     if (has(waterExposureUniform)) {
                         waterExposureUnit = bindShared(waterExposureUniform, waterExposure.texture(), waterExposureUnit);
+                    }
+                    if (has(waterNearestUniform) && waterDepth.texture() != null) {
+                        waterNearestUnit = bindShared(waterNearestUniform, waterDepth.texture(), waterNearestUnit);
                     }
                     if (has(magmaOceanUniform)) {
                         Texture waves = lavaOcean.texture();
@@ -3822,6 +3829,7 @@ final class GpuTerrain implements Disposable {
     /** Water and faded features follow units, with depth testing but no depth writes. */
     void renderTransparent(Camera camera) {
         shadingPass++;
+        waterDepth.invalidate();
         updateDetail(camera);
         biomes.update(coverScene);
         boolean hasWater = chunks.stream().anyMatch(chunk -> chunk.waterField != null);
@@ -3853,13 +3861,14 @@ final class GpuTerrain implements Disposable {
         }
         waterPages.prepare();
         // Waves need to hide the water behind them at grazing angles. This cheap pass shares both vertices and
-        // displacement with the colour pass. The already-drawn bed and submerged units remain visible through it.
-        Gdx.gl.glColorMask(false, false, false, false);
+        // displacement with the colour pass, and writes the nearest wave into a depth target of its own: the colour
+        // pass tests against it, fog stops at it, and the scene's depth keeps the beds for outlines and overlays.
+        int scene = waterDepth.begin();
         try {
             batch.begin(camera);
             waterPages.render(batch, environment, true);
             batch.end();
-        } finally { Gdx.gl.glColorMask(true, true, true, true); }
+        } finally { Gdx.gl.glBindFramebuffer(GL20.GL_FRAMEBUFFER, scene); }
         batch.begin(camera);
         waterPages.render(batch, environment, false);
         batch.end();
@@ -3899,6 +3908,9 @@ final class GpuTerrain implements Disposable {
     void setWetness(float wetness) {
         this.wetness = wetness;
     }
+
+    /** This frame's nearest water surface, for fog to stop at; null when the frame drew no water. */
+    Texture waterDepth() { return waterDepth.nearest(); }
 
     void setWind(BoardAtmosphere.Effects effects) {
         double angle = Math.toRadians(effects.windDirection());
@@ -4302,6 +4314,7 @@ final class GpuTerrain implements Disposable {
         assets.dispose();
         rainNoise.dispose();
         waterDetail.dispose();
+        waterDepth.dispose();
         ocean.dispose();
         waterExposure.dispose();
         lavaOcean.dispose();

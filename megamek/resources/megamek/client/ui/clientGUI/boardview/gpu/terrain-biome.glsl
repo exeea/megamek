@@ -128,11 +128,13 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
             normal = normalize(mix(normal, soilNormal, wetland));
         }
         normal = normalize(normal - gradient * wetland * (1.0 - bare));
-        vec2 wind = length(u_wind.xy) > .01 ? normalize(u_wind.xy) : vec2(.8, .6);
-        vec2 drift = wind * u_rainTime * .015;
-        float windStrength = u_wind.z * mix(3.0, 1.0, bare);
+        // The water's eased wind and integrated drift (GpuOcean): a change of wind never makes the ripples jump. The
+        // swell's crests keep one world direction, as turning them would sweep them across the board.
+        vec2 drift = u_waterDrift * .015;
+        float windStrength = u_waterWind.z * mix(3.0, 1.0, bare);
+        vec2 axis = vec2(.8, .6);
         vec2 ripple = (texture(u_waterDetail, world.xy * .20 - drift).rg - .5) * (.025 + windStrength * .07)
-              + wind * sin(dot(world.xy, wind) * 5.0 - u_rainTime * 1.6) * windStrength * .018
+              + axis * sin(dot(world.xy, axis) * 5.0 - u_rainTime * 1.6) * windStrength * .018
               + rainRipples(world.xy * .03) * .035;
         ripple *= 1.0 - smoothstep(.15, .55, pixelMetres);
         normal = normalize(mix(normal, normalize(vec3(-ripple, 1.0)), water * wetland));

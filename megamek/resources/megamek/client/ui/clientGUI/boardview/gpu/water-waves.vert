@@ -15,10 +15,12 @@ uniform vec2 u_waveFade;
 uniform vec2 u_waterMaterial;
 uniform vec3 u_waterWind;
 out vec3 v_waterRest;
+out float v_waterCrest;          // how tightly the swell gathers into a crest here: 0 flat, 1 about to fold
 // water-wave-functions
 
 void waterDisplace(inout vec4 pos) {
     v_waterRest = pos.xyz;
+    v_waterCrest = 0.0;
     if (u_waterOceanScale.x <= 0.0 || u_waterEffects <= 0.0 || u_waterMaterial.y < 0.5) return;
 #ifdef colorFlag
     // Colour G is a board-edge section's depth below the surface: only its top, like the surface itself, is at zero.
@@ -32,9 +34,10 @@ void waterDisplace(inout vec4 pos) {
     // shares a vertex moves it identically, so neither LOD seams nor the depth prepass can open a crack.
     float pixels = u_wavePixels / max(abs((u_projViewTrans * pos).w), 1.0);
     // Filter out crests shorter than about 1.4 grid spacings of the mesh used at this distance.
-    float filterMetres = max(3.5, 5.5 * pow(64.0 / max(pixels, 1.0), 0.6));
+    float filterMetres = max(2.5, 5.5 * pow(64.0 / max(pixels, 1.0), 0.6));
     float mip = clamp(log2(filterMetres * u_waterOceanScale.x * u_metre * OCEAN_SIZE), 0.0, 7.0);
     float visible = smoothstep(u_waveFade.x, u_waveFade.y, pixels);
-    vec3 shape = textureLod(u_waterShape, pos.xy * u_waterOceanScale.x, mip).xyz;
-    pos.xyz += shape * (u_metre * share * visible);
+    vec4 shape = textureLod(u_waterShape, pos.xy * u_waterOceanScale.x, mip);
+    pos.xyz += shape.xyz * (u_metre * share * visible);
+    v_waterCrest = shape.w * share;
 }

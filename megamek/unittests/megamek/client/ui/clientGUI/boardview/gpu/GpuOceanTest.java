@@ -21,6 +21,10 @@ class GpuOceanTest {
         assertTrue(peakWavelength(0) < 5, "Calm: " + peakWavelength(0));
         assertTrue(peakWavelength(1) > 55 && peakWavelength(1) < 85, "Gale: " + peakWavelength(1));
         assertTrue(GpuOcean.sea(1)[2] > GpuOcean.sea(0)[2], "The swell grows a little under wind");
+        // JONSWAP's closed form for the unscaled sea: about 3 m in a gale over this fetch, a 0.3 m swell in calm.
+        assertEquals(3, GpuOcean.significantHeight(1), .3);
+        assertEquals(.3, GpuOcean.significantHeight(0), .05);
+        assertEquals(1, GpuOcean.storm(0), 1e-6, "Calm water is never exaggerated");
     }
 
     @Test

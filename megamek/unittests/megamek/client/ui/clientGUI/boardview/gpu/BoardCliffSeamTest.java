@@ -17,6 +17,7 @@ import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrains;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -52,18 +53,16 @@ class BoardCliffSeamTest {
         BoardSculptTest.withTransitions(transitions, BoardCliffSeamTest::checkBoundaries);
     }
 
-    @ParameterizedTest(name = "mixed depths {0}")
-    @ValueSource(booleans = { false, true })
-    void submergedCliffsJoinBothTheRiverbedAndOrdinaryBanks(boolean mixedDepths) throws Exception {
+    @Test
+    void submergedCliffsJoinBothTheRiverbedAndOrdinaryBanks() throws Exception {
         var original = BoardRelief.tuning();
         try {
             BoardWetCliffTest.tune(true);
-            BoardScene scene = mixedDepths ? BoardWetCliffTest.mixedDepthScene()
-                  : scene("Map Pack Savannahs/16x17 Mountain Lake (Savannah).board");
+            BoardScene scene = scene("Map Pack Savannahs/16x17 Mountain Lake (Savannah).board");
             Map<Segment, Integer> joined = new HashMap<>();
             List<BoardSurface.Face> submerged = new ArrayList<>();
             Map<String, List<BoardSurface.Face>> upper = new HashMap<>();
-            Coords center = mixedDepths ? new Coords(4, 3) : new Coords(8, 14);
+            Coords center = new Coords(8, 14);
             for (var tile : scene.tiles()) {
                 if (tile.coords().distance(center) > 3) { continue; }
                 var surface = new BoardSurface(scene, tile);

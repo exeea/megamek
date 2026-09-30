@@ -37,7 +37,7 @@ void main() {
     vec4 scene = texture(u_scene, v_uv);
     vec4 atmosphere = vec4(0, 0, 0, 1);
     bool solidBase = false;
-    if (u_fogEnabled > 0.5) solidBase = groundBaseSide(world(depth), depth, u_sand.z, 0.01 / u_sand.w);
+    if (u_fogEnabled > 0.5) solidBase = groundBaseSide(world(depth), depth, u_sand.z);
     if (u_fogEnabled > 0.5 && !solidBase && v_uv.x >= u_scatteringBounds.x && v_uv.y >= u_scatteringBounds.y
           && v_uv.x <= u_scatteringBounds.z && v_uv.y <= u_scatteringBounds.w) {
         // Bilateral upsampling keeps low-resolution fog from bleeding across roofs and unit silhouettes.

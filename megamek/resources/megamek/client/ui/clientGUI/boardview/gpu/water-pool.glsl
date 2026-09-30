@@ -75,9 +75,11 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     // shallows keeps a calmer share of the swell and all of its chop, so shallow water never turns to glass.
     vec4 fetchMetres = waterFetch(rest);
     vec3 energy = waterWaveEnergy(rest, field, fetchMetres);
-    // Only open water keeps this floor: descents and fall lips stay on their own current-driven detail.
+    // Open water keeps this floor. Running water is too narrow for the wind to raise a sea on: a strong wind raises
+    // only short steep chop there, the ripple band, carried along with its current below.
     float openWater = smoothstep(0.0, 4.0, dot(fetchMetres, vec4(1.0)));
-    vec3 lit = max(energy, vec3(.3, .7, .9) * (smoothstep(0.0, .01, shore) * openWater)) * effects;
+    vec3 minimum = mix(vec3(.3, .7, .9) * openWater, vec3(0.0, 0.0, 1.0), flowing);
+    vec3 lit = max(energy, minimum * (smoothstep(0.0, .01, shore) * waterWindShare(field))) * effects;
     lit.yz *= mix(.75, 1.25, gust);
     vec4 swell = vec4(0.0), chop = vec4(0.0), ripple = vec4(0.0);
     // The fine slope shapes reflections and glitter; the broad one, swell and some chop, shapes how the waves
@@ -86,13 +88,31 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     float noise, height = 0.0, whitecaps = 0.0, fineUV = 1.0;
     if (u_waterOceanScale.x > 0.0) {
         swell = texture(u_waterOcean0, rest * u_waterOceanScale.x);
-        chop = texture(u_waterOcean1, rest * u_waterOceanScale.y);
-        ripple = texture(u_waterOcean2, rest * u_waterOceanScale.z);
-        broadSlope = swell.xy * lit.x + chop.xy * (lit.y * .35);
+        // Wind waves on a current ride along with it: in running water they are read where the current has carried
+        // them, in the same two restarting phases as the detail above, so they travel with the flow plus the wind.
+        vec2 chopDx = dFdx(rest * u_waterOceanScale.y), chopDy = dFdy(rest * u_waterOceanScale.y);
+        vec2 rippleDx = dFdx(rest * u_waterOceanScale.z), rippleDy = dFdy(rest * u_waterOceanScale.z);
+        if (flowing > 0.0) {
+            vec2 carriedA = advectedA / u_rainScale, carriedB = advectedB / u_rainScale;
+            chop = textureGrad(u_waterOcean1, carriedA * u_waterOceanScale.y, chopDx, chopDy) * weightA
+                  + textureGrad(u_waterOcean1, carriedB * u_waterOceanScale.y, chopDx, chopDy) * weightB;
+            ripple = textureGrad(u_waterOcean2, carriedA * u_waterOceanScale.z, rippleDx, rippleDy) * weightA
+                  + textureGrad(u_waterOcean2, carriedB * u_waterOceanScale.z, rippleDx, rippleDy) * weightB;
+            chop.xyz *= preserve;
+            ripple.xyz *= preserve;
+        } else {
+            chop = textureGrad(u_waterOcean1, rest * u_waterOceanScale.y, chopDx, chopDy);
+            ripple = textureGrad(u_waterOcean2, rest * u_waterOceanScale.z, rippleDx, rippleDy);
+        }
+        // A river's short chop is all the wave it has: its faces take the light as the sea's crests do.
+        broadSlope = swell.xy * lit.x + chop.xy * (lit.y * .35) + ripple.xy * (lit.z * flowing);
         slope = swell.xy * lit.x + chop.xy * lit.y + ripple.xy * (lit.z * .7);
         // Metres above the mean surface, from the crests the geometry and the eye both see.
         height = swell.z * energy.x + chop.z * energy.y;
-        whitecaps = max(swell.w * energy.x, chop.w * energy.y * .8);
+        // A river's short chop is steep enough in a gale to break at its highest crests: small flecks, never a sea's
+        // whitecaps. In a breeze its crests rarely reach that height.
+        float flecks = smoothstep(.09, .17, ripple.z) * lit.z * flowing;
+        whitecaps = max(max(swell.w * energy.x, chop.w * energy.y * .8), flecks);
         fineUV = u_waterOceanScale.z;
         noise = small.b;
     } else {
@@ -106,7 +126,9 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     slope *= calmed;
     broadSlope *= calmed;
     // Slopes are the surface's gradient: the normal leans away from the way the water rises.
-    slope += (small.rg * (0.02 + 0.03 * u_waterWind.z) * detail + rapidDetail.rg * (0.4 * agitation)) * effects;
+    // Running water carries its own ripples downstream in place of the wind's (waterWindShare).
+    slope += (small.rg * (0.02 + 0.03 * u_waterWind.z + 0.05 * flowing) * detail + rapidDetail.rg * (0.4 * agitation))
+          * effects;
     vec3 ripples = rainRippleField(position) * effects;
     slope += ripples.xy;
 
@@ -185,8 +207,12 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     vec3 glow = vec3(0.0);
     vec3 facets = illumination.light;
     vec2 key = vec2(-0.6, 0.8);
-    // A crest's height over the local sea, relative to what this wind raises: 0 in a trough, 1 on a high crest.
+    // A crest's height over the local sea, relative to what this wind raises: 0 in a trough, 1 on a high crest. Where
+    // the swell gathers the surface tightest, the sharp top of the crest, the water is thinnest and glows most.
     float crest = smoothstep(-.1, 1.0, height / (.25 + 1.6 * u_waterWind.z));
+#ifdef waterSurfaceFlag
+    crest = max(crest, smoothstep(.15, .55, v_waterCrest));
+#endif
 #if defined(lightingFlag) && numDirectionalLights > 0
     vec3 toSun = -u_dirLights[0].direction;
     key = normalize(toSun.xy + vec2(0.0, 0.001));

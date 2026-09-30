@@ -13,15 +13,9 @@ uniform vec4 u_waterFieldMap;    // world XY to field UV: scale XY, offset XY
 uniform vec2 u_waterMaterial;    // palette, procedural color; the program selects the geometry mode
 uniform float u_waterEffects;
 uniform float u_wavePixels;
-uniform vec3 u_waterWind;        // GpuOcean's eased wind: unit direction XY, strength Z; turns with the waves
-uniform vec2 u_waterDrift;       // how far that wind has carried the surface: seconds along its direction
 uniform int u_splashCount;
 uniform vec4 u_splashLines[12];  // where falls land nearby: from XY, to XY, the pool to the right; hex widths
 uniform float u_splashRadii[12]; // radius of each landing's boil, hex widths
-uniform sampler2D u_waterOcean0; // GpuOcean swell, chop and ripple cascades: RG slope, B height in metres,
-uniform sampler2D u_waterOcean1; // A persistent breaking foam
-uniform sampler2D u_waterOcean2;
-uniform vec3 u_waterOceanScale;  // world XY to each cascade's UV; zero without the simulation
 uniform float u_metre;           // world units per metre
 uniform float u_levelHeight;     // world units per level
 uniform float u_waterLine;       // water surface inset below its game level, shared with the bed shader
@@ -29,5 +23,3 @@ uniform int u_waderCount;
 uniform vec4 u_waders[12];       // GpuWaders: centre XY, radius at the waterline, water level; world units
 uniform vec4 u_waderMotion[12];  // velocity XY, world units per second
 const float FLOW_CYCLE = 2.4;    // seconds per two-phase advection cycle
-// A fixed turn of the finer layer, so its wave trains cross the swell's. Being constant, it cannot shear.
-const mat2 CROSSING = mat2(0.52, 0.85, -0.85, 0.52);

@@ -35,7 +35,9 @@ class GpuWaterWavesSmokeTest {
             // Heights come out in metres: four standard deviations of the longest cascade.
             assertTrue(4 * Math.sqrt(calm) > .15 && 4 * Math.sqrt(calm) < .5, "Calm swell " + 4 * Math.sqrt(calm));
             assertTrue(4 * Math.sqrt(breeze) > 1.2 && 4 * Math.sqrt(breeze) < 2.6, "Breeze " + 4 * Math.sqrt(breeze));
-            assertTrue(4 * Math.sqrt(gale) > 3 && 4 * Math.sqrt(gale) < 6, "Gale " + 4 * Math.sqrt(gale));
+            // A full gale is drawn to the configured height: its tallest waves are about 1.6 significant heights.
+            double target = GpuOcean.MAX_WAVE_HEIGHT / 1.6;
+            assertEquals(target, 4 * Math.sqrt(gale), target * .15, "Gale significant height");
             double crests = 0, troughs = 0;
             int crestCount = 0, troughCount = 0, foam = 0;
             for (int i = 0; i < TEXELS; i++) {

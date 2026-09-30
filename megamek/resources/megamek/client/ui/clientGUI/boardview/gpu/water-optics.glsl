@@ -2,6 +2,17 @@
 // One optical model for the water surface and everything seen through it. The bed keeps the hue a column of water
 // passes; the surface removes the rest of what the column absorbs and adds its in-scattered light.
 uniform sampler2D u_waterDetail; // RG ripple slope, B foam noise, A caustic network; every channel tiles
+// GpuOcean's swell, chop and ripple cascades: RG slope, B height in metres, A persistent breaking foam (none on the
+// ripples).
+uniform sampler2D u_waterOcean0;
+uniform sampler2D u_waterOcean1;
+uniform sampler2D u_waterOcean2;
+uniform vec3 u_waterOceanScale;  // world XY to each cascade's UV; zero without the simulation
+uniform vec3 u_waterWind;        // GpuOcean's eased wind: unit direction XY, strength Z; turns with the waves
+uniform vec2 u_waterDrift;       // how far that wind has carried the surface: seconds along its direction
+// A fixed turn for detail maps, so their wave trains cross the simulated ones. Fixed in the world: a map turning with
+// the wind would sweep across the whole board whenever the wind changed.
+const mat2 CROSSING = mat2(0.52, 0.85, -0.85, 0.52);
 // Depth in levels is encoded over this range, in the bed's vertex color and in the surface field alike.
 const float WATER_DEPTH_RANGE = 4.0;
 // Light crosses the column down to the bed and back up to the board camera: optical path per level of depth.

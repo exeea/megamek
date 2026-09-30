@@ -104,6 +104,7 @@ final class GpuBoardUi implements Disposable {
     private float anchorTop;
     private String menuTriggerName;
     private boolean reportOpenedForPhase;
+    private boolean wireframe;
 
     GpuBoardUi(BoardSource source, BoardCamera camera, Runnable changeSpeed) {
         this(source, camera, changeSpeed, () -> { });
@@ -482,6 +483,8 @@ final class GpuBoardUi implements Disposable {
     }
 
     boolean overviewIcons() { return tuning.overviewIcons(); }
+
+    boolean wireframe() { return wireframe; }
 
     Skin skin() { return skin; }
 
@@ -872,6 +875,7 @@ final class GpuBoardUi implements Disposable {
             String help = switch (command.id()) {
                 case "camera-fixed-sun" -> "GpuBoard.fixedSunHelp";
                 case "camera-overview-icons" -> "GpuBoard.overviewIconsHelp";
+                case "camera-wireframe" -> "GpuBoard.wireframeHelp";
                 default -> "GpuBoard.cameraAnimationHelp";
             };
             row.addListener(new TextTooltip(Messages.getString(help), skin, "menu"));
@@ -957,6 +961,7 @@ final class GpuBoardUi implements Disposable {
               new BoardScene.Command(Messages.getString("GpuBoard.resetCamera"), true, () -> camera.reset(frame.scene())),
               cameraToggle("camera-fixed-sun", "GpuBoard.fixedSun", () -> tuning.setFixedSun(!tuning.fixedSun())),
               cameraToggle("camera-overview-icons", "GpuBoard.overviewIcons", () -> tuning.setOverviewIcons(!tuning.overviewIcons())),
+              cameraToggle("camera-wireframe", "GpuBoard.wireframe", () -> wireframe = !wireframe),
               cameraToggle("camera-animate-selection", "GpuBoard.animateSelection",
                     () -> camera.animateOnSelectionChange = !camera.animateOnSelectionChange),
               cameraToggle("camera-animate-combat", "GpuBoard.animateCombat",
@@ -978,6 +983,7 @@ final class GpuBoardUi implements Disposable {
             case "camera-free-flight" -> camera.firstPerson();
             case "camera-fixed-sun" -> tuning.fixedSun();
             case "camera-overview-icons" -> tuning.overviewIcons();
+            case "camera-wireframe" -> wireframe;
             case "camera-animate-selection" -> camera.animateOnSelectionChange;
             case "camera-animate-combat" -> camera.animateCombatPlayback;
             case "camera-animate-movement" -> camera.animateOnMove;

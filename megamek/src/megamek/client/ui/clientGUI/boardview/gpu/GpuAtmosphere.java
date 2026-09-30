@@ -117,6 +117,7 @@ final class GpuAtmosphere implements Disposable {
     private List<BoardScene.Tile> groundTiles;
     private float groundLevel;
     private float groundBase;
+    private float groundHollow;
     private Texture groundNoise;
     private final GroundMotion groundMotion = new GroundMotion();
     private final Vector3 groundProjection = new Vector3();
@@ -472,12 +473,14 @@ final class GpuAtmosphere implements Disposable {
             groundTiles = board.tiles();
             groundLevel = BoardGeometry.level();
             groundBase = BoardGeometry.weatherBase(board);
+            groundHollow = (float) board.tiles().stream().mapToDouble(BoardRelief::headroom).max().orElse(0);
         }
     }
 
     private void bindGroundLayer(ShaderProgram shader, Camera camera, BoardScene board, float top, int noiseUnit) {
         shader.setUniformMatrix("u_inverseView", camera.invProjectionView);
         shader.setUniformf("u_groundBoard", board.width(), board.height(), BoardGeometry.width(), BoardGeometry.height());
+        shader.setUniformf("u_groundHollow", groundHollow);
         shader.setUniformf("u_boundsMin", -BoardGeometry.width(), -(board.height() + 1) * BoardGeometry.height(),
               groundBase);
         shader.setUniformf("u_boundsMax", (board.width() + 1) * BoardGeometry.width() * 0.75f, BoardGeometry.height(), top);
@@ -528,6 +531,7 @@ final class GpuAtmosphere implements Disposable {
         if (strength > 0) { updateGroundBase(board); }
         float height = settings.groundLayerHeight() * BoardGeometry.level();
         compositeShader.setUniformf("u_sand", strength, height, groundBase, 1 / BoardGeometry.level());
+        compositeShader.setUniformf("u_groundHollow", groundHollow);
         compositeShader.setUniformf("u_sandMaxOpacity", MAX_SAND_OPACITY);
         if (strength <= 0) { return; }
         bindGroundLayer(compositeShader, camera, board, groundBase + height * 3, 4);
@@ -559,6 +563,9 @@ final class GpuAtmosphere implements Disposable {
         fogShader.bind();
         sceneDepth.bind(0);
         fogShader.setUniformi("u_depth", 0);
+        Texture water = terrain.waterDepth();
+        (water == null ? sceneDepth : water).bind(4);
+        fogShader.setUniformi("u_waterDepth", 4);
         float variation = options.fogHeightVariation() * BoardGeometry.level();
         float top = base + Math.max((height + variation) * 3, settings.haze() > 0 ? height * 6 : 0);
         bindGroundLayer(fogShader, camera, board,

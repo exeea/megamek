@@ -42,6 +42,20 @@ float effectHiddenAt(vec2 uv, float unit) {
     return sampleUV.x < 0.0 ? 0.0 : step(0.6, texture(u_effectOpacity, sampleUV).a);
 }
 
+// How far the unit's own surface runs in camera depth across one pixel. The capture draws the unit apart from the
+// scene, and a steep face (a vent slat seen edge on) can rasterize a fraction of a pixel differently in the two: a
+// scene depth within that span is the unit itself, not something standing before it.
+float surfaceSpan(vec2 uv, float unit) {
+    vec2 texel = 1.0 / vec2(textureSize(u_unitDepth, 0));
+    float here = cameraDepth(unit), span = 0.0;
+    for (int i = 0; i < 4; i++) {
+        vec2 offset = texel * (i < 2 ? vec2(float(i * 2 - 1), 0.0) : vec2(0.0, float(i * 2 - 5)));
+        float next = depthAt(u_unitDepth, uv + offset);
+        if (next < 1.0) span = max(span, abs(cameraDepth(next) - here));
+    }
+    return span;
+}
+
 // 1 where the scene hides the unit. The ground's own relief, grass and scatter in the hex the unit stands in never do:
 // the capture's alpha holds the height below which that hex's decoration stays, in quarter levels offset by 128 (0 for
 // markers, which have no such exemption), so only what stands in another hex, or rises above it, hides a unit.
@@ -49,7 +63,10 @@ float hiddenAt(vec2 uv) {
     if (min(uv.x, uv.y) < 0.0 || max(uv.x, uv.y) > 1.0) return 0.0;
     float unit = depthAt(u_unitDepth, uv), scene = depthAt(u_sceneDepth, uv);
     if (unit >= 1.0) return 0.0;
-    if (behind(scene, unit, u_bias) < 0.5) return effectHiddenAt(uv, unit);
+    // The cheap test first: only an apparent occluder pays for the unit's own depth span.
+    if (behind(scene, unit, u_bias) < 0.5 || behind(scene, unit, max(u_bias, surfaceSpan(uv, unit))) < 0.5) {
+        return effectHiddenAt(uv, unit);
+    }
     vec3 occluder = worldAt(uv, scene), surface = worldAt(uv, unit);
     float groundTop = (texture(u_unitColors, uv).a * 255.0 - 128.0) * 0.25 * u_levelHeight;
     bool own = boardHex(occluder.xy * vec2(1.0, -1.0) / u_groundBoard.zw)

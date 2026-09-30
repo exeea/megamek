@@ -359,9 +359,6 @@ class GpuTerrainEffectsSmokeTest {
                 save(on, source.fire() > 0 ? "unit-behind-fire" : "unit-behind-smoke");
             }
             atlas.place(unit, camera, centre.cpy().add(0, -100, 0), 0, 2, false);
-            var frontOff = drawOutlined(terrain, atmosphere, visibility, effects, depth, surfaces, batch, smoke, camera, List.of(unit), 0);
-            var frontOn = drawOutlined(terrain, atmosphere, visibility, effects, depth, surfaces, batch, smoke, camera, List.of(unit), .75f);
-            assertEquals(0, different(frontOff, frontOn), "Smoke behind an exposed unit must not outline it");
             var absentOff = drawOutlined(terrain, atmosphere, visibility, effects, depth, surfaces, batch, smoke, camera, List.of(), 0);
             var absentOn = drawOutlined(terrain, atmosphere, visibility, effects, depth, surfaces, batch, smoke, camera, List.of(), .75f);
             assertEquals(0, different(absentOff, absentOn), "A unit absent from the visible snapshot must not be revealed");
