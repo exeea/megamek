@@ -61,9 +61,10 @@ bool biomePlant(vec3 point, vec3 sourceNormal, vec4 pigment, out vec3 position, 
     v_coverRoot = root.xy / u_worldMetre;
     float seed = a_coverRoot.w, angle = seed * 97.71;
     mat2 turn = mat2(cos(angle), sin(angle), -sin(angle), cos(angle));
+    float rowNumber = 0.0;
     // Every segment of a furrow shares its height and wind field, including clipped segments on a hex boundary.
     if (row) {
-        float rowNumber = round(dot(a_coverRoot.xy / u_metre, across) / @ROW_METRES@);
+        rowNumber = round(dot(a_coverRoot.xy / u_metre, across) / @ROW_METRES@);
         seed = fract(sin(rowNumber * 12.9898) * 43758.5453);
         turn = mat2(along, -across);
     }
@@ -90,6 +91,16 @@ bool biomePlant(vec3 point, vec3 sourceNormal, vec4 pigment, out vec3 position, 
     float gust = vegetationGust(windAnchor);
     // Stiffer crops bow less than flexible marsh leaves. Strength scales both lean and angular excursion.
     float flex = u_wind.z * (crop ? .78 + .22 * gust : 1.0 + .28 * gust);
+    if (row && u_biomeLod < 1.5) {
+        // Hash the planted row and stem, so support splits and all three planes keep one resting lean.
+        float stagger = mod(rowNumber * .5, 2.0) * .5;
+        float stem = floor(dot(windAnchor / u_metre, along) / @PLANT_SPACING@ - stagger);
+        vec2 variation = fract(sin(vec2(rowNumber * 12.9898 + stem * 78.233,
+              rowNumber * 39.3468 + stem * 11.135)) * 43758.5453) * 2.0 - 1.0;
+        vec2 lean = wind * flex + variation * @CROP_LEAN@;
+        flex = length(lean);
+        if (flex > .00001) wind = lean / flex;
+    }
     // Crop stems remain straight while swaying; all three planes sample the gust at their shared stem.
     // Marsh leaves form a flexible arch, with no displacement at the grounded base.
     float angleAtHeight = crop ? flex : flex * point.z / top;

@@ -58,12 +58,16 @@ final class GpuBiomeVegetation implements Disposable {
     private static final int STRIDE = 4;
     // Seven registered plants per strip; lengths stay in world metres, independent of per-row height variation.
     static final int PLANTS_PER_ROW = 7;
-    // Appearance controls: uniform plant size, and clear metres between neighbouring leaf spans along a row.
+    // Appearance controls: uniform size, extra width without added height, and clear metres along a row.
     static final float CROP_SCALE = 2f;
-    static final float PLANT_GAP = .78f;
-    private static final float PLANT_WIDTH = .30f * CROP_SCALE;
+    static final float CROP_WIDTH_SCALE = 2f;
+    static final float PLANT_GAP = 1f;
+    // Maximum resting lean per horizontal axis, in radians; roots retain their planted positions.
+    static final float CROP_LEAN = .12f;
+    private static final float PLANT_WIDTH = .30f * CROP_SCALE * CROP_WIDTH_SCALE;
     static final float PLANT_SPACING = PLANT_WIDTH + PLANT_GAP;
-    static final float ROW_LENGTH = PLANTS_PER_ROW * PLANT_SPACING, ROW_HALF_WIDTH = .36f * CROP_SCALE;
+    static final float ROW_LENGTH = PLANTS_PER_ROW * PLANT_SPACING;
+    static final float ROW_HALF_WIDTH = .36f * CROP_SCALE * CROP_WIDTH_SCALE;
     static final float CANOPY_HEIGHT = .88f;
     private static final float PLANT_FILL = .70f;
     private static final float ALONG_FILL = PLANT_WIDTH / PLANT_SPACING;
@@ -660,6 +664,8 @@ final class GpuBiomeVegetation implements Disposable {
               .replace("@ROW_METRES@", Float.toString(BoardBiome.ROW_METRES))
               .replace("@ROW_HALF_WIDTH@", Float.toString(ROW_HALF_WIDTH))
               .replace("@PLANTS_PER_ROW@", Float.toString(PLANTS_PER_ROW))
+              .replace("@PLANT_SPACING@", Float.toString(PLANT_SPACING))
+              .replace("@CROP_LEAN@", Float.toString(CROP_LEAN))
               .replace("@CROP_SCALE@", Float.toString(CROP_SCALE));
         // A plant outside this template's band or the view leaves every vertex of its triangles outside the clip volume.
         return source.replace("void main() {", wind + plant + "\nvoid main() {\nvec3 coverPosition, coverNormal; vec4 coverColor;\n"

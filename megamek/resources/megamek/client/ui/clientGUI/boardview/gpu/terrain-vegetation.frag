@@ -41,6 +41,12 @@ void main() {
         plant.a *= 1.0 + .25 * max(0.0, .5 * log2(max(dot(fx, fx), dot(fy, fy))));
     } else {
         plant = texture(u_diffuseTexture, v_diffuseUV);
+        // Hand off between upright cards and overhead crowns: each reads cleanly from its intended viewing angle.
+        if (u_biomeKind < 1.5 && u_biomeLod < 1.5) {
+            float overhead = abs(viewDirection().z);
+            plant.a *= v_diffuseUV.y >= .8 ? smoothstep(.65, .90, overhead)
+                  : 1.0 - smoothstep(.85, .98, overhead);
+        }
     }
 #endif
 #ifdef biomeVegetationFlag

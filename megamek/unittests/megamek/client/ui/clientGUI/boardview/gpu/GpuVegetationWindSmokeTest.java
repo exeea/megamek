@@ -133,8 +133,9 @@ class GpuVegetationWindSmokeTest {
         GL20.glUniformMatrix4fv(GL20.glGetUniformLocation(shader, "u_projViewTrans"), false,
               new Matrix4().setToScaling(clipScale, clipScale, clipScale).val);
         Vector3 along = new Vector3(-BoardBiome.ROW_Y, BoardBiome.ROW_X, 0);
-        Vector3 root = new Vector3(0, 0, .1f);
+        Vector3 root = new Vector3(along).scl(length / 2).add(0, 0, .1f);
         Vector3 side = new Vector3(0, -1, 0), front = new Vector3(1, 0, 0), top = new Vector3(0, 0, 1);
+        float minLean = Float.POSITIVE_INFINITY, maxLean = Float.NEGATIVE_INFINITY;
         for (float strength : new float[] { 0, .5f, 1 }) {
             for (float phase : new float[] { 0, 1, 2, 3 }) {
                 for (int i = 0; i < GpuBiomeVegetation.PLANTS_PER_ROW; i++) {
@@ -154,6 +155,14 @@ class GpuVegetationWindSmokeTest {
                                   .add(0, 0, (centre - .5f) * rise)) < .00001f,
                                   "Every plant's stem must stay on the supported slope");
                         }
+                        if (strength == 0 && height == 1.04f) {
+                            Vector3 foot = new Vector3(root).mulAdd(along, (centre - .5f) * length);
+                            float acrossLean = (whole.x - foot.x) * BoardBiome.ROW_X
+                                  + (whole.y - foot.y) * BoardBiome.ROW_Y;
+                            minLean = Math.min(minLean, acrossLean); maxLean = Math.max(maxLean, acrossLean);
+                            assertEquals(whole, sample(shader, root, 0, phase + 1, point, side).add(root),
+                                  "A plant's resting lean must stay still as the wind clock advances");
+                        }
                         // A hex boundary or bend can split a plant's supporting strip on either side of its centre.
                         for (float[] interval : new float[][] { { 0, centre + .02f }, { centre - .02f, 1 } }) {
                             float middle = (interval[0] + interval[1]) / 2 - .5f, span = interval[1] - interval[0];
@@ -170,6 +179,7 @@ class GpuVegetationWindSmokeTest {
                 }
             }
         }
+        assertTrue(maxLean - minLean > .03f, "Calm crop heads must vary across the row while roots stay aligned");
     }
 
     private static int program(boolean grass) {

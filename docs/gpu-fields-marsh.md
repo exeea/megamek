@@ -55,24 +55,29 @@ Runtime cutouts live in `mm-data/data/models/board/textures/foliage`:
 | `crop-row-side.png`, `crop-row-front.png`, `crop-row-top.png` | Seven distinct wheat variants, with matching upright and overhead views. |
 | `crop-row.json` | Pixel-space stem bases and crown centers for registering the three views. |
 
-Crop strips are 8.4 m long and 1.008 m wide, with seven plants at 1.2 m intervals.
+Crop strips repeat seven broad-leaf wheat variants with large ripe golden ears.
 Alternate 1.15 m furrows are planted, giving 2.3 m between crop rows. Strips crop
 their UVs at edges and roads and split to follow the published ground. Their
 centerlines stay grounded. Each plant has a side plane through its stem, a
 perpendicular front plane, and an overhead plane through the grain head. The
 three views share one atlas and the same registered plant center. Individual
-sprites fill 35% of their cell along the row and 70% across it, leaving space
-between plants; the near geometry omits those empty gutters. All seven variants
-are retained in every strip.
+overhead cards fade out at oblique angles, where their flat leaves would otherwise
+cut through the larger grain heads. From above they fill out each crown while
+the upright cards fade, hiding the edges exposed by their individual leans. The
+sprites derive their fill along the row from width and spacing, and fill 70%
+across it, leaving space between plants; the near geometry omits those empty
+gutters. All seven variants are retained in every strip.
 Pixel anchors belong to the artwork metadata, rather than independently cropping
 the three sheets and shifting their plants. Source prompts are recorded in
 `mm-data/tools/crop-texture-prompts.json`.
 
-The adjacent `CROP_SCALE` and `PLANT_GAP` constants in `GpuBiomeVegetation`
-control uniform plant size and the clear distance between leaf spans along a row.
-At scale 1.4, the 0.42 m leaf span plus a 0.78 m gap gives a 1.2 m plant pitch.
+The adjacent appearance constants in `GpuBiomeVegetation` control plant shape:
+`CROP_SCALE` sets overall size; `CROP_WIDTH_SCALE` widens both horizontal axes
+without adding height; `PLANT_GAP` sets the clear gap along each row. At the
+current overall scale 2 and width scale 2, the 1.2 m leaf span plus a 1 m gap
+gives a 2.2 m plant pitch and a 15.4 m seven-plant strip.
 Strip length and atlas occupancy derive from that pitch. Every other planted row
-is shifted by half the pitch (currently 0.6 m), derived from both controls. Near
+is shifted by half the pitch (currently 1.1 m), derived from those controls. Near
 plants and distant canopy runs share this world-space stagger across hex boundaries.
 
 Marsh clumps use deterministic candidate selection and smaller nested subsets
@@ -109,9 +114,13 @@ from an oblique view, so the canopy widens from its own width to the full row
 spacing as the view leaves the vertical. At very small scale only ground shading
 remains; its crop tint spans the same leaf-to-head range.
 
+Each near plant also has a small permanent lean, bounded by `CROP_LEAN` per
+horizontal axis. Its planted row and stem index determine that lean, so the
+heads vary within a row while every root remains on its staggered seed position.
+Wind combines with this resting lean; the distant tier retains its canopy approximation.
 All three planes sample wind at their shared plant center. Clipping a strip to
 another hex or supporting triangle retains that original center, texture phase,
-and gust. Front planes belong to one half-open support interval, preventing
+resting lean and gust. Front planes belong to one half-open support interval, preventing
 duplicate faces at a split. Trilinear mipmaps remain enabled for both the near
 atlas and distant canopy. Crops use opaque alpha cutouts with depth writes;
 the extra near geometry trades vertex work for less shading of empty gutters,
