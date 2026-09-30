@@ -18,10 +18,93 @@ import org.lwjgl.opengl.GL11;
 
 @Tag("on-demand")
 class GpuWaterWavesSmokeTest {
-    private static final int TEXELS = GpuOcean.SIZE * GpuOcean.SIZE;
+    private static final int SIZE = GpuOcean.SIZE, TEXELS = SIZE * SIZE;
+    private static final float FRAME = 1 / 60f;
 
     @Test
     void cascadesDescribeOneMovingSeaWithSharpCrestsAndFoamOnThem() {
+        run(ocean -> {
+            float time = run(ocean, 0, new Vector3(.8f, .6f, 0), 1);
+            assertNotNull(ocean.displacement(), "Real displacement must compile and attach, not silently fall back");
+            double calm = variance(read(ocean.displacement()), 2);
+            time = settle(ocean, time, new Vector3(.8f, .6f, .5f));
+            double breeze = variance(read(ocean.displacement()), 2);
+            time = settle(ocean, time, new Vector3(.8f, .6f, 1));
+            float[] shape = read(ocean.displacement()), swell = read(ocean.waves(0));
+            double gale = variance(shape, 2);
+            // Heights come out in metres: four standard deviations of the longest cascade.
+            assertTrue(4 * Math.sqrt(calm) > .15 && 4 * Math.sqrt(calm) < .5, "Calm swell " + 4 * Math.sqrt(calm));
+            assertTrue(4 * Math.sqrt(breeze) > 1.2 && 4 * Math.sqrt(breeze) < 2.6, "Breeze " + 4 * Math.sqrt(breeze));
+            assertTrue(4 * Math.sqrt(gale) > 3 && 4 * Math.sqrt(gale) < 6, "Gale " + 4 * Math.sqrt(gale));
+            double crests = 0, troughs = 0;
+            int crestCount = 0, troughCount = 0, foam = 0;
+            for (int i = 0; i < TEXELS; i++) {
+                for (int channel = 0; channel < 4; channel++) {
+                    assertTrue(Float.isFinite(shape[i * 4 + channel]) && Float.isFinite(swell[i * 4 + channel]));
+                }
+                assertEquals(shape[i * 4 + 2], swell[i * 4 + 2], .001, "Crest light must follow the displaced height");
+                float height = shape[i * 4 + 2], compression = shape[i * 4 + 3];
+                if (height > 0) { crests += compression; crestCount++; } else { troughs += compression; troughCount++; }
+                if (swell[i * 4 + 3] > .5) { foam++; }
+            }
+            // Choppy displacement gathers the surface into crests and spreads it through troughs.
+            assertTrue(crests / crestCount > troughs / troughCount + .02, "Crests, not troughs, are sharp");
+            assertTrue(foam > 0 && foam < TEXELS * .25, "Wind foam leaves open water between crests: " + foam);
+            for (int cascade = 1; cascade < GpuOcean.PATCHES.length; cascade++) {
+                assertTrue(variance(read(ocean.waves(cascade)), 0) > 0, "Every cascade carries slopes");
+            }
+            assertConjugates(read(ocean.spectrum()));
+            float[] before = read(ocean.displacement());
+            time = run(ocean, time, new Vector3(.8f, .6f, 1), 30);
+            double movement = 0;
+            float[] later = read(ocean.displacement());
+            for (int i = 2; i < later.length; i += 4) { movement += Math.abs(later[i] - before[i]); }
+            assertTrue(movement > 1, "The surface evolves; it cannot be a static normal texture");
+        });
+    }
+
+    @Test
+    void aChangeOfWindReshapesTheSeaWithoutAJumpAndItsWavesTravelDownwind() {
+        run(ocean -> {
+            var east = new Vector3(1, 0, 1);
+            float time = settle(ocean, run(ocean, 0, east, 1), east);
+            // Travelling waves obey dh/dt = -c dh/dx: with wind along +x, a rising surface lies where it slopes down
+            // toward +x, so the product sums negative. Waves running upwind would sum positive.
+            float[] before = read(ocean.displacement());
+            time = run(ocean, time, east, 6);
+            float[] after = read(ocean.displacement());
+            double travel = 0;
+            for (int y = 0; y < SIZE; y++) {
+                for (int x = 0; x < SIZE; x++) {
+                    float ahead = before[(y * SIZE + (x + 1) % SIZE) * 4 + 2], behind = before[(y * SIZE + (x + SIZE - 1) % SIZE) * 4 + 2];
+                    travel += (after[(y * SIZE + x) * 4 + 2] - before[(y * SIZE + x) * 4 + 2]) * (ahead - behind);
+                }
+            }
+            assertTrue(travel < 0, "Waves travel downwind, with the foam: " + travel);
+            // One ordinary frame of motion, then the same frame with the wind turned to the north and dropped.
+            double settled = change(ocean, time, east);
+            time += FRAME;
+            var north = new Vector3(0, 1, .3f);
+            double turned = change(ocean, time, north);
+            time += FRAME;
+            assertTrue(turned < settled * 1.5, "A new wind must not replace the sea at once: " + turned + " vs " + settled);
+            assertTrue(Math.abs(ocean.wind().x - 1) < .01 && Math.abs(ocean.wind().z - 1) < .01,
+                  "The water still answers to the old wind the moment it changes");
+            // Half-way, the wind changes again: the sea carries on from where it is.
+            time = run(ocean, time, north, (int) (GpuOcean.TRANSITION_SECONDS / 2 / FRAME));
+            assertTrue(ocean.wind().y > .2 && ocean.wind().x > .2, "Half-way, the wind has turned part of the way");
+            double again = change(ocean, time, new Vector3(-1, 0, .6f));
+            time += FRAME;
+            assertTrue(again < settled * 1.5, "Changing course mid-transition must not jump either: " + again);
+            time = settle(ocean, time, north);
+            assertTrue(ocean.wind().epsilonEquals(0, 1, .3f, .001f), "The water ends up on the new wind: " + ocean.wind());
+            assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+        });
+    }
+
+    private interface Check { void run(GpuOcean ocean); }
+
+    private static void run(Check check) {
         var failure = new AtomicReference<Throwable>();
         var configuration = GpuBoardWindow.configuration(false);
         configuration.setInitialVisible(false);
@@ -29,64 +112,50 @@ class GpuWaterWavesSmokeTest {
             @Override
             public void create() {
                 var ocean = new GpuOcean();
-                try {
-                    ocean.update(0, new Vector3(.8f, .6f, 0));
-                    assertNotNull(ocean.displacement(), "Real displacement must compile and attach, not silently fall back");
-                    double calm = variance(read(ocean.displacement()), 2);
-                    for (int frame = 1; frame <= 180; frame++) { ocean.update(frame / 60f, new Vector3(.8f, .6f, 1)); }
-                    float[] shape = read(ocean.displacement()), swell = read(ocean.waves(0));
-                    double gale = variance(shape, 2);
-                    assertTrue(gale > calm * 20, "A gale raises far higher waves than calm water: " + calm + " " + gale);
-                    // Heights come out in metres: four standard deviations of the longest cascade, about 4.5 m.
-                    assertTrue(4 * Math.sqrt(gale) > 3 && 4 * Math.sqrt(gale) < 6, "Gale height " + 4 * Math.sqrt(gale));
-                    double crests = 0, troughs = 0;
-                    int crestCount = 0, troughCount = 0, foam = 0;
-                    for (int i = 0; i < TEXELS; i++) {
-                        for (int channel = 0; channel < 4; channel++) {
-                            assertTrue(Float.isFinite(shape[i * 4 + channel]) && Float.isFinite(swell[i * 4 + channel]));
-                        }
-                        assertEquals(shape[i * 4 + 2], swell[i * 4 + 2], .001, "Crest light must follow the displaced height");
-                        float height = shape[i * 4 + 2], compression = shape[i * 4 + 3];
-                        if (height > 0) { crests += compression; crestCount++; } else { troughs += compression; troughCount++; }
-                        if (swell[i * 4 + 3] > .5) { foam++; }
-                    }
-                    // Choppy displacement gathers the surface into crests and spreads it through troughs.
-                    assertTrue(crests / crestCount > troughs / troughCount + .02, "Crests, not troughs, are sharp");
-                    assertTrue(foam > 0 && foam < TEXELS * .25, "Wind foam leaves open water between crests: " + foam);
-                    for (int cascade = 1; cascade < GpuOcean.PATCHES.length; cascade++) {
-                        assertTrue(variance(read(ocean.waves(cascade)), 0) > 0, "Every cascade carries slopes");
-                    }
-                    ocean.update(3.25f, new Vector3(.8f, .6f, 1));
-                    float[] later = read(ocean.displacement());
-                    double movement = 0;
-                    for (int i = 2; i < shape.length; i += 4) { movement += Math.abs(later[i] - shape[i]); }
-                    assertTrue(movement > 1, "The surface evolves; it cannot be a static normal texture");
-                    // Travelling waves obey dh/dt = -c dh/dx: with wind along +x, a rising surface lies where it
-                    // slopes down toward +x, so the product sums negative. Waves running upwind would sum positive.
-                    ocean.update(10, new Vector3(1, 0, 1));
-                    float[] before = read(ocean.displacement());
-                    ocean.update(10.1f, new Vector3(1, 0, 1));
-                    float[] after = read(ocean.displacement());
-                    double travel = 0;
-                    int size = GpuOcean.SIZE;
-                    for (int y = 0; y < size; y++) {
-                        for (int x = 0; x < size; x++) {
-                            float east = before[(y * size + (x + 1) % size) * 4 + 2];
-                            float west = before[(y * size + (x + size - 1) % size) * 4 + 2];
-                            travel += (after[(y * size + x) * 4 + 2] - before[(y * size + x) * 4 + 2]) * (east - west);
-                        }
-                    }
-                    assertTrue(travel < 0, "Waves travel downwind, with the foam: " + travel);
-                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
-                } catch (Throwable error) { failure.set(error); }
+                try { check.run(ocean); } catch (Throwable error) { failure.set(error); }
                 finally { ocean.dispose(); Gdx.app.exit(); }
             }
         }, configuration);
         if (failure.get() != null) { throw new AssertionError("FFT water outputs", failure.get()); }
     }
 
+    /** Frames at 60 Hz with a steady wind; returns the clock after them. */
+    private static float run(GpuOcean ocean, float time, Vector3 wind, int frames) {
+        for (int frame = 0; frame < frames; frame++) { ocean.update(time += FRAME, wind); }
+        return time;
+    }
+
+    /** Long enough for any change of wind to have finished reshaping the sea. */
+    private static float settle(GpuOcean ocean, float time, Vector3 wind) {
+        return run(ocean, time, wind, (int) ((GpuOcean.TRANSITION_SECONDS + 1) / FRAME));
+    }
+
+    /** Mean absolute change of height over one frame, under the given wind. */
+    private static double change(GpuOcean ocean, float time, Vector3 wind) {
+        float[] before = read(ocean.displacement());
+        ocean.update(time + FRAME, wind);
+        float[] after = read(ocean.displacement());
+        double sum = 0;
+        for (int i = 2; i < after.length; i += 4) { sum += Math.abs(after[i] - before[i]); }
+        return sum / TEXELS;
+    }
+
+    private static void assertConjugates(float[] spectrum) {
+        int width = SIZE * GpuOcean.PATCHES.length;
+        for (int cascade = 0; cascade < GpuOcean.PATCHES.length; cascade++) {
+            for (int y = 0; y < SIZE; y++) {
+                for (int x = 0; x < SIZE; x++) {
+                    int a = (y * width + cascade * SIZE + x) * 4;
+                    int b = (((SIZE - y) % SIZE) * width + cascade * SIZE + (SIZE - x) % SIZE) * 4;
+                    assertEquals(spectrum[b], spectrum[a + 2], 1e-9, "Conjugate partners keep the transform real");
+                    assertEquals(-spectrum[b + 1], spectrum[a + 3], 1e-9);
+                }
+            }
+        }
+    }
+
     private static float[] read(Texture texture) {
-        float[] data = new float[TEXELS * 4];
+        float[] data = new float[texture.getWidth() * texture.getHeight() * 4];
         var buffer = BufferUtils.newFloatBuffer(data.length);
         texture.bind(0);
         GL11.glGetTexImage(GL20.GL_TEXTURE_2D, 0, GL20.GL_RGBA, GL20.GL_FLOAT, buffer);
@@ -97,7 +166,8 @@ class GpuWaterWavesSmokeTest {
     private static double variance(float[] data, int channel) {
         double sum = 0, squares = 0;
         for (int i = channel; i < data.length; i += 4) { sum += data[i]; squares += data[i] * data[i]; }
-        double mean = sum / TEXELS;
-        return squares / TEXELS - mean * mean;
+        int count = data.length / 4;
+        double mean = sum / count;
+        return squares / count - mean * mean;
     }
 }

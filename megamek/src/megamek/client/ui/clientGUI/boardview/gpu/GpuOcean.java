@@ -16,6 +16,7 @@ import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.graphics.glutils.GLFrameBuffer;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.Disposable;
@@ -28,6 +29,11 @@ import com.badlogic.gdx.utils.GdxRuntimeException;
  * every transform stage is one draw for all of them, 16 draws a frame in total. One finish pass writes, per cascade,
  * slope/height/persistent foam for shading, and for the longest cascade the choppy displacement that moves the
  * mesh. Lava runs a single cascade with its own viscous spectrum and output. The passes need OpenGL 3.3, no compute.
+ * <p>
+ * A new wind never replaces the sea. Its spectrum is generated on the GPU in one draw and the sea blends towards it
+ * over {@link #TRANSITION_SECONDS}: every wave keeps its phase and keeps travelling, those along the new wind grow and
+ * the others die away. A further change during a transition starts from wherever the sea has got to. The water shaders
+ * read the same eased wind ({@link #wind()}), so ripples, gusts and foam turn with the waves instead of snapping.
  */
 final class GpuOcean implements Disposable {
     /** Texels along each side of one cascade. */
@@ -36,8 +42,8 @@ final class GpuOcean implements Disposable {
     static final float[] PATCHES = { 250, 55, 12.5f };
     /** Lava's single patch. */
     static final float LAVA_PATCH = 64;
-    /** A cascade hands over to the next at this many of the next one's own harmonics, where its sampling is fine. */
-    private static final float HANDOVER = 4;
+    /** Seconds a change of wind takes to reshape the sea: the old waves run on while the new ones build. */
+    static final float TRANSITION_SECONDS = 8;
     private static final int BITS = Integer.numberOfTrailingZeros(SIZE);
     private static final float GRAVITY = 9.81f;
     /** Every frequency is a multiple of 2π over this many seconds, so the clock can wrap without a jump. */
@@ -46,6 +52,10 @@ final class GpuOcean implements Disposable {
     private static final String[] PREVIOUS = { "u_previous0", "u_previous1", "u_previous2" };
     /** Effective open-sea fetch. Enclosed water carries less of it through the exposure map, never more. */
     private static final float FETCH_METRES = 60_000;
+    /** A calm swell ~110 m long, from a steady quarter to the wind. */
+    private static final float SWELL_METRES = 110, SWELL_TURN = .45f;
+    /** Smaller changes of wind leave the spectrum alone. */
+    private static final float WIND_EPSILON = .001f;
     /** The same FFT with a slowly evolving, short-wave-damped spectrum and displacement output for lava. */
     private final boolean lava;
     private final int cascades;
@@ -53,16 +63,27 @@ final class GpuOcean implements Disposable {
     private ShaderProgram spectrum;
     private ShaderProgram butterfly;
     private ShaderProgram finish;
+    /** Water only: generates a spectrum for a wind, or freezes a transition by mixing two. */
+    private ShaderProgram seed;
     private Mesh quad;
-    private int initial;
+    /** Water only: two independent standard normal deviates per texel, fixed for the life of the simulation. */
+    private int gauss;
+    /** Initial spectra: the sea blends from one towards another, the third is free. Lava keeps one. */
+    private final FrameBuffer[] spectra = new FrameBuffer[3];
+    private int from, to;
+    private float blend = 1;
+    private boolean seeded;
+    /** The next wind, when it differs from the one the sea is heading for. */
+    private boolean retarget;
     /** Ping-pong targets of the transform, and of the result, whose foam carries over from the previous frame. */
     private final FrameBuffer[] work = new FrameBuffer[2];
     private final FrameBuffer[] result = new FrameBuffer[2];
     private int latest;
     private boolean failed;
-    private float windX = Float.NaN;
-    private float windY;
-    private float windStrength;
+    /** Winds as direction XY and strength Z: where the sea comes from, where it is heading, and between them now. */
+    private final Vector3 fromWind = new Vector3(), toWind = new Vector3(), target = new Vector3(), eased = new Vector3();
+    /** Downwind travel of the eased wind, seconds times its direction, wrapped every {@link #LOOP_SECONDS}. */
+    private final Vector2 drift = new Vector2();
     private float previousTime = Float.NaN;
 
     GpuOcean() { this(false); }
@@ -93,6 +114,20 @@ final class GpuOcean implements Disposable {
         return lava || result[latest] == null ? null : result[latest].getTextureAttachments().get(cascades);
     }
 
+    /** The spectrum the sea is heading for: h0(k) and conj(h0(-k)) per texel, every cascade side by side. */
+    Texture spectrum() {
+        return spectra[to] == null ? null : spectra[to].getColorBufferTexture();
+    }
+
+    /**
+     * The wind the waves currently answer to: unit direction in XY, strength in Z. It eases with the sea, so shaders
+     * turn with the waves. Null until the first update.
+     */
+    Vector3 wind() { return seeded ? eased : null; }
+
+    /** How far the eased wind has carried the surface: seconds along its direction, continuous as the wind turns. */
+    Vector2 drift() { return drift; }
+
     /** World-space scale of a water cascade: multiply a world position by it to get texture coordinates. */
     static float scale(int cascade) {
         return 1 / BoardRelief.metres(PATCHES[cascade]);
@@ -109,22 +144,17 @@ final class GpuOcean implements Disposable {
      */
     void update(float time, Vector3 wind) {
         if (failed || !supported()) { return; }
+        float delta = Float.isNaN(previousTime) ? 0 : Math.clamp(time - previousTime, 0, .25f);
+        previousTime = time;
+        // Lava's convection is internal. Weather must not start or stop its motion.
+        float x = lava ? .8f : wind.x, y = lava ? .6f : wind.y;
+        float length = (float) Math.hypot(x, y);
+        if (length < .01f) { x = .8f; y = .6f; } else { x /= length; y /= length; }
+        target.set(x, y, lava ? .35f : MathUtils.clamp(wind.z, 0, 1));
+        retarget = seeded && !target.epsilonEquals(toWind, WIND_EPSILON);
         try {
             if (quad == null) { create(); }
-            // Lava's convection is internal. Weather must not start or stop its motion.
-            float strength = lava ? .35f : MathUtils.clamp(wind.z, 0, 1);
-            float x = lava ? .8f : wind.x, y = lava ? .6f : wind.y;
-            float length = (float) Math.hypot(x, y);
-            if (length < .01f) { x = .8f; y = .6f; } else { x /= length; y /= length; }
-            // A new or recreated simulation has no spectrum yet (windX is NaN, and every comparison with NaN is false).
-            if (Float.isNaN(windX) || Math.abs(x - windX) > .02f || Math.abs(y - windY) > .02f
-                  || Math.abs(strength - windStrength) > .02f) {
-                windX = x;
-                windY = y;
-                windStrength = strength;
-                upload(lava ? lavaSpectrum() : initialSpectrum(x, y, strength));
-            }
-            simulate(lava ? time * .12f : time);
+            simulate(lava ? time * .12f : time, delta);
         } catch (GdxRuntimeException error) {
             // A driver that cannot compile or attach these leaves the water on its static ripples.
             failed = true;
@@ -138,11 +168,12 @@ final class GpuOcean implements Disposable {
         butterfly = GpuShaderManager.program(() -> program("ocean-fft.frag"), next -> butterfly = next);
         finish = GpuShaderManager.program(() -> program(lava ? "ocean-lava-finish.frag" : "ocean-water-finish.frag"),
               next -> finish = next);
+        if (!lava) { seed = GpuShaderManager.program(() -> program("ocean-initial.frag"), next -> seed = next); }
         quad = new Mesh(true, 4, 0, new VertexAttribute(VertexAttributes.Usage.Position, 2, "a_position"));
         quad.setVertices(new float[] { -1, -1, 1, -1, -1, 1, 1, 1 });
+        for (int i = 0; i < (lava ? 1 : spectra.length); i++) { spectra[i] = floatTarget(SIZE * cascades); }
         for (int i = 0; i < 2; i++) {
-            work[i] = new GLFrameBuffer.FrameBufferBuilder(SIZE * cascades, SIZE)
-                  .addFloatAttachment(GL30.GL_RGBA32F, GL30.GL_RGBA, GL30.GL_FLOAT, true).build();
+            work[i] = floatTarget(SIZE * cascades);
             var output = new GLFrameBuffer.FrameBufferBuilder(SIZE, SIZE);
             // Water: one shading target per cascade, then the longest cascade's displacement.
             for (int target = 0; target < (lava ? 1 : cascades + 1); target++) {
@@ -155,12 +186,23 @@ final class GpuOcean implements Disposable {
                 waves.setAnisotropicFilter(8);
             }
         }
-        initial = Gdx.gl.glGenTexture();
-        Gdx.gl.glBindTexture(GL20.GL_TEXTURE_2D, initial);
-        Gdx.gl.glTexParameteri(GL20.GL_TEXTURE_2D, GL20.GL_TEXTURE_MIN_FILTER, GL20.GL_NEAREST);
-        Gdx.gl.glTexParameteri(GL20.GL_TEXTURE_2D, GL20.GL_TEXTURE_MAG_FILTER, GL20.GL_NEAREST);
-        // The first frame reads a previous result; start both without foam.
         IntBuffer state = saveState();
+        if (lava) {
+            spectra[0].getColorBufferTexture().bind(0);
+            FloatBuffer buffer = BufferUtils.newFloatBuffer(SIZE * SIZE * 4);
+            buffer.put(lavaSpectrum()).flip();
+            Gdx.gl.glTexSubImage2D(GL20.GL_TEXTURE_2D, 0, 0, 0, SIZE, SIZE, GL20.GL_RGBA, GL20.GL_FLOAT, buffer);
+        } else {
+            gauss = Gdx.gl.glGenTexture();
+            Gdx.gl.glBindTexture(GL20.GL_TEXTURE_2D, gauss);
+            Gdx.gl.glTexParameteri(GL20.GL_TEXTURE_2D, GL20.GL_TEXTURE_MIN_FILTER, GL20.GL_NEAREST);
+            Gdx.gl.glTexParameteri(GL20.GL_TEXTURE_2D, GL20.GL_TEXTURE_MAG_FILTER, GL20.GL_NEAREST);
+            FloatBuffer buffer = BufferUtils.newFloatBuffer(SIZE * cascades * SIZE * 2);
+            buffer.put(deviates()).flip();
+            Gdx.gl.glTexImage2D(GL20.GL_TEXTURE_2D, 0, GL30.GL_RG32F, SIZE * cascades, SIZE, 0, GL30.GL_RG,
+                  GL20.GL_FLOAT, buffer);
+        }
+        // The first frame reads a previous result; start both without foam.
         for (FrameBuffer target : result) {
             target.bind();
             Gdx.gl.glClearColor(0, 0, 0, 0);
@@ -174,6 +216,11 @@ final class GpuOcean implements Disposable {
         restoreState(state);
     }
 
+    private static FrameBuffer floatTarget(int width) {
+        return new GLFrameBuffer.FrameBufferBuilder(width, SIZE)
+              .addFloatAttachment(GL30.GL_RGBA32F, GL30.GL_RGBA, GL30.GL_FLOAT, true).build();
+    }
+
     static ShaderProgram program(String file) {
         return GpuGlsl.compile(file, GpuShaderSource.read("ocean.vert"), fragment(file));
     }
@@ -185,57 +232,36 @@ final class GpuOcean implements Disposable {
     }
 
     /**
-     * Water's three cascades side by side, as h0(k) and conj(h0(-k)) per texel. A fetch-limited JONSWAP sea for
-     * the wind (Hasselmann et al. 1973), spread about the wind by Donelan-Banner's sech², plus a low, narrow swell
-     * from a steady quarter to the wind so calm open water keeps breathing. Each cascade owns one band of wave
-     * numbers; neighbouring cascades cross-fade in power over an octave, so the sum is the full spectrum once.
-     * Amplitudes carry the wave-number cell area: the inverse transform yields heights in metres directly.
+     * Two standard normal deviates per texel of every cascade. The same draw serves every wind, so a change of wind
+     * reshapes the same sea instead of reshuffling it.
      */
-    static float[] initialSpectrum(float windX, float windY, float strength) {
-        // Calm air still ripples; a full gale (Beaufort 8) raises a steep, breaking sea with ~70 m peak waves.
-        float speed = 1.5f + 18.5f * strength;
-        double peak = Math.max(22 * Math.cbrt(GRAVITY * GRAVITY / (speed * FETCH_METRES)), .855 * GRAVITY / speed);
-        double alpha = Math.max(.076 * Math.pow(speed * speed / (FETCH_METRES * GRAVITY), .22), .0081);
-        double wind = Math.atan2(windY, windX), swellDirection = wind + .45;
-        // Art direction, not physics: storm seas are drawn up to 1.5 times higher than this fetch would raise them, so
-        // their crests read, fold and foam from a tactical camera as they do at sea level. Calm water stays physical.
-        double storm = 1 + .5 * strength * strength;
-        // An old swell ~110 m long, 0.3 m high in calm and 0.45 m in a gale; narrow, as swells are.
-        double swellPeak = Math.sqrt(GRAVITY * MathUtils.PI2 / 110), swellAlpha = 5.6e-5 + 7e-5 * strength;
+    static float[] deviates() {
         int width = SIZE * PATCHES.length;
-        float[] data = new float[width * SIZE * 4];
+        float[] data = new float[width * SIZE * 2];
         for (int cascade = 0; cascade < PATCHES.length; cascade++) {
-            float patch = PATCHES[cascade];
-            double cell = MathUtils.PI2 / patch;
-            double low = cascade == 0 ? 0 : HANDOVER * cell;
-            double high = cascade + 1 < PATCHES.length ? HANDOVER * MathUtils.PI2 / PATCHES[cascade + 1] : Double.MAX_VALUE;
-            float[] real = new float[SIZE * SIZE], imaginary = new float[SIZE * SIZE];
-            // One fixed draw per texel: wind changes reshape the same sea instead of reshuffling it.
             Random random = new Random(0x6f6365616eL + cascade);
             for (int m = 0; m < SIZE; m++) {
                 for (int n = 0; n < SIZE; n++) {
-                    double gaussReal = random.nextGaussian(), gaussImaginary = random.nextGaussian();
-                    double kx = cell * (n - SIZE / 2), ky = cell * (m - SIZE / 2), k = Math.hypot(kx, ky);
-                    // The Nyquist rows have no conjugate partner; leaving them empty keeps the result real.
-                    if (k < 1e-6 || n == 0 || m == 0) { continue; }
-                    double share = (cascade == 0 ? 1 : handover(k, low)) * (1 - handover(k, high));
-                    if (share <= 0) { continue; }
-                    double omega = Math.sqrt(GRAVITY * k), theta = Math.atan2(ky, kx);
-                    // S(ω)·D(θ)·dω/dk / k: variance per unit wave-number area, times the cell's area.
-                    double sea = jonswap(omega, peak, alpha) * donelanBanner(omega / peak, angle(theta - wind))
-                          + jonswap(omega, swellPeak, swellAlpha) * swellSpread(angle(theta - swellDirection));
-                    double variance = sea * (GRAVITY / (2 * omega)) / k * cell * cell * share
-                          // Capillary ripples below a few centimetres stay in the static detail map.
-                          * Math.exp(-k * k * .0004);
-                    // h0(k) and the mirrored conj(h0(-k)) both reach this wave vector: each carries half its variance.
-                    double amplitude = Math.sqrt(variance / 4) * storm;
-                    real[m * SIZE + n] = (float) (gaussReal * amplitude);
-                    imaginary[m * SIZE + n] = (float) (gaussImaginary * amplitude);
+                    int texel = (m * width + cascade * SIZE + n) * 2;
+                    data[texel] = (float) random.nextGaussian();
+                    data[texel + 1] = (float) random.nextGaussian();
                 }
             }
-            pack(data, width, cascade, real, imaginary);
         }
         return data;
+    }
+
+    /**
+     * The wind sea's JONSWAP peak angular frequency, its alpha, and the swell's alpha, for a strength from 0 to 1:
+     * fetch-limited (Hasselmann et al. 1973), never beyond a fully developed sea. Calm air still ripples; a full gale
+     * (Beaufort 8) raises a steep, breaking sea with ~70 m peak waves.
+     */
+    static float[] sea(float strength) {
+        float speed = 1.5f + 18.5f * strength;
+        double peak = Math.max(22 * Math.cbrt(GRAVITY * GRAVITY / (speed * FETCH_METRES)), .855 * GRAVITY / speed);
+        double alpha = Math.max(.076 * Math.pow(speed * speed / (FETCH_METRES * GRAVITY), .22), .0081);
+        // The swell is 0.3 m high in calm and 0.45 m in a gale.
+        return new float[] { (float) peak, (float) alpha, 5.6e-5f + 7e-5f * strength };
     }
 
     /** Lava's single viscous cascade, independent of wind: broad folds, short waves suppressed. */
@@ -261,84 +287,114 @@ final class GpuOcean implements Disposable {
         }
         // Root-mean-square slope of the cooling skin's folds.
         float scale = (float) (.12 / Math.sqrt(Math.max(variance, 1e-20)));
-        for (int i = 0; i < real.length; i++) { real[i] *= scale; imaginary[i] *= scale; }
         float[] data = new float[SIZE * SIZE * 4];
-        pack(data, SIZE, 0, real, imaginary);
-        return data;
-    }
-
-    /** Stores h0(k) and conj(h0(-k)) of one cascade into its block of the packed texture. */
-    private static void pack(float[] data, int width, int cascade, float[] real, float[] imaginary) {
         for (int m = 0; m < SIZE; m++) {
             for (int n = 0; n < SIZE; n++) {
                 int index = m * SIZE + n, mirror = ((SIZE - m) % SIZE) * SIZE + (SIZE - n) % SIZE;
-                int texel = (m * width + cascade * SIZE + n) * 4;
-                data[texel] = real[index];
-                data[texel + 1] = imaginary[index];
-                data[texel + 2] = real[mirror];
-                data[texel + 3] = -imaginary[mirror];
+                data[index * 4] = real[index] * scale;
+                data[index * 4 + 1] = imaginary[index] * scale;
+                data[index * 4 + 2] = real[mirror] * scale;
+                data[index * 4 + 3] = -imaginary[mirror] * scale;
             }
         }
+        return data;
     }
 
-    /** JONSWAP frequency spectrum, m²·s, peak enhancement 3.3. */
-    static double jonswap(double omega, double peak, double alpha) {
-        double sigma = omega <= peak ? .07 : .09, offset = (omega - peak) / (sigma * peak);
-        return alpha * GRAVITY * GRAVITY / Math.pow(omega, 5) * Math.exp(-1.25 * Math.pow(peak / omega, 4))
-              * Math.pow(3.3, Math.exp(-.5 * offset * offset));
+    /** Heads the sea for {@link #target}: first seeding, or from wherever a transition has got to. */
+    private void steer() {
+        if (!seeded) {
+            generate(to);
+            from = to;
+            blend = 1;
+            fromWind.set(target);
+            toWind.set(target);
+            eased.set(target);
+            seeded = true;
+            return;
+        }
+        if (blend < 1) {
+            // Freeze the transition where it is, so the new wind takes over from the sea as it now looks.
+            int frozen = spare(from, to);
+            seed.bind();
+            spectra[from].getColorBufferTexture().bind(1);
+            spectra[to].getColorBufferTexture().bind(2);
+            seed.setUniformi("u_from", 1);
+            seed.setUniformi("u_to", 2);
+            seed.setUniformf("u_blend", ease(blend));
+            pass(seed, spectra[frozen]);
+            // The old target is about to be overwritten: leave no unit sampling it.
+            for (int unit = 2; unit > 0; unit--) {
+                Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0 + unit);
+                Gdx.gl.glBindTexture(GL20.GL_TEXTURE_2D, 0);
+            }
+            from = frozen;
+        } else {
+            from = to;
+        }
+        fromWind.set(eased);
+        toWind.set(target);
+        generate(to = spare(from, from));
+        blend = 0;
     }
 
-    /** Donelan-Banner directional spreading: narrowest at the peak, broadening for shorter and longer waves. */
-    static double donelanBanner(double ratio, double theta) {
-        double beta = ratio < .95 ? 2.61 * Math.pow(Math.max(ratio, .56), 1.3)
-              : ratio < 1.6 ? 2.28 * Math.pow(ratio, -1.3)
-              : Math.pow(10, -.4 + .8393 * Math.exp(-.567 * Math.log(ratio * ratio)));
-        double sech = 1 / Math.cosh(beta * theta);
-        return beta / (2 * Math.tanh(beta * Math.PI)) * sech * sech;
+    /** Renders the spectrum of {@link #target}'s wind into one of the spectra. */
+    private void generate(int into) {
+        float[] sea = sea(target.z);
+        float wind = MathUtils.atan2(target.y, target.x);
+        seed.bind();
+        Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
+        Gdx.gl.glBindTexture(GL20.GL_TEXTURE_2D, gauss);
+        seed.setUniformi("u_gauss", 0);
+        seed.setUniformf("u_blend", -1);
+        seed.setUniformi("u_size", SIZE);
+        seed.setUniformf("u_patches", PATCHES[0], PATCHES[1], PATCHES[2]);
+        seed.setUniformf("u_directions", wind, wind + SWELL_TURN);
+        seed.setUniformf("u_sea", sea[0], sea[1], (float) Math.sqrt(GRAVITY * MathUtils.PI2 / SWELL_METRES), sea[2]);
+        // Art direction, not physics: storm seas are drawn up to 1.5 times higher than this fetch would raise them,
+        // so their crests read, fold and foam from a tactical camera as they do at sea level. Calm water stays physical.
+        seed.setUniformf("u_storm", 1 + .5f * target.z * target.z);
+        pass(seed, spectra[into]);
     }
 
-    /** A swell's narrow cos^2s(θ/2) spreading, s = 24: Γ(s+1) / (2√π Γ(s+½)) = 1.389 normalises it. */
-    private static double swellSpread(double theta) {
-        double c = Math.cos(theta / 2);
-        return 1.389 * Math.pow(c * c, 24);
+    /** An index of the three spectra that is neither a nor b. */
+    private static int spare(int a, int b) {
+        for (int i = 0; ; i++) { if (i != a && i != b) { return i; } }
     }
 
-    /** The angle wrapped into (-π, π]. */
-    private static double angle(double theta) {
-        return Math.IEEEremainder(theta, MathUtils.PI2);
+    private static float ease(float t) { return t * t * (3 - 2 * t); }
+
+    /** The wind between where the sea came from and where it is heading, turning the short way round. */
+    private void easeWind(float delta) {
+        blend = Math.min(1, blend + delta / TRANSITION_SECONDS);
+        float t = ease(blend);
+        float start = MathUtils.atan2(fromWind.y, fromWind.x), turn = MathUtils.atan2(toWind.y, toWind.x) - start;
+        turn = (float) Math.IEEEremainder(turn, MathUtils.PI2);
+        float angle = start + turn * t;
+        eased.set(MathUtils.cos(angle), MathUtils.sin(angle), MathUtils.lerp(fromWind.z, toWind.z, t));
+        drift.set((drift.x + eased.x * delta) % LOOP_SECONDS, (drift.y + eased.y * delta) % LOOP_SECONDS);
     }
 
-    /** 0 below 0.7 k, 1 above 1.4 k, smooth in log wave number: a power-complementary cross-fade. */
-    private static double handover(double k, double boundary) {
-        if (boundary <= 0) { return 1; }
-        double t = MathUtils.clamp((float) (Math.log(k / (.7 * boundary)) / Math.log(2)), 0, 1);
-        return t * t * (3 - 2 * t);
-    }
-
-    private void upload(float[] data) {
-        FloatBuffer buffer = BufferUtils.newFloatBuffer(data.length);
-        buffer.put(data).flip();
-        Gdx.gl.glBindTexture(GL20.GL_TEXTURE_2D, initial);
-        Gdx.gl.glTexImage2D(GL20.GL_TEXTURE_2D, 0, GL30.GL_RGBA32F, SIZE * cascades, SIZE, 0, GL20.GL_RGBA,
-              GL20.GL_FLOAT, buffer);
-        Gdx.gl.glBindTexture(GL20.GL_TEXTURE_2D, 0);
-    }
-
-    private void simulate(float time) {
-        float delta = Float.isNaN(previousTime) ? 0 : Math.clamp(time - previousTime, 0, .25f);
-        previousTime = time;
+    private void simulate(float time, float delta) {
         IntBuffer state = saveState();
-        boolean depthTest = Gdx.gl.glIsEnabled(GL20.GL_DEPTH_TEST), blend = Gdx.gl.glIsEnabled(GL20.GL_BLEND);
+        boolean depthTest = Gdx.gl.glIsEnabled(GL20.GL_DEPTH_TEST), blending = Gdx.gl.glIsEnabled(GL20.GL_BLEND);
         boolean cull = Gdx.gl.glIsEnabled(GL20.GL_CULL_FACE), scissor = Gdx.gl.glIsEnabled(GL20.GL_SCISSOR_TEST);
         Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
         Gdx.gl.glDisable(GL20.GL_BLEND);
         Gdx.gl.glDisable(GL20.GL_CULL_FACE);
         Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
-        Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
-        // The wave spectrum of every cascade at this instant.
-        Gdx.gl.glBindTexture(GL20.GL_TEXTURE_2D, initial);
+        if (lava) {
+            seeded = true;
+        } else {
+            if (!seeded || retarget) { steer(); }
+            easeWind(delta);
+        }
+        // The wave spectrum of every cascade at this instant, part-way between two winds while the sea changes.
         spectrum.bind();
-        spectrum.setUniformi("u_initial", 0);
+        spectra[from].getColorBufferTexture().bind(1);
+        spectra[to].getColorBufferTexture().bind(0);
+        spectrum.setUniformi("u_to", 0);
+        spectrum.setUniformi("u_from", 1);
+        spectrum.setUniformf("u_blend", ease(blend));
         spectrum.setUniformf("u_time", time % LOOP_SECONDS);
         spectrum.setUniformf("u_loop", MathUtils.PI2 / LOOP_SECONDS);
         spectrum.setUniformf("u_patches", lava ? LAVA_PATCH : PATCHES[0], lava ? 1 : PATCHES[1], lava ? 1 : PATCHES[2]);
@@ -373,11 +429,12 @@ final class GpuOcean implements Disposable {
             }
             finish.setUniformf("u_texels", PATCHES[0] / SIZE, PATCHES[1] / SIZE, PATCHES[2] / SIZE);
             // Horizontal displacement sharpens crests and broadens troughs; a gale folds the steepest over.
-            finish.setUniformf("u_choppiness", .75f + .5f * windStrength, 1f, .6f);
+            finish.setUniformf("u_choppiness", .75f + .5f * eased.z, 1f, .6f);
             finish.setUniformf("u_delta", delta);
-            // Foam drifts downwind at about 3 % of the wind's speed, measured in each cascade's texture.
-            float drift = (.05f + .55f * windStrength) * delta;
-            finish.setUniformf("u_drift", windX * drift, windY * drift);
+            // Foam drifts downwind at about 3 % of the wind's speed and spreads along it into streaks.
+            float travel = (.05f + .55f * eased.z) * delta;
+            finish.setUniformf("u_drift", eased.x * travel, eased.y * travel);
+            finish.setUniformf("u_downwind", eased.x, eased.y);
             finish.setUniformf("u_patches", PATCHES[0], PATCHES[1], PATCHES[2]);
         }
         pass(finish, result[next]);
@@ -393,7 +450,7 @@ final class GpuOcean implements Disposable {
         Gdx.gl.glBindTexture(GL20.GL_TEXTURE_2D, 0);
         latest = next;
         enable(GL20.GL_DEPTH_TEST, depthTest);
-        enable(GL20.GL_BLEND, blend);
+        enable(GL20.GL_BLEND, blending);
         enable(GL20.GL_CULL_FACE, cull);
         enable(GL20.GL_SCISSOR_TEST, scissor);
         restoreState(state);
@@ -426,20 +483,28 @@ final class GpuOcean implements Disposable {
 
     @Override
     public void dispose() {
-        for (ShaderProgram program : new ShaderProgram[] { spectrum, butterfly, finish }) {
+        for (ShaderProgram program : new ShaderProgram[] { spectrum, butterfly, finish, seed }) {
             if (program != null) { GpuShaderManager.dispose(program); }
         }
-        spectrum = butterfly = finish = null;
+        spectrum = butterfly = finish = seed = null;
         if (quad != null) { quad.dispose(); }
         quad = null;
+        for (int i = 0; i < spectra.length; i++) {
+            if (spectra[i] != null) { spectra[i].dispose(); }
+            spectra[i] = null;
+        }
         for (int i = 0; i < 2; i++) {
             if (work[i] != null) { work[i].dispose(); }
             if (result[i] != null) { result[i].dispose(); }
             work[i] = result[i] = null;
         }
-        if (initial != 0) { Gdx.gl.glDeleteTexture(initial); }
-        initial = 0;
-        windX = Float.NaN;
+        if (gauss != 0) { Gdx.gl.glDeleteTexture(gauss); }
+        gauss = 0;
+        // A recreated simulation seeds its spectrum again on its first update.
+        seeded = false;
+        from = to = 0;
+        blend = 1;
+        drift.setZero();
         previousTime = Float.NaN;
     }
 }

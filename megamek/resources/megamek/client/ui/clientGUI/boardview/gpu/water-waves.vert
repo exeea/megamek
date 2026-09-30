@@ -13,7 +13,7 @@ uniform float u_levelHeight;
 uniform float u_wavePixels;
 uniform vec2 u_waveFade;
 uniform vec2 u_waterMaterial;
-uniform vec3 u_wind;
+uniform vec3 u_waterWind;
 out vec3 v_waterRest;
 // water-wave-functions
 

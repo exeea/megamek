@@ -18,7 +18,7 @@ vec4 waterFetch(vec2 world) {
 vec3 waterWaveEnergy(vec2 world, vec4 field, vec4 fetch) {
     float bank = (field.r * 2.0 - 1.0) * SHORE_RANGE * HEX_METRES;
     float depth = field.g * 4.0 * u_levelHeight / u_metre;
-    vec2 wind = dot(u_wind.xy, u_wind.xy) > .0001 ? normalize(u_wind.xy) : vec2(.8, .6);
+    vec2 wind = dot(u_waterWind.xy, u_waterWind.xy) > .0001 ? normalize(u_waterWind.xy) : vec2(.8, .6);
     vec4 toward = max(vec4(wind.x, -wind.x, wind.y, -wind.y), vec4(0.0));
     float upwind = dot(fetch, toward) / max(dot(toward, vec4(1.0)), .001);
     float across = min(fetch.x + fetch.y, fetch.z + fetch.w);

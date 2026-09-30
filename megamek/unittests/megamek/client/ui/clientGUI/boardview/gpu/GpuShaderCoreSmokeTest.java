@@ -67,7 +67,7 @@ class GpuShaderCoreSmokeTest {
             compile(pair, pair);
         }
         for (var kind : GpuWeatherParticles.Kind.values()) { GpuWeatherParticles.shader(kind).dispose(); }
-        for (String fragment : List.of("ocean-spectrum", "ocean-fft", "ocean-water-finish", "ocean-lava-finish")) {
+        for (String fragment : List.of("ocean-initial", "ocean-spectrum", "ocean-fft", "ocean-water-finish", "ocean-lava-finish")) {
             GpuOcean.program(fragment + ".frag").dispose();
         }
         for (String fragment : List.of("atmosphere-composite", "atmosphere-fog", "cloud-transmission",

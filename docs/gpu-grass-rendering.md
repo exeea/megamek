@@ -51,8 +51,20 @@ ranges in a single call, but the Intel driver tested rejects it intermittently.
 Hexes out of view draw nothing. The shader evaluates density again at each
 actual root. Blade width introduces fractional density continuously. The two blade
 topologies switch at their detail threshold without a silhouette cross-fade.
-Grass needs at least 120 projected pixels per hex, which only full-detail chunks
-reach, so only those chunks carry grass roots.
+Grass needs at least 120 projected pixels per hex. Full terrain detail is
+requested from 64 pixels, but a full-detail chunk takes from a few hundred
+milliseconds to seconds to build and arrives one chunk at a time, so medium
+detail chunks carry grass roots as well (`BoardPlants`): a view that closes in
+finds the blades already installed while the finer ground is still being built.
+A chunk refined from coarse detail passes through medium detail first for the
+same reason (`GpuTerrain.nextDetail`). Roots are sampled in the hex's plane and
+dropped onto whichever ground is installed, so a root keeps its place and rank
+at every detail level; when the full-detail chunk lands, only the heights change
+with the ground under them, and the chunk uploads once without a blade moving.
+Roots that do arrive while their hex is already on screen without any, the only
+case left, grow in over half a second instead of appearing at once
+(`GpuGroundCover.visible`); roots a chunk brought while off screen show
+complete.
 
 The meadow field varies blade height and thickness continuously, keeping short
 growth in sparse patches. It is also used for ground color. Avoid introducing a
@@ -76,10 +88,14 @@ roots or uploading unchanged instance buffers.
 ## Cache and update boundaries
 
 No grass is prepared on the render thread. A chunk's roots are planted by the
-terrain worker that builds it and replaced with it; tiles an edit reuses keep
-their roots. A chunk's instance buffer uploads again only when the installed
-roots of one of its hexes change. Zooming changes the drawn prefix, panning
-changes which chunks draw, and neither uploads anything.
+terrain worker that builds it at medium or full detail and replaced with it;
+tiles an edit reuses keep their roots. Planting costs about 0.4 ms per hex,
+against several milliseconds of surface work per hex at either level, and a
+grass hex holds about 65 KB of roots, so a medium chunk's grass is cheap to
+plant but not free to keep; coarse and distant chunks carry none. A chunk's
+instance buffer uploads again only when the installed roots of one of its hexes
+change. Zooming changes the drawn prefix, panning changes which chunks draw, and
+neither uploads anything.
 
 The selected submission is reusable while the camera matrix, physical viewport,
 scene tile list, ordered candidates and the installed roots of the drawn hexes

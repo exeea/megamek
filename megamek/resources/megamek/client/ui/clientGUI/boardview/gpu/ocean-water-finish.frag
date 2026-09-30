@@ -14,6 +14,7 @@ uniform vec3 u_patches;        // metres each cascade repeats over
 uniform vec3 u_choppiness;
 uniform float u_delta;         // seconds since the last frame
 uniform vec2 u_drift;          // metres the foam travels downwind this frame
+uniform vec2 u_downwind;       // unit direction of the eased wind
 
 struct Crest {
     vec4 shading;
@@ -35,12 +36,13 @@ Crest crest(int cascade, float texel, float choppiness, float extent, sampler2D 
     // Below zero the surface folds over itself: a breaking crest.
     float jacobian = alongX.x * alongY.y - alongX.y * alongY.x;
     vec3 normal = cross(alongX, alongY);
-    // Foam drifts downwind, spreads a little and thins over several seconds after the crest has passed.
+    // Foam drifts downwind and thins over several seconds after the crest has passed. It spreads mostly along the
+    // wind, drawing out the streaks a sea leaves behind its breakers; as the wind turns, new streaks follow it.
     vec2 uv = (vec2(at) + .5) / float(u_size) - u_drift / extent;
-    vec2 texelUV = vec2(1.0 / float(u_size), 0.0);
+    vec2 along = u_downwind / float(u_size), across = vec2(-along.y, along.x) * .5;
     float old = textureLod(previous, uv, 0.0).a;
-    float spread = (textureLod(previous, uv + texelUV, 0.0).a + textureLod(previous, uv - texelUV, 0.0).a
-          + textureLod(previous, uv + texelUV.yx, 0.0).a + textureLod(previous, uv - texelUV.yx, 0.0).a) * .25;
+    float spread = (textureLod(previous, uv + along, 0.0).a + textureLod(previous, uv - along, 0.0).a) * .35
+          + (textureLod(previous, uv + across, 0.0).a + textureLod(previous, uv - across, 0.0).a) * .15;
     // Whitecaps seed on the steepest percent or two of crests in a gale, and on almost none in a breeze.
     float breaking = 1.0 - smoothstep(.55, .78, jacobian);
     float foam = max(breaking, mix(old, spread, min(u_delta * 1.4, .35)) * exp(-u_delta / 4.0));

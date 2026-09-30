@@ -13,7 +13,8 @@ uniform vec4 u_waterFieldMap;    // world XY to field UV: scale XY, offset XY
 uniform vec2 u_waterMaterial;    // palette, procedural color; the program selects the geometry mode
 uniform float u_waterEffects;
 uniform float u_wavePixels;
-uniform vec3 u_wind;
+uniform vec3 u_waterWind;        // GpuOcean's eased wind: unit direction XY, strength Z; turns with the waves
+uniform vec2 u_waterDrift;       // how far that wind has carried the surface: seconds along its direction
 uniform int u_splashCount;
 uniform vec4 u_splashLines[12];  // where falls land nearby: from XY, to XY, the pool to the right; hex widths
 uniform float u_splashRadii[12]; // radius of each landing's boil, hex widths

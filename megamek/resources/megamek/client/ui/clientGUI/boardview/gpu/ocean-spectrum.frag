@@ -5,7 +5,9 @@ layout(location = 0) out vec4 fragColor;
 // turns at the frequency deep water gives its length, so long swells outrun short chop. Water packs
 // height + i*displacementX, then displacementY; lava retains slopeX + i*slopeY, then displacementX + i*displacementY.
 // The same inverse transform handles both.
-uniform sampler2D u_initial; // h0(k) in red and green, conj(h0(-k)) in blue and alpha
+uniform sampler2D u_from;    // h0(k) in red and green, conj(h0(-k)) in blue and alpha: the sea a change of wind
+uniform sampler2D u_to;      // left, and the one it is heading for
+uniform float u_blend;       // eased progress from one to the other; every wave keeps its phase throughout
 uniform float u_time;
 uniform float u_loop;        // every frequency is a multiple of this, so the clock can wrap without a jump
 uniform vec3 u_patches;      // metres each cascade repeats over
@@ -20,7 +22,7 @@ void main() {
     ivec2 texel = ivec2(gl_FragCoord.xy);
     int cascade = texel.x / u_size;
     float extent = cascade == 0 ? u_patches.x : cascade == 1 ? u_patches.y : u_patches.z;
-    vec4 initial = texelFetch(u_initial, texel, 0);
+    vec4 initial = mix(texelFetch(u_from, texel, 0), texelFetch(u_to, texel, 0), u_blend);
     vec2 k = 6.2831853 * (vec2(texel.x - cascade * u_size, texel.y) - 0.5 * float(u_size)) / extent;
     float magnitude = max(length(k), 1e-6);
     float phase = floor(sqrt(9.81 * magnitude) / u_loop) * u_loop * u_time;

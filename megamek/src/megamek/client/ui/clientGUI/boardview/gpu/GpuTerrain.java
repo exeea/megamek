@@ -216,6 +216,8 @@ final class GpuTerrain implements Disposable {
                 private final int horizonUniform = register("u_rainHorizon");
                 private final int waterEffectsUniform = register("u_waterEffects");
                 private final int windUniform = register("u_wind");
+                private final int waterWindUniform = register("u_waterWind");
+                private final int waterDriftUniform = register("u_waterDrift");
                 private final int vegetationPhaseUniform = register("u_vegetationPhase");
                 private final int metreUniform = register("u_worldMetre");
                 private final int coverPixelsUniform = register("u_coverPixels");
@@ -280,6 +282,10 @@ final class GpuTerrain implements Disposable {
                     set(perspectiveUniform, camera.projection.val[Matrix4.M33] == 0 ? 1f : 0f);
                     set(waterEffectsUniform, waterEffects ? 1f : 0f);
                     set(windUniform, wind);
+                    // Water follows the ocean's eased wind, so its ripples, gusts and foam turn with the waves.
+                    Vector3 waterWind = ocean.wind();
+                    set(waterWindUniform, waterWind == null ? wind : waterWind);
+                    set(waterDriftUniform, ocean.drift());
                     set(vegetationPhaseUniform, vegetationPhase);
                     set(metreUniform, BoardRelief.detailMetres(1));
                     set(coverHexWidthUniform, BoardGeometry.width());

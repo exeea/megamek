@@ -38,12 +38,12 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     vec2 current = (field.ba * 2.0 - 1.0) * effects;
     float agitation = (falling ? v_color.a : v_color.r) * effects;
 
-    vec2 wind = length(u_wind.xy) > 0.01 ? normalize(u_wind.xy) : vec2(0.8, 0.6);
     // Broad noise, slow enough never to shear an advected pattern: G staggers the flow's restarts, B gathers
     // rapids foam into clusters a hex or two across, R varies the deep water's tone and the surf along a bank.
     vec4 broad = texture(u_rainNoise, position * 0.008 + 0.29);
-    // Gusts roll downwind in patches, so the wind never roughens a lake evenly: cat's paws on the chop.
-    float gust = texture(u_rainNoise, position * 0.035 - wind * (u_rainTime * 0.006)).r;
+    // Gusts roll downwind in patches, so the wind never roughens a lake evenly: cat's paws on the chop. The drift
+    // is integrated as the wind turns, so the patches never jump.
+    float gust = texture(u_rainNoise, position * 0.035 - u_waterDrift * 0.006).r;
 
     // Foam grain and, in rapids, fine chop. A current advects them in two phases, each restarting only while
     // its weight is zero, however weak the current, so no restart ever shows; in still water both phases read
@@ -57,8 +57,9 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     float preserve = mix(1.0, inversesqrt(weightA * weightA + weightB * weightB), flowing);
     vec2 advectedA = position - current * ((phase - 0.5) * FLOW_CYCLE);
     vec2 advectedB = position - current * ((fract(phase + 0.5) - 0.5) * FLOW_CYCLE) + 0.37 * flowing;
-    mat2 downwind = mat2(wind.x, -wind.y, wind.y, wind.x);
-    mat2 crossing = CROSSING * downwind;
+    // Fixed in the world: the simulated cascades carry the wind's direction, and a detail map turning with the wind
+    // would sweep across the whole board whenever it changed.
+    mat2 crossing = CROSSING;
     vec2 driftB = vec2(0.37, -0.29) * (u_rainTime * 0.03);
     vec4 small = ((texture(u_waterDetail, crossing * advectedA * 3.8 + driftB) - 0.5) * weightA
           + (texture(u_waterDetail, crossing * advectedB * 3.8 + driftB) - 0.5) * weightB) * preserve;
@@ -95,8 +96,8 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
         fineUV = u_waterOceanScale.z;
         noise = small.b;
     } else {
-        vec4 large = texture(u_waterDetail, downwind * position * 1.65 + vec2(u_rainTime * 0.018, 0.0)) - 0.5;
-        slope = large.rg * downwind * 0.5 * lit.x;
+        vec4 large = texture(u_waterDetail, crossing * position * 1.65 + vec2(u_rainTime * 0.018, 0.0)) - 0.5;
+        slope = large.rg * crossing * 0.5 * lit.x;
         broadSlope = slope;
         noise = large.b * 0.6 + small.b * 0.4;
     }
@@ -105,7 +106,7 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     slope *= calmed;
     broadSlope *= calmed;
     // Slopes are the surface's gradient: the normal leans away from the way the water rises.
-    slope += (small.rg * (0.02 + 0.03 * u_wind.z) * detail + rapidDetail.rg * (0.4 * agitation)) * effects;
+    slope += (small.rg * (0.02 + 0.03 * u_waterWind.z) * detail + rapidDetail.rg * (0.4 * agitation)) * effects;
     vec3 ripples = rainRippleField(position) * effects;
     slope += ripples.xy;
 
@@ -121,7 +122,7 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     float fetch = smoothstep(0.12, 0.25, beyond - shore);
     float nearBank = (1.0 - smoothstep(0.05, 0.28, shore)) * smoothstep(0.0, 0.01, shore) * fetch;
     float march = shore * 65.0 + u_rainTime * 1.6 + broad.r * 11.0 + gust * 5.0;
-    float surfEnergy = mix(.15, 1.0, u_wind.z) * fetch;
+    float surfEnergy = mix(.15, 1.0, u_waterWind.z) * fetch;
     slope += seaward * (cos(march) * 0.2 * nearBank * surfEnergy * effects * (1.0 - wetShore * .9));
 
     float wading = waterUnitWakes(v_cloudPosition.xy, noise, effects, slope);
@@ -142,12 +143,12 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     float grainy = noise + 0.5;
     float coverage = exp(-shore / width) + 0.4 * smoothstep(0.55, 0.95, sin(march)) * nearBank * surfEnergy;
     float surf = smoothstep(1.0 - coverage, 1.2 - coverage, grainy) * smoothstep(0.0, 0.003, shore);
-    // Whitecaps where the simulated crests fold over, trailing streaks drawn out downwind as they fade.
-    // Dense where the crest folds, fraying into lace and downwind streaks as the foam thins. Seen from afar the
-    // lace averages out, so the threshold widens and thin foam fades instead of hardening into solid patches.
-    float streaks = texture(u_waterDetail, downwind * position * vec2(1.1, 5.5) + 0.53).b;
+    // Whitecaps where the simulated crests fold over; the simulation drags their foam out into downwind streaks.
+    // Dense where the crest folds, fraying into lace as the foam thins. Seen from afar the lace averages out, so the
+    // threshold widens and thin foam fades instead of hardening into solid patches.
+    float lace = texture(u_waterDetail, crossing * position * 2.3 + 0.53).b;
     float laceEdge = mix(.8, .12, u_rainDetail);
-    float whitecap = smoothstep(1.0 - .65 * whitecaps, 1.0 - .65 * whitecaps + laceEdge, mix(grainy, streaks, .6))
+    float whitecap = smoothstep(1.0 - .65 * whitecaps, 1.0 - .65 * whitecaps + laceEdge, mix(grainy, lace, .6))
           * smoothstep(0.0, .35, whitecaps) * mix(.55, 1.0, u_rainDetail);
     // Strong rapids increase motion and the number of broken foam patches, while leaving water between them.
     // The fine grain frays their edges; the caustic network must not turn the entire reach into a white web.
@@ -185,7 +186,7 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     vec3 facets = illumination.light;
     vec2 key = vec2(-0.6, 0.8);
     // A crest's height over the local sea, relative to what this wind raises: 0 in a trough, 1 on a high crest.
-    float crest = smoothstep(-.1, 1.0, height / (.25 + 1.6 * u_wind.z));
+    float crest = smoothstep(-.1, 1.0, height / (.25 + 1.6 * u_waterWind.z));
 #if defined(lightingFlag) && numDirectionalLights > 0
     vec3 toSun = -u_dirLights[0].direction;
     key = normalize(toSun.xy + vec2(0.0, 0.001));
@@ -194,7 +195,7 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     // The sun's glitter, from facets as rough as the waves a pixel averages: close up each wave flashes, far off
     // their spread becomes a broad path of glitter instead of aliasing into lines.
     vec2 texels = fwidth(u_waterOceanScale.x > 0.0 ? rest * fineUV : position * 2.0) * OCEAN_SIZE;
-    float roughness = clamp(0.16 + 0.06 * log2(1.0 + max(texels.x, texels.y)) + 0.04 * u_wind.z, 0.16, 0.45);
+    float roughness = clamp(0.16 + 0.06 * log2(1.0 + max(texels.x, texels.y)) + 0.04 * u_waterWind.z, 0.16, 0.45);
     float a2 = roughness * roughness * roughness * roughness;
     vec3 halfway = normalize(view + toSun);
     float schlick = 0.02 + 0.98 * pow(1.0 - clamp(dot(halfway, view), 0.0, 1.0), 5.0);

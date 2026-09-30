@@ -115,18 +115,35 @@ with Donelan-Banner spreading, cross-faded in power with its neighbours, plus a
 low, narrow swell so calm open water keeps moving. Amplitudes are in metres: the
 spectrum of a full gale (wind 1, about 20 m/s) gives roughly 3 m significant
 height with 70 m crests, a moderate wind about 1.7 m, calm about 0.3 m of swell.
-As art direction, storm seas are drawn up to 1.5 times higher (`storm` in
-`initialSpectrum`) so their crests fold and foam visibly from a tactical camera;
+As art direction, storm seas are drawn up to 1.5 times higher (`u_storm` in
+`ocean-initial.frag`) so their crests fold and foam visibly from a tactical camera;
 calm water stays physical. Waves travel downwind at their deep-water speed; the
 smoke test checks the direction. The choppy displacement gathers the surface
 towards each crest, so crests are sharp and troughs broad; the smoke test checks
 that compression, and therefore foam, sits on crests.
 
+A change of wind never replaces the sea. `ocean-initial.frag` generates the new
+spectrum on the GPU in one draw, from normal deviates fixed for the session, and
+the spectrum pass blends from the old spectrum towards it over
+`GpuOcean.TRANSITION_SECONDS` (8 s). Every wave keeps its phase and keeps
+travelling: waves along the new wind grow, the others die away, and foam already
+on the water drifts on and thins. A further change during a transition first
+freezes the blend where it is, in one more draw, so the sea continues from how it
+looks. Nothing is computed on the CPU per change, so dragging the wind sliders
+costs two small draws a frame and no hitch. `GpuOcean.wind()` is the eased wind
+the sea currently answers to; water shaders read it as `u_waterWind`, and
+`u_waterDrift` integrates its travel, so ripples, gust patches, fetch weighting
+and foam turn with the waves instead of snapping. Other wind-driven effects keep
+the raw `u_wind`.
+
 One finish pass writes, per cascade, slope, height and persistent foam, and for
 the longest cascade the displacement and crest compression that move the mesh.
 Foam seeds where the steepest crests fold, drifts downwind and thins over a few
-seconds. The shader draws it dense where it is fresh and frays it into lace and
-downwind streaks; from afar the lace fades rather than hardening into patches.
+seconds. It spreads mostly along the wind, so the simulation itself draws it out
+into streaks, which follow the wind as it turns. The shader draws foam dense where
+it is fresh and frays it into lace; from afar the lace fades rather than hardening
+into patches. Detail maps stay fixed in the world: turning them with the wind would
+sweep them across the whole board whenever it changed.
 
 `waterWaveEnergy` (`water-wave.glsl`) gives each cascade's share at a point and is
 used by the vertex and fragment stages alike. Long waves need depth, room across

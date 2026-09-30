@@ -88,6 +88,9 @@ class GpuShrubSmokeTest {
                                   / Gdx.graphics.getHeight() / GpuTreeLodSmokeTest.PIXELS[lod];
                             camera.update();
                             terrain.animate(0, List.of(), 1);
+                            // A level change alone keeps the shadow map until the next refit; redraw it to count
+                            // the selected level's geometry.
+                            terrain.refreshShadows();
                             int shadow = count(profiler, () -> terrain.renderShadows(camera.camera, List.of()));
                             int colour = count(profiler, () -> terrain.render(camera.camera, false));
                             int depthCount = count(profiler, () -> terrain.renderDepth(camera.camera, List.of(), depth));
