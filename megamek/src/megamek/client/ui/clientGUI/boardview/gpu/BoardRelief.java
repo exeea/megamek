@@ -2442,8 +2442,8 @@ final class BoardRelief {
     /**
      * Rock kit placements, each derived from one canonical edge: formations standing on the rim of a drop (few and
      * small up to two levels, larger and more frequent from three) and fallen blocks on the talus and ground below a
-     * rise. They belong to the hex whose footprint holds them, so picking and unit support meet them there, and
-     * never enter the unit anchor.
+     * rise. Picking keeps overhanging rim rocks with the cliff; fallen blocks at its foot follow the lower hex's
+     * footprint. These formations never enter the unit anchor.
      */
     private void rocks(List<BoardSurface.Face> destination, Vector3 anchor) {
         // Special ground art keeps its top clear; coarse render tiers omit this small dressing.

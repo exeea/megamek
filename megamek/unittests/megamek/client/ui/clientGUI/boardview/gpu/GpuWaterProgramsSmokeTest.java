@@ -109,7 +109,10 @@ class GpuWaterProgramsSmokeTest {
             var mode = part.material.get(GpuWaterShader.class, GpuWaterShader.TYPE).mode;
             var program = ((BaseShader) GpuShaderProvider.unwrap(shader)).program;
             assertEquals(mode == GpuWaterShader.Mode.SURFACE || mode == GpuWaterShader.Mode.FALL,
-                  program.getUniformLocation("u_waterOcean") >= 0, "Only surfaces and crests need the wave simulation");
+                  program.getUniformLocation("u_waterOcean0") >= 0, "Only surfaces and crests need the wave simulation");
+            assertEquals(mode == GpuWaterShader.Mode.SURFACE || mode == GpuWaterShader.Mode.DEPTH
+                        || mode == GpuWaterShader.Mode.CUT, program.getUniformLocation("u_waterShape") >= 0,
+                  "The surface, its depth prepass and the board-edge section share one wave displacement");
             assertEquals(mode == GpuWaterShader.Mode.SURFACE || mode == GpuWaterShader.Mode.FALL,
                   program.getUniformLocation("u_waderCount") >= 0, "Only surfaces and crests need unit interactions");
             assertEquals(mode == GpuWaterShader.Mode.SPRAY, program.getUniformLocation("u_cameraUp") >= 0,

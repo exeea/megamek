@@ -4,5 +4,5 @@ layout(location = 0) out vec4 fragColor;
 // Lava: retain slopes and horizontal displacement for the moving cooling skin.
 // OCEAN_FINISH
 void main() {
-    fragColor = oceanSample(ivec2(gl_FragCoord.xy));
+    fragColor = oceanSample(0, ivec2(gl_FragCoord.xy));
 }

@@ -31,14 +31,21 @@ void main() {
 #ifdef diffuseTextureFlag
     diffuse = texture(u_diffuseTexture, v_diffuseUV);
 #endif
-#ifdef colorFlag
+    // How much of the surface is leaves, which scatter light around, rather than bark, cactus or snow.
+    float leaves = abs(u_foliage - 1.0) < .5 ? 1.0 : 0.0;
+#ifdef impostorFlag
+    // An impostor card's colour says how its plant takes the sun (prepare_tree_lods.py): red, the share its own leaves
+    // let through; green, how much of what the card shows is bark, cactus or snow. The card's shadow lookup skips the
+    // crown it stands in (surface-lighting.glsl), so the shadow map adds other casters alone.
+    float sunlit = v_color.r;
+    leaves = 1.0 - v_color.g;
+#elif defined(colorFlag)
     diffuse *= v_color;
 #endif
 #ifdef diffuseColorFlag
     diffuse *= u_diffuseColor;
 #endif
     vec3 albedo = diffuse.rgb;
-    bool canopy = abs(u_foliage - 1.0) < .5;
     // The source models tint their snow; fresh snow stays neutral, as on the ground below.
     if (u_foliage > 1.5) albedo = vec3(dot(albedo, vec3(.2126, .7152, .0722))) * vec3(.97, .98, 1.02);
     if (u_clay > .5) albedo = vec3(.52);
@@ -46,12 +53,15 @@ void main() {
     albedo = toLinear(albedo);
 #ifdef lightingFlag
     // Inside and under a canopy the sky is hidden by the leaves above.
-    vec3 ambient = skyLight(face, GROUND_ALBEDO) * (canopy ? mix(.7, 1.0, face.z * .5 + .5) : .85);
+    vec3 ambient = skyLight(face, GROUND_ALBEDO) * mix(.85, mix(.7, 1.0, face.z * .5 + .5), leaves);
     vec3 direct = vec3(0.0);
 #if numDirectionalLights > 0
     vec3 light = -u_dirLights[0].direction;
-    float incidence = canopy ? max(0.0, dot(face, light) * .6 + .4) : max(0.0, dot(face, light));
+    float incidence = mix(max(0.0, dot(face, light)), max(0.0, dot(face, light) * .6 + .4), leaves);
     direct = u_dirLights[0].color * sculptShadow(face, light) * incidence;
+#ifdef impostorFlag
+    direct *= sunlit;
+#endif
 #endif
     // Cloud shadows attenuate direct light here (inserted by GpuCloudShadow).
     vec3 sheen = vec3(0.0);

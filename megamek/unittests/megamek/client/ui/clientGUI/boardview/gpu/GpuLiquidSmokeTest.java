@@ -111,6 +111,8 @@ class GpuLiquidSmokeTest {
                 camera.setIsometric(isometric);
                 camera.fit(scene);
                 terrain.renderShadows(camera.camera, List.of());
+                // Detail refinement and water-page builds must finish before the animation comparison starts.
+                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                 List<int[]> before = samples(terrain, camera, scene, true);
                 GpuBoardTestUi.capture(new File(output, "liquids-" + (procedural ? "procedural" : shader ? "shader" : "gif")
                       + "-" + (isometric ? "isometric" : "top") + ".png"));

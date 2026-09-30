@@ -2,9 +2,11 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashMap;
@@ -13,10 +15,60 @@ import java.util.Map;
 
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
+import megamek.common.board.Board;
 import megamek.common.board.Coords;
+import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 
 class BoardGeometryPickingTest {
+    @Test
+    void badlandsRimRocksOverhangingTheLakeBelongToTheRaisedHex() {
+        Board board = new Board();
+        board.load(new File("data/boards/Shrapnel 13/16x17 Badlands 2 (Hazardous Liquid).board"));
+        List<BoardScene.Tile> tiles = new ArrayList<>();
+        for (int x = 0; x < board.getWidth(); x++) {
+            for (int y = 0; y < board.getHeight(); y++) {
+                var hex = board.getHex(x, y);
+                int depth = hex.containsTerrain(Terrains.WATER) ? hex.terrainLevel(Terrains.WATER) : -1;
+                tiles.add(new BoardScene.Tile(new Coords(x, y), hex.getLevel(), depth, false, 0,
+                      BoardFeatures.surface(hex), null, null, null, null, null, List.of(), List.of(),
+                      BoardLiquid.capture(hex), null, true));
+            }
+        }
+        BoardScene scene = new BoardScene(0, board.getWidth(), board.getHeight(), tiles,
+              List.of(), List.of(), -1, "", List.of());
+        Coords cliff = new Coords(9, 8), lake = new Coords(8, 8);
+        BoardSurface.Cache cache = new BoardSurface.Cache();
+        BoardSurface upper = cache.get(scene, scene.tile(cliff));
+        float floor = BoardGeometry.floor(scene);
+        Map<Coords, BoardTacticalGeometry.Surface> finished = new HashMap<>();
+        var candidates = tiles.stream().filter(tile -> tile.coords().distance(cliff) <= 1).toList();
+        for (var tile : candidates) {
+            finished.put(tile.coords(), BoardTacticalGeometry.Surface.of(cache.get(scene, tile), scene, floor));
+        }
+        int checked = 0;
+        for (var face : upper.faces) {
+            if (face.finish() != BoardSurface.Finish.OUTCROP) { continue; }
+            Vector3 point = new Vector3(face.a()).add(face.b()).add(face.c()).scl(1 / 3f);
+            if (!BoardGeometry.contains(lake, point.x, point.y)
+                  || point.z < BoardGeometry.surfaceZ(scene.tile(cliff))) { continue; }
+            Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
+            if (normal.z < .1f) { continue; }
+            // Hit the actual rock above the lake footprint, including its sloping sides, from just outside it.
+            Ray ray = new Ray(new Vector3(point).mulAdd(normal, .1f), new Vector3(normal).scl(-1));
+            BoardGeometry.Hit hit = BoardGeometry.hit(scene, ray, candidates, floor, cache);
+            assertNotNull(hit);
+            assertEquals(cliff, hit.coords(), "The visible rim rock must not select the lake four levels below");
+            assertTrue(hit.hardSurface() && hit.distance() < .02f, "Picking must still intersect the rock itself");
+            assertEquals(hit, BoardGeometry.hit(scene, ray, candidates, floor, finished::get));
+            checked++;
+        }
+        assertTrue(checked > 3, "The regression must exercise several real overhanging rock faces");
+        Vector3 water = BoardGeometry.center(lake, scene.tile(lake).elevation()).add(0, 0, 2);
+        assertEquals(lake, BoardGeometry.pick(scene, new Ray(water, new Vector3(0, 0, -1))),
+              "The water below remains independently selectable");
+    }
+
     @Test
     void finishedTerrainKeepsBuilderPickingForWaterIceCliffsAndTalus() {
         BoardGeometry.Tuning original = BoardGeometry.tuning();

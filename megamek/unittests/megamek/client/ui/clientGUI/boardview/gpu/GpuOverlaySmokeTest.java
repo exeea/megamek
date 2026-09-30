@@ -170,6 +170,7 @@ class GpuOverlaySmokeTest {
                 public void render() {
                     try {
                         super.render();
+                        if (GpuBoardTestUi.loading(this)) { return; }
                         tick++;
                         if (tick == 5 || tick == 12) {
                             SwingUtilities.invokeAndWait(fixture.source::refresh);

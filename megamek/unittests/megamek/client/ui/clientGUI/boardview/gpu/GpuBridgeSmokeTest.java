@@ -155,7 +155,9 @@ class GpuBridgeSmokeTest {
                             assertTrue(error < 1,
                                   "Mixed approaches must keep the best surface at the deck centre: " + name + ", error " + error);
                         }
-                        assertEquals(GpuRoads.SURFACE_LIFT + 2.5f, terrain.roofBounds(CENTER).max.z, .001f);
+                        // Banked spans carry the authored terminal block, which stands above the rails.
+                        assertEquals(GpuRoads.SURFACE_LIFT + Math.max(2.5f, BoardBridgeFooting.terminalHeight()),
+                              terrain.roofBounds(CENTER).max.z, .001f);
                     }
                     assertTrue(difference(plain.get(BoardRoad.Kind.PAVED), plain.get(BoardRoad.Kind.DIRT)) > 8,
                           "Dirt approaches must visibly resurface the deck");
@@ -251,14 +253,17 @@ class GpuBridgeSmokeTest {
                     camera.setIsometric(true);
                     for (int height : new int[] { 12, 36 }) {
                         BoardGeometry.tune(new BoardGeometry.Tuning(1, 1, 1, height, previous.gridShade()));
-                        for (int exits = 0; exits < 64; exits++) {
+                        // A span without attached roads is a natural bridge (docs/gpu-roads.md) with no GLB deck.
+                        for (int exits = 1; exits < 64; exits++) {
                             BoardScene scene = scene(exits);
                             terrain.update(scene);
                             var bounds = terrain.roofBounds(CENTER);
                             assertNotNull(bounds);
-                            assertEquals(GpuRoads.SURFACE_LIFT - 1.5f, bounds.min.z, .001f);
-                            assertEquals(GpuRoads.SURFACE_LIFT + 2.5f, bounds.max.z, .001f,
-                                  "Rail height must not follow the terrain-level setting");
+                            // The authored deck kit (kerbs, roundabouts, terminal block) sets the exact underside and rail
+                            // heights; they must stay near the slab's 1.5 below and 2.5 above, whatever the level setting.
+                            assertEquals(GpuRoads.SURFACE_LIFT - 1.5f, bounds.min.z, .15f);
+                            assertEquals(GpuRoads.SURFACE_LIFT + Math.max(2.5f, BoardBridgeFooting.terminalHeight()), bounds.max.z, .15f,
+                                  "Rail and terminal height must not follow the terrain-level setting");
                             for (int direction = 0; direction < 6; direction++) {
                                 if ((exits & (1 << direction)) != 0) { checkJoin(scene, terrain, CENTER, direction); }
                             }

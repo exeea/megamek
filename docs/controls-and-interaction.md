@@ -29,6 +29,13 @@ The hit goes through `BoardSource` to the existing phase operation. Picks includ
 the board generation, allowing the source to discard clicks from a map that has since
 been replaced. Camera gestures are handled by `BoardCamera`.
 
+Pointer picking uses `GpuTerrain.selectionHit`, passing through tree and shrub
+canopies to the board surface beneath the cursor. Buildings, bridges, units and
+point markers retain direct picking. Attack effects use `GpuTerrain.hit`, which
+also intersects foliage; physical impacts must not determine the pointer's hex.
+Cliff walls and overhanging rim rocks select the raised hex; rubble at the foot
+of a cliff selects the lower hex whose footprint contains the hit.
+
 Ordinary left-click behavior depends on the phase: select a unit, place it during
 deployment, plot movement or choose an attack target. Right-click opens contextual
 choices. Choosing a target, queuing an attack and completing the phase remain separate

@@ -89,6 +89,9 @@ class GpuTreeLodSmokeTest {
                             camera.camera.zoom = level == 0 ? 0.1f : zoomForSize(diameter, PIXELS[level]);
                             camera.update();
                             terrain.animate(0, List.of(), 1);
+                            // A level change alone keeps the shadow map until the next refit; redraw it to count
+                            // the selected level's geometry.
+                            terrain.refreshShadows();
                             int shadowCount = count(profiler, () -> terrain.renderShadows(camera.camera, List.of()));
                             int colorCount = count(profiler, () -> terrain.render(camera.camera, false));
                             if (level == 0) {
@@ -113,6 +116,7 @@ class GpuTreeLodSmokeTest {
                         for (int level : new int[] { 1, 2, 3, 0 }) {
                             camera.camera.zoom = level == 0 ? 0.1f : zoomForSize(diameter, PIXELS[level]);
                             camera.update();
+                            terrain.refreshShadows();
                             assertEquals(nearShadowCount - 3 * (triangles[0] - triangles[level]),
                                   count(profiler, () -> terrain.renderShadows(camera.camera, List.of())));
                             assertEquals(0, count(profiler, () -> terrain.renderTransparent(camera.camera)));

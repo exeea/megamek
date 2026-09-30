@@ -76,6 +76,7 @@ class GpuUnitLifecycleSmokeTest {
                     @Override
                     public void render() {
                         try {
+                            if (GpuBoardTestUi.loading(this)) { super.render(); return; }
                             if (frame == 4 || frame == 16) {
                                 SwingUtilities.invokeAndWait(() -> {
                                     try {

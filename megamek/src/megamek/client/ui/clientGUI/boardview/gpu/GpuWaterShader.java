@@ -153,7 +153,7 @@ final class GpuWaterShader extends Attribute {
     /** The same water's spray, thrown up where its falls land. */
     GpuWaterShader spray() { return new GpuWaterShader(this, Mode.SPRAY); }
 
-    /** Optical section at the board edge, without waves or authored animation frames. */
+    /** Optical section at the board edge: its top (colour G zero) follows the surface waves; authored frames are dropped. */
     GpuWaterShader cut() { return new GpuWaterShader(this, Mode.CUT); }
 
     static int palette(BoardLiquid liquid) {

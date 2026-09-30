@@ -144,7 +144,8 @@ final class GpuTerrain implements Disposable {
               litFragment("water-fall.frag"));
         private final DefaultShader.Config sprayShader = new DefaultShader.Config(GpuWaterfall.vertex(config.vertexShader),
               litFragment("water-spray.frag"));
-        private final DefaultShader.Config waterCutShader = new DefaultShader.Config(config.vertexShader,
+        // The board-edge section's top follows the waves it meets (water-waves.vert).
+        private final DefaultShader.Config waterCutShader = new DefaultShader.Config(waterShader.vertexShader,
               litFragment("water-cut.frag"));
         private final DefaultShader.Config liquidShader = new DefaultShader.Config(config.vertexShader,
               GpuLiquidShader.fragment(config.fragmentShader));
@@ -191,7 +192,9 @@ final class GpuTerrain implements Disposable {
                   + (renderable.material.has(GpuRoads.Coats.TYPE) ? "#define roadCoatFlag\n" : "")
                   + (renderable.material.has(GpuRoads.Soil.TYPE) ? "#define roadSoilFlag\n" : "")
                   + (renderable.material.has(BridgeDeck.TYPE) ? "#define bridgeDeckFlag\n" : "")
-                  + (renderable.material.has(GpuRoads.Maps.TYPE) ? "#define roadMapsFlag\n" : "");
+                  + (renderable.material.has(GpuRoads.Maps.TYPE) ? "#define roadMapsFlag\n" : "")
+                  + (renderable.material.has(Impostor.TYPE) && GpuTreeInstances.instanced(renderable)
+                        ? "#define impostorFlag\n" : "");
             DefaultShader result = new DefaultShader(renderable, chosen,
                   GpuGlsl.compile("GPU terrain", prefix, chosen.vertexShader, chosen.fragmentShader)) {
                 private final int normalMapsUniform = register("u_normalMaps");
@@ -219,7 +222,8 @@ final class GpuTerrain implements Disposable {
                 private final int coverHexWidthUniform = register("u_coverHexWidth");
                 private final int gridShadeUniform = register("u_gridShade");
                 private final int waterDetailUniform = register("u_waterDetail");
-                private final int waterOceanUniform = register("u_waterOcean");
+                private final int[] waterOceanUniforms = { register("u_waterOcean0"), register("u_waterOcean1"),
+                      register("u_waterOcean2") };
                 private final int waterShapeUniform = register("u_waterShape");
                 private final int wavePixelsUniform = register("u_wavePixels");
                 private final int waveFadeUniform = register("u_waveFade");
@@ -240,7 +244,8 @@ final class GpuTerrain implements Disposable {
                 private final int biomeSoilNormalUniform = register("u_biomeSoilNormal");
                 private final int biomeSoilTileUniform = register("u_biomeSoilTile");
                 private final Vector3 detailPosition = new Vector3();
-                private int rainNoiseUnit = -1, waterDetailUnit = -1, waterOceanUnit = -1, biomeUnit = -1;
+                private int rainNoiseUnit = -1, waterDetailUnit = -1, biomeUnit = -1;
+                private final int[] waterOceanUnits = { -1, -1, -1 };
                 private int biomeSoilUnit = -1, biomeSoilNormalUnit = -1;
                 private int magmaOceanUnit = -1;
                 private int waterShapeUnit = -1;
@@ -266,7 +271,7 @@ final class GpuTerrain implements Disposable {
                     set(normalMapsUniform, normalMaps ? 1f : 0f);
                     set(iceNormalsUniform, normalMaps ? 1f : 0f);
                     set(magmaTimeUniform, clock);
-                    set(magmaOceanScaleUniform, lavaOcean.texture() == null ? 0f : GpuOcean.scale());
+                    set(magmaOceanScaleUniform, lavaOcean.texture() == null ? 0f : GpuOcean.lavaScale());
                     set(roadProfileUniform, BoardRoad.JOIN_REACH, BoardRoad.WHEEL_OFFSET,
                           BoardRoad.TRACK_HALF_WIDTH, GpuRoads.WHEEL_TINT);
                     set(wetnessUniform, wetness);
@@ -305,8 +310,8 @@ final class GpuTerrain implements Disposable {
                     set(horizonUniform, horizon.r, horizon.g, horizon.b);
                     if (has(waterOceanScaleUniform)) {
                         // Without the wave simulation the water keeps its static ripples alone.
-                        Texture waves = ocean.texture();
-                        set(waterOceanScaleUniform, waves == null ? 0f : GpuOcean.scale());
+                        if (ocean.texture() == null) { set(waterOceanScaleUniform, 0f, 0f, 0f); }
+                        else { set(waterOceanScaleUniform, GpuOcean.scale(0), GpuOcean.scale(1), GpuOcean.scale(2)); }
                         set(waderCountUniform, waders.count);
                         if (waders.count > 0 && has(wadersUniform) && has(waderMotionUniform)) {
                             program.setUniform4fv(loc(wadersUniform), waders.bodies, 0, waders.count * 4);
@@ -330,9 +335,10 @@ final class GpuTerrain implements Disposable {
                         biomeSoilUnit = bindShared(biomeSoilUniform, soil.color(), biomeSoilUnit);
                         biomeSoilNormalUnit = bindShared(biomeSoilNormalUniform, soil.normal(), biomeSoilNormalUnit);
                     }
-                    if (has(waterOceanUniform)) {
-                        Texture waves = ocean.texture();
-                        waterOceanUnit = bindShared(waterOceanUniform, waves == null ? waterDetail : waves, waterOceanUnit);
+                    for (int cascade = 0; cascade < waterOceanUniforms.length; cascade++) {
+                        Texture waves = ocean.waves(cascade);
+                        waterOceanUnits[cascade] = bindShared(waterOceanUniforms[cascade],
+                              waves == null ? waterDetail : waves, waterOceanUnits[cascade]);
                     }
                     if (has(waterShapeUniform)) {
                         Texture shape = ocean.displacement();
@@ -441,6 +447,13 @@ final class GpuTerrain implements Disposable {
                     if (foliage != null) { target.set(id, foliage.value); }
                 }
             });
+            result.register("u_impostorLift", new BaseShader.LocalSetter() {
+                @Override
+                public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                    Impostor impostor = attributes.get(Impostor.class, Impostor.TYPE);
+                    if (impostor != null) { target.set(id, impostor.value); }
+                }
+            });
             result.register("u_sculptTiles", new BaseShader.LocalSetter() {
                 @Override
                 public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
@@ -500,7 +513,14 @@ final class GpuTerrain implements Disposable {
           GpuTreeInstances.depthProvider(new DepthShader.Config(null, GpuShaderSource.read("shadow-depth.frag")))),
           new GpuOpaqueSorter());
 
-    void shadersChanged() { staticShadowValid = false; shadowDirty = true; }
+    void shadersChanged() { refreshShadows(); }
+
+    /**
+     * Redraw the shadow map at the next pass, as terrain, light and shader changes do. Tree, scatter and building
+     * level changes do not: the map keeps the previous level's silhouette, which differs by about a texel, until
+     * the camera movement that changed the level refits the shadow.
+     */
+    void refreshShadows() { staticShadowValid = false; shadowDirty = true; }
 
     record ShadingDetail(float ripple, float rain) { }
 
@@ -597,6 +617,12 @@ final class GpuTerrain implements Disposable {
     /** Allocated only for gameplay casters. Reuses the unchanged terrain depth when units move. */
     private FrameBuffer staticShadow;
     private boolean staticShadowValid;
+    // The fit that covers the whole board (views crossing the horizon or below the highest terrain) is the same
+    // every time a tilt returns to it and the costliest to draw: its terrain shadow is kept and copied back.
+    private FrameBuffer boardShadow;
+    private boolean boardShadowValid;
+    private final OrthographicCamera boardShadowFit = new OrthographicCamera();
+    private boolean shadowBoardWide;
     private boolean shadowDirty;
     private float clock;
     private long shadingPass;
@@ -804,6 +830,19 @@ final class GpuTerrain implements Disposable {
         public Foliage copy() { return new Foliage(value); }
     }
 
+    /**
+     * Impostor cards and their plant's crown radius in model units. A card stands in the middle of its crown, so its
+     * shadow is looked up a crown radius toward the light: its own cards and crown cannot shade it, other casters can.
+     */
+    private static final class Impostor extends FloatAttribute {
+        static final long TYPE = register("boardImpostor");
+
+        Impostor(float radius) { super(TYPE, radius); }
+
+        @Override
+        public Impostor copy() { return new Impostor(value); }
+    }
+
     /** Marks a tree model's materials for the foliage shader, once; instances copy the marks. */
     private static Model foliage(Model model) {
         for (Material material : model.materials) {
@@ -812,9 +851,12 @@ final class GpuTerrain implements Disposable {
                 material.set(new Foliage(material.id.equals("snow") ? 2 : solid ? 0 : 1));
             }
             // The impostor cards are cutouts: their texels outside the plant discard in every pass, shadows included.
+            // They draw as opaque (unblended, sorted with the solid trees), so they too hide the ground beneath first.
             if (material.id.equals("impostor")) {
-                material.set(new BlendingAttribute(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA, 1),
-                      new FloatAttribute(FloatAttribute.AlphaTest, .5f));
+                BoundingBox bounds = model.calculateBoundingBox(new BoundingBox());
+                material.set(new BlendingAttribute(false, GL20.GL_ONE, GL20.GL_ZERO, 1),
+                      new FloatAttribute(FloatAttribute.AlphaTest, .5f),
+                      new Impostor(Math.max(bounds.getWidth(), bounds.getHeight()) / 2));
             }
         }
         return model;
@@ -1227,11 +1269,33 @@ final class GpuTerrain implements Disposable {
         if (detailJob != null && detailJob.rebuilding()) { jobs.add(detailJob); }
         if (jobs.isEmpty()) { return List.of(new TerrainLoadProgress.Status(0, 0, rebuild.progress.snapshot())); }
         BoardScene scene = rebuild.request.scene();
-        int sections = ((scene.width() + CHUNK_SIZE - 1) / CHUNK_SIZE)
-              * ((scene.height() + CHUNK_SIZE - 1) / CHUNK_SIZE);
+        int columns = (scene.width() + CHUNK_SIZE - 1) / CHUNK_SIZE;
+        int rows = (scene.height() + CHUNK_SIZE - 1) / CHUNK_SIZE;
         return jobs.stream().filter(job -> job.generation() == requested.generation())
-              .sorted(Comparator.comparingInt(DetailJob::index))
-              .map(job -> new TerrainLoadProgress.Status(job.index() + 1, sections, job.progress().snapshot())).toList();
+              .map(job -> new TerrainLoadProgress.Status(TerrainLoadProgress.displayIndex(job.index(), columns, rows) + 1,
+                    columns * rows, job.progress().snapshot()))
+              .sorted(Comparator.comparingInt(TerrainLoadProgress.Status::section)).toList();
+    }
+
+    /** Presentation only: derive cell colors from the current request's existing chunk ownership. */
+    TerrainLoadProgress.Sections buildSections() {
+        BoardScene scene = requested == null ? coverScene : requested.scene();
+        if (scene == null) { return TerrainLoadProgress.Sections.EMPTY; }
+        int columns = (scene.width() + CHUNK_SIZE - 1) / CHUNK_SIZE;
+        int rows = (scene.height() + CHUNK_SIZE - 1) / CHUNK_SIZE;
+        boolean current = requested != null && rebuild != null
+              && rebuild.request.generation() == requested.generation() && rebuild.plan != null;
+        List<TerrainLoadProgress.SectionState> states = new ArrayList<>(columns * rows);
+        for (int index = 0; index < columns * rows; index++) {
+            var state = TerrainLoadProgress.SectionState.WAITING;
+            if (requested == null || current && !rebuild.remaining.contains(index)) {
+                state = TerrainLoadProgress.SectionState.READY;
+            } else if (current && rebuild.started.contains(index)) {
+                state = TerrainLoadProgress.SectionState.LOADING;
+            }
+            states.add(state);
+        }
+        return new TerrainLoadProgress.Sections(columns, rows, states);
     }
 
     /** A different board must not remain selectable while its replacement is being prepared. */
@@ -1449,6 +1513,17 @@ final class GpuTerrain implements Disposable {
         return TerrainLod.select(hexPixels(camera, bounds), null);
     }
 
+    /**
+     * The level an installed chunk builds next for its projected size. Coarsening goes straight to its level;
+     * refinement to full detail passes through medium detail when the chunk is coarser than that, because medium
+     * detail builds in a fraction of the time and already carries the grass that full detail shows, so a view that
+     * closes in fast sees its blades long before the full ground lands.
+     */
+    private static TerrainLod nextDetail(float pixels, TerrainLod current) {
+        TerrainLod lod = TerrainLod.select(pixels, current);
+        return lod == TerrainLod.FULL && current.ordinal() > TerrainLod.MEDIUM.ordinal() ? TerrainLod.MEDIUM : lod;
+    }
+
     private static float hexPixels(Camera camera, BoundingBox bounds) {
         if (camera.projection.val[Matrix4.M33] != 0) { return BoardGeometry.width() * BoardCamera.pixelsPerUnit(camera); }
         // Nearest possible depth: every point of a perspective chunk receives at least the required detail.
@@ -1489,7 +1564,7 @@ final class GpuTerrain implements Disposable {
             if (!job.rebuilding()) {
                 valid &= requested == null && job.source() == chunks.get(job.index())
                       && (camera == null || job.settings().call(
-                            () -> TerrainLod.select(hexPixels(camera, job.source().bounds), job.source().lod)) == job.lod());
+                            () -> nextDetail(hexPixels(camera, job.source().bounds), job.source().lod)) == job.lod());
             }
             if (valid) {
                 try (TerrainSettings.Scope ignored = TerrainSettings.use(job.settings())) {
@@ -1595,14 +1670,14 @@ final class GpuTerrain implements Disposable {
                 Chunk chunk = chunks.get(i);
                 if (!camera.frustum.boundsInFrustum(chunk.bounds)) { continue; }
                 float pixels = hexPixels(camera, chunk.bounds);
-                TerrainLod lod = TerrainLod.select(pixels, chunk.lod);
+                TerrainLod lod = nextDetail(pixels, chunk.lod);
                 if (lod == chunk.lod) { continue; }
                 float score = lod.ordinal() < chunk.lod.ordinal() ? pixels : -pixels;
                 if (score > priority) { priority = score; candidate = i; }
             }
             if (candidate >= 0) {
                 Chunk source = chunks.get(candidate);
-                TerrainLod lod = TerrainLod.select(hexPixels(camera, source.bounds), source.lod);
+                TerrainLod lod = nextDetail(hexPixels(camera, source.bounds), source.lod);
                 Chunk cached = detailCache.get(candidate);
                 if (cached != null && cached.lod == lod) {
                     detailCache.remove(candidate);
@@ -1620,16 +1695,19 @@ final class GpuTerrain implements Disposable {
     private void queueChunks(Camera camera) {
         try (TerrainSettings.Scope ignored = TerrainSettings.use(rebuild.request.settings())) {
             BoardScene snapshot = rebuild.request.scene();
+            int columns = (snapshot.width() + CHUNK_SIZE - 1) / CHUNK_SIZE;
+            int rows = (snapshot.height() + CHUNK_SIZE - 1) / CHUNK_SIZE;
+            boolean loading = !ready(snapshot);
             while (rebuild.pending.size() + (detailJob == null ? 0 : 1) < 4) {
-                int rows = (snapshot.height() + CHUNK_SIZE - 1) / CHUNK_SIZE;
                 int candidate = -1;
                 float priority = -Float.MAX_VALUE;
                 for (int index : rebuild.remaining) {
                     if (rebuild.started.contains(index)) { continue; }
                     float x = BoardGeometry.centerX(new Coords(index / rows * CHUNK_SIZE, 0));
                     float y = BoardGeometry.centerY(new Coords(0, index % rows * CHUNK_SIZE));
-                    float score = camera == null ? -index : -camera.position.dst2(x, y, 0);
-                    if (camera != null && camera.frustum.sphereInFrustum(x, y, 0,
+                    float score = loading ? -TerrainLoadProgress.displayIndex(index, columns, rows)
+                          : camera == null ? -index : -camera.position.dst2(x, y, 0);
+                    if (!loading && camera != null && camera.frustum.sphereInFrustum(x, y, 0,
                           CHUNK_SIZE * BoardGeometry.width())) { score += 1e20f; }
                     if (score > priority) { priority = score; candidate = index; }
                 }
@@ -3516,18 +3594,28 @@ final class GpuTerrain implements Disposable {
         return result;
     }
 
-    /** Roofs, courtyard openings and walls use the authored mesh, not a bounding-box proxy. */
+    /** Pointer picks pass through foliage; roofs, courtyard openings and walls retain their authored mesh. */
     Coords pick(BoardScene scene, Ray ray) {
-        BoardGeometry.Hit hit = hit(scene, ray);
+        BoardGeometry.Hit hit = selectionHit(scene, ray);
         return hit == null ? null : hit.coords();
     }
 
-    BoardGeometry.Hit hit(BoardScene scene, Ray ray) {
-        if (!ready(scene)) { return null; }
-        return installedSettings.call(() -> hitInstalled(presentation(scene), ray));
+    /** Hover and clicks use the board beneath tree/shrub canopies, including when they overhang another hex. */
+    BoardGeometry.Hit selectionHit(BoardScene scene, Ray ray) {
+        return hit(scene, ray, false);
     }
 
-    private BoardGeometry.Hit hitInstalled(BoardScene scene, Ray ray) {
+    /** Physical hits for attack effects still include foliage. */
+    BoardGeometry.Hit hit(BoardScene scene, Ray ray) {
+        return hit(scene, ray, true);
+    }
+
+    private BoardGeometry.Hit hit(BoardScene scene, Ray ray, boolean includeFoliage) {
+        if (!ready(scene)) { return null; }
+        return installedSettings.call(() -> hitInstalled(presentation(scene), ray, includeFoliage));
+    }
+
+    private BoardGeometry.Hit hitInstalled(BoardScene scene, Ray ray, boolean includeFoliage) {
         // The caller has selected the installed coordinate system. A source snapshot that update has not yet
         // received still uses the authoritative-snapshot fallback, as before.
         boolean finished = tiles == scene.tiles();
@@ -3557,7 +3645,7 @@ final class GpuTerrain implements Disposable {
                 }
             }
             for (Prop prop : chunk.props) {
-                if (flatTrees && prop.tree()) { continue; }
+                if (prop.tree() && (flatTrees || !includeFoliage)) { continue; }
                 if (!Intersector.intersectRayBoundsFast(ray, prop.bounds())) {
                     continue;
                 }
@@ -3675,8 +3763,10 @@ final class GpuTerrain implements Disposable {
                 trees.add(chunk.sharedProps);
             }
         }
-        if (!drawTactical) { propBatch.render(batch, environment); terrainPages.render(batch, environment); }
+        // Trees first: the opaque sorter keeps this order of shaders, so the ground hidden under crowns fails the depth
+        // test instead of being shaded and painted over.
         batch.render(trees, environment);
+        if (!drawTactical) { propBatch.render(batch, environment); terrainPages.render(batch, environment); }
         batch.end();
         if (!drawTactical) {
             batch.begin(camera);
@@ -3745,7 +3835,10 @@ final class GpuTerrain implements Disposable {
         }
         batch.end();
         if (!hasWater) {
-            // Without open water there is no field atlas or depth prepass, but lake ice still draws.
+            // Without open water there is no field atlas or depth prepass, but lake ice still draws. The pages must
+            // still take this frame's sources: a page's mesh otherwise keeps the chunks of the last wet frame, whose
+            // water models a partial rebuild has already disposed.
+            waterPages.prepare();
             batch.begin(camera);
             waterPages.render(batch, environment, false);
             batch.end();
@@ -3868,9 +3961,13 @@ final class GpuTerrain implements Disposable {
     private void renderDepth(Camera camera, List<ModelInstance> units, ModelBatch pass, boolean shadows) {
         pass.begin(camera);
         trees.begin(shadows ? GpuTreeInstances.Pass.SHADOW : GpuTreeInstances.Pass.DEPTH);
+        // A shadow map whose texel spans half a metre or more cannot resolve leaves: its trees cast the shadow of
+        // their second decimated level at most. Alpha-tested foliage drawn into such a map at the near level was
+        // fragment-bound, 440-510 ms per refit on an Intel Iris Xe over MesaCity 1's woods.
+        int coarsest = shadows && camera.viewportWidth / SHADOW_RESOLUTION >= BoardRelief.metres(.5f) ? 2 : 0;
         for (Chunk chunk : chunks) {
             boolean visible = camera.frustum.boundsInFrustum(chunk.bounds);
-            if (!flatTrees) { trees.add(chunk.stand, chunk.treeLod, visible); }
+            if (!flatTrees) { trees.add(chunk.stand, Math.max(chunk.treeLod, coarsest), visible); }
             if (visible) {
                 pass.render(chunk.depthTerrain);
                 if (chunk.scatterVisible) {
@@ -3915,7 +4012,15 @@ final class GpuTerrain implements Disposable {
         }
         BoundingBox bounds = new BoundingBox(shadowBounds);
         for (ModelInstance unit : units) { bounds.ext(unitBounds(unit)); }
-        fitShadowCamera(view, shadowFit, bounds, shadow.direction);
+        BoundingBox receivers = view == null ? bounds : BoardCamera.viewportBounds(view, bounds);
+        // A view that crosses the horizon or sits below the highest terrain needs most of the board, and a tilt
+        // there changes the required fit every frame; each refit redrew every chunk and tree (200-430 ms on an
+        // Intel Iris Xe on MesaCity 1). Views needing most of the board share the board-wide fit, whose map is
+        // cached, and keep it until they need well under half of it, so a tilt cannot alternate between fits.
+        float share = receivers.getWidth() * receivers.getHeight() / Math.max(1e-6f, bounds.getWidth() * bounds.getHeight());
+        boolean boardWide = share > (shadowBoardWide ? .4f : .7f);
+        shadowBoardWide = boardWide;
+        fitShadowToReceivers(boardWide ? bounds : receivers, shadowFit, bounds, shadow.direction);
         shadowViewPresent = view != null;
         if (view != null) { shadowView.set(view.combined); }
         Camera lightCamera = shadow.getCamera();
@@ -3942,43 +4047,85 @@ final class GpuTerrain implements Disposable {
             shadowTransforms.get(index).set(unit.transform);
             shadowPoses.add(shadowPose(unit));
         }
+        int buffers = GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT;
+        if (shadowDirty) { boardShadowValid = false; }
+        boolean boardShadowCurrent = boardWide && boardShadowValid && sameFit(boardShadowFit, lightCamera);
         if (shadowDirty || projectionChanged || units.isEmpty() && !staticShadowValid) {
             // Coverage and terrain/light changes pay only the full pass. Populate the cache lazily when
             // units move in a stable view, rather than copying an invalidated cache on every camera frame.
             // Preview/editor maps retain just the original framebuffer, with no copy or extra allocation.
             staticShadowValid = false;
-            shadow.begin();
-            renderDepth(lightCamera, units, depthBatch, true);
-            shadow.end();
-        } else {
-            if (staticShadow == null) {
-                staticShadow = new FrameBuffer(Pixmap.Format.RGBA8888, SHADOW_RESOLUTION, SHADOW_RESOLUTION, true);
-            }
-            int buffers = GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT;
-            if (!staticShadowValid) {
-                shadow.begin();
-                renderDepth(lightCamera, List.of(), depthBatch, true);
-                shadow.end();
-                shadow.getFrameBuffer().transfer(staticShadow, buffers);
-                staticShadowValid = true;
+            if (boardShadowCurrent) {
+                // A tilt that crosses the horizon or drops below the highest terrain returns to the board-wide fit
+                // every time; drawing every chunk and tree again took 220-530 ms on an Intel Iris Xe, a copy a few.
+                boardShadow.transfer(shadow.getFrameBuffer(), buffers);
+                renderUnitShadows(lightCamera, units);
             } else {
-                // Copy both packed shader depth and the depth attachment; moved units must erase their old shadow
-                // and remain occluded by terrain. Reusing just the color attachment would produce stale depth.
-                staticShadow.transfer(shadow.getFrameBuffer(), buffers);
+                shadow.begin();
+                renderDepth(lightCamera, boardWide ? List.of() : units, depthBatch, true);
+                shadow.end();
+                if (boardWide) {
+                    if (boardShadow == null) {
+                        boardShadow = new FrameBuffer(Pixmap.Format.RGBA8888, SHADOW_RESOLUTION, SHADOW_RESOLUTION, true);
+                    }
+                    shadow.getFrameBuffer().transfer(boardShadow, buffers);
+                    remember(boardShadowFit, lightCamera);
+                    boardShadowValid = true;
+                    renderUnitShadows(lightCamera, units);
+                }
             }
-            if (!units.isEmpty()) {
-                shadow.getFrameBuffer().begin();
-                Gdx.gl.glEnable(GL20.GL_SCISSOR_TEST);
-                Gdx.gl.glScissor(1, 1, SHADOW_RESOLUTION - 2, SHADOW_RESOLUTION - 2);
-                depthBatch.begin(lightCamera);
-                renderDepthUnits(lightCamera, units, depthBatch);
-                depthBatch.end();
-                Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
-                shadow.getFrameBuffer().end();
+        } else {
+            if (boardShadowCurrent) {
+                boardShadow.transfer(shadow.getFrameBuffer(), buffers);
+            } else {
+                if (staticShadow == null) {
+                    staticShadow = new FrameBuffer(Pixmap.Format.RGBA8888, SHADOW_RESOLUTION, SHADOW_RESOLUTION, true);
+                }
+                if (!staticShadowValid) {
+                    shadow.begin();
+                    renderDepth(lightCamera, List.of(), depthBatch, true);
+                    shadow.end();
+                    shadow.getFrameBuffer().transfer(staticShadow, buffers);
+                    staticShadowValid = true;
+                } else {
+                    // Copy both packed shader depth and the depth attachment; moved units must erase their old
+                    // shadow and remain occluded by terrain. Reusing just the color attachment would produce stale
+                    // depth.
+                    staticShadow.transfer(shadow.getFrameBuffer(), buffers);
+                }
             }
+            renderUnitShadows(lightCamera, units);
         }
         shadowProjectionValid = true;
         shadowDirty = false;
+    }
+
+    /** The units' shadows over a terrain shadow already in the light's framebuffer. */
+    private void renderUnitShadows(Camera lightCamera, List<ModelInstance> units) {
+        if (units.isEmpty()) { return; }
+        shadow.getFrameBuffer().begin();
+        Gdx.gl.glEnable(GL20.GL_SCISSOR_TEST);
+        Gdx.gl.glScissor(1, 1, SHADOW_RESOLUTION - 2, SHADOW_RESOLUTION - 2);
+        depthBatch.begin(lightCamera);
+        renderDepthUnits(lightCamera, units, depthBatch);
+        depthBatch.end();
+        Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
+        shadow.getFrameBuffer().end();
+    }
+
+    private static boolean sameFit(Camera a, Camera b) {
+        return a.position.equals(b.position) && a.direction.equals(b.direction) && a.up.equals(b.up)
+              && a.viewportWidth == b.viewportWidth && a.viewportHeight == b.viewportHeight && a.near == b.near && a.far == b.far;
+    }
+
+    private static void remember(Camera target, Camera source) {
+        target.position.set(source.position);
+        target.direction.set(source.direction);
+        target.up.set(source.up);
+        target.viewportWidth = source.viewportWidth;
+        target.viewportHeight = source.viewportHeight;
+        target.near = source.near;
+        target.far = source.far;
     }
 
     /** All passes use the viewing camera's detail selection; scatter culling never rebuilds a mesh. */
@@ -3999,26 +4146,25 @@ final class GpuTerrain implements Disposable {
                 pixelsPerUnit = BoardCamera.pixelsPerUnit(camera, nearest);
             }
             float scatterPixels = chunk.scatterDiameter * pixelsPerUnit;
-            boolean visible = scatterPixels >= (chunk.scatterVisible ? 2 : 3);
-            if (visible != chunk.scatterVisible) {
-                chunk.scatterVisible = visible;
-                shadowDirty = true;
-            }
+            // Scatter this small casts a shadow under a texel: its appearance waits for the next refit, like trees'.
+            chunk.scatterVisible = scatterPixels >= (chunk.scatterVisible ? 2 : 3);
             boolean buildingsChanged = false;
             for (Prop prop : chunk.cutaways) { buildingsChanged |= prop.buildingDetail(pixelsPerUnit); }
             if (buildingsChanged) {
+                // The rebuilt caches serve the next shadow refit; a building's outline is the same at every level,
+                // so the map is not redrawn for the change alone (200-400 ms per redraw on an Intel Iris Xe when
+                // the fit spans MesaCity 1, and its 233 building hexes change level throughout a tilt).
                 GpuPropBatch.disposeMeshes(chunk.shadowPropRenderables);
                 chunk.shadowPropRenderables.clear();
                 chunk.cacheProps();
-                shadowDirty = true;
             }
             // Largest tree wins: smaller neighbors may retain extra detail, never lose it early.
             if (flatTrees) { continue; }
-            int next = TreeLod.level(chunk.treeDiameter * pixelsPerUnit, chunk.treeLod);
-            if (next != chunk.treeLod) {
-                chunk.treeLod = next;
-                shadowDirty = true;
-            }
+            // A level change alone does not redraw the shadow map: the next refit, which the camera movement that
+            // changed the level brings within a few frames, draws the new level, and until then the map holds the
+            // previous level's silhouette, which differs by less than a texel. Redrawing on every change drew every
+            // chunk and tree again, 220-530 ms per change on an Intel Iris Xe on MesaCity 1 while orbiting.
+            chunk.treeLod = TreeLod.level(chunk.treeDiameter * pixelsPerUnit, chunk.treeLod);
         }
     }
 
@@ -4040,7 +4186,11 @@ final class GpuTerrain implements Disposable {
 
     /** Focus texels on visible receivers, retaining the full light depth for offscreen shadow casters. */
     static void fitShadowCamera(Camera view, Camera target, BoundingBox bounds, Vector3 direction) {
-        BoundingBox receivers = view == null ? bounds : BoardCamera.viewportBounds(view, bounds);
+        fitShadowToReceivers(view == null ? bounds : BoardCamera.viewportBounds(view, bounds), target, bounds, direction);
+    }
+
+    /** Focus texels on these receivers, retaining the full light depth for offscreen shadow casters. */
+    static void fitShadowToReceivers(BoundingBox receivers, Camera target, BoundingBox bounds, Vector3 direction) {
         target.direction.set(direction).nor();
         Vector3 right = new Vector3(target.direction)
               .crs(Math.abs(target.direction.z) > 0.99f ? Vector3.Y : Vector3.Z).nor();
@@ -4139,6 +4289,7 @@ final class GpuTerrain implements Disposable {
         batch.dispose();
         depthBatch.dispose();
         if (staticShadow != null) { staticShadow.dispose(); }
+        if (boardShadow != null) { boardShadow.dispose(); }
         if (shadow != null) {
             shadow.dispose();
         }

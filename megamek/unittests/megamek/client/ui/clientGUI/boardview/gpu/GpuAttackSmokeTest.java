@@ -86,6 +86,8 @@ class GpuAttackSmokeTest {
                         when(gui.getUnitDisplayDialog()).thenReturn(mock(UnitDisplayDialog.class));
                         BoardClientState view = spy(fixture.view);
                         doReturn(gui).when(view).getClientgui();
+                        // Board clicks reach the phase display only on the client's current board.
+                        doReturn(java.util.Optional.of(view)).when(gui).getCurrentBoardState();
                         display.set(new UnitDisplayPanel(gui, null));
                         when(gui.getUnitDisplay()).thenReturn(display.get());
                         firing.set(new FiringDisplay(gui));
@@ -115,6 +117,7 @@ class GpuAttackSmokeTest {
                     @Override
                     public void render() {
                         super.render();
+                        if (GpuBoardTestUi.loading(this)) { return; }
                         try {
                             tick++;
                             if (tick == 1) {

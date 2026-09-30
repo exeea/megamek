@@ -182,14 +182,17 @@ class GpuModularBuildingSmokeTest {
             checkPicking(terrain, scene);
             camera.zoom(8);
             for (int i = 0; i < 3; i++) { frame.render(terrain, camera, scene); }
+            GpuReviewFrame.save(new File(output, "distant-shells.png"));
             checkPicking(terrain, scene);
-            camera.zoom(.125f);
             Vector3 occupant = BoardGeometry.center(new Coords(4, 4), 1);
             Model marker = new com.badlogic.gdx.graphics.g3d.utils.ModelBuilder().createBox(12, 12, 12,
                   new com.badlogic.gdx.graphics.g3d.Material(), com.badlogic.gdx.graphics.VertexAttributes.Usage.Position
                         | com.badlogic.gdx.graphics.VertexAttributes.Usage.Normal);
             try {
                 terrain.animate(0, List.of(new ModelInstance(marker, occupant)), .15f);
+                for (int i = 0; i < 3; i++) { frame.render(terrain, camera, scene); }
+                GpuReviewFrame.save(new File(output, "distant-cutaway.png"));
+                camera.zoom(.125f);
                 for (int i = 0; i < 3; i++) { frame.render(terrain, camera, scene); }
                 GpuReviewFrame.save(new File(output, "interior-cutaway.png"));
             } finally { marker.dispose(); }

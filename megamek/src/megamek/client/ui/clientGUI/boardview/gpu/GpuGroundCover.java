@@ -60,25 +60,24 @@ final class GpuGroundCover implements Disposable {
     }
 
     /**
-     * Deterministic roots on the hex's finished top triangles, filtered by the existing surface and road rules, as
-     * (x, y, z, rank) in rank order. Density selects a prefix by rank, so zooming never moves an existing blade.
+     * Deterministic roots over the hex, filtered by the existing surface and road rules, as (x, y, z, rank) in rank
+     * order. Candidates are drawn in the hex's plane and dropped onto the finished ground, so a root keeps its place
+     * and rank at every terrain detail level and only its height follows the installed ground: a medium-detail
+     * chunk's grass carries over to its full-detail replacement without a blade moving. Density selects a prefix by
+     * rank, so zooming never moves an existing blade either.
      */
     static FloatArray plant(BoardScene scene, BoardScene.Tile tile, BoardTacticalGeometry.Surface surface) {
         List<BoardSurface.Face> ground = new ArrayList<>(surface.top().stream()
               .filter(face -> face.finish() == BoardSurface.Finish.TOP).toList());
         if (BoardGeometry.tuning().stepsBetweenTops()) { ground.addAll(surface.slopes()); }
         ground.removeIf(face -> new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor().z <= .7f);
-        float[] areas = new float[ground.size()];
-        float total = 0;
-        for (int i = 0; i < ground.size(); i++) {
-            var face = ground.get(i);
-            total += Math.abs((face.b().x - face.a().x) * (face.c().y - face.a().y)
-                  - (face.c().x - face.a().x) * (face.b().y - face.a().y));
-            areas[i] = total;
-        }
         var roots = new FloatArray();
-        if (total <= 0) { return roots; }
-        var random = new Random(tile.coords().getX() * 0x9E3779B97F4A7C15L ^ tile.coords().getY() * 0xC2B2AE3D27D4EB4FL);
+        if (ground.isEmpty()) { return roots; }
+        var support = new GpuBiomeVegetation.Support(ground);
+        Coords coords = tile.coords();
+        float centerX = BoardGeometry.centerX(coords), centerY = BoardGeometry.centerY(coords);
+        float halfWidth = BoardGeometry.width() / 2, halfHeight = BoardGeometry.height() / 2;
+        var random = new Random(coords.getX() * 0x9E3779B97F4A7C15L ^ coords.getY() * 0xC2B2AE3D27D4EB4FL);
         boolean boundary = BoardSurfaceBlend.boundary(scene, tile);
         BoardRoad road = BoardRoad.rendered(tile) ? BoardRoad.of(scene, tile) : null;
         float sink = BoardGeometry.width() * .001f;
@@ -94,15 +93,19 @@ final class GpuGroundCover implements Disposable {
         }
         float iceReach = BoardRelief.metres(ICE_BORDER_REACH);
         for (int rank = 0; rank < ROOTS_PER_HEX; rank++) {
-            int index = Arrays.binarySearch(areas, random.nextFloat() * total);
-            var face = ground.get(Math.min(ground.size() - 1, index < 0 ? -index - 1 : index));
-            float a = random.nextFloat(), b = random.nextFloat();
-            if (a + b > 1) { a = 1 - a; b = 1 - b; }
-            float x = face.a().x + (face.b().x - face.a().x) * a + (face.c().x - face.a().x) * b;
-            float y = face.a().y + (face.b().y - face.a().y) * a + (face.c().y - face.a().y) * b;
-            float z = face.a().z + (face.b().z - face.a().z) * a + (face.c().z - face.a().z) * b;
-            if (road != null && road.distance((x - BoardGeometry.centerX(tile.coords())) / BoardGeometry.hexScale(),
-                  (y - BoardGeometry.centerY(tile.coords())) / BoardGeometry.hexScale()) < BoardRoad.SHOULDER + 1) { continue; }
+            // The same random sequence at every detail level: every candidate draws its place and its growth chance
+            // before any ground-dependent rejection.
+            float x, y;
+            do {
+                x = centerX + (random.nextFloat() * 2 - 1) * halfWidth;
+                y = centerY + (random.nextFloat() * 2 - 1) * halfHeight;
+            } while (!BoardGeometry.contains(coords, x, y));
+            float chance = random.nextFloat();
+            var face = support.face(x, y);
+            if (face == null) { continue; }
+            float z = face.height(x, y);
+            if (road != null && road.distance((x - centerX) / BoardGeometry.hexScale(),
+                  (y - centerY) / BoardGeometry.hexScale()) < BoardRoad.SHOULDER + 1) { continue; }
             boolean iced = false;
             for (Vector3[] edge : iceEdges) {
                 float ex = edge[1].x - edge[0].x, ey = edge[1].y - edge[0].y;
@@ -112,7 +115,7 @@ final class GpuGroundCover implements Disposable {
             if (iced) { continue; }
             float grass = boundary ? BoardSurfaceBlend.sample(scene, tile, x, y, z).grass()
                   : tile.surface() == BoardScene.Surface.GRASS ? 1 : 0;
-            if (random.nextFloat() <= grass * BoardRelief.smooth((grass - .55f) / .35f)) {
+            if (chance <= grass * BoardRelief.smooth((grass - .55f) / .35f)) {
                 roots.addAll(x, y, z - sink, rank);
             }
         }
@@ -258,6 +261,11 @@ final class GpuGroundCover implements Disposable {
     private record View(float[] projectionView, float viewportPixels, List<BoardScene.Tile> candidates,
           Map<Coords, FloatArray> sources, List<ModelInstance> instances) { }
     private View view;
+    /** How long blades take to grow on a hex whose roots arrived while it was already on screen without any. */
+    private static final long GROWTH_NANOS = 500_000_000L;
+    // Roots that arrived late are grown in from their arrival time rather than appearing at once. Roots a chunk
+    // brought while off screen are not late: the hex shows them complete when it comes into view.
+    private final Map<Coords, Long> arrivals = new HashMap<>();
 
     static String vertex(String source) {
         String meadow = "uniform sampler2D u_rainNoise;\n"
@@ -295,7 +303,9 @@ final class GpuGroundCover implements Disposable {
         }
         float viewportPixels = Gdx.graphics == null ? camera.viewportHeight
               : camera.viewportHeight * Gdx.graphics.getBackBufferHeight() / Math.max(1f, Gdx.graphics.getHeight());
-        if (view != null && view.viewportPixels() == viewportPixels
+        long now = System.nanoTime();
+        arrivals.values().removeIf(arrived -> now - arrived >= GROWTH_NANOS);
+        if (view != null && arrivals.isEmpty() && view.viewportPixels() == viewportPixels
               && Arrays.equals(view.projectionView(), camera.combined.val) && view.candidates().equals(candidates)) {
             boolean current = true;
             for (var entry : view.sources().entrySet()) {
@@ -317,13 +327,21 @@ final class GpuGroundCover implements Disposable {
             // Every candidate stays in its chunk's buffer, in view or not, so panning uploads nothing. Hexes without
             // installed roots are remembered too: their chunk's installation must refresh a stationary view.
             FloatArray roots = grass(plants.apply(tile.coords()));
-            if (inView) { sources.put(tile.coords(), roots); }
+            if (inView) {
+                if (roots != null && view != null && view.sources().containsKey(tile.coords())
+                      && view.sources().get(tile.coords()) == null) {
+                    arrivals.put(tile.coords(), now);
+                }
+                sources.put(tile.coords(), roots);
+            }
             if (roots == null) { continue; }
             // Enough roots for the hex's nearest edge; the shader evaluates density again at each actual root.
             nearest.set(center).mulAdd(camera.direction, -radius);
             float pixels = inView ? BoardGeometry.width() * BoardCamera.pixelsPerUnit(camera, nearest) : 0;
+            Long arrived = arrivals.get(tile.coords());
+            float growth = arrived == null ? 1 : BoardRelief.smooth((now - arrived) / (float) GROWTH_NANOS);
             chunk.roots.add(roots);
-            chunk.targets.add((int) Math.ceil(ROOTS_PER_HEX * density(pixels)));
+            chunk.targets.add((int) Math.ceil(ROOTS_PER_HEX * density(pixels) * growth));
             chunk.nearPixels = Math.max(chunk.nearPixels, pixels);
         }
         List<ModelInstance> result = new ArrayList<>();

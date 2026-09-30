@@ -26,6 +26,43 @@ import megamek.client.ui.util.KeyCommandBind;
 final class GpuBoardTestUi {
     private GpuBoardTestUi() { }
 
+    /**
+     * Whether the battle view still shows its loading screen. The board appears only once its terrain is ready, so
+     * scripted frames count from the first presented frame; a test's own tick counter must skip the loading frames.
+     */
+    static boolean loading(GpuBattleView view) {
+        try {
+            var field = GpuBattleView.class.getDeclaredField("loadingStage");
+            field.setAccessible(true);
+            return field.get(view) != null;
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException(error);
+        }
+    }
+
+    /**
+     * Render until the board is presented and its terrain has settled: the loading screen has gone and no build or
+     * detail job is pending, so a manually driven view inspects the outcome of its edits, not the frame before it.
+     */
+    static void present(GpuBattleView view) {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(120);
+        while (loading(view) || busy(view)) {
+            assertTrue(System.nanoTime() < deadline, "Terrain loading must finish");
+            view.render();
+        }
+    }
+
+    private static boolean busy(GpuBattleView view) {
+        try {
+            var field = GpuBattleView.class.getDeclaredField("terrain");
+            field.setAccessible(true);
+            GpuTerrain terrain = (GpuTerrain) field.get(view);
+            return terrain != null && terrain.busy();
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException(error);
+        }
+    }
+
     static Stage stage() {
         return (Stage) ((InputMultiplexer) Gdx.input.getInputProcessor()).getProcessors().first();
     }

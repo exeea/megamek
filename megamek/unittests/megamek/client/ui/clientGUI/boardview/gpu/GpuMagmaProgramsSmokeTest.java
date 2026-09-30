@@ -121,8 +121,8 @@ class GpuMagmaProgramsSmokeTest {
             for (String file : List.of("ocean-water-finish.frag", "ocean-lava-finish.frag", "ocean-finish.glsl")) {
                 var waterBefore = (ShaderProgram) field.get(water);
                 var lavaBefore = (ShaderProgram) field.get(lava);
-                assertTrue(waterBefore.getUniformLocation("u_previous") >= 0, "Water needs foam history");
-                assertEquals(-1, lavaBefore.getUniformLocation("u_previous"), "Lava has no foam history sampler");
+                assertTrue(waterBefore.getUniformLocation("u_previous0") >= 0, "Water needs foam history");
+                assertEquals(-1, lavaBefore.getUniformLocation("u_previous0"), "Lava has no foam history sampler");
                 assertEquals(-1, lavaBefore.getUniformLocation("u_lava"), "No runtime mode branch");
                 var changed = manager.apply(Map.of(file, GpuShaderSource.readDisk(file) + "\n// reload finish\n"));
                 assertTrue(changed.success(), changed.message());

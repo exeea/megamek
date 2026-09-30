@@ -1087,14 +1087,8 @@ public class ClientGUI extends AbstractClientGUI
 
         showDefaultBoard(CG_DEFAULT);
         client.changePhase(GamePhase.UNKNOWN);
-        MekSummaryCache mekSummaryCache = MekSummaryCache.getInstance();
-        UnitLoadingDialog unitLoadingDialog = new UnitLoadingDialog(frame, mekSummaryCache);
-        if (!mekSummaryCache.isInitialized()) {
-            unitLoadingDialog.setVisible(true);
-        }
-        mekSelectorDialog = new MegaMekUnitSelectorDialog(this, unitLoadingDialog);
-        randomArmyDialog = new RandomArmyDialog(frame, this);
-        new Thread(mekSelectorDialog, Messages.getString("ClientGUI.mekSelectorDialog")).start();
+        // Unit tools are created on demand; constructing them here can wait for the cache on the EDT.
+        new UnitLoadingDialog(frame).showForBackgroundLoad();
         frame.setVisible(!GpuBoardWindow.isActiveFor(this));
         GUIP.addPreferenceChangeListener(this);
     }
@@ -1447,11 +1441,11 @@ public class ClientGUI extends AbstractClientGUI
                 break;
             case FILE_REFRESH_CACHE:
                 refreshUnitCache();
-                new Thread(mekSelectorDialog, Messages.getString("ClientGUI.mekSelectorDialog")).start();
+                refreshMekSelector();
                 break;
             case FILE_REBUILD_CACHE:
                 rebuildUnitCache();
-                new Thread(mekSelectorDialog, Messages.getString("ClientGUI.mekSelectorDialog")).start();
+                refreshMekSelector();
                 break;
             case VIEW_CLIENT_SETTINGS:
                 showSettings();
@@ -1816,7 +1810,19 @@ public class ClientGUI extends AbstractClientGUI
     }
 
     public MegaMekUnitSelectorDialog getMekSelectorDialog() {
+        if (mekSelectorDialog == null) {
+            UnitLoadingDialog unitLoadingDialog = new UnitLoadingDialog(frame);
+            unitLoadingDialog.setVisible(true);
+            mekSelectorDialog = new MegaMekUnitSelectorDialog(this, unitLoadingDialog);
+            refreshMekSelector();
+        }
         return mekSelectorDialog;
+    }
+
+    private void refreshMekSelector() {
+        if (mekSelectorDialog != null) {
+            new Thread(mekSelectorDialog, Messages.getString("ClientGUI.mekSelectorDialog")).start();
+        }
     }
 
     public void switchPanel(GamePhase phase) {
@@ -4099,6 +4105,10 @@ public class ClientGUI extends AbstractClientGUI
     }
 
     public RandomArmyDialog getRandomArmyDialog() {
+        if (randomArmyDialog == null) {
+            new UnitLoadingDialog(frame).setVisible(true);
+            randomArmyDialog = new RandomArmyDialog(frame, this);
+        }
         return randomArmyDialog;
     }
 

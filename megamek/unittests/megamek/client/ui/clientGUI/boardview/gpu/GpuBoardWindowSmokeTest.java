@@ -113,16 +113,29 @@ import org.lwjgl.glfw.GLFW;
 class GpuBoardWindowSmokeTest {
     private boolean boardStyle;
 
+    private static final List<String> WINDOW_BOUNDS = List.of(GUIPreferences.GPU_BOARD_POS_X, GUIPreferences.GPU_BOARD_POS_Y,
+          GUIPreferences.GPU_BOARD_SIZE_WIDTH, GUIPreferences.GPU_BOARD_SIZE_HEIGHT);
+    private final java.util.Map<String, Integer> savedBounds = new java.util.HashMap<>();
+    private boolean savedMaximized;
+
     @BeforeEach
     void saveBoardStyle() {
-        boardStyle = GUIPreferences.getInstance().getUse3DBoard();
+        var prefs = GUIPreferences.getInstance();
+        boardStyle = prefs.getUse3DBoard();
+        // The native window reopens at its last saved bounds; every case starts from the maximized default.
+        for (String key : WINDOW_BOUNDS) { savedBounds.put(key, prefs.getInt(key)); }
+        savedMaximized = prefs.getBoolean(GUIPreferences.GPU_BOARD_MAXIMIZED);
+        prefs.setValue(GUIPreferences.GPU_BOARD_MAXIMIZED, true);
     }
 
     @AfterEach
     void restoreBoardStyle() throws Exception {
         await(() -> Thread.getAllStackTraces().keySet().stream()
               .noneMatch(thread -> thread.getName().equals("MegaMek-GPU-board")));
-        GUIPreferences.getInstance().setUse3DBoard(boardStyle);
+        var prefs = GUIPreferences.getInstance();
+        prefs.setUse3DBoard(boardStyle);
+        for (String key : WINDOW_BOUNDS) { prefs.setValue(key, savedBounds.get(key)); }
+        prefs.setValue(GUIPreferences.GPU_BOARD_MAXIMIZED, savedMaximized);
     }
     private record ClientWindow(JFrame frame, CommonMenuBar menus, BoardView view, JMenuItem gpuChoice,
           UnitOverviewOverlay overview) { }
@@ -1914,6 +1927,8 @@ class GpuBoardWindowSmokeTest {
     private static void openNative(ClientWindow ui) throws Exception {
         Application previous = Gdx.app;
         onSwing(() -> {
+            // A case that restored the window to a plain size saved that; the reopened board must be maximized again.
+            GUIPreferences.getInstance().setValue(GUIPreferences.GPU_BOARD_MAXIMIZED, true);
             ui.gpuChoice().doClick(0);
             assertTrue(GpuBoardWindow.isActiveFor(ui.view().getClientgui()), "Native ownership includes startup");
             return null;

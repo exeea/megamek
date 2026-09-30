@@ -120,7 +120,10 @@ class GpuTerrainTextureBindingSmokeTest {
                     // 45 water chunks exceed libGDX's maximum 32 texture slots, even without other samplers.
                     for (int x = 0; x < 72; x++) {
                         for (int y = 0; y < 40; y++) {
-                            tiles.add(new BoardScene.Tile(new Coords(x, y), 0, 1, false, 0,
+                            // A dry border keeps the board edge free of water cuts, whose depth-only program would
+                            // otherwise be the frame's last draw instead of a water surface.
+                            boolean border = x == 0 || y == 0 || x == 71 || y == 39;
+                            tiles.add(new BoardScene.Tile(new Coords(x, y), 0, border ? -1 : 1, false, 0,
                                   BoardScene.Surface.GRASS, ground, null, null, List.of(), List.of()));
                         }
                     }
@@ -150,8 +153,11 @@ class GpuTerrainTextureBindingSmokeTest {
                         assertTexture(program, "u_rainNoise", (Texture) field(terrain, "rainNoise"));
                         Texture detail = (Texture) field(terrain, "waterDetail");
                         assertTexture(program, "u_waterDetail", detail);
-                        Texture waves = ((GpuOcean) field(terrain, "ocean")).texture();
-                        assertTexture(program, "u_waterOcean", waves == null ? detail : waves);
+                        var ocean = (GpuOcean) field(terrain, "ocean");
+                        for (int cascade = 0; cascade < GpuOcean.PATCHES.length; cascade++) {
+                            Texture waves = ocean.waves(cascade);
+                            assertTexture(program, "u_waterOcean" + cascade, waves == null ? detail : waves);
+                        }
                         checked++;
                     }
                     assertTrue(checked > 0, "Exercise an actual water shader with chunk fields");

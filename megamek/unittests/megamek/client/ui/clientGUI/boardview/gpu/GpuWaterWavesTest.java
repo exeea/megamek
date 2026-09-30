@@ -49,12 +49,23 @@ class GpuWaterWavesTest {
     }
 
     @Test
-    void concaveBanksAndRoundedSlopesKeepTheirExistingGeometry() {
+    void concaveBaysGainInteriorSamplesWithinTheirOutlineAndSlopesKeepTheirGeometry() {
         var a = new Vector3(0, 0, 0); var b = new Vector3(30, 0, 0);
         var c = new Vector3(30, 10, 0); var d = new Vector3(10, 10, 0);
         var e = new Vector3(10, 30, 0); var f = new Vector3(0, 30, 0);
         var faces = List.of(face(a, b, d), face(b, c, d), face(a, d, f), face(d, e, f));
-        for (TerrainLod lod : TerrainLod.values()) { assertSame(faces, GpuWaterWaves.faces(faces, lod)); }
+        var resampled = GpuWaterWaves.faces(faces, TerrainLod.FULL);
+        assertTrue(resampled.size() > faces.size(), "Open water in a bay needs interior samples to carry waves");
+        assertEquals(area(faces), area(resampled), .01, "No triangle may reach across the bay's missing corner");
+        var vertices = new HashSet<Vector3>();
+        for (var face : resampled) {
+            assertTrue(cross(face) > 0, "Surface triangles must face up");
+            vertices.addAll(List.of(face.a(), face.b(), face.c()));
+            float x = (face.a().x + face.b().x + face.c().x) / 3, y = (face.a().y + face.b().y + face.c().y) / 3;
+            assertFalse(x > 10 && y > 10, "A triangle filled the notch outside the bank");
+        }
+        for (Vector3 corner : List.of(a, b, c, d, e, f)) { assertTrue(vertices.contains(corner), "Outline kept: " + corner); }
+        assertSame(faces, GpuWaterWaves.faces(faces, TerrainLod.DISTANT), "Distant bays keep their canonical faces");
         c.z = 5;
         var slope = List.of(face(a, b, c));
         assertSame(slope, GpuWaterWaves.faces(slope, TerrainLod.FULL));
@@ -80,18 +91,38 @@ class GpuWaterWavesTest {
     }
 
     @Test
-    void fetchStopsAtLandAndAtADifferentPoolLevel() {
-        int width = 25, height = 9;
+    void fetchStopsAtLandAndAtADifferentPoolLevelButRunsOnPastTheBoardEdge() {
+        int width = 25, height = 9, land = Integer.MIN_VALUE;
         int[] levels = new int[width * height];
-        for (int y = 0; y < height; y++) { levels[y * width + 12] = Integer.MIN_VALUE; }
+        for (int y = 0; y < height; y++) { levels[y * width + 12] = land; }
         byte[] fetch = GpuWaterExposure.fetch(levels, width, height, 20, 10);
-        assertTrue(Byte.toUnsignedInt(fetch[(4 * width + 8) * 4]) > 128, "Upwind lake is exposed");
-        assertEquals(0, Byte.toUnsignedInt(fetch[(4 * width) * 4]), "The board-edge optical section stays fixed");
+        // The lattice's border repeats the board's edge hexes: open water there runs on beyond the board.
+        assertEquals(255, Byte.toUnsignedInt(fetch[(4 * width) * 4]), "Water at the board edge continues beyond it");
+        assertEquals(255, Byte.toUnsignedInt(fetch[(4 * width + 8) * 4]), "The sea's fetch reaches across the lake");
         assertEquals(0, Byte.toUnsignedInt(fetch[(4 * width + 13) * 4]), "Immediately behind the island is sheltered");
         assertTrue(Byte.toUnsignedInt(fetch[(4 * width + 22) * 4]) > Byte.toUnsignedInt(fetch[(4 * width + 16) * 4]));
+        for (int y = 0; y < height; y++) { levels[y * width] = land; }
+        fetch = GpuWaterExposure.fetch(levels, width, height, 20, 10);
+        assertTrue(Byte.toUnsignedInt(fetch[(4 * width + 1) * 4]) < 10, "A coast on the edge shelters its lee");
         for (int y = 0; y < height; y++) { levels[y * width + 12] = 2; }
         fetch = GpuWaterExposure.fetch(levels, width, height, 20, 10);
         assertEquals(0, Byte.toUnsignedInt(fetch[(4 * width + 13) * 4]), "A waterfall does not carry ocean swell between levels");
+    }
+
+    @Test
+    void aRiverLeavingTheBoardStaysNarrowBeyondIt() {
+        int width = 9, height = 12, land = Integer.MIN_VALUE;
+        int[] levels = new int[width * height];
+        java.util.Arrays.fill(levels, land);
+        // One texel wide, through both border rows, as the repeated edge hexes carry it past the board.
+        for (int y = 0; y < height; y++) { levels[y * width + 4] = 0; }
+        byte[] fetch = GpuWaterExposure.fetch(levels, width, height, 20, 10);
+        for (int y : new int[] { 0, 1, height - 2, height - 1 }) {
+            int i = (y * width + 4) * 4;
+            assertEquals(0, Byte.toUnsignedInt(fetch[i]) + Byte.toUnsignedInt(fetch[i + 1]),
+                  "Across the river the banks stay close, at the edge too: no ocean swell in a stream");
+            assertEquals(255, Byte.toUnsignedInt(fetch[i + (y < 2 ? 3 : 2)]), "Along it, the river runs on");
+        }
     }
 
     private static GpuWaterShader.Field.Prepared field(int firstX, int firstY, int width, int height) {

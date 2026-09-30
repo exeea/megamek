@@ -56,12 +56,15 @@ class GpuShrubSmokeTest {
                     for (String family : FAMILIES) {
                         String name = "foliage-" + family;
                         terrain.update(scene(List.of(tile(family, new Coords(0, 0), ground)), 1, 1));
+                        // The placed shrub's projected diameter selects its level: the board measures its placed bounds.
+                        float diameter = 0;
                         for (Object chunk : (List<?>) field(terrain, "chunks")) {
                             for (Object prop : (List<?>) field(chunk, "props")) {
                                 var instance = (ModelInstance) field(prop, "instance");
                                 var scale = instance.transform.getScale(new Vector3());
                                 assertEquals(scale.z, scale.x, .0001f, "Shrubs must never be squashed: " + family);
                                 assertEquals(scale.z, scale.y, .0001f);
+                                diameter = ((BoundingBox) field(prop, "bounds")).getDimensions(new Vector3()).len();
                             }
                         }
                         Texture atlas = null;
@@ -78,8 +81,6 @@ class GpuShrubSmokeTest {
                                 assertSame(atlas, map.textureDescription.texture, "Every LOD and part borrows one atlas");
                             }
                         }
-                        float diameter = assets.model(name).calculateBoundingBox(new BoundingBox())
-                              .getDimensions(new Vector3()).len() * 1.1f;
                         camera.center(BoardGeometry.center(new Coords(0, 0), 0).add(0, 0, 9));
                         int nearColour = 0, nearDepth = 0;
                         for (int lod : new int[] { 0, 1, 2, 3, 0 }) {

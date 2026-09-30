@@ -64,6 +64,7 @@ class GpuInfantryPlateauSmokeTest {
                     try {
                         view.create();
                         BoardGeometry.tune(BoardGeometry.DEFAULTS);
+                        GpuBoardTestUi.present(view);
                         view.render();
                         view.boardCamera.advance(BoardCamera.ENTRANCE_SECONDS);
                         for (boolean cliffs : new boolean[] { false, true }) {
@@ -72,10 +73,12 @@ class GpuInfantryPlateauSmokeTest {
                             view.boardCamera.camera.zoom = .16f;
                             view.boardCamera.center(BoardGeometry.center(new Coords(8, 14), 0));
                             view.render();
+                            GpuBoardTestUi.present(view);
                             GpuBoardTestUi.capture(new File(output, cliffs ? "cliff-into-water.png" : "cliff-with-beach.png"));
                             if (cliffs) {
                                 view.boardCamera.orbit(30, 15);
                                 view.render();
+                                GpuBoardTestUi.present(view);
                                 GpuBoardTestUi.capture(new File(output, "cliff-foot-oblique.png"));
                                 for (var bank : List.of(new Coords(7, 14), new Coords(9, 13))) {
                                     view.boardCamera.setIsometric(true);
@@ -83,6 +86,7 @@ class GpuInfantryPlateauSmokeTest {
                                     view.boardCamera.camera.zoom = .10f;
                                     view.boardCamera.center(BoardGeometry.center(bank, 0));
                                     view.render();
+                                    GpuBoardTestUi.present(view);
                                     GpuBoardTestUi.capture(new File(output, "cliff-bank-" + bank.getX() + ".png"));
                                 }
                             }
@@ -92,6 +96,7 @@ class GpuInfantryPlateauSmokeTest {
                         view.boardCamera.camera.zoom = .17f;
                         view.boardCamera.center(BoardGeometry.center(new Coords(8, 13), 2));
                         view.render();
+                        GpuBoardTestUi.present(view);
                         GpuBoardTestUi.capture(new File(output, "river-plateau-oblique.png"));
                         verify(view);
                         view.boardCamera.setIsometric(false);
@@ -99,6 +104,7 @@ class GpuInfantryPlateauSmokeTest {
                         view.boardCamera.center(BoardGeometry.center(new Coords(8, 13), 2));
                         view.render();
                         verify(view);
+                        GpuBoardTestUi.present(view);
                         GpuBoardTestUi.capture(new File(output, "river-plateau-top.png"));
 
                         // Reuse the animators while the neighbouring bed changes the rendered river/cliff shape.
@@ -149,6 +155,8 @@ class GpuInfantryPlateauSmokeTest {
     }
 
     private static void verify(GpuBattleView view) throws Exception {
+        // A replaced board loads behind the loading screen before it can be inspected.
+        GpuBoardTestUi.present(view);
         var scene = (BoardScene) field(view, "scene");
         var instances = (Map<?, ?>) field(view, "unitInstances");
         var models = (GpuUnitModels) field(view, "unitModels");

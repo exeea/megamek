@@ -52,6 +52,7 @@ class GpuUnitHudSmokeTest {
                 public void render() {
                     try {
                         super.render();
+                        if (GpuBoardTestUi.loading(this)) { return; }
                         tick++;
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                         if (tick == 15 || tick == 30 || tick == 45) {

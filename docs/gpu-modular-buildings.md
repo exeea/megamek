@@ -43,8 +43,13 @@ Each child is a rigid mesh node; multiple material primitives in that mesh are f
 sparse. `floor0`, at least one upper floor, and at least one roof are required. Do not add helper mesh nodes.
 
 Author each floor exactly one model level (18 units) high in Blender's Z-up space. The GLB exporter converts to
-standard glTF Y-up. Build hollow walls with inward-facing geometry; runtime generates the interior slabs and
-struts. Author the modules as a readable stack: this kit's floor0, floor1, floor2 and roof0 stand at Z=0,18,36,54.
+standard glTF Y-up. LOD0 has hollow walls with inward-facing geometry; runtime generates the interior slabs and
+struts. LOD1 floor walls are flat, with oppositely wound faces so both sides remain visible, without thickness or
+edge caps. The inside retains the shared concrete texture. Outside, a padded 2048x256 atlas combines concrete,
+windows, doors and slab bands on the same surface, avoiding nearly coplanar accent meshes and their z-fighting.
+The three small rooftop vents are omitted from LOD1. The fortress uses 32 triangles per distant floor and 262
+for the complete distant kit. The atlas adds a shared texture; lower triangle counts alone do not establish an FPS gain.
+Author the modules as a readable stack: this kit's floor0, floor1, floor2 and roof0 stand at Z=0,18,36,54.
 The second LOD stands alongside at X=110, also assembled. Thus a viewer shows the building, not overlapping pieces.
 
 The loader computes each module's transformed geometry bounds and removes its horizontal center and minimum Z.
@@ -74,7 +79,7 @@ triangles for every possible building combination. Picking is independent of the
 
 - A kit owns its shared module models and one normalized triangle set per module. Textures use the existing
   `ModelTextures`/`GpuAssets` cache. Concrete trim and wall tints use vertex colors, sharing one embedded concrete
-  image; the roof uses the second image.
+  image; the roof uses the second image, and LOD1 exteriors use the padded facade atlas.
 - An assembly cache contains a compact string of module indices, its kit reference and shared interior reference.
   Offsets are implicit. There is no cached expanded Model per combination. The common four-module kit needs six
   index bytes for a five-level recipe on the JVM's compact-string representation, plus object/map overhead.

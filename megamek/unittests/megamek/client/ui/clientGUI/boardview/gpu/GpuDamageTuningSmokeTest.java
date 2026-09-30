@@ -163,6 +163,9 @@ class GpuDamageTuningSmokeTest {
                     tank.setDeployed(true);
                     fixture.game.addEntity(tank, false);
                     var infantry = new ConvInfantry();
+                    // Every label style, including the chassis-only one a player may have chosen, needs a name.
+                    infantry.setChassis("Foot Platoon");
+                    infantry.setModel("Rifle");
                     infantry.setId(3);
                     infantry.setOwner(fixture.player);
                     infantry.setPosition(new Coords(4, 5));
@@ -178,6 +181,8 @@ class GpuDamageTuningSmokeTest {
                     var view = new GpuBattleView(fixture.source);
                     try {
                         view.create();
+                        // The damage display exists only once the board is presented.
+                        GpuBoardTestUi.present(view);
                         view.render();
                         verify(view, fixture);
                     } catch (Throwable error) { failure.set(error); }

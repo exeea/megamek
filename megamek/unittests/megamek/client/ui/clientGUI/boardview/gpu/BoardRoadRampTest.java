@@ -285,9 +285,10 @@ class BoardRoadRampTest {
             Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
             float rise = Math.max(face.a().z, Math.max(face.b().z, face.c().z))
                   - Math.min(face.a().z, Math.min(face.b().z, face.c().z));
-            // A folded slope would stand up as a fin. Small slivers can still fold where two rims meet at a corner;
-            // they stay well below a visible fin (see docs/gpu-road-slopes-tunnels.md).
-            assertTrue(normal.z > 0 || rise < BoardRelief.metres(.3f),
+            // A folded slope would stand up as a fin. Small slivers can still fold where two rims cross at a corner;
+            // docs/gpu-road-slopes-tunnels.md bounds them at 0.9 m tall and under 0.3 m² (shipped maps stay lower).
+            float area = normal.len() / 2, metre = BoardRelief.metres(1);
+            assertTrue(normal.z > 0 || rise < BoardRelief.metres(.9f) && area < .3f * metre * metre,
                   "Every earthwork triangle has a positive footprint: " + surface.tile.coords() + " " + face);
         }
         for (int corner = 0; corner < 6; corner++) {

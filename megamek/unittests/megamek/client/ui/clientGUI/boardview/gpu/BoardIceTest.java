@@ -11,7 +11,9 @@ import static org.mockito.Mockito.when;
 
 import java.io.File;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
@@ -155,6 +157,53 @@ class BoardIceTest {
                 var hit = BoardGeometry.hit(scene, new Ray(new Vector3(farthest.x, farthest.y, 200), new Vector3(0, 0, -1)));
                 assertNotNull(hit);
                 assertNotEquals(frozen.coords(), hit.coords(), "Picking keeps the hex outline under the render-only margin");
+            }
+            return null;
+        });
+    }
+
+    @Test
+    void frozenAndOpenBedsMeetAlongEveryMouth() throws Exception {
+        onEdt(() -> {
+            var game = new Game();
+            var board = Board.createEmptyBoard(5, 5);
+            for (int x = 0; x < 5; x++) {
+                for (int y = 0; y < 5; y++) {
+                    // Deeper open water through a shallower frozen lake: beds of both kinds share every corner.
+                    board.setHex(new Coords(x, y), new Hex(0, x == 2 ? "water:2" : "water:1;ice:1", ""));
+                }
+            }
+            game.setBoard(board);
+            try (var source = new GpuMapSource(game, null, null)) {
+                var scene = source.takeFrame().scene();
+                Map<Coords, List<BoardSurface.Face>> beds = new HashMap<>();
+                for (var tile : scene.tiles()) {
+                    beds.put(tile.coords(), new BoardSurface(scene, tile).faces.stream()
+                          .filter(face -> face.finish() == BoardSurface.Finish.BED).toList());
+                }
+                int compared = 0;
+                for (var tile : scene.tiles()) {
+                    Vector3 centre = BoardGeometry.center(tile.coords(), 0);
+                    for (int edge = 0; edge < 6; edge++) {
+                        Coords other = tile.coords().translated(BoardGeometry.edgeDirection(edge));
+                        if (!beds.containsKey(other)) { continue; }
+                        Vector3 a = BoardGeometry.corner(tile.coords(), 0, edge);
+                        Vector3 b = BoardGeometry.corner(tile.coords(), 0, edge + 1);
+                        Vector3 across = BoardGeometry.center(other, 0).sub(centre).nor().scl(.001f);
+                        for (int k = 1; k < 20; k++) {
+                            Vector3 p = new Vector3(a).lerp(b, k / 20f);
+                            float own = BoardSurface.sampleHeight(beds.get(tile.coords()), p.x - across.x,
+                                  p.y - across.y, Float.NaN);
+                            float theirs = BoardSurface.sampleHeight(beds.get(other), p.x + across.x,
+                                  p.y + across.y, Float.NaN);
+                            if (Float.isNaN(own) || Float.isNaN(theirs)) { continue; }
+                            assertEquals(own, theirs, .01f, "The beds of " + tile.coords() + " and " + other
+                                  + " must meet without a slit at " + p);
+                            compared++;
+                        }
+                    }
+                }
+                assertTrue(compared > 500, "Mouths between the lake's hexes were sampled: " + compared);
             }
             return null;
         });

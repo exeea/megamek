@@ -89,7 +89,7 @@ class GpuBuildingTest {
         for (var mesh : distant.meshes) {
             for (var part : mesh.parts) { triangles += part.indices.length / 3; }
         }
-        assertTrue(triangles <= 800, "The complete distant kit must remain lightweight: " + triangles);
+        assertTrue(triangles <= 300, "The complete distant kit must remain lightweight: " + triangles);
     }
 
     @Test

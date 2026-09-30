@@ -24,7 +24,9 @@ A frozen lake is a slab whose top is the level units stand on, one pixel above
 open water. It runs on into frozen neighbours and up banks below frozen land. It
 breaks raggedly out over open water, shedding floes, and breaks off short of
 ice-free shores, leaving a lead with rubble. All of that is drawn only; support
-and picking keep the hex's waterline.
+and picking keep the hex's waterline. Ice changes no bed: frozen and open water
+at one level share the depths of their mouths and corners
+(`BoardSurface.cornerDepth`), so no slit opens between their beds.
 
 All ice shares world-anchored floes: snow drifts, bare grey ice and refrozen
 joints, so lake and land ice continue across each other. Land ice meets dry

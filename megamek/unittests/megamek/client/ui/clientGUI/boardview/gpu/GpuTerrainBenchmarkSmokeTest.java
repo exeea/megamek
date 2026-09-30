@@ -117,6 +117,7 @@ class GpuTerrainBenchmarkSmokeTest {
                 @Override
                 public void render() {
                     try {
+                        if (GpuBoardTestUi.loading(this)) { super.render(); return; }
                         if (frame < 2) {
                             long start = System.nanoTime();
                             super.render();

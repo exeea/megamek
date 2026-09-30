@@ -32,6 +32,10 @@ hex's nominal ground/water level plus a small clearance. Road ramps and sculpted
 relief do not raise this plane. Raised point symbols use the separate
 `GpuMarkers.locationSupport` helper to clear the hex ceiling and overlapping units.
 Flat annotations still test scene depth, so rising terrain can hide parts of them.
+Hover and editor-brush outlines, unit selection bands and target bands draw hidden
+sections in an additional depth pass at `GpuBattleView.SELECTION_OCCLUDED_ALPHA` (50%
+opacity), keeping unobstructed sections fully bright. Both passes use the same
+geometry and preserve the scene depth.
 `GpuBattleView.HOVER_HEX_INSET` controls the native hover and editor-brush outline's
 inset as a fraction of the hex radius; `.1` preserves the original 10% inset.
 Terrain tints follow the terrain, unit bands follow the

@@ -6,6 +6,7 @@ import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -60,6 +61,8 @@ class GpuBattleView extends ApplicationAdapter {
     static final float HOVER_LEVELS = UnitAnimator.HOVER_LEVELS;
     /** Hover and editor-brush outline inset as a fraction of the hex radius: 0 is the border, .1 keeps 90%. */
     static final float HOVER_HEX_INSET = .1f;
+    /** Opacity of hover, selection and target outlines hidden behind terrain or objects. */
+    static final float SELECTION_OCCLUDED_ALPHA = .5f;
     /** Width of the flat selection band as a fraction of the hex radius, extending inward from MARKER_INSET. */
     static final float SELECTION_BAND_WIDTH = .08f;
     /** Seconds for a complete rise and fall, on the shared animation clock. */
@@ -91,6 +94,8 @@ class GpuBattleView extends ApplicationAdapter {
     private GpuBoardSkin loadingTheme;
     private Label loadingLabel;
     private Label loadingDetails;
+    private GpuLoadingGrid loadingGrid;
+    private Label loadingWaiting, loadingActive, loadingReady;
     private volatile String loadingMessage = Messages.getString("ClientGUI.waitingOnTheServer");
     private final GpuDisplayScale displayScale = new GpuDisplayScale();
     final BoardCamera boardCamera = new BoardCamera();
@@ -214,17 +219,36 @@ class GpuBattleView extends ApplicationAdapter {
         loadingStage = new Stage(new ScreenViewport());
         Table content = new Table();
         content.setFillParent(true);
-        loadingLabel = new Label(loadingMessage, skin);
+        content.top().padTop(Value.percentHeight(.06f, content));
+        loadingLabel = new Label(loadingMessage, skin, "loading");
         loadingLabel.setName("board-loading-message");
         loadingLabel.setWrap(true);
         loadingLabel.setAlignment(Align.center);
-        loadingDetails = new Label("", skin);
+        loadingDetails = new Label("", skin, "heading");
         loadingDetails.setName("board-loading-details");
         loadingDetails.setWrap(true);
-        loadingDetails.setAlignment(Align.center);
-        content.add(new Label("MEGAMEK", skin, "kicker")).padBottom(18).row();
-        content.add(loadingLabel).width(Value.percentWidth(.9f, content)).maxWidth(900).row();
-        content.add(loadingDetails).width(Value.percentWidth(.9f, content)).maxWidth(900).padTop(18);
+        loadingDetails.setAlignment(Align.top | Align.center);
+        loadingGrid = new GpuLoadingGrid(skin);
+        Table legend = new Table();
+        loadingWaiting = new Label("", skin);
+        loadingActive = new Label("", skin);
+        loadingReady = new Label("", skin);
+        loadingWaiting.setName("board-loading-waiting");
+        loadingActive.setName("board-loading-active");
+        loadingReady.setName("board-loading-ready");
+        loadingWaiting.setColor(GpuBoardSkin.MUTED);
+        loadingActive.setColor(GpuLoadingGrid.LOADING);
+        loadingReady.setColor(GpuLoadingGrid.READY);
+        for (Label entry : List.of(loadingWaiting, loadingActive, loadingReady)) {
+            legend.add(entry).padLeft(12).padRight(12);
+        }
+        content.add(new Label("MEGAMEK", skin, "muted")).padBottom(12).row();
+        content.add(loadingLabel).width(Value.percentWidth(.9f, content)).maxWidth(900)
+              .height(loadingLabel.getStyle().font.getLineHeight() * 2).row();
+        content.add(loadingGrid).width(Value.percentWidth(.90f, content)).maxWidth(960)
+              .height(Value.percentHeight(.42f, content)).maxHeight(360).padTop(14).row();
+        content.add(legend).padTop(10).row();
+        content.add(loadingDetails).width(Value.percentWidth(.9f, content)).maxWidth(900).padTop(14);
         loadingStage.addActor(content);
     }
 
@@ -481,8 +505,16 @@ class GpuBattleView extends ApplicationAdapter {
             ScreenUtils.clear(.045f, .065f, .075f, 1, true);
             createLoadingStage();
             loadingLabel.setText(Messages.getString("GpuBoard.loadingOverall", Math.max(0, terrain.buildProgress())));
+            var sections = terrain.buildSections();
+            loadingGrid.update(sections);
+            loadingWaiting.setText(Messages.getString("GpuBoard.loadingLegend.waiting",
+                  Collections.frequency(sections.states(), TerrainLoadProgress.SectionState.WAITING)));
+            loadingActive.setText(Messages.getString("GpuBoard.loadingLegend.active",
+                  Collections.frequency(sections.states(), TerrainLoadProgress.SectionState.LOADING)));
+            loadingReady.setText(Messages.getString("GpuBoard.loadingLegend.ready",
+                  Collections.frequency(sections.states(), TerrainLoadProgress.SectionState.READY), sections.states().size()));
             loadingDetails.setText(terrain.buildDetails().stream().map(TerrainLoadProgress.Status::text)
-                  .collect(Collectors.joining("\n\n")));
+                  .collect(Collectors.joining("\n")));
             loadingStage.act(Math.min(Gdx.graphics.getDeltaTime(), .1f));
             loadingStage.draw();
             renderStage(null);
@@ -1274,18 +1306,36 @@ class GpuBattleView extends ApplicationAdapter {
 
     private void renderSelectionOutlines() {
         Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
+        // Both passes compare against the scene, without adding the markers themselves to its depth.
+        Gdx.gl.glDepthMask(false);
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
         lines.setProjectionMatrix(boardCamera.camera.combined);
+        try {
+            Gdx.gl.glDepthFunc(GL20.GL_GREATER);
+            drawSelectionOutlines(SELECTION_OCCLUDED_ALPHA);
+            Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
+            drawSelectionOutlines(1);
+        } finally {
+            Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
+            Gdx.gl.glDepthMask(true);
+            Gdx.gl.glDisable(GL20.GL_BLEND);
+        }
+    }
+
+    private void drawSelectionOutlines(float alpha) {
         lines.begin(ShapeRenderer.ShapeType.Filled);
         boolean showTargets = SHOW_TARGET_MARKERS && (!HIDE_TARGET_MARKERS_DURING_ATTACKS || playback.attacks().isEmpty());
         for (BoardScene.Unit unit : scene.units()) {
             if (unit.id() == scene.selectedId() || (hovered != null && unit.footprint().contains(hovered))) {
-                lines.setColor(unit.sensorContact() ? Color.ORANGE : unit.id() == scene.selectedId()
-                      ? Color.CYAN : Color.WHITE);
+                Color color = unit.sensorContact() ? Color.ORANGE : unit.id() == scene.selectedId()
+                      ? Color.CYAN : Color.WHITE;
+                lines.setColor(color.r, color.g, color.b, alpha);
                 float lift = unit.id() == scene.selectedId() ? selectionBob(hoverClock) : 0;
                 unitBand(unit, SELECTION_BAND_WIDTH, lift, false);
             }
             if (showTargets && showsTargetBand(unit.id())) {
-                lines.setColor(Color.RED);
+                lines.setColor(1, 0, 0, alpha);
                 unitBand(unit, TARGET_BAND_WIDTH, targetBob(hoverClock), true);
             }
         }
@@ -1293,7 +1343,7 @@ class GpuBattleView extends ApplicationAdapter {
         lines.setTransformMatrix(selectionTransform.idt());
         lines.begin(ShapeRenderer.ShapeType.Line);
         if (hovered != null && scene.tile(hovered) != null && !ui.hit(Gdx.input.getX(), Gdx.input.getY())) {
-            lines.setColor(Color.WHITE);
+            lines.setColor(1, 1, 1, alpha);
             if (source.isEditor() && editorModifiers() == InputEvent.CTRL_DOWN_MASK && ui.acceptsCameraKeys()) {
                 for (Coords coords : source.editorBrush(hovered, boardGeneration)) {
                     if (scene.tile(coords) != null) {
@@ -1442,7 +1492,7 @@ class GpuBattleView extends ApplicationAdapter {
             }
             var ray = boardCamera.camera.getPickRay(x, y, 0, ui.bottomPixels(),
                   boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight);
-            var ground = terrain.hit(scene, ray);
+            var ground = terrain.selectionHit(scene, ray);
             float nearest = ground == null ? Float.POSITIVE_INFINITY : ground.distance();
             Coords coords = ground == null ? null : ground.coords();
             int entityId = Entity.NONE;

@@ -114,7 +114,7 @@ class GpuBoardUiSmokeTest {
                             press(Input.Keys.ENTER);
                             assertEquals(1, chosen.get());
                             assertEquals(0, committed.get(), "Selecting a weapon must not finish the phase");
-                            assertFalse(controls.acceptsCameraKeys(), "Weapon choices stay open");
+                            assertFalse(controls.acceptsBoardKeys(), "Weapon choices stay open");
                             // A new snapshot revokes availability while the row is focused.
                             snapshot = presentation(snapshot, chosen, committed, true);
                         } else if (tick == 45) {

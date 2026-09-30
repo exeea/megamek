@@ -3,7 +3,7 @@ layout(location = 0) out vec4 fragColor;
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Open water; premultiplied reflection and in-scattered light over the visible bed.
 #define waterSurfaceFlag
-in vec2 v_waterRest;
+in vec3 v_waterRest;
 // water-uniforms
 // water-lighting-functions
 // biome-water-functions

@@ -478,6 +478,17 @@ final class GpuBiomeVegetation implements Disposable {
         float height(float x, float y) {
             return BoardSurface.sampleHeight(cells.get(row(y) * SIDE + column(x)), x, y, Float.NaN);
         }
+
+        /** The highest indexed face holding (x, y), or null where none does. */
+        BoardSurface.Face face(float x, float y) {
+            BoardSurface.Face highest = null;
+            float top = Float.NEGATIVE_INFINITY;
+            for (var face : cells.get(row(y) * SIDE + column(x))) {
+                float height = face.height(x, y);
+                if (height > top) { top = height; highest = face; }
+            }
+            return highest;
+        }
     }
 
     private static List<BoardSurface.Face> support(BoardScene.Tile tile, BoardTacticalGeometry.Surface surface) {

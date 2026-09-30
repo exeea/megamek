@@ -4,12 +4,26 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.Comparator;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.Test;
 
 class TerrainLoadProgressTest {
+    @Test
+    void loadingOrderCrossesEachDisplayedRowBeforeMovingDown() {
+        assertEquals(List.of(0, 2, 4, 6, 1, 3, 5, 7), displayOrder(4, 2));
+        assertEquals(List.of(0, 1, 2, 3, 4, 5, 6, 7), displayOrder(2, 4));
+        assertEquals(List.of(0, 3, 6, 1, 4, 7, 2, 5, 8), displayOrder(3, 3));
+    }
+
+    private static List<Integer> displayOrder(int columns, int rows) {
+        return IntStream.range(0, columns * rows).boxed()
+              .sorted(Comparator.comparingInt(index -> TerrainLoadProgress.displayIndex(index, columns, rows))).toList();
+    }
+
     @Test
     void parallelCompletionsPublishConsistentSnapshotsWithoutLosingWork() {
         var progress = new TerrainLoadProgress();

@@ -88,6 +88,7 @@ class GpuTargetingSmokeTest {
                 public void render() {
                     try {
                         super.render();
+                        if (GpuBoardTestUi.loading(this)) { return; }
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                         var playback = (UnitPlayback) field(this, "playback");
                         var scene = (BoardScene) field(this, "scene");

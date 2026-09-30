@@ -50,6 +50,9 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
 
     static float terminalLength() { return Kit.blocks.getFirst().size().y; }
 
+    /** How far a banked span's terminal block rises above the deck surface. */
+    static float terminalHeight() { return Kit.blocks.getFirst().size().z; }
+
     /** Paint extends onto the existing bank after the structural footing has ended. */
     BoardRoad road(BoardBridge.Deck deck, Coords coords) {
         var reaches = new ArrayList<>(lengths);

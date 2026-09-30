@@ -59,6 +59,11 @@ float surfaceVisibility() {
 #endif
 }
 
+#ifdef impostorFlag
+// The crown radius of an impostor card's tree, in world units (tree-instances.glsl).
+in float v_impostorLift;
+#endif
+
 // The sculpted terrain and its trees filter the shadow map more finely than the 4-tap surfaceVisibility().
 float sculptShadow(vec3 normal, vec3 light) {
 #ifdef shadowMapFlag
@@ -67,7 +72,13 @@ float sculptShadow(vec3 normal, vec3 light) {
     vec3 row = vec3(u_shadowMapProjViewTrans[0][0], u_shadowMapProjViewTrans[1][0], u_shadowMapProjViewTrans[2][0]);
     float texel = 4.0 * u_shadowPCFOffset / max(length(row), 1e-6);
     float skim = 1.0 - abs(dot(normal, light));
-    vec4 lifted = u_shadowMapProjViewTrans * vec4(v_cloudPosition + normal * texel * (.5 + 1.5 * skim), 1.0);
+    vec3 receiver = v_cloudPosition + normal * texel * (.5 + 1.5 * skim);
+#ifdef impostorFlag
+    // An impostor card stands in the middle of its crown, whose leaves face the light about a crown radius nearer:
+    // looked up there, the card's own cards and crown cannot shade it, while other trees and buildings still do.
+    receiver += light * v_impostorLift;
+#endif
+    vec4 lifted = u_shadowMapProjViewTrans * vec4(receiver, 1.0);
     vec3 shadowUv = lifted.xyz / lifted.w * .5 + .5;
     shadowUv.z = min(shadowUv.z, .998);
     // Rotated 12-tap disk, fixed to world position so it does not crawl when the camera moves.

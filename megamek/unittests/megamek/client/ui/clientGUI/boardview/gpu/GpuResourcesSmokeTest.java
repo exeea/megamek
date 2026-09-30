@@ -77,7 +77,8 @@ class GpuResourcesSmokeTest {
             for (String name : names) {
                 var model = assets.model(name);
                 assertSame(model, assets.model(name), "Asset geometry is shared");
-                assertTrue(model.meshes.first().getNumIndices() / 3 <= 500, name);
+                // Bridge decks carry authored roundabouts and kerbs (mm-data "roundabouts!"), up to about 830 triangles.
+                assertTrue(model.meshes.first().getNumIndices() / 3 <= (name.startsWith("bridges/") ? 900 : 500), name);
                 BoundingBox bounds = model.calculateBoundingBox(new BoundingBox());
                 assertTrue(bounds.isValid() && bounds.getWidth() > 0 && bounds.getDepth() > 0, name);
             }

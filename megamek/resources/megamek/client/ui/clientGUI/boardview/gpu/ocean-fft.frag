@@ -1,8 +1,9 @@
 #version 330 core
 layout(location = 0) out vec4 fragColor;
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
-// One radix-2 stage of the ocean's inverse FFT (GpuOcean), along x or y, on two complex values per texel. The first
-// stage reads its input in bit-reversed order; each later stage joins two transforms of half its length.
+// One radix-2 stage of the ocean's inverse FFT (GpuOcean), along x or y, on two complex values per texel. Cascades
+// lie side by side along x, so a horizontal stage stays inside its own cascade's block. The first stage reads its
+// input in bit-reversed order; each later stage joins two transforms of half its length.
 uniform sampler2D u_source;
 uniform int u_stage;
 uniform int u_vertical;
@@ -24,7 +25,9 @@ int reversed(int value) {
 
 void main() {
     ivec2 texel = ivec2(gl_FragCoord.xy);
-    int index = u_vertical == 1 ? texel.y : texel.x;
+    int size = 1 << u_bits;
+    int index = u_vertical == 1 ? texel.y : texel.x & (size - 1);
+    int block = u_vertical == 1 ? 0 : texel.x - index;
     int span = 1 << u_stage;
     int offset = index % (2 * span);
     bool upper = offset >= span;
@@ -34,8 +37,8 @@ void main() {
         a = reversed(a);
         b = reversed(b);
     }
-    vec4 even = texelFetch(u_source, u_vertical == 1 ? ivec2(texel.x, a) : ivec2(a, texel.y), 0);
-    vec4 odd = texelFetch(u_source, u_vertical == 1 ? ivec2(texel.x, b) : ivec2(b, texel.y), 0);
+    vec4 even = texelFetch(u_source, u_vertical == 1 ? ivec2(texel.x, a) : ivec2(block + a, texel.y), 0);
+    vec4 odd = texelFetch(u_source, u_vertical == 1 ? ivec2(texel.x, b) : ivec2(block + b, texel.y), 0);
     float angle = 3.14159265 * float(top) / float(span);
     vec2 twiddle = vec2(cos(angle), sin(angle));
     vec4 turned = vec4(multiply(twiddle, odd.xy), multiply(twiddle, odd.zw));

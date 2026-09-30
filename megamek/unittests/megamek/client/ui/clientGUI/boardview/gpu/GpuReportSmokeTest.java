@@ -73,6 +73,7 @@ class GpuReportSmokeTest {
                 @Override
                 public void render() {
                     super.render();
+                    if (GpuBoardTestUi.loading(this)) { return; }
                     try {
                         tick++;
                         if (tick == 1) {

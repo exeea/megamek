@@ -2,6 +2,11 @@
 // Shared by the colour and depth vertex shaders. Fixed instance locations keep their vertex array compatible.
 layout(location = 14) in vec4 a_instance0;
 layout(location = 15) in vec4 a_instance1;
+#ifdef impostorFlag
+// An impostor card's plant crown radius in model units; at this tree's scale it lifts the card's shadow lookup.
+uniform float u_impostorLift;
+out float v_impostorLift;
+#endif
 
 vec3 instanceTurn(vec3 v) {
     return vec3(a_instance1.x * v.x - a_instance1.y * v.y, a_instance1.y * v.x + a_instance1.x * v.y, v.z);

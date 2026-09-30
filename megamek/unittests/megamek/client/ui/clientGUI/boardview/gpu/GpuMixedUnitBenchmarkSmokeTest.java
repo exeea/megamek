@@ -149,6 +149,7 @@ class GpuMixedUnitBenchmarkSmokeTest {
                     @Override
                     public void render() {
                         try {
+                            if (GpuBoardTestUi.loading(this)) { super.render(); return; }
                             int phase = frame % 111;
                             int view = frame / 111;
                             if (phase >= 44 && !firing.isEmpty()) {
@@ -228,7 +229,7 @@ class GpuMixedUnitBenchmarkSmokeTest {
                             var library = field(this, "unitModels");
                             timings.close();
                             super.dispose();
-                            for (String cache : List.of("assemblies", "modular", "models", "descriptors", "failed")) {
+                            for (String cache : List.of("assemblies", "modular", "descriptors", "failed", "modelTextures")) {
                                 Object value = field(library, cache);
                                 assertTrue(value instanceof Map<?, ?> map ? map.isEmpty() : ((java.util.Set<?>) value).isEmpty(), cache);
                             }

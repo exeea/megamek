@@ -204,9 +204,11 @@ class GpuTerrainNormalsSmokeTest {
 
     private static BoardScene flatNormals(BoardScene scene) {
         BoardScene.Pixels flat = pixels(0xff8080ff);
+        // Only the normals change: every other layer (foliage, limb-free decals, biome...) must match the compared scene.
         List<BoardScene.Tile> tiles = scene.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(), tile.elevation(),
               tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(), tile.ground(), flat, tile.decals(),
-              tile.tactical(), tile.features(), tile.text())).toList();
+              tile.decalsWithoutLimbs(), tile.tactical(), tile.features(), tile.text(), tile.liquid(), tile.foliage(),
+              tile.detailedGround(), tile.road(), tile.fireSmoke(), tile.biome(), tile.impassable(), tile.blackIce())).toList();
         return new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of(), scene.light());
     }
 

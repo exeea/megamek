@@ -72,6 +72,8 @@ class GpuShadowCacheSmokeTest {
             terrain.renderShadows(camera.camera, List.of());
             assertNull(field(terrain, "staticShadow"), "Map-only views keep one shadow framebuffer");
             camera.zoom(.6f);
+            // The zoom changes tree levels, which the map picks up at its next redraw: start from that redraw.
+            terrain.refreshShadows();
             terrain.renderShadows(camera.camera, List.of());
             byte[] stationary = depth(terrain);
             for (int pan = 0; pan < 5; pan++) {

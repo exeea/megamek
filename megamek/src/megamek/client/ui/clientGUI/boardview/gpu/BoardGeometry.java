@@ -348,7 +348,9 @@ final class BoardGeometry {
                       && nearer(ray.origin.dst2(hit), nearest, candidate.order(), nearestOrder)) {
                     nearest = ray.origin.dst2(hit);
                     nearestOrder = candidate.order();
-                    result = footprint(scene, tile.coords(), hit);
+                    // Rim rocks can overhang a lower hex just like the cliff wall beneath them.
+                    result = face.finish() == BoardSurface.Finish.OUTCROP
+                          ? foot(scene, tile.coords(), hit) : footprint(scene, tile.coords(), hit);
                     hardSurface = hardSurface(tile, face);
                 }
             }

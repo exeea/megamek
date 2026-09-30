@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.TreeSet;
+import java.util.function.BiPredicate;
 
 import com.badlogic.gdx.math.EarClippingTriangulator;
 import com.badlogic.gdx.math.Vector2;
@@ -1121,14 +1122,23 @@ final class BoardSurface {
         }
     }
 
-    /** Water connected by gentle steps at this corner, in a canonical order for both water and bed heights. */
+    /** Open water connected by gentle steps at this corner, in a canonical order for water heights. */
     private List<BoardScene.Tile> cornerWater(BoardScene scene, int index) {
+        return corner(scene, index, BoardSurface::waterSlope);
+    }
+
+    /**
+     * This hex and those round the corner where edge {@code index} starts that {@code joins} links to it, directly or
+     * through each other, in the same order from every hex of the corner.
+     */
+    private List<BoardScene.Tile> corner(BoardScene scene, int index,
+          BiPredicate<BoardScene.Tile, BoardScene.Tile> joins) {
         List<BoardScene.Tile> joined = new ArrayList<>(List.of(tile));
         for (int pass = 0; pass < 2; pass++) {
             for (int e : new int[] { (index + 5) % 6, index }) {
                 BoardScene.Tile other = neighbor(scene, e);
                 if (other == null || joined.contains(other)) { continue; }
-                if (joined.stream().anyMatch(t -> waterSlope(t, other))) { joined.add(other); }
+                if (joined.stream().anyMatch(t -> joins.test(t, other))) { joined.add(other); }
             }
         }
         joined.sort(java.util.Comparator.comparingInt((BoardScene.Tile t) -> t.coords().getX())
@@ -1536,32 +1546,24 @@ final class BoardSurface {
         return BoardGeometry.waterZ(tile) - BoardGeometry.groundZ(tile);
     }
 
-    /** Mean depth of the connected water at this hex's level around the corner where edge {@code index} starts. */
+    /**
+     * Mean depth of the connected water around the corner where edge {@code index} starts. Ice does not change a bed:
+     * frozen and open water at one level join alike, so every bed round the corner meets at the same depth. Molten
+     * beds join only at their own level.
+     */
     private float cornerDepth(BoardScene scene, int index) {
-        if (!tile.frozen() && !tile.liquid().molten()) {
-            List<BoardScene.Tile> joined = cornerWater(scene, index);
-            float sum = 0;
-            int low = tile.elevation(), high = low;
-            for (BoardScene.Tile other : joined) {
-                sum += depth(other);
-                low = Math.min(low, other.elevation());
-                high = Math.max(high, other.elevation());
-            }
-            if (high - low >= 3) { return Math.min(sum / joined.size(), tuning().lipDepth() * BoardGeometry.hexScale()); }
-            return sum / joined.size();
-        }
-        List<Float> depths = new ArrayList<>(List.of(depth(tile)));
-        for (int edge : new int[] { (index + 5) % 6, index }) {
-            BoardScene.Tile other = neighbor(scene, edge);
-            if (other != null && tile.liquid().connects(other.liquid()) && other.elevation() == tile.elevation()) {
-                depths.add(depth(other));
-            }
-        }
-        // The same order in every hex around the corner, so all of them round the mean alike.
-        Collections.sort(depths);
+        boolean molten = tile.liquid().molten();
+        List<BoardScene.Tile> joined = corner(scene, index, (a, b) -> a.liquid().connects(b.liquid())
+              && (a.elevation() == b.elevation() || !molten && waterSlope(a, b)));
         float sum = 0;
-        for (float value : depths) { sum += value; }
-        return sum / depths.size();
+        int low = tile.elevation(), high = low;
+        for (BoardScene.Tile other : joined) {
+            sum += depth(other);
+            low = Math.min(low, other.elevation());
+            high = Math.max(high, other.elevation());
+        }
+        if (high - low >= 3) { return Math.min(sum / joined.size(), tuning().lipDepth() * BoardGeometry.hexScale()); }
+        return sum / joined.size();
     }
 
     /**

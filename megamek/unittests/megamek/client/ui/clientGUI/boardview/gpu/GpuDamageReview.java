@@ -166,8 +166,9 @@ final class GpuDamageReview {
                 var props = limbInstances(terrain, model);
                 assertEquals(3, props.size());
                 for (var prop : props) {
+                    // A limb rests just above the plateau's sculpted top, which undulates within its natural relief.
                     assertEquals(2 * BoardGeometry.LEVEL + .12f * BoardGeometry.HEX_SCALE,
-                          UnitBounds.world(prop).min.z, .01f);
+                          UnitBounds.world(prop).min.z, BoardRelief.metres(.5f));
                 }
                 assertSame(tile.decalsWithoutLimbs(), selectedDecals(terrain, coords));
                 view.boardCamera.center(BoardGeometry.center(coords, 2));

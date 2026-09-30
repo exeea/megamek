@@ -352,7 +352,8 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     static String vertex(String source) {
         source = insert(source, MAIN, GpuShaderSource.read("tree-instances.glsl") + "\n" + MAIN);
         source = insert(source, "vec4 pos = u_worldTrans * vec4(a_position, 1.0);",
-              "vec4 pos = vec4(instancePosition(a_position), 1.0);");
+              "vec4 pos = vec4(instancePosition(a_position), 1.0);\n#ifdef impostorFlag\n"
+                    + "v_impostorLift = u_impostorLift * a_instance0.w;\n#endif\n");
         return insert(source, "vec3 normal = normalize(u_normalMatrix * a_normal);", "vec3 normal = instanceNormal(a_normal);");
     }
 

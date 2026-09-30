@@ -45,7 +45,8 @@ class GpuShaderSourceTest {
                       .replaceAll(match -> match.group().replaceAll("[^\\n]", " "));
                 if (source.contains("void main(")) {
                     assertTrue(source.startsWith("#version 330 core"), "Standalone stage version: " + file);
-                    if (file.toString().endsWith(".frag")) {
+                    // A depth-only stage with an empty main (water-depth.frag) writes no colour and declares no output.
+                    if (file.toString().endsWith(".frag") && !source.matches("(?s).*void main\\(\\)\\s*\\{\\s*\\}.*")) {
                         assertTrue(source.contains("layout(location = 0) out vec4 fragColor;"), "Explicit output: " + file);
                     }
                 }

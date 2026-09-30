@@ -82,8 +82,8 @@ public class UnitLoadingDialog extends JDialog {
 
     public UnitLoadingDialog(JFrame frame, MekSummaryCache mekSummaryCache, String loadingMessage,
           boolean waitForUpcomingLoad) {
-        // A modal dialog keeps pumping Swing events while callers wait. Letting startup continue here can block
-        // the EDT in cache-dependent dialog constructors, freezing both painting and progress updates.
+        // Callers opening cache-dependent tools need to wait without blocking Swing's event queue.
+        // Passive lobby loading uses showForBackgroundLoad() instead and defers constructing those tools.
         super(frame, Messages.getString("UnitLoadingDialog.pleaseWait"), true);
         this.mekSummaryCache = Objects.requireNonNull(mekSummaryCache);
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
@@ -121,6 +121,13 @@ public class UnitLoadingDialog extends JDialog {
         }
 
         startMonitoring(waitForUpcomingLoad);
+    }
+
+    /** Shows dismissible progress without preventing the user from configuring the lobby while units load. */
+    public void showForBackgroundLoad() {
+        setModal(false);
+        setDefaultCloseOperation(DISPOSE_ON_CLOSE);
+        setVisible(true);
     }
 
     @Override

@@ -54,6 +54,11 @@ class GpuBuildingMaterialsSmokeTest {
                             hex.addTerrain(new Terrain(Terrains.FUEL_TANK_MAGN, 100));
                         } else if (x == 5 && y == 6) {
                             hex.addTerrain(new Terrain(Terrains.INDUSTRIAL, 2));
+                        } else if (x == 4 && y == 7) {
+                            // A road bank at deck height attaches to the span below; a span without an attached
+                            // road is a natural bridge with no GLB deck.
+                            hex.setLevel(2);
+                            hex.addTerrain(new Terrain(Terrains.ROAD, 1, true, 1 << 3));
                         } else if (x == 4 && y == 8) {
                             hex.addTerrain(new Terrain(Terrains.BRIDGE, 2, true, 9));
                             hex.addTerrain(new Terrain(Terrains.BRIDGE_CF, 100));
@@ -208,8 +213,11 @@ class GpuBuildingMaterialsSmokeTest {
         BoundingBox placed = terrain.roofBounds(coords);
         assertNotNull(placed, "Bridge terrain must instantiate one complete GLB deck");
         float deck = 2 * BoardGeometry.level() + GpuRoads.SURFACE_LIFT * BoardGeometry.hexScale();
-        assertEquals(deck - 1.5f * BoardGeometry.hexScale(), placed.min.z, .001f);
-        assertEquals(deck + 2.5f * BoardGeometry.hexScale(), placed.max.z, .001f);
+        // The authored deck kit sets the exact underside and rail heights, near the slab's 1.5 below and 2.5 above.
+        assertEquals(deck - 1.5f * BoardGeometry.hexScale(), placed.min.z, .15f * BoardGeometry.hexScale());
+        // A banked span carries the authored terminal block above its rails.
+        assertEquals(deck + Math.max(2.5f, BoardBridgeFooting.terminalHeight()) * BoardGeometry.hexScale(), placed.max.z,
+              .15f * BoardGeometry.hexScale());
         Ray ray = new Ray(BoardGeometry.center(coords, 0).add(0, 10 * BoardGeometry.hexScale(), deck + 50),
               new Vector3(0, 0, -1));
         BoardGeometry.Hit hit = terrain.hit(scene, ray);

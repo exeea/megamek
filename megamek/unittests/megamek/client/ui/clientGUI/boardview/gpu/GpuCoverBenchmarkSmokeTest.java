@@ -24,6 +24,7 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.FloatArray;
+import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
@@ -34,13 +35,17 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /**
- * Ground cover cost through the actual client painters, on boards covered entirely by one kind of plant and on
- * MesaCity 1: load time, frames until every visible cover hex shows its plants, settled frame cost with and without
- * the plants, and a pan and a zoom cycle. Measured, not asserted.
+ * Ground cover cost through the actual client painters, on boards covered entirely by one kind of plant, on
+ * MesaCity 1 (plantations) and on Elevated Highway (grass among cliffs): load time and installed detail levels,
+ * frames until every visible cover hex shows its plants, settled frame cost with and without the plants, a pan and
+ * a zoom cycle, tilt sweeps between the near-horizontal and overhead views with and without the plants, and a dive
+ * from an overview into the close view that counts the frames its plants are missing. The tactical overlay is
+ * driven like the battle view does, with a movement envelope around the focus. Measured, not asserted.
  */
 @Tag("on-demand")
 class GpuCoverBenchmarkSmokeTest {
     private static final String MESA_CITY = "data/boards/unofficial/SimonLandmine/96x102/96x102 MesaCity1.board";
+    private static final String ELEVATED_HIGHWAY = "data/boards/unofficial/Vamp/Elevated Highway.board";
     private static final int WIDTH = Integer.getInteger("megamek.gpu.coverWidth", 1600);
     private static final int HEIGHT = Integer.getInteger("megamek.gpu.coverHeight", 900);
     private static final int SIZE = Integer.getInteger("megamek.gpu.coverSize", 50);
@@ -51,11 +56,11 @@ class GpuCoverBenchmarkSmokeTest {
     enum Kind { FIELDS, GRASS, MARSH, WOODS }
 
     @ParameterizedTest
-    @ValueSource(strings = { "fields", "grass", "marsh", "woods", "mesacity" })
+    @ValueSource(strings = { "fields", "grass", "marsh", "woods", "mesacity", "elevated" })
     void profilesGroundCover(String board) throws Exception {
         String boards = System.getProperty("megamek.gpu.coverBoards", "");
         org.junit.jupiter.api.Assumptions.assumeTrue(boards.isEmpty() || List.of(boards.split(",")).contains(board));
-        Kind kind = board.equals("grass") ? Kind.GRASS : board.equals("marsh") ? Kind.MARSH
+        Kind kind = board.equals("grass") || board.equals("elevated") ? Kind.GRASS : board.equals("marsh") ? Kind.MARSH
               : board.equals("woods") ? Kind.WOODS : Kind.FIELDS;
         Board loaded;
         Coords focus;
@@ -63,6 +68,11 @@ class GpuCoverBenchmarkSmokeTest {
             loaded = new Board();
             loaded.load(new File(MESA_CITY));
             focus = new Coords(36, 24);
+        } else if (board.equals("elevated")) {
+            // Grass lowlands three levels below a plateau carrying the highway: the reported grass pop-in.
+            loaded = new Board();
+            loaded.load(new File(ELEVATED_HIGHWAY));
+            focus = new Coords(24, 28);
         } else {
             loaded = uniform(kind);
             focus = new Coords(SIZE / 2, SIZE / 2 + 5);
@@ -119,7 +129,10 @@ class GpuCoverBenchmarkSmokeTest {
                     try (var timings = new GpuStageTimings()) {
                         report.append(Gdx.gl.glGetString(GL20.GL_RENDERER)).append(" / ")
                               .append(Gdx.gl.glGetString(GL20.GL_VERSION)).append('\n');
-                        BoardScene scene = fixture.source.takeFrame().scene();
+                        // The battle view re-drapes its tactical markings whenever terrain detail changes; a
+                        // selected unit's movement envelope is the usual marking around the view.
+                        BoardScene scene = withEnvelope(fixture.source.takeFrame().scene(), focus);
+                        var tactical = new GpuTactical(terrain::tacticalSurface);
                         var cover = new Cover(terrain, kind, scene);
                         report.append(String.format(Locale.ROOT, "%s: %dx%d board, %d cover hexes, %dx%d window%n",
                               name, scene.width(), scene.height(), cover.hexes.size(), WIDTH, HEIGHT));
@@ -134,6 +147,7 @@ class GpuCoverBenchmarkSmokeTest {
                             settle(terrain, camera);
                             String view = VIEW_NAMES[v];
                             report.append("\n[").append(view).append(" view, ").append((int) VIEW_PIXELS[v]).append(" px/hex]\n");
+                            report.append(detail(terrain, camera));
                             cold(terrain, frame, camera, scene, cover, report, output, view);
                             report.append(cover.summary(profiler, terrain, frame, camera, scene));
                             steady(terrain, frame, camera, scene, timings, report, view + ": settled");
@@ -145,6 +159,14 @@ class GpuCoverBenchmarkSmokeTest {
                             timings.appendReport(report, view + ": pan frames");
                         }
                         report.append("\nzoom: ").append(zoom(terrain, frame, focus, scene, cover));
+                        for (int v = 0; v < VIEW_PIXELS.length; v++) {
+                            for (float rate : new float[] { .5f, 2 }) {
+                                report.append(String.format(Locale.ROOT, "\norbit %s view %.1f deg/frame: ", VIEW_NAMES[v], rate))
+                                      .append(orbit(terrain, tactical, frame, focus, scene, cover, timings, output, VIEW_PIXELS[v], rate));
+                            }
+                        }
+                        report.append("\ndive: ").append(dive(terrain, tactical, frame, focus, scene, cover, output));
+                        tactical.dispose();
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                     } catch (Throwable error) {
                         failure.set(error);
@@ -305,6 +327,221 @@ class GpuCoverBenchmarkSmokeTest {
                     + " detail pending, %d frames missing cover, lowest complete share %d%%, cover uploads %d, tree uploads %d%n",
               times.length, times[times.length / 2], times[times.length * 95 / 100], times[times.length - 1], busy,
               incomplete, worst, cover.uploads() - uploads, terrain.treeInstanceUploads() - treeUploads);
+    }
+
+    /**
+     * Tilt between the near-horizontal view and overhead at a steady rate, as dragging the view up and down does,
+     * once with the plants and once without them, so their cost shows per viewing angle. Each frame with plants is
+     * split into publish, terrain detail handoff, overlay and drawing, so a slow frame names its cause.
+     */
+    private static String orbit(GpuTerrain terrain, GpuTactical tactical, GpuReviewFrame frame, Coords focus, BoardScene scene,
+          Cover cover, GpuStageTimings timings, File output, float hexPixels, float rate) throws Exception {
+        float high = BoardCamera.MAX_TILT, low = 10;
+        int half = Math.round((high - low) / rate), frames = 2 * half;
+        double[][] passes = new double[2][frames];
+        double[] update = new double[frames], refine = new double[frames], render = new double[frames], overlay = new double[frames];
+        double[] shadows = new double[frames];
+        int[] replaced = new int[frames], missing = new int[frames], visible = new int[frames];
+        float[] tilt = new float[frames];
+        int incomplete = 0, worst = 100, busy = 0, replacements = 0;
+        long uploads = 0, treeUploads = 0;
+        var slow = new StringBuilder();
+        for (int pass = 0; pass < 2; pass++) {
+            if (pass == 1) { cover.hide(); }
+            var camera = view(focus, hexPixels);
+            camera.tilt(high);
+            settle(terrain, camera);
+            // Warm up with the timer queries in use: their first driver use can otherwise stall a measured frame.
+            // Finish each warm-up frame too, or the first measured frame waits for the whole queued backlog.
+            for (int i = 0; i < 20; i++) {
+                terrain.update(scene, camera.camera);
+                terrain.refine(camera.camera);
+                tactical.update(scene, true, null);
+                timings.beginFrame(false);
+                frame.render(terrain, camera, scene, timings);
+                Gdx.gl.glFinish();
+                org.lwjgl.glfw.GLFW.glfwSwapBuffers(org.lwjgl.glfw.GLFW.glfwGetCurrentContext());
+            }
+            if (pass == 0) { uploads = cover.uploads(); treeUploads = terrain.treeInstanceUploads(); }
+            for (int step = 0; step < frames; step++) {
+                camera.tilt(step < half ? -rate : rate);
+                tilt[step] = camera.tilt();
+                long t0 = System.nanoTime();
+                terrain.update(scene, camera.camera);
+                long t1 = System.nanoTime();
+                boolean changed = terrain.refine(camera.camera);
+                long t2 = System.nanoTime();
+                tactical.update(scene, changed, null);
+                long t2b = System.nanoTime();
+                // The frame's own shadow pass then finds nothing to do: this times detail selection and shadows alone.
+                terrain.renderShadows(camera.camera, List.of());
+                Gdx.gl.glFinish();
+                long t2c = System.nanoTime();
+                if (pass == 0) { timings.beginFrame(); frame.render(terrain, camera, scene, timings); }
+                else { frame.render(terrain, camera, scene); }
+                Gdx.gl.glFinish();
+                long t3 = System.nanoTime();
+                org.lwjgl.glfw.GLFW.glfwSwapBuffers(org.lwjgl.glfw.GLFW.glfwGetCurrentContext());
+                passes[pass][step] = (t3 - t0) / 1e6;
+                if (pass == 1) { continue; }
+                update[step] = (t1 - t0) / 1e6; refine[step] = (t2 - t1) / 1e6; overlay[step] = (t2b - t2) / 1e6;
+                shadows[step] = (t2c - t2b) / 1e6;
+                render[step] = (t3 - t2c) / 1e6;
+                if (changed) { replaced[step] = 1; replacements++; }
+                if (terrain.busy()) { busy++; }
+                int[] coverage = cover.coverage(camera);
+                visible[step] = coverage[1];
+                missing[step] = coverage[1] - coverage[0];
+                if (coverage[0] < coverage[1]) {
+                    incomplete++;
+                    worst = Math.min(worst, 100 * coverage[0] / coverage[1]);
+                }
+                if (step % (frames / 4) == 0 || step == frames - 1) {
+                    GpuReviewFrame.save(new File(output, String.format(Locale.ROOT, "orbit-%.0f-%.1f-%03d.png", hexPixels, rate, step)));
+                }
+            }
+            if (pass == 0) { uploads = cover.uploads() - uploads; treeUploads = terrain.treeInstanceUploads() - treeUploads; }
+            if (pass == 1) { cover.show(); }
+        }
+        slow.append("frame ms by tilt band, median with plants / without plants:");
+        for (int band = 80; band > 10; band -= 10) {
+            var with = new java.util.ArrayList<Double>();
+            var without = new java.util.ArrayList<Double>();
+            for (int step = 0; step < frames; step++) {
+                if (tilt[step] > band - 10 && tilt[step] <= band) { with.add(passes[0][step]); without.add(passes[1][step]); }
+            }
+            if (with.isEmpty()) { continue; }
+            with.sort(Double::compare);
+            without.sort(Double::compare);
+            slow.append(String.format(Locale.ROOT, " %d-%d: %.1f / %.1f;", band - 10, band, with.get(with.size() / 2),
+                  without.get(without.size() / 2)));
+        }
+        slow.append('\n');
+        slow.append(detail(terrain, view(focus, hexPixels)));
+        timings.appendReport(slow, String.format(Locale.ROOT, "orbit %.0f px %.1f deg/frame frames", hexPixels, rate));
+        Integer[] order = new Integer[frames];
+        for (int i = 0; i < frames; i++) { order[i] = i; }
+        double[] total = passes[0];
+        Arrays.sort(order, (a, b) -> Double.compare(total[b], total[a]));
+        slow.append("slowest frames: frame, tilt, total ms = publish + detail + overlay + shadows + draw, detail replaced,"
+              + " cover missing/visible\n");
+        for (int i = 0; i < Math.min(8, frames); i++) {
+            int f = order[i];
+            slow.append(String.format(Locale.ROOT, "  %d, %.0f deg, %.1f = %.1f + %.1f + %.1f + %.1f + %.1f, %s, %d/%d%n", f,
+                  tilt[f], total[f], update[f], refine[f], overlay[f], shadows[f], render[f], replaced[f] == 1 ? "yes" : "no",
+                  missing[f], visible[f]));
+        }
+        double[] sorted = total.clone();
+        Arrays.sort(sorted);
+        return String.format(Locale.ROOT, "%d frames, frame median %.1f ms, p95 %.1f ms, max %.1f ms; %d chunk detail"
+                    + " replacements, %d frames with terrain detail pending, %d frames missing cover, lowest complete share"
+                    + " %d%%, cover uploads %d, tree uploads %d%n%s", frames, sorted[frames / 2], sorted[frames * 95 / 100],
+              sorted[frames - 1], replacements, busy, incomplete, worst, uploads, treeUploads, slow);
+    }
+
+    /**
+     * Arrive at the close view from an overview in ten wheel steps, as a player does, then keep drawing: how long the
+     * plants of the hexes now in view take to appear, and how much of the view lacks them meanwhile.
+     */
+    private static String dive(GpuTerrain terrain, GpuTactical tactical, GpuReviewFrame frame, Coords focus, BoardScene scene,
+          Cover cover, File output) throws Exception {
+        var camera = view(focus, 36);
+        settle(terrain, camera);
+        for (int i = 0; i < 5; i++) { draw(terrain, frame, camera, scene); tactical.update(scene, true, null); Gdx.gl.glFinish(); }
+        long start = System.nanoTime(), uploads = cover.uploads();
+        int frames = 0, incomplete = 0, worst = 100, replacements = 0, firstComplete = -1;
+        double firstCompleteMs = -1, maxFrame = 0, maxOverlay = 0, maxDetail = 0;
+        var trace = new StringBuilder("  frame, cumulative ms, frame ms (detail + overlay + draw), detail replaced,"
+              + " complete/visible cover hexes\n");
+        while (frames < 600) {
+            if (frames < 10) {
+                camera.camera.zoom = BoardGeometry.width() / (float) (36 * Math.pow(VIEW_PIXELS[1] / 36, (frames + 1) / 10f));
+                camera.center(BoardGeometry.center(focus, 0));
+            }
+            long t = System.nanoTime();
+            terrain.update(scene, camera.camera);
+            boolean changed = terrain.refine(camera.camera);
+            if (changed) { replacements++; }
+            long t1 = System.nanoTime();
+            tactical.update(scene, changed, null);
+            long t2 = System.nanoTime();
+            frame.render(terrain, camera, scene);
+            Gdx.gl.glFinish();
+            long t3 = System.nanoTime();
+            double ms = (t3 - t) / 1e6, detail = (t1 - t) / 1e6, overlay = (t2 - t1) / 1e6;
+            maxFrame = Math.max(maxFrame, ms);
+            maxOverlay = Math.max(maxOverlay, overlay);
+            maxDetail = Math.max(maxDetail, detail);
+            frames++;
+            int[] coverage = cover.coverage(camera);
+            boolean complete = coverage[0] == coverage[1];
+            if (!complete) {
+                incomplete++;
+                worst = Math.min(worst, 100 * coverage[0] / coverage[1]);
+            }
+            if (frames <= 12 || frames % 20 == 0 || changed || complete && firstComplete < 0) {
+                trace.append(String.format(Locale.ROOT, "  %d, %.0f, %.1f (%.1f + %.1f + %.1f), %s, %d/%d%n", frames,
+                      (System.nanoTime() - start) / 1e6, ms, detail, overlay, (t3 - t2) / 1e6, changed ? "yes" : "no",
+                      coverage[0], coverage[1]));
+            }
+            if (frames == 10 || frames == 30 || frames == 60 || frames == 120) {
+                GpuReviewFrame.save(new File(output, "dive-" + frames + ".png"));
+            }
+            if (complete && frames >= 10 && firstComplete < 0) {
+                firstComplete = frames;
+                firstCompleteMs = (System.nanoTime() - start) / 1e6;
+                GpuReviewFrame.save(new File(output, "dive-complete.png"));
+            }
+            if (firstComplete >= 0 && !terrain.busy() && frames >= firstComplete + 30) { break; }
+        }
+        return String.format(Locale.ROOT, "%d frames, plants complete after %s (%.0f ms), %d frames missing cover,"
+                    + " lowest complete share %d%%, %d chunk detail replacements, worst frame %.1f ms (detail handoff %.1f,"
+                    + " overlay %.1f), cover uploads %d%n%s%s",
+              frames, firstComplete < 0 ? "never" : firstComplete + " frames", firstCompleteMs, incomplete, worst,
+              replacements, maxFrame, maxDetail, maxOverlay, cover.uploads() - uploads, trace, detail(terrain, camera));
+    }
+
+    /**
+     * The scene with a selected unit's movement envelope: hex-border markings on the hexes within ten of the focus,
+     * built like the impassable-hex markings, so the tactical overlay has the usual draping work on detail changes.
+     */
+    private static BoardScene withEnvelope(BoardScene scene, Coords focus) {
+        List<BoardTactical.Fill> fills = new ArrayList<>();
+        float width = BoardGeometry.TILE_WIDTH, height = BoardGeometry.TILE_HEIGHT;
+        for (BoardScene.Tile tile : scene.tiles()) {
+            Coords coords = tile.coords();
+            if (coords.distance(focus) > 10) { continue; }
+            float x = coords.getX() * width * .75f;
+            float y = (coords.getY() + (coords.getX() & 1) * .5f) * height;
+            var anchor = new BoardTactical.Point(x + width / 2, y + height / 2);
+            var outline = new BoardTactical.Contour(List.of(new BoardTactical.Point(x + width * .25f, y),
+                  new BoardTactical.Point(x + width * .75f, y), new BoardTactical.Point(x + width, y + height / 2),
+                  new BoardTactical.Point(x + width * .75f, y + height), new BoardTactical.Point(x + width * .25f, y + height),
+                  new BoardTactical.Point(x, y + height / 2)));
+            fills.add(new BoardTactical.Fill(List.of(outline), java.awt.geom.Path2D.WIND_NON_ZERO, 0xFF40C0FF,
+                  BoardTactical.Playback.LIVE, new BoardTactical.HexBorder(anchor, 1, 1.8f, 1), anchor));
+        }
+        return new BoardScene(scene.boardId(), scene.width(), scene.height(), scene.tiles(), scene.units(),
+              scene.plannedPath(), scene.selectedId(), scene.phase(), scene.commands(), scene.light(), scene.firingLines(),
+              scene.rangeBorders(), scene.markers(), new BoardTactical(List.copyOf(fills), List.of()), scene.rangeLabels(),
+              scene.fieldOfView());
+    }
+
+    /** Installed terrain detail levels, all chunks and the ones in this view, to show what a sweep can change. */
+    private static String detail(GpuTerrain terrain, BoardCamera camera) throws Exception {
+        int[] counts = new int[TerrainLod.values().length], visible = new int[counts.length];
+        for (Object chunk : (List<?>) field(terrain, "chunks")) {
+            var lod = (TerrainLod) field(chunk, "lod");
+            counts[lod.ordinal()]++;
+            if (camera.camera.frustum.boundsInFrustum((com.badlogic.gdx.math.collision.BoundingBox) field(chunk, "bounds"))) {
+                visible[lod.ordinal()]++;
+            }
+        }
+        var text = new StringBuilder("detail: ");
+        for (TerrainLod lod : TerrainLod.values()) {
+            text.append(String.format(Locale.ROOT, "%s %d (%d in view) ", lod, counts[lod.ordinal()], visible[lod.ordinal()]));
+        }
+        return text.append(TerrainLod.enabled() ? "" : "[detail selection disabled]").append('\n').toString();
     }
 
     /** The cover hexes of one kind and, through the renderers' state, whether each visible one is drawn. */

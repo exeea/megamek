@@ -58,9 +58,11 @@ final class GpuBoardSkin implements Disposable {
         BitmapFont font = font("default-font", "Noto Sans/NotoSans-Regular.ttf", 15);
         BitmapFont bold = font("bold-font", "Noto Sans/NotoSans-Bold.ttf", 15);
         BitmapFont heading = font("heading-font", "Noto Sans/NotoSans-Bold.ttf", 19);
+        BitmapFont loading = font("loading-font", "Noto Sans/NotoSans-Bold.ttf", 28);
         BitmapFont small = font("small-font", "Noto Sans/NotoSans-Regular.ttf", 12);
         skin.add("default", new Label.LabelStyle(font, TEXT));
         skin.add("heading", new Label.LabelStyle(heading, TEXT));
+        skin.add("loading", new Label.LabelStyle(loading, TEXT));
         skin.add("small", new Label.LabelStyle(small, MUTED));
         skin.add("kicker", new Label.LabelStyle(small, ACCENT));
         skin.add("muted", new Label.LabelStyle(small, MUTED));

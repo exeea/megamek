@@ -85,7 +85,8 @@ class GpuWaterShaderSmokeTest {
                 camera.camera.zoom *= .55f;
                 camera.center(BoardGeometry.center(new Coords(5, 4), 0));
                 waders.count = 0;
-                parityPixels(terrain, camera, true);
+                // The water pages coalesce their chunks after two stable frames; references come from the paged state.
+                for (int warmup = 0; warmup < 4; warmup++) { parityPixels(terrain, camera, true); }
                 byte[] empty = parityPixels(terrain, camera, true);
                 waders.count = 1;
                 waders.motion[0] = 0;

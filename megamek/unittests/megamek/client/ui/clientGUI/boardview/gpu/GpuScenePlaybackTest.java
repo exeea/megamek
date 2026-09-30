@@ -52,13 +52,15 @@ class GpuScenePlaybackTest {
     void eachAttackAppliesDestructionAndVisibilityAtImpactBeforeRecoveryOrTheNextAttack() {
         for (var kind : List.of(ResolvedAttack.Kind.SHOT, ResolvedAttack.Kind.KICK)) {
             var attacker = UnitPlaybackTest.unit(1, 0);
+            // Two attacks by one unit from one pose play as a single volley; a second attacker keeps them separate.
+            var second = UnitPlaybackTest.unit(5, 0);
             var victim = UnitPlaybackTest.unit(2, 4);
-            var before = snapshot(0, attacker, victim, contact(3, 1));
-            var firstImpact = snapshot(1, attacker, victim, contact(3, 3));
-            var latest = snapshot(2, attacker, contact(4, 2));
+            var before = snapshot(0, attacker, second, victim, contact(3, 1));
+            var firstImpact = snapshot(1, attacker, second, victim, contact(3, 3));
+            var latest = snapshot(2, attacker, second, contact(4, 2));
             var playback = new UnitPlayback();
             playback.accept(List.of(new BoardScene.SceneUpdate(before), UnitPlaybackTest.attack(attacker, victim, kind, true),
-                  new BoardScene.SceneUpdate(firstImpact), UnitPlaybackTest.attack(attacker, victim, kind, true),
+                  new BoardScene.SceneUpdate(firstImpact), UnitPlaybackTest.attack(second, victim, kind, true),
                   new BoardScene.SceneUpdate(latest)), latest, ignored -> false);
             playback.advance(0, UnitMotion.Speed.NORMAL);
             assertWorld(before, playback.present(latest));

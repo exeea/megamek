@@ -16,9 +16,9 @@ All Java classes below are in `client/ui/clientGUI/boardview/gpu`.
 | `BoardRiver`, `BoardFlow` | Derive connected stream paths and continuous visual current directions. |
 | `GpuWaterShader.Field` | Packs depth, shore distance, flow and agitation into a chunk-owned texture. |
 | `GpuWaterfall` | Builds falling sheets, their receiving-pool contacts and spray geometry. |
-| `GpuOcean` | Evolves the shared wind-wave texture on the GPU. |
-| `GpuWaterWaves` | Samples render-only wave geometry by LOD without changing the canonical bed or picking surface. |
-| `GpuWaterExposure` | Derives a coarse directional wind-fetch map from water coverage and elevations. |
+| `GpuOcean` | Evolves the shared wind-wave cascades on the GPU. |
+| `GpuWaterWaves` | Resamples level water on a world-aligned lattice by LOD, without changing the canonical bed or picking surface. |
+| `GpuWaterExposure` | Derives a coarse directional wind-fetch map; water running off the board edge continues beyond it. |
 | `GpuWaterPages` | Shares field atlases and indexed meshes across fixed spatial pages. |
 | `GpuWaders`, `GpuWaterImpacts` | Add posed-unit water contacts, wakes and entry spray. |
 | `GpuTerrain` | Prepares and owns meshes/fields, assembles water programs and orders their rendering. |
@@ -89,7 +89,10 @@ separate shader modes because they have different opacity and lighting needs.
 
 `BoardSurface.FALLS_OFF_THE_BOARD` optionally extends outgoing rivers below the
 board edge. It is disabled by default. Ordinary exposed edges show a cut surface;
-an off-board fall has no invented receiving pool or landing spray.
+an off-board fall has no invented receiving pool or landing spray. The cut shares
+the surface's wave vertex program: its top vertices (colour G zero) follow the
+waves at the same rest positions as the surface's border samples, so the section
+shows the wave profile without a gap. Its bottom stays on the bed.
 
 ## Color, waves and interaction
 
@@ -105,37 +108,58 @@ inputs; ice and magma do not become ordinary water through that blend.
 `USE_PROCEDURAL_WATER` selects depth-derived appearance; the authored animation
 path is retained through `GpuLiquidShader`.
 
-`GpuOcean` runs one 128×128 inverse FFT over a 64-metre patch. A single finish
-pass writes two mipmapped outputs: slope/height/foam and horizontal
-displacement/height/compression. Geometry, crest light and foam follow the same
-evolving surface. A weaker, rotated long swell samples that same simulation to
-break visible repetition; it adds no simulation passes. This is a visual
-superposition, not a second ocean simulation.
+`GpuOcean` runs three 128×128 cascades over 250, 55 and 12.5 metre patches, side
+by side in one texture, so each transform stage is one draw for all of them: 16
+draws a frame. Each cascade owns one band of a fetch-limited JONSWAP spectrum
+with Donelan-Banner spreading, cross-faded in power with its neighbours, plus a
+low, narrow swell so calm open water keeps moving. Amplitudes are in metres: the
+spectrum of a full gale (wind 1, about 20 m/s) gives roughly 3 m significant
+height with 70 m crests, a moderate wind about 1.7 m, calm about 0.3 m of swell.
+As art direction, storm seas are drawn up to 1.5 times higher (`storm` in
+`initialSpectrum`) so their crests fold and foam visibly from a tactical camera;
+calm water stays physical. Waves travel downwind at their deep-water speed; the
+smoke test checks the direction. The choppy displacement gathers the surface
+towards each crest, so crests are sharp and troughs broad; the smoke test checks
+that compression, and therefore foam, sits on crests.
 
-Wind changes the spectrum, with gentle residual motion in calm exposed water.
-`GpuWaterExposure` measures fetch in four directions on a coarse board lattice;
-depth and shore distance further damp waves in shallow water and narrows.
-Waves fade before elevation transitions, retaining the existing rounded stream
-descent. Board-edge sections remain fixed. This is a rendering approximation,
-not a hydraulic solver or a change to movement rules.
+One finish pass writes, per cascade, slope, height and persistent foam, and for
+the longest cascade the displacement and crest compression that move the mesh.
+Foam seeds where the steepest crests fold, drifts downwind and thins over a few
+seconds. The shader draws it dense where it is fresh and frays it into lace and
+downwind streaks; from afar the lace fades rather than hardening into patches.
 
-Breaking crests seed foam which drifts, disperses and decays. Rapids keep their
-existing current-driven patches. Foam does not cover all shallow water merely
-because its bed changes depth. Air/water Fresnel uses a 0.02037 normal-incidence
-reflectance and a fifth-power angular response; filtered specular highlights
-and restrained crest transmission replace the previous amplified facets.
+`waterWaveEnergy` (`water-wave.glsl`) gives each cascade's share at a point and is
+used by the vertex and fragment stages alike. Long waves need depth, room across
+the water and open water upwind (`GpuWaterExposure`); bays, narrows and shallows
+keep only chop and ripples, and every cascade dies out at a real bank. Water that
+reaches the board edge continues past it: the exposure map repeats the edge hexes
+beyond the board, so a lake or sea that touches the edge has unlimited fetch across
+it while a river leaving the board stays narrow. The shore field already treats an
+off-board edge as a mouth, not a bank. Descents, falls and ice have no fetch, so
+they keep their own current-driven surface. Lighting over the shallows keeps part of the swell and all of the chop
+even where the geometry is flat, so shallow water never turns to glass. Waves fade
+before elevation transitions, retaining the existing rounded stream descent. This
+is a rendering approximation, not a hydraulic solver or a change to movement rules.
 
-The FFT still uses 16 small full-screen draws, shared across the entire board.
-Its targets belong to the renderer, rather than individual hexes. Disabled water
-effects skip the simulation. If setup fails, water keeps its static ripple
-fallback. Game elevation, picking and unit support remain canonical.
+Only the longest cascade displaces geometry; shorter ones exist in the normals.
+Shading separates a broad normal (swell and some chop), which lights the waves so
+they read from a tactical height, from the full normal used for reflection and
+glitter. Crests glow turquoise with light scattered through them, strongest when
+looking towards the sun. Air/water Fresnel uses a 0.02037 normal-incidence
+reflectance and a fifth-power angular response.
+
+The FFT targets belong to the renderer, rather than individual hexes. Rapids keep
+their existing current-driven patches. Disabled water effects skip the
+simulation. If setup fails, water keeps its static ripple fallback. Game
+elevation, picking and unit support remain canonical.
 
 Water first establishes the nearest displaced surface in a depth-only pass,
 then blends its colour over the already-rendered bed and units. Both passes
-use the same displacement program and cached mesh ranges, preventing rear
-waves from blending through foreground crests at grazing angles. Reflections
-still sample sky/cloud lighting; this pass does not add screen-space scene
-reflections, refracted scene captures, wave collision or buoyancy.
+use the same displacement program (`invariant gl_Position`) and cached mesh
+ranges, preventing rear waves from blending through foreground crests at grazing
+angles. Reflections still sample sky/cloud lighting; this pass does not add
+screen-space scene reflections, refracted scene captures, wave collision or
+buoyancy.
 
 Unit contacts follow the animated model, not just the unit's hex center.
 `GpuWaders` supplies waterline interaction for posed units; `GpuWaterImpacts`
@@ -169,13 +193,12 @@ through edits or LOD invalidates its page. At most one page is built per frame;
 the original meshes draw while others await preparation. Partially visible
 pages preserve chunk culling and may require several contiguous draw ranges.
 
-Flat convex pools use a regular interior point grid, retaining their boundary
-samples through full/medium/coarse LOD. Interior spacing is 4/6/12 metres.
-Sloping and concave surfaces retain their canonical triangulation. Distant
-convex pools remove redundant collinear boundary samples after displacement
-has faded; an open hex then needs four triangles. The fade honours configured
+Level pools are resampled on a world-aligned triangular lattice, 3/6/12 metres
+at full/medium/coarse LOD, retaining every boundary sample so neighbours share
+their edges. Concave bays keep only triangles inside their outline and fall back
+to the canonical faces if the triangulation does not follow it. Sloping surfaces
+retain their canonical triangulation. Distant convex pools remove redundant
+collinear boundary samples after displacement has faded; an open hex then needs
+four triangles. The fade honours configured
 LOD thresholds and hysteresis. Shared indexed vertices reduce vertex traffic,
 and water shading uses each pixel's projected scale rather than a page centre.
-
-See [the water quality measurements](benchmarks/water-quality-2026-09-29.md)
-for native captures, draw counts, measured costs and validation limits.

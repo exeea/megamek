@@ -71,6 +71,7 @@ class GpuInfantryRoughSmokeTest {
                     try {
                         BoardGeometry.tune(BoardGeometry.DEFAULTS);
                         view.create();
+                        GpuBoardTestUi.present(view);
                         view.render();
                         view.boardCamera.advance(BoardCamera.ENTRANCE_SECONDS);
                         view.render();
@@ -134,6 +135,8 @@ class GpuInfantryRoughSmokeTest {
     }
 
     private static Map<String, Vector3> positions(GpuBattleView view) throws Exception {
+        // A replaced board loads behind the loading screen before it can be inspected.
+        GpuBoardTestUi.present(view);
         BoardScene scene = (BoardScene) field(view, "scene");
         var instances = (Map<?, ?>) field(view, "unitInstances");
         var models = (GpuUnitModels) field(view, "unitModels");
@@ -153,6 +156,7 @@ class GpuInfantryRoughSmokeTest {
     }
 
     private static void verifyFeet(GpuBattleView view) throws Exception {
+        GpuBoardTestUi.present(view);
         BoardScene scene = (BoardScene) field(view, "scene");
         var instances = (Map<?, ?>) field(view, "unitInstances");
         var models = (GpuUnitModels) field(view, "unitModels");
