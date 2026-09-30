@@ -11,6 +11,8 @@ import megamek.common.planetaryConditions.PlanetaryConditions;
 
 /** Scenario-derived visual settings owned by the GPU thread; tuning never changes planetary game conditions. */
 final class BoardAtmosphere {
+    /** Acceleration in metres per second squared when scenario gravity is 1 g. */
+    static final float STANDARD_GRAVITY = 9.81f;
     static final float MIN_GROUND_LAYER_HEIGHT = 1.0f;
     static final float STANDARD_GROUND_LAYER_HEIGHT = 2.0f;
     static final Settings DEFAULTS = new Settings(13, 0, 0, STANDARD_GROUND_LAYER_HEIGHT, 0, 0);

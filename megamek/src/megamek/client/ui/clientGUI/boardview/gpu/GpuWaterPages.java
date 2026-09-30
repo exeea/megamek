@@ -86,9 +86,11 @@ final class GpuWaterPages implements Disposable {
         for (Page page : pages.values()) { page.sources.clear(); page.visibility.clear(); }
     }
 
-    void add(Array<Renderable> parts, int pageId, boolean shown) {
+    void add(Array<Renderable> parts, int pageId, boolean shown, boolean waterVisible) {
         for (Renderable part : parts) {
             GpuWaterShader water = water(part);
+            // Lake ice shares this pass, but only liquid water disappears at zero gravity.
+            if (!waterVisible && water != null) { continue; }
             if (enabled && water != null && water.batchField() != null && !part.material.has(GpuLiquidShader.Frame.TYPE)) {
                 Page page = pages.computeIfAbsent(pageId, ignored -> new Page());
                 page.sources.add(part);

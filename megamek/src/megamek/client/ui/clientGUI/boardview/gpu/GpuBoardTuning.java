@@ -331,7 +331,8 @@ final class GpuBoardTuning {
         section(skin, "Planet properties");
         gravity = controls(skin, List.of(new Knob("Gravity (g)", 0, 10, 0.01f, "%.2f")), this::applyAtmosphere, 0);
         gravity.getFirst().slider().addListener(new TextTooltip(
-              "Visual gravity controls the height and timing of newly starting jump animations. "
+              "Visual gravity controls water waves, waterfall spray, and the height and timing of new jump animations. "
+                    + "At zero gravity, liquid water disappears. "
                     + "Moves and gameplay rules stay unchanged; an airborne jump finishes its existing arc.", skin, "menu"));
         pressure = choice(skin, "Air pressure", "tuning-atmosphere-pressure", Atmosphere.values(), this::applyAtmosphere);
         pressure.addListener(new TextTooltip("Visual atmosphere pressure: controls sky scattering, clouds and permitted weather. "

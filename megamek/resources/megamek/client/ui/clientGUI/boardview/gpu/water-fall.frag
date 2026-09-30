@@ -29,7 +29,7 @@ void main() {
     // up and stretches as it falls, while one steady clock scrolls them all without ever shearing the pattern.
     float metres = height * 4.0 * u_levelHeight / max(u_metre, 0.001);
     float fallen = drop * metres;
-    float flow = (sqrt(2.25 + 19.62 * fallen) - 1.5) / 9.81 - u_rainTime;
+    float flow = 2.0 * fallen / (sqrt(2.25 + 2.0 * u_gravity * fallen) + 1.5) - u_rainTime;
     // The streaks wander slowly across the sheet as they fall, by where they are, so neighbouring sheets agree.
     float wander = texture(u_rainNoise, position * 1.4 + vec2(0.13, flow * 0.05)).r - 0.5;
     float x = uv.x + wander * 0.36;

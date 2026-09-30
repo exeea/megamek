@@ -112,8 +112,8 @@ class GpuMagmaProgramsSmokeTest {
         var lava = new GpuOcean(true);
         var wind = new Vector3(.8f, .6f, .7f);
         try {
-            water.update(2, wind);
-            lava.update(2, wind);
+            water.update(2, wind, 9.81f);
+            lava.update(2, wind, 9.81f);
             assertNotNull(water.texture(), "Run water FFT without falling back");
             assertNotNull(lava.texture(), "Run lava FFT without falling back");
             var field = GpuOcean.class.getDeclaredField("finish");
@@ -132,8 +132,8 @@ class GpuMagmaProgramsSmokeTest {
                 int programs = ShaderProgram.getNumManagedShaderPrograms();
                 assertFalse(manager.apply(Map.of(file, "unfinished finish edit")).success());
                 assertEquals(programs, ShaderProgram.getNumManagedShaderPrograms(), "Rejected replacements do not leak");
-                water.update(3, wind);
-                lava.update(3, wind);
+                water.update(3, wind, 9.81f);
+                lava.update(3, wind, 9.81f);
                 assertNotNull(water.texture());
                 assertNotNull(lava.texture());
                 assertTrue(manager.apply(Map.of()).success());

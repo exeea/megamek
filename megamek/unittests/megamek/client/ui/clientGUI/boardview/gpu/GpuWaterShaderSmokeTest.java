@@ -3,6 +3,8 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.image.BufferedImage;
@@ -28,12 +30,64 @@ import com.badlogic.gdx.graphics.g3d.utils.DefaultRenderableSorter;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.board.Coords;
+import megamek.common.planetaryConditions.PlanetaryConditions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /** Same-camera A/B measurements and actual rain/splash pixels, rather than assuming shader arithmetic is faster. */
 @Tag("on-demand")
 class GpuWaterShaderSmokeTest {
+    @Test
+    void zeroScenarioGravityHidesWaterAndFallsInBothCamerasAndRestoresThem() {
+        var failure = new AtomicReference<Throwable>();
+        var configuration = GpuBoardWindow.configuration(false);
+        configuration.setWindowedMode(640, 480);
+        configuration.setInitialVisible(false);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                try {
+                    var scene = scene(true, 3);
+                    var conditions = new PlanetaryConditions();
+                    for (boolean procedural : new boolean[] { false, true }) {
+                        var terrain = new GpuTerrain(true, procedural);
+                        try {
+                            terrain.update(scene);
+                            terrain.setAtmosphere(BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS));
+                            for (boolean perspective : new boolean[] { false, true }) {
+                                var camera = new BoardCamera();
+                                camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                                camera.setPerspective(perspective);
+                                camera.setIsometric(true);
+                                camera.fit(scene);
+                                // Exercise zero on the first frame, hiding existing pages, and returning to water.
+                                for (float gravity : new float[] { 0, 1, 0, 2, .5f, 0, 1 }) {
+                                    conditions.setGravity(gravity);
+                                    terrain.setGravity(BoardAtmosphere.fromScenario(conditions, false, .5).gravity());
+                                    terrain.animate(0, List.of());
+                                    for (int warmup = 0; warmup < 4; warmup++) { parityPixels(terrain, camera, true); }
+                                    byte[] opaque = parityPixels(terrain, camera, false);
+                                    byte[] complete = parityPixels(terrain, camera, true);
+                                    if (gravity == 0) {
+                                        assertNull(terrain.waterDepth(), "Invisible water must not occlude fog");
+                                        assertParity(opaque, complete, parityPixels(terrain, camera, false), "zero-gravity");
+                                    } else {
+                                        assertNotNull(terrain.waterDepth());
+                                        assertVisibleDifference(opaque, complete, "Water and falls return at " + gravity + " g");
+                                    }
+                                    assertEquals(2, scene.tile(new Coords(4, 4)).waterDepth(), "Game terrain stays intact");
+                                }
+                            }
+                        } finally { terrain.dispose(); }
+                    }
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) { failure.set(error); }
+                finally { Gdx.app.exit(); }
+            }
+        }, configuration);
+        if (failure.get() != null) { throw new AssertionError("Scenario gravity water rendering", failure.get()); }
+    }
+
     @Test
     void unitInteractionsReloadAndPreserveWaterWithoutUnits() {
         var failure = new AtomicReference<Throwable>();

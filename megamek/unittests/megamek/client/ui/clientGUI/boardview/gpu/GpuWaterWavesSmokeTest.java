@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -104,6 +105,33 @@ class GpuWaterWavesSmokeTest {
         });
     }
 
+    @Test
+    void gravityChangesReseedMovingWavesAndZeroGravityCanRecover() {
+        run(ocean -> {
+            var wind = new Vector3(.8f, .6f, .7f);
+            ocean.update(1, wind, 9.81f);
+            assertNotNull(ocean.displacement());
+            float[] normal = read(ocean.spectrum());
+            for (float gravity : new float[] { .0981f, 4.905f, 19.62f, 98.1f }) {
+                ocean.update(1, wind, gravity);
+                assertNotNull(ocean.displacement(), "Changing gravity must not disable the simulation");
+                assertFalse(Arrays.equals(normal, read(ocean.spectrum())), "Gravity must regenerate the spectrum");
+                float[] before = read(ocean.displacement());
+                ocean.update(1.1f, wind, gravity);
+                float[] after = read(ocean.displacement());
+                for (float value : after) { assertTrue(Float.isFinite(value), "Gravity must keep waves finite"); }
+                assertFalse(Arrays.equals(before, after), "Waves must keep moving at each positive gravity");
+            }
+            ocean.update(2, wind, 0);
+            assertNull(ocean.displacement(), "Zero gravity releases the water simulation");
+            assertNull(ocean.spectrum());
+            ocean.update(2, wind, 9.81f);
+            assertNotNull(ocean.displacement(), "Water returns when gravity is restored");
+            assertArrayEquals(normal, read(ocean.spectrum()), "Returning to 1 g restores the original sea");
+            assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+        });
+    }
+
     private interface Check { void run(GpuOcean ocean); }
 
     private static void run(Check check) {
@@ -123,7 +151,7 @@ class GpuWaterWavesSmokeTest {
 
     /** Frames at 60 Hz with a steady wind; returns the clock after them. */
     private static float run(GpuOcean ocean, float time, Vector3 wind, int frames) {
-        for (int frame = 0; frame < frames; frame++) { ocean.update(time += FRAME, wind); }
+        for (int frame = 0; frame < frames; frame++) { ocean.update(time += FRAME, wind, 9.81f); }
         return time;
     }
 
@@ -135,7 +163,7 @@ class GpuWaterWavesSmokeTest {
     /** Mean absolute change of height over one frame, under the given wind. */
     private static double change(GpuOcean ocean, float time, Vector3 wind) {
         float[] before = read(ocean.displacement());
-        ocean.update(time + FRAME, wind);
+        ocean.update(time + FRAME, wind, 9.81f);
         float[] after = read(ocean.displacement());
         double sum = 0;
         for (int i = 2; i < after.length; i += 4) { sum += Math.abs(after[i] - before[i]); }

@@ -10,6 +10,7 @@ uniform sampler2D u_to;      // left, and the one it is heading for
 uniform float u_blend;       // eased progress from one to the other; every wave keeps its phase throughout
 uniform float u_time;
 uniform float u_loop;        // every frequency is a multiple of this, so the clock can wrap without a jump
+uniform float u_gravity;     // scenario acceleration, metres per second squared
 uniform vec3 u_patches;      // metres each cascade repeats over
 uniform int u_size;          // texels along a side of one cascade
 uniform bool u_water;
@@ -25,7 +26,7 @@ void main() {
     vec4 initial = mix(texelFetch(u_from, texel, 0), texelFetch(u_to, texel, 0), u_blend);
     vec2 k = 6.2831853 * (vec2(texel.x - cascade * u_size, texel.y) - 0.5 * float(u_size)) / extent;
     float magnitude = max(length(k), 1e-6);
-    float phase = floor(sqrt(9.81 * magnitude) / u_loop) * u_loop * u_time;
+    float phase = floor(sqrt(u_gravity * magnitude) / u_loop) * u_loop * u_time;
     // h0(k) turns clockwise, so its crests travel along k: the wind's direction, not against it.
     vec2 turn = vec2(cos(phase), sin(phase));
     vec2 height = multiply(initial.xy, vec2(turn.x, -turn.y)) + multiply(initial.zw, turn);

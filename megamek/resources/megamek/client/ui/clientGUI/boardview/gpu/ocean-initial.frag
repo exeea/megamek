@@ -16,14 +16,14 @@ uniform vec3 u_patches;     // metres each cascade repeats over
 uniform vec2 u_directions;  // radians the wind sea and the swell travel toward
 uniform vec4 u_sea;         // wind sea's JONSWAP peak (rad/s) and alpha, then the swell's
 uniform float u_storm;      // art-directed amplitude of a storm sea
+uniform float u_gravity;    // scenario acceleration, metres per second squared
 
-const float GRAVITY = 9.81;
 const float PI = 3.14159265;
 const float HANDOVER = 4.0; // a cascade hands over at this many of the next cascade's own harmonics
 
 float jonswap(float omega, float peak, float alpha) {
     float sigma = omega <= peak ? .07 : .09, offset = (omega - peak) / (sigma * peak);
-    return alpha * GRAVITY * GRAVITY / pow(omega, 5.0) * exp(-1.25 * pow(peak / omega, 4.0))
+    return alpha * u_gravity * u_gravity / pow(omega, 5.0) * exp(-1.25 * pow(peak / omega, 4.0))
           * pow(3.3, exp(-.5 * offset * offset));
 }
 
@@ -64,12 +64,12 @@ vec2 wave(int cascade, ivec2 index) {
     float share = (cascade == 0 ? 1.0 : handover(magnitude, HANDOVER * cell))
           * (cascade == 2 ? 1.0 : 1.0 - handover(magnitude, HANDOVER * 2.0 * PI
                 / (cascade == 0 ? u_patches.y : u_patches.z)));
-    float omega = sqrt(GRAVITY * magnitude), theta = atan(k.y, k.x);
+    float omega = sqrt(u_gravity * magnitude), theta = atan(k.y, k.x);
     // S(ω)·D(θ)·dω/dk / k: variance per unit wave-number area, times the cell's area.
     float sea = jonswap(omega, u_sea.x, u_sea.y) * donelanBanner(omega / u_sea.x, relative(theta, u_directions.x))
           + jonswap(omega, u_sea.z, u_sea.w) * swellSpread(relative(theta, u_directions.y));
     // Capillary ripples below a few centimetres stay in the static detail map.
-    float variance = sea * (GRAVITY / (2.0 * omega)) / magnitude * cell * cell * share
+    float variance = sea * (u_gravity / (2.0 * omega)) / magnitude * cell * cell * share
           * exp(-magnitude * magnitude * .0004);
     // h0(k) and the mirrored conj(h0(-k)) both reach this wave vector: each carries half its variance.
     ivec2 texel = ivec2(cascade * u_size + index.x, index.y);

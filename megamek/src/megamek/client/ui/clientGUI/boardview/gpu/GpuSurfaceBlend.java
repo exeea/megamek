@@ -99,7 +99,12 @@ final class GpuSurfaceBlend extends Attribute {
     /** Subdivision changes only interpolation, never the support surface or its silhouette. */
     static Map<Palette, List<Triangle>> prepare(BoardScene scene, BoardScene.Tile tile, List<BoardSurface.Face> faces,
           Function<Vector3, MeshPartBuilder.VertexInfo> vertices) {
-        return prepare(scene, tile, faces, vertices, BoardRelief.metres(2));
+        return prepare(scene, tile, faces, vertices, spacing(TerrainLod.FULL));
+    }
+
+    /** Broad cover changes span several metres; texture height and noise provide the fine contact detail. */
+    static float spacing(TerrainLod detail) {
+        return BoardRelief.metres(detail == TerrainLod.DISTANT ? 8 : detail == TerrainLod.COARSE ? 4 : 3);
     }
 
     static Map<Palette, List<Triangle>> prepare(BoardScene scene, BoardScene.Tile tile, List<BoardSurface.Face> faces,

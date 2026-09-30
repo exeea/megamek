@@ -4,6 +4,7 @@
 #define waterSprayFlag
 uniform float u_rainTime;
 uniform float u_metre;
+uniform float u_gravity;
 uniform vec3 u_wind;
 uniform vec3 u_cameraDirection;
 uniform vec3 u_cameraUp;
@@ -11,9 +12,10 @@ uniform vec3 u_cameraUp;
 
 void waterSpray(inout vec4 pos) {
     #ifdef waterSprayFlag
-    float gravity = 9.81 * u_metre;
+    float gravity = u_gravity * u_metre;
     float mist = step(0.75, a_color.a), droplet = step(0.25, a_color.a) - mist;
-    float speed = a_color.b * @SPRAY_SPEED@ * u_metre;
+    // Geometry stores the launch at 1 g; rescaling preserves the spray's height and bounds at any positive gravity.
+    float speed = a_color.b * @SPRAY_SPEED@ * u_metre * mix(sqrt(u_gravity / @STANDARD_GRAVITY@), 1.0, mist);
     vec3 aim = normalize(a_normal);
     // A droplet lives until it falls back into the water; mist until it has thinned away. Each rests a
     // moment below the surface, then launches again with a fresh aim, never twice on the same arc.

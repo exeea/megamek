@@ -43,7 +43,7 @@ final class GpuOcean implements Disposable {
     /** Lava's single patch. */
     static final float LAVA_PATCH = 64;
     /**
-     * Crest-to-trough height, in metres, of the tallest waves at full wind: the one control for how rough the sea
+     * Crest-to-trough height, in metres, of the tallest waves at full wind and 1 g: the control for how rough the sea
      * gets. A board-sized patch of sea has a few hundred waves, whose tallest are about 1.6 times its significant
      * height; lighter winds scale down from here, and calm water keeps its physical ripples and swell.
      */
@@ -51,7 +51,6 @@ final class GpuOcean implements Disposable {
     /** Seconds a change of wind takes to reshape the sea: the old waves run on while the new ones build. */
     static final float TRANSITION_SECONDS = 8;
     private static final int BITS = Integer.numberOfTrailingZeros(SIZE);
-    private static final float GRAVITY = 9.81f;
     /** Every frequency is a multiple of 2π over this many seconds, so the clock can wrap without a jump. */
     private static final float LOOP_SECONDS = 1000;
     /** The finish pass's previous result of the swell and chop, for foam that outlives its crest. */
@@ -60,8 +59,8 @@ final class GpuOcean implements Disposable {
     private static final float FETCH_METRES = 60_000;
     /** A calm swell ~110 m long, from a steady quarter to the wind. */
     private static final float SWELL_METRES = 110, SWELL_TURN = .45f;
-    /** How much higher than its fetch would raise it a full gale is drawn; see {@link #storm}. */
-    private static final double GALE_GAIN = MAX_WAVE_HEIGHT / 1.6 / significantHeight(1);
+    /** How much higher than its fetch would raise it a full gale at 1 g is drawn; see {@link #storm}. */
+    private static final double GALE_GAIN = MAX_WAVE_HEIGHT / 1.6 / significantHeight(1, BoardAtmosphere.STANDARD_GRAVITY);
     /** Smaller changes of wind leave the spectrum alone. */
     private static final float WIND_EPSILON = .001f;
     /** The same FFT with a slowly evolving, short-wave-damped spectrum and displacement output for lava. */
@@ -93,6 +92,8 @@ final class GpuOcean implements Disposable {
     /** Downwind travel of the eased wind, seconds times its direction, wrapped every {@link #LOOP_SECONDS}. */
     private final Vector2 drift = new Vector2();
     private float previousTime = Float.NaN;
+    /** Acceleration used to seed and evolve this simulation, in metres per second squared. */
+    private float gravity = BoardAtmosphere.STANDARD_GRAVITY;
 
     GpuOcean() { this(false); }
 
@@ -147,11 +148,18 @@ final class GpuOcean implements Disposable {
     }
 
     /**
-     * Advances the waves to the given time for a wind (direction in x and y, strength from 0 to 1 in z). Runs outside
-     * any model batch; it restores the framebuffer and viewport it found.
+     * Advances the waves to the given time for a wind (direction in x and y, strength from 0 to 1 in z) and nonnegative
+     * gravity in metres per second squared. Zero gravity removes water. Runs outside any model batch; it restores
+     * the framebuffer and viewport it found.
      */
-    void update(float time, Vector3 wind) {
+    void update(float time, Vector3 wind, float gravity) {
         if (!supported()) { return; }
+        if (!lava && gravity == 0) { dispose(); return; }
+        if (this.gravity != gravity) {
+            this.gravity = gravity;
+            // Both the spectrum's amplitudes and its wave frequencies change with gravity.
+            seeded = false;
+        }
         float delta = Float.isNaN(previousTime) ? 0 : Math.clamp(time - previousTime, 0, .25f);
         previousTime = time;
         // Lava's convection is internal. Weather must not start or stop its motion.
@@ -268,14 +276,15 @@ final class GpuOcean implements Disposable {
     }
 
     /**
-     * The wind sea's JONSWAP peak angular frequency, its alpha, and the swell's alpha, for a strength from 0 to 1:
+     * The wind sea's JONSWAP peak angular frequency, its alpha, and the swell's alpha, for a strength from 0 to 1
+     * and positive gravity in metres per second squared:
      * fetch-limited (Hasselmann et al. 1973), never beyond a fully developed sea. Calm air still ripples; a full gale
-     * (Beaufort 8) raises a steep, breaking sea with ~70 m peak waves.
+     * (Beaufort 8) raises a steep, breaking sea with ~70 m peak waves at 1 g.
      */
-    static float[] sea(float strength) {
+    static float[] sea(float strength, float gravity) {
         float speed = 1.5f + 18.5f * strength;
-        double peak = Math.max(22 * Math.cbrt(GRAVITY * GRAVITY / (speed * FETCH_METRES)), .855 * GRAVITY / speed);
-        double alpha = Math.max(.076 * Math.pow(speed * speed / (FETCH_METRES * GRAVITY), .22), .0081);
+        double peak = Math.max(22 * Math.cbrt(gravity * gravity / (speed * FETCH_METRES)), .855 * gravity / speed);
+        double alpha = Math.max(.076 * Math.pow(speed * speed / (FETCH_METRES * gravity), .22), .0081);
         // The swell is 0.3 m high in calm and 0.45 m in a gale.
         return new float[] { (float) peak, (float) alpha, 5.6e-5f + 7e-5f * strength };
     }
@@ -320,15 +329,15 @@ final class GpuOcean implements Disposable {
      * Significant height in metres of the sea the spectrum describes before any storm scaling: 4√m0, with JONSWAP's
      * m0 ≈ 1.52 αg²/(5ωp⁴) at a peak enhancement of 3.3, for the wind sea and the swell alike.
      */
-    static double significantHeight(float strength) {
-        float[] sea = sea(strength);
-        double swell = Math.sqrt(GRAVITY * MathUtils.PI2 / SWELL_METRES);
-        double m0 = 1.52 * GRAVITY * GRAVITY / 5 * (sea[1] / Math.pow(sea[0], 4) + sea[2] / Math.pow(swell, 4));
+    static double significantHeight(float strength, float gravity) {
+        float[] sea = sea(strength, gravity);
+        double swell = Math.sqrt(gravity * MathUtils.PI2 / SWELL_METRES);
+        double m0 = 1.52 * gravity * gravity / 5 * (sea[1] / Math.pow(sea[0], 4) + sea[2] / Math.pow(swell, 4));
         return 4 * Math.sqrt(m0);
     }
 
     /**
-     * Art direction, not physics: how much higher than its fetch would raise it the sea is drawn, so that at full wind
+     * Art direction, not physics: how much higher than its fetch would raise it the sea is drawn, so that at full wind and 1 g
      * its tallest waves reach {@link #MAX_WAVE_HEIGHT} and storm crests fold and foam visibly from a tactical camera.
      * Calm water stays physical.
      */
@@ -375,7 +384,7 @@ final class GpuOcean implements Disposable {
 
     /** Renders the spectrum of {@link #target}'s wind into one of the spectra. */
     private void generate(int into) {
-        float[] sea = sea(target.z);
+        float[] sea = sea(target.z, gravity);
         float wind = MathUtils.atan2(target.y, target.x);
         seed.bind();
         Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
@@ -385,7 +394,8 @@ final class GpuOcean implements Disposable {
         seed.setUniformi("u_size", SIZE);
         seed.setUniformf("u_patches", PATCHES[0], PATCHES[1], PATCHES[2]);
         seed.setUniformf("u_directions", wind, wind + SWELL_TURN);
-        seed.setUniformf("u_sea", sea[0], sea[1], (float) Math.sqrt(GRAVITY * MathUtils.PI2 / SWELL_METRES), sea[2]);
+        seed.setUniformf("u_gravity", gravity);
+        seed.setUniformf("u_sea", sea[0], sea[1], (float) Math.sqrt(gravity * MathUtils.PI2 / SWELL_METRES), sea[2]);
         seed.setUniformf("u_storm", storm(target.z));
         pass(seed, spectra[into]);
     }
@@ -436,6 +446,7 @@ final class GpuOcean implements Disposable {
         spectrum.setUniformf("u_blend", ease(blend));
         spectrum.setUniformf("u_time", time % LOOP_SECONDS);
         spectrum.setUniformf("u_loop", MathUtils.PI2 / LOOP_SECONDS);
+        spectrum.setUniformf("u_gravity", gravity);
         spectrum.setUniformf("u_patches", lava ? LAVA_PATCH : PATCHES[0], lava ? 1 : PATCHES[1], lava ? 1 : PATCHES[2]);
         spectrum.setUniformi("u_size", SIZE);
         spectrum.setUniformi("u_water", lava ? 0 : 1);

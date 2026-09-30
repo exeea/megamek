@@ -17,6 +17,7 @@ uniform int u_splashCount;
 uniform vec4 u_splashLines[12];  // where falls land nearby: from XY, to XY, the pool to the right; hex widths
 uniform float u_splashRadii[12]; // radius of each landing's boil, hex widths
 uniform float u_metre;           // world units per metre
+uniform float u_gravity;         // scenario acceleration, metres per second squared
 uniform float u_levelHeight;     // world units per level
 uniform float u_waterLine;       // water surface inset below its game level, shared with the bed shader
 uniform int u_waderCount;

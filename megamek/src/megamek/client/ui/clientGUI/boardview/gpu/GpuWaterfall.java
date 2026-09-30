@@ -207,10 +207,8 @@ final class GpuWaterfall {
         return (hash >>> 8) / (float) (1 << 24);
     }
 
-    /** Fastest launch the spray's vertex colour encodes, in metres per second. */
+    /** Fastest launch at 1 g that the spray's vertex colour encodes, in metres per second. */
     private static final float SPRAY_SPEED = 20;
-    /** Gravity, in metres per second squared. */
-    private static final float GRAVITY = 9.81f;
 
     /**
      * Spray where a fall lands: white water bursting up in dense puffs, bright droplets flung out in arcs, both falling
@@ -262,7 +260,8 @@ final class GpuWaterfall {
                       .add(0, 0, (droplet ? .9f : 1.3f) + .6f * random.nextFloat()).nor();
                 float share = droplet ? .2f + .35f * random.nextFloat() : .12f + .28f * random.nextFloat();
                 float rise = Math.clamp(fall * share, 1.2f, 14);
-                speed = (float) Math.sqrt(2 * GRAVITY * rise) / direction.z;
+                // Encode at 1 g; the vertex shader scales launch speed with live gravity without rebuilding meshes.
+                speed = (float) Math.sqrt(2 * BoardAtmosphere.STANDARD_GRAVITY * rise) / direction.z;
             }
             data.set(random.nextFloat(), random.nextFloat(), Math.min(1, speed / SPRAY_SPEED), kind);
             short first = mesh.vertex(corner(origin, direction, 0, 0, data));
@@ -292,7 +291,8 @@ final class GpuWaterfall {
      * quad around it. The particle's age replaces its vertex colour on the way to the fragment shader.
      */
     static String vertex(String source) {
-        String spray = GpuShaderSource.read("water-spray.glsl").replace("@SPRAY_SPEED@", Float.toString(SPRAY_SPEED));
+        String spray = GpuShaderSource.read("water-spray.glsl").replace("@SPRAY_SPEED@", Float.toString(SPRAY_SPEED))
+              .replace("@STANDARD_GRAVITY@", Float.toString(BoardAtmosphere.STANDARD_GRAVITY));
         String main = "void main() {", anchor = "gl_Position = u_projViewTrans * pos;";
         return insertOnce(insertOnce(source, main, spray + "\n" + main), anchor, "waterSpray(pos);\n" + anchor);
     }

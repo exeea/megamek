@@ -541,6 +541,7 @@ class GpuBattleView extends ApplicationAdapter {
         fieldOfView.configure(ui.fovStyle(), ui.fovDarkness(), ui.sensorStyle(), ui.sensorDarkness());
         var atmosphereSettings = ui.atmosphere();
         atmosphere.configure(atmosphereSettings);
+        terrain.setGravity(atmosphereSettings.gravity());
         attackEffects.setWind(atmosphereSettings.effects());
         atmosphere.setOptions(ui.atmosphereOptions());
         terrain.setNormalMaps(ui.normalMaps());
@@ -662,7 +663,10 @@ class GpuBattleView extends ApplicationAdapter {
         attackEffects.setLightDirection(atmosphere.lighting().direction());
         if (!unitIcons.active()) { jumpJets.render(boardCamera.camera); }
         attackEffects.render(boardCamera.camera, effectDepth);
-        if (!unitIcons.active()) { waterImpacts.render(boardCamera.camera, scene, motions, unitInstances, smokeLight, playback.attachment()); }
+        if (!terrain.waterVisible()) { waterImpacts.clear(); }
+        else if (!unitIcons.active()) {
+            waterImpacts.render(boardCamera.camera, scene, motions, unitInstances, smokeLight, playback.attachment());
+        }
         renderStage("atmosphere composite");
         atmosphere.end(boardCamera.camera, terrain, scene, ui.bottomPixels(), fieldOfView);
         if (wireframeView) { wireframe.lines(boardCamera.camera, terrain); }

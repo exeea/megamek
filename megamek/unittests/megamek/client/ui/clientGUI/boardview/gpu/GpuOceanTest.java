@@ -20,11 +20,26 @@ class GpuOceanTest {
         // Deep water: λ = 2πg/ω². Calm air only ripples; Beaufort 8 over the open-sea fetch peaks near 70 m.
         assertTrue(peakWavelength(0) < 5, "Calm: " + peakWavelength(0));
         assertTrue(peakWavelength(1) > 55 && peakWavelength(1) < 85, "Gale: " + peakWavelength(1));
-        assertTrue(GpuOcean.sea(1)[2] > GpuOcean.sea(0)[2], "The swell grows a little under wind");
+        assertTrue(GpuOcean.sea(1, 9.81f)[2] > GpuOcean.sea(0, 9.81f)[2], "The swell grows a little under wind");
         // JONSWAP's closed form for the unscaled sea: about 3 m in a gale over this fetch, a 0.3 m swell in calm.
-        assertEquals(3, GpuOcean.significantHeight(1), .3);
-        assertEquals(.3, GpuOcean.significantHeight(0), .05);
+        assertEquals(3, GpuOcean.significantHeight(1, 9.81f), .3);
+        assertEquals(.3, GpuOcean.significantHeight(0, 9.81f), .05);
         assertEquals(1, GpuOcean.storm(0), 1e-6, "Calm water is never exaggerated");
+    }
+
+    @Test
+    void lighterGravityRaisesLongerWavesUnderTheSameWind() {
+        double previousHeight = Double.POSITIVE_INFINITY, previousLength = Double.POSITIVE_INFINITY;
+        for (float gravity : new float[] { .01f, .16f, .5f, 1, 2, 10 }) {
+            float acceleration = gravity * 9.81f;
+            double omega = GpuOcean.sea(.7f, acceleration)[0];
+            double length = 2 * Math.PI * acceleration / (omega * omega);
+            double height = GpuOcean.significantHeight(.7f, acceleration);
+            assertTrue(Double.isFinite(height) && height > 0 && height < previousHeight);
+            assertTrue(Double.isFinite(length) && length > 0 && length < previousLength);
+            previousHeight = height;
+            previousLength = length;
+        }
     }
 
     @Test
@@ -41,7 +56,7 @@ class GpuOceanTest {
     }
 
     private static double peakWavelength(float strength) {
-        double omega = GpuOcean.sea(strength)[0];
+        double omega = GpuOcean.sea(strength, 9.81f)[0];
         return 2 * Math.PI * 9.81 / (omega * omega);
     }
 }

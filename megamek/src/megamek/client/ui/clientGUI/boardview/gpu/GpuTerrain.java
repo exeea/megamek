@@ -217,6 +217,7 @@ final class GpuTerrain implements Disposable {
                 private final int skyUniform = register("u_rainSky");
                 private final int horizonUniform = register("u_rainHorizon");
                 private final int waterEffectsUniform = register("u_waterEffects");
+                private final int gravityUniform = register("u_gravity");
                 private final int windUniform = register("u_wind");
                 private final int waterWindUniform = register("u_waterWind");
                 private final int waterDriftUniform = register("u_waterDrift");
@@ -284,7 +285,8 @@ final class GpuTerrain implements Disposable {
                     set(viewDirectionUniform, camera.direction);
                     set(viewPositionUniform, camera.position);
                     set(perspectiveUniform, camera.projection.val[Matrix4.M33] == 0 ? 1f : 0f);
-                    set(waterEffectsUniform, waterEffects ? 1f : 0f);
+                    set(waterEffectsUniform, waterEffects && waterVisible() ? 1f : 0f);
+                    set(gravityUniform, gravity);
                     set(windUniform, wind);
                     // Water follows the ocean's eased wind, so its ripples, gusts and foam turn with the waves.
                     Vector3 waterWind = ocean.wind();
@@ -648,6 +650,8 @@ final class GpuTerrain implements Disposable {
     /** Neutral material view: sculpted terrain drops its textures so only geometry, light and occlusion remain. */
     private boolean clay;
     private boolean waterEffects = true;
+    /** This frame's visual gravity, converted from the scenario's g multiplier to metres per second squared. */
+    private float gravity = BoardAtmosphere.STANDARD_GRAVITY;
     private float wetness;
     private float detailPixelsPerUnit = Float.NaN;
     private boolean hasCutaways;
@@ -2685,7 +2689,7 @@ final class GpuTerrain implements Disposable {
         Map<Vector3, Vector3> bedNormals = wallNormals(bed);
         bed = surface.renderBed(bed);
         Map<GpuSurfaceBlend.Palette, List<GpuSurfaceBlend.Triangle>> groups = new LinkedHashMap<>();
-        float spacing = BoardRelief.metres(lod == TerrainLod.DISTANT ? 8 : lod == TerrainLod.COARSE ? 4 : 2);
+        float spacing = GpuSurfaceBlend.spacing(lod);
         if (BoardSurfaceBlend.cliffBoundary(scene, tile)) {
             if (tile.liquid().volcanic() && tile.detailedGround()) {
                 formed.addAll(ground);
@@ -3504,10 +3508,10 @@ final class GpuTerrain implements Disposable {
         clock += delta;
         // A shared, continuous gust clock: stronger wind moves faster without rephasing when the slider changes.
         vegetationPhase = (vegetationPhase + delta * (.65f + 3.35f * wind.z)) % MathUtils.PI2;
-        if (chunks.stream().anyMatch(chunk -> chunk.lavaField != null)) { lavaOcean.update(clock, wind); }
+        if (chunks.stream().anyMatch(chunk -> chunk.lavaField != null)) { lavaOcean.update(clock, wind, gravity); }
         else if (lavaOcean.texture() != null) { lavaOcean.dispose(); }
         if (proceduralWater && waterEffects && chunks.stream().anyMatch(chunk -> chunk.waterField != null)) {
-            ocean.update(clock, wind);
+            ocean.update(clock, wind, gravity);
             waders.update(coverScene, units, units.stream().map(this::unitBounds).toList(), delta);
         }
         List<BoundingBox> occupied = hasCutaways && buildingOpacity < 1
@@ -3832,7 +3836,7 @@ final class GpuTerrain implements Disposable {
         waterDepth.invalidate();
         updateDetail(camera);
         biomes.update(coverScene);
-        boolean hasWater = chunks.stream().anyMatch(chunk -> chunk.waterField != null);
+        boolean hasWater = waterVisible() && chunks.stream().anyMatch(chunk -> chunk.waterField != null);
         if (hasWater) { waterExposure.update(coverScene); }
         waterPages.begin();
         int pageRows = (chunkRows + GpuWaterPages.CHUNKS_PER_PAGE - 1) / GpuWaterPages.CHUNKS_PER_PAGE;
@@ -3842,7 +3846,7 @@ final class GpuTerrain implements Disposable {
             boolean visible = camera.frustum.boundsInFrustum(chunk.bounds);
             int page = index / chunkRows / GpuWaterPages.CHUNKS_PER_PAGE * pageRows
                   + index % chunkRows / GpuWaterPages.CHUNKS_PER_PAGE;
-            waterPages.add(chunk.waterRenderables, page, visible);
+            waterPages.add(chunk.waterRenderables, page, visible, waterVisible());
             if (visible) {
                 for (Prop prop : chunk.faded) { batch.render(prop.instance(), environment); }
             }
@@ -3909,8 +3913,13 @@ final class GpuTerrain implements Disposable {
         this.wetness = wetness;
     }
 
+    /** Scenario or local preview gravity, in g; changing it never rebuilds or edits board geometry. */
+    void setGravity(float gravity) { this.gravity = gravity * BoardAtmosphere.STANDARD_GRAVITY; }
+
+    boolean waterVisible() { return gravity > 0; }
+
     /** This frame's nearest water surface, for fog to stop at; null when the frame drew no water. */
-    Texture waterDepth() { return waterDepth.nearest(); }
+    Texture waterDepth() { return waterVisible() ? waterDepth.nearest() : null; }
 
     void setWind(BoardAtmosphere.Effects effects) {
         double angle = Math.toRadians(effects.windDirection());
