@@ -1670,8 +1670,7 @@ public class BasicPathRanker extends PathRanker {
         BehaviorType behaviorType = getOwner().getUnitBehaviorTracker().getBehaviorType(movingUnit, getOwner());
 
         if (behaviorType == BehaviorType.ForcedWithdrawal || behaviorType == BehaviorType.MoveToDestination) {
-            int newDistanceToHome = distanceToHomeEdge(path.getFinalCoords(), path.getFinalBoardId(),
-                  getOwner().getHomeEdge(movingUnit),
+            int newDistanceToHome = distanceToDestination(movingUnit, path.getFinalCoords(), path.getFinalBoardId(),
                   game);
             double selfPreservation = getOwner().getBehaviorSettings().getSelfPreservationValue();
             double selfPreservationMod;
@@ -2594,6 +2593,13 @@ public class BasicPathRanker extends PathRanker {
 
     public double checkPathForHazards(MovePath path, Entity movingUnit, Game game) {
         logger.trace("Checking Path ({}) for hazards.", path);
+
+        // TW p.55: a WiGE vehicle that lands anywhere but a clear, paved or water hex crashes, and as it cannot land
+        // there the crash destroys it (TW p.68). Checked before the flying check, as the path is airborne until then.
+        if (path.landsWiGEVehicleWhereItCrashes()) {
+            logger.trace("WiGE lands where it crashes ({}).", UNIT_DESTRUCTION_FACTOR);
+            return UNIT_DESTRUCTION_FACTOR;
+        }
 
         // If we're flying or swimming, we don't care about ground hazards.
         if (EntityMovementType.MOVE_FLYING.equals(path.getLastStepMovementType()) ||

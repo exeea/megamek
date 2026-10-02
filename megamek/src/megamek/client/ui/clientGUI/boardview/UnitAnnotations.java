@@ -78,6 +78,7 @@ import megamek.common.units.Infantry;
 import megamek.common.units.Mek;
 import megamek.common.units.ProtoMek;
 import megamek.common.units.QuadVee;
+import megamek.common.units.ReconCameraRules;
 import megamek.common.units.Tank;
 
 /**
@@ -427,6 +428,30 @@ public final class UnitAnnotations {
     }
 
     /**
+     * Whether this unit's Recon Camera spotted a unit this turn, told only to the camera's side.
+     *
+     * @param entity the unit this sprite is drawn for
+     *
+     * @return {@code true} when the camera spotting label belongs on this unit
+     */
+    private boolean isSpottingWithItsCamera(Entity entity) {
+        boolean hasSpotted = entity.getReconCameraSpotTargetId() != Entity.NONE;
+        return hasSpotted && ReconCameraRules.isOnCameraSide(entity, bv.getLocalPlayer());
+    }
+
+    /**
+     * Whether a Recon Camera on the local player's side spotted this unit this turn.
+     *
+     * @param entity the unit this sprite is drawn for
+     *
+     * @return {@code true} when the camera spotted label belongs on this unit
+     */
+    private boolean isSpottedByAFriendlyCamera(Entity entity) {
+        // read from the spotted unit, so the mark shows even when the camera itself is not visible to this player
+        return entity.isReconCameraSpottedFor(bv.getLocalPlayer());
+    }
+
+    /**
      * @param entity the unit to check
      *
      * @return {@code true} when the unit belongs to the player sitting at this client
@@ -668,6 +693,18 @@ public final class UnitAnnotations {
         }
         if (isTheTargetOfAnOrderedScan(entity)) {
             stStr.add(new Status(GUIP.getPrecautionColor(), "SCANNED"));
+        }
+
+        // A Recon Camera spot that hit this turn, shown to the camera's side on the camera and on its target. The
+        // labels are drawn from the bottom up, so the second word goes in first to read "CAMERA" above it.
+        if (isSpottingWithItsCamera(entity)) {
+            stStr.add(new Status(GUIP.getPrecautionColor(), "CAMERA_SPOTTING"));
+            stStr.add(new Status(GUIP.getPrecautionColor(), "CAMERA"));
+        }
+
+        if (isSpottedByAFriendlyCamera(entity)) {
+            stStr.add(new Status(GUIP.getPrecautionColor(), "CAMERA_SPOTTED"));
+            stStr.add(new Status(GUIP.getPrecautionColor(), "CAMERA"));
         }
 
         if (entity.isGyroDestroyed()) {
