@@ -58,6 +58,11 @@ Ground wetness follows liquid rain automatically. Freezing temperature and very
 thin/airless conditions suppress it. `rain-surface.glsl` uses the same wetness for
 ground and other receiving materials; puddle response also depends on the surface.
 
+At zero gravity, `BoardAtmosphere.Settings` forces visual pressure to VACUUM.
+The existing vacuum limits remove clouds, fog, haze, precipitation, sand, lightning,
+wind and rain wetness for both scenario settings and local previews. Tuning shows
+VACUUM and disables incompatible weather controls; pressure is locked while gravity is zero.
+
 ## Light and color contract
 
 `BoardAtmosphere.lighting()` supplies linear, pre-exposed direct and ambient

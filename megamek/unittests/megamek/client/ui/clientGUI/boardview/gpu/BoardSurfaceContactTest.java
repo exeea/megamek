@@ -4,15 +4,45 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.File;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import megamek.common.board.Coords;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /** Every ordered surface pair, including within-family roles, constructed edges and volcanic banks. */
 class BoardSurfaceContactTest {
+    @Test
+    void minesCliffDebrisContinuesOntoTheReceivingGround() {
+        var scene = BoardCliffSeamTest.scene(new File("data/boards/Deserts/16x17 Mines 1.board"));
+        int compared = 0;
+        for (Coords at : List.of(new Coords(12, 3), new Coords(12, 4))) {
+            var high = new BoardSurface(scene, scene.tile(at));
+            var walls = high.walls(scene, BoardGeometry.floor(scene));
+            for (int direction = 0; direction < 6; direction++) {
+                var tile = scene.tile(at.translated(direction));
+                if (tile == null || tile.elevation() != -1) { continue; }
+                var low = new BoardSurface(scene, tile);
+                for (var face : low.groundFaces()) {
+                    if (face.finish() != BoardSurface.Finish.TOP) { continue; }
+                    for (var point : List.of(face.a(), face.b(), face.c())) {
+                        boolean shared = walls.stream().flatMap(w -> List.of(w.a(), w.b(), w.c()).stream())
+                              .anyMatch(p -> p.epsilonEquals(point, .001f));
+                        if (!shared) { continue; }
+                        assertEquals(0, low.relief.shade(point).foot(), .001f,
+                              "Debris must start at the actual shared cliff foot: " + tile.coords() + " " + point);
+                        compared++;
+                    }
+                }
+            }
+        }
+        assertTrue(compared > 20, "Compare the real emitted cliff-to-ground seam");
+    }
+
     @ParameterizedTest
     @ValueSource(ints = { 0, 1, 2, 3, 5 })
     void soilAndRockUseTheSameMaterialInputsOnBothSidesOfACliffCorner(int family) {
@@ -46,7 +76,7 @@ class BoardSurfaceContactTest {
 
     @ParameterizedTest
     @ValueSource(ints = { 0, 1, 2, 3, 4, 5, 6, 7 })
-    void allReceivingSurfacesShareTheFootCoverageAndKeepTheirIdentity(int upper) {
+    void receivingGroundSharesNaturalFootCoverageAndKeepsConstructedEdges(int upper) {
         var at = BoardSurfaceBlendTest.CENTER;
         for (int lower = 0; lower < BoardSurfaceBlend.FAMILIES; lower++) {
             int receiving = lower;
@@ -59,8 +89,8 @@ class BoardSurfaceContactTest {
                     var foot = BoardGeometry.center(at, 0).lerp(BoardGeometry.center(low.coords(), 0), .5f);
                     var cover = BoardSurfaceBlend.sampleCliff(scene, high, foot.x, foot.y, foot.z);
                     var receiver = BoardSurfaceBlend.sample(scene, low, foot.x, foot.y, foot.z);
-                    boolean slab = rise < 3 && (upper == BoardScene.Surface.CONCRETE.ordinal()
-                          || lower == BoardScene.Surface.CONCRETE.ordinal());
+                    boolean slab = lower == BoardScene.Surface.CONCRETE.ordinal()
+                          || rise < 3 && upper == BoardScene.Surface.CONCRETE.ordinal();
                     if (slab) {
                         assertEquals(BoardSurfaceBlend.solid(upper), cover, "The slab keeps its constructed edge");
                         assertEquals(BoardSurfaceBlend.solid(lower), receiver);

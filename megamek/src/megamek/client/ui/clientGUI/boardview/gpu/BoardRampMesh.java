@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -8,10 +9,8 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.function.Predicate;
-import java.util.function.ToDoubleFunction;
 
 import com.badlogic.gdx.math.EarClippingTriangulator;
 import com.badlogic.gdx.math.Vector3;
@@ -22,31 +21,52 @@ final class BoardRampMesh {
         final int id;
         final Vector3 point;
         final Set<Triangle> faces = new LinkedHashSet<>();
-        int revision;
+        boolean queued;
         boolean pinned;
         Vertex(int id, Vector3 point) { this.id = id; this.point = point; }
     }
 
-    private record Triangle(Vertex a, Vertex b, Vertex c, List<Vector3> samples) {
+    /** Interned by fixed source position for this simplification, including its lazy road classification. */
+    private static final class Sample {
+        final Vector3 point;
+        final int hash;
+        double tolerance = Double.NaN;
+
+        Sample(Vector3 point) { this.point = point; hash = point.hashCode(); }
+
+        @Override public int hashCode() { return hash; }
+
+        double tolerance(Predicate<Vector3> road, float scale) {
+            if (Double.isNaN(tolerance)) { tolerance = (road.test(point) ? .0001 : .1) * scale; }
+            return tolerance;
+        }
+    }
+
+    private record Triangle(Vertex a, Vertex b, Vertex c, List<Sample> samples) {
         List<Vertex> vertices() { return List.of(a, b, c); }
         BoardSurface.Face face() { return new BoardSurface.Face(a.point, b.point, c.point, BoardSurface.Finish.TOP); }
     }
-    private record Candidate(Vertex vertex, int revision, float error, List<Triangle> replacement) { }
     private record Key(long x, long y, long z) { }
 
     private BoardRampMesh() { }
 
     static void simplify(List<BoardSurface.Face> faces, Vector3 center, Predicate<Vector3> road, Predicate<Vector3> curved) {
-        ToDoubleFunction<Vector3> tolerance = p -> (road.test(p) ? .0001 : .1) * BoardGeometry.hexScale();
+        Map<Vector3, Sample> samples = new HashMap<>();
+        float scale = BoardGeometry.hexScale();
         Map<Key, Vertex> vertices = new HashMap<>();
         Set<Triangle> triangles = new LinkedHashSet<>();
         Map<Long, Integer> edges = new HashMap<>();
         for (var face : faces) {
             Vertex a = vertex(vertices, face.a()), b = vertex(vertices, face.b()), c = vertex(vertices, face.c());
             if (a == b || b == c || c == a) { continue; }
-            var triangle = new Triangle(a, b, c, List.of(a.point, b.point, c.point,
-                  new Vector3(a.point).lerp(b.point, .5f), new Vector3(b.point).lerp(c.point, .5f),
-                  new Vector3(c.point).lerp(a.point, .5f)));
+            // Ear clipping assumes an upward, unfolded height field. Leave folded source contact patches intact.
+            double area = (double) (b.point.x - a.point.x) * (c.point.y - a.point.y)
+                  - (double) (b.point.y - a.point.y) * (c.point.x - a.point.x);
+            if (area <= .00001) { a.pinned = b.pinned = c.pinned = true; }
+            var triangle = new Triangle(a, b, c, List.of(sample(samples, a.point), sample(samples, b.point),
+                  sample(samples, c.point), sample(samples, new Vector3(a.point).lerp(b.point, .5f)),
+                  sample(samples, new Vector3(b.point).lerp(c.point, .5f)),
+                  sample(samples, new Vector3(c.point).lerp(a.point, .5f))));
             triangles.add(triangle);
             for (var v : triangle.vertices()) { v.faces.add(triangle); }
             edges.merge(edge(a, b), 1, Integer::sum);
@@ -61,26 +81,33 @@ final class BoardRampMesh {
                 if (a.point.epsilonEquals(center, .0001f) || curved.test(a.point)) { a.pinned = true; }
             }
         }
-        var pending = new PriorityQueue<Candidate>(Comparator.comparingDouble(Candidate::error)
-              .thenComparingInt(c -> c.vertex().id));
-        vertices.values().forEach(v -> offer(v, tolerance, pending));
+        var pending = new ArrayDeque<Vertex>();
+        var triangulator = new EarClippingTriangulator();
+        // Evaluate only the current neighbourhood when popped; a queued neighbour needs no stale replacement.
+        // Source order keeps the choices deterministic without ranking and rebuilding every candidate by error.
+        vertices.values().stream().sorted(Comparator.comparingInt(v -> v.id)).forEach(v -> enqueue(v, pending));
         while (!pending.isEmpty()) {
-            Candidate next = pending.remove();
-            Vertex v = next.vertex();
-            if (v.revision != next.revision() || v.faces.isEmpty()) { continue; }
+            Vertex v = pending.remove();
+            v.queued = false;
+            List<Triangle> replacement = replacement(v, road, scale, triangulator);
+            if (replacement == null) { continue; }
             Set<Vertex> changed = new LinkedHashSet<>();
             for (var old : List.copyOf(v.faces)) {
                 triangles.remove(old);
                 for (var n : old.vertices()) { n.faces.remove(old); changed.add(n); }
             }
-            for (var added : next.replacement()) {
+            for (var added : replacement) {
                 triangles.add(added);
                 for (var n : added.vertices()) { n.faces.add(added); }
             }
-            for (var n : changed) { n.revision++; offer(n, tolerance, pending); }
+            for (var n : changed) { enqueue(n, pending); }
         }
         faces.clear();
         for (var t : triangles) { faces.add(t.face()); }
+    }
+
+    private static Sample sample(Map<Vector3, Sample> samples, Vector3 point) {
+        return samples.computeIfAbsent(point, Sample::new);
     }
 
     private static Vertex vertex(Map<Key, Vertex> vertices, Vector3 p) {
@@ -95,11 +122,16 @@ final class BoardRampMesh {
         return (long) Math.min(a.id, b.id) << 32 | Math.max(a.id, b.id);
     }
 
-    private static void offer(Vertex v, ToDoubleFunction<Vector3> tolerance, PriorityQueue<Candidate> pending) {
-        if (v.pinned || v.faces.isEmpty()) { return; }
+    private static void enqueue(Vertex v, ArrayDeque<Vertex> pending) {
+        if (!v.pinned && !v.faces.isEmpty() && !v.queued) { v.queued = true; pending.add(v); }
+    }
+
+    private static List<Triangle> replacement(Vertex v, Predicate<Vector3> road, float scale,
+          EarClippingTriangulator triangulator) {
+        if (v.pinned || v.faces.isEmpty()) { return null; }
         // Follow the original fan's opposite edges. No angular sorting or geometric guessing at concave banks.
         Map<Vertex, Vertex> links = new HashMap<>();
-        Set<Vector3> samples = new HashSet<>();
+        Set<Sample> samples = new HashSet<>();
         for (var t : v.faces) {
             var points = t.vertices();
             int index = points.indexOf(v);
@@ -112,20 +144,20 @@ final class BoardRampMesh {
         do {
             ring.add(at);
             at = links.get(at);
-            if (at == null || ring.size() > links.size()) { return; }
+            if (at == null || ring.size() > links.size()) { return null; }
         } while (at != first);
-        if (ring.size() != links.size()) { return; }
+        if (ring.size() != links.size()) { return null; }
         float[] xy = new float[ring.size() * 2];
         for (int i = 0; i < ring.size(); i++) {
             xy[2 * i] = ring.get(i).point.x; xy[2 * i + 1] = ring.get(i).point.y;
         }
-        var indices = new EarClippingTriangulator().computeTriangles(xy);
+        var indices = triangulator.computeTriangles(xy);
         List<Triangle> replacement = new ArrayList<>();
         for (int i = 0; i < indices.size; i += 3) {
             var t = new Triangle(ring.get(indices.get(i)), ring.get(indices.get(i + 2)), ring.get(indices.get(i + 1)),
                   new ArrayList<>());
             float area = new Vector3(t.b.point).sub(t.a.point).crs(new Vector3(t.c.point).sub(t.a.point)).z;
-            if (area < -.00001f) { return; }
+            if (area < -.00001f) { return null; }
             if (area <= .00001f) { continue; }
             replacement.add(t);
         }
@@ -134,23 +166,26 @@ final class BoardRampMesh {
             Vector3 a = ring.get(i).point, b = ring.get((i + 1) % ring.size()).point;
             boolean covered = replacement.stream().anyMatch(t -> containsEdge(t.a.point, t.b.point, a, b)
                   || containsEdge(t.b.point, t.c.point, a, b) || containsEdge(t.c.point, t.a.point, a, b));
-            if (!covered) { return; }
+            if (!covered) { return null; }
         }
-        float error = 0;
-        for (var p : samples) {
+        // Candidate vertices stay fixed: construct each plane once, rather than for every retained sample.
+        List<BoardSurface.Face> planes = replacement.stream().map(Triangle::face).toList();
+        for (var sample : samples) {
+            Vector3 p = sample.point;
             Triangle owner = null;
             float best = Float.POSITIVE_INFINITY;
-            for (var t : replacement) {
-                float height = t.face().height(p.x, p.y);
+            for (int i = 0; i < replacement.size(); i++) {
+                float height = planes.get(i).height(p.x, p.y);
                 if (Float.isFinite(height) && Math.abs(height - p.z) < best) {
-                    owner = t; best = Math.abs(height - p.z);
+                    owner = replacement.get(i); best = Math.abs(height - p.z);
+                    // Zero cannot improve; retain the same first minimum without scanning the remaining planes.
+                    if (best == 0) { break; }
                 }
             }
-            if (owner == null || best > tolerance.applyAsDouble(p)) { return; }
-            owner.samples().add(p);
-            error = Math.max(error, best);
+            if (owner == null || best > sample.tolerance(road, scale)) { return null; }
+            owner.samples().add(sample);
         }
-        pending.add(new Candidate(v, v.revision, error, replacement));
+        return replacement;
     }
 
     private static boolean containsEdge(Vector3 from, Vector3 to, Vector3 a, Vector3 b) {

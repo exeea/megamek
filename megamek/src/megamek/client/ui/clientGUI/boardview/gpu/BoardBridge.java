@@ -101,7 +101,7 @@ final class BoardBridge {
                     var kind = next.road() == BoardRoad.Kind.NONE ? BoardRoad.Kind.PAVED : next.road();
                     if (priority(kind) > priority(found)) { found = kind; }
                     if (found == BoardRoad.Kind.PAVED) { return new Material(found, BoardScene.Surface.ROCK); }
-                } else if (bank(current, next, d) && next.surface() != BoardScene.Surface.CONCRETE && banks.add(next.coords())) {
+                } else if (abutment(current, next, d) && next.surface() != BoardScene.Surface.CONCRETE && banks.add(next.coords())) {
                     votes[next.surface().ordinal()]++;
                 }
             }
@@ -133,10 +133,16 @@ final class BoardBridge {
     }
 
     static boolean bank(BoardScene.Tile tile, BoardScene.Tile next, int direction) {
+        return abutment(tile, next, direction)
+              && next.elevation() <= tile.elevation() + feature(tile).elevation() + 1;
+    }
+
+    /** Solid ground that can anchor a span, including a cliff rising above its deck. */
+    static boolean abutment(BoardScene.Tile tile, BoardScene.Tile next, int direction) {
         var bridge = feature(tile);
         return bridge != null && next != null && !next.liquid().present() && feature(next) == null
               && (bridge.bridgeExits() & (1 << direction)) != 0
-              && Math.abs(tile.elevation() + bridge.elevation() - next.elevation()) <= 1;
+              && next.elevation() >= tile.elevation() + bridge.elevation() - 1;
     }
 
     /** A bridge's passage at deck height, through a bank or along the deck; what lies well below it is no obstruction. */
@@ -166,7 +172,7 @@ final class BoardBridge {
             var direction = BoardGeometry.center(tile.coords().translated(d), tile.elevation()).sub(center);
             float length = direction.len();
             direction.scl(1 / length);
-            // Both styles reserve the widest mouth. A distant road edit must not change the bank's ground mesh.
+            // Both styles reserve the usable passage. A distant road edit must not change the bank's ground mesh.
             float width = Math.max(BoardRelief.metres(NATURAL_HALF_WIDTH * 1.04f),
                   (BoardRoad.Kind.PAVED.halfWidth + BoardRoad.SHOULDER) * BoardGeometry.hexScale());
             float level = span ? (tile.elevation() + own.elevation()) * BoardGeometry.level() : center.z;

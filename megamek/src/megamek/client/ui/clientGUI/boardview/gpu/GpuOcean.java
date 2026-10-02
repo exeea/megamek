@@ -48,6 +48,15 @@ final class GpuOcean implements Disposable {
      * height; lighter winds scale down from here, and calm water keeps its physical ripples and swell.
      */
     static final float MAX_WAVE_HEIGHT = 12;
+    /**
+     * Share of the open sea that shows whitecaps at full wind, seen up close. Lighter winds follow {@link #FOAM_ONSET}
+     * and {@link #FOAM_CURVE}; the share holds whatever the configured height or gravity.
+     */
+    static final float FOAM_COVERAGE = .26f;
+    /** Wind strength at which the first whitecaps appear. */
+    static final float FOAM_ONSET = .3f;
+    /** How the cover grows from the onset to full wind: 1 in proportion, above 1 slowly at first, below 1 quickly. */
+    static final float FOAM_CURVE = 1.8f;
     /** Seconds a change of wind takes to reshape the sea: the old waves run on while the new ones build. */
     static final float TRANSITION_SECONDS = 8;
     private static final int BITS = Integer.numberOfTrailingZeros(SIZE);
@@ -70,6 +79,8 @@ final class GpuOcean implements Disposable {
     private ShaderProgram spectrum;
     private ShaderProgram butterfly;
     private ShaderProgram finish;
+    /** Water only: moves the foam seeding towards the whitecap share the wind calls for. */
+    private ShaderProgram cover;
     /** Water only: generates a spectrum for a wind, or freezes a transition by mixing two. */
     private ShaderProgram seed;
     private Mesh quad;
@@ -85,6 +96,8 @@ final class GpuOcean implements Disposable {
     /** Ping-pong targets of the transform, and of the result, whose foam carries over from the previous frame. */
     private final FrameBuffer[] work = new FrameBuffer[2];
     private final FrameBuffer[] result = new FrameBuffer[2];
+    /** Water only: ping-pong 1x1 targets of the swell's and the chop's foam seeding compression, in R and G. */
+    private final FrameBuffer[] seeding = new FrameBuffer[2];
     private int latest;
     private boolean failed;
     /** Winds as direction XY and strength Z: where the sea comes from, where it is heading, and between them now. */
@@ -137,6 +150,9 @@ final class GpuOcean implements Disposable {
     /** How far the eased wind has carried the surface: seconds along its direction, continuous as the wind turns. */
     Vector2 drift() { return drift; }
 
+    /** The art-directed gain ({@link #storm}) the sea is drawn with at the eased wind; 1 until the first update. */
+    float gain() { return seeded ? storm(eased.z) : 1; }
+
     /** World-space scale of a water cascade: multiply a world position by it to get texture coordinates. */
     static float scale(int cascade) {
         return 1 / BoardRelief.metres(PATCHES[cascade]);
@@ -149,12 +165,12 @@ final class GpuOcean implements Disposable {
 
     /**
      * Advances the waves to the given time for a wind (direction in x and y, strength from 0 to 1 in z) and nonnegative
-     * gravity in metres per second squared. Zero gravity removes water. Runs outside any model batch; it restores
+     * gravity in metres per second squared. Zero gravity removes liquid waves. Runs outside any model batch; it restores
      * the framebuffer and viewport it found.
      */
     void update(float time, Vector3 wind, float gravity) {
         if (!supported()) { return; }
-        if (!lava && gravity == 0) { dispose(); return; }
+        if (gravity == 0) { dispose(); return; }
         if (this.gravity != gravity) {
             this.gravity = gravity;
             // Both the spectrum's amplitudes and its wave frequencies change with gravity.
@@ -162,7 +178,6 @@ final class GpuOcean implements Disposable {
         }
         float delta = Float.isNaN(previousTime) ? 0 : Math.clamp(time - previousTime, 0, .25f);
         previousTime = time;
-        // Lava's convection is internal. Weather must not start or stop its motion.
         float x = lava ? .8f : wind.x, y = lava ? .6f : wind.y;
         float length = (float) Math.hypot(x, y);
         if (length < .01f) { x = .8f; y = .6f; } else { x /= length; y /= length; }
@@ -175,7 +190,7 @@ final class GpuOcean implements Disposable {
         retarget = seeded && !target.epsilonEquals(toWind, WIND_EPSILON);
         try {
             if (quad == null) { create(); }
-            simulate(lava ? time * .12f : time, delta);
+            simulate(lava ? time * .30f : time, delta);
         } catch (GdxRuntimeException error) {
             // A driver that cannot compile or attach these leaves the water on its static ripples.
             failed = true;
@@ -192,12 +207,14 @@ final class GpuOcean implements Disposable {
         // A live edit of the generator regenerates the spectrum, so the change shows at once.
         if (!lava) {
             seed = GpuShaderManager.program(() -> program("ocean-initial.frag"), next -> { seed = next; seeded = false; });
+            cover = GpuShaderManager.program(() -> program("ocean-foam.frag"), next -> cover = next);
         }
         quad = new Mesh(true, 4, 0, new VertexAttribute(VertexAttributes.Usage.Position, 2, "a_position"));
         quad.setVertices(new float[] { -1, -1, 1, -1, -1, 1, 1, 1 });
-        for (int i = 0; i < (lava ? 1 : spectra.length); i++) { spectra[i] = floatTarget(SIZE * cascades); }
+        for (int i = 0; i < (lava ? 1 : spectra.length); i++) { spectra[i] = floatTarget(SIZE * cascades, SIZE); }
         for (int i = 0; i < 2; i++) {
-            work[i] = floatTarget(SIZE * cascades);
+            work[i] = floatTarget(SIZE * cascades, SIZE);
+            if (!lava) { seeding[i] = floatTarget(1, 1); }
             var output = new GLFrameBuffer.FrameBufferBuilder(SIZE, SIZE);
             // Water: one shading target per cascade, then the longest cascade's displacement.
             for (int target = 0; target < (lava ? 1 : cascades + 1); target++) {
@@ -226,6 +243,13 @@ final class GpuOcean implements Disposable {
             Gdx.gl.glTexImage2D(GL20.GL_TEXTURE_2D, 0, GL30.GL_RG32F, SIZE * cascades, SIZE, 0, GL30.GL_RG,
                   GL20.GL_FLOAT, buffer);
         }
+        // Foam starts seeding where it always used to; the cover moves it from there.
+        for (FrameBuffer target : seeding) {
+            if (target == null) { continue; }
+            target.bind();
+            Gdx.gl.glClearColor(.22f, .22f, 0, 0);
+            Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+        }
         // The first frame reads a previous result; start both without foam.
         for (FrameBuffer target : result) {
             target.bind();
@@ -240,8 +264,8 @@ final class GpuOcean implements Disposable {
         restoreState(state);
     }
 
-    private static FrameBuffer floatTarget(int width) {
-        return new GLFrameBuffer.FrameBufferBuilder(width, SIZE)
+    private static FrameBuffer floatTarget(int width, int height) {
+        return new GLFrameBuffer.FrameBufferBuilder(width, height)
               .addFloatAttachment(GL30.GL_RGBA32F, GL30.GL_RGBA, GL30.GL_FLOAT, true).build();
     }
 
@@ -343,6 +367,12 @@ final class GpuOcean implements Disposable {
      */
     static float storm(float strength) {
         return (float) (1 + (GALE_GAIN - 1) * strength * strength);
+    }
+
+    /** Share of open sea whitecaps cover at a wind strength: none up to {@link #FOAM_ONSET}, then up the curve. */
+    static float foamCover(float strength) {
+        float rise = Math.clamp((strength - FOAM_ONSET) / (1 - FOAM_ONSET), 0, 1);
+        return FOAM_COVERAGE * (float) Math.pow(rise, FOAM_CURVE);
     }
 
     /** Heads the sea for {@link #target}: first seeding, or from wherever a transition has got to. */
@@ -465,18 +495,31 @@ final class GpuOcean implements Disposable {
                 source = 1 - source;
             }
         }
-        // One MRT pass derives each cascade's shading, persistent foam and the swell's displacement.
         int next = 1 - latest;
+        if (!lava) {
+            var previous = result[latest].getTextureAttachments();
+            for (int cascade = 0; cascade < PREVIOUS.length; cascade++) { previous.get(cascade).bind(1 + cascade); }
+            // The ripple result carries how white the open sea shows (ocean-water-finish.frag).
+            previous.get(2).bind(4);
+            cover.bind();
+            cover.setUniformi("u_whitecaps", 4);
+            seeding[latest].getColorBufferTexture().bind(3);
+            cover.setUniformi("u_state", 3);
+            cover.setUniformf("u_cover", foamCover(eased.z));
+            cover.setUniformf("u_delta", delta);
+            pass(cover, seeding[next]);
+            seeding[next].getColorBufferTexture().bind(3);
+        }
+        // One MRT pass derives each cascade's shading, persistent foam and the swell's displacement.
         work[source].getColorBufferTexture().bind(0);
         finish.bind();
         finish.setUniformi("u_source", 0);
         finish.setUniformi("u_size", SIZE);
         if (!lava) {
-            var previous = result[latest].getTextureAttachments();
             for (int cascade = 0; cascade < PREVIOUS.length; cascade++) {
-                previous.get(cascade).bind(1 + cascade);
                 finish.setUniformi(PREVIOUS[cascade], 1 + cascade);
             }
+            finish.setUniformi("u_foam", 3);
             finish.setUniformf("u_texels", PATCHES[0] / SIZE, PATCHES[1] / SIZE, PATCHES[2] / SIZE);
             // Horizontal displacement sharpens crests and broadens troughs, the more so the stronger the wind; a gale
             // brings the steepest to the point of folding over.
@@ -489,7 +532,7 @@ final class GpuOcean implements Disposable {
             finish.setUniformf("u_patches", PATCHES[0], PATCHES[1], PATCHES[2]);
         }
         pass(finish, result[next]);
-        for (int unit = 1; unit <= PREVIOUS.length; unit++) {
+        for (int unit = 1; unit <= PREVIOUS.length + 2; unit++) {
             Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0 + unit);
             Gdx.gl.glBindTexture(GL20.GL_TEXTURE_2D, 0);
         }
@@ -534,10 +577,10 @@ final class GpuOcean implements Disposable {
 
     @Override
     public void dispose() {
-        for (ShaderProgram program : new ShaderProgram[] { spectrum, butterfly, finish, seed }) {
+        for (ShaderProgram program : new ShaderProgram[] { spectrum, butterfly, finish, seed, cover }) {
             if (program != null) { GpuShaderManager.dispose(program); }
         }
-        spectrum = butterfly = finish = seed = null;
+        spectrum = butterfly = finish = seed = cover = null;
         if (quad != null) { quad.dispose(); }
         quad = null;
         for (int i = 0; i < spectra.length; i++) {
@@ -547,7 +590,8 @@ final class GpuOcean implements Disposable {
         for (int i = 0; i < 2; i++) {
             if (work[i] != null) { work[i].dispose(); }
             if (result[i] != null) { result[i].dispose(); }
-            work[i] = result[i] = null;
+            if (seeding[i] != null) { seeding[i].dispose(); }
+            work[i] = result[i] = seeding[i] = null;
         }
         if (gauss != 0) { Gdx.gl.glDeleteTexture(gauss); }
         gauss = 0;

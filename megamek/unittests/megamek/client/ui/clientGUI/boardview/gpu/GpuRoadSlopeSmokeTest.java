@@ -66,7 +66,7 @@ class GpuRoadSlopeSmokeTest {
                     for (var scene : List.of(mines, lava)) {
                         terrain.update(scene);
                         var portals = scene.tiles().stream().flatMap(t -> BoardTunnel.entrances(scene, t).stream()).toList();
-                        assertEquals(scene == mines ? 2 : 13, portals.size());
+                        assertEquals(scene == mines ? 2 : 0, portals.size());
                         int index = 0;
                         for (var portal : portals) {
                             camera.setIsometric(true);

@@ -40,6 +40,12 @@ final class GpuUnitModels implements Disposable {
     private final Set<Path> failed = new HashSet<>();
     private final Map<String, Texture> modelTextures = new HashMap<>();
     private Texture bark;
+    // Asset previews use authored models. The board supplies its window's selection before each frame.
+    private UnitDisplayMode displayMode = UnitDisplayMode.MODELS;
+
+    void setDisplayMode(UnitDisplayMode mode) {
+        displayMode = mode;
+    }
 
     GpuUnitModels() {
         this(Configuration.dataDir().toPath().resolve("models"));
@@ -162,12 +168,13 @@ final class GpuUnitModels implements Disposable {
     /** Effects may use a displayed assembly, but must never rebuild a past loadout during recovery after a refit. */
     GpuUnitModel loaded(BoardScene.UnitModel selection, int unitId) {
         var assembly = assemblies.get(unitId);
-        return selection != null && selection.state() != null && assembly != null && assembly.matches(selection)
+        return selection != null && !displayMode.meeple(selection) && selection.state() != null
+              && assembly != null && assembly.matches(selection)
               ? assembly.model() : null;
     }
 
     GpuUnitModel get(BoardScene.UnitModel selection, int unitId) {
-        if (selection == null) {
+        if (selection == null || displayMode.meeple(selection)) {
             return null;
         }
         Assembly cached = assemblies.get(unitId);

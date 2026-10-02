@@ -18,40 +18,38 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
     private record Block(BoardShape shape, Vector3 size) { }
 
     /** Publish the complete immutable kit together; terrain workers retain one snapshot while building. */
-    private static final class Kit {
-        static volatile List<Block> blocks = load();
+    private static final BoardKit<List<Block>> KIT = new BoardKit<>(BoardBridgeFooting::load);
 
-        private static List<Block> load() {
-            var shapes = BoardShape.loadKit("bridge-terminal");
-            for (String name : shapes.keySet()) {
-                if (!name.matches("bridge-terminal-lod[01]")) {
-                    throw new IllegalArgumentException("Unexpected bridge terminal mesh: " + name);
-                }
+    private static List<Block> load() {
+        var shapes = BoardShape.loadKit("bridge-terminal");
+        for (String name : shapes.keySet()) {
+            if (!name.matches("bridge-terminal-lod[01]")) {
+                throw new IllegalArgumentException("Unexpected bridge terminal mesh: " + name);
             }
-            var blocks = MeshLod.load("bridge-terminal", 2, name -> {
-                var shape = shapes.get(name);
-                if (shape == null) { return null; }
-                var bounds = new BoundingBox().inf();
-                shape.polygons().forEach(face -> { for (var p : face.points()) { bounds.ext(p); } });
-                var size = bounds.getDimensions(new Vector3());
-                if (!bounds.min.isZero(.001f) || size.x <= 0 || size.y <= 0) {
-                    throw new IllegalArgumentException("Bridge terminal must start at the inner rail/deck origin: " + name);
-                }
-                return new Block(shape, size);
-            });
-            if (!blocks.getFirst().size().epsilonEquals(blocks.getLast().size(), .001f)) {
-                throw new IllegalArgumentException("Bridge terminal LODs must retain the same bank footprint and height");
-            }
-            return blocks;
         }
+        var blocks = MeshLod.load("bridge-terminal", 2, name -> {
+            var shape = shapes.get(name);
+            if (shape == null) { return null; }
+            var bounds = new BoundingBox().inf();
+            shape.polygons().forEach(face -> { for (var p : face.points()) { bounds.ext(p); } });
+            var size = bounds.getDimensions(new Vector3());
+            if (!bounds.min.isZero(.001f) || size.x <= 0 || size.y <= 0) {
+                throw new IllegalArgumentException("Bridge terminal must start at the inner rail/deck origin: " + name);
+            }
+            return new Block(shape, size);
+        });
+        if (!blocks.getFirst().size().epsilonEquals(blocks.getLast().size(), .001f)) {
+            throw new IllegalArgumentException("Bridge terminal LODs must retain the same bank footprint and height");
+        }
+        return blocks;
     }
 
-    static void reload() { Kit.blocks = Kit.load(); }
+    static void reload() { KIT.reload(); }
 
-    static float terminalLength() { return Kit.blocks.getFirst().size().y; }
+    static float terminalLength() { return KIT.get().getFirst().size().y; }
 
     /** How far a banked span's terminal block rises above the deck surface. */
-    static float terminalHeight() { return Kit.blocks.getFirst().size().z; }
+    static float terminalHeight() { return KIT.get().getFirst().size().z; }
 
     /** Paint extends onto the existing bank after the structural footing has ended. */
     BoardRoad road(BoardBridge.Deck deck, Coords coords) {
@@ -67,7 +65,7 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
     static BoardBridgeFooting build(BoardScene scene, BoardScene.Tile tile, TerrainLod lod, Map<Coords, BoardSurface> surfaces) {
         float level = tile.elevation() + BoardBridge.feature(tile).elevation();
         float scale = BoardGeometry.hexScale();
-        var block = Kit.blocks.get(lod == TerrainLod.FULL || lod == TerrainLod.MEDIUM ? 0 : 1);
+        var block = KIT.get().get(lod == TerrainLod.FULL || lod == TerrainLod.MEDIUM ? 0 : 1);
         var center = BoardGeometry.center(tile.coords(), level).add(0, 0, GpuRoads.SURFACE_LIFT * scale);
         var faces = new ArrayList<BoardBridge.Facet>();
         var lengths = new ArrayList<Float>();

@@ -130,7 +130,7 @@ final class GpuUnitModel implements Disposable {
         this.restDimensions = restDimensions == null ? bounds.getDimensions(new Vector3()) : new Vector3(restDimensions);
     }
 
-    /** Flat artwork for disabled/unavailable models; never extrude a sprite into a unit-shaped solid. */
+    /** Flat artwork for unavailable models in 3D Models mode. */
     static GpuUnitModel sprite(BoardScene.Pixels pixels, TextureRegion region) {
         ModelBuilder builder = new ModelBuilder();
         builder.begin();
@@ -143,6 +143,13 @@ final class GpuUnitModel implements Disposable {
         mesh.rect(-x, -y, 0, x, -y, 0, x, y, 0, -x, y, 0, 0, 0, 1);
         return new GpuUnitModel(builder.end());
     }
+
+    /** Backported libGDX token: textured alpha contour and solid walls. */
+    static GpuUnitModel meeple(BoardScene.Pixels pixels, TextureRegion region) {
+        return new GpuUnitModel(MeepleVisual.build(pixels, region));
+    }
+
+    boolean meeple() { return MeepleVisual.isMeeple(instance); }
 
     /** @return {@code true} if the upper body can turn on its own, so a torso twist leaves the legs where they are */
     boolean turnsUpperBody() {
@@ -296,6 +303,7 @@ final class GpuUnitModel implements Disposable {
         float scale = (multiHex ? 1 : BoardGeometry.unitScale()) * scaleTuning.unitScale();
         float thickness = height * BoardGeometry.level() * BoardGeometry.unitHeightScale()
               * scaleTuning.unitScale() * scaleTuning.heightScale();
+        if (meeple()) { thickness /= MeepleVisual.HEIGHT; }
         return placeScaled(placed, camera, ground, facing, scale, thickness);
     }
 

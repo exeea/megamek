@@ -8,16 +8,18 @@ import java.util.List;
 import java.util.Map;
 
 import com.badlogic.gdx.files.FileHandle;
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import com.badlogic.gdx.math.Matrix3;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.BoundingBox;
 import megamek.common.Configuration;
 
 /** Shared CPU geometry for the terrain-rock and scatter kits; no GL resources or placement policy. */
 record BoardShape(List<BoardShape.Polygon> polygons, float height) {
     /** One flat face, counter-clockwise seen from outside. */
-    record Polygon(Vector3[] points, Vector3 normal) { }
+    record Polygon(Vector3[] points, Vector3 normal, Color color) { }
 
     static Map<String, BoardShape> loadKit(String asset) {
         File root = new File(Configuration.dataDir(), "models/board");
@@ -32,10 +34,17 @@ record BoardShape(List<BoardShape.Polygon> polygons, float height) {
         return shapes.values().iterator().next();
     }
 
-    private static Map<String, BoardShape> shapes(ModelData data) {
+    static Map<String, BoardShape> shapes(ModelData data) {
+        return shapes(data, false);
+    }
+
+    /** Modular structures use their geometry bounds as origins, even when authored below Z=0. */
+    static Map<String, BoardShape> shapes(ModelData data, boolean centered) {
         var mesh = data.meshes.first();
         Map<String, short[]> indices = new HashMap<>();
         for (var part : mesh.parts) { indices.put(part.id, part.indices); }
+        Map<String, Color> colors = new HashMap<>();
+        for (var material : data.materials) { colors.put(material.id, material.diffuse); }
         Map<String, BoardShape> result = new HashMap<>();
         for (var node : data.nodes) {
             if (node.children.length != 0) { throw new IllegalArgumentException("Kit shapes must be root nodes"); }
@@ -59,8 +68,17 @@ record BoardShape(List<BoardShape.Polygon> polygons, float height) {
                     int offset = Short.toUnsignedInt(triangles[i]) * RigidGlb.STRIDE + 3;
                     Vector3 normal = new Vector3(mesh.vertices[offset], mesh.vertices[offset + 1],
                           mesh.vertices[offset + 2]).mul(normals).nor();
-                    polygons.add(new Polygon(points, normal));
+                    Color color = new Color(colors.get(part.materialId));
+                    color.mul(mesh.vertices[offset + 3], mesh.vertices[offset + 4], mesh.vertices[offset + 5], 1);
+                    polygons.add(new Polygon(points, normal, color));
                 }
+            }
+            if (centered && !polygons.isEmpty()) {
+                BoundingBox bounds = new BoundingBox().inf();
+                corners.values().forEach(bounds::ext);
+                Vector3 offset = GpuBuilding.moduleOffset(bounds);
+                corners.values().forEach(point -> point.add(offset));
+                height = bounds.getDepth();
             }
             if (polygons.isEmpty() || height <= 0) { throw new IllegalArgumentException("Empty kit shape: " + node.id); }
             if (result.put(node.id, new BoardShape(List.copyOf(polygons), height)) != null) {

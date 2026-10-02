@@ -21,6 +21,7 @@ final class GpuUnitShader extends DefaultShader {
     private final int markerEnabled = register("u_markerEnabled");
     private final int damageTexture = register("u_damageTexture");
     private final int damageEnabled = register("u_damageEnabled");
+    private final int damageOpacity = register("u_damageOpacity");
     private final int damageTransform = register("u_damageTransform");
 
     private GpuUnitShader(Renderable renderable, Config config) {
@@ -100,6 +101,7 @@ final class GpuUnitShader extends DefaultShader {
         set(damageEnabled, damage == null ? 0f
               : part.material.id.endsWith(UnitDamageDisplay.WRECKED_SUFFIX) ? 2f : 1f);
         if (damage != null) {
+            set(damageOpacity, damage.opacity);
             set(damageTexture, context.textureBinder.bind(damage.texture));
             set(damageTransform, damage.cos, damage.sin, damage.offsetU, damage.offsetV);
         }

@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.awt.RenderingHints;
 import java.awt.geom.Area;
 import java.awt.image.BufferedImage;
+import java.awt.image.DataBufferInt;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -415,17 +416,19 @@ final class GpuRoads {
         graphics.setColor(java.awt.Color.WHITE);
         graphics.fill(patch.shape());
         graphics.dispose();
-        int[] pixels = image.getRGB(0, 0, image.getWidth(), image.getHeight(), null, 0, image.getWidth());
+        // This newly allocated ARGB image owns a contiguous raster. Paint it in place; Pixels takes the final copy.
+        int[] pixels = ((DataBufferInt) image.getRaster().getDataBuffer()).getData();
+        Color scratch = new Color();
         for (int py = 0; py < image.getHeight(); py++) {
             for (int px = 0; px < image.getWidth(); px++) {
                 int i = py * image.getWidth() + px;
                 float alpha = (pixels[i] >>> 24) / 255f;
-                Color tint = alpha == 0 ? patch.tint() : color(road, patch, x + (px + .5f) / density, y + (py + .5f) / density);
+                Color tint = alpha == 0 ? patch.tint()
+                      : color(road, patch, x + (px + .5f) / density, y + (py + .5f) / density, scratch);
                 pixels[i] = Math.round(alpha * tint.a * 255) << 24 | Math.round(tint.r * 255) << 16
                       | Math.round(tint.g * 255) << 8 | Math.round(tint.b * 255);
             }
         }
-        image.setRGB(0, 0, image.getWidth(), image.getHeight(), pixels, 0, image.getWidth());
         return new MaskData(new BoardScene.Pixels(image).compact(), x, y, w, h);
     }
 
@@ -501,8 +504,8 @@ final class GpuRoads {
         return patch.texture().equals(texture(join.kind())) ? cover : 1 - cover;
     }
 
-    private static Color color(BoardRoad road, Patch patch, float x, float y) {
-        Color tint = new Color(patch.tint());
+    private static Color color(BoardRoad road, Patch patch, float x, float y, Color tint) {
+        tint.set(patch.tint());
         if (patch.blended()) {
             tint.a = coverage(road, patch, x, y);
         }

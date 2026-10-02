@@ -27,6 +27,7 @@ import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.NumberUtils;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
+import megamek.common.planetaryConditions.Atmosphere;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Tag;
@@ -62,8 +63,8 @@ class GpuRoughSmokeTest {
                         GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(output, oblique ? "overview-oblique.png" : "overview-top.png"));
-                        checkPicking(terrain, scene, new Coords(5, 3));
-                        checkPicking(terrain, scene, new Coords(8, 3));
+                        checkPicking(terrain, scene, new Coords(5, 3), BoardSurface.Finish.ROUGH);
+                        checkPicking(terrain, scene, new Coords(8, 3), BoardSurface.Finish.ROUGH);
                     }
                     camera.setIsometric(true);
                     for (int x : new int[] { 2, 5, 8 }) {
@@ -79,8 +80,23 @@ class GpuRoughSmokeTest {
                     terrain.update(edited, camera.camera);
                     GpuTerrainLodSmokeTest.settle(terrain, null, edited, camera);
                     assertNotSame(before, terrain.tacticalSurface(new Coords(5, 3)), "Fluff edits replace support geometry");
-                    checkPicking(terrain, edited, new Coords(5, 3));
+                    checkPicking(terrain, edited, new Coords(5, 3), BoardSurface.Finish.ROUGH);
                     frame.render(terrain, camera, edited);
+                    // Without gravity the boulders give way to bedrock outcrops, which keep their support and picking.
+                    frame.configure(new BoardAtmosphere.Settings(10, 0, 0, BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT,
+                          0, 0, BoardAtmosphere.Effects.NONE, Atmosphere.VACUUM));
+                    terrain.setGravity(0);
+                    terrain.update(scene, camera.camera);
+                    for (boolean low : new boolean[] { false, true }) {
+                        camera.setIsometric(true);
+                        if (low) { camera.orbit(-70, 20); }
+                        camera.camera.zoom = .17f;
+                        camera.center(BoardGeometry.center(new Coords(3, 3), 0));
+                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        frame.render(terrain, camera, scene);
+                        GpuReviewFrame.save(new File(output, low ? "zero-gravity-low.png" : "zero-gravity.png"));
+                    }
+                    checkPicking(terrain, scene, new Coords(2, 3), BoardSurface.Finish.OUTCROP);
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) {
                     failure.set(error);
@@ -118,8 +134,7 @@ class GpuRoughSmokeTest {
                     if (!rock.contains(new Vector3(data[at + position], data[at + position + 1], data[at + position + 2]))) { continue; }
                     assertTrue(part.material.has(Attribute.getAttributeType("boardSculpt")),
                           "Roadside boulders must use the same textured geology as neighboring rough");
-                    assertTrue(part.material.has(Attribute.getAttributeType("boardSculptMap4")));
-                    assertTrue(part.material.has(Attribute.getAttributeType("boardSculptMap5")));
+                    assertTrue(part.material.has(Attribute.getAttributeType("boardSculptLayers")));
                     assertEquals(255, (NumberUtils.floatToIntColor(data[at + color]) >>> 16) & 255,
                           "The shared shader must receive the rock material tag");
                     checked++;
@@ -135,8 +150,8 @@ class GpuRoughSmokeTest {
         return field.get(owner);
     }
 
-    private static void checkPicking(GpuTerrain terrain, BoardScene scene, Coords coords) {
-        var faces = terrain.tacticalSurface(coords).faces().stream().filter(face -> face.finish() == BoardSurface.Finish.ROUGH).toList();
+    private static void checkPicking(GpuTerrain terrain, BoardScene scene, Coords coords, BoardSurface.Finish finish) {
+        var faces = terrain.tacticalSurface(coords).faces().stream().filter(face -> face.finish() == finish).toList();
         assertFalse(faces.isEmpty());
         var face = faces.stream().max(java.util.Comparator.comparingDouble(f -> f.a().z + f.b().z + f.c().z)).orElseThrow();
         Vector3 p = new Vector3(face.a()).add(face.b()).add(face.c()).scl(1f / 3);

@@ -470,6 +470,10 @@ final class GpuBoardUi implements Disposable {
         return tuning.normalMaps();
     }
 
+    UnitDisplayMode unitDisplayMode() {
+        return tuning.unitDisplayMode();
+    }
+
     boolean grass() {
         return tuning.grass();
     }

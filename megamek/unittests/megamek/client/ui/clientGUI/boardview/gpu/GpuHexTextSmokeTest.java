@@ -57,7 +57,7 @@ class GpuHexTextSmokeTest {
     private static final int BOTTOM = 67;
 
     @Test
-    void terrainLabelsClearTheirOwnReliefButRemainHiddenBehindForegroundGeometry() {
+    void topViewRevealsEnabledLabelsWhileAngledGroundLabelsStillRespectSceneDepth() {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         var configuration = GpuBoardWindow.configuration(false);
         configuration.setWindowedMode(1200, 900);
@@ -98,12 +98,12 @@ class GpuHexTextSmokeTest {
                 terrain.renderShadows(camera.camera, List.of());
                 labels.update(scene, font, terrain::roofBounds);
                 frame(terrain, atmosphere, camera, scene, null);
-                labels.render(batch, camera.camera, atmosphere.depthTexture(), BOTTOM);
+                labels.render(batch, camera, atmosphere.depthTexture(), BOTTOM);
                 Pixmap actual = pixels();
                 capture(isometric ? "iso" : "top");
                 // Clear only the destination depth: the identical glyphs now have no possible occluder.
                 ScreenUtils.clear(0, 0, 0, 1, true);
-                labels.render(batch, camera.camera, atmosphere.depthTexture(), BOTTOM);
+                labels.render(batch, camera, atmosphere.depthTexture(), BOTTOM);
                 Pixmap expected = pixels();
                 try {
                     int total = pink(expected);
@@ -114,11 +114,16 @@ class GpuHexTextSmokeTest {
                     // Negative control: the previous flat depth test must fail on exactly the same rocks and glyphs.
                     labels.update(scene(false, false), font, terrain::roofBounds);
                     frame(terrain, atmosphere, camera, scene, null);
-                    labels.render(batch, camera.camera, atmosphere.depthTexture(), BOTTOM);
+                    labels.render(batch, camera, atmosphere.depthTexture(), BOTTOM);
                     Pixmap flat = pixels();
                     try {
-                        assertTrue(missing(expected, flat) > total * .10,
-                              "The regression fixture must reproduce substantial clipping with the old flat label plane");
+                        if (isometric) {
+                            assertTrue(missing(expected, flat) > total * .10,
+                                  "The regression fixture must reproduce clipping with the old flat label plane");
+                        } else {
+                            assertTrue(missing(expected, flat) <= total * .01,
+                                  "Top view must reveal labels independently of the relief envelope");
+                        }
                     } finally { flat.dispose(); }
                 } finally { actual.dispose(); expected.dispose(); }
             }
@@ -130,23 +135,26 @@ class GpuHexTextSmokeTest {
             camera.setIsometric(true);
             camera.center(BoardGeometry.center(LABELED, 2));
             frame(terrain, atmosphere, camera, cliff, null);
-            labels.render(batch, camera.camera, atmosphere.depthTexture(), BOTTOM);
+            labels.render(batch, camera, atmosphere.depthTexture(), BOTTOM);
             Pixmap hidden = pixels();
             try { assertEquals(0, pink(hidden), "Terrain labels must not be revealed through a foreground cliff"); }
             finally { hidden.dispose(); }
             capture("occluded-cliff");
 
-            // Same-hex roofs/units above the relief envelope retain their ordinary opaque depth too.
+            // Top view reveals both ground labels through a roof well above their relief envelope.
             terrain.update(scene);
             labels.update(scene, font, terrain::roofBounds);
             camera.setIsometric(false);
             camera.center(BoardGeometry.center(LABELED, 2));
             frame(terrain, atmosphere, camera, scene, object);
-            labels.render(batch, camera.camera, atmosphere.depthTexture(), BOTTOM);
+            labels.render(batch, camera, atmosphere.depthTexture(), BOTTOM);
             Pixmap covered = pixels();
-            try { assertEquals(0, pink(covered), "A taller object in the same hex must still occlude its terrain labels"); }
+            try { assertTrue(pink(covered) > 250, "Top-view coordinates and LEVEL must show through a taller object"); }
             finally { covered.dispose(); }
             checkUnitOcclusion(terrain, atmosphere, camera, scene, labels, batch);
+            checkHeightOcclusion(terrain, atmosphere, labels, font, batch, camera);
+            checkTopGrid(camera, scene);
+            assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Overlay drawing must leave valid GL state");
             checkStaticMeshes(batch);
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
         } finally {
@@ -208,11 +216,11 @@ class GpuHexTextSmokeTest {
             try {
                 ScreenUtils.clear(.1f, .2f, .3f, 1, true);
                 profiler.reset();
-                labels.render(batch, camera.camera, depth, 0);
+                labels.render(batch, camera, depth, 0);
                 assertEquals(2, profiler.getDrawCalls(), "All visible ranges merge into one draw per static mesh page");
                 camera.center(new com.badlogic.gdx.math.Vector3(-10000, 10000, 0));
                 profiler.reset();
-                labels.render(batch, camera.camera, depth, 0);
+                labels.render(batch, camera, depth, 0);
                 assertEquals(0, profiler.getDrawCalls(), "An off-board view must submit no glyph meshes");
             } finally { profiler.disable(); }
             labels.update(textScene(1, ""), font, coords -> null);
@@ -231,7 +239,7 @@ class GpuHexTextSmokeTest {
     private static void parity(GpuHexText labels, List<LegacyChunk> legacy, SpriteBatch batch, BoardCamera camera,
           Texture depth) {
         ScreenUtils.clear(.1f, .2f, .3f, 1, true);
-        labels.render(batch, camera.camera, depth, 0);
+        labels.render(batch, camera, depth, 0);
         Pixmap actual = pixels();
         // The unchanged text shader/depth uniforms were just set by render. Only the submission path differs.
         ScreenUtils.clear(.1f, .2f, .3f, 1, true);
@@ -410,13 +418,13 @@ class GpuHexTextSmokeTest {
             atmosphere.end(camera.camera, terrain, scene, BOTTOM);
             visibility.render(camera.camera, List.of(unit), atmosphere.depthTexture(), BOTTOM, .5f, 1);
             assertNotNull(visibility.depthTexture(), "Labels borrow the existing unit capture without a second render pass");
-            labels.render(textBatch, camera.camera, atmosphere.depthTexture(), visibility.depthTexture(), BOTTOM);
+            labels.render(textBatch, camera, atmosphere.depthTexture(), visibility.depthTexture(), BOTTOM);
             Pixmap protectedUnit = pixels();
-            try { assertEquals(0, pink(protectedUnit), "Visible unit parts below the relief bound must still occlude text"); }
+            try { assertTrue(pink(protectedUnit) > 250, "Top-view labels must also ignore captured unit depth"); }
             finally { protectedUnit.dispose(); }
-            labels.render(textBatch, camera.camera, atmosphere.depthTexture(), BOTTOM);
+            labels.render(textBatch, camera, atmosphere.depthTexture(), BOTTOM);
             Pixmap unprotectedUnit = pixels();
-            try { assertTrue(pink(unprotectedUnit) > 250, "This low object must exercise the unit-mask exception"); }
+            try { assertTrue(pink(unprotectedUnit) > 250, "Top-view labels also remain visible without a unit capture"); }
             finally { unprotectedUnit.dispose(); }
             visibility.render(camera.camera, List.of(), atmosphere.depthTexture(), BOTTOM, .5f, 1);
             assertNull(visibility.depthTexture(), "A previous unit frame must not hide labels after all units leave");
@@ -444,7 +452,154 @@ class GpuHexTextSmokeTest {
         atmosphere.end(camera.camera, terrain, scene, BOTTOM);
     }
 
+    private static void checkHeightOcclusion(GpuTerrain terrain, GpuAtmosphere atmosphere, GpuHexText labels,
+          BitmapFont font, SpriteBatch batch, BoardCamera camera) {
+        BoardScene scene = scene(false, true, 2);
+        terrain.update(scene);
+        labels.update(scene, font, terrain::roofBounds);
+        // Keep the rectangular object entirely inside the hex, including its tapered corners.
+        Model model = new ModelBuilder().createBox(.75f * BoardGeometry.WIDTH, .5f * BoardGeometry.HEIGHT,
+              8 * BoardGeometry.LEVEL, new Material(ColorAttribute.createDiffuse(.1f, .2f, .1f, 1)),
+              VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal);
+        ModelBatch objects = new ModelBatch();
+        GpuUnitVisibility visibility = new GpuUnitVisibility();
+        try {
+            ModelInstance object = new ModelInstance(model);
+            for (boolean perspective : List.of(false, true)) {
+                camera.setPerspective(perspective);
+                for (boolean isometric : List.of(false, true)) {
+                    camera.setIsometric(isometric);
+                    camera.center(BoardGeometry.center(LABELED, 4));
+                    frame(terrain, atmosphere, camera, scene, null);
+                    // Black makes the reference mask depend on glyph coverage, not the terrain's blended color.
+                    ScreenUtils.clear(0, 0, 0, 1, true);
+                    labels.render(batch, camera, atmosphere.depthTexture(), BOTTOM);
+                    Pixmap expected = pixels();
+                    try {
+                        assertTrue(pink(expected) > 250, "The fixture must contain visible HEIGHT glyphs");
+                        for (Coords coords : List.of(LABELED, new Coords(4, 4))) {
+                            object.transform.setToTranslation(BoardGeometry.center(coords, 4));
+                            ScreenUtils.clear(0, 0, 0, 1, true);
+                            atmosphere.begin((int) camera.camera.viewportWidth, (int) camera.camera.viewportHeight, 0);
+                            terrain.render(camera.camera, false);
+                            objects.begin(camera.camera);
+                            objects.render(object);
+                            objects.end();
+                            atmosphere.end(camera.camera, terrain, scene, BOTTOM);
+                            visibility.render(camera.camera, List.of(object), atmosphere.depthTexture(), BOTTOM, .5f, 1);
+                            labels.render(batch, camera, atmosphere.depthTexture(), visibility.depthTexture(), BOTTOM);
+                            Pixmap covered = pixels();
+                            try {
+                                if (coords.equals(LABELED)) {
+                                    capture("height-own-" + perspective + "-" + isometric);
+                                    assertEquals(0, missing(expected, covered),
+                                          "HEIGHT must show through its own hex's object: perspective=" + perspective
+                                                + ", isometric=" + isometric);
+                                } else if (isometric) {
+                                    assertTrue(missing(expected, covered) > pink(expected) * .25,
+                                          "A foreground object in another hex must occlude the HEIGHT glyphs it overlaps");
+                                } else {
+                                    assertEquals(0, missing(expected, covered), "An adjacent object must not hide clear glyphs");
+                                }
+                            } finally { covered.dispose(); }
+                        }
+                        if (isometric) {
+                            BoardScene cliff = scene(true, true, 2);
+                            terrain.update(cliff);
+                            frame(terrain, atmosphere, camera, cliff, null);
+                            labels.render(batch, camera, atmosphere.depthTexture(), BOTTOM);
+                            Pixmap covered = pixels();
+                            try { assertEquals(0, pink(covered), "A foreground cliff must hide HEIGHT at its shared hex edge"); }
+                            finally { covered.dispose(); terrain.update(scene); }
+                        }
+                    } finally { expected.dispose(); }
+                }
+            }
+        } finally { camera.setPerspective(false); visibility.dispose(); objects.dispose(); model.dispose(); }
+
+        Texture depth = texture(0x000000ff);
+        try {
+            for (boolean isometric : List.of(false, true)) {
+                camera.setIsometric(isometric);
+                camera.center(BoardGeometry.center(LABELED, 4));
+                for (int height : List.of(0, 2)) {
+                    labels.update(scene(false, true, height), font, c -> null);
+                    ScreenUtils.clear(0, 0, 0, 1, true);
+                    labels.render(batch, camera, depth, depth, BOTTOM);
+                    Pixmap expected = pixels();
+                    // Cover every pixel with nearer opaque depth, independently of any particular model shape.
+                    Gdx.gl.glClearDepthf(0);
+                    ScreenUtils.clear(0, 0, 0, 1, true);
+                    Gdx.gl.glClearDepthf(1);
+                    labels.render(batch, camera, depth, depth, BOTTOM);
+                    Pixmap covered = pixels();
+                    try {
+                        assertTrue(pink(expected) > 250);
+                        if (height == 0 && !isometric) {
+                            assertEquals(0, missing(expected, covered), "Every enabled overlay glyph must survive full occlusion");
+                        } else {
+                            assertEquals(0, pink(covered), "HEIGHT and angled ground labels must respect foreign scene depth");
+                        }
+                    } finally { expected.dispose(); covered.dispose(); }
+                }
+            }
+            labels.update(textScene(1, ""), font, c -> null);
+            ScreenUtils.clear(0, 0, 0, 1, true);
+            labels.render(batch, camera, depth, BOTTOM);
+            Pixmap empty = pixels();
+            try { assertEquals(0, pink(empty), "An empty captured label list must remain empty"); }
+            finally { empty.dispose(); }
+        } finally { depth.dispose(); }
+    }
+
+    private static void checkTopGrid(BoardCamera camera, BoardScene scene) {
+        GpuHexGrid grid = new GpuHexGrid();
+        var settings = BoardGeometry.tuning();
+        try {
+            camera.setIsometric(false);
+            int level = scene.tile(LABELED).elevation();
+            camera.center(BoardGeometry.center(LABELED, level));
+            for (boolean perspective : List.of(false, true)) {
+                camera.setPerspective(perspective);
+                ScreenUtils.clear(1, 1, 1, 1, true);
+                grid.render(camera, scene);
+                Pixmap expected = pixels();
+                Gdx.gl.glClearDepthf(0);
+                ScreenUtils.clear(1, 1, 1, 1, true);
+                Gdx.gl.glClearDepthf(1);
+                grid.render(camera, scene);
+                Pixmap covered = pixels();
+                try {
+                    assertTrue(expected.getPixels().equals(covered.getPixels()), "The entire grid must ignore scene depth");
+                    var edge = camera.camera.project(BoardGeometry.corner(LABELED, level, 0)
+                          .lerp(BoardGeometry.corner(LABELED, level, 1), .5f), 0, BOTTOM,
+                          camera.camera.viewportWidth, camera.camera.viewportHeight);
+                    assertTrue((covered.getPixel((int) edge.x, (int) edge.y) >>> 24) < 240,
+                          "The pixel comparison must contain a border at the actual hex elevation");
+                } finally { expected.dispose(); covered.dispose(); }
+            }
+            for (boolean disabled : List.of(false, true)) {
+                if (disabled) {
+                    BoardGeometry.tune(new BoardGeometry.Tuning(settings.hexScale(), settings.unitScale(),
+                          settings.unitHeightScale(), settings.levelHeight(), 1, settings.multiHexUnitScale(),
+                          settings.transitions(), settings.padding()));
+                    camera.setIsometric(false);
+                } else { camera.setIsometric(true); }
+                ScreenUtils.clear(1, 1, 1, 1, true);
+                Pixmap before = pixels();
+                grid.render(camera, scene);
+                Pixmap after = pixels();
+                try { assertTrue(before.getPixels().equals(after.getPixels()), "No overlay grid in angled view or when disabled"); }
+                finally { before.dispose(); after.dispose(); }
+            }
+        } finally { camera.setPerspective(false); BoardGeometry.tune(settings); grid.dispose(); }
+    }
+
     private static BoardScene scene(boolean cliff, boolean detailedLabels) {
+        return scene(cliff, detailedLabels, 0);
+    }
+
+    private static BoardScene scene(boolean cliff, boolean detailedLabels, int height) {
         BufferedImage image = new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB);
         var graphics = image.createGraphics();
         graphics.setColor(new java.awt.Color(86, 119, 54));
@@ -452,8 +607,10 @@ class GpuHexTextSmokeTest {
         graphics.dispose();
         BoardScene.Pixels ground = new BoardScene.Pixels(image);
         Font font = new Font(Font.SANS_SERIF, Font.PLAIN, 12);
-        List<BoardHexText> text = List.of(new BoardHexText("0404", 10, font, 0xffff00ff, true, 0),
-              new BoardHexText("LEVEL2", 60, font, 0xffff00ff, false, 0));
+        List<BoardHexText> text = height > 0
+              ? List.of(new BoardHexText("HEIGHT " + height, 40, font, 0xffff00ff, false, height))
+              : List.of(new BoardHexText("0404", 10, font, 0xffff00ff, true, 0),
+                    new BoardHexText("LEVEL2", 60, font, 0xffff00ff, false, 0));
         List<BoardScene.Feature> rocks = List.of(
               new BoardScene.Feature("scatter-rock", 0, 21, 0, 6, .6f, 0, BoardScene.FeatureKind.SCATTER),
               new BoardScene.Feature("scatter-rock", 0, -18, 0, 6, .6f, 0, BoardScene.FeatureKind.SCATTER));

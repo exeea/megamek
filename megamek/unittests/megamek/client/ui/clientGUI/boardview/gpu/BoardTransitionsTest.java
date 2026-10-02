@@ -41,7 +41,7 @@ class BoardTransitionsTest {
 
     /**
      * How far a hex's top reaches toward LOW across the middle third of the shared edge, in metres from the edge: the
-     * outermost vertex for the high hex, the innermost for the low one.
+     * outermost surface point for the high hex, the innermost for the low one.
      */
     private static float reach(BoardScene scene, Coords coords, boolean outermost) {
         Vector3[] edge = edge();
@@ -50,7 +50,9 @@ class BoardTransitionsTest {
         along.scl(1 / length);
         for (BoardSurface.Face face : new BoardSurface(scene, scene.tile(coords)).faces) {
             if (face.finish() != BoardSurface.Finish.TOP) { continue; }
-            for (Vector3 p : List.of(face.a(), face.b(), face.c())) {
+            // Sparse planar tops may have only their edge endpoints outside the middle third.
+            for (Vector3 p : List.of(face.a(), face.b(), face.c(), new Vector3(face.a()).lerp(face.b(), .5f),
+                  new Vector3(face.b()).lerp(face.c(), .5f), new Vector3(face.c()).lerp(face.a(), .5f))) {
                 Vector3 offset = new Vector3(p).sub(edge[0]);
                 float t = (offset.x * along.x + offset.y * along.y) / length;
                 if (t < 1 / 3f || t > 2 / 3f) { continue; }

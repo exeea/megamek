@@ -16,6 +16,46 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 class BoardWaterSlopeTest {
+    @Test
+    void boardEdgeCutsCloseToTheDrawnGradedLavaAndWater() {
+        BoardScene lava = BoardCliffSeamTest.scene(new File("data/boards/Map Pack Volcanic/16x17 Dome Vent 1.board"));
+        int checked = 0;
+        for (BoardScene scene : List.of(lava, BoardWaterfallTest.withWater(lava))) {
+            for (var tile : scene.tiles()) {
+                if (!tile.liquid().present()) { continue; }
+                BoardSurface surface = new BoardSurface(scene, tile);
+                Vector3[] bed = surface.waterGeometry().bedOutline();
+                for (int edge = 0; edge < 6; edge++) {
+                    if (scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(edge))) != null) { continue; }
+                    int side = edge;
+                    var cut = surface.cutFaces.stream().filter(face -> face.landEdge() == side).toList();
+                    for (int i = 0; i < BoardSurface.SHORE_SEGMENTS; i++) {
+                        int at = edge * BoardSurface.SHORE_SEGMENTS + i, next = (at + 1) % bed.length;
+                        for (float t : new float[] { 0, .5f, 1 }) {
+                            Vector3 top = new Vector3(surface.water.get(at)).lerp(surface.water.get(next), t);
+                            Vector3 bottom = new Vector3(bed[at]).lerp(bed[next], t);
+                            if (top.z - bottom.z < .01f) { continue; }
+                            for (Vector3 point : List.of(top, bottom)) {
+                                float gap = Float.POSITIVE_INFINITY;
+                                for (var face : cut) { gap = Math.min(gap, distanceToFace(point, face)); }
+                                assertTrue(gap < .003f, "Board-edge cut must join its actual graded rim and bed: "
+                                      + tile.coords() + ", " + tile.liquid().kind() + ", " + point + ", gap=" + gap);
+                            }
+                            checked++;
+                        }
+                    }
+                    for (var face : cut) {
+                        for (Vector3 point : List.of(face.a(), face.b(), face.c())) {
+                            assertTrue(point.z <= surface.waterHeight(point.x, point.y) + .003f,
+                                  "The cut must not protrude above the liquid at " + tile.coords() + ": " + point);
+                        }
+                    }
+                }
+            }
+        }
+        assertTrue(checked > 100, "Exercise both ends of several graded board-edge cuts");
+    }
+
     @ParameterizedTest
     @EnumSource(TerrainLod.class)
     void descendingDomeVentBanksMeetBothEndsOfTheirWalls(TerrainLod lod) {
@@ -128,8 +168,9 @@ class BoardWaterSlopeTest {
         return Math.min(boundary, Math.abs(ab.crs(ac).nor().dot(ap)));
     }
 
+    /** Easing a bank over only a third of its length tilted the water sideways; sky reflections traced its sides. */
     @Test
-    void aDescendingStreamKeepsItsRoundedBulgeBetweenSofterBanks() {
+    void aDescendingStreamLiesAboutLevelAcrossItsChannel() {
         Coords high = new Coords(3, 3);
         for (int drop : new int[] { 1, 2 }) {
             for (int direction = 0; direction < 6; direction++) {
@@ -148,12 +189,8 @@ class BoardWaterSlopeTest {
                         Vector3 point = new Vector3(middle).mulAdd(across, side);
                         float height = BoardSurface.sampleHeight(surface.waterFaces, point.x, point.y, Float.NaN);
                         assertTrue(Float.isFinite(height), "The sample must be inside the channel");
-                        assertEquals(level, height, .20f * drop * BoardGeometry.LEVEL,
-                              "Limit bank shoulders: drop=" + drop + ", direction=" + direction + ", at=" + along);
-                        if (along == .7f) {
-                            assertTrue(level - height > .06f * drop * BoardGeometry.LEVEL,
-                                  "The descending water must retain its rounded central bulge, direction=" + direction);
-                        }
+                        assertEquals(level, height, .08f * drop * BoardGeometry.LEVEL,
+                              "Level across the channel: drop=" + drop + ", direction=" + direction + ", at=" + along);
                     }
                 }
             }

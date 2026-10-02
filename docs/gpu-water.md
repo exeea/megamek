@@ -72,10 +72,24 @@ needs corresponding footprint, support and field updates.
 Connected water descends continuously over one- and two-level steps; larger drops
 form falls. The stream surface, its bed and the adjoining banks share the same
 mouth geometry. `BoardRiver` supplies the path and `BoardFlow` supplies currents,
-so direction changes remain continuous across hex boundaries.
-Graded streams retain a rounded cross-section; flattening it to a straight
-interpolation removes the flowing bulge. Mouth/corner heights remain fixed,
-and bank, bed and surface share the same descent correction.
+so direction changes remain continuous across hex boundaries. Only water open on
+five or more sides at its own level is a lake's still body, together with the water
+beside it; a river that widens to two hexes or runs through shallows stays open on
+fewer sides and keeps its current.
+Current direction uses height first: direct descents take priority, and higher
+inlets feed the branches of a level receiving reach. A branch can continue off
+the board while another drains into a lower pool. Without height evidence, a
+narrow channel entering at the board edge feeds a wider lake/ocean; an equally
+narrow level channel with no other evidence stays directionless. Lake bodies
+keep their local waves rather than translating as a whole. Water and lava use
+this same routing and the same continuous current-field sampler.
+Graded streams keep a rounded descent along their flow; flattening it to a straight
+interpolation removes the flowing bulge. Across the channel the water lies about
+level. Mouth/corner heights remain fixed, and bank, bed and surface share the same
+descent correction. A bank eases away from each corner's shared height over the
+same share of its length (`PLATEAU`) that the surface eases inward from its rim.
+Easing over only a third of it beside a descent's mouth tilted the water sideways
+by up to about 60 degrees, and sky reflections traced pale lines along its sides.
 
 Rapids/torrents increase current speed where a direction exists and add local
 churn and broken foam through the shaders. A completely level reach without an
@@ -116,10 +130,23 @@ low, narrow swell so calm open water keeps moving. Amplitudes are in metres: the
 spectrum of a full gale (wind 1, about 20 m/s) gives roughly 3 m significant
 height with 70 m crests, a moderate wind about 1.7 m, calm about 0.3 m of swell.
 As art direction, a full gale is drawn so its tallest waves, crest to trough, reach
-`GpuOcean.MAX_WAVE_HEIGHT` (7 m, about 1.5 times the physical sea), so its crests
-fold and foam visibly from a tactical camera. The gain grows with the square of
-the wind (`GpuOcean.storm`, `u_storm` in `ocean-initial.frag`); calm water stays
-physical. Waves travel downwind at their deep-water speed; the smoke test checks
+`GpuOcean.MAX_WAVE_HEIGHT`, so its crests fold and foam visibly from a tactical
+camera. The gain grows with the square of the wind (`GpuOcean.storm`, `u_storm` in
+`ocean-initial.frag`); calm water stays physical. Running water divides its
+ripple band by the current gain (`GpuOcean.gain`, `u_waterStorm`), so a river's
+short chop keeps its real height whatever the configured maximum. Scenario gravity sets both the spectrum's
+amplitudes and its wave speeds. At zero gravity, `GpuTerrain.update` derives a
+lunar presentation from the source tiles: every surface uses ROCK, vegetation
+and scatter disappear (the tiles are `bare`, which `BoardScatter.allowed` also
+denies the relief's field stones and shrubs), rough boulders give way to bedrock outcrops
+([Rough terrain variants](gpu-rough.md#zero-gravity)), and all liquids, magma crust and ice are removed. Each
+hex's positive water depth is subtracted from its elevation, and its depth/level
+labels become the resulting ground level. Bridges gain that same depth in relative
+height, including their height labels, so their decks stay at the original absolute
+level. Rendering, picking and support use
+this same snapshot after the existing terrain rebuild publishes it. Returning
+to positive gravity restores the source terrain; game hexes remain unchanged.
+Waves travel downwind at their deep-water speed; the smoke test checks
 the direction. The choppy displacement gathers the surface towards each crest, the
 more so the stronger the wind, so crests are sharp and troughs broad; the smoke
 test checks that compression, and therefore foam, sits on crests and that a gale
@@ -143,9 +170,21 @@ One finish pass writes, per cascade, slope, height and persistent foam, and for
 the longest cascade the displacement and crest compression that move the mesh.
 Foam seeds where the steepest crests fold, drifts downwind and thins over a few
 seconds. It spreads mostly along the wind, so the simulation itself draws it out
-into streaks, which follow the wind as it turns. The shader draws foam dense where
-it is fresh and frays it into lace; from afar the lace fades rather than hardening
-into patches. Detail maps stay fixed in the world: turning them with the wind would
+into streaks, which follow the wind as it turns. How much of the sea shows whitecaps is
+set directly, not left to how steep the configured sea is: `GpuOcean.foamCover`
+gives the share of open sea showing whitecaps up close for a wind, none up to
+`FOAM_ONSET`, then rising along `FOAM_CURVE` to `FOAM_COVERAGE` in a full gale.
+The defaults keep the gale's foam as the fixed seeding they replaced drew it at
+12 m and 1 g (26 %), and give some at half wind (about 3 %) where that had
+almost none. The finish pass records how white each texel of open sea would
+show, the surface's lace averaged over its noise, in the ripple result's alpha;
+each frame a one-pixel pass (`ocean-foam.frag`) compares its mean, the smallest
+mipmap level, with the target and moves the crest compression at which the
+swell's and the chop's foam seed, both together. The share follows a change of
+wind within about twenty seconds and holds whatever `MAX_WAVE_HEIGHT`, gravity
+or choppiness; the smoke test checks it at half and full wind. The shader draws
+foam dense where it is fresh and frays it into lace; from afar the lace fades
+rather than hardening into patches. Detail maps stay fixed in the world: turning them with the wind would
 sweep them across the whole board whenever it changed.
 
 `waterWaveEnergy` (`water-wave.glsl`) gives each cascade's share at a point and is
@@ -161,6 +200,24 @@ even where the geometry is flat, so shallow water never turns to glass. Waves fa
 before elevation transitions, retaining the existing rounded stream descent. This
 is a rendering approximation, not a hydraulic solver or a change to movement rules.
 
+Running water shows its current in any light. A coarse detail layer carried by the
+current alone (no world drift) shades broad, light and dark faces on level running water
+deeper than the shallows, and drifts clearer and siltier patches of the water's own
+colour past, so a river reads as flowing even in calm air and without a sun glint.
+Its banks take no lake surf, surge or wind-drifted foam band: only the band's grain
+drifts downstream. The depth-0 shallows, descents, lakes and falls keep their own
+look. Running water is too narrow for the wind to raise a sea on it. Above a light breeze
+(`waterWindShare`) a level reach takes only the ripple band, the short steep chop
+of a short fetch, read where its current has carried it (the same two restarting
+phases as its detail maps), so the chop travels with the flow plus the wind; in a
+gale its highest crests break into small flecks. In calm air a river shows only its
+current's own ripples, so an opposing wind never makes it appear to run backwards.
+A descent keeps its own current-driven surface: its mesh normal, exactly up on
+level water, tilts from the lip, and the tilt both removes the wind's chop and
+broadens the sun's glint, since water running down a slope is broken. A mirror-like
+glint there would trace a thin static line along the descent's curve. Bed caustics
+and the refraction sway of a submerged bed follow neither wind nor current.
+
 Only the longest cascade displaces geometry; shorter ones exist in the normals.
 Shading separates a broad normal (swell and some chop), which lights the waves so
 they read from a tactical height, from the full normal used for reflection and
@@ -173,13 +230,16 @@ their existing current-driven patches. Disabled water effects skip the
 simulation. If setup fails, water keeps its static ripple fallback. Game
 elevation, picking and unit support remain canonical.
 
-Water first establishes the nearest displaced surface in a depth-only pass into a
-target of its own (`GpuWaterDepth`), then blends its colour over the
-already-rendered bed and units, discarding any fragment behind that nearest
-surface. Both passes use the same displacement program (`invariant gl_Position`)
+Water first establishes its nearest boundary, displaced surface or board-edge
+section, in a depth-only pass into a target of its own (`GpuWaterDepth`), then
+blends its colour over the already-rendered bed and units, discarding any fragment
+behind that nearest boundary (`waterHidden` in `water-uniforms.glsl`). A section
+therefore shows only where it is the first water a ray meets: the far side of a
+zig-zag board edge faces the camera too, but is seen through the surface or the
+near section. Both passes use the same displacement program (`invariant gl_Position`)
 and cached mesh ranges, preventing rear waves from blending through foreground
 crests at grazing angles. Fog stops at the nearer of the scene depth and that
-surface. The scene depth itself keeps the bed and units, so unit outlines,
+boundary. The scene depth itself keeps the bed and units, so unit outlines,
 tactical overlays and weather never see the moving waves. Reflections still sample sky/cloud lighting; this pass does not add
 screen-space scene reflections, refracted scene captures, wave collision or
 buoyancy.
@@ -216,7 +276,7 @@ through edits or LOD invalidates its page. At most one page is built per frame;
 the original meshes draw while others await preparation. Partially visible
 pages preserve chunk culling and may require several contiguous draw ranges.
 
-Level pools are resampled on a world-aligned triangular lattice, 2.5/6/12 metres
+Level pools are resampled on a world-aligned triangular lattice, 3/6/12 metres
 at full/medium/coarse LOD, retaining every boundary sample so neighbours share
 their edges. Concave bays keep only triangles inside their outline and fall back
 to the canonical faces if the triangulation does not follow it. Sloping surfaces

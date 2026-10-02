@@ -79,9 +79,13 @@ final class BoardSurfaceBlend {
             return natural(b) && (a.elevation() == b.elevation()
                   || BoardGeometry.tuning().stepsBetweenTops() && Math.abs(a.elevation() - b.elevation()) == 1);
         }
-        // Concrete steps of one/two levels are complete slabs. Only the rock beneath taller slabs joins the ground.
-        return a == b || a.surface() != BoardScene.Surface.CONCRETE && b.surface() != BoardScene.Surface.CONCRETE
-              || Math.abs(a.elevation() - b.elevation()) >= 3;
+        // Only the rock beneath a tall concrete slab joins natural ground. A higher natural cliff must not
+        // spread its cover onto a lower paved surface or force that flat slab to subdivide for a material fade.
+        if (a == b || a.surface() != BoardScene.Surface.CONCRETE && b.surface() != BoardScene.Surface.CONCRETE) {
+            return true;
+        }
+        return a.surface() == BoardScene.Surface.CONCRETE && a.elevation() - b.elevation() >= 3
+              || b.surface() == BoardScene.Surface.CONCRETE && b.elevation() - a.elevation() >= 3;
     }
 
     static boolean cliffBoundary(BoardScene scene, BoardScene.Tile tile) { return boundary(scene, tile); }

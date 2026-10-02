@@ -109,8 +109,8 @@ class BoardReliefTest {
                 }
             }
         }
-        assertTrue(maximum - minimum > BoardRelief.metres(.3f), "Open ground has real, restrained relief");
-        assertTrue(maximum - minimum < BoardGeometry.LEVEL * .6f, "Relief never reads as another level");
+        assertEquals(BoardGeometry.level(), minimum, .001f, "Level terrain has no geometric height noise");
+        assertEquals(minimum, maximum, .001f, "Joined families share one flat plane");
     }
 
     @Test
@@ -125,8 +125,8 @@ class BoardReliefTest {
             for (BoardSurface.Face face : surface.walls(scene, BoardGeometry.floor(scene))) {
                 // A rectangular slab needs only corner vertices; also measure inside its triangles.
                 Vector3 middle = new Vector3(face.a()).add(face.b()).add(face.c()).scl(1 / 3f);
-                for (Vector3 p : level == 2 ? List.of(face.a(), face.b(), face.c(), middle)
-                      : List.of(face.a(), face.b(), face.c())) {
+                boolean panel = level == 2 || Math.min(face.a().z, Math.min(face.b().z, face.c().z)) >= underside - .001f;
+                for (Vector3 p : panel ? List.of(face.a(), face.b(), face.c(), middle) : List.of(face.a(), face.b(), face.c())) {
                     // Distance beyond the nearest logical edge; the rounded corners are skipped.
                     float beyond = -Float.MAX_VALUE, along = 0;
                     for (int edge = 0; edge < 6; edge++) {

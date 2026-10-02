@@ -84,6 +84,13 @@ class GpuBoardFileSmokeTest {
                             camera.orbit(0, 0);
                             camera.camera.zoom = oblique ? .7f * fit : fit;
                             camera.center(BoardGeometry.center(middle, scene.tile(middle).elevation()));
+                            if (System.getProperty("megamek.gpu.boards.closeup") != null) {
+                                String[] focus = System.getProperty("megamek.gpu.boards.closeup").split(",");
+                                Coords at = new Coords(Integer.parseInt(focus[0]), Integer.parseInt(focus[1]));
+                                camera.camera.zoom = Float.parseFloat(focus[2]);
+                                camera.orbit(Float.parseFloat(focus[3]), 0);
+                                camera.center(BoardGeometry.center(at, scene.tile(at).elevation()));
+                            }
                             frame.render(terrain, camera, scene);
                             GpuReviewFrame.save(new File(output, names.get(i) + (oblique ? "-oblique" : "-top")
                                   + String.format(Locale.ROOT, "-h%s.png", hour)));

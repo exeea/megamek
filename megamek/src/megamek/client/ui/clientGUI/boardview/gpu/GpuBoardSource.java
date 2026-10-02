@@ -306,7 +306,7 @@ final class GpuBoardSource implements BoardSource {
         // its first point and when it has just landed, so flying stays on the board through climbs and landings.
         int flightAltitude = entity.getAltitude() > 0 ? entity.getAltitude() : startAltitude;
         if (start != null && start.boardId() == view.getBoardId()) {
-            points.add(pathWaypoint(entity, start.coords(), start.elevation(), start.facing(),
+            points.add(unitWaypoint(entity, start.coords(), start.elevation(), start.facing(),
                   startAltitude > 0 ? startAltitude : flightAltitude, start.form()).withProneCause(start.proneCause())
                   .withFallSide(start.fallSide()).withHullDown(start.hullDown()));
         } else if (frame != null) {
@@ -315,7 +315,7 @@ final class GpuBoardSource implements BoardSource {
         }
         for (UnitLocation location : path) {
             var observedForm = location.form() != null ? location.form() : points.isEmpty() ? null : points.getLast().form();
-            BoardScene.Waypoint point = pathWaypoint(entity, location.coords(), location.elevation(),
+            BoardScene.Waypoint point = unitWaypoint(entity, location.coords(), location.elevation(),
                   location.facing(), flightAltitude, observedForm).withProneCause(location.proneCause() != null ? location.proneCause()
                         : points.isEmpty() ? null : points.getLast().proneCause())
                   .withFallSide(location.proneCause() != null ? location.fallSide()
@@ -330,7 +330,7 @@ final class GpuBoardSource implements BoardSource {
         var finalForm = UnitLocation.Form.capture(entity);
         if (!points.isEmpty() && finalForm != null && path.stream().allMatch(location -> location.form() == null)) {
             var last = path.getLast();
-            points.add(pathWaypoint(entity, last.coords(), last.elevation(), last.facing(), flightAltitude, finalForm)
+            points.add(unitWaypoint(entity, last.coords(), last.elevation(), last.facing(), flightAltitude, finalForm)
                   .withProneCause(points.getLast().proneCause()).withFallSide(points.getLast().fallSide())
                   .withHullDown(points.getLast().hullDown()));
         }
@@ -420,7 +420,8 @@ final class GpuBoardSource implements BoardSource {
         var usedImages = new IdentityHashMap<Image, Boolean>();
         var firing = unit(attacker, -1, result.attacker().coords(), false, usedImages);
         if (result.shot() != null && result.shot().launch() != null) {
-            firing = inForm(firing, attacker, waypoint(result.attacker().coords(), result.attacker().elevation(), result.attacker().facing()),
+            firing = inForm(firing, attacker, unitWaypoint(attacker, result.attacker().coords(),
+                  result.attacker().elevation(), result.attacker().facing(), attacker.getAltitude(), result.attacker().form()),
                   result.attacker().form());
         }
         var receiving = target == null ? null : unit(target, -1, result.target().coords(), false, usedImages);
@@ -775,7 +776,8 @@ final class GpuBoardSource implements BoardSource {
                 BoardScene.Tile next = new BoardScene.Tile(old.coords(), old.elevation(), old.waterDepth(), old.frozen(),
                       old.roadExits(), old.surface(), old.ground(), old.normals(), old.decals(), old.decalsWithoutLimbs(),
                       terrainImages.capture(hex.tactical(), old.tactical()), old.features(), hex.text(), old.liquid(),
-                      old.foliage(), old.detailedGround(), old.road(), old.fireSmoke(), old.biome(), old.impassable(), old.blackIce());
+                      old.foliage(), old.detailedGround(), old.road(), old.fireSmoke(), old.biome(), old.impassable(),
+                      old.blackIce(), old.cliffTopExits());
                 if (!next.equals(old)) {
                     painted.set(index, next);
                 }
@@ -865,10 +867,11 @@ final class GpuBoardSource implements BoardSource {
             if (path != null && path.getEntity().getBoardId() == view.getBoardId()) {
                 Entity entity = path.getEntity();
                 if (entity.getPosition() != null) {
-                    planned.add(waypoint(entity.getPosition(), entity.getElevation(), entity.getFacing()));
+                    planned.add(unitWaypoint(entity, entity.getPosition(), entity.getFacing()));
                 }
                 path.getStepVector().stream().filter(step -> step.getPosition() != null).forEach(step ->
-                      planned.add(waypoint(step.getPosition(), step.getElevation(), step.getFacing())));
+                      planned.add(unitWaypoint(entity, step.getPosition(), step.getElevation(), step.getFacing(),
+                            step.getAltitude(), null)));
             }
         }
         Point light = view.getTerrainLightDirection();
@@ -1018,7 +1021,8 @@ final class GpuBoardSource implements BoardSource {
             if (sensorContact(entity)) {
                 return waypoint(coords, 0.5f, 0);
             }
-            return new BoardScene.Waypoint(coords, flightLevel(entity, coords) + (entity.height() + 1) * 0.5f, 0);
+            var position = unitWaypoint(entity, coords, 0);
+            return new BoardScene.Waypoint(coords, position.elevation() + (entity.height() + 1) * 0.5f, 0);
         }
         return waypoint(coords, target.getElevation() + Math.max(0.15f, target.getHeight() * 0.5f), 0);
     }
@@ -1062,7 +1066,7 @@ final class GpuBoardSource implements BoardSource {
             footprint = List.of(coords);
         }
         BoardScene.Waypoint location = airborne
-              ? new BoardScene.Waypoint(coords, flightLevel(entity, coords), facing)
+              ? unitWaypoint(entity, coords, facing)
               : footprint.size() > 1 && UnitFootprint.terrainSupported(entity.getMovementMode())
                     ? new BoardScene.Waypoint(coords, UnitFootprint.support(board, coords, footprint, entity.getElevation()), facing)
                     : waypoint(coords, sensor ? 0 : entity.getElevation(), facing);
@@ -1104,31 +1108,26 @@ final class GpuBoardSource implements BoardSource {
     }
 
     /**
-     * Absolute level a flying visual floats at, with its token staying its own height above it. Aerospace altitude is
-     * already absolute above the board, exactly as the LOS height conversion treats it, and is the only height
-     * available for it because {@code Aero.getElevation()} reports the airborne sentinel while flying. VTOL and WiGE
-     * elevation is relative to the hex below them.
+     * Capture the current unit through the same elevation conversion as historical and planned movement.
      */
-    private float flightLevel(Entity entity, Coords coords) {
-        if (entity.getAltitude() > 0) {
-            return entity.getAltitude();
-        }
-        Hex hex = board == null ? null : board.getHex(coords);
-        return entity.getElevation() + (hex == null ? 0 : hex.getLevel());
+    private BoardScene.Waypoint unitWaypoint(Entity entity, Coords coords, int facing) {
+        return unitWaypoint(entity, coords, entity.getElevation(), facing, entity.getAltitude(), UnitLocation.Form.capture(entity));
     }
 
     /**
-     * Playback position of one movement path point. An aerospace reports the airborne elevation sentinel (999) in
-     * every step it takes while flying instead of a real level; those steps play at the given flight altitude, while a
-     * step carrying a real elevation (an aerospace taxiing, or set down on its landing hex) keeps it. Every other unit
+     * Single conversion for current units, playback, planned movement and firing. An aerospace reports the airborne
+     * sentinel (999) while flying instead of a real level; those steps play at the flight altitude above their hex.
+     * A step carrying a real elevation (an aerospace taxiing, or set down on its landing hex) keeps it. Every other unit
      * keeps its own per-step elevation, so VTOL and WiGE climbs and descents still animate.
+     * Published waypoint elevations are absolute render levels. Renderers must not add terrain height again;
+     * this visual conversion does not change the rules engine's altitude or LOS calculations.
      */
-    private BoardScene.Waypoint pathWaypoint(Entity entity, Coords coords, float elevation, int facing,
+    private BoardScene.Waypoint unitWaypoint(Entity entity, Coords coords, float elevation, int facing,
           int flightAltitude, UnitLocation.Form form) {
         boolean aero = form == null ? entity.isAero() : form.aero();
         if (form != null && form.altitude() > 0) { flightAltitude = form.altitude(); }
         BoardScene.Waypoint point = aero && elevation >= Aero.AERO_EFFECTIVE_ELEVATION && flightAltitude > 0
-              ? new BoardScene.Waypoint(coords, flightAltitude, facing)
+              ? waypoint(coords, flightAltitude, facing)
               : waypoint(coords, elevation, facing);
         // A real path elevation describes the displayed step; the final Entity may already have landed/taken off.
         return point.withAeroState(aeroState(aero, elevation, false)).withForm(form);

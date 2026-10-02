@@ -348,8 +348,9 @@ final class BoardGeometry {
                       && nearer(ray.origin.dst2(hit), nearest, candidate.order(), nearestOrder)) {
                     nearest = ray.origin.dst2(hit);
                     nearestOrder = candidate.order();
-                    // Rim rocks can overhang a lower hex just like the cliff wall beneath them.
-                    result = face.finish() == BoardSurface.Finish.OUTCROP
+                    // Rim rocks and a waterfall's bed lip can overhang a lower hex just like its cliff.
+                    // A high bed hit belongs to that upper pool; only the low talus belongs to the receiving hex.
+                    result = face.finish() == BoardSurface.Finish.OUTCROP || face.finish() == BoardSurface.Finish.BED
                           ? foot(scene, tile.coords(), hit) : footprint(scene, tile.coords(), hit);
                     hardSurface = hardSurface(tile, face);
                 }

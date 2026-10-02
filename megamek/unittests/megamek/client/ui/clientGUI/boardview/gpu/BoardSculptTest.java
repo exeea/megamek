@@ -93,11 +93,13 @@ class BoardSculptTest {
             BoardScene scene = scene(DRY, family);
             float floor = BoardGeometry.floor(scene);
             Map<List<Key>, Integer> edges = new HashMap<>();
+            List<BoardSurface.Face> complete = new ArrayList<>();
             int triangles = 0;
             for (BoardScene.Tile tile : scene.tiles()) {
                 BoardSurface surface = new BoardSurface(scene, tile);
                 List<BoardSurface.Face> faces = new ArrayList<>(surface.faces);
                 faces.addAll(surface.walls(scene, floor));
+                complete.addAll(faces);
                 for (BoardSurface.Face face : faces) {
                     if (face.finish() == BoardSurface.Finish.OUTCROP) { continue; }
                     triangles++;
@@ -118,7 +120,13 @@ class BoardSculptTest {
                 if (!plinth) { open++; }
             }
             assertTrue(triangles > 10000, "Sculpted terrain must be tessellated");
-            assertEquals(0, open, family + ": every sculpted edge must be shared by two triangles");
+            if (family == BoardScene.Surface.CONCRETE) {
+                // A two-triangle cast panel can meet several collinear rock segments. Check their entire
+                // coverage rather than requiring the slab to inherit every rock subdivision.
+                BoardCliffSeamTest.assertClosed(complete, floor, family.toString());
+            } else {
+                assertEquals(0, open, family + ": every sculpted edge must be shared by two triangles");
+            }
             for (var entry : edges.entrySet()) {
                 assertTrue(entry.getValue() <= 2, family + ": no edge may be shared by more than two triangles");
             }

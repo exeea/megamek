@@ -61,7 +61,7 @@ public record BoardHexText(String text, int baseline, Font font, int argb, boole
                 yPosition -= 10;
             }
             if (height > 0) {
-                labels.add(new BoardHexText(Messages.getString("BoardView1.HEIGHT") + height,
+                labels.add(new BoardHexText(Messages.getString("BoardView1.HEIGHT") + " " + height,
                       (int) (yPosition * scale), font_elev, GUIP.getBuildingTextColor().getRGB(), false, height));
                 yPosition -= 10;
             }

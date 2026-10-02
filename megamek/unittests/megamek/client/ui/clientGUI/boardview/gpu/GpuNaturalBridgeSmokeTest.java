@@ -16,14 +16,67 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
+import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /** Native material, passage, picking, edit and chunk-LOD integration for the separate natural bridge shell. */
 @Tag("on-demand")
 class GpuNaturalBridgeSmokeTest {
+    @Test
+    void lavaTubeArchesJoinTheirCliffsFromAboveAndBelow() throws Exception {
+        var scene = GpuRoadSourceTest.scene("Map Pack Volcanic/16x17 Lava Tubes 1.board");
+        File output = new File(System.getProperty("megamek.gpu.screenshots"), "natural-bridges");
+        Files.createDirectories(output.toPath());
+        var failure = new AtomicReference<Throwable>();
+        var config = GpuBoardWindow.configuration(false);
+        config.setWindowedMode(1440, 1080);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                var terrain = new GpuTerrain();
+                var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
+                      BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+                var skin = new GpuBoardSkin();
+                var labels = new GpuHexText();
+                var grid = new GpuHexGrid();
+                var batch = new SpriteBatch();
+                try {
+                    var camera = new BoardCamera();
+                    camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                    terrain.update(scene);
+                    terrain.animate(0, List.of());
+                    for (var at : List.of(new Coords(6, 6), new Coords(9, 9))) {
+                        camera.camera.zoom = .16f;
+                        for (float tilt : new float[] { 0, 55, 75 }) {
+                            camera.setIsometric(false);
+                            camera.orbit(110, tilt);
+                            camera.center(BoardGeometry.center(at, -.5f));
+                            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                            frame.render(terrain, camera, scene);
+                            GpuReviewFrame.save(new File(output, "lava-tubes-" + at.getBoardNum() + "-" + (int) tilt + ".png"));
+                            grid.render(camera, scene);
+                            labels.update(scene, skin.skin.getFont("default-font"), terrain::roofBounds);
+                            labels.render(batch, camera, frame.depthTexture(), 0);
+                            GpuReviewFrame.save(new File(output,
+                                  "lava-tubes-" + at.getBoardNum() + "-" + (int) tilt + "-labels.png"));
+                        }
+                    }
+                    assertEquals(0, scene.tiles().stream().flatMap(t -> BoardTunnel.entrances(scene, t).stream()).count());
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) { failure.set(error); }
+                finally {
+                    batch.dispose(); grid.dispose(); labels.dispose(); skin.dispose();
+                    frame.dispose(); terrain.dispose(); Gdx.app.exit();
+                }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Lava tube arch contacts", failure.get()); }
+    }
+
     @Test
     void naturalSpansRespectTheLowerTerrainAndChangeWithTheirApproaches() throws Exception {
         File output = new File(System.getProperty("megamek.gpu.screenshots"), "natural-bridges");

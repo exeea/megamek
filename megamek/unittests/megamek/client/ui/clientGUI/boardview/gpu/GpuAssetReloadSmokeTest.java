@@ -108,8 +108,8 @@ class GpuAssetReloadSmokeTest {
                             originalTexture = assets().material("terrain/rock");
                             treeHeight = assets().model("tree").calculateBoundingBox(new BoundingBox()).getHeight();
                             rockHeight = BoardRocks.rock(true, 0).height();
-                            scatterHeight = BoardScatter.bush(0).height();
-                            otherScatterHeight = BoardScatter.bush(1).height();
+                            scatterHeight = BoardScatter.bush(BoardScene.Surface.SAND, 0).height();
+                            otherScatterHeight = BoardScatter.bush(BoardScene.Surface.SAND, 1).height();
                             originalUnit = library().modular("reload/component.json");
                             assertNotNull(originalUnit);
                             unitHeight = originalUnit.model().calculateBoundingBox(new BoundingBox()).getHeight();
@@ -160,8 +160,8 @@ class GpuAssetReloadSmokeTest {
                             assertEquals(0x0000ffff, pixels.getInt(0), "The new image must reach GPU memory");
                             assertEquals(treeHeight * 2, assets().model("tree").calculateBoundingBox(new BoundingBox()).getHeight(), .001f);
                             assertEquals(rockHeight * 2, BoardRocks.rock(true, 0).height(), .001f);
-                            assertEquals(scatterHeight * 2, BoardScatter.bush(0).height(), .001f);
-                            assertEquals(otherScatterHeight, BoardScatter.bush(1).height(),
+                            assertEquals(scatterHeight * 2, BoardScatter.bush(BoardScene.Surface.SAND, 0).height(), .001f);
+                            assertEquals(otherScatterHeight, BoardScatter.bush(BoardScene.Surface.SAND, 1).height(),
                                   "Editing one scatter file leaves the other variants unchanged");
                             var unit = library().modular("reload/component.json");
                             assertNotSame(originalUnit, unit);

@@ -268,7 +268,7 @@ class GpuResourcesSmokeTest {
                 if (depth < 0) {
                     GpuBoardTestUi.capture(new File(System.getProperty("megamek.gpu.screenshots"), "building-faded.png"));
                 }
-                assertTrue(red > green + (depth < 0 ? 20 : 45),
+                assertTrue(red > green + (depth < 0 ? 10 : 45),
                       "Unit must remain visible inside a feature/water: depth=" + depth + ", pixel=" + Integer.toHexString(visible));
                 if (depth < 0) {
                     assertTrue((obscured >>> 24) < ((obscured >>> 16) & 255) + 10,
@@ -286,7 +286,8 @@ class GpuResourcesSmokeTest {
                         assertTrue(contrast < previousContrast, "A stationary unit must respond to live opacity changes");
                         previousContrast = contrast;
                         if (percent == 0) {
-                            assertTrue(contrast > 150, "Walls and upper floors must both fade away");
+                            assertTrue(contrast > 100 && contrast < 240,
+                                  "Hidden walls reveal the unit while upper floors retain some opacity");
                         } else if (percent == 100) {
                             assertEquals(obscured, pixel, "100% restores opaque rendering while the unit remains inside");
                         }

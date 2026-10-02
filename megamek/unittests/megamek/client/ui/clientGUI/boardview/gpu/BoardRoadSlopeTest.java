@@ -4,12 +4,16 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.Ray;
+import com.badlogic.gdx.utils.GdxNativesLoader;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -17,6 +21,52 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardRoadSlopeTest {
+    @Test
+    void mesaCityRoadCutsKeepClosedBoundaries() {
+        var scene = BoardCliffSeamTest.scene(new File(
+              "data/boards/unofficial/SimonLandmine/64x51/64x51 MesaCity1 N - Mesas.board"));
+        for (Coords at : List.of(new Coords(27, 21), new Coords(27, 22), new Coords(26, 21))) {
+            assertClosed(scene, at);
+        }
+    }
+
+    @Test
+    void mesaCityRoadCliffKeepsItsRimAtLargeCoordinates() {
+        var scene = BoardCliffSeamTest.scene(new File(
+              "data/boards/unofficial/SimonLandmine/64x51/64x51 MesaCity1 N - Mesas.board"));
+        var tile = scene.tile(new Coords(54, 33));
+        assertTrue(BoardRoad.rendered(tile), "Use the same sculpted road metadata as the rendered map");
+        GdxNativesLoader.load();
+        var camera = new BoardCamera();
+        camera.resize(1440, 1080);
+        camera.setIsometric(true);
+        camera.camera.zoom = .18f;
+        var focus = scene.tile(new Coords(55, 33));
+        camera.center(BoardGeometry.center(focus.coords(), focus.elevation()));
+        var surface = new BoardSurface(scene, tile);
+        var faces = new ArrayList<>(surface.groundFaces());
+        faces.addAll(surface.walls(scene, BoardGeometry.floor(scene)));
+        // Rays through the reported blue wedge beside slab 5634. Float rounding at these world coordinates
+        // previously made the top's untangler move two shared rim vertices while their cliff stayed put.
+        // Neighbour cuts also add cliff columns between this top's original vertices. Both sides of the
+        // road mouth must interpolate the actual emitted boundary, including these subpixel crack samples.
+        for (float[] pixel : new float[][] { {737, 340}, {742, 340}, {747, 340},
+              {763.5f, 333.5f}, {764.5f, 333.5f}, {742.5f, 343.5f}, {740.5f, 344.5f}, {738.5f, 345.5f},
+              {612.5f, 388.5f}, {612.5f, 389.5f}, {613.5f, 389.5f}, {613.5f, 390.5f}, {614.5f, 390.5f},
+              {614.5f, 391.5f}, {615.5f, 391.5f}, {615.5f, 392.5f}, {616.5f, 392.5f}, {615.5f, 393.5f},
+              {616.5f, 393.5f}, {617.5f, 393.5f} }) {
+            var origin = new Vector3(pixel[0] / 1440f * 2 - 1, 1 - pixel[1] / 1080f * 2, -1)
+                  .prj(camera.camera.invProjectionView);
+            var ray = new Ray(origin, camera.camera.direction);
+            assertTrue(faces.stream().anyMatch(face -> {
+                var normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
+                return normal.dot(ray.direction) < 0
+                      && Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), new Vector3());
+            }), "The visible road and cliff must cover the rim instead of exposing sky at pixel "
+                  + pixel[0] + "," + pixel[1]);
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(ints = { 0, 1, 2, 3, 4, 5 })
     void aGradedRimKeepsTheNativeCliffBelowTheRoadContact(int direction) {
@@ -167,6 +217,22 @@ class BoardRoadSlopeTest {
         return BoardSurfaceBlendTest.scene(c -> BoardRoadTest.tile(c,
               road && c.equals(low) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
               road && c.equals(low) ? 3 : 0, c.equals(at) ? rise : 0, BoardScene.Surface.SAND));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = { -2, 2 })
+    void concreteRampsClipEachGradedFaceOnceAgainstTheCorridor(int rise) {
+        // Clipping every corridor triangle against every graded face multiplied the two tessellations into
+        // 8,000-14,000 slab triangles per ramp hex (MesaCity1 N); a face clipped once keeps the same surface.
+        var at = BoardRoadTest.CENTER;
+        var scene = BoardSurfaceBlendTest.scene(c -> BoardRoadTest.tile(c,
+              c.equals(at) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE, c.equals(at) ? 9 : 0,
+              c.equals(at.translated(0)) ? rise : 0, BoardScene.Surface.CONCRETE));
+        var surface = new BoardSurface(scene, scene.tile(at));
+        assertTrue(BoardSurface.ramps(scene, scene.tile(at)) != 0, "the slab must carry a ramp approach");
+        long top = surface.groundFaces().stream().filter(face -> face.finish() == BoardSurface.Finish.TOP).count();
+        assertTrue(top < 1500, "concrete ramp slab emitted " + top + " top triangles");
+        assertClosed(scene, at);
     }
 
     @ParameterizedTest

@@ -24,6 +24,23 @@ import org.junit.jupiter.params.provider.EnumSource;
 
 class UnitModelSelectionTest {
     @Test
+    void wholeBodyDamageIncludesRearArmorAndStructureAndSurvivesCapture() {
+        var mek = new megamek.common.units.BipedMek();
+        for (int location = 0; location < mek.locations(); location++) {
+            mek.initializeArmor(20, location);
+            mek.initializeInternal(10, location);
+            if (mek.hasRearArmor(location)) { mek.initializeRearArmor(10, location); }
+        }
+        assertEquals(0, UnitModelState.capture(mek).appearance().bodyLoss());
+        mek.setArmor(0, Mek.LOC_CENTER_TORSO);
+        mek.setArmor(0, Mek.LOC_CENTER_TORSO, true);
+        mek.setInternal(5, Mek.LOC_CENTER_TORSO);
+        assertEquals(35f / 270, UnitModelState.capture(mek).appearance().bodyLoss(), .00001f);
+        mek.setDoomed(true);
+        assertEquals(1, UnitModelState.capture(mek).appearance().bodyLoss(), "A lethal result reaches the final damage band");
+    }
+
+    @Test
     void unidentifiedContactsNeverResolveModelIdentity() {
         Entity hidden = mock(Entity.class);
         MekTileset tileset = mock(MekTileset.class);

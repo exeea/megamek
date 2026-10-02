@@ -15,6 +15,7 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.GdxNativesLoader;
 import megamek.common.planetaryConditions.Atmosphere;
+import megamek.common.planetaryConditions.AtmosphericTaint;
 import megamek.common.planetaryConditions.BlowingSand;
 import megamek.common.planetaryConditions.Fog;
 import megamek.common.planetaryConditions.Light;
@@ -617,6 +618,62 @@ class BoardAtmosphereTest {
         assertEquals(BoardAtmosphere.MIN_SAND_FOG, blowingSand.fog(),
               "Blowing sand must keep a minimum ground fog even with fog none");
         assertEquals(0, blowingSand.haze(), "Sand has its own bounded veil and adds no haze");
+    }
+
+    @Test
+    void zeroGravityOverridesPressureAndAllWeatherInLocalPreviews() {
+        var effects = new BoardAtmosphere.Effects(1, 1, 1, 1, 1, 1, 135);
+        for (Atmosphere pressure : Atmosphere.values()) {
+            var settings = new BoardAtmosphere.Settings(13, 1, 1, 2, 1, .5f, effects, pressure, 25, true,
+                  AtmosphericTaint.TOXIC_POISON, 0);
+            assertVacuumWeather(settings);
+            assertEquals(13, settings.hour());
+            assertEquals(.5f, settings.exposure());
+        }
+        var positive = new BoardAtmosphere.Settings(13, 1, 1, 2, 1, .5f, effects, Atmosphere.STANDARD, 25, true,
+              AtmosphericTaint.TOXIC_POISON, .01f);
+        assertEquals(Atmosphere.STANDARD, positive.pressure(), "Positive gravity still permits an atmosphere");
+        assertEquals(effects, positive.effects());
+        assertEquals(1, positive.clouds());
+        assertEquals(1, positive.fog());
+        assertEquals(1, positive.haze());
+        assertEquals(1, BoardAtmosphere.wetness(positive));
+    }
+
+    @Test
+    void zeroGravitySuppressesEveryScenarioWeatherWithoutChangingTheScenario() {
+        var conditions = new PlanetaryConditions();
+        conditions.setFog(Fog.FOG_HEAVY);
+        conditions.setWind(Wind.STORM);
+        conditions.setWindDirection(WindDirection.SOUTHWEST);
+        conditions.setBlowingSand(BlowingSand.BLOWING_SAND);
+        for (Weather weather : Weather.values()) {
+            conditions.setWeather(weather);
+            conditions.setGravity(1);
+            var before = BoardAtmosphere.fromScenario(conditions, false, .5);
+            conditions.setGravity(0);
+            var zero = BoardAtmosphere.fromScenario(conditions, false, .5);
+            assertVacuumWeather(zero);
+            assertEquals(zero, BoardAtmosphere.followScenario(before, before, zero));
+            assertEquals(Atmosphere.STANDARD, conditions.getAtmosphere());
+            assertEquals(weather, conditions.getWeather());
+            assertEquals(Fog.FOG_HEAVY, conditions.getFog());
+            assertEquals(Wind.STORM, conditions.getWind());
+            conditions.setGravity(1);
+            var restored = BoardAtmosphere.fromScenario(conditions, false, .5);
+            assertEquals(before, restored);
+            assertEquals(restored, BoardAtmosphere.followScenario(zero, zero, restored));
+        }
+    }
+
+    private static void assertVacuumWeather(BoardAtmosphere.Settings settings) {
+        assertEquals(Atmosphere.VACUUM, settings.pressure());
+        assertEquals(BoardAtmosphere.Effects.NONE, settings.effects());
+        assertEquals(0, settings.clouds());
+        assertEquals(0, settings.fog());
+        assertEquals(0, settings.haze());
+        assertEquals(0, BoardAtmosphere.wetness(settings));
+        assertFalse(BoardAtmosphere.permitsWetness(settings));
     }
 
     @Test

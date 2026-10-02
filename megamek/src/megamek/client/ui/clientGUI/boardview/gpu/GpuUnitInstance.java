@@ -49,11 +49,15 @@ final class GpuUnitInstance extends ModelInstance {
     private float detailPixels = Float.NaN;
     private boolean forcedDetail;
     private int detailRevision;
+    private GpuUnitModel visual;
+
+    GpuUnitModel visual() { return visual; }
 
     GpuUnitInstance(Model model) { super(model); }
 
     GpuUnitInstance(GpuUnitModel model) {
         this(model.instance.model);
+        visual = model;
         for (var binding : model.equipment()) {
             Node node = getNode(binding.node());
             if (!binding.embedded() && node != null) {

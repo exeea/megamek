@@ -96,6 +96,9 @@ final class BoardRoad {
 
         /** A plain two-way road, whose course may bend through its borders. */
         boolean simple() { return plain && Integer.bitCount(exits) == 2; }
+
+        /** Opposite exits already describe a straight course through this hex. */
+        boolean straight() { return simple() && (exits & (exits >> 3)) != 0; }
     }
 
     private BoardRoad(Coords coords, List<List<Point>> paths, List<Point> borders, List<End> ends, List<Join> joins,
@@ -152,16 +155,21 @@ final class BoardRoad {
      * before to the border after. Other crossings (junctions, ends, bridges, climbs) stay square to their border and
      * hold a straight corridor; next to one, the crossing turns so that the hex's whole course into that corridor is
      * one circular arc, rather than a late sharp turn at its mouth. Both hexes derive the same crossing; the result is
-     * its direction, pointing out of this hex, or null for a square crossing.
+     * its direction, pointing out of this hex, or null for a square crossing. Opposite-exit roads keep their straight
+     * axis; their turning neighbours approach that same axis without pulling the straight road sideways.
      */
     static IntFunction<Vector2> bends(Coords coords, Function<Coords, Node> nodes) {
         return direction -> {
             if (!bent(coords, direction, nodes)) { return null; }
             Coords after = coords.translated(direction);
             int mine = other(nodes.apply(coords), direction), theirs = other(nodes.apply(after), (direction + 3) % 6);
+            Vector2 normal = border(coords, direction);
+            // A neighbouring turn must not pull an otherwise straight road into an S-bend. Both sides use this
+            // same tangent; keeping it non-null lets the turning hex use its full width for a broad approach.
+            if (nodes.apply(coords).straight() || nodes.apply(after).straight()) { return normal.nor(); }
             Vector2 offset = new Vector2(BoardGeometry.centerX(after) - BoardGeometry.centerX(coords),
                   BoardGeometry.centerY(after) - BoardGeometry.centerY(coords)).scl(1 / BoardGeometry.hexScale());
-            Vector2 before = border(coords, mine), beyond = border(after, theirs), normal = border(coords, direction);
+            Vector2 before = border(coords, mine), beyond = border(after, theirs);
             boolean held = !bent(coords, mine, nodes), holds = !bent(after, theirs, nodes);
             Vector2 tangent = held || holds ? new Vector2() : new Vector2(beyond).add(offset).sub(before);
             if (held) { tangent.sub(arc(Vector2.Zero, before, normal)); }
@@ -270,21 +278,27 @@ final class BoardRoad {
             Vector2 in = inward(ends.get(0), directions.get(0)), out = inward(ends.get(1), directions.get(1));
             float dx = to.x - from.x, dy = to.y - from.y, cross = in.x * out.y - in.y * out.x;
             float chord = (float) Math.hypot(dx, dy), reachIn = .39f * chord, reachOut = reachIn;
-            if (Math.abs(cross) > 1e-4f) {
-                // Converging tangents meet where a quadratic would put its control point; the cubic keeps that shape.
-                float s = (dx * out.y - dy * out.x) / cross, u = (dx * in.y - dy * in.x) / cross;
-                if (s > 0 && u > 0) {
-                    reachIn = 2 * s / 3;
-                    reachOut = 2 * u / 3;
+            if (Math.abs(dx * in.y - dy * in.x) < .0001f * chord
+                  && Math.abs(dx * out.y - dy * out.x) < .0001f * chord
+                  && dx * in.x + dy * in.y > 0 && dx * out.x + dy * out.y < 0) {
+                line(path, from, to);
+            } else {
+                if (Math.abs(cross) > 1e-4f) {
+                    // Converging tangents meet where a quadratic would put its control point; the cubic keeps that shape.
+                    float s = (dx * out.y - dy * out.x) / cross, u = (dx * in.y - dy * in.x) / cross;
+                    if (s > 0 && u > 0) {
+                        reachIn = 2 * s / 3;
+                        reachOut = 2 * u / 3;
+                    }
                 }
-            }
-            for (int i = 1; i <= 16; i++) {
-                float t = i / 16f, s = 1 - t;
-                float bx = from.x + in.x * reachIn, by = from.y + in.y * reachIn;
-                float cx = to.x + out.x * reachOut, cy = to.y + out.y * reachOut;
-                path.add(new Point(s * s * s * from.x + 3 * s * s * t * bx + 3 * s * t * t * cx + t * t * t * to.x,
-                      s * s * s * from.y + 3 * s * s * t * by + 3 * s * t * t * cy + t * t * t * to.y,
-                      from.width + t * (to.width - from.width)));
+                for (int i = 1; i <= 16; i++) {
+                    float t = i / 16f, s = 1 - t;
+                    float bx = from.x + in.x * reachIn, by = from.y + in.y * reachIn;
+                    float cx = to.x + out.x * reachOut, cy = to.y + out.y * reachOut;
+                    path.add(new Point(s * s * s * from.x + 3 * s * s * t * bx + 3 * s * t * t * cx + t * t * t * to.x,
+                          s * s * s * from.y + 3 * s * s * t * by + 3 * s * t * t * cy + t * t * t * to.y,
+                          from.width + t * (to.width - from.width)));
+                }
             }
             path.addAll(tail.reversed().subList(1, tail.size()));
             paths.add(path);
@@ -392,12 +406,7 @@ final class BoardRoad {
 
     private static void line(List<Point> path, Point a, Point b) {
         if (path.isEmpty()) { path.add(a); }
-        int steps = Math.max(1, (int) Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 4));
-        for (int i = 1; i < steps; i++) {
-            float t = i / (float) steps;
-            path.add(new Point(a.x + t * (b.x - a.x), a.y + t * (b.y - a.y), a.width + t * (b.width - a.width)));
-        }
-        // Exactly the end point: border crossings anchor the centre-line dashes.
+        // A line needs only its endpoints. Retain each explicit border point, which anchors the centre-line dashes.
         path.add(b);
     }
 
@@ -410,8 +419,8 @@ final class BoardRoad {
     private Area outline(float margin) {
         Area area = new Area();
         for (var path : paths) {
-            if (roundabout) {
-                // Each lane has constant width. Stroke it once instead of unioning hundreds of tiny discs.
+            if (path.stream().allMatch(point -> point.width == path.getFirst().width)) {
+                // A round stroke is the same constant-width envelope as the segment rectangles and vertex discs.
                 Path2D.Float lane = new Path2D.Float();
                 lane.moveTo(path.getFirst().x, path.getFirst().y);
                 for (int i = 1; i < path.size(); i++) { lane.lineTo(path.get(i).x, path.get(i).y); }

@@ -62,25 +62,31 @@ class BoardConcreteMeshTest {
     }
 
     @Test
-    void naturalNeighborsKeepTheirSharedSamplesAcrossMixedDetailChunks() {
+    void naturalNeighborsMeetTheStraightSlabAcrossMixedDetailChunks() {
         BoardScene scene = scene(at -> 0, true);
         Coords at = new Coords(7, 4);
         BoardSurface concrete = new BoardSurface(scene, scene.tile(at), TerrainLod.DISTANT);
+        assertEquals(6, concrete.faces.size(), "Adjacent soil must not subdivide the slab");
         int compared = 0;
         for (int e = 0; e < 6; e++) {
             Coords other = at.translated(BoardGeometry.edgeDirection(e));
             if (other.getX() != 8) { continue; }
             BoardSurface natural = new BoardSurface(scene, scene.tile(other), TerrainLod.FULL);
             Set<Vector3> own = vertices(concrete.faces), adjacent = vertices(natural.faces);
-            for (int i = 0; i <= TerrainLod.FULL.steps; i++) {
-                Vector3 p = concrete.relief.seam(e, e, i / (float) TerrainLod.FULL.steps);
+            for (int i = 0; i <= 1; i++) {
+                Vector3 p = concrete.relief.seam(e, e, i);
                 p.z = concrete.relief.groundHeight(p.x, p.y);
-                assertTrue(own.stream().anyMatch(q -> q.epsilonEquals(p, .001f)), "Concrete retains the natural seam");
+                assertTrue(own.stream().anyMatch(q -> q.epsilonEquals(p, .001f)), "Concrete keeps the straight edge");
                 assertTrue(adjacent.stream().anyMatch(q -> q.epsilonEquals(p, .001f)), "Both chunk details agree");
                 compared++;
             }
+            for (int i = 1; i < 10; i++) {
+                Vector3 p = concrete.relief.seam(e, e, i / 10f);
+                assertEquals(0, concrete.height(p.x, p.y), .001f);
+                assertEquals(0, natural.height(p.x, p.y), .001f, "Natural ground meets the whole straight seam");
+            }
         }
-        assertEquals(26, compared);
+        assertTrue(compared >= 4, "Exercise both shared edges, including their endpoints");
     }
 
     @Test
@@ -90,13 +96,14 @@ class BoardConcreteMeshTest {
             Coords at = new Coords(8, 4);
             for (TerrainLod lod : TerrainLod.values()) {
                 BoardSurface surface = new BoardSurface(scene, scene.tile(at), lod);
+                assertEquals(6, surface.faces.size(), "Tall bedrock must not subdivide the slab");
                 float underside = (levels - 1) * BoardGeometry.level();
                 var walls = surface.walls(scene, BoardGeometry.floor(scene));
                 List<BoardSurface.Face> slab = walls.stream()
                       .filter(f -> Math.min(f.a().z, Math.min(f.b().z, f.c().z)) >= underside - .001f).toList();
                 List<BoardSurface.Face> rock = walls.stream().filter(f -> !slab.contains(f)).toList();
                 assertTrue(!slab.isEmpty() && !rock.isEmpty(), "The slab still rests on real bedrock");
-                assertTrue(slab.size() <= 144, "The slab uses its perimeter, not a dense grid: " + slab.size());
+                assertEquals(4, slab.size(), "Two exposed rectangular slab panels: " + lod);
                 Set<Vector3> upper = vertices(slab), lower = vertices(rock);
                 for (Vector3 p : upper) {
                     if (Math.abs(p.z - underside) < .001f) {

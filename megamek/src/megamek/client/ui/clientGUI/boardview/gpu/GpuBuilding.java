@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.awt.geom.Area;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -31,12 +32,12 @@ final class GpuBuilding implements Disposable {
     private final List<Map<String, String>> names;
     private final Map<String, Assembly> assemblies = new HashMap<>();
     private final List<String> roles;
-    private final Map<String, List<Vector3>> footprints = new HashMap<>();
+    private final Map<String, Area> footprints = new HashMap<>();
     private final Map<String, List<Vector3>> triangles = new HashMap<>();
     private final Map<String, BoundingBox> bounds = new HashMap<>();
     private final Map<Interior, Model> interiors = new HashMap<>();
 
-    private record Interior(String roof, int levels) { }
+    private record Interior(List<Vector3> footprint, int levels) { }
 
     // One module index per character; offsets are implicit (index * LEVEL_HEIGHT). No expanded Model is cached.
     record Assembly(String modules, Model interior, GpuBuilding kit) {
@@ -71,21 +72,26 @@ final class GpuBuilding implements Disposable {
                     }
                     // Authoring placement and object origins are display-only. Derive each Lego piece's
                     // centered footprint and base from its geometry, including baked vertex translations.
-                    Vector3 center = bounds.getCenter(new Vector3());
-                    node.translation.add(-center.x, -center.y, -bounds.min.z);
+                    node.translation.add(moduleOffset(bounds));
                 }
                 models.get(lod).calculateTransforms();
             }
-            // The actual underside of each roof defines the enclosed volume, including courtyards and wings.
-            // Roof furniture and parapets do not change the occupied floor height or the support footprint.
+            // Roofs preserve courtyards and disconnected wings; wall sections exclude overhangs and ledges.
             for (var entry : names.getFirst().entrySet()) {
                 var node = models.getFirst().getNode(entry.getValue());
                 List<Vector3> geometry = GpuTerrain.triangles(node);
                 triangles.put(entry.getKey(), geometry);
                 bounds.put(entry.getKey(), node.calculateBoundingBox(new BoundingBox()));
                 if (entry.getKey().startsWith("roof")) {
-                    var footprint = GpuBuildingInterior.plane(geometry, 0, false);
-                    require(!footprint.isEmpty(), entry.getValue() + " requires a flat underside at Z=0");
+                    // The lowest underside may be only the overhanging border around a recessed roof panel.
+                    Area footprint = GpuBuildingInterior.area(geometry);
+                    require(!footprint.isEmpty(), entry.getValue() + " requires a roof footprint");
+                    footprints.put(entry.getKey(), footprint);
+                } else {
+                    // LODs share the wall envelope. The simplest authored walls omit window recesses and facade seams.
+                    Node wall = models.getLast().getNode(names.getLast().get(entry.getKey()));
+                    Area footprint = GpuBuildingInterior.walls(GpuTerrain.triangles(wall), LEVEL_HEIGHT * .5f);
+                    require(!footprint.isEmpty(), entry.getValue() + " requires a closed mid-storey wall outline");
                     footprints.put(entry.getKey(), footprint);
                 }
             }
@@ -122,6 +128,17 @@ final class GpuBuilding implements Disposable {
     }
 
     /** A stable per-placement seed, independent of camera, height, LOD, frame order and JVM hash randomization. */
+    static long seed(BoardScene.Tile tile, BoardScene.Feature feature) {
+        return tile.coords().getX() * 73_856_093L ^ tile.coords().getY() * 19_349_663L ^ feature.asset().hashCode();
+    }
+
+    /** Authored module origins are display-only; the mesh bounds define placement for rendering and clearance. */
+    static Vector3 moduleOffset(BoundingBox bounds) {
+        Vector3 center = bounds.getCenter(new Vector3());
+        return new Vector3(-center.x, -center.y, -bounds.min.z);
+    }
+
+    /** A stable per-placement seed, independent of camera, height, LOD, frame order and JVM hash randomization. */
     static List<String> select(Map<String, String> parts, int levels, long seed) {
         require(levels >= 1, "A building needs at least one level");
         List<String> roofs = parts.keySet().stream().filter(id -> id.startsWith("roof")).sorted().toList();
@@ -141,9 +158,13 @@ final class GpuBuilding implements Disposable {
         char[] modules = new char[selected.size()];
         for (int i = 0; i < modules.length; i++) { modules[i] = (char) roles.indexOf(selected.get(i)); }
         return assemblies.computeIfAbsent(new String(modules), key -> {
-            String roof = selected.getLast();
-            Model interior = interiors.computeIfAbsent(new Interior(roof, levels),
-                  ignored -> GpuBuildingInterior.build(footprints.get(roof), levels * LEVEL_HEIGHT, levels));
+            Area volume = new Area(footprints.get(selected.getLast()));
+            for (String floor : selected.subList(0, selected.size() - 1).stream().distinct().toList()) {
+                volume.intersect(footprints.get(floor));
+            }
+            var footprint = GpuBuildingInterior.triangles(volume);
+            Model interior = interiors.computeIfAbsent(new Interior(footprint, levels),
+                  ignored -> GpuBuildingInterior.build(footprint, levels * LEVEL_HEIGHT, levels));
             return new Assembly(key, interior, this);
         });
     }

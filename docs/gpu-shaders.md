@@ -32,6 +32,10 @@ Unit materials are configured by `GpuUnitShader`, including the linear-light
 adaptation of libGDX's base shader, normal maps and per-unit material inputs.
 Do not assume every program starts from a standalone vertex file: some extend
 the libGDX source with injected attributes and functions.
+libGDX binds only the instance attributes of the renderable a material program was
+created for, and `DefaultShader.canRender` does not compare them. `GpuTerrain`
+therefore also matches the instance layout: crop rows, which carry a row span,
+never reuse a reed program, which binds only the root.
 
 ## Loading, drafts and saving
 
@@ -90,6 +94,16 @@ Material programs share lighting, world projection and contact fields. A surface
 blend needs matching color, normal, height/roughness and occlusion weights.
 Wetness must affect the intended receiving materials, and emission belongs after
 ordinary lighting. Changes to alpha/cutouts may also require the shadow/depth path.
+
+macOS's OpenGL gives each shader stage only 16 texture units, and a program that
+samples more fails to link there, so the board does not draw on a Mac although
+Windows and Linux drivers (32 units) accept it. Add maps as layers of an existing
+array where they are aligned repeats of one set, as the sculpt maps
+(`u_terrainLayers`) and each magma set (`u_magmaMaps`) are. The on-demand
+`GpuSamplerBudgetSmokeTest` renders the battle view over volcanic, rain, snow, fog,
+river, highway and hazardous-liquid boards, fails on any program over 16, and
+prints every variant's count. On 2026-09-30 the fullest was the cloud-shadowed water
+surface at 13; sculpted terrain used at most 10 and magma at most 5.
 
 A shader edit normally replaces programs and invalidates affected render caches;
 it does not change game state, terrain support or picking. Change Java geometry

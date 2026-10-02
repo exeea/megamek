@@ -34,7 +34,7 @@ void waterDisplace(inout vec4 pos) {
     // shares a vertex moves it identically, so neither LOD seams nor the depth prepass can open a crack.
     float pixels = u_wavePixels / max(abs((u_projViewTrans * pos).w), 1.0);
     // Filter out crests shorter than about 1.4 grid spacings of the mesh used at this distance.
-    float filterMetres = max(2.5, 5.5 * pow(64.0 / max(pixels, 1.0), 0.6));
+    float filterMetres = max(3.5, 5.5 * pow(64.0 / max(pixels, 1.0), 0.6));
     float mip = clamp(log2(filterMetres * u_waterOceanScale.x * u_metre * OCEAN_SIZE), 0.0, 7.0);
     float visible = smoothstep(u_waveFade.x, u_waveFade.y, pixels);
     vec4 shape = textureLod(u_waterShape, pos.xy * u_waterOceanScale.x, mip);

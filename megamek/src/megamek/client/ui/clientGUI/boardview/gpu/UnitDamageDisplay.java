@@ -130,14 +130,20 @@ final class UnitDamageDisplay implements Disposable {
         static final long TYPE = register("unitDamageOverlay");
         final Texture texture;
         final int seed;
+        final float opacity;
         final float cos, sin, offsetU, offsetV;
 
         Overlay(Texture texture) { this(texture, 0); }
 
         Overlay(Texture texture, int seed) {
+            this(texture, seed, 1);
+        }
+
+        Overlay(Texture texture, int seed, float opacity) {
             super(TYPE);
             this.texture = texture;
             this.seed = seed;
+            this.opacity = opacity;
             float angle = (seed & 0xFFFF) * (MathUtils.PI2 / 65536);
             float scale = .8f + ((seed >>> 16) & 255) * (.4f / 255);
             cos = MathUtils.cos(angle) * scale;
@@ -146,12 +152,13 @@ final class UnitDamageDisplay implements Disposable {
             offsetV = (seed >>> 20) / 64f;
         }
 
-        @Override public Attribute copy() { return new Overlay(texture, seed); }
+        @Override public Attribute copy() { return new Overlay(texture, seed, opacity); }
         @Override public int compareTo(Attribute other) {
             if (type != other.type) { return Long.compare(type, other.type); }
             Overlay overlay = (Overlay) other;
             int comparison = Integer.compare(texture.getTextureObjectHandle(), overlay.texture.getTextureObjectHandle());
-            return comparison == 0 ? Integer.compare(seed, overlay.seed) : comparison;
+            if (comparison == 0) { comparison = Integer.compare(seed, overlay.seed); }
+            return comparison == 0 ? Float.compare(opacity, overlay.opacity) : comparison;
         }
     }
     /** The flat color of a burnt-out location. Dark, but not so dark that its shape is lost against a shadow. */
@@ -197,7 +204,7 @@ final class UnitDamageDisplay implements Disposable {
         return seed ^ (seed >>> 16);
     }
 
-    private Texture overlay(Stage stage) {
+    Texture overlay(Stage stage) {
         if (attemptedOverlays.add(stage)) {
             try {
                 Texture loaded = new Texture(new FileHandle(new File(Configuration.dataDir(),

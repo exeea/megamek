@@ -10,6 +10,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import com.badlogic.gdx.math.Intersector;
+import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrain;
@@ -17,6 +20,68 @@ import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 
 class BoardScatterTest {
+    @Test
+    void wildBushesHaveOpenSilhouettesAndSeparateWoodAndLeaves() {
+        for (var surface : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.SAND, BoardScene.Surface.ROCK)) {
+            for (int variant = 0; variant < BoardScatter.BUSHES / 2; variant++) {
+                var bush = BoardScatter.bush(surface, variant);
+                assertTrue(bush.polygons().size() <= 800, "Keep these full-detail decorations bounded");
+                assertTrue(bush.polygons().stream().anyMatch(p -> p.color().r > p.color().g * 1.2f),
+                      "Authored brown stems must survive the CPU loader");
+                assertTrue(bush.polygons().stream().anyMatch(p -> p.color().g > p.color().r),
+                      "Leaf colour must remain distinct from the woody stems");
+                float low = Float.POSITIVE_INFINITY;
+                for (var face : bush.polygons()) {
+                    for (var point : face.points()) {
+                        assertTrue(Math.hypot(point.x, point.y) <= BoardScatter.BUSH_RADIUS, "Stay within placement clearance");
+                        low = Math.min(low, point.z);
+                    }
+                }
+                assertEquals(0, low, .00001f, "Rooted at ground level");
+                assertEquals(2.4f, bush.height(), .00001f);
+                // An overhead view must see through the bush rather than find another solid green rock.
+                int hits = 0;
+                for (int x = 0; x < 30; x++) {
+                    for (int y = 0; y < 30; y++) {
+                        Ray ray = new Ray(new Vector3(((x + .5f) / 30 - .5f) * 3,
+                              ((y + .5f) / 30 - .5f) * 3, 3),
+                              new Vector3(0, 0, -1));
+                        if (bush.polygons().stream().anyMatch(p -> Intersector.intersectRayTriangle(ray,
+                              p.points()[0], p.points()[1], p.points()[2], null))) { hits++; }
+                    }
+                }
+                assertTrue(hits > 15 && hits < 450, surface + " overhead coverage: " + hits + "/900");
+            }
+        }
+    }
+
+    @Test
+    void bothBushPathsStandAboveGrassButBelowHalfALevel() {
+        var original = BoardGeometry.tuning();
+        try {
+            for (int level : new int[] { 1, 6, 18, 48 }) {
+                for (float hexScale : new float[] { .5f, 1, 2 }) {
+                    BoardGeometry.tune(new BoardGeometry.Tuning(hexScale, 1, 1, level, .8f));
+                    for (var surface : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.SAND, BoardScene.Surface.ROCK)) {
+                        for (var shape : List.of(BoardScatter.bush(surface, 0), BoardScatter.plant(surface))) {
+                            for (float variation : new float[] { .7f, 1, 1.2f }) {
+                                float scale = BoardScatter.bushScale(shape, variation);
+                                float height = shape.height() * scale;
+                                assertTrue(height <= BoardGeometry.level() * .45001f);
+                                if (level >= BoardGeometry.MODEL_LEVEL_HEIGHT) {
+                                    float grass = BoardGeometry.width() * GpuGroundCover.MAX_HEIGHT_FRACTION;
+                                    assertTrue(height - .02f * scale > grass * 1.1f,
+                                          "Even the smallest rooted bush stands above the tallest grass");
+                                    assertTrue(height <= grass * 1.301f, "Keep bushes only slightly taller than grass");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } finally { BoardGeometry.tune(original); }
+    }
+
     @Test
     void naturalSurfacesKeepVariedClustersAndStayStableAcrossSnapshots() {
         for (String theme : List.of("grass", "lunar", "desert", "dirt", "snow", "mars", "volcanic")) {
@@ -101,13 +166,33 @@ class BoardScatterTest {
               Terrains.SPACE, Terrains.SKY, Terrains.MAGMA, Terrains.FIRE, Terrains.GEYSER, Terrains.SWAMP, Terrains.MUD,
               Terrains.HAZARDOUS_LIQUID, Terrains.FORTIFIED }) {
             Hex hex = new Hex(0);
-            hex.addTerrain(new Terrain(type, type == Terrains.WATER ? 0 : 1));
+            hex.addTerrain(new Terrain(type, 1));
             for (int x = 0; x < 16; x++) {
                 for (int y = 0; y < 16; y++) {
                     assertTrue(scatter(hex, new Coords(x, y)).isEmpty(), "Protected terrain " + type);
                 }
             }
         }
+    }
+
+    @Test
+    void shallowWaterCanCaptureGrassAndBushesWhileDeeperWaterStaysClear() {
+        Hex shallow = new Hex(0);
+        shallow.setTheme("grass");
+        shallow.addTerrain(new Terrain(Terrains.WATER, 0));
+        Hex deep = new Hex(0);
+        deep.setTheme("grass");
+        deep.addTerrain(new Terrain(Terrains.WATER, 1));
+        Set<String> shapes = new HashSet<>();
+        for (int x = 0; x < 16; x++) {
+            for (int y = 0; y < 16; y++) {
+                Coords coords = new Coords(x, y);
+                scatter(shallow, coords).forEach(feature -> shapes.add(feature.asset()));
+                assertTrue(scatter(deep, coords).isEmpty(), "Positive-depth water rejects cosmetics during capture");
+            }
+        }
+        assertTrue(BoardScatter.DENSITY_MULTIPLIER <= 0 || shapes.containsAll(List.of("scatter-grass", "scatter-plant")),
+              "Depth-zero water remains eligible for the ordinary grass/bush population");
     }
 
     private static List<BoardScene.Feature> scatter(Hex hex, Coords coords) {

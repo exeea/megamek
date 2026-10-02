@@ -48,6 +48,50 @@ are currently displayed. Terrain changes go through `GpuTerrain`; unchanged chun
 shared assets can stay installed. Camera movement changes the view and visible detail
 without asking the game to construct another scene.
 
+## Unit display
+
+GPU Tuning's General tab has a **Unit display** selector, applied live in both cameras:
+
+- **All Meeples** draws every visible unit as an extruded token from its existing artwork.
+- **Mek Meeples** is the default: Meks use tokens; other units use their existing 3D models.
+- **3D Models** restores the existing authored-model presentation, including flat artwork when a model is unavailable.
+
+The Defaults button restores Mek Meeples. Sensor contacts retain their anonymous markers, and tactical overview
+icons still follow the overview setting. The token mesh reuses the libGDX branch's alpha-contour extrusion through
+`GpuCutout`. Both cameras use the same posed geometry for drawing, picking, shadows, attachments and effects.
+
+`MeepleVisual` owns token geometry, wall paint and attachment sockets. `MeepleAnimator` supplies rigid token poses;
+`UnitAnimator` retains articulated model poses. Both sample the existing movement/combat timeline. Walkers bounce,
+vehicles rock subtly and airborne craft bank through turns; displacement slides. Push/punch/kick and the stronger
+club swing or lance thrust approach and recover on the physical attack clock. Jumps reuse flame, smoke and landing
+timing with nozzles fixed to the token's local underside. Battle Armor uses the existing boarding/release
+trajectory and grips the token's actual contour, following its final pose. In All Meeples, the BA token attaches as
+one piece; hostile tokens rock about their grip while friendly riders remain steady. Ranged effects retain every reported weapon, fire from the token center, and hit varied visible surfaces
+on the incoming side instead of anatomical locations.
+
+Voluntary prone and hull-down share the shortened standing pose. Prone shooting uses its lowered center without
+standing attack tilts or physical approaches. Forced prone rotates the full solid onto the ground without changing
+its scale. The captured facing is already resolved by the rules engine (Core preserves facing; Total Warfare may
+change it); the token does not apply a second facing change. Rear impacts use the face-up pose, other impacts the
+face-down pose, with the upper end pointing along the captured heading. Side impacts never create a side-resting pose.
+In top view, fallen Meeples instead show their upright artwork at prone height, oriented along the resolved facing;
+the existing PRONE text indicates their state. Returning to an angled view restores the toppled pose.
+
+Meeples rest on a flat plane at their captured hex elevation, including while toppled, while preserving occupied
+roofs, bridges and airborne elevations. Decorative terrain and scatter do not tilt or lift the tokens.
+Token height uses occupied game levels (`Entity.height() + 1`) before visual scaling: ordinary vehicles occupy
+one level, while large support vehicles such as the Saturn Harvester occupy two.
+Both Meeples and authored models display flight altitude above the occupied hex: altitude 1 over level-10 terrain
+is drawn at level 11. Movement playback uses each waypoint's hex elevation; landing returns to the landing surface.
+LAM and QuadVee forms use their captured movement mode and occupied height, with a brief tilt and smooth height
+transition on the conversion clock. Whole multi-hex tokens fit and center on the existing occupied footprint.
+
+Token caps use clean camouflaged tileset artwork; walls use the shared camouflage shader. Whole-body damage is
+captured from remaining versus original armor (including rear armor) and structure, reaching the final stage when
+doomed/destroyed. The four existing body-damage textures apply only to the walls at half opacity to preserve team
+color/camouflage. The identification artwork stays clear at every damage stage. Repair and mode changes rebuild
+per-instance materials while retaining shared mesh/texture ownership.
+
 ## Wireframe and thermal signatures
 
 The Camera menu's Wireframe toggle draws terrain, buildings and trees as green lines,

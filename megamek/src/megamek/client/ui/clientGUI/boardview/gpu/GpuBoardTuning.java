@@ -106,6 +106,7 @@ final class GpuBoardTuning {
     private final CheckBox firstPerson;
     private final List<Control> cameraFieldOfView;
     private final CheckBox normalMaps;
+    private final SelectBox<UnitDisplayMode> unitDisplayMode;
     private final CheckBox vsync;
     /** The graphics card rows; null on computers without two cards to choose from. */
     private SelectBox<GpuGraphicsCard> graphicsCard;
@@ -204,6 +205,10 @@ final class GpuBoardTuning {
             }
         });
         normalMaps = checkbox(skin, "Normal maps", "tuning-normal-maps");
+        unitDisplayMode = choice(skin, "Unit display", "tuning-unit-display", UnitDisplayMode.values(), () -> { });
+        unitDisplayMode.addListener(new TextTooltip("All Meeples: every unit uses an extruded artwork token. "
+              + "Mek Meeples: only Meks use tokens; other units use 3D models. "
+              + "3D Models: use the existing models for all units.", skin, "menu"));
         vsync = checkbox(skin, "VSync", "tuning-vsync");
         // The window's own preference, shown once here and then left to the user; Defaults never touches it.
         vsync.setChecked(GpuBoardWindow.DEFAULT_VSYNC);
@@ -332,7 +337,9 @@ final class GpuBoardTuning {
         gravity = controls(skin, List.of(new Knob("Gravity (g)", 0, 10, 0.01f, "%.2f")), this::applyAtmosphere, 0);
         gravity.getFirst().slider().addListener(new TextTooltip(
               "Visual gravity controls water waves, waterfall spray, and the height and timing of new jump animations. "
-                    + "At zero gravity, liquid water disappears. "
+                    + "At zero gravity, all liquids and vegetation disappear, the surface becomes rock, "
+                    + "rough ground becomes bedrock outcrops, and liquid depth lowers the ground level. "
+                    + "Air pressure becomes Vacuum and all weather effects are disabled. "
                     + "Moves and gameplay rules stay unchanged; an airborne jump finishes its existing arc.", skin, "menu"));
         pressure = choice(skin, "Air pressure", "tuning-atmosphere-pressure", Atmosphere.values(), this::applyAtmosphere);
         pressure.addListener(new TextTooltip("Visual atmosphere pressure: controls sky scattering, clouds and permitted weather. "
@@ -945,6 +952,7 @@ final class GpuBoardTuning {
         setValues(cameraFieldOfView, new float[] { BoardCamera.DEFAULT_FIELD_OF_VIEW });
         applyCamera();
         normalMaps.setChecked(true);
+        unitDisplayMode.setSelected(UnitDisplayMode.DEFAULT);
         grass.setChecked(true);
         boolean fixedSunKept = fixedSun.isChecked();
         BoardGeometry.Tuning defaults = BoardGeometry.DEFAULTS;
@@ -1039,6 +1047,10 @@ final class GpuBoardTuning {
         return normalMaps.isChecked();
     }
 
+    UnitDisplayMode unitDisplayMode() {
+        return unitDisplayMode.getSelected();
+    }
+
     boolean grass() {
         return grass.isChecked();
     }
@@ -1113,6 +1125,7 @@ final class GpuBoardTuning {
         syncing = true;
         moonlight.setChecked(settings.moonlight());
         pressure.setSelected(settings.pressure());
+        pressure.setDisabled(settings.gravity() == 0);
         atmosphericTaint.setSelected(settings.taint());
         // Preserve unusual loaded temperatures when editing an unrelated control.
         temperature.getFirst().slider().setRange(Math.min(-200, settings.temperature()), Math.max(200, settings.temperature()));

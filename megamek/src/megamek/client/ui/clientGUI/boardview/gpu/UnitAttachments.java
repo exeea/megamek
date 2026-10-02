@@ -19,12 +19,15 @@ import com.badlogic.gdx.math.collision.BoundingBox;
 final class UnitAttachments {
     private final Map<String, Matrix4> previous = new HashMap<>();
     private final BoardSurface.Cache surfaces;
+    private final UnitPicking picking = new UnitPicking();
 
     UnitAttachments() { this(new BoardSurface.Cache()); }
 
     UnitAttachments(BoardSurface.Cache surfaces) { this.surfaces = surfaces; }
 
-    void clear() { previous.clear(); }
+    void clear() { previous.clear(); picking.clear(); }
+
+    void geometryChanged() { picking.clear(); }
 
     void place(BoardScene scene, GpuUnitModels models, Map<String, ModelInstance> instances,
           Map<String, UnitAnimator> animators, UnitAttachmentMotion motion, Camera camera,
@@ -37,38 +40,41 @@ final class UnitAttachments {
             if (unit.sensorContact() || unit.model() == null) { continue; }
             String key = unit.id() + ":" + unit.part();
             var instance = instances.get(key);
-            var model = models.get(unit.model(), unit.id());
-            if (instance == null || model == null || !model.infantry()) { continue; }
+            var model = displayed(models, unit, instance);
+            if (instance == null || model == null || !(model.infantry() || model.meeple())) { continue; }
             var transition = motion != null && motion.event.entityId() == unit.id() && motion.progress() < 1 ? motion : null;
             var binding = transition == null ? unit.attachment() : transition.boarding()
                   ? transition.event.after().attachment() : transition.event.before().attachment();
             var carrier = binding == null ? null : units.get(binding.carrierId());
             var host = carrier == null ? null : instances.get(carrier.id() + ":" + carrier.part());
-            var hostModel = carrier == null ? null : models.get(carrier.model(), carrier.id());
+            var hostModel = carrier == null ? null : displayed(models, carrier, host);
+            var members = model.meeple() ? java.util.List.of(instance.getNode(MeepleVisual.ROOT))
+                  : model.rigs().stream().filter(rig -> rig.container() != null && rig.trooper())
+                        .map(rig -> instance.getNode(rig.container())).filter(java.util.Objects::nonNull).toList();
             Map<String, Matrix4> ground = new HashMap<>();
-            for (var rig : model.rigs()) {
-                Node member = rig.container() == null ? null : instance.getNode(rig.container());
-                if (member != null && rig.trooper()) {
-                    ground.put(rig.container(), instance.transform.cpy().mul(member.globalTransform));
-                }
+            for (var member : members) {
+                ground.put(member.id, instance.transform.cpy().mul(member.globalTransform));
             }
             var animator = animators.get(key);
             if (animator != null && binding != null && host != null) {
                 animator.attachmentPose(binding.hostile(), clock, transition);
             }
             int index = 0;
-            for (var rig : model.rigs()) {
-                Node member = rig.container() == null ? null : instance.getNode(rig.container());
-                if (member == null || !rig.trooper()) { continue; }
-                String memberKey = key + ":" + rig.container();
+            for (var member : members) {
+                String memberKey = key + ":" + member.id;
                 retained.add(memberKey);
-                Matrix4 destination = ground.get(rig.container());
+                Matrix4 destination = ground.get(member.id);
                 if (binding != null && host != null && hostModel != null) {
-                    int slot = rig.container().startsWith("trooper-") ? Integer.parseInt(rig.container().substring(8)) - 1 : index;
-                    Vector3 suitSize = UnitBounds.subtree(model.instance.getNode(rig.container())).getDimensions(new Vector3())
-                          .scl(instance.transform.getScale(new Vector3()));
+                    int slot = member.id.startsWith("trooper-") ? Integer.parseInt(member.id.substring(8)) - 1 : index;
+                    Vector3 suitSize = UnitBounds.subtree(model.instance.getNode(member.id)).getDimensions(new Vector3())
+                          .scl(scale(instance.transform));
                     float suitHeight = suitSize.z;
-                    Matrix4 socket = socket(hostModel, host, slot, binding.hostile(), destination, suitSize);
+                    Matrix4 socket = hostModel.meeple()
+                          ? MeepleVisual.socket(host, slot, binding.hostile(), destination, suitSize, picking)
+                          : socket(hostModel, host, slot, binding.hostile(), destination, suitSize);
+                    if (model.meeple() && binding.hostile()) {
+                        MeepleVisual.swarm(socket, suitSize, clock, unit.id(), transition == null ? 1 : transition.grip(), hostModel.meeple());
+                    }
                     if (transition == null) { destination = socket; }
                     else {
                         if (transition.boarding()) { destination = socket; }
@@ -82,7 +88,7 @@ final class UnitAttachments {
                             // Travel/landing may finish in this tick. Release from the carrier's current pose,
                             // not a cached world position drawn partway through that earlier movement.
                             Matrix4 origin = !transition.boarding() ? socket.cpy()
-                                  : previous.containsKey(memberKey) ? previous.get(memberKey).cpy() : ground.get(rig.container()).cpy();
+                                  : previous.containsKey(memberKey) ? previous.get(memberKey).cpy() : ground.get(member.id).cpy();
                             if (transition.boarding() && !previous.containsKey(memberKey)) {
                                 var before = transition.event.before().location();
                                 origin.trn(BoardGeometry.center(before.coords(), before.elevation())
@@ -119,16 +125,17 @@ final class UnitAttachments {
                         Vector3 from = start.getTranslation(new Vector3()), to = destination.getTranslation(new Vector3());
                         Vector3 position = UnitAttachmentMotion.trajectory(from, to, flight.outward(), transition.progress(), flight.lift(),
                               flight.clearance(), new Vector3());
-                        Quaternion turn = start.getRotation(new Quaternion(), true).slerp(
-                              destination.getRotation(new Quaternion(), true), UnitAttack.smooth(transition.progress()));
+                        Quaternion turn = rotation(start).slerp(rotation(destination), UnitAttack.smooth(transition.progress()));
                         if (transition.thrown()) {
                             float tumble = MathUtils.sin(transition.progress() * MathUtils.PI);
                             turn.mul(new Quaternion(Vector3.X, (slot % 2 == 0 ? 1 : -1)
                                   * (transition.event.release() == BoardScene.Release.WATER ? 35 : 105) * tumble));
                         }
-                        destination = new Matrix4(position, turn, destination.getScale(new Vector3()));
+                        destination = new Matrix4(position, turn, scale(destination));
                     }
-                    setWorld(instance, member, destination);
+                    // A whole token has no parent joint. Keep its rigid world transform intact under nonuniform token scale.
+                    if (model.meeple()) { instance.transform.set(destination); }
+                    else { setWorld(instance, member, destination); }
                 }
                 previous.put(memberKey, destination.cpy());
                 index++;
@@ -136,6 +143,11 @@ final class UnitAttachments {
             if (binding != null && host != null) { anchors.put(unit, model.anchor(instance, camera)); }
         }
         previous.keySet().retainAll(retained);
+    }
+
+    private static GpuUnitModel displayed(GpuUnitModels models, BoardScene.Unit unit, ModelInstance instance) {
+        return instance instanceof GpuUnitInstance displayed && displayed.visual() != null ? displayed.visual()
+              : models.get(unit.model(), unit.id());
     }
 
     /** Fixed friendly/hostile surfaces avoid moving either squad when the other attaches or leaves. */
@@ -206,8 +218,19 @@ final class UnitAttachments {
         if (member.getParent() != null) { parent.mul(member.getParent().globalTransform); }
         Matrix4 local = parent.inv().mul(world);
         local.getTranslation(member.translation);
-        local.getRotation(member.rotation, true);
-        local.getScale(member.scale);
+        member.rotation.set(rotation(local));
+        member.scale.set(scale(local));
         instance.calculateTransforms();
+    }
+
+    /** Remove column scale before extracting rotation: a toppled token has different horizontal/vertical scales. */
+    static Quaternion rotation(Matrix4 frame) {
+        var scale = scale(frame);
+        return frame.cpy().scale(1 / scale.x, 1 / scale.y, 1 / scale.z).getRotation(new Quaternion()).nor();
+    }
+
+    static Vector3 scale(Matrix4 frame) {
+        return new Vector3(new Vector3(Vector3.X).rot(frame).len(), new Vector3(Vector3.Y).rot(frame).len(),
+              new Vector3(Vector3.Z).rot(frame).len());
     }
 }

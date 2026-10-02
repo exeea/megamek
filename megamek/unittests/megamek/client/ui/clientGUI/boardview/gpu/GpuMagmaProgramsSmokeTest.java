@@ -1,9 +1,11 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -16,6 +18,7 @@ import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.Environment;
 import com.badlogic.gdx.graphics.g3d.Material;
@@ -29,8 +32,10 @@ import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.ShaderProvider;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.utils.BufferUtils;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.lwjgl.opengl.GL11;
 
 /** Solid/flowing material identity and independent water/lava FFT finishing survive live source replacement. */
 @Tag("on-demand")
@@ -103,7 +108,8 @@ class GpuMagmaProgramsSmokeTest {
             var program = ((BaseShader) GpuShaderProvider.unwrap(shader)).program;
             assertEquals(flowing, program.getUniformLocation("u_magmaTime") >= 0);
             assertEquals(flowing, program.getUniformLocation("u_magmaOcean") >= 0);
-            assertEquals(flowing, program.getUniformLocation("u_magmaField") >= 0);
+            assertTrue(program.getUniformLocation("u_magmaField") >= 0,
+                  "Lava reads its currents and banks; a cooled bank reads how close the melt is");
         }
     }
 
@@ -138,9 +144,47 @@ class GpuMagmaProgramsSmokeTest {
                 assertNotNull(lava.texture());
                 assertTrue(manager.apply(Map.of()).success());
             }
+            checkGravity(lava, wind);
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
         } catch (ReflectiveOperationException error) { throw new AssertionError(error); }
         finally { water.dispose(); lava.dispose(); }
         assertEquals(0, ShaderProgram.getNumManagedShaderPrograms());
+    }
+
+    private static void checkGravity(GpuOcean lava, Vector3 wind) {
+        double previousMotion = 0;
+        for (float gravity : new float[] { .25f, 1, 4 }) {
+            float acceleration = gravity * BoardAtmosphere.STANDARD_GRAVITY;
+            lava.update(0, wind, acceleration);
+            float[] before = read(lava.texture());
+            lava.update(.2f, wind, acceleration);
+            float[] after = read(lava.texture());
+            double motion = 0;
+            for (int i = 0; i < after.length; i++) {
+                assertTrue(Float.isFinite(after[i]), "Gravity must keep the molten surface finite");
+                motion += Math.abs(after[i] - before[i]);
+            }
+            assertTrue(motion > previousMotion * 1.8,
+                  "A fourfold gravity increase must speed up lava's waves: " + motion + " vs " + previousMotion);
+            previousMotion = motion;
+        }
+        float[] moving = read(lava.texture());
+        lava.update(.2f, new Vector3(-1, 0, 0), 4 * BoardAtmosphere.STANDARD_GRAVITY);
+        assertArrayEquals(moving, read(lava.texture()), "Gravity, not wind, drives lava's waves");
+        lava.update(.2f, wind, 0);
+        assertNull(lava.texture(), "Zero gravity releases lava's wave targets just like water's");
+        assertNull(lava.spectrum());
+        lava.update(.2f, wind, 4 * BoardAtmosphere.STANDARD_GRAVITY);
+        assertNotNull(lava.texture(), "Positive gravity recreates lava's waves");
+        assertArrayEquals(moving, read(lava.texture()), "Restoring gravity and time restores the same surface");
+    }
+
+    private static float[] read(Texture texture) {
+        texture.bind(0);
+        var pixels = BufferUtils.newFloatBuffer(texture.getWidth() * texture.getHeight() * 4);
+        GL11.glGetTexImage(GL20.GL_TEXTURE_2D, 0, GL20.GL_RGBA, GL20.GL_FLOAT, pixels);
+        float[] result = new float[pixels.capacity()];
+        pixels.get(result);
+        return result;
     }
 }

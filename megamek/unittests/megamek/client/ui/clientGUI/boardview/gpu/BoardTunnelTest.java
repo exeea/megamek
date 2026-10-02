@@ -57,20 +57,17 @@ class BoardTunnelTest {
     }
 
     @Test
-    void lavaTubesBridgeExitsReceivePortalsAtDeckHeight() throws Exception {
+    void lavaTubesNaturalBridgesDoNotReceiveRoadPortals() throws Exception {
         var scene = GpuRoadSourceTest.scene("Map Pack Volcanic/16x17 Lava Tubes 1.board");
-        int portals = 0;
+        int bridges = 0;
         for (var tile : scene.tiles()) {
-            var entrances = BoardTunnel.entrances(scene, tile);
-            for (var tunnel : entrances) {
-                assertEquals(BoardTunnel.BRIDGE_ASSET, tunnel.asset());
-                assertEquals(GpuRoads.SURFACE_LIFT * BoardGeometry.hexScale(), tunnel.origin().z, .0001f);
-                assertEquals(BoardRoad.Kind.NONE, tile.road(), "These are authored bridges, with no ground road");
-                assertEquals(BoardRoad.Kind.PAVED, tunnel.kind());
-                portals++;
+            assertTrue(BoardTunnel.entrances(scene, tile).isEmpty(), tile.coords().getBoardNum());
+            if (BoardBridge.feature(tile) != null) {
+                assertTrue(BoardBridge.deck(scene, tile).natural());
+                bridges++;
             }
         }
-        assertEquals(13, portals, "Only cliff-facing bridge exits, excluding the four inter-bridge connections");
+        assertEquals(4, bridges);
     }
 
     @ParameterizedTest
@@ -81,16 +78,19 @@ class BoardTunnelTest {
             for (int direction = 0; direction < 6; direction++) {
                 int d = direction;
                 var scene = BoardSurfaceBlendTest.scene(c -> {
-                    var tile = BoardRoadTest.tile(c, c.equals(at) && !bridge ? BoardRoad.Kind.GRAVEL : BoardRoad.Kind.NONE,
-                          c.equals(at) && !bridge ? 1 << d : 0,
-                          c.equals(at.translated(d)) ? bridge ? 2 : 4 : bridge ? -2 : 0, family);
-                    return bridge && c.equals(at) ? bridge(tile, 1 << d) : tile;
+                    boolean approach = bridge && c.equals(at.translated((d + 3) % 6));
+                    boolean road = approach || (c.equals(at) && !bridge);
+                    var tile = BoardRoadTest.tile(c, road ? BoardRoad.Kind.GRAVEL : BoardRoad.Kind.NONE,
+                          road ? 1 << d : 0,
+                          c.equals(at.translated(d)) ? bridge ? 2 : 4 : bridge && !approach ? -2 : 0, family);
+                    return bridge && c.equals(at) ? bridge(tile, (1 << d) | (1 << ((d + 3) % 6))) : tile;
                 });
                 var entrances = BoardTunnel.entrances(scene, scene.tile(at));
                 assertEquals(1, entrances.size(), family + " direction " + d + " bridge=" + bridge);
                 var tunnel = entrances.getFirst();
                 assertEquals(bridge ? BoardTunnel.BRIDGE_ASSET : BoardTunnel.ASSET, tunnel.asset());
-                assertEquals(bridge ? BoardRoad.Kind.PAVED : BoardRoad.Kind.GRAVEL, tunnel.kind());
+                assertEquals(BoardRoad.Kind.GRAVEL, tunnel.kind());
+                assertEquals(GpuRoads.SURFACE_LIFT * BoardGeometry.hexScale(), tunnel.origin().z, .0001f);
                 var upper = new BoardSurface(scene, scene.tile(at.translated(d)));
                 var walls = upper.walls(scene, BoardGeometry.floor(scene));
                 float scale = BoardGeometry.hexScale();
@@ -112,11 +112,35 @@ class BoardTunnelTest {
     void bridgeExitsIntoOpenAirOrGroundWithoutHeadroomDoNotAcquirePortals(int rise) {
         var at = BoardRoadTest.CENTER;
         var scene = BoardSurfaceBlendTest.scene(c -> {
-            var tile = BoardRoadTest.tile(c, BoardRoad.Kind.NONE, 0, c.equals(at.translated(0)) ? rise : -2,
+            boolean approach = c.equals(at.translated(3));
+            var tile = BoardRoadTest.tile(c, approach ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE, approach ? 1 : 0,
+                  c.equals(at.translated(0)) ? rise : approach ? 0 : -2,
                   BoardScene.Surface.ROCK);
-            return c.equals(at) ? bridge(tile, 1) : tile;
+            return c.equals(at) ? bridge(tile, 9) : tile;
         });
+        assertFalse(BoardBridge.deck(scene, scene.tile(at)).natural());
         assertTrue(BoardTunnel.entrances(scene, scene.tile(at)).isEmpty());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = BoardRoad.Kind.class, names = { "PAVED", "ALLEY", "GRAVEL", "DIRT" })
+    void aDistantAttachedRoadEnablesTheBridgePortalAndSuppliesItsMaterial(BoardRoad.Kind kind) {
+        var at = BoardRoadTest.CENTER;
+        var scene = BoardBridgeMaterialsTest.straight(at, 0, 3, kind, BoardRoad.Kind.NONE);
+        var end = at.translated(0, 2);
+        var wall = BoardRoadTest.tile(end.translated(0), BoardRoad.Kind.NONE, 0, 3, BoardScene.Surface.ROCK);
+        scene = BoardNaturalBridgeTest.replace(scene, wall);
+        var entrances = BoardTunnel.entrances(scene, scene.tile(end));
+        assertEquals(1, entrances.size());
+        assertEquals(kind, entrances.getFirst().kind());
+        assertEquals(BoardTunnel.BRIDGE_ASSET, entrances.getFirst().asset());
+        assertTrue(BoardTunnel.entrances(scene, scene.tile(at.translated(0))).isEmpty(),
+              "Connected bridge decks stay open");
+
+        scene = BoardNaturalBridgeTest.replace(scene, BoardRoadTest.tile(at.translated(3), BoardRoad.Kind.NONE,
+              0, 0, BoardScene.Surface.ROCK));
+        assertTrue(BoardTunnel.entrances(scene, scene.tile(end)).isEmpty(),
+              "Removing the only approach restores the whole natural span");
     }
 
     private static BoardScene.Tile bridge(BoardScene.Tile t, int exits) {

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -50,11 +51,12 @@ class BoardRocksTest {
     @ParameterizedTest
     @EnumSource(TerrainLod.class)
     void libraryRocksAreClosedOutwardSolids(TerrainLod detail) {
-        // Blocks, boulders and the masses of shrubs.
+        // Plants have open branches and explicit leaf backs, rather than closed rock volumes. Kinds: blocks, boulders
+        // and the bedrock outcrops of zero-gravity rough.
         for (int kind = 0; kind < 3; kind++) {
-            int count = kind == 0 ? BoardRocks.BLOCKS : kind == 1 ? BoardRocks.BOULDERS : BoardScatter.BUSHES;
+            int count = kind == 0 ? BoardRocks.BLOCKS : kind == 1 ? BoardRocks.BOULDERS : BoardRocks.OUTCROPS;
             for (int variant = 0; variant < count; variant++) {
-                BoardShape rock = kind == 2 ? BoardScatter.bush(variant) : BoardRocks.rock(kind == 0, variant, detail);
+                BoardShape rock = shape(kind, variant, detail);
                 Map<List<Key>, Integer> edges = new HashMap<>();
                 double volume = 0;
                 int triangles = 0;
@@ -77,10 +79,9 @@ class BoardRocksTest {
                 }
                 assertTrue(volume > .02, "Faces wind outward and enclose a real volume");
                 assertTrue(triangles <= 120, "A rock keeps a small triangle budget");
-                assertTrue(kind != 2 || triangles <= 48, "A shrub's many masses each cost well under a boulder");
                 assertTrue(rock.height() > .2f && rock.height() < 1.2f);
-                if (kind != 2 && detail != TerrainLod.FULL) {
-                    int fullTriangles = BoardRocks.rock(kind == 0, variant).polygons().stream()
+                if (detail != TerrainLod.FULL) {
+                    int fullTriangles = shape(kind, variant, TerrainLod.FULL).polygons().stream()
                           .mapToInt(p -> p.points().length - 2).sum();
                     assertTrue(triangles <= fullTriangles, "Distant rocks keep a closed silhouette with fewer facets");
                     if (detail == TerrainLod.DISTANT) { assertTrue(triangles <= 28); }
@@ -89,9 +90,38 @@ class BoardRocksTest {
         }
     }
 
+    private static BoardShape shape(int kind, int variant, TerrainLod detail) {
+        return kind == 2 ? BoardRocks.outcrop(variant, detail) : BoardRocks.rock(kind == 0, variant, detail);
+    }
+
     private static List<BoardSurface.Face> rocks(BoardScene scene, Coords coords) {
-        return new BoardSurface(scene, scene.tile(coords)).faces.stream()
-              .filter(face -> face.finish() == BoardSurface.Finish.OUTCROP).toList();
+        var surface = new BoardSurface(scene, scene.tile(coords));
+        return surface.faces.stream().filter(face -> face.finish() == BoardSurface.Finish.OUTCROP
+              && surface.relief.shade(face.a()).kind() == BoardRelief.Kind.ROCK).toList();
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = TerrainLod.class, names = { "FULL", "MEDIUM" })
+    void mountainLakeKeepsCliffFootBouldersOnWaterOwnedBanks(TerrainLod detail) {
+        var scene = BoardCliffSeamTest.scene(new File("data/boards/Map Pack Savannahs/16x17 Mountain Lake (Savannah).board"));
+        for (Coords coords : List.of(new Coords(7, 14), new Coords(8, 14))) {
+            var tile = scene.tile(coords);
+            assertEquals(1, tile.waterDepth(), "The visible dry toe belongs to a depth-one water hex");
+            var surface = new BoardSurface(scene, tile, detail);
+            var rocks = surface.faces.stream().filter(face -> face.finish() == BoardSurface.Finish.OUTCROP).toList();
+            var formations = new HashSet<Float>();
+            float tallest = 0;
+            for (var face : rocks) {
+                var shade = surface.relief.shade(face.a());
+                assertEquals(BoardRelief.Kind.ROCK, shade.kind(), "Water retains geology, not cosmetic bushes");
+                formations.add(shade.tint());
+                tallest = Math.max(tallest, (shade.rim() + shade.foot()) * BoardRelief.metres(1));
+            }
+            assertTrue(formations.size() >= 2, "The cliff foot must retain several fallen blocks at " + coords + " " + detail);
+            assertTrue(tallest >= BoardRelief.metres(.5f), "The bank retains substantial boulders, not only tiny stones");
+            System.out.printf("MOUNTAIN_LAKE_BOULDERS %s %s rocks=%d triangles=%d tallestMetres=%.3f%n",
+                  coords, detail, formations.size(), rocks.size(), tallest / BoardRelief.metres(1));
+        }
     }
 
     @Test

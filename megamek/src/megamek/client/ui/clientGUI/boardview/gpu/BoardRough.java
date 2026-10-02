@@ -22,22 +22,20 @@ public final class BoardRough {
     }
 
     // Capture does not load geometry. Terrain workers share complete immutable CPU shapes, without GL resources.
-    private static final class Kit {
-        static volatile Map<String, BoardShape> shapes = load();
+    private static final BoardKit<Map<String, BoardShape>> KIT = new BoardKit<>(BoardRough::load);
 
-        private static Map<String, BoardShape> load() {
-            Map<String, BoardShape> result = new HashMap<>();
-            for (String name : List.of("dragon-tooth", "felled-trunk", "charred-stump", "fallen-stump")) {
-                String asset = "rough/" + name;
-                result.put(asset, BoardShape.loadModel(asset));
-            }
-            return Map.copyOf(result);
+    private static Map<String, BoardShape> load() {
+        Map<String, BoardShape> result = new HashMap<>();
+        for (String name : List.of("dragon-tooth", "felled-trunk", "charred-stump", "fallen-stump")) {
+            String asset = "rough/" + name;
+            result.put(asset, BoardShape.loadModel(asset));
         }
+        return Map.copyOf(result);
     }
 
     record Placement(String asset, Matrix4 transform) { }
 
-    static void reload() { Kit.shapes = Kit.load(); }
+    static void reload() { KIT.reload(); }
 
     static List<Placement> place(BoardSurface surface) {
         List<BoardScene.Feature> features = surface.tile.features().stream()
@@ -48,7 +46,7 @@ public final class BoardRough {
               .filter(face -> face.finish() != BoardSurface.Finish.OUTCROP
                     && face.finish() != BoardSurface.Finish.DRESSING && face.finish() != BoardSurface.Finish.ICE).toList();
         for (BoardScene.Feature feature : features) {
-            BoardShape shape = Kit.shapes.get(feature.asset());
+            BoardShape shape = KIT.get().get(feature.asset());
             float x = BoardGeometry.centerX(surface.tile.coords()) + feature.x() * BoardGeometry.hexScale();
             float y = BoardGeometry.centerY(surface.tile.coords()) + feature.y() * BoardGeometry.hexScale();
             float height = feature.height() * BoardGeometry.level();

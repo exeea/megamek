@@ -23,4 +23,11 @@ uniform float u_waterLine;       // water surface inset below its game level, sh
 uniform int u_waderCount;
 uniform vec4 u_waders[12];       // GpuWaders: centre XY, radius at the waterline, water level; world units
 uniform vec4 u_waderMotion[12];  // velocity XY, world units per second
+uniform sampler2D u_waterNearest; // GpuWaterDepth: this frame's nearest water, surface or board-edge section
 const float FLOW_CYCLE = 2.4;    // seconds per two-phase advection cycle
+
+// Water behind the nearest water along the view: a crest hides the waves behind it at grazing angles, and a
+// board-edge section shows only where it is the first water a ray meets, never through the surface or another section.
+bool waterHidden() {
+    return gl_FragCoord.z > texelFetch(u_waterNearest, ivec2(gl_FragCoord.xy), 0).r + 1e-6;
+}

@@ -9,6 +9,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.PixmapIO;
+import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.utils.Disposable;
 
 /**
@@ -33,6 +34,11 @@ final class GpuReviewFrame implements Disposable {
 
     BoardAtmosphere.Lighting lighting() {
         return atmosphere.lighting();
+    }
+
+    /** Borrow the completed scene depth when a review also draws board labels. */
+    Texture depthTexture() {
+        return atmosphere.depthTexture();
     }
 
     /** One frame of the scene from the camera, lit, shadowed and composited as on the board. */

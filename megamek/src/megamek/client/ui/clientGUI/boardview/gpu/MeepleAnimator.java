@@ -1,0 +1,200 @@
+/* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
+package megamek.client.ui.clientGUI.boardview.gpu;
+
+import java.util.List;
+import java.util.Map;
+
+import com.badlogic.gdx.graphics.Camera;
+import com.badlogic.gdx.graphics.g3d.ModelInstance;
+import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Quaternion;
+import com.badlogic.gdx.math.Vector3;
+import megamek.common.ResolvedAttack;
+import megamek.common.units.EntityMovementMode;
+import megamek.common.units.EntityMovementType;
+import megamek.common.units.FallSide;
+
+/** Rigid token animation only. Samples the existing movement/combat clocks; never advances a second timeline. */
+final class MeepleAnimator {
+    private MeepleAnimator() { }
+
+    static UnitMotion.Posture posture(BoardScene.Unit unit, UnitMotion.Sample motion) {
+        if (motion.posture() != null) { return motion.posture(); }
+        var cause = motion.moving() ? motion.proneCause() : unit.location().proneCause();
+        if (cause == null && unit.model() != null && unit.model().state() != null) {
+            cause = unit.model().state().pose().proneCause();
+        }
+        boolean hullDown = unit.location().hullDown() != null ? unit.location().hullDown()
+              : unit.model() != null && unit.model().state() != null && UnitAnimator.hullDown(unit);
+        return UnitMotion.Posture.of(cause, unit.location().fallSide(), hullDown);
+    }
+
+    static EntityMovementMode movement(BoardScene.Unit unit) {
+        var form = UnitConversion.form(unit);
+        return form != null ? form.movement() : unit.model() == null || unit.model().state() == null
+              ? EntityMovementMode.NONE : unit.model().state().structure().movement();
+    }
+
+    private static boolean walker(BoardScene.Unit unit) {
+        return switch (movement(unit)) {
+            case BIPED, TRIPOD, QUAD, INF_LEG, INF_JUMP, INF_UMU, BIPED_SWIM, QUAD_SWIM -> true;
+            default -> false;
+        };
+    }
+
+    static float standingHeight(BoardScene.Unit unit) {
+        var anatomy = unit.model() == null || unit.model().state() == null ? null : unit.model().state().structure().anatomy();
+        var form = UnitConversion.form(unit);
+        // Converted LAMs and vehicle-mode QuadVees occupy one level, even though their construction is still a Mek.
+        if (form != null && form.mode() != 0) { return 1; }
+        return anatomy == null ? unit.height() : anatomy.superHeavy() ? 3 : 2;
+    }
+
+    static float bounce(UnitMotion.Sample motion) {
+        if (!motion.moving() || (motion.type() != EntityMovementType.MOVE_WALK
+              && motion.type() != EntityMovementType.MOVE_RUN && motion.type() != EntityMovementType.MOVE_SPRINT)) { return 0; }
+        float envelope = MathUtils.clamp(Math.min(motion.progress(), 1 - motion.progress()) * 12, 0, 1);
+        return Math.abs(MathUtils.sin(motion.steps() * MathUtils.PI2 * 2)) * envelope;
+    }
+
+    static Vector3 place(GpuUnitModel model, ModelInstance instance, BoardScene.Unit unit, UnitMotion.Sample motion,
+          Camera camera, Vector3 ground, float facing) {
+        return place(model, instance, unit, motion, camera, ground, facing, null, false);
+    }
+
+    static Vector3 place(GpuUnitModel model, ModelInstance instance, BoardScene.Unit unit, UnitMotion.Sample motion,
+          Camera camera, Vector3 ground, float facing, UnitConversion conversion, boolean topView) {
+        // Whole-token passengers use this root too. Restore it before every pose, including after dismounting.
+        var root = instance.getNode(MeepleVisual.ROOT);
+        root.translation.setZero();
+        root.rotation.idt();
+        root.scale.set(1, 1, 1);
+        instance.calculateTransforms();
+        var posture = posture(unit, motion);
+        // A prone snapshot reports occupied height, not the token's standing shape. Recover the Mek's captured size.
+        float standing = standingHeight(unit);
+        boolean converting = conversion != null && conversion.event.entityId() == unit.id();
+        if (converting) {
+            standing = MathUtils.lerp(standingHeight(conversion.event.before()), standingHeight(conversion.event.after()), conversion.progress());
+        }
+        float crouch = Math.max(posture.crouch(), posture.kneel());
+        // Overhead, keep the artwork readable at prone height. The existing PRONE label conveys the state.
+        if (topView) { crouch = Math.max(crouch, posture.fallen()); }
+        float height = MathUtils.lerp(standing, 1, crouch);
+        float horizontal = unit.part() >= 0 ? 1 : BoardGeometry.unitScale();
+        var position = ground.cpy();
+        if (unit.part() < 0 && unit.footprint().size() > 1) {
+            var layout = UnitFootprint.layout(unit.location().coords(), unit.footprint(), unit.location().facing() * 60);
+            var bounds = UnitBounds.local(instance);
+            horizontal = Math.min(layout.width() / bounds.getWidth(), layout.depth() / bounds.getHeight()) * BoardGeometry.multiHexUnitScale();
+            position.add(new Vector3(layout.offsetX(), layout.offsetY(), 0).rotate(Vector3.Z, unit.location().facing() * 60 - facing));
+        }
+        var family = unit.model() == null || unit.model().state() == null ? UnitFamilyScale.DEFAULT
+              : unit.model().state().structure().family().forUnit(unit);
+        horizontal *= family.meepleScale();
+        float vertical = height * BoardGeometry.level() * BoardGeometry.unitHeightScale() / MeepleVisual.HEIGHT
+              * family.meepleScale() * family.meepleHeightScale();
+        boolean rear = posture.side() == FallSide.REAR;
+        float fall = posture.fallen();
+        float pitch = topView ? 0 : (rear ? 90 : -90) * fall * fall;
+        // The engine has already resolved final facing (Core keeps it, TW can change it). Do not add the fall roll again.
+        float yaw = rear && !topView ? 180 * fall : 0;
+        float upright = (1 - fall) * (1 - crouch);
+        float lift = motion.airborne(unit) || !walker(unit) ? 0 : bounce(motion) * BoardGeometry.level() * .13f * upright;
+        float bank = 0;
+        if (motion.moving() && motion.type() != EntityMovementType.MOVE_NONE && !walker(unit)) {
+            float envelope = MathUtils.clamp(Math.min(motion.progress(), 1 - motion.progress()) * 12, 0, 1) * upright;
+            bank = motion.airborne(unit) ? -MathUtils.clamp(motion.turn(), -12, 12) * envelope
+                  : MathUtils.sin(motion.steps() * MathUtils.PI2) * 1.5f * envelope;
+        }
+        if (motion.jets() != null) { pitch -= motion.jets().tilt() * .35f; }
+        if (converting) { pitch -= conversion.fold() * 12; }
+        instance.transform.set(position, new Quaternion(Vector3.Z, -facing + yaw))
+              .rotate(Vector3.X, pitch).rotate(Vector3.Y, bank).scale(horizontal, horizontal, vertical);
+        support(instance, position.z + .5f + lift);
+        return model.anchor(instance, camera);
+    }
+
+    /** Apply once after all units have their base pose, so contacts see the current target in either camera. */
+    static void attacks(BoardScene.Unit unit, ModelInstance instance, List<UnitAttack> attacks,
+          Map<String, ModelInstance> instances) {
+        float recoil = 0, impact = 0;
+        var posture = posture(unit, UnitMotion.Sample.STILL);
+        boolean prone = posture.crouch() > 0 || posture.fallen() > 0 || posture.kneel() > 0;
+        float death = unit.model() != null && unit.model().state() != null && unit.model().state().pose().dead() ? 1 : 0;
+        for (var attack : attacks) {
+            if (attack.event.target() != null && attack.event.target().id() == unit.id()) {
+                impact = Math.max(impact, attack.impact());
+                instance.transform.trn(attack.dodgeOffset(new Vector3()));
+            }
+            if (attack.event.entityId() != unit.id()) { continue; }
+            if (attack.shot()) { recoil = Math.max(recoil, attack.recoil()); continue; }
+            if (attack.death()) { death = attack.deathProgress(); continue; }
+            if (prone) { continue; }
+            if (attack.removal()) {
+                tilt(instance, 0, MathUtils.sin(attack.seconds * 18) * attack.windup() * 9, .5f);
+                continue;
+            }
+            var target = attack.event.target();
+            var victim = target == null ? null : instances.get(target.id() + ":" + target.part());
+            var center = UnitBounds.world(instance).getCenter(new Vector3());
+            var endpoint = UnitAttack.center(victim, attack.event.destination(), new Vector3());
+            if (attack.approach == null) {
+                var direction = endpoint.cpy().sub(center); direction.z = 0;
+                float radius = Math.max(UnitBounds.world(instance).getWidth(), UnitBounds.world(instance).getHeight()) * .5f;
+                float other = victim == null ? 0 : Math.max(UnitBounds.world(victim).getWidth(), UnitBounds.world(victim).getHeight()) * .5f;
+                attack.approach = direction.cpy().nor().scl(Math.max(0, direction.len() - radius - other))
+                      .limit(BoardGeometry.height() * UnitAttack.PHYSICAL_APPROACH_HEXES);
+                float heading = MathUtils.atan2(direction.x, direction.y) * MathUtils.radiansToDegrees;
+                attack.approachTurn = ((heading - unit.location().facing() * 60 + 540) % 360) - 180;
+            }
+            instance.transform.trn(attack.approach.cpy().scl(attack.approachWeight()));
+            attack.contact(victim, UnitBounds.world(instance).getCenter(new Vector3()), new Vector3());
+            float travel = attack.travelProgress();
+            float hop = Math.abs(MathUtils.sin(travel * MathUtils.PI * 4))
+                  * MathUtils.clamp(Math.min(travel, 1 - travel) * 10, 0, 1) * BoardGeometry.level() * .1f;
+            turn(instance, -attack.approachTurn * attack.approachFacingWeight());
+            boolean kick = attack.event.result().kind() == ResolvedAttack.Kind.KICK;
+            boolean punch = attack.event.result().kind() == ResolvedAttack.Kind.PUNCH;
+            boolean club = attack.event.result().kind() == ResolvedAttack.Kind.CLUB;
+            float swing = punch ? (attack.event.result().limb() == megamek.common.units.Mek.LOC_LEFT_ARM ? 1 : -1)
+                  * 18 * (attack.windup() - 1.7f * attack.strike()) : 0;
+            if (club && !attack.thrust()) { swing = 38 * (attack.windup() - 1.7f * attack.strike()); }
+            tilt(instance, (kick ? 24 : club ? -25 : -16) * attack.strike(), swing, kick ? 0 : .5f);
+            if (club && attack.thrust()) {
+                var forward = new Vector3(0, 1, 0).rot(instance.transform); forward.z = 0;
+                instance.transform.trn(forward.nor().scl(BoardGeometry.level() * .2f * attack.strike()));
+            }
+            instance.transform.trn(0, 0, hop);
+        }
+        if (!prone) { tilt(instance, 3 * recoil + 5 * impact, 0, .3f); }
+        if (death > 0 && posture(unit, UnitMotion.Sample.STILL).fallen() == 0) { tilt(instance, -80 * death, 0, 0); }
+    }
+
+    private static void turn(ModelInstance instance, float degrees) {
+        var position = instance.transform.getTranslation(new Vector3());
+        instance.transform.trn(position.cpy().scl(-1));
+        instance.transform.mulLeft(new com.badlogic.gdx.math.Matrix4().setToRotation(Vector3.Z, degrees));
+        instance.transform.trn(position);
+    }
+
+    /** Rotate the solid in world units, avoiding shear from its different horizontal/vertical scales. */
+    private static void tilt(ModelInstance instance, float pitch, float swing, float pivotFraction) {
+        if (pitch == 0 && swing == 0) { return; }
+        var bounds = UnitBounds.world(instance);
+        float floor = bounds.min.z;
+        var pivot = bounds.getCenter(new Vector3());
+        pivot.z = bounds.min.z + bounds.getDepth() * pivotFraction;
+        var forward = new Vector3(0, 1, 0).rot(instance.transform); forward.z = 0; forward.nor();
+        var axis = new Vector3(forward.y, -forward.x, 0);
+        var change = new com.badlogic.gdx.math.Matrix4().setToTranslation(pivot)
+              .rotate(Vector3.Z, swing).rotate(axis, pitch).translate(-pivot.x, -pivot.y, -pivot.z);
+        instance.transform.mulLeft(change);
+        float below = floor - UnitBounds.world(instance).min.z;
+        if (below > 0) { instance.transform.trn(0, 0, below); }
+    }
+
+    private static void support(ModelInstance instance, float floor) {
+        instance.transform.trn(0, 0, floor - UnitBounds.world(instance).min.z);
+    }
+}

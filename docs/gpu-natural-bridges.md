@@ -25,9 +25,11 @@ rebuilds the affected span and its adjoining banks, including across chunk bound
 
 ## Geometry and existing terrain
 
-`BoardNaturalBridge` builds a separate hollow shell, with a nearly level usable top, chipped lips, broad
-rock strata and a shallow arch underneath. It reuses the surface engine's photographic albedo, normals,
-geology, weather response and material batches. It adds no texture asset, per-bridge GPU resource or
+`BoardNaturalBridge` builds a separate hollow shell with curved, uneven outlines, broad bank shoulders,
+an eroded cap and a thick, asymmetric arch underneath. Rounded side strata bulge between the chipped
+top and recessed underside. Shared terrain normal smoothing joins the broad rock facets; the surface
+engine supplies photographic albedo, normal maps, geology, weather response and material batches.
+It adds no texture asset, per-bridge GPU resource or
 pillars through the lower hex. Fine cracks come from the existing material maps.
 
 The top's centre remains at the authoritative deck elevation. The underside reserves the last whole level
@@ -35,10 +37,17 @@ beneath that deck and respects lower feature tops. Ground, roads, water and unit
 remain independently constructed. This is presentation geometry; it does not change movement rules,
 terrain elevations, bridge CF or exits.
 
-Natural mouths fit the actual bank across their width, retaining five contact points at every LOD. They
-overlap the bank's finished top and ignore decorative boulders when sampling its height. This avoids the
-opening left when a straight two-corner end meets a scalloped cliff. Connected natural sections share
-mouth corners and omit internal end walls, including across mixed LODs.
+Natural mouths retain five contact points at every LOD. Their full rock body extends beyond the deepest
+front-facing cliff triangles across its width and height, including adjoining faces around scalloped
+corners. Only the bank's near-side edges participate, so a deeply recessed far wall cannot pull the end
+through the whole bank. Walkable banks also fit the finished top, ignoring decorative boulders. This seats both the cap
+and underside inside the cliff rather than fitting only its upper rim. Connected sections share mouth
+corners, underside clearance and arch support influence, and omit internal end walls across mixed LODs.
+
+A cliff above deck height also anchors the natural arch and contributes its rock material. The span's
+thicker underside extends into that wall at deck height instead of rising to the cliff top. This keeps
+the rock formation beneath spans such as Lava Tubes 1, with the lower passage still open. Such a cliff
+is not a walkable bank approach and does not receive a manufactured bridge footing or road tunnel.
 
 Manufactured bridges use `BoardBridgeFooting` to extend each terminal at least one metre into its bank
 hex. If the rim has receded, the extension grows until the full slab width has ground underneath, with an

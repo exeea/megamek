@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -21,7 +22,6 @@ class BoardBedLodTest {
     @EnumSource(TerrainLod.class)
     void bedsKeepTheirFootprintDepthAndBoundedHeightError(TerrainLod lod) {
         var scene = scene(false, false);
-        double saved = 0;
         for (Coords at : List.of(new Coords(1, 2), new Coords(2, 3), new Coords(3, 3), new Coords(4, 3),
               new Coords(5, 3), new Coords(6, 3), new Coords(7, 3))) {
             var full = new BoardSurface(scene, scene.tile(at), TerrainLod.FULL);
@@ -59,18 +59,49 @@ class BoardBedLodTest {
             assertEquals(BoardGeometry.groundZ(scene.tile(at)),
                   BoardSurface.sampleHeight(rendered, center.x, center.y, Float.NaN), .001f,
                   "The unit anchor stays at game depth");
-            saved += canonical.size() - rendered.size();
+            assertTrue(canonical.size() <= 360, "Canonical beds already omit unnecessary interior rings");
         }
-        if (lod == TerrainLod.DISTANT) { assertTrue(saved > 0, "Distant pool interiors should use fewer triangles"); }
     }
 
     @Test
-    void distantOpenLakeUsesFewerBedTriangles() {
+    void openLakeHasNoUnnecessaryInteriorBedRings() {
         var scene = scene(true, false);
         var at = new Coords(4, 3);
         var surface = new BoardSurface(scene, scene.tile(at), TerrainLod.DISTANT);
         var canonical = bed(surface);
-        assertTrue(surface.renderBed(canonical).size() < canonical.size(), "Remove unnecessary distant bed triangles");
+        assertEquals(6, canonical.size(), "A level hex floor needs only its six corners and the unit anchor");
+        assertEquals(canonical, surface.renderBed(canonical), "No separate dense support mesh is necessary");
+    }
+
+    @Test
+    void seaportBedsKeepShoreContactsAndDepthWithSparseFloors() {
+        var scene = BoardCliffSeamTest.scene(new File("data/boards/unofficial/Unknown/seaportwithfueltanks.board"));
+        int triangles = 0;
+        for (var tile : scene.tiles()) {
+            if (!tile.liquid().present()) { continue; }
+            var surface = new BoardSurface(scene, tile);
+            var faces = bed(surface);
+            triangles += faces.size();
+            assertTrue(faces.size() <= 84, "A shore contour needs one bank and one six-triangle floor");
+            var contact = surface.waterGeometry().bedOutline();
+            double footprint = 0;
+            var center = BoardGeometry.center(tile.coords(), 0);
+            for (int i = 0; i < contact.length; i++) {
+                Vector3 a = contact[i], b = contact[(i + 1) % contact.length];
+                footprint += (double) (a.x - center.x) * (b.y - center.y)
+                      - (double) (a.y - center.y) * (b.x - center.x);
+                for (Vector3 p : List.of(a, new Vector3(a).lerp(b, .5f))) {
+                    assertEquals(p.z, BoardSurface.sampleHeight(faces, p.x, p.y, Float.NaN), .003f,
+                          "The bed must meet every shore/depth contact at " + tile.coords());
+                }
+            }
+            assertEquals(footprint, area(faces), .03, "No missing or overlapping bed footprint");
+            assertEquals(BoardGeometry.groundZ(tile), surface.height(center.x, center.y), .001f,
+                  "Picking and support retain the game depth");
+        }
+        assertTrue(triangles < 2000, "The shipped seaport's beds must not regain concentric tessellation");
+        var open = new BoardSurface(scene, scene.tile(new Coords(3, 10)));
+        assertEquals(6, bed(open).size(), "Seaport0411 has a plain level floor");
     }
 
     @Test

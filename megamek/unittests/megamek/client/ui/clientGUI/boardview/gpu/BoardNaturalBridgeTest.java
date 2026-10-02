@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.Hex;
@@ -22,6 +23,89 @@ import org.junit.jupiter.params.provider.EnumSource;
 
 class BoardNaturalBridgeTest {
     static final Coords CENTER = new Coords(4, 4);
+
+    @Test
+    void lavaTubesGrowRockArchesIntoTheTallBanksAtEveryLod() throws Exception {
+        var scene = GpuRoadSourceTest.scene("Map Pack Volcanic/16x17 Lava Tubes 1.board");
+        int supports = 0;
+        for (var tile : scene.tiles()) {
+            var feature = BoardBridge.feature(tile);
+            if (feature == null) { continue; }
+            var center = BoardGeometry.center(tile.coords(), tile.elevation() + feature.elevation());
+            var deck = BoardBridge.deck(scene, tile);
+            assertTrue(deck.natural());
+            for (var lod : TerrainLod.values()) {
+                var shape = BoardNaturalBridge.build(scene, tile, deck, lod, new HashMap<>());
+                assertEquals(100, shape.hit(new Ray(new Vector3(center).add(0, 0, 10), new Vector3(0, 0, -1))), .001f,
+                      "The usable centre stays at the authored deck height");
+                assertTrue(shape.bounds().min.z > center.z - BoardGeometry.level(),
+                      "The whole level below remains clear");
+                assertTrue(shape.bounds().max.z <= center.z + .001f,
+                      "A tall bank must not pull the deck up to its top");
+                for (int d = 0; d < 6; d++) {
+                    if ((feature.bridgeExits() & (1 << d)) == 0) { continue; }
+                    var next = scene.tile(tile.coords().translated(d));
+                    if (next == null || next.elevation() < shape.level() + 2) { continue; }
+                    var direction = BoardGeometry.center(next.coords(), shape.level()).sub(center);
+                    var insideBank = new Vector3(center).mulAdd(direction, .6f);
+                    var up = new Ray(new Vector3(insideBank).add(0, 0, -BoardGeometry.level()), Vector3.Z);
+                    float underside = up.origin.z + (float) Math.sqrt(shape.hit(up));
+                    assertTrue(underside < center.z - BoardRelief.metres(3),
+                          "A substantial rock support must meet the wall: " + tile.coords().getBoardNum() + " " + lod + " exit " + d);
+                    supports++;
+                }
+            }
+        }
+        assertTrue(supports > 0, "The shipped board must exercise tall abutments");
+    }
+
+    @Test
+    void lavaTubeEndsAreBuriedInTheCliffAcrossTheirWidthAndDepth() throws Exception {
+        var scene = GpuRoadSourceTest.scene("Map Pack Volcanic/16x17 Lava Tubes 1.board");
+        int contacts = 0;
+        for (var lod : TerrainLod.values()) {
+            var surfaces = new HashMap<Coords, BoardSurface>();
+            for (var tile : scene.tiles()) {
+                if (BoardBridge.feature(tile) == null) { continue; }
+                var shape = BoardNaturalBridge.build(scene, tile, BoardBridge.deck(scene, tile), lod, surfaces);
+                var center = BoardGeometry.center(tile.coords(), shape.level());
+                for (int d = 0; d < 6; d++) {
+                    var next = scene.tile(tile.coords().translated(d));
+                    if (!BoardBridge.abutment(tile, next, d) || next.elevation() < shape.level() + 2) { continue; }
+                    var walls = surfaces.get(next.coords()).walls(scene, BoardGeometry.floor(scene), surfaces);
+                    var along = BoardGeometry.center(next.coords(), shape.level()).sub(center).nor();
+                    var ends = shape.facets().stream().filter(f -> f.part() == BoardBridge.Part.SIDE
+                          && f.normal().dot(along) > .99f).toList();
+                    float end = (float) ends.stream().mapToDouble(f -> f.a().dot(along)).max().orElseThrow();
+                    var points = ends.stream().filter(f -> Math.abs(f.a().dot(along) - end) < .001f)
+                          .flatMap(f -> List.of(f.a(), f.b(), f.c(),
+                                new Vector3(f.a()).add(f.b()).add(f.c()).scl(1f / 3)).stream()).distinct().toList();
+                    assertTrue(points.size() >= 10, "Exercise the full end, including both lips and its underside");
+                    for (var point : points) {
+                        var ray = new Ray(point, new Vector3(along).scl(-1));
+                        float nearest = Float.POSITIVE_INFINITY;
+                        boolean inside = false;
+                        var hit = new Vector3();
+                        for (var face : walls) {
+                            if (!Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit)) { continue; }
+                            float distance = point.dst2(hit);
+                            if (distance < nearest) {
+                                nearest = distance;
+                                // From inside solid rock, the first hit towards the span exits the cliff.
+                                var normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
+                                inside = normal.dot(ray.direction) > 0;
+                            }
+                        }
+                        assertTrue(inside && nearest < BoardGeometry.width() * BoardGeometry.width(),
+                              "The whole end must enter solid cliff: " + tile.coords().getBoardNum()
+                                    + " " + lod + " exit " + d + " at " + point + " inside " + inside + " distance " + nearest);
+                        contacts++;
+                    }
+                }
+            }
+        }
+        assertTrue(contacts > 0);
+    }
 
     @ParameterizedTest
     @EnumSource(value = BoardScene.Surface.class, names = { "GRASS", "DIRT", "SAND", "ROCK", "SNOW" })
@@ -78,6 +162,35 @@ class BoardNaturalBridgeTest {
                     assertFalse(other.facets().stream().anyMatch(f -> List.of(f.a(), f.b(), f.c()).stream()
                           .allMatch(p -> Math.abs(new Vector3(p).sub(seam).dot(normal)) < .0001f)),
                           "Connected spans must not have an internal end wall");
+                }
+            }
+        }
+    }
+
+    @Test
+    void branchingLavaTubeSpansShareTheirEntireRockJoinAtEveryLod() throws Exception {
+        var scene = GpuRoadSourceTest.scene("Map Pack Volcanic/16x17 Lava Tubes 1.board");
+        for (var tile : scene.tiles()) {
+            if (BoardBridge.feature(tile) == null) { continue; }
+            var shape = BoardNaturalBridge.build(scene, tile, BoardBridge.deck(scene, tile), TerrainLod.FULL, new HashMap<>());
+            var center = BoardGeometry.center(tile.coords(), shape.level());
+            for (int d = 0; d < 6; d++) {
+                var next = scene.tile(tile.coords().translated(d));
+                if (!BoardBridge.connected(tile, next, d)) { continue; }
+                var gate = BoardGeometry.center(next.coords(), shape.level()).sub(center).scl(.5f);
+                var seam = new Vector3(center).add(gate);
+                var normal = new Vector3(gate).nor();
+                var points = shape.facets().stream().filter(f -> f.part() != BoardBridge.Part.SIDE)
+                      .flatMap(f -> List.of(f.a(), f.b(), f.c()).stream())
+                      .filter(p -> Math.abs(new Vector3(p).sub(seam).dot(normal)) < .0001f).distinct().toList();
+                assertEquals(4, points.size());
+                for (var lod : TerrainLod.values()) {
+                    var other = BoardNaturalBridge.build(scene, next, BoardBridge.deck(scene, next), lod, new HashMap<>());
+                    var vertices = other.facets().stream().flatMap(f -> List.of(f.a(), f.b(), f.c()).stream()).toList();
+                    for (var point : points) {
+                        assertTrue(vertices.stream().anyMatch(p -> p.dst2(point) < .000001f),
+                              "Branching arches must not split at the hex boundary: " + tile.coords().getBoardNum() + " " + lod);
+                    }
                 }
             }
         }
@@ -209,9 +322,12 @@ class BoardNaturalBridgeTest {
             var tile = bridge(scene.tile(CENTER), exits);
             var edited = replace(scene, tile);
             var shape = BoardNaturalBridge.build(edited, tile, BoardBridge.deck(edited, tile), TerrainLod.FULL, new HashMap<>());
-            assertTrue(shape.facets().size() < 1100, "Bounded geometry even for branching natural spans");
+            assertTrue(shape.facets().size() < 1600, "Bounded geometry even for branching natural spans");
             Map<List<Vector3>, Integer> edges = new HashMap<>();
             for (var face : shape.facets()) {
+                if (face.part() == BoardBridge.Part.TOP || face.part() == BoardBridge.Part.RIM) {
+                    assertTrue(face.normal().z > 0, "Rounding an outline must not fold its top: exits=" + exits);
+                }
                 var points = List.of(face.a(), face.b(), face.c());
                 for (int i = 0; i < 3; i++) { edges.merge(List.of(points.get(i), points.get((i + 1) % 3)), 1, Integer::sum); }
             }

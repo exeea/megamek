@@ -8,7 +8,8 @@
 | --- | --- |
 | `BoardFeatures` | Capture rough/fluff appearance and remove duplicate legacy decals when native geometry represents it. |
 | `BoardRough` | Choose deterministic variant placements; supply the same occupied geometry to drawing, picking and support. |
-| `BoardRelief / BoardRocks` | Build ordinary rough boulders and their terrain contact. |
+| `BoardRelief / BoardRocks` | Build ordinary rough boulders, zero-gravity outcrops and their terrain contact. |
+| `BoardScene.Tile.lunar` | At zero gravity, turn rough boulders into bedrock outcrops. |
 | `GpuAssets` | Own the variant GLBs and shared textures; snapshots retain only placement data. |
 
 The 3D board reads the existing rough terrain and its `fluff` value:
@@ -53,3 +54,23 @@ footprint radii are three board units for standing stumps and six for the other 
 before placement scaling, matching capture's route clearance. No GL resources
 are retained in scene snapshots; GPU models and
 textures remain owned by `GpuAssets`.
+
+## Zero gravity
+
+Without gravity nothing lies loose. The lunar presentation (`BoardScene.Tile.lunar`, see
+[water](gpu-water.md)) keeps every third rough boulder of the hex's spiral as a bedrock outcrop
+three times its size; the captured height stays its bound for headroom and picking. Dragon's
+Teeth remain; felled timber goes with the other vegetation.
+
+`BoardRelief.boulders` places outcrops through the boulders' own path, so they share the terrain
+mesh, picking, unit support and road, bridge and tunnel clearance. They keep their authored
+proportions, steepened by 30% to read from above, within the captured height. Their strike follows
+a slowly varying board-wide field, so neighbouring formations align. A fifth of each lies below the
+plain and its root is never above the downhill side; one near the hex edge shrinks to fit.
+
+At zero gravity `terrain-sculpt.frag` shades the dry rock kit with the ground's own
+`naturalMaterial` as fully exposed rock: bedding planes and skirts take the plain's cover in the
+same world projection, scarps its wall. Occlusion toward the root remains only on scarps. Rim
+formations and fallen blocks below cliffs share this shading but keep their placement.
+
+The eight formations live in `mm-data/data/models/board/rocks/outcrop-N.glb`.

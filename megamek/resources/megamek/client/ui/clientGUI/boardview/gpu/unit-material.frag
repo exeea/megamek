@@ -5,6 +5,7 @@ uniform float u_markerEnabled;
 in vec3 v_paintPosition;
 uniform sampler2D u_damageTexture;
 uniform float u_damageEnabled;
+uniform float u_damageOpacity;
 in vec2 v_damageUV;
 in float v_damageMask;
 
@@ -31,7 +32,7 @@ vec3 unitOverlays(vec3 diffuse) {
     }
     if (u_damageEnabled > 0.5 && (u_damageEnabled > 1.5 || v_damageMask > 0.5)) {
         vec4 damage = texture(u_damageTexture, damageUV(v_damageUV));
-        diffuse = mix(diffuse, damage.rgb, damage.a);
+        diffuse = mix(diffuse, damage.rgb, damage.a * u_damageOpacity);
     }
     return diffuse;
 }

@@ -87,10 +87,9 @@ final class GpuWaterPages implements Disposable {
     }
 
     void add(Array<Renderable> parts, int pageId, boolean shown, boolean waterVisible) {
+        if (!waterVisible) { return; }
         for (Renderable part : parts) {
             GpuWaterShader water = water(part);
-            // Lake ice shares this pass, but only liquid water disappears at zero gravity.
-            if (!waterVisible && water != null) { continue; }
             if (enabled && water != null && water.batchField() != null && !part.material.has(GpuLiquidShader.Frame.TYPE)) {
                 Page page = pages.computeIfAbsent(pageId, ignored -> new Page());
                 page.sources.add(part);
@@ -149,7 +148,10 @@ final class GpuWaterPages implements Disposable {
     private void submit(ModelBatch batch, Environment environment, Renderable part, boolean depth) {
         if (depth) {
             GpuWaterShader water = water(part);
-            if (water == null || water.mode != GpuWaterShader.Mode.SURFACE) { return; }
+            // The surface and the board-edge section bound the water: the nearest of them hides the rest.
+            if (water == null || water.mode != GpuWaterShader.Mode.SURFACE && water.mode != GpuWaterShader.Mode.CUT) {
+                return;
+            }
             if (depthCount == depthParts.size) { depthParts.add(new Renderable()); }
             var copy = depthParts.get(depthCount++).set(part);
             copy.material = depthMaterials.computeIfAbsent(part.material, original -> {

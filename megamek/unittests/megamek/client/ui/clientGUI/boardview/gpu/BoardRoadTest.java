@@ -545,6 +545,48 @@ class BoardRoadTest {
     }
 
     @Test
+    void oppositeExitsStayStraightBesideTurnsAndGradesInEveryOrientation() {
+        for (int x : new int[] { 3, 4 }) {
+            Coords at = new Coords(x, 4);
+            for (int axis = 0; axis < 3; axis++) {
+                int forward = axis, reverse = axis + 3;
+                Coords before = at.translated(forward), after = at.translated(reverse);
+                for (boolean graded : new boolean[] { false, true }) {
+                    var scene = BoardSurfaceBlendTest.scene(c -> tile(c, BoardRoad.Kind.PAVED,
+                          c.equals(at) ? (1 << forward) | (1 << reverse)
+                                : c.equals(before) ? (1 << reverse) | (1 << ((forward + 1) % 6))
+                                : c.equals(after) ? (1 << forward) | (1 << ((reverse + 1) % 6)) : 0,
+                          graded && c.equals(after) ? 2 : 3, BoardScene.Surface.GRASS));
+                    var road = BoardRoad.of(scene, scene.tile(at));
+                    Vector3 gate = gate(at, forward), across = new Vector3(-gate.y, gate.x, 0).nor();
+                    for (float along = -1; along <= 1; along += .125f) {
+                        for (float offset : new float[] { -8, -4, 0, 4, 8 }) {
+                            Vector3 point = new Vector3(gate).scl(along).mulAdd(across, offset);
+                            assertEquals(Math.abs(offset) - BoardRoad.Kind.PAVED.halfWidth,
+                                  road.distance(point.x, point.y), .002f,
+                                  "Opposite exits must keep their straight centre and width beside another hex's turn");
+                            assertEquals(1, Math.abs(road.wheelDirection(point.x, point.y).dot(
+                                  new Vector2(gate.x, gate.y).nor())), .0001f);
+                        }
+                    }
+                    for (int d : new int[] { forward, reverse }) {
+                        var neighbor = at.translated(d);
+                        var out = BoardRoad.bends(at, c -> BoardRoad.Node.of(scene.tile(c))).apply(d);
+                        var in = BoardRoad.bends(neighbor, c -> BoardRoad.Node.of(scene.tile(c))).apply((d + 3) % 6);
+                        if (graded && d == reverse) {
+                            assertTrue(out == null && in == null, "A grade retains both straight ramp corridors");
+                        } else {
+                            assertTrue(out != null && in != null, "A level turn may approach from the whole neighbouring hex");
+                            assertTrue(out.epsilonEquals(new Vector2(in).scl(-1), .00001f),
+                                  "Both road halves must retain one shared tangent");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     void theLastHexBeforeASquareCrossingTurnsIntoItsCorridorAlongOneWideArc() {
         // As before the Fire and Ice 2 bridge: a plain road turns in its last hex towards a crossing that stays square,
         // here a junction. Its turn must not be left until the mouth of that crossing's straight corridor.

@@ -8,6 +8,5 @@ vec4 magmaOutput(Volcanic material, float bank, float strength) {
     ambient *= material.surface.b;
 #endif
     albedo *= ambient + direct;
-    vec2 heat = material.heat * mix(.72, 1.0, bank);
-    return vec4(toDisplay(albedo + sheen + magmaEmission(heat, strength)), 1.0);
+    return vec4(toDisplay(albedo + sheen + magmaRadiance(material, bank, strength)), 1.0);
 }

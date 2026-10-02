@@ -155,13 +155,14 @@ final class GpuSurfaceBlend extends Attribute {
         int mask = a.cover().mask() | b.cover().mask() | c.cover().mask();
         float ab = a.vertex().position.dst2(b.vertex().position), bc = b.vertex().position.dst2(c.vertex().position);
         float ca = c.vertex().position.dst2(a.vertex().position);
-        // A long top fan must not stretch a four-metre boundary into a half-hex fade. Refine only affected faces.
+        // A long top fan must not stretch a four-metre boundary into a half-hex fade. Linear cover needs no
+        // extra geometry; probe its edges and interior before subdividing a mixed triangle.
         if (Integer.bitCount(mask) > 4 || Integer.bitCount(mask) > 1 && Math.max(ab, Math.max(bc, ca)) > spacing * spacing) {
-            if (depth >= 12) { throw new IllegalStateException("Unbounded terrain cover palette at " + a.vertex().position); }
-            if (bc > ab && bc >= ca) { appendSplit(groups, family, cover, b, c, a, spacing, depth); }
-            else if (ca > ab) { appendSplit(groups, family, cover, c, a, b, spacing, depth); }
-            else { appendSplit(groups, family, cover, a, b, c, spacing, depth); }
-            return;
+            boolean split;
+            if (bc > ab && bc >= ca) { split = appendSplit(groups, family, cover, b, c, a, spacing, depth, mask); }
+            else if (ca > ab) { split = appendSplit(groups, family, cover, c, a, b, spacing, depth, mask); }
+            else { split = appendSplit(groups, family, cover, a, b, c, spacing, depth, mask); }
+            if (split) { return; }
         }
         // A slope can extend beyond its source footprint. Its absent family must not consume a palette slot.
         int base = (mask & (1 << family)) != 0 ? family : Integer.numberOfTrailingZeros(mask);
@@ -178,13 +179,34 @@ final class GpuSurfaceBlend extends Attribute {
         groups.computeIfAbsent(new Palette(base, first, second, third), key -> new ArrayList<>()).add(new Triangle(a, b, c));
     }
 
-    private static void appendSplit(Map<Palette, List<Triangle>> groups, int family,
+    private static boolean appendSplit(Map<Palette, List<Triangle>> groups, int family,
           Function<MeshPartBuilder.VertexInfo, BoardSurfaceBlend.Cover> cover,
-          Point a, Point b, Point c, float spacing, int depth) {
-        var v = new MeshPartBuilder.VertexInfo().set(a.vertex()).lerp(b.vertex(), .5f);
-        v.normal.nor();
-        var mid = new Point(v, cover.apply(v));
+          Point a, Point b, Point c, float spacing, int depth, int mask) {
+        var mid = between(cover, a, b, .5f);
+        if (Integer.bitCount(mask) <= 4 && accurate(mid, a, b, c, .5f, .5f, 0)
+              && accurate(between(cover, b, c, .5f), a, b, c, 0, .5f, .5f)
+              && accurate(between(cover, c, a, .5f), a, b, c, .5f, 0, .5f)
+              && accurate(between(cover, mid, c, 1 / 3f), a, b, c, 1 / 3f, 1 / 3f, 1 / 3f)) {
+            return false;
+        }
+        if (depth >= 12) { throw new IllegalStateException("Unbounded terrain cover palette at " + a.vertex().position); }
         append(groups, family, cover, a, mid, c, spacing, depth + 1);
         append(groups, family, cover, mid, b, c, spacing, depth + 1);
+        return true;
+    }
+
+    private static Point between(Function<MeshPartBuilder.VertexInfo, BoardSurfaceBlend.Cover> cover,
+          Point a, Point b, float amount) {
+        var v = new MeshPartBuilder.VertexInfo().set(a.vertex()).lerp(b.vertex(), amount);
+        v.normal.nor();
+        return new Point(v, cover.apply(v));
+    }
+
+    private static boolean accurate(Point sample, Point a, Point b, Point c, float wa, float wb, float wc) {
+        for (int family = 0; family < BoardSurfaceBlend.FAMILIES; family++) {
+            float expected = a.cover().weight(family) * wa + b.cover().weight(family) * wb + c.cover().weight(family) * wc;
+            if (Math.abs(sample.cover().weight(family) - expected) > .04f) { return false; }
+        }
+        return true;
     }
 }

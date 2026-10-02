@@ -373,15 +373,24 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
             protected Shader createShader(Renderable renderable) {
                 boolean instanced = instanced(renderable);
                 DepthShader.Config chosen = instanced ? trees : plain;
-                return new DepthShader(renderable, chosen, GpuGlsl.compile("GPU shadow depth",
+                boolean cutaway = renderable.material.has(GpuBuildingCutaway.TYPE);
+                String vertex = chosen.vertexShader == null ? GpuGlsl.libGdx(DepthShader.getDefaultVertexShader(), true) : chosen.vertexShader;
+                String fragment = chosen.fragmentShader == null ? GpuGlsl.libGdx(DepthShader.getDefaultFragmentShader(), false) : chosen.fragmentShader;
+                if (cutaway) {
+                    vertex = GpuBuildingCutaway.depthVertex(vertex, instanced);
+                    fragment = "in float v_buildingHeight;\n" + GpuBuildingCutaway.fragment(fragment, "v_buildingHeight");
+                }
+                DepthShader result = new DepthShader(renderable, chosen, GpuGlsl.compile("GPU shadow depth",
                       DepthShader.createPrefix(renderable, chosen),
-                      chosen.vertexShader == null ? GpuGlsl.libGdx(DepthShader.getDefaultVertexShader(), true) : chosen.vertexShader,
-                      chosen.fragmentShader == null ? GpuGlsl.libGdx(DepthShader.getDefaultFragmentShader(), false) : chosen.fragmentShader)) {
+                      vertex, fragment)) {
                     @Override
                     public boolean canRender(Renderable other) {
-                        return instanced(other) == instanced && super.canRender(other);
+                        return instanced(other) == instanced && other.material.has(GpuBuildingCutaway.TYPE) == cutaway
+                              && super.canRender(other);
                     }
                 };
+                GpuBuildingCutaway.register(result);
+                return result;
             }
         };
     }

@@ -14,6 +14,7 @@ change how already-visible information is displayed.
 | `GpuTactical`, `GpuFireControl` | Draw tactical primitives, range walls and attack lines. |
 | `BoardMarker`, `GpuMarkers`, `GpuCutout` | Describe visible point symbols and build/place their raised artwork. |
 | `UnitAnnotations`, `GpuHexText` | Present unit annotations and board text with the relevant placement/visibility rules. |
+| `GpuHexGrid` | Draw the shared hex border pattern through the completed scene in top view. |
 | `GpuUnitVisibility` | Draw the screen-space outline/fill for eligible units occluded by the scene. |
 | `GpuTerrain` | Fade occupied non-tree props and maintain their cutaway/depth state. |
 
@@ -38,6 +39,8 @@ opacity), keeping unobstructed sections fully bright. Both passes use the same
 geometry and preserve the scene depth.
 `GpuBattleView.HOVER_HEX_INSET` controls the native hover and editor-brush outline's
 inset as a fraction of the hex radius; `.1` preserves the original 10% inset.
+When the pointer hits a raised surface, its hover outline snaps the ray-hit height to the supporting floor level (the bottom of the storey hit by the ray). A second
+outline at the hex base and six connecting edges use 25% opacity to show the selected column.
 Terrain tints follow the terrain, unit bands follow the
 animated unit, and cross-hex lines retain their continuous layout. Upright range
 walls and raised point symbols have their own geometry; changing one must not
@@ -55,6 +58,17 @@ Change classification in the client capture; change appearance in
 `GpuFieldOfView` and the atmosphere's FOV helper.
 
 ## Point markers and labels
+
+`GpuHexText` uses only the labels captured by `BoardHexText`, preserving display preferences and the
+omission of LEVEL0. HEIGHT labels draw through content in their own hex, including units, while content
+in other hexes still occludes them. In top view, enabled ground labels ignore terrain, roofs, bridges
+and units. Angled ground labels retain scene depth, with the existing
+exception for their own decorative relief. Camera changes reuse the uploaded glyph meshes.
+
+`GpuHexGrid` repeats the existing terrain border pattern in top view after scene geometry and before
+labels. It shares the terrain's grid shading control, clips to the board footprint and does not write
+depth. One shared hex mesh uses captured coordinates and elevations, so overhead perspective also stays
+aligned; camera changes reuse the instance buffer. Angled views retain their existing terrain grid.
 
 `BoardClientState.getBoardMarkers()` captures existing marker descriptors,
 including minefields, artillery, objectives, notes, cargo and engineering status.
@@ -87,8 +101,16 @@ symbol and from the flat sprite fallback for a missing 3D asset.
 ## Building cutaways and see-through outlines
 
 A visible unit overlapping a non-tree prop's bounds can fade that prop.
+Hovering a building wall opens only the storey immediately above the highlighted floor plane.
+Its walls use the same opacity as unit-occupied buildings, while its supporting floor and struts remain opaque; other storeys and the roof
+keep their normal appearance. Both cameras use the same snapped height and original picking mesh,
+so opening a wall cannot move the hit to a different floor. Roof hover does not open a cutaway.
+The hover opening also works during unit cutaways, with its supporting floor kept opaque.
+Moving away restores the building unless a unit still requires it to remain faded.
 `GpuTerrain` uses animated bounds, so movement and flight height affect occupancy.
-Walls/floors use the chosen building opacity; interior struts remain opaque.
+Walls use the chosen building opacity; interior struts and floors at or below the lowest visible
+occupant remain opaque. Upper floors fade with an opacity one quarter of the way from the wall
+opacity to fully opaque. Moving between floors updates the existing render caches without rebuilding geometry.
 Faded surfaces stop writing camera depth, while buildings retain their full
 solid shadows. Leaving the prop restores its ordinary opacity/depth state.
 This is a bounds-based presentation effect, not physical collision.

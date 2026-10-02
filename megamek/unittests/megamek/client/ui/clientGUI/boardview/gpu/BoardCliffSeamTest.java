@@ -13,10 +13,9 @@ import java.util.Map;
 
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.math.Vector3;
-import megamek.common.Hex;
+import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
-import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -31,17 +30,12 @@ class BoardCliffSeamTest {
         Board board = new Board();
         board.load(file);
         List<BoardScene.Tile> tiles = new ArrayList<>();
+        var pixels = new BoardScene.PixelPool();
         for (int x = 0; x < board.getWidth(); x++) {
             for (int y = 0; y < board.getHeight(); y++) {
                 Coords at = new Coords(x, y);
-                Hex hex = board.getHex(at);
-                tiles.add(new BoardScene.Tile(at, hex.getLevel(),
-                      hex.containsTerrain(Terrains.WATER) ? hex.terrainLevel(Terrains.WATER) : -1,
-                      hex.containsTerrain(Terrains.ICE),
-                      hex.containsTerrain(Terrains.ROAD) ? hex.getTerrain(Terrains.ROAD).getExits() & 63 : 0,
-                      BoardFeatures.surface(hex), null, null, null, null, null,
-                      BoardFeatures.capture(hex, at, Map.of()), List.of(), BoardLiquid.capture(hex), null,
-                      BoardFeatures.detailedGround(hex, Map.of())));
+                var artwork = new BoardArtwork.HexImage(at, null, null, null, null, null, List.of(), Map.of(), null);
+                tiles.add(BoardScene.captureTile(board.getHex(at), artwork, null, pixels, board::getHex));
             }
         }
         return new BoardScene(0, board.getWidth(), board.getHeight(), tiles, List.of(), List.of(), -1, "", List.of());
@@ -167,6 +161,17 @@ class BoardCliffSeamTest {
               + open.stream().limit(5).toList());
     }
 
+    /** Continuous coverage also accepts a flat panel meeting several collinear rock segments. */
+    static void assertClosed(List<BoardSurface.Face> faces, float floor, String label) {
+        Map<Segment, Integer> edges = new HashMap<>();
+        countEdges(edges, faces);
+        long bottom = Math.round(floor * 1000);
+        var open = edges.entrySet().stream().filter(entry -> entry.getValue() == 1)
+              .map(Map.Entry::getKey).filter(e -> e.a.z != bottom || e.b.z != bottom)
+              .filter(e -> !covered(e, edges, Map.of(e, 1))).toList();
+        assertTrue(open.isEmpty(), label + " must close every boundary: " + open.stream().limit(8).toList());
+    }
+
     private record Point(long x, long y, long z) implements Comparable<Point> {
         static Point of(Vector3 p) {
             return new Point(Math.round(p.x * 1000), Math.round(p.y * 1000), Math.round(p.z * 1000));
@@ -189,17 +194,24 @@ class BoardCliffSeamTest {
         List<double[]> spans = new ArrayList<>();
         for (Segment other : joined.keySet()) {
             if (own.containsKey(other)) { continue; }
-            double[] span = new double[2];
+            double ax = other.a.x - edge.a.x, ay = other.a.y - edge.a.y, az = other.a.z - edge.a.z;
+            double bx = other.b.x - edge.a.x, by = other.b.y - edge.a.y, bz = other.b.z - edge.a.z;
+            double a = (ax * dx + ay * dy + az * dz) / length2;
+            double b = (bx * dx + by * dy + bz * dz) / length2;
+            if (Math.abs(b - a) < 1e-12) { continue; }
+            double low = Math.max(0, Math.min(a, b)), high = Math.min(1, Math.max(a, b));
+            if (low >= high) { continue; }
             boolean collinear = true;
-            int i = 0;
-            for (Point p : List.of(other.a, other.b)) {
-                double x = p.x - edge.a.x, y = p.y - edge.a.y, z = p.z - edge.a.z;
-                double t = (x * dx + y * dy + z * dz) / length2;
-                double rx = x - t * dx, ry = y - t * dy, rz = z - t * dz;
+            // Compare only the overlapping span: extending a short quantized edge all the way to the far end
+            // of a large slab amplifies its rounding error and falsely reports a gap.
+            for (double t : new double[] { low, high }) {
+                double u = (t - a) / (b - a);
+                double rx = ax + (bx - ax) * u - t * dx;
+                double ry = ay + (by - ay) * u - t * dy;
+                double rz = az + (bz - az) * u - t * dz;
                 collinear &= rx * rx + ry * ry + rz * rz <= 4;
-                span[i++] = t;
             }
-            if (collinear) { spans.add(new double[] { Math.min(span[0], span[1]), Math.max(span[0], span[1]) }); }
+            if (collinear) { spans.add(new double[] { low, high }); }
         }
         spans.sort(java.util.Comparator.comparingDouble(span -> span[0]));
         double end = 0;

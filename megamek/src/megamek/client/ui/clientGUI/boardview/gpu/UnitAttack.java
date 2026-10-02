@@ -26,6 +26,7 @@ final class UnitAttack {
     static final float MELEE_RUN_SECONDS = .65f;
     static final float MELEE_SWING_SECONDS = .4f;
     static final float MELEE_DODGE_HEXES = .14f;
+    static final float PHYSICAL_APPROACH_HEXES = .9f;
     static final int MACHINE_GUN_ROUNDS = 6;
     static final float MACHINE_GUN_FIRE_SECONDS = .55f;
     final BoardScene.Combat event;
@@ -119,6 +120,11 @@ final class UnitAttack {
     }
 
     /** Use the same posed mesh picker as the board. This is a contact location, never another hit decision. */
+    Vector3 contact(ModelInstance target, Vector3 origin, Vector3 result) {
+        if (surfaces == null) { surfaces = new UnitPicking(); }
+        return contact(target, origin, surfaces, result);
+    }
+
     Vector3 contact(ModelInstance target, Vector3 origin, UnitPicking picking, Vector3 result) {
         if (physicalContact != null) {
             result.set(physicalContact);
@@ -188,11 +194,18 @@ final class UnitAttack {
             at -= Math.max(0, impact.weight());
             if (at < 0) { location = impact.location(); break; }
         }
+        if (MeepleVisual.isMeeple(target)) { location = "*"; }
         if (surfaces == null) { surfaces = new UnitPicking(); }
         var key = new HitPoint(target, location, seed);
         var point = hitPoints.computeIfAbsent(key, ignored -> surfaces.surface(target, key.location(), origin,
               seed ^ event.result().id().hashCode()));
         if (point != null) { point.world(target, result); }
+        // A concave token can occlude its own incoming-facing wall. Stop at the first surface along the shot.
+        if (MeepleVisual.isMeeple(target)) {
+            var ray = new Ray(origin, result.cpy().sub(origin).nor());
+            float distance = surfaces.distance(target, ray);
+            if (Float.isFinite(distance)) { result.set(origin).mulAdd(ray.direction, (float) Math.sqrt(distance)); }
+        }
         return result;
     }
 

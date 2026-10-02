@@ -50,7 +50,7 @@ final class GpuWaterWaves {
             points.addAll(hull, 0, hull.length - 2);
         } else {
             addLattice(points, source, edges.keySet(), BoardRelief.metres(switch (lod) {
-                case FULL -> 2.5f;
+                case FULL -> 3;
                 case MEDIUM -> 6;
                 default -> 12;
             }));

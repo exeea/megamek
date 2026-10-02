@@ -106,7 +106,8 @@ class GpuBattleView extends ApplicationAdapter {
     private final GpuTerrainEffects terrainEffects = new GpuTerrainEffects();
     private final GpuEffectDepth effectDepth = new GpuEffectDepth();
     private final GpuWaterImpacts waterImpacts = new GpuWaterImpacts();
-    private final Map<BoardScene.Pixels, GpuUnitModel> spriteModels = new HashMap<>();
+    private record UnitSprite(BoardScene.Pixels pixels, boolean meeple) { }
+    private final Map<UnitSprite, GpuUnitModel> spriteModels = new HashMap<>();
     private final GpuUnitModels unitModels = GpuUnitModels.ENABLED ? new GpuUnitModels() : null;
     private final UnitDamageDisplay damageDisplay = new UnitDamageDisplay();
     private final GpuJumpJets jumpJets = new GpuJumpJets();
@@ -145,7 +146,10 @@ class GpuBattleView extends ApplicationAdapter {
     private GpuBoardUi ui;
     private BoardScene scene;
     private GpuHexText hexText;
+    private GpuHexGrid hexGrid;
     private Coords hovered;
+    /** Height of the latest pointer's terrain/object hit, owned by the render thread like hovered. */
+    private float hoverZ = Float.NaN;
     private UnitMotion.Speed playbackSpeed = UnitMotion.Speed.NORMAL;
     private boolean fitted;
     private long frames;
@@ -302,6 +306,7 @@ class GpuBattleView extends ApplicationAdapter {
         unitBatch = new ModelBatch(GpuShaderManager.provider("Units", GpuUnitShader::provider), new GpuOpaqueSorter());
         annotationBatch = new SpriteBatch();
         hexText = new GpuHexText();
+        hexGrid = new GpuHexGrid();
         lines = new ShapeRenderer();
     }
 
@@ -317,6 +322,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (unitBatch != null) { unitBatch.dispose(); unitBatch = null; }
         if (annotationBatch != null) { annotationBatch.dispose(); annotationBatch = null; }
         if (hexText != null) { hexText.dispose(); hexText = null; }
+        if (hexGrid != null) { hexGrid.dispose(); hexGrid = null; }
         if (lines != null) { lines.dispose(); lines = null; }
         attackEffects.dispose();
         terrainEffects.dispose();
@@ -409,6 +415,7 @@ class GpuBattleView extends ApplicationAdapter {
                         BoardRocks.reload();
                         BoardRough.reload();
                         BoardScatter.reload();
+                        BoardObstacles.reload();
                         BoardBridgeFooting.reload();
                         createSceneRenderers();
                         cameraTerrainRevision = -1;
@@ -480,6 +487,7 @@ class GpuBattleView extends ApplicationAdapter {
         }
         List<BoardScene.Tile> previousTiles = scene == null ? null : scene.tiles();
         scene = frame.scene();
+        if (unitModels != null) { unitModels.setDisplayMode(ui.unitDisplayMode()); }
         playback.accept(frame.timeline(), scene, this::hasInfantryTransports);
         try (TerrainSettings.Scope ignored = TerrainSettings.use(null)) {
             ui.update(frame, Messages.getString("GpuBoard.speed",
@@ -500,6 +508,8 @@ class GpuBattleView extends ApplicationAdapter {
         }
         boardGeneration = frame.boardGeneration();
         ui.setPlaybackPaused(playback.paused());
+        var atmosphereSettings = ui.atmosphere();
+        terrain.setGravity(atmosphereSettings.gravity());
         terrain.update(scene, boardCamera.camera);
         boolean detailChanged = terrain.refine(boardCamera.camera);
         settings.set(terrain.settings());
@@ -539,9 +549,7 @@ class GpuBattleView extends ApplicationAdapter {
         tactical.update(scene, detailChanged, hovered);
         fieldOfView.update(scene.fieldOfView());
         fieldOfView.configure(ui.fovStyle(), ui.fovDarkness(), ui.sensorStyle(), ui.sensorDarkness());
-        var atmosphereSettings = ui.atmosphere();
         atmosphere.configure(atmosphereSettings);
-        terrain.setGravity(atmosphereSettings.gravity());
         attackEffects.setWind(atmosphereSettings.effects());
         atmosphere.setOptions(ui.atmosphereOptions());
         terrain.setNormalMaps(ui.normalMaps());
@@ -552,10 +560,11 @@ class GpuBattleView extends ApplicationAdapter {
             spriteModels.values().forEach(GpuUnitModel::dispose);
             spriteModels.clear();
             unitPicking.clear();
+            attachments.geometryChanged();
         }
         Set<BoardScene.Pixels> images = scene.units().stream().map(BoardScene.Unit::image).collect(Collectors.toSet());
         boolean removedSprites = spriteModels.entrySet().removeIf(entry -> {
-            if (images.contains(entry.getKey())) {
+            if (images.contains(entry.getKey().pixels())) {
                 return false;
             }
             entry.getValue().dispose();
@@ -563,6 +572,7 @@ class GpuBattleView extends ApplicationAdapter {
         });
         if (removedSprites) {
             unitPicking.clear();
+            attachments.geometryChanged();
         }
         annotationTextures.update(scene.units().stream().filter(unit -> unit.annotations() != null).collect(Collectors.toMap(
               unit -> unit.id() + ":" + unit.part(), BoardScene.Unit::annotations)));
@@ -604,6 +614,14 @@ class GpuBattleView extends ApplicationAdapter {
         markers.beginFrame(scene.markers(), Gdx.graphics.getDeltaTime());
         prepareUnits();
         applyHover();
+        for (var unit : scene.units()) {
+            var instance = unitInstances.get(unit.id() + ":" + unit.part());
+            if (MeepleVisual.isMeeple(instance)) {
+                MeepleAnimator.attacks(unit, instance, playback.attacks(), unitInstances);
+                var visual = ((GpuUnitInstance) instance).visual();
+                unitAnchors.put(unit, visual.anchor(instance, boardCamera.camera));
+            }
+        }
         for (var attack : playback.attacks()) { attack.landscape = ray -> terrain.hit(scene, ray); }
         aimAttack();
         attachments.place(scene, unitModels, unitInstances, animators, playback.attachment(), boardCamera.camera, unitAnchors, hoverClock);
@@ -635,7 +653,8 @@ class GpuBattleView extends ApplicationAdapter {
         renderStage("cutaways and light");
         atmosphere.updateLight(boardCamera.camera);
         terrain.setAtmosphere(atmosphere.lighting());
-        terrain.animate(Gdx.graphics.getDeltaTime(), units, ui.buildingOpacity());
+        terrain.animate(Gdx.graphics.getDeltaTime(), units, ui.buildingOpacity(),
+              ui.hit(Gdx.input.getX(), Gdx.input.getY()) ? null : hovered, hoverFloorZ());
         renderStage("geometry shadows");
         terrain.renderShadows(boardCamera.camera, unitIcons.active() ? List.of() : units);
         renderStage("cloud transmission");
@@ -679,6 +698,7 @@ class GpuBattleView extends ApplicationAdapter {
         terrain.render(boardCamera.camera, true);
         fireControl.render(boardCamera.camera, Gdx.graphics.getDeltaTime());
         tactical.render(boardCamera.camera, Gdx.graphics.getDeltaTime(), unitIcons.active() ? unitIcons.instances() : List.of());
+        hexGrid.render(boardCamera, scene);
         renderHexText();
         fireControl.renderLabels(boardCamera.camera);
         renderSelectionOutlines();
@@ -727,7 +747,7 @@ class GpuBattleView extends ApplicationAdapter {
                 }
                 String key = unit.id() + ":" + unit.part();
                 var instance = unitInstances.get(key);
-                var model = unitModels.get(unit.model(), unit.id());
+                var model = instance instanceof GpuUnitInstance displayed ? displayed.visual() : null;
                 if (instance != null && model != null) {
                     jumpJets.update(key, model, instance, unit, sample);
                 }
@@ -774,7 +794,8 @@ class GpuBattleView extends ApplicationAdapter {
             GpuUnitModel visual = unit.sensorContact() ? markers.model(BoardMarker.Kind.SENSOR_CONTACT)
                   : unitModels == null ? null : unitModels.get(unit.model(), unit.id());
             boolean authored = !unit.sensorContact() && visual != null;
-            boolean dead = authored && unit.model().state() != null && unit.model().state().pose().dead();
+            boolean dead = !unit.sensorContact() && unit.model() != null && unit.model().state() != null
+                  && unit.model().state().pose().dead();
             var death = playback.attacks().stream().filter(attack -> attack.death() && attack.event.entityId() == unit.id())
                   .findFirst().orElse(null);
             float collapse = death == null ? dead ? 1 : 0 : death.deathProgress();
@@ -784,12 +805,14 @@ class GpuBattleView extends ApplicationAdapter {
                 if (Float.isFinite(ground)) { position.z = MathUtils.lerp(position.z, ground, collapse); }
             }
             if (visual == null) {
-                visual = spriteModels.computeIfAbsent(unit.image(), pixels ->
-                      GpuUnitModel.sprite(pixels, unitTextures.region(pixels)));
+                visual = spriteModels.computeIfAbsent(new UnitSprite(unit.image(), ui.unitDisplayMode().meeple(unit.model())),
+                      sprite -> sprite.meeple() ? GpuUnitModel.meeple(sprite.pixels(), unitTextures.region(sprite.pixels()))
+                            : GpuUnitModel.sprite(sprite.pixels(), unitTextures.region(sprite.pixels())));
             }
             String key = unit.id() + ":" + unit.part();
             ModelInstance instance = unitInstances.get(key);
             if (instance == null || instance.model != visual.instance.model) {
+                animators.remove(key);
                 instance = newUnitInstance(key, visual);
             }
             BoardScene.LocationDamage shownDamage = unitDamage.getOrDefault(key, BoardScene.LocationDamage.NONE);
@@ -798,8 +821,19 @@ class GpuBattleView extends ApplicationAdapter {
             BoardScene.LocationDamage damage = authored ? visual.infantry() ? unit.model().damage()
                   : UnitDamageDisplay.preview(unit.model().damage(), mek, ui.damageOverride(), visual.damageLocation(ui.damageLocation()))
                   : BoardScene.LocationDamage.NONE;
-            UnitModelState.Appearance appearance = authored && unit.model().state() != null
+            UnitModelState.Appearance appearance = !unit.sensorContact() && unit.model() != null && unit.model().state() != null
                   ? unit.model().state().appearance() : null;
+            if (visual.meeple()) {
+                // Fresh materials make repair/camouflage changes reversible; mesh buffers remain shared.
+                float loss = ui.damageOverride() >= 0 ? ui.damageOverride() : appearance == null ? 0 : appearance.bodyLoss();
+                var bodyDamage = UnitDamageDisplay.preview(BoardScene.LocationDamage.NONE, false, loss);
+                if (!bodyDamage.equals(shownDamage) || !java.util.Objects.equals(appearance, equipmentAppearance.get(key))) {
+                    instance = newUnitInstance(key, visual);
+                    MeepleVisual.appearance(instance, visual, appearance, ui.damageOverride(), unit.id(), camouflage, damageDisplay);
+                    unitDamage.put(key, bodyDamage);
+                    equipmentAppearance.put(key, appearance);
+                }
+            }
             if (authored && (!damage.equals(shownDamage)
                   || !java.util.Objects.equals(appearance, equipmentAppearance.get(key)))) {
                 UpperBodyTurn previousTurn = upperBodyTurns.get(key);
@@ -815,7 +849,7 @@ class GpuBattleView extends ApplicationAdapter {
                     visual.turnUpperBody(instance, previousTurn.degrees());
                 }
             }
-            if (dead) { damageDisplay.wreck(instance, visual, unit.id()); }
+            if (dead && authored) { damageDisplay.wreck(instance, visual, unit.id()); }
             // Presentation-only color for the see-through pass; the normal model materials retain their artwork.
             if (!(instance.userData instanceof Color)) {
                 instance.userData = new Color();
@@ -863,6 +897,8 @@ class GpuBattleView extends ApplicationAdapter {
             }
             Vector3 anchor = unit.sensorContact()
                   ? markers.placeSensor(unit.location().coords(), instance, boardCamera.camera, position)
+                  : visual.meeple() ? MeepleAnimator.place(visual, instance, placement, sample, boardCamera.camera, position, facing,
+                        playback.conversion(), boardCamera.isTopDown())
                   : visual.place(instance, boardCamera.camera, position, facing, placement);
             UnitAnimator animator = animators.get(key);
             if (authored && animator != null && unit.attachment() == null && animator.groundSupports(scene, placement, sample)) {
@@ -1312,7 +1348,7 @@ class GpuBattleView extends ApplicationAdapter {
 
     private void renderHexText() {
         hexText.update(scene, ui.font(), terrain::roofBounds);
-        hexText.render(annotationBatch, boardCamera.camera, atmosphere.depthTexture(), unitVisibility.depthTexture(),
+        hexText.render(annotationBatch, boardCamera, atmosphere.depthTexture(), unitVisibility.depthTexture(),
               ui.bottomPixels());
     }
 
@@ -1367,7 +1403,18 @@ class GpuBattleView extends ApplicationAdapter {
                     }
                 }
             } else {
-                ring(hovered);
+                float base = BoardTacticalGeometry.floatingZ(scene, hovered);
+                float top = Float.isNaN(hoverZ) ? base : Math.max(base, hoverFloorZ() + .5f * BoardGeometry.hexScale());
+                ring(hovered, top);
+                if (top > base + BoardGeometry.hexScale()) {
+                    lines.setColor(1, 1, 1, alpha * .25f);
+                    ring(hovered, base);
+                    Vector3 center = BoardGeometry.center(hovered, 0);
+                    for (int edge = 0; edge < 6; edge++) {
+                        Vector3 corner = BoardGeometry.inset(BoardGeometry.corner(hovered, 0, edge), center, HOVER_HEX_INSET);
+                        lines.line(corner.x, corner.y, base, corner.x, corner.y, top);
+                    }
+                }
             }
         }
         lines.end();
@@ -1432,8 +1479,15 @@ class GpuBattleView extends ApplicationAdapter {
         lines.triangle(cx, cy, bx, by, dx, dy);
     }
 
+    private float hoverFloorZ() {
+        return Float.isNaN(hoverZ) ? Float.NaN : MathUtils.floor(hoverZ / BoardGeometry.level() + .0001f) * BoardGeometry.level();
+    }
+
     private void ring(Coords coords) {
-        float z = BoardTacticalGeometry.floatingZ(scene, coords);
+        ring(coords, BoardTacticalGeometry.floatingZ(scene, coords));
+    }
+
+    private void ring(Coords coords, float z) {
         Vector3 center = BoardGeometry.center(coords, 0);
         Vector3 first = new Vector3();
         Vector3 second = new Vector3();
@@ -1496,7 +1550,7 @@ class GpuBattleView extends ApplicationAdapter {
         private record KeyPress(int code, int modifiers) { }
         private final Map<Integer, KeyPress> pressedKeys = new HashMap<>();
 
-        private record Pick(Coords coords, int entityId) { }
+        private record Pick(Coords coords, int entityId, float surfaceZ) { }
 
         private Coords pick(int x, int y) {
             return pickSelection(x, y).coords();
@@ -1504,7 +1558,7 @@ class GpuBattleView extends ApplicationAdapter {
 
         private Pick pickSelection(int x, int y) {
             if (scene == null || reloadingAssets || assetReloadFailed) {
-                return new Pick(null, Entity.NONE);
+                return new Pick(null, Entity.NONE, Float.NaN);
             }
             var ray = boardCamera.camera.getPickRay(x, y, 0, ui.bottomPixels(),
                   boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight);
@@ -1541,7 +1595,9 @@ class GpuBattleView extends ApplicationAdapter {
                     }
                 }
             }
-            return new Pick(coords, entityId);
+            float surfaceZ = ground != null && nearest == ground.distance()
+                  ? ray.getEndPoint(new Vector3(), (float) Math.sqrt(nearest)).z : Float.NaN;
+            return new Pick(coords, entityId, surfaceZ);
         }
 
         private void overlayInput(int event, int x, int y, Runnable fallback) {
@@ -1659,7 +1715,9 @@ class GpuBattleView extends ApplicationAdapter {
 
         @Override
         public boolean mouseMoved(int x, int y) {
-            hovered = ui.hit(x, y) ? null : pick(x, y);
+            Pick hit = ui.hit(x, y) ? new Pick(null, Entity.NONE, Float.NaN) : pickSelection(x, y);
+            hovered = hit.coords();
+            hoverZ = hit.surfaceZ();
             source.setHover(hovered);
             source.setPointer(ui.hit(x, y) ? -1 : Math.round(x / ui.hudScale()),
                   ui.hit(x, y) ? -1 : Math.round((y - ui.topPixels()) / ui.hudScale()));

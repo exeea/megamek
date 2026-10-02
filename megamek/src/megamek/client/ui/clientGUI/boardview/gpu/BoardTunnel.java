@@ -23,11 +23,10 @@ record BoardTunnel(Coords road, Vector3 origin, Vector3 along, BoardRoad.Kind ki
         if (BoardRoad.rendered(tile)) {
             entrances(scene, tile, tile.roadExits(), tile.elevation(), tile.road(), false, result);
         }
-        for (var feature : tile.features()) {
-            if (feature.asset().equals("bridge")) {
-                entrances(scene, tile, feature.bridgeExits(), tile.elevation() + feature.elevation(),
-                      BoardRoad.Kind.PAVED, true, result);
-            }
+        var feature = BoardBridge.feature(tile);
+        var kind = feature == null ? BoardRoad.Kind.NONE : BoardBridge.kind(scene, tile);
+        if (kind != BoardRoad.Kind.NONE) {
+            entrances(scene, tile, feature.bridgeExits(), tile.elevation() + feature.elevation(), kind, true, result);
         }
         return List.copyOf(result);
     }
@@ -38,6 +37,7 @@ record BoardTunnel(Coords road, Vector3 origin, Vector3 along, BoardRoad.Kind ki
             if ((exits & 1 << d) == 0) { continue; }
             var next = scene.tile(tile.coords().translated(d));
             if (next == null || next.liquid().present()
+                  || (bridge && BoardBridge.connected(tile, next, d))
                   || (next.elevation() - elevation) * BoardGeometry.level() < 20 * BoardGeometry.hexScale()) { continue; }
             // Ground roads keep their existing two-hex grading. A suspended deck instead meets the cliff at deck height.
             if (!bridge && (next.elevation() - elevation <= 2 || BoardSurface.hasRoadApproach(tile, next, d))) { continue; }

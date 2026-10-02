@@ -43,6 +43,16 @@ class GpuOceanTest {
     }
 
     @Test
+    void whitecapsCoverNothingInCalmAirAndTheConfiguredShareOfAGale() {
+        assertEquals(0, GpuOcean.foamCover(0), 1e-6);
+        assertEquals(0, GpuOcean.foamCover(GpuOcean.FOAM_ONSET), 1e-6, "The first whitecaps start at the onset");
+        assertEquals(GpuOcean.FOAM_COVERAGE, GpuOcean.foamCover(1), 1e-6);
+        for (float strength = GpuOcean.FOAM_ONSET; strength < 1; strength += .1f) {
+            assertTrue(GpuOcean.foamCover(strength + .1f) > GpuOcean.foamCover(strength), "More wind, more whitecaps");
+        }
+    }
+
+    @Test
     void lavaSpectrumIsHermitianSoItsTransformIsReal() {
         float[] lava = GpuOcean.lavaSpectrum();
         for (int y = 0; y < SIZE; y++) {

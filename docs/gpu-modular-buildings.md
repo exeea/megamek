@@ -42,6 +42,12 @@ if a GLB also supplies `lod2`, the loader uses it. Other asset types retain thei
 Each child is a rigid mesh node; multiple material primitives in that mesh are fine. Variant numbers may be
 sparse. `floor0`, at least one upper floor, and at least one roof are required. Do not add helper mesh nodes.
 
+Opaque materials may set glTF `doubleSided: true`. The shared rigid importer adds reverse-facing triangles with
+reversed normals, preserving colours and UVs, so both sides use the existing lighting, shadow and cutaway paths.
+Only double-sided primitives gain reverse faces; their additional vertices count toward the rigid asset's 65,535
+vertex limit. Single-sided materials remain unchanged. Explicit inner walls remain useful when the inside needs
+different geometry or textures. Alpha-blended and alpha-masked rigid materials remain unsupported.
+
 Author each floor exactly one model level (18 units) high in Blender's Z-up space. The GLB exporter converts to
 standard glTF Y-up. LOD0 has hollow walls with inward-facing geometry; runtime generates the interior slabs and
 struts. LOD1 floor walls are flat, with oppositely wound faces so both sides remain visible, without thickness or
@@ -65,12 +71,19 @@ to compress the floors. A five-level building has five floor modules plus its ro
 
 ## Interiors and picking
 
-Each roof must have a flat, downward-facing triangulated underside at its module base. That actual surface
-provides the occupied footprint, including notches, courtyards and disconnected wings. It is extruded through
-the stack height and passed to the shared `GpuBuildingInterior` floor/strut generator. This format assumes a
-constant footprint over the floors; setbacks and differing upper-floor footprints are not supported yet.
+The full roof projection preserves notches, courtyards and disconnected wings; its lowest underside alone may
+be only a border around an inset panel. The generated interior is clipped against closed mid-storey wall
+sections of the selected floor modules, using the external wall boundary so wall thickness remains included.
+Sections come from the simplest authored wall LOD (all LODs must share the same envelope), independently of
+camera distance. This keeps detailed window recesses and facade seams out of the floor geometry.
+Roof overhangs, sidewalks and horizontal decorative ledges do not enlarge those wall sections. The common
+footprint is extruded through the stack height and passed to `GpuBuildingInterior`; differing floor outlines
+therefore use their intersection rather than allowing full-height columns to extend outside any storey.
 Supports require their center and all four corners to lie inside the footprint. The roof cap's furniture does
-not increase occupied floor height. Existing occupancy cutaways fade walls and slabs while struts remain opaque.
+not increase occupied floor height. Generated floors and struts enter the render/depth passes only while that
+building is faded because of an occupant. Leaving, or disabling transparency, hides them again. They do not
+enter the exterior shadow pass, which retains the authored opaque shell. Existing occupancy cutaways fade
+walls and upper slabs while the occupied/lower floors and struts remain opaque.
 
 Picking keeps one triangle set per LOD0 module and offsets the ray for each story. It does not retain expanded
 triangles for every possible building combination. Picking is independent of the displayed LOD.

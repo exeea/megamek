@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.image.BufferedImage;
@@ -38,7 +39,7 @@ import org.junit.jupiter.api.Test;
 @Tag("on-demand")
 class GpuWaterShaderSmokeTest {
     @Test
-    void zeroScenarioGravityHidesWaterAndFallsInBothCamerasAndRestoresThem() {
+    void zeroScenarioGravityBuildsLunarTerrainInBothCamerasAndRestoresWater() {
         var failure = new AtomicReference<Throwable>();
         var configuration = GpuBoardWindow.configuration(false);
         configuration.setWindowedMode(640, 480);
@@ -47,7 +48,7 @@ class GpuWaterShaderSmokeTest {
             @Override
             public void create() {
                 try {
-                    var scene = scene(true, 3);
+                    var scene = lunarScene();
                     var conditions = new PlanetaryConditions();
                     for (boolean procedural : new boolean[] { false, true }) {
                         var terrain = new GpuTerrain(true, procedural);
@@ -64,6 +65,21 @@ class GpuWaterShaderSmokeTest {
                                 for (float gravity : new float[] { 0, 1, 0, 2, .5f, 0, 1 }) {
                                     conditions.setGravity(gravity);
                                     terrain.setGravity(BoardAtmosphere.fromScenario(conditions, false, .5).gravity());
+                                    terrain.update(scene);
+                                    BoardScene shown = terrain.presentation(scene);
+                                    if (gravity == 0) {
+                                        for (var tile : shown.tiles()) {
+                                            assertEquals(BoardScene.Surface.ROCK, tile.surface());
+                                            assertEquals(BoardLiquid.NONE, tile.liquid());
+                                            assertEquals(scene.tile(tile.coords()).elevation()
+                                                  - Math.max(0, scene.tile(tile.coords()).waterDepth()), tile.elevation());
+                                        }
+                                        terrain.update(scene);
+                                        assertSame(shown.tiles(), terrain.presentation(scene).tiles(),
+                                              "An unchanged zero-gravity frame reuses its converted tiles");
+                                    } else {
+                                        assertSame(scene.tiles(), shown.tiles(), "Positive gravity restores source tiles");
+                                    }
                                     terrain.animate(0, List.of());
                                     for (int warmup = 0; warmup < 4; warmup++) { parityPixels(terrain, camera, true); }
                                     byte[] opaque = parityPixels(terrain, camera, false);
@@ -531,6 +547,20 @@ class GpuWaterShaderSmokeTest {
 
     private static void save(Pixmap image, String name) {
         PixmapIO.writePNG(Gdx.files.absolute(new File(output(), name + ".png").getAbsolutePath()), image);
+    }
+
+    private static BoardScene lunarScene() {
+        BoardScene scene = scene(true, 3);
+        var tiles = new ArrayList<>(scene.tiles());
+        for (var kind : BoardLiquid.Kind.values()) {
+            var at = new Coords(6 + kind.ordinal(), 4);
+            var tile = scene.tile(at);
+            int depth = kind == BoardLiquid.Kind.WATER || kind == BoardLiquid.Kind.HAZARDOUS ? 1 : -1;
+            tiles.set(at.getX() * scene.height() + at.getY(), new BoardScene.Tile(at, 2, depth,
+                  kind == BoardLiquid.Kind.WATER, 0, tile.surface(), tile.ground(), null, null, null, null,
+                  List.of(), List.of(), new BoardLiquid(kind, "", 0), null, true));
+        }
+        return scene.withTiles(tiles);
     }
 
     private static BoardScene scene(boolean river, int drop) {

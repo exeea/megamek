@@ -26,7 +26,8 @@ final class UnitModelSelection {
         var movement = entity instanceof megamek.common.units.QuadVee ? megamek.common.units.EntityMovementMode.QUAD : form.movement();
         var captured = new UnitModelState(new UnitModelState.Structure(movement, structure.equipment(),
               structure.members(), structure.activeTroopers(), structure.externalSearchlight(), structure.anatomy(),
-              body == null ? null : new UnitModelState.BodyForm(movement.name(), body.size(), body.turrets(), body.fighters())),
+              body == null ? null : new UnitModelState.BodyForm(movement.name(), body.size(), body.turrets(), body.fighters()),
+              structure.family()),
               state.appearance(), new UnitModelState.Pose(pose.proneCause(), pose.facing(), pose.secondaryFacing(), form,
                     pose.dead(), pose.armsFlipped(), pose.hullDown()));
         return new BoardScene.UnitModel(tileset.modelFor(entity, part, form), tileset.genericModelFor(entity, part, form),
@@ -46,9 +47,7 @@ final class UnitModelSelection {
             return null;
         }
         String asset = tileset.modelFor(entity, part);
-        if (asset == null) {
-            return null;
-        }
+        // Meeples need the captured family, equipment and camouflage even without an authored asset.
         // Support assets may reuse an infantry tileset entry without exposing a personnel count.
         UnitModelState state = UnitModelState.capture(entity);
         int count = 1;
@@ -60,7 +59,7 @@ final class UnitModelSelection {
             // Formation artwork follows the unit's motive type, independently of its name or sprite.
             variant = infantry.getMovementMode().name();
         }
-        return new BoardScene.UnitModel(asset, tileset.genericModelFor(entity, part),
+        return new BoardScene.UnitModel(asset, asset == null ? null : tileset.genericModelFor(entity, part),
               variant, count, twist, damage(entity), state);
     }
 
@@ -75,12 +74,7 @@ final class UnitModelSelection {
     static BoardScene.LocationDamage damage(Entity entity) {
         if (entity instanceof Infantry) { return BoardScene.LocationDamage.NONE; }
         if (!(entity instanceof Mek mek)) {
-            float original = 0, remaining = 0;
-            for (int location = 0; location < entity.locations(); location++) {
-                original += armor(entity, location, true) + Math.max(0, entity.getOInternal(location));
-                remaining += armor(entity, location, false) + Math.max(0, entity.getInternal(location));
-            }
-            var stage = UnitDamageDisplay.bodyStage(loss(remaining, original));
+            var stage = UnitDamageDisplay.bodyStage(bodyLoss(entity));
             return stage == null ? BoardScene.LocationDamage.NONE
                   : new BoardScene.LocationDamage(Set.of(), Set.of(), java.util.Map.of("*", stage));
         }
@@ -109,6 +103,17 @@ final class UnitModelSelection {
             value += Math.max(0, original ? entity.getOArmor(location, true) : entity.getArmor(location, true));
         }
         return value;
+    }
+
+    /** Whole-body appearance, using the same armor/structure totals as unsplit authored units. */
+    static float bodyLoss(Entity entity) {
+        if (entity.isDestroyed() || entity.isDoomed()) { return 1; }
+        float original = 0, remaining = 0;
+        for (int location = 0; location < entity.locations(); location++) {
+            original += armor(entity, location, true) + Math.max(0, entity.getOInternal(location));
+            remaining += armor(entity, location, false) + Math.max(0, entity.getInternal(location));
+        }
+        return loss(remaining, original);
     }
 
     private static float loss(float remaining, float original) {

@@ -20,6 +20,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.GL30;
+import com.badlogic.gdx.graphics.GLTexture;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.TextureArray;
@@ -41,8 +42,9 @@ final class GpuAssets implements Disposable {
     private final Map<String, GpuBuilding> buildings = new HashMap<>();
     private final Map<String, Texture> materials = new HashMap<>();
     private final Map<String, Cliff> cliffs = new HashMap<>();
-    private final Map<Boolean, Magma> magmas = new HashMap<>();
+    private final Map<Boolean, TextureArray> magmas = new HashMap<>();
     private final Map<String, Sculpt> sculpts = new HashMap<>();
+    private final Map<String, JsonValue> sculptEntries = new HashMap<>();
     private TextureArray sculptArray;
     private TextureArray roadArray;
     private JsonValue sculptManifest;
@@ -57,21 +59,18 @@ final class GpuAssets implements Disposable {
     /** Three aligned, repeating maps. Surface channels are height, roughness, occlusion and relief range. */
     record Cliff(Texture color, Texture normal, Texture surface) { }
 
-    /** Standard relief maps plus R heat, GB signed flow and A heat bleeding onto crack walls. */
-    record Magma(Cliff relief, Texture heat) { }
-
-    Magma magma(boolean molten) {
+    /**
+     * Molten lava's or solid crust's aligned maps as the four layers of one array, so they take one texture unit:
+     * colour; normal; surface (height, roughness, occlusion, relief range); heat (R heat, GB signed flow, A heat
+     * bleeding onto crack walls). Null while the data set lacks any of them: magma then keeps its legacy artwork/GIF.
+     */
+    TextureArray magma(boolean molten) {
         if (magmas.containsKey(molten)) { return magmas.get(molten); }
-        String name = molten ? "lava" : "crust";
-        String key = "magma/" + name;
-        // Preserve the legacy artwork/GIF path for older or partial data packs.
-        for (String suffix : List.of("", "-normal", "-surface", "-heat")) {
-            if (!materialFile(key + suffix).exists()) {
-                magmas.put(molten, null);
-                return null;
-            }
+        var files = new ArrayList<FileHandle>();
+        for (String map : List.of("", "-normal", "-surface", "-heat")) {
+            files.add(materialFile("magma/" + (molten ? "lava" : "crust") + map));
         }
-        Magma maps = new Magma(relief("magma", name, "terrain/rock"), material(key + "-heat"));
+        TextureArray maps = files.stream().allMatch(FileHandle::exists) ? repeatingArray(files, 4) : null;
         magmas.put(molten, maps);
         return maps;
     }
@@ -90,10 +89,7 @@ final class GpuAssets implements Disposable {
                 files.add(materialFile("sculpt/" + name));
                 files.add(materialFile("sculpt/" + name + "-normal"));
             }
-            sculptArray = new TextureArray(new SculptArrayData(files, 2));
-            sculptArray.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
-            sculptArray.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
-            sculptArray.setAnisotropicFilter(8);
+            sculptArray = repeatingArray(files, 2);
         }
         return sculptArray;
     }
@@ -110,12 +106,24 @@ final class GpuAssets implements Disposable {
                 for (String map : List.of("", "-normal", "-surface")) { files.add(materialFile("roads/" + name + map)); }
             }
             if (!files.stream().allMatch(FileHandle::exists)) { return null; }
-            roadArray = new TextureArray(new SculptArrayData(files, 3));
-            roadArray.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
-            roadArray.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
-            roadArray.setAnisotropicFilter(8);
+            roadArray = repeatingArray(files, 3);
         }
         return roadArray;
+    }
+
+    /** Sets of {@code maps} aligned repeating maps, filtered like the separate material textures. */
+    private static TextureArray repeatingArray(List<FileHandle> files, int maps) {
+        var array = new TextureArray(new SculptArrayData(files, maps));
+        array.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
+        array.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
+        // GLTexture.setAnisotropicFilter always sets GL_TEXTURE_2D, so it would leave an array isotropic (blurred
+        // at grazing angles) and change whichever 2D texture the unit holds; set the array's own parameter.
+        float anisotropy = Math.min(8, GLTexture.getMaxAnisotropicFilterLevel());
+        if (anisotropy > 1) {
+            array.bind();
+            Gdx.gl.glTexParameterf(GL30.GL_TEXTURE_2D_ARRAY, GL20.GL_TEXTURE_MAX_ANISOTROPY_EXT, anisotropy);
+        }
+        return array;
     }
 
     /** Uploaded once per renderer; missing maps get the same neutral fallback as ordinary sculpt materials. */
@@ -272,16 +280,34 @@ final class GpuAssets implements Disposable {
      */
     Sculpt sculpt(String name) {
         return sculpts.computeIfAbsent(name, key -> {
-            FileHandle color = materialFile("sculpt/" + key), normal = materialFile("sculpt/" + key + "-normal");
-            FileHandle manifest = new FileHandle(new File(root, "textures/sculpt/manifest.json"));
-            if (sculptManifest == null && manifest.exists()) { sculptManifest = new JsonReader().parse(manifest); }
-            JsonValue entry = sculptManifest == null ? null : sculptManifest.get("materials").get(key);
-            if (!color.exists() || !normal.exists() || entry == null) {
+            JsonValue entry = sculptEntry(key);
+            if (entry == null) {
                 flatMaps();
                 return new Sculpt(flatColor, flatNormal, 4);
             }
-            return new Sculpt(texture(color), texture(normal), entry.getFloat("tile"));
+            return new Sculpt(texture(materialFile("sculpt/" + key)), texture(materialFile("sculpt/" + key + "-normal")),
+                  entry.getFloat("tile"));
         });
+    }
+
+    /** Array-backed materials need the repeat scale without decoding and uploading a second set of 2D textures. */
+    float sculptTile(String name) {
+        JsonValue entry = sculptEntry(name);
+        return entry == null ? 4 : entry.getFloat("tile");
+    }
+
+    private JsonValue sculptEntry(String name) {
+        if (!sculptEntries.containsKey(name)) {
+            FileHandle manifest = new FileHandle(new File(root, "textures/sculpt/manifest.json"));
+            if (sculptManifest == null && manifest.exists()) { sculptManifest = new JsonReader().parse(manifest); }
+            JsonValue entry = sculptManifest == null ? null : sculptManifest.get("materials").get(name);
+            if (!materialFile("sculpt/" + name).exists() || !materialFile("sculpt/" + name + "-normal").exists()) {
+                entry = null;
+            }
+            // Like the textures, metadata belongs to this asset owner; asset reload creates a fresh owner.
+            sculptEntries.put(name, entry);
+        }
+        return sculptEntries.get(name);
     }
 
     private static Texture solid(int rgba) {
@@ -342,7 +368,7 @@ final class GpuAssets implements Disposable {
             texture.setWrap(wrap, wrap);
             if (repeating && (file.parent().name().equals("cliffs") || file.parent().name().equals("ground")
                   || file.parent().name().equals("sculpt") || file.parent().name().equals("roads")
-                  || file.parent().name().equals("magma") || file.parent().name().equals("ice"))) {
+                  || file.parent().name().equals("ice"))) {
                 // Cliff relief needs its full resolution; mipmaps and supported anisotropy handle distance.
                 texture.setAnisotropicFilter(8);
             } else if (repeating) {
@@ -534,8 +560,10 @@ final class GpuAssets implements Disposable {
         modelLods.clear();
         materials.clear();
         cliffs.clear();
+        magmas.values().stream().filter(java.util.Objects::nonNull).forEach(TextureArray::dispose);
         magmas.clear();
         sculpts.clear();
+        sculptEntries.clear();
         if (sculptArray != null) { sculptArray.dispose(); sculptArray = null; }
         if (roadArray != null) { roadArray.dispose(); roadArray = null; }
         sculptManifest = null;

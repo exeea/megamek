@@ -48,6 +48,20 @@ class GpuTerrainIncrementalSmokeTest {
                     assertSame(retained, incremental.tacticalSurface(untouched),
                           "An untouched hex inside a replaced chunk keeps its finished surface");
                     compareFresh(incremental, scene);
+                    // Adding, redirecting and removing cliff exits changes only the edge shape, not either level.
+                    for (int exits : new int[] { 56, 24, 0 }) {
+                        var at = new Coords(8, 8);
+                        var tile = scene.tile(at);
+                        var tiles = new ArrayList<>(scene.tiles());
+                        tiles.set(at.getX() * scene.height() + at.getY(), new BoardScene.Tile(at, tile.elevation(),
+                              tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(), tile.ground(), tile.normals(),
+                              tile.decals(), tile.decalsWithoutLimbs(), tile.tactical(), tile.features(), tile.text(),
+                              tile.liquid(), tile.foliage(), tile.detailedGround(), tile.road(), tile.fireSmoke(), tile.biome(),
+                              tile.impassable(), tile.blackIce(), exits));
+                        scene = new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
+                        incremental.update(scene);
+                        compareFresh(incremental, scene);
+                    }
                     // Lowering the visual floor changes the perimeter, not every interior tile.
                     retained = incremental.tacticalSurface(new Coords(4, 4));
                     scene = edit(scene, new Coords(8, 8), -2, -1, BoardScene.Surface.SAND);

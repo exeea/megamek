@@ -25,6 +25,36 @@ vec3 fovEffect(vec4 mask) {
     return mask.a * 255.0 >= 15.5 ? u_sensorEffect : u_fovEffect;
 }
 
+float fovOpacity(vec4 mask) {
+    if (fovState(mask) <= 2.5) return 0.0;
+    vec3 effect = fovEffect(mask);
+    return effect.z > 0.5 ? 1.0 - pow(1.0 - effect.x, 4.0) : effect.x;
+}
+
+vec3 fovPosition(vec2 uv, float depth) {
+    vec4 point = u_fovInverseView * vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+    return point.xyz / point.w;
+}
+
+vec3 fovNormal(vec3 position) {
+    vec3 normal = cross(dFdx(position), dFdy(position));
+    return normal / max(length(normal), 0.000001);
+}
+
+vec2 fovSurfaceHex(vec3 position, vec3 normal) {
+    // At a cliff edge, sample just inside its solid side to avoid depth rounding into the adjacent hex.
+    vec3 inside = position - normal * (min(u_fovHexSize.x, u_fovHexSize.y) * 0.002);
+    return boardHex(vec2(inside.x, -inside.y) / u_fovHexSize);
+}
+
+float fovHeatTransmission(vec2 uv, float depth) {
+    vec3 position = fovPosition(uv, depth);
+    vec3 normal = fovNormal(position);
+    // As in the composite, derive the surface normal before branching away background lanes.
+    if (depth >= 1.0) return 1.0;
+    return 1.0 - fovOpacity(fovAt(fovSurfaceHex(position, normal)));
+}
+
 float fovBorder(vec2 neighbor, float distance, vec4 mask) {
     float state = fovState(mask);
     vec4 otherMask = fovAt(neighbor);
@@ -36,19 +66,13 @@ float fovBorder(vec2 neighbor, float distance, vec4 mask) {
 }
 
 vec3 fieldOfView(vec3 color, float depth) {
-    vec4 world = u_fovInverseView * vec4(v_uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
-    vec3 position = world.xyz / world.w;
-    vec3 normal = cross(dFdx(position), dFdy(position));
-    normal /= max(length(normal), 0.000001);
+    vec3 position = fovPosition(v_uv, depth);
+    vec3 normal = fovNormal(position);
     // Derivatives need the whole pixel quad, including background lanes at silhouettes.
     if (depth >= 1.0) return color;
     float horizontal = smoothstep(0.35, 0.80, abs(normal.z));
     vec2 point = vec2(position.x, -position.y) / u_fovHexSize;
-    // A cliff sits exactly on a shared edge. Reconstructed depth can round to either
-    // hex, so sample just inside its solid side instead of letting the wall sparkle.
-    // Top faces have no horizontal normal and keep their original lookup position.
-    vec3 inside = position - normal * (min(u_fovHexSize.x, u_fovHexSize.y) * 0.002);
-    vec2 hex = boardHex(vec2(inside.x, -inside.y) / u_fovHexSize);
+    vec2 hex = fovSurfaceHex(position, normal);
     vec4 mask = fovAt(hex);
     float state = fovState(mask);
     if (state < 0.5) return color;
@@ -72,7 +96,7 @@ vec3 fieldOfView(vec3 color, float depth) {
         color = mix(color, vec3(gray), desaturate);
         vec3 shade = sensor ? vec3(0.10, 0.20, 0.25) : vec3(0.025, 0.035, 0.055);
         if (u_fovOptions.y > 0.5) shade.b += 0.10;
-        if (effect.z > 0.5) amount = 1.0 - pow(1.0 - amount, 4.0);
+        amount = fovOpacity(mask);
         color = mix(color, shade, amount);
     } else if (state < 1.5 && mod(floor(mask.a * 255.0 + 0.5), 16.0) > 8.0) {
         color = mix(color, mask.rgb, u_fovOptions.x);

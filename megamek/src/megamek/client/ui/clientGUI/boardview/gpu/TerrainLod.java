@@ -5,10 +5,10 @@ import megamek.common.board.Coords;
 
 /** Render sampling only: the board's dimensions never choose terrain quality. */
 enum TerrainLod {
-    FULL(12, 1, new float[] { .26f, .52f, .78f }, new int[] { 3, 6, 12 }, true),
-    MEDIUM(6, 2, new float[] { .35f, .7f }, new int[] { 3, 6 }, true),
-    COARSE(3, 4, new float[] { .55f }, new int[] { 2 }, false),
-    DISTANT(1, 12, new float[0], new int[0], false);
+    FULL(6, 1, 3, true),
+    MEDIUM(3, 2, 2, true),
+    COARSE(2, 3, 1, false),
+    DISTANT(1, 6, 0, false);
 
     static final int CHUNK_SIZE = 8;
     static final boolean DEFAULT_ENABLED = true;
@@ -36,15 +36,13 @@ enum TerrainLod {
     static void tune(Tuning next) { tuning = next; }
     final int steps;
     final int rowStride;
-    final float[] rings;
-    final int[] ringSamples;
+    final int topSamples;
     final boolean dressing;
 
-    TerrainLod(int steps, int rowStride, float[] rings, int[] ringSamples, boolean dressing) {
+    TerrainLod(int steps, int rowStride, int topSamples, boolean dressing) {
         this.steps = steps;
         this.rowStride = rowStride;
-        this.rings = rings;
-        this.ringSamples = ringSamples;
+        this.topSamples = topSamples;
         this.dressing = dressing;
     }
 

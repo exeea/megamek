@@ -314,7 +314,7 @@ class BoardWaterfallTest {
     }
 
     @Test
-    void waterRocksHaveAFoundationInTheDrawnGround() {
+    void waterfallRocksKeepFoundationsAtEveryWaterDepth() {
         var original = BoardRelief.tuning();
         try {
             GpuRiverTerrainSmokeTest.setWidth(.5f);
@@ -327,12 +327,13 @@ class BoardWaterfallTest {
                     // Every placed rock carries its own deterministic tint on all its faces.
                     Map<Float, List<Vector3>> rocks = new HashMap<>();
                     for (var face : surface.faces) {
-                        if (face.finish() == BoardSurface.Finish.OUTCROP) {
+                        if (face.finish() == BoardSurface.Finish.OUTCROP
+                              && surface.relief.shade(face.a()).kind() == BoardRelief.Kind.ROCK) {
                             rocks.computeIfAbsent(surface.relief.shade(face.a()).tint(), key -> new ArrayList<>())
                                   .addAll(List.of(face.a(), face.b(), face.c()));
                         }
                     }
-                    assertTrue(!rocks.isEmpty(), "The fixture includes rocks at the lip and in its receiving pool");
+                    assertTrue(!rocks.isEmpty(), "Geological lip/pool rocks remain at depth " + depth);
                     for (var rock : rocks.values()) {
                         assertTrue(rock.stream().anyMatch(p -> p.z < BoardSurface.sampleHeight(ground, p.x, p.y, Float.NaN)),
                               "A rock must enter the terrain, including the depth-" + depth + " bed at " + coords);

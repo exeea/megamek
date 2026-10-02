@@ -63,7 +63,9 @@ class TerrainLodTest {
             }
         }
         assertEquals(area[1], area[0], .01, "Simplification must retain the entire ground footprint");
-        assertTrue(distant.faces.size() * 4 < full.faces.size(), "Subpixel ground should use substantially fewer triangles");
+        assertEquals(6, distant.faces.stream().filter(f -> f.finish() == BoardSurface.Finish.TOP).count());
+        assertEquals(6, full.faces.stream().filter(f -> f.finish() == BoardSurface.Finish.TOP).count(),
+              "Full detail must not add geometry to a flat top");
         Vector3 center = BoardGeometry.center(at, 1);
         for (int direction = 0; direction < 6; direction++) {
             Coords other = at.translated(direction);

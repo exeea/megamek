@@ -52,12 +52,12 @@ void concreteSlab(vec3 world, vec3 face, float h, float d, float rock,
         float shadeX, shadeY;
         vec2 sx = slab(world.y * sign(face.x), world.z, h, d, 1.0, single, shadeX);
         vec2 sy = slab(-world.x * sign(face.y), world.z, h, d, 0.0, single, shadeY);
-        vec3 concrete = mix(texture(u_mantleColor, sy).rgb * shadeY,
-              texture(u_mantleColor, sx).rgb * shadeX, along);
+        vec3 concrete = mix(mapTexel(u_sculptLayers.w, sy).rgb * shadeY,
+              mapTexel(u_sculptLayers.w, sx).rgb * shadeX, along);
         albedo = mix(albedo, concrete, poured);
-        if (u_normalMaps > .5) {
-            normal = normalize(mix(normal, wallNormal(u_mantleNormal, sx, sy, face, along), poured));
-            float pores = mix(texture(u_mantleNormal, sy).a, texture(u_mantleNormal, sx).a, along);
+        if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
+            normal = normalize(mix(normal, wallNormal(u_sculptLayers.w + 1.0, sx, sy, face, along), poured));
+            float pores = mix(mapTexel(u_sculptLayers.w + 1.0, sy).a, mapTexel(u_sculptLayers.w + 1.0, sx).a, along);
             cavity = mix(cavity, pores * .5 + .5, poured);
         }
     }

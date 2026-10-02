@@ -60,8 +60,10 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
         float amount = materialWeights(vec4(1.0 - fringe.x, fringe.x, 0.0, 0.0),
               vec4(materialHeight, soil.a, 0.0, 0.0)).y;
         color = mix(color, mix(earth, crop, canopy * planted * .95), amount);
-        if (u_normalMaps > .5) {
-            normal = normalize(mix(normal, upNormal(planarNormal(u_biomeSoilNormal, soilUV, u_biomeSoilTile, broad).rgb, face), amount));
+        if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
+            vec3 soilNormal = upNormal(planarNormal(u_biomeSoilNormal, soilUV, u_biomeSoilTile, broad).rgb, face);
+            soilNormal = normalize(mix(face, soilNormal, terrainNormalDetail));
+            normal = normalize(mix(normal, soilNormal, amount));
         }
         normal = normalize(normal + vec3(direction * sin(row * 6.2831853) * .30 * visible * cover.x, 0.0));
         cavity *= 1.0 - cover.x * (1.0 - ridge) * .30 * visible;
@@ -120,11 +122,12 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
         float bump = smoothstep(.45, .64, wet) * .23;
         float area = dot(dx, cross(dy, face));
         vec3 gradient = (cross(dy, face) * dFdx(bump) + cross(face, dx) * dFdy(bump)) / max(abs(area), .00001) * sign(area);
-        if (u_normalMaps > .5) {
+        if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
             vec3 soilNormal = projection.lying >= 1.0
                   ? upNormal(planarNormal(u_biomeSoilNormal, projection.top, u_biomeSoilTile, broad).rgb, face)
                   : drapedNormal(u_biomeSoilNormal, projection.top, projection.x, projection.y,
                         face, projection.side, u_biomeSoilTile, broad, projection.lying);
+            soilNormal = normalize(mix(face, soilNormal, terrainNormalDetail));
             normal = normalize(mix(normal, soilNormal, wetland));
         }
         normal = normalize(normal - gradient * wetland * (1.0 - bare));

@@ -29,17 +29,23 @@ final class BoardFlow {
         for (BoardScene.Tile tile : scene.tiles()) {
             if (!tile.liquid().present() || tile.frozen()) { continue; }
             List<BoardScene.Tile> adjacent = new ArrayList<>();
-            int levelMouths = 0;
             for (int direction = 0; direction < 6; direction++) {
                 BoardScene.Tile neighbor = scene.tile(tile.coords().translated(direction));
                 if (neighbor != null && !neighbor.frozen() && tile.liquid().connects(neighbor.liquid())) {
                     adjacent.add(neighbor);
-                    if (neighbor.elevation() == tile.elevation()) { levelMouths |= 1 << direction; }
                 }
             }
             neighbors.put(tile.coords(), adjacent);
-            // Adjacent open mouths form broad bays; separated mouths and narrow junctions carry a stream.
-            if ((levelMouths & ((levelMouths << 1) | (levelMouths >> 5))) != 0) { lakes.add(tile.coords()); }
+        }
+        // Water open on five or more sides at its own level is a lake's body, and so is the water beside it. A river
+        // stays open on fewer sides, even where it widens to two hexes or runs through shallows: it keeps its current.
+        for (var entry : neighbors.entrySet()) {
+            int elevation = scene.tile(entry.getKey()).elevation();
+            List<BoardScene.Tile> level = entry.getValue().stream()
+                  .filter(other -> other.elevation() == elevation).toList();
+            if (level.size() < 5) { continue; }
+            lakes.add(entry.getKey());
+            level.forEach(other -> lakes.add(other.coords()));
         }
         Map<Coords, Coords> downstream = new HashMap<>();
         Set<Coords> visited = new HashSet<>();
@@ -56,16 +62,18 @@ final class BoardFlow {
                 }
             }
             Map<Coords, Integer> distance = new HashMap<>();
-            boolean hasInlet = false;
+            List<BoardScene.Tile> inlets = new ArrayList<>();
             List<BoardScene.Tile> boundary = new ArrayList<>();
             for (BoardScene.Tile tile : plateau) {
                 BoardScene.Tile lowest = null;
+                boolean hasInlet = false;
                 for (BoardScene.Tile neighbor : neighbors.get(tile.coords())) {
                     hasInlet |= neighbor.elevation() > tile.elevation();
                     if (neighbor.elevation() < tile.elevation() && (lowest == null || neighbor.elevation() < lowest.elevation())) {
                         lowest = neighbor;
                     }
                 }
+                if (hasInlet) { inlets.add(tile); }
                 if (lowest != null) {
                     downstream.put(tile.coords(), lowest.coords());
                     distance.put(tile.coords(), 0);
@@ -73,21 +81,17 @@ final class BoardFlow {
                 }
                 if (edge(scene, tile.coords())) { boundary.add(tile); }
             }
-            // A higher inlet can identify a single boundary outlet or the lake into which a flat reach empties.
-            // With no elevation evidence, even a narrow edge-to-edge river has no assumed direction.
-            if (pending.isEmpty() && hasInlet) {
-                if (boundary.size() == 1 && !lakes.contains(boundary.getFirst().coords())) {
-                    BoardScene.Tile outlet = boundary.getFirst();
-                    for (int direction = 0; direction < 6; direction++) {
-                        Coords outside = outlet.coords().translated(direction);
-                        if (scene.tile(outside) == null) { downstream.put(outlet.coords(), outside); break; }
-                    }
-                    distance.put(outlet.coords(), 0);
-                    pending.add(outlet);
-                } else {
-                    for (BoardScene.Tile tile : plateau) {
-                        if (lakes.contains(tile.coords())) { distance.put(tile.coords(), 0); pending.add(tile); }
-                    }
+            // Height is the first source of direction. Carry an incoming descent along every branch of its flat
+            // receiving reach; routing everything back from one outlet instead turns the other arms into sources.
+            if (!inlets.isEmpty()) {
+                spreadFromInlets(scene, plateau, inlets, neighbors, downstream, lakes);
+                continue;
+            }
+            // With no height evidence, a narrow river entering at the map edge feeds a wider lake/ocean. An equally
+            // narrow edge-to-edge reach remains ambiguous, and the open lake body keeps its local waves, not a drift.
+            if (pending.isEmpty() && boundary.stream().anyMatch(tile -> neighbors.get(tile.coords()).size() <= 2)) {
+                for (BoardScene.Tile tile : plateau) {
+                    if (lakes.contains(tile.coords())) { distance.put(tile.coords(), 0); pending.add(tile); }
                 }
             }
             while (!pending.isEmpty()) {
@@ -120,6 +124,43 @@ final class BoardFlow {
             result.put(tile.coords(), new Current(-direction.x * speed, direction.y * speed * BoardGeometry.width() / BoardGeometry.height()));
         }
         return Map.copyOf(result);
+    }
+
+    private static void spreadFromInlets(BoardScene scene, List<BoardScene.Tile> plateau,
+          List<BoardScene.Tile> inlets, Map<Coords, List<BoardScene.Tile>> neighbors,
+          Map<Coords, Coords> downstream, Set<Coords> lakes) {
+        Map<Coords, Integer> distance = new HashMap<>();
+        ArrayDeque<BoardScene.Tile> pending = new ArrayDeque<>(inlets);
+        inlets.forEach(tile -> distance.put(tile.coords(), 0));
+        while (!pending.isEmpty()) {
+            BoardScene.Tile tile = pending.removeFirst();
+            for (BoardScene.Tile neighbor : neighbors.get(tile.coords())) {
+                if (neighbor.elevation() == tile.elevation() && !distance.containsKey(neighbor.coords())) {
+                    distance.put(neighbor.coords(), distance.get(tile.coords()) + 1);
+                    pending.add(neighbor);
+                }
+            }
+        }
+        for (BoardScene.Tile tile : plateau) {
+            // Direct downhill outlets retain priority. The lake body can receive several inflows without acquiring
+            // a single board-wide translation; isolated/closed pools are animated by their liquid's wave field.
+            if (downstream.containsKey(tile.coords()) || lakes.contains(tile.coords())) { continue; }
+            for (BoardScene.Tile neighbor : neighbors.get(tile.coords())) {
+                if (neighbor.elevation() == tile.elevation()
+                      && distance.get(neighbor.coords()) == distance.get(tile.coords()) + 1) {
+                    downstream.put(tile.coords(), neighbor.coords());
+                    break;
+                }
+            }
+            // A fed branch may leave the board even when another branch has an on-board lower outlet. Closed tips
+            // have no invented outlet through their banks and instead keep their local surface circulation.
+            if (!downstream.containsKey(tile.coords()) && edge(scene, tile.coords()) && distance.get(tile.coords()) > 0) {
+                for (int direction = 0; direction < 6; direction++) {
+                    Coords outside = tile.coords().translated(direction);
+                    if (scene.tile(outside) == null) { downstream.put(tile.coords(), outside); break; }
+                }
+            }
+        }
     }
 
     /** Follow the connected stream, not straight-line proximity to an unrelated waterfall. */

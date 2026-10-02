@@ -1434,6 +1434,7 @@ public class ClientGUI extends AbstractClientGUI
                 if (client.getLocalPlayer().getTeam() == Player.TEAM_UNASSIGNED) {
                     addToast(ToastLevel.ERROR,
                           Messages.getString("ClientGUI.openUnitListFileDialog.noReinforceMessage"));
+                    ignoreHotKeys = false;
                     return;
                 }
                 getRandomArmyDialog().setVisible(true);

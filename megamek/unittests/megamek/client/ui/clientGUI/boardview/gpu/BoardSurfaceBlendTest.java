@@ -38,12 +38,14 @@ class BoardSurfaceBlendTest {
     }
 
     @Test
-    void everyFamilyMeetsTheReceivingGroundAtItsCliffFootInEveryDirection() {
+    void everyFamilyMeetsTheReceivingNaturalGroundAtItsCliffFootInEveryDirection() {
         for (int family = 0; family < BoardSurfaceBlend.FAMILIES; family++) {
             int upper = family, lower = (family + 3) % BoardScene.Surface.values().length;
+            if (lower == BoardScene.Surface.CONCRETE.ordinal()) { lower = BoardScene.Surface.ROCK.ordinal(); }
+            int receiving = lower;
             for (int direction = 0; direction < 6; direction++) {
                 var next = CENTER.translated(direction);
-                var scene = scene(c -> tile(c, c.equals(CENTER) ? upper : lower, c.equals(CENTER) ? 4 : 0));
+                var scene = scene(c -> tile(c, c.equals(CENTER) ? upper : receiving, c.equals(CENTER) ? 4 : 0));
                 var high = scene.tile(CENTER);
                 var low = scene.tile(next);
                 var p = BoardGeometry.center(CENTER, 0).lerp(BoardGeometry.center(next, 0), .5f);
@@ -55,6 +57,21 @@ class BoardSurfaceBlendTest {
                 var above = BoardSurfaceBlend.sampleCliff(scene, high, p.x, p.y, p.z);
                 assertEquals(0, above.weight(lower), "Receiving terrain stays near the foot");
                 assertEquals(1, above.weight(upper), .00001f);
+            }
+        }
+    }
+
+    @Test
+    void naturalCliffsDoNotSpillTheirCoverAcrossLowerPavement() {
+        for (int rise : new int[] { 1, 2, 3, 4, 8 }) {
+            var scene = scene(c -> tile(c, c.equals(CENTER) ? BoardScene.Surface.CONCRETE : BoardScene.Surface.SAND,
+                  c.equals(CENTER) ? 0 : rise, -1, 0));
+            var pavement = scene.tile(CENTER);
+            assertFalse(BoardSurfaceBlend.boundary(scene, pavement));
+            for (int edge = 0; edge < 6; edge++) {
+                var point = BoardGeometry.corner(CENTER, 0, edge);
+                assertEquals(BoardSurfaceBlend.solid(BoardScene.Surface.CONCRETE),
+                      BoardSurfaceBlend.sample(scene, pavement, point.x, point.y, point.z));
             }
         }
     }

@@ -58,8 +58,10 @@ Camera-facing tactical labels use the same height. Shape painters opt in through
 `BoardTacticalGraphics.onHexPlane`; individual hex-border painters can request the same placement.
 Unit bands retain their animated unit support, range walls retain their upright/overhead presentations,
 and terrain tints still follow the ground. Ruler lines, drift arrows, C3 links and flyover routes span
-hexes and retain terrain-following placement. Ordinary hex text retains its roof/depth-aware placement;
-weapon-range letters retain their camera-dependent clearance.
+hexes and retain terrain-following placement. Ordinary hex text retains its roof-aware placement;
+HEIGHT labels draw through their own hex's content but remain occluded by other hexes. Top view reveals
+all enabled ground text and borders.
+Weapon-range letters retain their camera-dependent clearance.
 
 ## Hidden terrain flags
 

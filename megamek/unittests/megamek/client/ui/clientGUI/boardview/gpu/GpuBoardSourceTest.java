@@ -298,6 +298,27 @@ class GpuBoardSourceTest {
     }
 
     @Test
+    void cliffExitsSurviveTacticalArtworkRefreshes() throws Exception {
+        Board board = new Board();
+        board.load(new File("testresources/megamek/client/ui/clientGUI/boardview/gpu/cliffs.board"));
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        boolean coords = preferences.getCoordsEnabled();
+        try (GpuBoardFixture fixture = GpuBoardFixture.create(board)) {
+            for (boolean labels : new boolean[] { true, false }) {
+                SwingUtilities.invokeAndWait(() -> {
+                    preferences.setCoordsEnabled(labels);
+                    fixture.source.refresh();
+                });
+                BoardScene scene = fixture.source.takeFrame().scene();
+                assertEquals(56, scene.tile(new Coords(8, 12)).cliffTopExits());
+                assertEquals(24, scene.tile(new Coords(9, 12)).cliffTopExits());
+            }
+        } finally {
+            SwingUtilities.invokeAndWait(() -> preferences.setCoordsEnabled(coords));
+        }
+    }
+
+    @Test
     void gpuArtworkDoesNotIncludeClassicGeneratedShadows() throws Exception {
         GUIPreferences preferences = GUIPreferences.getInstance();
         boolean shadows = preferences.getShadowMap();
@@ -395,8 +416,9 @@ class GpuBoardSourceTest {
         }
     }
 
-    @Test
-    void airborneUnitsFloatAtTheirFlightHeight() throws Exception {
+    @ParameterizedTest
+    @ValueSource(ints = { -2, 0, 2, 10 })
+    void airborneUnitsFloatAboveTheirHex(int groundLevel) throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             Entity vtol = new MekFileParser(new File("testresources/megamek/common/units/Cobra Transport VTOL.blk"))
                   .getEntity();
@@ -411,9 +433,11 @@ class GpuBoardSourceTest {
                     fixture.game.addEntity(entity, false);
                 }
                 vtol.setPosition(new Coords(4, 4));
+                fixture.game.getBoard().setHex(vtol.getPosition(), new Hex(groundLevel));
                 vtol.setElevation(3);
                 fighter.setPosition(new Coords(6, 6));
-                fighter.setAltitude(5);
+                fixture.game.getBoard().setHex(fighter.getPosition(), new Hex(groundLevel));
+                fighter.setAltitude(1);
                 fixture.source.refresh();
             });
             BoardScene scene = fixture.source.takeFrame().scene();
@@ -423,10 +447,10 @@ class GpuBoardSourceTest {
             assertEquals(3 + fixture.game.getBoard().getHex(new Coords(4, 4)).getLevel(),
                   flyingVtol.location().elevation(), 0.001f, "A VTOL floats on its hex-relative elevation");
             BoardScene.Unit flyingFighter = unit(scene, 3);
-            assertTrue(flyingFighter.airborne(), "A fighter at altitude 5 flies");
+            assertTrue(flyingFighter.airborne(), "A fighter at altitude 1 flies");
             assertEquals(1, flyingFighter.height());
-            assertEquals(5, flyingFighter.location().elevation(), 0.001f,
-                  "Aerospace altitude is absolute; the airborne elevation sentinel is never drawn");
+            assertEquals(groundLevel + 1, flyingFighter.location().elevation(), 0.001f,
+                  "Aerospace visuals float above the hex; the airborne elevation sentinel is never drawn");
 
             SwingUtilities.invokeAndWait(() -> {
                 vtol.setElevation(0);
@@ -458,6 +482,8 @@ class GpuBoardSourceTest {
                 fighter.setDeployed(true);
                 fixture.game.addEntity(fighter, false);
                 fighter.setPosition(new Coords(6, 6));
+                fixture.game.getBoard().setHex(new Coords(6, 6), new Hex(2));
+                fixture.game.getBoard().setHex(new Coords(7, 6), new Hex(10));
                 fighter.setAltitude(5);
                 fixture.source.refresh();
             });
@@ -473,8 +499,8 @@ class GpuBoardSourceTest {
             GpuBoardSource.Frame frame = fixture.source.takeFrame();
             assertEquals(1, frame.movements().size());
             for (BoardScene.Waypoint point : frame.movements().getFirst().path()) {
-                assertEquals(5, point.elevation(), 0.001f,
-                      "A flying fighter's path plays at its altitude, not the airborne sentinel");
+                assertEquals(5 + fixture.game.getBoard().getHex(point.coords()).getLevel(), point.elevation(), 0.001f,
+                      "Each flight waypoint adds its own hex elevation");
                 assertEquals(BoardScene.AeroState.AIRBORNE, point.aeroState());
             }
         }
@@ -492,6 +518,9 @@ class GpuBoardSourceTest {
             flying.setPosition(new Coords(5, 5));
             flying.setAltitude(5);
             SwingUtilities.invokeAndWait(() -> {
+                fixture.game.getBoard().setHex(new Coords(5, 5), new Hex(10));
+                fixture.game.getBoard().setHex(new Coords(6, 5), new Hex(10));
+                fixture.game.getBoard().setHex(new Coords(6, 6), new Hex(10));
                 fighter.setOwner(fixture.player);
                 fighter.setDeployed(true);
                 fixture.game.addEntity(fighter, false);
@@ -499,6 +528,7 @@ class GpuBoardSourceTest {
                 ((Aero) fighter).land();
                 fixture.source.refresh();
             });
+            fixture.source.takeFrame(); // Discard setup events from raising the terrain under the fixture's Atlas.
             // The whole move carries the airborne sentinel except the step that sets the fighter down.
             Vector<UnitLocation> path = new Vector<>();
             path.add(new UnitLocation(5, new Coords(5, 5), 0, Aero.AERO_EFFECTIVE_ELEVATION, 0));
@@ -510,8 +540,8 @@ class GpuBoardSourceTest {
             GpuBoardSource.Frame frame = fixture.source.takeFrame();
             assertEquals(1, frame.movements().size());
             List<BoardScene.Waypoint> played = frame.movements().getFirst().path();
-            assertEquals(5, played.getFirst().elevation(), 0.001f,
-                  "A landing move starts at the altitude the fighter flew at");
+            assertEquals(15, played.getFirst().elevation(), 0.001f,
+                  "A landing move starts at the flight altitude above its starting hex");
             for (BoardScene.Waypoint point : played) {
                 assertTrue(point.elevation() < Aero.AERO_EFFECTIVE_ELEVATION,
                       "No playback point keeps the airborne sentinel");

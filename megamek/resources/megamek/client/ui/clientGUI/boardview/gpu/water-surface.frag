@@ -5,15 +5,13 @@ layout(location = 0) out vec4 fragColor;
 #define waterSurfaceFlag
 in vec3 v_waterRest;
 in float v_waterCrest;
-uniform sampler2D u_waterNearest; // GpuWaterDepth: this frame's nearest displaced water surface
 // water-uniforms
 // water-lighting-functions
 // biome-water-functions
 // water-pool-functions
 
 void main() {
-    // Only the nearest wave: at grazing angles a crest hides the water behind it.
-    if (gl_FragCoord.z > texelFetch(u_waterNearest, ivec2(gl_FragCoord.xy), 0).r + 1e-6) discard;
+    if (waterHidden()) discard;
     vec4 habitat, mixture;
     waterHabitat(habitat, mixture);
     vec3 tint = waterTint(mixture);

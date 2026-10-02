@@ -30,12 +30,12 @@ import com.badlogic.gdx.utils.FloatArray;
 import megamek.client.ui.clientGUI.boardview.BoardHexText;
 import megamek.common.board.Coords;
 
-/** Captured board labels stay legible over their own relief, with the scene's real depth everywhere else. */
+/** Captured labels: HEIGHT shows through its own hex; top view also reveals the enabled ground labels. */
 final class GpuHexText implements Disposable {
     /** Four vertices per glyph, with unsigned 16-bit indices. */
     private static final int PAGE_GLYPHS = 16_383;
     private static final int GLYPH_FLOATS = 20;
-    private record Plane(int elevation, float headroom) { }
+    private record Plane(int elevation, float headroom, boolean overlay) { }
     private record Chunk(BitmapFontCache glyphs, BoundingBox bounds) { }
     private record Range(BoundingBox bounds, int offset, int count) { }
     /** Owns the static mesh; the font owns the texture. Ranges keep the original chunk/page drawing order. */
@@ -64,7 +64,8 @@ final class GpuHexText implements Disposable {
             }
         }
     }
-    private final Map<Plane, List<Page>> groups = new TreeMap<>(Comparator.comparingInt(Plane::elevation)
+    private final Map<Plane, List<Page>> groups = new TreeMap<>(Comparator.comparing(Plane::overlay)
+          .thenComparingInt(Plane::elevation)
           .thenComparingDouble(Plane::headroom));
     private ShaderProgram shader;
     private final Matrix4 transform = new Matrix4();
@@ -93,7 +94,7 @@ final class GpuHexText implements Disposable {
         try {
             for (BoardScene.Tile tile : scene.tiles()) {
                 for (BoardHexText label : tile.text()) {
-                    Plane plane = new Plane(tile.elevation() + label.elevation(), headroom(tile, label));
+                    Plane plane = new Plane(tile.elevation() + label.elevation(), headroom(tile, label), label.elevation() > 0);
                     Coords cell = new Coords(tile.coords().getX() / GpuTerrain.CHUNK_SIZE,
                           tile.coords().getY() / GpuTerrain.CHUNK_SIZE);
                     Chunk chunk = next.computeIfAbsent(plane, key -> new HashMap<>())
@@ -213,12 +214,13 @@ final class GpuHexText implements Disposable {
         return (float) Math.ceil(BoardRelief.decoration(tile) / BoardGeometry.hexScale()) * BoardGeometry.hexScale();
     }
 
-    void render(SpriteBatch batch, Camera camera, Texture depth, int bottom) {
+    void render(SpriteBatch batch, BoardCamera camera, Texture depth, int bottom) {
         render(batch, camera, depth, null, bottom);
     }
 
-    void render(SpriteBatch batch, Camera camera, Texture depth, Texture unitDepth, int bottom) {
+    void render(SpriteBatch batch, BoardCamera boardCamera, Texture depth, Texture unitDepth, int bottom) {
         if (groups.isEmpty()) { return; }
+        Camera camera = boardCamera.camera;
         ShaderProgram previous = batch.getShader();
         batch.setShader(shader);
         batch.setProjectionMatrix(camera.combined);
@@ -252,6 +254,7 @@ final class GpuHexText implements Disposable {
                 float z = group.getKey().elevation() * BoardGeometry.level();
                 batch.setTransformMatrix(transform.setToTranslation(0, 0, z + .6f * BoardGeometry.hexScale()));
                 shader.setUniformf("u_surface", z, group.getKey().headroom());
+                shader.setUniformi("u_overlay", group.getKey().overlay() ? 1 : boardCamera.isTopDown() ? 2 : 0);
                 for (Page page : group.getValue()) { page.render(camera, shader); }
             }
         } finally {

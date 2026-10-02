@@ -317,6 +317,64 @@ class GpuBiomeSmokeTest {
         if (failure.get() != null) { throw new AssertionError("Fields and marsh native renderer", failure.get()); }
     }
 
+    /**
+     * Crop rows and reeds share a material and vertex layout, but only rows carry a_coverRow. Reeds drawn first, as on
+     * a board with marsh, must not leave the rows a shader that never binds it: the rows would draw as huge clumps.
+     */
+    @Test
+    void cropRowsKeepTheirShapeAfterReedsAreDrawnFirst() throws Exception {
+        var failure = new AtomicReference<Throwable>();
+        var config = GpuBoardWindow.configuration(false);
+        config.setWindowedMode(800, 600);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
+                      BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+                Pixmap alone = null, afterReeds = null;
+                try {
+                    var camera = new BoardCamera();
+                    camera.resize(800, 600);
+                    camera.setPerspective(true);
+                    camera.orbit(20, 50);
+                    camera.camera.zoom = BoardGeometry.width() / 600;
+                    camera.center(BoardGeometry.center(new Coords(4, 4), 0));
+                    alone = fields(null, frame, camera);
+                    afterReeds = fields(scene(BoardScene.Biome.MARSH), frame, camera);
+                    int changed = 0;
+                    for (int y = 0; y < alone.getHeight(); y++) {
+                        for (int x = 0; x < alone.getWidth(); x++) {
+                            int a = alone.getPixel(x, y), b = afterReeds.getPixel(x, y);
+                            for (int shift = 8; shift < 32; shift += 8) {
+                                if (Math.abs((a >>> shift & 255) - (b >>> shift & 255)) > 24) { changed++; break; }
+                            }
+                        }
+                    }
+                    assertTrue(changed < alone.getWidth() * alone.getHeight() / 100,
+                          "Crop rows must look the same whether or not reeds were drawn first: " + changed + " pixels differ");
+                } catch (Throwable error) { failure.set(error); }
+                finally {
+                    if (alone != null) { alone.dispose(); }
+                    if (afterReeds != null) { afterReeds.dispose(); }
+                    frame.dispose();
+                    Gdx.app.exit();
+                }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Crop rows after reeds", failure.get()); }
+    }
+
+    /** The fields drawn by a new renderer, after an optional first scene; the caller owns the returned pixels. */
+    private static Pixmap fields(BoardScene first, GpuReviewFrame frame, BoardCamera camera) throws Exception {
+        var terrain = new GpuTerrain();
+        try {
+            var plants = (GpuBiomeVegetation) field(terrain, "biomeVegetation");
+            if (first != null) { settle(terrain, plants, frame, camera, first); }
+            settle(terrain, plants, frame, camera, scene(BoardScene.Biome.FIELD));
+            return Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
+        } finally { terrain.dispose(); }
+    }
+
     static void registeredCrops(Texture texture, File output) {
         var pixels = new Pixmap(texture.getWidth(), texture.getHeight(), Pixmap.Format.RGBA8888);
         try {

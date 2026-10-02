@@ -14,13 +14,17 @@ import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.GL30;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
+import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
+import com.badlogic.gdx.graphics.g3d.attributes.DepthTestAttribute;
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.math.collision.Ray;
+import com.badlogic.gdx.utils.BufferUtils;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrain;
@@ -41,6 +45,7 @@ class GpuModularBuildingSmokeTest {
             public void create() {
                 try {
                     checkKit();
+                    checkLightBuilding();
                     GpuResourcesSmokeTest.checkInteriorCourtyard(1);
                     GpuResourcesSmokeTest.checkInteriorCourtyard(BoardGeometry.MODEL_LEVEL_HEIGHT);
                     checkTerrain();
@@ -121,6 +126,20 @@ class GpuModularBuildingSmokeTest {
         }
     }
 
+    private static void checkLightBuilding() {
+        var assets = new GpuAssets();
+        try {
+            var building = assets.building("buildings/saxarba/building_light/building_light_00", 5, 0);
+            assertNotNull(building);
+            var floors = new ModelInstance(building.interior(), "floors").calculateBoundingBox(new BoundingBox());
+            assertEquals(26, floors.getWidth(), .01f, "Floors stop at the external walls, before the roof border");
+            assertEquals(50, floors.getHeight(), .01f);
+            var struts = new ModelInstance(building.interior(), "struts").calculateBoundingBox(new BoundingBox());
+            assertTrue(floors.min.x <= struts.min.x && floors.max.x >= struts.max.x);
+            assertTrue(floors.min.y <= struts.min.y && floors.max.y >= struts.max.y);
+        } finally { assets.dispose(); }
+    }
+
     private static BoardScene scene(int middleHeight, String asset) {
         return BoardSurfaceBlendTest.scene(coords -> {
             int levels = coords.equals(new Coords(2, 4)) ? 1 : coords.equals(new Coords(4, 4)) ? middleHeight
@@ -139,7 +158,7 @@ class GpuModularBuildingSmokeTest {
         });
     }
 
-    private static void checkTerrain() {
+    private static void checkTerrain() throws Exception {
         String fallback = "buildings/saxarba/building_light/building_light_42";
         GpuAssets assets = new GpuAssets();
         try {
@@ -163,7 +182,9 @@ class GpuModularBuildingSmokeTest {
                 assertEquals(legacy.tile(coords).features().getFirst().height() * BoardGeometry.level(),
                       terrain.roofBounds(coords).getDepth(), .02f, "All structure types keep their board-model fallback");
             }
+            checkFloorCutaways(terrain, legacy, frame, camera);
             terrain.update(scene);
+            checkFloorCutaways(terrain, scene, frame, camera);
             camera.setIsometric(true);
             camera.fit(scene);
             camera.zoom(.55f);
@@ -208,6 +229,124 @@ class GpuModularBuildingSmokeTest {
             frame.dispose();
             terrain.dispose();
         }
+    }
+
+    static List<ModelInstance> floors(GpuTerrain terrain, Coords coords) throws Exception {
+        List<ModelInstance> floors = new java.util.ArrayList<>();
+        for (Object chunk : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "chunks")) {
+            for (Object prop : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(chunk, "cutaways")) {
+                float z = (float) GpuMixedUnitBenchmarkSmokeTest.field(prop, "floorZ");
+                if (!Float.isNaN(z) && coords.equals(GpuMixedUnitBenchmarkSmokeTest.field(prop, "coords"))) {
+                    floors.add((ModelInstance) GpuMixedUnitBenchmarkSmokeTest.field(prop, "instance"));
+                }
+            }
+        }
+        floors.sort(java.util.Comparator.comparingDouble(floor -> UnitBounds.world(floor).min.z));
+        return floors;
+    }
+
+    private static void checkFloorCutaways(GpuTerrain terrain, BoardScene scene, GpuReviewFrame frame,
+          BoardCamera camera) throws Exception {
+        Coords coords = new Coords(4, 4);
+        List<ModelInstance> floors = floors(terrain, coords);
+        assertEquals(5, floors.size(), "Each floor must have independent cutaway state and shared mesh geometry");
+        Model model = new com.badlogic.gdx.graphics.g3d.utils.ModelBuilder().createBox(8, 8, 10,
+              new com.badlogic.gdx.graphics.g3d.Material(), com.badlogic.gdx.graphics.VertexAttributes.Usage.Position
+                    | com.badlogic.gdx.graphics.VertexAttributes.Usage.Normal);
+        camera.setIsometric(false);
+        camera.camera.zoom = .25f;
+        camera.center(BoardGeometry.center(coords, 2));
+        try {
+            checkInteriorCache(terrain, false);
+            // A second, higher occupant cannot raise the opaque floor above the lowest occupant.
+            for (int lowest : new int[] { 0, 1, 3, 1 }) {
+                ModelInstance low = new ModelInstance(model, BoardGeometry.center(coords, lowest).add(0, 0, 5.5f));
+                ModelInstance high = new ModelInstance(model, BoardGeometry.center(coords, 4).add(0, 0, 5.5f));
+                for (float wallAlpha : new float[] { 0, .5f }) {
+                    terrain.animate(0, List.of(low, high), wallAlpha);
+                    checkInteriorCache(terrain, true);
+                    for (int level = 0; level < floors.size(); level++) {
+                        var material = floors.get(level).materials.first();
+                        var blend = material.get(BlendingAttribute.class, BlendingAttribute.Type);
+                        if (level <= lowest) {
+                            assertNull(blend, "Occupied floor and all lower floors remain opaque");
+                            assertFalse(material.has(DepthTestAttribute.Type), "Opaque floors retain normal depth writes");
+                        } else {
+                            assertNotNull(blend);
+                            assertTrue(blend.opacity > wallAlpha && blend.opacity < 1,
+                                  "Upper floors remain more visible than the walls");
+                            assertFalse(material.get(DepthTestAttribute.class, DepthTestAttribute.Type).depthMask);
+                        }
+                    }
+                    frame.render(terrain, camera, scene, false);
+                    float floorZ = UnitBounds.world(floors.get(lowest)).min.z;
+                    int samples = 0;
+                    for (int x = -20; x <= 20; x += 5) {
+                        for (int y = -20; y <= 20; y += 5) {
+                            Vector3 pixel = camera.camera.project(BoardGeometry.center(coords, 0).add(x, y, 0));
+                            var depth = BufferUtils.newFloatBuffer(1);
+                            Gdx.gl.glReadPixels((int) pixel.x, (int) pixel.y, 1, 1, GL30.GL_DEPTH_COMPONENT, GL20.GL_FLOAT, depth);
+                            Vector3 point = new Vector3(pixel.x / camera.camera.viewportWidth * 2 - 1,
+                                  pixel.y / camera.camera.viewportHeight * 2 - 1, depth.get(0) * 2 - 1)
+                                  .prj(camera.camera.invProjectionView);
+                            if (Math.abs(point.z - floorZ) < .1f) { samples++; }
+                        }
+                    }
+                    assertTrue(samples > 5, "The occupied floor must actually reach the opaque framebuffer, not disappear from its cache");
+                }
+            }
+            Ray roofRay = new Ray(BoardGeometry.center(coords, 0).add(0, 0, 400), new Vector3(0, 0, -1));
+            var shellHit = terrain.selectionHit(scene, roofRay);
+            for (int hoverLevel : new int[] { 0, 2, 4, 5, 0 }) {
+                terrain.animate(0, List.of(), .5f, coords, hoverLevel * BoardGeometry.level());
+                boolean interior = hoverLevel < 5;
+                checkInteriorCache(terrain, interior);
+                for (int level = 0; level < floors.size(); level++) {
+                    assertFalse(floors.get(level).materials.first().has(BlendingAttribute.Type),
+                          "Hover reveals its supporting floor and struts, but a roof hover restores the shell");
+                }
+                frame.render(terrain, camera, scene);
+                assertEquals(shellHit, terrain.selectionHit(scene, roofRay), "Cutaways must keep the shell's picking geometry");
+            }
+            // A roof hover must not cancel the existing unit-driven cutaway.
+            terrain.animate(0, List.of(new ModelInstance(model, BoardGeometry.center(coords, 1).add(0, 0, 5.5f))),
+                  .5f, coords, 5 * BoardGeometry.level());
+            checkInteriorCache(terrain, true);
+            assertFalse(floors.get(1).materials.first().has(BlendingAttribute.Type));
+            assertTrue(floors.get(2).materials.first().has(BlendingAttribute.Type));
+            terrain.animate(0, List.of());
+            checkInteriorCache(terrain, false);
+            terrain.animate(0, List.of(), 1, coords, BoardGeometry.level());
+            checkInteriorCache(terrain, false);
+            terrain.animate(0, List.of(new ModelInstance(model, BoardGeometry.center(coords, 1))), 1);
+            checkInteriorCache(terrain, false);
+            for (ModelInstance floor : floors) {
+                assertFalse(floor.materials.first().has(BlendingAttribute.Type), "Leaving restores every floor");
+            }
+        } finally { model.dispose(); }
+    }
+
+    static void checkInteriorCache(GpuTerrain terrain, boolean visible) throws Exception {
+        int interiors = 0;
+        for (Object chunk : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "chunks")) {
+            var renderables = new com.badlogic.gdx.utils.Array<com.badlogic.gdx.graphics.g3d.Renderable>();
+            ((com.badlogic.gdx.graphics.g3d.RenderableProvider) GpuMixedUnitBenchmarkSmokeTest.field(chunk, "solidProps"))
+                  .getRenderables(renderables, null);
+            for (Object value : (com.badlogic.gdx.utils.Array<?>) GpuMixedUnitBenchmarkSmokeTest.field(chunk, "sharedProps")) {
+                renderables.add((com.badlogic.gdx.graphics.g3d.Renderable) value);
+            }
+            for (var part : renderables) {
+                if (part.material.id.equals("struts") || part.material.id.equals("floors")) { interiors++; }
+            }
+            for (String field : List.of("sharedShadows", "shadowPropRenderables")) {
+                for (Object value : (com.badlogic.gdx.utils.Array<?>) GpuMixedUnitBenchmarkSmokeTest.field(chunk, field)) {
+                    var part = (com.badlogic.gdx.graphics.g3d.Renderable) value;
+                    assertFalse(part.material.id.equals("struts") || part.material.id.equals("floors"),
+                          "Generated cutaway aids must not cast exterior shadows");
+                }
+            }
+        }
+        assertEquals(visible, interiors > 0, "Interior geometry is submitted only while an occupied shell is faded");
     }
 
     private static void checkPicking(GpuTerrain terrain, BoardScene scene) {

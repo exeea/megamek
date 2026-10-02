@@ -23,7 +23,7 @@ final class UnitAnimator {
     static final float HOVER_PERIOD_SECONDS = 2.6f;
     static final float HOVER_LEVELS = .2f;
     private static final float HOVER_PHASE_STEP = .381966f;
-    static final float PHYSICAL_APPROACH_HEXES = .9f;
+    static final float PHYSICAL_APPROACH_HEXES = UnitAttack.PHYSICAL_APPROACH_HEXES;
     /** A longer distance per cycle also lengthens airtime, without changing planted-foot speed. */
     static final float MEK_STRIDE_LENGTH = 1.6f;
     static final float MEK_STEP_LIFT = .16f;

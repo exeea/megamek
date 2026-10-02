@@ -137,6 +137,64 @@ class RigidGlbTest {
         assertThrows(IllegalArgumentException.class, () -> RigidGlb.load(compressedFile));
     }
 
+    FileHandle sided(boolean doubleSided) throws Exception {
+        var document = document();
+        ((ObjectNode) document.get("materials").get(0)).put("doubleSided", doubleSided);
+        var node = (ObjectNode) document.get("nodes").get(1);
+        node.remove(java.util.List.of("translation", "rotation", "scale"));
+        return file(document, false);
+    }
+
+    @Test
+    void doubleSidedMaterialsPreservePaintAndReverseWindingAndNormals() throws Exception {
+        for (boolean indexed : new boolean[] { true, false }) {
+            var document = document();
+            ((ObjectNode) document.get("materials").get(0)).put("doubleSided", true);
+            if (!indexed) { ((ObjectNode) document.get("meshes").get(0).get("primitives").get(0)).remove("indices"); }
+            var mesh = RigidGlb.load(file(document, false)).meshes.first();
+            var indices = mesh.parts[0].indices;
+            assertEquals(6, indices.length);
+            for (int corner = 0; corner < 3; corner++) {
+                int front = Short.toUnsignedInt(indices[corner]) * RigidGlb.STRIDE;
+                int back = Short.toUnsignedInt(indices[5 - corner]) * RigidGlb.STRIDE;
+                for (int attribute = 0; attribute < RigidGlb.STRIDE; attribute++) {
+                    float expected = mesh.vertices[front + attribute];
+                    if (attribute >= 3 && attribute < 6) { expected = -expected; }
+                    assertEquals(expected, mesh.vertices[back + attribute], .00001f,
+                          "Reverse faces preserve position, vertex colour and UV, and flip only the normal");
+                }
+            }
+        }
+    }
+
+    @Test
+    void mixedMaterialsKeepSingleSidedFacesAndShareReverseVertices() throws Exception {
+        var document = document();
+        var materials = (com.fasterxml.jackson.databind.node.ArrayNode) document.get("materials");
+        materials.addObject().put("name", "two-sided").put("doubleSided", true);
+        var primitives = (com.fasterxml.jackson.databind.node.ArrayNode) document.get("meshes").get(0).get("primitives");
+        primitives.add(primitives.get(0).deepCopy());
+        primitives.add(primitives.get(0).deepCopy());
+        ((ObjectNode) primitives.get(1)).put("material", 1);
+        ((ObjectNode) primitives.get(2)).put("material", 1);
+        var mesh = RigidGlb.load(file(document, false)).meshes.first();
+        assertArrayEquals(new short[] { 0, 1, 2 }, mesh.parts[0].indices);
+        assertEquals(6, mesh.parts[1].indices.length);
+        assertArrayEquals(mesh.parts[1].indices, mesh.parts[2].indices);
+        assertEquals(6 * RigidGlb.STRIDE, mesh.vertices.length, "Shared attributes need only one reverse vertex set");
+        assertEquals(3 * RigidGlb.STRIDE, RigidGlb.load(sided(false)).meshes.first().vertices.length);
+    }
+
+    @Test
+    void doubleSidedDoesNotEnableUnsupportedAlphaModes() throws Exception {
+        for (String mode : new String[] { "BLEND", "MASK" }) {
+            var document = document();
+            ((ObjectNode) document.get("materials").get(0)).put("doubleSided", true).put("alphaMode", mode);
+            var file = file(document, false);
+            assertThrows(IllegalArgumentException.class, () -> RigidGlb.load(file));
+        }
+    }
+
     private ObjectNode levels() throws Exception {
         var document = document();
         var nodes = (com.fasterxml.jackson.databind.node.ArrayNode) document.get("nodes");

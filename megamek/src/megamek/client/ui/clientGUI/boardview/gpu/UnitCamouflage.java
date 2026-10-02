@@ -55,7 +55,8 @@ final class UnitCamouflage {
             camo = new UnitModelState.Camo(camo.category(), camo.filename(), camo.rotation(), camo.scale(),
                   camo.rgb(), pixels, marker);
         }
-        return new UnitModelState.Appearance(appearance.inoperableEquipment(), appearance.searchlightOn(), camo, fighters);
+        return new UnitModelState.Appearance(appearance.inoperableEquipment(), appearance.searchlightOn(), camo, fighters,
+              appearance.bodyLoss());
     }
 
     private static BoardScene.Pixels marker(UnitModelState.Marker marker) {

@@ -181,8 +181,8 @@ final class RigidGlb {
             Set<String> materialNames = new HashSet<>();
             for (var sourceMaterial : source.getMaterialModels()) {
                 var material = (MaterialModelV2) sourceMaterial;
-                require(material.getAlphaMode() == MaterialModelV2.AlphaMode.OPAQUE && !material.isDoubleSided(),
-                      "Rigid kits use opaque materials and explicit back faces");
+                require(material.getAlphaMode() == MaterialModelV2.AlphaMode.OPAQUE,
+                      "Rigid kits use opaque materials");
                 var target = new ModelMaterial();
                 target.id = material.getName();
                 require(target.id != null && materialNames.add(target.id), "Material names must be unique");
@@ -205,6 +205,7 @@ final class RigidGlb {
             }
             Map<MeshPrimitiveModel, String> partIds = new IdentityHashMap<>();
             Map<Map<String, AccessorModel>, Integer> offsets = new HashMap<>();
+            Map<Integer, Integer> backVertices = new HashMap<>();
             Set<String> names = new HashSet<>();
             List<ModelMeshPart> parts = new ArrayList<>();
             FloatArray vertices = new FloatArray();
@@ -235,6 +236,9 @@ final class RigidGlb {
                         require(value >= 0 && value < positions.getCount(), "Vertex index outside primitive");
                         part.indices[i] = (short) (value + base);
                     }
+                    if (primitive.getMaterialModel() instanceof MaterialModelV2 material && material.isDoubleSided()) {
+                        part.indices = doubleSided(vertices, part.indices, backVertices);
+                    }
                     parts.add(part);
                     partIds.put(primitive, part.id);
                 }
@@ -257,6 +261,31 @@ final class RigidGlb {
         } catch (RuntimeException error) {
             throw new IllegalArgumentException("Cannot read rigid GLB " + file + ": " + error.getMessage(), error);
         }
+    }
+
+    /**
+     * Bake the reverse face once at import: vertex lighting needs reversed normals, not merely disabled culling.
+     * All existing colour, shadow, instancing and cutaway paths then use the same ordinary single-sided geometry.
+     * Shared front vertices also share their reverse vertices, including across material primitives.
+     */
+    private static short[] doubleSided(FloatArray vertices, short[] front, Map<Integer, Integer> backVertices) {
+        short[] indices = java.util.Arrays.copyOf(front, Math.multiplyExact(front.length, 2));
+        for (int triangle = 0; triangle < front.length; triangle += 3) {
+            for (int corner = 0; corner < 3; corner++) {
+                int original = Short.toUnsignedInt(front[triangle + 2 - corner]);
+                int back = backVertices.computeIfAbsent(original, key -> {
+                    int index = vertices.size / STRIDE;
+                    require(index < 65535, "Rigid asset exceeds the vertex budget including double-sided faces");
+                    // Reserve before copying from the same array: growing it must not invalidate the source.
+                    vertices.ensureCapacity(STRIDE);
+                    vertices.addAll(vertices.items, key * STRIDE, STRIDE);
+                    for (int axis = 3; axis < 6; axis++) { vertices.items[index * STRIDE + axis] *= -1; }
+                    return index;
+                });
+                indices[front.length + triangle + corner] = (short) back;
+            }
+        }
+        return indices;
     }
 
     private static void collectMeshes(NodeModel node, Set<MeshModel> meshes, Set<NodeModel> visited) {

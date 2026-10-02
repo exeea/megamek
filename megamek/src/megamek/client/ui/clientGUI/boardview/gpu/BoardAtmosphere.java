@@ -128,6 +128,8 @@ final class BoardAtmosphere {
             java.util.Objects.requireNonNull(effects);
             java.util.Objects.requireNonNull(pressure);
             java.util.Objects.requireNonNull(taint);
+            // Zero gravity shares the existing vacuum limits for both scenarios and local previews.
+            if (gravity == 0) { pressure = Atmosphere.VACUUM; }
             if (pressure.isLighterThan(Atmosphere.THIN)) {
                 clouds = 0;
             }

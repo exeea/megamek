@@ -8,6 +8,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
 
+import com.badlogic.gdx.math.Vector3;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrains;
@@ -17,53 +18,84 @@ final class BoardScatter {
     /** 0 disables scatter, 1 is the baseline, 3 triples each biome's placement chance. */
     static final float DENSITY_MULTIPLIER = 3.0f;
     static final int BUSHES = 8;
+    /** Metres, covering the widest authored bush variant for placement and culling. */
+    static final float BUSH_RADIUS = 1.8f;
 
     private BoardScatter() { }
 
     // Scene capture needs only placement; defer geometry loading until a renderer requests a shape.
-    private static final class Kit {
-        static volatile Map<String, BoardShape> shapes = load();
+    private static final BoardKit<Map<String, BoardShape>> KIT = new BoardKit<>(BoardScatter::load);
 
-        private static Map<String, BoardShape> load() {
-            List<String> names = new ArrayList<>(List.of("grass", "plant"));
-            for (int variant = 0; variant < BUSHES; variant++) { names.add("bush-" + variant); }
-            for (boolean block : new boolean[] { true, false }) {
-                for (int variant = 0; variant < (block ? BoardRocks.BLOCKS : BoardRocks.BOULDERS); variant++) {
-                    names.add("stone-" + BoardRocks.name(block, variant));
-                }
+    private static Map<String, BoardShape> load() {
+        List<String> names = new ArrayList<>(List.of("grass", "plant", "plant-dry"));
+        for (int variant = 0; variant < BUSHES; variant++) { names.add("bush-" + variant); }
+        for (boolean block : new boolean[] { true, false }) {
+            for (int variant = 0; variant < (block ? BoardRocks.BLOCKS : BoardRocks.BOULDERS); variant++) {
+                names.add("stone-" + BoardRocks.name(block, variant));
             }
-            Map<String, BoardShape> shapes = new HashMap<>();
-            for (String name : names) {
-                Map<String, BoardShape> mesh = BoardShape.loadKit("scatter/" + name);
-                String node = name + "-lod0";
-                if (mesh.size() != 1 || !mesh.containsKey(node)) {
-                    throw new IllegalArgumentException("Scatter " + name + " must contain only " + node);
-                }
-                shapes.put(name, mesh.get(node));
-            }
-            return Map.copyOf(shapes);
         }
+        Map<String, BoardShape> shapes = new HashMap<>();
+        for (String name : names) {
+            Map<String, BoardShape> mesh = BoardShape.loadKit("scatter/" + name);
+            String node = name + "-lod0";
+            if (mesh.size() != 1 || !mesh.containsKey(node)) {
+                throw new IllegalArgumentException("Scatter " + name + " must contain only " + node);
+            }
+            shapes.put(name, mesh.get(node));
+        }
+        return Map.copyOf(shapes);
     }
 
     static BoardShape shape(String name) {
-        return Kit.shapes.get(name);
+        return KIT.get().get(name);
     }
 
     /** Replace the complete immutable LOD0 kit. */
-    static void reload() { Kit.shapes = Kit.load(); }
+    static void reload() { KIT.reload(); }
 
     /** Cosmetic stones always use the dedicated eight-triangle open-base meshes. */
     static BoardShape rock(BoardScene.Surface surface, int variant, boolean slab) {
         return shape("stone-" + BoardRocks.name(slab || BoardRocks.blocks(surface), variant));
     }
 
-    static BoardShape bush(int variant) {
-        return shape("bush-" + Math.floorMod(variant, BUSHES));
+    static BoardShape bush(BoardScene.Surface surface, int variant) {
+        return shape("bush-" + ((surface == BoardScene.Surface.GRASS ? BUSHES / 2 : 0)
+              + Math.floorMod(variant, BUSHES / 2)));
+    }
+
+    static BoardShape plant(BoardScene.Surface surface) {
+        return shape(surface == BoardScene.Surface.GRASS ? "plant" : "plant-dry");
+    }
+
+    /** Bushes stand just above tall grass, with a level cap to keep unusually shallow boards readable. */
+    static float bushScale(BoardShape shape, float scale) {
+        float variation = Math.clamp((scale - .7f) / .5f, 0, 1);
+        float height = BoardGeometry.width() * GpuGroundCover.MAX_HEIGHT_FRACTION * (1.15f + .15f * variation);
+        return Math.min(height, BoardGeometry.level() * .45f) / shape.height();
+    }
+
+    /**
+     * Shared by captured scatter and the relief's field stones and shrubs: bare rock takes neither, and only exposed
+     * depth-zero shallows can justify liquid-tile dressing; reject deeper beds before loading kits.
+     */
+    static boolean allowed(BoardScene.Tile tile) {
+        return !tile.bare() && !tile.liquid().volcanic() && (!tile.liquid().present() || tile.waterDepth() == 0);
+    }
+
+    /** A dry-bank placement must not spill underwater; shallow stones must visibly break the water surface. */
+    static boolean visible(BoardScene scene, BoardScene.Tile owner, Vector3 base, float height) {
+        if (!allowed(owner)) { return false; }
+        var receiving = BoardGeometry.tile(scene, base.x, base.y);
+        if (receiving == null || !receiving.liquid().present()) { return true; }
+        float water = BoardGeometry.waterZ(receiving);
+        if (!owner.liquid().present() && base.z >= water) { return true; }
+        return allowed(receiving) && base.z + height > water + BoardRelief.metres(.1f);
     }
 
     /** Cosmetic clusters leave the unit centre clear; terrain updates never reshuffle neighboring details. */
     static void capture(Hex hex, Coords coords, List<BoardScene.Feature> result) {
-        if (hex.containsAnyTerrainOf(Terrains.WATER, Terrains.ICE, Terrains.ROAD, Terrains.PAVEMENT,
+        if (hex.containsTerrain(Terrains.WATER) && hex.terrainLevel(Terrains.WATER) > 0
+              || hex.containsAnyTerrainOf(Terrains.ICE, Terrains.ROAD, Terrains.PAVEMENT,
               Terrains.BRIDGE, Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL, Terrains.FIELDS,
               Terrains.WOODS, Terrains.JUNGLE, Terrains.SPACE, Terrains.SKY, Terrains.MAGMA, Terrains.FIRE,
               Terrains.GEYSER, Terrains.SWAMP, Terrains.MUD, Terrains.HAZARDOUS_LIQUID, Terrains.FORTIFIED, Terrains.ROUGH)) {

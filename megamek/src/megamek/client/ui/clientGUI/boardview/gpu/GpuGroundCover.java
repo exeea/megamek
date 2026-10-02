@@ -44,6 +44,8 @@ final class GpuGroundCover implements Disposable {
     private static final int ROOTS_PER_HEX = 4096;
     private static final int STRIDE = 4;
     private static final float START_PIXELS = 120, FULL_PIXELS = 500;
+    /** The tallest standing blade, as a fraction of the hex width; shared with cosmetic shrub sizing. */
+    static final float MAX_HEIGHT_FRACTION = .07f;
     /** Metres frozen land's jagged border reaches past its hex edge at most: the shard offset, lean and splinters. */
     private static final float ICE_BORDER_REACH = 5.2f;
 
@@ -272,7 +274,8 @@ final class GpuGroundCover implements Disposable {
               + GpuShaderSource.read("terrain-meadow.glsl");
         String wind = GpuShaderSource.read("terrain-vegetation-wind.glsl");
         String blade = "#define GRASS_START_PIXELS " + START_PIXELS + "\n#define GRASS_FULL_PIXELS " + FULL_PIXELS
-              + "\n#define GRASS_ROOTS_PER_HEX " + ROOTS_PER_HEX + "\n" + GpuShaderSource.read("terrain-grass.glsl");
+              + "\n#define GRASS_ROOTS_PER_HEX " + ROOTS_PER_HEX
+              + "\n#define GRASS_MAX_HEIGHT " + MAX_HEIGHT_FRACTION + "\n" + GpuShaderSource.read("terrain-grass.glsl");
         // A root beyond its density leaves every vertex of its blade outside the clip volume.
         return source.replace("void main() {", wind + meadow + blade + "\nvoid main() {\nvec3 coverPosition, coverNormal; vec4 coverColor;\n"
                     + "if (!grassBlade(a_position, coverPosition, coverNormal, coverColor)) {\n"

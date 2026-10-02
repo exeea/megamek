@@ -1,5 +1,9 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Injected into the lit vertex shader. Only roots/ranks are stored; blade shape and wind live on the GPU.
+// Older running clients can reload this shader before their Java-side shared size constant is rebuilt.
+#ifndef GRASS_MAX_HEIGHT
+#define GRASS_MAX_HEIGHT .07
+#endif
 layout(location = 14) in vec4 a_coverRoot;
 uniform float u_coverPixels;
 uniform float u_coverHexWidth;
@@ -28,7 +32,7 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
     vec2 direction = vec2(cos(angle), sin(angle));
     vec3 side = vec3(-direction.y, direction.x, 0.0);
     float meadow = meadowCover(root.xy / u_worldMetre);
-    float height = u_coverHexWidth * mix(.025, .07, variation) * mix(.55, 1.0, meadow);
+    float height = u_coverHexWidth * mix(.025, GRASS_MAX_HEIGHT, variation) * mix(.55, 1.0, meadow);
     float width = u_coverHexWidth * mix(.0015, .0028, grassRandom(seed + 37u)) * mix(.75, 1.0, meadow);
     // Fractional growth of the last blade keeps density transitions continuous, without shading invisible blades.
     float growth = clamp(density - a_coverRoot.w, 0.0, 1.0);

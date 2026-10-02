@@ -12,10 +12,11 @@ import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.Disposable;
 
 /**
- * The nearest displaced water surface of a frame, in a depth target of its own. The water's colour pass tests against
- * it, so a crest hides the waves behind it at grazing angles, and fog stops at it. The scene's own depth keeps the beds
- * and units beneath: unit outlines, tactical overlays and weather never see the moving waves. Sized like the viewport
- * it is drawn for, so a pixel's depth sits at that pixel's texel.
+ * The nearest water of a frame, displaced surface or board-edge section, in a depth target of its own. The water's
+ * colour pass tests against it, so a crest hides the waves behind it at grazing angles and a section shows only where
+ * it is the first water a ray meets; fog stops at it. The scene's own depth keeps the beds and units beneath: unit
+ * outlines, tactical overlays and weather never see the moving waves. Sized like the viewport it is drawn for, so a
+ * pixel's depth sits at that pixel's texel.
  */
 final class GpuWaterDepth implements Disposable {
     private final IntBuffer query = BufferUtils.newIntBuffer(16);
@@ -26,7 +27,7 @@ final class GpuWaterDepth implements Disposable {
     /** The target the colour pass tests against, once created. */
     Texture texture() { return depth; }
 
-    /** This frame's nearest water surface, or null when the frame drew no water. */
+    /** This frame's nearest water, or null when the frame drew no water. */
     Texture nearest() { return current ? depth : null; }
 
     /** A new frame: no water surface yet. */

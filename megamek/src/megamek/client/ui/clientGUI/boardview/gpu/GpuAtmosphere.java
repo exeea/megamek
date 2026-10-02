@@ -103,6 +103,10 @@ final class GpuAtmosphere implements Disposable {
     private FrameBuffer sceneColor;
     private Texture sceneDepth;
     private FrameBuffer fog;
+    private GpuHeatGlow heatGlow;
+    private List<BoardScene.Tile> heatTiles;
+    private boolean molten;
+    private boolean sceneHdr;
     private GpuWeatherParticles particles;
     private GpuClouds clouds;
     private boolean cloudsActive;
@@ -212,6 +216,9 @@ final class GpuAtmosphere implements Disposable {
         if (source.contains("// ATMOSPHERE_GLARE")) {
             source = source.replace("// ATMOSPHERE_GLARE", GpuShaderSource.read("atmosphere-glare.glsl"));
         }
+        if (source.contains("// HEAT_RADIANCE")) {
+            source = source.replace("// HEAT_RADIANCE", GpuShaderSource.read("heat-radiance.glsl"));
+        }
         return source;
     }
 
@@ -292,6 +299,10 @@ final class GpuAtmosphere implements Disposable {
 
     /** Prepare clouds and surface weather before scene capture; cameras share their field and wind timeline. */
     void prepareClouds(GpuTerrain terrain, BoardScene board, float delta) {
+        if (heatTiles != board.tiles()) {
+            heatTiles = board.tiles();
+            molten = heatTiles.stream().anyMatch(tile -> tile.liquid().molten());
+        }
         terrain.setWetness(BoardAtmosphere.wetness(settings));
         terrain.setWind(settings.effects());
         cloudsActive = settings.clouds() > 0 && lighting.hasDirectLight();
@@ -307,9 +318,12 @@ final class GpuAtmosphere implements Disposable {
     void begin(int width, int height, float delta) {
         int pixelsWide = Math.max(1, HdpiUtils.toBackBufferX(width));
         int pixelsHigh = Math.max(1, HdpiUtils.toBackBufferY(height));
-        if (sceneColor == null || sceneColor.getWidth() != pixelsWide || sceneColor.getHeight() != pixelsHigh) {
+        if (sceneColor == null || sceneColor.getWidth() != pixelsWide || sceneColor.getHeight() != pixelsHigh
+              || sceneHdr != molten) {
             disposeBuffers();
-            sceneColor = buffer(pixelsWide, pixelsHigh, false);
+            sceneHdr = molten;
+            sceneColor = sceneHdr ? GpuHeatGlow.buffer(pixelsWide, pixelsHigh) : buffer(pixelsWide, pixelsHigh, false);
+            sceneColor.getColorBufferTexture().setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
             try {
                 sceneDepth = attachDepthTexture(sceneColor);
             } catch (RuntimeException failure) {
@@ -375,6 +389,12 @@ final class GpuAtmosphere implements Disposable {
         if (hasScattering()) {
             renderFog(camera, terrain, board);
         }
+        boolean glowActive = sceneHdr;
+        if (glowActive) {
+            if (heatGlow == null) { heatGlow = new GpuHeatGlow(quad); }
+            heatGlow.render(sceneColor.getColorBufferTexture(), sceneDepth,
+                  hasScattering() ? fog.getColorBufferTexture() : null, camera, fieldOfView);
+        }
         HdpiUtils.glViewport(0, bottom, (int) camera.viewportWidth, (int) camera.viewportHeight);
         screenState();
         Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
@@ -392,7 +412,14 @@ final class GpuAtmosphere implements Disposable {
         }
         compositeShader.setUniformi("u_scene", 0);
         compositeShader.setUniformi("u_depth", 1);
+        Texture water = hasScattering() || settings.effects().sand() > 0 ? terrain.waterDepth() : null;
+        if (water != null) { water.bind(6); }
+        compositeShader.setUniformi("u_waterDepth", water == null ? 1 : 6);
         compositeShader.setUniformi("u_fog", hasScattering() ? 2 : 0);
+        if (glowActive) { heatGlow.texture().bind(5); }
+        compositeShader.setUniformi("u_heatGlow", glowActive ? 5 : 0);
+        compositeShader.setUniformf("u_heatEnabled", sceneHdr ? 1 : 0);
+        compositeShader.setUniformf("u_heatGlowStrength", glowActive ? 0.12f : 0);
         compositeShader.setUniformf("u_fogEnabled", hasScattering() ? 1 : 0);
         if (hasScattering()) {
             // renderFog just projected its volume. Sand may subsequently bind a different, lower volume.
@@ -617,6 +644,7 @@ final class GpuAtmosphere implements Disposable {
             fog.dispose();
             fog = null;
         }
+        if (heatGlow != null) { heatGlow.disposeBuffers(); }
     }
 
     @Override
@@ -626,6 +654,7 @@ final class GpuAtmosphere implements Disposable {
             particles.dispose();
         }
         if (clouds != null) { clouds.dispose(); }
+        if (heatGlow != null) { heatGlow.dispose(); }
         if (groundNoise != null) { groundNoise.dispose(); }
         quad.dispose();
         GpuShaderManager.dispose(fogShader);

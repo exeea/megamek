@@ -13,8 +13,9 @@ void main() {
     float alpha;
     // A clean section through the water body: the light it scatters at each depth, dimmed as the daylight is
     // absorbed on its way down, hiding more of what lies behind it the deeper it runs. Waves, foam, glints, rain
-    // and the grid belong to the surface. Seen from inside, through the surface, it is not drawn.
-    if (!gl_FrontFacing) discard;
+    // and the grid belong to the surface. Seen from inside, through the surface or the near section, it is not drawn:
+    // the far side of a zig-zag board edge faces the camera too.
+    if (!gl_FrontFacing || waterHidden()) discard;
     vec3 kept = waterTransmission(palette, v_color.g * WATER_DEPTH_RANGE);
     alpha = 1.0 - (1.0 - WATER_MAX_OPACITY) * max(max(kept.r, kept.g), kept.b);
     color = scatter * illumination.light * kept * alpha;

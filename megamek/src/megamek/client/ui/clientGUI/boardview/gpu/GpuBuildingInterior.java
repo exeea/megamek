@@ -1,8 +1,14 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.awt.geom.Area;
+import java.awt.geom.Path2D;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.VertexAttributes;
@@ -16,13 +22,86 @@ import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 
-/** Simple box columns and two-sided floor sheets, clipped to the authored roof's actual footprint. */
+/** Simple box columns and two-sided floor sheets, clipped to the building's external wall outline. */
 final class GpuBuildingInterior {
     private static final float SPACING = 22;
     private static final float STRUT_WIDTH = 1.6f;
     private static final long ATTRIBUTES = VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal;
 
     private GpuBuildingInterior() { }
+
+    /** Weld triangle seams and reverse faces for the section graph, without depending on material normals. */
+    private record Point(long x, long y) {
+        static Point at(Vector3 a, Vector3 b, float z) {
+            float t = (z - a.z) / (b.z - a.z);
+            return new Point(Math.round((a.x + t * (b.x - a.x)) * 1000),
+                  Math.round((a.y + t * (b.y - a.y)) * 1000));
+        }
+    }
+
+    /** Mid-storey sections ignore horizontal roof overhangs, foundation borders and floor ledges. */
+    static Area walls(List<Vector3> triangles, float z) {
+        Map<Point, Set<Point>> edges = new LinkedHashMap<>();
+        for (int i = 0; i < triangles.size(); i += 3) {
+            List<Point> crossings = new ArrayList<>(2);
+            for (int side = 0; side < 3; side++) {
+                Vector3 a = triangles.get(i + side), b = triangles.get(i + (side + 1) % 3);
+                if ((a.z > z) != (b.z > z)) { crossings.add(Point.at(a, b, z)); }
+            }
+            if (crossings.size() != 2 || crossings.get(0).equals(crossings.get(1))) { continue; }
+            Point a = crossings.get(0), b = crossings.get(1);
+            edges.computeIfAbsent(a, ignored -> new LinkedHashSet<>()).add(b);
+            edges.computeIfAbsent(b, ignored -> new LinkedHashSet<>()).add(a);
+        }
+        List<Area> contours = new ArrayList<>();
+        for (Point start : edges.keySet()) {
+            while (!edges.get(start).isEmpty()) {
+                Path2D.Double path = new Path2D.Double();
+                path.moveTo(start.x / 1000.0, start.y / 1000.0);
+                Point current = start;
+                do {
+                    if (edges.get(current).isEmpty()) { break; }
+                    Point next = edges.get(current).iterator().next();
+                    edges.get(current).remove(next);
+                    edges.get(next).remove(current);
+                    current = next;
+                    path.lineTo(current.x / 1000.0, current.y / 1000.0);
+                } while (!current.equals(start));
+                // An open decorative panel is not an enclosed building footprint.
+                if (current.equals(start)) { path.closePath(); contours.add(new Area(path)); }
+            }
+        }
+        // Filling nested contours includes the wall thickness: the external boundary is authoritative here.
+        Area result = new Area();
+        contours.forEach(result::add);
+        return result;
+    }
+
+    static Area area(List<Vector3> triangles) {
+        Path2D.Float path = new Path2D.Float(Path2D.WIND_NON_ZERO);
+        for (int i = 0; i < triangles.size(); i += 3) {
+            Vector3 a = triangles.get(i), b = triangles.get(i + 1), c = triangles.get(i + 2);
+            float normal = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+            if (Math.abs(normal) < .0001f) { continue; }
+            if (normal < 0) { Vector3 swap = b; b = c; c = swap; }
+            // Match the wall-section weld tolerance; import roundoff must not create sliver holes at cap seams.
+            path.moveTo(Math.round(a.x * 1000) / 1000f, Math.round(a.y * 1000) / 1000f);
+            path.lineTo(Math.round(b.x * 1000) / 1000f, Math.round(b.y * 1000) / 1000f);
+            path.lineTo(Math.round(c.x * 1000) / 1000f, Math.round(c.y * 1000) / 1000f);
+            path.closePath();
+        }
+        return new Area(path);
+    }
+
+    static List<Vector3> triangles(Area footprint) {
+        List<Vector3> result = new ArrayList<>();
+        for (var triangle : BoardTacticalGeometry.flat(footprint, 0)) {
+            result.add(triangle.a());
+            result.add(triangle.b());
+            result.add(triangle.c());
+        }
+        return List.copyOf(result);
+    }
 
     static Model build(Model shell, int levels) {
         float height = shell.calculateBoundingBox(new BoundingBox()).max.z;
@@ -46,7 +125,7 @@ final class GpuBuildingInterior {
         return List.copyOf(result);
     }
 
-    /** The roof underside extruded through the wall stack is the interior volume for a modular building. */
+    /** Extrude the clipped external footprint through the wall stack for the generated cutaway interior. */
     static Model build(List<Vector3> roof, float height, int levels) {
         if (roof.isEmpty() || height <= 0 || levels < 1) {
             throw new IllegalArgumentException("Building interior needs a footprint and positive height");

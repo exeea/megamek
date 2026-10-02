@@ -21,6 +21,8 @@ import org.lwjgl.opengl.GL11;
 class GpuWaterWavesSmokeTest {
     private static final int SIZE = GpuOcean.SIZE, TEXELS = SIZE * SIZE;
     private static final float FRAME = 1 / 60f;
+    /** Half a minute: whitecaps settle on their cover within about fifteen seconds of a change of wind. */
+    private static final int FOAM_FRAMES = 1800;
 
     @Test
     void cascadesDescribeOneMovingSeaWithSharpCrestsAndFoamOnThem() {
@@ -30,7 +32,12 @@ class GpuWaterWavesSmokeTest {
             double calm = variance(read(ocean.displacement()), 2);
             time = settle(ocean, time, new Vector3(.8f, .6f, .5f));
             double breeze = variance(read(ocean.displacement()), 2);
+            // Whitecaps take longer than the waves to settle on the cover the wind calls for.
+            time = run(ocean, time, new Vector3(.8f, .6f, .5f), FOAM_FRAMES);
+            assertEquals(GpuOcean.foamCover(.5f), whitecaps(ocean), .015, "A moderate wind whitens its share of the sea");
             time = settle(ocean, time, new Vector3(.8f, .6f, 1));
+            time = run(ocean, time, new Vector3(.8f, .6f, 1), FOAM_FRAMES);
+            assertEquals(GpuOcean.FOAM_COVERAGE, whitecaps(ocean), .03, "A gale keeps the configured whitecap cover");
             float[] shape = read(ocean.displacement()), swell = read(ocean.waves(0));
             double gale = variance(shape, 2);
             // Heights come out in metres: four standard deviations of the longest cascade.
@@ -40,7 +47,7 @@ class GpuWaterWavesSmokeTest {
             double target = GpuOcean.MAX_WAVE_HEIGHT / 1.6;
             assertEquals(target, 4 * Math.sqrt(gale), target * .15, "Gale significant height");
             double crests = 0, troughs = 0;
-            int crestCount = 0, troughCount = 0, foam = 0;
+            int crestCount = 0, troughCount = 0;
             for (int i = 0; i < TEXELS; i++) {
                 for (int channel = 0; channel < 4; channel++) {
                     assertTrue(Float.isFinite(shape[i * 4 + channel]) && Float.isFinite(swell[i * 4 + channel]));
@@ -48,11 +55,9 @@ class GpuWaterWavesSmokeTest {
                 assertEquals(shape[i * 4 + 2], swell[i * 4 + 2], .001, "Crest light must follow the displaced height");
                 float height = shape[i * 4 + 2], compression = shape[i * 4 + 3];
                 if (height > 0) { crests += compression; crestCount++; } else { troughs += compression; troughCount++; }
-                if (swell[i * 4 + 3] > .5) { foam++; }
             }
             // Choppy displacement gathers the surface into crests and spreads it through troughs.
             assertTrue(crests / crestCount > troughs / troughCount + .02, "Crests, not troughs, are sharp");
-            assertTrue(foam > 0 && foam < TEXELS * .25, "Wind foam leaves open water between crests: " + foam);
             for (int cascade = 1; cascade < GpuOcean.PATCHES.length; cascade++) {
                 assertTrue(variance(read(ocean.waves(cascade)), 0) > 0, "Every cascade carries slopes");
             }
@@ -160,6 +165,11 @@ class GpuWaterWavesSmokeTest {
         return run(ocean, time, wind, (int) ((GpuOcean.TRANSITION_SECONDS + 1) / FRAME));
     }
 
+    /** Share of the open sea showing whitecaps up close, as the finish pass reckons it for the ripple result. */
+    private static double whitecaps(GpuOcean ocean) {
+        return mean(read(ocean.waves(2)), 3);
+    }
+
     /** Mean absolute change of height over one frame, under the given wind. */
     private static double change(GpuOcean ocean, float time, Vector3 wind) {
         float[] before = read(ocean.displacement());
@@ -191,6 +201,12 @@ class GpuWaterWavesSmokeTest {
         GL11.glGetTexImage(GL20.GL_TEXTURE_2D, 0, GL20.GL_RGBA, GL20.GL_FLOAT, buffer);
         buffer.get(data);
         return data;
+    }
+
+    private static double mean(float[] data, int channel) {
+        double sum = 0;
+        for (int i = channel; i < data.length; i += 4) { sum += data[i]; }
+        return sum / (data.length / 4);
     }
 
     private static double variance(float[] data, int channel) {

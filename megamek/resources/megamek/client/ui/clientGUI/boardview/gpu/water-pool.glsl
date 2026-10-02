@@ -50,13 +50,13 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     // the same texels and nothing pulses. Samples stay outside non-uniform branches: mip selection stays defined.
     float speed = length(current);
     float flowing = smoothstep(0.004, 0.02, speed);
-    float phase = fract(u_rainTime / FLOW_CYCLE + broad.g);
-    float weightA = 1.0 - abs(2.0 * phase - 1.0);
-    float weightB = 1.0 - weightA;
+    LiquidFlow flow = liquidFlow(u_rainTime, FLOW_CYCLE, broad.g);
+    float phase = flow.phase.x;
+    float weightA = flow.weight.x, weightB = flow.weight.y;
     // Uncorrelated patterns blend with preserved variance, so flowing water never calms mid-cycle.
-    float preserve = mix(1.0, inversesqrt(weightA * weightA + weightB * weightB), flowing);
-    vec2 advectedA = position - current * ((phase - 0.5) * FLOW_CYCLE);
-    vec2 advectedB = position - current * ((fract(phase + 0.5) - 0.5) * FLOW_CYCLE) + 0.37 * flowing;
+    float preserve = mix(1.0, liquidFlowVariance(flow), flowing);
+    vec2 advectedA = liquidFlowUv(position, current, flow, 0, vec2(0.0), 0.0);
+    vec2 advectedB = liquidFlowUv(position, current, flow, 1, vec2(0.0), 0.0) + 0.37 * flowing;
     // Fixed in the world: the simulated cascades carry the wind's direction, and a detail map turning with the wind
     // would sweep across the whole board whenever it changed.
     mat2 crossing = CROSSING;
@@ -64,10 +64,16 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     vec4 small = ((texture(u_waterDetail, crossing * advectedA * 3.8 + driftB) - 0.5) * weightA
           + (texture(u_waterDetail, crossing * advectedB * 3.8 + driftB) - 0.5) * weightB) * preserve;
     small.rg = small.rg * crossing;
-    // Rapids churn in larger, faster-moving patches than the fine surface grain. Keep one clock and blend
-    // their contribution by agitation: multiplying time by local agitation would shear the texture at joins.
-    vec4 rapidDetail = ((texture(u_waterDetail, crossing * advectedA * 0.65 + driftB * 4.0) - 0.5) * weightA
-          + (texture(u_waterDetail, crossing * advectedB * 0.65 + driftB * 4.0) - 0.5) * weightB) * preserve;
+    // Rapids churn, and a river's broad flow, in larger patches than the fine surface grain, carried by the current
+    // alone: a drift fixed in the world would skew or cancel it. Still, agitated water (a lake's pouring lip) keeps a
+    // slow churn of its own in the same restarting phases, whose patterns never overlap, so it never pulses. Keep one
+    // clock and blend by agitation: multiplying time by local agitation would shear the texture at joins.
+    vec2 stir = current + vec2(0.06, -0.06) * (1.0 - flowing);
+    vec2 stirA = liquidFlowUv(position, stir, flow, 0, vec2(0.0), 0.0);
+    vec2 stirB = liquidFlowUv(position, stir, flow, 1, vec2(0.0), 0.0) + 0.37;
+    vec4 rapidDetail = ((texture(u_waterDetail, crossing * stirA * 0.65) - 0.5) * weightA
+          + (texture(u_waterDetail, crossing * stirB * 0.65) - 0.5) * weightB)
+          * liquidFlowVariance(flow);
     rapidDetail.rg = rapidDetail.rg * crossing;
 
     // Wind waves: three cascades of one simulated sea at the undisplaced position, so slopes, crest light and foam
@@ -76,9 +82,11 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     vec4 fetchMetres = waterFetch(rest);
     vec3 energy = waterWaveEnergy(rest, field, fetchMetres);
     // Open water keeps this floor. Running water is too narrow for the wind to raise a sea on: a strong wind raises
-    // only short steep chop there, the ripple band, carried along with its current below.
+    // only short steep chop there, the ripple band, carried along with its current below. A descent keeps its own
+    // current-driven surface: its mesh normal, exactly up on level water, tilts from the lip.
     float openWater = smoothstep(0.0, 4.0, dot(fetchMetres, vec4(1.0)));
-    vec3 minimum = mix(vec3(.3, .7, .9) * openWater, vec3(0.0, 0.0, 1.0), flowing);
+    float level = smoothstep(.975, .995, surfaceNormal.z);
+    vec3 minimum = mix(vec3(.3, .7, .9) * openWater, vec3(0.0, 0.0, level), flowing);
     vec3 lit = max(energy, minimum * (smoothstep(0.0, .01, shore) * waterWindShare(field))) * effects;
     lit.yz *= mix(.75, 1.25, gust);
     vec4 swell = vec4(0.0), chop = vec4(0.0), ripple = vec4(0.0);
@@ -99,19 +107,21 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
             ripple = textureGrad(u_waterOcean2, carriedA * u_waterOceanScale.z, rippleDx, rippleDy) * weightA
                   + textureGrad(u_waterOcean2, carriedB * u_waterOceanScale.z, rippleDx, rippleDy) * weightB;
             chop.xyz *= preserve;
-            ripple.xyz *= preserve;
+            // A river's short chop keeps its real height: the storm's art-directed gain is for a sea's crests.
+            ripple.xyz *= preserve / mix(1.0, u_waterStorm, flowing);
         } else {
             chop = textureGrad(u_waterOcean1, rest * u_waterOceanScale.y, chopDx, chopDy);
             ripple = textureGrad(u_waterOcean2, rest * u_waterOceanScale.z, rippleDx, rippleDy);
         }
         // A river's short chop is all the wave it has: its faces take the light as the sea's crests do.
-        broadSlope = swell.xy * lit.x + chop.xy * (lit.y * .35) + ripple.xy * (lit.z * flowing);
+        broadSlope = swell.xy * lit.x + chop.xy * (lit.y * .35) + ripple.xy * (lit.z * flowing * 1.5);
         slope = swell.xy * lit.x + chop.xy * lit.y + ripple.xy * (lit.z * .7);
         // Metres above the mean surface, from the crests the geometry and the eye both see.
         height = swell.z * energy.x + chop.z * energy.y;
         // A river's short chop is steep enough in a gale to break at its highest crests: small flecks, never a sea's
         // whitecaps. In a breeze its crests rarely reach that height.
-        float flecks = smoothstep(.09, .17, ripple.z) * lit.z * flowing;
+        float flecks = smoothstep(.06, .12, ripple.z) * lit.z * flowing;
+        // GpuOcean steers the open sea's whitecaps by this combination and lace (ocean-water-finish.frag).
         whitecaps = max(max(swell.w * energy.x, chop.w * energy.y * .8), flecks);
         fineUV = u_waterOceanScale.z;
         noise = small.b;
@@ -125,10 +135,17 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     float calmed = 1.0 - wetShore * mix(.75, .25, marshShare);
     slope *= calmed;
     broadSlope *= calmed;
+    // Running water shows its current in any light: the churn's broad faces take the sky and sun as a lake's waves
+    // do, a texture only the current moves, so no wind can make a river seem to run backwards. Descents keep their
+    // own look, and so do the depth-0 shallows.
+    float running = flowing * level * smoothstep(0.03, 0.10, speed) * smoothstep(0.06, 0.45, depth) * (1.0 - wetShore);
+    vec2 sheet = rapidDetail.rg * (running * churn);
+    broadSlope += sheet;
+    slope += sheet * 0.25;
     // Slopes are the surface's gradient: the normal leans away from the way the water rises.
-    // Running water carries its own ripples downstream in place of the wind's (waterWindShare).
-    slope += (small.rg * (0.02 + 0.03 * u_waterWind.z + 0.05 * flowing) * detail + rapidDetail.rg * (0.4 * agitation))
-          * effects;
+    // Level running water carries its own ripples downstream in place of the wind's (waterWindShare).
+    slope += (small.rg * (0.02 + 0.03 * u_waterWind.z + 0.05 * flowing * level) * detail
+          + rapidDetail.rg * (0.4 * agitation)) * effects;
     vec3 ripples = rainRippleField(position) * effects;
     slope += ripples.xy;
 
@@ -141,7 +158,8 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     // Surf needs open water to build over: a narrow pool or channel, whose far bank is close, stays without it.
     float beyond = (texture(u_waterField, fieldUV + seaward * u_waterFieldMap.xy * (0.35 / u_rainScale)).r
           * 2.0 - 1.0) * SHORE_RANGE;
-    float fetch = smoothstep(0.12, 0.25, beyond - shore);
+    // Nor do a current's banks: its water runs past them instead of rolling in.
+    float fetch = smoothstep(0.12, 0.25, beyond - shore) * (1.0 - flowing);
     float nearBank = (1.0 - smoothstep(0.05, 0.28, shore)) * smoothstep(0.0, 0.01, shore) * fetch;
     float march = shore * 65.0 + u_rainTime * 1.6 + broad.r * 11.0 + gust * 5.0;
     float surfEnergy = mix(.15, 1.0, u_waterWind.z) * fetch;
@@ -159,9 +177,11 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     float contact = smoothstep(0.0, 0.003 + pixel, shore)
           * (1.0 - smoothstep(0.006 + pixel, 0.016 + 2.0 * pixel, shore + noise * 0.012));
     // Foam covers the water densely at the bank and breaks into drifts further out; the band pulses with each
-    // wave, varies along the bank and swells again where a roller breaks.
-    float surge = 0.5 + 0.5 * sin(u_rainTime * 1.1 + broad.r * 13.0 + gust * 6.0);
-    float width = mix(0.045, 0.11, gust) * (0.6 + 0.4 * surge) * (0.7 + 0.6 * broad.b) * mix(0.45, 1.0, fetch);
+    // wave, varies along the bank and swells again where a roller breaks. Beside running water it holds steady and
+    // only its grain drifts downstream: no wind-drifted pattern may travel along a river's bank.
+    float bankGust = mix(gust, 0.5, flowing);
+    float surge = mix(0.5 + 0.5 * sin(u_rainTime * 1.1 + broad.r * 13.0 + gust * 6.0), 0.5, flowing);
+    float width = mix(0.045, 0.11, bankGust) * (0.6 + 0.4 * surge) * (0.7 + 0.6 * broad.b) * mix(0.45, 1.0, fetch);
     float grainy = noise + 0.5;
     float coverage = exp(-shore / width) + 0.4 * smoothstep(0.55, 0.95, sin(march)) * nearBank * surfEnergy;
     float surf = smoothstep(1.0 - coverage, 1.2 - coverage, grainy) * smoothstep(0.0, 0.003, shore);
@@ -222,6 +242,9 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
     // their spread becomes a broad path of glitter instead of aliasing into lines.
     vec2 texels = fwidth(u_waterOceanScale.x > 0.0 ? rest * fineUV : position * 2.0) * OCEAN_SIZE;
     float roughness = clamp(0.16 + 0.06 * log2(1.0 + max(texels.x, texels.y)) + 0.04 * u_waterWind.z, 0.16, 0.45);
+    // Water running down a slope is broken: a descent spreads the sun's glitter instead of drawing it as a line along
+    // its curve. The mesh normal is exactly up on level water, which keeps its sharp glint.
+    roughness = mix(roughness, .45, falling ? 0.0 : min(length(surfaceNormal.xy) * 20.0, 1.0));
     float a2 = roughness * roughness * roughness * roughness;
     vec3 halfway = normalize(view + toSun);
     float schlick = 0.02 + 0.98 * pow(1.0 - clamp(dot(halfway, view), 0.0, 1.0), 5.0);
@@ -248,6 +271,10 @@ vec4 waterPool(bool falling, vec4 habitat, vec4 mixture, vec3 tint, vec3 authore
         vec3 deep = scatter * mix(0.86, 1.12, broad.r) * mix(0.8, 1.15, crest);
         body = mix(waterShallows(mixture), deep, smoothstep(0.1, 1.6, depth)) * facets * column;
         bodyAlpha = min(column, WATER_MAX_OPACITY);
+        // A current carries clearer and siltier water past in its own colour: its flow shows under any light.
+        float clarity = 1.0 + rapidDetail.b * running;
+        body *= clarity;
+        bodyAlpha = min(bodyAlpha * clarity, WATER_MAX_OPACITY);
     } else {
         bodyAlpha = 1.0;
         body = authored * tint * facets;

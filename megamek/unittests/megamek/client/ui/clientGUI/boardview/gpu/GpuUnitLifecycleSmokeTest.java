@@ -18,6 +18,7 @@ import javax.swing.Timer;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.scenes.scene2d.ui.SelectBox;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
@@ -71,6 +72,12 @@ class GpuUnitLifecycleSmokeTest {
                                   catch (InvocationTargetException error) { throw error.getCause(); }
                               });
                         super.create();
+                        try {
+                            var ui = (GpuBoardUi) field(this, "ui");
+                            var tuning = (GpuBoardTuning) field(ui, "tuning");
+                            SelectBox<UnitDisplayMode> display = tuning.panel().findActor("tuning-unit-display");
+                            display.setSelected(UnitDisplayMode.MODELS);
+                        } catch (Exception error) { throw new IllegalStateException(error); }
                     }
 
                     @Override
