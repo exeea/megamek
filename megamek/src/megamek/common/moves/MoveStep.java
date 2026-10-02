@@ -808,13 +808,15 @@ public class MoveStep implements Serializable {
             }
         }
 
-        // WiGEs get bonus MP for each string of three consecutive hexes they descend.
+        // WiGEs get bonus MP for each string of three consecutive hexes they descend. Measure the unit's own
+        // altitude: a WiGE holding its altitude (Keep Elevation) over lower terrain is not descending.
         if (entity.getMovementMode() == EntityMovementMode.WIGE &&
             getClearance() > 0 &&
             game.getOptions().booleanOption(OptionsConstants.ADVANCED_GROUND_MOVEMENT_VEHICLE_ADVANCED_MANEUVERS)) {
 
-            if (game.getBoard(boardId).getHex(getPosition()).ceiling() <
-                game.getBoard(boardId).getHex(prev.getPosition()).ceiling()) {
+            int altitude = game.getBoard(boardId).getHex(getPosition()).getLevel() + getElevation();
+            int previousAltitude = game.getBoard(boardId).getHex(prev.getPosition()).getLevel() + prev.getElevation();
+            if (altitude < previousAltitude) {
                 nWigeDescent = prev.getNWigeDescent() + 1;
                 if (nWigeDescent >= 3) {
                     wigeBonus++;
@@ -2766,21 +2768,22 @@ public class MoveStep implements Serializable {
                 // or into stacking violation.
                 Targetable target = getTarget(game);
                 if (target instanceof Entity other) {
+                    // Only jump and VTOL infantry may leave a VTOL or WiGE that has not landed, in its own hex; jump
+                    // infantry land on the ground or roof, VTOL infantry stay at its elevation (TW p.225, errata
+                    // v12.0)
+                    int unloadElevation = getElevation();
+                    Hex carrierHex = game.getBoard(boardId).getHex(curPos);
+                    if (AirborneDismountRules.isCarrierAirborne(entity, carrierHex, getElevation())) {
+                        boolean leavesCarrierHex = (getTargetPosition() != null) && !getTargetPosition().equals(curPos);
+                        if (leavesCarrierHex
+                              || !AirborneDismountRules.canDismountFromAirborneCarrier(game, entity, other)) {
+                            movementType = EntityMovementType.MOVE_ILLEGAL;
+                        }
+                        unloadElevation = AirborneDismountRules.dismountElevation(other, carrierHex, getElevation());
+                    }
                     // Change the destination hex if an unload dialog box set it elsewhere
                     if (getTargetPosition() != null) {
                         curPos = getTargetPosition();
-                    }
-                    // Infantry with jump capability or glider wings dismounting from VTOLs
-                    // land at ground level, not VTOL elevation (TW p.31, IO:AE p.79)
-                    int unloadElevation = getElevation();
-                    if (entity instanceof VTOL && other.isInfantry()) {
-                        Infantry inf = (Infantry) other;
-                        if (inf.getJumpMP() > 0 || inf.canExitVTOLWithGliderWings()) {
-                            Hex destHex = game.getBoard(boardId).getHex(curPos);
-                            if (destHex != null) {
-                                unloadElevation = destHex.getLevel();
-                            }
-                        }
                     }
                     if ((Compute.stackingViolation(game, other, curPos, entity, climbMode, true) != null) ||
                         other.isLocationProhibited(curPos, unloadElevation)) {
@@ -3926,6 +3929,11 @@ public class MoveStep implements Serializable {
             }
         }
 
+        // Airborne WiGE steps are MOVE_VTOL_*, so the elevation change check above is skipped for them
+        if (isAirborneWiGERiseTooHigh(src, srcHex, srcEl, srcAlt, dest, destHex)) {
+            return false;
+        }
+
         // Sheer Cliffs, TO p.39
         // Roads over cliffs cancel the cliff effects for units that move on roads
         boolean vehicleAffectedByCliff = entity instanceof Tank && !entity.isAirborneVTOLorWIGE();
@@ -4332,6 +4340,45 @@ public class MoveStep implements Serializable {
 
     public int getElevation() {
         return elevation;
+    }
+
+    /**
+     * TW p.55: a WiGE may enter a hex one level higher than its current hex, never two or more. A WiGE holding its
+     * altitude over lower hexes (TW p.56 example) is measured from that altitude rather than from the ground below it,
+     * so its altitude may rise by at most one level per hex entered. Building roofs count as the surface (see
+     * {@link Entity#calcElevation}). Grounded WiGEs, jumps and steps within one hex are not checked here.
+     *
+     * @param src     the hex the step starts in
+     * @param srcHex  the hex at {@code src}
+     * @param srcEl   the unit's elevation in the source hex
+     * @param srcAlt  the unit's absolute altitude in the source hex (hex level plus elevation)
+     * @param dest    the hex the step enters
+     * @param destHex the hex at {@code dest}
+     *
+     * @return {@code true} if this step would lift an airborne WiGE more than one level
+     */
+    private boolean isAirborneWiGERiseTooHigh(Coords src, Hex srcHex, int srcEl, int srcAlt, Coords dest,
+          Hex destHex) {
+        if ((movementMode != EntityMovementMode.WIGE) || (movementType == EntityMovementType.MOVE_JUMP)
+              || src.equals(dest)) {
+            return false;
+        }
+        int sourceClearance = srcEl;
+        if (srcHex.containsTerrain(Terrains.BLDG_ELEV)) {
+            sourceClearance -= srcHex.terrainLevel(Terrains.BLDG_ELEV);
+        }
+        if (sourceClearance <= 0) {
+            return false;
+        }
+        // Use the step elevation rather than isMovementPossible's destAlt, which is clamped to the floor of
+        // building hexes in some climb mode cases
+        int altitudeRise = (elevation + destHex.getLevel()) - srcAlt;
+        if (altitudeRise > 1) {
+            LOGGER.debug("isValidStep: airborne WiGE {} cannot rise {} levels into {}",
+                  getEntity().getDisplayName(), altitudeRise, dest);
+            return true;
+        }
+        return false;
     }
 
     /**
