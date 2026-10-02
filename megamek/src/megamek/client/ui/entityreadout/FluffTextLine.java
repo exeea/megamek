@@ -32,6 +32,8 @@
  */
 package megamek.client.ui.entityreadout;
 
+import java.util.List;
+
 import megamek.client.ui.util.DiscordFormat;
 
 /**
@@ -57,6 +59,11 @@ record FluffTextLine(String label, String value) implements ViewElement {
     public String toDiscord() {
         return DiscordFormat.BOLD + label + DiscordFormat.RESET + ": "
               + DiscordFormat.highlightNumbersForDiscord(htmlCleanedText()) + '\n';
+    }
+
+    @Override
+    public void addRows(List<EntityReadout.Row> rows) {
+        rows.add(new EntityReadout.Row(EntityReadout.Row.Kind.LABELED, List.of(label, htmlCleanedText().strip())));
     }
 
     private String htmlCleanedText() {

@@ -44,6 +44,8 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.StringJoiner;
+import java.util.stream.IntStream;
 import javax.swing.JCheckBox;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -58,10 +60,16 @@ import javax.swing.SwingConstants;
 import javax.swing.UIManager;
 
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogField;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.FieldKind;
 import megamek.client.ui.dialogs.buttonDialogs.AbstractButtonDialog;
+import megamek.client.ui.enums.DialogResult;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.InfantryActionDeclaration;
 import megamek.common.Player;
+import megamek.common.annotations.Nullable;
 import megamek.common.compute.InfantryActionStrengths;
 import megamek.common.game.Game;
 import megamek.common.units.AbstractBuildingEntity;
@@ -86,6 +94,8 @@ public class InfantryActionDeclarationDialog extends AbstractButtonDialog {
     private JCheckBox withdrawBox;
     private JSpinner crewSpinner;
     private JTextArea crewEffect;
+    /** What the dialog shows, as data: the Swing dialog and the native form show the same rows. */
+    private Content content;
 
     /**
      * @param frame    the parent frame
@@ -129,11 +139,10 @@ public class InfantryActionDeclarationDialog extends AbstractButtonDialog {
         JPanel column = new WidthTrackingPanel(new GridBagLayout());
         int padding = UIUtil.scaleForGUI(6);
         column.setBorder(javax.swing.BorderFactory.createEmptyBorder(padding, padding * 2, padding, padding * 2));
-        if (defends) {
-            addDefenceRows(column);
-        } else {
-            addAttackRows(column);
-        }
+        content = defends ? defenceRows() : attackRows();
+        addRows(column, content.own());
+        addRows(column, content.against());
+        refreshTotals();
         // A filler row takes the spare height, so the rows stay at the top when the dialog is tall
         GridBagConstraints filler = rowConstraints();
         filler.weighty = 1;
@@ -144,54 +153,94 @@ public class InfantryActionDeclarationDialog extends AbstractButtonDialog {
         return scroller;
     }
 
+    // ---------------------------------------------------------------- rows as data
+
+    /** What a row of the declaration is. */
+    private enum RowKind {
+        HEADING,
+        TEXT,
+        /** A unit the player may commit, ticked at first. */
+        UNIT,
+        /** The crew the defender commits. */
+        CREW,
+        /** The box that withdraws the player's force. */
+        WITHDRAW,
+        /** The player's total, which follows the choices. */
+        OWN_TOTAL,
+        /** What the crew to commit adds and costs, which follows the choice. */
+        CREW_EFFECT
+    }
+
+    /**
+     * One row of the declaration as data.
+     *
+     * @param kind what the row is
+     * @param text its text: the label of a unit, the crew or the withdrawal; empty for a total
+     * @param unit the infantry of a UNIT row, otherwise null
+     */
+    private record Row(RowKind kind, String text, @Nullable Infantry unit) {
+        Row(RowKind kind, String text) {
+            this(kind, text, null);
+        }
+    }
+
+    /**
+     * The declaration as data: the player's own side, whose rows hold the choices, then the side it faces.
+     *
+     * @param own     the player's side
+     * @param against the other side, from its heading on
+     */
+    private record Content(List<Row> own, List<Row> against) {}
+
     // ---------------------------------------------------------------- attacker
 
-    private void addAttackRows(JPanel column) {
+    private Content attackRows() {
+        List<Row> own = new ArrayList<>();
         List<Entity> engaged = new ArrayList<>();
         for (Entity entity : InfantryActionStrengths.engaged(game, building, true)) {
             if (entity.getOwnerId() == player.getId()) {
                 engaged.add(entity);
             }
         }
-        addHeading(column, Messages.getString(engaged.isEmpty() ? "InfantryActionDeclarationDialog.attackingWith"
-              : "InfantryActionDeclarationDialog.reinforcingWith"));
+        own.add(new Row(RowKind.HEADING, Messages.getString(engaged.isEmpty()
+              ? "InfantryActionDeclarationDialog.attackingWith" : "InfantryActionDeclarationDialog.reinforcingWith")));
         for (Entity unit : engaged) {
-            addText(column, Messages.getString("InfantryActionDeclarationDialog.alreadyIn", unit.getDisplayName(),
-                  number(InfantryActionStrengths.points(unit, null))));
+            own.add(new Row(RowKind.TEXT, Messages.getString("InfantryActionDeclarationDialog.alreadyIn",
+                  unit.getDisplayName(), number(InfantryActionStrengths.points(unit, null)))));
         }
         for (Infantry unit : InfantryActionStrengths.unengagedFriendlyInfantryInside(game, player, building)) {
-            addUnitBox(column, unit, true);
+            own.add(new Row(RowKind.UNIT, unitLine(unit, null), unit));
         }
-        ownTotal = addText(column, "");
+        own.add(new Row(RowKind.OWN_TOTAL, ""));
         if (!engaged.isEmpty()) {
-            withdrawBox = new JCheckBox(Messages.getString("InfantryActionDeclarationDialog.withdraw"));
-            withdrawBox.addActionListener(event -> refreshTotals());
-            column.add(withdrawBox, rowConstraints());
-            addText(column, Messages.getString("InfantryActionDeclarationDialog.withdrawExplained"));
+            own.add(new Row(RowKind.WITHDRAW, Messages.getString("InfantryActionDeclarationDialog.withdraw")));
+            own.add(new Row(RowKind.TEXT, Messages.getString("InfantryActionDeclarationDialog.withdrawExplained")));
         }
-        addHeading(column, Messages.getString("InfantryActionDeclarationDialog.against"));
+        List<Row> against = new ArrayList<>();
+        against.add(new Row(RowKind.HEADING, Messages.getString("InfantryActionDeclarationDialog.against")));
         double known = 0;
         for (Infantry enemy : InfantryActionStrengths.enemyInfantryInside(game, player, building)) {
-            addText(column, unitLine(enemy, building));
+            against.add(new Row(RowKind.TEXT, unitLine(enemy, building)));
             known += InfantryActionStrengths.points(enemy, building);
         }
         double crewPoints = InfantryActionStrengths.hasCrewToDefend(building)
               ? InfantryActionStrengths.crewPointsIfAllCommitted(building) : 0;
         if (crewPoints > 0) {
-            addText(column, Messages.getString("InfantryActionDeclarationDialog.crewUpTo", building.getDisplayName(),
-                  number(crewPoints)));
+            against.add(new Row(RowKind.TEXT, Messages.getString("InfantryActionDeclarationDialog.crewUpTo",
+                  building.getDisplayName(), number(crewPoints))));
         }
         if ((known <= 0) && (crewPoints <= 0)) {
-            addText(column, Messages.getString("InfantryActionDeclarationDialog.nobodyDefends"));
+            against.add(new Row(RowKind.TEXT, Messages.getString("InfantryActionDeclarationDialog.nobodyDefends")));
         }
-        addText(column, Messages.getString("InfantryActionDeclarationDialog.defenderTotal", number(known),
-              number(known + crewPoints)));
-        refreshTotals();
+        against.add(new Row(RowKind.TEXT, Messages.getString("InfantryActionDeclarationDialog.defenderTotal",
+              number(known), number(known + crewPoints))));
+        return new Content(own, against);
     }
 
     // ---------------------------------------------------------------- defender
 
-    private void addDefenceRows(JPanel column) {
+    private Content defenceRows() {
+        List<Row> own = new ArrayList<>();
         List<Entity> engaged = new ArrayList<>();
         for (Entity entity : InfantryActionStrengths.engaged(game, building, false)) {
             boolean ownInfantry = (entity.getOwnerId() == player.getId()) && (entity != building);
@@ -199,63 +248,84 @@ public class InfantryActionDeclarationDialog extends AbstractButtonDialog {
                 engaged.add(entity);
             }
         }
-        addHeading(column, Messages.getString("InfantryActionDeclarationDialog.defendingWith"));
+        own.add(new Row(RowKind.HEADING, Messages.getString("InfantryActionDeclarationDialog.defendingWith")));
         for (Entity unit : engaged) {
-            addText(column, Messages.getString("InfantryActionDeclarationDialog.alreadyIn", unit.getDisplayName(),
-                  number(InfantryActionStrengths.points(unit, building))));
+            own.add(new Row(RowKind.TEXT, Messages.getString("InfantryActionDeclarationDialog.alreadyIn",
+                  unit.getDisplayName(), number(InfantryActionStrengths.points(unit, building)))));
         }
         for (Infantry unit : InfantryActionStrengths.unengagedFriendlyInfantryInside(game, player, building)) {
-            addUnitBox(column, unit, true);
+            own.add(new Row(RowKind.UNIT, unitLine(unit, building), unit));
         }
-        int available = InfantryActionStrengths.crewAvailableToCommit(building);
         if (InfantryActionStrengths.hasCrewToDefend(building)) {
-            addText(column, Messages.getString("InfantryActionDeclarationDialog.crewState",
-                  building.getCommittedCrew(), building.getCrew().getCurrentSize()));
-            JPanel spinnerRow = new JPanel(new GridBagLayout());
-            GridBagConstraints labelConstraints = new GridBagConstraints();
-            labelConstraints.insets = new Insets(0, 0, 0, UIUtil.scaleForGUI(6));
-            spinnerRow.add(new JLabel(Messages.getString("InfantryActionDeclarationDialog.commitCrew")),
-                  labelConstraints);
-            crewSpinner = new JSpinner(new SpinnerNumberModel(0, 0, Math.max(0, available), 1));
-            crewSpinner.setEnabled(available > 0);
-            crewSpinner.addChangeListener(event -> refreshTotals());
-            spinnerRow.add(crewSpinner, new GridBagConstraints());
-            column.add(spinnerRow, rowConstraints());
-            crewEffect = addText(column, "");
+            own.add(new Row(RowKind.TEXT, Messages.getString("InfantryActionDeclarationDialog.crewState",
+                  building.getCommittedCrew(), building.getCrew().getCurrentSize())));
+            own.add(new Row(RowKind.CREW, Messages.getString("InfantryActionDeclarationDialog.commitCrew")));
+            own.add(new Row(RowKind.CREW_EFFECT, ""));
         }
-        ownTotal = addText(column, "");
+        own.add(new Row(RowKind.OWN_TOTAL, ""));
         if (InfantryActionStrengths.canWithdrawDefence(game, player, building)) {
-            withdrawBox = new JCheckBox(Messages.getString("InfantryActionDeclarationDialog.withdrawDefence"));
-            withdrawBox.addActionListener(event -> refreshTotals());
-            column.add(withdrawBox, rowConstraints());
-            addText(column, Messages.getString("InfantryActionDeclarationDialog.withdrawDefenceExplained"));
+            own.add(new Row(RowKind.WITHDRAW, Messages.getString("InfantryActionDeclarationDialog.withdrawDefence")));
+            own.add(new Row(RowKind.TEXT,
+                  Messages.getString("InfantryActionDeclarationDialog.withdrawDefenceExplained")));
         }
-        addHeading(column, Messages.getString("InfantryActionDeclarationDialog.against"));
+        List<Row> against = new ArrayList<>();
+        against.add(new Row(RowKind.HEADING, Messages.getString("InfantryActionDeclarationDialog.against")));
         double attackers = 0;
         for (Entity attacker : InfantryActionStrengths.engaged(game, building, true)) {
-            addText(column, unitLine(attacker, null));
+            against.add(new Row(RowKind.TEXT, unitLine(attacker, null)));
             attackers += InfantryActionStrengths.points(attacker, null);
         }
         for (Infantry enemy : InfantryActionStrengths.enemyInfantryInside(game, player, building)) {
             if (enemy.getInfantryCombatTargetId() == Entity.NONE) {
-                addText(column, Messages.getString("InfantryActionDeclarationDialog.couldAttack",
-                      enemy.getDisplayName(), number(InfantryActionStrengths.points(enemy, null))));
+                against.add(new Row(RowKind.TEXT, Messages.getString("InfantryActionDeclarationDialog.couldAttack",
+                      enemy.getDisplayName(), number(InfantryActionStrengths.points(enemy, null)))));
                 attackers += InfantryActionStrengths.points(enemy, null);
             }
         }
-        addText(column, Messages.getString("InfantryActionDeclarationDialog.attackerTotal", number(attackers),
-              InfantryActionStrengths.roundedUp(attackers)));
-        refreshTotals();
+        against.add(new Row(RowKind.TEXT, Messages.getString("InfantryActionDeclarationDialog.attackerTotal",
+              number(attackers), InfantryActionStrengths.roundedUp(attackers))));
+        return new Content(own, against);
     }
 
     // ---------------------------------------------------------------- shared rows
 
-    private void addUnitBox(JPanel column, Infantry unit, boolean ticked) {
-        JCheckBox box = new JCheckBox(unitLine(unit, defends ? building : null), ticked);
+    private void addRows(JPanel column, List<Row> rows) {
+        for (Row row : rows) {
+            switch (row.kind()) {
+                case HEADING -> addHeading(column, row.text());
+                case TEXT -> addText(column, row.text());
+                case UNIT -> addUnitBox(column, row);
+                case CREW -> addCrewSpinner(column, row.text());
+                case WITHDRAW -> {
+                    withdrawBox = new JCheckBox(row.text());
+                    withdrawBox.addActionListener(event -> refreshTotals());
+                    column.add(withdrawBox, rowConstraints());
+                }
+                case OWN_TOTAL -> ownTotal = addText(column, "");
+                case CREW_EFFECT -> crewEffect = addText(column, "");
+            }
+        }
+    }
+
+    private void addUnitBox(JPanel column, Row row) {
+        JCheckBox box = new JCheckBox(row.text(), true);
         box.addActionListener(event -> refreshTotals());
         unitBoxes.add(box);
-        offeredUnits.add(unit);
+        offeredUnits.add(row.unit());
         column.add(box, rowConstraints());
+    }
+
+    private void addCrewSpinner(JPanel column, String label) {
+        int available = InfantryActionStrengths.crewAvailableToCommit(building);
+        JPanel spinnerRow = new JPanel(new GridBagLayout());
+        GridBagConstraints labelConstraints = new GridBagConstraints();
+        labelConstraints.insets = new Insets(0, 0, 0, UIUtil.scaleForGUI(6));
+        spinnerRow.add(new JLabel(label), labelConstraints);
+        crewSpinner = new JSpinner(new SpinnerNumberModel(0, 0, Math.max(0, available), 1));
+        crewSpinner.setEnabled(available > 0);
+        crewSpinner.addChangeListener(event -> refreshTotals());
+        spinnerRow.add(crewSpinner, new GridBagConstraints());
+        column.add(spinnerRow, rowConstraints());
     }
 
     private void refreshTotals() {
@@ -408,5 +478,120 @@ public class InfantryActionDeclarationDialog extends AbstractButtonDialog {
         InfantryActionDeclaration declaration = getDeclaration();
         return declaration.withdraw() || !declaration.committedUnitIds().isEmpty()
               || (declaration.committedCrew() > 0);
+    }
+
+    // ---------------------------------------------------------------- native form
+
+    /**
+     * Showing the dialog asks in the client's native battle window instead when that draws dialogs: the side faced and
+     * the player's side as text, then the units to commit, the crew and the withdrawal. Each change answers the form
+     * at once and it is asked again with the totals the change makes, as they follow it here. Ok declares as here;
+     * Cancel and Esc, like the close box, do not.
+     */
+    @Override
+    public void setVisible(boolean visible) {
+        if (!visible || !answeredNatively()) {
+            super.setVisible(visible);
+        }
+    }
+
+    private boolean answeredNatively() {
+        ClientGUI gui = ClientGUI.forFrame(getFrame());
+        if (gui == null) {
+            return false;
+        }
+        List<String> buttons = List.of(resources.getString("Ok.text"), resources.getString("Cancel.text"));
+        while (true) {
+            DialogAnswer answer = gui.askForm(nativeMessage(), getTitle(), nativeFields(), buttons, 1);
+            if (answer == null) {
+                return false;
+            }
+            choose(answer.values());
+            if (answer.button() != DialogAnswer.CHANGED) {
+                if (answer.button() == 0) {
+                    setResult(DialogResult.CONFIRMED);
+                }
+                return true;
+            }
+        }
+    }
+
+    /**
+     * @return the native form's text: the side faced, then the player's side with its totals as the choices make them
+     */
+    private String nativeMessage() {
+        StringJoiner text = new StringJoiner("\n");
+        content.against().forEach(row -> text.add(row.text()));
+        text.add("");
+        for (Row row : content.own()) {
+            switch (row.kind()) {
+                case HEADING, TEXT -> text.add(row.text());
+                case OWN_TOTAL -> text.add(ownTotal.getText());
+                case CREW_EFFECT -> text.add(crewEffect.getText());
+                default -> {
+                    // the choices are the form's fields
+                }
+            }
+        }
+        return text.toString();
+    }
+
+    /**
+     * @return the native form's fields as the player left them: each unit to commit, the crew and the withdrawal, each
+     *       answering the form when it changes
+     */
+    private List<DialogField> nativeFields() {
+        List<DialogField> fields = new ArrayList<>();
+        int unit = 0;
+        for (Row row : content.own()) {
+            switch (row.kind()) {
+                case UNIT -> fields.add(new DialogField(row.text(), FieldKind.CHECKBOX, List.of(), 0, 0,
+                      Boolean.toString(unitBoxes.get(unit++).isSelected()), true));
+                case CREW -> fields.add(new DialogField(row.text(), FieldKind.CHOICE, crewChoices(), 0, 0,
+                      crewSpinner.getValue().toString(), true));
+                case WITHDRAW -> fields.add(new DialogField(row.text(), FieldKind.CHECKBOX, List.of(), 0, 0,
+                      Boolean.toString(withdrawBox.isSelected()), true));
+                default -> {
+                    // text rows are the form's message
+                }
+            }
+        }
+        return fields;
+    }
+
+    /**
+     * @return the crew numbers the spinner allows, from none to every crew member available
+     */
+    private List<String> crewChoices() {
+        int most = (Integer) ((SpinnerNumberModel) crewSpinner.getModel()).getMaximum();
+        return IntStream.rangeClosed(0, most).mapToObj(Integer::toString).toList();
+    }
+
+    /**
+     * Sets the controls as the native form left them, one value per field in order, and refreshes the totals; values
+     * that do not fit the fields (no answer to a change) change nothing.
+     */
+    private void choose(List<String> values) {
+        if (values.size() != nativeFields().size()) {
+            return;
+        }
+        int field = 0;
+        int unit = 0;
+        for (Row row : content.own()) {
+            switch (row.kind()) {
+                case UNIT -> unitBoxes.get(unit++).setSelected(Boolean.parseBoolean(values.get(field++)));
+                case CREW -> {
+                    int crew = crewChoices().indexOf(values.get(field++));
+                    if (crew >= 0) {
+                        crewSpinner.setValue(crew);
+                    }
+                }
+                case WITHDRAW -> withdrawBox.setSelected(Boolean.parseBoolean(values.get(field++)));
+                default -> {
+                    // text rows hold no value
+                }
+            }
+        }
+        refreshTotals();
     }
 }

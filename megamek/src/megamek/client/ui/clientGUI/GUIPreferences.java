@@ -46,8 +46,8 @@ import java.util.Optional;
 import javax.swing.ToolTipManager;
 import javax.swing.UIManager;
 
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.LabelDisplayStyle;
+import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.PlayerColour;
 import megamek.common.Configuration;
 import megamek.common.annotations.Nullable;
@@ -885,6 +885,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(SHOW_UNIT_DISPLAY_NAMES_ON_MINIMAP, false);
         store.setDefault(MOVE_DISPLAY_TAB_DURING_PHASES, true);
         store.setDefault(FIRE_DISPLAY_TAB_DURING_PHASES, true);
+        store.setDefault(MOVE_ENVELOPE, true);
 
         store.setDefault(MM_SYMBOL, true);
         store.setDefault(MINIMUM_SIZE_HEIGHT, 200);
@@ -965,7 +966,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
         store.setDefault(TOOLTIP_DELAY, 1000);
         store.setDefault(TOOLTIP_DISMISS_DELAY, -1);
-        store.setDefault(TOOLTIP_DIST_SUPPRESSION, BoardView.HEX_DIAG);
+        store.setDefault(TOOLTIP_DIST_SUPPRESSION, (int) Math.round(Math.hypot(HexTileset.HEX_W, HexTileset.HEX_H)));
         store.setDefault(SHOW_WPS_IN_TT, true);
         store.setDefault(SHOW_WPS_LOC_IN_TT, true);
         store.setDefault(SHOW_ARMOR_MINI_VIS_TT, true);

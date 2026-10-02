@@ -41,7 +41,7 @@ import java.util.Map;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.GroundObjectSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.HexFlagSprite;
@@ -89,13 +89,13 @@ public class GroundObjectSpriteHandler extends BoardViewSpriteHandler implements
 
     public void setGroundObjectSprites(Map<Coords, List<ICarryable>> objectCoordList) {
         clear();
-        if (clientGUI.boardViews().isEmpty()) {
+        if (clientGUI.boardStates().isEmpty()) {
             return;
         }
         currentGroundObjectList = objectCoordList;
         int flagCount = 0;
         if (currentGroundObjectList != null) {
-            BoardView boardView = (BoardView) clientGUI.boardViews().getFirst();
+            BoardClientState boardView = clientGUI.boardStates().getFirst();
             for (Coords coords : currentGroundObjectList.keySet()) {
                 boolean showOverlays = GUIP.getShowObjectiveOverlays();
                 for (ICarryable groundObject : currentGroundObjectList.get(coords)) {
@@ -109,7 +109,7 @@ public class GroundObjectSpriteHandler extends BoardViewSpriteHandler implements
             }
         }
 
-        clientGUI.boardViews().getFirst().addSprites(currentSprites);
+        clientGUI.boardStates().getFirst().addSprites(currentSprites);
         VICTORY_HEX_LOGGER.debug("[VictoryHex] Board shows {} ground object sprite(s), {} of them objective flag(s)",
               currentSprites.size(), flagCount);
     }
@@ -126,7 +126,7 @@ public class GroundObjectSpriteHandler extends BoardViewSpriteHandler implements
      *
      * @return the perimeter sprites of the zone, empty for radius 0
      */
-    private List<FieldOfFireSprite> zoneOutlineSprites(BoardView boardView, @Nullable Board board,
+    private List<FieldOfFireSprite> zoneOutlineSprites(BoardClientState boardView, @Nullable Board board,
           Coords center, int radius, ObjectiveMarker marker) {
         Color zoneColor = tracedControllerColor(marker);
         List<FieldOfFireSprite> outlineSprites = new ArrayList<>();
@@ -159,7 +159,7 @@ public class GroundObjectSpriteHandler extends BoardViewSpriteHandler implements
      *
      * @return a flag in the owning player's color for an objective marker, otherwise the generic cargo sprite
      */
-    private Sprite spriteFor(ICarryable groundObject, Coords coords, BoardView boardView) {
+    private Sprite spriteFor(ICarryable groundObject, Coords coords, BoardClientState boardView) {
         if (groundObject instanceof ObjectiveMarker marker) {
             boolean showOverlays = GUIP.getShowObjectiveOverlays();
             String schemeWord = showOverlays

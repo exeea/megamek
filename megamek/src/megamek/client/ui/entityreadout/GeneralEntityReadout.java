@@ -589,6 +589,16 @@ class GeneralEntityReadout implements EntityReadout {
         return getReadout(fontName, formatting, Arrays.asList(sectionsToShow));
     }
 
+    @Override
+    public List<Row> getRows() {
+        initialize();
+        List<Row> rows = new ArrayList<>();
+        for (ReadoutSections section : ReadoutSections.values()) {
+            sectionFor(section).forEach(element -> element.addRows(rows));
+        }
+        return rows;
+    }
+
     private List<ViewElement> sectionFor(ReadoutSections section) {
         return switch (section) {
             case HEADLINE -> headerSection;

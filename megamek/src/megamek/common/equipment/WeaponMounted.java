@@ -47,6 +47,7 @@ import megamek.common.compute.ComputeArc;
 import megamek.common.game.Game;
 import megamek.common.options.OptionsConstants;
 import megamek.common.units.Entity;
+import megamek.common.weapons.Weapon;
 import megamek.common.weapons.gaussRifles.GaussWeapon;
 import megamek.common.weapons.handlers.WeaponHandler;
 
@@ -423,6 +424,15 @@ public class WeaponMounted extends Mounted<WeaponType> {
         } else {
             return getType().getAmmoType() == AmmoType.AmmoTypeEnum.APDS;
         }
+    }
+
+    /**
+     * @return Whether this weapon fires on its own (AMS not set to manual use, or point defense mode), so it cannot be
+     *       fired at a chosen target.
+     */
+    public boolean firesAutomatically() {
+        return (getType().hasFlag(WeaponType.F_AUTO_TARGET) && !curMode().equals(Weapon.MODE_AMS_MANUAL))
+              || (hasModes() && curMode().equals(Weapon.MODE_POINT_DEFENSE));
     }
 
     /**

@@ -11,12 +11,13 @@ import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import javax.swing.AbstractButton;
-import javax.swing.JComboBox;
+import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JMenu;
 import javax.swing.JMenuItem;
 import javax.swing.JPopupMenu;
+import javax.swing.JRadioButtonMenuItem;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 
@@ -24,17 +25,21 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GameCommandsMenu;
 import megamek.client.ui.clientGUI.MapMenu;
-import megamek.client.ui.clientGUI.boardview.BoardView;
-import megamek.client.ui.dialogs.unitDisplay.WeaponPanel;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
+import megamek.client.ui.clientGUI.boardview.overlay.AbstractBoardViewOverlay;
+import megamek.client.ui.clientGUI.boardview.overlay.OffBoardTargetOverlay;
+import megamek.client.ui.clientGUI.boardview.overlay.PlanetaryConditionsOverlay;
+import megamek.client.ui.dialogs.BotCommands.BotCommandsPanel;
 import megamek.client.ui.panels.phaseDisplay.AbstractPhaseDisplay;
 import megamek.client.ui.panels.phaseDisplay.ActionPhaseDisplay;
-import megamek.client.ui.panels.phaseDisplay.AttackPhaseDisplay;
 import megamek.client.ui.panels.phaseDisplay.DeploymentDisplay;
-import megamek.client.ui.panels.phaseDisplay.FiringDisplay;
-import megamek.client.ui.panels.phaseDisplay.PhysicalDisplay;
+import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
 import megamek.client.ui.panels.phaseDisplay.StatusBarPhaseDisplay;
-import megamek.client.ui.panels.phaseDisplay.TargetingPhaseDisplay;
 import megamek.client.ui.panels.phaseDisplay.commands.MoveCommand;
+import megamek.client.ui.util.KeyCommandBind;
+import megamek.client.ui.widget.MegaMekButton;
+import megamek.common.OffBoardDirection;
+import megamek.common.Player;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.units.Entity;
@@ -46,19 +51,86 @@ final class GpuBoardActions {
           .map(MoveCommand::getCmd).collect(java.util.stream.Collectors.toUnmodifiableSet());
     private record Turn(JComponent panel, GamePhase phase, int index, int actor) { }
 
-    private final BoardView view;
+    private final BoardClientState view;
     private final Supplier<JComponent> panel;
-    private final BooleanSupplier closed;
+    private final BooleanSupplier ignoringInput;
     private final Runnable changed;
 
-    GpuBoardActions(BoardView view, Supplier<JComponent> panel, BooleanSupplier closed, Runnable changed) {
+    /** {@code ignoringInput} is the owner's EDT guard: closed, replaced, or not accepting input (modal shown). */
+    GpuBoardActions(BoardClientState view, Supplier<JComponent> panel, BooleanSupplier ignoringInput, Runnable changed) {
         this.view = view;
         this.panel = panel;
-        this.closed = closed;
+        this.ignoringInput = ignoringInput;
         this.changed = changed;
     }
 
     record PhaseStatus(String text, boolean blocking) { }
+
+    /** Phase command ids of the phase display's Done and Skip buttons and of the clear command. */
+    static final String DONE_ID = "phase.done";
+    static final String SKIP_ID = "phase.skip";
+    static final String CLEAR_ID = "clear";
+
+    /**
+     * The phase panel's status and the ids of its completion commands in the phase commands, "" when absent.
+     * {@code turnDetails} and {@code conditions} are the lines of the turn-details and planetary-conditions overlays.
+     */
+    record PhaseInfo(String status, boolean blocking, String doneId, String skipId, String clearId,
+          List<String> turnDetails, List<String> conditions) {
+        static final PhaseInfo EMPTY = new PhaseInfo("", false, "", "", "", List.of(), List.of());
+
+        PhaseInfo {
+            turnDetails = List.copyOf(turnDetails);
+            conditions = List.copyOf(conditions);
+        }
+    }
+
+    /**
+     * EDT: the phase info for the phase panel's status ({@link #phaseStatus}) and the captured phase commands. The turn
+     * details are the lines the phase display gives its turn-details overlay while it acts
+     * ({@code ActionPhaseDisplay.getTurnDetails}); the conditions are the lines of the planetary-conditions overlay for
+     * the shown board. Both are plain text: the colour codes the overlays add (a dimmed colour for an illegal step
+     * group, the hot or cold colour of an extreme temperature) are not kept.
+     */
+    PhaseInfo phaseInfo(List<BoardScene.Command> commands) {
+        var status = phaseStatus(panel.get());
+        List<String> turnDetails = panel.get() instanceof ActionPhaseDisplay action ? action.getTurnDetails().stream()
+              .map(line -> AbstractBoardViewOverlay.cleanedLine(line).strip()).toList() : List.of();
+        List<String> conditions = PlanetaryConditionsOverlay.conditionLines(view.game.getPlanetaryConditions(),
+              view.getBoard().isSpace()).stream().map(String::strip).toList();
+        return new PhaseInfo(status.text(), status.blocking(), present(commands, DONE_ID), skipId(commands),
+              present(commands, CLEAR_ID), turnDetails, conditions);
+    }
+
+    /** The id of the phase command that presses {@link #skipButton}, "" without one. */
+    private String skipId(List<BoardScene.Command> commands) {
+        if (!(panel.get() instanceof AbstractPhaseDisplay phase)) {
+            return "";
+        }
+        MegaMekButton skip = skipButton(phase);
+        return skip == null ? "" : present(commands, skip == phase.getButDone() ? DONE_ID : SKIP_ID);
+    }
+
+    /**
+     * The phase display's button that ends the unit's turn without an action: its Skip while MegaMek shows it; else,
+     * in movement, Done while the planned path is empty (with MegaMek's "nag for no action" preference off the
+     * display hides Skip, and Done, labelled Skip, holds the unit until a path exists); else null. The dock's Hold
+     * position and the hold of every remaining unit press it.
+     */
+    static MegaMekButton skipButton(AbstractPhaseDisplay phase) {
+        MegaMekButton done = phase.getButDone();
+        MegaMekButton skip = phase.getCompletionButtons().stream().filter(button -> button != done).findFirst()
+              .orElse(null);
+        if (skip == null && phase instanceof MovementDisplay movement && (movement.getPlannedMovement() == null
+              || movement.getPlannedMovement().length() == 0)) {
+            return done;
+        }
+        return skip;
+    }
+
+    private static String present(List<BoardScene.Command> commands, String id) {
+        return commands.stream().anyMatch(command -> command.id().equals(id)) ? id : "";
+    }
 
     /** Read presentation text from the existing phase controller on the EDT, including startup and waiting panels. */
     static PhaseStatus phaseStatus(JComponent panel) {
@@ -98,7 +170,7 @@ final class GpuBoardActions {
     }
 
     private boolean current(Turn expected) {
-        return !closed.getAsBoolean() && expected.equals(turn())
+        return !ignoringInput.getAsBoolean() && expected.equals(turn())
               && (!(expected.panel() instanceof AbstractPhaseDisplay phase) || !phase.isIgnoringEvents());
     }
 
@@ -112,14 +184,19 @@ final class GpuBoardActions {
             buttons.addAll(phase.getActionButtons());
         }
         collectButtons(owner.panel(), buttons);
-        List<BoardScene.Command> result = new ArrayList<>();
+        // The off-board targets lead: they show only while they can be used, as the classic board's arrows do.
+        List<BoardScene.Command> result = new ArrayList<>(offBoardTargets(owner));
         for (AbstractButton button : buttons) {
             String id = Objects.toString(button.getActionCommand(), button.getText());
             if (id == null || id.toLowerCase(java.util.Locale.ROOT).endsWith("more")) {
                 continue;
             }
-            boolean completion = owner.panel() instanceof AbstractPhaseDisplay phase
-                  && phase.getCompletionButtons().contains(button);
+            boolean completion = false;
+            if (owner.panel() instanceof AbstractPhaseDisplay phase && phase.getCompletionButtons().contains(button)) {
+                // The Done button's text changes with the plan; the HUD finds Done and Skip by stable ids.
+                completion = true;
+                id = button == phase.getButDone() ? DONE_ID : SKIP_ID;
+            }
             result.add(describe(id, button, completion, List.of(), () -> {
                 if (current(owner) && button.isEnabled() && available(owner.panel(), button)) {
                     button.doClick(0);
@@ -127,7 +204,7 @@ final class GpuBoardActions {
             }));
         }
         if (owner.panel() instanceof StatusBarPhaseDisplay phase) {
-            result.add(new BoardScene.Command("clear", Messages.getString("GpuBoard.clear"),
+            result.add(new BoardScene.Command(CLEAR_ID, Messages.getString("GpuBoard.clear"),
                   Messages.getString("GpuBoard.clearHelp"), phase.shouldReceiveKeyCommands(), false, List.of(),
                   dispatch(() -> {
                       if (current(owner) && phase.shouldReceiveKeyCommands()) {
@@ -135,94 +212,36 @@ final class GpuBoardActions {
                       }
                   })));
         }
-        BoardScene.Command weapons = weaponCommands(owner);
-        if (weapons != null) {
-            result.add(weapons);
-        }
         return result;
     }
 
-    BoardScene.Attack attackState() {
-        Turn owner = turn();
-        if (!(owner.panel() instanceof AttackPhaseDisplay attack) || owner.actor() == Entity.NONE) {
-            return null;
+    /**
+     * EDT: the arrows of the client's off-board target overlay (plan P7) as commands, one per board edge whose arrow
+     * the overlay shows now (the local targeting turn with an artillery weapon selected). Each runs that arrow's click
+     * while the turn it was captured in lasts; the overlay keeps every rule.
+     */
+    private List<BoardScene.Command> offBoardTargets(Turn owner) {
+        OffBoardTargetOverlay overlay = view.getOverlay(OffBoardTargetOverlay.class);
+        if (overlay == null) {
+            return List.of();
         }
-        WeaponPanel weapons = weaponPanel(owner);
-        String target = Messages.getString("MekDisplay.NoTarget");
-        if (weapons != null) {
-            target = weapons.getTargetName();
-        } else if (attack instanceof PhysicalDisplay physical && physical.getTarget() != null) {
-            target = physical.getTarget().getDisplayName();
-        }
-        return new BoardScene.Attack(target, weapons == null ? "" : plainText(weapons.getWeaponSummary()),
-              weapons == null ? "" : plainText(weapons.getFiringSolution()),
-              weapons == null ? -1 : weapons.weaponList.getSelectedIndex(),
-              attack.getAttackDescriptions().stream().map(GpuBoardActions::plainText).toList());
+        return overlay.shownDirections().stream().map(direction -> new BoardScene.Command("offboard." + direction,
+              Messages.getString("GpuBoard.hud.dock.offBoardTarget", edge(direction)), "", true, false, List.of(),
+              dispatch(() -> {
+                  if (current(owner)) {
+                      overlay.target(direction);
+                  }
+              }))).toList();
     }
 
-    private WeaponPanel weaponPanel(Turn owner) {
-        if (view.getClientgui() == null || !(owner.panel() instanceof FiringDisplay
-              || owner.panel() instanceof TargetingPhaseDisplay)) {
-            return null;
-        }
-        WeaponPanel weapons = view.getClientgui().getUnitDisplay().wPan;
-        return weapons.getSelectedEntityId() == owner.actor() && owner.actor() != Entity.NONE ? weapons : null;
-    }
-
-    private BoardScene.Command weaponCommands(Turn owner) {
-        WeaponPanel weapons = weaponPanel(owner);
-        if (weapons == null) {
-            return null;
-        }
-        var model = weapons.weaponList.getModel();
-        List<BoardScene.Command> choices = new ArrayList<>();
-        for (int i = 0; i < model.getSize(); i++) {
-            int index = i;
-            String label = model.getElementAt(index);
-            boolean selected = weapons.weaponList.getSelectedIndex() == index;
-            choices.add(new BoardScene.Command("weapon:" + index, (selected ? "* " : "") + plainText(label),
-                  selected ? plainText(weapons.getTargetSummary()) : "", weapons.weaponList.isEnabled(), false,
-                  List.of(), dispatch(() -> {
-                      if (current(owner) && weapons.weaponList.isEnabled() && weapons.getSelectedEntityId() == owner.actor()
-                            && weapons.weaponList.getModel() == model && index < model.getSize()
-                            && Objects.equals(label, model.getElementAt(index))) {
-                          weapons.weaponList.setSelectedIndex(index);
-                      }
-                  })));
-        }
-        addAmmoChoices(choices, weapons.getAmmoSelector(), "Ammunition", owner, weapons);
-        addAmmoChoices(choices, weapons.m_chBayWeapon, "Bay weapon", owner, weapons);
-        return new BoardScene.Command("weapons", "Weapons and ammunition", plainText(weapons.getTargetSummary()),
-              true, false, choices, () -> { });
-    }
-
-    private void addAmmoChoices(List<BoardScene.Command> choices, JComboBox<String> selector, String title, Turn owner,
-          WeaponPanel weapons) {
-        if (!selector.isVisible()) {
-            return;
-        }
-        List<BoardScene.Command> items = new ArrayList<>();
-        var model = selector.getModel();
-        var selectedWeapon = weapons.getSelectedWeapon();
-        int selectedIndex = weapons.weaponList.getSelectedIndex();
-        for (int i = 0; i < model.getSize(); i++) {
-            int index = i;
-            String label = model.getElementAt(index);
-            items.add(new BoardScene.Command(title + ":" + index,
-                  (selector.getSelectedIndex() == index ? "* " : "") + plainText(label), "", selector.isEnabled(),
-                  false, List.of(), dispatch(() -> {
-                      if (current(owner) && selector.isEnabled() && selector.isVisible() && selector.getModel() == model
-                            && weapons.getSelectedEntityId() == owner.actor()
-                            && weapons.weaponList.getSelectedIndex() == selectedIndex
-                            && weapons.getSelectedWeapon() == selectedWeapon
-                            && index < model.getSize() && Objects.equals(label, model.getElementAt(index))) {
-                          selector.setSelectedIndex(index);
-                      }
-                  })));
-        }
-        if (!items.isEmpty()) {
-            choices.add(new BoardScene.Command(title, title, "", selector.isEnabled(), false, items, () -> { }));
-        }
+    /** MegaMek's name of a board edge. */
+    private static String edge(OffBoardDirection direction) {
+        return Messages.getString(switch (direction) {
+            case NORTH -> "MovementDisplay.Edge.North";
+            case SOUTH -> "MovementDisplay.Edge.South";
+            case EAST -> "MovementDisplay.Edge.East";
+            default -> "MovementDisplay.Edge.West";
+        });
     }
 
     private static boolean available(JComponent owner, AbstractButton button) {
@@ -243,43 +262,14 @@ final class GpuBoardActions {
         }
     }
 
+    /** EDT: MegaMek's map menu at a hex, as commands that recheck the turn they were captured in. */
     List<BoardScene.Command> contextCommands(Coords coords) {
-        if (coords == null || !view.getBoard().contains(coords)) {
+        if (coords == null || !view.getBoard().contains(coords) || view.getClientgui() == null) {
             return List.of();
         }
         Turn owner = turn();
-        List<BoardScene.Command> result = new ArrayList<>();
-        boolean canUse = owner.phase().isOnMap()
-              && (view.getClientgui() == null || view.getClientgui().getClient().isMyTurn());
-        String hexAction = switch (owner.phase()) {
-            case MOVEMENT -> "Plot movement here";
-            case DEPLOYMENT -> "Deploy here";
-            case FIRING, PHYSICAL, TARGETING, OFFBOARD -> "Choose target here";
-            default -> "Select this hex";
-        };
-        result.add(new BoardScene.Command("board.useHex", hexAction, "Use the current phase tool at this location.",
-              canUse, false, !(owner.panel() instanceof AttackPhaseDisplay), List.of(), dispatch(() -> {
-                  if (current(owner) && owner.phase().isOnMap()
-                        && (view.getClientgui() == null || view.getClientgui().getClient().isMyTurn())) {
-                      view.mouseAction(coords, BoardView.BOARD_HEX_DRAG, java.awt.event.InputEvent.BUTTON1_DOWN_MASK, 1);
-                      view.mouseAction(coords, BoardView.BOARD_HEX_CLICK, 0, 1);
-                  }
-              })));
-        result.add(new BoardScene.Command("board.los", "Measure line of sight", "Choose the start and end hexes.",
-              true, false, List.of(), dispatch(() -> {
-                  if (current(owner)) {
-                      view.mouseAction(coords, BoardView.BOARD_HEX_CLICK, java.awt.event.InputEvent.CTRL_DOWN_MASK, 1);
-                  }
-              })));
-        if (view.getClientgui() != null) {
-            Supplier<Container> menu = () -> new MapMenu(coords, view.getBoardId(), owner.panel(), view.getClientgui());
-            result.addAll(menuCommands(menu.get(), menu, owner, List.of()));
-            BoardScene.Command weapons = weaponCommands(owner);
-            if (weapons != null) {
-                result.add(weapons);
-            }
-        }
-        return result;
+        Supplier<Container> menu = () -> new MapMenu(coords, view.getBoardId(), owner.panel(), view.getClientgui());
+        return menuCommands(menu.get(), menu, owner, List.of());
     }
 
     List<BoardScene.Command> globalCommands() {
@@ -298,10 +288,53 @@ final class GpuBoardActions {
         return result;
     }
 
-    /** The native window cannot trigger Swing accelerators, so invoke the current menu item on the EDT. */
+    /**
+     * EDT: one bot's commands from the bot commands panel: each popup button as a group of the items its popup lists
+     * for that bot, with MegaMek's labels and availability. A button whose popup lists nothing for the bot is left
+     * out, so a player the local player does not command gets none. Empty without the panel.
+     */
+    List<BoardScene.Command> botCommands(Player bot) {
+        BotCommandsPanel bots = botCommandsPanel();
+        if (bots == null) {
+            return List.of();
+        }
+        List<BoardScene.Command> result = new ArrayList<>();
+        for (BotCommandsPanel.PopupCommand command : bots.popupCommands(bot)) {
+            Supplier<Container> popup = () -> command.popup().get();
+            List<BoardScene.Command> items = menuCommands(popup.get(), popup, null, List.of());
+            AbstractButton button = command.button();
+            if (!items.isEmpty()) {
+                result.add(describe(button.getActionCommand(), button, false, items, () -> { }));
+            }
+        }
+        return result;
+    }
+
+    /** EDT: the bot commands panel's Pause/Continue button as a plain command, or null without the panel. */
+    BoardScene.Command pauseCommand() {
+        BotCommandsPanel bots = botCommandsPanel();
+        if (bots == null) {
+            return null;
+        }
+        AbstractButton pause = bots.pauseCommand();
+        return describe("bot-pause", pause, false, List.of(), () -> {
+            if (pause.isEnabled()) {
+                pause.doClick(0);
+            }
+        });
+    }
+
+    private BotCommandsPanel botCommandsPanel() {
+        return view.getClientgui() == null ? null : view.getClientgui().getBotCommandsPanel();
+    }
+
+    /**
+     * The native window cannot trigger Swing accelerators, so invoke the current menu item on the EDT. The caller
+     * ({@code GpuBoardSource.key}) has already dropped the key if the client ignores hotkeys.
+     */
     boolean menuShortcut(KeyStroke key) {
         var gui = view.getClientgui();
-        return !closed.getAsBoolean() && gui != null && !gui.shouldIgnoreHotKeys() && gui.getMenuBar() != null
+        return !ignoringInput.getAsBoolean() && gui != null && gui.getMenuBar() != null
               && menuShortcut(gui.getMenuBar(), key);
     }
 
@@ -350,8 +383,29 @@ final class GpuBoardActions {
         return result;
     }
 
+    /** A menu item's key, "{action command}:{text}"; a menu command's id is its menu path of keys joined by "/". */
     private static String menuKey(JMenuItem item) {
         return Objects.toString(item.getActionCommand(), "") + ":" + item.getText();
+    }
+
+    /**
+     * The menu item among {@code commands}, or in their groups, whose action command is {@code actionCommand}; null
+     * when there is none. The last key of an item's id is its own.
+     */
+    static BoardScene.Command menuItem(List<BoardScene.Command> commands, String actionCommand) {
+        for (BoardScene.Command command : commands) {
+            String id = command.id();
+            int key = id.lastIndexOf('/') + 1;
+            if (command.children().isEmpty() && id.startsWith(actionCommand, key)
+                  && id.startsWith(":", key + actionCommand.length())) {
+                return command;
+            }
+            BoardScene.Command item = menuItem(command.children(), actionCommand);
+            if (item != null) {
+                return item;
+            }
+        }
+        return null;
     }
 
     private static JMenuItem findItem(Container menu, List<String> path) {
@@ -367,16 +421,24 @@ final class GpuBoardActions {
         return null;
     }
 
+    /** A menu item also carries its accelerator text and, for a check or radio item, its selection. */
     private BoardScene.Command describe(String id, AbstractButton button, boolean commit,
           List<BoardScene.Command> children, Runnable action) {
+        KeyStroke accelerator = button instanceof JMenuItem item ? item.getAccelerator() : null;
+        Boolean selected = button instanceof JCheckBoxMenuItem || button instanceof JRadioButtonMenuItem
+              ? button.isSelected() : null;
         return new BoardScene.Command(id, plainText(button.getText()), plainText(button.getToolTipText()),
               button.isEnabled(), commit, MOVEMENT_COMMANDS.contains(button.getActionCommand())
-                    || Set.of("fireTwist", "fireStrafe").contains(button.getActionCommand()), children, dispatch(action));
+                    || Set.of("fireTwist", "fireStrafe").contains(button.getActionCommand()), children,
+              dispatch(action),
+              accelerator == null ? "" : KeyCommandBind.getDesc(accelerator.getKeyCode(), accelerator.getModifiers()),
+              selected);
     }
 
+    /** Runs on the EDT unless the owner ignores input by then: a command queued before a dialog opened is dropped. */
     private Runnable dispatch(Runnable action) {
         return () -> SwingUtilities.invokeLater(() -> {
-            if (!closed.getAsBoolean()) {
+            if (!ignoringInput.getAsBoolean()) {
                 action.run();
                 changed.run();
             }

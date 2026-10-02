@@ -40,7 +40,7 @@ import java.util.List;
 
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.preference.PreferenceChangeEvent;
 
@@ -104,7 +104,7 @@ public class KeyBindingsOverlay extends AbstractBoardViewOverlay {
     /**
      * An overlay for the BoardView that displays a selection of keybinds for the current game situation.
      */
-    public KeyBindingsOverlay(BoardView boardView) {
+    public KeyBindingsOverlay(BoardClientState boardView) {
         super(boardView, new Font("SansSerif", Font.PLAIN, 13));
     }
 
@@ -185,4 +185,5 @@ public class KeyBindingsOverlay extends AbstractBoardViewOverlay {
         }
         super.preferenceChange(e);
     }
+
 }

@@ -4167,7 +4167,7 @@ public abstract class Mek extends Entity implements Fortifiable, RubbleClearer, 
                   Mek.SYSTEM_SENSORS, Mek.LOC_HEAD);
             int sensorHits2 = getHitCriticalSlots(CriticalSlot.TYPE_SYSTEM,
                   Mek.SYSTEM_SENSORS, Mek.LOC_CENTER_TORSO);
-            if ((sensorHits + sensorHits2) == 3) {
+            if ((sensorHits + sensorHits2) == sensorHitsToDestroy()) {
                 roll.addModifier(4,
                       "Sensors Completely Destroyed for Torso-Mounted Cockpit");
             } else if (sensorHits == 2) {
@@ -6638,13 +6638,35 @@ public abstract class Mek extends Entity implements Fortifiable, RubbleClearer, 
               Mek.LOC_CENTER_TORSO);
     }
 
+    /**
+     * @return the number of engine hits ({@link #getEngineHits()}) that destroy this Mek: 3, or 2 for a superheavy Mek
+     *       with a compact engine (TW p.125, IO p.104). The server's engine checks and the unit record's engine hit box
+     *       use it.
+     */
+    public int engineHitsToDestroy() {
+        return (isSuperHeavy() && hasEngine() && (getEngine().getEngineType() == Engine.COMPACT_ENGINE)) ? 2 : 3;
+    }
+
+    /**
+     * @return the number of gyro hits ({@link #getGyroHits()}) that destroy this Mek's gyro: 2, or 3 for a heavy-duty
+     *       gyro. {@link #isGyroDestroyed()} and the unit record's gyro hit box use it.
+     */
+    public int gyroHitsToDestroy() {
+        return (getGyroType() == GYRO_HEAVY_DUTY) ? 3 : 2;
+    }
+
+    /**
+     * @return the number of sensor hits at which this Mek's sensors are completely destroyed: 3 with a torso-mounted
+     *       cockpit, whose sensors are in the head and the center torso, else 2. The piloting roll and the unit
+     *       record's sensor hit box use it.
+     */
+    public int sensorHitsToDestroy() {
+        return (getCockpitType() == COCKPIT_TORSO_MOUNTED) ? 3 : 2;
+    }
+
     @Override
     public boolean isGyroDestroyed() {
-        if (getGyroType() == GYRO_HEAVY_DUTY) {
-            return getGyroHits() > 2;
-        } else {
-            return getGyroHits() > 1;
-        }
+        return getGyroHits() >= gyroHitsToDestroy();
     }
 
     @Override

@@ -23,13 +23,13 @@ class GpuCaptureInvalidationTest {
                     graphics.setColor(Color.RED);
                     graphics.fillRect(90, 90, 20, 20);
                 });
-                fixture.view.clearHexImageCache();
+                fixture.view.clearArtwork();
                 fixture.source.refresh();
                 int first = paints.get();
                 assertTrue(first > 0);
                 fixture.source.refresh();
                 assertEquals(first, paints.get(), "The timer must not repaint an unchanged board");
-                fixture.view.clearHexImageCache();
+                fixture.view.clearArtwork();
                 fixture.source.refresh();
                 assertTrue(paints.get() > first, "Shared painter invalidation must reach the GPU snapshot");
                 fixture.source.setVisibleArea(new Rectangle(0, 16, 1, 1));

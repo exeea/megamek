@@ -159,7 +159,9 @@ final class UnitAnimator {
 
     /** A material replacement rebinds nodes but keeps playback; a new/revealed unit starts directly in its pose. */
     void apply(GpuUnitModel model, ModelInstance placed, BoardScene.Unit unit, UnitMotion.Sample motion,
-          float clock, float seconds, boolean instant, float twist) {
+          float clock, float seconds, boolean instant, float twist, float growth) {
+        // World units per model unit of travel; a grown unit's strides and wheel turns cover more (UnitScreenScale).
+        float groundScale = model.horizontalScale(unit) * growth;
         mountRecoil.clear();
         if (instance != placed) {
             instance = placed;
@@ -224,7 +226,7 @@ final class UnitAnimator {
             // Mix adjacent troop IDs so their gait, breathing and watch motions do not synchronize.
             float seed = Math.floorMod(identity * (body.rig.trooper() ? 0x9E3779B9 : 1), 4096) * (MathUtils.PI2 / 4096);
             var memberStep = formation.step(body.rig.container());
-            float distance = (memberStep == null ? bodyMotion.steps() * BoardGeometry.HEIGHT / model.horizontalScale(unit)
+            float distance = (memberStep == null ? bodyMotion.steps() * BoardGeometry.HEIGHT / groundScale
                   : memberStep.distance()) / body.memberScale;
             float travelSign = body.rig.trooper() || bodyMotion.forward() >= -.001f ? 1 : -1;
             float strideYaw = body.rig.trooper() ? 0 : MathUtils.atan2(bodyMotion.lateral() * travelSign,
@@ -294,7 +296,7 @@ final class UnitAnimator {
                 body.rotate("hull", Vector3.X, MathUtils.sin(localPhase * 2) * .65f * envelope);
                 if (motion.moving()) {
                     float traveled = body.rig.transport() ? formation.drivenDistance(body.rig.container())
-                          : motion.steps() * BoardGeometry.HEIGHT / model.horizontalScale(unit);
+                          : motion.steps() * BoardGeometry.HEIGHT / groundScale;
                     if (body.movementSequence != motion.sequence()) {
                         body.lastSteps = 0;
                         body.movementSequence = motion.sequence();
@@ -320,6 +322,15 @@ final class UnitAnimator {
         dying = unit.model().state().pose().dead();
         if (dying) { deathPose(1); }
         settleContacts();
+    }
+
+    /**
+     * {@link #apply(GpuUnitModel, ModelInstance, BoardScene.Unit, UnitMotion.Sample, float, float, boolean, float,
+     * float)} without zoom-out growth: the gait of a unit drawn at its size, or of one that does not walk now.
+     */
+    void apply(GpuUnitModel model, ModelInstance placed, BoardScene.Unit unit, UnitMotion.Sample motion,
+          float clock, float seconds, boolean instant, float twist) {
+        apply(model, placed, unit, motion, clock, seconds, instant, twist, 1);
     }
 
     static boolean hullDown(BoardScene.Unit unit) {

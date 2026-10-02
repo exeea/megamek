@@ -38,6 +38,7 @@ import java.awt.FlowLayout;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.io.Serial;
+import java.util.List;
 import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JFrame;
@@ -49,6 +50,8 @@ import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
 
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 
 /**
  * A simple prompt.
@@ -57,6 +60,8 @@ public class SliderDialog extends JDialog implements ActionListener, ChangeListe
     @Serial
     private static final long serialVersionUID = -7823206132140091543L;
     private final JButton butOk = new JButton(Messages.getString("Okay"));
+    private final JButton butCancel = new JButton(Messages.getString("Cancel"));
+    private final JLabel lblText = new JLabel();
     private final JSlider value;
     private boolean ok;
     private final JLabel curText = new JLabel();
@@ -72,7 +77,6 @@ public class SliderDialog extends JDialog implements ActionListener, ChangeListe
         getContentPane().setLayout(new BorderLayout());
         JPanel qp = new JPanel();
         qp.setLayout(new BorderLayout());
-        JLabel lblText = new JLabel();
         lblText.setText(question);
         qp.add(lblText, BorderLayout.NORTH);
         getContentPane().add(qp, BorderLayout.NORTH);
@@ -94,7 +98,6 @@ public class SliderDialog extends JDialog implements ActionListener, ChangeListe
         p.setLayout(new FlowLayout());
         butOk.addActionListener(this);
         p.add(butOk);
-        JButton butCancel = new JButton(Messages.getString("Cancel"));
         butCancel.addActionListener(this);
         p.add(butCancel);
         getContentPane().add(p, BorderLayout.SOUTH);
@@ -107,6 +110,27 @@ public class SliderDialog extends JDialog implements ActionListener, ChangeListe
     public boolean showDialog() {
         setVisible(true);
         return ok;
+    }
+
+    /**
+     * Showing the dialog asks in the owning client's native battle window instead when that draws dialogs, for a value
+     * within the slider's range; the answer moves the slider and confirms as the OK button does.
+     */
+    @Override
+    public void setVisible(boolean visible) {
+        ClientGUI gui = visible ? ClientGUI.forFrame(getOwner()) : null;
+        DialogAnswer answer = (gui == null) ? null : gui.askText(lblText.getText(), getTitle(),
+              String.valueOf(value.getValue()), value.getMinimum(), value.getMaximum(),
+              List.of(butOk.getText(), butCancel.getText()), 1);
+        if (answer == null) {
+            super.setVisible(visible);
+            return;
+        }
+        ok = answer.text() != null;
+        if (ok) {
+            value.setValue(Integer.parseInt(answer.text()));
+        }
+        dispose();
     }
 
     @Override

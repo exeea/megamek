@@ -23,7 +23,6 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.scenes.scene2d.ui.Slider;
-import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import megamek.client.ui.tileset.EquipmentModelPolicy;
 import megamek.client.ui.tileset.MekTileset;
@@ -291,8 +290,8 @@ final class GpuFamilyAssemblyReview {
                 var skin = new GpuBoardSkin();
                 try {
                     var tuning = new GpuBoardTuning(skin.skin);
-                    Slider normalScale = tuning.panel().findActor("Unit scale");
-                    Slider largeScale = tuning.panel().findActor("Multi-hex unit scale");
+                    Slider normalScale = GpuBoardTestUi.tuning(tuning, "Unit scale");
+                    Slider largeScale = GpuBoardTestUi.tuning(tuning, "Multi-hex unit scale");
                     assertNotNull(largeScale);
                     assertEquals(BoardGeometry.DEFAULT_MULTI_HEX_UNIT_SCALE, largeScale.getValue(), .001f);
                     normalScale.setValue(.3f);
@@ -302,8 +301,7 @@ final class GpuFamilyAssemblyReview {
                     assertEquals(.3f, BoardGeometry.UNIT_SCALE, .001f);
                     model.place(model.instance, camera.camera, ground, 0, unit);
                     assertEquals(original.getWidth() * .7f / base.multiHexUnitScale(), bounds(model.instance).getWidth(), .001f);
-                    TextButton defaults = tuning.panel().findActor("tuning-defaults");
-                    defaults.fire(new ChangeListener.ChangeEvent());
+                    tuning.defaults().fire(new ChangeListener.ChangeEvent());
                     assertEquals(BoardGeometry.DEFAULTS.unitScale(), normalScale.getValue(), .001f);
                     assertEquals(BoardGeometry.DEFAULT_MULTI_HEX_UNIT_SCALE, largeScale.getValue(), .001f);
                 } finally {

@@ -48,12 +48,12 @@ class GpuOffBoardOverlayTest {
                     var widgetView = spy(fixture.view);
                     doReturn(artillery).when(widgetView).getSelectedArtilleryWeapon();
                     doReturn(new Rectangle(800, 600)).when(widgetView).getDisplayablesRect();
-                    when(gui.getBoardView()).thenReturn(widgetView);
-                    when(gui.getCurrentBoardView()).thenReturn(Optional.of(widgetView));
+                    when(gui.getBoardState()).thenReturn(widgetView);
+                    when(gui.getCurrentBoardState()).thenReturn(Optional.of(widgetView));
                     var targeting = mock(TargetingPhaseDisplay.class);
                     when(targeting.currentEntity()).thenReturn(fixture.entity);
                     var overlay = new OffBoardTargetOverlay(gui);
-                    overlay.setTargetingPhaseDisplay(targeting);
+                    when(gui.getCurrentPanel()).thenReturn(targeting);
                     Rectangle bounds = new Rectangle(800, 600);
                     graphics.scale(density, density);
                     assertTrue(overlay.captureLayers(graphics, bounds).isEmpty());

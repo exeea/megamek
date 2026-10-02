@@ -1,7 +1,7 @@
 # GPU battle view
 
 The Java client has a libGDX/LWJGL3 board with one 3D scene, an orthographic orbit
-camera, animated unit models, and contextual Scene2D controls. The client remembers
+camera, animated unit models, and the native battle HUD ([gpu-hud.md](gpu-hud.md)). The client remembers
 the last board visualization, with 3D as the initial default. Its isometric camera fits closely
 around the whole map. A 1.2-second ease-out entrance zooms in from a wider view as the board
 fades in; camera input interrupts the entrance. Launch this checkout with
@@ -10,7 +10,7 @@ fades in; camera input interrupts the entrance. Launch this checkout with
 The native loading window appears before a scenario or server delivers its first map.
 Starting-scenario, receiving-data and waiting messages come from the existing phase
 panels and appear in that same native window. Normal phase status and waiting-player
-messages also appear in the native footer. Board selection does not depend on Swing
+messages also appear in the HUD's phase header and dock. Board selection does not depend on Swing
 map tabs; the classic viewport is neither constructed nor shown during native startup.
 The first **View** entry is a single switch: **2D Board** in 3D, or **3D Board** in 2D.
 The choice persists through phase changes, lobby visits and future games. Switching
@@ -20,9 +20,8 @@ shared client controls remain the same.
 Closing either board runs the same save-and-quit flow. Cancelling the prompt or
 cancelling a save keeps the current board open; closing never switches visualizations.
 Rendering failures offer an explicit retry, board switch or quit choice.
-The source adapter still reuses `BoardView`'s shared artwork, tactical state, overlays,
-and client commands; it does not need its classic component or a classic paint pass.
-The bottom-right corner shows the measured rendering FPS, refreshed once per second.
+The source adapter reuses the board's `BoardClientState`: its shared artwork, tactical state
+and client commands; it does not need the classic component or a classic paint pass.
 
 ## Terrain and assets
 
@@ -229,7 +228,7 @@ under any light.
 
 Blender source, reproducible exporter, texture prompts, model counts, and
 Quaternius CC0 attribution are recorded in the asset directory's README and
-`mm-data/tools/`. Runtime loads indexed G3DJ files and requires no Blender
+`mm-data/tools/`. Runtime loads the GLB files through `RigidGlb` and requires no Blender
 installation. The Gradle data-staging task includes these models and textures.
 
 ## Liquids
@@ -423,7 +422,7 @@ Cockpit glazing keeps its original appearance until destroyed. The shader recogn
 fixed `PALETTE['glass']` vertex color before tinting, so glass can remain in the existing detail meshes
 without additional draw calls. Only the destroyed overlay ignores that mask.
 
-Under **Tuning > General > Unit damage**, **Override visible unit damage** enables a
+Under **Tuning > Board > Unit damage**, **Override visible unit damage** enables a
 **Display damage** slider from 0 to 1 and a **Damage location** selector (default **All locations**).
 The preview applies across the board: segmented models use the chosen location, while models without
 locations always use the whole body. Locations absent from a particular model are skipped, and other
@@ -440,11 +439,8 @@ editor initialized from the active visual conditions. Apply always reapplies the
 mapping and resets extra atmospheric controls, even for unchanged conditions; Cancel leaves the preview alone.
 This affects visual weather and jump gravity only. **Defaults** restores the game's current conditions.
 
-Annotations use the existing entity painter, rasterized at higher resolution
-and drawn in screen space. They follow the animated unit, spread around nearby
-labels, and stay clamped to the viewport edge when their unit is offscreen.
-Normal game visibility still applies. Crowded views prioritize selected and
-hovered labels; extreme crowding can still overlap.
+Unit labels are the battle HUD's nameplates ([gpu-hud.md](gpu-hud.md)); the native view no
+longer draws the classic unit annotation boxes.
 
 A visible unit intersecting a non-tree feature's bounds fades the non-tree features in that hex.
 Buildings and other props default to 50% opacity. **Tuning > Building opacity** changes this live from
@@ -502,10 +498,13 @@ and changes only to light color, fog or exposure do not invalidate the cached sh
 animation clock. Symbols spin once every eight seconds in
 oblique views. At or below `FLAT_TILT_DEGREES` (30 degrees away from overhead),
 they stop spinning and align their face and upright direction with the camera,
-including while the camera rotates. Size, thickness, spin period and clearance
+including while the camera rotates. The same rule chooses the overhead layout (symbols flank a unit or
+ring an empty hex) and its smaller symbol size, and shrinks a sensor contact that shares its hex. It
+only changes how marker symbols are oriented, sized and laid out; it does not switch views, and the
+Tactical View, looking straight down, always uses it. Size, thickness, spin period and clearance
 are constants in the same class. The classic 2D board retains its existing art.
 
-`BoardView.getBoardMarkers()` snapshots existing sprite-handler output and shares
+`BoardClientState.getBoardMarkers()` snapshots existing sprite-handler output and shares
 minefield, demolition-charge, and artillery presentation with the classic painters.
 Special displays retain `SpecialHexDisplay.drawNow` filtering, including private
 notes, phase/round limits and preferences. The GPU capture omits the corresponding
@@ -523,10 +522,10 @@ the contact icon.
 
 The converted kinds include:
 
-- Minefield signs and demolition-charge symbols (`BoardView.drawMinefields`,
+- Minefield signs and demolition-charge symbols (`BoardClientState.drawMinefields`,
   `drawDemolitionCharges`), preserving the client's knowledge and owner filtering.
 - Artillery targets, incoming fire, and adjusted/auto-hit symbols; incoming orbital
-  bombardment and nuclear warnings (`BoardView` and `SpecialHexDisplay`). Keep
+  bombardment and nuclear warnings (`BoardClientState` and `SpecialHexDisplay`). Keep
   area footprints and drift lines on the board, separate from the raised symbol.
 - Player notes (`SpecialHexDisplay.PLAYER_NOTE`), with their existing visibility.
 - Objective/victory flags (`HexFlagSprite`), preserving owner colour, scheme and progress.
@@ -537,8 +536,7 @@ The converted kinds include:
   trench/bridge/sandbag/cleared-terrain artwork; only their status moves above it.
 
 Details and progress counters use a separate cached camera-facing label layer.
-It avoids the symbol bounds and unit labels. Unit labels also avoid location
-symbols, even when spreading labels between units is disabled. Point-symbol picking uses the same
+It avoids the symbol bounds. Point-symbol picking uses the same
 rendered meshes as unit picking and returns the original hex for its tooltip and
 commands. A symbol's outline switch does not alter game visibility.
 
@@ -573,122 +571,28 @@ Diagnostic firing heat-map icons also remain in the board layer with their combi
 
 ## Controls and presentation
 
-| Control | Action |
-| --- | --- |
-| Top view / Isometric | Restore a camera preset, retaining focus and zoom |
-| Fit board | Frame terrain, water, and feature heights |
-| Mouse wheel / numpad +/- | Zoom |
-| Right or middle drag | Pan |
-| Shift + right/middle drag | Orbit and tilt |
-| Q / E | Turn the camera one hex side (60 degrees); hold to keep turning |
-| Page Up / Page Down | Tilt toward overhead / lower the viewing angle while held |
-| Home / End | Reset camera and fit board / fit board at the current angle |
-| T / Z | Toggle the isometric preset / toggle the overview zoom |
-| Click / short right-click | Inspect a hex or visible unit |
-| Plot movement here / movement mode | Enter the existing persistent board tool |
-| Escape | Dismiss an open menu/tuning panel; otherwise leave the board tool and invoke Cancel |
-| Ctrl-click / Measure line of sight | Existing two-hex LOS tool |
-| Alt-click | Existing two-hex ruler; measurements bypass the phase's plotting tool |
-| All actions / F10 | Search the current phase's commands |
-| Tab / Shift+Tab | Select the next / previous unit through the current phase's controls |
-| Enter / slash | Activate the existing chat box / start a chat command |
-| Ctrl+K / Ctrl+P | Toggle the keyboard shortcuts / planetary conditions overlay |
-| Ctrl+D / Ctrl+F | Toggle the existing Unit Display / Force Display dialogs above the board |
-| Ctrl+M / Ctrl+Shift+G | Toggle the minimap / Bot Commands window |
-| F1–F6 | Select the existing Unit Display tabs while the inspector is open |
-| Ctrl+Shift+P / Ctrl+Alt+P | Existing bot-game pause/continue actions, with the panel's availability checks |
-| N / Shift+N in reports | Find the next / previous event containing the selected report keyword |
-| Ctrl+N / Ctrl+Shift+N in reports | Select the next / previous configured report keyword |
-| Shift+F / Ctrl+Shift+F in reports | Toggle keyword filtering / select the next configured filter |
-| Up/down, then Enter in a menu | Navigate enabled choices and activate |
-| Orders / Clear orders / Done or Skip | Inspect, clear, or explicitly commit through the original handlers |
-| Tuning / F9 | Adjust geometry, overlap opacity, see-through intensity, time of day, clouds, fog, haze, and exposure |
-| Speed / Space during playback | Change playback rate / finish queued animation |
-
-Configured gameplay and menu shortcuts use the same handlers and availability checks as the classic board.
-This includes the other overlays, labels and coordinates, range and movement displays, unit/minimap/force/bot
-panels, reports, settings, saves, and loads. Camera bindings control the native camera. F9 and F10 open the
-GPU tools only when those keys have no configured binding. Text entry and open menus take keyboard focus;
-closing them restores the board shortcuts. Window/menu shortcuts, inspector tabs and bot controls remain
-accessible from reports, tuning and command searches. Ordinary typing stays in the focused text field.
-Unit Display and Bot Commands float while in 3D and return to their saved docking locations in 2D.
-Minimap, player list and artillery windows retain their enabled state across board switches. The minimap
-publishes camera requests to the same native navigation path without creating a classic viewport.
-The native **Commands** menu reuses the old command bar's game and Game Master actions, including
-Report a Bug; every action checks the live menu again before executing. Reopened dialogs are raised above the native board; their original
-always-on-top setting is restored when leaving 3D. Keypad navigation honors Num Lock, including the weapon-mode keys.
-
-Report keyword controls use the same user-configured keyword lists as the legacy report. Navigation highlights
-and scrolls to matching events; multiword keyword filters retain events matching any of the words. The native
-reader preserves complete events rather than cutting the legacy HTML into individual matching lines.
-
-The HUD retains the configured MegaMek skin and its original action-button artwork.
-Menu bars, dropdowns and context menus use separate flat controls: compact rows on
-a matte surface, hover/keyboard highlights, and trailing arrows for submenus.
-The bottom action bar keeps its metal buttons, with bold confirmation labels.
-Search is reserved for the All Actions palette. Dropdowns open immediately below
-their trigger, or above it when there is more room; context menus stay beside the
-board click. Menus retain scrolling and viewport clamping; disabled explanations
-appear in tooltips instead of expanding every unavailable row. Keyboard navigation skips disabled actions.
-Camera rotation, fitting, and menu interaction do not issue game orders.
-
-The Tuning panel has two tabs. **General** contains geometry, family sizes, overview icons, visibility, field of view,
-sensor range and damage preview. **Atmosphere** contains planetary presets, lighting, planetary properties,
-weather and light/fog effects. Each tab retains its scroll position; the shared **Defaults** button resets
-both. Longer help text is available in tooltips.
+The battle HUD has its own document, [gpu-hud.md](gpu-hud.md): its input routing and Esc chain, the
+components and their commands, the key binds, the Tactical View, zoom-out unit scaling, the unit panel and the
+developer Tuning utility (pages **Board**, **Atmosphere** and **Camera**, with a shared **Defaults** button). The
+paragraphs below describe what the tuning controls change on the board.
 
 **Unit family sizes** exposes the existing `UnitFamilyScale` multipliers, all neutral at **1.0**.
 Infantry, battle armor, vehicles, aircraft, naval, ProtoMeks, static and other models each have their own
 uniform size control. Meks have an overall multiplier plus light (including ultralight), medium, heavy,
 assault and superheavy multipliers. These multiply the general Unit scale and preserve authored proportions;
-placement, picking and attachments share the resulting transform. **Fixed sun/moon** is available in both
-**Camera** and **Tuning > Atmosphere**, backed by the same setting.
+placement, picking and attachments share the resulting transform. **Fixed sun/moon** is available on both
+the Tuning utility's **Camera** and **Atmosphere** pages, backed by the same setting.
 
-**Camera > Distant top-view icons** is opt-in. Within 30 degrees of overhead (the same rule as flat
-markers), zooming out switches units to their classic 2D sprites and woods/jungle to the tileset's
-matching terrain artwork. Both lie in the board plane. Forest sprites retain the full rectangular
-image and its transparent edges, including canopy pixels extending outside the hex. Zooming in or
-tilting past 30 degrees restores the models. **Tuning > General > Overview icons** shares the checkbox
-and adjusts the switch threshold: 56 window pixels per hex by default, with a 15% margin when zooming
-back in to prevent flicker. `GpuUnitIcons` owns these defaults.
-
-Icons follow the existing animated positions and facing; airborne units project onto the visible
-ground, water or ice. Labels and picking follow the icons. Hidden units and trees leave the model,
-depth and shadow draws, while the original animation timeline continues. The icons reuse the existing
-tactical batches and add no fullscreen effect or render target. `GpuOverviewIconsSmokeTest` exercises
-the real Camera toggle, artwork, switching, picking and shadow restoration, and checks that canopy
-pixels outside the hex survive the native render.
-
-Tuning defaults are hex scale 1, unit scale 0.7, unit height scale 0.87, level
+Tuning defaults are hex scale 1, unit scale 0.7, unit height scale 1, level
 height 18, grid shade 0.8, building opacity 50%, and see-through
-intensity 75%. Opacity is local to the GPU window and changes materials without
+intensity 55%. Opacity is local to the GPU window and changes materials without
 rebuilding terrain. Defaults restores these values. A single geometry tuning record updates all derived
 dimensions on the render thread. No geometry tuning requires a second artwork
 capture or an alternate renderer.
 
-Scene2D reads monitor DPI and window size. Font rasterization and UI scaling
-keep controls usable from small windows to 4K. The shared overlay painters and
-their text caches rasterize at the framebuffer's native pixel density while
-retaining logical coordinates for layout and input. Menus and board input consume
-complete gestures independently. Keyboard, planetary conditions, and turn details
-panels keep their artwork separate from a shared 200 ms fade timeline. The GPU
-evaluates opacity each render frame, retaining the same texture throughout a fade
-and reversing from the current opacity when toggled again. Other widgets retain
-their painter order. Chat uses the same 200 ms timing for its slide. Toasts carry
-their entire 300 ms fade-in, configured hold, and 1 second fade-out schedule to
-the renderer; stack changes use timed position transitions. Each animated widget
-retains its own texture, so adding a toast does not rebuild the other panels.
-The unit overview also uses individual cached cards and scroll-button images,
-instead of a viewport-sized raster. A card is repainted only when its visible
-portrait, name, bars, condition text, border, or display density changes. Layout
-and input keep their existing logical coordinates. Unit labels cache the shared
-sprite painter's derived presentation (text, colors, statuses, bars, and TMM
-pips); unchanged labels reuse both their compact image and immutable pixel
-snapshot. Camera movement does not invalidate them. Sensor-only labels exclude
-private status, and removed or no-longer-visible units release their cached art.
-Off-board targeting buttons similarly share a small icon texture at native display
-density. Hidden buttons publish no HUD layer; eligibility, positions and click
-actions still come from the existing targeting overlay.
+The HUD's scaling, toasts, unit cards and labels are native Scene2D components ([gpu-hud.md](gpu-hud.md)).
+The native window no longer captures or draws the client's Swing overlay painters (chat box, unit overview,
+toasts, keybinding, planetary conditions and turn details overlays, off-board targeting buttons).
 
 Movement and flight arrows, movement envelopes, sensor and objective boundaries,
 C3 links, flyover/vector routes, strafing footprints, ruler/LOS indicators,
@@ -709,13 +613,13 @@ existing sprite painter's straight segments as translucent upright walls.
 respecting the existing visual-range color preference. The walls sit
 at the hex's surface elevation, including over water and ice, independently of
 water depth. At level changes, adjoining panels meet along a shared vertical
-span from the lower surface to half a level above the higher surface, as the
-firing contours do. They share the tactical mesh cache and movement-playback visibility.
+span from the lower surface to half a level above the higher surface.
+They share the tactical mesh cache and movement-playback visibility.
 The original thin white dashed stroke follows the top edge of each wall.
 `GpuTactical.OUTLINE_SCROLL_SPEED` controls dash travel in unscaled board pixels
 per second (default `4f`); `0f` keeps the original static pattern, and negative
-values reverse direction. At or below `GpuMarkers.FLAT_TILT_DEGREES` (30 degrees
-from overhead), the wall becomes the original flat band on the surface. Both
+values reverse direction. In the Tactical View the wall becomes the original flat band on the
+surface; the 3D view keeps it upright at every angle, so straight down it is seen edge-on. Both
 presentations share the animation clock, palette, opacity and playback visibility;
 switching between them and animating the dashes reuse the cached meshes.
 `SensorRangeSprite.GPU_RANGE_SHOW_MAP_BORDER` controls whether GPU visual and
@@ -755,7 +659,7 @@ into outcomes the server did not transmit individually.
 Map-sheet borders follow continuous hex edges, with a narrow contrast backing in
 the native view. Embedded-board outlines and ECM/ECCM source outlines also have
 contrast backing. Field colors, overlap resolution, range, ownership and visibility
-still come from `BoardView.updateEcmList`; sources on other boards are excluded.
+still come from `BoardClientState.updateEcmList`; sources on other boards are excluded.
 ECM transparency changes refresh both the field and source immediately. These
 updates preserve ground/feature artwork; only changed ECM static needs new raster
 pixels. ECCM tint, sheet borders and embedded-board indicators need no raster art.
@@ -789,8 +693,7 @@ wreck artwork, ECM static noise, diagnostic firing heat-map icons, other legacy
 artwork and custom hex-drawing plugins. Converted native shapes are excluded from
 that layer, so they are not rendered twice. This does not remove the tactical
 layer as a concept or move any game-rule decisions into the GPU renderer.
-Detailed dialogs use the Swing client; native chat input
-uses its existing editor and sending actions. See [contextual-ui.md](contextual-ui.md).
+Dialogs and chat are native; see [gpu-hud.md](gpu-hud.md).
 
 Time, lighting, weather presets, and their limits are documented in
 [gpu-atmosphere.md](gpu-atmosphere.md). Daylight is calibrated for the tileset's
@@ -799,46 +702,19 @@ Tactical markings and hex text draw after atmosphere compositing with restored
 opaque depth. HEIGHT labels are raised to the building/feature height and fit
 on the roof footprint. Other hex labels retain their terrain anchors.
 
-Declared attacks use thin arrows and optional red hex-corner bands at each target
-unit's base. Bands mark the selected unit's assigned targets, including every
-target in split fire, and clear when no unit is selected. While combat playback
-shows an attack, bands mark the targets of the unit that is firing, because the
-camera follows each attacker in turn while the selection stays where the game put
-it. `GpuFireControl.TARGET_ARROW_SIZE`
-scales the line thickness and arrowhead together: `1f` keeps the current size,
-`0.5f` halves it, and `2f` doubles it. Set
-`GpuBattleView.SHOW_TARGET_MARKERS` to `true` to enable the bands, or `false` to
-disable them. Their width and shared-clock bobbing use `TARGET_BAND_WIDTH`,
-`TARGET_BOB_PERIOD_SECONDS`, `TARGET_BOB_HEIGHT_OFFSET`, and
-`TARGET_BOB_HEIGHT_LEVELS`, initially matching the selection band's values.
-`GpuBattleView.HIDE_TARGET_ARROWS_DURING_ATTACKS` defaults to `true`, hiding every
-attacker's arrows during combat playback, regardless of selection.
-`GpuBattleView.HIDE_TARGET_MARKERS_DURING_ATTACKS` defaults to `false`, keeping
-enabled target bands visible for the currently firing unit during playback.
-These switches operate independently. Weapon range contours are unaffected.
+Declared attacks use thin lines from each attacker to its target. During the local weapon declaration the HUD
+draws the acting unit's lines as traces instead ([gpu-hud.md](gpu-hud.md)); every other line takes its attacker's
+side colour. `GpuFireControl.TARGET_ARROW_SIZE` scales the line thickness and arrowhead together: `1f` keeps the
+current size, `0.5f` halves it, and `2f` doubles it. `GpuBattleView.HIDE_TARGET_ARROWS_DURING_ATTACKS` defaults to
+`true`, hiding every attacker's arrows during combat playback, regardless of selection.
 
-`UnitOverviewOverlay` supplies both boards' unit strips: owned units on the right
-and visible enemies on the left, with independent scrolling. Enemy cards use the
-existing visibility checks, show anonymous radar portraits for sensor contacts,
-and recheck visibility before navigating. Both strips use the existing client selection/centering commands.
-They remain visible in 3D, so its menus omit the Unit Overview toggle and ignore its shortcut (Ctrl+U by default).
-The legacy 2D view retains its Unit Overview visibility preference.
-
-`GpuPanelDock` owns the right panels' placement, visibility and camera clearance.
-Only Report has a resize handle and remembers its chosen width; firing declarations
-and tuning keep the standard 362-unit width. Reports, attack controls and tuning occupy the
-same dock, one at a time; closing a utility panel restores attack controls when
-available. New panels join this dock instead of implementing their own bounds or
-resize gestures. The dock leaves the same gap on both sides of the right unit
-strip, and cannot be widened over the enemy strip. Window resizing and HUD scaling
-use the strips' captured layout; hiding an empty or disabled strip releases its space.
-Attack names, weapon and ammunition choices, and queued orders wrap within that
-width. The details scroll vertically when needed, keeping the fire buttons accessible.
+In the native window the HUD's forces panel, forces overview and right column replace the classic unit overview
+strips and side panels ([gpu-hud.md](gpu-hud.md)). The legacy 2D view retains its Unit Overview visibility
+preference.
 
 Firing playback frames the attacker and every target in the current volley,
 including unit height and multi-hex footprints. The shared camera pans and zooms
-into the area between the enemy strip and the dock, using their actual bounds
-and excluding the top and bottom bars. Above
+into the board area between the HUD's left and right columns (`GpuHud.cameraLeft` and `cameraWidth`). Above
 `BoardCamera.ATTACK_TOP_VIEW_TILT_DEGREES` (30 degrees from overhead), it also
 chooses a nearby orbit along the usable area's long axis and raises very low
 viewpoints. At or below that threshold, all automatic framing leaves an already
@@ -848,7 +724,7 @@ needed; it never zooms in, tilts or orbits.
 wall-clock time; animated firing waits for it. Late volley targets
 share the original deadline. Panel or window changes after the move refit
 immediately, and manual camera input takes control.
-The world-space orbit pivot stays on the action's support plane. The side-panel
+The world-space orbit pivot stays on the action's support plane. The columns'
 offset is applied separately to the camera, so manual orbit and tilt stay centered
 in the clear board area, panning remains on that plane, and pointer zoom stays
 anchored under the cursor. Changing panel width repositions the pivot without
@@ -856,9 +732,9 @@ moving the displayed board.
 
 `BoardCamera.ANIMATE_CAMERA_ON_SELECTION_CHANGE`,
 `BoardCamera.ANIMATE_CAMERA_COMBAT_PLAYBACK`, and
-`BoardCamera.ANIMATE_CAMERA_ON_MOVE` all default to `true`. These initialize the
-Camera menu's selection, combat and movement animation checkboxes for each window.
-Unchecking one applies that context's framing immediately instead of animating
+`BoardCamera.ANIMATE_CAMERA_ON_MOVE` all default to `true`. For each window they initialize the
+Tuning utility's Camera switches for selection and movement framing and the dock's Follow toggle for combat.
+Switching one off applies that context's framing immediately instead of animating
 it, including a transition already in progress. The options remain independent
 of each other and of the chosen view. Selection changes, sidebar navigation, and
 unit-centering commands share the same framing and selection-animation setting,
@@ -877,34 +753,24 @@ or to a new selection if one arrived during playback. Intermediate actions do
 not reposition it, and switching to Instant also settles an existing camera
 transition immediately.
 
-Weapon ranges use translucent contours and flat `min`, `S`, `M`, `L`, and `E`
-markers at the existing firing-arc handler's positions within each range area.
-The flat artwork reuses the classic marker painter at three times terrain resolution,
+Weapon range bands and their borders are drawn by the HUD's board overlay ([gpu-hud.md](gpu-hud.md)).
+`GpuFireControl` keeps flat `min`, `S`, `M`, `L`, and `E` markers at the existing firing-arc handler's positions
+within each range area. The flat artwork reuses the classic marker painter at three times terrain resolution,
 with antialiasing and a black outline. Each letter stays at its handler-selected hex
 and always faces the camera, upright at every tilt and bearing, without spinning.
 Its lowest edge clears the terrain or water surface by
 `GpuFireControl.RANGE_LABEL_CLEARANCE_LEVELS` elevation levels. Artwork is cached;
 camera movement changes only its transform, using the same orientation as flat
-location markers. Set
-`BoardView.GPU_SCROLLING_RANGE_LABELS` to `true` to replace those markers with
-scrolling contour text; it defaults to `false`. The contour ridge heights use
-hex surface levels, including above water; water depth does not lower them.
-The shared range-color preferences default to red for minimum, green for short,
-yellow for medium, orange for long, and purple for extreme. Flat letters,
-classic range bands, and GPU contours all use that same palette.
-`BoardFiringGeometry.RANGE_HEIGHT` sets height in elevation levels and
-`RANGE_CLEARANCE` sets surface clearance in unscaled board pixels.
-`GpuFireControl.RANGE_LABEL_SPACES` sets the blank spaces between labels and
-`RANGE_SCROLL_SPEED` sets travel in unscaled board pixels per second (zero pauses,
-negative reverses). Repeats fit each closed contour so letters cross its seam
-continuously. Both camera modes share these meshes and the same animation clock;
-the classic board keeps its ground labels.
+location markers. Setting `BoardTactical.SCROLLING_RANGE_LABELS` to `true` (default `false`) leaves these
+markers out. The shared range-color preferences default to red for minimum, green for short,
+yellow for medium, orange for long, and purple for extreme; flat letters and classic range bands
+use that palette. Both camera modes share the markers; the classic board keeps its ground labels.
 
 ## Ownership and rendering
 
 - `GpuBoardSource` reads game objects, visibility, tile artwork, and existing
   commands on Swing's event thread and publishes immutable presentation frames.
-- `BoardView.capturePlanarHexes` separates ground, flat decals, and remaining
+- `BoardClientState.capturePlanarHexes` separates ground, flat decals, and remaining
   tactical pixels in bounded chunks. Its compatibility path retains ECM static,
   legacy artwork and plugin painters at three times terrain resolution, and
   restores classic view state. Empty marking images are omitted. Ground has
@@ -916,7 +782,7 @@ the classic board keeps its ground labels.
   and atlas slots; diverging images split, and matching images merge again.
   Repaints, board changes and camera coverage invalidate tactical capture;
   unchanged frames reuse it, and offscreen markings are released.
-- `BoardView.captureTacticalGeometry` records the converted painters as immutable
+- `BoardClientState.captureTacticalGeometry` records the converted painters as immutable
   vectors. `GpuTactical` renders these as terrain-following meshes shared by both
   cameras. Ruler lines, endpoint crosshairs and LOS hex outlines use this path;
   changing or clearing them does not repaint their artwork into raster tiles.
@@ -938,7 +804,7 @@ the classic board keeps its ground labels.
   Pointer picking rejects unrelated chunks before running the shared surface
   and authored-mesh intersection code.
 - The draw order is opaque terrain/features, flat decals, units, transparent
-  water/faded features, tactical marks, and screen annotations/UI.
+  water/faded features, tactical marks, and the HUD.
   Converted tactical geometry follows the shared terrain triangles, including
   road approaches and water surfaces. Remaining raster marks use a flat plane
   one-third of a level above each hex's surface. Both paths test opaque depth
@@ -955,9 +821,10 @@ the classic board keeps its ground labels.
   occupancy, unit transforms and camera changes invalidate the cached map.
 - GL resources are created and disposed on the render thread. Shared assets own
   their textures; instance material changes do not transfer ownership.
-- `GpuBoardActions` adapts real phase buttons, menus, weapon lists, and ammunition
-  models. Callbacks return to Swing and recheck the panel, phase, turn, actor,
-  target, and current availability. There is no second rules engine.
+- `GpuBoardActions` adapts real phase buttons and menus; the HUD services adapt movement,
+  weapons, ammunition and physical attacks ([gpu-hud.md](gpu-hud.md)). Callbacks return to
+  Swing and recheck the panel, phase, turn, actor, target, and current availability. There
+  is no second rules engine.
 
 ## Verification
 
@@ -1066,17 +933,16 @@ both light directions in both camera views. Its screenshots are named `rim-lit-*
 
 ## Scope and limits
 
-This is a 3D board renderer with native contextual controls. Shared Java2D
-painters still supply tactical pixels, annotations, and existing HUD widgets.
-Their refresh and initial image loading can still stall presentation. Tactical
-capture is polled on Swing; it is not an entirely native vector HUD. Roof
+This is a 3D board renderer with the native battle HUD ([gpu-hud.md](gpu-hud.md)). Shared
+Java2D painters still supply tactical pixels. Their refresh and initial image loading can
+still stall presentation. Tactical capture is polled on Swing. Roof
 illustrations retain their original resolution and baked rooftop detail.
 Updating a copied roof silhouette requires rerunning the offline asset build.
 
 Transparency uses bounding boxes and normal
 alpha sorting, not volumetric water or order-independent transparency. Terrain
 still hides the normal unit material behind banks; the separate see-through
-highlight reveals the occluded silhouette, and screen annotations remain available.
+highlight reveals the occluded silhouette, and the HUD's nameplates stay visible.
 
 The automated checks do not establish an end-to-end human playthrough of every
 aerospace, artillery, transport, multi-map, bridge, or special-equipment

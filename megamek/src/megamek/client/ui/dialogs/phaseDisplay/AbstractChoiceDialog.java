@@ -46,6 +46,10 @@ import javax.swing.JToggleButton;
 import javax.swing.SwingConstants;
 import javax.swing.border.EmptyBorder;
 
+import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
 import megamek.client.ui.dialogs.buttonDialogs.AbstractButtonDialog;
 import megamek.client.ui.enums.DialogResult;
 import megamek.client.ui.util.UIUtil;
@@ -152,10 +156,52 @@ public abstract class AbstractChoiceDialog<T> extends AbstractButtonDialog {
         return result;
     }
 
+    /**
+     * Showing the dialog asks in the owning client's native battle window instead when that draws dialogs, and the
+     * answer chooses exactly as a click on this dialog's buttons does.
+     */
     @Override
     public void setVisible(boolean value) {
+        if (value && answeredNatively()) {
+            return;
+        }
         super.setVisible(value);
         updateChoices();
+    }
+
+    /**
+     * Each row shows the summary label, and the detail label when details can be shown, as plain text. These run the
+     * subclass formatters (to-hit, unit tooltips), so they are built only when the native window will show them.
+     */
+    private boolean answeredNatively() {
+        ClientGUI gui = ClientGUI.forFrame(getFrame());
+        if ((gui == null) || !GpuBoardWindow.drawsDialogsFor(gui)) {
+            return false;
+        }
+        JToggleButton scratch = new JToggleButton();
+        List<DialogRow> rows = new ArrayList<>();
+        for (T target : targets) {
+            summaryLabel(scratch, target);
+            String summary = scratch.getText();
+            String details = "";
+            if (detailsCheckBox.isVisible()) {
+                detailLabel(scratch, target);
+                details = scratch.getText();
+            }
+            rows.add(new DialogRow(summary, details, null, true));
+        }
+        DialogAnswer answer = gui.askRows(message, getTitle(), rows, isMultiSelect, List.of(), null,
+              List.of(resources.getString("Ok.text"), resources.getString("Cancel.text")), 1);
+        if (answer == null) {
+            return false;
+        }
+        if (isMultiSelect && (answer.button() == 0)) {
+            answer.selected().forEach(row -> choose(targets.get(row)));
+            okButtonActionPerformed(null);
+        } else if (!answer.selected().isEmpty()) {
+            choose(targets.get(answer.selected().getFirst()));
+        }
+        return true;
     }
 
     private void updateChoices() {

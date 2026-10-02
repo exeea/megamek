@@ -42,6 +42,7 @@ import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.HeadlessException;
 import java.awt.Image;
+import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.ComponentAdapter;
@@ -63,6 +64,7 @@ import javax.imageio.ImageIO;
 import javax.swing.*;
 import javax.swing.filechooser.FileFilter;
 import javax.swing.filechooser.FileNameExtensionFilter;
+import javax.swing.plaf.basic.BasicHTML;
 
 import megamek.MMConstants;
 import megamek.client.AbstractClient;
@@ -81,11 +83,17 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.audio.AudioService;
 import megamek.client.ui.clientGUI.audio.SoundManager;
 import megamek.client.ui.clientGUI.audio.SoundType;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.CollapseWarning;
 import megamek.client.ui.clientGUI.boardview.IBoardView;
 import megamek.client.ui.clientGUI.boardview.RulerDialog;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogField;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
 import megamek.client.ui.clientGUI.boardview.overlay.BoardToastOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.ChatterBoxOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.KeyBindingsOverlay;
@@ -132,7 +140,6 @@ import megamek.client.ui.util.BASE64ToolKit;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.MULVersionValidator;
 import megamek.client.ui.util.MegaMekController;
-import megamek.client.ui.util.UIUtil;
 import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.Report;
@@ -176,6 +183,7 @@ import megamek.common.units.IBomber;
 import megamek.common.units.Targetable;
 import megamek.common.util.AddBotUtil;
 import megamek.common.util.Distractable;
+import megamek.common.util.ImageUtil;
 import megamek.common.util.StringUtil;
 import megamek.common.voting.Poll;
 import megamek.common.voting.PollStatus;
@@ -386,13 +394,11 @@ public class ClientGUI extends AbstractClientGUI
     public ForceDisplayPanel forceDisplayPanel;
     private ForceDisplayDialog forceDisplayDialog;
     private MapMenu popup;
-    private RulerDialog ruler;
+    private final Map<Integer, RulerDialog> rulers = new HashMap<>();
     protected JComponent curPanel;
     /** Open the default board once per game; later phase changes preserve a manual choice or rendering fallback. */
     private boolean boardViewChosen;
     public ChatLounge chatlounge;
-    private OffBoardTargetOverlay offBoardOverlay;
-    private BoardToastOverlay toastOverlay;
 
     private final ConcurrentLinkedQueue<Runnable> toastDripQueue = new ConcurrentLinkedQueue<>();
     private javax.swing.Timer toastDripTimer;
@@ -499,6 +505,8 @@ public class ClientGUI extends AbstractClientGUI
         super(client);
         this.client = client;
         controller = c;
+        // Dialogs that know only their parent frame find their client here (forFrame)
+        frame.getRootPane().putClientProperty(ClientGUI.class, this);
         boardViewsContainer.setClassicViewEnabled(client instanceof BotClient || !GUIP.getUse3DBoard());
         initializeSpriteHandlers();
         panMain.setLayout(cardsMain);
@@ -568,7 +576,7 @@ public class ClientGUI extends AbstractClientGUI
 
     @Deprecated(since = "0.51.0", forRemoval = true)
     public BoardToastOverlay getToastOverlay() {
-        return toastOverlay;
+        return getCurrentBoardState().map(state -> state.getOverlay(BoardToastOverlay.class)).orElse(null);
     }
 
     /**
@@ -597,19 +605,22 @@ public class ClientGUI extends AbstractClientGUI
               entity.getShortName() + " [" + entity.getId() + "]" :
               "no entity";
         // Gate before normalizing: normalizeToastText is regex-heavy and only the shown path needs the
-        // cleaned text. On the suppressed paths log the raw text so switching toasts off does not pay the
+        // cleaned text. On the suppressed path log the raw text so switching toasts off does not pay the
         // normalization cost for every would-be toast.
-        if (toastOverlay == null) {
-            logger.debug("[Toast] suppressed [{}] ({}) - overlay not initialized yet: {}",
-                  level, entityLabel, text);
-            return;
-        }
         if (!GUIP.getToastEnabled()) {
             logger.debug("[Toast] suppressed [{}] ({}) - toasts switched off in client settings: {}",
                   level, entityLabel, text);
             return;
         }
         String normalizedText = ReportToastFormatter.normalizeToastText(text);
+        // The native battle window keeps its own stack, so it must not depend on the Swing overlay existing.
+        GpuBoardWindow.toast(this, level, normalizedText, entity);
+        BoardToastOverlay toastOverlay = getToastOverlay();
+        if (toastOverlay == null) {
+            logger.debug("[Toast] not on the Swing board [{}] ({}) - overlay not initialized yet: {}",
+                  level, entityLabel, normalizedText);
+            return;
+        }
         logger.debug("[Toast] shown [{}] ({}): {}", level, entityLabel, normalizedText);
         toastOverlay.show(level, normalizedText, entity);
     }
@@ -677,10 +688,6 @@ public class ClientGUI extends AbstractClientGUI
      * back on part way through the same phase.</p>
      */
     private void showReportAsToasts(String defaultPrefix, String report) {
-        if (toastOverlay == null) {
-            logger.debug("[Toast] report burst suppressed - overlay not initialized yet");
-            return;
-        }
         if (!GUIP.getToastEnabled()) {
             logger.debug("[Toast] report burst suppressed - toasts are switched off in client settings");
             return;
@@ -904,8 +911,7 @@ public class ClientGUI extends AbstractClientGUI
      * the server. The menu entry that leads here is only shown while the local player holds the role.
      */
     private void giveUpGameMaster() {
-        int choice = JOptionPane.showConfirmDialog(frame,
-              Messages.getString("ClientGUI.giveUpGameMaster.message"),
+        int choice = confirm(Messages.getString("ClientGUI.giveUpGameMaster.message"),
               Messages.getString("ClientGUI.giveUpGameMaster.title"),
               JOptionPane.YES_NO_OPTION,
               JOptionPane.QUESTION_MESSAGE);
@@ -1242,7 +1248,7 @@ public class ClientGUI extends AbstractClientGUI
 
 
     public void customizePlayer() {
-        PlayerSettingsDialog psd = new PlayerSettingsDialog(this, client, (BoardView) boardViews.get(0));
+        PlayerSettingsDialog psd = new PlayerSettingsDialog(this, client, getBoardState());
         psd.setVisible(true);
     }
 
@@ -1352,11 +1358,9 @@ public class ClientGUI extends AbstractClientGUI
                 break;
             case FILE_GAME_SAVE_SERVER:
                 ignoreHotKeys = true;
-                String filename = (String) JOptionPane.showInputDialog(frame,
-                      Messages.getString("ClientGUI.FileSaveServerDialog.message"),
+                String filename = (String) input(Messages.getString("ClientGUI.FileSaveServerDialog.message"),
                       Messages.getString("ClientGUI.FileSaveServerDialog.title"),
                       JOptionPane.QUESTION_MESSAGE,
-                      null,
                       null,
                       MMConstants.DEFAULT_SAVEGAME_NAME);
                 if (filename != null) {
@@ -1419,6 +1423,7 @@ public class ClientGUI extends AbstractClientGUI
                 if (client.getLocalPlayer().getTeam() == Player.TEAM_UNASSIGNED) {
                     addToast(ToastLevel.ERROR,
                           Messages.getString("ClientGUI.openUnitListFileDialog.noReinforceMessage"));
+                    ignoreHotKeys = false;
                     return;
                 }
                 getRandomArmyDialog().setVisible(true);
@@ -1529,7 +1534,8 @@ public class ClientGUI extends AbstractClientGUI
                 showLOSSettingDialog();
                 break;
             case VIEW_ZOOM_IN:
-                boardViews.get(0).zoomIn();
+                if (GpuBoardWindow.isActiveFor(this)) { GpuBoardWindow.cameraCommand(this, KeyCommandBind.ZOOM_IN); }
+                else { getCurrentBoardView().ifPresent(IBoardView::zoomIn); }
                 break;
             case VIEW_GPU_BOARD:
                 GUIP.setUse3DBoard(true);
@@ -1541,24 +1547,26 @@ public class ClientGUI extends AbstractClientGUI
                 GpuBoardWindow.showClassic(this);
                 break;
             case VIEW_ZOOM_OUT:
-                boardViews.get(0).zoomOut();
+                if (GpuBoardWindow.isActiveFor(this)) { GpuBoardWindow.cameraCommand(this, KeyCommandBind.ZOOM_OUT); }
+                else { getCurrentBoardView().ifPresent(IBoardView::zoomOut); }
                 break;
             case VIEW_ZOOM_OVERVIEW_TOGGLE:
-                boardViews.get(0).zoomOverviewToggle();
+                if (GpuBoardWindow.isActiveFor(this)) { GpuBoardWindow.cameraCommand(this, KeyCommandBind.ZOOM_OVERVIEW_TOGGLE); }
+                else { getCurrentBoardView().ifPresent(IBoardView::zoomOverviewToggle); }
                 break;
             case VIEW_TOGGLE_ISOMETRIC:
                 GUIP.setIsometricEnabled(!GUIP.getIsometricEnabled());
                 break;
             case VIEW_TOGGLE_FOV_HIGHLIGHT:
                 GUIP.setFovHighlight(!GUIP.getFovHighlight());
-                boardViews.get(0).refreshDisplayables();
+                onAllBoardStates(BoardClientState::refreshDisplayables);
                 if (client.getGame().getPhase().isMovement()) {
-                    ((BoardView) boardViews.get(0)).clearHexImageCache();
+                    onAllBoardStates(BoardClientState::visibilityChanged);
                 }
                 break;
             case VIEW_TOGGLE_FIELD_OF_FIRE:
                 GUIP.setShowFieldOfFire(!GUIP.getShowFieldOfFire());
-                boardViews.get(0).getPanel().repaint();
+                onAllBoardStates(BoardClientState::repaint);
                 break;
             case VIEW_TOGGLE_FLEE_ZONE:
                 toggleFleeZone();
@@ -1568,15 +1576,15 @@ public class ClientGUI extends AbstractClientGUI
                 break;
             case VIEW_TOGGLE_FOV_DARKEN:
                 GUIP.setFovDarken(!GUIP.getFovDarken());
-                boardViews.get(0).refreshDisplayables();
+                onAllBoardStates(BoardClientState::refreshDisplayables);
                 if (client.getGame().getPhase().isMovement()) {
-                    ((BoardView) boardViews.get(0)).clearHexImageCache();
+                    onAllBoardStates(BoardClientState::visibilityChanged);
                 }
                 break;
             case VIEW_TOGGLE_FOV_SPOTTING:
                 GUIP.setFovSpottingMode(!GUIP.getFovSpottingMode());
-                boardViews.get(0).refreshDisplayables();
-                ((BoardView) boardViews.get(0)).clearHexImageCache();
+                onAllBoardStates(BoardClientState::refreshDisplayables);
+                onAllBoardStates(BoardClientState::visibilityChanged);
                 break;
             case VIEW_TOGGLE_SHOW_OBJECTS:
                 // the ground object sprite handler listens for the preference change and re-renders
@@ -1601,7 +1609,7 @@ public class ClientGUI extends AbstractClientGUI
                 }
                 break;
             case VIEW_CHANGE_THEME:
-                ((BoardView) boardViews.get(0)).changeTheme();
+                getCurrentBoardState().ifPresent(BoardClientState::changeTheme);
                 break;
             case FIRE_SAVE_WEAPON_ORDER:
                 Entity ent = getUnitDisplay().getCurrentEntity();
@@ -1699,6 +1707,7 @@ public class ClientGUI extends AbstractClientGUI
         }
 
         // Ruler display
+        RulerDialog ruler = getCurrentBoardState().map(state -> rulers.get(state.getBoardId())).orElse(null);
         if ((ruler != null) && (ruler.getSize().width != 0) && (ruler.getSize().height != 0)) {
             GUIP.setRulerPosX(ruler.getLocation().x);
             GUIP.setRulerPosY(ruler.getLocation().y);
@@ -1721,8 +1730,19 @@ public class ClientGUI extends AbstractClientGUI
 
         // Tell all the displays to remove themselves as listeners.
         GpuBoardWindow.closeFor(this);
+        if (chatlounge != null) {
+            chatlounge.killPreviewBV();
+        }
+        client.getGame().removeGameListener(gameListener);
         boolean reportHandled = false;
         boardViews().forEach(IBoardView::dispose);
+        boardViews.clear();
+        miniMaps.values().forEach(MinimapDialog::dispose);
+        miniMaps.clear();
+        rulers.values().forEach(RulerDialog::dispose);
+        rulers.clear();
+        boardStates().forEach(BoardClientState::close);
+        boardStates.clear();
 
         for (String s : phaseComponents.keySet()) {
             JComponent component = phaseComponents.get(s);
@@ -1757,6 +1777,7 @@ public class ClientGUI extends AbstractClientGUI
         }
 
         GUIP.removePreferenceChangeListener(this);
+        tilesetManager.close();
         super.die();
     }
 
@@ -1781,7 +1802,7 @@ public class ClientGUI extends AbstractClientGUI
     public void switchPanel(GamePhase phase) {
         // Clear the old panel's listeners.
         if (curPanel instanceof BoardViewListener) {
-            boardViews().forEach(b -> b.removeBoardViewListener((BoardViewListener) curPanel));
+            boardStates().forEach(b -> b.removeBoardViewListener((BoardViewListener) curPanel));
         }
 
         if (curPanel instanceof ActionListener) {
@@ -1806,7 +1827,7 @@ public class ClientGUI extends AbstractClientGUI
                 ChatLounge cl = (ChatLounge) phaseComponents.get(String.valueOf(GamePhase.LOUNGE));
                 cb.setDoneButton(cl.getButDone());
                 cl.setBottom(cb.getComponent());
-                boardViews().forEach(bv -> ((BoardView) bv).getTilesetManager().reset());
+                tilesetManager.reset();
                 break;
             case POINTBLANK_SHOT:
             case VICTORY_SETUP:
@@ -1854,7 +1875,7 @@ public class ClientGUI extends AbstractClientGUI
 
         // Set the new panel's listeners
         if (curPanel instanceof BoardViewListener listener) {
-            boardViews().forEach(b -> b.addBoardViewListener(listener));
+            boardStates().forEach(b -> b.addBoardViewListener(listener));
         }
 
         if (curPanel instanceof ActionListener) {
@@ -1896,11 +1917,14 @@ public class ClientGUI extends AbstractClientGUI
 
     /** Construct the legacy map components only when that visualization is requested. */
     public void setClassicBoardViewEnabled(boolean enabled) {
-        boardViewsContainer.setClassicViewEnabled(enabled);
-        if (!enabled) {
-            boardViews().stream().filter(BoardView.class::isInstance).map(BoardView.class::cast)
-                  .forEach(BoardView::releaseClassicView);
+        if (enabled) {
+            boardStates().forEach(this::createClassicBoardView);
+        } else {
+            boardViews().forEach(IBoardView::dispose);
+            boardViews.clear();
         }
+        boardViewsContainer.setClassicViewEnabled(enabled);
+        boardViewsContainer.updateMapTabs();
     }
 
     /** Reapply auxiliary window presentation after changing board windows, without changing saved docking choices. */
@@ -2003,7 +2027,6 @@ public class ClientGUI extends AbstractClientGUI
                 }
                 currPhaseDisplay = (StatusBarPhaseDisplay) component;
                 panSecondary.add(component, secondary);
-                offBoardOverlay.setTargetingPhaseDisplay((TargetingPhaseDisplay) component);
                 break;
             case PREMOVEMENT:
                 component = new PrephaseDisplay(this, GamePhase.PREMOVEMENT);
@@ -2149,7 +2172,8 @@ public class ClientGUI extends AbstractClientGUI
 
     protected void showBoardPopup(BoardViewEvent event) {
         if (fillPopup(event)) {
-            event.getBoardView().showPopup(popup, event.getCoords());
+            BoardView classic = getBoardView(event.getBoardId());
+            if (classic != null) { classic.showPopup(popup, event.getCoords()); }
         }
     }
 
@@ -2237,9 +2261,12 @@ public class ClientGUI extends AbstractClientGUI
         return false;
     }
 
-    /** Shows or hides the minimap based on the current menu setting. */
+    /**
+     * Shows or hides the minimap based on the current menu setting. The native battle window's minimap keeps the
+     * player's choice through every phase, so its phase rules apply to the classic board only.
+     */
     private void maybeShowMinimap() {
-        if (!boardViewsContainer.isClassicViewEnabled() && !GpuBoardWindow.isActiveFor(this)) {
+        if (!boardViewsContainer.isClassicViewEnabled() || GpuBoardWindow.isActiveFor(this)) {
             return;
         }
         GamePhase phase = getClient().getGame().getPhase();
@@ -2317,6 +2344,8 @@ public class ClientGUI extends AbstractClientGUI
      * it in the lobby or a report phase. Does not change the menu setting.
      */
     void setMapVisible(boolean visible) {
+        // Over the native battle window its HUD shows the minimap; the minimap windows stay hidden.
+        if (visible && GpuBoardWindow.isActiveFor(this)) { setMapVisible(false); return; }
         miniMaps.values().forEach(miniMap -> miniMap.setVisible(visible));
         if (getMiniMapDialog() != null) {
             getMiniMapDialog().setVisible(visible);
@@ -2332,6 +2361,8 @@ public class ClientGUI extends AbstractClientGUI
     }
 
     void setPlayerListVisible(boolean visible) {
+        // The native battle window's HUD lists the players (Menu > Players); the Swing list stays hidden there.
+        if (visible && GpuBoardWindow.isActiveFor(this)) { setPlayerListVisible(false); return; }
         conditionalRequestFocus(visible);
         if (visible) {
             showPlayerList();
@@ -2341,6 +2372,8 @@ public class ClientGUI extends AbstractClientGUI
     }
 
     void setRoundsInAirVisible(boolean visible) {
+        // The native battle window's log lists the rounds in the air; the Swing window stays hidden there.
+        if (visible && GpuBoardWindow.isActiveFor(this)) { setRoundsInAirVisible(false); return; }
         if (getRoundsInAirDialog() != null) {
             if (visible) {
                 // Push the current "reveal all artillery" preference to the server on open. The preference change
@@ -2433,6 +2466,8 @@ public class ClientGUI extends AbstractClientGUI
      * @param visible whether the bot commands panel should be shown
      */
     void setBotCommandsLocation(boolean visible) {
+        // The native battle window's Players panel holds the bot commands; the Swing panel stays hidden there.
+        if (visible && GpuBoardWindow.isActiveFor(this)) { setBotCommandsLocation(false); return; }
         if ((botCommandsPanel == null) || (getBotCommandsDialog() == null) || (commandBarPanel == null)) {
             return;
         }
@@ -2467,6 +2502,8 @@ public class ClientGUI extends AbstractClientGUI
     }
 
     public void setForceDisplayVisible(boolean visible) {
+        // The native battle window's force overview stands for it; its window (and its Unit Display) stays hidden.
+        if (visible && GpuBoardWindow.isActiveFor(this)) { setForceDisplayVisible(false); return; }
         if (getForceDisplayDialog() != null) {
             getForceDisplayDialog().setVisible(visible);
             conditionalRequestFocus(visible);
@@ -2516,12 +2553,14 @@ public class ClientGUI extends AbstractClientGUI
     }
 
     public void setUnitDisplayLocation(boolean visible) {
-        // The same inspector floats over the native board; its saved 2D docking choice remains unchanged.
+        // Over the native board the panel stays in its dialog; its saved 2D docking choice remains unchanged. Once the
+        // native HUD draws (the switch that also routes the dialogs), its unit card and sheet replace the Unit Display:
+        // the dialog stays hidden, while the panel lives on in it as plumbing, the firing display's weapon list.
         if (GpuBoardWindow.isActiveFor(this)) {
             getUnitDisplayDialog().add(getUnitDisplay(), BorderLayout.CENTER);
             getUnitDisplay().setTitleVisible(false);
             getUnitDisplay().setVisible(visible);
-            getUnitDisplayDialog().setVisible(visible);
+            getUnitDisplayDialog().setVisible(visible && !GpuBoardWindow.drawsDialogsFor(this));
             getUnitDisplayDialog().revalidate();
             getUnitDisplayDialog().repaint();
             return;
@@ -2642,7 +2681,7 @@ public class ClientGUI extends AbstractClientGUI
     }
 
     private boolean fillPopup(BoardViewEvent event) {
-        popup = new MapMenu(event.getCoords(), event.getBoardView().getBoardId(), curPanel, this);
+        popup = new MapMenu(event.getCoords(), event.getBoardState().getBoardId(), curPanel, this);
         return popup.getHasMenu();
     }
 
@@ -2662,6 +2701,345 @@ public class ClientGUI extends AbstractClientGUI
         ChoiceDialog choice = new ChoiceDialog(frame, title, question, choices);
         choice.setVisible(true);
         return choice.getChoices();
+    }
+
+    /**
+     * EDT: asks a JOptionPane question in this client's native battle window and waits for the answer, as the modal
+     * JOptionPane does. The message is a String, which Swing reads as HTML when it starts with "&lt;html&gt;", or an
+     * Object[] of such Strings, at most one JCheckBox, which receives the answer's checkbox state, and at most one
+     * ImageIcon, which the native dialog shows beside the text. Enter presses the JOptionPane's default button: the
+     * first one without options, else the option equal to {@code initialValue}, and none when no option equals it. The
+     * JOptionPane's message type (its icon) is not carried: the native dialog shows errors, warnings and questions
+     * alike.
+     *
+     * @return what the JOptionPane returns: the chosen option's index when options are given, otherwise
+     *       {@link JOptionPane#YES_OPTION}, {@code NO_OPTION}, {@code CANCEL_OPTION} or {@code OK_OPTION}, and
+     *       {@link JOptionPane#CLOSED_OPTION} when Esc closes it; null when the caller must show its Swing dialog (no
+     *       native window draws it, or the message holds a part it cannot show)
+     */
+    public @Nullable Integer askNative(@Nullable Object message, @Nullable String title, int optionType,
+          @Nullable Object[] options, @Nullable Object initialValue, boolean monospace) {
+        StringJoiner text = new StringJoiner("\n");
+        JCheckBox checkBox = null;
+        ImageIcon image = null;
+        for (Object part : (message instanceof Object[] parts) ? parts : new Object[] { message }) {
+            if (part instanceof String line) {
+                text.add(promptText(line));
+            } else if ((part instanceof JCheckBox box) && (checkBox == null)) {
+                checkBox = box;
+            } else if ((part instanceof ImageIcon icon) && (image == null)) {
+                image = icon;
+            } else {
+                return null;
+            }
+        }
+        List<String> buttons;
+        if (options == null) {
+            buttons = optionButtons(optionType);
+        } else {
+            buttons = new ArrayList<>();
+            for (Object option : options) {
+                if ((option instanceof Component) || (option instanceof Icon)) {
+                    return null;
+                }
+                buttons.add(String.valueOf(option));
+            }
+        }
+        int defaultButton = (options == null) ? 0 : Arrays.asList(options).indexOf(initialValue);
+        // the image goes as its file's bytes, which only a window that draws the dialog needs
+        String imageFile = ((image == null) || !GpuBoardWindow.drawsDialogsFor(this)) ? null
+              : ImageUtil.base64TextEncodeImage(image.getImage());
+        DialogAnswer answer = GpuBoardWindow.route(this, new DialogRequest(0, DialogKind.MESSAGE,
+              Objects.requireNonNullElse(title, ""), text.toString(), monospace, buttons, defaultButton,
+              JOptionPane.CLOSED_OPTION, List.of(), List.of(), (checkBox == null) ? "" : checkBox.getText(),
+              (checkBox != null) && checkBox.isSelected(), null, null, null, List.of(), imageFile));
+        if (answer == null) {
+            return null;
+        }
+        if (checkBox != null) {
+            checkBox.setSelected(answer.checked());
+        }
+        int button = answer.button();
+        if ((button < 0) || (button >= buttons.size())) {
+            return JOptionPane.CLOSED_OPTION;
+        }
+        return ((options == null) && (optionType == JOptionPane.OK_CANCEL_OPTION) && (button == 1))
+              ? JOptionPane.CANCEL_OPTION : button;
+    }
+
+    /**
+     * {@link #askNative} shaped like {@link ConfirmDialog}: MegaMek's own Yes and No texts, and {@code dontBother},
+     * when given, below the question. ConfirmDialog sets no default button; Enter presses the focused button, as
+     * FlatLaf does outside macOS. Without the box, Yes is focused, so Enter answers Yes. With it, the box is focused
+     * and Enter answers nothing.
+     *
+     * @return {@link JOptionPane#YES_OPTION}, {@code NO_OPTION}, or {@code CLOSED_OPTION} when Esc closes it; null
+     *       when the caller must show its Swing dialog
+     */
+    public @Nullable Integer askYesNo(String question, String title, @Nullable JCheckBox dontBother) {
+        Object[] yesNo = { Messages.getString("Yes"), Messages.getString("No") };
+        Object message = (dontBother == null) ? question : new Object[] { question, dontBother };
+        return askNative(message, title, JOptionPane.YES_NO_OPTION, yesNo, (dontBother == null) ? yesNo[0] : null,
+              false);
+    }
+
+    /**
+     * EDT: asks for one row (CHOICE) or for any rows (MULTI) in this client's native battle window and waits for the
+     * answer, as a modal dialog does. Texts may be Swing HTML; they are shown as plain text. Button 0 confirms, the
+     * others and Esc ({@code cancelButton}, or -1 for a close box) cancel. {@code initiallySelected} holds the rows
+     * selected when the dialog opens (at most one for CHOICE); {@code max}, when set, is the most rows a MULTI ticks.
+     * An answer with more rows than allowed is cancelled: dropping some of them would change the player's choice.
+     *
+     * @return null when the caller must show its Swing dialog (no native window draws it); otherwise the answer. Its
+     *       selection is empty unless button 0 was pressed, and holds only enabled rows in ascending order: at most one
+     *       for CHOICE, at most {@code max} for MULTI
+     */
+    public @Nullable DialogAnswer askRows(@Nullable String message, String title, List<DialogRow> rows, boolean multi,
+          List<Integer> initiallySelected, @Nullable Integer max, List<String> buttons, int cancelButton) {
+        return askRows(message, title, rows, multi, initiallySelected, max, null, buttons, cancelButton);
+    }
+
+    /**
+     * {@link #askRows(String, String, List, boolean, List, Integer, List, int)} with {@code checkBox}, when given,
+     * below the rows: as in {@link #askNative}, the box receives the answer's state whichever button closed the dialog.
+     */
+    public @Nullable DialogAnswer askRows(@Nullable String message, String title, List<DialogRow> rows, boolean multi,
+          List<Integer> initiallySelected, @Nullable Integer max, @Nullable JCheckBox checkBox, List<String> buttons,
+          int cancelButton) {
+        List<DialogRow> shown = rows.stream()
+              .map(row -> new DialogRow(promptText(row.label()), promptText(row.detail()), row.icon(), row.enabled()))
+              .toList();
+        DialogRequest request = new DialogRequest(0, multi ? DialogKind.MULTI : DialogKind.CHOICE, title,
+              promptText(message), false, buttons, 0, cancelButton, shown, initiallySelected,
+              (checkBox == null) ? "" : promptText(checkBox.getText()), (checkBox != null) && checkBox.isSelected(),
+              null, null, max, List.of());
+        DialogAnswer answer = GpuBoardWindow.route(this, request);
+        if (answer == null) {
+            return null;
+        }
+        if (checkBox != null) {
+            checkBox.setSelected(answer.checked());
+        }
+        List<Integer> selected = (answer.button() != 0) ? List.of() : answer.selected().stream()
+              .filter(row -> (row >= 0) && (row < rows.size()) && rows.get(row).enabled())
+              .distinct().sorted().toList();
+        int limit = !multi ? 1 : ((max == null) ? rows.size() : max);
+        if (selected.size() > limit) {
+            logger.warn("Native {} answer selects {} rows, more than {}: cancelled", request.kind(), selected.size(),
+                  limit);
+            return DialogAnswer.cancelled(request);
+        }
+        return new DialogAnswer(answer.button(), selected, null, answer.checked(), List.of());
+    }
+
+    /**
+     * EDT: {@link #askRows} for one entry of a dialog's combo box: its entries are the rows, and the dialog opens on its
+     * selected entry. A confirmed entry becomes the combo box's selection.
+     *
+     * @return null when the caller must show its Swing dialog (no native window draws it); true when button 0
+     *       confirmed an entry, false otherwise
+     */
+    public @Nullable Boolean askEntry(@Nullable String message, String title, JComboBox<?> entries,
+          List<String> buttons, int cancelButton) {
+        List<DialogRow> rows = new ArrayList<>();
+        for (int index = 0; index < entries.getItemCount(); index++) {
+            rows.add(new DialogRow(String.valueOf(entries.getItemAt(index)), "", null, true));
+        }
+        int selected = entries.getSelectedIndex();
+        DialogAnswer answer = askRows(message, title, rows, false, (selected < 0) ? List.of() : List.of(selected),
+              null, buttons, cancelButton);
+        if (answer == null) {
+            return null;
+        }
+        if (answer.selected().isEmpty()) {
+            return false;
+        }
+        entries.setSelectedIndex(answer.selected().getFirst());
+        return true;
+    }
+
+    /**
+     * EDT: asks for a text in this client's native battle window and waits for the answer, as a modal dialog does.
+     * With {@code min} or {@code max} set, the text must be an integer in that range. Button 0 confirms, the others
+     * and Esc ({@code cancelButton}, or -1 for a close box) cancel.
+     *
+     * @return null when the caller must show its Swing dialog (no native window draws it); otherwise the answer, whose
+     *       text is null unless button 0 was pressed with a text that meets the bounds
+     */
+    public @Nullable DialogAnswer askText(@Nullable String message, String title, String initialText,
+          @Nullable Integer min, @Nullable Integer max, List<String> buttons, int cancelButton) {
+        DialogAnswer answer = GpuBoardWindow.route(this, new DialogRequest(0, DialogKind.INPUT, title,
+              promptText(message), false, buttons, 0, cancelButton, List.of(), List.of(), "", false, initialText, min,
+              max, List.of()));
+        if (answer == null) {
+            return null;
+        }
+        String text = (answer.button() == 0) ? answer.text() : null;
+        if ((text != null) && ((min != null) || (max != null)) && !isIntegerWithin(text, min, max)) {
+            text = null;
+        }
+        return new DialogAnswer(answer.button(), List.of(), text, answer.checked(), List.of());
+    }
+
+    /**
+     * EDT: asks for the values of a form in this client's native battle window and waits for the answer, as a modal
+     * dialog does. Texts may be Swing HTML; they are shown as plain text. Button 0 confirms, the others and Esc
+     * ({@code cancelButton}, or -1 for a close box) cancel. An answer with a value its field cannot hold is cancelled.
+     * A change of a live field answers {@link DialogAnswer#CHANGED} with the values as the player left them, unchecked,
+     * for the caller's next form.
+     *
+     * @return null when the caller must show its Swing dialog (no native window draws it); otherwise the answer. Its
+     *       values are empty unless button 0 was pressed, and then hold one value per field: an INTEGER of the field's
+     *       range, one of a CHOICE's choices, "true" or "false" for a CHECKBOX, or the text of a TEXT field
+     */
+    public @Nullable DialogAnswer askForm(@Nullable String message, String title, List<DialogField> fields,
+          List<String> buttons, int cancelButton) {
+        List<DialogField> shown = fields.stream().map(field -> new DialogField(promptText(field.label()),
+              field.kind(), field.choices(), field.min(), field.max(), field.initial(), field.live())).toList();
+        DialogRequest request = new DialogRequest(0, DialogKind.FORM, title, promptText(message), false, buttons, 0,
+              cancelButton, List.of(), List.of(), "", false, null, null, null, shown);
+        DialogAnswer answer = GpuBoardWindow.route(this, request);
+        if (answer == null) {
+            return null;
+        }
+        if (answer.button() == DialogAnswer.CHANGED) {
+            return new DialogAnswer(DialogAnswer.CHANGED, List.of(), null, answer.checked(), answer.values());
+        }
+        if (answer.button() != 0) {
+            return new DialogAnswer(answer.button(), List.of(), null, answer.checked(), List.of());
+        }
+        List<String> values = answer.values();
+        boolean fits = values.size() == fields.size();
+        for (int index = 0; fits && (index < values.size()); index++) {
+            fits = holds(fields.get(index), values.get(index));
+        }
+        if (!fits) {
+            logger.warn("Native form answer {} does not fit its {} fields: cancelled", values, fields.size());
+            return DialogAnswer.cancelled(request);
+        }
+        return new DialogAnswer(0, List.of(), null, answer.checked(), values);
+    }
+
+    /** Whether a form field can hold the value the native form answered for it. */
+    private static boolean holds(DialogField field, @Nullable String value) {
+        return (value != null) && switch (field.kind()) {
+            case INTEGER -> isIntegerWithin(value, field.min(), field.max());
+            case CHOICE -> field.choices().contains(value);
+            case CHECKBOX -> "true".equals(value) || "false".equals(value);
+            case TEXT -> true;
+        };
+    }
+
+    private static boolean isIntegerWithin(String text, @Nullable Integer min, @Nullable Integer max) {
+        try {
+            int value = Integer.parseInt(text);
+            return ((min == null) || (value >= min)) && ((max == null) || (value <= max));
+        } catch (NumberFormatException ex) {
+            return false;
+        }
+    }
+
+    /**
+     * {@link JOptionPane#showInputDialog(Component, Object, String, int, Icon, Object[], Object)} over this client's
+     * frame, asked in its native battle window instead when that draws dialogs: the values' texts as a CHOICE, or a
+     * text field (INPUT) when there are no values.
+     *
+     * @return the chosen value or the entered text; null when cancelled, as JOptionPane returns
+     */
+    public @Nullable Object input(String message, String title, int messageType, @Nullable Object[] values,
+          @Nullable Object initialValue) {
+        List<String> okCancel = optionButtons(JOptionPane.OK_CANCEL_OPTION);
+        if (values == null) {
+            DialogAnswer answer = askText(message, title, (initialValue == null) ? "" : initialValue.toString(), null,
+                  null, okCancel, 1);
+            if (answer != null) {
+                return answer.text();
+            }
+        } else {
+            List<DialogRow> rows = Arrays.stream(values)
+                  .map(value -> new DialogRow(String.valueOf(value), "", null, true)).toList();
+            DialogAnswer answer = askRows(message, title, rows, false, firstSelectedRow(values, initialValue), null,
+                  okCancel, 1);
+            if (answer != null) {
+                return answer.selected().isEmpty() ? null : values[answer.selected().getFirst()];
+            }
+        }
+        return JOptionPane.showInputDialog(frame, message, title, messageType, null, values, initialValue);
+    }
+
+    /**
+     * The row a JOptionPane input list starts with: the initial value, or else the first value in the combo box it uses
+     * for fewer than 20 values; its list for 20 or more values starts without a selection.
+     */
+    private static List<Integer> firstSelectedRow(Object[] values, @Nullable Object initialValue) {
+        int row = (initialValue == null) ? -1 : Arrays.asList(values).indexOf(initialValue);
+        if ((row < 0) && (values.length > 0) && (values.length < 20)) {
+            row = 0;
+        }
+        return (row < 0) ? List.of() : List.of(row);
+    }
+
+    /** A prompt text as the native dialog shows it: Swing's HTML (text starting with "&lt;html&gt;") as plain text. */
+    private static String promptText(@Nullable String text) {
+        if (text == null) {
+            return "";
+        }
+        return BasicHTML.isHTMLString(text) ? GpuBoardWindow.plainText(text) : text;
+    }
+
+    /**
+     * The client whose frame {@code window} is, or null for any other window. Dialogs that know only their parent frame
+     * use it to ask in that client's native battle window.
+     */
+    public static @Nullable ClientGUI forFrame(@Nullable Window window) {
+        return ((window instanceof JFrame owner)
+              && (owner.getRootPane().getClientProperty(ClientGUI.class) instanceof ClientGUI gui)) ? gui : null;
+    }
+
+    /** JOptionPane's buttons, with its texts, for an option type without custom options. */
+    private static List<String> optionButtons(int optionType) {
+        String ok = UIManager.getString("OptionPane.okButtonText");
+        String cancel = UIManager.getString("OptionPane.cancelButtonText");
+        String yes = UIManager.getString("OptionPane.yesButtonText");
+        String no = UIManager.getString("OptionPane.noButtonText");
+        return switch (optionType) {
+            case JOptionPane.YES_NO_OPTION -> List.of(yes, no);
+            case JOptionPane.YES_NO_CANCEL_OPTION -> List.of(yes, no, cancel);
+            case JOptionPane.OK_CANCEL_OPTION -> List.of(ok, cancel);
+            default -> List.of(ok);
+        };
+    }
+
+    /**
+     * {@link JOptionPane#showConfirmDialog(Component, Object, String, int, int)} over this client's frame, asked in its
+     * native battle window instead when that draws dialogs (see {@link #askNative}).
+     */
+    public int confirm(Object message, String title, int optionType, int messageType) {
+        Integer answer = askNative(message, title, optionType, null, null, false);
+        return (answer != null) ? answer
+              : JOptionPane.showConfirmDialog(frame, message, title, optionType, messageType);
+    }
+
+    /**
+     * {@link JOptionPane#showOptionDialog} over this client's frame, asked in its native battle window instead when
+     * that draws dialogs (see {@link #askNative}).
+     */
+    public int option(Object message, String title, int optionType, int messageType, @Nullable Icon icon,
+          Object[] options, Object initialValue) {
+        Integer answer = askNative(message, title, optionType, options, initialValue, false);
+        return (answer != null) ? answer
+              : JOptionPane.showOptionDialog(frame, message, title, optionType, messageType, icon, options,
+              initialValue);
+    }
+
+    /**
+     * {@link JOptionPane#showMessageDialog(Component, Object, String, int)} over this client's frame, shown in its
+     * native battle window instead when that draws dialogs (see {@link #askNative}).
+     */
+    public void message(Object message, String title, int messageType) {
+        if (askNative(message, title, JOptionPane.DEFAULT_OPTION, null, null, false) == null) {
+            JOptionPane.showMessageDialog(frame, message, title, messageType);
+        }
     }
 
     /**
@@ -2691,6 +3069,10 @@ public class ClientGUI extends AbstractClientGUI
      * @see java.awt.GraphicsEnvironment#isHeadless
      */
     public void doAlertDialog(String title, String message, int messageType) {
+        if (askNative("<html><pre>" + message + "</pre></html>", title, JOptionPane.DEFAULT_OPTION, null, null, true)
+              != null) {
+            return;
+        }
         JTextPane textArea = new JTextPane();
         Report.setupStylesheet(textArea);
         BASE64ToolKit toolKit = new BASE64ToolKit();
@@ -2732,6 +3114,10 @@ public class ClientGUI extends AbstractClientGUI
      * @return <code>true</code> if yes
      */
     public boolean doYesNoDialog(String title, String question) {
+        Integer answer = askYesNo(question, title, null);
+        if (answer != null) {
+            return answer == JOptionPane.YES_OPTION;
+        }
         ConfirmDialog confirm = new ConfirmDialog(frame, title, question);
         confirm.setVisible(true);
         return confirm.getAnswer();
@@ -3195,9 +3581,26 @@ public class ClientGUI extends AbstractClientGUI
      * distance, to-hit modifiers, and an elevation cross-section diagram.
      */
     private void showLOSSettingDialog() {
+        RulerDialog ruler = getCurrentBoardState().map(state -> rulers.get(state.getBoardId())).orElse(null);
         if (ruler != null) {
             ruler.setVisible(true);
             ruler.toFront();
+        }
+    }
+
+    /** Closes the board's ruler as its Close button does: the measurement and its line on the board end. */
+    public void closeRuler(int boardId) {
+        RulerDialog ruler = rulers.get(boardId);
+        if (ruler != null) {
+            ruler.close();
+        }
+    }
+
+    /** Shows the board's ruler with its elevation diagram for this measurement (the GPU view's LOS card asks it). */
+    public void showRulerDiagram(int boardId, Coords from, int fromHeight, Coords to, int toHeight) {
+        RulerDialog ruler = rulers.get(boardId);
+        if (ruler != null) {
+            ruler.showDiagram(from, fromHeight, to, toHeight);
         }
     }
 
@@ -3270,58 +3673,45 @@ public class ClientGUI extends AbstractClientGUI
 
         @Override
         public void gameBoardNew(GameBoardNewEvent e) {
-            Board newBoard = e.getNewBoard();
-            final int boardId = e.getBoardId();
-
-            if (newBoard != null) {
+            int boardId = e.getBoardId();
+            IBoardView oldView = boardViews.remove(boardId);
+            if (oldView != null) { oldView.dispose(); }
+            RulerDialog oldRuler = rulers.remove(boardId);
+            if (oldRuler != null) { oldRuler.dispose(); }
+            BoardClientState oldState = boardStates.remove(boardId);
+            if (oldState != null) { oldState.close(); }
+            var oldMinimap = miniMaps.remove(boardId);
+            if (oldMinimap != null) { oldMinimap.dispose(); }
+            if (e.getNewBoard() != null) {
                 try {
-                    if (boardViews.containsKey(boardId)) {
-                        boardViews.get(boardId).removeBoardViewListener(ClientGUI.this);
-                        boardViews.get(boardId).dispose();
-                    }
-                    if (miniMaps.containsKey(boardId)) {
-                        miniMaps.get(boardId).setVisible(false);
-                        miniMaps.get(boardId).dispose();
-                    }
-                    BoardView boardView = new BoardView(client.getGame(), controller, ClientGUI.this, boardId);
-                    MinimapDialog newMinimap = new MinimapDialog(frame);
-                    newMinimap.add(new MinimapPanel(newMinimap,
-                          client.getGame(),
-                          boardView,
-                          ClientGUI.this,
-                          null,
-                          boardId));
-                    boolean isInLounge = client.getGame().getPhase().isLounge();
-                    newMinimap.setVisible(!isInLounge
-                          && (boardViewsContainer.isClassicViewEnabled() || GpuBoardWindow.isActiveFor(ClientGUI.this))
+                    BoardClientState state = new BoardClientState(client.getGame(), controller, ClientGUI.this, boardId, tilesetManager);
+                    boardStates.put(boardId, state);
+                    state.setLocalPlayer(client.getLocalPlayer());
+                    state.addBoardViewListener(ClientGUI.this);
+                    if (curPanel instanceof BoardViewListener listener) { state.addBoardViewListener(listener); }
+                    state.addOverlay(new ChatterBoxOverlay(ClientGUI.this, state, controller, cb));
+                    state.addOverlay(new UnitOverviewOverlay(ClientGUI.this));
+                    state.addOverlay(new UnitOverviewOverlay(ClientGUI.this, true));
+                    state.addOverlay(new OffBoardTargetOverlay(ClientGUI.this));
+                    state.addOverlay(new KeyBindingsOverlay(state));
+                    state.addOverlay(new PlanetaryConditionsOverlay(state));
+                    state.addOverlay(new TurnDetailsOverlay(state));
+                    state.addOverlay(new BoardToastOverlay(state, ClientGUI.this));
+                    state.redrawAllEntities();
+                    state.refreshAttacks();
+                    if (boardViewsContainer.isClassicViewEnabled()) { createClassicBoardView(state); }
+                    MinimapDialog minimap = new MinimapDialog(frame);
+                    minimap.add(new MinimapPanel(minimap, client.getGame(), state, ClientGUI.this, null, boardId));
+                    minimap.setVisible(!client.getGame().getPhase().isLounge()
+                          && boardViewsContainer.isClassicViewEnabled() && !GpuBoardWindow.isActiveFor(ClientGUI.this)
                           && GUIP.getMinimapEnabled());
-                    miniMaps.put(boardId, newMinimap);
-                    boardViews.put(boardId, boardView);
-                    boardView.getPanel().setPreferredSize(clientGuiPanel.getSize());
-                    boardView.addBoardViewListener(ClientGUI.this);
-                    var cb2 = new ChatterBoxOverlay(ClientGUI.this, boardView, controller, cb);
-                    offBoardOverlay = new OffBoardTargetOverlay(ClientGUI.this);
-                    boardView.getPanel().addKeyListener(cb2);
-                    boardView.addOverlay(cb2);
-                    boardView.addOverlay(new UnitOverviewOverlay(ClientGUI.this));
-                    boardView.addOverlay(new UnitOverviewOverlay(ClientGUI.this, true));
-                    boardView.addOverlay(offBoardOverlay);
-                    boardView.addOverlay(new KeyBindingsOverlay(boardView));
-                    boardView.addOverlay(new PlanetaryConditionsOverlay(boardView));
-                    boardView.addOverlay(new TurnDetailsOverlay(boardView));
-                    toastOverlay = new BoardToastOverlay(boardView, ClientGUI.this);
-                    boardView.addOverlay(toastOverlay);
-                    boardView.setTooltipProvider(new TWBoardViewTooltip(client.getGame(), ClientGUI.this, boardView));
-                    boardViewsContainer.updateMapTabs();
-                    ruler = new RulerDialog(frame, boardView, client.getGame());
-                    boardView.addBoardViewListener(ClientGUI.this);
-                    if (CG_BOARD_VIEW.equals(mainNames.get(client.getGame().getPhase().toString()))) {
-                        showDefaultBoard(CG_BOARD_VIEW);
-                    }
-                } catch (IOException ex) {
-                    // this is likely fatal anyway
-                    throw new RuntimeException(ex);
-                }
+                    miniMaps.put(boardId, minimap);
+                    rulers.put(boardId, new RulerDialog(frame, state, client.getGame()));
+                } catch (IOException ex) { throw new IllegalStateException("Could not initialize board presentation", ex); }
+            }
+            boardViewsContainer.updateMapTabs();
+            if (CG_BOARD_VIEW.equals(mainNames.get(client.getGame().getPhase().toString()))) {
+                showDefaultBoard(CG_BOARD_VIEW);
             }
         }
 
@@ -3361,7 +3751,7 @@ public class ClientGUI extends AbstractClientGUI
 
         @Override
         public void gamePhaseChange(GamePhaseChangeEvent e) {
-            for (IBoardView bv : boardViews()) {
+            for (BoardClientState bv : boardStates()) {
                 // This is a really lame place for this, but I couldn't find a
                 // better one without making massive changes (which didn't seem
                 // worth it for one little feature).
@@ -3371,10 +3761,7 @@ public class ClientGUI extends AbstractClientGUI
                     // and the equals function of Player isn't powerful enough.
                     bv.setLocalPlayer(client.getLocalPlayer().getId());
                 }
-                if (bv instanceof BoardView boardView) {
-                    // Make sure the ChatterBox starts out deactivated.
-                    boardView.setChatterBoxActive(false);
-                }
+                bv.setChatterBoxActive(false);
             }
 
             // Swap to this phase's panel.
@@ -3469,7 +3856,7 @@ public class ClientGUI extends AbstractClientGUI
 
         @Override
         public void gameEnd(GameEndEvent e) {
-            getBoardView().clearMovementData();
+            getBoardState().clearMovementData();
             clearFieldOfFire();
             clearTemporarySprites();
             getLocalBots().values().forEach(AbstractClient::die);
@@ -3624,8 +4011,7 @@ public class ClientGUI extends AbstractClientGUI
                         paths[1] = null;
                         optionType = JOptionPane.YES_NO_OPTION;
                     }
-                    int choice = JOptionPane.showOptionDialog(frame,
-                          Messages.getFormattedString("CFRDomino.Message", entity.getDisplayName()),
+                    int choice = option(Messages.getFormattedString("CFRDomino.Message", entity.getDisplayName()),
                           Messages.getString("CFRDomino.Title"),
                           optionType,
                           JOptionPane.QUESTION_MESSAGE,
@@ -3659,19 +4045,32 @@ public class ClientGUI extends AbstractClientGUI
                     // Updated AMS selection code for dealing with Multi_AMS and standard selection
                     JList amsList = new JList(amsOptions.toArray());
                     JScrollPane amsScrollPane = new JScrollPane(amsList);
+                    int amsMaxCount;
                     if (entity.getGame().getOptions().booleanOption(OptionsConstants.ADVANCED_COMBAT_MULTI_USE_AMS)) {
-                        amsList.setSelectionModel(new AmsAssignGUI(amsList, amsOptions.size()));
+                        amsMaxCount = amsOptions.size();
                     } else if (Game.rulesManager.getRulesEquipment().getAMSMultiShot()) {
-                        amsList.setSelectionModel(new AmsAssignGUI(amsList, 2));
+                        amsMaxCount = 2;
                     } else {
-                        amsList.setSelectionModel(new AmsAssignGUI(amsList, 1));
+                        amsMaxCount = 1;
                     }
+                    amsList.setSelectionModel(new AmsAssignGUI(amsList, amsMaxCount));
 
-                    int amsResult = JOptionPane.showConfirmDialog(frame,
-                          amsScrollPane,
-                          Messages.getString("CFRAMSAssign.Message", entity.getDisplayName()),
-                          JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE
-                    );
+                    String amsTitle = Messages.getString("CFRAMSAssign.Message", entity.getDisplayName());
+                    DialogAnswer amsAnswer = askRows("", amsTitle,
+                          amsOptions.stream().map(option -> new DialogRow(option, "", null, true)).toList(), true,
+                          List.of(), amsMaxCount, optionButtons(JOptionPane.OK_CANCEL_OPTION), 1);
+                    int amsResult;
+                    if (amsAnswer != null) {
+                        // The list stays the source of the selection, capped by its selection model as in Swing
+                        amsList.setSelectedIndices(amsAnswer.selected().stream().mapToInt(Integer::intValue).toArray());
+                        amsResult = (amsAnswer.button() == 0) ? JOptionPane.OK_OPTION : JOptionPane.CANCEL_OPTION;
+                    } else {
+                        amsResult = JOptionPane.showConfirmDialog(frame,
+                              amsScrollPane,
+                              amsTitle,
+                              JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE
+                        );
+                    }
 
                     int[] selectedItems = amsList.getSelectedIndices();
                     if (amsResult == JOptionPane.OK_OPTION && !(selectedItems.length == 1
@@ -3716,11 +4115,9 @@ public class ClientGUI extends AbstractClientGUI
                         apdsOptions.add(waaMsg);
                     }
 
-                    result = JOptionPane.showInputDialog(frame,
-                          Messages.getString("CFRAPDSAssign.Message", entity.getDisplayName()),
+                    result = input(Messages.getString("CFRAPDSAssign.Message", entity.getDisplayName()),
                           Messages.getString("CFRAPDSAssign.Title", entity.getDisplayName()),
                           JOptionPane.QUESTION_MESSAGE,
-                          null,
                           apdsOptions.toArray(),
                           null);
                     // If they closed it, assume no action
@@ -3753,14 +4150,13 @@ public class ClientGUI extends AbstractClientGUI
                         return;
                     }
                     // If this is the client to handle the PBS, take care of it
-                    getBoardView().centerOn(attacker);
-                    getBoardView().highlight(attacker.getPosition());
-                    getBoardView().select(target.getPosition());
-                    getBoardView().cursor(target.getPosition());
+                    getBoardState().centerOn(attacker);
+                    getBoardState().highlight(attacker.getPosition());
+                    getBoardState().select(target.getPosition());
+                    getBoardState().cursor(target.getPosition());
 
                     // Ask whether the player wants to take a PBS or not
-                    int pbsChoice = JOptionPane.showConfirmDialog(frame,
-                          Messages.getString("ClientGUI.PointBlankShot.Message",
+                    int pbsChoice = confirm(Messages.getString("ClientGUI.PointBlankShot.Message",
                                 target.getShortName(),
                                 attacker.getShortName()),
                           Messages.getString("ClientGUI.PointBlankShot.Title"),
@@ -3781,7 +4177,7 @@ public class ClientGUI extends AbstractClientGUI
                         currentDisplay.beginMyTurn();
                         currentDisplay.selectEntity(gameCFREvent.getEntityId());
                         currentDisplay.target(target);
-                        getBoardView().select(target.getPosition());
+                        getBoardState().select(target.getPosition());
                     } else { // PBS declined
                         client.sendHiddenPBSCFRResponse(null);
                     }
@@ -3803,11 +4199,9 @@ public class ClientGUI extends AbstractClientGUI
                     }
                     logger.debug("CFR_TELEGUIDED_TARGET: showing dialog with {} targets", targetDescriptions.size());
                     // Set up the selection pane
-                    input = (String) JOptionPane.showInputDialog(frame,
-                          Messages.getString("TeleMissileTargetDialog.message"),
+                    input = (String) input(Messages.getString("TeleMissileTargetDialog.message"),
                           Messages.getString("TeleMissileTargetDialog.title"),
                           JOptionPane.QUESTION_MESSAGE,
-                          null,
                           targetDescriptions.toArray(),
                           targetDescriptions.getFirst());
                     if (input != null) {
@@ -3841,11 +4235,9 @@ public class ClientGUI extends AbstractClientGUI
                     }
                     logger.debug("CFR_TAG_TARGET: showing dialog with {} targets", TAGTargetDescriptions.size());
                     // Set up the selection pane
-                    input = (String) JOptionPane.showInputDialog(frame,
-                          Messages.getString("TAGTargetDialog.message"),
+                    input = (String) input(Messages.getString("TAGTargetDialog.message"),
                           Messages.getString("TAGTargetDialog.title"),
                           JOptionPane.QUESTION_MESSAGE,
-                          null,
                           TAGTargetDescriptions.toArray(),
                           TAGTargetDescriptions.getFirst());
                     if (input != null) {
@@ -3882,21 +4274,17 @@ public class ClientGUI extends AbstractClientGUI
 
     @Override
     public void setChatBoxActive(boolean active) {
-        getBoardView().setChatterBoxActive(active);
+        getCurrentBoardState().ifPresent(state -> state.setChatterBoxActive(active));
     }
 
     @Override
     public void clearChatBox() {
-        Optional<IBoardView> ibv = getCurrentBoardView();
-        if (ibv.isPresent() && ibv.get() instanceof BoardView bv) {
-            bv.setChatterBoxActive(false);
-        }
+        getCurrentBoardState().ifPresent(state -> state.setChatterBoxActive(false));
     }
 
     @Override
     public boolean isChatBoxActive() {
-        Optional<IBoardView> ibv = getCurrentBoardView();
-        return ibv.isPresent() && ibv.get() instanceof BoardView bv && bv.getChatterBoxActive();
+        return getCurrentBoardState().map(BoardClientState::getChatterBoxActive).orElse(false);
     }
 
     @Override
@@ -3941,10 +4329,7 @@ public class ClientGUI extends AbstractClientGUI
      * @param selectedEntityNum The selectedEntityNum to set.
      */
     public void setSelectedEntityNum(int selectedEntityNum) {
-        boardViews().stream()
-              .filter(bv -> bv instanceof BoardView)
-              .map(bv -> (BoardView) bv)
-              .forEach(bv -> bv.selectEntity(client.getGame().getEntity(selectedEntityNum)));
+        boardStates().forEach(state -> state.selectEntity(client.getGame().getEntity(selectedEntityNum)));
     }
 
     public RandomArmyDialog getRandomArmyDialog() {
@@ -3992,7 +4377,7 @@ public class ClientGUI extends AbstractClientGUI
         waitD.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
         // save!
         try {
-            ImageIO.write(boardViews.get(0).getEntireBoardImage(ignoreUnits, false),
+            ImageIO.write(getCurrentBoardState().orElseThrow().getEntireBoardImage(ignoreUnits),
                   CG_FILE_FORMAT_NAME_PNG,
                   curFileBoardImage);
         } catch (IOException e) {
@@ -4111,7 +4496,7 @@ public class ClientGUI extends AbstractClientGUI
     public boolean shouldIgnoreHotKeys() {
         return ignoreHotKeys
               || ((gameOptionsDialog != null) && gameOptionsDialog.isVisible())
-              || UIUtil.isModalDialogDisplayed()
+              || isModalDialogShown()
               || ((help != null) && help.isVisible())
               || ((commonSettingsDialog != null) && commonSettingsDialog.isVisible())
               || ((aw != null) && aw.isVisible());
@@ -4420,6 +4805,11 @@ public class ClientGUI extends AbstractClientGUI
         firingArcSpriteHandler.clearValues();
     }
 
+    /** @return the shown field of fire's hexes per range bracket ({@link FiringArcSpriteHandler#fieldOfFire()}) */
+    public List<Set<Coords>> fieldOfFire() {
+        return firingArcSpriteHandler.fieldOfFire();
+    }
+
     /**
      * Updates the Nova Networks menu enablement based on whether the local player has any Nova CEWS units in their
      * force.
@@ -4480,7 +4870,7 @@ public class ClientGUI extends AbstractClientGUI
      * @return True when the currently shown BoardView is in the process of showing some animation
      */
     public boolean isCurrentBoardViewShowingAnimation() {
-        return getCurrentBoardView().filter(IBoardView::isShowingAnimation).isPresent();
+        return getCurrentBoardState().filter(BoardClientState::isShowingAnimation).isPresent();
     }
 
     /**
@@ -4495,7 +4885,7 @@ public class ClientGUI extends AbstractClientGUI
     private void centerOn(@Nullable BoardLocation boardLocation, @Nullable Entity entity) {
         if (getClient().getGame().hasBoardLocation(boardLocation)) {
             showBoardView(boardLocation.boardId());
-            BoardView board = getBoardView(boardLocation);
+            BoardClientState board = getBoardState(boardLocation);
             if (entity == null) {
                 board.centerOnHex(boardLocation.coords());
             } else {
@@ -4538,17 +4928,35 @@ public class ClientGUI extends AbstractClientGUI
     }
 
     public void suspendBoardTooltips() {
-        onAllBoardViews(BoardView::suspendTooltip);
+        onAllBoardStates(BoardClientState::suspendTooltip);
         // hide any currently shown tooltip, but don't disable tooltips entirely:
         ToolTipManager.sharedInstance().setEnabled(false);
         ToolTipManager.sharedInstance().setEnabled(true);
     }
 
     public void activateBoardTooltips() {
-        onAllBoardViews(BoardView::activateTooltip);
+        onAllBoardStates(BoardClientState::activateTooltip);
     }
 
     public TilesetManager getTilesetManager() {
         return tilesetManager;
     }
+    public void onAllBoardStates(Consumer<BoardClientState> consumer) {
+        boardStates().forEach(consumer);
+    }
+
+    private void createClassicBoardView(BoardClientState state) {
+        if (boardViews.containsKey(state.getBoardId())) { return; }
+        try {
+            BoardView view = new BoardView(state, controller, this);
+            view.setTooltipProvider(new TWBoardViewTooltip(client.getGame(), this, state));
+            view.getPanel().setPreferredSize(clientGuiPanel.getSize());
+            view.getPanel().addKeyListener(new java.awt.event.KeyAdapter() {
+                @Override public void keyPressed(java.awt.event.KeyEvent event) { state.chatKey(event); }
+            });
+            boardViews.put(state.getBoardId(), view);
+            view.redrawAllEntities();
+        } catch (IOException exception) { throw new IllegalStateException("Could not open the classic board", exception); }
+    }
+
 }

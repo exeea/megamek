@@ -60,6 +60,7 @@ import megamek.client.ui.SharedUtility;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.common.actions.TriggerBPodAction;
+import megamek.common.annotations.Nullable;
 import megamek.common.board.Coords;
 import megamek.common.equipment.Mounted;
 import megamek.common.equipment.WeaponType;
@@ -67,7 +68,6 @@ import megamek.common.game.Game;
 import megamek.common.units.Entity;
 import megamek.common.units.Infantry;
 import megamek.common.units.Mek;
-import megamek.common.units.QuadMek;
 
 /**
  * A dialog displayed to the player when they have an opportunity to trigger an Anti-BA Pod on one of their units.
@@ -87,6 +87,13 @@ public class TriggerBPodDialog extends JDialog implements ActionListener {
     private final int entityId;
 
     private final ClientGUI clientGUI;
+
+    /** The question above the pods. */
+    private final String message;
+
+    /** The entity's Anti-BA Pods in weapon order, and the checkbox of each. */
+    private final List<TriggerPod> pods;
+    private final List<JCheckBox> boxes = new ArrayList<>();
 
     /**
      * A helper class to track when a Anti-BA Pod has been selected to be triggered.
@@ -131,9 +138,9 @@ public class TriggerBPodDialog extends JDialog implements ActionListener {
         super(clientGUI.getFrame(), Messages.getString("TriggerBPodDialog.title"), true);
         entityId = entity.getId();
         this.clientGUI = clientGUI;
+        message = Messages.getString("TriggerBPodDialog.selectPodsToTrigger", entity.getDisplayName());
 
-        JTextArea labMessage = new JTextArea(Messages.getString("TriggerBPodDialog.selectPodsToTrigger",
-              entity.getDisplayName()));
+        JTextArea labMessage = new JTextArea(message);
         labMessage.setEditable(false);
         labMessage.setOpaque(false);
 
@@ -141,56 +148,18 @@ public class TriggerBPodDialog extends JDialog implements ActionListener {
         JPanel panPods = new JPanel();
         panPods.setLayout(new GridLayout(0, 1));
 
-        // Walk through the entity's weapons equipment, looking for Anti-BA Pods.
-        for (Mounted<?> mount : entity.getWeaponList()) {
-
-            // Is this an Anti-BA Pod?
-            if (mount.getType().hasFlag(WeaponType.F_B_POD)) {
-                // Create a checkbox for the pod, and add it to the panel.
-                String message = entity.getLocationName(mount.getLocation())
-                      + ' ' + mount.getName();
-                JCheckBox pod = new JCheckBox(message);
-                panPods.add(pod);
-
-                // Can the entity fire the pod?
-                if (mount.canFire()) {
-                    // Only Leg's and CT BPods can be used against Leg attacks
-                    if (attackType.equals(Infantry.LEG_ATTACK)
-                          && (mount.getLocation() != Mek.LOC_CENTER_TORSO)
-                          && (mount.getLocation() != Mek.LOC_LEFT_LEG)
-                          && (mount.getLocation() != Mek.LOC_RIGHT_LEG)) {
-                        if (entity instanceof QuadMek) {
-                            if ((mount.getLocation() != Mek.LOC_LEFT_ARM)
-                                  || (mount.getLocation() != Mek.LOC_RIGHT_ARM)) {
-                                pod.setEnabled(false);
-                            }
-                        } else {
-                            pod.setEnabled(false);
-                        }
-                    } // Only Forward Mounted Arm and Side Torso B-Pod's can be
-                    // used against
-                    // Swarm attacks
-                    else if (attackType.equals(Infantry.SWARM_MEK)
-                          && (mount.isRearMounted()
-                          || (mount.getLocation() == Mek.LOC_CENTER_TORSO)
-                          || (mount.getLocation() == Mek.LOC_LEFT_LEG) || (mount
-                          .getLocation() == Mek.LOC_RIGHT_LEG))) {
-                        pod.setEnabled(false);
-                    } else {
-                        // Yup. Add a traker for this pod.
-                        TriggerPodTracker tracker = new TriggerPodTracker(pod,
-                              entity.getEquipmentNum(mount));
-                        trackers.add(tracker);
-
-                    }
-                } else {
-                    // Nope. Disable the checkbox.
-                    pod.setEnabled(false);
-                }
-
-            } // End found-Anti-BA-Pod
-
-        } // Look at the next piece of equipment.
+        // A checkbox for each of the entity's Anti-BA Pods; only the ones this attack lets fire get a tracker.
+        pods = podsOf(entity, attackType);
+        for (TriggerPod pod : pods) {
+            JCheckBox box = new JCheckBox(pod.label());
+            panPods.add(box);
+            boxes.add(box);
+            if (pod.triggerable()) {
+                trackers.add(new TriggerPodTracker(box, pod.podNum()));
+            } else {
+                box.setEnabled(false);
+            }
+        }
 
         // OK button.
         JButton butOkay = new JButton(Messages.getString("Okay"));
@@ -243,9 +212,51 @@ public class TriggerBPodDialog extends JDialog implements ActionListener {
                     / 2);
     }
 
+    /**
+     * The entity's Anti-BA Pods in weapon order: each with its location and name, and whether it can be triggered
+     * against this attack.
+     */
+    private static List<TriggerPod> podsOf(Entity entity, String attackType) {
+        List<TriggerPod> pods = new ArrayList<>();
+        for (Mounted<?> mount : entity.getWeaponList()) {
+            if (mount.getType().hasFlag(WeaponType.F_B_POD)) {
+                pods.add(new TriggerPod(entity.getLocationName(mount.getLocation()) + ' ' + mount.getName(),
+                      entity.getEquipmentNum(mount), mount.canFire() && answers(mount, attackType)));
+            }
+        }
+        return pods;
+    }
+
+    /**
+     * Whether the pod may be used against the attack. A quad Mek's other pods are refused against a leg attack too:
+     * the quad check this dialog had, (location != LEFT_ARM) || (location != RIGHT_ARM), holds for every location.
+     */
+    private static boolean answers(Mounted<?> mount, String attackType) {
+        int location = mount.getLocation();
+        boolean legOrCentreTorso = (location == Mek.LOC_CENTER_TORSO) || (location == Mek.LOC_LEFT_LEG)
+              || (location == Mek.LOC_RIGHT_LEG);
+        if (attackType.equals(Infantry.LEG_ATTACK)) {
+            // Only Leg's and CT BPods can be used against Leg attacks
+            return legOrCentreTorso;
+        }
+        // Only Forward Mounted Arm and Side Torso B-Pod's can be used against Swarm attacks
+        return !(attackType.equals(Infantry.SWARM_MEK) && (mount.isRearMounted() || legOrCentreTorso));
+    }
+
     @Override
     public void actionPerformed(ActionEvent e) {
         setVisible(false);
+    }
+
+    /**
+     * Showing the dialog asks in the client's native battle window instead when that draws dialogs
+     * ({@link TriggerPod#askNatively}); {@link #getActions()} then triggers the ticked pods as it does here.
+     */
+    @Override
+    public void setVisible(boolean visible) {
+        if (!visible || !TriggerPod.askNatively(clientGUI, getTitle(), message, pods, boxes)) {
+            super.setVisible(visible);
+        }
     }
 
     /**
@@ -264,9 +275,11 @@ public class TriggerBPodDialog extends JDialog implements ActionListener {
                 Entity targetEntity = clientGUI.getClient().getGame().getEntity(entityId);
 
                 if (targetEntity != null) {
-                    temp.addElement(new TriggerBPodAction(entityId,
-                          pod.getNum(),
-                          chooseTarget(targetEntity.getPosition()).getId()));
+                    // Cancel (null) triggers nothing, as in the other target prompts
+                    Entity target = chooseTarget(targetEntity.getPosition());
+                    if (target != null) {
+                        temp.addElement(new TriggerBPodAction(entityId, pod.getNum(), target.getId()));
+                    }
                 }
             }
         }
@@ -278,8 +291,10 @@ public class TriggerBPodDialog extends JDialog implements ActionListener {
      * Have the player select a target from the entities at the given coords.
      *
      * @param pos - the <code>Coords</code> containing targets.
+     *
+     * @return the chosen infantry, or null when there is none or the player cancelled the choice
      */
-    private Entity chooseTarget(Coords pos) {
+    private @Nullable Entity chooseTarget(Coords pos) {
         final Game game = clientGUI.getClient().getGame();
         // Assume that we have *no* choice.
         Entity choice = null;
@@ -304,10 +319,10 @@ public class TriggerBPodDialog extends JDialog implements ActionListener {
 
         // If we have multiple choices, display a selection dialog.
         else if (targets.size() > 1) {
-            String input = (String) JOptionPane.showInputDialog(clientGUI.getFrame(),
+            String input = (String) clientGUI.input(
                   Messages.getString("TriggerBPodDialog.ChooseTargetDialog.message", pos.getBoardNum()),
                   Messages.getString("TriggerBPodDialog.ChooseTargetDialog.title"),
-                  JOptionPane.QUESTION_MESSAGE, null, SharedUtility.getDisplayArray(targets), null);
+                  JOptionPane.QUESTION_MESSAGE, SharedUtility.getDisplayArray(targets), null);
             choice = (Infantry) SharedUtility.getTargetPicked(targets, input);
         } // End have-choices
 

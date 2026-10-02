@@ -16,17 +16,28 @@ import java.util.stream.Stream;
 import javax.swing.ImageIcon;
 
 import megamek.client.ui.clientGUI.boardview.BoardFieldOfView;
+import megamek.client.ui.clientGUI.boardview.BoardHexText;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.common.board.Coords;
 import megamek.common.units.EntityMovementType;
 
-/** A presentation snapshot. Only the Swing thread reads the game; the GPU thread owns rendering. */
+/**
+ * A presentation snapshot. Only the Swing thread reads the game; the GPU thread owns rendering. {@code rangeBands}
+ * holds the displayed weapon's range bracket per hex, as the firing-arc handler classifies it.
+ */
 record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Unit> units,
       List<Waypoint> plannedPath, int selectedId, String phase, List<Command> commands, Light light,
       List<FiringLine> firingLines, List<RangeBorder> rangeBorders, List<BoardMarker> markers, BoardTactical tactical,
-      List<RangeLabel> rangeLabels, BoardFieldOfView fieldOfView) {
+      List<RangeLabel> rangeLabels, BoardFieldOfView fieldOfView, Map<Coords, Integer> rangeBands) {
+
+    BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Unit> units,
+          List<Waypoint> plannedPath, int selectedId, String phase, List<Command> commands, Light light,
+          List<FiringLine> firingLines, List<RangeBorder> rangeBorders, List<BoardMarker> markers,
+          BoardTactical tactical, List<RangeLabel> rangeLabels, BoardFieldOfView fieldOfView) {
+        this(boardId, width, height, tiles, units, plannedPath, selectedId, phase, commands, light, firingLines,
+              rangeBorders, markers, tactical, rangeLabels, fieldOfView, Map.of());
+    }
 
     BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Unit> units,
           List<Waypoint> plannedPath, int selectedId, String phase, List<Command> commands, Light light,
@@ -82,6 +93,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         rangeBorders = List.copyOf(rangeBorders);
         rangeLabels = List.copyOf(rangeLabels);
         markers = List.copyOf(markers);
+        rangeBands = Map.copyOf(rangeBands);
     }
 
     /** Absolute endpoint levels and displayed attack modes, copied from the existing visible attack sprites. */
@@ -134,36 +146,45 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
 
     /** Authored model or scatter shape, placement in tile pixels, and height in elevation levels. */
     record Feature(String asset, float x, float y, float rotation, float scale, float height, float elevation,
-          FeatureKind kind) {
+          FeatureKind kind, int bridgeExits) {
+        Feature(String asset, float x, float y, float rotation, float scale, float height, float elevation,
+              FeatureKind kind) {
+            this(asset, x, y, rotation, scale, height, elevation, kind, 0);
+        }
+
         Feature(String asset, float x, float y, float rotation, float scale, float height, float elevation) {
             this(asset, x, y, rotation, scale, height, elevation, FeatureKind.PROP);
         }
     }
 
-    /** Water depth -1 means dry. Ground and decals are independent from solid feature geometry. */
+    /**
+     * Water depth -1 means dry. Ground and decals are independent from solid feature geometry. {@code foliage} is
+     * the tileset's flat top-view art for every feature mesh (woods, structures, bridges, limbs), which flat views
+     * draw instead of those meshes.
+     */
     record Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
           Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-          Pixels tactical, List<Feature> features, List<BoardView.HexText> text, BoardLiquid liquid, Pixels foliage) {
+          Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels foliage) {
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-              Pixels tactical, List<Feature> features, List<BoardView.HexText> text, BoardLiquid liquid) {
+              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid) {
             this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
                   tactical, features, text, liquid, null);
         }
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
-              Pixels tactical, List<Feature> features, List<BoardView.HexText> text) {
+              Pixels tactical, List<Feature> features, List<BoardHexText> text) {
             this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
                   tactical, features, text, waterDepth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE);
         }
 
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
-              Pixels normals, Pixels decals, Pixels tactical, List<Feature> features, List<BoardView.HexText> text) {
+              Pixels normals, Pixels decals, Pixels tactical, List<Feature> features, List<BoardHexText> text) {
             this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, null, tactical, features, text);
         }
 
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
-              Pixels decals, Pixels tactical, List<Feature> features, List<BoardView.HexText> text) {
+              Pixels decals, Pixels tactical, List<Feature> features, List<BoardHexText> text) {
             this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, null, decals, tactical, features, text);
         }
 
@@ -318,7 +339,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
 
     BoardScene withUnits(List<Unit> shown) {
         return new BoardScene(boardId, width, height, tiles, shown, plannedPath, selectedId, phase, commands, light,
-              firingLines, rangeBorders, markers, tactical, rangeLabels, fieldOfView);
+              firingLines, rangeBorders, markers, tactical, rangeLabels, fieldOfView, rangeBands);
     }
 
     /** Board artwork, terrain and authorized contacts advance with the queue; interactive tools stay live. */
@@ -336,7 +357,8 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               hideMovement ? List.of() : world.plannedPath, selectedId, phase, commands, light,
               hideMovement ? List.of() : world.firingLines, hideMovement ? List.of() : world.rangeBorders, shownMarkers,
               tactical.duringPlayback(settled == null ? BoardTactical.EMPTY : settled.tactical, hideMovement),
-              hideMovement ? List.of() : world.rangeLabels, hideMovement ? BoardFieldOfView.EMPTY : world.fieldOfView);
+              hideMovement ? List.of() : world.rangeLabels, hideMovement ? BoardFieldOfView.EMPTY : world.fieldOfView,
+              hideMovement ? Map.of() : world.rangeBands);
     }
 
     /** Excludes HUD commands and other live controls, which do not need a playback checkpoint. */
@@ -345,14 +367,23 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               && tiles.equals(other.tiles) && units.equals(other.units) && markers.equals(other.markers)
               && tactical.equals(other.tactical) && plannedPath.equals(other.plannedPath)
               && firingLines.equals(other.firingLines) && rangeBorders.equals(other.rangeBorders)
-              && rangeLabels.equals(other.rangeLabels) && fieldOfView.equals(other.fieldOfView);
+              && rangeLabels.equals(other.rangeLabels) && fieldOfView.equals(other.fieldOfView)
+              && rangeBands.equals(other.rangeBands);
     }
 
-    /** The action marshals back to Swing and rechecks the original button before invoking it. */
+    /**
+     * The action marshals back to Swing and rechecks the original button before invoking it. {@code shortcut} is the
+     * menu item's accelerator text ("" without one); {@code selected} is a toggle item's state, null for other items.
+     */
     public record Command(String id, String label, String detail, boolean enabled, boolean commit, boolean boardTool,
-          List<Command> children, Runnable action) {
+          List<Command> children, Runnable action, String shortcut, Boolean selected) {
         public Command {
             children = List.copyOf(children);
+        }
+
+        public Command(String id, String label, String detail, boolean enabled, boolean commit, boolean boardTool,
+              List<Command> children, Runnable action) {
+            this(id, label, detail, enabled, commit, boardTool, children, action, "", null);
         }
 
         public Command(String label, boolean enabled, Runnable action) {
@@ -368,14 +399,6 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
     public record Context(Coords coords, List<Command> commands) {
         public Context {
             commands = List.copyOf(commands);
-        }
-    }
-
-    /** Swing owns attack selection and calculations; the GL thread receives only their presentation. */
-    public record Attack(String targetName, String weaponDetails, String targetDetails, int selectedWeapon,
-          List<String> orders) {
-        public Attack {
-            orders = List.copyOf(orders);
         }
     }
 

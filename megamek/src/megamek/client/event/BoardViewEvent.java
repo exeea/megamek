@@ -37,13 +37,13 @@ import java.awt.event.InputEvent;
 import java.io.Serial;
 import java.util.EventObject;
 
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.units.Entity;
 
 /**
- * Instances of this class are sent as a result of changes in BoardView
+ * Shared board interactions emitted by either renderer.
  *
  * @see BoardViewListener
  */
@@ -78,28 +78,6 @@ public class BoardViewEvent extends EventObject {
     private int modifiers;
     private int entityId;
     private int mouseButton = 0;
-
-    public BoardViewEvent(BoardView source, Coords coords, int type, int modifiers) {
-        super(source);
-        this.coords = coords;
-        this.type = type;
-        this.modifiers = modifiers;
-    }
-
-    public BoardViewEvent(BoardView source, int type) {
-        this(source, type, Entity.NONE);
-    }
-
-    public BoardViewEvent(BoardView source, int type, int entityId) {
-        super(source);
-        this.type = type;
-        this.entityId = entityId;
-    }
-
-    public BoardViewEvent(BoardView source, Coords coords, int type, int modifiers, int mouseButton) {
-        this(source, coords, type, modifiers);
-        this.mouseButton = mouseButton;
-    }
 
     /**
      * Returns the type of event that this is
@@ -152,15 +130,13 @@ public class BoardViewEvent extends EventObject {
      * @return This event's location
      */
     public BoardLocation getBoardLocation() {
-        return BoardLocation.of(coords, getBoardView().getBoardId());
+        return BoardLocation.of(coords, getBoardState().getBoardId());
     }
 
-    public BoardView getBoardView() {
-        return (BoardView) getSource();
-    }
+
 
     public int getBoardId() {
-        return getBoardView().getBoardId();
+        return getBoardState().getBoardId();
     }
 
     public boolean isShiftHeld() {
@@ -173,5 +149,27 @@ public class BoardViewEvent extends EventObject {
 
     public boolean isCtrlHeld() {
         return (getModifiers() & InputEvent.CTRL_DOWN_MASK) != 0;
+    }
+
+    public BoardViewEvent(BoardClientState source, Coords coords, int type, int modifiers) {
+        super(source);
+        this.coords = coords;
+        this.type = type;
+        this.modifiers = modifiers;
+    }
+    public BoardViewEvent(BoardClientState source, int type) {
+        this(source, type, Entity.NONE);
+    }
+    public BoardViewEvent(BoardClientState source, int type, int entityId) {
+        super(source);
+        this.type = type;
+        this.entityId = entityId;
+    }
+    public BoardViewEvent(BoardClientState source, Coords coords, int type, int modifiers, int mouseButton) {
+        this(source, coords, type, modifiers);
+        this.mouseButton = mouseButton;
+    }
+    public BoardClientState getBoardState() {
+        return (BoardClientState) getSource();
     }
 }

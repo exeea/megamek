@@ -108,7 +108,6 @@ import megamek.common.options.IOption;
 import megamek.common.options.OptionsConstants;
 import megamek.common.planetaryConditions.Atmosphere;
 import megamek.common.planetaryConditions.PlanetaryConditions;
-import megamek.common.planetaryConditions.TaintedAtmosphereRules;
 import megamek.common.planetaryConditions.Wind;
 import megamek.common.rolls.PilotingRollData;
 import megamek.common.rolls.Roll;
@@ -8727,7 +8726,8 @@ public class TWGameManager extends AbstractGameManager {
     }
 
     /**
-     * Set the LocationsExposure of an entity
+     * Set the LocationsExposure of an entity: {@link WaterExposure} sets the statuses, and every location the water
+     * reaches gets its breach check here, in the order it names.
      *
      * @param entity    The <code>Entity</code> who's exposure is being set
      * @param hex       The <code>Hex</code> the entity is in
@@ -8736,87 +8736,10 @@ public class TWGameManager extends AbstractGameManager {
      */
     public Vector<Report> doSetLocationsExposure(Entity entity, Hex hex, boolean isJump, int elevation) {
         Vector<Report> vPhaseReport = new Vector<>();
-        PlanetaryConditions conditions = game.getPlanetaryConditions();
-        boolean aeroSpaceborne = (entity.getEntityType() & Entity.ETYPE_AERO) == 0 && entity.isSpaceborne();
-        if (hex == null) {
-            return vPhaseReport;
-        }
-        if ((hex.terrainLevel(Terrains.WATER) > 0) && !isJump && (elevation < 0)) {
-            int partialWaterLevel = 1;
-            if ((entity instanceof Mek) && entity.isSuperHeavy()) {
-                partialWaterLevel = 2;
-            }
-            if ((entity instanceof Mek) &&
-                  !entity.isProne() &&
-                  (hex.terrainLevel(Terrains.WATER) <= partialWaterLevel)) {
-                for (int loop = 0; loop < entity.locations(); loop++) {
-                    entity.setLocationStatus(loop, airExposureStatus(entity, loop, conditions, aeroSpaceborne));
-                }
-                entity.setLocationStatus(Mek.LOC_RIGHT_LEG, ILocationExposureStatus.WET);
-                entity.setLocationStatus(Mek.LOC_LEFT_LEG, ILocationExposureStatus.WET);
-                vPhaseReport.addAll(breachCheck(entity, Mek.LOC_RIGHT_LEG, hex));
-                vPhaseReport.addAll(breachCheck(entity, Mek.LOC_LEFT_LEG, hex));
-                if (entity instanceof QuadMek) {
-                    entity.setLocationStatus(Mek.LOC_RIGHT_ARM, ILocationExposureStatus.WET);
-                    entity.setLocationStatus(Mek.LOC_LEFT_ARM, ILocationExposureStatus.WET);
-                    vPhaseReport.addAll(breachCheck(entity, Mek.LOC_RIGHT_ARM, hex));
-                    vPhaseReport.addAll(breachCheck(entity, Mek.LOC_LEFT_ARM, hex));
-                }
-                if (entity instanceof TripodMek) {
-                    entity.setLocationStatus(Mek.LOC_CENTER_LEG, ILocationExposureStatus.WET);
-                    vPhaseReport.addAll(breachCheck(entity, Mek.LOC_CENTER_LEG, hex));
-                }
-            } else {
-                boolean isOutOfTheWater = entity.relHeight() >= 0;
-                for (int loop = 0; loop < entity.locations(); loop++) {
-                    // A breach does not heal by moving. Leaving it marked stops a later pass over the same water
-                    // resetting it to merely wet and announcing the same hole all over again.
-                    if (entity.getLocationStatus(loop) == ILocationExposureStatus.BREACHED) {
-                        continue;
-                    }
-                    int status = isOutOfTheWater ?
-                          airExposureStatus(entity, loop, conditions, aeroSpaceborne) :
-                          ILocationExposureStatus.WET;
-                    entity.setLocationStatus(loop, status);
-                    if (status == ILocationExposureStatus.WET) {
-                        vPhaseReport.addAll(breachCheck(entity, loop, hex));
-                    }
-                }
-            }
-        } else {
-            for (int loop = 0; loop < entity.locations(); loop++) {
-                // "Even if a unit exits the water, all limbs and equipment in the flooded location remain
-                // non-functional" (TW p.121), so climbing out does not close the hole either.
-                if (entity.getLocationStatus(loop) == ILocationExposureStatus.BREACHED) {
-                    continue;
-                }
-                entity.setLocationStatus(loop, airExposureStatus(entity, loop, conditions, aeroSpaceborne));
-            }
+        for (int location : WaterExposure.apply(entity, hex, isJump, elevation, game.getPlanetaryConditions())) {
+            vPhaseReport.addAll(breachCheck(entity, location, hex));
         }
         return vPhaseReport;
-    }
-
-    /**
-     * The exposure status one location takes from the air around it. A vacuum or trace atmosphere exposes every
-     * location (TO:AR p.52); a tainted or toxic atmosphere exposes only the locations whose breach the rules give an
-     * effect to, which {@link TaintedAtmosphereRules#isLocationExposedToTaint} decides (TO:AR p.54).
-     *
-     * @param entity         the unit whose location is being set
-     * @param location       the location being set
-     * @param conditions     the planetary conditions in force
-     * @param aeroSpaceborne whether this is a non-aerospace unit that is nonetheless in space
-     *
-     * @return the {@link ILocationExposureStatus} value for this location's exposure to the air
-     */
-    private int airExposureStatus(Entity entity, int location, PlanetaryConditions conditions,
-          boolean aeroSpaceborne) {
-        if (conditions.getAtmosphere().isLighterThan(Atmosphere.THIN) || aeroSpaceborne) {
-            return ILocationExposureStatus.VACUUM;
-        }
-        if (TaintedAtmosphereRules.isLocationExposedToTaint(entity, location, conditions.getAtmosphericTaint())) {
-            return ILocationExposureStatus.TAINTED;
-        }
-        return ILocationExposureStatus.NORMAL;
     }
 
     /**
@@ -12535,11 +12458,7 @@ public class TWGameManager extends AbstractGameManager {
             r.subject = ae.getId();
             r.add(toHit.getDesc());
             addReport(r);
-            if ((ae instanceof LandAirMek) && ae.isAirborneVTOLorWIGE()) {
-                game.addControlRoll(new PilotingRollData(ae.getId(), 0, "missed a kick"));
-            } else {
-                game.addPSR(new PilotingRollData(ae.getId(), 0, "missed a kick"));
-            }
+            addMissedKickRoll(ae);
             return;
         } else if (toHit.getValue() == TargetRoll.AUTOMATIC_SUCCESS) {
             r = new Report(4065);
@@ -12584,11 +12503,7 @@ public class TWGameManager extends AbstractGameManager {
             r = new Report(4035);
             r.subject = ae.getId();
             addReport(r);
-            if (ae instanceof LandAirMek && ae.isAirborneVTOLorWIGE()) {
-                game.addControlRoll(new PilotingRollData(ae.getId(), 0, "missed a kick"));
-            } else {
-                game.addPSR(new PilotingRollData(ae.getId(), 0, "missed a kick"));
-            }
+            addMissedKickRoll(ae);
 
             // If the target is in a building, the building absorbs the damage.
             if (targetInBuilding && (bldg != null)) {
@@ -12705,7 +12620,7 @@ public class TWGameManager extends AbstractGameManager {
             }
 
             if (te.canFall()) {
-                PilotingRollData kickPRD = getKickPushPSR(te, ae, te, "was kicked");
+                PilotingRollData kickPRD = PhysicalAttackPsr.kickOrPush(game, te, te, "was kicked");
                 game.addPSR(kickPRD);
             }
 
@@ -14688,17 +14603,17 @@ public class TWGameManager extends AbstractGameManager {
                 r.addDesc(ae);
                 addReport(r);
                 if (ae.canFall()) {
-                    PilotingRollData pushPRD = getKickPushPSR(ae, ae, te, "was pushed");
+                    PilotingRollData pushPRD = PhysicalAttackPsr.kickOrPush(game, ae, te, "was pushed");
                     game.addPSR(pushPRD);
-                } else if (ae instanceof LandAirMek && ae.isAirborneVTOLorWIGE()) {
-                    game.addControlRoll(getKickPushPSR(ae, ae, te, "was pushed"));
+                } else if (PhysicalAttackPsr.isControlRoll(ae)) {
+                    game.addControlRoll(PhysicalAttackPsr.kickOrPush(game, ae, te, "was pushed"));
                 }
 
                 if (te.canFall()) {
-                    PilotingRollData targetPushPRD = getKickPushPSR(te, ae, te, "was pushed");
+                    PilotingRollData targetPushPRD = PhysicalAttackPsr.kickOrPush(game, te, te, "was pushed");
                     game.addPSR(targetPushPRD);
-                } else if (ae instanceof LandAirMek && ae.isAirborneVTOLorWIGE()) {
-                    game.addControlRoll(getKickPushPSR(te, ae, te, "was pushed"));
+                } else if (PhysicalAttackPsr.isControlRoll(ae)) {
+                    game.addControlRoll(PhysicalAttackPsr.kickOrPush(game, te, te, "was pushed"));
                 }
                 return;
             }
@@ -14727,7 +14642,7 @@ public class TWGameManager extends AbstractGameManager {
         Coords src = te.getPosition();
         Coords dest = src.translated(direction);
 
-        PilotingRollData pushPRD = getKickPushPSR(te, ae, te, "was pushed");
+        PilotingRollData pushPRD = PhysicalAttackPsr.kickOrPush(game, te, te, "was pushed");
 
         if (Compute.isValidDisplacement(game, te.getId(), te.getPosition(), direction)) {
             r = new Report(4170);
@@ -14844,7 +14759,7 @@ public class TWGameManager extends AbstractGameManager {
 
         // we hit...
         if (te.canFall()) {
-            PilotingRollData pushPRD = getKickPushPSR(te, ae, te, "was tripped");
+            PilotingRollData pushPRD = PhysicalAttackPsr.kickOrPush(game, te, te, "was tripped");
             game.addPSR(pushPRD);
         }
 
@@ -17103,39 +17018,14 @@ public class TWGameManager extends AbstractGameManager {
         attacker.setDisplacementAttack(null);
     }
 
-    /**
-     * Get the Kick or Push PSR, modified by weight class
-     *
-     * @param psrEntity The <code>Entity</code> that should make a PSR
-     * @param attacker  The attacking <code>Entity></code>
-     * @param target    The target <code>Entity</code>
-     *
-     * @return The <code>PilotingRollData</code>
-     */
-    private PilotingRollData getKickPushPSR(Entity psrEntity, Entity attacker, Entity target, String reason) {
-        int mod = 0;
-        PilotingRollData psr = new PilotingRollData(psrEntity.getId(), mod, reason);
-        if (psrEntity.hasQuirk(OptionsConstants.QUIRK_POS_STABLE)) {
-            psr.addModifier(-1, "stable", false);
+    /** Adds the roll a unit makes for a missed kick: a control roll or a PSR, resolved later. */
+    private void addMissedKickRoll(Entity attacker) {
+        PilotingRollData roll = PhysicalAttackPsr.missedKick(attacker);
+        if (PhysicalAttackPsr.isControlRoll(attacker)) {
+            game.addControlRoll(roll);
+        } else {
+            game.addPSR(roll);
         }
-        if (game.getOptions().booleanOption(OptionsConstants.ADVANCED_GROUND_MOVEMENT_TAC_OPS_PHYSICAL_PSR)) {
-
-            mod = switch (target.getWeightClass()) {
-                case EntityWeightClass.WEIGHT_LIGHT -> 1;
-                case EntityWeightClass.WEIGHT_MEDIUM -> 0;
-                case EntityWeightClass.WEIGHT_HEAVY -> -1;
-                case EntityWeightClass.WEIGHT_ASSAULT -> -2;
-                default -> mod;
-            };
-            String reportStr;
-            if (mod > 0) {
-                reportStr = ("weight class modifier +") + mod;
-            } else {
-                reportStr = ("weight class modifier ") + mod;
-            }
-            psr.addModifier(mod, reportStr, false);
-        }
-        return psr;
     }
 
     void resolveWeather() {
@@ -20870,12 +20760,7 @@ public class TWGameManager extends AbstractGameManager {
                 }
                 int numEngineHits = en.getEngineHits();
                 boolean engineExploded = checkEngineExplosion(en, reports, numEngineHits);
-                int hitsToDestroy = 3;
-                if (en.isSuperHeavy() && en.hasEngine() && (en.getEngine().getEngineType() == Engine.COMPACT_ENGINE)) {
-                    hitsToDestroy = 2;
-                }
-
-                if (!engineExploded && (numEngineHits >= hitsToDestroy)) {
+                if (!engineExploded && (numEngineHits >= ((Mek) en).engineHitsToDestroy())) {
                     // third engine hit
                     reports.addAll(destroyEntity(en, "engine destruction"));
                     if (shouldAutoEjectOnDestruction()) {
@@ -23869,14 +23754,7 @@ public class TWGameManager extends AbstractGameManager {
 
             boolean breached = (lowFail) ? (breachRoll <= target) : (breachRoll >= target);
             // Breach by damage or lack of armor.
-            if ((breached) ||
-                  !(entity.getArmor(loc) > 0) ||
-                  (dumping &&
-                        (!(entity instanceof Mek) ||
-                              (loc == Mek.LOC_CENTER_TORSO) ||
-                              (loc == Mek.LOC_RIGHT_TORSO) ||
-                              (loc == Mek.LOC_LEFT_TORSO))) ||
-                  !(!(entity instanceof Mek) || entity.getArmor(loc, true) > 0)) {
+            if (breached || entity.breachesWithoutRoll(loc)) {
                 // Functional HarJel prevents breach as long as armor remains
                 // (and, presumably, as long as you don't open your chassis on
                 // purpose, say to dump ammo...).
@@ -24011,14 +23889,10 @@ public class TWGameManager extends AbstractGameManager {
             }
 
             // Did the hull breach destroy the engine?
-            int hitsToDestroy = 3;
-            if (mek.isSuperHeavy() && mek.hasEngine() && (mek.getEngine().getEngineType() == Engine.COMPACT_ENGINE)) {
-                hitsToDestroy = 2;
-            }
             if ((entity.getHitCriticalSlots(CriticalSlot.TYPE_SYSTEM, Mek.SYSTEM_ENGINE, Mek.LOC_LEFT_TORSO) +
                   entity.getHitCriticalSlots(CriticalSlot.TYPE_SYSTEM, Mek.SYSTEM_ENGINE, Mek.LOC_CENTER_TORSO) +
                   entity.getHitCriticalSlots(CriticalSlot.TYPE_SYSTEM, Mek.SYSTEM_ENGINE, Mek.LOC_RIGHT_TORSO)) >=
-                  hitsToDestroy) {
+                  mek.engineHitsToDestroy()) {
                 vDesc.addAll(destroyEntity(entity, "engine destruction"));
                 if (shouldAutoEjectOnDestruction()) {
                     vDesc.addAll(abandonEntity(entity));
@@ -26902,11 +26776,7 @@ public class TWGameManager extends AbstractGameManager {
             destructionReason = "crew death";
             survivable = false;
         } else if (entity instanceof Mek mek) {
-            // 3 engine hits destroy a Mek; superheavies with compact engines only take 2 (TW p.125, IO p.104)
-            int engineHitsToDestroy = (mek.isSuperHeavy()
-                  && mek.hasEngine()
-                  && (mek.getEngine().getEngineType() == Engine.COMPACT_ENGINE)) ? 2 : 3;
-            if (mek.getEngineHits() >= engineHitsToDestroy) {
+            if (mek.getEngineHits() >= mek.engineHitsToDestroy()) {
                 destructionReason = "engine destruction";
             }
         } else if ((entity instanceof Aero aero) && (aero.getSI() <= 0)) {

@@ -1,0 +1,382 @@
+/* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
+package megamek.client.ui.clientGUI.boardview.gpu;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
+
+import megamek.client.ui.clientGUI.boardview.UnitStatusWords;
+import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.tooltip.UnitToolTip;
+import megamek.client.ui.dialogs.unitDisplay.HeatEffects;
+import megamek.common.ECMInfo;
+import megamek.common.Player;
+import megamek.common.Report;
+import megamek.common.actions.AttackAction;
+import megamek.common.actions.EntityAction;
+import megamek.common.actions.SearchlightAttackAction;
+import megamek.common.actions.WeaponAttackAction;
+import megamek.common.board.Coords;
+import megamek.common.compute.Compute;
+import megamek.common.compute.ComputeECM;
+import megamek.common.enums.GamePhase;
+import megamek.common.equipment.IArmorState;
+import megamek.common.force.Force;
+import megamek.common.game.Game;
+import megamek.common.game.GameTurn;
+import megamek.common.options.OptionsConstants;
+import megamek.common.turns.SpecificEntityTurn;
+import megamek.common.units.Entity;
+import megamek.common.units.EntityMovementType;
+import megamek.common.units.Mek;
+import megamek.common.units.Targetable;
+
+/** EDT-owned HUD battle status, copied from the client's game on each capture and never authoritative. */
+final class GpuBattleStatus {
+    /** The server's initiative line "{name} rolls a {roll}." (TWGameManager.writeInitiativeReport). */
+    private static final int INITIATIVE_REPORT = 1015;
+    /** One roll of an {@code InitiativeRoll} text: "{total}[{roll}+{bonus}". */
+    private static final Pattern ROLL = Pattern.compile("(-?\\d+)\\[(-?\\d+)\\+(-?\\d+)");
+
+    /**
+     * Immutable status published with a frame; {@code round} is the round the player sees, 0 before the first combat
+     * round (GpuReportLog.displayRound), and {@code turns} is the game's turn list in order. {@code initiative}
+     * lists the sides of this round's initiative roll; {@code turnOrderHidden} is true under double blind, where the
+     * server does not report the turn order either.
+     */
+    record Snapshot(int round, GamePhase phase, boolean myTurn, int localPlayerId, int actorId, List<Slot> turns,
+          int turnIndex, List<UnitStatus> units, List<InitiativeSide> initiative, boolean turnOrderHidden) {
+        static final Snapshot EMPTY = new Snapshot(0, GamePhase.UNKNOWN, false, Player.PLAYER_NONE, Entity.NONE,
+              List.of(), -1, List.of(), List.of(), false);
+
+        Snapshot {
+            turns = List.copyOf(turns);
+            units = List.copyOf(units);
+            initiative = List.copyOf(initiative);
+        }
+    }
+
+    /**
+     * One side of the round's initiative roll as the server reported it: a player, or under team initiative a team of
+     * several players ({@code name} "Team 1", {@code rgb} 0). {@code total} = {@code roll} + {@code bonus} of the
+     * deciding roll (after a Tactical Genius reroll, the reroll); {@code tieBreaks} are the totals of the rolls that
+     * broke a tie. {@code dice} is the kept pair, empty when unknown, which it always is on a client: the server keeps
+     * the side rolls to itself. {@code playerIds} are the ids of the players the side stands for, in id order (a
+     * team's players who are not observers, as the report lists them), so a turn's {@code Slot.playerId} finds its
+     * side.
+     */
+    record InitiativeSide(String name, int rgb, Side side, int total, int roll, int bonus, List<Integer> dice,
+          List<Integer> tieBreaks, List<Integer> playerIds) {
+        InitiativeSide {
+            dice = List.copyOf(dice);
+            tieBreaks = List.copyOf(tieBreaks);
+            playerIds = List.copyOf(playerIds);
+        }
+    }
+
+    /**
+     * One activation; {@code entityId} is {@code Entity.NONE} unless the turn names a unit the local player may
+     * identify. A turn without a player (only {@code UnloadStrandedTurn}) has an empty name and colour 0.
+     */
+    record Slot(int playerId, String playerName, int rgb, Side side, int entityId) { }
+
+    enum Side { OWN, ALLY, ENEMY }
+
+    /**
+     * One listed unit as the classic client shows it. {@code name} is the client's unique short name, {@code chassis}
+     * and {@code model} its two parts. {@code canActNow}: the local player's current turn accepts it; {@code pending}:
+     * a remaining turn of the phase accepts it; {@code done}: it has acted this phase; {@code destroyed}: destroyed or
+     * doomed, as the tooltip says. {@code heatCapacity} is the tooltip's text, empty for units without heat, and
+     * {@code moved} is empty before the unit moves. {@code heatEffects} is the Mek heat table's text for its heat,
+     * empty when that level has no effect. {@code statusWords} are the words of its board label
+     * ({@code UnitStatusWords.statusWords}) and {@code statusTiles} the label's small tiles such as its elevation or
+     * "N" for narc pods ({@code UnitStatusWords.statusTiles}). {@code weightClassIndex} is its
+     * {@code Entity.getWeightClass()}, an {@code EntityWeightClass} category code and not an order by weight (the
+     * support vehicle and large craft codes lie above ASSAULT); {@code declaredAttacks} is the number of attack
+     * actions it has declared this phase, including in the physical phase a charge, death from above or ram declared
+     * while moving (see {@code declaredAttacks}); for the unit acting in the local player's firing turn it also counts
+     * the attacks queued but not yet sent, so it is a declaration only once the unit is {@code done}.
+     * {@code ownerId} is its owner's player id. A sensor contact carries only its id, side, position, board and blip
+     * icon: its text is empty, its numbers are zero, its facing is -1, its meters are {@code ARMOR_NA}, its owner is
+     * {@code Player.PLAYER_NONE} and it has no status words or tiles.
+     */
+    record UnitStatus(int id, Side side, boolean sensorContact, String name, String chassis, String model,
+          double tons, String weightClass, String formation, String pilot, int gunnery, int piloting, double armor,
+          double structure, int heat, int heatRgb, String heatCapacity, int walk, String run, int jump, String moved,
+          int mpUsed, int hexesMoved, int facing, int tmm, boolean canActNow, boolean pending, boolean done,
+          boolean destroyed, int damageLevel, List<String> destroyedLocations, String heatEffects, Coords position,
+          int boardId, BoardScene.Pixels icon, List<UnitStatusWords.StatusWord> statusWords, int weightClassIndex,
+          int declaredAttacks, int ownerId, List<UnitStatusWords.StatusWord> statusTiles) {
+        UnitStatus {
+            destroyedLocations = List.copyOf(destroyedLocations);
+            statusWords = List.copyOf(statusWords);
+            statusTiles = List.copyOf(statusTiles);
+        }
+    }
+
+    /** Total, roll and bonus of one roll in an {@code InitiativeRoll} text. */
+    private record Roll(int total, int roll, int bonus) { }
+
+    private Snapshot snapshot = Snapshot.EMPTY;
+
+    /**
+     * Lists the local player's units ({@code Game.getPlayerEntities}, as the classic unit overview) and every other
+     * {@code visible} unit; units that are not {@code identified} stay anonymous. {@code activeTurn} is the turn the
+     * client lets the local player act in now, or null. An unchanged capture returns the previous snapshot, so the
+     * render thread can compare by identity.
+     */
+    Snapshot capture(Game game, Player local, GameTurn activeTurn, int actorId, Predicate<Entity> visible,
+          Predicate<Entity> identified, Function<Entity, BoardScene.Pixels> icon) {
+        GpuBoardSource.requireSwingThread();
+        int localId = local == null ? Player.PLAYER_NONE : local.getId();
+        List<GameTurn> turns = game.getTurnsList();
+        int turnIndex = game.getTurnIndex();
+        // A report phase gives no unit a turn: the initiative report's list is the round's order, which the slots show.
+        List<GameTurn> remaining = game.getPhase().isReport() ? List.of()
+              : turns.subList(Math.clamp(turnIndex, 0, turns.size()), turns.size());
+        List<Slot> slots = new ArrayList<>();
+        for (GameTurn turn : turns) {
+            Player player = game.getPlayer(turn.playerId());
+            Entity named = turn instanceof SpecificEntityTurn specific ? game.getEntity(specific.getEntityNum()) : null;
+            slots.add(new Slot(turn.playerId(), player == null ? "" : player.getName(), rgb(player),
+                  side(local != null && turn.isValid(localId, game), player, local),
+                  named != null && identified.test(named) ? named.getId() : Entity.NONE));
+        }
+        List<Entity> listed = new ArrayList<>(local == null ? List.of() : game.getPlayerEntities(local, true));
+        game.getEntitiesVector().stream().filter(entity -> entity.getOwnerId() != localId && visible.test(entity))
+              .forEach(listed::add);
+        // The same ECM computation the board view makes for its unit labels (BoardView.updateEcmList)
+        List<ECMInfo> ecm = ComputeECM.computeAllEntitiesECMInfo(game.getEntitiesVector());
+        Map<Integer, Integer> attacks = declaredAttacks(game, local);
+        List<UnitStatus> units = new ArrayList<>();
+        for (Entity entity : listed) {
+            Side side = side(entity.getOwnerId() == localId, entity.getOwner(), local);
+            if (!identified.test(entity)) {
+                units.add(new UnitStatus(entity.getId(), side, true, "", "", "", 0, "", "", "", 0, 0,
+                      IArmorState.ARMOR_NA, IArmorState.ARMOR_NA, 0, 0, "", 0, "", 0, "", 0, 0, -1, 0, false, false,
+                      false, false, Entity.DMG_NONE, List.of(), "", entity.getPosition(), entity.getBoardId(),
+                      icon.apply(entity), List.of(), 0, 0, Player.PLAYER_NONE, List.of()));
+                continue;
+            }
+            // Turn types override either isValidEntity form. The form without the infantry/ProtoMek "move later"
+            // check keeps such units pending, because that option only delays their turn.
+            boolean pending = remaining.stream().anyMatch(turn -> turn.isValidEntity(entity, game)
+                  || turn.isValidEntity(entity, game, false));
+            List<UnitStatusWords.StatusWord> words = UnitStatusWords.statusWords(entity,
+                  ComputeECM.isAffectedByECM(entity, entity.getPosition(), entity.getPosition(), ecm));
+            List<UnitStatusWords.StatusWord> tiles = UnitStatusWords.statusTiles(entity, game.isOnSpaceMap(entity), local);
+            units.add(unit(game, entity, side, activeTurn != null && activeTurn.isValidEntity(entity, game), pending,
+                  icon.apply(entity), words, tiles, attacks.getOrDefault(entity.getId(), 0)));
+        }
+        Snapshot next = new Snapshot(GpuReportLog.displayRound(game.getRoundCount(), game.getReports(0)),
+              game.getPhase(), activeTurn != null, localId, actorId, slots, turnIndex, units, initiative(game, local),
+              game.getOptions().booleanOption(OptionsConstants.ADVANCED_DOUBLE_BLIND));
+        if (!next.equals(snapshot)) {
+            snapshot = next;
+        }
+        return snapshot;
+    }
+
+    /**
+     * EDT: the own units still to act in this phase, the {@code local} player's (null: none) that MegaMek has not
+     * marked done, counted as {@code Game.getMeksLeft} counts Meks. The movement plan's hold and the fire orders'
+     * resolve mode count them down.
+     */
+    static int unitsToAct(Game game, Player local) {
+        return local == null ? 0
+              : (int) game.getPlayerEntities(local, false).stream().filter(Entity::isSelectableThisTurn).count();
+    }
+
+    private static int rgb(Player player) {
+        return player == null ? 0 : player.getColour().getColour().getRGB();
+    }
+
+    /** Own; otherwise ally unless {@code Player.isEnemyOf} calls the owner an enemy. No owner counts as enemy. */
+    private static Side side(boolean own, Player owner, Player local) {
+        return own ? Side.OWN : owner == null || owner.isEnemyOf(local) ? Side.ENEMY : Side.ALLY;
+    }
+
+    /**
+     * The attack actions each unit has declared this phase, one per weapon, from the game's pending actions (the list
+     * BoardView.refreshAttacks draws its arrows from). Searchlight illumination is no attack and is not counted. In
+     * the physical phase the charges, death from above attacks and rams declared while moving count too, although the
+     * board draws no arrow for them: the game keeps them in lists of their own until they resolve at the end of that
+     * phase. As in BoardView.addAttack, a handheld weapon's attack counts for the unit carrying it, and an artillery
+     * attack aimed at a hex stays secret when its owner is the local player's enemy. During the local player's firing
+     * turn the pending actions also hold the attacks FiringDisplay has queued but not yet sent.
+     */
+    private static Map<Integer, Integer> declaredAttacks(Game game, Player local) {
+        Stream<EntityAction> actions = game.getActionsVector().stream();
+        if (game.getPhase().isPhysical()) {
+            actions = Stream.concat(actions, Stream.concat(game.getChargesVector().stream(),
+                  game.getRamsVector().stream()));
+        }
+        Map<Integer, Integer> counts = new HashMap<>();
+        actions.filter(action -> action instanceof AttackAction && !(action instanceof SearchlightAttackAction))
+              .map(AttackAction.class::cast)
+              .forEach(attack -> {
+                  Entity weapon = game.getEntity(attack.getEntityId());
+                  Entity attacker = weapon == null ? null : weapon.getAttackingEntity();
+                  boolean secret = attack instanceof WeaponAttackAction
+                        && attack.getTargetType() == Targetable.TYPE_HEX_ARTILLERY && !friendly(weapon, local);
+                  if (attacker != null && !secret) {
+                      counts.merge(attacker.getId(), 1, Integer::sum);
+                  }
+              });
+        return counts;
+    }
+
+    /**
+     * Whether {@code weapon}'s owner is not the local player's enemy, by the rule {@code side} uses
+     * ({@code Player.isEnemyOf}: two players without a team are enemies); false when either is unknown.
+     */
+    private static boolean friendly(Entity weapon, Player local) {
+        Player owner = weapon == null ? null : weapon.getOwner();
+        return owner != null && !owner.isEnemyOf(local);
+    }
+
+    /**
+     * The sides of this round's last initiative report. The server rolls team initiative on its own {@code Team}
+     * objects and sends only the players, whose own rolls just order the players inside a team, so its report lines
+     * are the client's one copy of the side rolls. A team of several players has a line of its own, followed by one
+     * line per member, which are skipped. A Tactical Genius reroll appends a second report, which replaces the first.
+     * Individual initiative writes other lines and gives no sides.
+     */
+    private static List<InitiativeSide> initiative(Game game, Player local) {
+        List<Report> reports = game.getReports(game.getRoundCount());
+        int end = reports.size();
+        while (end > 0 && reports.get(end - 1).messageId != INITIATIVE_REPORT) {
+            end--;
+        }
+        int start = end;
+        while (start > 0 && reports.get(start - 1).messageId == INITIATIVE_REPORT) {
+            start--;
+        }
+        List<String> teamNames = List.of(Player.TEAM_NAMES);
+        List<InitiativeSide> sides = new ArrayList<>();
+        int team = Player.TEAM_NONE;
+        for (Report report : reports.subList(start, end)) {
+            // The exact text the server wrote: a lone player's coloured name, a team's name or a member's name
+            String written = Objects.toString(report.data(0), "");
+            List<Roll> rolls = rolls(Objects.toString(report.data(1), ""));
+            Player player = game.getPlayersList().stream().filter(candidate ->
+                  written.equals(candidate.getColorForPlayer()) || written.equals(candidate.getName()))
+                  .findFirst().orElse(null);
+            if (rolls.isEmpty() || (team > Player.TEAM_NONE && player != null && player.getTeam() == team)) {
+                continue; // no roll, or a member's own line below its team's line
+            }
+            team = Math.max(Player.TEAM_NONE, teamNames.indexOf(written));
+            String name = team > Player.TEAM_NONE ? written
+                  : player != null ? player.getName() : GpuBoardActions.plainText(written);
+            boolean own;
+            List<Integer> playerIds;
+            if (team > Player.TEAM_NONE) {
+                // A team side stands for its players who are not observers, the ones the report lists below it; the
+                // first of them stands for the team's relation to the local player
+                int teamId = team;
+                List<Player> members = game.getPlayersList().stream()
+                      .filter(candidate -> candidate.getTeam() == teamId && !candidate.isObserver()).toList();
+                own = local != null && local.getTeam() == teamId;
+                player = members.isEmpty() ? null : members.getFirst();
+                playerIds = members.stream().map(Player::getId).sorted().toList();
+            } else {
+                own = local != null && local.equals(player);
+                playerIds = player == null ? List.of() : List.of(player.getId());
+            }
+            Roll deciding = rolls.getFirst();
+            sides.add(new InitiativeSide(name, team > Player.TEAM_NONE ? 0 : rgb(player), side(own, player, local),
+                  deciding.total(), deciding.roll(), deciding.bonus(), List.of(),
+                  rolls.subList(1, rolls.size()).stream().map(Roll::total).toList(), playerIds));
+        }
+        return sides;
+    }
+
+    /**
+     * The side that won the initiative: the best reported rolls in the order of {@code InitiativeRoll.compareTo} (the
+     * higher total, then the higher of each tie-break both sides rolled). Null when there are no sides or two sides
+     * share the best rolls.
+     */
+    static InitiativeSide winner(List<InitiativeSide> sides) {
+        InitiativeSide best = sides.stream().max(GpuBattleStatus::compareRolls).orElse(null);
+        return best == null || sides.stream().filter(side -> compareRolls(side, best) == 0).count() > 1 ? null : best;
+    }
+
+    /**
+     * The side that moves first (plan B5): the side that stands for the player of the round's first activation, which
+     * under team initiative is the player's team. Null while the turn order is hidden (double blind, plan D4) or
+     * empty, or when no side stands for that player.
+     */
+    static InitiativeSide movesFirst(Snapshot status) {
+        if (status.turnOrderHidden() || status.turns().isEmpty()) {
+            return null;
+        }
+        int player = status.turns().getFirst().playerId();
+        return status.initiative().stream().filter(side -> side.playerIds().contains(player)).findFirst()
+              .orElse(null);
+    }
+
+    private static int compareRolls(InitiativeSide first, InitiativeSide second) {
+        int compare = Integer.compare(first.total(), second.total());
+        for (int i = 0; compare == 0 && i < Math.min(first.tieBreaks().size(), second.tieBreaks().size()); i++) {
+            compare = Integer.compare(first.tieBreaks().get(i), second.tieBreaks().get(i));
+        }
+        return compare;
+    }
+
+    /** The rolls of an {@code InitiativeRoll} text in order; a Tactical Genius reroll replaces its original. */
+    private static List<Roll> rolls(String text) {
+        List<Roll> rolls = new ArrayList<>();
+        Matcher matcher = ROLL.matcher(text);
+        while (matcher.find()) {
+            Roll roll = new Roll(Integer.parseInt(matcher.group(1)), Integer.parseInt(matcher.group(2)),
+                  Integer.parseInt(matcher.group(3)));
+            if (!rolls.isEmpty() && text.startsWith("](", matcher.start() - 2)) {
+                rolls.set(rolls.size() - 1, roll);
+            } else {
+                rolls.add(roll);
+            }
+        }
+        return rolls;
+    }
+
+    /** The values the classic unit display and tooltip show; no rule is recomputed here. */
+    private static UnitStatus unit(Game game, Entity entity, Side side, boolean canActNow, boolean pending,
+          BoardScene.Pixels icon, List<UnitStatusWords.StatusWord> statusWords, List<UnitStatusWords.StatusWord> statusTiles,
+          int declaredAttacks) {
+        Force formation = game.getForces().getForce(entity);
+        boolean tracksHeat = entity.getHeatCapacity() != Entity.DOES_NOT_TRACK_HEAT;
+        String heatEffects = "";
+        if (entity instanceof Mek mek) {
+            boolean tacOpsHeat = game.getOptions().booleanOption(OptionsConstants.ADVANCED_COMBAT_TAC_OPS_HEAT);
+            heatEffects = HeatEffects.getHeatEffects(entity.heat, tacOpsHeat, mek.hasTSM(false));
+            // The heat table names every level without an effect with the text of heat 0
+            if (heatEffects.equals(HeatEffects.getHeatEffects(0, tacOpsHeat, mek.hasTSM(false)))) {
+                heatEffects = "";
+            }
+        }
+        List<String> destroyedLocations = IntStream.range(0, entity.locations()).filter(entity::isLocationBad)
+              .mapToObj(entity::getLocationAbbr).toList();
+        return new UnitStatus(entity.getId(), side, false, entity.getShortName(), entity.getChassis(),
+              entity.getModel(), entity.getWeight(), entity.getWeightClassName(),
+              formation == null ? "" : formation.getName(), entity.getCrew().getName(),
+              entity.getCrew().getGunnery(), entity.getCrew().getPiloting(), entity.getArmorRemainingPercent(),
+              entity.getInternalRemainingPercent(), entity.heat,
+              tracksHeat ? GUIPreferences.getInstance().getColorForHeat(entity.heat).getRGB() : 0,
+              tracksHeat ? UnitToolTip.getHeatCapacityForDisplay(entity).heatCapacityStr : "", entity.getWalkMP(),
+              entity.getRunMPasString(), entity.getJumpMPWithTerrain(),
+              entity.moved == EntityMovementType.MOVE_NONE ? "" : entity.getMovementString(entity.moved),
+              entity.mpUsed, entity.delta_distance, entity.getFacing(),
+              Compute.getTargetMovementModifier(game, entity.getId()).getValue(), canActNow, pending,
+              entity.isDone(), entity.isDoomed() || entity.isDestroyed(), entity.getDamageLevel(),
+              destroyedLocations, heatEffects, entity.getPosition(), entity.getBoardId(), icon, statusWords,
+              entity.getWeightClass(), declaredAttacks, entity.getOwnerId(), statusTiles);
+    }
+}

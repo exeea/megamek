@@ -32,6 +32,8 @@
  */
 package megamek.client.ui.entityreadout;
 
+import java.util.List;
+
 import megamek.client.ui.util.DiscordFormat;
 
 /**
@@ -62,5 +64,10 @@ class LabeledElement implements ViewElement {
     @Override
     public String toDiscord() {
         return label + ": " + DiscordFormat.BOLD + value.toDiscord() + DiscordFormat.RESET;
+    }
+
+    @Override
+    public void addRows(List<EntityReadout.Row> rows) {
+        rows.add(new EntityReadout.Row(EntityReadout.Row.Kind.LABELED, List.of(label, value.toPlainText())));
     }
 }

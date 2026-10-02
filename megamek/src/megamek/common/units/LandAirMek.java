@@ -794,7 +794,7 @@ public class LandAirMek extends BipedMek implements IAero, IBomber {
         }
 
         int avionicsHits = getAvionicsHits();
-        if (avionicsHits > 2) {
+        if (avionicsHits >= avionicsHitsToDestroy()) {
             roll.addModifier(5, "avionics destroyed");
         } else if (avionicsHits > 0) {
             roll.addModifier(avionicsHits, "avionics damage");
@@ -1401,6 +1401,14 @@ public class LandAirMek extends BipedMek implements IAero, IBomber {
             hits += getBadCriticalSlots(CriticalSlot.TYPE_SYSTEM, LAM_AVIONICS, loc);
         }
         return hits;
+    }
+
+    /**
+     * @return the number of avionics hits ({@link #getAvionicsHits()}) at which this LAM's avionics are destroyed in
+     *       fighter mode: 3. The control roll and the unit record's avionics hit box use it.
+     */
+    public int avionicsHitsToDestroy() {
+        return 3;
     }
 
     @Override

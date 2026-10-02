@@ -34,6 +34,7 @@
 package megamek.client.ui.entityreadout;
 
 import java.util.Collection;
+import java.util.List;
 
 import megamek.client.ui.util.ViewFormatting;
 import megamek.common.annotations.Nullable;
@@ -175,4 +176,23 @@ public interface EntityReadout {
      *       given output formatting.
      */
     String getReadout(String fontName, ViewFormatting formatting, Collection<ReadoutSections> sectionsToShow);
+
+    /**
+     * @return The readout with all sections as rows of plain text, for a view that lays it out itself.
+     */
+    List<Row> getRows();
+
+    /**
+     * One row of the readout: the unit's name ({@code TITLE}), a label and its value ({@code LABELED}), the column
+     * names of a table ({@code TABLE_HEADER}) or one of its rows ({@code TABLE_ROW}), a line of text ({@code TEXT}) or
+     * the blank line between two blocks ({@code SPACE}, no cells). Every cell is plain text.
+     */
+    record Row(Kind kind, List<String> cells) {
+        public Row {
+            cells = List.copyOf(cells);
+        }
+
+        /** What a row of the readout holds. */
+        public enum Kind { TITLE, LABELED, TABLE_HEADER, TABLE_ROW, TEXT, SPACE }
+    }
 }

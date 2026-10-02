@@ -67,7 +67,7 @@ class GpuDeploymentSmokeTest {
                             camera.fit(scene);
                             drawWorld(terrain, atmosphere, camera, scene);
                             terrain.render(camera.camera, true);
-                            tactical.render(camera.camera, 0);
+                            tactical.render(camera.camera, 0, !isometric);
                             GpuBoardTestUi.capture(new File(output, "deployment-depth-" + (isometric ? "isometric" : "top") + ".png"));
                         }
                         // Exercise the normal dimensions and a changed level/hex scale, using the same scene.

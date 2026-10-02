@@ -15,7 +15,7 @@ final class SquadronVisual {
     static GpuUnitModel assemble(GpuUnitModels library, JsonValue descriptor, UnitModelState.Structure structure) {
         var members = structure.bodyForm().fighters();
         var body = library.modular(descriptor.getString("body"));
-        if (body == null || body.triangles() * members.size() > UnitModelDescriptor.TRIANGLE_LIMIT) {
+        if (body == null || body.triangles() * members.size() > UnitModelDescriptor.MAX_TRIANGLES) {
             throw new IllegalArgumentException("Missing or over-budget squadron body");
         }
         Model assembled = new Model();

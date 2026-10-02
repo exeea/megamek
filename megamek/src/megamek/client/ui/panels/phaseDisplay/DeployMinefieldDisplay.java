@@ -48,7 +48,7 @@ import javax.swing.JOptionPane;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.IBoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.dialogs.phaseDisplay.EMPMineSettingDialog;
 import megamek.client.ui.dialogs.phaseDisplay.MineDensityDialog;
@@ -184,11 +184,11 @@ public class DeployMinefieldDisplay extends StatusBarPhaseDisplay {
     private boolean deployingEMPMinefields() {
         return currentCommand.equals(DeployMinefieldCommand.DEPLOY_MINE_EMP);
     }
-    
+
     private boolean deployingTripwires() {
         return currentCommand.equals(DeployMinefieldCommand.DEPLOY_TRIPWIRE);
     }
-    
+
     private boolean deployingPitfalls() {
         return currentCommand.equals(DeployMinefieldCommand.DEPLOY_PITFALL);
     }
@@ -273,7 +273,7 @@ public class DeployMinefieldDisplay extends StatusBarPhaseDisplay {
     private void endMyTurn() {
         stopTimer();
         disableButtons();
-        clientgui.onAllBoardViews(IBoardView::clearMarkedHexes);
+        clientgui.onAllBoardStates(BoardClientState::clearMarkedHexes);
     }
 
     /**
@@ -331,7 +331,7 @@ public class DeployMinefieldDisplay extends StatusBarPhaseDisplay {
                 if (mf.getPlayerId() == clientgui.getClient().getLocalPlayer().getId()) {
                     mfRemoved.add(mf);
                     deployedMinefields.removeElement(mf);
-                    
+
                     p.setMinefieldCount(mf.getType(), p.getMinefieldCount(mf.getType()) + 1);
                 }
             }
@@ -358,8 +358,8 @@ public class DeployMinefieldDisplay extends StatusBarPhaseDisplay {
                 String title = "Choose Cargo to Place";
                 String body = "Choose the cargo to place:";
                 toDeploy = runWithSuspendedTooltips(() ->
-                      (ICarryable) JOptionPane.showInputDialog(clientgui.getFrame(),
-                            body, title, JOptionPane.QUESTION_MESSAGE, null,
+                      (ICarryable) clientgui.input(
+                            body, title, JOptionPane.QUESTION_MESSAGE,
                             groundObjects.toArray(), groundObjects.getFirst()));
                 if (toDeploy == null) {
                     return;
@@ -501,7 +501,7 @@ public class DeployMinefieldDisplay extends StatusBarPhaseDisplay {
 	                        Messages.getString("DeployMinefieldDisplay.IllegalPlacement"));
 	                  return;
             	}
-            	
+
                 // Fixed density of 5 since tripwires are one-use
                 mf = Minefield.createMinefield(coords, p.getId(),
                       Minefield.TYPE_TRIPWIRE, 5, 5);
@@ -517,7 +517,7 @@ public class DeployMinefieldDisplay extends StatusBarPhaseDisplay {
 	                        Messages.getString("DeployMinefieldDisplay.IllegalPlacement"));
 	                  return;
             	}
-            	
+
                 // Fixed density of 5 since pitfalls are one-use
                 mf = Minefield.createMinefield(coords, p.getId(),
                       Minefield.TYPE_PITFALL, 5, 5);
@@ -529,13 +529,13 @@ public class DeployMinefieldDisplay extends StatusBarPhaseDisplay {
             }else {
                 return;
             }
-            
+
             if (mf != null) {
                 mf.setWeaponDelivered(false);
                 game.addMinefield(mf);
                 deployedMinefields.addElement(mf);
             }
-            clientgui.getBoardView().refreshDisplayables();
+            clientgui.getBoardState().refreshDisplayables();
         }
 
         setConventionalEnabled(p.getMinefieldCount(Minefield.TYPE_CONVENTIONAL));
@@ -612,7 +612,7 @@ public class DeployMinefieldDisplay extends StatusBarPhaseDisplay {
         }
 
         // check for a deployment
-        event.getBoardView().select(event.getCoords());
+        event.getBoardState().select(event.getCoords());
         deployMinefield(event);
     }
 
@@ -690,7 +690,7 @@ public class DeployMinefieldDisplay extends StatusBarPhaseDisplay {
                       undeployedFortifications);
             }
 
-            if (JOptionPane.showConfirmDialog(clientgui.getFrame(),
+            if (clientgui.confirm(
                   message,
                   Messages.getString("DeployMinefieldDisplay.undeployedTitle"),
                   JOptionPane.YES_NO_OPTION,
@@ -709,7 +709,7 @@ public class DeployMinefieldDisplay extends StatusBarPhaseDisplay {
     }
 
     /**
-     * Suspends BoardView hex tooltips for the duration of the given action so they cannot draw over a modal dialog, and
+     * Suspends BoardClientState hex tooltips for the duration of the given action so they cannot draw over a modal dialog, and
      * re-activates them when the action returns.
      */
     private void runWithSuspendedTooltips(Runnable action) {
@@ -722,7 +722,7 @@ public class DeployMinefieldDisplay extends StatusBarPhaseDisplay {
     }
 
     /**
-     * Suspends BoardView hex tooltips for the duration of the given action so they cannot draw over a modal dialog, and
+     * Suspends BoardClientState hex tooltips for the duration of the given action so they cannot draw over a modal dialog, and
      * re-activates them when the action returns.
      *
      * @return the value supplied by the action
@@ -771,13 +771,13 @@ public class DeployMinefieldDisplay extends StatusBarPhaseDisplay {
               "DeployMinefieldDisplay." + DeployMinefieldCommand.DEPLOY_MINE_EMP.getCmd(), nbr));
         buttons.get(DeployMinefieldCommand.DEPLOY_MINE_EMP).setEnabled(nbr > 0);
     }
-    
+
     private void setTripwireEnabled(int nbr) {
         buttons.get(DeployMinefieldCommand.DEPLOY_TRIPWIRE).setText(Messages.getString(
               "DeployMinefieldDisplay." + DeployMinefieldCommand.DEPLOY_TRIPWIRE.getCmd(), nbr));
         buttons.get(DeployMinefieldCommand.DEPLOY_TRIPWIRE).setEnabled(nbr > 0);
     }
-    
+
     private void setPitfallEnabled(int nbr) {
         buttons.get(DeployMinefieldCommand.DEPLOY_PITFALL).setText(Messages.getString(
               "DeployMinefieldDisplay." + DeployMinefieldCommand.DEPLOY_PITFALL.getCmd(), nbr));
@@ -803,6 +803,6 @@ public class DeployMinefieldDisplay extends StatusBarPhaseDisplay {
     @Override
     public void removeAllListeners() {
         clientgui.getClient().getGame().removeGameListener(this);
-        clientgui.onAllBoardViews(bv -> bv.removeBoardViewListener(this));
+        clientgui.onAllBoardStates(bv -> bv.removeBoardViewListener(this));
     }
 }

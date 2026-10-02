@@ -61,24 +61,24 @@ class GpuFieldOfViewSmokeTest {
                                 tick++;
                                 if (tick == 1) {
                                     boardCamera.setIsometric(false);
-                                    GpuBoardTestUi.click("tuning");
+                                    // The samples are board pixels: the HUD's panels would cover some of them.
+                                    ((GpuHud) field("ui")).stage.getRoot().setVisible(false);
                                     assertDefaults();
                                     // Compare FoV at one hour, independently of each window's sampled scenario time.
-                                    Slider time = GpuBoardTestUi.stage().getRoot().findActor("Time of day");
+                                    Slider time = GpuBoardTestUi.tuning(this, "Time of day");
                                     time.setValue(13);
-                                    GpuBoardTestUi.click("fov-style-" + style.name());
-                                    GpuBoardTestUi.click("fov-style-" + style.name());
+                                    GpuBoardTestUi.pressTuning(modeButton("fov", style));
+                                    GpuBoardTestUi.pressTuning(modeButton("fov", style));
                                     assertTrue(modeButton("sensor", GpuFieldOfView.SENSOR_STYLE).isChecked(),
                                           "FoV controls must leave the sensor style unchanged");
-                                    GpuBoardTestUi.click("sensor-style-" + sensorStyle.name());
-                                    GpuBoardTestUi.click("sensor-style-" + sensorStyle.name());
+                                    GpuBoardTestUi.pressTuning(modeButton("sensor", sensorStyle));
+                                    GpuBoardTestUi.pressTuning(modeButton("sensor", sensorStyle));
                                     for (GpuFieldOfView.Style mode : GpuFieldOfView.Style.values()) {
                                         assertEquals(mode == style, modeButton("fov", mode).isChecked(),
                                               "Exactly one FoV mode must remain selected, even when clicked twice");
                                         assertEquals(mode == sensorStyle, modeButton("sensor", mode).isChecked(),
                                               "Exactly one sensor mode must remain selected, independently of FoV");
                                     }
-                                    GpuBoardTestUi.click("tuning");
                                     probe = new GpuFieldOfView();
                                     probe.configure(style, GpuFieldOfView.FOV_DARKNESS, sensorStyle, GpuFieldOfView.SENSOR_DARKNESS);
                                     probe.update(mask);
@@ -108,8 +108,7 @@ class GpuFieldOfViewSmokeTest {
                                     capture("isometric");
                                     darknessSlider("FoV").setValue(50);
                                     darknessSlider("Sensor").setValue(50);
-                                    GpuBoardTestUi.click("tuning");
-                                    GpuBoardTestUi.click("tuning-defaults");
+                                    GpuBoardTestUi.pressTuning(GpuBoardTestUi.tuning(this, "tuning-defaults"));
                                 } else if (tick == 28) {
                                     assertDefaults();
                                     if (style == GpuFieldOfView.Style.GRAYSCALE) {
@@ -146,11 +145,17 @@ class GpuFieldOfViewSmokeTest {
                         }
 
                         private Slider darknessSlider(String effect) {
-                            return GpuBoardTestUi.stage().getRoot().findActor(effect + " darkness");
+                            return GpuBoardTestUi.tuning(this, effect + " darkness");
                         }
 
                         private TextButton modeButton(String effect, GpuFieldOfView.Style mode) {
-                            return GpuBoardTestUi.stage().getRoot().findActor(effect + "-style-" + mode.name());
+                            return GpuBoardTestUi.tuning(this, effect + "-style-" + mode.name());
+                        }
+
+                        private Object field(String name) throws ReflectiveOperationException {
+                            var field = GpuBattleView.class.getDeclaredField(name);
+                            field.setAccessible(true);
+                            return field.get(this);
                         }
 
                         private Appearance appearance(BoardScene scene) {
@@ -160,7 +165,6 @@ class GpuFieldOfViewSmokeTest {
                                 float visible = 0, blocked = 0;
                                 float visibleChroma = 0, blockedChroma = 0;
                                 int visibleCount = 0, blockedCount = 0;
-                                float scale = new GpuDisplayScale().read(fixture.source.uiPreferences.scale());
                                 for (BoardScene.Tile tile : scene.tiles()) {
                                     // Unit HUD annotations cover nearby hexes and deliberately keep their colors.
                                     if (tile.water() || !tile.features().isEmpty()
@@ -169,13 +173,8 @@ class GpuFieldOfViewSmokeTest {
                                     }
                                     Vector3 point = BoardGeometry.center(tile.coords(), tile.elevation())
                                           .add(BoardGeometry.WIDTH * 0.10f, BoardGeometry.HEIGHT * 0.08f, 0);
-                                    boardCamera.camera.project(point, 0, Math.round(GpuBoardUi.TURN_HEIGHT * scale),
-                                          boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight);
-                                    // The camera can retain a zoom that puts edge hexes behind the toolbar or turn panel.
-                                    float bottom = Math.round(GpuBoardUi.TURN_HEIGHT * scale);
-                                    if (point.y < bottom || point.y >= bottom + boardCamera.camera.viewportHeight) {
-                                        continue;
-                                    }
+                                    boardCamera.camera.project(point, 0, 0, boardCamera.camera.viewportWidth,
+                                          boardCamera.camera.viewportHeight);
                                     int x = Math.round(point.x * pixels.getWidth() / Gdx.graphics.getWidth());
                                     int y = Math.round(point.y * pixels.getHeight() / Gdx.graphics.getHeight());
                                     if (x < 0 || y < 0 || x >= pixels.getWidth() || y >= pixels.getHeight()) {

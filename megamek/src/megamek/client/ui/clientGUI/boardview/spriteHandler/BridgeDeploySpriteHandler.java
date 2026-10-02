@@ -33,7 +33,7 @@
 package megamek.client.ui.clientGUI.boardview.spriteHandler;
 
 import megamek.client.ui.clientGUI.AbstractClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.sprite.BridgeBuildSprite;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
@@ -74,7 +74,7 @@ public class BridgeDeploySpriteHandler extends BoardViewSpriteHandler {
      */
     public void updateBridgeDeploySprites() {
         clear();
-        if (clientGUI.boardViews().isEmpty()) {
+        if (clientGUI.boardStates().isEmpty()) {
             return;
         }
         for (Entity entity : game.getEntitiesVector()) {
@@ -88,7 +88,7 @@ public class BridgeDeploySpriteHandler extends BoardViewSpriteHandler {
                 continue;
             }
             BoardLocation location = BoardLocation.of(target, entity.getBoardId());
-            BoardView boardView = (BoardView) clientGUI.getBoardView(location);
+            BoardClientState boardView = clientGUI.getBoardState(location);
             if (boardView != null) {
                 // A one-turn deployment has no meaningful build ramp, so reuse the engineers' build sprite at full
                 // strength (a solid "1/1" bridge ghost), and ring it with a yellow/black hazard outline so the target

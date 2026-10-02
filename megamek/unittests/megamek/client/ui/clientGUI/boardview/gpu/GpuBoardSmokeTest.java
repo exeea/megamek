@@ -21,16 +21,14 @@ import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
-import com.badlogic.gdx.InputMultiplexer;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.scenes.scene2d.Stage;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListenerAdapter;
-import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.sprite.MovementEnvelopeSprite;
+import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.actions.WeaponAttackAction;
@@ -86,9 +84,11 @@ class GpuBoardSmokeTest {
                         previousFrame = now;
                         if (frames() == 90) {
                             topHash = capture("top.png");
-                            // Exercise Scene2D input, not just the camera setter. The click must not reach the board.
-                            click("iso");
-                            assertTrue(boardCamera.isIsometric());
+                            // Exercise the native key input, not just the camera setter. It must not reach the board.
+                            boardCamera.zoom(2);
+                            float zoomed = boardCamera.camera.zoom;
+                            GpuBoardTestUi.press(KeyCommandBind.CAMERA_FIT_BOARD);
+                            assertNotEquals(zoomed, boardCamera.camera.zoom, "Fit board fits the board again");
                             SwingUtilities.invokeAndWait(() -> { });
                             assertEquals(0, boardClicks.get());
                             boardCamera.fit(fixture.source.takeFrame().scene());
@@ -104,32 +104,12 @@ class GpuBoardSmokeTest {
                             boardCamera.reset(fixture.source.takeFrame().scene());
                         } else if (frames() == 98) {
                             // The tuning panel drives the shared terrain and unit dimensions.
-                            click("tuning");
+                            click("tuning-button");
                         } else if (frames() == 102) {
                             capture("tuning-panel.png");
-                            click("tuning");
-                        } else if (frames() == 105) {
-                            click("all-actions");
-                            for (char character : "zzz".toCharArray()) {
-                                Gdx.input.getInputProcessor().keyTyped(character);
-                            }
-                        } else if (frames() == 108) {
-                            Stage stage = (Stage) ((InputMultiplexer) Gdx.input.getInputProcessor()).getProcessors().first();
-                            assertEquals(null, stage.getRoot().findActor("Hold position"));
-                            for (int i = 0; i < 3; i++) {
-                                Gdx.input.getInputProcessor().keyTyped('\b');
-                            }
-                        } else if (frames() == 110) {
-                            // Invoke the actual Swing button through its Scene2D counterpart.
-                            capture("context-actions.png");
-                            Gdx.input.getInputProcessor().keyDown(Input.Keys.DOWN);
-                            Gdx.input.getInputProcessor().keyUp(Input.Keys.DOWN);
-                            Gdx.input.getInputProcessor().keyDown(Input.Keys.ENTER);
-                            Gdx.input.getInputProcessor().keyUp(Input.Keys.ENTER);
-                            SwingUtilities.invokeAndWait(() -> { });
-                            assertEquals(1, fixture.clicks.get());
-                            assertEquals(0, boardClicks.get());
-                            Gdx.input.getInputProcessor().keyDown(Input.Keys.ESCAPE);
+                            click("tuning-button");
+                            // The board gestures below aim at fixed window points; the HUD's panels would take them.
+                            hud().stage.getRoot().setVisible(false);
                         } else if (frames() == 120) {
                             Vector<UnitLocation> path = new Vector<>();
                             path.add(new UnitLocation(1, new Coords(5, 5), 0, 0, 0));
@@ -151,7 +131,7 @@ class GpuBoardSmokeTest {
                             Gdx.input.getInputProcessor().keyUp(Input.Keys.SPACE);
                             assertFalse(isMoving());
                             assertEquals(new Coords(7, 5), fixture.entity.getPosition());
-                            assertEquals(1, fixture.clicks.get(), "Skipping animation must not issue orders");
+                            assertEquals(0, fixture.clicks.get(), "Skipping animation must not issue orders");
                         } else if (frames() == 160) {
                             assertNotEquals(topHash, capture("isometric.png"));
                             assertNotEquals(movingHash, capture("movement-finished.png"));
@@ -164,10 +144,8 @@ class GpuBoardSmokeTest {
                             assertEquals(new Coords(4, 4), fixture.source.takeFrame().context().coords());
                             assertEquals(0, boardClicks.get(), "Opening a context must not edit orders");
                             capture("target-context.png");
-                            click("board.useHex");
-                            SwingUtilities.invokeAndWait(() -> { });
-                            assertEquals(2, boardClicks.get());
                             Gdx.input.getInputProcessor().keyDown(Input.Keys.ESCAPE);
+                            Gdx.input.getInputProcessor().keyUp(Input.Keys.ESCAPE);
                             SwingUtilities.invokeAndWait(() -> {
                                 fixture.view.markDeploymentHexesFor(fixture.entity);
                                 fixture.view.addSprites(List.of(new MovementEnvelopeSprite(fixture.view, Color.MAGENTA,
@@ -182,7 +160,7 @@ class GpuBoardSmokeTest {
                             cameraDrag(true, 120, 40);
                             assertFalse(direction.epsilonEquals(boardCamera.camera.direction, 0.001f));
                             assertTrue(focus.epsilonEquals(boardCamera.focus, 0.001f));
-                            assertEquals(2, boardClicks.get(), "Orbit gestures must not issue game commands");
+                            assertEquals(0, boardClicks.get(), "Orbit gestures must not issue game commands");
                         } else if (frames() == 216) {
                             capture("orbit.png");
                             orbitTarget = fixture.source.takeFrame().scene().tiles().stream()
@@ -192,20 +170,23 @@ class GpuBoardSmokeTest {
                             SwingUtilities.invokeAndWait(() -> { });
                             assertTrue(fixture.source.takeFrame().context() != null, "Orbit click must open a context menu");
                             assertEquals(orbitTarget, fixture.source.takeFrame().context().coords());
-                            assertEquals(2, boardClicks.get(), "Inspection after orbit must not issue orders");
+                            assertEquals(0, boardClicks.get(), "Inspection after orbit must not issue orders");
                             capture("orbit-context.png");
                             Gdx.input.getInputProcessor().keyDown(Input.Keys.ESCAPE);
-                            click("camera");
+                            Gdx.input.getInputProcessor().keyUp(Input.Keys.ESCAPE);
                         } else if (frames() == 230) {
+                            // The held turn and tilt keys move the camera while a frame plays; Home resets it.
                             Vector3 direction = new Vector3(boardCamera.camera.direction);
-                            GpuBoardTestUi.clickText(Messages.getString("GpuBoard.rotateLeft"));
-                            GpuBoardTestUi.clickText(Messages.getString("GpuBoard.tiltUp"));
+                            Gdx.input.getInputProcessor().keyDown(Input.Keys.Q);
+                            Gdx.input.getInputProcessor().keyDown(Input.Keys.PAGE_UP);
+                            super.render();
+                            Gdx.input.getInputProcessor().keyUp(Input.Keys.Q);
+                            Gdx.input.getInputProcessor().keyUp(Input.Keys.PAGE_UP);
                             assertFalse(direction.epsilonEquals(boardCamera.camera.direction, 0.001f));
-                            GpuBoardTestUi.clickText(Messages.getString("GpuBoard.resetCamera"));
+                            GpuBoardTestUi.press(KeyCommandBind.CAMERA_RESET);
                             assertTrue(boardCamera.isIsometric());
                         } else if (frames() == 234) {
-                            capture("camera-menu.png");
-                            Gdx.input.getInputProcessor().keyDown(Input.Keys.ESCAPE);
+                            capture("camera-keys.png");
                             Vector3 focus = new Vector3(boardCamera.focus);
                             cameraDrag(false, 80, 30);
                             assertFalse(focus.epsilonEquals(boardCamera.focus, 0.001f));
@@ -223,7 +204,7 @@ class GpuBoardSmokeTest {
                             Gdx.input.getInputProcessor().touchDragged(600, 350, 0);
                             Gdx.input.getInputProcessor().touchUp(600, 350, 0, Input.Buttons.RIGHT);
                             assertTrue(focus.epsilonEquals(boardCamera.focus, 0.001f), "Focus loss must cancel dragging");
-                            assertEquals(2, boardClicks.get());
+                            assertEquals(0, boardClicks.get());
                             Input original = Gdx.input;
                             Input mouse = spy(original);
                             doReturn(500).when(mouse).getX();
@@ -280,8 +261,8 @@ class GpuBoardSmokeTest {
                     Vector3 point = screenPosition(coords);
                     int x = (int) point.x;
                     int y = (int) point.y;
-                    Gdx.input.getInputProcessor().touchDown(x, y, 0, Input.Buttons.LEFT);
-                    Gdx.input.getInputProcessor().touchUp(x, y, 0, Input.Buttons.LEFT);
+                    Gdx.input.getInputProcessor().touchDown(x, y, 0, Input.Buttons.RIGHT);
+                    Gdx.input.getInputProcessor().touchUp(x, y, 0, Input.Buttons.RIGHT);
                     SwingUtilities.invokeAndWait(() -> { });
                 }
 
@@ -305,6 +286,12 @@ class GpuBoardSmokeTest {
 
                 private void click(String name) {
                     GpuBoardTestUi.click(name);
+                }
+
+                private GpuHud hud() throws ReflectiveOperationException {
+                    var field = GpuBattleView.class.getDeclaredField("ui");
+                    field.setAccessible(true);
+                    return (GpuHud) field.get(this);
                 }
 
             }, GpuBoardWindow.configuration(false));

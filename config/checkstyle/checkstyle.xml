@@ -50,5 +50,11 @@
             <property name="message" value="Forbidden word found" />
             <property name="severity" value="error" />
         </module>
+
+        <!-- The native UI toolkit's imports (import-control.xml); other packages are not checked. -->
+        <module name="ImportControl">
+            <property name="file" value="${config_loc}/import-control.xml" />
+            <property name="path" value="megamek.client.ui.gdx." />
+        </module>
     </module>
 </module>

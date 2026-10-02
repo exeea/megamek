@@ -7,6 +7,8 @@ import static org.mockito.Mockito.when;
 
 import java.awt.event.InputEvent;
 import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
@@ -18,8 +20,11 @@ import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.Stage;
+import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
+import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
+import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import megamek.client.ui.util.KeyCommandBind;
 
 /** Shared native UI input and artwork assertions; all calls run on the GL thread. */
@@ -31,19 +36,28 @@ final class GpuBoardTestUi {
     }
 
     static void press(KeyCommandBind bind) {
-        Input original = Gdx.input;
-        Input keyboard = mock(Input.class);
-        when(keyboard.getInputProcessor()).thenReturn(original.getInputProcessor());
-        when(keyboard.isKeyPressed(Input.Keys.CONTROL_LEFT)).thenReturn((bind.modifiers & InputEvent.CTRL_DOWN_MASK) != 0);
-        when(keyboard.isKeyPressed(Input.Keys.SHIFT_LEFT)).thenReturn((bind.modifiers & InputEvent.SHIFT_DOWN_MASK) != 0);
-        when(keyboard.isKeyPressed(Input.Keys.ALT_LEFT)).thenReturn((bind.modifiers & InputEvent.ALT_DOWN_MASK) != 0);
-        when(keyboard.isKeyPressed(Input.Keys.SYM)).thenReturn((bind.modifiers & InputEvent.META_DOWN_MASK) != 0);
         int key = java.util.stream.IntStream.rangeClosed(1, Input.Keys.MAX_KEYCODE)
               .filter(candidate -> GpuBattleView.awtKey(candidate) == bind.key).findFirst().orElseThrow();
+        withModifiers(bind.modifiers, () -> {
+            Gdx.input.getInputProcessor().keyDown(key);
+            Gdx.input.getInputProcessor().keyUp(key);
+        });
+    }
+
+    /** Runs {@code action} while the input reports the modifier keys of {@code modifiers} (InputEvent masks) held. */
+    static void withModifiers(int modifiers, Runnable action) {
+        Input original = Gdx.input;
+        // Read first: the input may be a test's mock, which must not be called while another stub is being made.
+        com.badlogic.gdx.InputProcessor processor = original.getInputProcessor();
+        Input keyboard = mock(Input.class);
+        when(keyboard.getInputProcessor()).thenReturn(processor);
+        when(keyboard.isKeyPressed(Input.Keys.CONTROL_LEFT)).thenReturn((modifiers & InputEvent.CTRL_DOWN_MASK) != 0);
+        when(keyboard.isKeyPressed(Input.Keys.SHIFT_LEFT)).thenReturn((modifiers & InputEvent.SHIFT_DOWN_MASK) != 0);
+        when(keyboard.isKeyPressed(Input.Keys.ALT_LEFT)).thenReturn((modifiers & InputEvent.ALT_DOWN_MASK) != 0);
+        when(keyboard.isKeyPressed(Input.Keys.SYM)).thenReturn((modifiers & InputEvent.META_DOWN_MASK) != 0);
         Gdx.input = keyboard;
         try {
-            original.getInputProcessor().keyDown(key);
-            original.getInputProcessor().keyUp(key);
+            action.run();
         } finally {
             Gdx.input = original;
         }
@@ -64,6 +78,30 @@ final class GpuBoardTestUi {
 
     static void click(String name) {
         clickActor(stage().getRoot().findActor(name));
+    }
+
+    /** Whether the actor is on a stage and shown: it and every group above it are visible. */
+    static boolean shown(Actor actor) {
+        for (Actor each = actor; each != null; each = each.getParent()) {
+            if (!each.isVisible()) {
+                return false;
+            }
+        }
+        return actor != null && actor.getStage() != null;
+    }
+
+    /** The texts of the visible, non-empty labels at or below {@code actor}, depth first; none for null. */
+    static List<String> texts(Actor actor) {
+        List<String> texts = new ArrayList<>();
+        if (actor != null && actor.isVisible()) {
+            if (actor instanceof Label label && label.getText().length() > 0) {
+                texts.add(label.getText().toString());
+            }
+            if (actor instanceof Group group) {
+                group.getChildren().forEach(child -> texts.addAll(texts(child)));
+            }
+        }
+        return texts;
     }
 
     static void clickText(String label) {
@@ -88,12 +126,7 @@ final class GpuBoardTestUi {
 
     private static void clickActor(Actor actor) {
         assertTrue(actor != null, "Missing UI action");
-        // Switch tuning tabs through pointer input before scrolling a control into view.
-        for (Actor parent = actor.getParent(); parent != null; parent = parent.getParent()) {
-            if (!parent.isVisible() && "tuning-scroll".equals(parent.getName())) { click("tuning-tab-atmosphere"); }
-            if (!parent.isVisible() && "tuning-general-scroll".equals(parent.getName())) { click("tuning-tab-general"); }
-        }
-        // Controls can move below the fold as the tuning panel grows. Scroll them into view before real input.
+        // Controls can move below the fold of a scrolling panel. Scroll them into view before real input.
         for (Actor parent = actor.getParent(); parent != null; parent = parent.getParent()) {
             if (parent instanceof ScrollPane scroll) {
                 Vector2 position = actor.localToAscendantCoordinates(scroll.getWidget(), new Vector2());
@@ -128,6 +161,49 @@ final class GpuBoardTestUi {
             return hash;
         } finally {
             image.dispose();
+        }
+    }
+
+    /** The board view's tuning model, which the HUD's tuning panel edits. */
+    static GpuBoardTuning tuning(GpuBattleView view) {
+        try {
+            var field = GpuBattleView.class.getDeclaredField("tuning");
+            field.setAccessible(true);
+            return (GpuBoardTuning) field.get(view);
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException(error);
+        }
+    }
+
+    /**
+     * The control named {@code name} of the board view's tuning model, such as "Time of day" or "tuning-defaults".
+     * Setting it applies the value, as the HUD's tuning panel does through the same control.
+     */
+    static <T extends Actor> T tuning(GpuBattleView view, String name) {
+        return tuning(tuning(view), name);
+    }
+
+    /** The control named {@code name} on either page of a tuning model, or its Defaults button. */
+    @SuppressWarnings("unchecked")
+    static <T extends Actor> T tuning(GpuBoardTuning tuning, String name) {
+        Actor control = name.equals(tuning.defaults().getName()) ? tuning.defaults()
+              : tuning.boardRows().findActor(name);
+        control = control != null ? control : tuning.atmosphereRows().findActor(name);
+        assertTrue(control != null, "Missing tuning control " + name);
+        return (T) control;
+    }
+
+    /**
+     * Presses a button of the tuning model, as the tuning panel does: a checkbox switches, a mode of a group is chosen,
+     * any other button acts.
+     */
+    static void pressTuning(TextButton button) {
+        if (button instanceof CheckBox box) {
+            box.toggle();
+        } else if (button.getButtonGroup() != null) {
+            button.setChecked(true);
+        } else {
+            button.fire(new ChangeListener.ChangeEvent());
         }
     }
 }

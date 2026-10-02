@@ -59,7 +59,7 @@ import megamek.client.bot.princess.ArtilleryCommandAndControl.SpecialAmmo;
 import megamek.client.bot.princess.CardinalEdge;
 import megamek.client.bot.princess.ChatCommands;
 import megamek.client.ui.Messages;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.dialogs.BuildingEditDialog;
 import megamek.client.ui.dialogs.HexEditDialog;
@@ -385,9 +385,9 @@ public class MapMenu extends JPopupMenu {
         JMenuItem item = new JMenuItem(Messages.getString("NoteDialog.action"));
         item.addActionListener(evt -> {
             NoteDialog nd = new NoteDialog(gui.frame, finalNote);
-            gui.getBoardView().setShouldIgnoreKeys(true);
+            gui.getBoardState().setShouldIgnoreKeys(true);
             nd.setVisible(true);
-            gui.getBoardView().setShouldIgnoreKeys(false);
+            gui.getBoardState().setShouldIgnoreKeys(false);
             if (nd.isAccepted()) {
                 client.sendSpecialHexDisplayAppend(coords, boardLocation.boardId(), finalNote);
             }
@@ -548,10 +548,9 @@ public class MapMenu extends JPopupMenu {
 
     private JMenuItem setFleeAction(JMenuItem fleeMenuItem, Player bot, CardinalEdge cardinalEdge) {
         fleeMenuItem.addActionListener(evt -> {
-            int confirm = JOptionPane.showConfirmDialog(gui.getFrame(),
-                  Messages.getString("Bot.commands.flee.confirmation", bot.getName()),
+            int confirm = gui.confirm(Messages.getString("Bot.commands.flee.confirmation", bot.getName()),
                   Messages.getString("Bot.commands.flee.confirm"),
-                  JOptionPane.YES_NO_OPTION);
+                  JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
 
             if (confirm == JOptionPane.YES_OPTION) {
                 client.sendChat(String.format("%s: fl : %d", bot.getName(), cardinalEdge.getIndex()));
@@ -779,10 +778,10 @@ public class MapMenu extends JPopupMenu {
                   entity,
                   true,
                   client);
-            gui.getBoardView().setShouldIgnoreKeys(true);
+            gui.getBoardState().setShouldIgnoreKeys(true);
             med.setVisible(true);
             med.dispose();
-            gui.getBoardView().setShouldIgnoreKeys(false);
+            gui.getBoardState().setShouldIgnoreKeys(false);
         });
         return item;
     }
@@ -801,6 +800,10 @@ public class MapMenu extends JPopupMenu {
 
     private JMenu createViewMenu() {
         JMenu menu = new JMenu("View");
+        // Over the native battle window its unit card and record sheet show a unit, so the menu has no View (D13).
+        if (megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.isActiveFor(gui)) {
+            return menu;
+        }
         Game game = client.getGame();
         Player localPlayer = client.getLocalPlayer();
         int playerId = localPlayer.getId();
@@ -1597,9 +1600,9 @@ public class MapMenu extends JPopupMenu {
 
     void plotCourse(ActionEvent e) {
         ((MovementDisplay) currentPanel).actionPerformed(e);
-        BoardView view = (BoardView) gui.getBoardView(boardLocation);
-        view.mouseAction(coords, BoardView.BOARD_HEX_DRAG, InputEvent.BUTTON1_DOWN_MASK, MouseEvent.BUTTON1);
-        view.mouseAction(coords, BoardView.BOARD_HEX_CLICK, InputEvent.BUTTON1_DOWN_MASK, MouseEvent.BUTTON1);
+        BoardClientState view = (BoardClientState) gui.getBoardState(boardLocation);
+        view.mouseAction(coords, BoardClientState.BOARD_HEX_DRAG, InputEvent.BUTTON1_DOWN_MASK, MouseEvent.BUTTON1);
+        view.mouseAction(coords, BoardClientState.BOARD_HEX_CLICK, InputEvent.BUTTON1_DOWN_MASK, MouseEvent.BUTTON1);
     }
 
     Targetable decodeTargetInfo(String info) {

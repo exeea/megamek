@@ -69,14 +69,14 @@ class GpuUnitVisibilitySmokeTest {
         List<Pixmap> captures = new ArrayList<>();
         try {
             GpuBoardTuning tuning = new GpuBoardTuning(skin.skin);
-            Slider strength = tuning.panel().findActor("See-through");
+            Slider strength = GpuBoardTestUi.tuning(tuning, "See-through");
             assertNotNull(strength);
             assertEquals(GpuUnitVisibility.DEFAULT_OUTLINE_INTENSITY, tuning.seeThrough());
             strength.setValue(0);
             assertEquals(0, tuning.seeThrough());
             assertEquals(GpuTerrain.DEFAULT_BUILDING_OPACITY, tuning.buildingOpacity());
-            assertNull(tuning.panel().findActor("Tree opacity"));
-            tuning.panel().findActor("tuning-defaults").fire(new ChangeListener.ChangeEvent());
+            assertNull(tuning.boardRows().findActor("Tree opacity"));
+            tuning.defaults().fire(new ChangeListener.ChangeEvent());
             assertEquals(GpuUnitVisibility.DEFAULT_OUTLINE_INTENSITY, tuning.seeThrough());
 
             BoardScene scene = ridge();

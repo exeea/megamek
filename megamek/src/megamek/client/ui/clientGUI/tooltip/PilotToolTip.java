@@ -42,6 +42,8 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.List;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 import javax.imageio.ImageIO;
@@ -53,6 +55,7 @@ import megamek.common.Configuration;
 import megamek.common.alphaStrike.AlphaStrikeElement;
 import megamek.common.game.Game;
 import megamek.common.game.InGameObject;
+import megamek.common.options.IOptionGroup;
 import megamek.common.options.OptionsConstants;
 import megamek.common.options.PilotOptions;
 import megamek.common.units.Crew;
@@ -288,16 +291,9 @@ public final class PilotToolTip {
     private static StringBuilder crewAdvantages(final Entity entity, boolean detailed) {
         String result;
         String sOptionList;
-        Crew crew = entity.getCrew();
-        // The Edge group (Edge points and their triggers) is only meaningful when the Edge game option is enabled.
-        // When it is disabled, hide the whole group so it doesn't clutter the unit card (issue #7142).
-        Game game = entity.getGame();
-        boolean edgeEnabled = (game == null) || game.getOptions().booleanOption(OptionsConstants.EDGE);
         // Pass entity to getOptionList so it can add prosthetic enhancement details during generation
-        sOptionList = getOptionList(crew.getOptions().getGroups(),
-              groupKey -> (!edgeEnabled && PilotOptions.EDGE_ADVANTAGES.equals(groupKey)) ? 0
-                    : crew.countOptions(groupKey),
-              detailed, entity);
+        sOptionList = getOptionList(entity.getCrew().getOptions().getGroups(), abilityCounter(entity), detailed,
+              entity);
 
         String attr = String.format("FACE=Dialog COLOR=%s", UIUtil.toColorHexString(GUIP.getUnitToolTipQuirkColor()));
         sOptionList = UIUtil.tag("FONT", attr, sOptionList);
@@ -305,6 +301,29 @@ public final class PilotToolTip {
         result = UIUtil.tag("span", fontSizeAttr, sOptionList);
 
         return new StringBuilder().append(result);
+    }
+
+    /**
+     * The crew's active special abilities, implants and other pilot options by group, each with its value and an
+     * infantry platoon's prosthetic enhancements. The Edge group is left out while the Edge game option is off. This
+     * tooltip, the Unit Display's Pilot tab and the GPU unit record list these.
+     */
+    public static List<TipUtil.OptionGroup> crewAbilities(Entity entity) {
+        return TipUtil.optionGroups(entity.getCrew().getOptions().getGroups(), abilityCounter(entity),
+              IOptionGroup::getDisplayableName, entity);
+    }
+
+    /**
+     * Counts the crew's active options of a group. The Edge group (Edge points and their triggers) is only meaningful
+     * when the Edge game option is enabled; when it is disabled, the whole group is hidden so it doesn't clutter the
+     * unit card (issue #7142).
+     */
+    private static Function<String, Integer> abilityCounter(Entity entity) {
+        Crew crew = entity.getCrew();
+        Game game = entity.getGame();
+        boolean edgeEnabled = (game == null) || game.getOptions().booleanOption(OptionsConstants.EDGE);
+        return groupKey -> (!edgeEnabled && PilotOptions.EDGE_ADVANTAGES.equals(groupKey)) ? 0
+              : crew.countOptions(groupKey);
     }
 
     private PilotToolTip() {

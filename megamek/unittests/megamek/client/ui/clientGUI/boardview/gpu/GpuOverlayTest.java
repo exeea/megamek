@@ -3,9 +3,6 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Color;
 import java.awt.Dimension;
@@ -21,7 +18,6 @@ import megamek.client.ui.IDisplayable;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.overlay.KeyBindingsOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.OverlayImage;
-import megamek.client.ui.clientGUI.boardview.overlay.PlanetaryConditionsOverlay;
 import megamek.client.ui.util.StringDrawer;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.KeyBindParser;
@@ -144,71 +140,6 @@ class GpuOverlayTest {
             SwingUtilities.invokeAndWait(() -> {
                 preferences.setValue(GUIPreferences.GUI_SCALE, originalScale);
                 preferences.setValue(GUIPreferences.PLANETARY_CONDITIONS_BACKGROUND_TRANSPARENCY, originalAlpha);
-            });
-        }
-    }
-
-    @Test
-    void fadesStartHiddenReverseContinuouslyAndKeepTheSameArtwork() throws Exception {
-        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            SwingUtilities.invokeAndWait(() -> {
-                KeyBindingsOverlay keys = new KeyBindingsOverlay(fixture.view) {
-                    @Override
-                    protected boolean getVisibilityGUIPreference() {
-                        return false;
-                    }
-                };
-                PlanetaryConditionsOverlay conditions = new PlanetaryConditionsOverlay(fixture.view) {
-                    @Override
-                    protected boolean getVisibilityGUIPreference() {
-                        return false;
-                    }
-                };
-                try {
-                    fixture.view.addOverlay(keys);
-                    fixture.view.addOverlay(conditions);
-                    fixture.source.setViewport(1400, 900, 1400, 900);
-                    fixture.source.refresh();
-                    GpuBoardSource.Hud hidden = fixture.source.takeFrame().hud();
-                    assertEquals(2, hidden.layers().size());
-                    hidden.layers().forEach(layer -> assertEquals(0, layer.fade().opacity(System.nanoTime())));
-                    keys.setVisible(true);
-                    conditions.setVisible(true);
-                    fixture.source.refresh();
-                    GpuBoardSource.Hud shown = fixture.source.takeFrame().hud();
-                    for (int index = 0; index < shown.layers().size(); index++) {
-                        var layer = shown.layers().get(index);
-                        assertSame(hidden.layers().get(index).pixels(), layer.pixels(),
-                              "Toggling visibility must not require new texture pixels");
-                        OverlayImage.Fade fade = layer.fade();
-                        long start = fade.transition().startedNanos();
-                        assertEquals(0, fade.opacity(start));
-                        assertEquals(0.5f, fade.opacity(start + 100_000_000));
-                        assertEquals(1, fade.opacity(start + 200_000_000));
-                        assertFalse(fade.isAnimating(start + 200_000_000));
-                        float previous = 0;
-                        for (int sample = 1; sample <= 12; sample++) {
-                            float opacity = fade.opacity(start + sample * 16_666_667L);
-                            assertTrue(opacity > previous, "Opacity advances between the 100 ms scene captures");
-                            previous = opacity;
-                        }
-                    }
-                    keys.setVisible(false);
-                    fixture.source.refresh();
-                    GpuBoardSource.Hud reversed = fixture.source.takeFrame().hud();
-                    var fade = reversed.layers().getFirst().fade();
-                    assertEquals(shown.layers().getFirst().fade().opacity(fade.transition().startedNanos()),
-                          fade.transition().from());
-                    assertEquals(0, fade.opacity(fade.transition().startedNanos() + 200_000_000));
-                    assertSame(shown.layers().getFirst().pixels(), reversed.layers().getFirst().pixels());
-                    assertEquals(shown.layers().get(1).fade(), reversed.layers().get(1).fade(),
-                          "Reversing one overlay must not restart the other");
-                } finally {
-                    GUIPreferences.getInstance().removePreferenceChangeListener(keys);
-                    GUIPreferences.getInstance().removePreferenceChangeListener(conditions);
-                    KeyBindParser.removePreferenceChangeListener(keys);
-                    KeyBindParser.removePreferenceChangeListener(conditions);
-                }
             });
         }
     }

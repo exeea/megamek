@@ -200,6 +200,17 @@ class TableElement implements MultiRowViewElement {
     }
 
     @Override
+    public void addRows(List<EntityReadout.Row> rows) {
+        if (Arrays.stream(colNames).anyMatch(name -> !name.isBlank())) {
+            rows.add(new EntityReadout.Row(EntityReadout.Row.Kind.TABLE_HEADER, List.of(colNames)));
+        }
+        for (ViewElement[] row : data) {
+            rows.add(new EntityReadout.Row(EntityReadout.Row.Kind.TABLE_ROW,
+                  Arrays.stream(row).map(ViewElement::toPlainText).toList()));
+        }
+    }
+
+    @Override
     public String toDiscord() {
         StringBuilder sb = new StringBuilder();
         sb.append(DiscordFormat.UNDERLINE).append(DiscordFormat.ROW_SHADING);

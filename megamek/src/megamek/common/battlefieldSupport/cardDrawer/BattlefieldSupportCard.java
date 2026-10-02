@@ -47,8 +47,6 @@ import java.awt.font.TextAttribute;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
-import java.io.InputStream;
-import java.nio.file.Files;
 import java.time.LocalDate;
 import java.util.Locale;
 import java.util.Map;
@@ -65,16 +63,10 @@ import megamek.common.annotations.Nullable;
 import megamek.common.battlefieldSupport.BFSDamage;
 import megamek.common.battlefieldSupport.BattlefieldSupportAsset;
 import megamek.common.util.ImageUtil;
+import megamek.common.util.SvgUtil;
 import megamek.common.util.fileUtils.MegaMekFile;
 import megamek.logging.MMLogger;
-import org.apache.batik.anim.dom.SVGDOMImplementation;
-import org.apache.batik.bridge.BridgeContext;
-import org.apache.batik.bridge.GVTBuilder;
-import org.apache.batik.bridge.UserAgentAdapter;
-import org.apache.batik.dom.util.SAXDocumentFactory;
 import org.apache.batik.gvt.GraphicsNode;
-import org.apache.batik.util.XMLResourceDescriptor;
-import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 
@@ -732,13 +724,8 @@ public class BattlefieldSupportCard {
             logger.warn("BFS card logo SVG not found: {}", file);
             return null;
         }
-        try (InputStream is = Files.newInputStream(file.toPath())) {
-            SAXDocumentFactory factory = new SAXDocumentFactory(SVGDOMImplementation.getDOMImplementation(),
-                  XMLResourceDescriptor.getXMLParserClassName());
-            Document doc = factory.createDocument(file.toURI().toASCIIString(), is);
-            BridgeContext ctx = new BridgeContext(new UserAgentAdapter());
-            ctx.setDynamicState(BridgeContext.STATIC);
-            return new GVTBuilder().build(ctx, doc);
+        try {
+            return SvgUtil.graphics(file);
         } catch (Exception e) {
             logger.error(e, "Failed to load BFS card logo SVG: " + filename);
             return null;

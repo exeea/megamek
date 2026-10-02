@@ -43,13 +43,17 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.StringJoiner;
 import java.util.stream.Collectors;
 import javax.swing.*;
 
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
 import megamek.client.ui.util.UIUtil;
+import megamek.common.annotations.Nullable;
 import megamek.common.board.Coords;
 import megamek.common.game.Game;
 import megamek.common.units.Entity;
@@ -238,38 +242,52 @@ public class NovaNetworkDialog extends JDialog implements ActionListener {
         unitListModel.clear();
         entityMap.clear();
 
-        int index = 0;
+        List<UnitRow> rows = unitRows();
+        for (int index = 0; index < rows.size(); index++) {
+            unitListModel.addElement(rows.get(index).text());
+            entityMap.put(index, rows.get(index).entity());
+        }
+    }
+
+    /**
+     * One row of the unit list: a unit, or a section header or spacer without one.
+     *
+     * @param text   what the row shows
+     * @param entity the unit, or null
+     */
+    private record UnitRow(String text, @Nullable Entity entity) {}
+
+    /**
+     * @return the unit list's rows, here and in the native battle window: the player's units under their header, then
+     *       the allied units under theirs
+     */
+    private List<UnitRow> unitRows() {
+        List<UnitRow> rows = new ArrayList<>();
 
         // Add player's units
         if (!playerNovaUnits.isEmpty()) {
-            unitListModel.addElement(Messages.getString("NovaNetworkDialog.sectionHeader",
-                  Messages.getString("NovaNetworkDialog.yourUnits")));
-            entityMap.put(index++, null); // Header, no entity
+            rows.add(new UnitRow(Messages.getString("NovaNetworkDialog.sectionHeader",
+                  Messages.getString("NovaNetworkDialog.yourUnits")), null)); // Header, no entity
 
             for (Entity entity : playerNovaUnits) {
-                String displayText = formatEntityDisplay(entity);
-                unitListModel.addElement(displayText);
-                entityMap.put(index++, entity);
+                rows.add(new UnitRow(formatEntityDisplay(entity), entity));
             }
         }
 
         // Add allied units
         if (!alliedNovaUnits.isEmpty()) {
             if (!playerNovaUnits.isEmpty()) {
-                unitListModel.addElement(""); // Spacer
-                entityMap.put(index++, null);
+                rows.add(new UnitRow("", null)); // Spacer
             }
 
-            unitListModel.addElement(Messages.getString("NovaNetworkDialog.sectionHeader",
-                  Messages.getString("NovaNetworkDialog.alliedUnits")));
-            entityMap.put(index++, null); // Header, no entity
+            rows.add(new UnitRow(Messages.getString("NovaNetworkDialog.sectionHeader",
+                  Messages.getString("NovaNetworkDialog.alliedUnits")), null)); // Header, no entity
 
             for (Entity entity : alliedNovaUnits) {
-                String displayText = formatEntityDisplay(entity);
-                unitListModel.addElement(displayText);
-                entityMap.put(index++, entity);
+                rows.add(new UnitRow(formatEntityDisplay(entity), entity));
             }
         }
+        return rows;
     }
 
     /**
@@ -384,6 +402,13 @@ public class NovaNetworkDialog extends JDialog implements ActionListener {
      * Updates the pending changes display area.
      */
     private void updatePendingChanges() {
+        pendingChangesArea.setText(pendingText());
+    }
+
+    /**
+     * @return the pending changes, one per line, or the text saying there are none
+     */
+    private String pendingText() {
         StringBuilder pendingChangesText = new StringBuilder();
         boolean hasPending = false;
 
@@ -404,11 +429,7 @@ public class NovaNetworkDialog extends JDialog implements ActionListener {
             }
         }
 
-        if (hasPending) {
-            pendingChangesArea.setText(pendingChangesText.toString());
-        } else {
-            pendingChangesArea.setText(Messages.getString("NovaNetworkDialog.noPendingChanges"));
-        }
+        return hasPending ? pendingChangesText.toString() : Messages.getString("NovaNetworkDialog.noPendingChanges");
     }
 
     /**
@@ -470,21 +491,27 @@ public class NovaNetworkDialog extends JDialog implements ActionListener {
      * Links the selected units into a network.
      */
     private void linkSelectedUnits() {
-        List<Entity> selectedEntities = getSelectedEntities();
+        show(link(getSelectedEntities()));
+    }
+
+    /**
+     * Queues the link of the given units into one network, here or in the native battle window.
+     *
+     * @return null when the link was queued, otherwise what tells the player why not
+     */
+    private @Nullable Notice link(List<Entity> selectedEntities) {
         logger.debug("Link action: {} units selected", selectedEntities.size());
 
         if (selectedEntities.isEmpty()) {
             logger.warn("Link action failed: No units selected");
-            showError(Messages.getString("NovaNetworkDialog.error.noSelection"));
-            return;
+            return new Notice(Messages.getString("NovaNetworkDialog.error.noSelection"), true);
         }
 
         // Validate: can only link units owned by local player
         boolean canModify = selectedEntities.stream().anyMatch(e -> e.getOwnerId() == localPlayerId);
         if (!canModify) {
             logger.warn("Link action failed: No units owned by local player");
-            showError(Messages.getString("NovaNetworkDialog.error.notYourUnits"));
-            return;
+            return new Notice(Messages.getString("NovaNetworkDialog.error.notYourUnits"), true);
         }
 
         // Determine target network based on selection:
@@ -519,8 +546,9 @@ public class NovaNetworkDialog extends JDialog implements ActionListener {
 
             if (!anyChanges) {
                 logger.debug("No action needed: All selected units already in network {}", targetNetworkId);
-                showInfo(Messages.getString("NovaNetworkDialog.info.alreadyNetworked", targetNetworkId));
-                return;  // Exit without making changes
+                // Exit without making changes
+                return new Notice(Messages.getString("NovaNetworkDialog.info.alreadyNetworked", targetNetworkId),
+                      false);
             }
         } else {
             // Mixed selection or different networks - create new network
@@ -561,8 +589,8 @@ public class NovaNetworkDialog extends JDialog implements ActionListener {
         // IO: Alternate Eras p.60: "link up to two other units" = max 3 total
         if (resultingNetworkSize > 3) {
             logger.warn("Link action failed: Resulting network would have {} units (max 3)", resultingNetworkSize);
-            showError(Messages.getString("NovaNetworkDialog.error.tooManyUnitsResult", resultingNetworkSize));
-            return;
+            return new Notice(Messages.getString("NovaNetworkDialog.error.tooManyUnitsResult", resultingNetworkSize),
+                  true);
         }
 
         // Queue link actions for all selected units
@@ -572,32 +600,35 @@ public class NovaNetworkDialog extends JDialog implements ActionListener {
             pendingChanges.put(entity.getId(), targetNetworkId);
         }
 
-        // Refresh display
-        populateUnitList();
-        updatePendingChanges();
-
         logger.debug("Link action completed successfully: {} units now in network", resultingNetworkSize);
+        return null;
     }
 
     /**
      * Unlinks the selected units from their networks.
      */
     private void unlinkSelectedUnits() {
-        List<Entity> selectedEntities = getSelectedEntities();
+        show(unlink(getSelectedEntities()));
+    }
+
+    /**
+     * Queues the unlink of the given units, each back to its own network, here or in the native battle window.
+     *
+     * @return null when the unlink was queued, otherwise what tells the player why not
+     */
+    private @Nullable Notice unlink(List<Entity> selectedEntities) {
         logger.debug("Unlink action: {} units selected", selectedEntities.size());
 
         if (selectedEntities.isEmpty()) {
             logger.warn("Unlink action failed: No units selected");
-            showError(Messages.getString("NovaNetworkDialog.error.noSelection"));
-            return;
+            return new Notice(Messages.getString("NovaNetworkDialog.error.noSelection"), true);
         }
 
         // Validate: can only modify units owned by local player
         boolean canModify = selectedEntities.stream().anyMatch(e -> e.getOwnerId() == localPlayerId);
         if (!canModify) {
             logger.warn("Unlink action failed: No units owned by local player");
-            showError(Messages.getString("NovaNetworkDialog.error.notYourUnits"));
-            return;
+            return new Notice(Messages.getString("NovaNetworkDialog.error.notYourUnits"), true);
         }
 
         // Queue unlink actions for all selected units
@@ -612,11 +643,36 @@ public class NovaNetworkDialog extends JDialog implements ActionListener {
             pendingChanges.put(entity.getId(), targetNetworkId);
         }
 
-        // Refresh display
-        populateUnitList();
-        updatePendingChanges();
-
         logger.debug("Unlink action completed successfully");
+        return null;
+    }
+
+    /**
+     * What a link or unlink tells the player instead of queuing a change.
+     *
+     * @param text  the message
+     * @param error {@code true} for an error, {@code false} for a piece of information
+     */
+    private record Notice(String text, boolean error) {
+        String title() {
+            return Messages.getString(error ? "NovaNetworkDialog.error.title" : "NovaNetworkDialog.info.title");
+        }
+
+        int messageType() {
+            return error ? JOptionPane.ERROR_MESSAGE : JOptionPane.INFORMATION_MESSAGE;
+        }
+    }
+
+    /**
+     * After a link or unlink here: the refreshed list and pending changes, or the notice why nothing changed.
+     */
+    private void show(@Nullable Notice notice) {
+        if (notice == null) {
+            populateUnitList();
+            updatePendingChanges();
+        } else {
+            JOptionPane.showMessageDialog(this, notice.text(), notice.title(), notice.messageType());
+        }
     }
 
     /** {@code true} once Apply sent at least one network change, so the caller can confirm a declaration was made. */
@@ -633,12 +689,26 @@ public class NovaNetworkDialog extends JDialog implements ActionListener {
      * Applies all pending network changes by sending them to the server.
      */
     private void applyPendingChanges() {
-        if (pendingChanges.isEmpty()) {
+        if (!sendPendingChanges()) {
             JOptionPane.showMessageDialog(this,
                   Messages.getString("NovaNetworkDialog.noPendingChanges"),
                   Messages.getString("NovaNetworkDialog.title"),
                   JOptionPane.INFORMATION_MESSAGE);
             return;
+        }
+
+        clearHighlighting();
+        dispose();
+    }
+
+    /**
+     * Sends every pending network change to the server, here or from the native battle window.
+     *
+     * @return {@code false} when there was nothing to send
+     */
+    private boolean sendPendingChanges() {
+        if (pendingChanges.isEmpty()) {
+            return false;
         }
 
         // Send all pending changes to server
@@ -659,8 +729,7 @@ public class NovaNetworkDialog extends JDialog implements ActionListener {
         }
 
         pendingChanges.clear();
-        clearHighlighting();
-        dispose();
+        return true;
     }
 
     /**
@@ -696,7 +765,7 @@ public class NovaNetworkDialog extends JDialog implements ActionListener {
      */
     private void updateEntityHighlighting() {
         List<Entity> selectedEntities = getSelectedEntities();
-        BoardView boardView = clientGUI.getBoardView();
+        BoardClientState boardView = clientGUI.getBoardState();
 
         // Highlight entity name tags
         boardView.highlightSelectedEntities(selectedEntities);
@@ -715,7 +784,7 @@ public class NovaNetworkDialog extends JDialog implements ActionListener {
      * highlights.
      */
     private void clearHighlighting() {
-        BoardView boardView = clientGUI.getBoardView();
+        BoardClientState boardView = clientGUI.getBoardState();
 
         // Clear entity name tag highlights
         boardView.highlightSelectedEntities(new ArrayList<>());
@@ -727,20 +796,92 @@ public class NovaNetworkDialog extends JDialog implements ActionListener {
     }
 
     /**
-     * Shows an error dialog.
+     * Showing the dialog manages the networks in the client's native battle window instead when that draws dialogs:
+     * the units and the pending changes as text, with Link..., Unlink..., Apply Changes, Revert All and Close. Link...
+     * and Unlink... ask for the units to act on; a refusal is shown and the same units are asked for again. Apply,
+     * Revert and Close act as they do here; Esc, like the close box, closes without asking.
      */
-    private void showError(String message) {
-        JOptionPane.showMessageDialog(this, message,
-              Messages.getString("NovaNetworkDialog.error.title"),
-              JOptionPane.ERROR_MESSAGE);
+    @Override
+    public void setVisible(boolean visible) {
+        if (!visible || !managedNatively()) {
+            super.setVisible(visible);
+        }
+    }
+
+    private boolean managedNatively() {
+        Object[] actions = { Messages.getString("NovaNetworkDialog.link"),
+              Messages.getString("NovaNetworkDialog.unlink"), btnApply.getText(), btnRevert.getText(),
+              btnCancel.getText() };
+        while (true) {
+            Integer action = clientGUI.askNative(overview(), getTitle(), JOptionPane.DEFAULT_OPTION, actions, null,
+                  false);
+            boolean drawn = (action != null) && ((action < 0) || (action > 1) || pickNatively(action == 0));
+            if (!drawn) {
+                // The native window stopped drawing dialogs: the Swing dialog goes on from here
+                populateUnitList();
+                updatePendingChanges();
+                return false;
+            }
+            if (action == 2) {
+                if (sendPendingChanges()) {
+                    dispose();
+                    return true;
+                }
+                clientGUI.message(Messages.getString("NovaNetworkDialog.noPendingChanges"), getTitle(),
+                      JOptionPane.INFORMATION_MESSAGE);
+            } else if (action == 3) {
+                pendingChanges.clear();
+            } else if ((action == 4) || (action < 0)) {
+                boolean keep = (action == 4) && !pendingChanges.isEmpty() && (clientGUI.confirm(
+                      Messages.getString("NovaNetworkDialog.discardChanges"), getTitle(), JOptionPane.YES_NO_OPTION,
+                      JOptionPane.WARNING_MESSAGE) != JOptionPane.YES_OPTION);
+                if (!keep) {
+                    pendingChanges.clear();
+                    dispose();
+                    return true;
+                }
+            }
+        }
     }
 
     /**
-     * Shows an info dialog.
+     * @return what the native form shows above its buttons: the instructions, the unit list and the pending changes
      */
-    private void showInfo(String message) {
-        JOptionPane.showMessageDialog(this, message,
-              Messages.getString("NovaNetworkDialog.info.title"),
-              JOptionPane.INFORMATION_MESSAGE);
+    private String overview() {
+        StringJoiner text = new StringJoiner("\n");
+        text.add(Messages.getString("NovaNetworkDialog.instructions")).add("");
+        text.add(Messages.getString("NovaNetworkDialog.unitListLabel"));
+        unitRows().forEach(row -> text.add(row.text()));
+        text.add("").add(Messages.getString("NovaNetworkDialog.pendingLabel")).add(pendingText().stripTrailing());
+        return text.toString();
+    }
+
+    /**
+     * Asks for the units to link or unlink and queues the change; a refusal is shown and the same units are asked for
+     * again. Cancel or Esc returns to the overview.
+     *
+     * @return {@code false} when the native window stopped drawing dialogs
+     */
+    private boolean pickNatively(boolean link) {
+        List<Integer> ticked = List.of();
+        while (true) {
+            List<UnitRow> rows = unitRows();
+            DialogAnswer answer = clientGUI.askRows(Messages.getString("NovaNetworkDialog.instructions"), getTitle(),
+                  rows.stream().map(row -> new DialogRow(row.text(), "", null, row.entity() != null)).toList(), true,
+                  ticked, null, List.of((link ? btnLink : btnUnlink).getText(), Messages.getString("Cancel")), 1);
+            if (answer == null) {
+                return false;
+            }
+            if (answer.button() != 0) {
+                return true;
+            }
+            List<Entity> selected = answer.selected().stream().map(row -> rows.get(row).entity()).toList();
+            Notice notice = link ? link(selected) : unlink(selected);
+            if (notice == null) {
+                return true;
+            }
+            clientGUI.message(notice.text(), notice.title(), notice.messageType());
+            ticked = answer.selected();
+        }
     }
 }

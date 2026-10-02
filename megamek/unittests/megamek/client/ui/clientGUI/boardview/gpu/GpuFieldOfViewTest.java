@@ -16,8 +16,8 @@ import javax.swing.SwingUtilities;
 
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardFieldOfView;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
@@ -82,7 +82,7 @@ class GpuFieldOfViewTest {
                 assertEquals(BoardFieldOfView.Visibility.BLOCKED, at(mask, behindRidge).visibility());
                 assertFalse(at(mask, behindRidge).outsideSensorRange(),
                       "A ridge blocking a hex-only LOS preview must not select the sensor effect");
-                assertEquals(fixture.view.getFovHighlighting().evaluate(behindRidge), at(mask, behindRidge));
+                assertEquals(fixture.view.getFieldOfView().evaluate(behindRidge), at(mask, behindRidge));
                 assertEquals(before.tiles().stream().map(BoardScene.Tile::tactical).toList(),
                       measured.tiles().stream().map(BoardScene.Tile::tactical).toList());
                 assertSame(mask, measured.withUnits(measured.units()).fieldOfView(),
@@ -160,7 +160,7 @@ class GpuFieldOfViewTest {
                 doReturn(7).when(viewer).getSensorCheck();
                 ClientGUI gui = mock(ClientGUI.class);
                 doReturn(viewer).when(gui).getDisplayedUnit();
-                BoardView view = new BoardView(fixture.game, null, gui, 0);
+                BoardClientState view = new BoardClientState(fixture.game, null, gui, 0, null);
                 try {
                     view.select(viewer.getPosition());
                     Rectangle area = new Rectangle(0, 0, 9, height);
@@ -187,7 +187,7 @@ class GpuFieldOfViewTest {
                           "Without an active sensor, no sensor-range mask may be inferred from BLOCKED");
                     assertTrue(at(mask, beyond).outsideSensorRange(), "Published snapshots must remain immutable");
                 } finally {
-                    view.dispose();
+                    view.close();
                 }
                 return null;
             });

@@ -89,6 +89,8 @@ final class GpuTerrain implements Disposable {
     private final GpuTextures<Coords> decals = new GpuTextures<>();
     private final GpuTextures<Coords> tactical = new GpuTextures<>();
     private final GpuTextures<Coords> foliage = new GpuTextures<>(true);
+    /** The sprite art in the foliage atlas; a vanished sprite keeps its slot until the next full rebuild. */
+    private Map<Coords, BoardScene.Pixels> spriteSlots = Map.of();
     private final ModelBatch batch = new ModelBatch(new DefaultShaderProvider(
           GpuCloudShadow.vertex(DefaultShader.getDefaultVertexShader()),
           GpuCloudShadow.fragment(DefaultShader.getDefaultFragmentShader(), false)) {
@@ -202,7 +204,8 @@ final class GpuTerrain implements Disposable {
     private float wetness;
     private float detailPixelsPerUnit = Float.NaN;
     private boolean hasCutaways;
-    private boolean flatTrees;
+    /** Top-view presentation: every feature mesh is hidden and the tileset's flat sprites stand in for them. */
+    private boolean flatFeatures;
 
     /** Tiny shared, mipmapped field: mask and sky variation; allocated once, never updated per frame. */
     private static Texture rainNoise() {
@@ -331,7 +334,7 @@ final class GpuTerrain implements Disposable {
         final List<ModelInstance> water = new ArrayList<>();
         final List<LiquidSurface> liquidMaterials = new ArrayList<>();
         final List<ModelInstance> tactical = new ArrayList<>();
-        final List<ModelInstance> flatTrees = new ArrayList<>();
+        final List<ModelInstance> sprites = new ArrayList<>();
         final List<Prop> props = new ArrayList<>();
         final List<Prop> cutaways = new ArrayList<>();
         final List<Array<Renderable>> treeRenderables = List.of(new Array<>(), new Array<>(), new Array<>());
@@ -393,7 +396,7 @@ final class GpuTerrain implements Disposable {
                 for (Prop prop : props) {
                     if (prop.tree()) {
                         builder.add(treeLod == 0 ? prop.instance() : new ModelInstance(
-                              assets.model(TreeLod.asset(prop.treeAsset, treeLod)), prop.instance().transform));
+                              assets.lodModel(prop.treeAsset, treeLod), prop.instance().transform));
                     }
                 }
             });
@@ -431,7 +434,7 @@ final class GpuTerrain implements Disposable {
             disposePropMeshes(propRenderables);
             disposePropMeshes(shadowPropRenderables);
             treeRenderables.forEach(Chunk::disposePropMeshes);
-            for (List<ModelInstance> layer : List.of(opaque, scatter, overlays, water, tactical, flatTrees)) {
+            for (List<ModelInstance> layer : List.of(opaque, scatter, overlays, water, tactical, sprites)) {
                 layer.forEach(instance -> instance.model.dispose());
             }
         }
@@ -548,7 +551,10 @@ final class GpuTerrain implements Disposable {
         rims.retainUsed();
         rebuildAll |= ground.update(terrainPixels, normalPixels);
         rebuildAll |= decals.update(decalPixels);
+        // A collapse, a destroyed bridge or a cleared forest must not change the sprite atlas layout by itself.
+        if (!rebuildAll) { spriteSlots.forEach(foliagePixels::putIfAbsent); }
         rebuildAll |= foliage.update(foliagePixels);
+        spriteSlots = foliagePixels;
         boolean markingsChanged = tactical.update(tacticalPixels);
         tiles = scene.tiles();
         tuning = nextTuning;
@@ -592,7 +598,7 @@ final class GpuTerrain implements Disposable {
         Layer scatter = new Layer();
         Material scatterMaterial = new Material(ColorAttribute.createDiffuse(Color.WHITE));
         Layer overlay = new Layer();
-        Layer trees = new Layer();
+        Layer sprites = new Layer();
         Layer liquid = new Layer();
         Map<String, LiquidSurface> animations = new HashMap<>();
         for (int x = startX; x < Math.min(scene.width(), startX + CHUNK_SIZE); x++) {
@@ -628,8 +634,8 @@ final class GpuTerrain implements Disposable {
                 }
                 if (tile.foliage() != null) {
                     TextureRegion art = foliage.region(tile.coords());
-                    trees.add(material(art.getTexture(), true), mesh -> foliage(mesh, tile, art));
-                    float height = BoardGeometry.surfaceZ(tile) + .16f * BoardGeometry.HEX_SCALE;
+                    sprites.add(material(art.getTexture(), true), mesh -> foliage(mesh, tile, art));
+                    float height = spriteZ(tile);
                     chunk.bounds.ext(BoardGeometry.centerX(tile.coords()) - BoardGeometry.WIDTH / 2,
                           BoardGeometry.centerY(tile.coords()) - BoardGeometry.HEIGHT / 2, height);
                     chunk.bounds.ext(BoardGeometry.centerX(tile.coords()) + BoardGeometry.WIDTH / 2,
@@ -715,9 +721,14 @@ final class GpuTerrain implements Disposable {
                     if (limb && limbModel == null) {
                         continue;
                     }
-                    String asset = feature.kind() == BoardScene.FeatureKind.TREE
-                          ? TreeLod.asset(feature.asset(), 0) : feature.asset();
-                    ModelInstance instance = new ModelInstance(limb ? limbModel : assets.model(asset));
+                    boolean bridge = feature.asset().equals("bridge");
+                    // One complete deck GLB per bridge exit pattern; bridge.glb is the straight north-south span (09).
+                    int exits = feature.bridgeExits();
+                    String asset = !bridge ? feature.asset() : exits == 9 ? "bridge"
+                          : "bridges/bridge-exits-" + String.format(java.util.Locale.ROOT, "%02d", exits);
+                    Model model = limb ? limbModel : feature.kind() == BoardScene.FeatureKind.TREE
+                          ? assets.lodModel(feature.asset(), 0) : assets.model(asset);
+                    ModelInstance instance = new ModelInstance(model);
                     for (Material material : instance.materials) {
                         if (material.id.equals("wall")) {
                             material.get(TextureAttribute.class, TextureAttribute.Diffuse).scaleV = feature.height();
@@ -729,21 +740,35 @@ final class GpuTerrain implements Disposable {
                     float base = feature.asset().equals("bridge")
                           ? tile.elevation() * BoardGeometry.LEVEL + 0.16f * BoardGeometry.HEX_SCALE
                           : surface.height(px, py);
+                    BoundingBox bounds = instance.calculateBoundingBox(new BoundingBox());
                     if (limb) {
                         // Lay the held limb on its side, then ground its actual bounds. No unit/entity is created.
                         float scale = feature.scale() * BoardGeometry.UNIT_SCALE * BoardGeometry.HEX_SCALE;
                         instance.transform.setToTranslation(px, py, base).rotate(Vector3.Z, feature.rotation())
                               .rotate(Vector3.Y, 90).scale(scale, scale, scale);
-                        BoundingBox bounds = instance.calculateBoundingBox(new BoundingBox()).mul(instance.transform);
-                        instance.transform.val[Matrix4.M23] += base - bounds.min.z + .12f * BoardGeometry.HEX_SCALE;
+                        BoundingBox placed = new BoundingBox(bounds).mul(instance.transform);
+                        instance.transform.val[Matrix4.M23] += base - placed.min.z + .12f * BoardGeometry.HEX_SCALE;
+                    } else if (bridge) {
+                        // Bridge elevation locates the deck; it never stretches its thickness or raised rails.
+                        // Each GLB is a complete joined deck, already clipped to the actual hex exit edges.
+                        float scale = BoardGeometry.HEX_SCALE;
+                        instance.transform.setToTranslation(px, py, base + feature.elevation() * BoardGeometry.LEVEL)
+                              .scale(scale, scale, scale);
                     } else {
+                        // Trees and structures retain inspectable proportions; their actual Z extent fits the
+                        // rules' height. Fuel tanks and industrial structures also use the building catalog,
+                        // without building cutaways.
+                        boolean fitHeight = feature.kind() == BoardScene.FeatureKind.TREE
+                              || feature.kind() == BoardScene.FeatureKind.BUILDING
+                              || feature.asset().startsWith("buildings/");
+                        float sourceHeight = fitHeight ? bounds.getDepth() : 1;
                         instance.transform.setToTranslation(px, py,
                               base + feature.elevation() * BoardGeometry.LEVEL)
                               .rotate(Vector3.Z, feature.rotation())
                               .scale(feature.scale() * BoardGeometry.HEX_SCALE, feature.scale() * BoardGeometry.HEX_SCALE,
-                                    feature.height() * BoardGeometry.LEVEL);
+                                    feature.height() * BoardGeometry.LEVEL / sourceHeight);
                     }
-                    BoundingBox bounds = instance.calculateBoundingBox(new BoundingBox()).mul(instance.transform);
+                    bounds.mul(instance.transform);
                     chunk.props.add(new Prop(tile.coords(), instance, bounds,
                           feature.kind() == BoardScene.FeatureKind.TREE ? feature.asset() : null));
                     if (feature.kind() == BoardScene.FeatureKind.BUILDING) {
@@ -763,7 +788,7 @@ final class GpuTerrain implements Disposable {
         solid.finish(chunk.opaque);
         scatter.finish(chunk.scatter);
         overlay.finish(chunk.overlays);
-        trees.finish(chunk.flatTrees);
+        sprites.finish(chunk.sprites);
         liquid.finish(chunk.water);
         // The floating markings remain visible when only their raised edge enters the viewport.
         chunk.bounds.ext(chunk.bounds.max.x, chunk.bounds.max.y, chunk.bounds.max.z + BoardGeometry.LEVEL / 3);
@@ -862,7 +887,7 @@ final class GpuTerrain implements Disposable {
             material.set(water);
             if (!water.impacts.isEmpty()) { material.id += ":splash:" + surface.tile.coords(); }
             if (liquid.kind() == BoardLiquid.Kind.HAZARDOUS) {
-                material.set(ColorAttribute.createDiffuse(0.4f, 1, 0.12f, 1));
+                material.set(ColorAttribute.createDiffuse(BoardLiquid.HAZARDOUS_TINT));
             }
         }
         return material;
@@ -904,12 +929,17 @@ final class GpuTerrain implements Disposable {
     /** Preserve the full transparent sprite: canopies extend beyond the hex's diagonal edges. */
     private static void foliage(MeshPartBuilder mesh, BoardScene.Tile tile, TextureRegion art) {
         var center = BoardGeometry.center(tile.coords(), 0);
-        center.z = BoardGeometry.surfaceZ(tile) + .16f * BoardGeometry.HEX_SCALE;
+        center.z = spriteZ(tile);
         float halfWidth = BoardGeometry.WIDTH / 2, halfHeight = BoardGeometry.HEIGHT / 2;
         mesh.rect(markingVertex(new Vector3(center).add(-halfWidth, -halfHeight, 0), tile.coords(), art),
               markingVertex(new Vector3(center).add(halfWidth, -halfHeight, 0), tile.coords(), art),
               markingVertex(new Vector3(center).add(halfWidth, halfHeight, 0), tile.coords(), art),
               markingVertex(new Vector3(center).add(-halfWidth, halfHeight, 0), tile.coords(), art));
+    }
+
+    /** At the hex's level, above the decals: a river's banks rise to it, and must not cover a bridge's art. */
+    private static float spriteZ(BoardScene.Tile tile) {
+        return tile.elevation() * BoardGeometry.LEVEL + .16f * BoardGeometry.HEX_SCALE;
     }
 
     private static void surface(MeshPartBuilder mesh, Coords coords, BoardSurface.Face face,
@@ -1163,7 +1193,8 @@ final class GpuTerrain implements Disposable {
         boolean changedOpacity = nextBuilding != buildingOpacity;
         buildingOpacity = nextBuilding;
         clock += delta;
-        List<BoundingBox> occupied = hasCutaways && buildingOpacity < 1
+        // Hidden flat-mode structures need no cutaway, so icons never rebuild their mesh caches.
+        List<BoundingBox> occupied = hasCutaways && buildingOpacity < 1 && !flatFeatures
               ? units.stream().map(this::unitBounds).toList() : List.of();
         for (Chunk chunk : chunks) {
             for (LiquidSurface liquid : chunk.liquidMaterials) {
@@ -1240,6 +1271,7 @@ final class GpuTerrain implements Disposable {
         return environment;
     }
 
+    /** The highest feature mesh of a hex, also while flat mode hides it: its height labels keep one place. */
     BoundingBox roofBounds(Coords coords) {
         BoundingBox result = null;
         int index = (coords.getX() / CHUNK_SIZE) * chunkRows + coords.getY() / CHUNK_SIZE;
@@ -1247,7 +1279,6 @@ final class GpuTerrain implements Disposable {
             return null;
         }
         for (Prop prop : chunks.get(index).props) {
-            if (flatTrees && prop.tree()) { continue; }
             if (prop.coords().equals(coords)
                   && (result == null || prop.bounds().max.z > result.max.z)) {
                 result = prop.bounds();
@@ -1281,8 +1312,7 @@ final class GpuTerrain implements Disposable {
                     candidates.add(scene.tile(new Coords(x, y)));
                 }
             }
-            for (Prop prop : chunk.props) {
-                if (flatTrees && prop.tree()) { continue; }
+            for (Prop prop : flatFeatures ? List.<Prop>of() : chunk.props) {
                 if (!Intersector.intersectRayBoundsFast(ray, prop.bounds())) {
                     continue;
                 }
@@ -1323,9 +1353,10 @@ final class GpuTerrain implements Disposable {
         return result;
     }
 
-    void setFlatTrees(boolean enabled) {
-        if (flatTrees != enabled) {
-            flatTrees = enabled;
+    /** Hides every feature mesh (trees, structures, bridges, limbs, scatter) from all passes and picking. */
+    void setFlatFeatures(boolean enabled) {
+        if (flatFeatures != enabled) {
+            flatFeatures = enabled;
             shadowDirty = true;
             detailPixelsPerUnit = Float.NaN;
         }
@@ -1342,15 +1373,16 @@ final class GpuTerrain implements Disposable {
                 continue;
             }
             if (drawTactical) {
-                if (flatTrees) { chunk.flatTrees.forEach(instance -> batch.render(instance)); }
                 chunk.tactical.forEach(instance -> batch.render(instance));
             } else {
                 chunk.opaque.forEach(instance -> batch.render(instance, environment));
-                if (chunk.scatterVisible) {
-                    chunk.scatter.forEach(instance -> batch.render(instance, environment));
+                if (!flatFeatures) {
+                    if (chunk.scatterVisible) {
+                        chunk.scatter.forEach(instance -> batch.render(instance, environment));
+                    }
+                    batch.render(chunk.solidProps, environment);
+                    batch.render(chunk.trees, environment);
                 }
-                batch.render(chunk.solidProps, environment);
-                if (!flatTrees) { batch.render(chunk.trees, environment); }
             }
         }
         batch.end();
@@ -1365,14 +1397,29 @@ final class GpuTerrain implements Disposable {
         }
     }
 
-    /** Water and faded features follow units, with depth testing but no depth writes. */
+    /**
+     * Water and faded features follow units, with depth testing but no depth writes. Flat sprites follow the water
+     * in their own batch, so bridges and canopy edges lie on it. They use the scene's light with the plain lit shader
+     * (no ground normal maps or rain wetness) and precede the atmosphere composite, so its fog and field-of-view
+     * dimming apply to them.
+     */
     void renderTransparent(Camera camera) {
         updateDetail(camera);
         batch.begin(camera);
         for (Chunk chunk : chunks) {
             if (camera.frustum.boundsInFrustum(chunk.bounds)) {
                 chunk.water.forEach(instance -> batch.render(instance, environment));
-                for (Prop prop : chunk.faded) { batch.render(prop.instance(), environment); }
+                if (!flatFeatures) {
+                    for (Prop prop : chunk.faded) { batch.render(prop.instance(), environment); }
+                }
+            }
+        }
+        batch.end();
+        if (!flatFeatures) { return; }
+        batch.begin(camera);
+        for (Chunk chunk : chunks) {
+            if (camera.frustum.boundsInFrustum(chunk.bounds)) {
+                chunk.sprites.forEach(instance -> batch.render(instance, environment));
             }
         }
         batch.end();
@@ -1453,11 +1500,13 @@ final class GpuTerrain implements Disposable {
         for (Chunk chunk : chunks) {
             if (camera.frustum.boundsInFrustum(chunk.bounds)) {
                 chunk.opaque.forEach(pass::render);
-                if (chunk.scatterVisible) {
-                    chunk.scatter.forEach(pass::render);
+                if (!flatFeatures) {
+                    if (chunk.scatterVisible) {
+                        chunk.scatter.forEach(pass::render);
+                    }
+                    pass.render(shadows ? chunk.shadowProps : chunk.solidProps);
+                    pass.render(chunk.trees);
                 }
-                pass.render(shadows ? chunk.shadowProps : chunk.solidProps);
-                if (!flatTrees) { pass.render(chunk.trees); }
             }
         }
         for (ModelInstance unit : units) {
@@ -1473,7 +1522,7 @@ final class GpuTerrain implements Disposable {
     void renderShadows(OrthographicCamera view, List<ModelInstance> units) {
         if (view != null) {
             updateDetail(view);
-        } else if (!flatTrees) {
+        } else if (!flatFeatures) {
             chunks.forEach(chunk -> chunk.cacheTrees(assets));
         }
         if (shadow == null || environment.shadowMap == null) {
@@ -1541,8 +1590,9 @@ final class GpuTerrain implements Disposable {
                 shadowDirty = true;
             }
             // Largest tree wins: smaller neighbors may retain extra detail, never lose it early.
-            if (flatTrees) { continue; }
-            int next = TreeLod.level(chunk.treeDiameter * pixelsPerUnit, chunk.treeLod);
+            if (flatFeatures) { continue; }
+            // Three mesh levels: the GLB impostor cards (level 3) need rimshaderv1's tree instance shader.
+            int next = TreeLod.level(TreeLod.PROPS, chunk.treeDiameter * pixelsPerUnit, chunk.treeLod);
             if (next != chunk.treeLod) {
                 chunk.treeLod = next;
                 shadowDirty = true;

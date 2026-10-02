@@ -36,12 +36,17 @@ import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
+import java.awt.Image;
+import javax.swing.ImageIcon;
 import javax.swing.JFrame;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextPane;
 import javax.swing.border.EmptyBorder;
 
+import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.util.FlatLafStyleBuilder;
 import megamek.client.ui.util.FontHandler;
 import megamek.client.ui.util.UIUtil;
@@ -52,6 +57,30 @@ public class MMNarrativeStoryDialog extends MMStoryDialog {
     public MMNarrativeStoryDialog(final JFrame parent, NarrativeDisplayProvider sEvent) {
         super(parent, sEvent);
         initialize();
+    }
+
+    /**
+     * Shows the story in the client's GPU battle window while that draws dialogs: its image beside its text, with OK,
+     * as here. Otherwise this dialog shows.
+     */
+    @Override
+    public void setVisible(boolean visible) {
+        ClientGUI gui = visible ? ClientGUI.forFrame(getOwner()) : null;
+        if ((gui != null) && shownNatively(gui)) {
+            dispose();
+        } else {
+            super.setVisible(visible);
+        }
+    }
+
+    /** @return true when the client's battle window showed the story, which the player has closed */
+    private boolean shownNatively(ClientGUI gui) {
+        Image image = storyImage();
+        // the text pane shows the story's text as HTML
+        String text = "<html>" + getStoryPoint().text() + "</html>";
+        Object[] message = (image == null) ? new Object[] { text } : new Object[] { new ImageIcon(image), text };
+        String ok = Messages.getString("Ok.text");
+        return gui.askNative(message, getTitle(), JOptionPane.DEFAULT_OPTION, new Object[] { ok }, ok, false) != null;
     }
 
     @Override

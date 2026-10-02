@@ -46,6 +46,7 @@ import java.awt.event.WindowEvent;
 import java.io.Serial;
 import java.util.ArrayList;
 import java.util.Enumeration;
+import java.util.List;
 import java.util.Vector;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
@@ -55,6 +56,7 @@ import javax.swing.JPanel;
 import javax.swing.JTextArea;
 
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.common.units.Entity;
 import megamek.common.equipment.MiscType;
@@ -78,6 +80,13 @@ public class TriggerAPPodDialog extends JDialog implements ActionListener {
      * The <code>int</code> ID of the entity that can fire AP Pods.
      */
     private final int entityId;
+
+    /** The question above the pods. */
+    private final String message;
+
+    /** The entity's AP Pods in equipment order, and the checkbox of each. */
+    private final List<TriggerPod> pods;
+    private final List<JCheckBox> boxes = new ArrayList<>();
 
     /**
      * A helper class to track when an AP Pod has been selected to be triggered.
@@ -121,9 +130,9 @@ public class TriggerAPPodDialog extends JDialog implements ActionListener {
     public TriggerAPPodDialog(JFrame parent, Entity entity) {
         super(parent, Messages.getString("TriggerAPPodDialog.title"), true);
         entityId = entity.getId();
+        message = Messages.getString("TriggerAPPodDialog.selectPodsToTrigger", entity.getDisplayName());
 
-        JTextArea labMessage = new JTextArea(Messages.getString("TriggerAPPodDialog.selectPodsToTrigger",
-              entity.getDisplayName()));
+        JTextArea labMessage = new JTextArea(message);
         labMessage.setEditable(false);
         labMessage.setOpaque(false);
 
@@ -131,32 +140,18 @@ public class TriggerAPPodDialog extends JDialog implements ActionListener {
         JPanel panPods = new JPanel();
         panPods.setLayout(new GridLayout(0, 1));
 
-        // Walk through the entity's misc equipment, looking for AP Pods.
-        for (Mounted<?> mount : entity.getMisc()) {
-            // Is this an AP Pod?
-            if (mount.getType().hasFlag(MiscType.F_AP_POD)) {
-
-                // Create a checkbox for the pod, and add it to the panel.
-                String message = entity.getLocationName(mount.getLocation())
-                      + ' '
-                      + mount.getName();
-                JCheckBox pod = new JCheckBox(message);
-                panPods.add(pod);
-
-                // Can the entity fire the pod?
-                if (mount.canFire()) {
-                    // Yup. Add a tracker for this pod.
-                    TriggerPodTracker tracker = new TriggerPodTracker(pod,
-                          entity.getEquipmentNum(mount));
-                    trackers.add(tracker);
-                } else {
-                    // Nope. Disable the checkbox.
-                    pod.setEnabled(false);
-                }
-
-            } // End found-AP-Pod
-
-        } // Look at the next piece of equipment.
+        // A checkbox for each of the entity's AP Pods; only the ones that can fire get a tracker.
+        pods = podsOf(entity);
+        for (TriggerPod pod : pods) {
+            JCheckBox box = new JCheckBox(pod.label());
+            panPods.add(box);
+            boxes.add(box);
+            if (pod.triggerable()) {
+                trackers.add(new TriggerPodTracker(box, pod.podNum()));
+            } else {
+                box.setEnabled(false);
+            }
+        }
 
         // OK button.
         JButton butOkay = new JButton(Messages.getString("Okay"));
@@ -208,9 +203,34 @@ public class TriggerAPPodDialog extends JDialog implements ActionListener {
                     + parent.getSize().height / 2 - size.height / 2);
     }
 
+    /**
+     * The entity's AP Pods in equipment order: each with its location and name, and whether it can fire now.
+     */
+    private static List<TriggerPod> podsOf(Entity entity) {
+        List<TriggerPod> pods = new ArrayList<>();
+        for (Mounted<?> mount : entity.getMisc()) {
+            if (mount.getType().hasFlag(MiscType.F_AP_POD)) {
+                pods.add(new TriggerPod(entity.getLocationName(mount.getLocation()) + ' ' + mount.getName(),
+                      entity.getEquipmentNum(mount), mount.canFire()));
+            }
+        }
+        return pods;
+    }
+
     @Override
     public void actionPerformed(ActionEvent e) {
         setVisible(false);
+    }
+
+    /**
+     * Showing the dialog asks in the client's native battle window instead when that draws dialogs
+     * ({@link TriggerPod#askNatively}); {@link #getActions()} then triggers the ticked pods as it does here.
+     */
+    @Override
+    public void setVisible(boolean visible) {
+        if (!visible || !TriggerPod.askNatively(ClientGUI.forFrame(getOwner()), getTitle(), message, pods, boxes)) {
+            super.setVisible(visible);
+        }
     }
 
     /**

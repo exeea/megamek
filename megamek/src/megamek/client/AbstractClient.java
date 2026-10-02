@@ -407,6 +407,12 @@ public abstract class AbstractClient implements IClient {
         closeClientListeners.addElement(l);
     }
 
+    /** Detaches a listener whose window or board has been disposed. */
+    public void removeCloseClientListener(CloseClientListener listener) {
+        closeClientListeners.remove(listener);
+    }
+
+
     /**
      * This method is the starting point that handles all received Packets. This method should only be overridden in
      * very special cases such as in Princess to call Precognition.

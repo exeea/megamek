@@ -33,7 +33,7 @@
 package megamek.client.ui.clientGUI.boardview.spriteHandler;
 
 import megamek.client.ui.clientGUI.AbstractClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.sprite.BridgeBuildSprite;
 import megamek.common.board.BoardLocation;
 import megamek.common.event.GamePhaseChangeEvent;
@@ -63,7 +63,7 @@ public class BridgeBuildSpriteHandler extends BoardViewSpriteHandler {
      */
     public void updateBridgeBuildSprites() {
         clear();
-        if (clientGUI.boardViews().isEmpty()) {
+        if (clientGUI.boardStates().isEmpty()) {
             return;
         }
         for (Entity entity : game.getEntitiesVector()) {
@@ -72,7 +72,7 @@ public class BridgeBuildSpriteHandler extends BoardViewSpriteHandler {
                 continue;
             }
             BoardLocation location = BoardLocation.of(convInfantry.getBridgeTargetCoords(), entity.getBoardId());
-            BoardView boardView = (BoardView) clientGUI.getBoardView(location);
+            BoardClientState boardView = clientGUI.getBoardState(location);
             if (boardView != null) {
                 // Both build and dismantling show the standing structure on the same N / build-required scale: the
                 // build counts it up as turns are banked, the dismantling counts the same number back down to zero.

@@ -39,6 +39,7 @@ import java.awt.Insets;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.io.Serial;
+import java.util.List;
 import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JFrame;
@@ -47,6 +48,8 @@ import javax.swing.JOptionPane;
 import javax.swing.JTextField;
 
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.common.game.Game;
 import megamek.common.options.OptionsConstants;
 import megamek.common.weapons.bayWeapons.capital.CapitalMissileBayWeapon;
@@ -59,6 +62,7 @@ public class TeleMissileSettingDialog extends JDialog implements ActionListener 
     private static final long serialVersionUID = -7642946136536329067L;
     private final JButton butOk = new JButton(Messages.getString("Okay"));
     private final JTextField fldSetting = new JTextField("50", 2);
+    private final JLabel labMessage = new JLabel(Messages.getString("SetTeleMissileVelocityDialog.labSetVelocity"));
     private int setting;
     private final JFrame frame;
     private final int maxVelocity;
@@ -69,7 +73,6 @@ public class TeleMissileSettingDialog extends JDialog implements ActionListener 
         maxVelocity = game.getOptions().intOption(OptionsConstants.ADVANCED_AERO_RULES_STRATOPS_BEARINGS_ONLY_VELOCITY);
         frame = p;
         butOk.addActionListener(this);
-        JLabel labMessage = new JLabel(Messages.getString("SetTeleMissileVelocityDialog.labSetVelocity"));
         GridBagLayout gridBagLayout = new GridBagLayout();
         getContentPane().setLayout(gridBagLayout);
         GridBagConstraints c = new GridBagConstraints();
@@ -127,5 +130,25 @@ public class TeleMissileSettingDialog extends JDialog implements ActionListener 
             }
         }
         setVisible(false);
+    }
+
+    /**
+     * Showing the dialog asks in the owning client's native battle window instead when that draws dialogs; only a
+     * velocity in the valid range can be entered there. The attack divides by the velocity, so Esc there keeps the one
+     * shown, within the range, rather than the 0 that closing this window leaves.
+     */
+    @Override
+    public void setVisible(boolean visible) {
+        ClientGUI gui = visible ? ClientGUI.forFrame(frame) : null;
+        int minimum = CapitalMissileBayWeapon.CAPITAL_MISSILE_MIN_VELOCITY;
+        DialogAnswer answer = (gui == null) ? null : gui.askText(labMessage.getText(), getTitle(),
+              fldSetting.getText(), minimum, maxVelocity, List.of(butOk.getText()), JOptionPane.CLOSED_OPTION);
+        if (answer == null) {
+            super.setVisible(visible);
+        } else if (answer.text() != null) {
+            setting = Integer.parseInt(answer.text());
+        } else {
+            setting = Math.max(minimum, Math.min(Integer.parseInt(fldSetting.getText()), maxVelocity));
+        }
     }
 }

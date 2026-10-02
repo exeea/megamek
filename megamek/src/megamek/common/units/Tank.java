@@ -574,9 +574,19 @@ public class Tank extends Entity implements Fortifiable, RubbleClearer {
     public void setFacing(int facing) {
         super.setFacing(facing);
         if (isTurretLocked(getLocTurret())) {
-            int nTurretFacing = (facing + m_nTurretOffset + 6) % 6;
-            super.setSecondaryFacing(nTurretFacing);
+            super.setSecondaryFacing(lockedTurretFacing(facing));
         }
+    }
+
+    /** A locked turret keeps its offset from the hull when the hull turns. */
+    private int lockedTurretFacing(int facing) {
+        return (facing + m_nTurretOffset + 6) % 6;
+    }
+
+    @Override
+    int secondaryFacingAfterMove(int newFacing) {
+        return (!getAlreadyTwisted() && isTurretLocked(getLocTurret())) ? lockedTurretFacing(newFacing)
+              : super.secondaryFacingAfterMove(newFacing);
     }
 
     public int getDualTurretFacing() {

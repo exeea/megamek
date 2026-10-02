@@ -58,7 +58,7 @@ public abstract class SimpleConfirmDialog extends SimpleNagNotice {
     }
 
     /**
-     * Shows this confirm dialog. Note that while the dialog is shown, BoardView tooltips are suspended so they don't
+     * Shows this confirm dialog. Note that while the dialog is shown, BoardClientState tooltips are suspended so they don't
      * overlap the dialog.
      */
     @Override
@@ -71,10 +71,12 @@ public abstract class SimpleConfirmDialog extends SimpleNagNotice {
 
             clientGui.suspendBoardTooltips();
 
-            isOKSelected = JOptionPane.showConfirmDialog(clientGui.getFrame(),
+            Integer answer = clientGui.askNative("<html>" + message() + "</html>", title(),
+                  JOptionPane.OK_CANCEL_OPTION, null, null, false);
+            isOKSelected = ((answer != null) ? answer : JOptionPane.showConfirmDialog(clientGui.getFrame(),
                   contentPanel,
                   title(),
-                  JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION;
+                  JOptionPane.OK_CANCEL_OPTION)) == JOptionPane.OK_OPTION;
         } finally {
             clientGui.activateBoardTooltips();
         }

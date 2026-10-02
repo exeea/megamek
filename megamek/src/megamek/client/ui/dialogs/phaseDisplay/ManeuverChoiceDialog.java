@@ -43,6 +43,9 @@ import java.awt.event.ActionListener;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.Serial;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
 import javax.swing.AbstractButton;
 import javax.swing.ButtonGroup;
 import javax.swing.JButton;
@@ -53,7 +56,10 @@ import javax.swing.JRadioButton;
 import javax.swing.JScrollPane;
 
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
 import megamek.common.board.Board;
 import megamek.common.ManeuverType;
 import megamek.common.moves.MovePath;
@@ -246,6 +252,42 @@ public class ManeuverChoiceDialog extends JDialog implements ActionListener {
             confirm = false;
             setVisible(false);
         }
+    }
+
+    /**
+     * Showing the dialog asks in the owning client's native battle window instead when that draws dialogs: one enabled
+     * maneuver, with its tooltip as the detail. The answer selects it as this dialog's radio buttons would.
+     */
+    @Override
+    public void setVisible(boolean visible) {
+        if (!visible || !answeredNatively()) {
+            super.setVisible(visible);
+        }
+    }
+
+    private boolean answeredNatively() {
+        ClientGUI gui = ClientGUI.forFrame(getOwner());
+        if ((gui == null) || (checkboxes == null)) {
+            return false;
+        }
+        List<DialogRow> rows = new ArrayList<>();
+        List<Integer> selected = new ArrayList<>();
+        for (int type = 0; type < checkboxes.length; type++) {
+            rows.add(new DialogRow(checkboxes[type].getText(),
+                  Objects.requireNonNullElse(checkboxes[type].getToolTipText(), ""), null,
+                  checkboxes[type].isEnabled()));
+            if (checkboxes[type].isSelected()) {
+                selected.add(type);
+            }
+        }
+        DialogAnswer answer = gui.askRows("", getTitle(), rows, false, selected, null,
+              List.of(butOK.getText(), butCancel.getText()), 1);
+        if (answer == null) {
+            return false;
+        }
+        confirm = answer.button() == 0;
+        answer.selected().forEach(type -> checkboxes[type].setSelected(true));
+        return true;
     }
 
     /**

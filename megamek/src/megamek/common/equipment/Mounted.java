@@ -595,29 +595,86 @@ public class Mounted<T extends EquipmentType> implements Serializable, RoundUpda
         return getType().getDesc(getSize());
     }
 
+    /**
+     * @return the description with its state: {@link #getStateMark()}, then {@link #getPlainDesc()}, then the loaded
+     *       ammunition's shots and the mount's further marks (battle armor mount, disposable, dumping, armored,
+     *       internal bomb bay, pintle weight)
+     */
     public String getDesc() {
+        StringBuilder desc = new StringBuilder(getStateMark()).append(getPlainDesc());
+        if ((type instanceof AmmoType) && (location != Entity.LOC_NONE)) {
+            desc.append(" (");
+            desc.append(shotsLeft);
+            desc.append(")");
+        }
+        if (getEntity() instanceof BattleArmor) {
+            if ((getBaMountLoc() >= BattleArmor.MOUNT_LOC_BODY) && (getBaMountLoc() <= BattleArmor.MOUNT_LOC_TURRET)) {
+                desc.append(" (%s)".formatted(BattleArmor.getBaMountLocName(getBaMountLoc())));
+            }
+            if (isDWPMounted()) {
+                desc.append(" (DWP)");
+            }
+            if (isSquadSupportWeapon()) {
+                desc.append(" (SSWM)");
+            }
+            if (isAPMMounted()) {
+                desc.append(" (APM)");
+            }
+        }
+        if ((this instanceof WeaponMounted weaponMounted) && weaponMounted.isDisposableWeapon()) {
+            desc.append(" (Disposable)");
+        }
+        if (isDumping()) {
+            desc.append(" (dumping)");
+        }
+
+        if (isArmored()) {
+            desc.append(" (armored)");
+        }
+
+        if (isInternalBomb()) {
+            desc.append(" (Int. Bay)");
+        }
+
+        if (is(EquipmentTypeLookup.PINTLE_TURRET) &&
+              entity instanceof Tank tank &&
+              tank.getBaseChassisSponsonPintleWeight() >= 0) {
+            desc.append(" (%d kg)".formatted((int) (getTonnage() * 1000)));
+        }
+        return desc.toString();
+    }
+
+    /**
+     * @return the mark {@link #getDesc()} starts with, the first that applies: "**" destroyed beyond repair, "*"
+     *       destroyed, "x " missing or useless, "+" used this round, "j " jammed, "- " fired, "d " about to dump its
+     *       ammunition; else ""
+     */
+    public String getStateMark() {
+        if (destroyed) {
+            return repairable ? "*" : "**";
+        } else if (missing || useless) {
+            return "x ";
+        } else if (usedThisRound) {
+            return "+";
+        } else if (jammed) {
+            return "j ";
+        } else if (fired) {
+            return "- ";
+        } else if (isPendingDump()) {
+            return "d ";
+        }
+        return "";
+    }
+
+    /**
+     * @return the description without any state: the base description, the number of weapons of a weapon group, the
+     *       mount marks (R), (T), (ST), (PT), a directional torso mount with its facing and lock, and the facing of a
+     *       vehicular grenade launcher or of equipment on a building
+     */
+    public String getPlainDesc() {
         StringBuilder desc = new StringBuilder(getBaseDesc());
         if (isWeaponGroup()) {
             desc.append(" (").append(getNWeapons()).append(")");
-        }
-        if (destroyed) {
-            if (!repairable) {
-                desc.insert(0, "**");
-            } else {
-                desc.insert(0, "*");
-            }
-        } else if (missing) {
-            desc.insert(0, "x ");
-        } else if (useless) {
-            desc.insert(0, "x ");
-        } else if (usedThisRound) {
-            desc.insert(0, "+");
-        } else if (jammed) {
-            desc.insert(0, "j ");
-        } else if (fired) {
-            desc.insert(0, "- ");
-        } else if (isPendingDump()) {
-            desc.insert(0, "d ");
         }
         if (rearMounted) {
             desc.append(" (R)");
@@ -671,45 +728,6 @@ public class Mounted<T extends EquipmentType> implements Serializable, RoundUpda
                     desc.append(" (FL)");
                     break;
             }
-        }
-        if ((type instanceof AmmoType) && (location != Entity.LOC_NONE)) {
-            desc.append(" (");
-            desc.append(shotsLeft);
-            desc.append(")");
-        }
-        if (getEntity() instanceof BattleArmor) {
-            if ((getBaMountLoc() >= BattleArmor.MOUNT_LOC_BODY) && (getBaMountLoc() <= BattleArmor.MOUNT_LOC_TURRET)) {
-                desc.append(" (%s)".formatted(BattleArmor.getBaMountLocName(getBaMountLoc())));
-            }
-            if (isDWPMounted()) {
-                desc.append(" (DWP)");
-            }
-            if (isSquadSupportWeapon()) {
-                desc.append(" (SSWM)");
-            }
-            if (isAPMMounted()) {
-                desc.append(" (APM)");
-            }
-        }
-        if ((this instanceof WeaponMounted weaponMounted) && weaponMounted.isDisposableWeapon()) {
-            desc.append(" (Disposable)");
-        }
-        if (isDumping()) {
-            desc.append(" (dumping)");
-        }
-
-        if (isArmored()) {
-            desc.append(" (armored)");
-        }
-
-        if (isInternalBomb()) {
-            desc.append(" (Int. Bay)");
-        }
-
-        if (is(EquipmentTypeLookup.PINTLE_TURRET) &&
-              entity instanceof Tank tank &&
-              tank.getBaseChassisSponsonPintleWeight() >= 0) {
-            desc.append(" (%d kg)".formatted((int) (getTonnage() * 1000)));
         }
         return desc.toString();
     }
@@ -1930,6 +1948,21 @@ public class Mounted<T extends EquipmentType> implements Serializable, RoundUpda
 
     public int getOriginalShots() {
         return originalShots;
+    }
+
+    /**
+     * @return the shots this ammunition's bin holds when full: 1 for a one-shot weapon's ammunition, else its original
+     *       shots where the unit records them (they are 0 for a Mek's bins), else one load of its type; never fewer
+     *       than it holds now. 0 for equipment that is not ammunition. The rule of the unit editor's shots control
+     *       ({@code UnitDamagePanelBuilder.fullShots}); the GPU unit record uses it.
+     */
+    public int getFullShots() {
+        if (!(type instanceof AmmoType ammoType)) {
+            return 0;
+        } else if (isOneShot()) {
+            return 1;
+        }
+        return Math.max((originalShots > 0) ? originalShots : ammoType.getShots(), getBaseShotsLeft());
     }
 
     public void setOriginalShots(int shots) {

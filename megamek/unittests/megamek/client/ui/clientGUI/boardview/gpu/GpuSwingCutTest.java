@@ -1,0 +1,409 @@
+/* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
+package megamek.client.ui.clientGUI.boardview.gpu;
+
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.ask;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.dismiss;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.present;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.routingClient;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.doCallRealMethod;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import java.awt.AWTEvent;
+import java.awt.GraphicsEnvironment;
+import java.awt.Toolkit;
+import java.awt.event.AWTEventListener;
+import java.io.File;
+import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import javax.swing.JFrame;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JSpinner;
+
+import megamek.client.Client;
+import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
+import megamek.client.ui.clientGUI.boardview.BoardTactical;
+import megamek.client.ui.clientGUI.boardview.RulerDialog;
+import megamek.client.ui.clientGUI.boardview.sprite.FiringSolutionSprite;
+import megamek.client.ui.clientGUI.boardview.sprite.MovementEnvelopeSprite;
+import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.Asked;
+import megamek.client.ui.panels.phaseDisplay.DeployMinefieldDisplay;
+import megamek.common.Configuration;
+import megamek.common.ToHitData;
+import megamek.common.board.Coords;
+import megamek.common.equipment.Cargo;
+import megamek.common.util.FiringSolution;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+
+/**
+ * The Swing cut's EDT side (I3): the board state's tactical capture leaves out what the HUD draws itself (G4), the
+ * minefield display's undeployed question and the map menu go through the native window (D12, D13), and the ruler
+ * stays hidden under the LOS card, whose close ends the ruler's measurement (G3), until the card's Elevation diagram
+ * shows it (user item 6).
+ */
+@Timeout(120)
+class GpuSwingCutTest {
+    private static File originalDataDir;
+
+    /** Earlier test classes can leave the data folder on testresources; the fixtures need the staged data. */
+    @BeforeAll
+    static void useStagedData() {
+        originalDataDir = Configuration.dataDir();
+        Configuration.setDataDir(null);
+    }
+
+    @AfterAll
+    static void restoreDataDir() {
+        Configuration.setDataDir(originalDataDir);
+    }
+
+    /**
+     * G4: MegaMek's firing solution draws into the board state's tactical capture, but the native frame leaves it out
+     * (the board labels' to-hit badges stand for it), and the sprite stays shown for the classic board.
+     */
+    @Test
+    void theNativeFrameLeavesOutMegaMeksFiringSolutions() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            FiringSolutionSprite solution = onSwing(() -> {
+                ToHitData toHit = new ToHitData(4, "test");
+                toHit.setLocation(new Coords(8, 5));
+                toHit.setRange(3);
+                FiringSolutionSprite sprite = new FiringSolutionSprite(fixture.view, new FiringSolution(toHit, true));
+                fixture.view.addSprites(List.of(sprite));
+                return sprite;
+            });
+            List<BoardTactical> captures = onSwing(() -> {
+                BoardTactical all = fixture.view.captureTacticalGeometry();
+                fixture.view.removeSprites(List.of(solution));
+                BoardTactical without = fixture.view.captureTacticalGeometry();
+                fixture.view.addSprites(List.of(solution));
+                fixture.source.refresh();
+                return List.of(all, without, fixture.source.takeFrame().scene().tactical());
+            });
+            assertNotEquals(captures.get(1), captures.get(0), "MegaMek's own capture draws the solution");
+            assertEquals(captures.get(1), captures.get(2), "The native frame draws everything else, and no solution");
+            assertFalse(onSwing(solution::isHidden), "The capture leaves the sprite shown for the classic board");
+        }
+    }
+
+    /**
+     * G4: while the plan draws a unit's route and envelope, the native frame leaves out MegaMek's movement envelope,
+     * and every one of its fills only then; the sprites stay shown. Without a plan (MegaMek's own board tool) the
+     * frame shows MegaMek's envelope, as it shows a hex pick's highlight (GpuMovePlanTest).
+     */
+    @Test
+    void theNativeFrameLeavesOutMegaMeksEnvelopeOnlyWhileThePlanDrawsOne() throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            List<MovementEnvelopeSprite> envelope = onSwing(moving::envelopeSprites);
+            assertFalse(envelope.isEmpty(), "MegaMek's board state shows the selected unit's envelope");
+            Set<Integer> colours = onSwing(() -> {
+                GUIPreferences preferences = GUIPreferences.getInstance();
+                return Set.of(preferences.getMoveDefaultColor().getRGB() & 0xFFFFFF,
+                      preferences.getMoveRunColor().getRGB() & 0xFFFFFF,
+                      preferences.getMoveJumpColor().getRGB() & 0xFFFFFF,
+                      preferences.getMoveSprintColor().getRGB() & 0xFFFFFF);
+            });
+
+            moving.board.panel = moving.display;
+            Planned planning = planned(moving);
+            assertTrue(planning.planner(), "The Sagittaire walks in a planner gear");
+            List<BoardTactical.Fill> left = new ArrayList<>(planning.state());
+            planning.fills().forEach(left::remove);
+            assertEquals(planning.state().size() - planning.fills().size(), left.size(), "The frame adds no fill");
+            assertFalse(left.isEmpty(), "The envelope's fills are left out");
+            assertTrue(left.stream().allMatch(fill -> colours.contains(fill.argb() & 0xFFFFFF)),
+                  "Only the envelope's fills are left out");
+            assertTrue(onSwing(() -> envelope.stream().noneMatch(Sprite::isHidden)),
+                  "The capture leaves the envelope shown for the classic board");
+
+            moving.board.panel = new JPanel();
+            Planned classic = planned(moving);
+            assertFalse(classic.planner());
+            assertEquals(classic.state(), classic.fills(), "Without a plan the frame shows MegaMek's envelope");
+        }
+    }
+
+    /** A capture: the plan's planner flag, the frame's tactical fills and the board state's own ones. */
+    private record Planned(boolean planner, List<BoardTactical.Fill> fills, List<BoardTactical.Fill> state) { }
+
+    /** EDT, in one event: captures the frame, then the board state's own tactical capture of the same sprites. */
+    private static Planned planned(GpuMovementFixture moving) throws Exception {
+        return onSwing(() -> {
+            moving.board.source.refresh();
+            GpuBoardSource.Frame frame = moving.board.source.takeFrame();
+            return new Planned(frame.panels().move().planner(), frame.scene().tactical().fills(),
+                  moving.board.view.captureTacticalGeometry().fills());
+        });
+    }
+
+    /**
+     * D12: the minefield display's question about undeployed objects is the client's confirm, so the presented
+     * window asks it natively; No keeps the turn, Yes ends it.
+     */
+    @Test
+    void theUndeployedObjectsQuestionIsAskedInTheNativeWindow() throws Exception {
+        ClientGUI gui = routingClient();
+        Client client = mock(Client.class);
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            when(client.getGame()).thenReturn(fixture.game);
+            when(client.getLocalPlayer()).thenReturn(fixture.player);
+            when(client.isMyTurn()).thenReturn(true);
+            when(gui.getClient()).thenReturn(client);
+            fixture.player.getGroundObjectsToPlace()
+                  .add(GpuListPromptBridgeTest.groundObject(new Cargo(), "Supply crate", 2));
+            DeployMinefieldDisplay display = GpuListPromptBridgeTest.placingCargo(gui);
+            present(gui, fixture.view, fixture.source);
+            try {
+                Asked<Object> kept = ask(fixture.source, () -> {
+                    display.ready();
+                    return null;
+                }, JOptionPane.NO_OPTION, false);
+                DialogRequest request = kept.request();
+                assertEquals(DialogKind.MESSAGE, request.kind());
+                assertEquals(Messages.getString("DeployMinefieldDisplay.undeployedTitle"), request.title());
+                assertEquals(Messages.getString("DeployMinefieldDisplay.undeployedCarryables", 1), request.message());
+                verify(client, never()).sendDeployGroundObjects(any());
+
+                ask(fixture.source, () -> {
+                    display.ready();
+                    return null;
+                }, JOptionPane.YES_OPTION, false);
+                verify(client).sendDeployGroundObjects(any());
+            } finally {
+                dismiss();
+                onSwing(() -> {
+                    display.removeAllListeners();
+                    return null;
+                });
+            }
+        }
+    }
+
+    /**
+     * D13: over the battle window MegaMek's map menu, which the HUD's "More actions" captures, has no View group (its
+     * Unit Display and readout are the HUD's unit card and record sheet); the classic board keeps it.
+     */
+    @Test
+    void theCapturedMapMenuHasNoViewGroupWhileTheBattleWindowIsActive() throws Exception {
+        ClientGUI gui = mock(ClientGUI.class);
+        Client client = mock(Client.class);
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            when(client.getGame()).thenReturn(fixture.game);
+            when(client.getLocalPlayer()).thenReturn(fixture.player);
+            when(gui.getClient()).thenReturn(client);
+            BoardClientState view = spy(fixture.view);
+            doReturn(gui).when(view).getClientgui();
+            GpuBoardActions actions = new GpuBoardActions(view, () -> fixture.panel, () -> false, () -> { });
+            Coords hex = fixture.entity.getPosition();
+            assertTrue(labels(onSwing(() -> actions.contextCommands(hex))).contains("View"),
+                  "The classic board's map menu views the unit on the hex");
+            present(gui, view, fixture.source);
+            try {
+                List<String> labels = labels(onSwing(() -> actions.contextCommands(hex)));
+                assertFalse(labels.contains("View"), "No View group over the battle window: " + labels);
+                assertFalse(labels.isEmpty(), "The map menu's other groups stay");
+            } finally {
+                dismiss();
+            }
+        }
+    }
+
+    private static List<String> labels(List<BoardScene.Command> commands) {
+        return commands.stream().map(BoardScene.Command::label).toList();
+    }
+
+    /**
+     * G3: over the battle window a Ctrl measurement opens the LOS card while MegaMek's ruler stays hidden; the card's
+     * close ends the ruler's measurement and its line on the board, as the ruler's Close does. Without the battle
+     * window the ruler shows as before.
+     */
+    @Test
+    void theRulerStaysHiddenUnderTheLosCardAndTheCardsCloseEndsItsMeasurement() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "Shows the Swing ruler");
+        ClientGUI gui = mock(ClientGUI.class);
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            BoardClientState view = spy(fixture.view);
+            doReturn(gui).when(view).getClientgui();
+            JFrame frame = onSwing(JFrame::new);
+            RulerDialog ruler = onSwing(() -> new RulerDialog(frame, view, fixture.game));
+            Map<Integer, RulerDialog> rulers = new HashMap<>(Map.of(view.getBoardId(), ruler));
+            var field = ClientGUI.class.getDeclaredField("rulers");
+            field.setAccessible(true);
+            field.set(gui, rulers);
+            doCallRealMethod().when(gui).closeRuler(anyInt());
+            GpuBoardSource source = onSwing(() -> new GpuBoardSource(view, () -> fixture.panel));
+            Coords from = fixture.entity.getPosition();
+            Coords to = new Coords(from.getX(), from.getY() - 3);
+            present(gui, view, source);
+            try {
+                measure(view, source, from, to);
+                assertFalse(onSwing(ruler::isVisible), "The ruler stays hidden over the battle window");
+                assertNotNull(source.takeFrame().panels().los().card(), "The LOS card shows the measurement");
+                assertEquals(from, onSwing(view::getRulerStart));
+
+                source.los().closeCard();
+                onSwing(() -> null);
+                assertNull(onSwing(view::getRulerStart), "The card's close ends the ruler's measurement");
+                assertNull(onSwing(view::getRulerEnd));
+                assertNull(onSwing(() -> {
+                    source.refresh();
+                    return source.takeFrame().panels().los().card();
+                }));
+
+                dismiss();
+                measure(view, source, from, to);
+                assertTrue(onSwing(ruler::isVisible), "On the classic board the ruler shows as before");
+            } finally {
+                dismiss();
+                onSwing(() -> {
+                    ruler.dispose();
+                    source.close();
+                    frame.dispose();
+                    return null;
+                });
+            }
+        }
+    }
+
+    /**
+     * The LOS card's Elevation diagram (user item 6, U2): over the battle window the hidden ruler shows with its
+     * diagram open for the card's hexes and heights (a stepped height included), raised by the window's dialog
+     * listener, and the card keeps its heights. The ruler's Close hides it, ends the measurement and closes the card.
+     */
+    @Test
+    void theCardsElevationDiagramShowsTheRulerOverTheBattleWindowAndItsCloseEndsTheMeasurement() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "Shows the Swing ruler");
+        ClientGUI gui = mock(ClientGUI.class);
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        boolean diagram = preferences.getRulerDiagramVisible();
+        // The player keeps the ruler's diagram closed: the ruler opens without it.
+        preferences.setRulerDiagramVisible(false);
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            BoardClientState view = spy(fixture.view);
+            doReturn(gui).when(view).getClientgui();
+            JFrame frame = onSwing(JFrame::new);
+            // The ruler belongs to the client's classic window, whose dialogs the battle window's listener judges.
+            when(gui.getFrame()).thenReturn(frame);
+            RulerDialog ruler = onSwing(() -> new RulerDialog(frame, view, fixture.game));
+            var field = ClientGUI.class.getDeclaredField("rulers");
+            field.setAccessible(true);
+            field.set(gui, new HashMap<>(Map.of(view.getBoardId(), ruler)));
+            doCallRealMethod().when(gui).showRulerDiagram(anyInt(), any(), anyInt(), any(), anyInt());
+            GpuBoardSource source = onSwing(() -> new GpuBoardSource(view, () -> fixture.panel));
+            Coords from = fixture.entity.getPosition();
+            Coords to = new Coords(from.getX(), from.getY() - 3);
+            GpuBoardWindow window = present(gui, view, source);
+            Field listenerField = GpuBoardWindow.class.getDeclaredField("dialogListener");
+            listenerField.setAccessible(true);
+            AWTEventListener listener = (AWTEventListener) listenerField.get(window);
+            Toolkit.getDefaultToolkit().addAWTEventListener(listener, AWTEvent.COMPONENT_EVENT_MASK);
+            try {
+                measure(view, source, from, to);
+                GpuLosResult.Card measured = source.takeFrame().panels().los().card();
+                source.los().measure(from, to, measured.fromHeight(), measured.toHeight() + 1);
+                GpuLosResult.Card stepped = onSwing(() -> {
+                    source.refresh();
+                    return source.takeFrame().panels().los().card();
+                });
+                assertFalse(onSwing(ruler::isVisible), "The ruler stays hidden under the card");
+
+                source.los().showDiagram();
+                onSwing(() -> null);
+                assertTrue(onSwing(ruler::isVisible), "The diagram's ruler shows over the battle window");
+                assertTrue(onSwing(ruler::isAlwaysOnTop), "raised above it by the window's dialog listener");
+                assertNotNull(onSwing(() -> GpuDialogRoutingTest.button(ruler,
+                      Messages.getString("Ruler.hideDiagram"))), "with its diagram open");
+                assertEquals(List.of(from, to, stepped.fromHeight(), stepped.toHeight()), onSwing(() -> {
+                    List<JSpinner> heights = GpuDialogRoutingTest.components(ruler, JSpinner.class);
+                    return List.of(view.getRulerStart(), view.getRulerEnd(), heights.get(0).getValue(),
+                          heights.get(1).getValue());
+                }), "The ruler measures the card's hexes at the card's heights");
+                assertEquals(stepped, onSwing(() -> {
+                    source.refresh();
+                    return source.takeFrame().panels().los().card();
+                }), "The card keeps its heights");
+
+                onSwing(() -> {
+                    GpuDialogRoutingTest.press(ruler, Messages.getString("Ruler.Close"));
+                    return null;
+                });
+                assertFalse(onSwing(ruler::isVisible), "The ruler's Close hides it");
+                assertNull(onSwing(view::getRulerStart), "and ends the measurement");
+                assertNull(onSwing(() -> {
+                    source.refresh();
+                    return source.takeFrame().panels().los().card();
+                }), "and the card with it");
+
+                // A card the ruler did not measure (a remeasure, or the menu's line of sight while toasts are off):
+                // the diagram's ruler takes its hexes, and the card keeps its heights.
+                Coords other = new Coords(from.getX() + 1, from.getY() - 2);
+                source.los().measure(from, other, measured.fromHeight(), 3);
+                GpuLosResult.Card own = onSwing(() -> {
+                    source.refresh();
+                    return source.takeFrame().panels().los().card();
+                });
+                source.los().showDiagram();
+                onSwing(() -> null);
+                assertEquals(List.of(true, from, other, own.fromHeight(), 3), onSwing(() -> {
+                    List<JSpinner> heights = GpuDialogRoutingTest.components(ruler, JSpinner.class);
+                    return List.of(ruler.isVisible(), view.getRulerStart(), view.getRulerEnd(),
+                          heights.get(0).getValue(), heights.get(1).getValue());
+                }), "The ruler measures the card's hexes at its heights");
+                assertEquals(own, onSwing(() -> {
+                    source.refresh();
+                    return source.takeFrame().panels().los().card();
+                }), "The card the ruler took stays as it is");
+            } finally {
+                Toolkit.getDefaultToolkit().removeAWTEventListener(listener);
+                dismiss();
+                onSwing(() -> {
+                    ruler.dispose();
+                    source.close();
+                    frame.dispose();
+                    return null;
+                });
+            }
+        } finally {
+            preferences.setRulerDiagramVisible(diagram);
+        }
+    }
+
+    /** EDT: a Ctrl measurement between two hexes, as MegaMek's board reports both ends, then a capture. */
+    private static void measure(BoardClientState view, GpuBoardSource source, Coords from, Coords to)
+          throws Exception {
+        onSwing(() -> {
+            view.checkLOS(from);
+            view.checkLOS(to);
+            source.refresh();
+            return null;
+        });
+    }
+}

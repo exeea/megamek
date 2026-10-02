@@ -19,6 +19,7 @@ import javax.swing.JTabbedPane;
 import javax.swing.SwingUtilities;
 
 import megamek.client.Client;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.common.board.Board;
 import megamek.common.enums.GamePhase;
@@ -74,6 +75,9 @@ class BoardViewsContainerTest {
         var views = AbstractClientGUI.class.getDeclaredField("boardViews");
         views.setAccessible(true);
         views.set(gui, new HashMap<>());
+        var states = AbstractClientGUI.class.getDeclaredField("boardStates");
+        states.setAccessible(true);
+        states.set(gui, new HashMap<>());
         Client client = mock(Client.class);
         Game game = new Game();
         game.setBoard(0, new Board(1, 1));
@@ -88,17 +92,20 @@ class BoardViewsContainerTest {
             BoardViewsContainer container = new BoardViewsContainer(gui);
             container.setClassicViewEnabled(false);
             assertTrue(container.getCurrentBoardView().isEmpty());
-            gui.boardViews.put(0, first);
-            gui.boardViews.put(1, second);
+            gui.boardStates.put(0, mock(BoardClientState.class));
+            gui.boardStates.put(1, mock(BoardClientState.class));
             container.updateMapTabs();
-            assertSame(first, container.getCurrentBoardView().orElseThrow());
+            assertEquals(0, container.getCurrentBoardId().orElseThrow());
             container.showBoardView(1);
             container.updateMapTabs();
-            assertSame(second, container.getCurrentBoardView().orElseThrow());
+            assertEquals(1, container.getCurrentBoardId().orElseThrow());
+            assertTrue(container.getCurrentBoardView().isEmpty());
             verify(first, never()).getComponent();
             verify(second, never()).getComponent();
             assertEquals(0, ((JPanel) container.getPanel()).getComponentCount());
 
+            gui.boardViews.put(0, first);
+            gui.boardViews.put(1, second);
             container.setClassicViewEnabled(true);
             JTabbedPane tabs = (JTabbedPane) ((JPanel) container.getPanel()).getComponent(0);
             assertSame(second.getComponent(), tabs.getSelectedComponent());
@@ -109,9 +116,11 @@ class BoardViewsContainerTest {
             assertSame(first, container.getCurrentBoardView().orElseThrow());
 
             gui.boardViews.remove(0);
+            gui.boardStates.remove(0);
             container.updateMapTabs();
             assertSame(second, container.getCurrentBoardView().orElseThrow());
             gui.boardViews.clear();
+            gui.boardStates.clear();
             container.updateMapTabs();
             assertTrue(container.getCurrentBoardView().isEmpty());
         });

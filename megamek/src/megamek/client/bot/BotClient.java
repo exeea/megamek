@@ -52,6 +52,7 @@ import javax.swing.JOptionPane;
 import javax.swing.JScrollPane;
 import javax.swing.JTextPane;
 import javax.swing.ScrollPaneConstants;
+import javax.swing.SwingUtilities;
 
 import megamek.client.AbstractClient;
 import megamek.client.Client;
@@ -59,6 +60,7 @@ import megamek.client.bot.princess.BehaviorSettings;
 import megamek.client.bot.princess.CardinalEdge;
 import megamek.client.bot.princess.MinefieldDeploymentPlanner;
 import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.common.ECMInfo;
 import megamek.common.Hex;
 import megamek.common.Player;
@@ -1432,9 +1434,15 @@ public abstract class BotClient extends Client {
     }
 
     /**
-     * Pops up a dialog box showing an alert
+     * Pops up a dialog box showing an alert. While the native battle window of the client that created this bot is
+     * presented, that client shows the alert natively: this bot's own box has no owner and would open behind it.
      */
     public void doAlertDialog(String title, String message) {
+        ClientGUI gui = getClientGUI();
+        if ((gui != null) && GpuBoardWindow.drawsDialogsFor(gui)) {
+            SwingUtilities.invokeLater(() -> gui.doAlertDialog(title, message));
+            return;
+        }
         JTextPane textArea = new JTextPane();
         Report.setupStylesheet(textArea);
 

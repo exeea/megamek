@@ -43,7 +43,7 @@ import java.awt.Rectangle;
 import java.awt.Transparency;
 import java.util.Objects;
 
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
 import megamek.client.ui.util.StringDrawer;
 import megamek.client.ui.util.UIUtil;
@@ -64,7 +64,7 @@ public class SBFPlaceHolderSprite extends Sprite {
 
     /** Used to color the label when this unit is selected for movement etc. */
     //    private boolean isSelected;
-    public SBFPlaceHolderSprite(BoardView boardView, SBFUnitPlaceHolder placeHolder, Player owner, SBFGame game) {
+    public SBFPlaceHolderSprite(BoardGlyphContext boardView, SBFUnitPlaceHolder placeHolder, Player owner, SBFGame game) {
         super(boardView);
         this.placeHolder = Objects.requireNonNull(placeHolder);
         this.owner = owner;

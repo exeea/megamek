@@ -58,7 +58,9 @@ import javax.swing.JScrollPane;
 
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.game.Game;
 import megamek.common.units.CombatVehicleEscapePod;
@@ -270,7 +272,7 @@ public class AbandonUnitDialog extends JDialog implements ActionListener {
      * Highlights the specified entity on the board view.
      */
     private void highlightEntity(Entity entity) {
-        BoardView boardView = clientGUI.getBoardView();
+        BoardClientState boardView = clientGUI.getBoardState();
 
         boardView.highlightSelectedEntities(Collections.singletonList(entity));
 
@@ -285,7 +287,7 @@ public class AbandonUnitDialog extends JDialog implements ActionListener {
      * Clears all highlighting from the board view.
      */
     private void clearHighlighting() {
-        BoardView boardView = clientGUI.getBoardView();
+        BoardClientState boardView = clientGUI.getBoardState();
         boardView.highlightSelectedEntities(Collections.emptyList());
         boardView.setHighlightedEntityHexes(Collections.emptyList());
         boardView.repaint();
@@ -308,18 +310,51 @@ public class AbandonUnitDialog extends JDialog implements ActionListener {
     public void actionPerformed(ActionEvent e) {
         if (e.getSource() == btnConfirm) {
             // Send abandonment announcements for all selected units
-            for (Map.Entry<Integer, JCheckBox> entry : unitCheckboxes.entrySet()) {
-                if (entry.getValue().isSelected()) {
-                    clientGUI.getClient().sendUnitAbandonmentAnnouncement(entry.getKey());
-                    logger.debug("Sent abandonment announcement for unit ID: {}", entry.getKey());
-                    applied = true;
-                }
-            }
+            announce(unitCheckboxes.entrySet().stream().filter(entry -> entry.getValue().isSelected())
+                  .map(Map.Entry::getKey).toList());
             clearHighlighting();
             dispose();
         } else if (e.getSource() == btnCancel) {
             clearHighlighting();
             dispose();
         }
+    }
+
+    /**
+     * Announces the abandonment of the units the player ticked, here or in the native battle window.
+     *
+     * @param unitIds the ticked units
+     */
+    private void announce(List<Integer> unitIds) {
+        for (int unitId : unitIds) {
+            clientGUI.getClient().sendUnitAbandonmentAnnouncement(unitId);
+            logger.debug("Sent abandonment announcement for unit ID: {}", unitId);
+            applied = true;
+        }
+    }
+
+    /**
+     * Showing the dialog asks in the client's native battle window instead when that draws dialogs: the units, each
+     * with its crew, to tick. Confirm announces the ticked units as here; Cancel and Esc, like the close box, announce
+     * nothing.
+     */
+    @Override
+    public void setVisible(boolean visible) {
+        if (!visible || !answeredNatively()) {
+            super.setVisible(visible);
+        }
+    }
+
+    private boolean answeredNatively() {
+        List<DialogRow> rows = abandonableUnits.stream().map(unit -> new DialogRow(Messages.getString(
+              "AbandonUnitDialog.unitAndCrew", unit.getShortName(), getCrewNames(unit)), "", null, true)).toList();
+        DialogAnswer answer = clientGUI.askRows(Messages.getString("AbandonUnitDialog.instructions"), getTitle(), rows,
+              true, List.of(), null, List.of(btnConfirm.getText(), btnCancel.getText()), 1);
+        if (answer == null) {
+            return false;
+        }
+        announce(answer.selected().stream().map(row -> abandonableUnits.get(row).getId()).toList());
+        dispose();
+        return true;
     }
 }

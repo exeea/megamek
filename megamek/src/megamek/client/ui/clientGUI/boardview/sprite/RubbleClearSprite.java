@@ -46,8 +46,8 @@ import java.util.HashMap;
 import java.util.Map;
 import javax.swing.ImageIcon;
 
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Configuration;
@@ -108,7 +108,7 @@ public class RubbleClearSprite extends HexSprite {
      * @param turnsRequired  the total turns the clearing needs (the denominator)
      * @param overlayCounter {@code true} to draw the progress counter over the unit; {@code false} to draw the cleared-path fade behind
      */
-    public RubbleClearSprite(BoardView boardView, Coords loc, int turnsCompleted, int turnsRequired,
+    public RubbleClearSprite(BoardGlyphContext boardView, Coords loc, int turnsCompleted, int turnsRequired,
           boolean overlayCounter) {
         super(boardView, loc);
         this.turnsCompleted = turnsCompleted;

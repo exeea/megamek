@@ -42,7 +42,7 @@ import java.awt.Rectangle;
 import java.awt.Stroke;
 import java.awt.image.ImageObserver;
 
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.common.board.Coords;
 import megamek.common.units.Entity;
 
@@ -58,7 +58,7 @@ public class FlyOverSprite extends Sprite implements TacticalSprite {
 
     Color spriteColor;
 
-    public FlyOverSprite(BoardView boardView1, final Entity e) {
+    public FlyOverSprite(BoardGlyphContext boardView1, final Entity e) {
         super(boardView1);
         en = e;
         spriteColor = e.getOwner().getColour().getColour();
@@ -80,7 +80,7 @@ public class FlyOverSprite extends Sprite implements TacticalSprite {
         double prevAngle = prev.radian(curr);
 
         Point currPoint = bv.getCentreHexLocation(curr, true);
-        final double lw = bv.getScale() * BoardView.FLY_OVER_LINE_WIDTH;
+        final double lw = bv.getScale() * BoardGlyphContext.FLY_OVER_LINE_WIDTH;
 
         // This is a bend
         double diff;
@@ -143,7 +143,7 @@ public class FlyOverSprite extends Sprite implements TacticalSprite {
         }
 
         // line width
-        final double lw = bv.getScale() * BoardView.FLY_OVER_LINE_WIDTH;
+        final double lw = bv.getScale() * BoardGlyphContext.FLY_OVER_LINE_WIDTH;
         int numPassedThrough = en.getPassedThrough().size();
         double angle;
         double xDiff, yDiff;

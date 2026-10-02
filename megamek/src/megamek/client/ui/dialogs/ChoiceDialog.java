@@ -43,10 +43,15 @@ import java.awt.event.ActionListener;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.Serial;
+import java.util.ArrayList;
+import java.util.List;
 import javax.swing.*;
 
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
 
 /**
  * A (somewhat primitive) dialog that asks a question and lets the player select from the available choices. The
@@ -74,6 +79,9 @@ public class ChoiceDialog extends JDialog implements ActionListener {
     //the maximum number of choices that can be made; -1 if no maximum
     private int maxChoices;
 
+    private String question;
+    private boolean single;
+
     /**
      * Create and initialize the dialog.
      *
@@ -87,6 +95,8 @@ public class ChoiceDialog extends JDialog implements ActionListener {
         super.setResizable(false);
 
         this.maxChoices = max;
+        this.question = question;
+        single = isSingle;
 
         GridBagLayout gridBagLayout = new GridBagLayout();
         getContentPane().setLayout(gridBagLayout);
@@ -312,6 +322,43 @@ public class ChoiceDialog extends JDialog implements ActionListener {
             confirm = false;
             setVisible(false);
         }
+    }
+
+    /**
+     * Showing the dialog asks in the owning client's native battle window instead when that draws dialogs. The answer
+     * sets the choices as this dialog's own controls would, so the getters return the same result either way.
+     */
+    @Override
+    public void setVisible(boolean visible) {
+        if (!visible || !answeredNatively()) {
+            super.setVisible(visible);
+        }
+    }
+
+    private boolean answeredNatively() {
+        ClientGUI gui = ClientGUI.forFrame(getOwner());
+        if (gui == null) {
+            return false;
+        }
+        int count = (checkboxes == null) ? 0 : checkboxes.length;
+        List<DialogRow> rows = new ArrayList<>();
+        List<Integer> selected = new ArrayList<>();
+        for (int index = 0; index < count; index++) {
+            rows.add(new DialogRow(checkboxes[index].getText(), "", null, checkboxes[index].isEnabled()));
+            if (checkboxes[index].isSelected()) {
+                selected.add(index);
+            }
+        }
+        DialogAnswer answer = gui.askRows(question, getTitle(), rows, !single, selected,
+              (maxChoices == -1) ? null : maxChoices, List.of(butOK.getText(), butCancel.getText()), 1);
+        if (answer == null) {
+            return false;
+        }
+        confirm = answer.button() == 0;
+        for (int index = 0; index < count; index++) {
+            checkboxes[index].setSelected(answer.selected().contains(index));
+        }
+        return true;
     }
 
     /**

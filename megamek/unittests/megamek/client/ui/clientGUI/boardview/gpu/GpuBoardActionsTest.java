@@ -28,7 +28,7 @@ import megamek.client.Client;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
 import megamek.client.ui.dialogs.unitDisplay.WeaponPanel;
 import megamek.client.ui.panels.phaseDisplay.FiringDisplay;
@@ -67,7 +67,7 @@ class GpuBoardActionsTest {
                 menus.get().addActionListener(event -> clicks.incrementAndGet());
                 ClientGUI gui = mock(ClientGUI.class);
                 when(gui.getMenuBar()).thenReturn(menus.get());
-                BoardView view = spy(fixture.view);
+                BoardClientState view = spy(fixture.view);
                 doReturn(gui).when(view).getClientgui();
                 commands.set(new GpuBoardActions(view, () -> fixture.panel, () -> false, () -> { }).globalCommands());
                 fixture.game.setPhase(GamePhase.MOVEMENT_REPORT);
@@ -81,6 +81,32 @@ class GpuBoardActionsTest {
                 find(commands.get(), Messages.getString("CommonMenuBar.viewClassicBoard")).action().run();
                 SwingUtilities.invokeAndWait(() -> { });
                 assertEquals(1, clicks.get(), "An unavailable global menu item must not execute a stale callback");
+            } finally {
+                SwingUtilities.invokeAndWait(() -> menus.get().die());
+            }
+        }
+    }
+
+    @Test
+    void menuItemsAreFoundInTheirMenusByTheirActionCommands() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            AtomicReference<CommonMenuBar> menus = new AtomicReference<>();
+            AtomicReference<List<BoardScene.Command>> commands = new AtomicReference<>();
+            SwingUtilities.invokeAndWait(() -> {
+                menus.set(CommonMenuBar.getMenuBarForGame());
+                ClientGUI gui = mock(ClientGUI.class);
+                when(gui.getMenuBar()).thenReturn(menus.get());
+                BoardClientState view = spy(fixture.view);
+                doReturn(gui).when(view).getClientgui();
+                commands.set(new GpuBoardActions(view, () -> fixture.panel, () -> false, () -> { }).globalCommands());
+            });
+            try {
+                // The View menu's items that the HUD's minimap and conditions buttons run.
+                assertEquals(Messages.getString("CommonMenuBar.viewMinimap"),
+                      GpuBoardActions.menuItem(commands.get(), ClientGUI.VIEW_MINI_MAP).label());
+                assertEquals(Messages.getString("CommonMenuBar.viewPlanetaryConditions"),
+                      GpuBoardActions.menuItem(commands.get(), ClientGUI.VIEW_PLANETARY_CONDITIONS_OVERLAY).label());
+                assertNull(GpuBoardActions.menuItem(commands.get(), "viewMini"), "A prefix names no item");
             } finally {
                 SwingUtilities.invokeAndWait(() -> menus.get().die());
             }
@@ -124,7 +150,7 @@ class GpuBoardActionsTest {
             when(client.getLocalPlayer()).thenReturn(fixture.player);
             when(client.isMyTurn()).thenReturn(true);
             when(client.getMyTurn()).thenReturn(new GameTurn(fixture.player.getId()));
-            BoardView view = spy(fixture.view);
+            BoardClientState view = spy(fixture.view);
             doReturn(gui).when(view).getClientgui();
             FiringDisplay phase = mock(FiringDisplay.class);
             when(phase.currentEntity()).thenReturn(fixture.entity);
@@ -198,7 +224,7 @@ class GpuBoardActionsTest {
     }
 
     @Test
-    void offPageCommandsAndWeaponChoicesUseTheOriginalModels() throws Exception {
+    void offPageCommandsUseTheOriginalModels() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             Controls controls = controls(fixture);
             AtomicInteger clicks = new AtomicInteger();
@@ -211,67 +237,14 @@ class GpuBoardActionsTest {
                 commands.set(controls.actions().phaseCommands());
             });
             find(commands.get(), "Off page").action().run();
-            find(commands.get(), "Laser B").action().run();
             SwingUtilities.invokeAndWait(() -> { });
             assertEquals(1, clicks.get());
-            assertEquals(1, controls.weapons().weaponList.getSelectedIndex());
-            SwingUtilities.invokeAndWait(() -> controls.weapons().weaponList.setEnabled(false));
-            flatten(commands.get()).stream().filter(command -> command.id().equals("weapon:0"))
-                  .findFirst().orElseThrow().action().run();
-            SwingUtilities.invokeAndWait(() -> { });
-            assertEquals(1, controls.weapons().weaponList.getSelectedIndex(), "A stale disabled list cannot select a weapon");
-            BoardScene.Command ammo = find(commands.get(), "Special");
-            SwingUtilities.invokeAndWait(() -> controls.weapons().getAmmoSelector().setEnabled(false));
-            ammo.action().run();
-            SwingUtilities.invokeAndWait(() -> { });
-            assertEquals(0, controls.weapons().getAmmoSelector().getSelectedIndex());
         }
     }
 
     private static List<BoardScene.Command> flatten(List<BoardScene.Command> commands) {
         return commands.stream().flatMap(command -> java.util.stream.Stream.concat(java.util.stream.Stream.of(command),
               flatten(command.children()).stream())).toList();
-    }
-
-    @Test
-    void attackSnapshotUsesTheActingUnitsPresentationAndPendingOrders() throws Exception {
-        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            Controls controls = controls(fixture);
-            SwingUtilities.invokeAndWait(() -> {
-                when(controls.weapons().getTargetName()).thenReturn("Target Test");
-                when(controls.weapons().getWeaponSummary()).thenReturn("Laser<br>Heat 3  Damage 5");
-                when(controls.weapons().getFiringSolution()).thenReturn("Range: 4<br>To Hit: 7 (58%)");
-                when(controls.phase().getAttackDescriptions()).thenReturn(List.of("Laser &gt; Target Test"));
-                controls.weapons().weaponList.setSelectedIndex(1);
-                BoardScene.Attack state = controls.actions().attackState();
-                assertEquals("Target Test", state.targetName());
-                assertEquals("Laser\nHeat 3  Damage 5", state.weaponDetails());
-                assertEquals("Range: 4\nTo Hit: 7 (58%)", state.targetDetails());
-                assertEquals(1, state.selectedWeapon());
-                assertEquals(List.of("Laser > Target Test"), state.orders());
-                when(controls.weapons().getSelectedEntityId()).thenReturn(controls.target().getId());
-                assertEquals("", controls.actions().attackState().weaponDetails(),
-                      "Inspecting another unit must not put its weapons in the acting unit's panel");
-                when(controls.phase().currentEntity()).thenReturn(null);
-                assertNull(controls.actions().attackState());
-            });
-        }
-    }
-
-    @Test
-    void ammunitionCannotApplyToAWeaponSelectedAfterTheSnapshot() throws Exception {
-        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            Controls controls = controls(fixture);
-            AtomicReference<BoardScene.Command> ammunition = new AtomicReference<>();
-            SwingUtilities.invokeAndWait(() -> {
-                controls.weapons().weaponList.setSelectedIndex(0);
-                ammunition.set(find(controls.actions().phaseCommands(), "Special"));
-                controls.weapons().weaponList.setSelectedIndex(1);
-            });
-            ammunition.get().action().run();
-            SwingUtilities.invokeAndWait(() ->
-                  assertEquals(0, controls.weapons().getAmmoSelector().getSelectedIndex()));
-        }
     }
 
     private static BoardScene.Command find(List<BoardScene.Command> commands, String label) {

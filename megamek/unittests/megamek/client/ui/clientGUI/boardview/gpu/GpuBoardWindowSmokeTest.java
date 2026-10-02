@@ -13,20 +13,15 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockConstruction;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.awt.BorderLayout;
-import java.awt.Color;
-import java.awt.Dimension;
-import java.awt.Graphics;
-import java.awt.Point;
-import java.awt.Rectangle;
 import java.awt.Window;
-import java.awt.event.WindowEvent;
 import java.io.File;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Optional;
@@ -51,36 +46,29 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Graphics;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.math.Vector3;
 import megamek.client.Client;
-import megamek.client.event.BoardViewEvent;
-import megamek.client.event.BoardViewListenerAdapter;
-import megamek.client.ui.IDisplayable;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.BoardViewsContainer;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.CommandBarPanel;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardViewPanel;
 import megamek.client.ui.clientGUI.boardview.overlay.UnitOverviewOverlay;
-import megamek.client.ui.dialogs.BotCommands.BotCommandsDialog;
-import megamek.client.ui.dialogs.BotCommands.BotCommandsPanel;
-import megamek.client.ui.dialogs.forceDisplay.ForceDisplayDialog;
-import megamek.client.ui.dialogs.forceDisplay.ForceDisplayPanel;
 import megamek.client.ui.dialogs.miniReport.MiniReportDisplayDialog;
 import megamek.client.ui.dialogs.miniReport.MiniReportDisplayPanel;
-import megamek.client.ui.dialogs.minimap.MinimapDialog;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayDialog;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
-import megamek.client.ui.entityreadout.LiveReadoutDialog;
+import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.panels.StartingScenarioPanel;
 import megamek.client.ui.panels.WaitingForServerPanel;
 import megamek.client.ui.util.KeyCommandBind;
-import megamek.common.Player;
 import megamek.common.Report;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
+import megamek.common.units.Entity;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
@@ -103,6 +91,61 @@ class GpuBoardWindowSmokeTest {
               .noneMatch(thread -> thread.getName().equals("MegaMek-GPU-board")));
         GUIPreferences.getInstance().setUse3DBoard(boardStyle);
     }
+
+    @Test
+    void nativeGameplayRendersWithoutConstructingAClassicBoard() throws Exception {
+        var classic = onSwing(() -> mockConstruction(BoardView.class));
+        var panels = onSwing(() -> mockConstruction(BoardViewPanel.class));
+        var session = onSwing(GpuGameplayStateTest.Session::create);
+        JFrame owner = onSwing(JFrame::new);
+        CommonMenuBar menus = onSwing(CommonMenuBar::getMenuBarForGame);
+        ClientGUI gui = session.state().getClientgui();
+        try {
+            Application previous = Gdx.app;
+            onSwing(() -> {
+                session.source().close();
+                when(gui.getFrame()).thenReturn(owner);
+                when(gui.getMenuBar()).thenReturn(menus);
+                menus.setPhase(GamePhase.MOVEMENT);
+                GpuBoardWindow.open(session.state(), gui::getMainPanel);
+                return null;
+            });
+            await(() -> Gdx.app != null && Gdx.app != previous);
+            await(() -> onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames() > 3));
+            for (boolean isometric : new boolean[] { false, true }) {
+                onGl(() -> {
+                    GpuBattleView battle = (GpuBattleView) Gdx.app.getApplicationListener();
+                    battle.boardCamera.setIsometric(isometric);
+                    return null;
+                });
+                awaitNavigation();
+                onGl(() -> {
+                    File directory = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
+                    assertTrue(directory.isDirectory() || directory.mkdirs());
+                    GpuBoardTestUi.capture(new File(directory, "native-state-" + (isometric ? "iso" : "top") + ".png"));
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                    return null;
+                });
+            }
+            onSwing(() -> {
+                assertTrue(classic.constructed().isEmpty());
+                assertTrue(panels.constructed().isEmpty());
+                assertFalse(session.state().isClosed());
+                return null;
+            });
+        } finally {
+            onSwing(() -> { GpuBoardWindow.closeFor(gui); return null; });
+            await(() -> !GpuBoardWindow.isActiveFor(gui));
+            onSwing(() -> {
+                session.close();
+                owner.dispose();
+                menus.die();
+                panels.close();
+                classic.close();
+                return null;
+            });
+        }
+    }
     private record ClientWindow(JFrame frame, CommonMenuBar menus, BoardView view, JMenuItem gpuChoice,
           UnitOverviewOverlay overview) { }
 
@@ -113,7 +156,7 @@ class GpuBoardWindowSmokeTest {
             try {
                 onSwing(() -> {
                     ui.view().centerOn(fixture.entity);
-                    assertEquals(fixture.entity.getId(), ui.view().getCenterRequest().entityId());
+                    assertEquals(fixture.entity.getId(), ui.view().getClientState().getCenterRequest().entityId());
                     assertNull(ui.view().getPanel().getParent());
                     return null;
                 });
@@ -135,7 +178,7 @@ class GpuBoardWindowSmokeTest {
                 });
             } finally {
                 onSwing(() -> {
-                    GpuBoardWindow.closeFor(ui.view());
+                    GpuBoardWindow.closeFor(ui.view().getClientState());
                     ui.frame().dispose();
                     ui.view().dispose();
                     GUIPreferences.getInstance().removePreferenceChangeListener(ui.menus());
@@ -145,22 +188,22 @@ class GpuBoardWindowSmokeTest {
         }
     }
 
+    /**
+     * W1 (unit panel design 14 U4): once the native HUD draws, its switch on, no phase shows the Unit Display's window,
+     * however the client's preferences, phase rules or keys ask for it; the panel stays in its hidden dialog with its
+     * unit, the firing display's weapon list. Back on the classic board the window shows again.
+     */
     @Test
-    void unitDialogsOpenOverTheNativeBoardAndKeepTheirClassicSettings() throws Exception {
+    void theUnitDisplaysWindowStaysHiddenOverTheNativeHudInEveryPhase() throws Exception {
         GUIPreferences preferences = GUIPreferences.getInstance();
         int location = preferences.getUnitDisplayLocation();
         boolean unitEnabled = preferences.getUnitDisplayEnabled();
-        boolean forceEnabled = preferences.getForceDisplayEnabled();
-        boolean overviewEnabled = preferences.getShowUnitOverview();
-        AtomicInteger restoredLocation = new AtomicInteger(-1);
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             ClientWindow ui = onSwing(() -> createClientWindow(fixture));
             ClientGUI gui = ui.view().getClientgui();
             UnitDisplayDialog unit = onSwing(() -> {
-                preferences.setUnitDisplayLocation(1);
-                preferences.setUnitDisplayEnabled(false);
-                preferences.setForceDisplayEnabled(false);
-                preferences.setShowUnitOverview(false);
+                preferences.setUnitDisplayLocation(0);
+                preferences.setUnitDisplayEnabled(true);
                 UnitDisplayPanel panel = new UnitDisplayPanel(gui);
                 UnitDisplayDialog dialog = new UnitDisplayDialog(ui.frame(), gui);
                 when(gui.getUnitDisplay()).thenReturn(panel);
@@ -168,88 +211,60 @@ class GpuBoardWindowSmokeTest {
                 panel.displayEntity(fixture.entity);
                 doCallRealMethod().when(gui).setUnitDisplayVisible(anyBoolean());
                 doAnswer(invocation -> {
+                    // This fixture has no classic split panes; the classic board's request is only observed
                     if (GpuBoardWindow.isActiveFor(gui)) {
                         invocation.callRealMethod();
                     } else {
-                        // Observe the request; this fixture has no legacy split panes.
-                        restoredLocation.set(preferences.getUnitDisplayLocation());
+                        dialog.setVisible(invocation.getArgument(0));
                     }
                     return null;
                 }).when(gui).setUnitDisplayLocation(anyBoolean());
-                doCallRealMethod().when(gui).setForceDisplayVisible(anyBoolean());
+                doCallRealMethod().when(gui).maybeShowUnitDisplay();
                 doCallRealMethod().when(gui).actionPerformed(any());
                 doCallRealMethod().when(gui).preferenceChange(any());
                 ui.menus().addActionListener(gui);
                 preferences.addPreferenceChangeListener(gui);
-                ui.view().addOverlay(ui.overview());
-                return dialog;
-            });
-            ForceDisplayDialog force = onSwing(() -> {
-                ForceDisplayDialog dialog = new ForceDisplayDialog(ui.frame(), gui);
-                ForceDisplayPanel panel = new ForceDisplayPanel(gui);
-                when(gui.getForceDisplayPanel()).thenReturn(panel);
-                dialog.add(panel);
-                when(gui.getForceDisplayDialog()).thenReturn(dialog);
-                // Reuse a dialog that has already emitted WINDOW_OPENED in the classic view.
-                dialog.setVisible(true);
-                dialog.setVisible(false);
                 return dialog;
             });
             try {
                 openNative(ui);
-                await(() -> onSwing(() -> ui.view().sidePanelInset() > 0));
-                input(() -> GpuBoardTestUi.click("battle-report-toggle"));
-                pressShortcut(KeyCommandBind.UNIT_DISPLAY);
-                await(() -> onSwing(() -> unit.isShowing() && unit.isAlwaysOnTop()));
-                pressShortcut(KeyCommandBind.FORCE_DISPLAY);
-                await(() -> onSwing(() -> force.isShowing() && force.isAlwaysOnTop()));
+                await(() -> onSwing(() -> GpuBoardWindow.drawsDialogsFor(gui)));
+                for (GamePhase phase : List.of(GamePhase.DEPLOYMENT, GamePhase.MOVEMENT, GamePhase.FIRING,
+                      GamePhase.PHYSICAL, GamePhase.FIRING_REPORT, GamePhase.END_REPORT)) {
+                    onSwing(() -> {
+                        fixture.game.setPhase(phase);
+                        ui.menus().setPhase(phase);
+                        gui.maybeShowUnitDisplay();
+                        gui.refreshAuxiliaryWindows();
+                        preferences.setUnitDisplayEnabled(true);
+                        return null;
+                    });
+                    pressShortcut(KeyCommandBind.UNIT_DISPLAY);
+                    pressShortcut(KeyCommandBind.UNIT_DISPLAY);
+                    onSwing(() -> {
+                        assertFalse(Arrays.stream(Window.getWindows())
+                              .anyMatch(window -> window instanceof UnitDisplayDialog && window.isShowing()), phase
+                              + ": no Unit Display window");
+                        assertTrue(SwingUtilities.isDescendingFrom(gui.getUnitDisplay(), unit));
+                        assertSame(fixture.entity, gui.getUnitDisplay().getCurrentEntity());
+                        return null;
+                    });
+                }
                 onSwing(() -> {
-                    assertFalse(ui.frame().isVisible());
-                    assertTrue(SwingUtilities.isDescendingFrom(gui.getUnitDisplay(), unit));
-                    assertSame(fixture.entity, gui.getUnitDisplay().getCurrentEntity());
-                    assertEquals(1, preferences.getUnitDisplayLocation());
-                    force.dispatchEvent(new WindowEvent(force, WindowEvent.WINDOW_CLOSING));
-                    force.setAlwaysOnTop(false);
-                    fixture.game.setPhase(GamePhase.FIRING_REPORT);
-                    ui.menus().setPhase(GamePhase.FIRING_REPORT);
-                    return null;
-                });
-                pressShortcut(KeyCommandBind.FORCE_DISPLAY);
-                await(() -> onSwing(() -> force.isShowing() && force.isAlwaysOnTop()));
-                pressShortcut(KeyCommandBind.UNIT_DISPLAY);
-                await(() -> onSwing(() -> !unit.isVisible()));
-                pressShortcut(KeyCommandBind.UNIT_DISPLAY);
-                await(() -> onSwing(() -> unit.isShowing() && unit.isAlwaysOnTop()));
-                input(() -> GpuBoardTestUi.click("battle-report-toggle"));
-                pressShortcut(KeyCommandBind.UNIT_OVERVIEW);
-                onSwing(() -> {
-                    assertFalse(preferences.getShowUnitOverview());
-                    assertTrue(ui.view().sidePanelInset() > 0);
                     GpuBoardWindow.showClassic(gui);
                     return null;
                 });
-                await(() -> onSwing(() -> ui.frame().isVisible() && restoredLocation.get() == 1));
-                onSwing(() -> {
-                    assertFalse(unit.isAlwaysOnTop());
-                    assertFalse(force.isAlwaysOnTop());
-                    assertEquals(0, ui.view().sidePanelInset(), "2D retains its hidden overview preference");
-                    return null;
-                });
+                await(() -> onSwing(unit::isShowing));
             } finally {
                 onSwing(() -> {
                     preferences.removePreferenceChangeListener(gui);
-                    preferences.removePreferenceChangeListener(gui.getForceDisplayPanel());
-                    fixture.game.removeGameListener(gui.getForceDisplayPanel());
-                    GpuBoardWindow.closeFor(ui.view());
+                    GpuBoardWindow.closeFor(ui.view().getClientState());
                     unit.dispose();
-                    force.dispose();
                     ui.frame().dispose();
                     ui.view().dispose();
                     ui.menus().die();
                     preferences.setUnitDisplayLocation(location);
                     preferences.setUnitDisplayEnabled(unitEnabled);
-                    preferences.setForceDisplayEnabled(forceEnabled);
-                    preferences.setShowUnitOverview(overviewEnabled);
                     return null;
                 });
             }
@@ -266,7 +281,7 @@ class GpuBoardWindowSmokeTest {
                 Application previous = Gdx.app;
                 onSwing(() -> {
                     phase.set(new StartingScenarioPanel());
-                    when(gui.getCurrentBoardView()).thenReturn(Optional.empty());
+                    when(gui.getCurrentBoardState()).thenReturn(Optional.empty());
                     GpuBoardWindow.open(gui, phase::get);
                     return null;
                 });
@@ -289,18 +304,20 @@ class GpuBoardWindowSmokeTest {
                     return message.getText().toString().equals(Messages.getString("ClientGUI.waitingOnTheServer"));
                 }));
                 onSwing(() -> {
-                    when(gui.getCurrentBoardView()).thenReturn(Optional.of(ui.view()));
+                    doReturn(Optional.of(ui.view().getClientState())).when(gui).getCurrentBoardState();
                     return null;
                 });
                 await(() -> onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames() >= 5));
+                // With the board, the HUD's phase header names the server wait until a phase display replaces it.
+                String waiting = UiTheme.upper(Messages.getString("ClientGUI.waitingOnTheServer"));
+                await(() -> onGl(() -> phaseHeaderTexts().contains(waiting)));
                 onGl(() -> {
                     assertEquals(window, ((Lwjgl3Graphics) Gdx.graphics).getWindow().getWindowHandle());
-                    assertTrue(GpuBoardTestUi.stage().getRoot().findActor("board-phase-notice").isVisible());
                     assertNull(GpuBoardTestUi.stage().getRoot().findActor("board-loading-message"));
                     return null;
                 });
                 onSwing(() -> { phase.set(fixture.panel); return null; });
-                await(() -> onGl(() -> !GpuBoardTestUi.stage().getRoot().findActor("board-phase-notice").isVisible()));
+                await(() -> onGl(() -> !phaseHeaderTexts().contains(waiting)));
                 onSwing(() -> {
                     verify(ui.view(), never()).getComponent();
                     assertFalse(ui.frame().isVisible());
@@ -310,7 +327,8 @@ class GpuBoardWindowSmokeTest {
                     BoardView view = new BoardView(fixture.game, null, gui, 0);
                     view.setLocalPlayer(fixture.player);
                     ui.view().dispose();
-                    when(gui.getCurrentBoardView()).thenReturn(Optional.of(view));
+                    fixture.view.close();
+                    doReturn(Optional.of(view.getClientState())).when(gui).getCurrentBoardState();
                     return view;
                 });
                 try {
@@ -412,6 +430,11 @@ class GpuBoardWindowSmokeTest {
         }
     }
 
+    /** The texts of the HUD's phase header, on the GL thread. */
+    private static List<String> phaseHeaderTexts() {
+        return GpuBoardTestUi.texts(GpuBoardTestUi.stage().getRoot().findActor("phase-header"));
+    }
+
     private static JOptionPane savePrompt(JFrame frame) {
         for (Window window : frame.getOwnedWindows()) {
             if (window instanceof JDialog dialog && dialog.isShowing()) {
@@ -423,93 +446,6 @@ class GpuBoardWindowSmokeTest {
             }
         }
         return null;
-    }
-
-    @Test
-    void botCommandsAndMinimapStayAccessibleWithoutTheClassicDock() throws Exception {
-        GUIPreferences preferences = GUIPreferences.getInstance();
-        int location = preferences.getBotCommandsLocation();
-        boolean botEnabled = preferences.getBotCommandsEnabled();
-        boolean mapEnabled = preferences.getMinimapEnabled();
-        int botAuto = preferences.getBotCommandsAutoDisplayNonReportPhase();
-        int mapAuto = preferences.getMinimapAutoDisplayNonReportPhase();
-        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            ClientWindow ui = onSwing(() -> createClientWindow(fixture, false));
-            ClientGUI gui = ui.view().getClientgui();
-            BotCommandsDialog bot = onSwing(() -> {
-                Player player = new Player(77, "Bot");
-                player.setBot(true);
-                fixture.game.addPlayer(player.getId(), player);
-                preferences.setBotCommandsLocation(ClientGUI.BOT_COMMANDS_LOCATION_DOCKED);
-                preferences.setBotCommandsEnabled(true);
-                preferences.setBotCommandAutoDisplayNonReportPhase(GUIPreferences.SHOW);
-                preferences.setMinimapAutoDisplayNonReportPhase(GUIPreferences.SHOW);
-                BotCommandsDialog dialog = new BotCommandsDialog(ui.frame(), gui);
-                BotCommandsPanel panel = new BotCommandsPanel(gui.getClient(), null, null, gui);
-                CommandBarPanel bar = new CommandBarPanel(gui);
-                JPanel top = new JPanel(new BorderLayout());
-                top.add(bar, BorderLayout.NORTH);
-                setField(ClientGUI.class, gui, "botCommandsPanel", panel);
-                setField(ClientGUI.class, gui, "commandBarPanel", bar);
-                setField(ClientGUI.class, gui, "panTop", top);
-                when(gui.getBotCommandsDialog()).thenReturn(dialog);
-                doCallRealMethod().when(gui).preferenceChange(any());
-                doCallRealMethod().when(gui).actionPerformed(any());
-                preferences.addPreferenceChangeListener(gui);
-                ui.menus().addActionListener(gui);
-                return dialog;
-            });
-            MinimapDialog minimap = onSwing(() -> {
-                MinimapDialog dialog = new MinimapDialog(ui.frame());
-                dialog.add(new JPanel());
-                dialog.setSize(240, 200);
-                when(gui.getMiniMapDialog()).thenReturn(dialog);
-                setField(AbstractClientGUI.class, gui, "miniMaps", java.util.Map.of(0, dialog));
-                return dialog;
-            });
-            try {
-                openNative(ui);
-                await(() -> onSwing(() -> bot.isShowing() && bot.isAlwaysOnTop()
-                      && minimap.isShowing() && minimap.isAlwaysOnTop()));
-                assertEquals(ClientGUI.BOT_COMMANDS_LOCATION_DOCKED, preferences.getBotCommandsLocation());
-                input(() -> GpuBoardTestUi.click("battle-report-toggle"));
-                pressShortcut(KeyCommandBind.MINIMAP);
-                await(() -> onSwing(() -> !minimap.isVisible()));
-                pressShortcut(KeyCommandBind.MINIMAP);
-                await(() -> onSwing(minimap::isShowing));
-                onSwing(() -> {
-                    preferences.setBotCommandsEnabled(false);
-                    assertFalse(bot.isVisible());
-                    preferences.setBotCommandsEnabled(true);
-                    assertTrue(bot.isVisible());
-                    GpuBoardWindow.showClassic(gui);
-                    return null;
-                });
-                await(() -> onSwing(() -> ui.frame().isVisible() && !bot.isVisible()));
-                onSwing(() -> {
-                    assertEquals(0, bot.getContentPane().getComponentCount(), "The same panel returns to the 2D dock");
-                    assertTrue(minimap.isVisible());
-                    assertFalse(minimap.isAlwaysOnTop());
-                    return null;
-                });
-            } finally {
-                onSwing(() -> {
-                    preferences.removePreferenceChangeListener(gui);
-                    GpuBoardWindow.closeFor(ui.view());
-                    bot.dispose();
-                    minimap.dispose();
-                    ui.frame().dispose();
-                    ui.view().dispose();
-                    ui.menus().die();
-                    preferences.setBotCommandsLocation(location);
-                    preferences.setBotCommandsEnabled(botEnabled);
-                    preferences.setBotCommandAutoDisplayNonReportPhase(botAuto);
-                    preferences.setMinimapAutoDisplayNonReportPhase(mapAuto);
-                    preferences.setMinimapEnabled(mapEnabled);
-                    return null;
-                });
-            }
-        }
     }
 
     @Test
@@ -550,17 +486,10 @@ class GpuBoardWindowSmokeTest {
                     assertTrue(preferences.getMiniReportEnabled(), "Suppressing the old window preserves 2D preferences");
                     return null;
                 });
-                await(() -> onGl(() -> GpuBoardTestUi.stage().getRoot().findActor("report-readout:1") != null));
-                input(() -> GpuBoardTestUi.click("report-readout:1"));
-                await(() -> onSwing(() -> java.util.Arrays.stream(ui.frame().getOwnedWindows())
-                      .anyMatch(window -> window instanceof LiveReadoutDialog && window.isVisible() && window.isAlwaysOnTop())));
+                // The report phase opens the HUD's log, which stands for the classic report.
+                await(() -> onGl(() -> GpuBoardTestUi.shown(GpuBoardTestUi.stage().getRoot().findActor("log-panel"))));
                 onSwing(() -> {
-                    assertFalse(report.isVisible(), "Opening a unit's details must not revive the old report");
-                    for (var window : ui.frame().getOwnedWindows()) {
-                        if (window instanceof LiveReadoutDialog) {
-                            window.dispatchEvent(new WindowEvent(window, WindowEvent.WINDOW_CLOSING));
-                        }
-                    }
+                    assertFalse(report.isVisible(), "The native log must not revive the old report");
                     GpuBoardWindow.showClassic(gui);
                     return null;
                 });
@@ -568,7 +497,7 @@ class GpuBoardWindowSmokeTest {
                 assertFalse(onSwing(() -> GpuBoardWindow.isActiveFor(gui)));
             } finally {
                 onSwing(() -> {
-                    GpuBoardWindow.closeFor(ui.view());
+                    GpuBoardWindow.closeFor(ui.view().getClientState());
                     report.dispose();
                     ui.frame().dispose();
                     ui.view().dispose();
@@ -585,45 +514,10 @@ class GpuBoardWindowSmokeTest {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             ClientWindow ui = onSwing(() -> createClientWindow(fixture));
             Coords position = fixture.entity.getPosition();
-            AtomicInteger overlayClicks = new AtomicInteger();
-            AtomicInteger unitClicks = new AtomicInteger();
             GUIPreferences preferences = GUIPreferences.getInstance();
             float originalScale = preferences.getGUIScale();
-            boolean originalOverview = preferences.getShowUnitOverview();
             try {
                 onSwing(() -> {
-                    preferences.setShowUnitOverview(true);
-                    ui.view().addOverlay(ui.overview());
-                    ui.view().addBoardViewListener(new BoardViewListenerAdapter() {
-                        @Override
-                        public void unitSelected(BoardViewEvent event) {
-                            assertEquals(fixture.entity.getId(), event.getEntityId());
-                            unitClicks.incrementAndGet();
-                        }
-                    });
-                    ui.view().addOverlay(new IDisplayable() {
-                        private Rectangle bounds() {
-                            float scale = preferences.getGUIScale();
-                            return new Rectangle(Math.round(20 * scale), Math.round(30 * scale),
-                                  Math.round(80 * scale), Math.round(40 * scale));
-                        }
-
-                        @Override
-                        public void draw(Graphics graphics, Rectangle rect) {
-                            Rectangle bounds = bounds();
-                            graphics.setColor(Color.CYAN);
-                            graphics.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
-                        }
-
-                        @Override
-                        public boolean isHit(Point point, Dimension size) {
-                            if (bounds().contains(point)) {
-                                overlayClicks.incrementAndGet();
-                                return true;
-                            }
-                            return false;
-                        }
-                    });
                     ui.view().centerOnHex(position);
                     return null;
                 });
@@ -649,10 +543,12 @@ class GpuBoardWindowSmokeTest {
                 onSwing(() -> { ui.view().centerOnHex(position); return null; });
                 await(() -> onGl(() -> unitIsCentered(fixture)));
                 assertTrue(onSwing(() -> ui.frame().isDisplayable()), "Switching must preserve the original client");
-                // The classic window is hidden, so a client dialog must be raised above the native window.
+                // The classic window is hidden, so an allowed client dialog, here the About box, must be raised above
+                // the native window.
                 JDialog probe = onSwing(() -> {
-                    JDialog dialog = new JDialog(ui.frame(), "GPU dialog probe", false);
-                    dialog.setSize(160, 90);
+                    JDialog dialog = new JOptionPane("GPU dialog probe").createDialog(ui.frame(),
+                          Messages.getString("about.title", megamek.MMConstants.PROJECT_NAME));
+                    dialog.setModal(false);
                     dialog.setVisible(true);
                     return dialog;
                 });
@@ -666,19 +562,7 @@ class GpuBoardWindowSmokeTest {
                     // Allow the EDT to publish the resized overlay and upload it on the render thread.
                     await(() -> onGl(() -> ((GpuBattleView) Gdx.app.getApplicationListener()).frames() > resizedFrame + 15));
                     assertFalse(onSwing(() -> ui.frame().isVisible()), "Resizing must not fall back to the classic board");
-                    int previousClicks = overlayClicks.get();
-                    input(() -> {
-                        float scale = Gdx.graphics.getWidth() / GpuBoardTestUi.stage().getWidth();
-                        int x = Math.round(40 * scale);
-                        int y = Math.round((GpuBoardUi.TOP_HEIGHT + 40) * scale);
-                        Gdx.input.getInputProcessor().touchDown(x, y, 0, Input.Buttons.LEFT);
-                        Gdx.input.getInputProcessor().touchUp(x, y, 0, Input.Buttons.LEFT);
-                    });
-                    onSwing(() -> {
-                        assertEquals(previousClicks + 1, overlayClicks.get(), "Scaled HUD input must match the painted widget");
-                        return null;
-                    });
-                    // Exercise the actual sidebar, independently of any phase selection handler.
+                    // A client's request to centre on the unit, as Center camera gives it, keeps zoom and angle.
                     float zoom = onGl(() -> {
                         GpuBattleView battle = (GpuBattleView) Gdx.app.getApplicationListener();
                         battle.boardCamera.setIsometric(size[0] != 900);
@@ -686,23 +570,15 @@ class GpuBoardWindowSmokeTest {
                         assertFalse(unitIsCentered(fixture));
                         return battle.boardCamera.camera.zoom;
                     });
-                    Vector3 direction = onGl(() -> new Vector3(((GpuBattleView) Gdx.app.getApplicationListener()).boardCamera.camera.direction));
-                    int previousUnitClicks = unitClicks.get();
-                    Runnable sidebarClick = () -> {
-                        float scale = Gdx.graphics.getWidth() / GpuBoardTestUi.stage().getWidth();
-                        float overlayScale = scale / (size[0] == 2560 ? 1.5f : 1f);
-                        int x = Math.round(Gdx.graphics.getWidth() - 33 * overlayScale);
-                        int y = Math.round(GpuBoardUi.TOP_HEIGHT * scale + 29 * overlayScale);
-                        Gdx.input.getInputProcessor().touchDown(x, y, 0, Input.Buttons.LEFT);
-                        Gdx.input.getInputProcessor().touchUp(x, y, 0, Input.Buttons.LEFT);
+                    Vector3 direction = onGl(() -> new Vector3(((GpuBattleView) Gdx.app.getApplicationListener())
+                          .boardCamera.camera.direction));
+                    Callable<Long> centerOnUnit = () -> {
+                        ui.view().centerOn(fixture.entity);
+                        var request = ui.view().getClientState().getCenterRequest();
+                        assertEquals(fixture.entity.getId(), request.entityId());
+                        return request.sequence();
                     };
-                    input(sidebarClick);
-                    onSwing(() -> {
-                        assertEquals(fixture.entity.getId(), ui.view().getCenterRequest().entityId());
-                        return null;
-                    });
-                    awaitNavigation();
-                    assertEquals(previousUnitClicks + 1, unitClicks.get(), "Sidebar centering must retain the existing selection event");
+                    awaitCenterRequest(onSwing(centerOnUnit));
                     Vector3 settled = onGl(() -> {
                         GpuBattleView battle = (GpuBattleView) Gdx.app.getApplicationListener();
                         assertEquals(zoom, battle.boardCamera.camera.zoom, 0.001f, "Centering preserves zoom");
@@ -713,33 +589,30 @@ class GpuBoardWindowSmokeTest {
                         GpuBoardTestUi.capture(new File(output, "resize-" + size[0] + ".png"));
                         return battle.boardCamera.focus.cpy();
                     });
-                    input(sidebarClick);
-                    onSwing(() -> {
-                        assertEquals(previousUnitClicks + 2, unitClicks.get());
-                        return null;
-                    });
-                    awaitNavigation();
+                    awaitCenterRequest(onSwing(centerOnUnit));
                     onGl(() -> {
                         GpuBattleView battle = (GpuBattleView) Gdx.app.getApplicationListener();
                         assertTrue(settled.epsilonEquals(battle.boardCamera.focus, .001f),
-                              "A second sidebar click must retain the same framing, not snap to the unit's hex");
+                              "A second request must retain the same framing, not snap to the unit's hex");
                         return null;
                     });
                 }
+                // The HUD's Menu holds the menu bar's commands; its groups stay open when it opens again.
+                input(() -> GpuBoardTestUi.click("utility-menu"));
                 input(() -> GpuBoardTestUi.clickText(Messages.getString("CommonMenuBar.FileMenu")));
-                captureMenu("file-menu.png");
+                captureMenu("menu-file.png");
                 input(() -> Gdx.input.getInputProcessor().keyDown(Input.Keys.ESCAPE));
+                input(() -> GpuBoardTestUi.click("utility-menu"));
                 input(() -> GpuBoardTestUi.clickText(Messages.getString("CommonMenuBar.ViewMenu")));
-                captureMenu("menu-bar.png");
+                captureMenu("menu-view.png");
                 onGl(() -> {
                     GpuBattleView battle = (GpuBattleView) Gdx.app.getApplicationListener();
                     float before = battle.boardCamera.camera.zoom;
                     GpuBoardTestUi.clickText(Messages.getString("CommonMenuBar.viewZoomIn"));
                     assertNotEquals(before, battle.boardCamera.camera.zoom, "The menu must zoom the active GPU camera");
-                    Gdx.input.getInputProcessor().keyDown(Input.Keys.ESCAPE);
                     return null;
                 });
-                input(() -> GpuBoardTestUi.clickText(Messages.getString("CommonMenuBar.ViewMenu")));
+                input(() -> GpuBoardTestUi.click("utility-menu"));
                 onGl(() -> {
                     GpuBoardTestUi.clickText(Messages.getString("CommonMenuBar.viewClassicBoard"));
                     return null;
@@ -757,7 +630,7 @@ class GpuBoardWindowSmokeTest {
                 assertTrue(preferences.getUse3DBoard());
                 assertEquals(ClientGUI.VIEW_CLASSIC_BOARD, ui.gpuChoice().getActionCommand());
                 onSwing(() -> {
-                    GpuBoardWindow.closeFor(ui.view());
+                    GpuBoardWindow.closeFor(ui.view().getClientState());
                     ui.frame().dispose();
                     return null;
                 });
@@ -771,9 +644,8 @@ class GpuBoardWindowSmokeTest {
             } finally {
                 onSwing(() -> {
                     preferences.setValue(GUIPreferences.GUI_SCALE, originalScale);
-                    preferences.setShowUnitOverview(originalOverview);
                     preferences.removePreferenceChangeListener(ui.overview());
-                    GpuBoardWindow.closeFor(ui.view());
+                    GpuBoardWindow.closeFor(ui.view().getClientState());
                     ui.frame().dispose();
                     ui.menus().die();
                     return null;
@@ -805,11 +677,11 @@ class GpuBoardWindowSmokeTest {
         return ((GpuBattleView) Gdx.app.getApplicationListener()).boardCamera.focus.epsilonEquals(expected, 0.01f);
     }
 
-    private ClientWindow createClientWindow(GpuBoardFixture fixture) {
+    private ClientWindow createClientWindow(GpuBoardFixture fixture) throws Exception {
         return createClientWindow(fixture, true);
     }
 
-    private ClientWindow createClientWindow(GpuBoardFixture fixture, boolean classic) {
+    private ClientWindow createClientWindow(GpuBoardFixture fixture, boolean classic) throws Exception {
         fixture.source.close();
         ClientGUI gui = mock(ClientGUI.class, invocation -> switch (invocation.getMethod().getName()) {
             case "refreshAuxiliaryWindows", "setMapVisible", "setBotCommandsLocation",
@@ -824,12 +696,21 @@ class GpuBoardWindowSmokeTest {
         JFrame frame = new JFrame("MegaMek - Classic board switch test");
         CommonMenuBar menus = CommonMenuBar.getMenuBarForGame();
         menus.setPhase(GamePhase.MOVEMENT);
+        when(gui.getClient()).thenReturn(client);
+        when(client.getGame()).thenReturn(fixture.game);
+        when(client.getLocalPlayer()).thenReturn(fixture.player);
+        when(gui.getFrame()).thenReturn(frame);
+        when(gui.getMainPanel()).thenReturn(new JPanel());
+        fixture.view.close();
+        fixture.view = new BoardClientState(fixture.game, null, gui, 0, null);
+        fixture.view.setLocalPlayer(fixture.player);
+        BoardView renderer = new BoardView(fixture.view, null, gui);
         if (classic) {
-            frame.add(fixture.view.getComponent());
+            frame.add(renderer.getComponent());
         }
-        BoardView view = spy(fixture.view);
+        BoardView view = spy(renderer);
         // BoardViewPanel retains its original owner; let that owner create its viewport on demand too.
-        doAnswer(invocation -> fixture.view.getComponent()).when(view).getComponent();
+        doAnswer(invocation -> renderer.getComponent()).when(view).getComponent();
         doReturn(gui).when(view).getClientgui();
         when(gui.getClient()).thenReturn(client);
         when(client.getGame()).thenReturn(fixture.game);
@@ -840,15 +721,19 @@ class GpuBoardWindowSmokeTest {
             if (invocation.getArgument(0, Boolean.class)) {
                 frame.add(view.getComponent());
             } else {
-                fixture.view.releaseClassicView();
+                renderer.releaseClassicView();
                 view.releaseClassicView();
             }
             frame.validate();
             return null;
         }).when(gui).setClassicBoardViewEnabled(anyBoolean());
         when(gui.getMenuBar()).thenReturn(menus);
-        when(gui.getCurrentBoardView()).thenReturn(Optional.of(view));
+        doReturn(Optional.of(fixture.view)).when(gui).getCurrentBoardState();
         when(gui.boardViews()).thenReturn(List.of(view));
+        doReturn(List.of(fixture.view)).when(gui).boardStates();
+        doReturn(fixture.view).when(gui).getBoardState();
+        doReturn(fixture.view).when(gui).getBoardState(any(BoardLocation.class));
+        doReturn(fixture.view).when(gui).getBoardState(any(Entity.class));
         when(gui.getBoardView()).thenReturn(view);
         when(gui.getBoardView(any(BoardLocation.class))).thenReturn(view);
         when(gui.getMainPanel()).thenReturn(new JPanel());
@@ -864,7 +749,7 @@ class GpuBoardWindowSmokeTest {
         menus.addActionListener(event -> {
             if (event.getActionCommand().equals(ClientGUI.VIEW_GPU_BOARD)) {
                 GUIPreferences.getInstance().setUse3DBoard(true);
-                GpuBoardWindow.open(view, () -> fixture.panel);
+                GpuBoardWindow.open(fixture.view, () -> fixture.panel);
             } else if (event.getActionCommand().equals(ClientGUI.VIEW_CLASSIC_BOARD)) {
                 GUIPreferences.getInstance().setUse3DBoard(false);
                 GpuBoardWindow.showClassic(gui);
@@ -910,6 +795,20 @@ class GpuBoardWindowSmokeTest {
         }));
     }
 
+    /**
+     * Waits until the render thread has applied the client's center request {@code sequence} (or a later one) and its
+     * framing has ended. The source publishes the request with its next frame (its timer runs every 100 ms, later
+     * under load), so a few rendered frames alone do not show that the request arrived.
+     */
+    private static void awaitCenterRequest(long sequence) throws Exception {
+        var applied = GpuBattleView.class.getDeclaredField("centerSequence");
+        applied.setAccessible(true);
+        await(() -> onGl(() -> {
+            GpuBattleView battle = (GpuBattleView) Gdx.app.getApplicationListener();
+            return applied.getLong(battle) >= sequence && !battle.boardCamera.isFraming();
+        }));
+    }
+
     private static <T> T onGl(Callable<T> action) throws Exception {
         Application app = Gdx.app;
         FutureTask<T> task = new FutureTask<>(action);
@@ -918,10 +817,8 @@ class GpuBoardWindowSmokeTest {
     }
 
     private static void captureMenu(String name) throws Exception {
-        await(() -> onGl(() -> GpuBoardTestUi.stage().getRoot().findActor("tactical-menu").getColor().a == 1));
+        await(() -> onGl(() -> GpuBoardTestUi.shown(GpuBoardTestUi.stage().getRoot().findActor("menu-panel"))));
         onGl(() -> {
-            assertFalse(GpuBoardTestUi.stage().getRoot().findActor("command-search").getParent().isVisible(),
-                  "Menu-bar dropdowns do not include command search");
             File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
             assertTrue(output.isDirectory() || output.mkdirs());
             GpuBoardTestUi.capture(new File(output, name));

@@ -84,9 +84,14 @@ public class DeployFacingChoiceDialog extends AbstractChoiceDialog<Integer> {
         return (facing != null) ? facing : -1;
     }
 
+    /** The name of a facing (0-5) as the facing choices show it, such as "North-East". */
+    public static String facingName(int facing) {
+        return Messages.getString(FACING_NAMES[facing]);
+    }
+
     @Override
     protected void detailLabel(JToggleButton button, Integer facing) {
-        String facingName = Messages.getString(FACING_NAMES[facing]);
+        String facingName = facingName(facing);
         String text = "<HTML><HEAD>" + styles() + "</HEAD><BODY><CENTER>"
               + spanCSS("facing", facingName)
               + "<BR>" + spanCSS("facingNumber", "(" + facing + ")")

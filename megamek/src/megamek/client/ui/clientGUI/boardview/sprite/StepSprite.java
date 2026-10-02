@@ -46,17 +46,17 @@ import java.awt.image.BufferedImage;
 import megamek.MMConstants;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.HexDrawUtilities;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.ToHitData;
-import megamek.common.compute.Compute;
 import megamek.common.enums.MoveStepType;
 import megamek.common.equipment.MiscType;
 import megamek.common.game.Game;
 import megamek.common.moves.ClimbingHelper;
+import megamek.common.moves.MovePathSummary;
 import megamek.common.moves.MoveStep;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementMode;
@@ -84,7 +84,7 @@ public class StepSprite extends Sprite implements TacticalSprite {
     private final boolean isLastStep;
     private Image baseScaleImage;
 
-    public StepSprite(BoardView boardView1, final MoveStep step,
+    public StepSprite(BoardGlyphContext boardView1, final MoveStep step,
           boolean isLastStep) {
         super(boardView1);
         this.step = step;
@@ -123,11 +123,10 @@ public class StepSprite extends Sprite implements TacticalSprite {
 
         paintTactical(g2D);
 
-        baseScaleImage = bv.getPanel().createImage(tempImage.getSource());
-        image = bv.getScaledImage(bv.getPanel().createImage(tempImage.getSource()), false);
+        baseScaleImage = tempImage;
+        image = bv.getScaledImage(tempImage, false);
 
         graph.dispose();
-        tempImage.flush();
     }
 
     @Override
@@ -149,7 +148,6 @@ public class StepSprite extends Sprite implements TacticalSprite {
         boolean isLastLegalStep = isLastStep &&
               (step.getMovementType(true) != EntityMovementType.MOVE_ILLEGAL);
 
-        boolean jumped = false;
         boolean isMASCOrSuperCharger = false;
         boolean isBackwards = false;
 
@@ -161,7 +159,7 @@ public class StepSprite extends Sprite implements TacticalSprite {
                 isMASCOrSuperCharger = (step.isUsingMASC() || step.isUsingSupercharger());
                 break;
             case MOVE_JUMP:
-                jumped = true;
+                // a jump is never drawn as backwards
                 break;
             default:
                 if ((step.getType() == MoveStepType.BACKWARDS)
@@ -174,7 +172,7 @@ public class StepSprite extends Sprite implements TacticalSprite {
 
         Color col = GUIP.getColorForMovement(movementType, isMASCOrSuperCharger, isBackwards);
 
-        if (bv.game.useVectorMove()) {
+        if (bv.getGame().useVectorMove()) {
             drawActiveVectors(step, graph);
         }
 
@@ -251,7 +249,7 @@ public class StepSprite extends Sprite implements TacticalSprite {
                     drawArrowShape(g2D, facingArrow, col);
                 }
 
-                if (bv.game.useVectorMove()) {
+                if (bv.getGame().useVectorMove()) {
                     drawMovementCost(step, isLastStep, new Point(0, 0), graph, col, false);
                 }
                 break;
@@ -346,7 +344,7 @@ public class StepSprite extends Sprite implements TacticalSprite {
         }
 
         if (isLastLegalStep) {
-            drawTMMAndRolls(step, jumped, bv.game, new Point(0, 0), graph, col, true);
+            drawTMMAndRolls(step, bv.getGame(), new Point(0, 0), graph, col, true);
         }
 
     }
@@ -524,20 +522,12 @@ public class StepSprite extends Sprite implements TacticalSprite {
         graph.drawString(costString, costX - 1, stepPos.y + 38);
     }
 
-    private void drawTMMAndRolls(MoveStep step, boolean jumped, Game game, Point stepPos, Graphics graph, Color col,
+    private void drawTMMAndRolls(MoveStep step, Game game, Point stepPos, Graphics graph, Color col,
           boolean shiftFlag) {
 
         StringBuilder subscriptStringBuf = new StringBuilder();
 
-        int distance = step.getDistance();
-        boolean airborneNonAerospace = (step.getMovementType(isLastStep) == EntityMovementType.MOVE_VTOL_RUN)
-              || (step.getMovementType(isLastStep) == EntityMovementType.MOVE_VTOL_WALK)
-              || ((step.getMovementMode() == EntityMovementMode.VTOL)
-              && (((step.getMovementType(isLastStep) != EntityMovementType.MOVE_NONE) || step.getEntity()
-              .isAirborneVTOLorWIGE()))
-              || (step.getMovementType(isLastStep) == EntityMovementType.MOVE_VTOL_SPRINT));
-
-        ToHitData toHitData = Compute.getTargetMovementModifier(distance, jumped, airborneNonAerospace, game);
+        ToHitData toHitData = MovePathSummary.tmm(step, game);
         subscriptStringBuf.append((toHitData.getValue() < 0) ? '-' : '+');
         subscriptStringBuf.append(toHitData.getValue());
 

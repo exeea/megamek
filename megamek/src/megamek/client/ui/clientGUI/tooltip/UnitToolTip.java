@@ -89,6 +89,21 @@ public final class UnitToolTip {
 
     private static final GUIPreferences GUIP = GUIPreferences.getInstance();
 
+    /** A Mek system index's code in {@link SystemCrit} and the message key of its armor summary abbreviation. */
+    private static final Map<Integer, String[]> MEK_SYSTEMS = Map.ofEntries(
+          Map.entry(Mek.SYSTEM_SENSORS, new String[] { "SENSORS", "AbbreviationSensors" }),
+          Map.entry(Mek.SYSTEM_LIFE_SUPPORT, new String[] { "LIFE_SUPPORT", "AbbreviationLifeSupport" }),
+          Map.entry(Mek.SYSTEM_ENGINE, new String[] { "ENGINE", "AbbreviationEngine" }),
+          Map.entry(Mek.SYSTEM_GYRO, new String[] { "GYRO", "AbbreviationGyro" }),
+          Map.entry(Mek.ACTUATOR_SHOULDER, new String[] { "SHOULDER", "AbbreviationShoulder" }),
+          Map.entry(Mek.ACTUATOR_UPPER_ARM, new String[] { "UPPER_ARM", "AbbreviationUpperArm" }),
+          Map.entry(Mek.ACTUATOR_LOWER_ARM, new String[] { "LOWER_ARM", "AbbreviationLowerArm" }),
+          Map.entry(Mek.ACTUATOR_HAND, new String[] { "HAND", "AbbreviationHand" }),
+          Map.entry(Mek.ACTUATOR_HIP, new String[] { "HIP", "AbbreviationHip" }),
+          Map.entry(Mek.ACTUATOR_UPPER_LEG, new String[] { "UPPER_LEG", "AbbreviationUpperLeg" }),
+          Map.entry(Mek.ACTUATOR_LOWER_LEG, new String[] { "LOWER_LEG", "AbbreviationLowerLeg" }),
+          Map.entry(Mek.ACTUATOR_FOOT, new String[] { "FOOT", "AbbreviationLowerFoot" }));
+
     public static StringBuilder lobbyTip(InGameObject unit, Player localPlayer, MapSettings mapSettings) {
         if (unit instanceof Entity) {
             return getEntityTipTable((Entity) unit,
@@ -381,7 +396,7 @@ public final class UnitToolTip {
         }
     }
 
-    private static String getQuirks(Entity entity, Game game, boolean details) {
+    public static String getQuirks(Entity entity, Game game, boolean details) {
         if (game.getOptions().booleanOption(OptionsConstants.ADVANCED_STRATOPS_QUIRKS)) {
             StringBuilder sQuirks = new StringBuilder();
             String quirksList = getOptionList(entity.getQuirks().getGroups(), entity::countQuirks, details);
@@ -418,7 +433,7 @@ public final class UnitToolTip {
         return "";
     }
 
-    private static String getPartialRepairs(Entity entity, boolean details) {
+    public static String getPartialRepairs(Entity entity, boolean details) {
         String result = "";
         String partialList = getOptionList(entity.getPartialRepairs().getGroups(),
               grp -> entity.countPartialRepairs(),
@@ -453,284 +468,125 @@ public final class UnitToolTip {
               entity.getLocationAbbr(location);
     }
 
-    private static StringBuilder sysCrits(Entity entity, int type, int index, int loc, String locAbbr) {
-        String result;
-        int total = entity.getNumberOfCriticalSlots(type, index, loc);
-        int hits = entity.getHitCriticalSlots(type, index, loc);
-        int good = total - hits;
-        boolean bad = (entity.getBadCriticalSlots(type, index, loc) > 0);
-
-        if ((good + hits) > 0) {
-            result = "&nbsp;&nbsp;" + locAbbr + ":&nbsp;";
-            result += systemBar(good, hits, bad);
-        } else {
-            result = "&nbsp;";
+    /**
+     * One system's critical damage as the armor summary shows it.
+     *
+     * @param location the location, {@link Entity#LOC_NONE} for a vehicle's unit-wide systems
+     * @param code     the system: {@code SENSORS}, {@code LIFE_SUPPORT}, {@code ENGINE}, {@code GYRO}, a Mek actuator
+     *                 ({@code SHOULDER}, {@code UPPER_ARM}, {@code LOWER_ARM}, {@code HAND}, {@code HIP},
+     *                 {@code UPPER_LEG}, {@code LOWER_LEG}, {@code FOOT}), {@code STABILIZER}, {@code TURRET_LOCKED}
+     *                 or a vehicle's motive damage ({@code MINOR_MOTIVE}, {@code MODERATE_MOTIVE},
+     *                 {@code HEAVY_MOTIVE})
+     * @param label    the armor summary's abbreviation of the system
+     * @param good     its intact critical slots; for a vehicle system 1 while it is not hit, and for vehicle sensors
+     *                 the hits the sensors can still take
+     * @param hits     its damaged critical slots; for a vehicle system 1 once hit, and for vehicle sensors their hits
+     * @param bad      whether it is damaged: a Mek system with a destroyed, breached or missing slot, a vehicle system
+     *                 that is hit
+     */
+    public record SystemCrit(int location, String code, String label, int good, int hits, boolean bad) {
+        /** Whether the unit has this system here; the armor summary leaves a blank for one it lacks. */
+        public boolean present() {
+            return (good + hits) > 0;
         }
-
-        return new StringBuilder().append(result);
     }
 
-    private static StringBuilder sysStabilizers(Tank tank, int loc, String locAbbr) {
-        String result;
-        int total = 1;
-        int hits = tank.isStabiliserHit(loc) ? 1 : 0;
-        int good = total - hits;
-        boolean bad = hits > 0;
-
-        result = "&nbsp;&nbsp;" + locAbbr + ":&nbsp;";
-        result += systemBar(good, hits, bad);
-
-        return new StringBuilder().append(result);
+    /**
+     * The critical damage of the unit's systems that the armor summary shows: per location for Meks (their systems and
+     * actuators) and vehicles (stabilizers and turret locks), then a vehicle's unit-wide engine, sensors and motive
+     * damage. The unit tooltip and the GPU unit record both use it.
+     */
+    public static List<SystemCrit> systemCrits(Entity entity) {
+        List<SystemCrit> crits = new ArrayList<>();
+        for (int loc = 0; loc < entity.locations(); loc++) {
+            crits.addAll(locationCrits(entity, loc));
+        }
+        if (entity instanceof Tank tank) {
+            if (!(tank instanceof GunEmplacement)) {
+                crits.add(vehicleCrit(Entity.LOC_NONE, "ENGINE", "AbbreviationEngine", 1, tank.isEngineHit() ? 1 : 0));
+            }
+            crits.add(vehicleCrit(Entity.LOC_NONE, "SENSORS", "AbbreviationSensors", Tank.CRIT_SENSOR_MAX,
+                  tank.getSensorHits()));
+            if (!(tank instanceof GunEmplacement) && !(tank instanceof VTOL)) {
+                crits.add(vehicleCrit(Entity.LOC_NONE, "MINOR_MOTIVE", "AbbreviationMinorMovementDamage", 1,
+                      tank.hasMinorMovementDamage() ? 1 : 0));
+                crits.add(vehicleCrit(Entity.LOC_NONE, "MODERATE_MOTIVE", "AbbreviationModerateMovementDamage", 1,
+                      tank.hasModerateMovementDamage() ? 1 : 0));
+                crits.add(vehicleCrit(Entity.LOC_NONE, "HEAVY_MOTIVE", "AbbreviationHeavyMovementDamage", 1,
+                      tank.hasHeavyMovementDamage() ? 1 : 0));
+            }
+        }
+        return crits;
     }
 
-    private static StringBuilder sysTurretLocked(Tank tank, int loc, String locAbbr) {
-        String result;
-        int total = 1;
-        int hits = tank.isTurretLocked(loc) ? 1 : 0;
-        int good = total - hits;
-        boolean bad = hits > 0;
-
-        result = "&nbsp;&nbsp;" + locAbbr + ":&nbsp;";
-        result += systemBar(good, hits, bad);
-
-        return new StringBuilder().append(result);
-    }
-
-    private static StringBuilder sysEngineHit(Tank tank, String locAbbr) {
-        String result;
-        int total = 1;
-        int hits = tank.isEngineHit() ? 1 : 0;
-        int good = total - hits;
-        boolean bad = hits > 0;
-
-        result = "&nbsp;&nbsp;" + locAbbr + ":&nbsp;";
-        result += systemBar(good, hits, bad);
-
-        return new StringBuilder().append(result);
-    }
-
-    private static StringBuilder sysSensorHit(Tank tank, String locAbbr) {
-        String result;
-        int total = Tank.CRIT_SENSOR_MAX;
-        int hits = tank.getSensorHits();
-        int good = total - hits;
-        boolean bad = hits > 0;
-
-        result = "&nbsp;&nbsp;" + locAbbr + ":&nbsp;";
-        result += systemBar(good, hits, bad);
-
-        return new StringBuilder().append(result);
-    }
-
-    private static StringBuilder sysMinorMovementDamage(Tank tank, String locAbbr) {
-        String result;
-        int total = 1;
-        int hits = tank.hasMinorMovementDamage() ? 1 : 0;
-        int good = total - hits;
-        boolean bad = hits > 0;
-
-        result = "&nbsp;&nbsp;" + locAbbr + ":&nbsp;";
-        result += systemBar(good, hits, bad);
-
-        return new StringBuilder().append(result);
-    }
-
-    private static StringBuilder sysModerateMovementDamage(Tank tank, String locAbbr) {
-        String result;
-        int total = 1;
-        int hits = tank.hasModerateMovementDamage() ? 1 : 0;
-        int good = total - hits;
-        boolean bad = hits > 0;
-
-        result = "&nbsp;&nbsp;" + locAbbr + ":&nbsp;";
-        result += systemBar(good, hits, bad);
-
-        return new StringBuilder().append(result);
-    }
-
-    private static StringBuilder sysHeavyMovementDamage(Tank tank, String locAbbr) {
-        String result;
-        int total = 1;
-        int hits = tank.hasHeavyMovementDamage() ? 1 : 0;
-        int good = total - hits;
-        boolean bad = hits > 0;
-
-        result = "&nbsp;&nbsp;" + locAbbr + ":&nbsp;";
-        result += systemBar(good, hits, bad);
-
-        return new StringBuilder().append(result);
-    }
-
-    private static StringBuilder buildSysCrits(Entity entity, int loc) {
-        String result = "";
-        String msgAbbrSensors = Messages.getString("BoardView1.Tooltip.AbbreviationSensors");
-        String msgAbbrLifeSupport = Messages.getString("BoardView1.Tooltip.AbbreviationLifeSupport");
-        String msgAbbrEngine = Messages.getString("BoardView1.Tooltip.AbbreviationEngine");
-        String msgAbbrGyro = Messages.getString("BoardView1.Tooltip.AbbreviationGyro");
-        String msgAbbrShoulder = Messages.getString("BoardView1.Tooltip.AbbreviationShoulder");
-        String msgAbbrUpperArm = Messages.getString("BoardView1.Tooltip.AbbreviationUpperArm");
-        String msgAbbrLowerArm = Messages.getString("BoardView1.Tooltip.AbbreviationLowerArm");
-        String msgAbbrHand = Messages.getString("BoardView1.Tooltip.AbbreviationHand");
-        String msgAbbrHip = Messages.getString("BoardView1.Tooltip.AbbreviationHip");
-        String msgAbbrUpperLeg = Messages.getString("BoardView1.Tooltip.AbbreviationUpperLeg");
-        String msgAbbrLowerLeg = Messages.getString("BoardView1.Tooltip.AbbreviationLowerLeg");
-        String msgAbbrFoot = Messages.getString("BoardView1.Tooltip.AbbreviationLowerFoot");
-        String msgAbbrStabilizers = Messages.getString("BoardView1.Tooltip.AbbreviationStabilizers");
-        String msgAbbrTurretLocked = Messages.getString("BoardView1.Tooltip.AbbreviationTurretLocked");
-
+    /** The systems the armor summary lists for one location, in its order; a system the unit lacks is not present. */
+    private static List<SystemCrit> locationCrits(Entity entity, int loc) {
         if (entity instanceof Mek) {
-            switch (loc) {
-                case Mek.LOC_HEAD:
-                    result = sysCrits(entity,
-                          CriticalSlot.TYPE_SYSTEM,
-                          Mek.SYSTEM_SENSORS,
-                          loc,
-                          msgAbbrSensors).toString();
-                    result += sysCrits(entity,
-                          CriticalSlot.TYPE_SYSTEM,
-                          Mek.SYSTEM_LIFE_SUPPORT,
-                          loc,
-                          msgAbbrLifeSupport).toString();
-                    break;
-                case Mek.LOC_CENTER_TORSO:
-                    result = sysCrits(entity,
-                          CriticalSlot.TYPE_SYSTEM,
-                          Mek.SYSTEM_ENGINE,
-                          loc,
-                          msgAbbrEngine).toString();
-                    result += sysCrits(entity, CriticalSlot.TYPE_SYSTEM, Mek.SYSTEM_GYRO, loc, msgAbbrGyro).toString();
-                    result += sysCrits(entity,
-                          CriticalSlot.TYPE_SYSTEM,
-                          Mek.SYSTEM_SENSORS,
-                          loc,
-                          msgAbbrSensors).toString();
-                    result += sysCrits(entity,
-                          CriticalSlot.TYPE_SYSTEM,
-                          Mek.SYSTEM_LIFE_SUPPORT,
-                          loc,
-                          msgAbbrLifeSupport).toString();
-                    break;
-                case Mek.LOC_RIGHT_TORSO:
-                case Mek.LOC_LEFT_TORSO:
-                    result = sysCrits(entity,
-                          CriticalSlot.TYPE_SYSTEM,
-                          Mek.SYSTEM_ENGINE,
-                          loc,
-                          msgAbbrEngine).toString();
-                    result += sysCrits(entity,
-                          CriticalSlot.TYPE_SYSTEM,
-                          Mek.SYSTEM_LIFE_SUPPORT,
-                          loc,
-                          msgAbbrLifeSupport).toString();
-                    break;
-                case Mek.LOC_RIGHT_ARM:
-                case Mek.LOC_LEFT_ARM:
-                    result = sysCrits(entity,
-                          CriticalSlot.TYPE_SYSTEM,
-                          Mek.ACTUATOR_SHOULDER,
-                          loc,
-                          msgAbbrShoulder).toString();
-                    result += sysCrits(entity,
-                          CriticalSlot.TYPE_SYSTEM,
-                          Mek.ACTUATOR_UPPER_ARM,
-                          loc,
-                          msgAbbrUpperArm).toString();
-                    result += sysCrits(entity,
-                          CriticalSlot.TYPE_SYSTEM,
-                          Mek.ACTUATOR_LOWER_ARM,
-                          loc,
-                          msgAbbrLowerArm).toString();
-                    result += sysCrits(entity,
-                          CriticalSlot.TYPE_SYSTEM,
-                          Mek.ACTUATOR_HAND,
-                          loc,
-                          msgAbbrHand).toString();
-                    result += sysCrits(entity, CriticalSlot.TYPE_SYSTEM, Mek.ACTUATOR_HIP, loc, msgAbbrHip).toString();
-                    result += sysCrits(entity,
-                          CriticalSlot.TYPE_SYSTEM,
-                          Mek.ACTUATOR_UPPER_LEG,
-                          loc,
-                          msgAbbrUpperLeg).toString();
-                    result += sysCrits(entity,
-                          CriticalSlot.TYPE_SYSTEM,
-                          Mek.ACTUATOR_LOWER_LEG,
-                          loc,
-                          msgAbbrLowerLeg).toString();
-                    result += sysCrits(entity,
-                          CriticalSlot.TYPE_SYSTEM,
-                          Mek.ACTUATOR_FOOT,
-                          loc,
-                          msgAbbrFoot).toString();
-                    break;
-                case Mek.LOC_RIGHT_LEG:
-                case Mek.LOC_LEFT_LEG:
-                case Mek.LOC_CENTER_LEG:
-                    result = sysCrits(entity, CriticalSlot.TYPE_SYSTEM, Mek.ACTUATOR_HIP, loc, msgAbbrHip).toString();
-                    result += sysCrits(entity,
-                          CriticalSlot.TYPE_SYSTEM,
-                          Mek.ACTUATOR_UPPER_LEG,
-                          loc,
-                          msgAbbrUpperLeg).toString();
-                    result += sysCrits(entity,
-                          CriticalSlot.TYPE_SYSTEM,
-                          Mek.ACTUATOR_LOWER_LEG,
-                          loc,
-                          msgAbbrLowerLeg).toString();
-                    result += sysCrits(entity,
-                          CriticalSlot.TYPE_SYSTEM,
-                          Mek.ACTUATOR_FOOT,
-                          loc,
-                          msgAbbrFoot).toString();
-                    break;
-                default:
-                    result = "&nbsp;";
+            int[] systems = switch (loc) {
+                case Mek.LOC_HEAD -> new int[] { Mek.SYSTEM_SENSORS, Mek.SYSTEM_LIFE_SUPPORT };
+                case Mek.LOC_CENTER_TORSO -> new int[] { Mek.SYSTEM_ENGINE, Mek.SYSTEM_GYRO, Mek.SYSTEM_SENSORS,
+                                                         Mek.SYSTEM_LIFE_SUPPORT };
+                case Mek.LOC_RIGHT_TORSO, Mek.LOC_LEFT_TORSO -> new int[] { Mek.SYSTEM_ENGINE,
+                                                                            Mek.SYSTEM_LIFE_SUPPORT };
+                case Mek.LOC_RIGHT_ARM, Mek.LOC_LEFT_ARM -> new int[] { Mek.ACTUATOR_SHOULDER, Mek.ACTUATOR_UPPER_ARM,
+                                                                        Mek.ACTUATOR_LOWER_ARM, Mek.ACTUATOR_HAND,
+                                                                        Mek.ACTUATOR_HIP, Mek.ACTUATOR_UPPER_LEG,
+                                                                        Mek.ACTUATOR_LOWER_LEG, Mek.ACTUATOR_FOOT };
+                case Mek.LOC_RIGHT_LEG, Mek.LOC_LEFT_LEG, Mek.LOC_CENTER_LEG ->
+                      new int[] { Mek.ACTUATOR_HIP, Mek.ACTUATOR_UPPER_LEG, Mek.ACTUATOR_LOWER_LEG, Mek.ACTUATOR_FOOT };
+                default -> new int[0];
+            };
+            List<SystemCrit> crits = new ArrayList<>();
+            for (int system : systems) {
+                int total = entity.getNumberOfCriticalSlots(CriticalSlot.TYPE_SYSTEM, system, loc);
+                int hits = entity.getHitCriticalSlots(CriticalSlot.TYPE_SYSTEM, system, loc);
+                crits.add(new SystemCrit(loc, MEK_SYSTEMS.get(system)[0],
+                      Messages.getString("BoardView1.Tooltip." + MEK_SYSTEMS.get(system)[1]), total - hits, hits,
+                      entity.getBadCriticalSlots(CriticalSlot.TYPE_SYSTEM, system, loc) > 0));
             }
-        } else if (entity instanceof SuperHeavyTank || entity instanceof LargeSupportTank) {
-            Tank tank = (Tank) entity;
-
-            switch (loc) {
-                case SuperHeavyTank.LOC_BODY:
-                case SuperHeavyTank.LOC_FRONT:
-                case SuperHeavyTank.LOC_RIGHT:
-                case SuperHeavyTank.LOC_LEFT:
-                case SuperHeavyTank.LOC_REAR_RIGHT:
-                case SuperHeavyTank.LOC_REAR_LEFT:
-                case SuperHeavyTank.LOC_REAR:
-                    result = sysStabilizers(tank, loc, msgAbbrStabilizers).toString();
-                    break;
-                case SuperHeavyTank.LOC_TURRET:
-                case SuperHeavyTank.LOC_TURRET_2:
-                    result = sysStabilizers(tank, loc, msgAbbrStabilizers).toString();
-                    result += tank.getTurretCount() > 0 ?
-                          sysTurretLocked(tank, loc, msgAbbrTurretLocked).toString() :
-                          "&nbsp;";
-                    break;
-                default:
-                    result = "&nbsp;";
-            }
+            return crits;
         } else if (entity instanceof Tank tank) {
-
-            switch (loc) {
-                case Tank.LOC_BODY:
-                case Tank.LOC_FRONT:
-                case Tank.LOC_RIGHT:
-                case Tank.LOC_LEFT:
-                case Tank.LOC_REAR:
-                    result = sysStabilizers(tank, loc, msgAbbrStabilizers).toString();
-                    break;
-                case Tank.LOC_TURRET:
-                case Tank.LOC_TURRET_2:
-                    result = sysStabilizers(tank, loc, msgAbbrStabilizers).toString();
-                    result += tank.getTurretCount() > 0 ?
-                          sysTurretLocked(tank, loc, msgAbbrTurretLocked).toString() :
-                          "&nbsp;";
-                    break;
-                default:
-                    result = "&nbsp;";
+            boolean superHeavy = (entity instanceof SuperHeavyTank) || (entity instanceof LargeSupportTank);
+            boolean turret = superHeavy ? ((loc == SuperHeavyTank.LOC_TURRET) || (loc == SuperHeavyTank.LOC_TURRET_2))
+                  : ((loc == Tank.LOC_TURRET) || (loc == Tank.LOC_TURRET_2));
+            boolean hull = superHeavy ? ((loc >= SuperHeavyTank.LOC_BODY) && (loc <= SuperHeavyTank.LOC_REAR))
+                  : ((loc >= Tank.LOC_BODY) && (loc <= Tank.LOC_REAR));
+            if (!turret && !hull) {
+                return List.of();
             }
+            SystemCrit stabilizer = vehicleCrit(loc, "STABILIZER", "AbbreviationStabilizers", 1,
+                  tank.isStabiliserHit(loc) ? 1 : 0);
+            if (!turret) {
+                return List.of(stabilizer);
+            }
+            // A turret location of a vehicle without turrets shows a blank for its lock
+            boolean turrets = tank.getTurretCount() > 0;
+            return List.of(stabilizer, vehicleCrit(loc, "TURRET_LOCKED", "AbbreviationTurretLocked", turrets ? 1 : 0,
+                  (turrets && tank.isTurretLocked(loc)) ? 1 : 0));
         }
+        return List.of();
+    }
 
-        return new StringBuilder().append(result);
+    /** A vehicle system that the armor summary shows as {@code total} boxes with {@code hits} of them hit. */
+    private static SystemCrit vehicleCrit(int loc, String code, String labelKey, int total, int hits) {
+        return new SystemCrit(loc, code, Messages.getString("BoardView1.Tooltip." + labelKey), total - hits, hits,
+              hits > 0);
+    }
+
+    /** The armor summary's text for one system: its label and hit boxes, or a blank for a system the unit lacks. */
+    private static String sysCritText(SystemCrit crit) {
+        return crit.present() ? "&nbsp;&nbsp;" + crit.label() + ":&nbsp;" + systemBar(crit.good(), crit.hits(),
+              crit.bad()) : "&nbsp;";
+    }
+
+    /** The armor summary's system texts of one location; a Mek or vehicle location without any shows a blank. */
+    private static String buildSysCrits(Entity entity, List<SystemCrit> crits, int loc) {
+        StringBuilder result = new StringBuilder();
+        crits.stream().filter(crit -> crit.location() == loc).forEach(crit -> result.append(sysCritText(crit)));
+        if (result.isEmpty() && ((entity instanceof Mek) || (entity instanceof Tank))) {
+            result.append("&nbsp;");
+        }
+        return result.toString();
     }
 
     /** Returns the graphical Armor representation. */
@@ -751,12 +607,7 @@ public final class UnitToolTip {
         String row;
         StringBuilder rows = new StringBuilder();
 
-        String msg_abbr_sensors = Messages.getString("BoardView1.Tooltip.AbbreviationSensors");
-        String msg_abbr_engine = Messages.getString("BoardView1.Tooltip.AbbreviationEngine");
-        String msgAbbrMinorMovementDamage = Messages.getString("BoardView1.Tooltip.AbbreviationMinorMovementDamage");
-        String msgAbbrModerateMovementDamage = Messages.getString(
-              "BoardView1.Tooltip.AbbreviationModerateMovementDamage");
-        String msgAbbrHeavyMovementDamage = Messages.getString("BoardView1.Tooltip.AbbreviationHeavyMovementDamage");
+        List<SystemCrit> crits = systemCrits(entity);
 
         for (int loc = 0; loc < entity.locations(); loc++) {
             // do not show locations that do not support/have armor/internals like HULL on
@@ -791,7 +642,7 @@ public final class UnitToolTip {
                 col2 += intactLocBar(entity.getOArmor(loc), entity.getArmor(loc), armorChar).toString();
             }
 
-            col3 = buildSysCrits(entity, loc).toString();
+            col3 = buildSysCrits(entity, crits, loc);
 
             col1 = UIUtil.tag("span", fontSizeAttr, col1);
             col2 = UIUtil.tag("span", fontSizeAttr, col2);
@@ -804,58 +655,33 @@ public final class UnitToolTip {
             rows.append(row);
         }
 
-        switch (entity) {
-            case GunEmplacement tank -> {
-                col1 = "&nbsp;";
-                col2 = sysSensorHit(tank, msg_abbr_sensors).toString();
-                col3 = "&nbsp;";
-
-                col1 = UIUtil.tag("span", fontSizeAttr, col1);
-                col2 = UIUtil.tag("span", fontSizeAttr, col2);
-                col3 = UIUtil.tag("span", fontSizeAttr, col3);
-
-                col1 = UIUtil.tag("TD", "", col1);
-                col2 = UIUtil.tag("TD", "", col2);
-                col3 = UIUtil.tag("TD", "", col3);
-                row = UIUtil.tag("TR", "", col1 + col2 + col3);
-                rows.append(row);
+        // A vehicle's unit-wide systems: engine and sensors, then its motive damage
+        if (entity instanceof Tank) {
+            StringBuilder systems = new StringBuilder();
+            StringBuilder motive = new StringBuilder();
+            for (SystemCrit crit : crits) {
+                if (crit.location() != Entity.LOC_NONE) {
+                    continue;
+                }
+                if (crit.code().endsWith("_MOTIVE")) {
+                    motive.append(sysCritText(crit));
+                } else {
+                    systems.append(sysCritText(crit));
+                }
             }
-            case VTOL tank -> {
-                col1 = "&nbsp;";
-                col2 = sysEngineHit(tank, msg_abbr_engine).toString();
-                col2 += sysSensorHit(tank, msg_abbr_sensors).toString();
-                col3 = "&nbsp;";
+            col1 = motive.isEmpty() ? "&nbsp;" : "";
+            col2 = systems.toString();
+            col3 = motive.isEmpty() ? "&nbsp;" : motive.toString();
 
-                col1 = UIUtil.tag("span", fontSizeAttr, col1);
-                col2 = UIUtil.tag("span", fontSizeAttr, col2);
-                col3 = UIUtil.tag("span", fontSizeAttr, col3);
+            col1 = UIUtil.tag("span", fontSizeAttr, col1);
+            col2 = UIUtil.tag("span", fontSizeAttr, col2);
+            col3 = UIUtil.tag("span", fontSizeAttr, col3);
 
-                col1 = UIUtil.tag("TD", "", col1);
-                col2 = UIUtil.tag("TD", "", col2);
-                col3 = UIUtil.tag("TD", "", col3);
-                row = UIUtil.tag("TR", "", col1 + col2 + col3);
-                rows.append(row);
-            }
-            case Tank tank -> {
-                col1 = "";
-                col2 = sysEngineHit(tank, msg_abbr_engine).toString();
-                col2 += sysSensorHit(tank, msg_abbr_sensors).toString();
-                col3 = sysMinorMovementDamage(tank, msgAbbrMinorMovementDamage).toString();
-                col3 += sysModerateMovementDamage(tank, msgAbbrModerateMovementDamage).toString();
-                col3 += sysHeavyMovementDamage(tank, msgAbbrHeavyMovementDamage).toString();
-
-                col1 = UIUtil.tag("span", fontSizeAttr, col1);
-                col2 = UIUtil.tag("span", fontSizeAttr, col2);
-                col3 = UIUtil.tag("span", fontSizeAttr, col3);
-
-                col1 = UIUtil.tag("TD", "", col1);
-                col2 = UIUtil.tag("TD", "", col2);
-                col3 = UIUtil.tag("TD", "", col3);
-                row = UIUtil.tag("TR", "", col1 + col2 + col3);
-                rows.append(row);
-            }
-            default -> {
-            }
+            col1 = UIUtil.tag("TD", "", col1);
+            col2 = UIUtil.tag("TD", "", col2);
+            col3 = UIUtil.tag("TD", "", col3);
+            row = UIUtil.tag("TR", "", col1 + col2 + col3);
+            rows.append(row);
         }
 
         String attr = String.format("FACE=Dialog COLOR=%s", UIUtil.toColorHexString(GUIP.getUnitToolTipFGColor()));
@@ -1617,7 +1443,7 @@ public final class UnitToolTip {
         return result;
     }
 
-    private static String getBvInfo(GameOptions gameOptions, Entity entity, Player localPlayer, boolean showBV) {
+    public static String getBvInfo(GameOptions gameOptions, Entity entity, Player localPlayer, boolean showBV) {
         String result = "";
         if (showBV) {
             // BV Info
@@ -1638,7 +1464,7 @@ public final class UnitToolTip {
         return result;
     }
 
-    private static String getMovementInfo(Game game, Entity entity) {
+    public static String getMovementInfo(Game game, Entity entity) {
         String result = "";
         // "Has not yet moved" only during movement phase
         if (!entity.isDone() && game.getPhase().isMovement()) {
@@ -1796,7 +1622,7 @@ public final class UnitToolTip {
         return result;
     }
 
-    private static String getUnitStatus(Game game, Entity entity, boolean isGunEmplacement) {
+    public static String getUnitStatus(Game game, Entity entity, boolean isGunEmplacement) {
         String attr;
         String result = "";
 
@@ -1891,7 +1717,7 @@ public final class UnitToolTip {
         return result;
     }
 
-    private static String getSeenByInfo(Game game, GameOptions gameOptions, Entity entity) {
+    public static String getSeenByInfo(Game game, GameOptions gameOptions, Entity entity) {
         String result = "";
 
         // If Double Blind, add information about who sees this Entity
@@ -1939,7 +1765,7 @@ public final class UnitToolTip {
         return result;
     }
 
-    private static String getSensorInfo(GameOptions gameOptions, Entity entity, PlanetaryConditions conditions) {
+    public static String getSensorInfo(GameOptions gameOptions, Entity entity, PlanetaryConditions conditions) {
         String sensors = "";
         // If sensors, display what sensors this unit is using
         if (gameOptions.booleanOption(OptionsConstants.ADVANCED_TAC_OPS_SENSORS) ||
@@ -1970,7 +1796,7 @@ public final class UnitToolTip {
      *       Cover only benefits infantry (TO:AR p.106 / TO:AUE p.153); a vehicle in a fortified hex is noted without
      *       implying a benefit.
      */
-    private static String getFortificationStatus(Entity entity) {
+    public static String getFortificationStatus(Entity entity) {
         if (entity instanceof Infantry infantry) {
             if (infantry.isFortifying()) {
                 return Messages.getString("BoardView1.fortifyProgress",
@@ -2005,7 +1831,7 @@ public final class UnitToolTip {
      * Returns Variable Range Targeting mode info for tooltip display. Shows icon + mode name for units with VRT quirk
      * (BMM pg. 86).
      */
-    private static String getVariableRangeTargetingInfo(Entity entity) {
+    public static String getVariableRangeTargetingInfo(Entity entity) {
         if (!entity.hasVariableRangeTargeting()) {
             return "";
         }
@@ -2155,6 +1981,160 @@ public final class UnitToolTip {
         return new StringBuilder().append(table);
     }
 
+    /** A reason the movement row marks for MP that differ from the unit's original MP. */
+    public enum MovementCause { GRAVITY, HEAT, BOMBS, WEATHER, DAMAGE, SHIELD, MODULAR_ARMOR }
+
+    /**
+     * The movement damage the movement rows count: destroyed legs (or tracks), hip and leg actuator hits, all and
+     * destroyed jump jets, jump boosters and partial wing slots, and the partial wing's atmosphere bonus less its
+     * weight class bonus.
+     */
+    private record MovementDamage(int legsDestroyed, int hipHits, int actuatorHits, int jumpJets,
+          int jumpJetsDestroyed, int jumpBoosters, int jumpBoostersDestroyed, int partialWing, int partialWingDestroyed,
+          int partialWingWeatherMod) { }
+
+    private static MovementDamage movementDamage(Entity entity) {
+        int hipHits = 0;
+        int actuatorHits = 0;
+        int legsDestroyed = 0;
+
+        if (entity instanceof Mek) {
+            if (entity.getMovementMode() == EntityMovementMode.TRACKED) {
+                for (Mounted<?> m : entity.getMisc()) {
+                    if (m.getType().hasFlag(MiscType.F_TRACKS)) {
+                        if (m.isHit() || entity.isLocationBad(m.getLocation())) {
+                            legsDestroyed++;
+                        }
+                    }
+                }
+            } else {
+                for (int i = 0; i < entity.locations(); i++) {
+                    if (entity.locationIsLeg(i)) {
+                        if (!entity.isLocationBad(i)) {
+                            if (((Mek) entity).legHasHipCrit(i)) {
+                                hipHits++;
+                                if ((entity.getGame() == null) || !entity.getGame().getOptions()
+                                      .booleanOption(OptionsConstants.ADVANCED_GROUND_MOVEMENT_TAC_OPS_LEG_DAMAGE)) {
+                                    continue;
+                                }
+                            }
+                            actuatorHits += ((Mek) entity).countLegActuatorCrits(i);
+                        } else {
+                            legsDestroyed++;
+                        }
+                    }
+                }
+            }
+        }
+
+        int jumpJet = 0;
+        int jumpJetDestroyed = 0;
+        int jumpBooster = 0;
+        int jumpBoosterDestroyed = 0;
+        int partialWing = 0;
+        int partialWingDestroyed = 0;
+        int partialWingWeatherMod = 0;
+
+        if ((entity instanceof Mek) || (entity instanceof Tank)) {
+            for (Mounted<?> mounted : entity.getMisc()) {
+                if (mounted.getType().hasFlag(MiscType.F_JUMP_JET)) {
+                    jumpJet++;
+                    if (mounted.isDestroyed() || mounted.isBreached()) {
+                        jumpJetDestroyed++;
+                    }
+                }
+                if (mounted.getType().hasFlag(MiscType.F_JUMP_BOOSTER)) {
+                    jumpBooster++;
+                    if (mounted.isDestroyed() || mounted.isBreached()) {
+                        jumpBoosterDestroyed++;
+                    }
+                }
+                if (mounted.getType().hasFlag(MiscType.F_PARTIAL_WING)) {
+                    int eNum = entity.getEquipmentNum(mounted);
+                    partialWing += entity.getGoodCriticalSlots(CriticalSlot.TYPE_EQUIPMENT,
+                          eNum,
+                          Mek.LOC_RIGHT_TORSO);
+                    partialWing += entity.getGoodCriticalSlots(CriticalSlot.TYPE_EQUIPMENT,
+                          eNum,
+                          Mek.LOC_LEFT_TORSO);
+                    partialWingDestroyed += entity.getBadCriticalSlots(CriticalSlot.TYPE_EQUIPMENT,
+                          eNum,
+                          Mek.LOC_RIGHT_TORSO);
+                    partialWingDestroyed += entity.getBadCriticalSlots(CriticalSlot.TYPE_EQUIPMENT,
+                          eNum,
+                          Mek.LOC_LEFT_TORSO);
+
+                    if (entity instanceof Mek mek) {
+                        partialWingWeatherMod = mek.getPartialWingJumpAtmosphereBonus() -
+                              mek.getPartialWingJumpWeightClassBonus();
+                    }
+                }
+            }
+
+            partialWing += partialWingDestroyed;
+        }
+        return new MovementDamage(legsDestroyed, hipHits, actuatorHits, jumpJet, jumpJetDestroyed, jumpBooster,
+              jumpBoosterDestroyed, partialWing, partialWingDestroyed, partialWingWeatherMod);
+    }
+
+    /**
+     * The causes the movement row marks, in its order: gravity and heat while the MP differ from the original MP, then
+     * a bomb load, weather, movement damage, a shield and modular armor. The unit tooltip and the GPU unit record both
+     * use it; a gun emplacement has no movement row.
+     */
+    public static List<MovementCause> movementCauses(Entity entity) {
+        return movementCauses(entity, movementDamage(entity));
+    }
+
+    private static List<MovementCause> movementCauses(Entity entity, MovementDamage damage) {
+        List<MovementCause> causes = new ArrayList<>();
+        int walkMP = entity.getOriginalWalkMP();
+        int walkMPModified = entity.getWalkMP();
+        int runMPModified = entity.getRunMP();
+        if ((walkMP != walkMPModified) || (entity.getOriginalRunMP() != runMPModified)
+              || (entity.getOriginalJumpMP() != entity.getJumpMP())) {
+            if (entity.getGame().getPlanetaryConditions().getGravity() != 1.0) {
+                causes.add(MovementCause.GRAVITY);
+            }
+            int walkMPNoHeat = entity.getWalkMP(MPCalculationSetting.NO_HEAT);
+            int runMPNoHeat = entity.getRunMP(MPCalculationSetting.NO_HEAT);
+            if ((walkMPNoHeat != walkMPModified) || (runMPNoHeat != runMPModified)) {
+                causes.add(MovementCause.HEAT);
+            }
+        }
+        if ((entity instanceof IBomber bomber) && (bomber.reduceMPByBombLoad(walkMP) != walkMP)) {
+            causes.add(MovementCause.BOMBS);
+        }
+        int weatherMod = entity.getGame().getPlanetaryConditions().getMovementMods(entity);
+        if ((weatherMod != 0) || (damage.partialWingWeatherMod() != 0)) {
+            causes.add(MovementCause.WEATHER);
+        }
+        if ((damage.legsDestroyed() > 0) ||
+              (damage.hipHits() > 0) ||
+              (damage.actuatorHits() > 0) ||
+              (damage.jumpJetsDestroyed() > 0) ||
+              (damage.partialWingDestroyed() > 0) ||
+              (damage.jumpBoostersDestroyed() > 0) ||
+              (entity.isImmobile()) ||
+              (entity.isGyroDestroyed())) {
+            causes.add(MovementCause.DAMAGE);
+        }
+        if ((entity instanceof BipedMek) || (entity instanceof TripodMek)) {
+            int shieldMod = 0;
+            if (entity.hasShield()) {
+                shieldMod -= entity.getNumberOfShields(MiscTypeFlag.S_SHIELD_LARGE);
+                shieldMod -= entity.getNumberOfShields(MiscTypeFlag.S_SHIELD_MEDIUM);
+            }
+            if (shieldMod != 0) {
+                causes.add(MovementCause.SHIELD);
+            }
+        }
+        if (entity.hasModularArmor()) {
+            causes.add(MovementCause.MODULAR_ARMOR);
+        }
+        return causes;
+    }
+
     /**
      * Returns unit values that are relevant in-game and in the lobby such as movement ability.
      */
@@ -2168,88 +2148,7 @@ public final class UnitToolTip {
 
         // Unit movement ability
         if (!isGunEmplacement) {
-            int hipHits = 0;
-            int actuatorHits = 0;
-            int legsDestroyed = 0;
-
-            if (entity instanceof Mek) {
-                if (entity.getMovementMode() == EntityMovementMode.TRACKED) {
-                    for (Mounted<?> m : entity.getMisc()) {
-                        if (m.getType().hasFlag(MiscType.F_TRACKS)) {
-                            if (m.isHit() || entity.isLocationBad(m.getLocation())) {
-                                legsDestroyed++;
-                            }
-                        }
-                    }
-                } else {
-                    for (int i = 0; i < entity.locations(); i++) {
-                        if (entity.locationIsLeg(i)) {
-                            if (!entity.isLocationBad(i)) {
-                                if (((Mek) entity).legHasHipCrit(i)) {
-                                    hipHits++;
-                                    if ((entity.getGame() == null) ||
-                                          (!entity.getGame()
-                                                .getOptions()
-                                                .booleanOption(OptionsConstants.ADVANCED_GROUND_MOVEMENT_TAC_OPS_LEG_DAMAGE))) {
-                                        continue;
-                                    }
-                                }
-                                actuatorHits += ((Mek) entity).countLegActuatorCrits(i);
-                            } else {
-                                legsDestroyed++;
-                            }
-                        }
-                    }
-                }
-            }
-
-            int jumpJet = 0;
-            int jumpJetDestroyed = 0;
-            int jumpBooster = 0;
-            int jumpBoosterDestroyed = 0;
-            int partialWing = 0;
-            int partialWingDestroyed = 0;
-            int partialWingWeatherMod = 0;
-
-            if ((entity instanceof Mek) || (entity instanceof Tank)) {
-                for (Mounted<?> mounted : entity.getMisc()) {
-                    if (mounted.getType().hasFlag(MiscType.F_JUMP_JET)) {
-                        jumpJet++;
-                        if (mounted.isDestroyed() || mounted.isBreached()) {
-                            jumpJetDestroyed++;
-                        }
-                    }
-                    if (mounted.getType().hasFlag(MiscType.F_JUMP_BOOSTER)) {
-                        jumpBooster++;
-                        if (mounted.isDestroyed() || mounted.isBreached()) {
-                            jumpBoosterDestroyed++;
-                        }
-                    }
-                    if (mounted.getType().hasFlag(MiscType.F_PARTIAL_WING)) {
-                        int eNum = entity.getEquipmentNum(mounted);
-                        partialWing += entity.getGoodCriticalSlots(CriticalSlot.TYPE_EQUIPMENT,
-                              eNum,
-                              Mek.LOC_RIGHT_TORSO);
-                        partialWing += entity.getGoodCriticalSlots(CriticalSlot.TYPE_EQUIPMENT,
-                              eNum,
-                              Mek.LOC_LEFT_TORSO);
-                        partialWingDestroyed += entity.getBadCriticalSlots(CriticalSlot.TYPE_EQUIPMENT,
-                              eNum,
-                              Mek.LOC_RIGHT_TORSO);
-                        partialWingDestroyed += entity.getBadCriticalSlots(CriticalSlot.TYPE_EQUIPMENT,
-                              eNum,
-                              Mek.LOC_LEFT_TORSO);
-
-                        if (entity instanceof Mek mek) {
-                            partialWingWeatherMod = mek.getPartialWingJumpAtmosphereBonus() -
-                                  mek.getPartialWingJumpWeightClassBonus();
-                        }
-                    }
-                }
-
-                partialWing += partialWingDestroyed;
-            }
-
+            MovementDamage damage = movementDamage(entity);
             int walkMP = entity.getOriginalWalkMP();
             int runMP = entity.getOriginalRunMP();
             int jumpMP = entity.getOriginalJumpMP();
@@ -2287,80 +2186,19 @@ public final class UnitToolTip {
             String sMoveMode = entity.getMovementModeAsString();
             sMove += sMoveMode;
 
-            if ((walkMP != walkMPModified) || (runMP != runMPModified) || (jumpMP != jumpMPModified)) {
-                if (entity.getGame().getPlanetaryConditions().getGravity() != 1.0) {
-                    sMove += DOT_SPACER;
-                    String sGravity = entity.getGame().getPlanetaryConditions().getGravity() + "g";
-                    String attr = String.format("FACE=Dialog COLOR=%s",
-                          UIUtil.toColorHexString((GUIP.getWarningColor())));
-                    sMove += UIUtil.tag("FONT", attr, sGravity);
-                }
-                int walkMPNoHeat = entity.getWalkMP(MPCalculationSetting.NO_HEAT);
-                int runMPNoHeat = entity.getRunMP(MPCalculationSetting.NO_HEAT);
-                if ((walkMPNoHeat != walkMPModified) || (runMPNoHeat != runMPModified)) {
-                    sMove += DOT_SPACER;
-                    String sHeat = "\uD83D\uDD25";
-                    String attr = String.format("FACE=Dialog COLOR=%s",
-                          UIUtil.toColorHexString((GUIP.getWarningColor())));
-                    sMove += UIUtil.tag("FONT", attr, sHeat);
-                }
-            }
-
-            if (entity instanceof IBomber) {
-                int bombMod = ((IBomber) entity).reduceMPByBombLoad(walkMP);
-                if (bombMod != walkMP) {
-                    sMove += DOT_SPACER;
-                    String sBomb = "\uD83D\uDCA3";
-                    String attr = String.format("FACE=Dialog COLOR=%s",
-                          UIUtil.toColorHexString((GUIP.getWarningColor())));
-                    sMove += UIUtil.tag("FONT", attr, sBomb);
-                }
-            }
-
-            int weatherMod = entity.getGame().getPlanetaryConditions().getMovementMods(entity);
-
-            if ((weatherMod != 0) || (partialWingWeatherMod != 0)) {
+            for (MovementCause cause : movementCauses(entity, damage)) {
+                String mark = switch (cause) {
+                    case GRAVITY -> entity.getGame().getPlanetaryConditions().getGravity() + "g";
+                    case HEAT -> "\uD83D\uDD25";
+                    case BOMBS -> "\uD83D\uDCA3";
+                    case WEATHER -> "\u2602";
+                    case DAMAGE -> "\uD83D\uDD27";
+                    case SHIELD -> "\u26E8";
+                    case MODULAR_ARMOR -> "\u27EC\u25AE";
+                };
                 sMove += DOT_SPACER;
-                String sWeather = "\u2602";
                 String attr = String.format("FACE=Dialog COLOR=%s", UIUtil.toColorHexString((GUIP.getWarningColor())));
-                sMove += UIUtil.tag("FONT", attr, sWeather);
-            }
-
-            if ((legsDestroyed > 0) ||
-                  (hipHits > 0) ||
-                  (actuatorHits > 0) ||
-                  (jumpJetDestroyed > 0) ||
-                  (partialWingDestroyed > 0) ||
-                  (jumpBoosterDestroyed > 0) ||
-                  (entity.isImmobile()) ||
-                  (entity.isGyroDestroyed())) {
-                sMove += DOT_SPACER;
-                String sDamage = "\uD83D\uDD27";
-                String attr = String.format("FACE=Dialog COLOR=%s", UIUtil.toColorHexString((GUIP.getWarningColor())));
-                sMove += UIUtil.tag("FONT", attr, sDamage);
-            }
-
-            if ((entity instanceof BipedMek) || (entity instanceof TripodMek)) {
-                int shieldMod = 0;
-                if (entity.hasShield()) {
-                    shieldMod -= entity.getNumberOfShields(MiscTypeFlag.S_SHIELD_LARGE);
-                    shieldMod -= entity.getNumberOfShields(MiscTypeFlag.S_SHIELD_MEDIUM);
-                }
-
-                if (shieldMod != 0) {
-                    sMove += DOT_SPACER;
-                    String sShield = "\u26E8";
-                    String attr = String.format("FACE=Dialog COLOR=%s",
-                          UIUtil.toColorHexString((GUIP.getWarningColor())));
-                    sMove += UIUtil.tag("FONT", attr, sShield);
-                }
-            }
-
-            if (entity.hasModularArmor()) {
-                sMove += DOT_SPACER;
-                String sArmor = "\u27EC\u25AE";
-                String attr = String.format("FACE=Dialog COLOR=%s", UIUtil.toColorHexString((GUIP.getWarningColor())));
-                sMove += UIUtil.tag("FONT", attr, sArmor);
+                sMove += UIUtil.tag("FONT", attr, mark);
             }
             // Display SI for Aerodynes, and LAMs only if in Fighter mode
             if (entity instanceof IAero unit &&
@@ -2375,19 +2213,23 @@ public final class UnitToolTip {
             row = UIUtil.tag("TR", "", col);
             rows += row;
 
-            if ((jumpJetDestroyed > 0) || (jumpBoosterDestroyed > 0) || (partialWingDestroyed > 0)) {
+            if ((damage.jumpJetsDestroyed() > 0) || (damage.jumpBoostersDestroyed() > 0)
+                  || (damage.partialWingDestroyed() > 0)) {
                 String jj = "";
-                if (jumpJetDestroyed > 0) {
+                if (damage.jumpJetsDestroyed() > 0) {
                     String msgJumpJets = Messages.getString("BoardView1.Tooltip.JumpJets");
-                    jj = msgJumpJets + ": " + (jumpJet - jumpJetDestroyed) + "/" + jumpJet;
+                    jj = msgJumpJets + ": " + (damage.jumpJets() - damage.jumpJetsDestroyed()) + "/"
+                          + damage.jumpJets();
                 }
-                if (jumpBoosterDestroyed > 0) {
+                if (damage.jumpBoostersDestroyed() > 0) {
                     String msg_jumpBoosters = Messages.getString("BoardView1.Tooltip.JumpBoosters");
-                    jj += "; " + msg_jumpBoosters + ": " + (jumpBooster - jumpBoosterDestroyed) + "/" + jumpBooster;
+                    jj += "; " + msg_jumpBoosters + ": " + (damage.jumpBoosters() - damage.jumpBoostersDestroyed())
+                          + "/" + damage.jumpBoosters();
                 }
-                if (partialWingDestroyed > 0) {
+                if (damage.partialWingDestroyed() > 0) {
                     String msgPartialWing = Messages.getString("BoardView1.Tooltip.PartialWing");
-                    jj += "; " + msgPartialWing + ": " + (partialWing - partialWingDestroyed) + "/" + partialWing;
+                    jj += "; " + msgPartialWing + ": " + (damage.partialWing() - damage.partialWingDestroyed()) + "/"
+                          + damage.partialWing();
                 }
                 if (jj.startsWith(";")) {
                     jj = jj.substring(2);
@@ -2626,7 +2468,11 @@ public final class UnitToolTip {
      * size rather than on the bin a weapon happens to be linked to, so ammo for a weapon whose own bin is empty or
      * destroyed is still recognised as belonging to that weapon.
      */
-    private static boolean feedsAWeaponOnThisUnit(Entity entity, AmmoMounted ammoBin) {
+    /**
+     * Whether the bin's ammunition fits a weapon of the unit; a bin that feeds none is carried ammunition (such as an
+     * ammunition trailer's load). The tooltip and the GPU unit record both use it.
+     */
+    public static boolean feedsAWeaponOnThisUnit(Entity entity, AmmoMounted ammoBin) {
         for (WeaponMounted weapon : entity.getWeaponList()) {
             if (AmmoType.isAmmoValid(ammoBin.getType(), weapon.getType())) {
                 return true;
@@ -2660,7 +2506,7 @@ public final class UnitToolTip {
     }
 
 
-    private static String getForceInfo(Entity entity) {
+    public static String getForceInfo(Entity entity) {
         StringBuilder sForceEntry = new StringBuilder();
         var forceChain = entity.getGame().getForces().forceChain(entity);
 
@@ -2704,7 +2550,7 @@ public final class UnitToolTip {
     }
 
     /** Returns an overview of the C3 system the unit is in. */
-    private static StringBuilder c3Info(Entity entity, boolean details) {
+    public static StringBuilder c3Info(Entity entity, boolean details) {
         String result = "";
         String sC3Info = "";
 

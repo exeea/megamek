@@ -47,6 +47,8 @@ dependencies {
     implementation "com.badlogicgames.gdx:gdx:${gdxVersion}"
     implementation "com.badlogicgames.gdx:gdx-backend-lwjgl3:${gdxVersion}"
     implementation "com.badlogicgames.gdx:gdx-freetype:${gdxVersion}"
+    // CPU-only glTF decoding; terrain workers and unit validation share the same mesh data.
+    implementation 'de.javagl:jgltf-model:2.0.4'
     runtimeOnly "com.badlogicgames.gdx:gdx-platform:${gdxVersion}:natives-desktop"
     runtimeOnly "com.badlogicgames.gdx:gdx-freetype-platform:${gdxVersion}:natives-desktop"
 
@@ -215,6 +217,7 @@ tasks.register('stageDataImages', Sync) {
         include "fluff/**/*.*"
         include "hexes/**/*.*"
         include "misc/**/*.*"
+        include "paperdolls/**/*.*"
         include "portraits/**/*.*"
         include "temp/**/*.*"
         include "units/**/*.*"
@@ -611,11 +614,14 @@ tasks.register('gpuBoardSmoke', Test) {
     testClassesDirs = sourceSets.test.output.classesDirs
     classpath = sourceSets.test.runtimeClasspath
     useJUnitPlatform { includeTags 'on-demand' }
-    filter { includeTestsMatching 'megamek.client.ui.clientGUI.boardview.gpu.*SmokeTest' }
+    filter {
+        includeTestsMatching 'megamek.client.ui.clientGUI.boardview.gpu.*SmokeTest'
+        includeTestsMatching 'megamek.client.ui.gdx.*SmokeTest'
+    }
     jvmArgs = mmJvmOptions
     systemProperty 'java.awt.headless', 'false'
-    systemProperty 'megamek.gpu.referenceModels', new File(gradle.includedBuild('mm-data').projectDir,
-            'tools/unit-models/references/legacy').absolutePath
+    systemProperty 'megamek.gpu.referenceFoliage', new File(gradle.includedBuild('mm-data').projectDir,
+            'tools/board-models/foliage').absolutePath
     systemProperty 'megamek.gpu.screenshots', layout.buildDirectory.dir('gpu-board-review').get().asFile.absolutePath
     outputs.upToDateWhen { false }
 }
@@ -713,6 +719,15 @@ tasks.register('alphaStrikeMassConvert', JavaExec) {
     group = 'utility'
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'megamek.utilities.AlphaStrikeMassConvert'
+}
+
+tasks.register('convertPaperdolls', JavaExec) {
+    description = 'Converts the paperdoll SVG source in mm-data into the HUD paperdoll JSON and review PNGs'
+    group = 'utility'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'megamek.utilities.PaperdollConverter'
+    args "${mmDataDir}/tools/paperdolls/src", "${mmDataDir}/data/images/paperdolls",
+          "${mmDataDir}/tools/paperdolls/review"
 }
 
 tasks.register('boardsTagger', JavaExec) {

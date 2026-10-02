@@ -10,7 +10,6 @@ import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import javax.imageio.ImageIO;
@@ -25,7 +24,7 @@ import com.badlogic.gdx.graphics.GL30;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.Model;
-import com.badlogic.gdx.graphics.g3d.loader.G3dModelLoader;
+import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.JsonReader;
 import megamek.common.Configuration;
@@ -34,6 +33,7 @@ import megamek.common.Configuration;
 final class GpuAssets implements Disposable {
     private final File root = new File(Configuration.dataDir(), "models/board");
     private final Map<String, Model> models = new HashMap<>();
+    private final Map<String, List<Model>> modelLods = new HashMap<>();
     private final Map<Interior, Model> interiors = new HashMap<>();
     private final Map<String, Texture> materials = new HashMap<>();
     private final Map<String, Color> materialTints = new HashMap<>();
@@ -65,18 +65,28 @@ final class GpuAssets implements Disposable {
     }
 
     Model model(String name) {
-        return models.computeIfAbsent(name, key -> {
-            var data = new G3dModelLoader(new JsonReader()).loadModelData(new FileHandle(new File(root, key + ".g3dj")));
-            Model model = new Model(data, filename -> texture(new FileHandle(filename)));
-            // Textures are shared across models and terrain; only this cache disposes them.
-            Iterator<Disposable> owned = model.getManagedDisposables().iterator();
-            while (owned.hasNext()) {
-                if (owned.next() instanceof Texture) {
-                    owned.remove();
-                }
+        return lodModel(name, 0);
+    }
+
+    private Model createModel(ModelData data) {
+        return ModelTextures.create(data, materials, filename -> texture(new FileHandle(filename)));
+    }
+
+    Model lodModel(String name, int level) {
+        return modelLods.computeIfAbsent(name, shape -> {
+            FileHandle file = new FileHandle(new File(root, shape + ".glb"));
+            if (!file.exists()) {
+                throw new IllegalArgumentException("Missing board model " + file.path());
             }
-            return model;
-        });
+            var data = RigidGlb.loadLods(file, root.toPath());
+            List<Model> levels = new ArrayList<>();
+            for (int index = 0; index < data.size(); index++) {
+                int previous = data.indexOf(data.get(index));
+                levels.add(previous < index ? levels.get(previous)
+                      : models.computeIfAbsent(MeshLod.name(shape, index), key -> createModel(data.get(previous))));
+            }
+            return List.copyOf(levels);
+        }).get(level);
     }
 
     Texture material(String name) {
@@ -151,7 +161,7 @@ final class GpuAssets implements Disposable {
     }
 
     private Texture texture(FileHandle file) {
-        return materials.computeIfAbsent(file.file().toPath().normalize().toString(), key -> {
+        return materials.computeIfAbsent(file.file().toPath().toAbsolutePath().normalize().toString(), key -> {
             Texture texture = new Texture(file, true);
             texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
             boolean repeating = file.file().toPath().toAbsolutePath().normalize()
@@ -176,10 +186,15 @@ final class GpuAssets implements Disposable {
         return liquids.computeIfAbsent(source, this::loadLiquid);
     }
 
+    /** A file of the board tileset, such as a liquid animation the board plays and the minimap shows. */
+    static File tilesetFile(String path) {
+        return new File(Configuration.dataDir(), "models/board/tileset/" + path);
+    }
+
     private Animation<Texture> loadLiquid(BoardLiquid.Textures source) {
-        Animation<BoardScene.Pixels> decoded = readWater(new File(root, "tileset/" + source.base()));
+        Animation<BoardScene.Pixels> decoded = readWater(tilesetFile(source.base()));
         Animation<BoardScene.Pixels> foam = source.foam().isEmpty() ? null
-              : readAnimation(new File(root, "tileset/" + source.foam()), false);
+              : readAnimation(tilesetFile(source.foam()), false);
         if (foam != null && !Arrays.equals(decoded.ends(), foam.ends())) {
             throw new IllegalStateException("Liquid and foam GIF timelines must match: " + source);
         }
@@ -342,6 +357,7 @@ final class GpuAssets implements Disposable {
         materials.values().forEach(Texture::dispose);
         liquids.values().forEach(animation -> animation.frames().forEach(Texture::dispose));
         models.clear();
+        modelLods.clear();
         materials.clear();
         materialTints.clear();
         liquids.clear();

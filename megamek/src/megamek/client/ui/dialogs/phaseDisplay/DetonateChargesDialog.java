@@ -58,7 +58,9 @@ import javax.swing.JScrollPane;
 
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.board.Board;
@@ -257,7 +259,7 @@ public class DetonateChargesDialog extends JDialog implements ActionListener {
                 selectedHexes.add(entry.getKey().pos);
             }
         }
-        BoardView boardView = clientGUI.getBoardView();
+        BoardClientState boardView = clientGUI.getBoardState();
         boardView.setDemolitionChargeHighlightHexes(selectedHexes);
         boardView.repaint();
     }
@@ -266,7 +268,7 @@ public class DetonateChargesDialog extends JDialog implements ActionListener {
      * Clears all highlighting from the board view.
      */
     private void clearHighlighting() {
-        BoardView boardView = clientGUI.getBoardView();
+        BoardClientState boardView = clientGUI.getBoardState();
         boardView.setDemolitionChargeHighlightHexes(Collections.emptyList());
         boardView.repaint();
     }
@@ -284,25 +286,57 @@ public class DetonateChargesDialog extends JDialog implements ActionListener {
     @Override
     public void actionPerformed(ActionEvent e) {
         if (e.getSource() == btnDetonate) {
-            // Send detonation announcements for all selected charges; the server resolves them in the End Phase
-            int announcedCharges = 0;
-            for (Map.Entry<DemolitionCharge, JCheckBox> entry : chargeCheckboxes.entrySet()) {
-                if (entry.getValue().isSelected()) {
-                    clientGUI.getClient().sendExplodeBuilding(entry.getKey());
-                    logger.debug("Sent detonation announcement for charge at {}", entry.getKey().pos);
-                    announcedCharges++;
-                }
-            }
-            if (announcedCharges > 0) {
-                applied = true;
-                clientGUI.addToast(ToastLevel.SUCCESS,
-                      Messages.getString("DetonateChargesDialog.toast.announced", announcedCharges));
-            }
+            detonate(chargeCheckboxes.entrySet().stream().filter(entry -> entry.getValue().isSelected())
+                  .map(Map.Entry::getKey).toList());
             clearHighlighting();
             dispose();
         } else if (e.getSource() == btnCancel) {
             clearHighlighting();
             dispose();
         }
+    }
+
+    /**
+     * Announces the detonation of the charges the player ticked, here or in the native battle window; the server
+     * resolves them in the End Phase.
+     *
+     * @param charges the ticked charges
+     */
+    private void detonate(List<DemolitionCharge> charges) {
+        for (DemolitionCharge charge : charges) {
+            clientGUI.getClient().sendExplodeBuilding(charge);
+            logger.debug("Sent detonation announcement for charge at {}", charge.pos);
+        }
+        if (!charges.isEmpty()) {
+            applied = true;
+            clientGUI.addToast(ToastLevel.SUCCESS,
+                  Messages.getString("DetonateChargesDialog.toast.announced", charges.size()));
+        }
+    }
+
+    /**
+     * Showing the dialog asks in the client's native battle window instead when that draws dialogs: the charges, each
+     * with its structure, hex and damage, to tick. Detonate announces the ticked charges as here; Cancel and Esc, like
+     * the close box, announce nothing.
+     */
+    @Override
+    public void setVisible(boolean visible) {
+        if (!visible || !answeredNatively()) {
+            super.setVisible(visible);
+        }
+    }
+
+    private boolean answeredNatively() {
+        List<DialogRow> rows = playerCharges.stream().map(entry -> new DialogRow(Messages.getString(
+              "DetonateChargesDialog.charge", entry.building().getName(), entry.charge().pos.getBoardNum(),
+              Integer.toString(entry.charge().damage)), "", null, true)).toList();
+        DialogAnswer answer = clientGUI.askRows(Messages.getString("DetonateChargesDialog.instructions"), getTitle(),
+              rows, true, List.of(), null, List.of(btnDetonate.getText(), btnCancel.getText()), 1);
+        if (answer == null) {
+            return false;
+        }
+        detonate(answer.selected().stream().map(row -> playerCharges.get(row).charge()).toList());
+        dispose();
+        return true;
     }
 }

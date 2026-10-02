@@ -37,13 +37,17 @@ import java.awt.event.ActionListener;
 import java.awt.event.ItemEvent;
 import java.awt.event.ItemListener;
 import java.util.Arrays;
+import java.util.List;
+import java.util.stream.IntStream;
 
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.dialogs.phaseDisplay.AimedShotDialog;
 import megamek.client.ui.widget.IndexedRadioButton;
 import megamek.common.LosEffects;
 import megamek.common.ToHitData;
+import megamek.common.annotations.Nullable;
 import megamek.common.battleArmor.BattleArmor;
 import megamek.common.compute.Compute;
 import megamek.common.compute.ComputeSideTable;
@@ -57,6 +61,17 @@ import megamek.common.units.SuperHeavyTank;
 import megamek.common.units.Tank;
 
 public class AimedShotHandler implements ActionListener, ItemListener {
+    /**
+     * The aimed shot dialog's choices while the native battle window offers them in its place: the target's location
+     * names and, for each, whether an aimed shot may pick it.
+     */
+    public record Offer(List<String> locations, List<Boolean> enabled) {
+        public Offer {
+            locations = List.copyOf(locations);
+            enabled = List.copyOf(enabled);
+        }
+    }
+
     private final FiringDisplay firingDisplay;
 
     private int aimingAt = Entity.LOC_NONE;
@@ -67,13 +82,16 @@ public class AimedShotHandler implements ActionListener, ItemListener {
 
     private AimedShotDialog asd;
 
+    /** The dialog's choices while the native window offers them instead of the dialog; null otherwise. */
+    private Offer offer;
+
     public AimedShotHandler(FiringDisplay firingDisplay) {
         this.firingDisplay = firingDisplay;
         // ignore
     }
 
     public void showDialog() {
-        if (asd != null) {
+        if ((asd != null) || (offer != null)) {
             AimingMode oldAimingMode = aimingMode;
             closeDialog();
             aimingMode = oldAimingMode;
@@ -132,17 +150,37 @@ public class AimedShotHandler implements ActionListener, ItemListener {
                 return;
             }
 
-            asd = new AimedShotDialog(
-                  this.firingDisplay.getClientGUI().getFrame(),
-                  Messages.getString("FiringDisplay.AimedShotDialog.title"),
-                  Messages.getString("FiringDisplay.AimedShotDialog.message"),
-                  options, enabled, aimingAt,
-                  (ClientGUI) this.firingDisplay.getClientGUI(), this.firingDisplay.getTarget(),
-                  this, this);
+            if ((this.firingDisplay.getClientGUI() instanceof ClientGUI gui) && GpuBoardWindow.drawsDialogsFor(gui)) {
+                // The native window offers the same choices; it aims through aimAt as the dialog's buttons do.
+                offer = new Offer(Arrays.asList(options),
+                      IntStream.range(0, enabled.length).mapToObj(index -> enabled[index]).toList());
+            } else {
+                asd = new AimedShotDialog(
+                      this.firingDisplay.getClientGUI().getFrame(),
+                      Messages.getString("FiringDisplay.AimedShotDialog.title"),
+                      Messages.getString("FiringDisplay.AimedShotDialog.message"),
+                      options, enabled, aimingAt,
+                      (ClientGUI) this.firingDisplay.getClientGUI(), this.firingDisplay.getTarget(),
+                      this, this);
 
-            asd.setVisible(true);
+                asd.setVisible(true);
+            }
             this.firingDisplay.updateTarget();
         }
+    }
+
+    /** The dialog's choices while the native battle window offers them in its place, else null. */
+    public @Nullable Offer getOffer() {
+        return offer;
+    }
+
+    /**
+     * Aims at a location of the current target ({@link Entity#LOC_NONE}: no aimed shot), as a choice in the aimed shot
+     * dialog does.
+     */
+    public void aimAt(int location) {
+        aimingAt = location;
+        this.firingDisplay.updateTarget();
     }
 
     boolean[] createEnabledMask(int length) {
@@ -308,11 +346,14 @@ public class AimedShotHandler implements ActionListener, ItemListener {
     }
 
     public void closeDialog() {
-        if (asd != null) {
+        if ((asd != null) || (offer != null)) {
             aimingAt = Entity.LOC_NONE;
             aimingMode = AimingMode.NONE;
-            asd.dispose();
-            asd = null;
+            if (asd != null) {
+                asd.dispose();
+                asd = null;
+            }
+            offer = null;
             this.firingDisplay.updateTarget();
         }
     }
@@ -424,7 +465,6 @@ public class AimedShotHandler implements ActionListener, ItemListener {
     @Override
     public void itemStateChanged(ItemEvent ev) {
         IndexedRadioButton icb = (IndexedRadioButton) ev.getSource();
-        aimingAt = icb.getIndex();
-        this.firingDisplay.updateTarget();
+        aimAt(icb.getIndex());
     }
 }

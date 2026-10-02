@@ -104,6 +104,14 @@ class UnitEquipmentAssemblyTest {
     }
 
     private static GpuUnitModel assemble(UnitModelState.MekAnatomy anatomy, List<UnitModelEquipment.Mount> equipment) {
+        return assemble(anatomy, equipment, 1);
+    }
+
+    /**
+     * @param gunTriangles the triangle count each fitted gun module reports
+     */
+    private static GpuUnitModel assemble(UnitModelState.MekAnatomy anatomy, List<UnitModelEquipment.Mount> equipment,
+          int gunTriangles) {
         var library = mock(GpuUnitModels.class);
         when(library.descriptor("equipment.json")).thenReturn(new JsonReader().parse("""
               {"schema":2,"equipment":{"Gun":{"model":"gun.json"}},"fallbacks":{"weapon":"gun.json"}}
@@ -117,9 +125,10 @@ class UnitEquipmentAssemblyTest {
         gun.nodes.add(barrel);
         var emitter = new UnitModelDescriptor.Emitter("muzzle", "barrel", List.of(0f, 2f, 0f), List.of(0f, 1f, 0f),
               "muzzle", "bullet");
-        var weapon = new UnitModelDescriptor(2, "equipment", "ballistic", "gun.g3dj", bounds, "rigid-v1",
-              Map.of("root", "barrel"), Map.of(), List.of(), List.of(emitter), List.of(), Map.of());
-        when(library.modular("gun.json")).thenReturn(new GpuUnitModels.ModularAsset(weapon, gun, 1));
+        var weapon = new UnitModelDescriptor(2, "equipment", "ballistic", "gun.glb", bounds, "rigid-v1",
+              Map.of("root", "barrel"), Map.of(), List.of(), List.of(emitter), List.of(), Map.of(), null);
+        when(library.modular("gun.json")).thenReturn(new GpuUnitModels.ModularAsset(weapon, List.of(gun, gun, gun),
+              List.of(gunTriangles, gunTriangles, gunTriangles)));
 
         Model assembled = new Model();
         List<UnitModelDescriptor.Hardpoint> points = new ArrayList<>();
@@ -137,10 +146,10 @@ class UnitEquipmentAssemblyTest {
             }
         }
         assembled.calculateTransforms();
-        var body = new UnitModelDescriptor(2, "body", "mek", "body.g3dj", bounds, "biped-v1",
-              Map.of("root", "CT"), Map.of(), points, List.of(), List.of(), Map.of());
+        var body = new UnitModelDescriptor(2, "body", "mek", "body.glb", bounds, "biped-v1",
+              Map.of("root", "CT"), Map.of(), points, List.of(), List.of(), Map.of(), null);
         var structure = new UnitModelState.Structure(EntityMovementMode.BIPED, equipment, List.of(), 0, false, anatomy);
-        var bindings = UnitEquipmentAssembly.attachAll(library, recipe, new GpuUnitModels.ModularAsset(body, assembled, 1),
+        var bindings = UnitEquipmentAssembly.attachAll(library, recipe, new GpuUnitModels.ModularAsset(body, List.of(assembled, assembled, assembled), List.of(1, 1, 1)),
               structure, assembled);
         assembled.calculateTransforms();
         return new GpuUnitModel(assembled, "CT", true, bindings);

@@ -132,17 +132,44 @@ public final class TipUtil {
     private static String optionListFull(Enumeration<IOptionGroup> advGroups, Function<String, Integer> counter,
           Function<IOptionGroup, String> namer, Entity entity) {
         StringBuilder result = new StringBuilder();
+        for (OptionGroup group : optionGroups(advGroups, counter, namer, entity)) {
+            // Group title
+            result.append("<I>").append(group.name()).append(":</I><BR>");
+            // Arrange the options in lines according to length
+            List<String> advLines = UIUtil.arrangeInLines(group.options(), 40, " \u2B1D ", false);
+            for (String line : advLines) {
+                result.append("&nbsp;&nbsp;").append(line).append("<BR>");
+            }
+        }
+        return result.toString();
+    }
 
+    /**
+     * One group of options with the text of each of its active options.
+     *
+     * @param name    the group's name
+     * @param options each active option's name with its value
+     */
+    public record OptionGroup(String name, List<String> options) {
+        public OptionGroup {
+            options = List.copyOf(options);
+        }
+    }
+
+    /**
+     * The active options of the groups that the counter counts, by group in option order; each option's text is its
+     * name with its value and, for an infantry platoon ({@code entity}), its prosthetic enhancements or extraneous
+     * limbs.
+     */
+    public static List<OptionGroup> optionGroups(Enumeration<IOptionGroup> advGroups, Function<String, Integer> counter,
+          Function<IOptionGroup, String> namer, @Nullable Entity entity) {
         // Get prosthetic enhancement details if this is an infantry entity
         String regularProstheticDetails = getRegularProstheticDetails(entity);
         String extraneousLimbDetails = getExtraneousLimbDetails(entity);
-
+        List<OptionGroup> groups = new ArrayList<>();
         while (advGroups.hasMoreElements()) {
             IOptionGroup advGroup = advGroups.nextElement();
             if (counter.apply(advGroup.getKey()) > 0) {
-                // Group title
-                result.append("<I>").append(namer.apply(advGroup)).append(":</I><BR>");
-
                 // Gather the group options
                 List<String> origList = new ArrayList<>();
                 for (Enumeration<IOption> advantages = advGroup.getOptions(); advantages.hasMoreElements(); ) {
@@ -166,15 +193,10 @@ public final class TipUtil {
                         origList.add(displayText);
                     }
                 }
-
-                // Arrange the options in lines according to length
-                List<String> advLines = UIUtil.arrangeInLines(origList, 40, " \u2B1D ", false);
-                for (String line : advLines) {
-                    result.append("&nbsp;&nbsp;").append(line).append("<BR>");
-                }
+                groups.add(new OptionGroup(namer.apply(advGroup), origList));
             }
         }
-        return result.toString();
+        return groups;
     }
 
     /**

@@ -36,14 +36,14 @@ import java.awt.Font;
 import java.awt.Rectangle;
 
 import megamek.MMConstants;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.common.units.Entity;
 
 /**
  * Sprite for an wreck. Consists of an image, drawn from the Tile Manager and an identification label.
  */
 public class WreckSprite extends AbstractWreckSprite {
-    public WreckSprite(BoardView boardView1, final Entity entity, int secondaryPos) {
+    public WreckSprite(BoardGlyphContext boardView1, final Entity entity, int secondaryPos) {
         super(boardView1);
         this.entity = entity;
         this.secondaryPos = secondaryPos;
@@ -51,8 +51,8 @@ public class WreckSprite extends AbstractWreckSprite {
         String shortName = entity.getShortName();
 
         Font font = new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 10);
-        modelRect = new Rectangle(47, 55, bv.getPanel().getFontMetrics(font).stringWidth(shortName) + 1,
-              bv.getPanel().getFontMetrics(font).getAscent());
+        modelRect = new Rectangle(47, 55, bv.getFontMetrics(font).stringWidth(shortName) + 1,
+              bv.getFontMetrics(font).getAscent());
         Rectangle tempBounds = new Rectangle(bv.getHexSize()).union(modelRect);
         if (secondaryPos == -1) {
             tempBounds.setLocation(bv.getHexLocation(entity.getPosition()));

@@ -442,6 +442,46 @@ public abstract class Entity extends TurnOrdered
     protected boolean selfDestructedThisTurn = false;
 
     /**
+     * The fields MovePathHandler commits at the end of a move (position, facing, secondary facing, delta_distance,
+     * moved and mpUsed when the move ends; elevation, prone, hull-down, evading and the end of bracing while it
+     * processes the steps) and the to-hit rules read. HypotheticalState reads and writes them directly. A field the
+     * server starts committing there that to-hit reads belongs here (FirePreviewServerAgreementTest pins this list).
+     */
+    record MovementState(@Nullable Coords position, int boardId, int facing, int secondaryFacing, int elevation,
+          boolean prone, @Nullable ProneCause proneCause, @Nullable FallSide fallSide, boolean hullDown,
+          boolean evading, int braceLocation, EntityMovementType moved, int deltaDistance, int mpUsed) {
+
+        MovementState withSecondaryFacing(int newSecondaryFacing) {
+            return new MovementState(position, boardId, facing, newSecondaryFacing, elevation, prone, proneCause,
+                  fallSide, hullDown, evading, braceLocation, moved, deltaDistance, mpUsed);
+        }
+    }
+
+    /** The raw fields listed in {@link MovementState}, read without any getter redirection. */
+    MovementState movementState() {
+        return new MovementState(position, boardId, facing, sec_facing, elevation, prone, proneCause, fallSide,
+              hullDown, evading, braceLocation, moved, delta_distance, mpUsed);
+    }
+
+    /** Plain field writes: no event, no rule guard, no setter cascade and no position-lookup update. */
+    void writeMovementState(MovementState state) {
+        position = state.position();
+        boardId = state.boardId();
+        facing = state.facing();
+        sec_facing = state.secondaryFacing();
+        elevation = state.elevation();
+        prone = state.prone();
+        proneCause = state.proneCause();
+        fallSide = state.fallSide();
+        hullDown = state.hullDown();
+        evading = state.evading();
+        braceLocation = state.braceLocation();
+        moved = state.moved();
+        delta_distance = state.deltaDistance();
+        mpUsed = state.mpUsed();
+    }
+
+    /**
      * Indicates this unit has announced abandonment during the End Phase. The crew will exit during the End Phase of
      * the following turn (TacOps:AR p.165). Only applies to Meks - vehicles abandon immediately.
      */
@@ -2587,6 +2627,15 @@ public abstract class Entity extends TurnOrdered
         return cached;
     }
 
+    /** The transient {@link #getBoardLocation()} memo, so a hypothetical state can put back the very same object. */
+    @Nullable BoardLocation boardLocationCache() {
+        return cachedBoardLocation;
+    }
+
+    void restoreBoardLocationCache(@Nullable BoardLocation cache) {
+        cachedBoardLocation = cache;
+    }
+
     /**
      * @return a set of the coords this Entity occupies
      */
@@ -3392,6 +3441,15 @@ public abstract class Entity extends TurnOrdered
     }
 
     /**
+     * The secondary facing this unit has after MovePathHandler ends a move with setFacing(newFacing) and
+     * setSecondaryFacing(newFacing): newFacing, unless the unit already twisted in an earlier phase of this round,
+     * which makes setSecondaryFacing ignore the reset.
+     */
+    int secondaryFacingAfterMove(int newFacing) {
+        return getAlreadyTwisted() ? sec_facing : newFacing;
+    }
+
+    /**
      * Utility function that handles situations where a facing change imparts some kind of permanent effect to the
      * entity.
      */
@@ -3421,6 +3479,11 @@ public abstract class Entity extends TurnOrdered
      */
     public boolean getAlreadyTwisted() {
         return twistedPhase != null && twistedPhase.isBefore(game.getPhase());
+    }
+
+    /** Whether this unit may declare a torso twist or turret rotation now (the rule FiringDisplay enables twist on). */
+    public boolean canTwistNow() {
+        return !getAlreadyTwisted() && canChangeSecondaryFacing() && getCrew().isActive();
     }
 
     /**
@@ -7020,6 +7083,21 @@ public abstract class Entity extends TurnOrdered
             }
         }
         return false;
+    }
+
+    /**
+     * Whether this location is breached as soon as a breach check exposes it (to water or vacuum), whatever the roll:
+     * it has no armor (front, or rear on a Mek), or ammunition is being dumped through it (any location of a non-Mek,
+     * a Mek's torsos).
+     *
+     * @param location the location to check
+     */
+    public boolean breachesWithoutRoll(int location) {
+        boolean mek = this instanceof Mek;
+        boolean dumping = getAmmo().stream().anyMatch(AmmoMounted::isDumping);
+        return (getArmor(location) <= 0) || (mek && (getArmor(location, true) <= 0))
+              || (dumping && (!mek || (location == Mek.LOC_CENTER_TORSO) || (location == Mek.LOC_RIGHT_TORSO)
+              || (location == Mek.LOC_LEFT_TORSO)));
     }
 
     public boolean hasBoostedC3() {

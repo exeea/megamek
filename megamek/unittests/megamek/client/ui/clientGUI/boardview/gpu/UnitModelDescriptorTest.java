@@ -8,8 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import com.badlogic.gdx.files.FileHandle;
-import com.badlogic.gdx.graphics.g3d.loader.G3dModelLoader;
-import com.badlogic.gdx.utils.JsonReader;
+import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -32,8 +31,12 @@ class UnitModelDescriptorTest {
             Path file = assets.resolve(key + ".json");
             var descriptor = UnitModelDescriptor.read(file);
             Path mesh = UnitModelDescriptor.contained(assets, file.getParent().resolve(descriptor.mesh()));
-            var data = new G3dModelLoader(new JsonReader()).loadModelData(new FileHandle(mesh.toFile()));
+            var levels = RigidGlb.loadLods(new FileHandle(mesh.toFile()));
+            var data = levels.getFirst();
             descriptor.validate(data);
+            for (int level = 1; level < levels.size(); level++) {
+                if (levels.get(level) != levels.get(level - 1)) { descriptor.validate(levels.get(level), level); }
+            }
             int triangles = 0;
             for (var part : data.meshes.first().parts) {
                 triangles += part.indices.length / 3;
@@ -43,35 +46,44 @@ class UnitModelDescriptorTest {
     }
 
     @Test
-    void detailedMeshesMayExceedTheTargetButNotTheHardCap() throws Exception {
+    void anAssetMayReachTheSanityCeilingButNotPassIt() throws Exception {
         var descriptor = UnitModelDescriptor.read(assets.resolve("bodies/warhammer.json"));
-        var data = new G3dModelLoader(new JsonReader()).loadModelData(new FileHandle(assets.resolve("bodies/warhammer.g3dj").toFile()));
-        var part = data.meshes.first().parts[0];
-        int otherTriangles = UnitModelDescriptor.triangleCount(data) - part.indices.length / 3;
-        short[] original = part.indices;
-        part.indices = new short[(1500 - otherTriangles) * 3];
-        for (int index = 0; index < part.indices.length; index++) {
-            part.indices[index] = original[index % 3];
-        }
-        assertEquals(1500, descriptor.validate(data));
-        part.indices = java.util.Arrays.copyOf(part.indices, part.indices.length + 3);
+        var data = meshData(assets.resolve("bodies/warhammer.glb"));
+        resizeTo(data, UnitModelDescriptor.MAX_TRIANGLES);
+        assertEquals(UnitModelDescriptor.MAX_TRIANGLES, descriptor.validate(data));
+        resizeTo(data, UnitModelDescriptor.MAX_TRIANGLES + 1);
         assertThrows(IllegalArgumentException.class, () -> descriptor.validate(data));
     }
 
     @Test
-    void equipmentHasItsOwnStrictUnder150Budget() throws Exception {
-        var descriptor = UnitModelDescriptor.read(assets.resolve("equipment/ppc.json"));
-        var data = new G3dModelLoader(new JsonReader()).loadModelData(new FileHandle(assets.resolve("equipment/ppc.g3dj").toFile()));
-        var part = data.meshes.first().parts[0];
-        int otherTriangles = UnitModelDescriptor.triangleCount(data) - part.indices.length / 3;
-        short[] original = part.indices;
-        part.indices = new short[(149 - otherTriangles) * 3];
-        for (int index = 0; index < part.indices.length; index++) {
-            part.indices[index] = original[index % 3];
-        }
-        assertEquals(149, descriptor.validate(data));
-        part.indices = java.util.Arrays.copyOf(part.indices, part.indices.length + 3);
-        assertThrows(IllegalArgumentException.class, () -> descriptor.validate(data));
+    void bodiesSuitsAndEquipmentHaveNoArtBudgetInTheEngine() throws Exception {
+        // The former caps (1,500 per body, 3,000 per LOD0 body, 330 per suit, 149 per equipment module) are gone:
+        // the mm-data exporter enforces the art budgets, the engine only a sanity ceiling.
+        assertValidatesAt("bodies/warhammer", 4000);
+        assertValidatesAt("troops/battle-armor-standing", 5000);
+        assertValidatesAt("equipment/ppc", 1000);
+    }
+
+    @Test
+    void aMeshOtherThanGlbIsRejected() throws Exception {
+        ObjectNode document = (ObjectNode) json.readTree(assets.resolve("equipment/ppc.json").toFile());
+        document.put("mesh", "ppc.g3dj");
+        Path broken = scratch.resolve("broken-mesh.json");
+        json.writeValue(broken.toFile(), document);
+        assertThrows(JsonMappingException.class, () -> UnitModelDescriptor.read(broken));
+    }
+
+    @Test
+    void onlyABodyMayBeMarkedAsLod0() throws Exception {
+        ObjectNode equipment = (ObjectNode) json.readTree(assets.resolve("equipment/ppc.json").toFile());
+        equipment.put("detail", "lod0");
+        Path broken = scratch.resolve("broken.json");
+        json.writeValue(broken.toFile(), equipment);
+        assertThrows(JsonMappingException.class, () -> UnitModelDescriptor.read(broken));
+        ObjectNode body = (ObjectNode) json.readTree(assets.resolve("bodies/warhammer.json").toFile());
+        body.put("detail", "medium");
+        json.writeValue(broken.toFile(), body);
+        assertThrows(JsonMappingException.class, () -> UnitModelDescriptor.read(broken));
     }
 
     @Test
@@ -82,7 +94,7 @@ class UnitModelDescriptorTest {
         Path broken = scratch.resolve("broken.json");
         json.writeValue(broken.toFile(), document);
         var descriptor = UnitModelDescriptor.read(broken);
-        var data = new G3dModelLoader(new JsonReader()).loadModelData(new FileHandle(assets.resolve("bodies/warhammer.g3dj").toFile()));
+        var data = meshData(assets.resolve("bodies/warhammer.glb"));
         assertThrows(IllegalArgumentException.class, () -> descriptor.validate(data));
         var valid = UnitModelDescriptor.read(file);
         data.meshes.first().vertices[0] = Float.NaN;
@@ -107,7 +119,7 @@ class UnitModelDescriptorTest {
         Path file = assets.resolve("bodies/family-spheroid.json");
         var descriptor = UnitModelDescriptor.read(file);
         assertEquals(4, descriptor.landingSupports().size());
-        var data = new G3dModelLoader(new JsonReader()).loadModelData(new FileHandle(file.resolveSibling(descriptor.mesh()).toFile()));
+        var data = meshData(file.resolveSibling(descriptor.mesh()));
         descriptor.validate(data);
         ObjectNode document = (ObjectNode) json.readTree(file.toFile());
         ((ObjectNode) document.get("landingSupports").get(0)).put("foot", "missing-pad");
@@ -130,9 +142,32 @@ class UnitModelDescriptorTest {
     @Test
     void assetReferencesCannotEscapeTheModelDirectory() throws Exception {
         Path root = Files.createDirectory(scratch.resolve("models"));
-        Path outside = Files.writeString(scratch.resolve("outside.g3dj"), "{}");
+        Path outside = Files.writeString(scratch.resolve("outside.glb"), "{}");
         assertThrows(IllegalArgumentException.class, () -> UnitModelDescriptor.contained(root, outside));
         assertThrows(IllegalArgumentException.class,
-              () -> UnitModelDescriptor.contained(root, root.resolve("../outside.g3dj")));
+              () -> UnitModelDescriptor.contained(root, root.resolve("../outside.glb")));
+    }
+
+    /** The LOD0 geometry of a GLB asset, read without any GPU allocation. */
+    private static ModelData meshData(Path glb) {
+        return RigidGlb.loadLods(new FileHandle(glb.toFile())).getFirst();
+    }
+
+    /** Pads the first mesh part with copies of its first triangle, so the asset holds exactly {@code total}. */
+    private static void resizeTo(ModelData data, int total) {
+        var part = data.meshes.first().parts[0];
+        int otherTriangles = UnitModelDescriptor.triangleCount(data) - part.indices.length / 3;
+        short[] original = part.indices;
+        part.indices = new short[(total - otherTriangles) * 3];
+        for (int index = 0; index < part.indices.length; index++) {
+            part.indices[index] = original[index % 3];
+        }
+    }
+
+    private void assertValidatesAt(String asset, int triangles) throws Exception {
+        var descriptor = UnitModelDescriptor.read(assets.resolve(asset + ".json"));
+        var data = meshData(assets.resolve(asset + ".glb"));
+        resizeTo(data, triangles);
+        assertEquals(triangles, descriptor.validate(data), asset);
     }
 }

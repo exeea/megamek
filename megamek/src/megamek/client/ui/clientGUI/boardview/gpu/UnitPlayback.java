@@ -4,10 +4,12 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -36,6 +38,12 @@ final class UnitPlayback {
     private double hold;
     private boolean completed;
     private boolean paused;
+    /** stepOnce(): the paused queue plays until an action other than {@link #stepFrom} has completed. */
+    private boolean stepping;
+    private BoardScene.Animation stepFrom;
+    /** A retained attack that a review re-presents over the waiting live queue (A.10), or null. */
+    private UnitAttack review;
+    private List<UnitAttack> reviewed = List.of();
     private Predicate<BoardScene.Unit> transports = ignored -> false;
     private final Consumer<BoardScene.Movement> completeMovement;
     private final java.util.function.BiConsumer<UnitAttack, Boolean> soundCue;
@@ -118,11 +126,24 @@ final class UnitPlayback {
     /** The view may briefly hold an action while its camera frames the participants or complete movement route. */
     void advance(double seconds, UnitMotion.Speed speed, Predicate<UnitPlayback> cameraReady) {
         if (speed == UnitMotion.Speed.INSTANT) {
+            review(null);
             paused = false;
             finish();
             return;
         }
-        if (paused) {
+        if (review != null) {
+            // A review plays alone: the live queue waits, paused or not, so the two never interleave (A.10).
+            if (cameraReady.test(this)) {
+                float previous = review.seconds;
+                review.seconds = (float) Math.min(review.duration, review.seconds + Math.max(0, seconds) * speed.rate);
+                cue(review, previous);
+                if (review.seconds >= review.duration) {
+                    review(null);
+                }
+            }
+            return;
+        }
+        if (paused && !stepping) {
             return;
         }
         double remaining = Math.max(0, seconds);
@@ -132,6 +153,7 @@ final class UnitPlayback {
             if (active == null) {
                 active = pending.pollFirst();
                 if (active == null) {
+                    stepping = false;
                     return;
                 }
                 completed = false;
@@ -163,10 +185,7 @@ final class UnitPlayback {
                     attacks.forEach(shot -> {
                         float previous = shot.seconds;
                         shot.seconds = Math.min(shot.duration, (float) combatSeconds - shot.delay);
-                        if (previous < UnitAttack.ANTICIPATION_SECONDS && shot.seconds >= UnitAttack.ANTICIPATION_SECONDS) {
-                            soundCue.accept(shot, false);
-                        }
-                        if (previous < shot.contactSeconds && shot.seconds >= shot.contactSeconds) { soundCue.accept(shot, true); }
+                        cue(shot, previous);
                     });
                     applySceneUpdates();
                 } else {
@@ -184,6 +203,11 @@ final class UnitPlayback {
                 }
                 applySceneUpdates();
                 hold = COMPLETION_HOLD_SECONDS;
+                if (stepping && active != stepFrom) {
+                    // stepOnce(): one more action has played; the queue waits again.
+                    stepping = false;
+                    return;
+                }
             }
             double pause = Math.min(remaining, hold);
             hold -= pause;
@@ -200,11 +224,66 @@ final class UnitPlayback {
         }
     }
 
-    UnitAttack attack() { return attack; }
+    /** Sounds consume the launch and contact edges of a shot's clock. */
+    private void cue(UnitAttack shot, float previous) {
+        if (previous < UnitAttack.ANTICIPATION_SECONDS && shot.seconds >= UnitAttack.ANTICIPATION_SECONDS) {
+            soundCue.accept(shot, false);
+        }
+        if (previous < shot.contactSeconds && shot.seconds >= shot.contactSeconds) { soundCue.accept(shot, true); }
+    }
 
-    List<UnitAttack> attacks() { return visibleAttacks; }
+    /** The presented attack: a reviewed one while a review runs, else the live one. */
+    UnitAttack attack() { return review != null ? review : attack; }
 
-    BoardScene.Movement movement() { return active instanceof BoardScene.Movement move ? move : null; }
+    List<UnitAttack> attacks() { return review != null ? reviewed : visibleAttacks; }
+
+    /** The live movement under way; none while a review presents an attack. */
+    BoardScene.Movement movement() {
+        return review == null && active instanceof BoardScene.Movement move ? move : null;
+    }
+
+    /**
+     * While paused, plays exactly one more action (A.10 J7) and the queue waits again: an action under way that is not
+     * presented yet (an attack before its impact, a movement) is that action; one already presented finishes, then the
+     * next one plays to its completion. A unit's volley is one action.
+     */
+    void stepOnce() {
+        if (paused) {
+            stepping = true;
+            stepFrom = completed || attack != null && !beforeImpact() ? active : null;
+        }
+    }
+
+    /**
+     * Re-presents a retained attack (A.10 J8): its effects play once more while the live queue waits, and before its
+     * impact its attacker and target show as captured. It applies nothing, so the presented scene is the live one
+     * again afterwards. Null ends a review.
+     */
+    void review(BoardScene.Combat event) {
+        review = event == null ? null : new UnitAttack(event);
+        reviewed = review == null ? List.of() : List.of(review);
+    }
+
+    boolean reviewing() { return review != null; }
+
+    /**
+     * The live attacks not presented yet, by their resolution id: the queued ones and the shots under way before their
+     * impact, so whatever follows the playback (log, counter, pop-ups) shows a shot as it lands.
+     */
+    Set<UUID> waiting() {
+        Set<UUID> ids = new HashSet<>();
+        for (var event : pending) {
+            if (event instanceof BoardScene.Combat combat) {
+                ids.add(combat.result().id());
+            }
+        }
+        for (UnitAttack shot : attacks) {
+            if (shot.seconds < shot.contactSeconds) {
+                ids.add(shot.event.result().id());
+            }
+        }
+        return ids;
+    }
 
     /** Interpolate only a displacement actually present in the post-resolution checkpoint. */
     void placeDisplacement(BoardScene.Unit unit, com.badlogic.gdx.math.Vector3 position) {
@@ -288,7 +367,10 @@ final class UnitPlayback {
 
     boolean paused() { return paused; }
 
-    void togglePaused() { paused = !paused; }
+    void togglePaused() {
+        paused = !paused;
+        stepping = false;
+    }
 
     private UnitMotion start(BoardScene.Movement movement) {
         var motion = motions.computeIfAbsent(movement.entityId(), ignored -> new UnitMotion(movement.path().getFirst()));
@@ -331,10 +413,13 @@ final class UnitPlayback {
         conversion = null;
         hold = 0;
         completed = false;
+        stepping = false;
+        stepFrom = null;
     }
 
     void clear() {
         resetQueue();
+        review(null);
         paused = false;
         motions.clear();
         observed.clear();
@@ -360,8 +445,21 @@ final class UnitPlayback {
         }
     }
 
-    /** Retain only captured, authorized appearance until its event plays; no later loadout or damage leaks forward. */
+    /**
+     * Retain only captured, authorized appearance until its event plays; no later loadout or damage leaks forward. A
+     * reviewed attack shows its captured attacker and target until its impact, over the live tiles (A.10).
+     */
     BoardScene present(BoardScene scene) {
+        BoardScene live = presentLive(scene);
+        if (review == null || review.seconds + 1e-7 >= review.contactSeconds) {
+            return live;
+        }
+        Map<Integer, BoardScene.Unit> shown = new LinkedHashMap<>();
+        holdUnits(review.event, shown, true);
+        return live.withUnits(replaced(live.units(), shown));
+    }
+
+    private BoardScene presentLive(BoardScene scene) {
         applySceneUpdates();
         // UnitMotion completion includes landing, unloading and formation settling. Pending moves also hide
         // overlays between events; the final completion hold does not delay their return.
@@ -397,15 +495,21 @@ final class UnitPlayback {
             else { attacks.forEach(shot -> holdUnits(shot.event, shown, true)); }
         }
         pending.forEach(event -> holdUnits(event, shown, false));
-        List<BoardScene.Unit> units = new ArrayList<>();
-        for (var unit : scene.units()) {
-            var replacement = shown.remove(unit.id());
-            units.add(replacement == null ? unit : replacement);
-        }
-        // An already-visible victim may be removed by the game before its final received attack has played.
-        units.addAll(shown.values());
+        List<BoardScene.Unit> units = replaced(scene.units(), shown);
         retainMotions(units);
         return scene.withUnits(units);
+    }
+
+    /** The units with the held ones in their place. */
+    private static List<BoardScene.Unit> replaced(List<BoardScene.Unit> units, Map<Integer, BoardScene.Unit> shown) {
+        List<BoardScene.Unit> result = new ArrayList<>();
+        for (var unit : units) {
+            var replacement = shown.remove(unit.id());
+            result.add(replacement == null ? unit : replacement);
+        }
+        // An already-visible victim may be removed by the game before its final received attack has played.
+        result.addAll(shown.values());
+        return result;
     }
 
     private void retainMotions(List<BoardScene.Unit> units) {

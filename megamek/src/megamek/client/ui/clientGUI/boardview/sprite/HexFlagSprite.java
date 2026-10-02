@@ -37,8 +37,8 @@ import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.geom.Path2D;
 
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.StringDrawer;
 import megamek.client.ui.util.UIUtil;
@@ -90,7 +90,7 @@ public class HexFlagSprite extends HexSprite {
      * @param flagColor the fill color of the flag's banner, usually the owning player's color
      * @param label     a short word drawn under the flag (the point's scheme), or {@code null} for none
      */
-    public HexFlagSprite(BoardView boardView, Coords location, Color flagColor, @Nullable String label) {
+    public HexFlagSprite(BoardGlyphContext boardView, Coords location, Color flagColor, @Nullable String label) {
         this(boardView, location, flagColor, label, null);
     }
 
@@ -101,7 +101,7 @@ public class HexFlagSprite extends HexSprite {
      * @param label     A short word drawn under the flag (the point's scheme), or {@code null} for none
      * @param progress  A counter drawn under the label, e.g. {@code "2/3"}, or {@code null} for none
      */
-    public HexFlagSprite(BoardView boardView, Coords location, Color flagColor, @Nullable String label,
+    public HexFlagSprite(BoardGlyphContext boardView, Coords location, Color flagColor, @Nullable String label,
           @Nullable String progress) {
         super(boardView, location);
         this.flagColor = flagColor;

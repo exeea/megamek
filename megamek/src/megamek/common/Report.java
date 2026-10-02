@@ -658,6 +658,19 @@ public class Report implements ReportEntry {
         return tagData.size();
     }
 
+    /**
+     * Internal method. Not for typical use.
+     * <p>
+     * Get one data value as it was added, without translation or formatting.
+     *
+     * @param index position of data value (indexes are chronological and start at zero)
+     *
+     * @return the data value, or null if it was hidden from this recipient or the index is out of range
+     */
+    public @Nullable String data(int index) {
+        return (index >= 0) && (index < tagData.size()) ? tagData.get(index) : null;
+    }
+
     private String getTag() {
         return getTag(tagCounter);
     }

@@ -32,21 +32,14 @@
  */
 package megamek.client.ui.clientGUI.boardview.sprite;
 
-import java.awt.AlphaComposite;
-import java.awt.Graphics2D;
-import java.awt.Image;
-import java.awt.Point;
-import java.awt.Rectangle;
-import java.text.MessageFormat;
+import java.awt.*;
 
-import megamek.client.ui.Messages;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.EntityWreckHelper;
 import megamek.common.board.Coords;
 import megamek.common.units.Entity;
 import megamek.common.units.Terrains;
-import megamek.common.preference.PreferenceManager;
 import megamek.common.util.ImageUtil;
 
 /**
@@ -61,7 +54,7 @@ public abstract class AbstractWreckSprite extends Sprite {
 
     protected int secondaryPos;
 
-    public AbstractWreckSprite(BoardView boardView1) {
+    public AbstractWreckSprite(BoardGlyphContext boardView1) {
         super(boardView1);
     }
 
@@ -117,8 +110,8 @@ public abstract class AbstractWreckSprite extends Sprite {
         boolean displayDestroyedDecal = EntityWreckHelper.displayDestroyedDecal(entity);
 
         if (displayDestroyedDecal) {
-            Image destroyed = bv.getTileManager().bottomLayerWreckMarkerFor(entity, 0);
-            if (null != destroyed) {
+            Image destroyed = bv.getTilesetManager().bottomLayerWreckMarkerFor(entity, 0);
+            if (destroyed != null) {
                 graph.drawImage(destroyed, 0, 0, this);
             }
         }
@@ -127,8 +120,8 @@ public abstract class AbstractWreckSprite extends Sprite {
         boolean drawFuelLeak = EntityWreckHelper.displayFuelLeak(entity);
 
         if (drawFuelLeak) {
-            Image fuelLeak = bv.getTileManager().bottomLayerFuelLeakMarkerFor(entity);
-            if (null != fuelLeak) {
+            Image fuelLeak = bv.getTilesetManager().bottomLayerFuelLeakMarkerFor(entity);
+            if (fuelLeak != null) {
                 graph.drawImage(fuelLeak, 0, 0, this);
             }
         }
@@ -137,8 +130,8 @@ public abstract class AbstractWreckSprite extends Sprite {
         boolean drawMotiveWreckage = EntityWreckHelper.displayMotiveDamage(entity);
 
         if (drawMotiveWreckage) {
-            Image motiveWreckage = bv.getTileManager().bottomLayerMotiveMarkerFor(entity);
-            if (null != motiveWreckage) {
+            Image motiveWreckage = bv.getTilesetManager().bottomLayerMotiveMarkerFor(entity);
+            if (motiveWreckage != null) {
                 graph.drawImage(motiveWreckage, 0, 0, this);
             }
         }
@@ -149,15 +142,15 @@ public abstract class AbstractWreckSprite extends Sprite {
         if (EntityWreckHelper.displayDevastation(entity)) {
             // objects in space should not have craters
             wreck = entity.isSpaceborne() ?
-                  bv.getTileManager().wreckMarkerFor(entity, secondaryPos) :
-                  bv.getTileManager().getCraterFor(entity, secondaryPos);
+                  bv.getTilesetManager().wreckMarkerFor(entity, secondaryPos) :
+                  bv.getTilesetManager().getCraterFor(entity, secondaryPos);
         } else {
             wreck = EntityWreckHelper.useExplicitWreckImage(entity) ?
-                  bv.getTileManager().wreckMarkerFor(entity, secondaryPos) :
-                  bv.getTileManager().imageFor(entity, secondaryPos);
+                  bv.getTilesetManager().wreckMarkerFor(entity, secondaryPos) :
+                  bv.getTilesetManager().imageFor(entity, secondaryPos);
         }
 
-        if (null != wreck) {
+        if (wreck != null) {
             graph.drawImage(wreck, 0, 0, this);
         }
 
@@ -189,13 +182,6 @@ public abstract class AbstractWreckSprite extends Sprite {
 
     @Override
     public StringBuffer getTooltip() {
-        StringBuffer result = new StringBuffer();
-        result.append(Messages.getString("BoardView1.Tooltip.Wreckof")).append(" ");
-        result.append(entity.getChassis());
-        result.append(MessageFormat.format(" ({0})", entity.getOwner().getName()));
-        if (PreferenceManager.getClientPreferences().getShowUnitId()) {
-            result.append(MessageFormat.format(" [ID: {0}]", entity.getId()));
-        }
-        return result;
+        return new StringBuffer(megamek.client.ui.clientGUI.tooltip.HexTooltip.wreckText(entity));
     }
 }

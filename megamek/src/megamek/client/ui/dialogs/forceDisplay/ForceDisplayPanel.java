@@ -353,7 +353,7 @@ public class ForceDisplayPanel extends JPanel implements GameListener, IPreferen
                           && entity.isDeployed()
                           && !entity.isOffBoard()
                           && entity.getPosition() != null) {
-                        clientgui.getBoardView().centerOnHex(entity.getPosition());
+                        clientgui.getBoardState().centerOnHex(entity.getPosition());
                     }
                 }
             }

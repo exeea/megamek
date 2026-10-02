@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<!DOCTYPE import-control PUBLIC
+        "-//Checkstyle//DTD ImportControl Configuration 1.4//EN"
+        "https://checkstyle.org/dtds/import_control_1_4.dtd">
+
+<!--
+    The native UI toolkit (megamek.client.ui.gdx, sources and tests) depends on nothing of the game or of a view: only
+    java (no AWT), libGDX, MegaMek's Messages and MMLogger, its own package and JUnit. It is backend-neutral: only the
+    test harness UiTestStage opens a desktop (LWJGL3) window. Callers pass in the fonts directory, the scale and all
+    texts. Fully qualified names in code are not checked.
+-->
+<import-control pkg="megamek.client.ui.gdx" strategyOnMismatch="disallowed">
+    <disallow pkg="java.awt" />
+    <allow pkg="java" />
+    <disallow pkg="com.badlogic.gdx.backends" />
+    <allow pkg="com.badlogic.gdx" />
+    <allow pkg="megamek.client.ui.gdx" />
+    <allow class="megamek.client.ui.Messages" />
+    <allow class="megamek.logging.MMLogger" />
+    <allow pkg="org.junit" />
+    <file name="UiTestStage">
+        <allow pkg="com.badlogic.gdx.backends.lwjgl3" />
+    </file>
+</import-control>

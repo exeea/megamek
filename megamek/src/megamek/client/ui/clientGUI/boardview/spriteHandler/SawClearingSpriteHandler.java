@@ -35,7 +35,7 @@ package megamek.client.ui.clientGUI.boardview.spriteHandler;
 import java.util.Map;
 
 import megamek.client.ui.clientGUI.AbstractClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.sprite.SawClearingSprite;
 import megamek.common.board.BoardLocation;
 import megamek.common.event.board.GameBoardChangeEvent;
@@ -61,13 +61,13 @@ public class SawClearingSpriteHandler extends BoardViewSpriteHandler {
      */
     public void setSawClearingSprites(Map<BoardLocation, Integer> cutHexes) {
         clear();
-        if (clientGUI.boardViews().isEmpty()) {
+        if (clientGUI.boardStates().isEmpty()) {
             return;
         }
         if (cutHexes != null) {
             for (Map.Entry<BoardLocation, Integer> entry : cutHexes.entrySet()) {
                 BoardLocation location = entry.getKey();
-                BoardView boardView = (BoardView) clientGUI.getBoardView(location);
+                BoardClientState boardView = clientGUI.getBoardState(location);
                 if (boardView != null) {
                     SawClearingSprite sprite = new SawClearingSprite(
                           boardView, location.coords(), entry.getValue());

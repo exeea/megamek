@@ -76,7 +76,8 @@ class GpuResourcesSmokeTest {
             for (String name : names) {
                 var model = assets.model(name);
                 assertSame(model, assets.model(name), "Asset geometry is shared");
-                assertTrue(model.meshes.first().getNumIndices() / 3 <= 500, name);
+                // Bridge decks carry authored roundabouts and kerbs (mm-data "roundabouts!"), up to about 830 triangles.
+                assertTrue(model.meshes.first().getNumIndices() / 3 <= (name.startsWith("bridges/") ? 900 : 500), name);
                 BoundingBox bounds = model.calculateBoundingBox(new BoundingBox());
                 assertTrue(bounds.isValid() && bounds.getWidth() > 0 && bounds.getDepth() > 0, name);
             }
@@ -154,10 +155,10 @@ class GpuResourcesSmokeTest {
         GpuTerrain terrain = new GpuTerrain();
         GpuBoardSkin skin = new GpuBoardSkin();
         GpuBoardTuning tuning = new GpuBoardTuning(skin.skin);
-        assertNull(tuning.panel().findActor("Speed gain / hex"));
-        Slider opacity = tuning.panel().findActor("Building opacity");
+        assertNull(tuning.boardRows().findActor("Speed gain / hex"));
+        Slider opacity = GpuBoardTestUi.tuning(tuning, "Building opacity");
         assertEquals(0.5f, tuning.buildingOpacity());
-        assertNull(tuning.panel().findActor("Tree opacity"));
+        assertNull(tuning.boardRows().findActor("Tree opacity"));
         ModelBatch units = new ModelBatch();
         var model = new ModelBuilder().createBox(14, 14, 10,
               new Material(ColorAttribute.createDiffuse(Color.RED)),
@@ -248,8 +249,8 @@ class GpuResourcesSmokeTest {
                         assertEquals(solidStrut, rgba(camera, strutTop), "Struts must stay opaque and occlude units below");
                     }
                     unit.transform.setToTranslation(center.x, center.y, bed + 5.5f);
-                    tuning.panel().findActor("tuning-defaults").fire(new ChangeListener.ChangeEvent());
-                    assertNull(tuning.panel().findActor("Speed gain / hex"));
+                    tuning.defaults().fire(new ChangeListener.ChangeEvent());
+                    assertNull(tuning.boardRows().findActor("Speed gain / hex"));
                     assertEquals(0.5f, tuning.buildingOpacity());
                     terrain.animate(0, List.of());
                     drawModel(terrain, camera, units, unit);

@@ -36,11 +36,14 @@ import java.awt.Container;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.IntStream;
 import javax.swing.ButtonGroup;
 import javax.swing.JFrame;
 import javax.swing.JRadioButton;
 
 import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
 import megamek.client.ui.dialogs.buttonDialogs.AbstractButtonDialog;
 import megamek.client.ui.panels.FacingPickerPanel;
 import megamek.codeUtilities.MathUtility;
@@ -87,6 +90,27 @@ public class BuildingFacingDialog extends AbstractButtonDialog {
             buttonGroup.add(button);
         }
         return new FacingPickerPanel(facings, FacingPickerPanel.previewOnHex(clientgui, building, 0));
+    }
+
+    /**
+     * Showing the dialog asks in the owning client's native battle window instead when that draws dialogs: the six
+     * facings by name, those that do not fit disabled, starting on the building's own; OK confirms the chosen one as
+     * this dialog's OK button does.
+     */
+    @Override
+    public void setVisible(boolean visible) {
+        int selected = getChosenFacing();
+        DialogAnswer answer = !visible ? null : clientgui.askRows("", getTitle(), IntStream.range(0, facings.size())
+                    .mapToObj(facing -> new DialogRow(DeployFacingChoiceDialog.facingName(facing), "", null,
+                          facings.get(facing).isEnabled())).toList(), false,
+              (selected == NO_FACING) ? List.of() : List.of(selected), null,
+              List.of(resources.getString("Ok.text"), resources.getString("Cancel.text")), 1);
+        if (answer == null) {
+            super.setVisible(visible);
+        } else if (answer.button() == 0) {
+            answer.selected().forEach(facing -> facings.get(facing).setSelected(true));
+            okButtonActionPerformed(null);
+        }
     }
 
     /**

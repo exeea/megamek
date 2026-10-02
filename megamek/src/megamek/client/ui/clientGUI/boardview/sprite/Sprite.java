@@ -41,8 +41,8 @@ import java.awt.Rectangle;
 import java.awt.image.ImageObserver;
 
 import jakarta.annotation.Nonnull;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.common.annotations.Nullable;
 
 /**
@@ -52,14 +52,14 @@ import megamek.common.annotations.Nullable;
  */
 abstract public class Sprite implements ImageObserver, Comparable<Sprite> {
 
-    public final BoardView bv;
+    public final BoardGlyphContext bv;
     protected Rectangle bounds;
     protected Image image;
     // Set this to true if you don't want the sprite to be drawn.
     protected boolean hidden = false;
 
-    protected Sprite(BoardView boardView1) {
-        bv = boardView1;
+    protected Sprite(BoardGlyphContext boardView1) {
+        bv = boardView1.glyphContext();
     }
 
     /**
@@ -186,4 +186,7 @@ abstract public class Sprite implements ImageObserver, Comparable<Sprite> {
               "; no image" :
               "");
     }
+    /** Unit visuals belong to the active renderer, not the shared tactical capture. */
+    public boolean isUnitVisual() { return false; }
+
 }

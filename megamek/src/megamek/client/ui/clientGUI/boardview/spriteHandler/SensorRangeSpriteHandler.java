@@ -39,7 +39,7 @@ import java.util.Set;
 
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.sprite.SensorRangeSprite;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
@@ -91,7 +91,7 @@ public class SensorRangeSpriteHandler extends BoardViewSpriteHandler implements 
 
     public void setSensorRange(Entity entity, Coords assumedPosition) {
         clear();
-        if (clientGUI.boardViews().isEmpty()) {
+        if (clientGUI.boardStates().isEmpty()) {
             return;
         }
         currentEntity = entity;
@@ -174,7 +174,7 @@ public class SensorRangeSpriteHandler extends BoardViewSpriteHandler implements 
         // create the sprites
 
         // for all available range
-        BoardView boardView = (BoardView) clientGUI.getBoardView(board.getBoardId());
+        BoardClientState boardView = clientGUI.getBoardState(board.getBoardId());
         for (int b = 0; b < lBrackets.size(); b++) {
             if (sensorRanges.get(b) == null) {
                 continue;

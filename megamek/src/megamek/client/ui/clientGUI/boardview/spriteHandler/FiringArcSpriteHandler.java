@@ -169,17 +169,17 @@ public class FiringArcSpriteHandler extends BoardViewSpriteHandler implements IP
     }
 
     /**
-     * Draw the sprites for the currently stored values for position, unit, arc etc. Does not draw sprites if field of
-     * fire is deactivated.
+     * The field of fire of the weapon shown last ({@link #update}): per range bracket (minimum, short, medium, long and,
+     * where extreme range applies, extreme) the board hexes in the weapon's arc at that bracket's distances, each hex
+     * in at most one bracket. Empty when no weapon is shown (values cleared, unit off board or no weapon displayed).
+     * Unlike {@link #renewSprites()} it does not depend on the field of fire setting.
+     *
+     * @return a new list of new sets, one per bracket, indexed by {@link RangeType} bracket
      */
-    public void renewSprites() {
-        clear();
-        if (clientGUI.boardViews().isEmpty()) {
-            return;
-        }
-        if (!GUIP.getShowFieldOfFire() || (firingEntity == null) || (firingPosition == null)
-              || firingEntity.isOffBoard() || clientGUI.getDisplayedWeapon().isEmpty()) {
-            return;
+    public List<Set<Coords>> fieldOfFire() {
+        if ((firingEntity == null) || (firingPosition == null) || firingEntity.isOffBoard()
+              || clientGUI.getDisplayedWeapon().isEmpty()) {
+            return List.of();
         }
 
         Board board = game.getBoard(firingEntity);
@@ -256,6 +256,23 @@ public class FiringArcSpriteHandler extends BoardViewSpriteHandler implements IP
                             arc));
             }
         }
+        return fieldFire;
+    }
+
+    /**
+     * Draw the sprites for the currently stored values for position, unit, arc etc. Does not draw sprites if field of
+     * fire is deactivated.
+     */
+    public void renewSprites() {
+        clear();
+        if (clientGUI.boardStates().isEmpty() || !GUIP.getShowFieldOfFire()) {
+            return;
+        }
+        List<Set<Coords>> fieldFire = fieldOfFire();
+        if (fieldFire.isEmpty()) {
+            return;
+        }
+        Board board = game.getBoard(firingEntity);
 
         // for all available range brackets Min/S/M/L/E ...
         for (int bracket = 0; bracket < fieldFire.size(); bracket++) {
@@ -273,7 +290,7 @@ public class FiringArcSpriteHandler extends BoardViewSpriteHandler implements IP
                 }
                 // create sprite if there's a border to paint
                 if (edgesToPaint > 0) {
-                    FieldOfFireSprite ffSprite = new FieldOfFireSprite(clientGUI.getBoardView(firingEntity),
+                    FieldOfFireSprite ffSprite = new FieldOfFireSprite(clientGUI.getBoardState(firingEntity),
                           bracket,
                           loc,
                           edgesToPaint);
@@ -314,7 +331,7 @@ public class FiringArcSpriteHandler extends BoardViewSpriteHandler implements IP
                 if (board.contains(mark) && fieldFire.get(bracket).contains(mark)
                       && ((bracket > 0) || (numMinMarkers < 2))) {
                     TextMarkerSprite tS =
-                          new TextMarkerSprite(clientGUI.getBoardView(firingEntity),
+                          new TextMarkerSprite(clientGUI.getBoardState(firingEntity),
                                 mark,
                                 bracket);
                     currentSprites.add(tS);
@@ -325,7 +342,7 @@ public class FiringArcSpriteHandler extends BoardViewSpriteHandler implements IP
             }
         }
 
-        clientGUI.getBoardView(firingEntity).addSprites(currentSprites);
+        clientGUI.getBoardState(firingEntity).addSprites(currentSprites);
     }
 
     @Override

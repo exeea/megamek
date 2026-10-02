@@ -40,7 +40,7 @@ import java.awt.Rectangle;
 import java.awt.image.ImageObserver;
 
 import megamek.MMConstants;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.sprite.AbstractWreckSprite;
 import megamek.common.units.Entity;
 
@@ -52,7 +52,7 @@ public class IsometricWreckSprite extends AbstractWreckSprite {
     /**
      * Isometric wreck sprite constructor, calculates boundaries
      */
-    public IsometricWreckSprite(BoardView boardView1, final Entity entity, int secondaryPos) {
+    public IsometricWreckSprite(BoardGlyphContext boardView1, final Entity entity, int secondaryPos) {
         super(boardView1);
         this.entity = entity;
         this.secondaryPos = secondaryPos;
@@ -60,8 +60,8 @@ public class IsometricWreckSprite extends AbstractWreckSprite {
         String shortName = entity.getShortName();
 
         Font font = new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 10);
-        modelRect = new Rectangle(47, 55, bv.getPanel().getFontMetrics(font).stringWidth(
-              shortName) + 1, bv.getPanel().getFontMetrics(font).getAscent());
+        modelRect = new Rectangle(47, 55, bv.getFontMetrics(font).stringWidth(
+              shortName) + 1, bv.getFontMetrics(font).getAscent());
 
         image = null;
     }

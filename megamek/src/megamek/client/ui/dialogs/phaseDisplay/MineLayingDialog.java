@@ -44,6 +44,7 @@ import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.Serial;
 import java.util.ArrayList;
+import java.util.List;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JDialog;
@@ -51,6 +52,7 @@ import javax.swing.JFrame;
 import javax.swing.JLabel;
 
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.common.units.Entity;
 import megamek.common.equipment.EquipmentType;
@@ -63,7 +65,9 @@ import megamek.common.equipment.Mounted;
 public class MineLayingDialog extends JDialog implements ActionListener {
     @Serial
     private static final long serialVersionUID = -1067865530113792340L;
+    private final JButton butOkay = new JButton(Messages.getString("Okay"));
     private final JButton butCancel = new JButton(Messages.getString("Cancel"));
+    private final JLabel labMessage;
     private boolean okay = true;
 
     /**
@@ -83,7 +87,7 @@ public class MineLayingDialog extends JDialog implements ActionListener {
         super(parent, Messages.getString("MineLayingDialog.title"), true);
         this.entity = entity;
 
-        JLabel labMessage = new JLabel(Messages.getString("MineLayingDialog.selectMineToLay",
+        labMessage = new JLabel(Messages.getString("MineLayingDialog.selectMineToLay",
               entity.getDisplayName()));
 
         // Walk through the entity's misc equipment, looking for mines.
@@ -105,7 +109,6 @@ public class MineLayingDialog extends JDialog implements ActionListener {
         } // Look at the next piece of equipment.
 
         // buttons
-        JButton butOkay = new JButton(Messages.getString("Okay"));
         butOkay.addActionListener(this);
         butCancel.addActionListener(this);
 
@@ -159,6 +162,22 @@ public class MineLayingDialog extends JDialog implements ActionListener {
             okay = false;
         }
         setVisible(false);
+    }
+
+    /**
+     * Showing the dialog asks in the owning client's native battle window instead when that draws dialogs: the chosen
+     * mine is laid as with Okay; Cancel and Esc lay none.
+     */
+    @Override
+    public void setVisible(boolean visible) {
+        ClientGUI gui = visible ? ClientGUI.forFrame(getOwner()) : null;
+        Boolean confirmed = (gui == null) ? null : gui.askEntry(labMessage.getText(), getTitle(), chMines,
+              List.of(butOkay.getText(), butCancel.getText()), 1);
+        if (confirmed == null) {
+            super.setVisible(visible);
+        } else if (!confirmed) {
+            butCancel.doClick(0);
+        }
     }
 
     public boolean getAnswer() {

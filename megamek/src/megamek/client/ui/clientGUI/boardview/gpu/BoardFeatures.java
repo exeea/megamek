@@ -69,17 +69,8 @@ final class BoardFeatures {
         }
         if (hex.containsTerrain(Terrains.BRIDGE)) {
             int exits = hex.getTerrain(Terrains.BRIDGE).getExits() & 63;
-            for (int direction = 0; direction < 6; direction++) {
-                if ((exits & (1 << direction)) != 0) {
-                    Coords neighbor = coords.translated(direction);
-                    float dx = (neighbor.getX() - coords.getX()) * BoardGeometry.TILE_WIDTH * 0.75f;
-                    float dy = -((neighbor.getY() - coords.getY()) * BoardGeometry.TILE_HEIGHT
-                          + ((neighbor.getX() & 1) - (coords.getX() & 1)) * BoardGeometry.TILE_HEIGHT / 2);
-                    result.add(new BoardScene.Feature("bridge", 0, 0, (float) Math.toDegrees(Math.atan2(-dx, dy)),
-                          (float) Math.hypot(dx, dy) / BoardGeometry.TILE_HEIGHT, 1,
-                          hex.terrainLevel(Terrains.BRIDGE_ELEV)));
-                }
-            }
+            result.add(new BoardScene.Feature("bridge", 0, 0, 0, 1, 1,
+                  hex.terrainLevel(Terrains.BRIDGE_ELEV), BoardScene.FeatureKind.PROP, exits));
         }
         boolean jungle = hex.containsTerrain(Terrains.JUNGLE);
         if (jungle || hex.containsTerrain(Terrains.WOODS)) {

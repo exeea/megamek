@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024-2025 The MegaMek Team. All Rights Reserved.
+ * Copyright (C) 2024-2026 The MegaMek Team. All Rights Reserved.
  *
  * This file is part of MegaMek.
  *
@@ -43,11 +43,10 @@ import java.awt.Transparency;
 import java.util.List;
 import java.util.Objects;
 
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
 import megamek.client.ui.util.StringDrawer;
 import megamek.client.ui.util.UIUtil;
-import megamek.codeUtilities.MathUtility;
 import megamek.common.Player;
 import megamek.common.strategicBattleSystems.SBFFormation;
 import megamek.common.strategicBattleSystems.SBFGame;
@@ -72,13 +71,13 @@ public class SBFFormationSprite extends Sprite {
     private boolean isSelected;
 
 
-    public SBFFormationSprite(BoardView boardView, SBFFormation formation, Player owner, SBFGame game) {
+    public SBFFormationSprite(BoardGlyphContext boardView, SBFFormation formation, Player owner, SBFGame game) {
         super(boardView);
         this.formation = Objects.requireNonNull(formation);
         this.owner = owner;
         List<SBFFormation> formationsInHex = game.getActiveFormationsAt(formation.getPosition());
         formationCountInHex = formationsInHex.size();
-        positionInHex = MathUtility.clamp(formationsInHex.indexOf(formation), 0, 3);
+        positionInHex = Math.clamp(formationsInHex.indexOf(formation), 0, 3);
         getBounds();
     }
 

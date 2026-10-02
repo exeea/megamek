@@ -44,7 +44,7 @@ import java.awt.event.InputEvent;
 import java.awt.event.MouseEvent;
 
 import megamek.client.event.BoardViewEvent;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -63,11 +63,11 @@ class AttackPhaseDisplayHexMouseActionTest {
 
     private static final Coords CLICKED_HEX = new Coords(5, 10);
 
-    private BoardView boardView;
+    private BoardClientState boardView;
 
     @BeforeEach
     void setUp() {
-        boardView = mock(BoardView.class);
+        boardView = mock(BoardClientState.class);
     }
 
     private BoardViewEvent hexEvent(int eventType, int modifiers, int mouseButton) {
@@ -76,7 +76,7 @@ class AttackPhaseDisplayHexMouseActionTest {
         when(event.getCoords()).thenReturn(CLICKED_HEX);
         when(event.getModifiers()).thenReturn(modifiers);
         when(event.getButton()).thenReturn(mouseButton);
-        when(event.getBoardView()).thenReturn(boardView);
+        when(event.getBoardState()).thenReturn(boardView);
         return event;
     }
 

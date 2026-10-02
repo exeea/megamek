@@ -59,7 +59,10 @@ import javax.swing.JScrollPane;
 
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogField;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.FieldKind;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.enums.VariableRangeTargetingMode;
 import megamek.common.game.Game;
@@ -215,8 +218,7 @@ public class VariableRangeTargetingDialog extends JDialog implements ActionListe
             modeGroup.add(shortButton);
 
             // Select based on pending mode or current mode
-            VariableRangeTargetingMode effectiveMode = (pendingMode != null) ? pendingMode : currentMode;
-            if (effectiveMode.isLong()) {
+            if (effectiveMode(entity).isLong()) {
                 longButton.setSelected(true);
             } else {
                 shortButton.setSelected(true);
@@ -286,7 +288,7 @@ public class VariableRangeTargetingDialog extends JDialog implements ActionListe
      * Highlights the specified entity on the board view.
      */
     private void highlightEntity(Entity entity) {
-        BoardView boardView = clientGUI.getBoardView();
+        BoardClientState boardView = clientGUI.getBoardState();
 
         // Highlight entity name tag
         boardView.highlightSelectedEntities(Collections.singletonList(entity));
@@ -303,7 +305,7 @@ public class VariableRangeTargetingDialog extends JDialog implements ActionListe
      * Clears all entity highlighting on the board view.
      */
     private void clearHighlighting() {
-        BoardView boardView = clientGUI.getBoardView();
+        BoardClientState boardView = clientGUI.getBoardState();
         boardView.highlightSelectedEntities(Collections.emptyList());
         boardView.setHighlightedEntityHexes(Collections.emptyList());
         boardView.repaint();
@@ -325,19 +327,27 @@ public class VariableRangeTargetingDialog extends JDialog implements ActionListe
      * Applies the selected mode changes to all units.
      */
     private void applyChanges() {
+        Map<Integer, VariableRangeTargetingMode> selectedModes = new HashMap<>();
+        longModeButtons.forEach((entityId, longButton) -> selectedModes.put(entityId, longButton.isSelected()
+              ? VariableRangeTargetingMode.LONG
+              : VariableRangeTargetingMode.SHORT));
+        applyModes(selectedModes);
+    }
+
+    /**
+     * Sends the mode each unit was given, here or in the native battle window, where it differs from the mode the unit
+     * would have next turn.
+     *
+     * @param selectedModes the selected mode by unit id; a unit without one keeps its mode
+     */
+    private void applyModes(Map<Integer, VariableRangeTargetingMode> selectedModes) {
         for (Entity entity : playerUnits) {
             int entityId = entity.getId();
-            JRadioButton longButton = longModeButtons.get(entityId);
+            VariableRangeTargetingMode selectedMode = selectedModes.get(entityId);
 
-            if (longButton != null) {
-                VariableRangeTargetingMode selectedMode = longButton.isSelected()
-                      ? VariableRangeTargetingMode.LONG
-                      : VariableRangeTargetingMode.SHORT;
-
+            if (selectedMode != null) {
                 // Only send if mode is actually changing
-                VariableRangeTargetingMode currentMode = entity.getVariableRangeTargetingMode();
-                VariableRangeTargetingMode pendingMode = entity.getPendingVariableRangeTargetingMode();
-                VariableRangeTargetingMode effectiveMode = (pendingMode != null) ? pendingMode : currentMode;
+                VariableRangeTargetingMode effectiveMode = effectiveMode(entity);
 
                 if (selectedMode != effectiveMode) {
                     logger.debug("Entity {} changing Variable Range Targeting mode from {} to {}",
@@ -347,6 +357,51 @@ public class VariableRangeTargetingDialog extends JDialog implements ActionListe
                 }
             }
         }
+    }
+
+    /**
+     * @return the mode the unit will have next turn: its pending mode if one is set, otherwise its current mode
+     */
+    private static VariableRangeTargetingMode effectiveMode(Entity entity) {
+        VariableRangeTargetingMode pendingMode = entity.getPendingVariableRangeTargetingMode();
+        return (pendingMode != null) ? pendingMode : entity.getVariableRangeTargetingMode();
+    }
+
+    /**
+     * Showing the dialog asks in the client's native battle window instead when that draws dialogs: one choice of Long
+     * or Short per unit, beside its current mode, starting on the mode it will have next turn. Apply sends the changed
+     * modes as here; Cancel and Esc, like the close box, send nothing.
+     */
+    @Override
+    public void setVisible(boolean visible) {
+        if (!visible || !answeredNatively()) {
+            super.setVisible(visible);
+        }
+    }
+
+    private boolean answeredNatively() {
+        List<String> modes = List.of(Messages.getString("VariableRangeTargetingDialog.modeLong"),
+              Messages.getString("VariableRangeTargetingDialog.modeShort"));
+        List<DialogField> fields = playerUnits.stream().map(entity -> new DialogField(Messages.getString(
+              "VariableRangeTargetingDialog.unitNow", entity.getShortName(), getModeDisplayText(
+                    entity.getVariableRangeTargetingMode(), entity.getPendingVariableRangeTargetingMode())),
+              FieldKind.CHOICE, modes, 0, 0, modes.get(effectiveMode(entity).isLong() ? 0 : 1))).toList();
+        DialogAnswer answer = clientGUI.askForm(Messages.getString("VariableRangeTargetingDialog.instructions"),
+              getTitle(), fields, List.of(btnApply.getText(), btnCancel.getText()), 1);
+        if (answer == null) {
+            return false;
+        }
+        if (answer.button() == 0) {
+            Map<Integer, VariableRangeTargetingMode> selectedModes = new HashMap<>();
+            for (int index = 0; index < playerUnits.size(); index++) {
+                selectedModes.put(playerUnits.get(index).getId(), modes.indexOf(answer.values().get(index)) == 0
+                      ? VariableRangeTargetingMode.LONG
+                      : VariableRangeTargetingMode.SHORT);
+            }
+            applyModes(selectedModes);
+        }
+        dispose();
+        return true;
     }
 
     /**

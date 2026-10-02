@@ -39,7 +39,7 @@ import java.util.List;
 
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.preference.PreferenceChangeEvent;
 
@@ -51,7 +51,7 @@ public class TurnDetailsOverlay extends AbstractBoardViewOverlay {
 
     List<String> lines = new ArrayList<>();
 
-    public TurnDetailsOverlay(BoardView boardView) {
+    public TurnDetailsOverlay(BoardClientState boardView) {
         super(boardView, new Font(Font.MONOSPACED, Font.BOLD, 12));
     }
 
@@ -105,4 +105,5 @@ public class TurnDetailsOverlay extends AbstractBoardViewOverlay {
         }
         super.preferenceChange(e);
     }
+
 }

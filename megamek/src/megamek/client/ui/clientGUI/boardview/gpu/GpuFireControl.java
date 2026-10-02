@@ -1,10 +1,8 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import java.awt.Font;
-import java.awt.RenderingHints;
-import java.awt.font.FontRenderContext;
 import java.awt.image.BufferedImage;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -13,8 +11,6 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.graphics.Pixmap;
-import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g3d.Material;
@@ -25,31 +21,26 @@ import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.DepthTestAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.IntAttribute;
-import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
-import megamek.MMConstants;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.sprite.TextMarkerSprite;
+import megamek.client.ui.gdx.UiTheme;
 
-/** Unlit, depth-tested tactical volumes shared by both cameras. Owns its meshes and batch on the GL thread. */
+/**
+ * The firing lines, unlit and depth-tested, and the flat range labels, shared by both cameras; the range bands and
+ * their borders are GpuBoardOverlay's. Owns its meshes and batch on the GL thread.
+ */
 final class GpuFireControl implements Disposable {
     /** Positive size multiplier for firing-line thickness and the arrowhead; 1 keeps the current size. */
     static final float TARGET_ARROW_SIZE = 1f;
-    /** Blank spaces between repeated range labels on the contour. */
-    static final int RANGE_LABEL_SPACES = 3;
-    /** Travel along the contour in unscaled board pixels per second; negative values reverse it. */
-    static final float RANGE_SCROLL_SPEED = 20;
     /** Keep the entire flat label above the hex surface while it follows the camera. */
     static final float RANGE_LABEL_CLEARANCE_LEVELS = 1f / 3;
     private static final int LABEL_ART_SCALE = 3;
     private static final long ATTRIBUTES = VertexAttributes.Usage.Position | VertexAttributes.Usage.ColorPacked;
-    private static final long TEXTURED_ATTRIBUTES = ATTRIBUTES | VertexAttributes.Usage.TextureCoordinates;
-    /** Beam width as a fraction of its offset from the hex edge. */
-    private static final float FRAME_RATIO = 0.6f;
     private final ModelBatch batch = new ModelBatch();
     private final SpriteBatch labelBatch = new SpriteBatch();
     private final GpuTextures<String> labelTextures = new GpuTextures<>(true);
@@ -59,86 +50,53 @@ final class GpuFireControl implements Disposable {
           new BlendingAttribute(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA),
           new DepthTestAttribute(GL20.GL_LEQUAL, false), IntAttribute.createCullFace(GL20.GL_NONE));
     private List<BoardScene.FiringLine> firingLines = List.of();
-    private List<BoardScene.RangeBorder> rangeBorders = List.of();
     private List<BoardScene.RangeLabel> rangeLabels = List.of();
     private BoardScene scene;
     private ModelInstance instance;
     private int tuning = -1;
-    private double scrollDistance;
+    // The inputs of the shown lines, by identity: the captured lines, whether attacks play, the status and orders.
+    private List<BoardScene.FiringLine> capturedLines = List.of();
+    private boolean hidden;
+    private GpuBattleStatus.Snapshot status;
+    private GpuFireOrders.Snapshot fire;
 
-    void update(BoardScene scene) {
-        update(scene, false);
-    }
-
-    void update(BoardScene scene, boolean hideArrows) {
+    /**
+     * Shows the scene's firing lines and range labels. The lines hide while attacks play ({@code hideArrows}). The
+     * declaring actor's lines to the targets of its orders are left to the board labels' traces, so that each
+     * attacker and target has one trace (rebuild plan H32); every other line takes its attacker's side colour.
+     */
+    void update(BoardScene scene, boolean hideArrows, GpuBattleStatus.Snapshot status, GpuFireOrders.Snapshot fire) {
         updateLabels(scene);
-        List<BoardScene.FiringLine> shownLines = hideArrows ? List.of() : scene.firingLines();
+        List<BoardScene.FiringLine> shownLines = firingLines;
+        if (scene.firingLines() != capturedLines || hideArrows != hidden || status != this.status
+              || fire != this.fire) {
+            capturedLines = scene.firingLines();
+            hidden = hideArrows;
+            this.status = status;
+            this.fire = fire;
+            shownLines = hideArrows ? List.of() : lines(capturedLines, status, fire);
+        }
         boolean changed = tuning != BoardGeometry.revision() || !firingLines.equals(shownLines)
-              || !rangeBorders.equals(scene.rangeBorders()) || !sameTerrain(scene.tiles());
+              || !sameTerrain(scene.tiles());
         this.scene = scene;
         if (!changed) {
             return;
         }
         tuning = BoardGeometry.revision();
         firingLines = shownLines;
-        rangeBorders = scene.rangeBorders();
         if (instance != null) {
             instance.model.dispose();
             instance = null;
         }
-        if (firingLines.isEmpty() && rangeBorders.isEmpty()) {
+        if (firingLines.isEmpty()) {
             return;
         }
         ModelBuilder builder = new ModelBuilder();
         builder.begin();
         int part = 0;
-        // Register each shared texture with the model so clearing or rebuilding disposes it exactly once.
-        Map<String, Texture> labels = new HashMap<>();
-        for (List<BoardFiringGeometry.RangeSide> contour : BoardFiringGeometry.rangeContours(scene)) {
-            List<BoardFiringGeometry.RangeEdge> walls = contour.stream()
-                  .map(side -> BoardFiringGeometry.rangeWall(scene, side)).toList();
-            Color color = color(contour.getFirst().border().rgb(), 0.18f);
-            // Keep even a fragmented, very large range boundary below the mesh's 16-bit index limit.
-            for (int first = 0; first < walls.size(); first += 512) {
-                int limit = Math.min(first + 512, walls.size());
-                MeshPartBuilder frame = builder.part("range-frame-" + part++, GL20.GL_TRIANGLES, ATTRIBUTES, material);
-                for (int i = first; i < limit; i++) {
-                    range(frame, walls.get(i), color);
-                }
-            }
-            if (!BoardView.GPU_SCROLLING_RANGE_LABELS) {
-                continue;
-            }
-            float[] distances = new float[walls.size() + 1];
-            for (int i = 0; i < walls.size(); i++) {
-                distances[i + 1] = distances[i] + walls.get(i).topA().dst(walls.get(i).topB());
-            }
-            float perimeter = distances[walls.size()];
-            Texture texture = labels.computeIfAbsent(contour.getFirst().border().label(), label -> {
-                Texture created = rangeTexture(label);
-                builder.manage(created);
-                return created;
-            });
-            float repeatLength = BoardFiringGeometry.RANGE_HEIGHT * BoardGeometry.LEVEL
-                  * texture.getWidth() / texture.getHeight();
-            // Fit a whole number of repeats, so a letter crosses the closing edge without a phase jump.
-            float repeats = Math.max(1, Math.round(perimeter / repeatLength));
-            Material outside = rangeMaterial("range-outside-" + part, texture, repeats / perimeter);
-            Material inside = rangeMaterial("range-inside-" + part, texture, -repeats / perimeter);
-            for (int first = 0; first < walls.size(); first += 512) {
-                int limit = Math.min(first + 512, walls.size());
-                for (int face = 0; face < 2; face++) {
-                    MeshPartBuilder mesh = builder.part("range-face-" + part++, GL20.GL_TRIANGLES,
-                          TEXTURED_ATTRIBUTES, face == 0 ? outside : inside);
-                    for (int i = first; i < limit; i++) {
-                        rangeFace(mesh, walls.get(i), color, distances[i], distances[i + 1], face == 1);
-                    }
-                }
-            }
-        }
         for (BoardScene.FiringLine line : firingLines) {
             MeshPartBuilder mesh = builder.part("attack-" + part++, GL20.GL_TRIANGLES, ATTRIBUTES, material);
-            Color color = color(line.rgb(), 1).lerp(Color.WHITE, 0.22f);
+            Color color = color(line.rgb(), 1);
             List<Vector3> path = BoardFiringGeometry.trajectory(scene, line);
             for (int i = 1; i < path.size(); i++) {
                 tube(mesh, path.get(i - 1), path.get(i), .725f * BoardGeometry.HEX_SCALE * TARGET_ARROW_SIZE, color);
@@ -152,14 +110,30 @@ final class GpuFireControl implements Disposable {
         instance = new ModelInstance(model);
     }
 
-    /** The selected unit's targets, drawn independently of arrow visibility; playback marks the firing unit's own. */
-    boolean targets(int entityId) {
-        return scene != null && scene.selectedId() >= 0 && scene.firingLines().stream()
-              .anyMatch(line -> line.attackerId() == scene.selectedId() && line.targetId() == entityId);
+    /**
+     * The lines to draw: all but the actor's lines to its orders' targets, which the board labels trace (a read-only
+     * draft has none), each in its attacker's side colour, mint for the player's and allied units and coral for
+     * enemies; an unlisted attacker keeps its line's colour.
+     */
+    private static List<BoardScene.FiringLine> lines(List<BoardScene.FiringLine> lines,
+          GpuBattleStatus.Snapshot status, GpuFireOrders.Snapshot fire) {
+        List<BoardScene.FiringLine> shown = new ArrayList<>();
+        for (BoardScene.FiringLine line : lines) {
+            if (line.attackerId() == fire.actorId()
+                  && fire.targets().stream().anyMatch(target -> target.id() == line.targetId())) {
+                continue;
+            }
+            GpuBattleStatus.UnitStatus attacker = GpuHudState.unit(status, line.attackerId());
+            int rgb = attacker == null ? line.rgb()
+                  : Color.rgb888(attacker.side() == GpuBattleStatus.Side.ENEMY ? UiTheme.CORAL : UiTheme.MINT);
+            shown.add(new BoardScene.FiringLine(line.source(), line.target(), rgb, line.indirect(),
+                  line.attackerId(), line.targetId()));
+        }
+        return shown;
     }
 
     private void updateLabels(BoardScene scene) {
-        List<BoardScene.RangeLabel> next = BoardView.GPU_SCROLLING_RANGE_LABELS ? List.of() : scene.rangeLabels();
+        List<BoardScene.RangeLabel> next = BoardTactical.SCROLLING_RANGE_LABELS ? List.of() : scene.rangeLabels();
         if (rangeLabels.equals(next)) {
             return;
         }
@@ -216,85 +190,6 @@ final class GpuFireControl implements Disposable {
         return new Color(((rgb >>> 16) & 255) / 255f, ((rgb >>> 8) & 255) / 255f, (rgb & 255) / 255f, alpha);
     }
 
-    private Material rangeMaterial(String id, Texture texture, float scale) {
-        Material result = material.copy();
-        result.id = id;
-        TextureAttribute diffuse = TextureAttribute.createDiffuse(texture);
-        diffuse.scaleU = scale;
-        // Each face is readable from its own side and moves in the same world direction.
-        result.set(diffuse, IntAttribute.createCullFace(GL20.GL_BACK));
-        return result;
-    }
-
-    private static Texture rangeTexture(String label) {
-        Font font = new Font(MMConstants.FONT_SANS_SERIF, Font.BOLD, 96);
-        FontRenderContext context = new FontRenderContext(null, true, true);
-        var glyph = font.createGlyphVector(context, label);
-        var bounds = glyph.getPixelBounds(context, 0, 0);
-        int gap = (int) Math.ceil(font.getStringBounds(" ".repeat(RANGE_LABEL_SPACES), context).getWidth());
-        BufferedImage image = new BufferedImage(Math.max(1, bounds.width + gap), 128, BufferedImage.TYPE_INT_ARGB);
-        var graphics = image.createGraphics();
-        try {
-            graphics.setColor(new java.awt.Color(255, 255, 255, 46));
-            graphics.fillRect(0, 0, image.getWidth(), image.getHeight());
-            graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            graphics.setColor(java.awt.Color.WHITE);
-            graphics.drawGlyphVector(glyph, (image.getWidth() - bounds.width) / 2f - bounds.x,
-                  (image.getHeight() - bounds.height) / 2f - bounds.y);
-        } finally {
-            graphics.dispose();
-        }
-        Pixmap pixels = GpuTextures.pixmap(new BoardScene.Pixels(image), 0, false);
-        try {
-            Texture texture = new Texture(pixels, true);
-            texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
-            texture.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.ClampToEdge);
-            return texture;
-        } finally {
-            pixels.dispose();
-        }
-    }
-
-    private static Vector3 thickness(BoardFiringGeometry.RangeEdge edge) {
-        Vector3 along = new Vector3(edge.bottomB().x - edge.bottomA().x,
-              edge.bottomB().y - edge.bottomA().y, 0).nor();
-        return new Vector3(Vector3.Z).crs(along)
-              .scl(BoardGeometry.MARKER_INSET * BoardGeometry.WIDTH / 2 * FRAME_RATIO);
-    }
-
-    private static void rangeFace(MeshPartBuilder mesh, BoardFiringGeometry.RangeEdge edge, Color color,
-          float from, float to, boolean inside) {
-        Vector3 shift = inside ? thickness(edge) : new Vector3();
-        Vector3 a = new Vector3(inside ? edge.bottomB() : edge.bottomA()).add(shift);
-        Vector3 b = new Vector3(inside ? edge.bottomA() : edge.bottomB()).add(shift);
-        Vector3 c = new Vector3(inside ? edge.topA() : edge.topB()).add(shift);
-        Vector3 d = new Vector3(inside ? edge.topB() : edge.topA()).add(shift);
-        Color ink = new Color(color.r, color.g, color.b, 1);
-        float height = BoardFiringGeometry.RANGE_HEIGHT * BoardGeometry.LEVEL;
-        float vA = (d.z - a.z) / height, vB = (c.z - b.z) / height;
-        float uA = inside ? to : from, uB = inside ? from : to;
-        // Clamp V below the top band, retaining a translucent skirt at cliffs without stretching the letters.
-        mesh.rect(vertex(a, ink).setUV(uA, vA), vertex(b, ink).setUV(uB, vB),
-              vertex(c, ink).setUV(uB, 0), vertex(d, ink).setUV(uA, 0));
-    }
-
-    private static void range(MeshPartBuilder mesh, BoardFiringGeometry.RangeEdge edge, Color color) {
-        Vector3 a = edge.bottomA(), b = edge.bottomB(), c = edge.topB(), d = edge.topA();
-        Vector3 shift = thickness(edge);
-        Vector3 innerA = new Vector3(a).add(shift), innerB = new Vector3(b).add(shift);
-        Vector3 innerC = new Vector3(c).add(shift), innerD = new Vector3(d).add(shift);
-        if (!BoardView.GPU_SCROLLING_RANGE_LABELS) {
-            quad(mesh, a, b, c, d, color);
-            quad(mesh, innerB, innerA, innerD, innerC, color);
-        }
-        quad(mesh, a, innerA, innerB, b, color);
-        quad(mesh, a, d, innerD, innerA, color);
-        quad(mesh, b, innerB, innerC, c, color);
-        Color cap = new Color(color).mul(1, 1, 1, 1.5f);
-        quad(mesh, d, c, innerC, innerD, cap);
-        tube(mesh, d, c, 0.65f * BoardGeometry.HEX_SCALE, new Color(color.r, color.g, color.b, 0.85f));
-    }
-
     private static void quad(MeshPartBuilder mesh, Vector3 a, Vector3 b, Vector3 c, Vector3 d, Color color) {
         mesh.rect(vertex(a, color), vertex(b, color), vertex(c, color), vertex(d, color));
     }
@@ -330,20 +225,8 @@ final class GpuFireControl implements Disposable {
         }
     }
 
-    void render(Camera camera, float deltaSeconds) {
-        if (BoardView.GPU_SCROLLING_RANGE_LABELS) {
-            scrollDistance += deltaSeconds * RANGE_SCROLL_SPEED * BoardGeometry.HEX_SCALE;
-        }
+    void render(Camera camera) {
         if (instance != null) {
-            if (BoardView.GPU_SCROLLING_RANGE_LABELS) {
-                for (Material face : instance.materials) {
-                    TextureAttribute texture = face.get(TextureAttribute.class, TextureAttribute.Diffuse);
-                    if (texture != null) {
-                        double offset = -scrollDistance * texture.scaleU;
-                        texture.offsetU = (float) (offset - Math.floor(offset));
-                    }
-                }
-            }
             batch.begin(camera);
             batch.render(instance);
             batch.end();

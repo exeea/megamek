@@ -136,7 +136,10 @@ class BoardFeaturesTest {
         var models = Map.of(Terrains.BUILDING, selectedRoof, Terrains.INDUSTRIAL, industrialRoof);
         var features = BoardFeatures.capture(hex, new Coords(2, 2), models);
         assertTrue(features.stream().anyMatch(feature -> feature.asset().equals(selectedRoof) && feature.height() == 4));
-        assertEquals(2, features.stream().filter(feature -> feature.asset().equals("bridge") && feature.elevation() == 2).count());
+        var bridges = features.stream().filter(feature -> feature.asset().equals("bridge")).toList();
+        assertEquals(1, bridges.size(), "One connected deck per bridge hex");
+        assertEquals(2, bridges.getFirst().elevation());
+        assertEquals(18, bridges.getFirst().bridgeExits());
         assertTrue(features.stream().anyMatch(feature -> feature.asset().equals(industrialRoof) && feature.height() == 3));
         assertEquals(features, BoardFeatures.capture(hex, new Coords(2, 2), models), "Placement must remain stable across snapshots");
         assertFalse(BoardFeatures.capture(hex, new Coords(2, 2), Map.of()).stream()

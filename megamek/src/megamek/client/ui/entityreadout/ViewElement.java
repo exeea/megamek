@@ -32,6 +32,8 @@
  */
 package megamek.client.ui.entityreadout;
 
+import java.util.List;
+
 /**
  * A common interface for the various elements of the unit readout. ways to present data that can be formatted either as
  * HTML or as plain text.
@@ -54,6 +56,17 @@ interface ViewElement {
      * @return The contents of this view element, rendered as a Discord-friendly string.
      */
     String toDiscord();
+
+    /**
+     * Adds the contents of this view element to the rows of a readout ({@link EntityReadout#getRows()}): by default one
+     * row of its plain text, none when it has no text.
+     */
+    default void addRows(List<EntityReadout.Row> rows) {
+        String text = toPlainText().strip();
+        if (!text.isEmpty()) {
+            rows.add(new EntityReadout.Row(EntityReadout.Row.Kind.TEXT, List.of(text)));
+        }
+    }
 
     static String asHtmlTooltip(String text, String tooltip) {
         return "<span title=\"" + tooltip.replace("\"", "&quot;") + "\">" + text + "*</span>";

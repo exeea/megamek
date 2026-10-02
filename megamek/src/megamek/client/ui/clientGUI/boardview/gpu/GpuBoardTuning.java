@@ -8,18 +8,12 @@ import java.util.Locale;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.scenes.scene2d.Actor;
-import com.badlogic.gdx.scenes.scene2d.InputEvent;
-import com.badlogic.gdx.scenes.scene2d.InputListener;
-import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.ButtonGroup;
 import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
-import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
-import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.SelectBox;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.Slider;
-import com.badlogic.gdx.scenes.scene2d.ui.Stack;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
@@ -30,7 +24,9 @@ import megamek.common.planetaryConditions.Atmosphere;
 import megamek.common.planetaryConditions.AtmosphericTaint;
 
 /**
- * Live board controls. Geometry is shared with picking; presentation settings belong to this GPU window.
+ * The board view's presentation settings as a model of Scene2D controls: the rows of a Board and an Atmosphere page,
+ * and Defaults. Each control holds its value and applies it when set; GpuTuningPanel shows the rows in the hud-v3 look
+ * and never draws these widgets. Geometry is shared with picking; the other settings belong to this GPU window.
  */
 final class GpuBoardTuning {
     private static final float SLIDER_WIDTH = 120;
@@ -78,15 +74,17 @@ final class GpuBoardTuning {
           new Knob("Wind strength", 0, 1, 0.05f, "%.2f"),
           new Knob("Wind direction", 0, 360, 15, "%.0f"));
 
-    private final Table panel = new Table();
-    /** Construction cursor only; each tab owns its own rows and scroll position. */
+    /** Construction cursor only; each page owns its own rows. */
     private Table rows = new Table();
+    private final Table general;
+    private final Table atmospheric;
+    private final TextButton reset;
     private final CheckBox normalMaps;
     private final CheckBox vsync;
     private final List<Control> geometry;
     private final List<Control> familySizes;
-    private final CheckBox overviewIcons;
-    private final List<Control> overview;
+    private final CheckBox zoomScaling;
+    private final List<Control> zoomScale;
     private final List<Control> visibility;
     private final ButtonGroup<TextButton> fovModes;
     private final List<Control> fieldOfView;
@@ -115,12 +113,7 @@ final class GpuBoardTuning {
     }
 
     GpuBoardTuning(Skin skin, GpuBoardSource source) {
-        panel.setBackground(skin.getDrawable("menu-panel"));
-        panel.setTouchable(Touchable.enabled);
-        panel.setName("board-tuning");
-        panel.pad(8).top();
-        panel.add(new Label("Board tuning", skin)).left().padBottom(6).row();
-        Table general = rows;
+        general = rows;
         rows.top().defaults().pad(0, 3, 0, 3);
         section(skin, "Geometry");
         geometry = controls(skin, KNOBS, this::applyGeometry, 0);
@@ -147,14 +140,24 @@ final class GpuBoardTuning {
             slider.addListener(new TextTooltip("Uniform size multiplier; 1.00 is neutral. Stacks with Unit scale. "
                   + "Mek weight classes also multiply All Meks; ultralight Meks use Light Meks.", skin, "menu"));
         }
-        section(skin, "Overview icons");
-        overviewIcons = checkbox(skin, "Tactical View (Top-View only)", "tuning-overview-icons");
-        overviewIcons.addListener(new TextTooltip("Replace units and trees with flat board artwork when zoomed out "
-              + "within 15 degrees of overhead. Also available in the Camera menu.", skin, "menu"));
-        overview = controls(skin, List.of(new Knob("Icon switch hex px", 0, 256, 2, "%.0f")),
-              this::applyOverview, 0);
-        overview.getFirst().slider().addListener(new TextTooltip("Switch to icons when a hex is this many window pixels wide. "
-              + "Zoom in 15% further to return to models, avoiding flicker at the boundary.", skin, "menu"));
+        section(skin, "Zoom-out unit scaling");
+        zoomScaling = checkbox(skin, "Scale units up when zoomed out", "tuning-zoom-scaling");
+        zoomScaling.addListener(new TextTooltip("Zoomed out past the threshold, 3D units grow on every axis so they "
+              + "keep their size on screen, up to the maximum; picking and labels follow. Tactical View icons keep "
+              + "their size in the hex.", skin, "menu"));
+        zoomScale = controls(skin, List.of(new Knob("Threshold hex px", 16, 256, 2, "%.0f"),
+              new Knob("Max zoom-out scale", 1, 4, 0.05f, "%.2f")), this::applyZoomScaling, 0);
+        zoomScale.getFirst().slider().addListener(new TextTooltip("Units grow while a hex is narrower on screen than "
+              + "this many HUD pixels (window pixels over the display scale): half that width doubles them.", skin,
+              "menu"));
+        zoomScale.get(1).slider().addListener(new TextTooltip("The largest growth; 1.00 keeps units at their size.",
+              skin, "menu"));
+        zoomScaling.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                applyZoomScaling();
+            }
+        });
         section(skin, "Unit visibility");
         visibility = controls(skin, VISIBILITY_KNOBS, this::applyVisibility, 0);
         visibility.get(1).slider().addListener(new TextTooltip(
@@ -165,7 +168,7 @@ final class GpuBoardTuning {
         section(skin, "Outside sensor range");
         sensorModes = effectModes(skin, "sensor");
         sensors = controls(skin, SENSOR_KNOBS, this::applyFieldOfView, 0);
-        Table atmospheric = new Table();
+        atmospheric = new Table();
         rows = atmospheric;
         rows.top().defaults().pad(0, 3, 0, 3);
         TextButton conditions = new TextButton("Planetary conditions...", skin, "menu-control");
@@ -313,17 +316,7 @@ final class GpuBoardTuning {
                 applyDamage();
             }
         });
-        ScrollPane generalScroll = scroll(skin, general, "tuning-general-scroll");
-        ScrollPane atmosphereScroll = scroll(skin, atmospheric, "tuning-scroll");
-        Table tabs = new Table();
-        ButtonGroup<TextButton> tabGroup = new ButtonGroup<>();
-        tab(skin, tabs, tabGroup, "General", generalScroll, atmosphereScroll);
-        tab(skin, tabs, tabGroup, "Atmosphere", atmosphereScroll, generalScroll);
-        atmosphereScroll.setVisible(false);
-        panel.add(tabs).growX().padBottom(6).row();
-        panel.add(new Stack(generalScroll, atmosphereScroll)).minHeight(0).grow().row();
-        panel.add(new Image(skin.getDrawable("rule"))).height(1).growX().padTop(6).row();
-        TextButton reset = new TextButton("Defaults", skin, "menu-control");
+        reset = new TextButton("Defaults", skin, "menu-control");
         reset.setName("tuning-defaults");
         reset.addListener(new TextTooltip("Restore both tabs: geometry, family sizes, visibility, light/fog effects, "
               + "the game's current planetary conditions, and disable damage preview.",
@@ -338,49 +331,7 @@ final class GpuBoardTuning {
                 restoreDefaults();
             }
         });
-        Table buttons = new Table();
-        buttons.add(reset).width(76).height(22);
-        buttons.add(new Label("Visual preview only", skin, "small")).padLeft(10).expandX().left();
-        buttons.add(new Label("F9 to close", skin, "small")).right();
-        panel.add(buttons).growX().padTop(4).row();
         restoreDefaults();
-    }
-
-    private ScrollPane scroll(Skin skin, Table content, String name) {
-        ScrollPane scroll = new ScrollPane(content, skin, "menu");
-        scroll.setName(name);
-        scroll.setFadeScrollBars(false);
-        scroll.setScrollingDisabled(true, false);
-        scroll.setFlickScroll(false);
-        scroll.addListener(new InputListener() {
-            @Override
-            public void enter(InputEvent event, float x, float y, int pointer, Actor fromActor) {
-                panel.getStage().setScrollFocus(scroll);
-            }
-        });
-        return scroll;
-    }
-
-    private void tab(Skin skin, Table tabs, ButtonGroup<TextButton> group, String label, ScrollPane page, ScrollPane other) {
-        TextButton button = new TextButton(label, skin, "menu-control");
-        button.setName("tuning-tab-" + label.toLowerCase(Locale.ROOT));
-        group.add(button);
-        button.addListener(new ChangeListener() {
-            @Override
-            public void changed(ChangeEvent event, Actor actor) {
-                if (!button.isChecked()) { return; }
-                if (panel.getStage() != null) {
-                    panel.getStage().unfocus(other);
-                    panel.getStage().setScrollFocus(page);
-                }
-                damageLocation.hideList();
-                pressure.hideList();
-                atmosphericTaint.hideList();
-                page.setVisible(true);
-                other.setVisible(false);
-            }
-        });
-        tabs.add(button).growX().height(26).padRight(2);
     }
 
     private Table section(Skin skin, String title) {
@@ -469,8 +420,22 @@ final class GpuBoardTuning {
         return result;
     }
 
-    Table panel() {
-        return panel;
+    /**
+     * The Board page's rows, one control per row; GpuTuningPanel (G17) shows them as its Board tab. Their widgets hold
+     * the values: setting one applies it.
+     */
+    Table boardRows() {
+        return general;
+    }
+
+    /** The Atmosphere page's rows, which GpuTuningPanel shows as its Atmosphere tab. */
+    Table atmosphereRows() {
+        return atmospheric;
+    }
+
+    /** The Defaults button: a ChangeEvent on it restores both tabs. */
+    TextButton defaults() {
+        return reset;
     }
 
     /**
@@ -491,9 +456,9 @@ final class GpuBoardTuning {
         }
         setValues(familySizes, familyDefaults);
         applyFamilySizes();
-        overviewIcons.setChecked(GpuUnitIcons.DEFAULT_ENABLED);
-        setValues(overview, new float[] { GpuUnitIcons.DEFAULT_HEX_PIXELS });
-        updateReadings(overview);
+        zoomScaling.setChecked(UnitScreenScale.ENABLED);
+        setValues(zoomScale, new float[] { UnitScreenScale.THRESHOLD, UnitScreenScale.MAX });
+        applyZoomScaling();
         setValues(visibility, new float[] { GpuTerrain.DEFAULT_BUILDING_OPACITY * 100,
               GpuUnitVisibility.DEFAULT_OUTLINE_INTENSITY * 100 });
         updateReadings(visibility);
@@ -554,12 +519,6 @@ final class GpuBoardTuning {
     boolean fixedSun() {
         return fixedSun.isChecked();
     }
-
-    boolean overviewIcons() { return overviewIcons.isChecked(); }
-
-    void setOverviewIcons(boolean enabled) { overviewIcons.setChecked(enabled); }
-
-    float overviewHexPixels() { return value(overview, 0); }
 
     void setFixedSun(boolean fixed) {
         fixedSun.setChecked(fixed);
@@ -673,7 +632,13 @@ final class GpuBoardTuning {
         updateReadings(visibility);
     }
 
-    private void applyOverview() { updateReadings(overview); }
+    private void applyZoomScaling() {
+        UnitScreenScale.enabled = zoomScaling.isChecked();
+        UnitScreenScale.threshold = value(zoomScale, 0);
+        UnitScreenScale.max = value(zoomScale, 1);
+        zoomScale.forEach(control -> control.slider().setDisabled(!zoomScaling.isChecked()));
+        updateReadings(zoomScale);
+    }
 
     private void applyFieldOfView() {
         updateReadings(fieldOfView);

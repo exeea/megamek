@@ -40,8 +40,8 @@ import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.geom.Point2D;
 
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.util.StringDrawer;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Facing;
@@ -66,17 +66,17 @@ public class MovementModifierEnvelopeSprite extends HexSprite implements Tactica
     private final String modifier;
 
     /**
-     * @param boardView The {@link BoardView}
+     * @param boardView The {@link BoardGlyphContext}
      * @param movePath  The {@link MovePath} to the present hex
      */
-    public MovementModifierEnvelopeSprite(BoardView boardView, MovePath movePath) {
+    public MovementModifierEnvelopeSprite(BoardGlyphContext boardView, MovePath movePath) {
         super(boardView, movePath.getFinalCoords());
 
         facing = Facing.valueOfInt(movePath.getFinalFacing());
 
         // One shared computation with the bot's position evaluation, so the overlay and the bot
         // can never value destinations differently.
-        int movementModifier = DefensiveMovementModifier.forPath(movePath, boardView.game);
+        int movementModifier = DefensiveMovementModifier.forPath(movePath, boardView.getGame());
         float hue = 0.7f - 0.15f * movementModifier;
         color = new Color(Color.HSBtoRGB(hue, 1, 1));
         modifier = String.format("%+d", movementModifier);
@@ -101,7 +101,7 @@ public class MovementModifierEnvelopeSprite extends HexSprite implements Tactica
     }
     @Override
     public void drawTactical(Graphics2D graphics) {
-        Graphics2D local = BoardTacticalGraphics.at(graphics, bv.getHexLocation(getPosition()));
+        Graphics2D local = BoardTacticalGraphics.onHexPlane(graphics, bv.getHexLocation(getPosition()));
         try {
             paintTactical(local);
         } finally {

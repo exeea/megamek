@@ -37,6 +37,8 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.ItemEvent;
 import java.awt.event.ItemListener;
+import java.util.ArrayList;
+import java.util.List;
 import javax.swing.*;
 
 import megamek.MMConstants;
@@ -74,7 +76,13 @@ import megamek.common.util.fileUtils.MegaMekFile;
 /**
  * This class shows information about a unit that doesn't belong elsewhere.
  */
-class ExtraPanel extends PicMap implements ActionListener, ItemListener {
+public class ExtraPanel extends PicMap implements ActionListener, ItemListener {
+    /** The phases a hidden unit can be set to activate in; {@link GamePhase#UNKNOWN} stops a pending activation. */
+    public static final List<GamePhase> HIDDEN_ACTIVATION_PHASES = List.of(GamePhase.UNKNOWN, GamePhase.MOVEMENT,
+          GamePhase.FIRING, GamePhase.PHYSICAL);
+    /** The heat sink control's action, which the firing displays answer by clearing their unsent attacks. */
+    private static final String CHANGE_SINKS = "changeSinks";
+
     private final UnitDisplayPanel unitDisplayPanel;
 
     private final JPanel panelMain;
@@ -139,7 +147,7 @@ class ExtraPanel extends PicMap implements ActionListener, ItemListener {
 
         sinks2B = new JButton(
               Messages.getString("MekDisplay.configureActiveSinksLabel"));
-        sinks2B.setActionCommand("changeSinks");
+        sinks2B.setActionCommand(CHANGE_SINKS);
         sinks2B.addActionListener(this);
 
         dumpBombs = new JButton(Messages.getString("MekDisplay.DumpBombsLabel"));
@@ -176,18 +184,13 @@ class ExtraPanel extends PicMap implements ActionListener, ItemListener {
         activateHidden.setToolTipText(Messages.getString("MekDisplay.ActivateHidden.ToolTip"));
         comboActivateHiddenPhase.setToolTipText(Messages.getString("MekDisplay.ActivateHiddenPhase.ToolTip"));
         activateHidden.addActionListener(this);
-        comboActivateHiddenPhase.addItem(GamePhase.UNKNOWN);
-        comboActivateHiddenPhase.addItem(GamePhase.MOVEMENT);
-        comboActivateHiddenPhase.addItem(GamePhase.FIRING);
-        comboActivateHiddenPhase.addItem(GamePhase.PHYSICAL);
+        HIDDEN_ACTIVATION_PHASES.forEach(comboActivateHiddenPhase::addItem);
         comboActivateHiddenPhase.setRenderer(new DefaultListCellRenderer() {
             @Override
             public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected,
                   boolean cellHasFocus) {
                 return super.getListCellRendererComponent(list,
-                      (((value instanceof GamePhase) && ((GamePhase) value).isUnknown())
-                            ? Messages.getString("MekDisplay.ActivateHidden.StopActivating")
-                            : value),
+                      (value instanceof GamePhase phase) ? hiddenActivationLabel(phase) : value,
                       index, isSelected, cellHasFocus);
             }
         });
@@ -373,154 +376,14 @@ class ExtraPanel extends PicMap implements ActionListener, ItemListener {
             dontChange = false;
         }
 
-        // Walk through the list of teams. There
-        // can't be more teams than players.
-        StringBuilder buff;
         if (clientgui != null) {
             Game game = clientgui.getClient().getGame();
             GameOptions gameOptions = game.getOptions();
 
-            for (Player player : game.getPlayersList()) {
-                int team = player.getTeam();
-                if (en.isNarcedBy(team) && !player.isObserver()) {
-                    buff = new StringBuilder(Messages.getString("MekDisplay.NARCedBy"));
-                    buff.append(player.getName())
-                          .append(" [").append(player.getTeamName()).append(']');
-                    ((DefaultListModel<String>) narcList.getModel()).addElement(buff.toString());
-                }
-
-                if (en.isINarcedBy(team) && !player.isObserver()) {
-                    buff = new StringBuilder(Messages.getString("MekDisplay.INarcHoming"));
-                    buff.append(player.getName()).append(" [")
-                          .append(player.getTeamName()).append("] ")
-                          .append(Messages.getString("MekDisplay.attached"))
-                          .append('.');
-                    ((DefaultListModel<String>) narcList.getModel()).addElement(buff.toString());
-                }
-            }
-
-            if (en.isINarcedWith(INarcPod.ECM)) {
-                buff = new StringBuilder(Messages.getString("MekDisplay.iNarcECMPodAttached"));
-                ((DefaultListModel<String>) narcList.getModel()).addElement(buff.toString());
-            }
-
-            if (en.isINarcedWith(INarcPod.HAYWIRE)) {
-                buff = new StringBuilder(Messages.getString("MekDisplay.iNarcHaywirePodAttached"));
-                ((DefaultListModel<String>) narcList.getModel()).addElement(buff.toString());
-            }
-
-            if (en.isINarcedWith(INarcPod.NEMESIS)) {
-                buff = new StringBuilder(Messages.getString("MekDisplay.iNarcNemesisPodAttached"));
-                ((DefaultListModel<String>) narcList.getModel()).addElement(buff.toString());
-            }
-
-            // Show inferno track.
-            if (en.infernos.isStillBurning()) {
-                buff = new StringBuilder(Messages.getString("MekDisplay.InfernoBurnRemaining"));
-                buff.append(en.infernos.getTurnsLeftToBurn());
-                ((DefaultListModel<String>) narcList.getModel()).addElement(buff.toString());
-            }
-
-            if ((en instanceof Tank) && ((Tank) en).isOnFire()) {
-                ((DefaultListModel<String>) narcList.getModel())
-                      .addElement(Messages.getString("MekDisplay.OnFire"));
-            }
-
-            // Show electromagnetic interference.
-            if (en.isSufferingEMI()) {
-                ((DefaultListModel<String>) narcList.getModel())
-                      .addElement(Messages.getString("MekDisplay.IsEMId"));
-            }
-
-            // Show ECM affect.
-            Coords pos = en.getPosition();
-            if (ComputeECM.isAffectedByAngelECM(en, pos, pos)) {
-                ((DefaultListModel<String>) narcList.getModel())
-                      .addElement(Messages.getString("MekDisplay.InEnemyAngelECMField"));
-            } else if (ComputeECM.isAffectedByECM(en, pos, pos)) {
-                ((DefaultListModel<String>) narcList.getModel())
-                      .addElement(Messages.getString("MekDisplay.InEnemyECMField"));
-            }
-
-            // Active Stealth Armor? If yes, we're under ECM
-            if (en.isStealthActive()
-                  && ((en instanceof Mek) || (en instanceof Tank))) {
-                ((DefaultListModel<String>) narcList.getModel())
-                      .addElement(Messages.getString("MekDisplay.UnderStealth"));
-            }
-
-            // burdened due to unjettisoned body-mounted missiles on BA?
-            if ((en instanceof BattleArmor) && ((BattleArmor) en).isBurdened()) {
-                ((DefaultListModel<String>) narcList.getModel())
-                      .addElement(Messages.getString("MekDisplay.Burdened"));
-            }
-
-            // suffering from taser feedback?
-            if (en.getTaserFeedBackRounds() > 0) {
-                ((DefaultListModel<String>) narcList.getModel())
-                      .addElement(en.getTaserFeedBackRounds()
-                            + " " + Messages.getString("MekDisplay.TaserFeedBack"));
-            }
-
-            // taser interference?
-            if (en.getTaserInterference() > 0) {
-                ((DefaultListModel<String>) narcList.getModel()).addElement("+"
-                      + en.getTaserInterference() + " "
-                      + Messages.getString("MekDisplay.TaserInterference"));
-            }
-
-            // suffering from TSEMP Interference?
-            if (en.getTsempEffect() == MMConstants.TSEMP_EFFECT_INTERFERENCE) {
-                ((DefaultListModel<String>) narcList.getModel())
-                      .addElement(Messages.getString("MekDisplay.TSEMPInterference"));
-            }
-
-            // suffering from EMP Mine Interference?
-            if (en.getEMPInterferenceRounds() > 0) {
-                ((DefaultListModel<String>) narcList.getModel())
-                      .addElement(Messages.getString("MekDisplay.EMPInterference",
-                            en.getEMPInterferenceRounds()));
-            }
-
-            // suffering from EMP Mine Shutdown?
-            if (en.getEMPShutdownRounds() > 0) {
-                ((DefaultListModel<String>) narcList.getModel())
-                      .addElement(Messages.getString("MekDisplay.EMPShutdown",
-                            en.getEMPShutdownRounds()));
-            }
-
-            if (en.hasDamagedRHS()) {
-                ((DefaultListModel<String>) narcList.getModel())
-                      .addElement(Messages.getString("MekDisplay.RHSDamaged"));
-            }
-
-            // Show Turret Locked.
-            if ((en instanceof Tank) && !((Tank) en).hasNoTurret()
-                  && !en.canChangeSecondaryFacing()) {
-                ((DefaultListModel<String>) narcList.getModel())
-                      .addElement(Messages.getString("MekDisplay.Turretlocked"));
-            }
-
-            // Show jammed weapons.
-            for (Mounted<?> weapon : en.getWeaponList()) {
-                if (weapon.isJammed()) {
-                    buff = new StringBuilder(weapon.getName());
-                    buff.append(Messages.getString("MekDisplay.isJammed"));
-                    ((DefaultListModel<String>) narcList.getModel()).addElement(buff.toString());
-                }
-            }
-
-            // Show breached locations.
-            for (int loc = 0; loc < en.locations(); loc++) {
-                if (en.getLocationStatus(loc) == ILocationExposureStatus.BREACHED) {
-                    buff = new StringBuilder(en.getLocationName(loc));
-                    buff.append(Messages.getString("MekDisplay.Breached"));
-                    ((DefaultListModel<String>) narcList.getModel()).addElement(buff.toString());
-                }
-            }
-
-            if (narcList.getModel().getSize() == 0) {
-                ((DefaultListModel<String>) narcList.getModel()).addElement(" ");
+            DefaultListModel<String> affectedModel = (DefaultListModel<String>) narcList.getModel();
+            affectedBy(game, en).forEach(affectedModel::addElement);
+            if (affectedModel.getSize() == 0) {
+                affectedModel.addElement(" ");
             }
 
             // transport values
@@ -530,40 +393,11 @@ class ExtraPanel extends PicMap implements ActionListener, ItemListener {
             }
             unusedR.setText(unused);
             carriesR.setText(null);
-            // boolean hasText = false;
-            for (Entity other : en.getLoadedUnits()) {
-                carriesR.append(other.getShortName());
+            for (String carried : carried(game, en)) {
+                carriesR.append(carried);
                 carriesR.append("\n");
             }
-
-            // Show club(s).
-            for (Mounted<?> club : en.getClubs()) {
-                carriesR.append(club.getName());
-                carriesR.append("\n");
-            }
-
-            // show cargo.
-            for (ICarryable cargo : en.getDistinctCarriedObjects()) {
-                carriesR.append(cargo.specificName());
-                carriesR.append("\n");
-            }
-
-            // We may not be saving captured pilots correctly on game save; some valid pilots don't have
-            // entities.
-            for (int pickedUpID : en.getPickedUpMekWarriors()) {
-                Entity carried = game.getEntity(pickedUpID);
-                carriesR.append((carried == null) ? "(ID " + pickedUpID + ")" : carried.getShortName());
-                carriesR.append("\n");
-            }
-
-            // Show searchlight
-            if (en.hasSearchlight()) {
-                if (en.isUsingSearchlight()) {
-                    carriesR.append(Messages.getString("MekDisplay.SearchlightOn"));
-                } else {
-                    carriesR.append(Messages.getString("MekDisplay.SearchlightOff"));
-                }
-            }
+            carriesR.append(searchlightText(en));
 
             // Show Heat Effects, but only for Meks.
             heatR.setText("");
@@ -572,12 +406,7 @@ class ExtraPanel extends PicMap implements ActionListener, ItemListener {
             if (en instanceof Mek m) {
                 sinks2B.setEnabled(!dontChange);
                 sinks = m.getActiveSinksNextRound();
-                if (m.hasDoubleHeatSinks()) {
-                    sinksR.append(Messages.getString("MekDisplay.activeSinksTextDouble",
-                          sinks, sinks * 2));
-                } else {
-                    sinksR.append(Messages.getString("MekDisplay.activeSinksTextSingle", sinks));
-                }
+                sinksR.append(activeSinksText(m, sinks));
 
                 if (m.hasRiscHeatSinkOverrideKit()) {
                     sinksR.append(Messages.getString("MekDisplay.RiscKit"));
@@ -630,21 +459,244 @@ class ExtraPanel extends PicMap implements ActionListener, ItemListener {
         onResize();
     }
 
+    /**
+     * The Extras tab's "Affected by" list for the unit: attached (i)Narc pods, a burning inferno or fire, interference,
+     * an enemy ECM field, active stealth and other effects, jammed weapons and breached locations; empty when nothing
+     * affects it. The Unit Display and the GPU record sheet both use it.
+     */
+    public static List<String> affectedBy(Game game, Entity en) {
+        List<String> affected = new ArrayList<>();
+        // Walk through the list of teams. There
+        // can't be more teams than players.
+        StringBuilder buff;
+        for (Player player : game.getPlayersList()) {
+            int team = player.getTeam();
+            // The messages end before the player's name ("NARCed by Team of"), so a space separates them
+            if (en.isNarcedBy(team) && !player.isObserver()) {
+                buff = new StringBuilder(Messages.getString("MekDisplay.NARCedBy"));
+                buff.append(' ').append(player.getName())
+                      .append(" [").append(player.getTeamName()).append(']');
+                affected.add(buff.toString());
+            }
+
+            if (en.isINarcedBy(team) && !player.isObserver()) {
+                buff = new StringBuilder(Messages.getString("MekDisplay.INarcHoming"));
+                buff.append(' ').append(player.getName()).append(" [")
+                      .append(player.getTeamName()).append("] ")
+                      .append(Messages.getString("MekDisplay.attached"))
+                      .append('.');
+                affected.add(buff.toString());
+            }
+        }
+
+        if (en.isINarcedWith(INarcPod.ECM)) {
+            affected.add(Messages.getString("MekDisplay.iNarcECMPodAttached"));
+        }
+
+        if (en.isINarcedWith(INarcPod.HAYWIRE)) {
+            affected.add(Messages.getString("MekDisplay.iNarcHaywirePodAttached"));
+        }
+
+        if (en.isINarcedWith(INarcPod.NEMESIS)) {
+            affected.add(Messages.getString("MekDisplay.iNarcNemesisPodAttached"));
+        }
+
+        // Show inferno track.
+        if (en.infernos.isStillBurning()) {
+            affected.add(Messages.getString("MekDisplay.InfernoBurnRemaining") + en.infernos.getTurnsLeftToBurn());
+        }
+
+        if ((en instanceof Tank) && ((Tank) en).isOnFire()) {
+            affected.add(Messages.getString("MekDisplay.OnFire"));
+        }
+
+        // Show electromagnetic interference.
+        if (en.isSufferingEMI()) {
+            affected.add(Messages.getString("MekDisplay.IsEMId"));
+        }
+
+        // Show ECM affect.
+        Coords pos = en.getPosition();
+        if (ComputeECM.isAffectedByAngelECM(en, pos, pos)) {
+            affected.add(Messages.getString("MekDisplay.InEnemyAngelECMField"));
+        } else if (ComputeECM.isAffectedByECM(en, pos, pos)) {
+            affected.add(Messages.getString("MekDisplay.InEnemyECMField"));
+        }
+
+        // Active Stealth Armor? If yes, we're under ECM
+        if (en.isStealthActive()
+              && ((en instanceof Mek) || (en instanceof Tank))) {
+            affected.add(Messages.getString("MekDisplay.UnderStealth"));
+        }
+
+        // burdened due to unjettisoned body-mounted missiles on BA?
+        if ((en instanceof BattleArmor) && ((BattleArmor) en).isBurdened()) {
+            affected.add(Messages.getString("MekDisplay.Burdened"));
+        }
+
+        // suffering from taser feedback?
+        if (en.getTaserFeedBackRounds() > 0) {
+            affected.add(en.getTaserFeedBackRounds()
+                  + " " + Messages.getString("MekDisplay.TaserFeedBack"));
+        }
+
+        // taser interference?
+        if (en.getTaserInterference() > 0) {
+            affected.add("+"
+                  + en.getTaserInterference() + " "
+                  + Messages.getString("MekDisplay.TaserInterference"));
+        }
+
+        // suffering from TSEMP Interference?
+        if (en.getTsempEffect() == MMConstants.TSEMP_EFFECT_INTERFERENCE) {
+            affected.add(Messages.getString("MekDisplay.TSEMPInterference"));
+        }
+
+        // suffering from EMP Mine Interference?
+        if (en.getEMPInterferenceRounds() > 0) {
+            affected.add(Messages.getString("MekDisplay.EMPInterference",
+                  en.getEMPInterferenceRounds()));
+        }
+
+        // suffering from EMP Mine Shutdown?
+        if (en.getEMPShutdownRounds() > 0) {
+            affected.add(Messages.getString("MekDisplay.EMPShutdown",
+                  en.getEMPShutdownRounds()));
+        }
+
+        if (en.hasDamagedRHS()) {
+            affected.add(Messages.getString("MekDisplay.RHSDamaged"));
+        }
+
+        // Show Turret Locked.
+        if ((en instanceof Tank) && !((Tank) en).hasNoTurret()
+              && !en.canChangeSecondaryFacing()) {
+            affected.add(Messages.getString("MekDisplay.Turretlocked"));
+        }
+
+        // Show jammed weapons.
+        for (Mounted<?> weapon : en.getWeaponList()) {
+            if (weapon.isJammed()) {
+                affected.add(weapon.getName() + Messages.getString("MekDisplay.isJammed"));
+            }
+        }
+
+        // Show breached locations.
+        for (int loc = 0; loc < en.locations(); loc++) {
+            if (en.getLocationStatus(loc) == ILocationExposureStatus.BREACHED) {
+                affected.add(en.getLocationName(loc) + Messages.getString("MekDisplay.Breached"));
+            }
+        }
+        return affected;
+    }
+
+    /**
+     * The Extras tab's "Carrying" lines for the unit: its loaded units, clubs, cargo and picked-up MekWarriors, one
+     * per line. The Unit Display and the GPU record sheet both use it.
+     */
+    public static List<String> carried(Game game, Entity en) {
+        List<String> carried = new ArrayList<>();
+        for (Entity other : en.getLoadedUnits()) {
+            carried.add(other.getShortName());
+        }
+
+        // Show club(s).
+        for (Mounted<?> club : en.getClubs()) {
+            carried.add(club.getName());
+        }
+
+        // show cargo.
+        for (ICarryable cargo : en.getDistinctCarriedObjects()) {
+            carried.add(cargo.specificName());
+        }
+
+        // We may not be saving captured pilots correctly on game save; some valid pilots don't have
+        // entities.
+        for (int pickedUpID : en.getPickedUpMekWarriors()) {
+            Entity pickedUp = game.getEntity(pickedUpID);
+            carried.add((pickedUp == null) ? "(ID " + pickedUpID + ")" : pickedUp.getShortName());
+        }
+        return carried;
+    }
+
+    /** The state of the unit's searchlight as the Extras tab shows it below what the unit carries; "" without one. */
+    public static String searchlightText(Entity en) {
+        if (!en.hasSearchlight()) {
+            return "";
+        }
+        return Messages.getString(en.isUsingSearchlight() ? "MekDisplay.SearchlightOn" : "MekDisplay.SearchlightOff");
+    }
+
     private void refreshSensorChoices(Entity en) {
         chSensors.removeItemListener(this);
         chSensors.removeAllItems();
-        for (int i = 0; i < en.getSensors().size(); i++) {
-            Sensor sensor = en.getSensors().elementAt(i);
+        sensorLabels(en).forEach(chSensors::addItem);
+        int next = nextSensorIndex(en);
+        if (next >= 0) {
+            chSensors.setSelectedIndex(next);
+        }
+        chSensors.addItemListener(this);
+    }
+
+    /** The text of the hidden activation list for a phase. */
+    public static String hiddenActivationLabel(GamePhase phase) {
+        return phase.isUnknown() ? Messages.getString("MekDisplay.ActivateHidden.StopActivating") : phase.toString();
+    }
+
+    /** The unit's sensors as the sensor list names them, in the unit's sensor order. */
+    public static List<String> sensorLabels(Entity en) {
+        List<String> labels = new ArrayList<>();
+        for (Sensor sensor : en.getSensors()) {
             String condition = "";
             if (sensor.isBAP() && !en.hasBAP(false)) {
                 condition = " (Disabled)";
             }
-            chSensors.addItem(sensor.getDisplayName() + condition);
-            if ((en.getNextSensor() != null) && (sensor.type() == en.getNextSensor().type())) {
-                chSensors.setSelectedIndex(i);
+            labels.add(sensor.getDisplayName() + condition);
+        }
+        return labels;
+    }
+
+    /** The index of the sensor the unit uses from the end of the turn (the last one of its type), or -1 for none. */
+    public static int nextSensorIndex(Entity en) {
+        int next = -1;
+        for (int i = 0; i < en.getSensors().size(); i++) {
+            if ((en.getNextSensor() != null) && (en.getSensors().elementAt(i).type() == en.getNextSensor().type())) {
+                next = i;
             }
         }
-        chSensors.addItemListener(this);
+        return next;
+    }
+
+    /**
+     * Switches the unit to one of its sensors at the end of the turn and tells the player and the server; the sensor
+     * list's action. The Unit Display and the GPU record sheet both use it.
+     */
+    public static void setNextSensor(ClientGUI clientgui, Entity entity, int sensorIdx) {
+        Sensor sensor = entity.getSensors().elementAt(sensorIdx);
+        entity.setNextSensor(sensor);
+        String sensorMsg = Messages.getString("MekDisplay.willSwitchAtEnd",
+              "Active Sensors",
+              sensor.getDisplayName());
+        clientgui.systemMessage(sensorMsg);
+        clientgui.getClient().sendSensorChange(entity.getId(), sensorIdx);
+    }
+
+    /** The panel's text for a number of active heat sinks of the Mek, such as "4 (8) Double Heat Sink(s) active". */
+    public static String activeSinksText(Mek mek, int sinks) {
+        return mek.hasDoubleHeatSinks() ? Messages.getString("MekDisplay.activeSinksTextDouble", sinks, sinks * 2)
+              : Messages.getString("MekDisplay.activeSinksTextSingle", sinks);
+    }
+
+    /**
+     * Sets how many heat sinks the Mek keeps active from the next round, as the heat sink control does: the client's
+     * menu bar first hands the control's action to its listeners, among them the phase display, which in the firing
+     * phase clears its unsent attacks (FiringDisplay, PointblankShotDisplay); then the Mek and the server take the
+     * number. The Unit Display and the GPU unit record both use it.
+     */
+    public static void setActiveSinks(ClientGUI clientgui, Mek mek, int activeSinks) {
+        clientgui.getMenuBar().actionPerformed(new ActionEvent(mek, ActionEvent.ACTION_PERFORMED, CHANGE_SINKS));
+        mek.setActiveSinksNextRound(activeSinks);
+        clientgui.getClient().sendSinksChange(mek.getId(), activeSinks);
     }
 
     @Override
@@ -662,14 +714,8 @@ class ExtraPanel extends PicMap implements ActionListener, ItemListener {
             Entity entity = clientgui.getClient().getGame().getEntity(myMekId);
 
             if (entity != null) {
-                Sensor sensor = entity.getSensors().elementAt(sensorIdx);
-                entity.setNextSensor(sensor);
+                setNextSensor(clientgui, entity, sensorIdx);
                 refreshSensorChoices(entity);
-                String sensorMsg = Messages.getString("MekDisplay.willSwitchAtEnd",
-                      "Active Sensors",
-                      sensor.getDisplayName());
-                clientgui.systemMessage(sensorMsg);
-                clientgui.getClient().sendSensorChange(myMekId, sensorIdx);
             }
         }
     }
@@ -680,7 +726,7 @@ class ExtraPanel extends PicMap implements ActionListener, ItemListener {
         if (clientgui == null) {
             return;
         }
-        if ("changeSinks".equals(ae.getActionCommand()) && !dontChange) {
+        if (CHANGE_SINKS.equals(ae.getActionCommand()) && !dontChange) {
             Entity mekEntity = clientgui.getClient().getGame().getEntity(myMekId);
 
             if (mekEntity instanceof Mek mek) {
@@ -693,11 +739,7 @@ class ExtraPanel extends PicMap implements ActionListener, ItemListener {
                     return;
                 }
 
-                clientgui.getMenuBar().actionPerformed(ae);
-                int numActiveSinks = prompt.getValue();
-
-                mek.setActiveSinksNextRound(numActiveSinks);
-                clientgui.getClient().sendSinksChange(myMekId, numActiveSinks);
+                setActiveSinks(clientgui, mek, prompt.getValue());
                 displayMek(mek);
             }
         } else if (activateHidden.equals(ae.getSource()) && !dontChange) {

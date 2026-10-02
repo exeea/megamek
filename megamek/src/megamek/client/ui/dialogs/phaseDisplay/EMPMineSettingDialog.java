@@ -38,6 +38,7 @@ import java.awt.Insets;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.io.Serial;
+import java.util.List;
 import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JFrame;
@@ -46,6 +47,8 @@ import javax.swing.JOptionPane;
 import javax.swing.JTextField;
 
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.codeUtilities.StringUtility;
 
 /**
@@ -58,9 +61,12 @@ import megamek.codeUtilities.StringUtility;
 public class EMPMineSettingDialog extends JDialog implements ActionListener {
     @Serial
     private static final long serialVersionUID = 1L;
+    private static final int MIN_SETTING = 10;
+    private static final int MAX_SETTING = 200;
 
     private final JButton butOk = new JButton(Messages.getString("Okay"));
     private final JTextField fldSetting = new JTextField("10", 3);
+    private final JLabel labMessage = new JLabel(Messages.getString("EMPMineSettingDialog.selectSetting"));
     private int setting;
     private final JFrame frame;
 
@@ -69,7 +75,6 @@ public class EMPMineSettingDialog extends JDialog implements ActionListener {
         super.setResizable(false);
         frame = p;
         butOk.addActionListener(this);
-        JLabel labMessage = new JLabel(Messages.getString("EMPMineSettingDialog.selectSetting"));
         GridBagLayout gridBagLayout = new GridBagLayout();
         getContentPane().setLayout(gridBagLayout);
         GridBagConstraints gridBagConstraints = new GridBagConstraints();
@@ -117,7 +122,7 @@ public class EMPMineSettingDialog extends JDialog implements ActionListener {
                       JOptionPane.WARNING_MESSAGE);
                 return;
             }
-            if ((setting < 10) || (setting > 200)) {
+            if ((setting < MIN_SETTING) || (setting > MAX_SETTING)) {
                 JOptionPane.showMessageDialog(frame,
                       Messages.getString("EMPMineSettingDialog.alert.Message"),
                       Messages.getString("EMPMineSettingDialog.alert.Title"),
@@ -126,5 +131,22 @@ public class EMPMineSettingDialog extends JDialog implements ActionListener {
             }
         }
         setVisible(false);
+    }
+
+    /**
+     * Showing the dialog asks in the owning client's native battle window instead when that draws dialogs; only a
+     * setting in the valid range can be entered there. Esc there leaves the setting unset (0), as closing this window
+     * does, which the minefield deployment reads as a cancel.
+     */
+    @Override
+    public void setVisible(boolean visible) {
+        ClientGUI gui = visible ? ClientGUI.forFrame(frame) : null;
+        DialogAnswer answer = (gui == null) ? null : gui.askText(labMessage.getText(), getTitle(),
+              fldSetting.getText(), MIN_SETTING, MAX_SETTING, List.of(butOk.getText()), JOptionPane.CLOSED_OPTION);
+        if (answer == null) {
+            super.setVisible(visible);
+        } else if (answer.text() != null) {
+            setting = Integer.parseInt(answer.text());
+        }
     }
 }

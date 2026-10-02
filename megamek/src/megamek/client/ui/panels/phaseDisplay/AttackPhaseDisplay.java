@@ -256,7 +256,7 @@ public abstract class AttackPhaseDisplay extends ActionPhaseDisplay {
         // Rebuild the weapon display and reselect the flipped weapon (mirrors the mode-change flow). A full refresh
         // is avoided here: it selects the first weapon and short-circuits the unit-display rebuild when the entity
         // object is unchanged, which is what dropped the selection and left the arc indicator stale.
-        clientgui.onAllBoardViews(boardView -> boardView.redrawEntity(currentEntity()));
+        clientgui.onAllBoardStates(boardView -> boardView.redrawEntity(currentEntity()));
         clientgui.getUnitDisplay().wPan.displayMek(currentEntity());
         clientgui.getUnitDisplay().wPan.selectWeapon(weapon);
         updateDonePanel();
@@ -456,7 +456,7 @@ public abstract class AttackPhaseDisplay extends ActionPhaseDisplay {
      * hex on a plain left click.
      * <p>
      * Every attack phase display routes its mouse handling through this method so that a single click can select a
-     * hex only once. {@link megamek.client.ui.clientGUI.boardview.BoardView#select(megamek.common.board.Coords)}
+     * hex only once. {@link megamek.client.ui.clientGUI.boardview.BoardClientState#select(megamek.common.board.Coords)}
      * fires a hex-selected event every time it is called, even when the hex has not changed, and the displays
      * answer that event by asking the player which unit in the hex to attack. A second selection for the same
      * click therefore opens that target window twice (issue #8781).
@@ -469,10 +469,10 @@ public abstract class AttackPhaseDisplay extends ActionPhaseDisplay {
      */
     protected static void applyHexMouseAction(BoardViewEvent event, boolean twistModifierHeld) {
         switch (event.getType()) {
-            case BoardViewEvent.BOARD_HEX_DRAGGED -> event.getBoardView().cursor(event.getCoords());
+            case BoardViewEvent.BOARD_HEX_DRAGGED -> event.getBoardState().cursor(event.getCoords());
             case BoardViewEvent.BOARD_HEX_CLICKED -> {
                 if (!twistModifierHeld && isPlainLeftClick(event)) {
-                    event.getBoardView().select(event.getCoords());
+                    event.getBoardState().select(event.getCoords());
                 }
             }
             default -> {

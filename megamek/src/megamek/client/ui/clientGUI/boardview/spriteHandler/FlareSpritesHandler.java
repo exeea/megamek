@@ -35,8 +35,7 @@ package megamek.client.ui.clientGUI.boardview.spriteHandler;
 import java.util.Collection;
 
 import megamek.client.ui.clientGUI.AbstractClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
-import megamek.client.ui.clientGUI.boardview.IBoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.sprite.FlareSprite;
 import megamek.common.equipment.Flare;
 import megamek.common.event.board.GameBoardChangeEvent;
@@ -54,8 +53,8 @@ public class FlareSpritesHandler extends BoardViewSpriteHandler {
     public void renewSprites(Collection<Flare> flares) {
         clear();
         for (Flare flare : flares) {
-            IBoardView iBoardView = clientGUI.getBoardView(flare.getBoardId());
-            if (iBoardView instanceof BoardView boardView) {
+            BoardClientState boardView = clientGUI.getBoardState(flare.getBoardId());
+            if (boardView != null) {
                 var sprite = new FlareSprite(boardView, flare);
                 currentSprites.add(sprite);
                 boardView.addSprite(sprite);

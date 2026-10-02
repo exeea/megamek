@@ -47,13 +47,16 @@ import java.util.Set;
 import javax.swing.JDialog;
 import javax.swing.JFrame;
 import javax.swing.JOptionPane;
+import javax.swing.Timer;
 import javax.swing.WindowConstants;
 
 import megamek.client.IClient;
 import megamek.client.commands.ClientCommand;
 import megamek.client.ui.IClientCommandHandler;
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.IBoardView;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.clientGUI.boardview.spriteHandler.BoardViewSpriteHandler;
 import megamek.client.ui.dialogs.MMDialogs.MMNarrativeStoryDialog;
 import megamek.client.ui.dialogs.minimap.MinimapDialog;
@@ -85,6 +88,9 @@ public abstract class AbstractClientGUI implements IClientGUI, IClientCommandHan
 
     /** Temporarily stores story dialogs so they can be shown one after the other */
     private final List<JDialog> queuedStoryDialogs = new ArrayList<>();
+    private static final int STORY_RETRY_MILLIS = 250;
+    /** While stories wait for a modal dialog, looks again every {@link #STORY_RETRY_MILLIS} until it is gone. */
+    private final Timer storyRetry = new Timer(STORY_RETRY_MILLIS, event -> showDialogs());
 
     protected Map<String, ClientCommand> clientCommands = new HashMap<>();
 
@@ -92,6 +98,8 @@ public abstract class AbstractClientGUI implements IClientGUI, IClientCommandHan
      * The {@link megamek.client.ui.clientGUI.boardview.BoardView}'s of the game with the board ID as the map key
      */
     public final Map<Integer, IBoardView> boardViews = new HashMap<>();
+    /** Authoritative client presentation, retained when its renderer changes. */
+    protected final Map<Integer, BoardClientState> boardStates = new HashMap<>();
 
     /**
      * The minimaps of the game with the board ID as the map key
@@ -111,7 +119,7 @@ public abstract class AbstractClientGUI implements IClientGUI, IClientCommandHan
 
     @Override
     public boolean shouldIgnoreHotKeys() {
-        return UIUtil.isModalDialogDisplayed();
+        return isModalDialogShown();
     }
 
     @Override
@@ -155,6 +163,7 @@ public abstract class AbstractClientGUI implements IClientGUI, IClientCommandHan
 
     @Override
     public void die() {
+        storyRetry.stop();
         spriteHandlers.forEach(BoardViewSpriteHandler::dispose);
         frame.removeAll();
         frame.setVisible(false);
@@ -240,6 +249,14 @@ public abstract class AbstractClientGUI implements IClientGUI, IClientCommandHan
         return "Unknown Client Command.";
     }
 
+    /**
+     * True while a modal Swing dialog or a native dialog of this client's GPU battle window is shown. Story dialogs
+     * wait for both, and ClientGUI ignores hotkeys for both.
+     */
+    protected boolean isModalDialogShown() {
+        return UIUtil.isModalDialogDisplayed() || GpuBoardWindow.dialogPendingFor(this);
+    }
+
     protected void showScriptedMessage(GameScriptedMessageEvent event) {
         queuedStoryDialogs.add(new MMNarrativeStoryDialog(frame, event));
         showDialogs();
@@ -251,14 +268,20 @@ public abstract class AbstractClientGUI implements IClientGUI, IClientCommandHan
      * MM, this is different as the server may send multiple story dialog packets which will all be processed and shown
      * without user input. This method prevents that behavior so that only one story dialog is shown at one time. Note
      * that when story dialogs trigger at the same time, their order is likely to be the order they were added to the
-     * game but packet transport can make them arrive at the client in a different order.
+     * game but packet transport can make them arrive at the client in a different order. Stories that arrive while
+     * another modal dialog is shown, a native one of the GPU battle window included, show once it is gone.
      */
     private void showDialogs() {
-        if (!UIUtil.isModalDialogDisplayed()) {
-            while (!queuedStoryDialogs.isEmpty()) {
-                JDialog dialog = queuedStoryDialogs.removeFirst();
-                dialog.setVisible(true);
+        if (isModalDialogShown()) {
+            if (!queuedStoryDialogs.isEmpty()) {
+                storyRetry.start();
             }
+            return;
+        }
+        storyRetry.stop();
+        while (!queuedStoryDialogs.isEmpty()) {
+            JDialog dialog = queuedStoryDialogs.removeFirst();
+            dialog.setVisible(true);
         }
     }
 
@@ -290,5 +313,19 @@ public abstract class AbstractClientGUI implements IClientGUI, IClientCommandHan
      */
     public Optional<IBoardView> getCurrentBoardView() {
         return boardViewsContainer.getCurrentBoardView();
+    }
+
+    /** Shared board presentation, independent of the selected renderer. */
+    public BoardClientState getBoardState(int boardId) {
+        return boardStates.get(boardId);
+    }
+    public BoardClientState getBoardState() { return getCurrentBoardState().orElse(null); }
+    public BoardClientState getBoardState(Targetable target) { return getBoardState(target.getBoardId()); }
+    public BoardClientState getBoardState(BoardLocation location) { return getBoardState(location.boardId()); }
+    public List<BoardClientState> boardStates() {
+        return List.copyOf(boardStates.values());
+    }
+    public Optional<BoardClientState> getCurrentBoardState() {
+        return boardViewsContainer.getCurrentBoardId().map(this::getBoardState);
     }
 }

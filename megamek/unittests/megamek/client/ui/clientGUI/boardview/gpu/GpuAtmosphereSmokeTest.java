@@ -38,10 +38,11 @@ import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
 import com.badlogic.gdx.math.Matrix4;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
-import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Slider;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.board.Coords;
@@ -949,46 +950,44 @@ class GpuAtmosphereSmokeTest {
                             assertEquals(1, value("Ground fog"));
                             assertEquals(1, value("Haze"));
                             assertEquals(initial.groundLayerHeight(), value("Ground layer height"));
-                            CheckBox fixed = GpuBoardTestUi.stage().getRoot().findActor("tuning-fixed-sun");
+                            CheckBox fixed = GpuBoardTestUi.tuning(this, "tuning-fixed-sun");
                             assertFalse(fixed.isChecked());
                             assertEquals(BoardAtmosphere.MOONLIGHT_SHADOW_CONTRAST, value("Moon shadow contrast"), 0.0001f);
                             initialMoonFill = renderedAtmosphere(this).lighting().ambient().r;
-                            GpuBoardTestUi.stage().getRoot().<Slider>findActor("Moon shadow contrast").setValue(0);
+                            GpuBoardTestUi.<Slider>tuning(this, "Moon shadow contrast").setValue(0);
                             GpuBoardTestUi.capture(new File(output, "weather-scenario-night-snow.png"));
-                            GpuBoardTestUi.click("tuning");
+                            // The HUD's tuning panel shows the model's controls in the captures below.
+                            GpuBoardTestUi.click("tuning-button");
                         } else if (frames() == 5) {
                             assertTrue(renderedAtmosphere(this).lighting().ambient().r > initialMoonFill,
                                   "The moon contrast slider must update the live light without changing scenario settings");
-                            GpuBoardTestUi.click("atmosphere-CLEAR");
+                            GpuBoardTestUi.click("tuning-atmosphere-tab");
+                            press("atmosphere-CLEAR");
                             assertEquals(0, value("Snow"));
                             assertEquals(0, value("Ground fog"));
                             assertEquals(0, value("Haze"));
-                            Slider time = GpuBoardTestUi.stage().getRoot().findActor("Time of day");
+                            Slider time = GpuBoardTestUi.tuning(this, "Time of day");
                             time.setValue(13);
-                            Actor rain = GpuBoardTestUi.stage().getRoot().findActor("weather-toggle-Rain");
-                            ScrollPane scroll = GpuBoardTestUi.stage().getRoot().findActor("tuning-scroll");
-                            scroll.scrollTo(rain.getX(), rain.getY(), rain.getWidth(), rain.getHeight(), false, true);
-                            scroll.updateVisualScroll();
                         } else if (frames() == 7) {
-                            GpuBoardTestUi.click("weather-toggle-Rain");
+                            press("weather-toggle-Rain");
                             assertTrue(value("Rain") > 0);
-                            assertNull(GpuBoardTestUi.stage().getRoot().findActor("tuning-weather-wetness"));
-                            assertNull(GpuBoardTestUi.stage().getRoot().findActor("Terrain wetness"));
-                            assertNull(GpuBoardTestUi.stage().getRoot().findActor("Cloud density"));
-                            assertNull(GpuBoardTestUi.stage().getRoot().findActor("cloud-quality-LOW"));
-                            assertNull(GpuBoardTestUi.stage().getRoot().findActor("cloud-quality-MEDIUM"));
-                            assertNull(GpuBoardTestUi.stage().getRoot().findActor("cloud-quality-HIGH"));
-                            Slider rays = GpuBoardTestUi.stage().getRoot().findActor("God rays");
+                            GpuBoardTuning model = GpuBoardTestUi.tuning(this);
+                            for (String removed : List.of("tuning-weather-wetness", "Terrain wetness", "Cloud density",
+                                  "cloud-quality-LOW", "cloud-quality-MEDIUM", "cloud-quality-HIGH")) {
+                                assertNull(model.boardRows().findActor(removed), removed);
+                                assertNull(model.atmosphereRows().findActor(removed), removed);
+                            }
+                            Slider rays = GpuBoardTestUi.tuning(this, "God rays");
                             rays.setValue(0);
-                            Slider glare = GpuBoardTestUi.stage().getRoot().findActor("Sun glare");
+                            Slider glare = GpuBoardTestUi.tuning(this, "Sun glare");
                             assertEquals(GpuAtmosphere.Options.DEFAULTS.sunGlare(), glare.getValue(), 0.0001f);
                             glare.setValue(0);
                             assertEquals(GpuAtmosphere.FOG_HEIGHT_VARIATION, value("Fog height variation"), 0.0001f);
                             assertEquals(GpuAtmosphere.FOG_DENSITY_VARIATION, value("Fog density variation"), 0.0001f);
-                            GpuBoardTestUi.stage().getRoot().<Slider>findActor("Fog height variation").setValue(1.25f);
-                            GpuBoardTestUi.stage().getRoot().<Slider>findActor("Fog density variation").setValue(0.5f);
-                            Slider minimum = GpuBoardTestUi.stage().getRoot().findActor("Cloud shadow min");
-                            Slider maximum = GpuBoardTestUi.stage().getRoot().findActor("Cloud shadow max");
+                            GpuBoardTestUi.<Slider>tuning(this, "Fog height variation").setValue(1.25f);
+                            GpuBoardTestUi.<Slider>tuning(this, "Fog density variation").setValue(0.5f);
+                            Slider minimum = GpuBoardTestUi.tuning(this, "Cloud shadow min");
+                            Slider maximum = GpuBoardTestUi.tuning(this, "Cloud shadow max");
                             assertEquals(GpuClouds.MIN_SHADOW_STRENGTH, minimum.getValue(), 0.0001f);
                             assertEquals(GpuClouds.MAX_SHADOW_STRENGTH, maximum.getValue(), 0.0001f);
                             minimum.setValue(0.2f);
@@ -996,8 +995,8 @@ class GpuAtmosphereSmokeTest {
                             minimum.setValue(0.4f);
                             assertEquals(minimum.getValue(), maximum.getValue(), "The panel must display the effective range");
                             minimum.setValue(0.1f);
-                            Slider cover = GpuBoardTestUi.stage().getRoot().findActor("Cloud cover");
-                            Slider wind = GpuBoardTestUi.stage().getRoot().findActor("Wind strength");
+                            Slider cover = GpuBoardTestUi.tuning(this, "Cloud cover");
+                            Slider wind = GpuBoardTestUi.tuning(this, "Wind strength");
                             wind.setValue(0);
                             cover.setValue(0.05f);
                             assertEquals(0, wind.getValue());
@@ -1006,7 +1005,7 @@ class GpuAtmosphereSmokeTest {
                             cover.setValue(0);
                             wind.setValue(0);
                             assertEquals(0, wind.getValue(), "Clear weather permits calm wind");
-                            GpuBoardTestUi.click("tuning-fixed-sun");
+                            press("tuning-fixed-sun");
                             boardCamera.orbit(60, 10);
                         } else if (frames() == 10) {
                             assertEquals(13, value("Time of day"), "Frame updates must preserve tuning overrides");
@@ -1020,14 +1019,14 @@ class GpuAtmosphereSmokeTest {
                             assertEquals(0.5f, value("Fog density variation"), 0.0001f);
                             assertEquals(0.1f, value("Cloud shadow min"), 0.0001f);
                             assertEquals(0.4f, value("Cloud shadow max"), 0.0001f);
-                            CheckBox fixed = GpuBoardTestUi.stage().getRoot().findActor("tuning-fixed-sun");
+                            CheckBox fixed = GpuBoardTestUi.tuning(this, "tuning-fixed-sun");
                             assertTrue(fixed.isChecked());
                             assertNotEquals(BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS).direction(),
                                   renderedAtmosphere(this).lighting().direction(), "The live checkbox must change the light direction");
                             GpuBoardTestUi.capture(new File(output, "weather-rain-controls.png"));
-                            GpuBoardTestUi.click("weather-toggle-Rain");
+                            press("weather-toggle-Rain");
                             assertEquals(0, value("Rain"));
-                            GpuBoardTestUi.click("tuning-defaults");
+                            press("tuning-defaults");
                         } else if (frames() == 12) {
                             assertEquals(0.5f, value("God rays"));
                             assertEquals(GpuAtmosphere.Options.DEFAULTS.sunGlare(), value("Sun glare"), 0.0001f);
@@ -1037,7 +1036,7 @@ class GpuAtmosphereSmokeTest {
                             assertEquals(GpuClouds.MIN_SHADOW_STRENGTH, value("Cloud shadow min"), 0.0001f);
                             assertEquals(GpuClouds.MAX_SHADOW_STRENGTH, value("Cloud shadow max"), 0.0001f);
                             assertEquals(initial.effects().wind(), value("Wind strength"));
-                            CheckBox fixed = GpuBoardTestUi.stage().getRoot().findActor("tuning-fixed-sun");
+                            CheckBox fixed = GpuBoardTestUi.tuning(this, "tuning-fixed-sun");
                             assertTrue(fixed.isChecked(), "Defaults keeps the fixed sun/moon frame the user chose");
                             assertNotEquals(BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS).direction(),
                                   renderedAtmosphere(this).lighting().direction());
@@ -1046,9 +1045,9 @@ class GpuAtmosphereSmokeTest {
                             assertEquals(0, value("Rain"));
                             assertEquals(1, value("Ground fog"), "Defaults restores scenario fog");
                             assertEquals(1, value("Haze"));
-                            GpuBoardTestUi.click("weather-toggle-Snow");
+                            press("weather-toggle-Snow");
                             assertEquals(0, value("Snow"));
-                            GpuBoardTestUi.click("weather-toggle-Snow");
+                            press("weather-toggle-Snow");
                             assertTrue(value("Snow") > 0);
                             assertEquals(0, fixture.clicks.get(), "Weather controls must not issue game orders");
                             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
@@ -1058,14 +1057,14 @@ class GpuAtmosphereSmokeTest {
                             });
                         } else if (frames() == 14) {
                             assertFalse(renderedAtmosphere(this).lighting().hasDirectLight());
-                            assertTrue(GpuBoardTestUi.stage().getRoot().<Slider>findActor("Moon shadow contrast").isDisabled());
-                            Slider time = GpuBoardTestUi.stage().getRoot().findActor("Time of day");
+                            assertTrue(GpuBoardTestUi.<Slider>tuning(this, "Moon shadow contrast").isDisabled());
+                            Slider time = GpuBoardTestUi.tuning(this, "Time of day");
                             time.setValue(13);
                         } else if (frames() == 16) {
                             assertTrue(renderedAtmosphere(this).lighting().hasDirectLight(), "A daytime preview still gets sunlight");
-                            Slider time = GpuBoardTestUi.stage().getRoot().findActor("Time of day");
+                            Slider time = GpuBoardTestUi.tuning(this, "Time of day");
                             time.setValue(0);
-                            GpuBoardTestUi.click("tuning-fixed-sun");
+                            press("tuning-fixed-sun");
                         } else if (frames() == 18) {
                             assertFalse(renderedAtmosphere(this).lighting().hasDirectLight(),
                                   "Manual time and the fixed-light option must preserve an explicit moonless night");
@@ -1079,8 +1078,13 @@ class GpuAtmosphereSmokeTest {
                 }
 
                 private float value(String name) {
-                    Slider slider = GpuBoardTestUi.stage().getRoot().findActor(name);
+                    Slider slider = GpuBoardTestUi.tuning(this, name);
                     return slider.getValue();
+                }
+
+                /** A press on the tuning model's button, as the HUD's tuning panel gives it. */
+                private void press(String name) {
+                    GpuBoardTestUi.pressTuning(GpuBoardTestUi.tuning(this, name));
                 }
             }, GpuBoardWindow.configuration(false));
             if (failure.get() != null) {
@@ -1119,16 +1123,17 @@ class GpuAtmosphereSmokeTest {
                             slider("Time of day").setValue(13);
                         } else if (frames() == 4) {
                             daylight = GpuBoardTestUi.capture(new File(output, "atmosphere-board-day.png"));
-                            GpuBoardTestUi.click("tuning");
+                            GpuBoardTestUi.click("tuning-button");
                         } else if (frames() == 6) {
-                            GpuBoardTestUi.click("atmosphere-LIGHT_FOG");
+                            GpuBoardTestUi.click("tuning-atmosphere-tab");
+                            press("atmosphere-LIGHT_FOG");
                             slider("Time of day").setValue(17.5f);
                         } else if (frames() == 8) {
                             assertEquals(17.5f, slider("Time of day").getValue(), "The clock can override a complete preset");
                             assertEquals(AtmospherePreset.LIGHT_FOG.settings(0.5).fog(),
                                   slider("Ground fog").getValue(), 0.001f);
                             assertNotEquals(daylight, GpuBoardTestUi.capture(new File(output, "atmosphere-controls.png")));
-                            GpuBoardTestUi.click("tuning");
+                            GpuBoardTestUi.click("tuning-button");
                         } else if (frames() == 10) {
                             GpuBoardTestUi.capture(new File(output, "atmosphere-board-sunset-mist.png"));
                             slider("Time of day").setValue(0);
@@ -1147,11 +1152,11 @@ class GpuAtmosphereSmokeTest {
                         } else if (frames() == 18) {
                             GpuBoardTestUi.capture(new File(output, "atmosphere-board-day-overcast.png"));
                             slider("Time of day").setValue(0);
+                            GpuBoardTestUi.click("tuning-button");
                         } else if (frames() == 20) {
-                            GpuBoardTestUi.click("tuning");
-                            GpuBoardTestUi.click("atmosphere-HEAVY_FOG");
+                            press("atmosphere-HEAVY_FOG");
                             assertEquals(AtmospherePreset.HEAVY_FOG.settings(0.5).clouds(), slider("Cloud cover").getValue(), 0.001f);
-                            GpuBoardTestUi.click("atmosphere-CLEAR");
+                            press("atmosphere-CLEAR");
                             assertEquals(0, slider("Cloud cover").getValue());
                             assertEquals(0, slider("Ground fog").getValue());
                             assertEquals(0, slider("Haze").getValue());
@@ -1162,13 +1167,15 @@ class GpuAtmosphereSmokeTest {
                             assertEquals(0, slider("Cloud cover").getValue());
                             Gdx.graphics.setWindowedMode(900, 600);
                         } else if (frames() == 24) {
-                            Actor panel = GpuBoardTestUi.stage().getRoot().findActor("board-tuning");
-                            assertTrue(panel.getX() >= 0 && panel.getRight() <= GpuBoardTestUi.stage().getWidth());
-                            assertTrue(panel.getY() >= GpuBoardUi.TURN_HEIGHT);
-                            assertTrue(panel.getTop() <= GpuBoardTestUi.stage().getHeight() - GpuBoardUi.TOP_HEIGHT);
+                            // The HUD's tuning panel stays inside the smaller window.
+                            Stage hud = GpuBoardTestUi.stage();
+                            Actor panel = hud.getRoot().findActor("tuning-frame");
+                            Vector2 corner = panel.localToStageCoordinates(new Vector2());
+                            assertTrue(corner.x >= 0 && corner.x + panel.getWidth() <= hud.getWidth());
+                            assertTrue(corner.y >= 0 && corner.y + panel.getHeight() <= hud.getHeight());
                             GpuBoardTestUi.capture(new File(output, "atmosphere-controls-small.png"));
                             assertEquals(0, fixture.clicks.get(), "Visual controls must not issue orders");
-                            GpuBoardTestUi.click("tuning");
+                            GpuBoardTestUi.click("tuning-button");
                             slider("Time of day").setValue(6);
                             slider("Cloud cover").setValue(0);
                             slider("Ground fog").setValue(0);
@@ -1210,7 +1217,12 @@ class GpuAtmosphereSmokeTest {
                 }
 
                 private Slider slider(String name) {
-                    return GpuBoardTestUi.stage().getRoot().findActor(name);
+                    return GpuBoardTestUi.tuning(this, name);
+                }
+
+                /** A press on the tuning model's button, as the HUD's tuning panel gives it. */
+                private void press(String name) {
+                    GpuBoardTestUi.pressTuning(GpuBoardTestUi.tuning(this, name));
                 }
             }, GpuBoardWindow.configuration(false));
         }

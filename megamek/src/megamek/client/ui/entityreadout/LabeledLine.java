@@ -32,6 +32,8 @@
  */
 package megamek.client.ui.entityreadout;
 
+import java.util.List;
+
 import megamek.client.ui.util.DiscordFormat;
 
 /**
@@ -68,5 +70,10 @@ class LabeledLine implements ViewElement {
     @Override
     public String toDiscord() {
         return label + ": " + DiscordFormat.highlightNumbersForDiscord(value.toDiscord()) + '\n';
+    }
+
+    @Override
+    public void addRows(List<EntityReadout.Row> rows) {
+        rows.add(new EntityReadout.Row(EntityReadout.Row.Kind.LABELED, List.of(label, value.toPlainText())));
     }
 }

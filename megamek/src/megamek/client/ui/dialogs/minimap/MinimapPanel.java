@@ -66,16 +66,11 @@ import java.util.Vector;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.imageio.ImageIO;
-import javax.swing.JCheckBox;
-import javax.swing.JCheckBoxMenuItem;
-import javax.swing.JDialog;
-import javax.swing.JMenu;
-import javax.swing.JOptionPane;
-import javax.swing.JPanel;
-import javax.swing.SwingUtilities;
+import javax.swing.*;
 
 import megamek.MMConstants;
 import megamek.client.Client;
+import megamek.client.CloseClientListener;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListener;
 import megamek.client.event.BoardViewListenerAdapter;
@@ -85,7 +80,7 @@ import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.GifRecordingMode;
 import megamek.client.ui.clientGUI.IClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.util.ScalingPopup;
 import megamek.client.ui.util.StringDrawer;
 import megamek.client.ui.util.UIUtil;
@@ -187,12 +182,17 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
     private static final GUIPreferences GUIP = GUIPreferences.getInstance();
     private static final ClientPreferences CLIENT_PREFERENCES = PreferenceManager.getClientPreferences();
     private BufferedImage mapImage;
-    private final BoardView bv;
+    private final BoardClientState bv;
+    private java.util.function.Consumer<Coords> hexClickHandler;
+    private GameListenerAdapter gameListener;
+
+    public void setHexClickHandler(java.util.function.Consumer<Coords> handler) { hexClickHandler = handler; }
     private final Game game;
     private Board board;
     private final int boardId;
     private final JDialog dialog;
     private Client client;
+    private CloseClientListener closeClientListener;
     private final IClientGUI clientGui;
     /**
      * Game UUIDs that already have a {@link MinimapPanel} writing the summary GIF. A multi-board game creates one
@@ -272,19 +272,19 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
     }
 
     /**
-     * Returns a minimap image of the given board at the given zoom index. The game and {@link BoardView} object will be
+     * Returns a minimap image of the given board at the given zoom index. The game and {@link BoardClientState} object will be
      * used to display additional information.
      */
-    public static BufferedImage getMinimapImage(Game game, BoardView boardView, int zoom, @Nullable File minimapTheme,
+    public static BufferedImage getMinimapImage(Game game, BoardClientState boardView, int zoom, @Nullable File minimapTheme,
           int boardId) {
         return getMinimapImage(game, boardView, zoom, null, minimapTheme, Collections.emptyList(), boardId);
     }
 
     /**
-     * Returns a minimap image of the given board at the given zoom index. The game and {@link BoardView} object will be
+     * Returns a minimap image of the given board at the given zoom index. The game and {@link BoardClientState} object will be
      * used to display additional information.
      */
-    public static BufferedImage getMinimapImage(Game game, BoardView boardView, int zoom, IClientGUI clientGui,
+    public static BufferedImage getMinimapImage(Game game, BoardClientState boardView, int zoom, IClientGUI clientGui,
           @Nullable File minimapTheme, List<Line> movePathLines, int boardId) {
         try {
             // Send the fail image when the zoom index is wrong to make this noticeable
@@ -309,10 +309,10 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
      * Creates a minimap panel. The only required parameter is a game that contains the board to display. When the
      * dialog is not null, it is assumed that this minimap will be visible for a while, and it will register itself to
      * various objects as a listener to changes. When the dialog is null, it is assumed that the minimap is only used to
-     * create a snapshot image. When a {@link BoardView} is given, the visible area is shown.
+     * create a snapshot image. When a {@link BoardClientState} is given, the visible area is shown.
      */
 
-    public MinimapPanel(@Nullable MinimapDialog minimapDialog, Game game, @Nullable BoardView boardView,
+    public MinimapPanel(@Nullable MinimapDialog minimapDialog, Game game, @Nullable BoardClientState boardView,
           @Nullable IClientGUI clientGUI,
           @Nullable File minimapTheme, int boardId) {
         this.game = Objects.requireNonNull(game);
@@ -335,10 +335,10 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
     }
 
     /**
-     * Registers the minimap as listener to the given game, board, {@link BoardView} (that are not null).
+     * Registers the minimap as listener to the given game, board, {@link BoardClientState} (that are not null).
      */
     private void initializeListeners() {
-        game.addGameListener(new GameListenerAdapter() {
+        gameListener = new GameListenerAdapter() {
 
             @Override
             public void gamePhaseChange(GamePhaseChangeEvent e) {
@@ -430,18 +430,21 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
 
             @Override
             public void gameBoardNew(GameBoardNewEvent e) {
-                if (e.getBoardId() == boardId) {
-                    Board b = e.getOldBoard();
-                    if (b != null) {
-                        b.removeBoardListener(boardListener);
-                    }
-                    b = e.getNewBoard();
-                    if (b != null) {
-                        b.addBoardListener(boardListener);
-                    }
-                    board = b;
-                    initializeMap();
+                if (gameListener == null || e.getBoardId() != boardId) {
+                    return;
                 }
+                if (e.getNewBoard() == null) {
+                    dispose();
+                    return;
+                }
+                // A newly created panel can receive the same event that created it. Move its actual subscription,
+                // not the event's old board, or the new board receives this listener twice.
+                if (board != e.getNewBoard()) {
+                    board.removeBoardListener(boardListener);
+                    board = e.getNewBoard();
+                    board.addBoardListener(boardListener);
+                }
+                initializeMap();
             }
 
             @Override
@@ -453,14 +456,15 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
             public void gameNewAction(GameNewActionEvent e) {
                 refreshMap();
             }
-        });
+        };
+        game.addGameListener(gameListener);
 
         board.addBoardListener(boardListener);
         if (bv != null) {
             bv.addBoardViewListener(boardViewListener);
         }
         if (client != null) {
-            client.addCloseClientListener(() -> {
+            closeClientListener = () -> {
                 GIF_RECORDING_DECISIONS.remove(game.getUUIDString());
                 if (ownsSummaryGif && (gifWriterThread != null)) {
                     if (gifWriterThread.isAlive()) {
@@ -468,9 +472,25 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
                     }
                     releaseSummaryGifOwnership();
                 }
-            });
+            };
+            client.addCloseClientListener(closeClientListener);
         }
         GUIP.addPreferenceChangeListener(this);
+    }
+
+    /** Detach the minimap and release its recording when its owning window is disposed. */
+    public void dispose() {
+        if (client != null && closeClientListener != null) {
+            client.removeCloseClientListener(closeClientListener);
+            closeClientListener = null;
+        }
+        if (gameListener != null) { game.removeGameListener(gameListener); gameListener = null; }
+        if (board != null) { board.removeBoardListener(boardListener); }
+        if (bv != null) { bv.removeBoardViewListener(boardViewListener); }
+        GUIP.removePreferenceChangeListener(this);
+        hexClickHandler = null;
+        if (ownsSummaryGif && gifWriterThread != null) { gifWriterThread.stopThread(true); }
+        releaseSummaryGifOwnership();
     }
 
     /**
@@ -501,7 +521,7 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
             return;
         }
         GIF_RECORDING_DECISIONS.computeIfAbsent(game.getUUIDString(),
-              gameId -> askWhetherToRecordGif(parent));
+              gameId -> askWhetherToRecordGif(parent, null));
     }
 
     /**
@@ -550,11 +570,11 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
      */
     private @Nullable Boolean askWhetherToRecordGifOnEdt() {
         if (SwingUtilities.isEventDispatchThread()) {
-            return askWhetherToRecordGif(this);
+            return askWhetherToRecordGif(this, clientGui);
         }
         AtomicReference<Boolean> answerHolder = new AtomicReference<>();
         try {
-            SwingUtilities.invokeAndWait(() -> answerHolder.set(askWhetherToRecordGif(this)));
+            SwingUtilities.invokeAndWait(() -> answerHolder.set(askWhetherToRecordGif(this, clientGui)));
         } catch (InterruptedException interruptedException) {
             Thread.currentThread().interrupt();
             return null;
@@ -570,19 +590,21 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
      * persists the answer as {@link GifRecordingMode#ALWAYS} or {@link GifRecordingMode#NEVER} so the dialog never
      * shows again. Must be called on the event dispatch thread.
      *
-     * @param parent The parent component for the dialog, or {@code null} to center on screen
+     * @param parent    The parent component for the dialog, or {@code null} to center on screen
+     * @param clientGui The game's client, whose native battle window asks instead when it draws dialogs; a Swing
+     *                  dialog falls back to its frame. Null (the lobby) asks with a Swing dialog over {@code parent}
      *
      * @return {@code true} if the player wants this game recorded
      */
-    private static boolean askWhetherToRecordGif(@Nullable Component parent) {
+    private static boolean askWhetherToRecordGif(@Nullable Component parent, @Nullable IClientGUI clientGui) {
         JCheckBox rememberChoice = new JCheckBox(Messages.getString("MinimapPanel.RecordGifDialog.remember"));
         Object[] dialogContent = { Messages.getString("MinimapPanel.RecordGifDialog.message"),
                                    Messages.getString("MinimapPanel.RecordGifDialog.warning"),
                                    rememberChoice };
-        int response = JOptionPane.showConfirmDialog(parent,
-              dialogContent,
-              Messages.getString("MinimapPanel.RecordGifDialog.title"),
-              JOptionPane.YES_NO_OPTION,
+        String title = Messages.getString("MinimapPanel.RecordGifDialog.title");
+        int response = (clientGui instanceof ClientGUI gui)
+              ? gui.confirm(dialogContent, title, JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE)
+              : JOptionPane.showConfirmDialog(parent, dialogContent, title, JOptionPane.YES_NO_OPTION,
               JOptionPane.QUESTION_MESSAGE);
         boolean recordThisGame = (response == JOptionPane.YES_OPTION);
         if (rememberChoice.isSelected()) {
@@ -978,7 +1000,7 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
 
             // In case the flag SHOW SYMBOLS is set, it will draw the units and other stuff
             if (symbolsDisplayMode == SHOW_SYMBOLS) {
-                if (null != game) {
+                if (game != null) {
                     // draw dead units
                     multiUnits.clear();
                     for (Entity e : game.getOutOfGameEntitiesVector()) {
@@ -1046,7 +1068,7 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
 
     /** Indicates the deployment hexes. */
     private void drawDeploymentZone(Graphics g) {
-        if ((null != client) && (null != game) && game.getPhase().isDeployment() && (bv != null)
+        if ((client != null) && (game != null) && game.getPhase().isDeployment() && (bv != null)
               && (bv.getDeployingEntity() != null) && (dialog != null) && (getLocalPlayer() != null)) {
             GameTurn turn = game.getTurn();
             if ((turn != null) && (turn.playerId() == getLocalPlayer().getId())) {
@@ -1077,7 +1099,7 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
     }
 
     /**
-     * Draws a box showing the portion of the board that is currently visible in the {@link BoardView}.
+     * Draws a box showing the portion of the board that is currently visible in the {@link BoardClientState}.
      */
     private void paintVisibleSection(Graphics g) {
         if (minimized || (bv == null)) {
@@ -1408,7 +1430,7 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
         // sanity check...
         // cross-board attacks don't get attack arrows (for now, must possibly allow some A2G, O2G, A2A attacks later
         // when target/attacker hexes are not really but effectively on the same board)
-        if ((null == source) || (null == target) || !game.onTheSameBoard(source, target)
+        if ((source == null) || (target == null) || !game.onTheSameBoard(source, target)
               || (target.getBoardId() != boardId)) {
             return;
         }
@@ -2043,7 +2065,7 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
         if (!new Rectangle(getSize()).contains(x, y)) {
             return;
         }
-        if ((modifiers & InputEvent.CTRL_DOWN_MASK) != 0) {
+        if (bv != null && (modifiers & InputEvent.CTRL_DOWN_MASK) != 0) {
             bv.checkLOS(translateCoords(x - leftMargin, y - topMargin));
         }
         if (dragging) {
@@ -2110,7 +2132,7 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
     }
 
     /**
-     * Changes the currently shown {@link BoardView} to this minimap's own board.
+     * Changes the currently shown {@link BoardClientState} to this minimap's own board.
      */
     private void ShowThisBoardView() {
         if (clientGui instanceof AbstractClientGUI abstractClientGUI) {
@@ -2119,14 +2141,16 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
     }
 
     /**
-     * Centers the BoardView connected to the Minimap on x, y in the Minimap's pixel coordinates.
+     * Centers the BoardClientState connected to the Minimap on x, y in the Minimap's pixel coordinates.
      */
     private void centerOnPos(double x, double y) {
+        if (hexClickHandler != null) {
+            hexClickHandler.accept(translateCoords((int) x - leftMargin, (int) y - topMargin));
+            return;
+        }
+        if (bv == null) { return; }
         ShowThisBoardView();
-        bv.centerOnPointRel(
-              ((x - leftMargin)) / ((HEX_SIDE_BY_SIN30[zoom] + HEX_SIDE[zoom]) * board.getWidth()),
-              ((y - topMargin)) / (2 * HEX_SIDE_BY_COS30[zoom] * board.getHeight()));
-        bv.stopSoftCentering();
+        bv.centerOnHex(translateCoords((int) x - leftMargin, (int) y - topMargin));
         repaint();
     }
 

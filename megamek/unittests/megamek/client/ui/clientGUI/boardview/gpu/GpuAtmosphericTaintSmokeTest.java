@@ -20,14 +20,11 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
-import com.badlogic.gdx.scenes.scene2d.Stage;
-import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.SelectBox;
 import com.badlogic.gdx.scenes.scene2d.ui.Slider;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener.ChangeEvent;
 import com.badlogic.gdx.utils.ScreenUtils;
-import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import megamek.common.board.Coords;
 import megamek.common.planetaryConditions.Atmosphere;
 import megamek.common.planetaryConditions.AtmosphericTaint;
@@ -143,13 +140,12 @@ class GpuAtmosphericTaintSmokeTest {
 
     private void checkTuning(GpuAtmosphere atmosphere) throws Exception {
         var skin = new GpuBoardSkin();
-        var stage = new Stage(new ScreenViewport());
         try {
             var tuning = new GpuBoardTuning(skin.skin);
             var original = settings(12, 0, AtmosphericTaint.TOXIC_POISON, Atmosphere.STANDARD);
             tuning.useScenario(original, true);
-            Slider strength = tuning.panel().findActor("Taint strength");
-            SelectBox<AtmosphericTaint> taint = tuning.panel().findActor("tuning-atmospheric-taint");
+            Slider strength = GpuBoardTestUi.tuning(tuning, "Taint strength");
+            SelectBox<AtmosphericTaint> taint = GpuBoardTestUi.tuning(tuning, "tuning-atmospheric-taint");
             assertFalse(strength.isDisabled());
             assertEquals(original.taint(), taint.getSelected());
             atmosphere.configure(original);
@@ -167,10 +163,10 @@ class GpuAtmosphericTaintSmokeTest {
             atmosphere.setOptions(tuning.atmosphereOptions());
             assertSame(cached, atmosphere.lighting(), "Unchanged settings must reuse the palette");
 
-            Slider hour = tuning.panel().findActor("Time of day");
+            Slider hour = GpuBoardTestUi.tuning(tuning, "Time of day");
             hour.setValue(6);
             assertEquals(original.taint(), tuning.atmosphere().taint());
-            tuning.panel().<Slider>findActor("Ground fog").setValue(0.6f);
+            GpuBoardTestUi.<Slider>tuning(tuning, "Ground fog").setValue(0.6f);
             assertEquals(original.taint(), tuning.atmosphere().taint());
             strength.setValue(2);
             var updated = settings(12, 0, AtmosphericTaint.TAINTED_FLAME, Atmosphere.STANDARD);
@@ -185,24 +181,12 @@ class GpuAtmosphericTaintSmokeTest {
                 tuning.useScenario(unavailable, false);
                 assertTrue(strength.isDisabled());
             }
-            TextButton defaults = tuning.panel().findActor("tuning-defaults");
+            TextButton defaults = tuning.defaults();
             defaults.fire(new ChangeEvent());
             assertEquals(original, tuning.atmosphere());
             assertEquals(BoardAtmosphere.DEFAULT_TAINT_STRENGTH, tuning.atmosphereOptions().taintStrength());
             assertFalse(strength.isDisabled());
-            stage.addActor(tuning.panel());
-            tuning.panel().setBounds(20, 20, 340, Gdx.graphics.getHeight() - 40);
-            stage.act(0);
-            tuning.panel().validate();
-            ScrollPane scroll = tuning.panel().findActor("tuning-scroll");
-            scroll.setScrollPercentY(1);
-            scroll.updateVisualScroll();
-            stage.act(0);
-            stage.draw();
-            assertTrue(taint.getWidth() > 100, "The taint selector must have room to show its current value");
-            GpuBoardTestUi.capture(new File(output, "taint-tuning.png"));
         } finally {
-            stage.dispose();
             skin.dispose();
         }
     }

@@ -22,7 +22,7 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
 import com.badlogic.gdx.scenes.scene2d.ui.Slider;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardFocus;
 import megamek.common.Hex;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Board;
@@ -112,7 +112,7 @@ class GpuMixedUnitBenchmarkSmokeTest {
                     boolean preparePlaybackCamera(UnitPlayback state, BoardScene scene) { return true; }
 
                     @Override
-                    void updateCameraFocus(BoardScene scene, BoardView.CenterRequest request, BoardScene.Animation action) {
+                    void updateCameraFocus(BoardScene scene, BoardFocus request, BoardScene.Animation action) {
                         if (frame == 0) { super.updateCameraFocus(scene, request, action); }
                     }
 
@@ -171,7 +171,7 @@ class GpuMixedUnitBenchmarkSmokeTest {
                                 allocated += allocation.getThreadAllocatedBytes(Thread.currentThread().threadId()) - bytes;
                             }
                             if (phase == 1) {
-                                ((Slider) GpuBoardTestUi.stage().getRoot().findActor("Time of day")).setValue(13);
+                                ((Slider) GpuBoardTestUi.tuning(this, "Time of day")).setValue(13);
                                 var scene = (BoardScene) field(this, "scene");
                                 assertEquals(count, scene.units().size());
                                 boardCamera.setIsometric(battalion ? view % views >= 2 : view % views == 1);

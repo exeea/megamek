@@ -32,6 +32,8 @@
  */
 package megamek.client.ui.entityreadout;
 
+import java.util.List;
+
 /**
  * Displays a single line of text. The default constructor is used to insert a new line.
  */
@@ -54,5 +56,11 @@ record PlainLine(String value) implements ViewElement {
     @Override
     public String toDiscord() {
         return toPlainText();
+    }
+
+    @Override
+    public void addRows(List<EntityReadout.Row> rows) {
+        rows.add(value.isBlank() ? new EntityReadout.Row(EntityReadout.Row.Kind.SPACE, List.of())
+              : new EntityReadout.Row(EntityReadout.Row.Kind.TEXT, List.of(value)));
     }
 }

@@ -14,6 +14,7 @@ import java.util.List;
 import javax.swing.SwingUtilities;
 
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.ECMEffects;
@@ -84,11 +85,16 @@ class GpuHexOverlayTest {
                 assertTrue(triangles.stream().filter(t -> t.argb() == new Color(0, 140, 0, 120).getRGB())
                       .allMatch(t -> t.a().z > 3 * BoardGeometry.LEVEL && t.b().z > 3 * BoardGeometry.LEVEL
                             && t.c().z > 3 * BoardGeometry.LEVEL));
-                fixture.view.getComponent();
-                fixture.view.zoomOut();
-                float scale = fixture.view.getScale();
-                assertEquals(marked.tactical(), fixture.view.captureTacticalGeometry());
-                assertEquals(scale, fixture.view.getScale());
+                BoardView classic = fixture.classicView();
+                try {
+                    classic.getComponent();
+                    classic.zoomOut();
+                    float scale = classic.getScale();
+                    assertEquals(marked.tactical(), fixture.view.captureTacticalGeometry());
+                    assertEquals(scale, classic.getScale());
+                } finally {
+                    classic.dispose();
+                }
                 prefs.setMapSheetColor(Color.YELLOW);
                 fixture.source.refresh();
                 assertTrue(covers(fixture.source.takeFrame().scene().tactical(), Color.YELLOW, new Coords(8, 17), 42, 0));
@@ -136,7 +142,7 @@ class GpuHexOverlayTest {
                 assertTrue(covers(eccm.tactical(), tint, sample, 42, 36));
                 assertTrue(eccm.tile(sample).tactical() == null, "ECCM needs no raster artwork");
 
-                BoardView.PlanarHex cached = artwork(fixture, sample);
+                BoardArtwork.HexImage cached = artwork(fixture, sample);
                 GUIPreferences.getInstance().setECMTransparency(48);
                 assertSame(cached.terrain(), artwork(fixture, sample).terrain(), "Opacity must not repaint terrain");
                 fixture.source.refresh();
@@ -188,8 +194,8 @@ class GpuHexOverlayTest {
         }
     }
 
-    private static BoardView.PlanarHex artwork(GpuBoardFixture fixture, Coords coords) {
-        List<BoardView.PlanarHex> result = new ArrayList<>();
+    private static BoardArtwork.HexImage artwork(GpuBoardFixture fixture, Coords coords) {
+        List<BoardArtwork.HexImage> result = new ArrayList<>();
         fixture.view.capturePlanarHexes(new Rectangle(coords.getX(), coords.getY(), 1, 1), false, result::add);
         return result.getFirst();
     }

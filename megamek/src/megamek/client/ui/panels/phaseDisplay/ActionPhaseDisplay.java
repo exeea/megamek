@@ -37,10 +37,12 @@ import java.awt.event.ActionEvent;
 import java.io.Serial;
 import java.util.List;
 import javax.swing.AbstractAction;
+import javax.swing.JCheckBox;
+import javax.swing.JOptionPane;
 
+import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
-import megamek.client.ui.clientGUI.boardview.IBoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.overlay.TurnDetailsOverlay;
 import megamek.client.ui.dialogs.ConfirmDialog;
 import megamek.client.ui.util.KeyCommandBind;
@@ -66,6 +68,9 @@ public abstract class ActionPhaseDisplay extends StatusBarPhaseDisplay {
     protected int currentEntity = Entity.NONE;
 
     private boolean ignoreNoActionNag = false;
+
+    /** The lines last given to the turn details overlay, never null. */
+    private List<String> turnDetails = List.of();
 
     protected final ClientGUI clientgui;
     protected final Game game;
@@ -207,11 +212,26 @@ public abstract class ActionPhaseDisplay extends StatusBarPhaseDisplay {
         return !isTimerExpired();
     }
 
-    private boolean doYesNoBotherDialog(String title, String body, Runnable setNag) {
-        ConfirmDialog nag = clientgui.doYesNoBotherDialog(title, body);
-        if (nag.getAnswer()) {
+    /**
+     * Asks a yes/no question with a "do not bother" box (natively when the battle window draws dialogs); runs
+     * {@code setNag} on Yes with the box ticked. Returns true when the player declined.
+     */
+    protected boolean doYesNoBotherDialog(String title, String body, Runnable setNag) {
+        JCheckBox dontBother = new JCheckBox(Messages.getString("ConfirmDialog.dontBother"));
+        Integer answer = clientgui.askYesNo(body, title, dontBother);
+        boolean confirmed;
+        boolean showAgain;
+        if (answer != null) {
+            confirmed = answer == JOptionPane.YES_OPTION;
+            showAgain = !dontBother.isSelected();
+        } else {
+            ConfirmDialog nag = clientgui.doYesNoBotherDialog(title, body);
+            confirmed = nag.getAnswer();
+            showAgain = nag.getShowAgain();
+        }
+        if (confirmed) {
             // do they want to be bothered again?
-            if (!nag.getShowAgain()) {
+            if (!showAgain) {
                 setNag.run();
             }
         } else {
@@ -308,8 +328,10 @@ public abstract class ActionPhaseDisplay extends StatusBarPhaseDisplay {
             butSkipTurn.setEnabled(true);
         }
 
-        for (IBoardView ibv : clientgui.boardViews()) {
-            if (ibv instanceof BoardView bv) {
+        this.turnDetails = turnDetails == null ? List.of() : List.copyOf(turnDetails);
+        for (BoardClientState ibv : clientgui.boardStates()) {
+            BoardClientState bv = ibv;
+            if (bv != null) {
                 TurnDetailsOverlay turnDetailsOverlay = bv.getTurnDetailsOverlay();
                 if (turnDetailsOverlay != null) {
                     turnDetailsOverlay.setLines(turnDetails);
@@ -335,20 +357,32 @@ public abstract class ActionPhaseDisplay extends StatusBarPhaseDisplay {
     }
 
     protected void clearMovementSprites() {
-        clientgui.boardViews().forEach(bv -> ((BoardView) bv).clearMovementData());
+        clientgui.boardStates().forEach(bv -> bv.clearMovementData());
     }
 
     protected void clearMarkedHexes() {
-        clientgui.boardViews().forEach(IBoardView::clearMarkedHexes);
+        clientgui.boardStates().forEach(BoardClientState::clearMarkedHexes);
     }
 
     @Override
     public void removeAllListeners() {
         game.removeGameListener(this);
-        clientgui.boardViews().forEach(bv -> bv.removeBoardViewListener(this));
+        clientgui.boardStates().forEach(bv -> bv.removeBoardViewListener(this));
     }
 
     public int getCurrentEntity() {
         return currentEntity;
+    }
+
+    /**
+     * @return The turn details (planned steps or pending attacks) that this display last gave to the turn details
+     *       overlay while it acts: during the local player's turn or a point-blank shot. Otherwise an empty list, as
+     *       {@link TurnDetailsOverlay} clears its copy when the turn passes to another player. Unlike
+     *       {@link AttackPhaseDisplay#getAttackDescriptions()}, which lists every pending attack at any time, these are
+     *       the overlay's lines (a firing display gives none for a lone torso twist, for example).
+     */
+    public List<String> getTurnDetails() {
+        boolean acting = clientgui.getClient().isMyTurn() || clientgui.isProcessingPointblankShot();
+        return acting ? turnDetails : List.of();
     }
 }

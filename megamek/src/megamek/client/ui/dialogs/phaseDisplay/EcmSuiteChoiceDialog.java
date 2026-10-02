@@ -40,6 +40,10 @@ import javax.swing.JFrame;
 import javax.swing.JToggleButton;
 
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
 import megamek.client.ui.enums.DialogResult;
 import megamek.common.annotations.Nullable;
 import megamek.common.equipment.EquipmentActivation;
@@ -56,6 +60,7 @@ import megamek.common.units.Entity;
  * it is still pending, and in the lobby it lives in a dropdown until the customization is confirmed.</p>
  */
 public class EcmSuiteChoiceDialog extends AbstractChoiceDialog<MiscMounted> {
+    private static final String TITLE = "EcmSuiteChoiceDialog.title";
 
     private final transient Entity entity;
     private final transient Map<MiscMounted, String> suiteModeNames;
@@ -71,9 +76,7 @@ public class EcmSuiteChoiceDialog extends AbstractChoiceDialog<MiscMounted> {
      */
     protected EcmSuiteChoiceDialog(JFrame frame, Entity entity, Map<MiscMounted, String> suiteModeNames,
           List<MiscMounted> ecmSuites) {
-        super(frame, "EcmSuiteChoiceDialog.title",
-              Messages.getString("EcmSuiteChoiceDialog.message", entity.getShortName()),
-              ecmSuites, false);
+        super(frame, TITLE, message(entity), ecmSuites, false);
         this.entity = entity;
         this.suiteModeNames = suiteModeNames;
         // The suites can read alike down to the location, so one per row keeps the labels from being squeezed
@@ -93,12 +96,23 @@ public class EcmSuiteChoiceDialog extends AbstractChoiceDialog<MiscMounted> {
 
     @Override
     protected void summaryLabel(JToggleButton button, MiscMounted target) {
-        button.setText(Messages.getString("EcmSuiteChoiceDialog.suite",
-              EquipmentActivation.ecmSuiteLabel(entity, target), suiteModeNames.get(target)));
+        button.setText(suiteLabel(entity, target, suiteModeNames.get(target)));
+    }
+
+    private static String message(Entity entity) {
+        return Messages.getString("EcmSuiteChoiceDialog.message", entity.getShortName());
+    }
+
+    /** A suite's choice: its label, numbered when the unit has several, and the mode to show against it. */
+    private static String suiteLabel(Entity entity, MiscMounted suite, String modeName) {
+        return Messages.getString("EcmSuiteChoiceDialog.suite", EquipmentActivation.ecmSuiteLabel(entity, suite),
+              modeName);
     }
 
     /**
-     * Shows the modal dialog and returns the single ECM suite the player wants to leave on.
+     * Shows the modal dialog and returns the single ECM suite the player wants to leave on. When the frame's client
+     * draws its dialogs in its native battle window, the same question is that window's choice and no Swing dialog is
+     * built.
      *
      * @param frame          parent frame that owns this dialog
      * @param entity         the unit whose ECM suites are in conflict
@@ -109,8 +123,20 @@ public class EcmSuiteChoiceDialog extends AbstractChoiceDialog<MiscMounted> {
      */
     public static @Nullable MiscMounted showSingleChoiceDialog(JFrame frame, Entity entity,
           Map<MiscMounted, String> suiteModeNames) {
-        EcmSuiteChoiceDialog dialog = new EcmSuiteChoiceDialog(frame, entity, suiteModeNames,
-              new ArrayList<>(suiteModeNames.keySet()));
+        List<MiscMounted> suites = new ArrayList<>(suiteModeNames.keySet());
+        ClientGUI client = ClientGUI.forFrame(frame);
+        if ((client != null) && GpuBoardWindow.drawsDialogsFor(client)) {
+            List<DialogRow> rows = suites.stream()
+                  .map(suite -> new DialogRow(suiteLabel(entity, suite, suiteModeNames.get(suite)), "", null, true))
+                  .toList();
+            // The dialog's own buttons: OK confirms the chosen suite, Cancel or Esc chooses none
+            DialogAnswer answer = client.askRows(message(entity), Messages.getString(TITLE), rows, false, List.of(),
+                  null, List.of(Messages.getString("Ok.text"), Messages.getString("Cancel.text")), 1);
+            if (answer != null) {
+                return answer.selected().isEmpty() ? null : suites.get(answer.selected().getFirst());
+            }
+        }
+        EcmSuiteChoiceDialog dialog = new EcmSuiteChoiceDialog(frame, entity, suiteModeNames, suites);
         DialogResult result = dialog.showDialog();
         if (result == DialogResult.CONFIRMED) {
             return dialog.getFirstChoice();

@@ -52,7 +52,7 @@ import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListenerAdapter;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
 import megamek.common.RangeType;
@@ -67,7 +67,8 @@ import megamek.common.util.Distractable;
  * Clicked hexes are highlighted on the board and listed by hex number in a small floating control dialog with
  * Done/Cancel; clicking a selected hex again deselects it. While picking, the current phase display is told to ignore
  * events so the same clicks do not also drive unit movement or firing. Picking ends automatically if the game phase
- * changes.
+ * changes. Over the GPU battle window, its HUD shows the instructions and status instead of the control dialog and
+ * ends the pick with its Done and Cancel keys.
  *
  * @author HammerGS
  */
@@ -77,7 +78,7 @@ public class HexTargetPicker {
     private static final int ALL_HEX_BORDERS = 63;
 
     private final ClientGUI clientGUI;
-    private final BoardView boardView;
+    private final BoardClientState boardView;
     private final String orderDescription;
     private final boolean singleHex;
     private final int maxHexes;
@@ -102,7 +103,7 @@ public class HexTargetPicker {
      * @param maxHexes          The maximum number of hexes that may be picked, or 0 for no limit
      * @param onTargetsSelected Called with the picked hexes as dash-separated hex numbers (e.g. "0810-0811")
      */
-    public HexTargetPicker(ClientGUI clientGUI, BoardView boardView, String orderDescription, boolean singleHex,
+    public HexTargetPicker(ClientGUI clientGUI, BoardClientState boardView, String orderDescription, boolean singleHex,
           int maxHexes, Consumer<String> onTargetsSelected) {
         this.clientGUI = clientGUI;
         this.boardView = boardView;
@@ -144,7 +145,42 @@ public class HexTargetPicker {
         };
         clientGUI.getClient().getGame().addGameListener(phaseChangeListener);
 
-        createControlDialog();
+        if (!megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.drawsDialogsFor(clientGUI)) {
+            createControlDialog();
+        }
+    }
+
+    /** @return the instructions: which order the clicked hexes are for */
+    public String instructions() {
+        return Messages.getString("BotCommandPanel.HexPicker.instructions", orderDescription);
+    }
+
+    /** @return the status: how many hexes are picked and their hex numbers, in the order they were picked */
+    public String status() {
+        String hexNumbers = pickedHexes.keySet().stream()
+              .map(Coords::getBoardNum)
+              .collect(Collectors.joining(", "));
+        return Messages.getString("BotCommandPanel.HexPicker.status", pickedHexes.size(), hexNumbers);
+    }
+
+    /** @return whether a hex is picked */
+    public boolean hasHexes() {
+        return !pickedHexes.isEmpty();
+    }
+
+    /** @return true until Done, Cancel or a phase change ends the pick */
+    public boolean isPicking() {
+        return !finished;
+    }
+
+    /** Ends the pick as Done does: the order goes out with the picked hexes, if any. */
+    public void done() {
+        finish(true);
+    }
+
+    /** Ends the pick as Cancel does: no order goes out. */
+    public void cancel() {
+        finish(false);
     }
 
     private void addHex(Coords coords) {
@@ -181,12 +217,11 @@ public class HexTargetPicker {
         controlDialog.setAlwaysOnTop(true);
         controlDialog.setLayout(new BorderLayout(5, 5));
 
-        JLabel instructions = new JLabel(Messages.getString("BotCommandPanel.HexPicker.instructions",
-              orderDescription));
+        JLabel instructions = new JLabel(instructions());
         instructions.setBorder(BorderFactory.createEmptyBorder(10, 10, 0, 10));
         controlDialog.add(instructions, BorderLayout.NORTH);
 
-        statusLabel = new JLabel(Messages.getString("BotCommandPanel.HexPicker.status", 0, ""));
+        statusLabel = new JLabel(status());
         statusLabel.setBorder(BorderFactory.createEmptyBorder(0, 10, 0, 10));
         controlDialog.add(statusLabel, BorderLayout.CENTER);
 
@@ -212,12 +247,10 @@ public class HexTargetPicker {
     }
 
     private void updateStatus() {
-        String hexNumbers = pickedHexes.keySet().stream()
-              .map(Coords::getBoardNum)
-              .collect(Collectors.joining(", "));
-        statusLabel.setText(Messages.getString("BotCommandPanel.HexPicker.status",
-              pickedHexes.size(), hexNumbers));
-        controlDialog.pack();
+        if (controlDialog != null) {
+            statusLabel.setText(status());
+            controlDialog.pack();
+        }
     }
 
     /**

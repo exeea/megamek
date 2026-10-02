@@ -10,24 +10,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Color;
 import java.awt.Dimension;
-import java.awt.Graphics;
 import java.awt.Point;
 import java.awt.Rectangle;
-import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.List;
 import java.util.Vector;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 
 import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListenerAdapter;
-import megamek.client.ui.IDisplayable;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.ECMEffects;
 import megamek.client.ui.clientGUI.boardview.sprite.CursorSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.MovementEnvelopeSprite;
@@ -59,19 +56,24 @@ class GpuBoardSourceTest {
     void minimapNavigationAndViewportRecreationDoNotDependOnAnInactiveRenderer() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             SwingUtilities.invokeAndWait(() -> {
-                assertNull(fixture.view.getPanel().getParent());
-                fixture.view.centerOnPointRel(1, 1);
-                Coords corner = new Coords(fixture.game.getBoard().getWidth() - 1,
-                      fixture.game.getBoard().getHeight() - 1);
-                assertEquals(corner, fixture.view.getCenterRequest().coords());
-                fixture.source.refresh();
-                assertEquals(fixture.view.getCenterRequest(), fixture.source.takeFrame().centerRequest());
-                assertNull(fixture.view.getPanel().getParent());
-                var classic = fixture.view.getComponent();
-                fixture.view.releaseClassicView();
-                assertNull(fixture.view.getPanel().getParent());
-                assertEquals(corner, fixture.view.getCenterRequest().coords());
-                assertNotSame(classic, fixture.view.getComponent(), "Switching back creates a new classic viewport");
+                BoardView classic = fixture.classicView();
+                try {
+                    assertNull(classic.getPanel().getParent());
+                    classic.centerOnPointRel(1, 1);
+                    Coords corner = new Coords(fixture.game.getBoard().getWidth() - 1,
+                          fixture.game.getBoard().getHeight() - 1);
+                    assertEquals(corner, fixture.view.getCenterRequest().coords());
+                    fixture.source.refresh();
+                    assertEquals(fixture.view.getCenterRequest(), fixture.source.takeFrame().centerRequest());
+                    assertNull(classic.getPanel().getParent());
+                    var viewport = classic.getComponent();
+                    classic.releaseClassicView();
+                    assertNull(classic.getPanel().getParent());
+                    assertEquals(corner, fixture.view.getCenterRequest().coords());
+                    assertNotSame(viewport, classic.getComponent(), "Switching back creates a new classic viewport");
+                } finally {
+                    classic.dispose();
+                }
             });
         }
     }
@@ -82,8 +84,6 @@ class GpuBoardSourceTest {
         boolean softCenter = preferences.getSoftCenter();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             SwingUtilities.invokeAndWait(() -> {
-                assertNull(fixture.view.getPanel().getParent());
-                assertFalse(fixture.view.getPanel().isDisplayable());
                 for (boolean smooth : new boolean[] { false, true }) {
                     preferences.setSoftCenter(smooth);
                     fixture.view.centerOn(fixture.entity);
@@ -94,10 +94,8 @@ class GpuBoardSourceTest {
                     assertFalse(frame.scene().tiles().isEmpty());
                     assertFalse(frame.scene().units().isEmpty());
                 }
-                BufferedImage image = fixture.view.getEntireBoardImage(false, true);
+                BufferedImage image = fixture.view.getEntireBoardImage(false);
                 assertTrue(image.getWidth() > 0 && image.getHeight() > 0);
-                assertNull(fixture.view.getPanel().getParent());
-                assertFalse(fixture.view.getPanel().isDisplayable());
             });
         } finally {
             SwingUtilities.invokeAndWait(() -> preferences.setSoftCenter(softCenter));
@@ -189,8 +187,9 @@ class GpuBoardSourceTest {
         }
     }
 
-    @Test
-    void coexistingStructuresUseTheirSelectedSaxarbaArtworkAndOwnHeights() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = { "", "desert", "snow", "volcano", "dirt", "lunar" })
+    void coexistingStructuresUseTheirSelectedSaxarbaArtworkAndOwnHeights(String theme) throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             SwingUtilities.invokeAndWait(() -> {
                 Coords coords = new Coords(2, 2);
@@ -203,6 +202,7 @@ class GpuBoardSourceTest {
                 hex.addTerrain(new Terrain(Terrains.FUEL_TANK_CF, 40));
                 hex.addTerrain(new Terrain(Terrains.FUEL_TANK_MAGN, 100));
                 hex.addTerrain(new Terrain(Terrains.INDUSTRIAL, 3));
+                hex.setTheme(theme);
                 fixture.game.getBoard().setHex(coords, hex);
                 fixture.source.refresh();
                 var tile = fixture.source.takeFrame().scene().tile(coords);
@@ -279,27 +279,28 @@ class GpuBoardSourceTest {
     }
 
     @Test
-    void annotationResolutionDoesNotDependOnClassicZoom() throws Exception {
+    void tileResolutionDoesNotDependOnClassicZoom() throws Exception {
         int originalZoom = GUIPreferences.getInstance().getMapZoomIndex();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            BoardScene.Pixels before = fixture.source.takeFrame().scene().units().getFirst().annotations();
             BoardScene.Tile tile = fixture.source.takeFrame().scene().tile(new Coords(0, 0));
-            assertTrue(before.height() >= 80);
             SwingUtilities.invokeAndWait(() -> {
-                fixture.view.getComponent();
-                fixture.view.zoomOut();
-                float scale = fixture.view.getScale();
-                Dimension size = new Dimension(fixture.view.getHexSize());
-                fixture.source.refresh();
-                assertEquals(scale, fixture.view.getScale());
-                assertEquals(size, fixture.view.getHexSize());
+                BoardView classic = fixture.classicView();
+                try {
+                    classic.getComponent();
+                    classic.zoomOut();
+                    float scale = classic.getScale();
+                    Dimension size = new Dimension(classic.getHexSize());
+                    fixture.source.refresh();
+                    assertEquals(scale, classic.getScale());
+                    assertEquals(size, classic.getHexSize());
+                } finally {
+                    classic.dispose();
+                }
             });
-            assertSame(before, fixture.source.takeFrame().scene().units().getFirst().annotations());
             BoardScene.Tile after = fixture.source.takeFrame().scene().tile(new Coords(0, 0));
             assertEquals((int) BoardGeometry.TILE_WIDTH, after.ground().width());
             assertEquals((int) BoardGeometry.TILE_HEIGHT, after.ground().height());
             assertTrue(samePixels(tile.ground(), after.ground()));
-            assertEquals(GpuBattleView.annotationScale(1), GpuBattleView.annotationScale(0.5f));
         } finally {
             SwingUtilities.invokeAndWait(() -> GUIPreferences.getInstance().setMapZoomIndex(originalZoom));
         }
@@ -589,53 +590,6 @@ class GpuBoardSourceTest {
         }
     }
 
-    @ParameterizedTest
-    @ValueSource(doubles = { 1, 1.5, 2 })
-    void screenOverlayCapturesNativePixelsAndConsumesTheWholeClickGesture(double density) throws Exception {
-        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            AtomicInteger hit = new AtomicInteger();
-            AtomicInteger board = new AtomicInteger();
-            SwingUtilities.invokeAndWait(() -> {
-                fixture.view.addOverlay(new IDisplayable() {
-                    @Override
-                    public void draw(Graphics graphics, Rectangle rect) {
-                        graphics.setColor(Color.CYAN);
-                        graphics.fillRect(20, 30, 80, 40);
-                    }
-
-                    @Override
-                    public boolean isHit(Point point, Dimension size) {
-                        if (new Rectangle(20, 30, 80, 40).contains(point)) {
-                            hit.incrementAndGet();
-                            fixture.view.centerOn(fixture.entity);
-                            return true;
-                        }
-                        return false;
-                    }
-                });
-                fixture.source.setViewport(200, 100, (int) (200 * density), (int) (100 * density));
-                fixture.source.refresh();
-            });
-            BoardScene.Pixels hud = fixture.source.takeFrame().hud().layers().getFirst().pixels();
-            assertEquals((int) (200 * density), hud.width());
-            assertEquals((int) (100 * density), hud.height());
-            assertEquals(0x00ffffff, hud.rgba((int) (40 * density) * hud.width() + (int) (40 * density)));
-            assertEquals(0, hud.rgba((int) (20 * density) * hud.width() + (int) (40 * density)));
-            fixture.source.overlayInput(MouseEvent.MOUSE_PRESSED, 40, 40, board::incrementAndGet);
-            fixture.source.overlayInput(MouseEvent.MOUSE_RELEASED, 40, 40, board::incrementAndGet);
-            SwingUtilities.invokeAndWait(() -> { });
-            assertEquals(1, hit.get());
-            assertEquals(0, board.get());
-            assertEquals(fixture.view.getCenterRequest(), fixture.source.takeFrame().centerRequest(),
-                  "An overlay focus request must be published immediately with its handled input");
-            assertEquals(fixture.entity.getId(), fixture.source.takeFrame().centerRequest().entityId(),
-                  "The render snapshot must retain the requested unit, not just its hex");
-            fixture.source.overlayInput(MouseEvent.MOUSE_PRESSED, 150, 80, board::incrementAndGet);
-            SwingUtilities.invokeAndWait(() -> { });
-            assertEquals(1, board.get());
-        }
-    }
-
     @Test
     void groundIncludesRoughAndRubbleArtworkForNormalMapping() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
@@ -646,14 +600,14 @@ class GpuBoardSourceTest {
             SwingUtilities.invokeAndWait(() -> {
                 Hex hex = fixture.game.getBoard().getHex(coords);
                 hex.setTheme("desert");
-                fixture.view.clearHexImageCache();
+                fixture.view.clearArtwork();
                 plain.set(groundArt(fixture, coords));
                 hex.addTerrain(new Terrain(Terrains.ROUGH, 1));
-                fixture.view.clearHexImageCache();
+                fixture.view.clearArtwork();
                 rough.set(groundArt(fixture, coords));
                 hex.removeTerrain(Terrains.ROUGH);
                 hex.addTerrain(new Terrain(Terrains.RUBBLE, 1));
-                fixture.view.clearHexImageCache();
+                fixture.view.clearArtwork();
                 rubble.set(groundArt(fixture, coords));
                 hex.removeTerrain(Terrains.RUBBLE);
             });
@@ -798,7 +752,7 @@ class GpuBoardSourceTest {
                 fixture.source.refresh();
             });
             BoardScene.Unit after = fixture.source.takeFrame().scene().units().getFirst();
-            assertEquals(fixture.view.getTileManager().facingFor(fixture.entity), after.location().facing());
+            assertEquals(fixture.view.getTilesetManager().facingFor(fixture.entity), after.location().facing());
             assertEquals(1, after.location().facing());
             assertSame(before.image(), after.image());
         }

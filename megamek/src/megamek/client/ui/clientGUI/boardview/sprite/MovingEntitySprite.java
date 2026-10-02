@@ -42,7 +42,7 @@ import java.awt.Rectangle;
 import java.awt.image.ImageObserver;
 
 import megamek.MMConstants;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.common.board.Coords;
 import megamek.common.units.Entity;
 import megamek.common.util.ImageUtil;
@@ -55,7 +55,7 @@ public class MovingEntitySprite extends Sprite {
 
     private final int elevation;
 
-    public MovingEntitySprite(BoardView boardView, final Entity entity, final Coords position, final int facing,
+    public MovingEntitySprite(BoardGlyphContext boardView, final Entity entity, final Coords position, final int facing,
           final int elevation) {
         super(boardView);
         this.entity = entity;
@@ -66,12 +66,12 @@ public class MovingEntitySprite extends Sprite {
         Font font = new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 10);
         Rectangle modelRect = new Rectangle(47,
               55,
-              bv.getPanel().getFontMetrics(font).stringWidth(shortName) + 1,
-              bv.getPanel().getFontMetrics(font).getAscent());
+              bv.getFontMetrics(font).stringWidth(shortName) + 1,
+              bv.getFontMetrics(font).getAscent());
 
         int altAdjust = 0;
         if (entity.isAirborne() || entity.isAirborneVTOLorWIGE()) {
-            altAdjust = (int) (bv.DROP_SHADOW_DISTANCE * bv.getScale());
+            altAdjust = (int) (bv.getDropShadowDistance() * bv.getScale());
         } else if (elevation != 0) {
             altAdjust = (int) (elevation * boardView.getVerticalOffset() * bv.getScale());
         }
@@ -91,10 +91,10 @@ public class MovingEntitySprite extends Sprite {
     public void drawOnto(Graphics graphics, int x, int y, ImageObserver observer) {
         // If this is an airborne unit, render the shadow.
         if (entity.isAirborne() || entity.isAirborneVTOLorWIGE()) {
-            Image shadow = bv.createShadowMask(bv.getTileManager().imageFor(entity, facing, -1));
+            Image shadow = bv.createShadowMask(bv.getTilesetManager().imageFor(entity, facing, -1));
             shadow = bv.getScaledImage(shadow, true);
 
-            graphics.drawImage(shadow, x, y + (int) (bv.DROP_SHADOW_DISTANCE * bv.getScale()), observer);
+            graphics.drawImage(shadow, x, y + (int) (bv.getDropShadowDistance() * bv.getScale()), observer);
         } else if (elevation > 0) {
             Image shadow = bv.createShadowMask(bv.getTilesetManager().imageFor(entity, facing, -1));
             shadow = bv.getScaledImage(shadow, true);
@@ -113,7 +113,7 @@ public class MovingEntitySprite extends Sprite {
         }
         // If this is a submerged unit, render the shadow after the unit.
         if (elevation < 0) {
-            Image shadow = bv.createShadowMask(bv.getTileManager().imageFor(entity, facing, -1));
+            Image shadow = bv.createShadowMask(bv.getTilesetManager().imageFor(entity, facing, -1));
             shadow = bv.getScaledImage(shadow, true);
 
             graphics.drawImage(shadow, x, y, observer);

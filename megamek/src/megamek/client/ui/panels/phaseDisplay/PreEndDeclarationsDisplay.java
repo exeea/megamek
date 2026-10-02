@@ -42,7 +42,7 @@ import javax.swing.SwingUtilities;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.IBoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.dialogs.phaseDisplay.AbandonUnitDialog;
 import megamek.client.ui.dialogs.phaseDisplay.DetonateChargesDialog;
@@ -258,7 +258,7 @@ public class PreEndDeclarationsDisplay extends AttackPhaseDisplay {
         updateDeployBridgeButtonLabel(entity, deployable);
         Coords frontHex = BridgeLayerLogic.getBridgeLayerTargetCoords(entity);
         if (frontHex != null) {
-            clientgui.getBoardView().highlight(frontHex);
+            clientgui.getBoardState().highlight(frontHex);
         }
         if (deployable.size() > 1) {
             MiscMounted next = deployable.get((selectedDeployBridgeIndex + 1) % deployable.size());
@@ -521,7 +521,7 @@ public class PreEndDeclarationsDisplay extends AttackPhaseDisplay {
 
         // Update cursor position for hex info display
         //if (event.getCoords() != null) {
-        //    clientgui.getBoardView().cursor(event.getCoords());
+        //    clientgui.getBoardState().cursor(event.getCoords());
         //}
         // This display has no torso twist, so the shift key never suppresses the selection.
         applyHexMouseAction(event, false);
@@ -546,7 +546,7 @@ public class PreEndDeclarationsDisplay extends AttackPhaseDisplay {
      */
     public void target(Targetable t) {
         setTarget(t);
-        //clientgui.getBoardView().select(t.getPosition());
+        //clientgui.getBoardState().select(t.getPosition());
     }
 
     /**
@@ -846,8 +846,8 @@ public class PreEndDeclarationsDisplay extends AttackPhaseDisplay {
         selectedDeployBridgeIndex = 0;
         clientgui.setSelectedEntityNum(entityId);
         clientgui.getUnitDisplay().displayEntity(selected);
-        clientgui.getBoardView().highlight(selected.getPosition());
-        clientgui.getBoardView().centerOn(selected);
+        clientgui.getBoardState().highlight(selected.getPosition());
+        clientgui.getBoardState().centerOn(selected);
 
         updateButtons();
     }
@@ -893,7 +893,7 @@ public class PreEndDeclarationsDisplay extends AttackPhaseDisplay {
         stopTimer();
         disableButtons();
         setTarget(null);
-        clientgui.onAllBoardViews(IBoardView::clearMarkedHexes);
+        clientgui.onAllBoardStates(BoardClientState::clearMarkedHexes);
     }
 
     /**

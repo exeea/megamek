@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.clearInvocations;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -43,12 +42,7 @@ class GpuMeasurementSmokeTest {
             });
             GpuBoardSource source = mock(GpuBoardSource.class);
             source.uiPreferences = fixture.source.uiPreferences;
-            source.phaseStatus = fixture.source.phaseStatus;
             when(source.takeFrame()).thenAnswer(invocation -> fixture.source.takeFrame());
-            doAnswer(invocation -> {
-                invocation.getArgument(3, Runnable.class).run();
-                return null;
-            }).when(source).overlayInput(anyInt(), anyInt(), anyInt(), any(Runnable.class));
             new Lwjgl3Application(new GpuBattleView(source) {
                 private int tick;
 
@@ -58,6 +52,9 @@ class GpuMeasurementSmokeTest {
                         super.render();
                         tick++;
                         if (tick == 1) {
+                            // Board gestures only: the HUD routes them, but its panels (the LOS card) must not cover
+                            // the measured hex in either camera.
+                            hud().stage.getRoot().setVisible(false);
                             boardCamera.setIsometric(false);
                             boardCamera.center(BoardGeometry.center(new Coords(6, 5), 0));
                             boardCamera.zoom(0.45f);
@@ -89,10 +86,8 @@ class GpuMeasurementSmokeTest {
                 private void gesture(int modifiers) {
                     clearInvocations(source);
                     var tile = fixture.source.takeFrame().scene().tile(start);
-                    float scale = new GpuDisplayScale().read(source.uiPreferences.scale());
                     Vector3 screen = boardCamera.camera.project(BoardGeometry.center(start, tile.elevation()),
-                          0, Math.round(GpuBoardUi.TURN_HEIGHT * scale),
-                          boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight);
+                          0, 0, boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight);
                     int x = Math.round(screen.x), y = Gdx.graphics.getHeight() - Math.round(screen.y);
                     Input realInput = Gdx.input;
                     InputProcessor processor = realInput.getInputProcessor();
@@ -107,6 +102,12 @@ class GpuMeasurementSmokeTest {
                     } finally {
                         Gdx.input = realInput;
                     }
+                }
+
+                private GpuHud hud() throws ReflectiveOperationException {
+                    var field = GpuBattleView.class.getDeclaredField("ui");
+                    field.setAccessible(true);
+                    return (GpuHud) field.get(this);
                 }
             }, GpuBoardWindow.configuration(false));
         }

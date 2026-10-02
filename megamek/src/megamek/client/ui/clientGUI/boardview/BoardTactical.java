@@ -11,6 +11,8 @@ import megamek.common.board.Coords;
 
 /** Immutable drawing commands in unscaled board pixels; game state remains on the Swing thread. */
 public record BoardTactical(List<Fill> fills, List<Label> labels, List<Wall> walls, List<Fill> flatWalls) {
+    /** Range contour labels are a presentation choice shared by capture and rendering. */
+    public static final boolean SCROLLING_RANGE_LABELS = false;
     public static final BoardTactical EMPTY = new BoardTactical(List.of(), List.of());
 
     /** Measurement tools stay live, unit overlays hide, and map-state markings retain their last displayed state. */
@@ -47,8 +49,26 @@ public record BoardTactical(List<Fill> fills, List<Label> labels, List<Wall> wal
     public record Point(float x, float y) { }
 
     /** A straight upright segment anchored to its hex's surface; height is in board elevation levels. */
-    public record Wall(Coords coords, Point a, Point b, float height, int argb, Outline outline, float outlineDistance,
-          Playback playback) { }
+    public record Wall(Coords coords, Point a, Point b, BoardRangeBorder border, float outlineDistance, Playback playback,
+          List<Coords> aNeighbors, List<Coords> bNeighbors) {
+        public Wall {
+            aNeighbors = List.copyOf(aNeighbors);
+            bNeighbors = List.copyOf(bNeighbors);
+        }
+
+        public Wall(Coords coords, Point a, Point b, BoardRangeBorder border, float outlineDistance, Playback playback) {
+            this(coords, a, b, border, outlineDistance, playback, List.of(), List.of());
+        }
+
+        public Wall(Coords coords, Point a, Point b, float height, int argb, Outline outline, float outlineDistance,
+              Playback playback) {
+            this(coords, a, b, new BoardRangeBorder(height, argb, outline), outlineDistance, playback);
+        }
+
+        public float height() { return border.height(); }
+        public int argb() { return border.argb(); }
+        public Outline outline() { return border.outline(); }
+    }
 
     /** BasicStroke is immutable; retain the existing painter's line width and dash pattern. */
     public record Outline(int argb, BasicStroke stroke) { }
@@ -59,9 +79,26 @@ public record BoardTactical(List<Fill> fills, List<Label> labels, List<Wall> wal
         }
     }
 
-    public record Fill(List<Contour> contours, int winding, int argb, Playback playback) {
+    /** Anchor is the transformed hex center in board pixels; captured contours remain the generic fallback. */
+    public record HexBorder(Point anchor, double padding, double width, float scale, boolean zone) {
+        public HexBorder(Point anchor, double padding, double width, float scale) {
+            this(anchor, padding, width, scale, false);
+        }
+    }
+
+    /** A plane anchor places any shape on its owner hex's flat annotation plane; null follows the terrain. */
+    public record Fill(List<Contour> contours, int winding, int argb, Playback playback, HexBorder border,
+          Point planeAnchor) {
         public Fill(List<Contour> contours, int winding, int argb) {
             this(contours, winding, argb, Playback.LIVE);
+        }
+
+        public Fill(List<Contour> contours, int winding, int argb, Playback playback) {
+            this(contours, winding, argb, playback, null);
+        }
+
+        public Fill(List<Contour> contours, int winding, int argb, Playback playback, HexBorder border) {
+            this(contours, winding, argb, playback, border, null);
         }
 
         public Fill {

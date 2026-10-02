@@ -81,6 +81,9 @@ class GpuMarkerCaptureTest {
     @Test
     void mixedEngineeringSpritesKeepTerrainAndRestoreClassicLabelsAfterCapture() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create(board())) {
+            // Sprites regain their classic artwork after a capture only where a classic projection exists.
+            var classicView = fixture.classicView();
+            try {
             List<Sprite> sprites = List.of(new BridgeBuildSprite(fixture.view, ROOF, 2, 6, 9),
                   new FortifyBuildSprite(fixture.view, new Coords(3, 2), 1, 3),
                   new DugInSprite(fixture.view, new Coords(4, 2), 0.5f, "Digging in"),
@@ -104,6 +107,7 @@ class GpuMarkerCaptureTest {
                   && marker.label().equals("2/6")));
             assertTrue(fixture.source.takeFrame().scene().tile(ROOF).tactical() != null,
                   "The unfinished bridge's terrain preview must survive point-marker conversion");
+            } finally { classicView.dispose(); }
         }
     }
 

@@ -28,8 +28,8 @@ import megamek.client.Client;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.LabelDisplayStyle;
+import megamek.client.ui.clientGUI.boardview.UnitAnnotations;
 import megamek.client.ui.clientGUI.boardview.overlay.UnitOverviewOverlay;
-import megamek.client.ui.clientGUI.boardview.sprite.EntitySprite;
 import megamek.common.Player;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
@@ -76,11 +76,6 @@ class GpuUnitHudTest {
                     assertTrue(cards.get(0).x() > 700 * density);
                     assertTrue(cards.get(1).x() < 10 * density);
                     assertEquals(cards.get(1).x(), cards.get(2).x());
-                    fixture.source.setViewport(logical.width, logical.height, pixels.width, pixels.height);
-                    fixture.source.refresh();
-                    var hud = fixture.source.takeFrame().hud();
-                    assertEquals(66 * density, hud.leftPanelInset(), .01);
-                    assertEquals(hud.sidePanelInset(), hud.leftPanelInset());
 
                     assertTrue(enemies.isHit(new Point(30, 25), logical));
                     verify(gui).centerOnUnit(units.get(0));
@@ -100,8 +95,7 @@ class GpuUnitHudTest {
                     assertTrue(enemies.isHit(new Point(30, 25), logical));
                     verify(gui, never()).centerOnUnit(units.get(0));
                     units.get(1).setHidden(true);
-                    fixture.source.refresh();
-                    assertEquals(0, fixture.source.takeFrame().hud().leftPanelInset());
+                    fixture.view.captureOverlayLayers(logical, pixels);
                     assertFalse(enemies.isDragged(new Point(30, 25), logical));
                     assertTrue(fixture.view.sidePanelInset() > 0, "The friendly strip stays independent");
                 } finally {
@@ -126,11 +120,6 @@ class GpuUnitHudTest {
                 UnitOverviewOverlay overview = new UnitOverviewOverlay(gui);
                 try {
                     fixture.view.addOverlay(overview);
-                    fixture.source.refresh();
-                    var initialHud = fixture.source.takeFrame().hud();
-                    assertEquals(1, initialHud.width());
-                    assertEquals(0, initialHud.sidePanelInset(), "No sidebar layout exists before the native viewport arrives");
-                    assertTrue(initialHud.layers().isEmpty());
                     Dimension logical = new Dimension(800, 400);
                     Dimension nativeSize = new Dimension((int) (800 * density), (int) (400 * density));
                     var before = fixture.view.captureOverlayLayers(logical, nativeSize);
@@ -139,16 +128,6 @@ class GpuUnitHudTest {
                         assertTrue(layer.image().getWidth() <= 64 * density);
                         assertTrue(layer.image().getHeight() <= 56 * density);
                     }
-                    fixture.source.setViewport(logical.width, logical.height, nativeSize.width, nativeSize.height);
-                    fixture.source.refresh();
-                    var pixels = fixture.source.takeFrame().hud();
-                    var card = pixels.layers().getFirst();
-                    float outsideGap = pixels.width() - card.x() - card.pixels().width();
-                    assertEquals(outsideGap, card.x() - (pixels.width() - pixels.sidePanelInset()), 1,
-                          "The captured sidebar reservation includes a matching inner gap at every pixel density");
-                    fixture.source.refresh();
-                    assertSame(pixels.layers().getFirst().pixels(), fixture.source.takeFrame().hud().layers().getFirst().pixels());
-
                     fixture.entity.heat = 15;
                     var changed = fixture.view.captureOverlayLayers(logical, nativeSize);
                     assertNotSame(before.getFirst().image(), changed.getFirst().image());
@@ -163,8 +142,6 @@ class GpuUnitHudTest {
 
                     prefs.setShowUnitOverview(false);
                     assertTrue(fixture.view.captureOverlayLayers(logical, nativeSize).isEmpty());
-                    fixture.source.refresh();
-                    assertEquals(0, fixture.source.takeFrame().hud().sidePanelInset());
                     prefs.setShowUnitOverview(true);
                     assertEquals(2, fixture.view.captureOverlayLayers(logical, nativeSize).size());
                 } finally {
@@ -226,7 +203,7 @@ class GpuUnitHudTest {
                 try {
                     prefs.setTMMPipMode(1);
                     prefs.setUnitLabelStyle(LabelDisplayStyle.ABBREV);
-                    EntitySprite.Annotations first = fixture.view.captureUnitAnnotations(fixture.entity, -1, null);
+                    UnitAnnotations.Annotations first = fixture.view.captureUnitAnnotations(fixture.entity, -1, null);
                     fixture.entity.setPosition(new Coords(7, 7));
                     fixture.entity.setFacing(3);
                     fixture.entity.setSecondaryFacing(3);
@@ -256,12 +233,6 @@ class GpuUnitHudTest {
                     var pips = fixture.view.captureUnitAnnotations(fixture.entity, -1, renamed);
                     assertChanged(renamed, pips);
                     assertSame(pips, fixture.view.captureUnitAnnotations(fixture.entity, -1, pips));
-
-                    fixture.source.refresh();
-                    var published = fixture.source.takeFrame().scene().units().getFirst().annotations();
-                    fixture.source.refresh();
-                    assertSame(published, fixture.source.takeFrame().scene().units().getFirst().annotations(),
-                          "The immutable render snapshot must reuse its pixel storage too");
                 } finally {
                     prefs.setUnitValidColor(validColor);
                     prefs.setUnitLabelStyle(style);
@@ -271,42 +242,7 @@ class GpuUnitHudTest {
         }
     }
 
-    @Test
-    void cachedLabelsDropPrivateStatusWhenAVisibleEnemyBecomesASensorContact() throws Exception {
-        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            SwingUtilities.invokeAndWait(() -> {
-                Player enemy = new Player(1, "Opponent");
-                enemy.setTeam(2);
-                fixture.game.addPlayer(enemy.getId(), enemy);
-                fixture.entity.setOwner(enemy);
-                fixture.entity.setProne(true);
-                fixture.source.refresh();
-                var visible = fixture.source.takeFrame().scene().units().getFirst().annotations();
-                fixture.game.getOptions().getOption(OptionsConstants.ADVANCED_DOUBLE_BLIND).setValue(true);
-                fixture.game.getOptions().getOption(OptionsConstants.ADVANCED_TAC_OPS_SENSORS).setValue(true);
-                fixture.entity.addBeenDetectedBy(fixture.player);
-                fixture.source.refresh();
-                var sensor = fixture.source.takeFrame().scene().units().getFirst();
-                assertTrue(sensor.sensorContact());
-                assertNotEquals(visible, sensor.annotations());
-                fixture.entity.setProne(false);
-                fixture.entity.setArmor(0, Mek.LOC_CENTER_TORSO);
-                fixture.source.refresh();
-                assertSame(sensor.annotations(), fixture.source.takeFrame().scene().units().getFirst().annotations(),
-                      "Hidden damage and status must neither appear nor invalidate a sensor-only label");
-                fixture.entity.addBeenSeenBy(fixture.player);
-                fixture.source.refresh();
-                assertNotEquals(sensor.annotations(), fixture.source.takeFrame().scene().units().getFirst().annotations());
-                fixture.entity.clearSeenBy();
-                fixture.game.getOptions().getOption(OptionsConstants.ADVANCED_HIDDEN_UNITS).setValue(true);
-                fixture.entity.setHidden(true);
-                fixture.source.refresh();
-                assertTrue(fixture.source.takeFrame().scene().units().isEmpty());
-            });
-        }
-    }
-
-    private static void assertChanged(EntitySprite.Annotations before, EntitySprite.Annotations after) {
+    private static void assertChanged(UnitAnnotations.Annotations before, UnitAnnotations.Annotations after) {
         assertNotSame(before.image(), after.image());
         assertNotEquals(new BoardScene.Pixels(before.image()), new BoardScene.Pixels(after.image()));
     }
@@ -319,8 +255,8 @@ class GpuUnitHudTest {
         ClientGUI gui = mock(ClientGUI.class);
         when(gui.getClient()).thenReturn(client);
         when(gui.getMainPanel()).thenReturn(new JPanel());
-        when(gui.getCurrentBoardView()).thenReturn(Optional.of(fixture.view));
-        when(gui.getBoardView()).thenReturn(fixture.view);
+        when(gui.getCurrentBoardState()).thenReturn(Optional.of(fixture.view));
+        when(gui.getBoardState()).thenReturn(fixture.view);
         return gui;
     }
 

@@ -39,12 +39,15 @@ import java.awt.Font;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.io.Serial;
+import java.util.List;
+import java.util.stream.IntStream;
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JSlider;
 import javax.swing.SwingConstants;
@@ -52,7 +55,12 @@ import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
 
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogField;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.FieldKind;
 import megamek.client.ui.util.UIUtil;
+import megamek.codeUtilities.MathUtility;
 import megamek.common.actions.SuicideImplantsAttackAction;
 import megamek.common.battleArmor.BattleArmor;
 import megamek.common.units.Aero;
@@ -74,8 +82,10 @@ public class SuicideImplantsDialog extends JDialog implements ActionListener, Ch
 
     private final JButton buttonOk = new JButton(Messages.getString("Okay"));
     private final JButton buttonCancel = new JButton(Messages.getString("Cancel"));
+    private final JLabel warningLabel = new JLabel(Messages.getString("SuicideImplantsDialog.warning"));
 
     private JSlider trooperSlider;
+    private JLabel instructionLabel;
     private JLabel damageLabel;
     private JLabel trooperCountLabel;
 
@@ -110,7 +120,6 @@ public class SuicideImplantsDialog extends JDialog implements ActionListener, Ch
               UIUtil.scaleForGUI(15)));
 
         // Warning label
-        JLabel warningLabel = new JLabel(Messages.getString("SuicideImplantsDialog.warning"));
         warningLabel.setForeground(Color.RED);
         warningLabel.setFont(warningLabel.getFont().deriveFont(Font.BOLD));
         warningLabel.setAlignmentX(CENTER_ALIGNMENT);
@@ -143,7 +152,7 @@ public class SuicideImplantsDialog extends JDialog implements ActionListener, Ch
         int maxTroopers = SuicideImplantsAttackAction.getMaxTroopersFor(entity);
 
         // Instruction label
-        JLabel instructionLabel = new JLabel(Messages.getString("SuicideImplantsDialog.selectTroopers"));
+        instructionLabel = new JLabel(Messages.getString("SuicideImplantsDialog.selectTroopers"));
         instructionLabel.setAlignmentX(CENTER_ALIGNMENT);
         mainPanel.add(instructionLabel);
 
@@ -187,21 +196,23 @@ public class SuicideImplantsDialog extends JDialog implements ActionListener, Ch
     }
 
     private void addConfirmationPanel(JPanel mainPanel) {
-        String confirmMessage;
-        if (entity.isMek()) {
-            confirmMessage = Messages.getString("SuicideImplantsDialog.confirmMek");
-        } else if (entity instanceof Aero) {
-            // Note: Keep instanceof Aero - entity.isAero() is not equivalent
-            confirmMessage = Messages.getString("SuicideImplantsDialog.confirmAero");
-        } else if (entity.isVehicle()) {
-            confirmMessage = Messages.getString("SuicideImplantsDialog.confirmVehicle");
-        } else {
-            confirmMessage = Messages.getString("SuicideImplantsDialog.confirmGeneric");
-        }
-
-        JLabel confirmLabel = new JLabel("<html><center>" + confirmMessage + "</center></html>");
+        JLabel confirmLabel = new JLabel("<html><center>" + confirmMessage() + "</center></html>");
         confirmLabel.setAlignmentX(CENTER_ALIGNMENT);
         mainPanel.add(confirmLabel);
+    }
+
+    /** What detonating does to a unit without troopers to choose from. */
+    private String confirmMessage() {
+        if (entity.isMek()) {
+            return Messages.getString("SuicideImplantsDialog.confirmMek");
+        } else if (entity instanceof Aero) {
+            // Note: Keep instanceof Aero - entity.isAero() is not equivalent
+            return Messages.getString("SuicideImplantsDialog.confirmAero");
+        } else if (entity.isVehicle()) {
+            return Messages.getString("SuicideImplantsDialog.confirmVehicle");
+        } else {
+            return Messages.getString("SuicideImplantsDialog.confirmGeneric");
+        }
     }
 
     /**
@@ -212,6 +223,51 @@ public class SuicideImplantsDialog extends JDialog implements ActionListener, Ch
     public boolean showDialog() {
         setVisible(true);
         return confirmed;
+    }
+
+    /**
+     * Showing the dialog asks in the owning client's native battle window instead when that draws dialogs: troopers are
+     * chosen from the slider's values, and each choice moves the slider, so the damage line shown follows it; other
+     * units confirm the detonation. The answer confirms as the Okay button does.
+     */
+    @Override
+    public void setVisible(boolean visible) {
+        ClientGUI gui = visible ? ClientGUI.forFrame(getOwner()) : null;
+        if ((gui == null) || !answeredNatively(gui)) {
+            super.setVisible(visible);
+        }
+    }
+
+    /** Asks until the player confirms or cancels; false when the Swing dialog must show instead. */
+    private boolean answeredNatively(ClientGUI gui) {
+        List<String> buttons = List.of(buttonOk.getText(), buttonCancel.getText());
+        if (trooperSlider == null) {
+            Integer answer = gui.askNative(new Object[] { warningLabel.getText(), confirmMessage() }, getTitle(),
+                  JOptionPane.DEFAULT_OPTION, buttons.toArray(), buttons.getFirst(), false);
+            if (answer == null) {
+                return false;
+            }
+            ((answer == 0) ? buttonOk : buttonCancel).doClick(0);
+            return true;
+        }
+        while (true) {
+            List<String> counts = IntStream.rangeClosed(trooperSlider.getMinimum(), trooperSlider.getMaximum())
+                  .mapToObj(String::valueOf).toList();
+            DialogField troopers = new DialogField(instructionLabel.getText(), FieldKind.CHOICE, counts, 0, 0,
+                  String.valueOf(trooperSlider.getValue()), true);
+            DialogAnswer answer = gui.askForm(warningLabel.getText() + "\n" + damageLabel.getText(), getTitle(),
+                  List.of(troopers), buttons, 1);
+            if (answer == null) {
+                return false;
+            }
+            if (!answer.values().isEmpty()) {
+                trooperSlider.setValue(MathUtility.parseInt(answer.values().getFirst(), trooperSlider.getValue()));
+            }
+            if (answer.button() != DialogAnswer.CHANGED) {
+                ((answer.button() == 0) ? buttonOk : buttonCancel).doClick(0);
+                return true;
+            }
+        }
     }
 
     /**

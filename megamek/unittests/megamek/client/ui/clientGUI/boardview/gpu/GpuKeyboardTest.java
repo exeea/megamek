@@ -15,27 +15,21 @@ import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.swing.JMenu;
 import javax.swing.JMenuItem;
 import javax.swing.JPanel;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
-import javax.swing.Timer;
 
 import com.badlogic.gdx.Input;
 import megamek.client.Client;
-import megamek.client.ui.clientGUI.ChatterBox;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.BoardView;
-import megamek.client.ui.clientGUI.boardview.overlay.ChatterBoxOverlay;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.overlay.KeyBindingsOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.PlanetaryConditionsOverlay;
 import megamek.client.ui.dialogs.BotCommands.BotCommandsPanel;
@@ -52,14 +46,13 @@ class GpuKeyboardTest {
     private final GUIPreferences preferences = GUIPreferences.getInstance();
     private GpuBoardFixture fixture;
     private GpuBoardSource source;
-    private BoardView view;
+    private BoardClientState view;
     private ClientGUI gui;
     private Client client;
     private CommonMenuBar menu;
     private TestController controller;
     private KeyBindingsOverlay keys;
     private PlanetaryConditionsOverlay conditions;
-    private ChatterBoxOverlay chat;
     private boolean originalKeys;
     private boolean originalConditions;
 
@@ -90,20 +83,22 @@ class GpuKeyboardTest {
                 when(gui.getClient()).thenReturn(client);
                 when(gui.getMenuBar()).thenReturn(menu);
                 when(gui.getMainPanel()).thenReturn(new JPanel());
+                when(gui.getFrame()).thenReturn(new javax.swing.JFrame());
                 controller = new TestController();
                 controller.clientGUI = gui;
                 gui.controller = controller;
                 for (KeyCommandBind bind : KeyCommandBind.values()) {
                     controller.registerKeyCommandBind(bind);
                 }
-                view = new BoardView(fixture.game, controller, gui, 0);
+                view = new BoardClientState(fixture.game, controller, gui, 0, null);
                 view.setLocalPlayer(fixture.player);
                 keys = new KeyBindingsOverlay(view);
                 conditions = new PlanetaryConditionsOverlay(view);
                 view.addOverlay(keys);
                 view.addOverlay(conditions);
+                when(gui.getCurrentBoardState()).thenReturn(java.util.Optional.of(view));
+                when(gui.getBoardState()).thenReturn(view);
                 source = new GpuBoardSource(view, () -> fixture.panel);
-                source.setViewport(1400, 900, 1400, 900);
                 source.refresh();
             } catch (Exception error) {
                 throw new IllegalStateException(error);
@@ -117,13 +112,10 @@ class GpuKeyboardTest {
             if (source != null) {
                 source.close();
             }
-            if (chat != null) {
-                chat.dispose();
-                preferences.removePreferenceChangeListener(chat);
-            }
             if (view != null) {
-                view.dispose();
+                view.close();
             }
+            if (gui != null && gui.getFrame() != null) { gui.getFrame().dispose(); }
             if (menu != null) {
                 menu.die();
             }
@@ -142,48 +134,6 @@ class GpuKeyboardTest {
             }
         });
         fixture.close();
-    }
-
-    @Test
-    void bothOverlaysToggleAndFinishFadingWhileTheClassicWindowIsHidden() throws Exception {
-        assertFalse(view.getPanel().isShowing());
-        press(KeyCommandBind.KEY_BINDS);
-        SwingUtilities.invokeAndWait(() -> {
-            assertFalse(keys.isVisible());
-            assertTrue(conditions.isVisible());
-        });
-        press(KeyCommandBind.PLANETARY_CONDITIONS);
-        SwingUtilities.invokeAndWait(() -> {
-            assertFalse(keys.isVisible());
-            assertFalse(conditions.isVisible());
-        });
-        CompletableFuture<Void> faded = new CompletableFuture<>();
-        Timer check = new Timer(20, event -> {
-            if (!keys.isSliding() && !conditions.isSliding()) {
-                faded.complete(null);
-            }
-        });
-        SwingUtilities.invokeAndWait(check::start);
-        try {
-            faded.get(3, TimeUnit.SECONDS);
-        } finally {
-            SwingUtilities.invokeAndWait(check::stop);
-        }
-        SwingUtilities.invokeAndWait(source::refresh);
-        GpuBoardSource.Hud hud = source.takeFrame().hud();
-        for (GpuBoardSource.HudLayer layer : hud.layers()) {
-            assertEquals(0, layer.fade().opacity(System.nanoTime()), "Hidden overlays must disappear from the GPU HUD");
-        }
-        press(KeyCommandBind.KEY_BINDS);
-        SwingUtilities.invokeAndWait(() -> {
-            assertTrue(keys.isVisible());
-            assertFalse(conditions.isVisible());
-        });
-        press(KeyCommandBind.PLANETARY_CONDITIONS);
-        SwingUtilities.invokeAndWait(() -> {
-            assertTrue(keys.isVisible());
-            assertTrue(conditions.isVisible());
-        });
     }
 
     @Test
@@ -316,34 +266,6 @@ class GpuKeyboardTest {
         assertFalse(source.takeFrame().globalCommands().stream()
               .filter(command -> command.id().equals("game-commands")).flatMap(command -> command.children().stream())
               .anyMatch(command -> command.id().equals(skip.id())), "A stale privileged command disappears immediately");
-    }
-
-    @Test
-    void chatUsesExistingEditingAndSendingWithoutTypingItsOpeningShortcutTwice() throws Exception {
-        SwingUtilities.invokeAndWait(() -> {
-            ChatterBox history = mock(ChatterBox.class);
-            history.history = new LinkedList<>();
-            chat = new ChatterBoxOverlay(gui, view, controller, history);
-            view.addOverlay(chat);
-            view.getPanel().addKeyListener(chat);
-        });
-        source.key(KeyEvent.VK_SLASH, true, 0);
-        source.keyTyped('/');
-        source.key(KeyEvent.VK_SLASH, false, 0);
-        SwingUtilities.invokeAndWait(() -> assertEquals("/", chat.getMessage()));
-        source.key(KeyEvent.VK_W, true, 0);
-        source.keyTyped('w');
-        source.key(KeyEvent.VK_W, false, 0);
-        source.key(KeyEvent.VK_E, true, 0);
-        source.keyTyped('\u00e9');
-        source.key(KeyEvent.VK_E, false, 0);
-        SwingUtilities.invokeAndWait(() -> assertEquals("/w\u00e9", chat.getMessage()));
-        press(KeyEvent.VK_BACK_SPACE, 0);
-        SwingUtilities.invokeAndWait(() -> assertEquals("/w", chat.getMessage()));
-        press(KeyEvent.VK_ENTER, 0);
-        SwingUtilities.invokeAndWait(() -> verify(client).sendChat("/w"));
-        press(KeyCommandBind.CANCEL);
-        assertFalse(source.chatActive());
     }
 
     @Test

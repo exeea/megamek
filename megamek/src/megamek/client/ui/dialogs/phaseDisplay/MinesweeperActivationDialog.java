@@ -60,7 +60,10 @@ import javax.swing.JScrollPane;
 import megamek.client.Client;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogField;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.FieldKind;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Player;
 import megamek.common.annotations.Nullable;
@@ -291,7 +294,7 @@ public class MinesweeperActivationDialog extends JDialog implements ActionListen
     }
 
     private void highlightEntity(Entity entity) {
-        BoardView boardView = clientGUI.getBoardView();
+        BoardClientState boardView = clientGUI.getBoardState();
         boardView.highlightSelectedEntities(Collections.singletonList(entity));
         if (entity.getPosition() != null) {
             boardView.setHighlightedEntityHexes(Collections.singletonList(entity.getPosition()));
@@ -300,7 +303,7 @@ public class MinesweeperActivationDialog extends JDialog implements ActionListen
     }
 
     private void clearHighlighting() {
-        BoardView boardView = clientGUI.getBoardView();
+        BoardClientState boardView = clientGUI.getBoardState();
         boardView.highlightSelectedEntities(Collections.emptyList());
         boardView.setHighlightedEntityHexes(Collections.emptyList());
         boardView.repaint();
@@ -323,14 +326,26 @@ public class MinesweeperActivationDialog extends JDialog implements ActionListen
      * applies it as a pending mode that takes effect next turn (instantModeSwitch = false).
      */
     private void applyChanges() {
+        Map<Integer, Boolean> selectedOff = new HashMap<>();
+        onModeButtons.forEach((entityId, onButton) -> selectedOff.put(entityId, !onButton.isSelected()));
+        applyStates(selectedOff);
+    }
+
+    /**
+     * Sends a mode change for every minesweeper the player switched, here or in the native battle window, to a state
+     * other than its effective one.
+     *
+     * @param selectedOff whether each unit's sweeper was set Off, by unit id; a unit without a setting keeps its state
+     */
+    private void applyStates(Map<Integer, Boolean> selectedOff) {
         for (Entity entity : playerUnits) {
-            JRadioButton onButton = onModeButtons.get(entity.getId());
+            Boolean off = selectedOff.get(entity.getId());
             MiscMounted minesweeper = getMinesweeper(entity);
-            if ((onButton == null) || (minesweeper == null)) {
+            if ((off == null) || (minesweeper == null)) {
                 continue;
             }
 
-            boolean selectOff = !onButton.isSelected();
+            boolean selectOff = off;
             if (selectOff == isEffectivelyOff(minesweeper)) {
                 continue; // no change
             }
@@ -350,5 +365,41 @@ public class MinesweeperActivationDialog extends JDialog implements ActionListen
      */
     public boolean wasApplied() {
         return applied;
+    }
+
+    /**
+     * Showing the dialog asks in the client's native battle window instead when that draws dialogs: one choice of On
+     * or Off per minesweeper, beside its current state, starting on the state it will have next turn. Apply sends the
+     * changed states as here; Cancel and Esc, like the close box, send nothing.
+     */
+    @Override
+    public void setVisible(boolean visible) {
+        if (!visible || !answeredNatively()) {
+            super.setVisible(visible);
+        }
+    }
+
+    private boolean answeredNatively() {
+        List<String> states = List.of(Messages.getString("MinesweeperActivationDialog.stateOn"),
+              Messages.getString("MinesweeperActivationDialog.stateOff"));
+        List<Entity> sweeping = playerUnits.stream().filter(entity -> getMinesweeper(entity) != null).toList();
+        List<DialogField> fields = sweeping.stream().map(entity -> new DialogField(Messages.getString(
+              "MinesweeperActivationDialog.unitNow", entity.getShortName(),
+              getStateDisplayText(getMinesweeper(entity))), FieldKind.CHOICE, states, 0, 0,
+              states.get(isEffectivelyOff(getMinesweeper(entity)) ? 1 : 0))).toList();
+        DialogAnswer answer = clientGUI.askForm(Messages.getString("MinesweeperActivationDialog.instructions"),
+              getTitle(), fields, List.of(btnApply.getText(), btnCancel.getText()), 1);
+        if (answer == null) {
+            return false;
+        }
+        if (answer.button() == 0) {
+            Map<Integer, Boolean> selectedOff = new HashMap<>();
+            for (int index = 0; index < sweeping.size(); index++) {
+                selectedOff.put(sweeping.get(index).getId(), states.indexOf(answer.values().get(index)) == 1);
+            }
+            applyStates(selectedOff);
+        }
+        dispose();
+        return true;
     }
 }

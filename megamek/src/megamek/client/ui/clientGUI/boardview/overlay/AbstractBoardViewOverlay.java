@@ -47,7 +47,7 @@ import java.util.Objects;
 import megamek.client.ui.IDisplayable;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.util.StringDrawer;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.KeyBindParser;
@@ -73,7 +73,7 @@ public abstract class AbstractBoardViewOverlay implements IDisplayable, IPrefere
     /** The ClientGUI of the boardview. May be null! */
     protected final ClientGUI clientGui;
     protected static final GUIPreferences GUIP = GUIPreferences.getInstance();
-    protected final BoardView boardView;
+    protected final BoardClientState boardView;
 
     /** True when the overlay is displayed or fading in. */
     private boolean visible;
@@ -87,6 +87,7 @@ public abstract class AbstractBoardViewOverlay implements IDisplayable, IPrefere
     /** The current game phase. */
     protected GamePhase currentPhase;
     protected final Game currentGame;
+    private final GameListener gameListener;
 
     protected final Font font;
 
@@ -96,7 +97,7 @@ public abstract class AbstractBoardViewOverlay implements IDisplayable, IPrefere
     private int overlayWidth = 500;
     private int overlayHeight = 500;
 
-    public AbstractBoardViewOverlay(BoardView boardView, Font font) {
+    public AbstractBoardViewOverlay(BoardClientState boardView, Font font) {
         this.font = font;
         visible = getVisibilityGUIPreference();
         fade = new OverlayImage.Fade(0, visible ? 1 : 0, visible ? 1 : 0);
@@ -106,7 +107,7 @@ public abstract class AbstractBoardViewOverlay implements IDisplayable, IPrefere
         currentPhase = currentGame.getPhase();
         // Detects phase and turn changes to display
         // The active player has changed
-        GameListener gameListener = new GameListenerAdapter() {
+        gameListener = new GameListenerAdapter() {
             @Override
             public void gamePhaseChange(GamePhaseChangeEvent e) {
                 currentPhase = e.getNewPhase();
@@ -122,6 +123,13 @@ public abstract class AbstractBoardViewOverlay implements IDisplayable, IPrefere
         currentGame.addGameListener(gameListener);
         GUIPreferences.getInstance().addPreferenceChangeListener(this);
         KeyBindParser.addPreferenceChangeListener(this);
+    }
+
+    @Override
+    public void dispose() {
+        currentGame.removeGameListener(gameListener);
+        GUIPreferences.getInstance().removePreferenceChangeListener(this);
+        KeyBindParser.removePreferenceChangeListener(this);
     }
 
     protected void addHeader(List<String> lines) {
@@ -239,7 +247,7 @@ public abstract class AbstractBoardViewOverlay implements IDisplayable, IPrefere
 
     /** Calculates the pixel size of the display from the necessary text lines. */
     private Rectangle getSize(List<String> lines, FontMetrics fm) {
-        List<String> cleanedLines = lines.stream().map(this::cleanedLine).toList();
+        List<String> cleanedLines = lines.stream().map(AbstractBoardViewOverlay::cleanedLine).toList();
         int width = cleanedLines.stream().mapToInt(fm::stringWidth).max().orElse(0);
         int height = fm.getHeight() * lines.size();
         return new Rectangle(width, height);
@@ -272,7 +280,7 @@ public abstract class AbstractBoardViewOverlay implements IDisplayable, IPrefere
     /**
      * Returns the line but without the color code at the start if there was one.
      */
-    private String cleanedLine(String line) {
+    public static String cleanedLine(String line) {
         if (line.startsWith("#") && line.length() > 7) {
             return line.substring(7);
         } else {
@@ -355,6 +363,7 @@ public abstract class AbstractBoardViewOverlay implements IDisplayable, IPrefere
 
     /** Makes the BoardView redraw, updating the overlay in the process. */
     protected void scheduleBoardViewRepaint() {
-        boardView.getPanel().repaint();
+        boardView.repaint();
     }
+
 }

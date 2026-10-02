@@ -40,12 +40,16 @@ import java.awt.event.ActionListener;
 import java.util.Collection;
 import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
+import javax.swing.AbstractButton;
 import javax.swing.JMenu;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
@@ -63,7 +67,7 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.audio.AudioService;
 import megamek.client.ui.clientGUI.audio.SoundType;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.MegaMekController;
@@ -107,7 +111,16 @@ public class BotCommandsPanel extends JPanel {
     // This latch is used only to change the state of the button from pause to continue and back
     private boolean pauseLatch = false;
     private MegaMekButton pauseContinue;
-    private List<MegaMekButton> commandButtons = List.of();
+    /** The popup buttons in the panel's order, each with its popup's factory for the bots that pass a test. */
+    private final Map<MegaMekButton, Function<Predicate<Player>, JPopupMenu>> popups = new LinkedHashMap<>();
+    /** The hex pick of the last order that picks hexes; it may have ended. */
+    private HexTargetPicker hexPicker;
+
+    /**
+     * One popup button for a view that shows the panel's commands itself, such as the GPU battle view's players panel:
+     * the button, whose label, tooltip and enabled state that view shows, and a factory of the popup it opens.
+     */
+    public record PopupCommand(AbstractButton button, Supplier<JPopupMenu> popup) { }
 
     /**
      * Bot Commands Panel constructor.
@@ -189,35 +202,23 @@ public class BotCommandsPanel extends JPanel {
     private void initialize() {
         applyLayout(false);
         UIUtil.applyTopBarBackground(this);
-        var retreat = createButton("Retreat");
         pauseContinue = createButton("PauseGame");
-        var maneuver = createButton("Maneuver");
-        var priorityTarget = createButton("PriorityTarget");
-        var ignoreTarget = createButton("IgnoreTarget");
-        var setBehavior = createButton("SetBehavior");
-        var artillery = createButton("Artillery");
-        var waypoints = createButton("Waypoints");
-        commandButtons = List.of(retreat, maneuver, priorityTarget, ignoreTarget, setBehavior, artillery,
-              waypoints);
+        popups.put(createButton("Maneuver"), this::createManeuverPopup);
+        popups.put(createButton("SetBehavior"), this::createSelectBehaviorPopup);
+        popups.put(createButton("Retreat"), this::createRetreatPopup);
+        popups.put(createButton("Artillery"), this::createArtilleryPopup);
+        popups.put(createButton("PriorityTarget"), this::createPriorityTargetPopup);
+        popups.put(createButton("IgnoreTarget"), this::createIgnoreTargetPopup);
+        popups.put(createButton("Waypoints"), this::createWaypointsPopup);
 
-        maneuver.addActionListener(evt -> showButtonPopup(maneuver, this::createManeuverPopup));
-        priorityTarget.addActionListener(evt -> showButtonPopup(priorityTarget, this::createPriorityTargetPopup));
-        ignoreTarget.addActionListener(evt -> showButtonPopup(ignoreTarget, this::createIgnoreTargetPopup));
-        retreat.addActionListener(evt -> showButtonPopup(retreat, this::createRetreatPopup));
-        setBehavior.addActionListener(evt -> showButtonPopup(setBehavior, this::createSelectBehaviorPopup));
-        artillery.addActionListener(evt -> showButtonPopup(artillery, this::createArtilleryPopup));
-        waypoints.addActionListener(evt -> showButtonPopup(waypoints, this::createWaypointsPopup));
+        // Each popup lists every bot under the player's command.
+        popups.forEach((button, popup) -> button.addActionListener(
+              evt -> showButtonPopup(button, () -> popup.apply(botPlayer -> true))));
         pauseContinue.addActionListener(evt -> pauseUnpause());
 
         // Add them to the buttonPanel. With 2 rows set, the grid grows columns as needed.
         this.add(pauseContinue);
-        this.add(maneuver);
-        this.add(setBehavior);
-        this.add(retreat);
-        this.add(artillery);
-        this.add(priorityTarget);
-        this.add(ignoreTarget);
-        this.add(waypoints);
+        popups.keySet().forEach(this::add);
         // The misc button is only added to the panel once a caller configures it (e.g. as Request Victory). It is left
         // out until then because GridLayout reserves a cell for a child even while that child is invisible, which would
         // leave an empty gap at the end of the strip in the GUIs that never configure it.
@@ -243,7 +244,7 @@ public class BotCommandsPanel extends JPanel {
      */
     private void updateButtonStates() {
         boolean inGame = client.getGame().getPhase() != GamePhase.LOUNGE;
-        for (MegaMekButton commandButton : commandButtons) {
+        for (MegaMekButton commandButton : popups.keySet()) {
             commandButton.setEnabled(inGame);
         }
         boolean pauseAllowed = canBePaused();
@@ -251,6 +252,29 @@ public class BotCommandsPanel extends JPanel {
         pauseContinue.setToolTipText(Messages.getString(pauseAllowed
               ? "BotCommandPanel.PauseGame.tooltip"
               : "BotCommandPanel.PauseGame.unavailable.tooltip"));
+    }
+
+    /**
+     * The popup buttons in the panel's order, each with the popup it opens limited to one bot: that bot's items, as the
+     * button lists them when the bot is the only one under the local player's command, and none for a player the local
+     * player does not command. The popups are built on the event thread, anew on each call.
+     *
+     * @param bot the bot whose commands the popups list
+     *
+     * @return the popup buttons with their popups for that bot
+     */
+    public List<PopupCommand> popupCommands(Player bot) {
+        Predicate<Player> onlyThisBot = botPlayer -> botPlayer.getId() == bot.getId();
+        return popups.entrySet().stream()
+              .map(popup -> new PopupCommand(popup.getKey(), () -> popup.getValue().apply(onlyThisBot)))
+              .toList();
+    }
+
+    /**
+     * @return the Pause/Continue button, a plain command: clicking it pauses or continues a game played by bots only
+     */
+    public AbstractButton pauseCommand() {
+        return pauseContinue;
     }
 
     /**
@@ -377,9 +401,9 @@ public class BotCommandsPanel extends JPanel {
         }
     }
 
-    private JPopupMenu createSelectBehaviorPopup() {
+    private JPopupMenu createSelectBehaviorPopup(Predicate<Player> bots) {
         var behaviorSettingsFactory = BehaviorSettingsFactory.getInstance();
-        return createBotFirstPopup((botMenu, botPlayer) -> {
+        return createBotFirstPopup(bots, (botMenu, botPlayer) -> {
             for (String behaviorName : behaviorSettingsFactory.getBehaviorNameList()) {
                 JMenuItem behaviorItem = new JMenuItem(behaviorName);
                 behaviorItem.addActionListener(evt -> {
@@ -405,8 +429,8 @@ public class BotCommandsPanel extends JPanel {
         sendChatCommand(botPlayer, ChatCommands.SHOW_DISHONORED);
     }
 
-    private JPopupMenu createRetreatPopup() {
-        return createBotFirstPopup((botMenu, botPlayer) -> {
+    private JPopupMenu createRetreatPopup(Predicate<Player> bots) {
+        return createBotFirstPopup(bots, (botMenu, botPlayer) -> {
             addRetreatAction(botMenu, botPlayer, CardinalEdge.NORTH, this::retreatNorth);
             addRetreatAction(botMenu, botPlayer, CardinalEdge.EAST, this::retreatEast);
             addRetreatAction(botMenu, botPlayer, CardinalEdge.SOUTH, this::retreatSouth);
@@ -508,8 +532,8 @@ public class BotCommandsPanel extends JPanel {
               });
     }
 
-    private JPopupMenu createManeuverPopup() {
-        return createBotFirstPopup((botMenu, botPlayer) -> {
+    private JPopupMenu createManeuverPopup(Predicate<Player> bots) {
+        return createBotFirstPopup(bots, (botMenu, botPlayer) -> {
             botMenu.add(createPostureMenu(botPlayer));
             botMenu.addSeparator();
             addBotAction(botMenu, botPlayer, "AlphaStrike", this::alphaStrikeManeuver);
@@ -599,53 +623,60 @@ public class BotCommandsPanel extends JPanel {
      * already bound to that bot. When the player commands exactly one bot, the bot level is skipped and that bot's
      * actions are inlined directly into the popup so no extra navigation is needed.
      *
+     * @param bots      Only bots under the player's command that pass this test are listed (all of them for the
+     *                  panel's buttons, one bot for {@link #popupCommands})
      * @param populator Fills a given bot's submenu with the command's actions, bound to that bot
      *
      * @return The created popup
      */
-    private JPopupMenu createBotFirstPopup(BiConsumer<JMenu, Player> populator) {
-        return createBotFirstPopup(populator, 0, botPlayer -> true);
+    private JPopupMenu createBotFirstPopup(Predicate<Player> bots, BiConsumer<JMenu, Player> populator) {
+        return createBotFirstPopup(bots, populator, 0, botPlayer -> true);
     }
 
     /**
      * Builds a bot-first popup including only bots that pass the given filter - used to drop bots from menus that do
      * not make sense for them (e.g. excluding fully off-board bots from movement menus).
      *
+     * @param bots      Only bots under the player's command that pass this test are listed
      * @param populator Fills a given bot's submenu with the command's actions, bound to that bot
      * @param botFilter Only bots passing this test get a submenu
      *
      * @return The created popup
      */
-    private JPopupMenu createBotFirstPopup(BiConsumer<JMenu, Player> populator, Predicate<Player> botFilter) {
-        return createBotFirstPopup(populator, 0, botFilter);
+    private JPopupMenu createBotFirstPopup(Predicate<Player> bots, BiConsumer<JMenu, Player> populator,
+          Predicate<Player> botFilter) {
+        return createBotFirstPopup(bots, populator, 0, botFilter);
     }
 
     /**
-     * Builds a bot-first popup (see {@link #createBotFirstPopup(BiConsumer)}) and, when {@code scrollThreshold} is
-     * positive, attaches a scroller so long per-bot action lists stay usable.
+     * Builds a bot-first popup (see {@link #createBotFirstPopup(Predicate, BiConsumer)}) and, when
+     * {@code scrollThreshold} is positive, attaches a scroller so long per-bot action lists stay usable.
      *
+     * @param bots            Only bots under the player's command that pass this test are listed
      * @param populator       Fills a given bot's submenu with the command's actions, bound to that bot
      * @param scrollThreshold The maximum number of visible items before scrolling, or 0 for no scroller
      *
      * @return The created popup
      */
-    private JPopupMenu createBotFirstPopup(BiConsumer<JMenu, Player> populator, int scrollThreshold) {
-        return createBotFirstPopup(populator, scrollThreshold, botPlayer -> true);
+    private JPopupMenu createBotFirstPopup(Predicate<Player> bots, BiConsumer<JMenu, Player> populator,
+          int scrollThreshold) {
+        return createBotFirstPopup(bots, populator, scrollThreshold, botPlayer -> true);
     }
 
     /**
      * Builds a bot-first popup with both a scroll threshold and a bot filter.
      *
+     * @param bots            Only bots under the player's command that pass this test are listed
      * @param populator       Fills a given bot's submenu with the command's actions, bound to that bot
      * @param scrollThreshold The maximum number of visible items before scrolling, or 0 for no scroller
      * @param botFilter       Only bots passing this test get a submenu
      *
      * @return The created popup
      */
-    private JPopupMenu createBotFirstPopup(BiConsumer<JMenu, Player> populator, int scrollThreshold,
-          Predicate<Player> botFilter) {
+    private JPopupMenu createBotFirstPopup(Predicate<Player> bots, BiConsumer<JMenu, Player> populator,
+          int scrollThreshold, Predicate<Player> botFilter) {
         JPopupMenu popup = new JPopupMenu();
-        List<Player> botPlayers = getBotPlayersUnderYourCommand().stream().filter(botFilter).toList();
+        List<Player> botPlayers = getBotPlayersUnderYourCommand().stream().filter(bots).filter(botFilter).toList();
         if (botPlayers.size() == 1) {
             // Single-bot shortcut: inline the only bot's actions, dropping the redundant bot submenu level.
             JMenu botMenu = new JMenu();
@@ -822,8 +853,8 @@ public class BotCommandsPanel extends JPanel {
         sendChatCommand(botPlayer, ChatCommands.CLEAR_IGNORED_TARGETS);
     }
 
-    private JPopupMenu createPriorityTargetPopup() {
-        return createBotFirstPopup((botMenu, botPlayer) -> {
+    private JPopupMenu createPriorityTargetPopup(Predicate<Player> bots) {
+        return createBotFirstPopup(bots, (botMenu, botPlayer) -> {
             addEnemyUnitMenu(botMenu, botPlayer, "PriorityTargetMenu", this::setPriorityTarget);
             addEnemyUnitMenu(botMenu, botPlayer, "TagTargetMenu", this::setTagTarget);
             addStrategicTargetItem(botMenu, botPlayer);
@@ -874,8 +905,8 @@ public class BotCommandsPanel extends JPanel {
               });
     }
 
-    private JPopupMenu createIgnoreTargetPopup() {
-        return createBotFirstPopup((botMenu, botPlayer) -> {
+    private JPopupMenu createIgnoreTargetPopup(Predicate<Player> bots) {
+        return createBotFirstPopup(bots, (botMenu, botPlayer) -> {
             addEnemyUnitMenu(botMenu, botPlayer, "IgnoreTargetMenu", this::setIgnoreTarget);
             addEnemyPlayerMenu(botMenu, botPlayer, "IgnorePlayer", ChatCommands.IGNORE_PLAYER,
                   "BotCommandPanel.toast.ignorePlayer");
@@ -923,8 +954,8 @@ public class BotCommandsPanel extends JPanel {
         clearIgnoredTargets(botPlayer);
     }
 
-    private JPopupMenu createArtilleryPopup() {
-        return createBotFirstPopup((botMenu, botPlayer) -> {
+    private JPopupMenu createArtilleryPopup(Predicate<Player> bots) {
+        return createBotFirstPopup(bots, (botMenu, botPlayer) -> {
             addBotAction(botMenu, botPlayer, "ArtilleryHalt",
                   bot -> sendArtilleryOrder(bot, ArtilleryOrder.HALT, SpecialAmmo.STANDARD, ""));
             addBotAction(botMenu, botPlayer, "ArtilleryAuto",
@@ -1164,11 +1195,9 @@ public class BotCommandsPanel extends JPanel {
      */
     private void pickTargetHexes(String orderDescription, boolean singleHex, int maxHexes, String fallbackPromptKey,
           Consumer<String> onTargetsSelected) {
-        BoardView boardView = null;
+        BoardClientState boardView = null;
         if (clientGUI != null) {
-            boardView = clientGUI.getCurrentBoardView()
-                  .filter(BoardView.class::isInstance)
-                  .map(BoardView.class::cast)
+            boardView = clientGUI.getCurrentBoardState()
                   .orElse(null);
         }
         if (boardView == null) {
@@ -1178,7 +1207,21 @@ public class BotCommandsPanel extends JPanel {
             }
             return;
         }
-        new HexTargetPicker(clientGUI, boardView, orderDescription, singleHex, maxHexes, onTargetsSelected).start();
+        if (hexPicker != null) {
+            // one pick at a time: the clicks of a pick still running would go to both
+            hexPicker.cancel();
+        }
+        hexPicker = new HexTargetPicker(clientGUI, boardView, orderDescription, singleHex, maxHexes,
+              onTargetsSelected);
+        hexPicker.start();
+    }
+
+    /**
+     * @return the hex pick of a bot order while it runs, else null. The GPU battle window shows it on its HUD and
+     *       ends it with its Done and Cancel keys.
+     */
+    public @Nullable HexTargetPicker hexPicker() {
+        return ((hexPicker != null) && hexPicker.isPicking()) ? hexPicker : null;
     }
 
     /**
@@ -1192,10 +1235,14 @@ public class BotCommandsPanel extends JPanel {
      * @return The entered hex numbers joined with dashes, or {@code null} if the player canceled or the input was invalid
      */
     private @Nullable String promptForHexNumbers(String promptMessageKey, String promptTitleKey, int maxHexes) {
-        String input = JOptionPane.showInputDialog(this,
-              Messages.getString(promptMessageKey),
-              Messages.getString(promptTitleKey),
-              JOptionPane.QUESTION_MESSAGE);
+        // the client's prompt, which its GPU battle window asks natively
+        String input = (clientGUI != null)
+              ? (String) clientGUI.input(Messages.getString(promptMessageKey), Messages.getString(promptTitleKey),
+                    JOptionPane.QUESTION_MESSAGE, null, null)
+              : JOptionPane.showInputDialog(this,
+                    Messages.getString(promptMessageKey),
+                    Messages.getString(promptTitleKey),
+                    JOptionPane.QUESTION_MESSAGE);
         if ((input == null) || input.isBlank()) {
             return null;
         }
@@ -1308,8 +1355,8 @@ public class BotCommandsPanel extends JPanel {
         return targets.replace("-", ", ");
     }
 
-    private JPopupMenu createWaypointsPopup() {
-        return createBotFirstPopup((botMenu, botPlayer) -> {
+    private JPopupMenu createWaypointsPopup(Predicate<Player> bots) {
+        return createBotFirstPopup(bots, (botMenu, botPlayer) -> {
             if (!getUnitsOwnedBy(botPlayer).isEmpty()) {
                 botMenu.add(createWaypointHexOrderMenu(botPlayer, "SetWaypoints", ChatCommands.SET_WAYPOINT));
                 botMenu.add(createWaypointHexOrderMenu(botPlayer, "AddWaypoint", ChatCommands.ADD_WAYPOINT));

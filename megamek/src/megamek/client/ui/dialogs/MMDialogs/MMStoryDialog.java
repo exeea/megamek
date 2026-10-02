@@ -123,6 +123,11 @@ public abstract class MMStoryDialog extends JDialog {
         return storyPoint;
     }
 
+    /** @return the image the dialog shows: the portrait, else the splash image; null for none */
+    protected Image storyImage() {
+        return (storyPoint.portrait() != null) ? storyPoint.portrait() : storyPoint.splashImage();
+    }
+
     protected JPanel getImagePanel() {
         JPanel imagePanel = new JPanel(new BorderLayout()) {
             @Override
@@ -131,10 +136,7 @@ public abstract class MMStoryDialog extends JDialog {
             }
         };
 
-        Image img = storyPoint.splashImage();
-        if (storyPoint.portrait() != null) {
-            img = storyPoint.portrait();
-        }
+        Image img = storyImage();
 
         if (null != img) {
 

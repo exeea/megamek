@@ -117,11 +117,10 @@ final class BoardSurface {
             return null;
         }
         // A level deck wins over a sloped ground road; a sloped deck is the last connected-road fallback.
-        // Captured bridge arms point north before rotation; hex directions run clockwise.
         return bridge.features().stream().filter(feature -> feature.asset().equals("bridge")
               && Math.abs(bridge.elevation() + feature.elevation() - road.elevation()) <= 1
               && (!continuation || bridge.elevation() + feature.elevation() == road.elevation())
-              && Math.floorMod(Math.round(-feature.rotation() / 60), 6) == reverse).findFirst().orElse(null);
+              && (feature.bridgeExits() & (1 << reverse)) != 0).findFirst().orElse(null);
     }
 
     private void river(BoardScene scene) {

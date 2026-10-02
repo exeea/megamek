@@ -108,7 +108,6 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.buttons.DialogButton;
 import megamek.client.ui.buttons.MMToggleButton;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.CloseAction;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.IMapSettingsObserver;
 import megamek.client.ui.clientGUI.UnitRecipients;
@@ -319,6 +318,7 @@ public class ChatLounge extends AbstractPhaseDisplay
     private ClientDialog boardPreviewW;
     private final Game boardPreviewGame = new Game();
     private transient BoardView previewBV;
+    private transient RulerDialog previewRuler;
     Dimension currentMapButtonSize = new Dimension(0, 0);
     private final JCheckBox showPlayerDeployment = new JCheckBox(Messages.getString("ChatLounge.showPlayerDeployment"));
 
@@ -455,7 +455,7 @@ public class ChatLounge extends AbstractPhaseDisplay
             enableUnitAddButtons();
         }
         clientgui.getClient().getGame().addGameListener(this);
-        clientgui.boardViews().forEach(bv -> bv.addBoardViewListener(this));
+        clientgui.boardStates().forEach(bv -> bv.addBoardViewListener(this));
 
         loader = new ImageLoader();
         loader.execute();
@@ -1001,66 +1001,8 @@ public class ChatLounge extends AbstractPhaseDisplay
         });
         panGroundMap.add(splGroundMap);
 
-        // set up the board preview window.
-        boardPreviewW = new ClientDialog(clientgui.getFrame(),
-              Messages.getString("BoardSelectionDialog.ViewGameBoard"),
-              false);
-        boardPreviewW.setLocationRelativeTo(clientgui.getFrame());
-
-        try {
-            boardPreviewGame.setPhase(GamePhase.LOUNGE);
-            previewBV = new BoardView(boardPreviewGame, null, null, 0);
-            previewBV.setDisplayInvalidFields(false);
-            previewBV.setUseLosTool(false);
-            previewBV.setTooltipProvider(new TWBoardViewTooltip(boardPreviewGame, clientgui, previewBV));
-
-            showPlayerDeployment.setSelected(true);
-            showPlayerDeployment.addActionListener(e -> previewGameBoard());
-
-            JButton previewSaveAs = new JButton(Messages.getString("BoardSelectionDialog.ViewGameBoardSaveAs"));
-            previewSaveAs.addActionListener(e -> clientgui.boardSaveAs(boardPreviewGame));
-
-            JPanel previewSettingsPanel = new JPanel(new FlowLayout());
-            previewSettingsPanel.add(showPlayerDeployment);
-            previewSettingsPanel.add(previewSaveAs);
-
-            Box previewPanel = Box.createVerticalBox();
-            previewPanel.add(previewSettingsPanel);
-            previewPanel.add(previewBV.getComponent(true));
-            boardPreviewW.add(previewPanel);
-            boardPreviewW.setSize(clientgui.getFrame().getWidth() / 2, clientgui.getFrame().getHeight() / 2);
-            // remember the preview window's size and position between sessions, like the standard dialogs do
-            // (the preferences are written when MegaMek exits normally)
-            boardPreviewW.setName("BoardPreviewDialog");
-            try {
-                MegaMek.getMMPreferences().forClass(ChatLounge.class)
-                      .manage(new JWindowPreference(boardPreviewW));
-            } catch (Exception exception) {
-                LOGGER.warn(exception, "Could not set up size/position memory for the board preview window");
-            }
-
-            String closeAction = "closeAction";
-            final KeyStroke escape = KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0);
-            boardPreviewW.getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(escape, closeAction);
-            boardPreviewW.getRootPane().getInputMap(JComponent.WHEN_FOCUSED).put(escape, closeAction);
-            boardPreviewW.getRootPane().getActionMap().put(closeAction, new CloseAction(boardPreviewW));
-
-            RulerDialog.color1 = GUIP.getRulerColor1();
-            RulerDialog.color2 = GUIP.getRulerColor2();
-            RulerDialog ruler = new RulerDialog(clientgui.getFrame(), previewBV, boardPreviewGame);
-
-            // Most boards will be far too large on the standard zoom
-            previewBV.zoomOut();
-            previewBV.zoomOut();
-            previewBV.zoomOut();
-            previewBV.zoomOut();
-            boardPreviewW.center();
-        } catch (IOException e) {
-            JOptionPane.showMessageDialog(this,
-                  Messages.getString("BoardEditor.CouldNotInitialize") + e,
-                  Messages.getString("BoardEditor.FatalError"),
-                  JOptionPane.ERROR_MESSAGE);
-        }
+        showPlayerDeployment.setSelected(true);
+        showPlayerDeployment.addActionListener(e -> previewGameBoard());
         refreshMapButtons();
     }
 
@@ -1489,6 +1431,75 @@ public class ChatLounge extends AbstractPhaseDisplay
         return hasServerBoard ? board : null;
     }
 
+    /** The classic preview owns a renderer only after the user opens it. */
+    private boolean initializeBoardPreview() {
+        boardPreviewW = new ClientDialog(clientgui.getFrame(),
+              Messages.getString("BoardSelectionDialog.ViewGameBoard"),
+              false);
+        boardPreviewW.setLocationRelativeTo(clientgui.getFrame());
+        boardPreviewW.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
+        boardPreviewW.addWindowListener(new WindowAdapter() {
+            @Override public void windowClosing(WindowEvent event) { killPreviewBV(); }
+        });
+
+        try {
+            boardPreviewGame.setPhase(GamePhase.LOUNGE);
+            previewBV = new BoardView(boardPreviewGame, null, null, 0);
+            previewBV.setDisplayInvalidFields(false);
+            previewBV.setUseLosTool(false);
+            previewBV.setTooltipProvider(new TWBoardViewTooltip(boardPreviewGame, clientgui, previewBV.getClientState()));
+
+            JButton previewSaveAs = new JButton(Messages.getString("BoardSelectionDialog.ViewGameBoardSaveAs"));
+            previewSaveAs.addActionListener(e -> clientgui.boardSaveAs(boardPreviewGame));
+
+            JPanel previewSettingsPanel = new JPanel(new FlowLayout());
+            previewSettingsPanel.add(showPlayerDeployment);
+            previewSettingsPanel.add(previewSaveAs);
+
+            Box previewPanel = Box.createVerticalBox();
+            previewPanel.add(previewSettingsPanel);
+            previewPanel.add(previewBV.getComponent(true));
+            boardPreviewW.add(previewPanel);
+            boardPreviewW.setSize(clientgui.getFrame().getWidth() / 2, clientgui.getFrame().getHeight() / 2);
+            // remember the preview window's size and position between sessions, like the standard dialogs do
+            // (the preferences are written when MegaMek exits normally)
+            boardPreviewW.setName("BoardPreviewDialog");
+            try {
+                MegaMek.getMMPreferences().forClass(ChatLounge.class)
+                      .manage(new JWindowPreference(boardPreviewW));
+            } catch (Exception exception) {
+                LOGGER.warn(exception, "Could not set up size/position memory for the board preview window");
+            }
+
+            String closeAction = "closeAction";
+            final KeyStroke escape = KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0);
+            boardPreviewW.getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(escape, closeAction);
+            boardPreviewW.getRootPane().getInputMap(JComponent.WHEN_FOCUSED).put(escape, closeAction);
+            boardPreviewW.getRootPane().getActionMap().put(closeAction, new AbstractAction() {
+                @Override public void actionPerformed(ActionEvent event) { killPreviewBV(); }
+            });
+
+            RulerDialog.color1 = GUIP.getRulerColor1();
+            RulerDialog.color2 = GUIP.getRulerColor2();
+            previewRuler = new RulerDialog(clientgui.getFrame(), previewBV.getClientState(), boardPreviewGame);
+
+            // Most boards will be far too large on the standard zoom
+            previewBV.zoomOut();
+            previewBV.zoomOut();
+            previewBV.zoomOut();
+            previewBV.zoomOut();
+            boardPreviewW.center();
+            return true;
+        } catch (IOException e) {
+            killPreviewBV();
+            JOptionPane.showMessageDialog(this,
+                  Messages.getString("BoardEditor.CouldNotInitialize") + e,
+                  Messages.getString("BoardEditor.FatalError"),
+                  JOptionPane.ERROR_MESSAGE);
+            return false;
+        }
+    }
+
     public void previewGameBoard() {
         Board serverBoard = serverGeneratedBoard();
         if (serverBoard == null) {
@@ -1498,6 +1509,9 @@ public class ChatLounge extends AbstractPhaseDisplay
               ? serverBoard
               : ServerBoardHelper.getPossibleGameBoard(mapSettings, false);
         boardPreviewGame.setBoard(newBoard);
+        if ((previewBV == null) && !initializeBoardPreview()) {
+            return;
+        }
         previewBV.setLocalPlayer(client().getLocalPlayer());
         final var gOpts = game().getOptions();
         boardPreviewGame.setOptions(gOpts);
@@ -1932,7 +1946,7 @@ public class ChatLounge extends AbstractPhaseDisplay
             psd.dispose();
         }
 
-        psd = new PlayerSettingsDialog(clientgui, c, previewBV);
+        psd = new PlayerSettingsDialog(clientgui, c, previewBV == null ? null : previewBV.getClientState());
         psd.setModal(false);
         psd.showDialog();
     }
@@ -1991,7 +2005,7 @@ public class ChatLounge extends AbstractPhaseDisplay
         int indexOfButton = mapButtons.indexOf(button);
         mapSettings.getBoardsSelectedVector().set(indexOfButton, board);
         clientgui.getClient().sendMapSettings(mapSettings);
-        if (boardPreviewW.isVisible()) {
+        if ((boardPreviewW != null) && boardPreviewW.isVisible()) {
             previewGameBoard();
         }
 
@@ -2402,7 +2416,7 @@ public class ChatLounge extends AbstractPhaseDisplay
                         refreshMapUI();
                         clientgui.getClient().sendMapSettings(mapSettings);
 
-                        if (boardPreviewW.isVisible()) {
+                        if ((boardPreviewW != null) && boardPreviewW.isVisible()) {
                             previewGameBoard();
                         }
 
@@ -2774,9 +2788,7 @@ public class ChatLounge extends AbstractPhaseDisplay
             psd.dispose();
         }
 
-        if (boardPreviewW != null) {
-            boardPreviewW.dispose();
-        }
+        killPreviewBV();
 
         boolean done = !localPlayer().isDone();
 
@@ -2852,7 +2864,7 @@ public class ChatLounge extends AbstractPhaseDisplay
     @Override
     public void removeAllListeners() {
         clientgui.getClient().getGame().removeGameListener(this);
-        clientgui.boardViews().forEach(bv -> bv.removeBoardViewListener(this));
+        clientgui.boardStates().forEach(bv -> bv.removeBoardViewListener(this));
         GUIP.removePreferenceChangeListener(this);
         PreferenceManager.getClientPreferences().removePreferenceChangeListener(this);
         MekSummaryCache.getInstance().removeListener(mekSummaryCacheListener);
@@ -4309,8 +4321,17 @@ public class ChatLounge extends AbstractPhaseDisplay
     }
 
     public void killPreviewBV() {
+        if (previewRuler != null) {
+            previewRuler.dispose();
+            previewRuler = null;
+        }
         if (previewBV != null) {
             previewBV.dispose();
+            previewBV = null;
+        }
+        if (boardPreviewW != null) {
+            boardPreviewW.dispose();
+            boardPreviewW = null;
         }
     }
 

@@ -38,26 +38,19 @@ import static megamek.client.ui.tileset.HexTileset.HEX_W;
 
 import java.awt.*;
 import java.awt.event.ActionEvent;
-import java.awt.event.InputEvent;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseListener;
 import java.awt.event.MouseMotionAdapter;
 import java.awt.event.MouseMotionListener;
 import java.awt.geom.AffineTransform;
-import java.awt.geom.Path2D;
 import java.awt.geom.Point2D;
 import java.awt.image.BufferedImage;
-import java.awt.image.DataBufferInt;
 import java.io.File;
 import java.io.IOException;
 import java.util.*;
 import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Consumer;
-import java.util.stream.Collectors;
-import javax.imageio.ImageIO;
 import javax.swing.*;
 import javax.swing.plaf.metal.DefaultMetalTheme;
 import javax.swing.plaf.metal.MetalTheme;
@@ -73,70 +66,43 @@ import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.clientGUI.boardview.overlay.ChatterBoxOverlay;
-import megamek.client.ui.clientGUI.boardview.overlay.OverlayImage;
 import megamek.client.ui.clientGUI.boardview.overlay.TurnDetailsOverlay;
-import megamek.client.ui.clientGUI.boardview.overlay.UnitOverviewOverlay;
 import megamek.client.ui.clientGUI.boardview.sprite.*;
-import megamek.client.ui.clientGUI.boardview.sprite.TacticalSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.isometric.IsometricSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.isometric.IsometricWreckSprite;
 import megamek.client.ui.clientGUI.boardview.toolTip.BoardViewTooltipProvider;
 import megamek.client.ui.dialogs.phaseDisplay.EntityChoiceDialog;
-import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.tileset.TilesetManager;
 import megamek.client.ui.util.EntityWreckHelper;
-import megamek.client.ui.util.FontHandler;
 import megamek.client.ui.util.ImageCache;
 import megamek.client.ui.util.KeyBindReceiver;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.MegaMekController;
-import megamek.client.ui.util.StringDrawer;
 import megamek.client.ui.util.UIUtil;
 import megamek.client.ui.widget.MegaMekBorder;
 import megamek.client.ui.widget.SkinSpecification;
 import megamek.client.ui.widget.SkinSpecification.UIComponents;
 import megamek.client.ui.widget.SkinXMLHandler;
-import megamek.common.ArtilleryModifier;
 import megamek.common.Configuration;
-import megamek.common.ECMInfo;
 import megamek.common.Hex;
 import megamek.common.KeyBindParser;
 import megamek.common.Player;
-import megamek.common.SpecialHexDisplay;
-import megamek.common.actions.ArtilleryAttackAction;
 import megamek.common.actions.AttackAction;
-import megamek.common.actions.EntityAction;
-import megamek.common.actions.PhysicalAttackAction;
-import megamek.common.actions.WeaponAttackAction;
 import megamek.common.annotations.Nullable;
-import megamek.common.board.AllowedDeploymentHelper;
 import megamek.common.board.Board;
-import megamek.common.board.BoardHelper;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
-import megamek.common.board.FacingOption;
-import megamek.common.compute.Compute;
-import megamek.common.compute.ComputeArc;
-import megamek.common.compute.ComputeECM;
-import megamek.common.enums.MoveStepType;
-import megamek.common.equipment.EquipmentActivation;
 import megamek.common.equipment.Minefield;
 import megamek.common.equipment.Mounted;
-import megamek.common.equipment.WeaponType;
 import megamek.common.event.GameListener;
 import megamek.common.event.GameListenerAdapter;
-import megamek.common.event.GameNewActionEvent;
-import megamek.common.event.GamePhaseChangeEvent;
 import megamek.common.event.board.BoardEvent;
 import megamek.common.event.board.BoardListener;
 import megamek.common.event.board.GameBoardChangeEvent;
 import megamek.common.event.board.GameBoardNewEvent;
 import megamek.common.event.entity.GameEntityChangeEvent;
-import megamek.common.event.entity.GameEntityNewEvent;
-import megamek.common.event.entity.GameEntityRemoveEvent;
 import megamek.common.game.Game;
 import megamek.common.moves.MovePath;
-import megamek.common.moves.MoveStep;
 import megamek.common.options.OptionsConstants;
 import megamek.common.pathfinder.BoardClusterTracker;
 import megamek.common.pathfinder.BoardClusterTracker.BoardCluster;
@@ -146,27 +112,22 @@ import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.IPreferenceChangeListener;
 import megamek.common.preference.PreferenceChangeEvent;
 import megamek.common.preference.PreferenceManager;
-import megamek.common.rolls.TargetRoll;
 import megamek.common.units.*;
 import megamek.common.util.ImageUtil;
 import megamek.common.util.fileUtils.MegaMekFile;
 import megamek.logging.MMLogger;
-import megamek.server.props.OrbitalBombardment;
 
 /**
  * Displays the board; lets the user scroll around and select points on it.
  */
 public final class BoardView extends AbstractBoardView
-      implements BoardListener, MouseListener, IPreferenceChangeListener, KeyBindReceiver {
+      implements BoardListener, MouseListener, IPreferenceChangeListener, KeyBindReceiver, BoardGlyphContext {
     private static final MMLogger LOGGER = MMLogger.create(BoardView.class);
 
     public static final int BOARD_HEX_CLICK = 1;
     public static final int BOARD_HEX_DOUBLE_CLICK = 2;
     public static final int BOARD_HEX_DRAG = 3;
     private static final int BOARD_HEX_POPUP = 4;
-
-    // the dimensions of MegaMek's hex images
-    public static final int HEX_DIAG = (int) Math.round(Math.sqrt(HEX_W * HEX_W + HEX_H * HEX_H));
 
     static final int HEX_WC = HEX_W - (HEX_W / 4);
 
@@ -206,10 +167,10 @@ public final class BoardView extends AbstractBoardView
     public boolean zoomOverview = false;
 
     // line width of the c3 network lines
-    public static final int C3_LINE_WIDTH = 1;
+    public static final int C3_LINE_WIDTH = BoardGlyphContext.C3_LINE_WIDTH;
 
     // line width of the fly over lines
-    public static final int FLY_OVER_LINE_WIDTH = 3;
+    public static final int FLY_OVER_LINE_WIDTH = BoardGlyphContext.FLY_OVER_LINE_WIDTH;
     private static final Font FONT_7 = new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 7);
     private static final Font FONT_9 = new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 9);
     private static final Font FONT_10 = new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 10);
@@ -218,13 +179,6 @@ public final class BoardView extends AbstractBoardView
     private static final Font FONT_16 = new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 16);
     private static final Font FONT_18 = new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 18);
     private static final Font FONT_24 = new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 24);
-
-    /**
-     * Distance hex text labels keep from the tile edge they hang from, in tile artwork pixels: the coordinate label
-     * keeps it from the tile's top edge, the level/depth/height/foliage stack from its bottom edge, so the text keeps
-     * a visible margin instead of touching the hex border. The GPU board draws the same labels from these offsets.
-     */
-    private static final int HEX_TEXT_MARGIN = 6;
 
     Dimension hex_size;
 
@@ -273,52 +227,15 @@ public final class BoardView extends AbstractBoardView
      */
     private Map<ArrayList<Integer>, IsometricSprite> isometricSpriteIds = new HashMap<>();
 
-    // sprites for the three selection cursors
-    private final CursorSprite cursorSprite;
-    private final CursorSprite highlightSprite;
-    private final CursorSprite selectedSprite;
-    private final CursorSprite firstLOSSprite;
-    private final CursorSprite secondLOSSprite;
-
-    // sprite for current movement
-    ArrayList<StepSprite> pathSprites = new ArrayList<>();
-    ArrayList<FlightPathIndicatorSprite> fpiSprites = new ArrayList<>();
-
-    private final ArrayList<Coords> strafingCoords = new ArrayList<>(5);
-
-    // vector of sprites for all firing lines
-    private final ArrayList<AttackSprite> attackSprites = new ArrayList<>();
-
-    // vector of sprites for all movement paths (using vectored movement)
-    private final ArrayList<MovementSprite> movementSprites = new ArrayList<>();
-
-    // vector of sprites for C3 network lines
-    private final ArrayList<C3Sprite> c3Sprites = new ArrayList<>();
-
-    // list of sprites for declared VTOL/AirMek bombing/strafing targets
-    private final ArrayList<VTOLAttackSprite> vtolAttackSprites = new ArrayList<>();
-
-    // vector of sprites for aero flyover lines
-    private final ArrayList<FlyOverSprite> flyOverSprites = new ArrayList<>();
 
     TilesetManager tileManager;
-    private HexTileset gpuTileset;
+    private final boolean ownsClientState;
+    private final GameListener boardGameListener;
+    private long appliedFocus;
+    private final List<Runnable> keyRegistrations = new ArrayList<>();
 
     // polygons for a few things
-    private static final Polygon HEX_POLY;
-
-    static {
-        // hex polygon
-        HEX_POLY = new Polygon();
-        HEX_POLY.addPoint(21, 0);
-        HEX_POLY.addPoint(62, 0);
-        HEX_POLY.addPoint(83, 35);
-        HEX_POLY.addPoint(83, 36);
-        HEX_POLY.addPoint(62, 71);
-        HEX_POLY.addPoint(21, 71);
-        HEX_POLY.addPoint(0, 36);
-        HEX_POLY.addPoint(0, 35);
-    }
+    private static final Polygon HEX_POLY = HexDrawUtilities.rasterHex();
 
     Shape[] movementPolys;
     Shape[] facingPolys;
@@ -328,15 +245,6 @@ public final class BoardView extends AbstractBoardView
 
     // Image to hold the complete board shadow map
     BufferedImage shadowMap;
-    private boolean gpuCapture;
-
-    /**
-     * Stores the currently deploying entity, used for highlighting deployment hexes.
-     */
-    private Entity en_Deployer = null;
-
-    // should be able to turn it off(board editor)
-    private boolean useLOSTool = true;
 
     // Initial scale factor for sprites and map
     float scale = 1.00f;
@@ -359,33 +267,12 @@ public final class BoardView extends AbstractBoardView
     private ArrayList<WreckSprite> wreckSprites = new ArrayList<>();
     private ArrayList<IsometricWreckSprite> isometricWreckSprites = new ArrayList<>();
 
-    // highlighted entity hexes (for Nova CEWS network dialog)
-    private List<Coords> highlightedEntityHexes = new ArrayList<>();
 
-    // highlighted demolition charge hexes (selected in the Detonate Charges dialog) - drawn with a bold yellow/black
-    // hazard outline, separate from the plain entity highlight above
-    private List<Coords> demolitionChargeHighlightHexes = new ArrayList<>();
-
-    private Coords rulerStart;
-    private Coords rulerEnd;
-    private Color rulerStartColor;
-    private Color rulerEndColor;
-
-    private Coords lastCursor;
-    Coords selected;
-    private Coords firstLOS;
+    private Board observedBoard;
+    private boolean disposed;
+    private final BoardClientState clientState;
 
     /** stores the theme last selected to override all hex themes */
-    private String selectedTheme = null;
-
-    // hexes with ECM effect
-    private Map<Coords, Color> ecmHexes = null;
-    // hexes that are teh centers of ECM effects
-    private Map<Coords, Color> ecmCenters = null;
-    // hexes with ECM effect
-    private Map<Coords, Color> eccmHexes = null;
-    // hexes that are teh centers of ECCM effects
-    private Map<Coords, Color> eccmCenters = null;
 
     // reference to our timer task for redraw
     private final TimerTask redrawTimerTask;
@@ -404,12 +291,10 @@ public final class BoardView extends AbstractBoardView
     /**
      * Keeps track of whether we have an active ChatterBox2
      */
-    private boolean chatterBoxActive = false;
 
     /**
      * Keeps track of whether an outside source tells the BoardView that it should ignore keyboard commands.
      */
-    private boolean shouldIgnoreKeys = false;
 
     private final FovHighlightingAndDarkening fovHighlightingAndDarkening;
 
@@ -420,22 +305,15 @@ public final class BoardView extends AbstractBoardView
      * Cache that stores hex images for different coords
      */
     ImageCache<Coords, HexImageCacheEntry> hexImageCache;
-    private final ImageCache<Coords, HexImageCacheEntry> planarHexImageCache = new ImageCache<>();
 
     /**
      * GPU hex layers, kept per hex so captures do not re-match the tileset every frame: the ground artwork
      * the hex paints, the same ground without its water, and the features drawn over both.
      */
-    private record GroundArtwork(BufferedImage color, BufferedImage normal) { }
-    private final Map<Coords, GroundArtwork> groundArtwork = new HashMap<>();
-    private final Map<String, Image> groundNormals = new HashMap<>();
-    private final Map<Coords, DecalArtwork> featureArtwork = new HashMap<>();
 
-    private boolean showLobbyPlayerDeployment = false;
 
     private long paintCompsStartTime;
 
-    private Rectangle displayablesRect = new Rectangle();
 
     // Soft Centering ---
 
@@ -454,7 +332,6 @@ public final class BoardView extends AbstractBoardView
      * Holds the final Coords for a planned movement. Set by MovementDisplay, used to display the distance in the board
      * tooltip.
      */
-    private Coords movementTarget;
 
     // Used to track the previous x/y for tooltip display
     int prevTipX = -1, prevTipY = -1;
@@ -479,220 +356,95 @@ public final class BoardView extends AbstractBoardView
     /**
      * Keeps track of whether all deployment zones should be shown in the Arty Auto Hit Designation phase
      */
-    public boolean showAllDeployment = false;
-
-    private final StringDrawer invalidString =
-          new StringDrawer(Messages.getString("BoardEditor.INVALID")).color(GUIP.getWarningColor())
-                .font(FontHandler.notoFont().deriveFont(Font.BOLD))
-                .center();
 
     BoardViewTooltipProvider boardViewToolTip = (point, movementTarget) -> null;
-    private boolean tooltipSuspended = false;
 
     // Part of the sprites need specialized treatment; as there can be many sprites, filtering them on the spot is a
     // noticeable performance hit (in iso mode), therefore the sprites are copied to specialized lists when created
-    private final TreeSet<Sprite> overTerrainSprites = new TreeSet<>();
-    private final TreeSet<HexSprite> behindTerrainHexSprites = new TreeSet<>();
 
-    private final List<HexDrawPlugin> hexDrawPlugins = new ArrayList<>();
 
     /**
      * Construct a new board view for the specified game
      */
     public BoardView(final Game game, final MegaMekController controller, @Nullable ClientGUI clientgui, int boardId)
           throws IOException {
+        this(game, controller, clientgui, boardId, null);
+    }
+
+    /** Editor tools can share their tileset with an explicitly opened compatibility viewport. */
+    public BoardView(Game game, MegaMekController controller, @Nullable ClientGUI clientgui, int boardId,
+          @Nullable TilesetManager sharedTileset) throws IOException {
+        this(game, controller, clientgui, boardId, sharedTileset, null);
+    }
+
+    public BoardView(BoardClientState state, MegaMekController controller, @Nullable ClientGUI clientgui) throws IOException {
+        this(state.getGame(), controller, clientgui, state.getBoardId(), state.getTilesetManager(), state);
+    }
+
+    private BoardView(Game game, MegaMekController controller, @Nullable ClientGUI clientgui, int boardId,
+          @Nullable TilesetManager sharedTileset, @Nullable BoardClientState sharedState) throws IOException {
         super(boardId);
         this.game = game;
         this.clientgui = clientgui;
-
+        ownsClientState = sharedState == null;
+        clientState = ownsClientState ? new BoardClientState(game, controller, clientgui, boardId, sharedTileset) : sharedState;
         hexImageCache = new ImageCache<>();
-        tileManager = new TilesetManager(game);
+        tileManager = clientState.getTilesetManager();
+        clientState.setEntityRenderer(entity -> {
+            if (entity == null) { redrawAllEntitySprites(); } else { redrawEntitySprites(entity); }
+        });
+        clientState.setVisibleArea(this::getVisibleArea);
+        clientState.setInputEnabled(this::shouldReceiveKeyCommands);
+        clientState.setProjection(this);
+        clientState.setMovingUnitPainter(graphics -> {
+            drawSprites(graphics, movingEntitySprites);
+            drawSprites(graphics, ghostEntitySprites);
+        });
         ToolTipManager.sharedInstance().registerComponent(boardPanel);
         setVerticalOffset();
 
         // For Entities that have converted to another mode, check for a different sprite for units that have been
         // blown up, damaged or ejected, force a reload Clear some information regardless of what phase it is
-        GameListener gameListener = new GameListenerAdapter() {
-
+        boardGameListener = new GameListenerAdapter() {
             @Override
-            public void gameEntityNew(GameEntityNewEvent gameEntityNewEvent) {
-                updateEcmList();
-                redrawAllEntities();
-                if (game.getPhase().isMovement()) {
-                    refreshMoveVectors();
+            public void gameEntityChange(GameEntityChangeEvent event) {
+                Entity entity = event.getEntity();
+                Vector<UnitLocation> path = event.getMovePath();
+                if (path != null && !path.isEmpty() && GUIP.getShowMoveStep()
+                      && !game.getOptions().booleanOption(OptionsConstants.INIT_SIMULTANEOUS_MOVEMENT)
+                      && EntityVisibilityUtils.detectedOrHasVisual(getLocalPlayer(), game, entity)) {
+                    addMovingUnit(entity, new Vector<>(path));
                 }
             }
-
             @Override
-            public void gameEntityRemove(GameEntityRemoveEvent gameEntityRemoveEvent) {
-                updateEcmList();
-                redrawAllEntities();
-                if (game.getPhase().isMovement()) {
-                    refreshMoveVectors();
-                }
-            }
-
-            @Override
-            public void gameEntityChange(GameEntityChangeEvent gameEntityChangeEvent) {
-                final Vector<UnitLocation> movePath = gameEntityChangeEvent.getMovePath();
-                final Entity entity = gameEntityChangeEvent.getEntity();
-                final var gameOptions = game.getOptions();
-
-                updateEcmList();
-
-                // For Entities that have converted to another mode, check for a different sprite
-                if (game.getPhase().isMovement() && entity.isConvertingNow()) {
-                    tileManager.reloadImage(entity);
-                }
-
-                // For units that have been blown up, damaged, ejected or handed to another player (a traitor
-                // switch means the new owner's camouflage), force a reload. Without the old state we cannot tell
-                // whether the damage changed, so reload to be safe; the reload reuses the cached image when
-                // nothing shown in fact changed, so it costs nothing in the common case.
-                final Entity oldEntity = gameEntityChangeEvent.getOldEntity();
-                boolean shownStateChanged = true;
-                if (oldEntity != null) {
-                    boolean damageChanged = entity.getDamageLevel() != oldEntity.getDamageLevel();
-                    boolean destructionChanged = entity.isDestroyed() != oldEntity.isDestroyed();
-                    boolean ownerChanged = entity.getOwnerId() != oldEntity.getOwnerId();
-                    boolean ejectionChanged = entity.getCrew().isEjected() != oldEntity.getCrew().isEjected();
-                    shownStateChanged = damageChanged || destructionChanged || ownerChanged || ejectionChanged;
-                }
-                if (shownStateChanged) {
-                    tileManager.reloadImage(entity);
-                }
-
-                redrawAllEntities();
-
-                if (game.getPhase().isMovement()) {
-                    refreshMoveVectors();
-                }
-
-                if ((movePath != null) && !movePath.isEmpty() && GUIP.getShowMoveStep() && !gameOptions.booleanOption(
-                      OptionsConstants.INIT_SIMULTANEOUS_MOVEMENT)) {
-                    if ((localPlayer == null) || !game.getOptions()
-                          .booleanOption(OptionsConstants.ADVANCED_DOUBLE_BLIND) || !entity.getOwner()
-                          .isEnemyOf(localPlayer) || entity.hasSeenEntity(localPlayer)) {
-                        addMovingUnit(entity, movePath);
-                    }
-                }
-            }
-
-            @Override
-            public void gameNewAction(GameNewActionEvent gameNewActionEvent) {
-                EntityAction entityAction = gameNewActionEvent.getAction();
-                if (entityAction instanceof AttackAction attackAction) {
-                    addAttack(attackAction);
-                }
-            }
-
-            @Override
-            public void gameBoardNew(GameBoardNewEvent gameBoardNewEvent) {
-                Board oldBoard = gameBoardNewEvent.getOldBoard();
-
-                if (oldBoard != null) {
-                    oldBoard.removeBoardListener(BoardView.this);
-                }
-
-                oldBoard = gameBoardNewEvent.getNewBoard();
-
-                if (oldBoard != null) {
-                    oldBoard.addBoardListener(BoardView.this);
-                }
-
-                game.getBoard(boardId).initializeAllAutomaticTerrain();
+            public void gameBoardChanged(GameBoardChangeEvent event) {
                 clearHexImageCache();
-                updateBoard();
-                clearShadowMap();
             }
 
             @Override
-            public void gameBoardChanged(GameBoardChangeEvent gameBoardChangeEvent) {
-                clearHexImageCache();
-                boardChanged();
-                // Update ECM list for temporary ECM fields (from EMP mines, etc.)
-                updateEcmList();
-            }
-
-            @Override
-            public void gamePhaseChange(GamePhaseChangeEvent gamePhaseChangeEvent) {
-                if (GUIP.getGameSummaryBoardView() && (gamePhaseChangeEvent.getOldPhase().isDeployment()
-                      || gamePhaseChangeEvent.getOldPhase().isMovement()
-                      || gamePhaseChangeEvent.getOldPhase().isTargeting()
-                      || gamePhaseChangeEvent.getOldPhase().isFiring()
-                      || gamePhaseChangeEvent.getOldPhase().isPhysical())) {
-                    File dir = new File(Configuration.gameSummaryImagesBVDir(), game.getUUIDString());
-
-                    if (dir.exists() || dir.mkdirs()) {
-                        String fileName = String.format("round_%03d_%03d_%s.png",
-                              game.getRoundCount(),
-                              gamePhaseChangeEvent.getOldPhase().ordinal(),
-                              gamePhaseChangeEvent.getOldPhase());
-
-                        File imgFile = new File(dir, fileName);
-
-                        try {
-                            ImageIO.write(getEntireBoardImage(false, true), "png", imgFile);
-                        } catch (Exception ex) {
-                            LOGGER.error(ex, "Unable to write board image {}", imgFile);
-                        }
+            public void gameBoardNew(GameBoardNewEvent event) {
+                if (!disposed && (event.getBoardId() == boardId)) {
+                    if (observedBoard != null) {
+                        observedBoard.removeBoardListener(BoardView.this);
                     }
-                }
-
-                refreshAttacks();
-
-                // Clear some information regardless of what phase it is
-                if (clientgui != null) {
-                    clientgui.clearTemporarySprites();
-                }
-
-                switch (gamePhaseChangeEvent.getNewPhase()) {
-                    case MOVEMENT:
-                        refreshMoveVectors();
-                    case FIRING:
-                        clearAllMoveVectors();
-                    case PHYSICAL:
-                        refreshAttacks();
-                        break;
-                    case INITIATIVE:
-                        clearAllAttacks();
-                        break;
-                    case INITIATIVE_REPORT:
-                    case MOVEMENT_REPORT:
-                    case FIRING_REPORT:
-                    case PHYSICAL_REPORT:
-                    case END_REPORT:
-                        // Rebuild entity sprites (including C3 connection lines) for report phases
-                        redrawAllEntities();
-                        break;
-                    case END:
-                    case VICTORY:
-                        clearSprites();
-                    case LOUNGE:
-                        clearHexImageCache();
-                        clearAllMoveVectors();
-                        clearAllAttacks();
-                        clearSprites();
-                        select(null);
-                        cursor(null);
-                        highlight(null);
-                    default:
-                }
-                for (Entity entity : game.getEntitiesVector()) {
-                    if ((entity.getDamageLevel() != Entity.DMG_NONE) && ((entity.damageThisRound != 0)
-                          || (entity.isBuildingEntityOrGunEmplacement()))) {
-                        tileManager.reloadImage(entity);
+                    observedBoard = event.getNewBoard();
+                    if (observedBoard != null) {
+                        observedBoard.addBoardListener(BoardView.this);
+                        updateBoard();
                     }
+                    clearHexImageCache();
+                    clearShadowMap();
+                    boardPanel.repaint();
                 }
-
             }
         };
 
-        game.addGameListener(gameListener);
-        game.getBoard(boardId).addBoardListener(this);
+        game.addGameListener(boardGameListener);
+        observedBoard = game.getBoard(boardId);
+        observedBoard.addBoardListener(this);
 
         redrawTimerTask = scheduleRedrawTimer(); // call only once
-        clearSprites();
+        if (ownsClientState) { clearSprites(); }
         boardPanel.addMouseListener(this);
         boardPanel.addMouseWheelListener(mouseWheelEvent -> {
             Point mousePoint = mouseWheelEvent.getPoint();
@@ -701,7 +453,7 @@ public final class BoardView extends AbstractBoardView
 
             // If the mouse is over an IDisplayable, have it react instead of the board. Currently only implemented
             // for the ChatterBox
-            for (IDisplayable displayable : overlays) {
+            for (IDisplayable displayable : clientState.overlays) {
                 if (displayable instanceof ChatterBoxOverlay chatterBox2) {
                     double width = scrollPane.getViewport().getSize().getWidth();
                     double height = scrollPane.getViewport().getSize().getHeight();
@@ -769,7 +521,7 @@ public final class BoardView extends AbstractBoardView
             @Override
             public void mouseMoved(MouseEvent mouseEvent) {
                 Point point = mouseEvent.getPoint();
-                for (IDisplayable displayable : overlays) {
+                for (IDisplayable displayable : clientState.overlays) {
 
                     if (displayable.isBeingDragged()) {
                         return;
@@ -787,11 +539,11 @@ public final class BoardView extends AbstractBoardView
 
                 final Coords mcoords = getCoordsAt(point);
                 if (!mcoords.equals(lastCoords) && game.getBoard(boardId).contains(mcoords)) {
-                    if (tooltipSuspended) {
+                    if (clientState.isTooltipSuspended()) {
                         boardPanel.setToolTipText(null);
                     } else {
                         lastCoords = mcoords;
-                        boardPanel.setToolTipText(boardViewToolTip.getTooltip(mouseEvent, movementTarget));
+                        boardPanel.setToolTipText(boardViewToolTip.getTooltip(mouseEvent, clientState.movementTarget));
                     }
                 } else if (!game.getBoard(boardId).contains(mcoords)) {
                     boardPanel.setToolTipText(null);
@@ -824,7 +576,7 @@ public final class BoardView extends AbstractBoardView
             @Override
             public void mouseDragged(MouseEvent mouseEvent) {
                 Point point = mouseEvent.getPoint();
-                for (IDisplayable displayable : overlays) {
+                for (IDisplayable displayable : clientState.overlays) {
                     Point adjustPoint = new Point((int) Math.min(boardSize.getWidth(), -boardPanel.getBounds().getX()),
                           (int) Math.min(boardSize.getHeight(), -boardPanel.getBounds().getY()));
                     Point dispPoint = new Point();
@@ -896,59 +648,48 @@ public final class BoardView extends AbstractBoardView
 
         initPolys();
 
-        cursorSprite = new CursorSprite(this, Color.cyan);
-        highlightSprite = new CursorSprite(this, Color.white);
-        selectedSprite = new CursorSprite(this, Color.blue);
-        firstLOSSprite = new CursorSprite(this, Color.red);
-        secondLOSSprite = new CursorSprite(this, Color.red);
 
         PreferenceManager.getClientPreferences().addPreferenceChangeListener(this);
         GUIP.addPreferenceChangeListener(this);
         KeyBindParser.addPreferenceChangeListener(this);
 
-        SpecialHexDisplay.Type.ARTILLERY_MISS.init();
-        SpecialHexDisplay.Type.ARTILLERY_HIT.init();
-        SpecialHexDisplay.Type.ARTILLERY_DRIFT.init();
-        SpecialHexDisplay.Type.ARTILLERY_INCOMING.init();
-        SpecialHexDisplay.Type.ARTILLERY_TARGET.init();
-        SpecialHexDisplay.Type.ARTILLERY_ADJUSTED.init();
-        SpecialHexDisplay.Type.ARTILLERY_AUTO_HIT.init();
-        SpecialHexDisplay.Type.BOMB_MISS.init();
-        SpecialHexDisplay.Type.BOMB_HIT.init();
-        SpecialHexDisplay.Type.BOMB_DRIFT.init();
-        SpecialHexDisplay.Type.PLAYER_NOTE.init();
-        SpecialHexDisplay.Type.ORBITAL_BOMBARDMENT.init();
-        SpecialHexDisplay.Type.ORBITAL_BOMBARDMENT_INCOMING.init();
-        SpecialHexDisplay.Type.NUKE_HIT.init();
-        SpecialHexDisplay.Type.NUKE_INCOMING.init();
 
-        fovHighlightingAndDarkening = new FovHighlightingAndDarkening(this);
+        fovHighlightingAndDarkening = clientState.getFieldOfView();
+        clientState.setChanged(() -> {
+            hexImageCache.clear();
+            BoardFocus request = clientState.getCenterRequest();
+            if (request.sequence() != appliedFocus) {
+                appliedFocus = request.sequence();
+                if (request.coords() != null) { applyCenterRequest(request.coords()); }
+            }
+            for (EntitySprite sprite : entitySprites) {
+                sprite.setAffectedByECM(clientState.isAffectedByECM(sprite.getEntity()));
+                sprite.setSelected(clientState.isEntitySelected(sprite.getEntity()));
+            }
+            boardPanel.repaint();
+        });
 
-        radarBlipImage = ImageUtil.loadImageFromFile(new MegaMekFile(Configuration.miscImagesDir(),
-              FILENAME_RADAR_BLIP_IMAGE).toString());
+        radarBlipImage = clientState.getRadarBlipImage();
     }
 
     private void registerKeyboardCommands(final MegaMekController controller) {
-        controller.registerCommandAction(KeyCommandBind.TOGGLE_CHAT, this, this::performChat);
-        controller.registerCommandAction(KeyCommandBind.TOGGLE_CHAT_CMD, this, this::performChatCmd);
-        controller.registerCommandAction(KeyCommandBind.CENTER_ON_SELECTED, this, this::centerOnSelected);
 
-        controller.registerCommandAction(KeyCommandBind.SCROLL_NORTH,
+        keyRegistrations.add(controller.registerCommandAction(KeyCommandBind.SCROLL_NORTH,
               this::canScrollClassicView,
               this::scrollNorth,
-              this::pingMinimap);
-        controller.registerCommandAction(KeyCommandBind.SCROLL_SOUTH,
+              this::pingMinimap));
+        keyRegistrations.add(controller.registerCommandAction(KeyCommandBind.SCROLL_SOUTH,
               this::canScrollClassicView,
               this::scrollSouth,
-              this::pingMinimap);
-        controller.registerCommandAction(KeyCommandBind.SCROLL_EAST,
+              this::pingMinimap));
+        keyRegistrations.add(controller.registerCommandAction(KeyCommandBind.SCROLL_EAST,
               this::canScrollClassicView,
               this::scrollEast,
-              this::pingMinimap);
-        controller.registerCommandAction(KeyCommandBind.SCROLL_WEST,
+              this::pingMinimap));
+        keyRegistrations.add(controller.registerCommandAction(KeyCommandBind.SCROLL_WEST,
               this::canScrollClassicView,
               this::scrollWest,
-              this::pingMinimap);
+              this::pingMinimap));
     }
 
     private boolean canScrollClassicView() {
@@ -976,34 +717,10 @@ public final class BoardView extends AbstractBoardView
         stopSoftCentering();
     }
 
-    private void performChatCmd() {
-        if (!getChatterBoxActive()) {
-            setChatterBoxActive(true);
-            for (IDisplayable displayable : overlays) {
-                if (displayable instanceof ChatterBoxOverlay chatterBox2) {
-                    chatterBox2.slideUp();
-                    chatterBox2.setMessage("/");
-                }
-            }
-            boardPanel.requestFocus();
-        }
-    }
-
-    private void performChat() {
-        if (!getChatterBoxActive()) {
-            setChatterBoxActive(true);
-            for (IDisplayable displayable : overlays) {
-                if (displayable instanceof ChatterBoxOverlay chatterBox2) {
-                    chatterBox2.slideUp();
-                }
-            }
-            boardPanel.requestFocus();
-        }
-    }
 
     @Override
     public boolean shouldReceiveKeyCommands() {
-        return !getChatterBoxActive() && boardPanel.isVisible() && !game.getPhase().isLounge() && !shouldIgnoreKeys;
+        return !getChatterBoxActive() && boardPanel.isVisible() && !game.getPhase().isLounge() && !clientState.shouldIgnoreKeys;
     }
 
     private final RedrawWorker redrawWorker = new RedrawWorker();
@@ -1043,28 +760,17 @@ public final class BoardView extends AbstractBoardView
 
     @Override
     public void preferenceChange(PreferenceChangeEvent e) {
-        invalidatePlanarCapture();
         switch (e.getName()) {
-            case GUIPreferences.SHOW_DEPLOY_ZONES_ARTY_AUTO:
-                showAllDeployment = (boolean) e.getNewValue();
-                repaint();
-                break;
-
             case ClientPreferences.MAP_TILESET:
                 clearHexImageCache();
                 updateBoard();
                 break;
 
             case GUIPreferences.UNIT_LABEL_STYLE:
-                if (clientgui != null) {
-                    clientgui.systemMessage("Label style changed to " + GUIP.getUnitLabelStyle().description);
-                }
             case GUIPreferences.UNIT_LABEL_BORDER:
             case GUIPreferences.TEAM_COLORING:
             case GUIPreferences.SHOW_DAMAGE_DECAL:
             case GUIPreferences.SHOW_DAMAGE_LEVEL:
-                updateEntityLabels();
-
                 for (Sprite s : wreckSprites) {
                     s.prepare();
                 }
@@ -1074,10 +780,6 @@ public final class BoardView extends AbstractBoardView
                 }
 
                 break;
-            case GUIPreferences.USE_CAMO_OVERLAY:
-                tileManager.reloadUnitIcons();
-                break;
-
             case GUIPreferences.USE_ISOMETRIC:
                 toggleIsometric();
                 break;
@@ -1086,9 +788,6 @@ public final class BoardView extends AbstractBoardView
             case GUIPreferences.BOARD_MAP_SHEET_COLOR:
                 hexImageCache.clear();
                 boardPanel.repaint();
-                break;
-            case GUIPreferences.BOARD_ECM_TRANSPARENCY:
-                updateEcmList();
                 break;
 
             case GUIPreferences.AO_HEX_SHADOWS:
@@ -1112,17 +811,35 @@ public final class BoardView extends AbstractBoardView
                 boardPanel.repaint();
                 break;
             case GUIPreferences.INCLINES:
-                game.getBoard(boardId).initializeAllAutomaticTerrain();
                 clearHexImageCache();
                 boardPanel.repaint();
                 break;
         }
     }
 
+    /**
+     * Returns whether a unit that finished a move can have that move animated. A unit that mounted a DropShip, was
+     * recovered by a carrier or left the board during its move has no position left, so there is no hex to draw its
+     * ghost sprite in.
+     *
+     * @param entity the unit that finished a move
+     *
+     * @return {@code true} when the unit still has a position to animate from
+     */
+    static boolean canAnimateMove(@Nullable Entity entity) {
+        return (entity != null) && (entity.getPosition() != null);
+    }
+
     void addMovingUnit(Entity entity, Vector<UnitLocation> movePath) {
+        if (!canAnimateMove(entity)) {
+            LOGGER.debug("Move animation skipped: {} has no position (loaded or off board)",
+                  (entity == null) ? "null entity" : entity.getShortName());
+            return;
+        }
         if (!movePath.isEmpty() && isOnThisBord(entity)) {
             MovingUnit m = new MovingUnit(entity, movePath);
             movingUnits.add(m);
+            clientState.setMovingUnits(true);
 
             GhostEntitySprite ghostSprite = new GhostEntitySprite(this, entity);
             ghostEntitySprites.add(ghostSprite);
@@ -1247,17 +964,17 @@ public final class BoardView extends AbstractBoardView
         graphics2D.translate(-HEX_W, -HEX_H);
 
         // draw all the "displayable"
-        if (displayablesRect == null) {
-            displayablesRect = new Rectangle();
+        if (clientState.displayablesRect == null) {
+            clientState.displayablesRect = new Rectangle();
         }
 
-        displayablesRect.x = -boardPanel.getX();
-        displayablesRect.y = -boardPanel.getY();
-        displayablesRect.width = scrollPane.getViewport().getViewRect().width;
-        displayablesRect.height = scrollPane.getViewport().getViewRect().height;
+        clientState.displayablesRect.x = -boardPanel.getX();
+        clientState.displayablesRect.y = -boardPanel.getY();
+        clientState.displayablesRect.width = scrollPane.getViewport().getViewRect().width;
+        clientState.displayablesRect.height = scrollPane.getViewport().getViewRect().height;
 
-        for (IDisplayable displayable : overlays) {
-            displayable.draw(graphics2D, displayablesRect);
+        for (IDisplayable displayable : clientState.overlays) {
+            displayable.draw(graphics2D, clientState.displayablesRect);
         }
 
         if (GUIP.getShowFPS()) {
@@ -1285,108 +1002,7 @@ public final class BoardView extends AbstractBoardView
 
     /** Shared tactical presentation for the classic board and GPU surface layers. */
     private void drawTacticalLayers(Graphics2D graphics2D, boolean includeUnits) {
-        // Minefield signs all over the place!
-        drawMinefields(graphics2D);
-
-        // Demolition charges set by the local player
-        drawDemolitionCharges(graphics2D);
-
-        // Artillery targets
-        drawArtilleryHexes(graphics2D);
-        drawOrbitalBombardmentHexes(graphics2D);
-
-        // The GPU capture draws selection, hover and acting-unit outlines natively. Capturing the classic flat
-        // hex cursors as well would render them on each hex's raised marking plane, split across neighbouring
-        // levels wherever the hexes differ in elevation.
-        if (includeUnits) {
-            // draw highlight border
-            drawSprite(graphics2D, highlightSprite);
-        }
-
-        // draw entity hex highlights (Nova CEWS network dialog)
-        BoardTacticalGraphics.draw(graphics2D, BoardTactical.Playback.HIDE_DURING_MOVEMENT, this::drawEntityHexHighlights);
-
-        // draw demolition charge selection highlights (Detonate Charges dialog)
-        drawDemolitionChargeHighlights(graphics2D);
-
-        // draw cursors
-        if (includeUnits) {
-            drawSprite(graphics2D, cursorSprite);
-            drawSprite(graphics2D, selectedSprite);
-        }
-        drawSprite(graphics2D, firstLOSSprite);
-        drawSprite(graphics2D, secondLOSSprite);
-
-        // draw deployment indicators.
-        if ((game.getPhase().isSetArtilleryAutoHitHexes() && showAllDeployment) || ((game.getPhase().isLounge())
-              && showLobbyPlayerDeployment)) {
-            BoardTacticalGraphics.draw(graphics2D, BoardTactical.Playback.HIDE_DURING_MOVEMENT, this::drawAllDeployment);
-        }
-
-        // A capture does not run drawHexes, which is where the deploying entity's legal deployment borders are
-        // painted for the interactive board, so the captured layer carries them instead.
-        if (!includeUnits && (en_Deployer != null)) {
-            BoardTacticalGraphics.draw(graphics2D, BoardTactical.Playback.HIDE_DURING_MOVEMENT, this::drawDeploymentBorders);
-        }
-
-        // draw C3 links
-        drawSprites(graphics2D, c3Sprites);
-
-        // draw flyover routes
-        if (game.getBoard(boardId).isGround()) {
-            drawSprites(graphics2D, vtolAttackSprites);
-            drawSprites(graphics2D, flyOverSprites);
-        }
-
-        // draw moving onscreen entities; a GPU capture leaves unit artwork out because it draws the moving token itself
-        if (includeUnits) {
-            drawSprites(graphics2D, movingEntitySprites);
-            drawSprites(graphics2D, ghostEntitySprites);
-        }
-
-        // draw onscreen attacks
-        drawSprites(graphics2D, attackSprites);
-
-        // draw artillery drift lines (from the targeted hex to where the round actually landed)
-        BoardTacticalGraphics.draw(graphics2D, BoardTactical.Playback.HOLD_DURING_PLAYBACK, this::drawArtilleryDriftLines);
-
-        // draw movement vectors.
-        if (game.useVectorMove() && game.getPhase().isMovement()) {
-            drawSprites(graphics2D, movementSprites);
-        }
-
-        if (game.getPhase().isFiring() && (!gpuCapture || graphics2D instanceof BoardTacticalGraphics)) {
-            BoardTacticalGraphics.draw(graphics2D, BoardTactical.Playback.HIDE_DURING_MOVEMENT, graphics -> {
-                for (Coords c : strafingCoords) {
-                    drawHexBorder(graphics, getHexLocation(c), Color.yellow, 0, 3);
-                }
-            });
-        }
-
-        // In iso mode, some sprites are drawn in drawHexes so they can go behind terrain; draw only the others here
-          drawSprites(graphics2D, includeUnits ? overTerrainSprites : overTerrainSprites.stream()
-              .filter(sprite -> !(sprite instanceof EntitySprite) && !(sprite instanceof IsometricSprite)).toList());
-
-        // draw movement, if valid
-        drawSprites(graphics2D, pathSprites);
-
-        // draw flight path indicators
-        drawSprites(graphics2D, fpiSprites);
-
-        // draw the ruler line
-        if (rulerStart != null && (!gpuCapture || graphics2D instanceof BoardTacticalGraphics)) {
-            Point start = getCentreHexLocation(rulerStart);
-            if (rulerEnd != null) {
-                Point end = getCentreHexLocation(rulerEnd);
-                graphics2D.setColor(Color.yellow);
-                graphics2D.drawLine(start.x, start.y, end.x, end.y);
-
-                drawRulerCrosshair(graphics2D, end, rulerEndColor);
-            }
-
-            drawRulerCrosshair(graphics2D, start, rulerStartColor);
-        }
-
+        clientState.drawTacticalLayers(graphics2D, includeUnits);
     }
 
     /**
@@ -1397,11 +1013,11 @@ public final class BoardView extends AbstractBoardView
      */
     @SuppressWarnings("unused")
     private void renderApproxHexDirection(Graphics2D g) {
-        if (getSelectedEntity() == null || selected == null) {
+        if (getSelectedEntity() == null || getSelected() == null) {
             return;
         }
 
-        int direction = getSelectedEntity().getPosition().approximateDirection(selected, 0, 0);
+        int direction = getSelectedEntity().getPosition().approximateDirection(getSelected(), 0, 0);
 
         Coords donutCoords = getSelectedEntity().getPosition().translated(direction);
 
@@ -1467,9 +1083,6 @@ public final class BoardView extends AbstractBoardView
 
     public void clearShadowMap() {
         shadowMap = null;
-        planarHexImageCache.clear();
-        groundArtwork.clear();
-        featureArtwork.clear();
     }
 
     public @Nullable Point getTerrainLightDirection() {
@@ -1489,9 +1102,7 @@ public final class BoardView extends AbstractBoardView
      * Looks through a vector of buffered images and draws them if they're onscreen.
      */
     private synchronized void drawSprites(Graphics2D graphics2D, Collection<? extends Sprite> spriteArrayList) {
-        for (Sprite sprite : spriteArrayList) {
-            drawSprite(graphics2D, sprite);
-        }
+        clientState.drawSprites(graphics2D, spriteArrayList);
     }
 
     private synchronized void drawHexSpritesForHex(Coords coords, Graphics2D graphics2D,
@@ -1499,8 +1110,7 @@ public final class BoardView extends AbstractBoardView
         Rectangle view = graphics2D.getClipBounds();
 
         for (HexSprite sprite : spriteArrayList) {
-            if ((!includeUnits && sprite instanceof IsometricSprite)
-                  || (gpuCapture && (hasNativeVolume(sprite) || sprite instanceof TacticalSprite))) {
+            if (!includeUnits && sprite instanceof IsometricSprite) {
                 continue;
             }
             Coords spritePosition = sprite.getPosition();
@@ -1569,30 +1179,7 @@ public final class BoardView extends AbstractBoardView
     /**
      * Draws a sprite, if it is in the current view
      */
-    private void drawSprite(Graphics2D graphics2D, Sprite sprite) {
-        if (gpuCapture && hasNativeVolume(sprite)) {
-            return;
-        }
-        if (graphics2D instanceof BoardTacticalGraphics) {
-            if (!sprite.isHidden() && sprite instanceof TacticalSprite tactical) {
-                BoardTacticalGraphics.draw(graphics2D, tactical.playback(), tactical::drawTactical);
-            }
-            return;
-        }
-        if (gpuCapture && sprite instanceof TacticalSprite) {
-            return;
-        }
-        Rectangle view = graphics2D.getClipBounds();
 
-        // This can potentially be an expensive operation
-        Rectangle spriteBounds = sprite.getBounds();
-        if (view.intersects(spriteBounds) && !sprite.isHidden()) {
-            if (!sprite.isReady()) {
-                sprite.prepare();
-            }
-            sprite.drawOnto(graphics2D, spriteBounds.x, spriteBounds.y, boardPanel);
-        }
-    }
 
     /**
      * Checks if a deployment indicator (yellow or cyan hex border) should be drawn for the given hex and draws it.
@@ -1601,133 +1188,16 @@ public final class BoardView extends AbstractBoardView
      * @param coords     The hex coords of the hex to check
      */
     private void drawDeployment(Graphics2D graphics2D, Coords coords) {
-        if (gpuCapture && !(graphics2D instanceof BoardTacticalGraphics)) {
-            return;
-        }
-        Board board = game.getBoard(boardId);
-        if (en_Deployer == null || !board.isLegalDeployment(coords, en_Deployer)) {
-            return;
-        }
-        boolean isAirDeployGround = en_Deployer.getMovementMode().isHover() || en_Deployer.getMovementMode().isVTOL();
-        boolean isWiGE = en_Deployer.getMovementMode().isWiGE();
-        boolean boardProhibited = en_Deployer.isBoardProhibited(board);
-
-        if (en_Deployer.isAero()) {
-            if (en_Deployer.getAltitude() > 0) {
-                // Flying Aeros are always above it all
-                if (!en_Deployer.isLocationProhibited(coords, boardId, board.getMaxElevation()) && !boardProhibited) {
-                    drawHexBorder(graphics2D, getHexLocation(coords), Color.yellow);
-                }
-            } else if (en_Deployer.getAltitude() == 0) {
-                // Show prospective Altitude 1+ hexes
-                if (!en_Deployer.isLocationProhibited(coords, boardId, 1) && !boardProhibited) {
-                    drawHexBorder(graphics2D, getHexLocation(coords), Color.cyan);
-                }
-            }
-        } else if (isAirDeployGround || isWiGE) {
-            // Draw hexes that are legal at a higher deployment elevation
-            Hex hex = board.getHex(coords);
-            // Default to Elevation 1 if ceiling + 1 <= 0.
-            int maxHeight = (isWiGE) ? 1 : (hex != null) ? Math.max(hex.ceiling() + 1, 1) : 1;
-            if (!en_Deployer.isLocationProhibited(coords, boardId, maxHeight) && !boardProhibited) {
-                drawHexBorder(graphics2D, getHexLocation(coords), Color.cyan);
-            }
-        } else if (en_Deployer instanceof AbstractBuildingEntity) {
-            var deploymentHelper = new AllowedDeploymentHelper(en_Deployer, coords, board, board.getHex(coords), game);
-            FacingOption facingOption = deploymentHelper.findAllowedFacings(0);
-            if (facingOption != null && facingOption.hasValidFacings()) {
-                // Draw hexes that're legal if we rotate
-                if (!boardProhibited) {
-                    drawHexBorder(graphics2D, getHexLocation(coords), Color.yellow);
-                }
-            }
-        }
-
-        if (!en_Deployer.isLocationProhibited(BoardLocation.of(coords, boardId)) && !boardProhibited) {
-            // Draw hexes that are legal at lowest deployment elevation
-            drawHexBorder(graphics2D, getHexLocation(coords), Color.yellow);
-        }
-
-        if (!en_Deployer.isLocationProhibited(BoardLocation.of(coords, boardId))
-              && en_Deployer.isLocationDeadly(coords)) {
-            drawHexBorder(graphics2D, getHexLocation(coords), GUIP.getWarningColor());
-        }
+        clientState.drawDeployment(graphics2D, coords);
     }
 
     /** Draws the deploying entity's legal deployment borders for every hex overlapping the clip. */
-    private void drawDeploymentBorders(Graphics2D graphics2D) {
-        Rectangle view = graphics2D.getClipBounds();
-        int firstX = (view.x / (int) (HEX_WC * scale)) - 1;
-        int firstY = (view.y / (int) (HEX_H * scale)) - 1;
-        int lastX = firstX + (view.width / (int) (HEX_WC * scale)) + 3;
-        int lastY = firstY + (view.height / (int) (HEX_H * scale)) + 3;
-        for (int x = firstX; x <= lastX; x++) {
-            for (int y = firstY; y <= lastY; y++) {
-                Coords coords = new Coords(x, y);
-                if (getBoard().getHex(coords) != null) {
-                    drawDeployment(graphics2D, coords);
-                }
-            }
-        }
-    }
+
 
     /**
      * Draw indicators for the deployment zones of all players
      */
-    private void drawAllDeployment(Graphics2D graphics2D) {
-        if (gpuCapture && !(graphics2D instanceof BoardTacticalGraphics)) {
-            return;
-        }
-        Rectangle view = graphics2D.getClipBounds();
-        // only update visible hexes
-        int drawX = (view.x / (int) (HEX_WC * scale)) - 1;
-        int drawY = (view.y / (int) (HEX_H * scale)) - 1;
 
-        int drawWidth = (view.width / (int) (HEX_WC * scale)) + 3;
-        int drawHeight = (view.height / (int) (HEX_H * scale)) + 3;
-
-        List<Player> players = game.getPlayersList();
-        final var gameOptions = game.getOptions();
-
-        if (gameOptions.booleanOption(OptionsConstants.BASE_SET_PLAYER_DEPLOYMENT_TO_PLAYER_0)) {
-            players = players.stream()
-                  .filter(player -> player.isBot() || player.getId() == 0)
-                  .collect(Collectors.toList());
-        }
-
-        if (game.getPhase().isLounge()
-              && !localPlayer.isGameMaster()
-              && (gameOptions.booleanOption(OptionsConstants.BASE_BLIND_DROP) || gameOptions.booleanOption(
-              OptionsConstants.BASE_REAL_BLIND_DROP))) {
-            players = players.stream().filter(player -> !player.isEnemyOf(localPlayer)).collect(Collectors.toList());
-        }
-
-        Board board = game.getBoard(boardId);
-        // loop through the hexes
-        for (int i = 0;
-              i < drawHeight;
-              i++) {
-            for (int j = 0;
-                  j < drawWidth;
-                  j++) {
-                Coords coords = new Coords(j + drawX, i + drawY);
-                int pCount = 0;
-                int bThickness = 1 + 10 / game.getNoOfPlayers();
-                // loop through all players
-                for (Player player : players) {
-                    if (board.isLegalDeployment(coords, player)) {
-                        Color playerColor = player.getColour().getColour();
-                        drawHexBorder(graphics2D,
-                              getHexLocation(coords),
-                              playerColor,
-                              (bThickness + 2) * pCount,
-                              bThickness);
-                        pCount++;
-                    }
-                }
-            }
-        }
-    }
 
     /**
      * Draw a layer of a solid color (alpha possible) on the hex at {@link Point} no padding by default
@@ -1758,48 +1228,31 @@ public final class BoardView extends AbstractBoardView
     }
 
     private static GradientPaint getGradientPaint(Color startingColor, float fogStripes, boolean reversed) {
-        Color endingColor = new Color(startingColor.getRed() / 2,
-              startingColor.getGreen() / 2,
-              startingColor.getBlue() / 2,
-              startingColor.getAlpha() / 2);
-
-        // the numbers make the lines align across hexes
-        // reversed changes stripe direction from bottom-left/top-right to top-left/bottom-right
-        if (reversed) {
-            return new GradientPaint(104.0f / fogStripes,
-                  0.0f,
-                  startingColor,
-                  42.0f / fogStripes,
-                  106.0f / fogStripes,
-                  endingColor,
-                  true);
-        } else {
-            return new GradientPaint(42.0f / fogStripes,
-                  0.0f,
-                  startingColor,
-                  104.0f / fogStripes,
-                  106.0f / fogStripes,
-                  endingColor,
-                  true);
-        }
+        return BoardClientState.getGradientPaint(startingColor, fogStripes, reversed);
     }
 
     public void drawHexBorder(Graphics2D graphics2D, Color color, double padding, double lineWidth) {
-        drawHexBorder(graphics2D, new Point(0, 0), color, padding, lineWidth);
+        clientState.drawHexBorder(graphics2D, color, padding, lineWidth);
     }
 
     public void drawHexBorder(Graphics2D graphics2D, Point point, Color col, double pad, double lineWidth) {
-        graphics2D.setColor(col);
-        graphics2D.fill(AffineTransform.getTranslateInstance(point.x, point.y)
-              .createTransformedShape(AffineTransform.getScaleInstance(scale, scale)
-                    .createTransformedShape(HexDrawUtilities.getHexFullBorderArea(lineWidth, pad))));
+        clientState.drawHexBorder(graphics2D, point, col, pad, lineWidth);
+    }
+
+    private void drawHexBorder(Graphics2D graphics2D, Point point, Color col, double pad, double lineWidth,
+          boolean floating) {
+        clientState.drawHexBorder(graphics2D, point, col, pad, lineWidth, floating);
     }
 
     /**
      * Draw an outline around the hex at {@link Point} no padding and a width of 1
      */
     private void drawHexBorder(Graphics2D graphics2D, Point point, Color color) {
-        drawHexBorder(graphics2D, point, color, 0, 1);
+        clientState.drawHexBorder(graphics2D, point, color);
+    }
+
+    private void drawHexBorder(Graphics2D graphics2D, Point point, Color color, boolean floating) {
+        clientState.drawHexBorder(graphics2D, point, color, floating);
     }
 
     /**
@@ -1807,64 +1260,16 @@ public final class BoardView extends AbstractBoardView
      * selected entity is not owned
      */
     public Mounted<?> getSelectedArtilleryWeapon() {
-        // We don't want to display artillery auto-hit/adjusted fire hexes during the ArtyAutoHitHexes phase. These
-        // could be displayed if the player uses the /reset command in some situations
-        if (game.getPhase().isSetArtilleryAutoHitHexes()) {
-            return null;
-        }
-
-        Mounted<?> selectedWeapon = selectedWeapon();
-
-        if ((getSelectedEntity() == null) || (selectedWeapon == null)) {
-            return null;
-        }
-
-        if (!getSelectedEntity().getOwner().equals(getLocalPlayer())) {
-            return null; // Not my business to see this
-        }
-
-        if (getSelectedEntity().getEquipmentNum(selectedWeapon) == -1) {
-            return null; // inconsistent state - weapon not on entity
-        }
-
-        if (!((selectedWeapon.getType() instanceof WeaponType) && selectedWeapon.getType()
-              .hasFlag(WeaponType.F_ARTILLERY))) {
-            return null; // not artillery
-        }
-
-        // otherwise, a weapon is selected, and it is artillery
-        return selectedWeapon;
+        return clientState.getSelectedArtilleryWeapon();
     }
 
-    @Nullable
-    private Mounted<?> selectedWeapon() {
-        return (clientgui != null) ? clientgui.getDisplayedWeapon().orElse(null) : null;
-    }
 
     /**
      * Draws hex borders for highlighted entity hexes (Nova CEWS network dialog).
      *
      * @param graphics The graphics object to draw on
      */
-    private void drawEntityHexHighlights(Graphics2D graphics) {
-        if (gpuCapture && !(graphics instanceof BoardTacticalGraphics)) {
-            return;
-        }
-        graphics.setColor(UIUtil.uiGreen());
-        graphics.setStroke(new BasicStroke((float) (2.0 * scale)));
 
-        for (Coords hex : highlightedEntityHexes) {
-            Point hexPos = getHexLocation(hex);
-            Shape hexBorder = HexDrawUtilities.getHexFullBorderLine(0);
-            Shape scaled = AffineTransform
-                  .getScaleInstance(scale, scale)
-                  .createTransformedShape(hexBorder);
-            Shape translated = AffineTransform
-                  .getTranslateInstance(hexPos.x, hexPos.y)
-                  .createTransformedShape(scaled);
-            graphics.draw(translated);
-        }
-    }
 
     /** Hazard-stripe yellow for the bold demolition charge selection outline. */
     private static final Color DEMO_CHARGE_HAZARD_COLOR = new Color(255, 213, 0);
@@ -1877,205 +1282,27 @@ public final class BoardView extends AbstractBoardView
      *
      * @param graphics The graphics object to draw on
      */
-    private void drawDemolitionChargeHighlights(Graphics2D graphics) {
-        if (gpuCapture && !(graphics instanceof BoardTacticalGraphics)) {
-            return;
-        }
-        if (demolitionChargeHighlightHexes.isEmpty()) {
-            return;
-        }
-        boolean hazard = GUIP.getDemolitionChargeHazardOutline();
-        Stroke oldStroke = graphics.getStroke();
-        for (Coords hex : demolitionChargeHighlightHexes) {
-            Point hexPos = getHexLocation(hex);
-            Shape hexBorder = HexDrawUtilities.getHexFullBorderLine(0);
-            Shape scaled = AffineTransform
-                  .getScaleInstance(scale, scale)
-                  .createTransformedShape(hexBorder);
-            Shape border = AffineTransform
-                  .getTranslateInstance(hexPos.x, hexPos.y)
-                  .createTransformedShape(scaled);
-            if (hazard) {
-                float boldWidth = (float) Math.max(3.0, 4.0 * scale);
-                // Black base pass, then a yellow dashed pass on top so the gaps show black underneath - a hazard stripe.
-                graphics.setColor(Color.BLACK);
-                graphics.setStroke(new BasicStroke(boldWidth, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER));
-                graphics.draw(border);
-                float dash = (float) Math.max(6.0, 10.0 * scale);
-                graphics.setColor(DEMO_CHARGE_HAZARD_COLOR);
-                graphics.setStroke(new BasicStroke(boldWidth, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER,
-                      10.0f, new float[] { dash, dash }, 0.0f));
-                graphics.draw(border);
-            } else {
-                graphics.setColor(UIUtil.uiGreen());
-                graphics.setStroke(new BasicStroke((float) (2.0 * scale)));
-                graphics.draw(border);
-            }
-        }
-        graphics.setStroke(oldStroke);
-    }
+
 
     /**
      * Draw the orbital bombardment attacks on the board view
      *
      * @param boardGraphics The graphics object to draw on
      */
-    private void drawOrbitalBombardmentHexes(Graphics2D boardGraphics) {
-        Image orbitalBombardmentImage = tileManager.getOrbitalBombardmentImage();
-        Rectangle view = boardGraphics.getClipBounds();
 
-        // Compute the origin of the viewing area
-        int drawX = (view.x / (int) (HEX_WC * scale)) - 1;
-        int drawY = (view.y / (int) (HEX_H * scale)) - 1;
-
-        // Compute size of viewing area
-        int drawWidth = (view.width / (int) (HEX_WC * scale)) + 3;
-        int drawHeight = (view.height / (int) (HEX_H * scale)) + 3;
-
-        // Draw incoming artillery sprites - requires server to update client's view of game
-        for (Enumeration<OrbitalBombardment> attacks = game.getOrbitalBombardmentAttacks();
-              attacks.hasMoreElements(); ) {
-            final OrbitalBombardment orbitalBombardment = attacks.nextElement();
-            final Coords coords = new Coords(orbitalBombardment.getX(), orbitalBombardment.getY());
-            // Is the Coord within the viewing area?
-            boolean insideViewArea = ((coords.getX() >= drawX)
-                  && (coords.getX() <= (drawX + drawWidth))
-                  && (coords.getY() >= drawY)
-                  && (coords.getY() <= (drawY + drawHeight)));
-            if (insideViewArea) {
-                if (gpuCapture) {
-                    if (!(boardGraphics instanceof BoardTacticalGraphics)) {
-                        continue;
-                    }
-                    // Keep the blast footprint on the ground; only its centre symbol floats.
-                    for (Coords affected : coords.allAtDistanceOrLess(orbitalBombardment.getRadius())) {
-                        drawHexBorder(boardGraphics, getHexLocation(affected),
-                              new Color(BoardMarker.Kind.ORBITAL_INCOMING.rgb()));
-                    }
-                    continue;
-                }
-                Point hexLocation = getHexLocation(coords);
-                boardGraphics.drawImage(getScaledImage(orbitalBombardmentImage, true),
-                      hexLocation.x,
-                      hexLocation.y,
-                      boardPanel);
-                for (Coords atDistanceCoords : coords.allAtDistanceOrLess(orbitalBombardment.getRadius())) {
-                    Point location = getHexLocation(atDistanceCoords);
-                    boardGraphics.drawImage(getScaledImage(orbitalBombardmentImage, true),
-                          location.x,
-                          location.y,
-                          boardPanel);
-                }
-            }
-        }
-    }
 
     /**
      * Display artillery modifier in retargeted hexes
      */
-    private void drawArtilleryHexes(Graphics2D graphics2D) {
-        if (gpuCapture) {
-            return;
-        }
-        Rectangle area = markerHexArea(graphics2D);
-        for (BoardMarker marker : artilleryMarkers()) {
-            if (!area.contains(marker.coords().getX(), marker.coords().getY())) {
-                continue;
-            }
-            int icon = switch (marker.kind()) {
-                case ARTILLERY_AUTO_HIT -> TilesetManager.ARTILLERY_AUTO_HIT;
-                case ARTILLERY_ADJUSTED -> TilesetManager.ARTILLERY_ADJUSTED;
-                default -> TilesetManager.ARTILLERY_INCOMING;
-            };
-            Point location = getHexLocation(marker.coords());
-            graphics2D.drawImage(getScaledImage(tileManager.getArtilleryTarget(icon), true),
-                  location.x, location.y, boardPanel);
-        }
-    }
+
 
     /** The same owner-visible attacks and selected-weapon modifiers feed both views. */
-    private List<BoardMarker> artilleryMarkers() {
-        List<BoardMarker> result = new ArrayList<>();
-        for (Enumeration<ArtilleryAttackAction> attacks = game.getArtilleryAttacks(); attacks.hasMoreElements();) {
-            Targetable target = attacks.nextElement().getTarget(game);
-            if (isOnThisBord(target)) {
-                result.add(boardMarker(BoardMarker.Kind.ARTILLERY_INCOMING, target.getPosition(), ""));
-            }
-        }
-        Mounted<?> weapon = getSelectedArtilleryWeapon();
-        if (weapon != null) {
-            for (ArtilleryModifier modifier : Objects.requireNonNull(getSelectedEntity()).aTracker.getWeaponModifiers(weapon)) {
-                boolean automatic = modifier.getModifier() == TargetRoll.AUTOMATIC_SUCCESS;
-                result.add(boardMarker(automatic ? BoardMarker.Kind.ARTILLERY_AUTO_HIT : BoardMarker.Kind.ARTILLERY_ADJUSTED,
-                      modifier.getCoords(), automatic ? "" : Integer.toString(modifier.getModifier())));
-            }
-        }
-        return result;
-    }
 
-    private Rectangle markerHexArea(Graphics2D graphics) {
-        Rectangle clip = graphics.getClipBounds();
-        return new Rectangle(clip.x / (int) (HEX_WC * scale) - 1, clip.y / (int) (HEX_H * scale) - 1,
-              clip.width / (int) (HEX_WC * scale) + 4, clip.height / (int) (HEX_H * scale) + 4);
-    }
 
     /**
      * Writes "MINEFIELD" in minefield hexes...
      */
-    private void drawMinefields(Graphics2D graphics2D) {
-        if (gpuCapture) {
-            return;
-        }
-        Rectangle area = markerHexArea(graphics2D);
-        for (BoardMarker marker : minefieldMarkers()) {
-            Coords coords = marker.coords();
-            if (!area.contains(coords.getX(), coords.getY())) {
-                continue;
-            }
-            Point hexLocation = getHexLocation(coords);
-            graphics2D.drawImage(getScaledImage(tileManager.getMinefieldSign(), true),
-                  hexLocation.x, hexLocation.y + (int) (10 * scale), boardPanel);
-            graphics2D.setColor(Color.black);
-            boolean vibrabomb = game.getNbrMinefields(coords) == 1
-                  && game.getMinefields(coords).getFirst().getType() == Minefield.TYPE_VIBRABOMB;
-            int lineY = vibrabomb ? 22 : 31;
-            for (String line : marker.label().split("\\n")) {
-                drawCenteredString(line, hexLocation.x, hexLocation.y + (int) (lineY * scale), font_minefield, graphics2D);
-                lineY += 9;
-            }
-        }
-    }
 
-    private List<BoardMarker> minefieldMarkers() {
-        List<BoardMarker> result = new ArrayList<>();
-        for (Enumeration<Coords> mined = game.getMinedCoords(); mined.hasMoreElements();) {
-            Coords coords = mined.nextElement();
-            if (!getBoard().contains(coords)) {
-                continue;
-            }
-            String label = "";
-            if (game.getNbrMinefields(coords) > 1) {
-                label = Messages.getString("BoardView1.Multiple");
-            } else if (game.getNbrMinefields(coords) == 1) {
-                Minefield minefield = game.getMinefields(coords).getFirst();
-                label = switch (minefield.getType()) {
-                    case Minefield.TYPE_CONVENTIONAL -> Messages.getString("BoardView1.Conventional") + minefield.getDensity() + ")";
-                    case Minefield.TYPE_INFERNO -> Messages.getString("BoardView1.Inferno") + minefield.getDensity() + ")";
-                    case Minefield.TYPE_ACTIVE -> Messages.getString("BoardView1.Active") + minefield.getDensity() + ")";
-                    case Minefield.TYPE_COMMAND_DETONATED -> Messages.getString("BoardView1.Command-") + "\n"
-                          + Messages.getString("BoardView1.detonated") + minefield.getDensity() + ")";
-                    case Minefield.TYPE_VIBRABOMB -> Messages.getString("BoardView1.Vibrabomb")
-                          + (localPlayer != null && minefield.getPlayerId() == localPlayer.getId()
-                                ? "\n(" + minefield.getSetting() + ")" : "");
-                    case Minefield.TYPE_TRIPWIRE -> Messages.getString("BoardView1.Tripwire");
-                    case Minefield.TYPE_PITFALL -> Messages.getString("BoardView1.Pitfall");
-                    default -> "";
-                };
-            }
-            result.add(boardMarker(BoardMarker.Kind.MINEFIELD, coords, label));
-        }
-        return result;
-    }
 
     /**
      * Draws an indicator on every hex holding a demolition charge set by the local player, so the player can keep track
@@ -2083,33 +1310,7 @@ public final class BoardView extends AbstractBoardView
      *
      * @param graphics2D the graphics context to draw on
      */
-    private void drawDemolitionCharges(Graphics2D graphics2D) {
-        if (gpuCapture) {
-            return;
-        }
-        Rectangle area = markerHexArea(graphics2D);
-        for (BoardMarker marker : demolitionMarkers()) {
-            if (area.contains(marker.coords().getX(), marker.coords().getY())) {
-                drawDemolitionChargeLabel(graphics2D, getHexLocation(marker.coords()), marker.label());
-            }
-        }
-    }
 
-    private List<BoardMarker> demolitionMarkers() {
-        List<BoardMarker> result = new ArrayList<>();
-        if (localPlayer != null) {
-            for (IBuilding building : getBoard().getBuildingsVector()) {
-                for (DemolitionCharge charge : building.getDemolitionCharges()) {
-                    if (charge.playerId == localPlayer.getId() && getBoard().contains(charge.pos)) {
-                        result.add(boardMarker(BoardMarker.Kind.DEMOLITION_CHARGE, charge.pos,
-                              GUIP.getDemolitionChargeColor().getRGB(),
-                              Messages.getString("BoardView1.demoChargeSet", charge.damage)));
-                    }
-                }
-            }
-        }
-        return result;
-    }
 
     private static final Color DEMO_CHARGE_OUTLINE_COLOR = new Color(0, 0, 0, 200);
 
@@ -2122,39 +1323,7 @@ public final class BoardView extends AbstractBoardView
      * @param hexLocation the pixel location of the hex
      * @param label       the label text
      */
-    private void drawDemolitionChargeLabel(Graphics2D graphics2D, Point hexLocation, String label) {
-        // The marker color is a client setting so players can adjust it for color vision deficiencies
-        // and for visibility against the terrain colors of the current map
-        Color demolitionChargeColor = GUIP.getDemolitionChargeColor();
-        int centerX = hexLocation.x + (hex_size.width / 2);
-        int centerY = hexLocation.y + (hex_size.height / 2);
-        int radius = Math.max(3, (int) (7 * scale));
-        int tickLength = Math.max(2, (int) (4 * scale));
 
-        Stroke oldStroke = graphics2D.getStroke();
-        // Outline pass (thicker, dark) below the colored pass keeps the crosshair visible on any terrain
-        graphics2D.setStroke(new BasicStroke(Math.max(2.5f, 3f * scale)));
-        graphics2D.setColor(DEMO_CHARGE_OUTLINE_COLOR);
-        drawCrosshair(graphics2D, centerX, centerY, radius, tickLength);
-        graphics2D.setStroke(new BasicStroke(Math.max(1f, 1.5f * scale)));
-        graphics2D.setColor(demolitionChargeColor);
-        drawCrosshair(graphics2D, centerX, centerY, radius, tickLength);
-        graphics2D.setStroke(oldStroke);
-
-        // Damage label on a dark backing pill below the crosshair
-        FontMetrics metrics = boardPanel.getFontMetrics(font_minefield);
-        int stringWidth = metrics.stringWidth(label);
-        int labelX = centerX - (stringWidth / 2);
-        int labelY = centerY + radius + tickLength + metrics.getAscent() + 2;
-
-        graphics2D.setColor(new Color(0, 0, 0, 160));
-        graphics2D.fillRoundRect(labelX - 4, labelY - metrics.getAscent() - 1,
-              stringWidth + 8, metrics.getAscent() + metrics.getDescent() + 2, 8, 8);
-
-        graphics2D.setFont(font_minefield);
-        graphics2D.setColor(demolitionChargeColor);
-        graphics2D.drawString(label, labelX, labelY);
-    }
 
     /**
      * Draws a crosshair: a circle with four tick lines extending outward at the cardinal points and a center dot.
@@ -2165,21 +1334,10 @@ public final class BoardView extends AbstractBoardView
      * @param radius     the circle radius in pixels
      * @param tickLength the length of the tick lines in pixels
      */
-    private void drawCrosshair(Graphics2D graphics2D, int centerX, int centerY, int radius, int tickLength) {
-        graphics2D.drawOval(centerX - radius, centerY - radius, radius * 2, radius * 2);
-        graphics2D.drawLine(centerX, centerY - radius - tickLength, centerX, centerY - radius + tickLength);
-        graphics2D.drawLine(centerX, centerY + radius - tickLength, centerX, centerY + radius + tickLength);
-        graphics2D.drawLine(centerX - radius - tickLength, centerY, centerX - radius + tickLength, centerY);
-        graphics2D.drawLine(centerX + radius - tickLength, centerY, centerX + radius + tickLength, centerY);
-        graphics2D.fillOval(centerX - 1, centerY - 1, 3, 3);
-    }
+
 
     private void drawCenteredString(String string, int x, int y, Font font, Graphics2D graphics2D) {
-        FontMetrics currentMetrics = boardPanel.getFontMetrics(font);
-        int stringWidth = currentMetrics.stringWidth(string);
-        x += ((hex_size.width - stringWidth) / 2);
-        graphics2D.setFont(font);
-        graphics2D.drawString(string, x, y);
+        clientState.drawCenteredString(string, x, y, font, graphics2D);
     }
 
     /**
@@ -2195,67 +1353,14 @@ public final class BoardView extends AbstractBoardView
      * @param graphics2D     The hex graphics context
      * @param scale          The current board scale
      */
-    private void drawHeatMapTurnLabel(Collection<SpecialHexDisplay> heatMapMarkers, Graphics2D graphics2D,
-          float scale) {
-        SortedSet<Integer> firingCountdowns = new TreeSet<>();
-        SortedSet<Integer> predictedTurns = new TreeSet<>();
-        for (SpecialHexDisplay marker : heatMapMarkers) {
-            String info = marker.getInfo();
-            if ((info == null) || !info.startsWith(SpecialHexDisplay.HEAT_MAP_PREFIX)) {
-                continue;
-            }
-            // Control token is "<turn-or-countdown>:<heat>:<kind>".
-            String[] fields = heatMapToken(info).split(":");
-            if (fields.length == 0) {
-                continue;
-            }
-            try {
-                int value = Integer.parseInt(fields[0]);
-                if ((fields.length >= 3) && SpecialHexDisplay.HEAT_MAP_KIND_FIRING.equals(fields[2])) {
-                    firingCountdowns.add(value);
-                } else {
-                    predictedTurns.add(value);
-                }
-            } catch (NumberFormatException ignored) {
-                // skip a marker whose turn value is not numeric
-            }
-        }
 
-        String label;
-        if (!firingCountdowns.isEmpty()) {
-            // A firing marker's countdown wins over a predicted label; merge distinct countdowns with '/'.
-            if ((firingCountdowns.size() == 1) && (firingCountdowns.first() == 0)) {
-                label = Messages.getString("BoardView.artillery.splash");
-            } else {
-                label = Messages.getString("BoardView.artillery.firingCountdown", joinValues(firingCountdowns));
-            }
-        } else if (!predictedTurns.isEmpty()) {
-            label = Messages.getString("BoardView.artillery.predictedTurns", joinValues(predictedTurns));
-        } else {
-            return;
-        }
-
-        Color previousColor = graphics2D.getColor();
-        graphics2D.setColor(Color.WHITE);
-        drawCenteredString(label, 0, (int) (45 * scale), font_note, graphics2D);
-        graphics2D.setColor(previousColor);
-    }
 
     /**
      * @param values The values to render
      *
      * @return The values joined with a slash, e.g. {@code 1/2}
      */
-    private String joinValues(Collection<Integer> values) {
-        StringBuilder joined = new StringBuilder();
-        for (Integer value : values) {
-            if (joined.length() > 0) {
-                joined.append('/');
-            }
-            joined.append(value);
-        }
-        return joined.toString();
-    }
+
 
     /**
      * The cold-to-hot diverging color ramp for predicted-position heat-map markers: navy blue (coldest, a single
@@ -2284,21 +1389,14 @@ public final class BoardView extends AbstractBoardView
      *
      * @return The control token (without the prefix), or an empty string if there is none
      */
-    private String heatMapToken(String info) {
-        int prefixLength = SpecialHexDisplay.HEAT_MAP_PREFIX.length();
-        int space = info.indexOf(' ', prefixLength);
-        return (space > prefixLength) ? info.substring(prefixLength, space) : info.substring(prefixLength);
-    }
+
 
     /**
      * @param specialHexDisplay A special hex display being drawn
      *
      * @return {@code true} if this is any bot artillery heat-map marker (predicted-position or firing)
      */
-    private boolean isHeatMapMarker(SpecialHexDisplay specialHexDisplay) {
-        String info = specialHexDisplay.getInfo();
-        return (info != null) && info.startsWith(SpecialHexDisplay.HEAT_MAP_PREFIX);
-    }
+
 
     /**
      * @param specialHexDisplay A special hex display being drawn
@@ -2306,31 +1404,14 @@ public final class BoardView extends AbstractBoardView
      * @return {@code true} if this is a predicted-position heat-map marker (painted as a cold-to-hot color fill),
      *       {@code false} for a firing marker or any non-heat-map display
      */
-    private boolean isPredictedHeatMapMarker(SpecialHexDisplay specialHexDisplay) {
-        String info = specialHexDisplay.getInfo();
-        if ((info == null) || !info.startsWith(SpecialHexDisplay.HEAT_MAP_PREFIX)) {
-            return false;
-        }
-        String[] fields = heatMapToken(info).split(":");
-        return (fields.length >= 3) && SpecialHexDisplay.HEAT_MAP_KIND_PREDICTED.equals(fields[2]);
-    }
+
 
     /**
      * @param info A heat-map marker's info text
      *
      * @return The number of enemies predicted to converge on the hex (the marker's heat), or 1 if it cannot be parsed
      */
-    private int heatMapHeatUnits(String info) {
-        String[] fields = heatMapToken(info).split(":");
-        if (fields.length >= 2) {
-            try {
-                return Integer.parseInt(fields[1]);
-            } catch (NumberFormatException ignored) {
-                return 1;
-            }
-        }
-        return 1;
-    }
+
 
     /**
      * Maps a predicted hex's heat (number of enemies converging on it) to a color on the cold-to-hot diverging ramp:
@@ -2341,20 +1422,7 @@ public final class BoardView extends AbstractBoardView
      *
      * @return The color to paint the hex
      */
-    private Color heatMapDivergingColor(int heatUnits) {
-        float normalized = (float) (heatUnits - 1) / (HEAT_MAP_MAX_HEAT_UNITS - 1);
-        normalized = Math.max(0.0f, Math.min(1.0f, normalized));
-        float scaledPosition = normalized * (HEAT_MAP_COLOR_RAMP.length - 1);
-        int lowerStop = (int) Math.floor(scaledPosition);
-        int upperStop = Math.min(lowerStop + 1, HEAT_MAP_COLOR_RAMP.length - 1);
-        float fraction = scaledPosition - lowerStop;
-        Color from = HEAT_MAP_COLOR_RAMP[lowerStop];
-        Color to = HEAT_MAP_COLOR_RAMP[upperStop];
-        int red = Math.round(from.getRed() + (fraction * (to.getRed() - from.getRed())));
-        int green = Math.round(from.getGreen() + (fraction * (to.getGreen() - from.getGreen())));
-        int blue = Math.round(from.getBlue() + (fraction * (to.getBlue() - from.getBlue())));
-        return new Color(red, green, blue);
-    }
+
 
     /**
      * Paints a predicted-position heat-map marker as a cold-to-hot translucent fill over the whole hex (navy = one
@@ -2365,18 +1433,7 @@ public final class BoardView extends AbstractBoardView
      * @param graphics2D        The hex graphics context
      * @param scale             The current board scale
      */
-    private void drawHeatMapPredictedHex(SpecialHexDisplay specialHexDisplay, Graphics2D graphics2D, float scale) {
-        Color heatColor = heatMapDivergingColor(heatMapHeatUnits(specialHexDisplay.getInfo()));
-        Color previousColor = graphics2D.getColor();
-        Composite previousComposite = graphics2D.getComposite();
-        graphics2D.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, HEAT_MAP_FILL_ALPHA));
-        graphics2D.setColor(heatColor);
-        AffineTransform hexScale = new AffineTransform();
-        hexScale.scale(scale, scale);
-        graphics2D.fill(hexScale.createTransformedShape(HEX_POLY));
-        graphics2D.setComposite(previousComposite);
-        graphics2D.setColor(previousColor);
-    }
+
 
     /** Color of the artillery drift line drawn from a targeted hex to where the round actually landed. */
     private static final Color ARTILLERY_DRIFT_LINE_COLOR = new Color(255, 191, 0);
@@ -2388,40 +1445,7 @@ public final class BoardView extends AbstractBoardView
      *
      * @param graphics2D The board graphics context, in board pixel space at the current scale
      */
-    private void drawArtilleryDriftLines(Graphics2D graphics2D) {
-        if (gpuCapture && !(graphics2D instanceof BoardTacticalGraphics)) {
-            return;
-        }
-        if (!GUIP.getShowArtilleryDriftArrows()) {
-            return;
-        }
-        Board board = game.getBoard(boardId);
-        if (board == null) {
-            return;
-        }
-        Map<Coords, Collection<SpecialHexDisplay>> specialHexDisplays = board.getSpecialHexDisplayTable();
-        if ((specialHexDisplays == null) || specialHexDisplays.isEmpty()) {
-            return;
-        }
-        Stroke previousStroke = graphics2D.getStroke();
-        Color previousColor = graphics2D.getColor();
-        float dashLength = Math.max(4.0f, hex_size.width / 14.0f);
-        graphics2D.setColor(ARTILLERY_DRIFT_LINE_COLOR);
-        graphics2D.setStroke(new BasicStroke(Math.max(1.0f, hex_size.width / 60.0f), BasicStroke.CAP_ROUND,
-              BasicStroke.JOIN_ROUND, 1.0f, new float[] { dashLength, dashLength }, 0.0f));
-        for (Map.Entry<Coords, Collection<SpecialHexDisplay>> entry : specialHexDisplays.entrySet()) {
-            for (SpecialHexDisplay specialHexDisplay : entry.getValue()) {
-                Coords landingHex = specialHexDisplay.getDriftHex();
-                if ((landingHex == null)
-                      || !specialHexDisplay.drawNow(game.getPhase(), game.getRoundCount(), getLocalPlayer(), GUIP)) {
-                    continue;
-                }
-                drawDriftLine(graphics2D, entry.getKey(), landingHex);
-            }
-        }
-        graphics2D.setStroke(previousStroke);
-        graphics2D.setColor(previousColor);
-    }
+
 
     /**
      * Draws a single drift line, with an arrowhead at the landing hex, between the centers of two hexes.
@@ -2430,27 +1454,7 @@ public final class BoardView extends AbstractBoardView
      * @param targetedHex The hex that was targeted (line origin)
      * @param landingHex  The hex the round drifted to (arrowhead end)
      */
-    private void drawDriftLine(Graphics2D graphics2D, Coords targetedHex, Coords landingHex) {
-        Point targetedPoint = getHexLocation(targetedHex);
-        Point landingPoint = getHexLocation(landingHex);
-        if ((targetedPoint == null) || (landingPoint == null)) {
-            return;
-        }
-        int fromX = targetedPoint.x + (hex_size.width / 2);
-        int fromY = targetedPoint.y + (hex_size.height / 2);
-        int toX = landingPoint.x + (hex_size.width / 2);
-        int toY = landingPoint.y + (hex_size.height / 2);
-        graphics2D.drawLine(fromX, fromY, toX, toY);
-        double angle = Math.atan2((double) toY - fromY, (double) toX - fromX);
-        int headLength = Math.max(6, hex_size.width / 6);
-        double spread = Math.toRadians(28);
-        int leftX = (int) Math.round(toX - (headLength * Math.cos(angle - spread)));
-        int leftY = (int) Math.round(toY - (headLength * Math.sin(angle - spread)));
-        int rightX = (int) Math.round(toX - (headLength * Math.cos(angle + spread)));
-        int rightY = (int) Math.round(toY - (headLength * Math.sin(angle + spread)));
-        graphics2D.drawLine(toX, toY, leftX, leftY);
-        graphics2D.drawLine(toX, toY, rightX, rightY);
-    }
+
 
     @Override
     public BufferedImage getEntireBoardImage(boolean ignoreUnits, boolean useBaseZoom) {
@@ -2526,7 +1530,7 @@ public final class BoardView extends AbstractBoardView
                         if (!saveBoardImage && GUIP.getShowWrecks()) {
                             drawIsometricWreckSpritesForHex(coords, graphics2D, isometricWreckSprites, false);
                         }
-                        drawHexSpritesForHex(coords, graphics2D, behindTerrainHexSprites, includeUnits);
+                        drawHexSpritesForHex(coords, graphics2D, clientState.behindTerrainHexSprites, includeUnits);
                         drawDeployment(graphics2D, coords);
                         drawOrthograph(coords, graphics2D);
                         // On-bridge wrecks: drawn after the bridge orthograph so they sit on the deck.
@@ -2551,105 +1555,41 @@ public final class BoardView extends AbstractBoardView
         if (hex == null) {
             return;
         }
-        Image baseImage = gpuCapture ? gpuTileset.getBase(hex) : tileManager.baseFor(hex);
+        Image baseImage = tileManager.baseFor(hex);
         drawBaseTerrain(hex, graphics2D, baseImage);
     }
 
-    private void drawBaseTerrain(Hex hex, Graphics2D graphics2D, Image baseImage) {
-        Image scaledImage = getScaledImage(baseImage, true);
-
-        // check if this is a standard tile image 84x72 or something different
-        boolean standardTile = (baseImage.getHeight(null) == HEX_H) && (baseImage.getWidth(null) == HEX_W);
-        // do not make larger than hex images even when the input image is big
-        int origImgWidth = scaledImage.getWidth(null); // save for later, needed for large tiles
-        int origImgHeight = scaledImage.getHeight(null);
-
-        if (standardTile) { // is the image hex-sized, 84*72?
-            graphics2D.drawImage(scaledImage, 0, 0, boardPanel);
-            return;
-        }
-
-        // Draw image for a texture larger than a hex
-        Point p1SRC = getHexLocationLargeTile(hex.getCoords().getX(), hex.getCoords().getY());
-        p1SRC.x = p1SRC.x % origImgWidth;
-        p1SRC.y = p1SRC.y % origImgHeight;
-        Point p2SRC = new Point((int) (p1SRC.x + HEX_W * scale), (int) (p1SRC.y + HEX_H * scale));
-        Point p2DST = new Point((int) (HEX_W * scale), (int) (HEX_H * scale));
-
-        // hex mask to limit drawing to the hex shape
-        // TODO : this is not ideal yet but at least it draws without leaving gaps at any zoom
-        Image hexMask = getScaledImage(tileManager.getHexMask(), true);
-        graphics2D.drawImage(hexMask, 0, 0, boardPanel);
-        Composite svComp = graphics2D.getComposite();
-        graphics2D.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_ATOP, 1f));
-
-        // paint the right slice from the big pic
-        graphics2D.drawImage(scaledImage, 0, 0, p2DST.x, p2DST.y, p1SRC.x, p1SRC.y, p2SRC.x, p2SRC.y, null);
-
-        // Handle wrapping of the image
-        if (p2SRC.x > origImgWidth && p2SRC.y <= origImgHeight) {
-            graphics2D.drawImage(scaledImage,
-                  origImgWidth - p1SRC.x,
-                  0,
-                  p2DST.x,
-                  p2DST.y,
-                  0,
-                  p1SRC.y,
-                  p2SRC.x - origImgWidth,
-                  p2SRC.y,
-                  null); // paint additional slice on the left side
-        } else if (p2SRC.x <= origImgWidth && p2SRC.y > origImgHeight) {
-            graphics2D.drawImage(scaledImage,
-                  0,
-                  origImgHeight - p1SRC.y,
-                  p2DST.x,
-                  p2DST.y,
-                  p1SRC.x,
-                  0,
-                  p2SRC.x,
-                  p2SRC.y - origImgHeight,
-                  null); // paint additional slice on the top
-        } else if (p2SRC.x > origImgWidth) {
-            graphics2D.drawImage(scaledImage,
-                  origImgWidth - p1SRC.x,
-                  0,
-                  p2DST.x,
-                  p2DST.y,
-                  0,
-                  p1SRC.y,
-                  p2SRC.x - origImgWidth,
-                  p2SRC.y,
-                  null); // paint additional slice on the top
-            graphics2D.drawImage(scaledImage,
-                  0,
-                  origImgHeight - p1SRC.y,
-                  p2DST.x,
-                  p2DST.y,
-                  p1SRC.x,
-                  0,
-                  p2SRC.x,
-                  p2SRC.y - origImgHeight,
-                  null); // paint additional slice on the left side
-            // paint additional slice on the top left side
-            graphics2D.drawImage(scaledImage,
-                  origImgWidth - p1SRC.x,
-                  origImgHeight - p1SRC.y,
-                  p2DST.x,
-                  p2DST.y,
-                  0,
-                  0,
-                  p2SRC.x - origImgWidth,
-                  p2SRC.y - origImgHeight,
-                  null);
-        }
-
-        graphics2D.setComposite(svComp);
+    private void drawBaseTerrain(Hex hex, Graphics2D graphics, Image image) {
+        BoardArtwork.drawBaseTerrain(hex, graphics, image, getScaledImage(image, true),
+              getScaledImage(tileManager.getHexMask(), true), scale);
     }
 
     /**
      * Draws a hex onto the board buffer. This assumes that drawRect is current, and does not check if the hex is
      * visible.
      */
+    /**
+     * Checks if options for darkening and highlighting are turned on: If there is no LOS from currently selected
+     * hex/entity, then darkens hex c. If there is a LOS from the hex c to the selected hex/entity, then hex c is
+     * colored according to distance.
+     *
+     * @param boardGraph The board on which we paint.
+     * @param c          Hex that is being processed.
+     */
+    private boolean drawFieldOfView(Graphics2D boardGraph, Coords c) {
+        BoardFieldOfView.Hex result = fovHighlightingAndDarkening.evaluate(c);
+        if (result.tint() != 0) {
+            Color tint = new Color(result.tint(), true);
+            if (result.visibility() == BoardFieldOfView.Visibility.ORIGIN) {
+                drawHexBorder(boardGraph, new Point(0, 0), tint, 0, 7);
+            } else {
+                drawHexLayer(boardGraph, tint,
+                      result.visibility() == BoardFieldOfView.Visibility.BLOCKED, GUIP.getFovSpottingMode());
+            }
+        }
+        return result.hasLineOfSight();
+    }
+
     private void drawHex(Coords coords, Graphics boardGraph, boolean saveBoardImage) {
         if (!game.getBoard(boardId).contains(coords)) {
             return;
@@ -2676,22 +1616,20 @@ public final class BoardView extends AbstractBoardView
         boolean dontCache = false;
         int imgWidth = (int) (HEX_W * scale);
         int imgHeight = (int) (HEX_H * scale);
-        if (!gpuCapture) {
-            // Tactical capture does not draw the base tile or raised classic sides.
-            Image baseImage = tileManager.baseFor(hex);
-            scaledImage = getScaledImage(baseImage, true);
-            dontCache = animatedImages.contains(baseImage.hashCode());
-            imgWidth = Math.min(imgWidth, scaledImage.getWidth(null));
-            imgHeight = Math.min(imgHeight, scaledImage.getHeight(null));
-            int largestLevelDiff = 0;
-            for (int dir : allDirections) {
-                Hex adjHex = game.getBoard(boardId).getHexInDir(coords, dir);
-                if (adjHex != null) {
-                    largestLevelDiff = Math.max(largestLevelDiff, Math.abs(level - adjHex.getLevel()));
-                }
+        // Tactical capture does not draw the base tile or raised classic sides.
+        Image baseImage = tileManager.baseFor(hex);
+        scaledImage = getScaledImage(baseImage, true);
+        dontCache = animatedImages.contains(baseImage.hashCode());
+        imgWidth = Math.min(imgWidth, scaledImage.getWidth(null));
+        imgHeight = Math.min(imgHeight, scaledImage.getHeight(null));
+        int largestLevelDiff = 0;
+        for (int dir : allDirections) {
+            Hex adjHex = game.getBoard(boardId).getHexInDir(coords, dir);
+            if (adjHex != null) {
+                largestLevelDiff = Math.max(largestLevelDiff, Math.abs(level - adjHex.getLevel()));
             }
-            imgHeight += (int) (verticalOffset * scale * largestLevelDiff);
         }
+        imgHeight += (int) (verticalOffset * scale * largestLevelDiff);
         // If the base image isn't ready, we should signal a repaint and stop
         if ((imgWidth < 0) || (imgHeight < 0)) {
             boardPanel.repaint();
@@ -2703,23 +1641,53 @@ public final class BoardView extends AbstractBoardView
         Graphics2D graphics2D = (Graphics2D) (hexImage.getGraphics());
         UIUtil.setHighQualityRendering(graphics2D);
 
-        if (!gpuCapture) {
-            drawBaseTerrain(hex, graphics2D);
+        drawBaseTerrain(hex, graphics2D);
 
-            // To place roads under the shadow map, some supers have to be drawn before the shadow map, otherwise the
-            // supers are drawn after. Unfortunately the supers images themselves can't be checked for roads.
-            List<Image> supers = tileManager.supersFor(hex);
-            boolean supersUnderShadow = false;
-            if (hex.containsTerrain(Terrains.ROAD)
-                  || hex.containsTerrain(Terrains.WATER)
-                  || hex.containsTerrain(Terrains.PAVEMENT)
-                  || hex.containsTerrain(Terrains.GROUND_FLUFF)
-                  || hex.containsTerrain(Terrains.ROUGH)
-                  || hex.containsTerrain(Terrains.RUBBLE)
-                  || hex.containsTerrain(Terrains.SNOW)) {
-                supersUnderShadow = true;
-                if (supers != null) {
-                    for (Image image : supers) {
+        // To place roads under the shadow map, some supers have to be drawn before the shadow map, otherwise the
+        // supers are drawn after. Unfortunately the supers images themselves can't be checked for roads.
+        List<Image> supers = tileManager.supersFor(hex);
+        boolean supersUnderShadow = false;
+        if (hex.containsTerrain(Terrains.ROAD)
+              || hex.containsTerrain(Terrains.WATER)
+              || hex.containsTerrain(Terrains.PAVEMENT)
+              || hex.containsTerrain(Terrains.GROUND_FLUFF)
+              || hex.containsTerrain(Terrains.ROUGH)
+              || hex.containsTerrain(Terrains.RUBBLE)
+              || hex.containsTerrain(Terrains.SNOW)) {
+            supersUnderShadow = true;
+            if (supers != null) {
+                for (Image image : supers) {
+                    if (animatedImages.contains(image.hashCode())) {
+                        dontCache = true;
+                    }
+                    scaledImage = getScaledImage(image, true);
+                    graphics2D.drawImage(scaledImage, 0, 0, boardPanel);
+                }
+            }
+        }
+
+        // Add the terrain & building shadows
+        if (GUIP.getShadowMap() && (shadowMap != null)) {
+            Point p1SRC = getHexLocationLargeTile(coords.getX(), coords.getY(), 1);
+            Point p2SRC = new Point(p1SRC.x + HEX_W, p1SRC.y + HEX_H);
+            Point p2DST = new Point(hex_size.width, hex_size.height);
+
+            Composite svComp = graphics2D.getComposite();
+            if (conditions.getLight().isDay()) {
+                graphics2D.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_ATOP, 0.55f));
+            } else {
+                graphics2D.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_ATOP, 0.45f));
+            }
+
+            // paint the right slice from the big pic
+            graphics2D.drawImage(shadowMap, 0, 0, p2DST.x, p2DST.y, p1SRC.x, p1SRC.y, p2SRC.x, p2SRC.y, null);
+            graphics2D.setComposite(svComp);
+        }
+
+        if (!supersUnderShadow) {
+            if (supers != null) {
+                for (Image image : supers) {
+                    if (image != null) {
                         if (animatedImages.contains(image.hashCode())) {
                             dontCache = true;
                         }
@@ -2728,145 +1696,38 @@ public final class BoardView extends AbstractBoardView
                     }
                 }
             }
+        }
 
-            // Add the terrain & building shadows
-            if (!gpuCapture && GUIP.getShadowMap() && (shadowMap != null)) {
-                Point p1SRC = getHexLocationLargeTile(coords.getX(), coords.getY(), 1);
-                Point p2SRC = new Point(p1SRC.x + HEX_W, p1SRC.y + HEX_H);
-                Point p2DST = new Point(hex_size.width, hex_size.height);
+        // Check for buildings and woods buried under their own shadows.
+        if ((supers != null) && supersUnderShadow && (hex.containsTerrain(Terrains.BUILDING) || hex.containsTerrain(
+              Terrains.WOODS))) {
+            Image lastSuper = supers.getLast();
+            scaledImage = getScaledImage(lastSuper, true);
+            graphics2D.drawImage(scaledImage, 0, 0, boardPanel);
+        }
 
-                Composite svComp = graphics2D.getComposite();
-                if (conditions.getLight().isDay()) {
-                    graphics2D.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_ATOP, 0.55f));
-                } else {
-                    graphics2D.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_ATOP, 0.45f));
-                }
-
-                // paint the right slice from the big pic
-                graphics2D.drawImage(shadowMap, 0, 0, p2DST.x, p2DST.y, p1SRC.x, p1SRC.y, p2SRC.x, p2SRC.y, null);
-                graphics2D.setComposite(svComp);
-            }
-
-            if (!supersUnderShadow) {
-                if (supers != null) {
-                    for (Image image : supers) {
-                        if (null != image) {
-                            if (animatedImages.contains(image.hashCode())) {
-                                dontCache = true;
-                            }
-                            scaledImage = getScaledImage(image, true);
-                            graphics2D.drawImage(scaledImage, 0, 0, boardPanel);
-                        }
-                    }
-                }
-            }
-
-            // Check for buildings and woods buried under their own shadows.
-            if ((supers != null) && supersUnderShadow && (hex.containsTerrain(Terrains.BUILDING) || hex.containsTerrain(
-                  Terrains.WOODS))) {
-                Image lastSuper = supers.getLast();
-                scaledImage = getScaledImage(lastSuper, true);
-                graphics2D.drawImage(scaledImage, 0, 0, boardPanel);
-            }
-
-            // AO Hex Shadow in this hex when a higher one is adjacent
-            if (!gpuCapture && GUIP.getAOHexShadows()) {
-                for (int dir : allDirections) {
-                    Shape ShadowShape = getElevationShadowArea(coords, dir);
-                    GradientPaint gpl = getElevationShadowGP(coords, dir);
-                    if ((ShadowShape != null) && (gpl != null)) {
-                        graphics2D.setPaint(gpl);
-                        graphics2D.fill(getElevationShadowArea(coords, dir));
-                    }
-                }
-            }
-
-            // Orthographic = bridges
-            List<Image> orthogonalImages = tileManager.orthographicFor(hex);
-            if (orthogonalImages != null) {
-                for (Image image : orthogonalImages) {
-                    if (animatedImages.contains(image.hashCode())) {
-                        dontCache = true;
-                    }
+        // AO Hex Shadow in this hex when a higher one is adjacent
+        if (GUIP.getAOHexShadows()) {
+            for (int dir : allDirections) {
+                Shape ShadowShape = getElevationShadowArea(coords, dir);
+                GradientPaint gpl = getElevationShadowGP(coords, dir);
+                if ((ShadowShape != null) && (gpl != null)) {
+                    graphics2D.setPaint(gpl);
+                    graphics2D.fill(getElevationShadowArea(coords, dir));
                 }
             }
         }
 
-        AffineTransform scaleTransform = new AffineTransform();
-        scaleTransform.scale(scale, scale);
-
-        int spaceInterfacePosition = BoardHelper.spaceAtmosphereInterfacePosition(game);
-        // Draw in atmosphere in a high-altitude map (unless planetary conditions say its vacuum)
-        if (BoardHelper.isAtmosphericRow(game, getBoard(), coords)) {
-            int atmosphericRow = BoardHelper.effectiveAtmosphericRowNumber(game, getBoard(), coords);
-            // First, fade out the stars
-            int alphaStepStars = 120 / (spaceInterfacePosition - 1);
-            graphics2D.setColor(new Color(0, 0, 0, 250 - atmosphericRow * alphaStepStars));
-            graphics2D.fill(scaleTransform.createTransformedShape(HEX_POLY));
-            // Add atmosphere
-            int alphaStep = 160 / (spaceInterfacePosition - 1);
-            graphics2D.setColor(new Color(0, 250, 250, 190 - atmosphericRow * alphaStep));
-            graphics2D.fill(scaleTransform.createTransformedShape(HEX_POLY));
-        }
-
-        // Draw in the space/atmosphere interface in a high-altitude map
-        if (BoardHelper.isSpaceAtmosphereInterface(game, getBoard(), coords)) {
-            Polygon halfHex = new Polygon();
-            halfHex.addPoint(21, 0);
-            halfHex.addPoint(42, 0);
-            halfHex.addPoint(42, 71);
-            halfHex.addPoint(21, 71);
-            halfHex.addPoint(0, 36);
-            halfHex.addPoint(0, 35);
-            graphics2D.setColor(new Color(0, 250, 250, 15));
-            graphics2D.fill(scaleTransform.createTransformedShape(halfHex));
-            Polygon line = new Polygon();
-            line.addPoint(42, 0);
-            line.addPoint(42, 71);
-            graphics2D.setColor(new Color(130, 130, 130, 100));
-            BasicStroke bs1 = new BasicStroke(2,
-                  BasicStroke.CAP_BUTT,
-                  BasicStroke.JOIN_ROUND,
-                  1.0f,
-                  new float[] { 3f, 5f },
-                  0f);
-            graphics2D.setStroke(bs1);
-            AffineTransform oldTransform = graphics2D.getTransform();
-            graphics2D.transform(scaleTransform);
-            graphics2D.draw(line);
-            graphics2D.setTransform(oldTransform);
-        }
-
-        // Draw in ground in a high-altitude map
-        if (BoardHelper.isGroundRowHex(getBoard(), coords)) {
-            // Atmosphere
-            if (!game.getPlanetaryConditions().getAtmosphere().isVacuum()) {
-                int atmosphericRow = BoardHelper.effectiveAtmosphericRowNumber(game, getBoard(), 1) - 1;
-                // First, fade out the stars
-                int alphaStepStars = 120 / (spaceInterfacePosition - 1);
-                graphics2D.setColor(new Color(0, 0, 0, 250 - atmosphericRow * alphaStepStars));
-                graphics2D.fill(scaleTransform.createTransformedShape(HEX_POLY));
-                // Add atmosphere
-                int alphaStep = 160 / (spaceInterfacePosition - 1);
-                graphics2D.setColor(new Color(0, 250, 250, 190 - atmosphericRow * alphaStep));
-                graphics2D.fill(scaleTransform.createTransformedShape(HEX_POLY));
+        // Orthographic = bridges
+        List<Image> orthogonalImages = tileManager.orthographicFor(hex);
+        if (orthogonalImages != null) {
+            for (Image image : orthogonalImages) {
+                if (animatedImages.contains(image.hashCode())) {
+                    dontCache = true;
+                }
             }
-
-            Polygon leftTriangle = new Polygon();
-            leftTriangle.addPoint(21, 0);
-            leftTriangle.addPoint(21, 71);
-            leftTriangle.addPoint(0, 36);
-            leftTriangle.addPoint(0, 35);
-            graphics2D.setColor(new Color(40, 80, 40));
-            graphics2D.fill(scaleTransform.createTransformedShape(leftTriangle));
-            graphics2D.setColor(new Color(40, 140, 40));
-            graphics2D.draw(scaleTransform.createTransformedShape(HexDrawUtilities.getHexCrossLine01(4, 2)));
         }
-
-        if (!gpuCapture && getBoard().embeddedBoardCoords().contains(coords)) {
-            drawEmbeddedBoard(graphics2D);
-        }
-        drawElectronicWarfare(graphics2D, coords);
+        clientState.drawHexEffects(graphics2D, coords);
 
         // Darken the hex for nighttime, if applicable
         if (GUIP.getDarkenMapAtNight()
@@ -2883,52 +1744,7 @@ public final class BoardView extends AbstractBoardView
             }
         }
 
-        // Set the text color according to Preferences or Light Gray in space
-        graphics2D.setColor(GUIP.getBoardTextColor());
-        if (game.getBoard(boardId).isSpace()) {
-            graphics2D.setColor(GUIP.getBoardSpaceTextColor());
-        }
-
-        // draw special stuff for the hex
-        final Collection<SpecialHexDisplay> shdList = game.getBoard(boardId).getSpecialHexDisplay(coords);
-        try {
-            if (shdList != null) {
-                // Several heat-map markers can stack on one hex (multiple tubes firing it, or a prediction plus a
-                // shot). Draw each marker's icon/fill, but collect them so a single combined turn label is drawn (their
-                // distinct values merged), rather than each marker drawing its label over the others.
-                List<SpecialHexDisplay> heatMapMarkers = new ArrayList<>();
-                for (SpecialHexDisplay shd : shdList) {
-                    if (gpuCapture && isPredictedHeatMapMarker(shd)) {
-                        continue;
-                    }
-                    if (gpuCapture && pointMarkerKind(shd) != null) {
-                        continue;
-                    }
-                    if (shd.drawNow(game.getPhase(), game.getRoundCount(), getLocalPlayer(), GUIP)) {
-                        // A predicted-position heat-map marker paints the hex with a cold-to-hot color (navy = one
-                        // enemy converging, crimson = many) instead of an icon; the firing marker and every other
-                        // display draw their icon.
-                        if (isPredictedHeatMapMarker(shd)) {
-                            drawHeatMapPredictedHex(shd, graphics2D, scale);
-                        } else {
-                            scaledImage = getScaledImage(shd.getDefaultImage(), true);
-                            graphics2D.drawImage(scaledImage, 0, 0, boardPanel);
-                        }
-                        if (isHeatMapMarker(shd) && !gpuCapture) {
-                            heatMapMarkers.add(shd);
-                        }
-                    }
-                }
-                if (!heatMapMarkers.isEmpty()) {
-                    drawHeatMapTurnLabel(heatMapMarkers, graphics2D, scale);
-                }
-            }
-        } catch (Exception e) {
-            LOGGER.error(e, "Exception, probably can't load file.");
-            drawCenteredString("Loading Error", 0, (int) (50 * scale), font_note, graphics2D);
-            graphics2D.dispose();
-            return;
-        }
+        clientState.drawSpecialHexes(graphics2D, coords);
 
         // Hex text (coordinates, level/depth/height) is drawn separately in drawHexText()
         // so that it renders on top of bridge orthographs
@@ -2950,62 +1766,56 @@ public final class BoardView extends AbstractBoardView
         Point p7 = new Point(0, s36);
         Point p8 = new Point(0, s35);
 
-        if (!gpuCapture) {
-            graphics2D.setColor(Color.black);
-            graphics2D.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 1f));
+        graphics2D.setColor(Color.black);
+        graphics2D.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 1f));
 
-            // draw elevation borders
-            if (drawElevationLine(coords, 0)) {
-                drawIsometricElevation(coords, Color.GRAY, p1, p2, 0, graphics2D);
-                if (GUIP.getLevelHighlight()) {
-                    graphics2D.drawLine(s21, 0, s62, 0);
-                }
-            }
-
-            if (drawElevationLine(coords, 1)) {
-                drawIsometricElevation(coords, Color.DARK_GRAY, p3, p1, 1, graphics2D);
-                if (GUIP.getLevelHighlight()) {
-                    graphics2D.drawLine(s62, 0, s83, s35);
-                }
-            }
-
-            if (drawElevationLine(coords, 2)) {
-                drawIsometricElevation(coords, Color.LIGHT_GRAY, p4, p5, 2, graphics2D);
-                if (GUIP.getLevelHighlight()) {
-                    graphics2D.drawLine(s83, s36, s62, s71);
-                }
-            }
-
-            if (drawElevationLine(coords, 3)) {
-                drawIsometricElevation(coords, Color.GRAY, p6, p5, 3, graphics2D);
-                if (GUIP.getLevelHighlight()) {
-                    graphics2D.drawLine(s62, s71, s21, s71);
-                }
-            }
-
-            if (drawElevationLine(coords, 4)) {
-                drawIsometricElevation(coords, Color.DARK_GRAY, p7, p6, 4, graphics2D);
-                if (GUIP.getLevelHighlight()) {
-                    graphics2D.drawLine(s21, s71, 0, s36);
-                }
-            }
-
-            if (drawElevationLine(coords, 5)) {
-                drawIsometricElevation(coords, Color.LIGHT_GRAY, p8, p2, 5, graphics2D);
-                if (GUIP.getLevelHighlight()) {
-                    graphics2D.drawLine(0, s35, s21, 0);
-                }
-
+        // draw elevation borders
+        if (drawElevationLine(coords, 0)) {
+            drawIsometricElevation(coords, Color.GRAY, p1, p2, 0, graphics2D);
+            if (GUIP.getLevelHighlight()) {
+                graphics2D.drawLine(s21, 0, s62, 0);
             }
         }
 
+        if (drawElevationLine(coords, 1)) {
+            drawIsometricElevation(coords, Color.DARK_GRAY, p3, p1, 1, graphics2D);
+            if (GUIP.getLevelHighlight()) {
+                graphics2D.drawLine(s62, 0, s83, s35);
+            }
+        }
+
+        if (drawElevationLine(coords, 2)) {
+            drawIsometricElevation(coords, Color.LIGHT_GRAY, p4, p5, 2, graphics2D);
+            if (GUIP.getLevelHighlight()) {
+                graphics2D.drawLine(s83, s36, s62, s71);
+            }
+        }
+
+        if (drawElevationLine(coords, 3)) {
+            drawIsometricElevation(coords, Color.GRAY, p6, p5, 3, graphics2D);
+            if (GUIP.getLevelHighlight()) {
+                graphics2D.drawLine(s62, s71, s21, s71);
+            }
+        }
+
+        if (drawElevationLine(coords, 4)) {
+            drawIsometricElevation(coords, Color.DARK_GRAY, p7, p6, 4, graphics2D);
+            if (GUIP.getLevelHighlight()) {
+                graphics2D.drawLine(s21, s71, 0, s36);
+            }
+        }
+
+        if (drawElevationLine(coords, 5)) {
+            drawIsometricElevation(coords, Color.LIGHT_GRAY, p8, p2, 5, graphics2D);
+            if (GUIP.getLevelHighlight()) {
+                graphics2D.drawLine(0, s35, s21, 0);
+            }
+
+        }
         // When the board image is saved, it shouldn't be spoiled by drawing LOS effects
-        boolean hasLoS = gpuCapture || saveBoardImage || fovHighlightingAndDarkening.draw(graphics2D, coords);
+        boolean hasLoS = saveBoardImage || drawFieldOfView(graphics2D, coords);
 
-        if (!gpuCapture) {
-            drawMapSheetBorders(graphics2D, coords);
-        }
-
+        drawMapSheetBorders(graphics2D, coords);
         if (!hasLoS && GUIP.getFovGrayscale()) {
             // rework the pixels to grayscale
             for (int x = 0;
@@ -3027,9 +1837,7 @@ public final class BoardView extends AbstractBoardView
             }
         }
 
-        for (var plugin : hexDrawPlugins) {
-            plugin.draw(graphics2D, hex, game, coords, this);
-        }
+        clientState.drawHexPlugins(graphics2D, coords);
         graphics2D.dispose();
 
         cacheEntry = new HexImageCacheEntry(hexImage);
@@ -3081,76 +1889,18 @@ public final class BoardView extends AbstractBoardView
     }
 
     /**
-     * Draws hex text overlays (coordinates, level, depth, height, foliage, invalid hex info) directly to the board
+     * Draws hex text clientState.overlays (coordinates, level, depth, height, foliage, invalid hex info) directly to the board
      * graphics. This is called after drawOrthograph so that text renders on top of bridge images.
      */
     private void drawHexText(Coords coords, Hex hex, Board board, Graphics2D boardGraph) {
         final Point hexLocation = getHexLocation(coords);
         int hexX = hexLocation.x;
         int hexY = hexLocation.y;
-        if (!gpuCapture) {
-            for (HexText label : hexText(coords, hex, board)) {
-                boardGraph.setColor(new Color(label.argb(), true));
-                // A label hanging from the tile's top edge is anchored by the top of its glyphs, so its baseline
-                // sits one ascent below the published offset.
-                int offset = label.baseline()
-                      + (label.fromTop() ? boardPanel.getFontMetrics(label.font()).getAscent() : 0);
-                drawCenteredString(label.text(), hexX, hexY + offset, label.font(), boardGraph);
-            }
-        }
-
+        BoardHexText.draw(boardGraph, hexLocation, hex_size.width,
+              BoardHexText.capture(coords, hex, board, scale, font_hexNumber, font_elev));
         if (displayInvalidHexInfo && !hex.isValid(null)) {
-            Point hexCenter = new Point(hexX + (int) (HEX_W / 2.0f * scale), hexY + (int) (HEX_H / 2.0f * scale));
-            invalidString.at(hexCenter).fontSize(14.0f * scale).outline(Color.WHITE, scale / 2).draw(boardGraph);
+            BoardHexText.drawInvalid(boardGraph, new Point(hexX, hexY), scale);
         }
-    }
-
-    /**
-     * One hex text label: its text, color, and font, plus the offset it keeps from the tile's top edge in tile
-     * artwork pixels. The offset carries the label's baseline, except for a label hanging from the tile's top edge
-     * ({@code fromTop}), where the glyphs rise from the offset instead: those are anchored by their top, so their
-     * baseline cannot be put at the offset without pushing them into the tile's top border.
-     */
-    public record HexText(String text, int baseline, Font font, int argb, boolean fromTop, int elevation) { }
-
-    private List<HexText> hexText(Coords coords, Hex hex, Board board) {
-        List<HexText> labels = new ArrayList<>();
-        Color color = board.isSpace() ? GUIP.getBoardSpaceTextColor() : GUIP.getBoardTextColor();
-        if (GUIP.getCoordsEnabled() && scale >= 0.5) {
-            labels.add(new HexText(coords.getBoardNum(), (int) (HEX_TEXT_MARGIN * scale), font_hexNumber,
-                  color.getRGB(), true, 0));
-        }
-        if (scale > 0.5f) {
-            int level = hex.getLevel();
-            int depth = hex.depth(false);
-            Terrain basement = hex.getTerrain(Terrains.BLDG_BASEMENT_TYPE);
-            if (basement != null) {
-                depth = 0;
-            }
-            int height = Math.max(hex.terrainLevel(Terrains.BLDG_ELEV), hex.terrainLevel(Terrains.BRIDGE_ELEV));
-            height = Math.max(height, hex.terrainLevel(Terrains.INDUSTRIAL));
-            int yPosition = HEX_H - HEX_TEXT_MARGIN;
-            if (level != 0) {
-                labels.add(new HexText(Messages.getString("BoardView1.LEVEL") + level,
-                      (int) (yPosition * scale), font_elev, color.getRGB(), false, 0));
-                yPosition -= 10;
-            }
-            if (depth != 0) {
-                labels.add(new HexText(Messages.getString("BoardView1.DEPTH") + depth,
-                      (int) (yPosition * scale), font_elev, color.getRGB(), false, 0));
-                yPosition -= 10;
-            }
-            if (height > 0) {
-                labels.add(new HexText(Messages.getString("BoardView1.HEIGHT") + height,
-                      (int) (yPosition * scale), font_elev, GUIP.getBuildingTextColor().getRGB(), false, height));
-                yPosition -= 10;
-            }
-            if (hex.terrainLevel(Terrains.FOLIAGE_ELEV) == 1) {
-                labels.add(new HexText(Messages.getString("BoardView1.LowFoliage"),
-                      (int) (yPosition * scale), font_elev, GUIP.getLowFoliageColor().getRGB(), false, 0));
-            }
-        }
-        return List.copyOf(labels);
     }
 
     /**
@@ -3267,17 +2017,7 @@ public final class BoardView extends AbstractBoardView
      * opposite direction as well.
      */
     private boolean drawElevationLine(Coords src, int direction) {
-        final Hex srcHex = game.getBoard(boardId).getHex(src);
-        final Hex destHex = game.getBoard(boardId).getHexInDir(src, direction);
-        if ((destHex == null) && (srcHex.getLevel() != 0)) {
-            return true;
-        } else if (destHex == null) {
-            return false;
-        } else if (srcHex.getLevel() != destHex.getLevel()) {
-            return true;
-        } else {
-            return (srcHex.floor() != destHex.floor());
-        }
+        return HexDrawUtilities.hasElevationBorder(game.getBoard(boardId), src, direction);
     }
 
     /**
@@ -3401,8 +2141,7 @@ public final class BoardView extends AbstractBoardView
      * incorrect for large tiles
      */
     static Point getHexLocationLargeTile(int x, int y, float tileScale) {
-        int yPosition = (int) (y * HEX_H * tileScale) + ((x & 1) == 1 ? (int) ((HEX_H / 2.0f) * tileScale) : 0);
-        return new Point((int) (x * HEX_WC * tileScale), yPosition);
+        return BoardArtwork.largeTileLocation(x, y, tileScale);
     }
 
     private Point getHexLocationLargeTile(int x, int y) {
@@ -3432,46 +2171,21 @@ public final class BoardView extends AbstractBoardView
     }
 
     /**
-     * Draws a crosshair-with-circle (bullseye) marker at the given point for the ruler tool. The marker scales with the
+     * Draws a crosshair-with-circle (bullseye) marker at the given hex for the ruler tool. The marker scales with the
      * current board zoom level so it remains visible at all zoom levels.
      */
-    private void drawRulerCrosshair(Graphics2D g2d, Point center, Color color) {
-        // Scale crosshair size to ~20% of hex width, with a minimum of 4px
-        int radius = Math.max(4, (int) (HEX_W * scale * 0.10f));
-        int crossLen = Math.max(6, (int) (HEX_W * scale * 0.15f));
-        Stroke oldStroke = g2d.getStroke();
-        g2d.setStroke(new BasicStroke(Math.max(1.5f, scale * 1.5f)));
 
-        // Outer circle
-        g2d.setColor(color);
-        g2d.drawOval(center.x - radius, center.y - radius, radius * 2, radius * 2);
-
-        // Crosshair lines extending beyond the circle
-        g2d.drawLine(center.x - crossLen, center.y, center.x + crossLen, center.y);
-        g2d.drawLine(center.x, center.y - crossLen, center.x, center.y + crossLen);
-
-        // Center dot
-        int dotRadius = Math.max(1, (int) (scale * 1.5f));
-        g2d.fillOval(center.x - dotRadius, center.y - dotRadius, dotRadius * 2, dotRadius * 2);
-
-        g2d.setStroke(oldStroke);
-    }
 
     public void drawRuler(Coords startCoords, Coords endCoords, Color startColor, Color endColor) {
-        rulerStart = startCoords;
-        rulerEnd = endCoords;
-        rulerStartColor = startColor;
-        rulerEndColor = endColor;
-
-        boardPanel.repaint();
+        clientState.drawRuler(startCoords, endCoords, startColor, endColor);
     }
 
     public Coords getRulerStart() {
-        return rulerStart;
+        return clientState.getRulerStart();
     }
 
     public Coords getRulerEnd() {
-        return rulerEnd;
+        return clientState.getRulerEnd();
     }
 
     @Override
@@ -3536,7 +2250,10 @@ public final class BoardView extends AbstractBoardView
         return new Coords(-1, -1);
     }
 
-    @Override
+    public void setTooltipProvider(megamek.client.ui.clientGUI.boardview.toolTip.TWBoardViewTooltip provider) {
+        boardViewToolTip = (point, target) -> provider.getTooltip(getCoordsAt(point), target);
+    }
+
     public void setTooltipProvider(BoardViewTooltipProvider provider) {
         boardViewToolTip = provider;
     }
@@ -3622,11 +2339,11 @@ public final class BoardView extends AbstractBoardView
      * taking off (airborne DropShips lose their secondary hexes). Try to prevent annoying
      * ConcurrentModificationExceptions
      */
-    public void redrawEntity(Entity entity) {
+    public void redrawEntitySprites(Entity entity) {
         Integer entityId = entity.getId();
 
         // Remove sprites from backing sprite collections before modifying the entitySprites and isometricSprites.
-        // Otherwise, orphaned overTerrainSprites or behindTerrainHexSprites can result.
+        // Otherwise, orphaned clientState.overTerrainSprites or clientState.behindTerrainHexSprites can result.
         removeSprites(entitySprites);
         removeSprites(isometricSprites);
 
@@ -3746,49 +2463,12 @@ public final class BoardView extends AbstractBoardView
         addSprites(entitySprites);
         addSprites(isometricSprites);
 
-        // Remove C3 sprites
-        c3Sprites.removeIf(c3sprite -> (c3sprite.getEntityId() == entity.getId()) || (c3sprite.getMasterId()
-              == entity.getId()));
-
-        // Update C3 link, if necessary
-        if (entity.hasC3() || entity.hasC3i() || entity.hasNovaCEWS() || entity.hasNavalC3()) {
-            addC3Link(entity);
-        }
-
-        // The removal above also dropped the lines that this entity's hierarchic subordinates draw TO it (each
-        // slave owns its own line to its master), and addC3Link(entity) only redraws the entity's own line to its
-        // master. Re-add the subordinates' lines, otherwise selecting a master in the firing phase erases its
-        // network on the board until the next full redraw.
-        for (Entity subordinate : game.getEntitiesVector()) {
-            if ((subordinate.getC3MasterId() == entity.getId())
-                  && !subordinate.equals(entity)
-                  && subordinate.hasC3()
-                  && isOnThisBord(subordinate)) {
-                addC3Link(subordinate);
-            }
-        }
-
-        vtolAttackSprites.removeIf(s -> s.getEntity().getId() == entity.getId());
-
-        // Remove Flyover Sprites
-        flyOverSprites.removeIf(flyOverSprite -> flyOverSprite.getEntityId() == entity.getId());
-
-        // Add Flyover path, if necessary
-        if ((boardId == entity.getPassedThroughBoardId())
-              && (entity.isAirborne() || entity.isMakingVTOLGroundAttack())
-              && (entity.getPassedThrough().size() > 1)) {
-            addFlyOverPath(entity);
-        }
-
-        updateEcmList();
-        highlightSelectedEntity(getSelectedEntity());
-        scheduleRedraw();
     }
 
     /**
      * Clears all old entity sprites out of memory and sets up new ones.
      */
-    public void redrawAllEntities() {
+    public void redrawAllEntitySprites() {
         int numEntities = game.getNoOfEntities();
         // Prevent IllegalArgumentException
         numEntities = Math.max(1, numEntities);
@@ -3800,17 +2480,7 @@ public final class BoardView extends AbstractBoardView
         ArrayList<WreckSprite> newWrecks = new ArrayList<>();
         ArrayList<IsometricWreckSprite> newIsometricWrecks = new ArrayList<>();
 
-        Board board = game.getBoard(boardId);
-        Enumeration<Entity> e = game.getWreckedEntities();
-        while (e.hasMoreElements()) {
-            Entity entity = e.nextElement();
-            Coords position = entity.getPosition();
-            // Infantry don't leave wrecks, but CVEP (which extends Infantry) should show crashed pod wreckage
-            boolean isInfantryButNotCVEP = (entity instanceof Infantry) && !(entity instanceof CombatVehicleEscapePod);
-            if (isOnThisBord(entity)
-                  && !isInfantryButNotCVEP
-                  && (position != null)
-                  && board.contains(position)) {
+        for (Entity entity : clientState.getWrecks()) {
                 WreckSprite wreckSprite;
                 IsometricWreckSprite isometricWreckSprite;
                 if (entity.getSecondaryPositions().isEmpty()) {
@@ -3827,29 +2497,21 @@ public final class BoardView extends AbstractBoardView
                     }
                 }
             }
-        }
 
-        clearC3Networks();
-        clearFlyOverPaths();
         for (Entity entity : game.getEntitiesVector()) {
-            if ((boardId == entity.getPassedThroughBoardId()) && (entity.isAirborne()
-                  || entity.isMakingVTOLGroundAttack()) && (
-                  entity.getPassedThrough().size() > 1)) {
-                addFlyOverPath(entity);
-            }
             if (entity.getPosition() == null || !isOnThisBord(entity)) {
                 continue;
             }
-            if ((localPlayer != null)
+            if ((getLocalPlayer() != null)
                   && game.getOptions().booleanOption(OptionsConstants.ADVANCED_DOUBLE_BLIND)
-                  && entity.getOwner().isEnemyOf(localPlayer)
-                  && !entity.hasSeenEntity(localPlayer)
-                  && !entity.hasDetectedEntity(localPlayer)) {
+                  && entity.getOwner().isEnemyOf(getLocalPlayer())
+                  && !entity.hasSeenEntity(getLocalPlayer())
+                  && !entity.hasDetectedEntity(getLocalPlayer())) {
                 continue;
             }
-            if ((localPlayer != null)
+            if ((getLocalPlayer() != null)
                   && game.getOptions().booleanOption(OptionsConstants.ADVANCED_HIDDEN_UNITS)
-                  && entity.getOwner().isEnemyOf(localPlayer)
+                  && entity.getOwner().isEnemyOf(getLocalPlayer())
                   && entity.isHidden()) {
                 continue;
             }
@@ -3872,9 +2534,6 @@ public final class BoardView extends AbstractBoardView
                 }
             }
 
-            if (entity.hasC3() || entity.hasC3i() || entity.hasNovaCEWS() || entity.hasNavalC3()) {
-                addC3Link(entity);
-            }
         }
 
         removeSprites(entitySprites);
@@ -3891,11 +2550,6 @@ public final class BoardView extends AbstractBoardView
 
         wreckSprites = newWrecks;
         isometricWreckSprites = newIsometricWrecks;
-
-        // Update ECM list, to ensure that Sprites are updated with ECM info
-        updateEcmList();
-        // Re-highlight a selected entity, if present
-        highlightSelectedEntity(getSelectedEntity());
 
         scheduleRedraw();
     }
@@ -3947,8 +2601,10 @@ public final class BoardView extends AbstractBoardView
         if (coords == null) {
             return;
         }
-        centerRequest = new CenterRequest(centerRequest.sequence() + 1, coords, entityId);
+        clientState.centerOn(coords, entityId);
+    }
 
+    private void applyCenterRequest(Coords coords) {
         // A native camera request must not construct or move the legacy viewport.
         if (scrollPane == null || (clientgui != null && GpuBoardWindow.isActiveFor(clientgui))) {
             stopSoftCentering();
@@ -4109,67 +2765,7 @@ public final class BoardView extends AbstractBoardView
      * Clears the old movement data and draws the new.
      */
     public void drawMovementData(Entity entity, MovePath movePath) {
-        MoveStep previousStep = null;
-
-        clearMovementData();
-
-        // Nothing to do if we don't have a MovePath
-        if (movePath == null) {
-            movementTarget = null;
-            return;
-        }
-        // need to update the movement sprites based on the move path for this entity only way to do this is to clear
-        // and refresh (seems wasteful)
-
-        // first get the color for the vector
-        Color color = Color.blue;
-        if (movePath.getLastStep() != null) {
-            color = switch (movePath.getLastStep().getMovementType(true)) {
-                case MOVE_RUN, MOVE_VTOL_RUN, MOVE_OVER_THRUST -> GUIP.getMoveRunColor();
-                case MOVE_SPRINT, MOVE_VTOL_SPRINT -> GUIP.getMoveSprintColor();
-                case MOVE_JUMP -> GUIP.getMoveJumpColor();
-                case MOVE_ILLEGAL -> GUIP.getMoveIllegalColor();
-                default -> GUIP.getMoveDefaultColor();
-            };
-            movementTarget = movePath.getLastStep().getPosition();
-        } else {
-            movementTarget = null;
-        }
-
-        refreshMoveVectors(entity, movePath, color);
-
-        for (ListIterator<MoveStep> i = movePath.getSteps();
-              i.hasNext(); ) {
-            final MoveStep step = i.next();
-            if ((null != previousStep) && ((step.getType() == MoveStepType.UP)
-                  || (step.getType() == MoveStepType.DOWN)
-                  || (step.getType() == MoveStepType.ACC)
-                  || (step.getType() == MoveStepType.DEC)
-                  || (step.getType() == MoveStepType.ACCELERATION)
-                  || (step.getType() == MoveStepType.DECELERATION))) {
-                // Mark the previous elevation change sprite hidden so that we can draw a new one in its place
-                // without having overlap.
-                pathSprites.getLast().setHidden(true);
-            }
-
-            if (previousStep != null
-                  // for advanced movement, we always need to hide prior because costs will overlap, and we only
-                  // want the current facing
-                  && (game.useVectorMove()
-                  // A LAM converting from AirMek to Biped uses two convert steps, and we only want to
-                  // show the last.
-                  || (step.getType() == MoveStepType.CONVERT_MODE
-                  && previousStep.getType() == MoveStepType.CONVERT_MODE)
-                  || step.getType() == MoveStepType.BOOTLEGGER)) {
-                pathSprites.getLast().setHidden(true);
-            }
-
-            pathSprites.add(new StepSprite(this, step, movePath.isEndStep(step)));
-            previousStep = step;
-        }
-
-        displayFlightPathIndicator(movePath);
-        boardPanel.repaint(100);
+        clientState.drawMovementData(entity, movePath);
     }
 
     /**
@@ -4179,71 +2775,25 @@ public final class BoardView extends AbstractBoardView
      *
      * @param movePath - Current MovePath that represents the current units movement state
      */
-    private void displayFlightPathIndicator(MovePath movePath) {
-        // Don't attempt displaying Flight Path Indicators if using advanced aero movement.
-        if (game.useVectorMove()) {
-            return;
-        }
 
-        // Don't calculate any kind of flight path indicators if the move is not legal.
-        if (movePath.getLastStepMovementType() == EntityMovementType.MOVE_ILLEGAL) {
-            return;
-        }
-
-        // If the unit has remaining aerodyne velocity display the flight path indicators for remaining velocity.
-        if ((movePath.getFinalVelocityLeft() > 0) && !movePath.nextForwardStepOffBoard()) {
-            List<MoveStep> fpiSteps = new ArrayList<>();
-
-            // Cloning the current movement path because we don't want to change its state.
-            MovePath fpiPath = movePath.clone();
-
-            // While velocity remains, add a forward step to the cloned movement path.
-            while (fpiPath.getFinalVelocityLeft() > 0) {
-                fpiPath.addStep(MoveStepType.FORWARDS);
-                fpiSteps.add(fpiPath.getLastStep());
-
-                // short circuit the flight path indicator if we are off the board.
-                if (fpiPath.nextForwardStepOffBoard()) {
-                    break;
-                }
-            }
-
-            // For each hex in the entities forward trajectory, add a flight turn indicator sprite.
-            for (MoveStep moveStep : fpiSteps) {
-                fpiSprites.add(new FlightPathIndicatorSprite(this,
-                      fpiSteps,
-                      fpiSteps.indexOf(moveStep),
-                      fpiPath.isEndStep(moveStep)));
-            }
-        }
-    }
 
     /**
      * Clears current movement data from the screen
      */
     public void clearMovementData() {
-        pathSprites = new ArrayList<>();
-        fpiSprites = new ArrayList<>();
-        movementTarget = null;
-        checkFoVHexImageCacheClear();
-        boardPanel.repaint();
-        refreshMoveVectors();
+        clientState.clearMovementData();
     }
 
     public void addStrafingCoords(Coords coords) {
-        strafingCoords.add(coords);
-        repaint();
+        clientState.addStrafingCoords(coords);
     }
 
     public void setStrafingCoords(Collection<Coords> coords) {
-        strafingCoords.clear();
-        strafingCoords.addAll(coords);
-        repaint();
+        clientState.setStrafingCoords(coords);
     }
 
     public void clearStrafingCoords() {
-        strafingCoords.clear();
-        repaint();
+        clientState.clearStrafingCoords();
     }
 
     public ClientGUI getClientgui() {
@@ -4258,24 +2808,30 @@ public final class BoardView extends AbstractBoardView
         return hex_size;
     }
 
-    public TilesetManager getTileManager() {
-        return tileManager;
-    }
+    @Override
+    public Game getGame() { return game; }
+
+    @Override
+    public java.awt.FontMetrics getFontMetrics(Font font) { return boardPanel.getFontMetrics(font); }
+
+    @Override
+    public int getDropShadowDistance() { return DROP_SHADOW_DISTANCE; }
+
 
     public Shape[] getFacingPolys() {
-        return facingPolys;
+        return clientState.getFacingPolys();
     }
 
     public Shape[] getMovementPolys() {
-        return movementPolys;
+        return clientState.getMovementPolys();
     }
 
     public Shape getUpArrow() {
-        return upArrow;
+        return clientState.getUpArrow();
     }
 
     public Shape getDownArrow() {
-        return downArrow;
+        return clientState.getDownArrow();
     }
 
     /**
@@ -4283,30 +2839,16 @@ public final class BoardView extends AbstractBoardView
      * marked.
      */
     public void markDeploymentHexesFor(Entity ce) {
-        en_Deployer = ce;
-        repaint();
+        clientState.markDeploymentHexesFor(ce);
     }
 
     /**
      * Returns the entity that is currently being deployed
      */
     public Entity getDeployingEntity() {
-        return en_Deployer;
+        return clientState.getDeployingEntity();
     }
 
-    /**
-     * add a fly over path to the sprite list
-     */
-    public void addFlyOverPath(Entity entity) {
-        if (entity.getPosition() == null) {
-            return;
-        }
-
-        if (entity.isMakingVTOLGroundAttack()) {
-            vtolAttackSprites.add(new VTOLAttackSprite(this, entity));
-        }
-        flyOverSprites.add(new FlyOverSprite(this, entity));
-    }
 
     /**
      * @param coords the given coords
@@ -4314,350 +2856,49 @@ public final class BoardView extends AbstractBoardView
      * @return any entities flying over the given coords
      */
     public ArrayList<Entity> getEntitiesFlyingOver(Coords coords) {
-        ArrayList<Entity> entities = new ArrayList<>();
-        for (FlyOverSprite flyOverSprite : flyOverSprites) {
-            // Space borne units shouldn't count here. They show up incorrectly in the firing display when sensors
-            // are in use.
-            if (flyOverSprite.getEntity().getPassedThrough().contains(coords) && !flyOverSprite.getEntity()
-                  .isSpaceborne()) {
-                entities.add(flyOverSprite.getEntity());
-            }
-        }
-        return entities;
+        return clientState.getEntitiesFlyingOver(coords);
     }
 
-    /**
-     * Adds a c3 line to the sprite list.
-     */
-    public void addC3Link(Entity entity) {
-        if (entity.getPosition() == null) {
-            return;
-        }
-
-        if (entity.hasC3i()) {
-            for (Entity entity1 : game.getEntitiesVector()) {
-                if (entity1.getPosition() == null) {
-                    return;
-                }
-
-                if (entity.onSameC3NetworkAs(entity1) && !entity1.equals(entity) && !ComputeECM.isAffectedByECM(entity,
-                      entity.getPosition(),
-                      entity1.getPosition())) {
-                    c3Sprites.add(new C3Sprite(this, entity, entity1));
-                }
-            }
-        } else if (entity.hasNavalC3()) {
-            for (Entity entity1 : game.getEntitiesVector()) {
-                if (entity1.getPosition() == null) {
-                    return;
-                }
-
-                if (entity.onSameC3NetworkAs(entity1) && !entity1.equals(entity)) {
-                    c3Sprites.add(new C3Sprite(this, entity, entity1));
-                }
-            }
-        } else if (entity.hasNovaCEWS()) {
-            // WOR Nova CEWS
-            for (Entity entity1 : game.getEntitiesVector()) {
-                if (entity1.getPosition() == null) {
-                    return;
-                }
-                ECMInfo ecmInfo = ComputeECM.getECMEffects(entity,
-                      entity.getPosition(),
-                      entity1.getPosition(),
-                      true,
-                      null);
-                if (entity.onSameC3NetworkAs(entity1)
-                      && !entity1.equals(entity)
-                      && (ecmInfo != null)
-                      && !ecmInfo.isNovaECM()) {
-                    c3Sprites.add(new C3Sprite(this, entity, entity1));
-                }
-            }
-        } else if (entity.getC3Master() != null) {
-            Entity eMaster = entity.getC3Master();
-            if (eMaster.getPosition() == null) {
-                return;
-            }
-
-            // A unit whose C3 gear is switched off is not on the network, so neither end draws a link. The
-            // non-hierarchic branches above get this from onSameC3NetworkAs(); the hierarchic branch does not
-            // consult it, so the same check is applied here. Network wiring is left intact, so the links come
-            // back when the gear is switched on again.
-            if (EquipmentActivation.isC3SwitchedOff(entity) || EquipmentActivation.isC3SwitchedOff(eMaster)) {
-                return;
-            }
-
-            // ECM cuts off the network
-            boolean blocked;
-
-            if (entity.hasBoostedC3() && eMaster.hasBoostedC3()) {
-                blocked = ComputeECM.isAffectedByAngelECM(entity, entity.getPosition(), eMaster.getPosition())
-                      || ComputeECM.isAffectedByAngelECM(eMaster, eMaster.getPosition(), eMaster.getPosition());
-            } else {
-                blocked = ComputeECM.isAffectedByECM(entity, entity.getPosition(), eMaster.getPosition())
-                      || ComputeECM.isAffectedByECM(eMaster, eMaster.getPosition(), eMaster.getPosition());
-            }
-
-            if (!blocked) {
-                c3Sprites.add(new C3Sprite(this, entity, entity.getC3Master()));
-            }
-        }
-    }
 
     /**
      * Adds an attack to the sprite list.
      */
     public void addAttack(AttackAction attackAction) {
-        // Don't make sprites for unknown entities and sensor returns
-        // cross-board attacks don't get attack arrows (for now, must possibly allow some A2G, O2G, A2A attacks later
-        // when target/attacker hexes are not really but effectively on the same board)
-        Entity weaponEntity = game.getEntity(attackAction.getEntityId());
-        if (weaponEntity == null) {
-            return;
-        }
-        Entity attacker = weaponEntity.getAttackingEntity();
-        Targetable target = game.getTarget(attackAction.getTargetType(), attackAction.getTargetId());
-        if ((attacker == null)
-              || (target == null)
-              || (target.getTargetType() == Targetable.TYPE_I_NARC_POD)
-              || (target.getPosition() == null)
-              || (attacker.getPosition() == null)
-              || !game.onTheSameBoard(attacker, target)
-              || !isOnThisBord(target)) {
-            return;
-        }
-        EntitySprite entitySprite = entitySpriteIds.get(getIdAndLoc(attacker.getId(),
-              (attacker.getSecondaryPositions().isEmpty() ? -1 : 0)));
-        if (entitySprite != null && entitySprite.onlyDetectedBySensors()) {
-            return;
-        }
-
-        boardPanel.repaint(100);
-        int attackerId = attackAction.getEntityId();
-        for (AttackSprite sprite : attackSprites) {
-            // can we just add this attack to an existing one?
-            if ((sprite.getEntityId() == attackerId) && (sprite.getTargetId() == attackAction.getTargetId())) {
-                // use existing attack, but add this weapon
-                sprite.addEntityAction(attackAction);
-                rebuildAllSpriteDescriptions(attackerId);
-                return;
-            }
-        }
-        // no re-use possible, add a new one don't add a sprite for an artillery attack made by the other player
-        if (attackAction instanceof WeaponAttackAction weaponAttackAction) {
-            int ownerId = weaponAttackAction.getEntity(game).getOwner().getId();
-            int teamId = weaponAttackAction.getEntity(game).getOwner().getTeam();
-
-            if (attackAction.getTargetType() != Targetable.TYPE_HEX_ARTILLERY) {
-                attackSprites.add(new AttackSprite(this, attackAction));
-            } else if (ownerId == getLocalPlayer().getId() || teamId == getLocalPlayer().getTeam()) {
-                attackSprites.add(new AttackSprite(this, attackAction));
-            }
-        } else {
-            attackSprites.add(new AttackSprite(this, attackAction));
-        }
-        rebuildAllSpriteDescriptions(attackerId);
+        clientState.addAttack(attackAction);
     }
 
-    /**
-     * adding a new EntityAction may affect the ToHits of other attacks so rebuild. The underlying data is cached when
-     * possible, so the should o the minimum amount of work needed
-     */
-    void rebuildAllSpriteDescriptions(int attackerId) {
-        for (AttackSprite sprite : attackSprites) {
-            if (sprite.getEntityId() == attackerId) {
-                sprite.rebuildDescriptions();
-            }
-        }
-
-    }
 
     /**
      * Removes all attack sprites from a certain entity
      */
     public synchronized void removeAttacksFor(@Nullable Entity entity) {
-        if (entity == null) {
-            return;
-        }
-
-        int entityId = entity.getId();
-        attackSprites.removeIf(sprite -> sprite.getEntityId() == entityId);
-        boardPanel.repaint(100);
+        clientState.removeAttacksFor(entity);
     }
 
     /**
      * Clears out all attacks and re-adds the ones in the current game.
      */
     public void refreshAttacks() {
-        clearAllAttacks();
-        for (Enumeration<EntityAction> i = game.getActions();
-              i.hasMoreElements(); ) {
-            EntityAction entityAction = i.nextElement();
-            if (entityAction instanceof AttackAction attackAction) {
-                addAttack(attackAction);
-            }
-        }
-
-        for (Enumeration<AttackAction> i = game.getDisplacementAttacks();
-             i.hasMoreElements(); ) {
-            AttackAction attackAction = i.nextElement();
-            if (attackAction instanceof PhysicalAttackAction physicalAttackAction) {
-                addAttack(physicalAttackAction);
-            }
-        }
-        boardPanel.repaint(100);
+        clientState.refreshAttacks();
     }
 
-    public void refreshMoveVectors() {
-        clearAllMoveVectors();
-        if (game.useVectorMove()) {
-            for (Entity entity : game.getEntitiesVector()) {
-                if (entity.getPosition() != null) {
-                    movementSprites.add(new MovementSprite(this, entity, entity.getVectors(), Color.GRAY, false));
-                }
-            }
-        }
-    }
-
-    public void refreshMoveVectors(Entity entity, MovePath movePath, Color color) {
-        clearAllMoveVectors();
-        if (game.useVectorMove()) {
-            // same as normal but when I find the active entity I used the MovePath to get vector
-            for (Entity entity1 : game.getEntitiesVector()) {
-                if (entity1.getPosition() != null) {
-                    if ((entity != null) && (entity1.getId() == entity.getId())) {
-                        movementSprites.add(new MovementSprite(this, entity1, movePath.getFinalVectors(), color, true));
-                    } else {
-                        movementSprites.add(new MovementSprite(this, entity1, entity1.getVectors(), color, false));
-                    }
-                }
-            }
-        }
-    }
 
     public void clearC3Networks() {
-        c3Sprites.clear();
+        clientState.clearC3Networks();
     }
 
-    public void clearFlyOverPaths() {
-        vtolAttackSprites.clear();
-        flyOverSprites.clear();
-    }
-
-    /**
-     * Clears out all attacks that were being drawn
-     */
-    public void clearAllAttacks() {
-        attackSprites.clear();
-    }
-
-    /**
-     * Clears out all movement vectors that were being drawn
-     */
-    public void clearAllMoveVectors() {
-        movementSprites.clear();
-    }
-
-    private void firstLOSHex(Coords coords) {
-        if (useLOSTool) {
-            moveCursor(secondLOSSprite, null);
-            moveCursor(firstLOSSprite, coords);
-        }
-    }
-
-    private void secondLOSHex(Coords targetCoords, Coords attackerCoords) {
-        if (useLOSTool) {
-            moveCursor(secondLOSSprite, targetCoords);
-            // LOS calculation and display is handled by RulerDialog via the
-            // BOARD_SECOND_LOS_HEX event fired by checkLOS()
-        }
-    }
 
     /**
      * Initializes the various overlay polygons with their vertices.
      */
     public void initPolys() {
-        AffineTransform facingRotate = new AffineTransform();
-
-        // facing polygons
-        Polygon facingPolyTmp = new Polygon();
-        facingPolyTmp.addPoint(41, 3);
-        facingPolyTmp.addPoint(35, 9);
-        facingPolyTmp.addPoint(41, 7);
-        facingPolyTmp.addPoint(42, 7);
-        facingPolyTmp.addPoint(48, 9);
-        facingPolyTmp.addPoint(42, 3);
-
-        // create the rotated shapes
-        facingPolys = new Shape[8];
-        for (int direction : allDirections) {
-            facingPolys[direction] = facingRotate.createTransformedShape(facingPolyTmp);
-            facingRotate.rotate(Math.toRadians(60), HEX_W / 2.0f, HEX_H / 2.0f);
-        }
-
-        // final facing polygons
-        Polygon finalFacingPolyTmp = new Polygon();
-        finalFacingPolyTmp.addPoint(41, 3);
-        finalFacingPolyTmp.addPoint(21, 18);
-        finalFacingPolyTmp.addPoint(41, 14);
-        finalFacingPolyTmp.addPoint(42, 14);
-        finalFacingPolyTmp.addPoint(61, 18);
-        finalFacingPolyTmp.addPoint(42, 3);
-
-        // create the rotated shapes
-        facingRotate.setToIdentity();
-        finalFacingPolys = new Shape[8];
-        for (int direction : allDirections) {
-            finalFacingPolys[direction] = facingRotate.createTransformedShape(finalFacingPolyTmp);
-            facingRotate.rotate(Math.toRadians(60), HEX_W / 2.0f, HEX_H / 2.0f);
-        }
-
-        // movement polygons
-        Polygon movementPolyTmp = getMovementPolyTmp();
-
-        // create the rotated shapes
-        facingRotate.setToIdentity();
-        movementPolys = new Shape[8];
-        for (int direction : allDirections) {
-            movementPolys[direction] = facingRotate.createTransformedShape(movementPolyTmp);
-            facingRotate.rotate(Math.toRadians(60), HEX_W / 2.0f, HEX_H / 2.0f);
-        }
-
-        // Up and Down Arrows
-        facingRotate.setToIdentity();
-        facingRotate.translate(0, -31);
-        upArrow = facingRotate.createTransformedShape(movementPolyTmp);
-
-        facingRotate.setToIdentity();
-        facingRotate.rotate(Math.toRadians(180), HEX_W / 2.0f, HEX_H / 2.0f);
-        facingRotate.translate(0, -31);
-        downArrow = facingRotate.createTransformedShape(movementPolyTmp);
+        clientState.initPolys();
+        facingPolys = clientState.getFacingPolys();
+        movementPolys = clientState.getMovementPolys();
+        upArrow = clientState.getUpArrow();
+        downArrow = clientState.getDownArrow();
     }
 
-    private static Polygon getMovementPolyTmp() {
-        Polygon movementPolyTmp = new Polygon();
-        movementPolyTmp.addPoint(47, 67);
-        movementPolyTmp.addPoint(48, 66);
-        movementPolyTmp.addPoint(42, 62);
-        movementPolyTmp.addPoint(41, 62);
-        movementPolyTmp.addPoint(35, 66);
-        movementPolyTmp.addPoint(36, 67);
-
-        movementPolyTmp.addPoint(47, 67);
-        movementPolyTmp.addPoint(45, 68);
-        movementPolyTmp.addPoint(38, 68);
-        movementPolyTmp.addPoint(38, 69);
-        movementPolyTmp.addPoint(45, 69);
-        movementPolyTmp.addPoint(45, 68);
-
-        movementPolyTmp.addPoint(45, 70);
-        movementPolyTmp.addPoint(38, 70);
-        movementPolyTmp.addPoint(38, 71);
-        movementPolyTmp.addPoint(45, 71);
-        movementPolyTmp.addPoint(45, 68);
-        return movementPolyTmp;
-    }
 
     synchronized boolean doMoveUnits(long idleTime) {
         boolean movingSomething = false;
@@ -4696,7 +2937,7 @@ public final class BoardView extends AbstractBoardView
                     movingEntitySpriteIds.clear();
                     movingEntitySprites.clear();
                     ghostEntitySprites.clear();
-                    processBoardViewEvent(new BoardViewEvent(this, BoardViewEvent.FINISHED_MOVING_UNITS));
+                    clientState.setMovingUnits(false);
                 }
             }
         }
@@ -4731,7 +2972,7 @@ public final class BoardView extends AbstractBoardView
             return;
         }
 
-        for (IDisplayable displayable : overlays) {
+        for (IDisplayable displayable : clientState.overlays) {
             double width = scrollPane.getViewport().getSize().getWidth();
             double height = scrollPane.getViewport().getSize().getHeight();
             Dimension dispDimension = new Dimension();
@@ -4770,7 +3011,7 @@ public final class BoardView extends AbstractBoardView
             boardPanel.setCursor(Cursor.getPredefinedCursor(Cursor.DEFAULT_CURSOR));
         }
 
-        for (IDisplayable displayable : overlays) {
+        for (IDisplayable displayable : clientState.overlays) {
             if (displayable.isReleased()) {
                 return;
             }
@@ -4820,7 +3061,7 @@ public final class BoardView extends AbstractBoardView
 
     @Override
     public void setUseLosTool(boolean use) {
-        useLOSTool = use;
+        clientState.setUseLosTool(use);
     }
 
     public TilesetManager getTilesetManager() {
@@ -4832,82 +3073,22 @@ public final class BoardView extends AbstractBoardView
         return radarBlipImage;
     }
 
-    /** Flat terrain and decals; solid feature models are captured separately from the Hex. */
-    public record PlanarHex(Coords coords, BufferedImage terrain, BufferedImage normals, BufferedImage decals,
-          BufferedImage decalsWithoutLimbs, BufferedImage tactical, List<HexText> text,
-          Map<Integer, String> structureModels, BufferedImage foliage) { }
-
-    private record DecalArtwork(BufferedImage full, BufferedImage withoutLimbs, BufferedImage foliage) { }
-
-    /** Use scrolling text on GPU range contours instead of flat, camera-facing range markers. */
-    public static final boolean GPU_SCROLLING_RANGE_LABELS = false;
-    private static final int GPU_MARKING_SCALE = 3;
-    private BufferedImage planarChunkImage;
-    private final AtomicLong planarRevision = new AtomicLong();
-
     void invalidatePlanarCapture() {
-        if (!gpuCapture || !SwingUtilities.isEventDispatchThread()) {
-            planarRevision.incrementAndGet();
-        }
+        clientState.invalidatePlanarCapture();
     }
 
-    public long getPlanarRevision() {
-        return planarRevision.get();
-    }
 
     /** Releases capture-only working memory when the native view closes or switches boards. */
     public void releasePlanarCapture() {
-        planarChunkImage = null;
-        planarHexImageCache.clear();
-        groundArtwork.clear();
-        featureArtwork.clear();
+        clientState.releasePlanarCapture();
+
+        clientState.clearArtwork();
     }
 
-    /** Immutable navigation intent from the client; a unit request retains its identity even in a stacked hex. */
-    public record CenterRequest(long sequence, Coords coords, int entityId) {
-        public CenterRequest(long sequence, Coords coords) {
-            this(sequence, coords, Entity.NONE);
-        }
-    }
-    private CenterRequest centerRequest = new CenterRequest(0, null);
 
-    public CenterRequest getCenterRequest() {
-        return centerRequest;
-    }
+    public BoardClientState getClientState() { return clientState; }
+    @Override public BoardGlyphContext glyphContext() { return clientState; }
 
-    /** Screen-anchored board widgets use their existing painters and input handlers in either window. */
-    public BufferedImage captureOverlayImage(Dimension size, Dimension pixels) {
-        BufferedImage image = new BufferedImage(Math.max(1, pixels.width), Math.max(1, pixels.height),
-              BufferedImage.TYPE_INT_ARGB);
-        Graphics2D graphics = overlayGraphics(image, size, pixels);
-        try {
-            for (IDisplayable overlay : overlays) {
-                overlay.draw(graphics, new Rectangle(size));
-            }
-        } finally {
-            graphics.dispose();
-        }
-        return image;
-    }
-
-    public boolean overlayInput(int event, Point point, Dimension size, Dimension pixels) {
-        // Drawing establishes widget bounds for this viewport before hit testing.
-        if (event != MouseEvent.MOUSE_MOVED) {
-            captureOverlayImage(size, pixels);
-        }
-        for (IDisplayable overlay : overlays) {
-            boolean handled = switch (event) {
-                case MouseEvent.MOUSE_PRESSED -> overlay.isHit(point, size);
-                case MouseEvent.MOUSE_RELEASED -> overlay.isReleased();
-                case MouseEvent.MOUSE_DRAGGED -> overlay.isDragged(point, size);
-                default -> overlay.isMouseOver(point, size);
-            };
-            if (handled) {
-                return true;
-            }
-        }
-        return false;
-    }
 
     /** Uses the existing tooltip provider with the GPU's picked hex, regardless of classic camera occlusion. */
     public String getHexTooltip(Coords coords) {
@@ -4919,591 +3100,39 @@ public final class BoardView extends AbstractBoardView
             verticalOffset = 0;
             Point point = getCentreHexLocation(coords);
             point.translate(HEX_W, HEX_H);
-            return boardViewToolTip.getTooltip(point, movementTarget);
+            return boardViewToolTip.getTooltip(point, clientState.movementTarget);
         } finally {
             verticalOffset = originalOffset;
         }
     }
 
-    public BufferedImage captureUnitAnnotations(Entity entity, int part) {
-        return captureUnitAnnotations(entity, part, null).image();
-    }
-
-    public EntitySprite.Annotations captureUnitAnnotations(Entity entity, int part, EntitySprite.Annotations previous) {
-        if (!SwingUtilities.isEventDispatchThread()) {
-            throw new IllegalStateException("Unit annotations must be captured on the Swing event thread");
-        }
-        float originalScale = scale;
-        Dimension originalSize = hex_size;
-        try {
-            scale = 1;
-            hex_size = new Dimension(HEX_W, HEX_H);
-            EntitySprite existing = entitySpriteIds.get(getIdAndLoc(entity.getId(), part));
-            EntitySprite sprite = new EntitySprite(this, entity, part, radarBlipImage);
-            return sprite.captureAnnotations(previous, existing == null ? entity.equals(getSelectedEntity()) : existing.getSelected(),
-                  existing != null && existing.isAffectedByECM());
-        } finally {
-            scale = originalScale;
-            hex_size = originalSize;
-        }
-    }
-
-    public List<PlanarHex> capturePlanarHexes(Rectangle hexArea) {
-        List<PlanarHex> result = new ArrayList<>();
-        capturePlanarHexes(hexArea, true, hex -> {
-            BufferedImage marking = hex.tactical();
-            if (marking != null) {
-                BufferedImage copy = new BufferedImage(marking.getWidth(), marking.getHeight(), BufferedImage.TYPE_INT_ARGB);
-                copy.setData(marking.getData());
-                marking = copy;
-            }
-            result.add(new PlanarHex(hex.coords(), hex.terrain(), hex.normals(), hex.decals(), hex.decalsWithoutLimbs(),
-                  marking, hex.text(), hex.structureModels(), hex.foliage()));
-        });
-        result.sort(Comparator.comparingInt((PlanarHex hex) -> hex.coords().getX())
-              .thenComparingInt(hex -> hex.coords().getY()));
-        return result;
-    }
-
-    /** The consumer must copy pixels before returning: tactical images borrow the reusable capture buffer. */
-    public void capturePlanarHexes(Rectangle hexArea, boolean includeTactical, Consumer<PlanarHex> consumer) {
-        capturePlanarHexes(hexArea, true, includeTactical, consumer);
-    }
-
-    /** Refreshes markings and text without regenerating unchanged terrain artwork or feature models. */
-    public void capturePlanarTactical(Rectangle hexArea, Consumer<PlanarHex> consumer) {
-        capturePlanarHexes(hexArea, false, true, consumer);
-    }
-
-    private void capturePlanarHexes(Rectangle hexArea, boolean includeArtwork, boolean includeTactical,
-          Consumer<PlanarHex> consumer) {
-        if (!SwingUtilities.isEventDispatchThread()) {
-            throw new IllegalStateException("Board layers must be captured on the Swing event thread");
-        }
-        if (gpuTileset == null) {
-            gpuTileset = new HexTileset(game, new File(Configuration.dataDir(), "models/board/tileset"));
-            try {
-                gpuTileset.loadFromFile("saxarba.tileset");
-            } catch (IOException exception) {
-                throw new IllegalStateException("Cannot load the 3D board's Saxarba tileset", exception);
-            }
-        }
-        if (!tileManager.isStarted()) {
-            tileManager.loadNeededImages(game);
-        }
-        Rectangle area = hexArea.intersection(new Rectangle(0, 0, getBoard().getWidth(), getBoard().getHeight()));
-        if (area.isEmpty()) {
-            return;
-        }
-        float originalScale = scale;
-        int originalZoom = zoomIndex;
-        Dimension originalSize = hex_size;
-        ImageCache<Integer, Image> originalScaledCache = scaledImageCache;
-        int originalOffset = verticalOffset;
-        ImageCache<Coords, HexImageCacheEntry> originalCache = hexImageCache;
-        BufferedImage originalShadows = shadowMap;
-        boolean originalCapture = gpuCapture;
-        Set<Sprite> prepared = new LinkedHashSet<>(allSprites);
-        prepared.addAll(pathSprites);
-        prepared.addAll(fpiSprites);
-        prepared.addAll(attackSprites);
-        prepared.addAll(c3Sprites);
-        prepared.addAll(movementSprites);
-        prepared.addAll(vtolAttackSprites);
-        prepared.addAll(flyOverSprites);
-        prepared.addAll(ghostEntitySprites);
-        prepared.addAll(wreckSprites);
-        prepared.addAll(isometricWreckSprites);
-        prepared.addAll(List.of(cursorSprite, highlightSprite, selectedSprite, firstLOSSprite, secondLOSSprite));
-        try {
-            scale = 1;
-            zoomIndex = BASE_ZOOM_INDEX;
-            updateFontSizes();
-            hex_size = new Dimension(HEX_W, HEX_H);
-            verticalOffset = 0;
-            if (originalScale != 1) {
-                scaledImageCache = new ImageCache<>();
-            }
-            gpuCapture = true;
-            shadowMap = null;
-            hexImageCache = planarHexImageCache;
-            ImageCache<Integer, Image> artworkScaledCache = scaledImageCache;
-            // Repaint the shared paths, borders and symbols at their destination
-            // resolution. Enlarging an already-captured 84px sprite blurs its edges.
-            scale = GPU_MARKING_SCALE;
-            hex_size = new Dimension(HEX_W * GPU_MARKING_SCALE, HEX_H * GPU_MARKING_SCALE);
-            scaledImageCache = new ImageCache<>();
-            font_minefield = font_minefield.deriveFont(font_minefield.getSize2D() * GPU_MARKING_SCALE);
-            if (includeTactical) {
-                prepared.stream().filter(sprite -> !sprite.isHidden() && !(sprite instanceof IsometricSprite)
-                            && !(sprite instanceof TacticalSprite))
-                      .filter(sprite -> originalOffset != 0 || originalScale != GPU_MARKING_SCALE || hasMarkerTerrain(sprite))
-                      .forEach(Sprite::prepare);
-            }
-            ImageCache<Integer, Image> markingScaledCache = scaledImageCache;
-            for (int column = area.x; column < area.x + area.width; column += 16) {
-                for (int row = area.y; row < area.y + area.height; row += 16) {
-                    // ImageCache's MAX_SIZE sets its initial capacity, not an eviction limit.
-                    // Keep at most two chunks even when the camera shows the entire board.
-                    if (planarHexImageCache.size() > 256) {
-                        planarHexImageCache.clear();
-                    }
-                    if (groundArtwork.size() > 256) {
-                        groundArtwork.clear();
-                        featureArtwork.clear();
-                    }
-                    Rectangle chunk = new Rectangle(column, row, Math.min(16, area.x + area.width - column),
-                          Math.min(16, area.y + area.height - row));
-                    scale = 1;
-                    hex_size = new Dimension(HEX_W, HEX_H);
-                    scaledImageCache = artworkScaledCache;
-                    Map<Coords, PlanarHex> artwork = new HashMap<>();
-                    for (int x = chunk.x; x < chunk.x + chunk.width; x++) {
-                        for (int y = chunk.y; y < chunk.y + chunk.height; y++) {
-                            Coords coords = new Coords(x, y);
-                            Hex hex = getBoard().getHex(coords);
-                            GroundArtwork ground = includeArtwork ? captureGroundArtwork(coords) : null;
-                            DecalArtwork decals = includeArtwork ? captureDecals(coords) : null;
-                            PlanarHex art = new PlanarHex(coords, ground == null ? null : ground.color(),
-                                  ground == null ? null : ground.normal(),
-                                  decals == null ? null : decals.full(), decals == null ? null : decals.withoutLimbs(),
-                                  null, hexText(coords, hex, getBoard()),
-                                  includeArtwork ? structureModels(hex) : Map.of(), decals == null ? null : decals.foliage());
-                            if (includeTactical) {
-                                artwork.put(coords, art);
-                            } else {
-                                consumer.accept(art);
-                            }
-                        }
-                    }
-                    if (includeTactical) {
-                        scale = GPU_MARKING_SCALE;
-                        hex_size = new Dimension(HEX_W * GPU_MARKING_SCALE, HEX_H * GPU_MARKING_SCALE);
-                        scaledImageCache = markingScaledCache;
-                        capturePlanarChunk(chunk, artwork, consumer);
-                    }
-                }
-            }
-        } finally {
-            scale = originalScale;
-            zoomIndex = originalZoom;
-            updateFontSizes();
-            hex_size = originalSize;
-            scaledImageCache = originalScaledCache;
-            verticalOffset = originalOffset;
-            hexImageCache = originalCache;
-            shadowMap = originalShadows;
-            gpuCapture = originalCapture;
-            if (includeTactical) {
-                prepared.stream().filter(sprite -> !sprite.isHidden() && !(sprite instanceof IsometricSprite)
-                            && !(sprite instanceof TacticalSprite))
-                      .filter(sprite -> originalOffset != 0 || originalScale != GPU_MARKING_SCALE || hasMarkerTerrain(sprite))
-                      .forEach(Sprite::prepare);
-            }
-        }
-    }
-
-    /** Captures rule results only. The GPU owns their presentation, independently of per-hex raster artwork. */
-    public BoardFieldOfView captureFieldOfView(Rectangle requestedArea) {
-        if (!SwingUtilities.isEventDispatchThread()) {
-            throw new IllegalStateException("Field of view must be captured on the Swing event thread");
-        }
-        if (!shouldFovDarken() && !shouldFovHighlight()) {
-            return BoardFieldOfView.EMPTY;
-        }
-        int width = getBoard().getWidth(), height = getBoard().getHeight();
-        Rectangle area = new Rectangle(requestedArea);
-        area.grow(1, 1);
-        area = area.intersection(new Rectangle(0, 0, width, height));
-        List<BoardFieldOfView.Hex> hexes = new ArrayList<>(Collections.nCopies(width * height, BoardFieldOfView.Hex.NONE));
-        for (int x = area.x; x < area.x + area.width; x++) {
-            for (int y = area.y; y < area.y + area.height; y++) {
-                hexes.set(x * height + y, fovHighlightingAndDarkening.evaluate(new Coords(x, y)));
-            }
-        }
-        BoardFieldOfView result = new BoardFieldOfView(width, height, hexes, GUIP.getFovDarkenAlpha(),
-              GUIP.getFovHighlightAlpha(), shouldFovDarken(), GUIP.getFovGrayscale(), GUIP.getFovSpottingMode());
-        return result.active() ? result : BoardFieldOfView.EMPTY;
-    }
-
-    /** Captures shared tactical shapes without preparing sprites or touching a board-sized bitmap. */
-    public BoardTactical captureTacticalGeometry() {
-        if (!SwingUtilities.isEventDispatchThread()) {
-            throw new IllegalStateException("Tactical state must be captured on the Swing event thread");
-        }
-        float originalScale = scale;
-        int originalZoom = zoomIndex;
-        Dimension originalSize = hex_size;
-        int originalOffset = verticalOffset;
-        boolean originalCapture = gpuCapture;
-        BoardTacticalGraphics graphics = new BoardTacticalGraphics();
-        try {
-            scale = 1;
-            zoomIndex = BASE_ZOOM_INDEX;
-            hex_size = new Dimension(HEX_W, HEX_H);
-            verticalOffset = 0;
-            gpuCapture = true;
-            updateFontSizes();
-            graphics.setClip(0, 0, getBoard().getWidth() * HEX_WC + HEX_W,
-                  getBoard().getHeight() * HEX_H + HEX_H);
-            UIUtil.setHighQualityRendering(graphics);
-            captureHexOverlays(graphics);
-            for (var entry : getBoard().getSpecialHexDisplayTable().entrySet()) {
-                List<SpecialHexDisplay> heat = entry.getValue().stream().filter(this::isHeatMapMarker)
-                      .filter(marker -> marker.drawNow(game.getPhase(), game.getRoundCount(), getLocalPlayer(), GUIP))
-                      .toList();
-                if (!heat.isEmpty()) {
-                    Graphics2D local = BoardTacticalGraphics.at(graphics, getHexLocation(entry.getKey()));
-                    try {
-                        BoardTacticalGraphics.draw(local, BoardTactical.Playback.HOLD_DURING_PLAYBACK, layer -> {
-                            heat.stream().filter(this::isPredictedHeatMapMarker)
-                                  .forEach(marker -> drawHeatMapPredictedHex(marker, layer, 1));
-                            drawHeatMapTurnLabel(heat, layer, 1);
-                        });
-                    } finally {
-                        local.dispose();
-                    }
-                }
-            }
-            drawSprites(graphics, behindTerrainHexSprites);
-            drawTacticalLayers(graphics, false);
-            return graphics.snapshot();
-        } finally {
-            graphics.dispose();
-            scale = originalScale;
-            zoomIndex = originalZoom;
-            hex_size = originalSize;
-            verticalOffset = originalOffset;
-            gpuCapture = originalCapture;
-            updateFontSizes();
-        }
-    }
-
-    private void capturePlanarChunk(Rectangle area, Map<Coords, PlanarHex> artwork, Consumer<PlanarHex> consumer) {
-        Rectangle pixels = new Rectangle(area.x * HEX_WC * GPU_MARKING_SCALE, area.y * HEX_H * GPU_MARKING_SCALE,
-              ((area.width - 1) * HEX_WC + HEX_W) * GPU_MARKING_SCALE,
-              (area.height * HEX_H + HEX_H / 2) * GPU_MARKING_SCALE);
-        if (planarChunkImage == null || planarChunkImage.getWidth() < pixels.width || planarChunkImage.getHeight() < pixels.height) {
-            planarChunkImage = new BufferedImage(pixels.width, pixels.height, BufferedImage.TYPE_INT_ARGB);
-        }
-        BufferedImage tactical = planarChunkImage;
-        Graphics2D graphics = tactical.createGraphics();
-        try {
-            graphics.setComposite(AlphaComposite.Clear);
-            graphics.fillRect(0, 0, tactical.getWidth(), tactical.getHeight());
-            graphics.setComposite(AlphaComposite.SrcOver);
-            graphics.translate(-pixels.x, -pixels.y);
-            graphics.setClip(pixels);
-            UIUtil.setHighQualityRendering(graphics);
-            // Physical terrain and native geometry are omitted; ECM static, legacy artwork and
-            // plugin painters remain in the compatibility layer. No rules are copied here.
-            for (int column = area.x; column < area.x + area.width; column++) {
-                for (int row = area.y; row < area.y + area.height; row++) {
-                    Coords coords = new Coords(column, row);
-                    drawHex(coords, graphics, false);
-                    if (GUIP.getShowWrecks() && !GpuBoardWindow.modelsEnabled()) {
-                        drawIsometricWreckSpritesForHex(coords, graphics, isometricWreckSprites, false);
-                        drawIsometricWreckSpritesForHex(coords, graphics, isometricWreckSprites, true);
-                    }
-                    drawHexSpritesForHex(coords, graphics, behindTerrainHexSprites, false);
-                }
-            }
-            drawTacticalLayers(graphics, false);
-        } finally {
-            graphics.dispose();
-        }
-        for (int column = area.x; column < area.x + area.width; column++) {
-            for (int row = area.y; row < area.y + area.height; row++) {
-                Coords coords = new Coords(column, row);
-                Point point = getHexLocation(coords);
-                int left = point.x - pixels.x;
-                int top = point.y - pixels.y;
-                PlanarHex art = artwork.get(coords);
-                consumer.accept(new PlanarHex(coords, art.terrain(), art.normals(), art.decals(),
-                      art.decalsWithoutLimbs(), markingImage(tactical, left, top), art.text(), art.structureModels(), art.foliage()));
-            }
-        }
-    }
-
-    private static BufferedImage markingImage(BufferedImage layer, int x, int y) {
-        int width = HEX_W * GPU_MARKING_SCALE, height = HEX_H * GPU_MARKING_SCALE;
-        int[] pixels = ((DataBufferInt) layer.getRaster().getDataBuffer()).getData();
-        for (int row = y; row < y + height; row++) {
-            int start = row * layer.getWidth() + x;
-            for (int index = start; index < start + width; index++) {
-                if ((pixels[index] >>> 24) != 0) {
-                    return layer.getSubimage(x, y, width, height);
-                }
-            }
-        }
-        return null;
-    }
-
-    private Map<Integer, String> structureModels(Hex hex) {
-        Map<Integer, String> models = new HashMap<>();
-        if (hex.containsAnyTerrainOf(Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL)) {
-            List<Image> images = new ArrayList<>(gpuTileset.getSupers(hex));
-            images.add(gpuTileset.getBase(hex));
-            for (Image image : images) {
-                String source = gpuTileset.imageSource(image).replace('\\', '/');
-                int extension = source.lastIndexOf('.');
-                if (extension > 0) {
-                    String model = "buildings/" + source.substring(0, extension);
-                    if (new File(Configuration.dataDir(), "models/board/" + model + ".g3dj").isFile()) {
-                        for (int terrain : new int[] { Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL }) {
-                            if (hex.containsTerrain(terrain) && gpuTileset.imageHasTerrain(image, terrain)) {
-                                models.putIfAbsent(terrain, model);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        return Map.copyOf(models);
-    }
-
-    private GroundArtwork captureGroundArtwork(Coords coords) {
-        return groundArtwork.computeIfAbsent(coords, key -> {
-            Hex ground = game.getBoard(boardId).getHex(key).duplicate();
-            ground.removeAllTerrains();
-            Hex source = game.getBoard(boardId).getHex(key);
-            for (int terrain : GROUND_TERRAINS) {
-                if (source.containsTerrain(terrain)) {
-                    ground.addTerrain(source.getTerrain(terrain));
-                }
-            }
-            BufferedImage image = new BufferedImage(HEX_W, HEX_H, BufferedImage.TYPE_INT_ARGB);
-            BufferedImage normal = new BufferedImage(HEX_W, HEX_H, BufferedImage.TYPE_INT_ARGB);
-            Graphics2D graphics = image.createGraphics();
-            Graphics2D normalGraphics = normal.createGraphics();
-            try {
-                UIUtil.setHighQualityRendering(graphics);
-                UIUtil.setHighQualityRendering(normalGraphics);
-                Image base = gpuTileset.getBase(ground);
-                drawBaseTerrain(ground, graphics, base);
-                drawBaseTerrain(ground, normalGraphics, groundNormal(base));
-                // Select variants once, and use the same layering and large-image crop for their normal maps.
-                for (Image overlay : gpuTileset.getSupers(ground)) {
-                    if (overlay != null) {
-                        graphics.drawImage(getScaledImage(overlay, true), 0, 0, boardPanel);
-                        normalGraphics.drawImage(getScaledImage(groundNormal(overlay), true), 0, 0, boardPanel);
-                    }
-                }
-            } finally {
-                graphics.dispose();
-                normalGraphics.dispose();
-                // Filtered hexes are temporary, not board-owned tileset cache keys.
-                gpuTileset.clearHex(ground);
-            }
-            return new GroundArtwork(image, normal);
-        });
-    }
-
-    /** Normal assets are prepared offline from this exact source image; custom art without a map stays flat. */
-    private Image groundNormal(Image artwork) {
-        String source = gpuTileset.imageSource(artwork).replace('\\', '/');
-        return groundNormals.computeIfAbsent(source, key -> {
-            File file = new File(Configuration.dataDir(), "models/board/normals/" + key + ".png");
-            if (!key.isEmpty() && file.isFile()) {
-                Image normal = ImageUtil.loadImageFromFile(file.toString());
-                if (normal != null && normal.getWidth(null) == artwork.getWidth(null)
-                      && normal.getHeight(null) == artwork.getHeight(null)) {
-                    return normal;
-                }
-            }
-            BufferedImage flat = new BufferedImage(artwork.getWidth(null), artwork.getHeight(null), BufferedImage.TYPE_INT_ARGB);
-            Graphics2D graphics = flat.createGraphics();
-            try {
-                graphics.drawImage(artwork, 0, 0, null);
-                graphics.setComposite(AlphaComposite.SrcIn);
-                graphics.setColor(new Color(128, 128, 255));
-                graphics.fillRect(0, 0, flat.getWidth(), flat.getHeight());
-            } finally {
-                graphics.dispose();
-            }
-            return flat;
-        });
-    }
-
-    private DecalArtwork captureDecals(Coords coords) {
-        return featureArtwork.computeIfAbsent(coords, key -> {
-            Hex flat = game.getBoard(boardId).getHex(key).duplicate();
-            BufferedImage foliage = null;
-            if (flat.containsAnyTerrainOf(Terrains.WOODS, Terrains.JUNGLE)) {
-                Hex trees = flat.duplicate();
-                trees.removeAllTerrains();
-                for (int type : new int[] { Terrains.WOODS, Terrains.JUNGLE, Terrains.FOLIAGE_ELEV, Terrains.FLUFF }) {
-                    if (flat.containsTerrain(type)) { trees.addTerrain(flat.getTerrain(type)); }
-                }
-                foliage = drawDecals(trees);
-            }
-            for (int terrain : GROUND_TERRAINS) {
-                flat.removeTerrain(terrain);
-            }
-            for (int terrain : MODEL_TERRAINS) {
-                flat.removeTerrain(terrain);
-            }
-            BufferedImage full = drawDecals(flat);
-            BufferedImage withoutLimbs = null;
-            if (flat.containsAnyTerrainOf(Terrains.ARMS, Terrains.LEGS)) {
-                flat.removeTerrain(Terrains.ARMS);
-                flat.removeTerrain(Terrains.LEGS);
-                withoutLimbs = drawDecals(flat);
-            }
-            // The GPU chooses the filtered image only after successfully loading the replacement mesh.
-            return new DecalArtwork(full, withoutLimbs, foliage);
-        });
-    }
-
-    private BufferedImage drawDecals(Hex flat) {
-        BufferedImage image = new BufferedImage(HEX_W, HEX_H, BufferedImage.TYPE_INT_ARGB);
-        Graphics2D graphics = image.createGraphics();
-        try {
-            UIUtil.setHighQualityRendering(graphics);
-            drawSupers(flat, graphics);
-        } finally {
-            graphics.dispose();
-            gpuTileset.clearHex(flat);
-        }
-        return image;
-    }
-
-    /** Read after overlay capture, on Swing's thread, so hidden or empty unit strips reserve no space. */
-    public int sidePanelInset() {
-        return unitStripInset(false);
-    }
-
-    public int leftPanelInset() {
-        return unitStripInset(true);
-    }
-
-    private int unitStripInset(boolean left) {
-        return overlays.stream().filter(UnitOverviewOverlay.class::isInstance)
-              .map(UnitOverviewOverlay.class::cast).filter(strip -> strip.isOnLeft() == left)
-              .mapToInt(UnitOverviewOverlay::sidePanelInset).max().orElse(0);
-    }
-
-    /** Preserves painter order while keeping cached text and its fade separate for native compositing. */
-    public List<OverlayImage> captureOverlayLayers(Dimension size, Dimension pixels) {
-        List<OverlayImage> layers = new ArrayList<>();
-        Rectangle bounds = new Rectangle(size);
-        Graphics2D metrics = overlayGraphics(new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB), size, pixels);
-        BufferedImage pending = null;
-        Graphics2D painter = null;
-        try {
-            for (IDisplayable overlay : overlays) {
-                List<OverlayImage> captured = overlay.captureLayers(metrics, bounds);
-                if (captured != null) {
-                    if (pending != null) {
-                        painter.dispose();
-                        painter = null;
-                        layers.add(new OverlayImage(pending, 0, 0, OverlayImage.Fade.OPAQUE));
-                        pending = null;
-                    }
-                    layers.addAll(captured);
-                } else {
-                    // Consecutive widgets can share a raster, but must retain their order around faded panels.
-                    if (pending == null) {
-                        pending = new BufferedImage(Math.max(1, pixels.width), Math.max(1, pixels.height),
-                              BufferedImage.TYPE_INT_ARGB);
-                        painter = overlayGraphics(pending, size, pixels);
-                    }
-                    overlay.draw(painter, bounds);
-                }
-            }
-            if (pending != null) {
-                layers.add(new OverlayImage(pending, 0, 0, OverlayImage.Fade.OPAQUE));
-            }
-        } finally {
-            metrics.dispose();
-            if (painter != null) {
-                painter.dispose();
-            }
-        }
-        return List.copyOf(layers);
-    }
-
-    private static Graphics2D overlayGraphics(BufferedImage image, Dimension size, Dimension pixels) {
-        Graphics2D graphics = image.createGraphics();
-        // Layout and hit coordinates stay logical; artwork is rasterized at the display's native density.
-        graphics.scale(Math.max(1, pixels.width) / (double) Math.max(1, size.width),
-              Math.max(1, pixels.height) / (double) Math.max(1, size.height));
-        UIUtil.setHighQualityRendering(graphics);
-        return graphics;
-    }
-
-    /** Draws the tileset's super images for a hex, which it layers over the base terrain. */
-    private void drawSupers(Hex hex, Graphics2D graphics) {
-        if (hex == null) {
-            return;
-        }
-        List<Image> supers = gpuTileset.getSupers(hex);
-        if (supers == null) {
-            return;
-        }
-        for (Image image : supers) {
-            if (image != null) {
-                graphics.drawImage(getScaledImage(image, true), 0, 0, boardPanel);
-            }
-        }
-    }
-
-    private static final int[] GROUND_TERRAINS = { Terrains.ROAD, Terrains.ROAD_FLUFF, Terrains.PAVEMENT, Terrains.SAND,
-          Terrains.SNOW, Terrains.TUNDRA, Terrains.MUD, Terrains.SWAMP, Terrains.ICE, Terrains.MAGMA, Terrains.FIELDS,
-          Terrains.ROUGH, Terrains.RUBBLE };
-
-    /** These have geometry in 3D; painted cliffs and slopes would duplicate the actual faces. */
-    private static final int[] MODEL_TERRAINS = { Terrains.WATER, Terrains.WATER_FLUFF, Terrains.RAPIDS, Terrains.HAZARDOUS_LIQUID,
-          Terrains.BUILDING, Terrains.BLDG_CF, Terrains.BLDG_ELEV, Terrains.BLDG_FLUFF, Terrains.BLDG_ARMOR,
-          Terrains.FUEL_TANK, Terrains.FUEL_TANK_CF, Terrains.FUEL_TANK_ELEV, Terrains.FUEL_TANK_MAGN,
-          Terrains.BRIDGE, Terrains.BRIDGE_CF, Terrains.BRIDGE_ELEV, Terrains.BRIDGE_REPAIRED,
-          Terrains.WOODS, Terrains.JUNGLE, Terrains.FOLIAGE_ELEV, Terrains.INDUSTRIAL,
-          Terrains.CLIFF_TOP, Terrains.CLIFF_BOTTOM, Terrains.INCLINE_TOP, Terrains.INCLINE_BOTTOM,
-          Terrains.INCLINE_HIGH_TOP, Terrains.INCLINE_HIGH_BOTTOM };
-
-    /**
-     * @param lastCursor The lastCursor to set.
-     */
-    public void setLastCursor(Coords lastCursor) {
-        this.lastCursor = lastCursor;
-    }
-
-    /**
-     * @return Returns the lastCursor.
-     */
-    public Coords getLastCursor() {
-        return lastCursor;
-    }
 
     /**
      * @param selected The selected to set.
      */
     public void setSelected(Coords selected) {
-        if (this.selected != selected) {
-            this.selected = selected;
-            checkFoVHexImageCacheClear();
-        }
+        clientState.setSelected(selected);
     }
 
     /**
      * @return Returns the selected.
      */
     public Coords getSelected() {
-        return selected;
+        return clientState.getSelected();
     }
 
     /**
      * @param firstLOS The firstLOS to set.
      */
     public void setFirstLOS(Coords firstLOS) {
-        this.firstLOS = firstLOS;
+        clientState.setFirstLOS(firstLOS);
     }
 
     /**
      * @return Returns the firstLOS.
      */
     public Coords getFirstLOS() {
-        return firstLOS;
+        return clientState.getFirstLOS();
     }
 
     /**
@@ -5513,13 +3142,12 @@ public final class BoardView extends AbstractBoardView
      */
     @Override
     public void select(Coords coords) {
-        if ((coords == null) || game.getBoard(boardId).contains(coords)) {
-            setSelected(coords);
-            moveCursor(selectedSprite, coords);
-            moveCursor(firstLOSSprite, null);
-            moveCursor(secondLOSSprite, null);
-            processBoardViewEvent(new BoardViewEvent(this, coords, BoardViewEvent.BOARD_HEX_SELECTED, 0));
-        }
+        clientState.select(coords);
+    }
+
+    /** Select a hex for inspection without invoking a phase's target, deployment or movement tool. */
+    public void selectForInspection(Coords coords) {
+        clientState.selectForInspection(coords);
     }
 
     /**
@@ -5529,7 +3157,7 @@ public final class BoardView extends AbstractBoardView
      * @param y the y coordinate.
      */
     public void select(int x, int y) {
-        select(new Coords(x, y));
+        clientState.select(x, y);
     }
 
     /**
@@ -5539,21 +3167,14 @@ public final class BoardView extends AbstractBoardView
      */
     @Override
     public void highlight(Coords coords) {
-        if ((coords == null) || game.getBoard(boardId).contains(coords)) {
-            moveCursor(highlightSprite, coords);
-            moveCursor(firstLOSSprite, null);
-            moveCursor(secondLOSSprite, null);
-            processBoardViewEvent(new BoardViewEvent(this, coords, BoardViewEvent.BOARD_HEX_HIGHLIGHTED, 0));
-        }
+        clientState.highlight(coords);
     }
 
     /**
      * @param color The new colour of the highlight cursor.
      */
     public void setHighlightColor(Color color) {
-        highlightSprite.setColor(color);
-        highlightSprite.prepare();
-        repaint();
+        clientState.setHighlightColor(color);
     }
 
     /**
@@ -5563,13 +3184,12 @@ public final class BoardView extends AbstractBoardView
      * @param y the y coordinate.
      */
     public void highlight(int x, int y) {
-        highlight(new Coords(x, y));
+        clientState.highlight(x, y);
     }
 
     public synchronized void highlightSelectedEntity(Entity entity) {
-        for (EntitySprite sprite : entitySprites) {
-            sprite.setSelected(sprite.getEntity().equals(entity));
-        }
+        clientState.highlightSelectedEntity(entity);
+        for (EntitySprite sprite : entitySprites) { sprite.setSelected(clientState.isEntitySelected(sprite.getEntity())); }
     }
 
     /**
@@ -5579,9 +3199,8 @@ public final class BoardView extends AbstractBoardView
      * @param entities List of entities to highlight (can be empty to clear all highlights)
      */
     public synchronized void highlightSelectedEntities(List<Entity> entities) {
-        for (EntitySprite sprite : entitySprites) {
-            sprite.setSelected(entities.contains(sprite.getEntity()));
-        }
+        clientState.highlightSelectedEntities(entities);
+        for (EntitySprite sprite : entitySprites) { sprite.setSelected(clientState.isEntitySelected(sprite.getEntity())); }
     }
 
     /**
@@ -5591,8 +3210,7 @@ public final class BoardView extends AbstractBoardView
      * @param hexes List of hex coordinates to highlight (can be empty to clear all highlights)
      */
     public void setHighlightedEntityHexes(List<Coords> hexes) {
-        highlightedEntityHexes = new ArrayList<>(hexes);
-        repaint();
+        clientState.setHighlightedEntityHexes(hexes);
     }
 
     /**
@@ -5602,8 +3220,7 @@ public final class BoardView extends AbstractBoardView
      * @param hexes List of hex coordinates to highlight (can be empty to clear all highlights)
      */
     public void setDemolitionChargeHighlightHexes(List<Coords> hexes) {
-        demolitionChargeHighlightHexes = new ArrayList<>(hexes);
-        repaint();
+        clientState.setDemolitionChargeHighlightHexes(hexes);
     }
 
     /**
@@ -5613,17 +3230,7 @@ public final class BoardView extends AbstractBoardView
      */
     @Override
     public void cursor(Coords coords) {
-        if ((coords == null) || game.getBoard(boardId).contains(coords)) {
-            if ((getLastCursor() == null) || (coords == null) || !coords.equals(getLastCursor())) {
-                setLastCursor(coords);
-                moveCursor(cursorSprite, coords);
-                moveCursor(firstLOSSprite, null);
-                moveCursor(secondLOSSprite, null);
-                processBoardViewEvent(new BoardViewEvent(this, coords, BoardViewEvent.BOARD_HEX_CURSOR, 0));
-            } else {
-                setLastCursor(coords);
-            }
-        }
+        clientState.cursor(coords);
     }
 
     /**
@@ -5633,21 +3240,11 @@ public final class BoardView extends AbstractBoardView
      * @param y the y coordinate.
      */
     public void cursor(int x, int y) {
-        cursor(new Coords(x, y));
+        clientState.cursor(x, y);
     }
 
     public void checkLOS(Coords c) {
-        if ((c == null) || game.getBoard(boardId).contains(c)) {
-            if (getFirstLOS() == null) {
-                setFirstLOS(c);
-                firstLOSHex(c);
-                processBoardViewEvent(new BoardViewEvent(this, c, BoardViewEvent.BOARD_FIRST_LOS_HEX, 0));
-            } else {
-                secondLOSHex(c, getFirstLOS());
-                processBoardViewEvent(new BoardViewEvent(this, c, BoardViewEvent.BOARD_SECOND_LOS_HEX, 0));
-                setFirstLOS(null);
-            }
-        }
+        clientState.checkLOS(c);
     }
 
     /**
@@ -5655,43 +3252,7 @@ public final class BoardView extends AbstractBoardView
      * action.
      */
     public void mouseAction(int x, int y, int mouseActionType, int modifiers, int mouseButton) {
-        if (game.getBoard(boardId).contains(x, y)) {
-            Coords coords = new Coords(x, y);
-            switch (mouseActionType) {
-                case BOARD_HEX_CLICK:
-                    if ((modifiers & InputEvent.CTRL_DOWN_MASK) != 0) {
-                        checkLOS(coords);
-                    } else {
-                        processBoardViewEvent(new BoardViewEvent(this,
-                              coords,
-                              BoardViewEvent.BOARD_HEX_CLICKED,
-                              modifiers,
-                              mouseButton));
-                    }
-                    break;
-                case BOARD_HEX_DOUBLE_CLICK:
-                    processBoardViewEvent(new BoardViewEvent(this,
-                          coords,
-                          BoardViewEvent.BOARD_HEX_DOUBLE_CLICKED,
-                          modifiers,
-                          mouseButton));
-                    break;
-                case BOARD_HEX_DRAG:
-                    processBoardViewEvent(new BoardViewEvent(this,
-                          coords,
-                          BoardViewEvent.BOARD_HEX_DRAGGED,
-                          modifiers,
-                          mouseButton));
-                    break;
-                case BOARD_HEX_POPUP:
-                    processBoardViewEvent(new BoardViewEvent(this,
-                          coords,
-                          BoardViewEvent.BOARD_HEX_POPUP,
-                          modifiers,
-                          mouseButton));
-                    break;
-            }
-        }
+        clientState.mouseAction(x, y, mouseActionType, modifiers, mouseButton);
     }
 
     /**
@@ -5703,7 +3264,7 @@ public final class BoardView extends AbstractBoardView
      * @param mouseButton - mouse button associated with this event 0 = no button 1 = Button 1 2 = Button 2
      */
     public void mouseAction(Coords coords, int eventType, int modifiers, int mouseButton) {
-        mouseAction(coords.getX(), coords.getY(), eventType, modifiers, mouseButton);
+        clientState.mouseAction(coords, eventType, modifiers, mouseButton);
     }
 
     @Override
@@ -5717,8 +3278,8 @@ public final class BoardView extends AbstractBoardView
 
     @Override
     public void boardChangedHex(BoardEvent boardEvent) {
-        // A changed blocker can affect LOS far beyond this hex and its immediate neighbors.
-        checkFoVHexImageCacheClear();
+        // Shared state has invalidated LOS. Only the classic raster embeds FoV into its hex images.
+        if (shouldFovDarken() || shouldFovHighlight()) { hexImageCache.clear(); }
         Coords coords = boardEvent.getCoords();
         Hex hex = game.getBoard(boardId).getHex(coords);
         // An elevator changes its terrain overlay level, which the isometric view can draw beyond the immediate
@@ -5727,7 +3288,7 @@ public final class BoardView extends AbstractBoardView
         boolean hasIndustrialElevator = (hex != null) && hex.containsTerrain(Terrains.INDUSTRIAL_ELEVATOR);
         boolean hasSolarisElevator = (hex != null) && hex.containsTerrain(Terrains.SOLARIS_ELEVATOR);
         if (hasIndustrialElevator || hasSolarisElevator) {
-            clearHexImageCache();
+            hexImageCache.clear();
         } else {
             hexImageCache.remove(coords);
             // Also repaint the surrounding hexes because of shadows, border etc.
@@ -5752,18 +3313,7 @@ public final class BoardView extends AbstractBoardView
 
     @Override
     public void clearSprites() {
-        pathSprites.clear();
-        fpiSprites.clear();
-        attackSprites.clear();
-        c3Sprites.clear();
-        vtolAttackSprites.clear();
-        flyOverSprites.clear();
-        movementSprites.clear();
-
-        overTerrainSprites.clear();
-        behindTerrainHexSprites.clear();
-
-        super.clearSprites();
+        clientState.clearSprites();
     }
 
     public synchronized void updateBoard() {
@@ -5782,9 +3332,9 @@ public final class BoardView extends AbstractBoardView
         public void run() {
             long currentTime = java.lang.System.currentTimeMillis();
 
-            // The GPU window also presents these overlays while the classic panel is hidden.
+            // The GPU window also presents these clientState.overlays while the classic panel is hidden.
             boolean redraw = false;
-            for (IDisplayable displayable : overlays) {
+            for (IDisplayable displayable : clientState.overlays) {
                 if (!displayable.isSliding()) {
                     displayable.setIdleTime(currentTime - lastTime, true);
                 } else {
@@ -5809,223 +3359,10 @@ public final class BoardView extends AbstractBoardView
      */
     public synchronized void selectEntity(Entity entity) {
         checkFoVHexImageCacheClear();
-        updateEcmList();
+        clientState.updateEcmList();
         highlightSelectedEntity(entity);
     }
 
-    /**
-     * Updates maps that determine how to shade hexes affected by E(C)CM. This is expensive, so precalculate only when
-     * entity changes occur
-     **/
-    public void updateEcmList() {
-        Map<Coords, Color> newECMHexes = new HashMap<>();
-        Map<Coords, Color> newECMCenters = new HashMap<>();
-        Map<Coords, Color> newECCMHexes = new HashMap<>();
-        Map<Coords, Color> newECCMCenters = new HashMap<>();
-
-        // Compute info about all E(C)CM on the board
-        final ArrayList<ECMInfo> allEcmInfo = ComputeECM.computeAllEntitiesECMInfo(game.getEntitiesVector());
-
-        // First, mark the sources of E(C)CM Used for highlighting hexes and tooltips
-        for (Entity entity : game.getEntitiesVector()) {
-            if (entity.getPosition() == null || !isOnThisBord(entity)) {
-                continue;
-            }
-
-            Player localPlayer = getLocalPlayer();
-            boolean entityIsEnemy = entity.getOwner().isEnemyOf(localPlayer);
-
-            // If this unit isn't spotted somehow, it's ECM doesn't show up
-            if ((localPlayer != null)
-                  && game.getOptions().booleanOption(OptionsConstants.ADVANCED_DOUBLE_BLIND)
-                  && entityIsEnemy
-                  && !entity.hasSeenEntity(localPlayer)
-                  && !entity.hasDetectedEntity(localPlayer)) {
-                continue;
-            }
-
-            // hidden enemy entities don't show their ECM bubble
-            if (entityIsEnemy && entity.isHidden()) {
-                continue;
-            }
-
-            final Color ecmColor = ECMEffects.getECMColor(entity.getOwner());
-            // Update ECM center information
-            if (entity.getECMInfo() != null) {
-                newECMCenters.put(entity.getPosition(), ecmColor);
-            }
-            // Update ECCM center information
-            if (entity.getECCMInfo() != null) {
-                newECCMCenters.put(entity.getPosition(), ecmColor);
-            }
-            // Update Entity sprite's ECM status
-            int secondaryIdx = -1;
-            if (!entity.getSecondaryPositions().isEmpty()) {
-                secondaryIdx = 0;
-            }
-            EntitySprite entitySprite = entitySpriteIds.get(getIdAndLoc(entity.getId(), secondaryIdx));
-            if (entitySprite != null) {
-                Coords position = entity.getPosition();
-                entitySprite.setAffectedByECM(ComputeECM.isAffectedByECM(entity, position, position, allEcmInfo));
-            }
-        }
-
-        // Keep track of allied ECM and enemy ECCM
-        Map<Coords, ECMEffects> ecmAffectedCoords = new HashMap<>();
-        // Keep track of allied ECCM and enemy ECM
-        Map<Coords, ECMEffects> eccmAffectedCoords = new HashMap<>();
-        for (ECMInfo ecmInfo : allEcmInfo) {
-            // Check if ECM source is on this board
-            // Entity-based ECM: check if entity is on this board
-            // Entity-less ECM (e.g., EMP mines): check if position is valid on this board
-            if (ecmInfo.getEntity() != null) {
-                if (!isOnThisBord(ecmInfo.getEntity())) {
-                    continue;
-                }
-            } else {
-                // Entity-less ECM field (from EMP mines, etc.) - check position is on board
-                if (ecmInfo.getPos() == null || !game.getBoard(boardId).contains(ecmInfo.getPos())) {
-                    continue;
-                }
-            }
-
-            // Can't see ECM field of unspotted unit
-            Player localPlayer = getLocalPlayer();
-            if ((ecmInfo.getEntity() != null) && (localPlayer != null) && game.getOptions()
-                  .booleanOption(OptionsConstants.ADVANCED_DOUBLE_BLIND) && ecmInfo.getEntity()
-                  .getOwner()
-                  .isEnemyOf(localPlayer) && !ecmInfo.getEntity().hasSeenEntity(localPlayer) && !ecmInfo.getEntity()
-                  .hasDetectedEntity(localPlayer)) {
-                continue;
-            }
-
-            // hidden enemy entities don't show their ECM bubble
-            if (ecmInfo.getEntity() != null
-                  && ecmInfo.getEntity().getOwner().isEnemyOf(localPlayer)
-                  && ecmInfo.getEntity().isHidden()) {
-                continue;
-            }
-
-            final Coords ecmPos = ecmInfo.getPos();
-            final int range = ecmInfo.getRange();
-
-            // Add each Coords within range to the list of ECM Coords
-            for (int x = -range;
-                  x <= range;
-                  x++) {
-                for (int y = -range;
-                      y <= range;
-                      y++) {
-                    Coords coords = new Coords(x + ecmPos.getX(), y + ecmPos.getY());
-                    int distance = ecmPos.distance(coords);
-                    int direction = ecmInfo.getDirection();
-                    // Direction is the facing of the owning Entity
-                    boolean inArc = (direction == -1) || ComputeArc.isInArc(ecmPos,
-                          direction,
-                          coords,
-                          Compute.ARC_NOSE);
-                    if ((distance > range) || !inArc) {
-                        continue;
-                    }
-
-                    // Check for allied ECCM or enemy ECM
-                    if ((!ecmInfo.isOpposed(localPlayer) && ecmInfo.isECCM()) || (ecmInfo.isOpposed(localPlayer)
-                          && ecmInfo.isECCM())) {
-                        ECMEffects ecmEffects = eccmAffectedCoords.computeIfAbsent(coords, k -> new ECMEffects());
-                        ecmEffects.addECM(ecmInfo);
-                    } else {
-                        ECMEffects ecmEffects = ecmAffectedCoords.computeIfAbsent(coords, k -> new ECMEffects());
-                        ecmEffects.addECM(ecmInfo);
-                    }
-                }
-            }
-        }
-
-        // Finally, determine the color for each affected hex
-        for (Coords coords : ecmAffectedCoords.keySet()) {
-            ECMEffects ecm = ecmAffectedCoords.get(coords);
-            ECMEffects eccm = eccmAffectedCoords.get(coords);
-            processAffectedCoords(coords, ecm, eccm, newECMHexes, newECCMHexes);
-        }
-
-        for (Coords coords : eccmAffectedCoords.keySet()) {
-            ECMEffects ecm = ecmAffectedCoords.get(coords);
-            ECMEffects eccm = eccmAffectedCoords.get(coords);
-            // Already processed all ECM affected coords
-
-            if (ecm != null) {
-                continue;
-            }
-
-            processAffectedCoords(coords, null, eccm, newECMHexes, newECCMHexes);
-        }
-
-        Set<Coords> updatedHexes = new HashSet<>();
-        for (Map<Coords, Color> colors : Arrays.asList(ecmHexes, eccmHexes, ecmCenters, eccmCenters,
-              newECMHexes, newECCMHexes, newECMCenters, newECCMCenters)) {
-            if (colors != null) {
-                updatedHexes.addAll(colors.keySet());
-            }
-        }
-        for (Coords coords : updatedHexes) {
-            hexImageCache.remove(coords);
-            // Only ECM noise still belongs to the GPU raster cache. Terrain artwork is unaffected.
-            if (!Objects.equals(colorAt(ecmHexes, coords), newECMHexes.get(coords))) {
-                planarHexImageCache.remove(coords);
-            }
-        }
-        if (!newECMHexes.equals(ecmHexes) || !newECCMHexes.equals(eccmHexes)
-              || !newECMCenters.equals(ecmCenters) || !newECCMCenters.equals(eccmCenters)) {
-            checkFoVHexImageCacheClear();
-            invalidatePlanarCapture();
-        }
-
-        synchronized (this) {
-            ecmHexes = newECMHexes;
-            ecmCenters = newECMCenters;
-            eccmHexes = newECCMHexes;
-            eccmCenters = newECCMCenters;
-        }
-
-        boardPanel.repaint();
-    }
-
-    private void processAffectedCoords(Coords coords, ECMEffects ecm, ECMEffects eccm, Map<Coords, Color> newECMHexes,
-          Map<Coords, Color> newECCMHexes) {
-        Color hexColorECM = null;
-
-        if (ecm != null) {
-            hexColorECM = ecm.getHexColor();
-        }
-
-        Color hexColorECCM = null;
-
-        if (eccm != null) {
-            hexColorECCM = eccm.getHexColor();
-        }
-
-        // Hex color is null if all effects cancel out
-        if ((hexColorECM == null) && (hexColorECCM == null)) {
-            return;
-        }
-
-        if ((hexColorECM != null) && (hexColorECCM == null)) {
-            if (ecm.isECCM()) {
-                newECCMHexes.put(coords, hexColorECM);
-            } else {
-                newECMHexes.put(coords, hexColorECM);
-            }
-        } else if (hexColorECM == null) {
-            if (eccm.isECCM()) {
-                newECCMHexes.put(coords, hexColorECCM);
-            } else {
-                newECMHexes.put(coords, hexColorECCM);
-            }
-        } else { // Both are non-null
-            newECMHexes.put(coords, hexColorECM);
-            newECCMHexes.put(coords, hexColorECCM);
-        }
-    }
 
     /**
      * Have the player select an Entity from the entities at the given coords.
@@ -6064,6 +3401,7 @@ public final class BoardView extends AbstractBoardView
     @Override
     public void setDisplayInvalidFields(boolean displayInvalidFields) {
         displayInvalidHexInfo = displayInvalidFields;
+        clientState.setDisplayInvalidFields(displayInvalidFields);
     }
 
     @Override
@@ -6193,8 +3531,8 @@ public final class BoardView extends AbstractBoardView
 
     private void pingMinimap() {
         // send the minimap a hex moused event to make it update the visible area rectangle
-        BoardViewEvent bve = new BoardViewEvent(this, BoardViewEvent.BOARD_HEX_DRAGGED);
-        for (BoardViewListener l : boardViewListeners) {
+        BoardViewEvent bve = new BoardViewEvent(clientState, BoardViewEvent.BOARD_HEX_DRAGGED);
+        for (BoardViewListener l : clientState.listeners) {
             l.hexMoused(bve);
         }
     }
@@ -6228,6 +3566,15 @@ public final class BoardView extends AbstractBoardView
         }
 
         zoomIndex--;
+        zoom();
+    }
+
+    /**
+     * Reset the zoom level to the BASE_ZOOM_INDEX
+     */
+    @Override
+    public void zoomReset() {
+        zoomIndex = BASE_ZOOM_INDEX;
         zoom();
     }
 
@@ -6315,22 +3662,22 @@ public final class BoardView extends AbstractBoardView
 
         scaledImageCache = new ImageCache<>();
 
-        cursorSprite.prepare();
-        highlightSprite.prepare();
-        selectedSprite.prepare();
-        firstLOSSprite.prepare();
-        secondLOSSprite.prepare();
+        clientState.cursorSprite.prepare();
+        clientState.highlightSprite.prepare();
+        clientState.selectedSprite.prepare();
+        clientState.firstLOSSprite.prepare();
+        clientState.secondLOSSprite.prepare();
 
-        allSprites.forEach(Sprite::prepare);
+        clientState.allSprites.forEach(Sprite::prepare);
 
         updateFontSizes();
         updateBoard();
 
-        for (StepSprite sprite : pathSprites) {
+        for (StepSprite sprite : clientState.pathSprites) {
             sprite.refreshZoomLevel();
         }
 
-        for (FlightPathIndicatorSprite sprite : fpiSprites) {
+        for (FlightPathIndicatorSprite sprite : clientState.fpiSprites) {
             sprite.prepare();
         }
 
@@ -6450,25 +3797,14 @@ public final class BoardView extends AbstractBoardView
 
     public void toggleIsometric() {
         setVerticalOffset();
-        allSprites.forEach(Sprite::prepare);
+        clientState.allSprites.forEach(Sprite::prepare);
         clearHexImageCache();
         updateBoard();
         repaint();
     }
 
     public void updateEntityLabels() {
-        for (Entity entity : game.getEntitiesVector()) {
-            entity.generateShortName();
-        }
-
-        for (EntitySprite entitySprite : entitySprites) {
-            entitySprite.prepare();
-        }
-
-        for (IsometricSprite isometricSprite : isometricSprites) {
-            isometricSprite.prepare();
-        }
-        boardPanel.repaint();
+        clientState.updateEntityLabels();
     }
 
     public BufferedImage createShadowMask(Image image) {
@@ -6493,18 +3829,26 @@ public final class BoardView extends AbstractBoardView
      * @return Returns true if the BoardView has an active chatter box else false.
      */
     public boolean getChatterBoxActive() {
-        return chatterBoxActive;
+        return clientState.getChatterBoxActive();
     }
 
     /**
      * @param chatterBoxActive whether the BoardView has an active chatter box or not.
      */
     public void setChatterBoxActive(boolean chatterBoxActive) {
-        this.chatterBoxActive = chatterBoxActive;
+        clientState.setChatterBoxActive(chatterBoxActive);
     }
 
     public void setShouldIgnoreKeys(boolean shouldIgnoreKeys) {
-        this.shouldIgnoreKeys = shouldIgnoreKeys;
+        clientState.setShouldIgnoreKeys(shouldIgnoreKeys);
+    }
+
+    /** EDT-only asset refresh shared by the native board and this view's artwork capture. */
+    public void reloadAssets() throws IOException {
+        tileManager.reloadAssets();
+        clientState.reloadArtwork();
+        scaledImageCache.clear();
+        clearHexImageCache();
     }
 
     public void clearHexImageCache() {
@@ -6513,9 +3857,8 @@ public final class BoardView extends AbstractBoardView
         }
         invalidatePlanarCapture();
         hexImageCache.clear();
-        planarHexImageCache.clear();
-        groundArtwork.clear();
-        featureArtwork.clear();
+
+        clientState.clearArtwork();
     }
 
     /**
@@ -6530,9 +3873,8 @@ public final class BoardView extends AbstractBoardView
         invalidatePlanarCapture();
         for (Coords coords : setCoords) {
             hexImageCache.remove(coords);
-            planarHexImageCache.remove(coords);
-            groundArtwork.remove(coords);
-            featureArtwork.remove(coords);
+
+            clientState.invalidateArtwork(coords);
         }
     }
 
@@ -6556,62 +3898,21 @@ public final class BoardView extends AbstractBoardView
         return HEX_POLY;
     }
 
-    /**
-     * Displays a dialog and changes the theme of all board hexes to the user-chosen theme.
-     */
-    public @Nullable String changeTheme() {
-        if (game == null) {
-            return null;
-        }
-        Board board = game.getBoard(boardId);
-        if (board.isSpace()) {
-            return null;
-        }
-
-        Set<String> themes = tileManager.getThemes();
-
-        if (themes.remove("")) {
-            themes.add("(No Theme)");
-        }
-
-        themes.add("(Original Theme)");
-
-        setShouldIgnoreKeys(true);
-        selectedTheme = (String) JOptionPane.showInputDialog(null,
-              "Choose the desired theme:",
-              "Theme Selection",
-              JOptionPane.PLAIN_MESSAGE,
-              null,
-              themes.toArray(),
-              selectedTheme);
-        setShouldIgnoreKeys(false);
-
-        if (selectedTheme == null) {
-            return null;
-        } else if (selectedTheme.equals("(Original Theme)")) {
-            selectedTheme = null;
-        } else if (selectedTheme.equals("(No Theme)")) {
-            selectedTheme = "";
-        }
-
-        board.setTheme(selectedTheme);
-        return selectedTheme;
-    }
 
     public Rectangle getDisplayablesRect() {
-        return displayablesRect;
+        return clientState.displayablesRect;
     }
 
     public boolean shouldFovHighlight() {
-        return GUIP.getFovHighlight() && !(game.getPhase().isReport());
+        return clientState.shouldFovHighlight();
     }
 
     public boolean shouldFovDarken() {
-        return GUIP.getFovDarken() && !(game.getPhase().isReport());
+        return clientState.shouldFovDarken();
     }
 
     public void setShowLobbyPlayerDeployment(boolean showLobbyPlayerDeployment) {
-        this.showLobbyPlayerDeployment = showLobbyPlayerDeployment;
+        clientState.setShowLobbyPlayerDeployment(showLobbyPlayerDeployment);
     }
 
     @Override
@@ -6642,15 +3943,31 @@ public final class BoardView extends AbstractBoardView
 
     @Override
     public void dispose() {
+        if (disposed) {
+            return;
+        }
+        disposed = true;
         // The native window belongs to the client, so replacing a map must not close it.
         if (getClientgui() == null) {
-            GpuBoardWindow.closeFor(this);
+            GpuBoardWindow.closeFor(clientState);
         }
-        overlays.stream().filter(UnitOverviewOverlay.class::isInstance).map(UnitOverviewOverlay.class::cast)
-              .forEach(GUIP::removePreferenceChangeListener);
-        super.dispose();
+        keyRegistrations.forEach(Runnable::run);
+        keyRegistrations.clear();
+        ToolTipManager.sharedInstance().unregisterComponent(boardPanel);
         redrawTimerTask.cancel();
-        fovHighlightingAndDarkening.die();
+        game.removeGameListener(boardGameListener);
+        if (observedBoard != null) {
+            observedBoard.removeBoardListener(this);
+        }
+        removeSprites(entitySprites);
+        removeSprites(isometricSprites);
+        clientState.setChanged(() -> { });
+        clientState.setProjection(null);
+        clientState.setMovingUnitPainter(null);
+        clientState.setEntityRenderer(entity -> { });
+        clientState.setInputEnabled(() -> true);
+        clientState.setVisibleArea(() -> new double[] { 0, 0, 1, 1 });
+        if (ownsClientState) { clientState.close(); }
         KeyBindParser.removePreferenceChangeListener(this);
         GUIP.removePreferenceChangeListener(this);
         PreferenceManager.getClientPreferences().removePreferenceChangeListener(this);
@@ -6659,10 +3976,7 @@ public final class BoardView extends AbstractBoardView
     /** @return The TurnDetailsOverlay if this BoardView has one. */
     @Nullable
     public TurnDetailsOverlay getTurnDetailsOverlay() {
-        return (TurnDetailsOverlay) overlays.stream()
-              .filter(o -> o instanceof TurnDetailsOverlay)
-              .findFirst()
-              .orElse(null);
+        return clientState.getTurnDetailsOverlay();
     }
 
     /**
@@ -6671,102 +3985,46 @@ public final class BoardView extends AbstractBoardView
      */
     @Nullable
     public Entity getSelectedEntity() {
-        return clientgui != null ? clientgui.getDisplayedUnit() : null;
+        return clientState.getSelectedEntity();
     }
 
-    public FovHighlightingAndDarkening getFovHighlighting() {
-        return fovHighlightingAndDarkening;
-    }
 
     public ArrayList<IsometricWreckSprite> getIsoWreckSprites() {
         return isometricWreckSprites;
     }
 
     public ArrayList<AttackSprite> getAttackSprites() {
-        return attackSprites;
+        return clientState.getAttackSprites();
     }
 
-    private static boolean hasNativeVolume(Sprite sprite) {
-        return sprite instanceof AttackSprite || sprite instanceof CollapseWarningSprite
-              || sprite instanceof GroundObjectSprite || sprite instanceof FlareSprite
-              || sprite instanceof HexFlagSprite || sprite instanceof SawClearingSprite
-              || sprite instanceof BridgeRepairedSprite
-              || sprite instanceof FieldOfFireSprite field && field.isWeaponRange()
-              || sprite instanceof TextMarkerSprite text && text.isWeaponRange();
-    }
-
-    private static boolean hasMarkerTerrain(Sprite sprite) {
-        return sprite instanceof BridgeBuildSprite || sprite instanceof FortifyBuildSprite
-              || sprite instanceof RubbleClearSprite || sprite instanceof DugInSprite;
-    }
 
     /** Used by mixed terrain/status sprites to leave only their terrain artwork in the planar capture. */
     public boolean isGpuCapture() {
-        return gpuCapture;
+        return false;
     }
 
     public BoardMarker boardMarker(BoardMarker.Kind kind, Coords coords, String label) {
-        return boardMarker(kind, coords, kind.rgb(), label);
+        return clientState.boardMarker(kind, coords, label);
     }
 
     public BoardMarker boardMarker(BoardMarker.Kind kind, Coords coords, int rgb, String label) {
-        Hex hex = coords == null ? null : getBoard().getHex(coords);
-        return new BoardMarker(kind, coords, hex == null ? 0 : hex.ceiling(), rgb, label);
+        return clientState.boardMarker(kind, coords, rgb, label);
     }
 
     /** Swing-only snapshot of the existing visible handlers, local attacks, and special-hex display rules. */
     public List<BoardMarker> getBoardMarkers() {
-        List<BoardMarker> result = new ArrayList<>();
-        allSprites.stream().filter(sprite -> !sprite.isHidden()).map(Sprite::boardMarker)
-              .filter(Objects::nonNull).forEach(result::add);
-        result.addAll(minefieldMarkers());
-        result.addAll(demolitionMarkers());
-        result.addAll(artilleryMarkers());
-        for (Enumeration<OrbitalBombardment> attacks = game.getOrbitalBombardmentAttacks(); attacks.hasMoreElements();) {
-            OrbitalBombardment attack = attacks.nextElement();
-            result.add(boardMarker(BoardMarker.Kind.ORBITAL_INCOMING, new Coords(attack.getX(), attack.getY()), ""));
-        }
-        getBoard().getSpecialHexDisplayTable().forEach((coords, displays) -> {
-            for (SpecialHexDisplay display : displays) {
-                BoardMarker.Kind kind = pointMarkerKind(display);
-                if (kind != null && display.drawNow(game.getPhase(), game.getRoundCount(), getLocalPlayer(), GUIP)) {
-                    result.add(boardMarker(kind, coords, ""));
-                }
-            }
-        });
-        return result.stream().filter(marker -> marker.coords() != null && getBoard().contains(marker.coords()))
-              .distinct().sorted(Comparator.comparingInt((BoardMarker marker) -> marker.coords().getX())
-                    .thenComparingInt(marker -> marker.coords().getY()).thenComparing(BoardMarker::kind)
-                    .thenComparing(BoardMarker::label).thenComparingInt(BoardMarker::rgb)).toList();
+        return clientState.getBoardMarkers();
     }
 
-    private BoardMarker.Kind pointMarkerKind(SpecialHexDisplay display) {
-        if (isHeatMapMarker(display)) {
-            return null;
-        }
-        return switch (display.getType()) {
-            case ARTILLERY_AUTO_HIT -> BoardMarker.Kind.ARTILLERY_AUTO_HIT;
-            case ARTILLERY_ADJUSTED -> BoardMarker.Kind.ARTILLERY_ADJUSTED;
-            case ARTILLERY_INCOMING -> BoardMarker.Kind.ARTILLERY_INCOMING;
-            case ARTILLERY_TARGET -> BoardMarker.Kind.ARTILLERY_TARGET;
-            case NUKE_INCOMING -> BoardMarker.Kind.NUKE_INCOMING;
-            case ORBITAL_BOMBARDMENT_INCOMING -> BoardMarker.Kind.ORBITAL_INCOMING;
-            case PLAYER_NOTE -> BoardMarker.Kind.PLAYER_NOTE;
-            default -> null;
-        };
-    }
 
     /** Existing handler output, including its arc, range and preference filtering. Swing thread only. */
     public List<FieldOfFireSprite> getWeaponRangeSprites() {
-        return allSprites.stream().filter(FieldOfFireSprite.class::isInstance).map(FieldOfFireSprite.class::cast)
-              .filter(sprite -> sprite.isWeaponRange() && !sprite.isHidden()).toList();
+        return clientState.getWeaponRangeSprites();
     }
 
     /** Preserve the handler's visible label positions; the GPU only changes their orientation. */
     public List<TextMarkerSprite> getWeaponRangeTextSprites() {
-        return GPU_SCROLLING_RANGE_LABELS ? List.of() : allSprites.stream()
-              .filter(TextMarkerSprite.class::isInstance).map(TextMarkerSprite.class::cast)
-              .filter(sprite -> sprite.isWeaponRange() && !sprite.isHidden()).toList();
+        return clientState.getWeaponRangeTextSprites();
     }
 
     @Override
@@ -6775,28 +4033,18 @@ public final class BoardView extends AbstractBoardView
     }
 
     @Override
+    public void addSprite(Sprite sprite) {
+        addSprites(List.of(sprite));
+    }
+
+    @Override
     public void addSprites(Collection<? extends Sprite> sprites) {
-        super.addSprites(sprites);
-        sprites.stream()
-              .filter(s -> !(s instanceof HexSprite hexSprite) || !hexSprite.isBehindTerrain())
-              .forEach(overTerrainSprites::add);
-        sprites.stream()
-              .filter(s -> s instanceof HexSprite)
-              .map(s -> (HexSprite) s)
-              .filter(HexSprite::isBehindTerrain)
-              .forEach(behindTerrainHexSprites::add);
+        clientState.addSprites(sprites);
     }
 
     @Override
     public void removeSprites(Collection<? extends Sprite> sprites) {
-        super.removeSprites(sprites);
-        overTerrainSprites.removeAll(sprites);
-
-        for (Sprite sprite : sprites) {
-            if (sprite instanceof HexSprite hexSprite) {
-                behindTerrainHexSprites.remove(hexSprite);
-            }
-        }
+        clientState.removeSprites(sprites);
     }
 
     /**
@@ -6812,7 +4060,7 @@ public final class BoardView extends AbstractBoardView
      *       targetable's deployment status checked.
      */
     public boolean isOnThisBord(@Nullable Targetable targetable) {
-        return (targetable != null) && targetable.getBoardId() == boardId;
+        return clientState.isOnThisBord(targetable);
     }
 
     /**
@@ -6823,195 +4071,30 @@ public final class BoardView extends AbstractBoardView
      */
     @SuppressWarnings("unused")
     public boolean isOnThisBord(BoardLocation boardLocation) {
-        return boardLocation.isOn(boardId);
+        return clientState.isOnThisBord(boardLocation);
     }
 
     /** Capture only affected hexes, in stable order, using the same painters as the classic board. */
-    private void captureHexOverlays(BoardTacticalGraphics graphics) {
-        Board board = getBoard();
-        Set<Coords> marked = new TreeSet<>(Comparator.comparingInt(Coords::getX).thenComparingInt(Coords::getY));
-        marked.addAll(board.embeddedBoardCoords());
-        for (Map<Coords, Color> colors : Arrays.asList(ecmHexes, eccmHexes, ecmCenters, eccmCenters)) {
-            if (colors != null) {
-                marked.addAll(colors.keySet());
-            }
-        }
-        if (GUIP.getShowMapSheets()) {
-            for (int x = 0; x < board.getWidth(); x++) {
-                for (int y = 0; y < board.getHeight(); y++) {
-                    if (x % 16 == 0 || x % 16 == 15 || y % 17 == 0 || y % 17 == 16) {
-                        marked.add(new Coords(x, y));
-                    }
-                }
-            }
-        }
-        marked.removeIf(coords -> !board.contains(coords));
-        for (Coords coords : marked) {
-            Graphics2D local = BoardTacticalGraphics.at(graphics, getHexLocation(coords));
-            try {
-                BoardTacticalGraphics.draw(local, BoardTactical.Playback.HOLD_DURING_PLAYBACK,
-                      layer -> drawElectronicWarfare(layer, coords));
-                if (board.embeddedBoardCoords().contains(coords)) {
-                    drawEmbeddedBoard(local);
-                }
-            } finally {
-                local.dispose();
-            }
-        }
-        if (GUIP.getShowMapSheets()) {
-            // Shared edges cross into both hexes; all coverage fills must be below the borders.
-            for (Coords coords : marked) {
-                Graphics2D local = BoardTacticalGraphics.at(graphics, getHexLocation(coords));
-                try {
-                    drawMapSheetBorders(local, coords);
-                } finally {
-                    local.dispose();
-                }
-            }
-        }
-    }
 
-    private static Color colorAt(Map<Coords, Color> colors, Coords coords) {
-        return colors == null ? null : colors.get(coords);
-    }
 
     /** Shared authoritative colors; only the static texture remains in native raster capture. */
-    private void drawElectronicWarfare(Graphics2D graphics, Coords coords) {
-        Graphics2D local = (Graphics2D) graphics.create();
-        try {
-            boolean vectors = local instanceof BoardTacticalGraphics;
-            boolean solids = !gpuCapture || vectors;
-            Color ecm = colorAt(ecmHexes, coords);
-            if (ecm != null) {
-                if (solids) {
-                    drawFieldTint(local, ecm);
-                }
-                if (!vectors) {
-                    Image noise = getScaledImage(tileManager.getEcmStaticImage(ecm), false);
-                    local.drawImage(noise, 0, 0, noise.getWidth(null), noise.getHeight(null), boardPanel);
-                }
-            }
-            if (solids) {
-                drawFieldTint(local, colorAt(eccmHexes, coords));
-                drawFieldSource(local, colorAt(ecmCenters, coords));
-                drawFieldSource(local, colorAt(eccmCenters, coords));
-            }
-        } finally {
-            local.dispose();
-        }
-    }
 
-    private void drawFieldTint(Graphics2D graphics, Color tint) {
-        if (tint != null) {
-            graphics.setColor(tint);
-            // Use the full shared hex in native geometry, avoiding the classic bitmap's one-pixel gutters.
-            Shape hex = graphics instanceof BoardTacticalGraphics ? HexDrawUtilities.getHexFullBorderLine(0) : HEX_POLY;
-            graphics.fill(AffineTransform.getScaleInstance(scale, scale).createTransformedShape(hex));
-        }
-    }
-
-    private void drawFieldSource(Graphics2D graphics, Color tint) {
-        if (tint == null) {
-            return;
-        }
-        if (graphics instanceof BoardTacticalGraphics) {
-            int alpha = Math.min(255, tint.getAlpha() * 2);
-            drawHexBorder(graphics, new Color(0, 0, 0, Math.min(160, alpha)), 4, 6);
-            drawHexBorder(graphics, new Color(tint.getRed(), tint.getGreen(), tint.getBlue(), alpha), 5, 4);
-        } else {
-            drawHexBorder(graphics, tint.darker(), 5, 10);
-        }
-    }
 
     private void drawMapSheetBorders(Graphics2D graphics, Coords coords) {
-        if (!GUIP.getShowMapSheets()) {
-            return;
-        }
-        int borders = 0;
-        if (coords.getX() % 16 == 0) {
-            borders |= (1 << 4) | (1 << 5);
-        } else if (coords.getX() % 16 == 15) {
-            borders |= (1 << 1) | (1 << 2);
-        }
-        if (coords.getY() % 17 == 0) {
-            borders |= 1;
-            if (coords.getX() % 2 == 0) {
-                borders |= (1 << 1) | (1 << 5);
-            }
-        } else if (coords.getY() % 17 == 16) {
-            borders |= 1 << 3;
-            if (coords.getX() % 2 == 1) {
-                borders |= (1 << 2) | (1 << 4);
-            }
-        }
-        if (borders == 0) {
-            return;
-        }
-        Path2D path = new Path2D.Double();
-        for (int direction = 0; direction < 6; direction++) {
-            if ((borders & (1 << direction)) != 0) {
-                path.append(HexDrawUtilities.getHexBorderLine(direction), false);
-            }
-        }
-        Graphics2D local = (Graphics2D) graphics.create();
-        try {
-            local.scale(scale, scale);
-            Color color = GUIP.getMapsheetColor();
-            boolean vectors = local instanceof BoardTacticalGraphics;
-            if (vectors) {
-                local.setColor(new Color(0, 0, 0, color.getAlpha() / 2));
-                local.setStroke(new BasicStroke(4.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                local.draw(path);
-            }
-            local.setColor(color);
-            local.setStroke(new BasicStroke(vectors ? 2.5f : 1 / scale, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-            local.draw(path);
-        } finally {
-            local.dispose();
-        }
+        clientState.drawMapSheetBorders(graphics, coords);
     }
 
     /** Draws an embedded-board indicator using the same rectangle in both renderers. */
-    private void drawEmbeddedBoard(Graphics2D g) {
-        AffineTransform oldTransform = g.getTransform();
-        Stroke oldStroke = g.getStroke();
-        g.transform(AffineTransform.getScaleInstance(scale, scale));
-        g.setColor(new Color(0, 140, 0, 120));
-        g.fillRect(HEX_W / 4 + 1, 2, HEX_W / 2 - 2, HEX_H - 4);
-        if (g instanceof BoardTacticalGraphics) {
-            g.setColor(new Color(0, 0, 0, 150));
-            g.setStroke(new BasicStroke(3.5f));
-            g.drawRect(HEX_W / 4 + 1, 2, HEX_W / 2 - 2, HEX_H - 4);
-        }
-        g.setColor(new Color(0, 140, 0));
-        g.setStroke(new BasicStroke(1.5f));
-        g.drawRect(HEX_W / 4 + 1, 2, HEX_W / 2 - 2, HEX_H - 4);
-        g.setTransform(oldTransform);
-        g.setStroke(oldStroke);
-    }
+
 
     @Override
     public boolean isShowingAnimation() {
         return isMovingUnits();
     }
 
-    public void suspendTooltip() {
-        tooltipSuspended = true;
-        boardPanel.setToolTipText(null);
-    }
-
-    public void activateTooltip() {
-        tooltipSuspended = false;
-    }
-
-    public void toggleShowDeployment() {
-        showAllDeployment = !showAllDeployment;
-        repaint();
-    }
 
     public void addHexDrawPlugin(HexDrawPlugin plugin) {
-        hexDrawPlugins.add(plugin);
-        invalidatePlanarCapture();
+        clientState.addHexDrawPlugin(plugin);
     }
 
     /**
@@ -7028,4 +4111,16 @@ public final class BoardView extends AbstractBoardView
     public int getVerticalOffset() {
         return verticalOffset;
     }
+
+    @Override public Player getLocalPlayer() { return clientState.getLocalPlayer(); }
+    @Override public void setLocalPlayer(Player player) { clientState.setLocalPlayer(player); }
+    @Override public Set<Sprite> getAllSprites() { return clientState.getAllSprites(); }
+    @Override public void addBoardViewListener(BoardViewListener listener) { clientState.addBoardViewListener(listener); }
+    @Override public void removeBoardViewListener(BoardViewListener listener) { clientState.removeBoardViewListener(listener); }
+    @Override public void processBoardViewEvent(BoardViewEvent event) { clientState.processBoardViewEvent(event); }
+    @Override public void addOverlay(IDisplayable overlay) { clientState.addOverlay(overlay); }
+    @Override public void removeOverlay(IDisplayable overlay) { clientState.removeOverlay(overlay); }
+    public void redrawEntity(Entity entity) { clientState.redrawEntity(entity); }
+    public void redrawAllEntities() { clientState.redrawAllEntities(); }
+
 }

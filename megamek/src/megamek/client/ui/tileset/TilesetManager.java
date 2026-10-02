@@ -50,7 +50,7 @@ import java.util.Map;
 import java.util.Set;
 
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.HexDrawUtilities;
 import megamek.client.ui.tileset.MekTileset.MekEntry;
 import megamek.client.ui.util.EntityWreckHelper;
 import megamek.client.ui.util.RotateFilter;
@@ -113,7 +113,7 @@ public class TilesetManager implements IPreferenceChangeListener {
     private boolean started = false;
 
     // mek images
-    private final MekTileset wreckTileset = new MekTileset(new MegaMekFile(Configuration.unitImagesDir(),
+    private MekTileset wreckTileset = new MekTileset(new MegaMekFile(Configuration.unitImagesDir(),
           DIR_NAME_WRECKS).getFile());
     private final List<EntityImage> mekImageList = new ArrayList<>();
     private final Map<ArrayList<Integer>, EntityImage> mekImages = new HashMap<>();
@@ -164,6 +164,13 @@ public class TilesetManager implements IPreferenceChangeListener {
         GUIPreferences.getInstance().addPreferenceChangeListener(this);
     }
 
+    /** Release the listeners owned by this artwork service. */
+    public void close() {
+        PreferenceManager.getClientPreferences().removePreferenceChangeListener(this);
+        GUIPreferences.getInstance().removePreferenceChangeListener(this);
+        hexTileset.close();
+    }
+
     /** React to changes in the settings. */
     @Override
     public void preferenceChange(PreferenceChangeEvent e) {
@@ -173,8 +180,10 @@ public class TilesetManager implements IPreferenceChangeListener {
             try {
                 hexTileset.incDepth = 0;
                 hts.loadFromFile((String) e.getNewValue());
+                hexTileset.close();
                 hexTileset = hts;
             } catch (IOException ignored) {
+                hts.close();
                 return;
             }
         }
@@ -401,6 +410,10 @@ public class TilesetManager implements IPreferenceChangeListener {
         return minefieldSign;
     }
 
+    public static Image loadHexMask() {
+        return ImageUtil.loadImageFromFile(new File(Configuration.hexesDir(), FILENAME_HEX_MASK).toString());
+    }
+
     public Image getHexMask() {
         return hexMask;
     }
@@ -421,7 +434,7 @@ public class TilesetManager implements IPreferenceChangeListener {
             image = new BufferedImage(HexTileset.HEX_W,
                   HexTileset.HEX_H, BufferedImage.TYPE_INT_ARGB);
             Graphics g = image.getGraphics();
-            Polygon hexPoly = BoardView.getHexPoly();
+            Polygon hexPoly = HexDrawUtilities.rasterHex();
             g.setColor(tint.darker());
             // Draw ~200 small "ovals" at random locations within a hex
             // A 3x3 oval ends up looking more like a cross
@@ -504,7 +517,7 @@ public class TilesetManager implements IPreferenceChangeListener {
         }
 
         minefieldSign = loadSpecificImage(Configuration.hexesDir(), Minefield.FILENAME_IMAGE);
-        hexMask = loadSpecificImage(Configuration.hexesDir(), FILENAME_HEX_MASK);
+        hexMask = loadHexMask();
 
         artilleryAutoHit = loadSpecificImage(Configuration.hexesDir(), FILENAME_ARTILLERY_AUTO_HIT_IMAGE);
         artilleryAdjusted = loadSpecificImage(Configuration.hexesDir(), FILENAME_ARTILLERY_ADJUSTED_IMAGE);
@@ -623,6 +636,33 @@ public class TilesetManager implements IPreferenceChangeListener {
 
     public synchronized void reloadUnitIcons() {
         mekImages.clear();
+    }
+
+    /** Reread tileset definitions and artwork after an artist edits the deployed files. */
+    public synchronized void reloadAssets() throws IOException {
+        HexTileset replacement = new HexTileset(game);
+        MekTileset wrecks = new MekTileset(new MegaMekFile(Configuration.unitImagesDir(), DIR_NAME_WRECKS).getFile());
+        try {
+            replacement.loadFromFile(PreferenceManager.getClientPreferences().getMapTileset());
+            wrecks.loadFromFile("wreckset.txt");
+        } catch (IOException | RuntimeException failure) {
+            replacement.close();
+            throw failure;
+        }
+        hexTileset.close();
+        hexTileset = replacement;
+        wreckTileset = wrecks;
+        wreckageDecals.clear();
+        wreckageDecalCount.put(FILENAME_SUFFIX_WRECKS_ULTRALIGHT, getULightDecalCount());
+        wreckageDecalCount.put(FILENAME_SUFFIX_WRECKS_ASSAULT_PLUS, getUHeavyDecalCount());
+        hexMask = null;
+        minefieldSign = null;
+        artilleryAutoHit = null;
+        artilleryAdjusted = null;
+        artilleryIncoming = null;
+        orbitalBombardmentIncoming = null;
+        EntityImage.reloadAssets();
+        reset();
     }
 
     /** Returns the number of available ultralight destroyed bottom decal images. */

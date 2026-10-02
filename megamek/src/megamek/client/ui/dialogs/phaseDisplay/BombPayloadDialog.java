@@ -44,7 +44,9 @@ import java.awt.event.ItemListener;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.Serial;
+import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Map;
 import java.util.StringTokenizer;
 import javax.swing.JButton;
@@ -55,6 +57,10 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogField;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.FieldKind;
 import megamek.common.equipment.BombLoadout;
 import megamek.common.equipment.enums.BombType.BombTypeEnum;
 
@@ -74,6 +80,7 @@ public class BombPayloadDialog extends JDialog implements ActionListener, ItemLi
     private BombLoadout availableBombs;
 
     private final JPanel panButtons = new JPanel();
+    private final JLabel description = new JLabel();
     private final JButton butOK = new JButton(Messages.getString("Okay"));
     private final JButton butCancel = new JButton(Messages.getString("Cancel"));
 
@@ -114,7 +121,6 @@ public class BombPayloadDialog extends JDialog implements ActionListener, ItemLi
         //c.gridy = 0;
         c.insets = new Insets(5, 5, 5, 5);
 
-        JLabel description = new JLabel();
         if (numFighters != 0) {
             description.setText(Messages.getString("BombPayloadDialog.SquadronBombDesc"));
         } else {
@@ -252,6 +258,48 @@ public class BombPayloadDialog extends JDialog implements ActionListener, ItemLi
         } else {
             confirm = false;
             setVisible(false);
+        }
+    }
+
+    /**
+     * Showing the dialog asks in the owning client's native battle window instead when that draws dialogs: a form with
+     * one choice of this dialog's entries per bomb type. Under a limit, each pick there is made in this dialog as the
+     * player's pick is, which narrows the other entries, and the form comes back with them.
+     */
+    @Override
+    public void setVisible(boolean visible) {
+        ClientGUI gui = visible ? ClientGUI.forFrame(getOwner()) : null;
+        if ((gui == null) || !answeredNatively(gui)) {
+            super.setVisible(visible);
+        }
+    }
+
+    /** Shows the form until the player confirms or cancels it; false when the Swing dialog must show instead. */
+    private boolean answeredNatively(ClientGUI gui) {
+        while (true) {
+            List<DialogField> fields = new ArrayList<>();
+            for (Map.Entry<BombTypeEnum, JComboBox<String>> entry : b_choices.entrySet()) {
+                JComboBox<String> comboBox = entry.getValue();
+                List<String> counts = new ArrayList<>();
+                for (int index = 0; index < comboBox.getItemCount(); index++) {
+                    counts.add(comboBox.getItemAt(index));
+                }
+                fields.add(new DialogField(b_labels.get(entry.getKey()).getText(), FieldKind.CHOICE, counts, 0, 0,
+                      (String) comboBox.getSelectedItem(), limit > -1));
+            }
+            DialogAnswer answer = gui.askForm(description.getText(), getTitle(), fields,
+                  List.of(butOK.getText(), butCancel.getText()), 1);
+            if (answer == null) {
+                return false;
+            }
+            List<JComboBox<String>> comboBoxes = List.copyOf(b_choices.values());
+            for (int index = 0; index < Math.min(comboBoxes.size(), answer.values().size()); index++) {
+                comboBoxes.get(index).setSelectedItem(answer.values().get(index));
+            }
+            if (answer.button() != DialogAnswer.CHANGED) {
+                ((answer.button() == 0) ? butOK : butCancel).doClick(0);
+                return true;
+            }
         }
     }
 

@@ -40,6 +40,7 @@ import java.util.List;
 import javax.swing.AbstractListModel;
 
 import megamek.client.ui.Messages;
+import megamek.common.annotations.Nullable;
 import megamek.common.equipment.AmmoType;
 import megamek.common.equipment.MiscType;
 import megamek.common.equipment.Mounted;
@@ -55,7 +56,7 @@ import megamek.common.units.Entity;
  *
  * @author arlith
  */
-class WeaponListModel extends AbstractListModel<String> {
+public class WeaponListModel extends AbstractListModel<String> {
     @Serial
     private static final long serialVersionUID = 6312003196674512339L;
 
@@ -145,96 +146,114 @@ class WeaponListModel extends AbstractListModel<String> {
      */
     @Override
     public String getElementAt(int index) {
-        final WeaponMounted mounted = weapons.get(index);
-        final WeaponType weaponType = mounted.getType();
         Game game = null;
         if (weaponPanel.unitDisplayPanel.getClientGUI() != null) {
             game = weaponPanel.unitDisplayPanel.getClientGUI().getClient().getGame();
         }
+        return rowParts(game, weapons.get(index)).text();
+    }
 
-        Entity entityMounted = mounted.getEntity();
-        StringBuilder wn = new StringBuilder(mounted.getDesc());
-        if ((mounted.getLinkedBy() != null)
-              && (mounted.getLinkedBy().getType() instanceof MiscType)
-              && (mounted.getLinkedBy().getType().hasFlag(MiscType.F_RISC_LASER_PULSE_MODULE))) {
-            wn.append("+").append(mounted.getLinkedBy().getShortName());
-        }
-        wn.append(" [");
-        wn.append(entityMounted.getLocationAbbr(mounted.getLocation()));
-        //Check if mixedTech and add Clan or IS tag
-        if (entityMounted.isMixedTech()) {
-            wn.insert(0, weaponType.isClan() ? "(C) " : "(IS) ");
-        }
-        if (mounted.isSplit()) {
-            wn.append('/');
-            wn.append(entityMounted.getLocationAbbr(mounted.getSecondLocation()));
-        }
-        wn.append(']');
-        // determine shots left & total shots left
-        if ((weaponType.getAmmoType() != AmmoType.AmmoTypeEnum.NA)
-              && (!weaponType.hasFlag(WeaponType.F_ONE_SHOT)
-              || weaponType.hasFlag(WeaponType.F_BA_INDIVIDUAL))
-              && (weaponType.getAmmoType() != AmmoType.AmmoTypeEnum.INFANTRY)) {
-            int shotsLeft = 0;
-            if ((mounted.getLinked() != null)
-                  && !mounted.getLinked().isDumping()) {
-                shotsLeft = mounted.getLinked().getUsableShotsLeft();
+    /**
+     * The parts of one weapon's row in the weapon list, in their order.
+     *
+     * @param techTag     "(C) " or "(IS) " on a mixed-tech unit, else ""
+     * @param desc        the weapon's description with its state mark ({@link Mounted#getDesc()})
+     * @param riscModule  the short name of a linked RISC laser pulse module, else ""
+     * @param location    the location, with the second location of a split weapon ("LT/CT")
+     * @param loadedShots the shots of the loaded ammunition (0 while it dumps; a double one-shot launcher's usable
+     *                    shots of its loaded munition), -1 when the row shows no shots
+     * @param totalShots  the usable shots of every bin the weapon can switch to (a double one-shot launcher's original
+     *                    shots of its loaded munition), -1 when the row shows no shots
+     * @param rapidFire   whether a machine gun fires rapidly
+     * @param hotLoaded   whether a launcher is hot-loaded
+     * @param mode        the state name of the current mode, null for a weapon without modes
+     * @param pendingMode the state name of the mode queued for the end of the turn, null when none is queued
+     * @param chargeState a Bombast laser's charge state, null for other weapons
+     * @param calledShot  the weapon's called shot, null while the TacOps called shots option is off
+     */
+    public record RowParts(String techTag, String desc, String riscModule, String location, int loadedShots,
+          int totalShots, boolean rapidFire, boolean hotLoaded, @Nullable String mode, @Nullable String pendingMode,
+          @Nullable String chargeState, @Nullable String calledShot) {
+
+        /** The row's text in the weapon list. */
+        public String text() {
+            StringBuilder row = new StringBuilder(techTag).append(desc);
+            if (!riscModule.isEmpty()) {
+                row.append('+').append(riscModule);
             }
+            row.append(" [").append(location).append(']');
+            if (totalShots >= 0) {
+                row.append(" (").append(loadedShots).append('/').append(totalShots).append(')');
+            }
+            if (rapidFire) {
+                row.append(Messages.getString("MekDisplay.rapidFire"));
+            }
+            if (hotLoaded) {
+                row.append(Messages.getString("MekDisplay.isHotLoaded"));
+            }
+            // Both describe what the weapon is set to, or will be set to, so they take the state label
+            if (mode != null) {
+                row.append(' ').append(mode);
+                if (pendingMode != null) {
+                    row.append(" (next turn, ").append(pendingMode).append(')');
+                }
+            }
+            if (chargeState != null) {
+                row.append(' ').append(chargeState);
+            }
+            if (calledShot != null) {
+                row.append(' ').append(calledShot);
+            }
+            return row.toString();
+        }
+    }
 
-            int totalShotsLeft = entityMounted.getTotalMunitionsOfType(mounted);
-
-            wn.append(" (");
-            wn.append(shotsLeft);
-            wn.append('/');
-            wn.append(totalShotsLeft);
-            wn.append(')');
+    /**
+     * The parts of one weapon's row in the weapon list; the game is the client's, null without a client. The Unit
+     * Display and the GPU unit record both use it.
+     */
+    public static RowParts rowParts(@Nullable Game game, WeaponMounted mounted) {
+        WeaponType weaponType = mounted.getType();
+        Entity entityMounted = mounted.getEntity();
+        Mounted<?> linkedBy = mounted.getLinkedBy();
+        String riscModule = ((linkedBy != null) && (linkedBy.getType() instanceof MiscType)
+              && linkedBy.getType().hasFlag(MiscType.F_RISC_LASER_PULSE_MODULE)) ? linkedBy.getShortName() : "";
+        String location = entityMounted.getLocationAbbr(mounted.getLocation());
+        if (mounted.isSplit()) {
+            location += "/" + entityMounted.getLocationAbbr(mounted.getSecondLocation());
+        }
+        String techTag = entityMounted.isMixedTech() ? (weaponType.isClan() ? "(C) " : "(IS) ") : "";
+        int loadedShots = -1;
+        int totalShots = -1;
+        if ((weaponType.getAmmoType() != AmmoType.AmmoTypeEnum.NA)
+              && (!weaponType.hasFlag(WeaponType.F_ONE_SHOT) || weaponType.hasFlag(WeaponType.F_BA_INDIVIDUAL))
+              && (weaponType.getAmmoType() != AmmoType.AmmoTypeEnum.INFANTRY)) {
+            loadedShots = ((mounted.getLinked() != null) && !mounted.getLinked().isDumping())
+                  ? mounted.getLinked().getUsableShotsLeft() : 0;
+            totalShots = entityMounted.getTotalMunitionsOfType(mounted);
         } else if (weaponType.hasFlag(WeaponType.F_DOUBLE_ONE_SHOT)
               || (entityMounted.isSupportVehicle() && (weaponType.getAmmoType() == AmmoType.AmmoTypeEnum.INFANTRY))) {
-            int shotsLeft = 0;
-            int totalShots = 0;
+            loadedShots = 0;
+            totalShots = 0;
             EnumSet<AmmoType.Munitions> munition = ((AmmoType) mounted.getLinked().getType()).getMunitionType();
             for (Mounted<?> current = mounted.getLinked(); current != null; current = current.getLinked()) {
                 if (((AmmoType) current.getType()).getMunitionType().equals(munition)) {
-                    shotsLeft += current.getUsableShotsLeft();
+                    loadedShots += current.getUsableShotsLeft();
                     totalShots += current.getOriginalShots();
                 }
             }
-            wn.append(" (").append(shotsLeft)
-                  .append("/").append(totalShots).append(")");
         }
-
-        // MG rapid fire
-        if (mounted.isRapidFire()) {
-            wn.append(Messages.getString("MekDisplay.rapidFire"));
-        }
-
-        // Hot loaded Missile Launchers
-        if (mounted.isHotLoaded()) {
-            wn.append(Messages.getString("MekDisplay.isHotLoaded"));
-        }
-
-        // Fire Mode - lots of things have variable modes
-        if (mounted.hasModes()) {
-            wn.append(' ');
-
-            // Describes what the weapon is set to, and what it will be set to, so both take the state label
-            wn.append(mounted.curMode().getStateName(mounted.getType()));
-            if (!mounted.pendingMode().equals(Mounted.MODE_NONE)) {
-                wn.append(" (next turn, ");
-                wn.append(mounted.pendingMode().getStateName(mounted.getType()));
-                wn.append(')');
-            }
-        }
-        if (mounted.getType().hasFlag(WeaponType.F_BOMBAST_LASER)) {
-            wn.append(' ');
-            wn.append(mounted.getChargeState().getDescription());
-        }
-        if ((game != null)
-              && game.getOptions().booleanOption(OptionsConstants.ADVANCED_COMBAT_TAC_OPS_CALLED_SHOTS)) {
-            wn.append(' ');
-            wn.append(mounted.getCalledShot().getDisplayableName());
-        }
-        return wn.toString();
+        boolean modes = mounted.hasModes();
+        String mode = modes ? mounted.curMode().getStateName(weaponType) : null;
+        String pendingMode = (modes && !mounted.pendingMode().equals(Mounted.MODE_NONE))
+              ? mounted.pendingMode().getStateName(weaponType) : null;
+        String chargeState = weaponType.hasFlag(WeaponType.F_BOMBAST_LASER)
+              ? mounted.getChargeState().getDescription() : null;
+        String calledShot = ((game != null)
+              && game.getOptions().booleanOption(OptionsConstants.ADVANCED_COMBAT_TAC_OPS_CALLED_SHOTS))
+              ? mounted.getCalledShot().getDisplayableName() : null;
+        return new RowParts(techTag, mounted.getDesc(), riscModule, location, loadedShots, totalShots,
+              mounted.isRapidFire(), mounted.isHotLoaded(), mode, pendingMode, chargeState, calledShot);
     }
 
     /**

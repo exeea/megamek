@@ -51,6 +51,7 @@ import megamek.common.equipment.EquipmentMode;
 import megamek.common.equipment.MiscType;
 import megamek.common.equipment.Mounted;
 import megamek.common.game.Game;
+import megamek.common.moves.MovePathSummary;
 import megamek.common.options.OptionsConstants;
 import megamek.common.rolls.PilotingRollData;
 import megamek.common.rolls.Roll;
@@ -74,39 +75,9 @@ class HeatResolver extends AbstractTWRuleHandler {
      */
     void addMovementHeat() {
         for (Entity entity : getGame().inGameTWEntities()) {
-            if (entity.hasDamagedRHS()) {
-                entity.changeHeatBuildup(1, Messages.getString("HeatBreakdown.damagedRadicalHeatSink"));
-            }
-
-            if ((entity.getMovementMode() == EntityMovementMode.BIPED_SWIM) ||
-                  (entity.getMovementMode() == EntityMovementMode.QUAD_SWIM)) {
-                // UMU heat
-                entity.changeHeatBuildup(1, Messages.getString("HeatBreakdown.movementUMU"));
-                continue;
-            }
-
-            // build up heat from movement
-            if (entity.moved == EntityMovementType.MOVE_NONE) {
-                entity.changeHeatBuildup(entity.getStandingHeat(),
-                      Messages.getString("HeatBreakdown.movementStanding"));
-            } else if ((entity.moved == EntityMovementType.MOVE_WALK) ||
-                  (entity.moved == EntityMovementType.MOVE_VTOL_WALK) ||
-                  (entity.moved == EntityMovementType.MOVE_CAREFUL_STAND)) {
-                entity.changeHeatBuildup(entity.getWalkHeat(),
-                      Messages.getString("HeatBreakdown.movementWalking"));
-            } else if ((entity.moved == EntityMovementType.MOVE_RUN) ||
-                  (entity.moved == EntityMovementType.MOVE_VTOL_RUN) ||
-                  (entity.moved == EntityMovementType.MOVE_SKID)) {
-                entity.changeHeatBuildup(entity.getRunHeat(),
-                      Messages.getString("HeatBreakdown.movementRunning"));
-            } else if ((entity.moved == EntityMovementType.MOVE_JUMP)
-                  && !entity.isJumpingWithMechanicalBoosters()) {
-                entity.changeHeatBuildup(entity.getJumpHeat(entity.delta_distance),
-                      Messages.getString("HeatBreakdown.movementJumping"));
-            } else if ((entity.moved == EntityMovementType.MOVE_SPRINT) ||
-                  (entity.moved == EntityMovementType.MOVE_VTOL_SPRINT)) {
-                entity.changeHeatBuildup(entity.getSprintHeat(),
-                      Messages.getString("HeatBreakdown.movementSprinting"));
+            for (MovePathSummary.HeatSource source : MovePathSummary.movementHeat(entity, entity.moved,
+                  entity.delta_distance, entity.isJumpingWithMechanicalBoosters())) {
+                entity.changeHeatBuildup(source.heat(), Messages.getString(source.reasonKey()));
             }
         }
     }

@@ -40,13 +40,14 @@ import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Image;
 import java.awt.image.BufferedImage;
-import java.util.Enumeration;
 import java.util.Vector;
 import javax.swing.JComponent;
 
 import megamek.MMConstants;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.tooltip.PilotToolTip;
+import megamek.client.ui.clientGUI.tooltip.TipUtil;
 import megamek.client.ui.widget.BackGroundDrawer;
 import megamek.client.ui.widget.SkinXMLHandler;
 import megamek.client.ui.widget.UnitDisplaySkinSpecification;
@@ -55,11 +56,7 @@ import megamek.client.ui.widget.picmap.PMPicArea;
 import megamek.client.ui.widget.picmap.PMSimpleLabel;
 import megamek.client.ui.widget.picmap.PMUtil;
 import megamek.common.Configuration;
-import megamek.common.enums.ProstheticEnhancementType;
-import megamek.common.options.IOption;
-import megamek.common.options.IOptionGroup;
 import megamek.common.options.OptionsConstants;
-import megamek.common.units.ConvInfantry;
 import megamek.common.units.Entity;
 import megamek.common.units.Infantry;
 import megamek.common.util.fileUtils.MegaMekFile;
@@ -290,61 +287,20 @@ public class PilotMapSet implements DisplayMapSet {
             pmSimpleLabel.setString("");
         }
         int i = 0;
-        for (Enumeration<IOptionGroup> advGroups = en.getCrew().getOptions().getGroups(); advGroups
-              .hasMoreElements(); ) {
+        for (TipUtil.OptionGroup group : PilotToolTip.crewAbilities(en)) {
             if (i >= advantagesR.length - 1) {
                 advantagesR[advantagesR.length - 1].setString(Messages.getString("PilotMapSet.more"));
                 break;
             }
-            IOptionGroup advGroup = advGroups.nextElement();
-            if (en.getCrew().countOptions(advGroup.getKey()) > 0) {
-                advantagesR[i++].setString(advGroup.getDisplayableName());
-                for (Enumeration<IOption> advancedOptions = advGroup.getOptions();
-                      advancedOptions.hasMoreElements(); ) {
-                    if (i >= advantagesR.length - 1) {
-                        advantagesR[advantagesR.length - 1].setString("  " + Messages.getString("PilotMapSet.more"));
-                        return;
-                    }
-                    IOption adv = advancedOptions.nextElement();
-                    if ((adv != null) && adv.booleanValue()) {
-                        String displayText = adv.getDisplayableNameWithValue();
-                        // Append prosthetic enhancement details for Enhanced/Improved Enhanced
-                        if ((OptionsConstants.MD_PL_ENHANCED.equals(adv.getName())
-                              || OptionsConstants.MD_PL_I_ENHANCED.equals(adv.getName()))
-                              && (en instanceof ConvInfantry infantry)) {
-                            String details = getProstheticEnhancementDetails(infantry);
-                            if (!details.isEmpty()) {
-                                displayText += " (" + details + ")";
-                            }
-                        }
-                        advantagesR[i++].setString("  " + displayText);
-                    }
+            advantagesR[i++].setString(group.name());
+            for (String ability : group.options()) {
+                if (i >= advantagesR.length - 1) {
+                    advantagesR[advantagesR.length - 1].setString("  " + Messages.getString("PilotMapSet.more"));
+                    return;
                 }
+                advantagesR[i++].setString("  " + ability);
             }
         }
-    }
-
-    /**
-     * Gets a formatted string describing the configured prosthetic enhancements.
-     *
-     * @param infantry The infantry unit to check
-     *
-     * @return String like "Laser x2, Grappler x1" or empty string if none configured
-     */
-    private String getProstheticEnhancementDetails(ConvInfantry infantry) {
-        StringBuilder details = new StringBuilder();
-        if (infantry.hasProstheticEnhancement1()) {
-            ProstheticEnhancementType type1 = infantry.getProstheticEnhancement1();
-            details.append(type1.getDisplayName()).append(" x").append(infantry.getProstheticEnhancement1Count());
-        }
-        if (infantry.hasProstheticEnhancement2()) {
-            if (!details.isEmpty()) {
-                details.append(", ");
-            }
-            ProstheticEnhancementType type2 = infantry.getProstheticEnhancement2();
-            details.append(type2.getDisplayName()).append(" x").append(infantry.getProstheticEnhancement2Count());
-        }
-        return details.toString();
     }
 
     @Override

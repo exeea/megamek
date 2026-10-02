@@ -36,7 +36,7 @@ import java.awt.*;
 import java.awt.geom.AffineTransform;
 
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.UIUtil;
@@ -63,7 +63,7 @@ public class SBFStepSprite extends Sprite {
 
     private final Image baseScaleImage;
 
-    public SBFStepSprite(BoardView bv, final SBFMoveStep step, SBFMovePath movePath) {
+    public SBFStepSprite(BoardGlyphContext bv, final SBFMoveStep step, SBFMovePath movePath) {
         super(bv);
         this.step = step;
         isLastStep = movePath.isEndStep(step);

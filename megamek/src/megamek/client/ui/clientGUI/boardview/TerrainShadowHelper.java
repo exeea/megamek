@@ -62,7 +62,6 @@ import megamek.client.ui.util.ImageCache;
 import megamek.common.Hex;
 import megamek.common.annotations.Nullable;
 import megamek.common.board.Board;
-import megamek.common.board.BoardType;
 import megamek.common.board.Coords;
 import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.units.Terrains;
@@ -107,16 +106,7 @@ class TerrainShadowHelper {
     /** Shadow travel per elevation level in board pixels; shared by the classic and GPU renderers. */
     @Nullable
     Point lightDirection() {
-        Board board = boardView.getBoard();
-        if (!GUIP.getShadowMap() || board == null || board.isSpace() || board.getBoardType() == BoardType.SKY
-              || boardView.game.getPhase().isUnknown()) {
-            return null;
-        }
-        PlanetaryConditions conditions = boardView.game.getPlanetaryConditions();
-        if (conditions.getLight().isMoonlessOrPitchBack()) {
-            return new Point(0, 0);
-        }
-        return conditions.getLight().isDuskDawn() ? new Point(-38, 14) : new Point(-19, 7);
+        return boardView.getClientState().getTerrainLightDirection();
     }
 
     @Nullable

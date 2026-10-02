@@ -37,8 +37,11 @@ import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.awt.Window;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.stream.IntStream;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.DefaultListCellRenderer;
@@ -54,8 +57,13 @@ import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingUtilities;
 
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogField;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.FieldKind;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Player;
+import megamek.common.annotations.Nullable;
 import megamek.common.equipment.ObjectiveMarker;
 import megamek.common.equipment.ObjectiveScoringScheme;
 import megamek.common.equipment.ObjectiveScoringScheme.HoldCounting;
@@ -64,8 +72,8 @@ import megamek.common.equipment.ObjectiveScoringScheme.SchemePreset;
 /**
  * The properties editor of a control point: control radius, victory point value and the scoring scheme with its
  * preset-specific numbers. Shown as a modal pane with Okay / Remove Flag / Cancel by the Victory Setup phase
- * display when a player clicks a hex; the caller applies any removal, so the editor itself never touches the
- * game.
+ * display when a player clicks a hex, or as a native form of the same rows over the GPU battle window; the caller
+ * applies any removal, so the editor itself never touches the game.
  */
 public final class VictoryHexPropertiesPane {
 
@@ -177,9 +185,8 @@ public final class VictoryHexPropertiesPane {
         String removeLabel = Messages.getString("VictoryHex.remove");
         String cancelLabel = Messages.getString("Cancel");
         Object[] dialogOptions = { okLabel, removeLabel, cancelLabel };
-        int result = JOptionPane.showOptionDialog(frame, editorPanel,
-              Messages.getString("VictoryHex.title", marker.generalName()),
-              JOptionPane.YES_NO_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE, null, dialogOptions, okLabel);
+        int result = option(frame, propertiesPanel, schemeDescription, editorPanel,
+              Messages.getString("VictoryHex.title", marker.generalName()), dialogOptions);
         if (result == 1) {
             return Result.REMOVED;
         }
@@ -337,6 +344,138 @@ public final class VictoryHexPropertiesPane {
         constraints.gridwidth = 2;
         constraints.weighty = 1;
         panel.add(Box.createVerticalGlue(), constraints);
+    }
+
+    /** One label-and-control row of the properties grid, as {@link #addRow} adds it. */
+    private record Row(JLabel label, Component control) {}
+
+    /**
+     * Asks for the pane's option: in the native battle window of the frame's client while that draws dialogs, as a
+     * form of the rows the pane shows, with its labels and its description; otherwise as the Swing option pane. A
+     * list or box the pane reacts to asks again once its change is set on the pane's control, which refreshes the
+     * rows; Okay leaves the answers in the controls, which the pane then applies as its own.
+     *
+     * @param frame       the parent frame
+     * @param rows        the properties grid
+     * @param description the scheme description below the grid
+     * @param editor      the pane's whole editor, for the Swing option pane
+     * @param title       the pane's title
+     * @param options     Okay, Remove Flag and Cancel
+     *
+     * @return the chosen option's index, or {@link JOptionPane#CLOSED_OPTION}
+     */
+    private static int option(JFrame frame, JPanel rows, JLabel description, JPanel editor, String title,
+          Object[] options) {
+        ClientGUI gui = ClientGUI.forFrame(frame);
+        List<Row> shown = (gui == null) ? null : shownRows(rows);
+        while (shown != null) {
+            DialogAnswer answer = gui.askForm(description.getText(), title,
+                  shown.stream().map(VictoryHexPropertiesPane::field).toList(),
+                  Arrays.stream(options).map(String::valueOf).toList(), JOptionPane.CLOSED_OPTION);
+            if (answer == null) {
+                break;
+            }
+            if ((answer.button() == 0) || (answer.button() == DialogAnswer.CHANGED)) {
+                setControls(shown, answer.values());
+            }
+            if (answer.button() != DialogAnswer.CHANGED) {
+                return answer.button();
+            }
+            shown = shownRows(rows);
+        }
+        return JOptionPane.showOptionDialog(frame, editor, title, JOptionPane.YES_NO_CANCEL_OPTION,
+              JOptionPane.PLAIN_MESSAGE, null, options, options[0]);
+    }
+
+    /**
+     * @param rows the properties grid
+     *
+     * @return the rows the pane shows and lets the player change, in its order; null when one of them has a control
+     *       the native form cannot show
+     */
+    private static @Nullable List<Row> shownRows(JPanel rows) {
+        List<Row> shown = new ArrayList<>();
+        Component[] parts = rows.getComponents();
+        for (int index = 0; index + 1 < parts.length; index += 2) {
+            Component control = parts[index + 1];
+            if ((parts[index] instanceof JLabel label) && label.isVisible() && control.isVisible()
+                  && control.isEnabled()) {
+                boolean shownNatively = (control instanceof JSpinner) || (control instanceof JComboBox)
+                      || (control instanceof JCheckBox);
+                if (!shownNatively) {
+                    return null;
+                }
+                shown.add(new Row(label, control));
+            }
+        }
+        return shown;
+    }
+
+    /**
+     * @param row a shown row
+     *
+     * @return its native form field: a spinner's bounds and value, a list's entries as the list shows them, a box's
+     *       state; a list or box the pane reacts to (one with action listeners) is live
+     */
+    private static DialogField field(Row row) {
+        String label = row.label().getText();
+        if (row.control() instanceof JSpinner spinner) {
+            SpinnerNumberModel model = (SpinnerNumberModel) spinner.getModel();
+            return new DialogField(label, FieldKind.INTEGER, List.of(), (Integer) model.getMinimum(),
+                  (Integer) model.getMaximum(), String.valueOf(spinner.getValue()));
+        }
+        if (row.control() instanceof JComboBox<?> list) {
+            List<String> entries = IntStream.range(0, list.getItemCount()).mapToObj(index -> entry(list, index))
+                  .toList();
+            return new DialogField(label, FieldKind.CHOICE, entries, 0, 0,
+                  (list.getSelectedIndex() < 0) ? "" : entries.get(list.getSelectedIndex()),
+                  list.getActionListeners().length > 0);
+        }
+        JCheckBox box = (JCheckBox) row.control();
+        return new DialogField(label, FieldKind.CHECKBOX, List.of(), 0, 0, Boolean.toString(box.isSelected()),
+              box.getActionListeners().length > 0);
+    }
+
+    /**
+     * Sets each shown row's control to the form's answer for it, as the player would in the pane, so the pane's own
+     * listeners follow; a number the spinner cannot take, typed only in part, leaves it as it is.
+     *
+     * @param rows   the rows the form showed
+     * @param values the form's answer, one value per row
+     */
+    private static void setControls(List<Row> rows, List<String> values) {
+        for (int index = 0; index < Math.min(rows.size(), values.size()); index++) {
+            String value = values.get(index);
+            Component control = rows.get(index).control();
+            if (control instanceof JSpinner spinner) {
+                SpinnerNumberModel model = (SpinnerNumberModel) spinner.getModel();
+                try {
+                    int number = Integer.parseInt(value);
+                    if ((number >= (Integer) model.getMinimum()) && (number <= (Integer) model.getMaximum())) {
+                        spinner.setValue(number);
+                    }
+                } catch (NumberFormatException partlyTyped) {
+                    // the spinner keeps its value
+                }
+            } else if (control instanceof JComboBox<?> list) {
+                IntStream.range(0, list.getItemCount()).filter(at -> entry(list, at).equals(value)).findFirst()
+                      .ifPresent(list::setSelectedIndex);
+            } else if ((control instanceof JCheckBox box) && (box.isSelected() != Boolean.parseBoolean(value))) {
+                box.doClick(0);
+            }
+        }
+    }
+
+    /**
+     * @param list  a list of the pane
+     * @param index an entry's index
+     *
+     * @return the entry as the list shows it: its renderer's text
+     */
+    private static <T> String entry(JComboBox<T> list, int index) {
+        Component shown = list.getRenderer().getListCellRendererComponent(new JList<>(), list.getItemAt(index), index,
+              false, false);
+        return (shown instanceof JLabel label) ? label.getText() : String.valueOf(list.getItemAt(index));
     }
 
     /**

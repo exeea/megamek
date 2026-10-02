@@ -100,11 +100,12 @@ class GpuTacticalSmokeTest {
                         assertEquals(builds, probe.builds(), "Unchanged geometry must survive new frames and cameras");
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                         if (tick == 15) {
-                            boardCamera.setIsometric(false);
+                            setTacticalView(true);
                             boardCamera.zoom(0.6f);
                         } else if (tick == 35) {
                             GpuBoardTestUi.capture(new File(output, "native-tactical-top.png"));
-                            boardCamera.setIsometric(true);
+                            setTacticalView(false);
+                            boardCamera.zoom(0.6f);
                         } else if (tick == 60) {
                             GpuBoardTestUi.capture(new File(output, "native-tactical-isometric.png"));
                             Gdx.app.exit();

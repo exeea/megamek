@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -249,6 +250,78 @@ class UnitPlaybackTest {
         playback.clear();
         assertEquals(2, completions.size(), "A board switch discards its old playback instead of re-creating old models");
         assertTrue(playback.motions.isEmpty());
+    }
+
+    @Test
+    void stepOnceWhilePausedPresentsExactlyOneMoreAction() {
+        var first = attack(unit(1, 4), unit(2, 5), ResolvedAttack.Kind.SHOT, true);
+        var second = attack(unit(3, 6), unit(2, 5), ResolvedAttack.Kind.SHOT, false);
+        var third = attack(unit(1, 4), unit(3, 6), ResolvedAttack.Kind.KICK, true);
+        var playback = new UnitPlayback();
+        playback.accept(List.of(first, second, third), scene(unit(1, 4), unit(2, 5), unit(3, 6)), ignored -> false);
+        playback.advance(.1, UnitMotion.Speed.NORMAL);
+        playback.stepOnce();
+        playback.advance(100, UnitMotion.Speed.NORMAL);
+        assertFalse(playback.busy(), "Without a pause the queue plays on");
+
+        playback.accept(List.of(first, second, third), scene(unit(1, 4), unit(2, 5), unit(3, 6)), ignored -> false);
+        playback.advance(.1, UnitMotion.Speed.NORMAL);
+        playback.togglePaused();
+        assertEquals(Set.of(first.result().id(), second.result().id(), third.result().id()), playback.waiting(),
+              "The shot under way has not landed yet");
+        playback.stepOnce();
+        playback.advance(100, UnitMotion.Speed.NORMAL);
+        assertSame(first, playback.attack().event, "The shot under way landing is the one more action");
+        assertEquals(Set.of(second.result().id(), third.result().id()), playback.waiting());
+        playback.advance(100, UnitMotion.Speed.NORMAL);
+        assertSame(first, playback.attack().event, "The queue waits again");
+        playback.stepOnce();
+        playback.advance(100, UnitMotion.Speed.NORMAL);
+        assertSame(second, playback.attack().event, "A landed shot finishes, then the next one plays");
+        assertTrue(playback.paused());
+        assertEquals(Set.of(third.result().id()), playback.waiting());
+        playback.stepOnce();
+        playback.advance(100, UnitMotion.Speed.NORMAL);
+        assertSame(third, playback.attack().event);
+        assertTrue(playback.waiting().isEmpty());
+        playback.togglePaused();
+        playback.advance(100, UnitMotion.Speed.NORMAL);
+        assertFalse(playback.busy());
+    }
+
+    @Test
+    void reviewPlaysARetainedAttackAloneOverTheLiveSceneAndAppliesNothing() {
+        var attacker = unit(1, 4);
+        var target = unit(2, 5);
+        var hit = new BoardScene.Unit(2, -1, "Unit 2 hit", target.location(), null, false, null, 2, false);
+        var retained = attack(attacker, target, ResolvedAttack.Kind.SHOT, true);
+        var queued = attack(unit(3, 6), hit, ResolvedAttack.Kind.SHOT, false);
+        var live = scene(attacker, hit, unit(3, 6));
+        var playback = new UnitPlayback();
+        playback.accept(List.of(queued), live, ignored -> false);
+        playback.togglePaused();
+        playback.review(retained);
+        assertSame(retained, playback.attack().event);
+        assertEquals(List.of(retained), playback.attacks().stream().map(shot -> shot.event).toList());
+        var shown = playback.present(live);
+        assertSame(live.tiles(), shown.tiles(), "A review keeps the live tiles");
+        assertEquals(target, shown.units().stream().filter(unit -> unit.id() == 2).findFirst().orElseThrow(),
+              "Before its impact the target shows as captured");
+        playback.advance(100, UnitMotion.Speed.NORMAL);
+        assertFalse(playback.reviewing());
+        assertEquals(Set.of(queued.result().id()), playback.waiting(), "The paused live queue did not move");
+        assertEquals(live.units(), playback.present(live).units(), "Nothing of the review stays");
+
+        playback.togglePaused();
+        playback.review(retained);
+        playback.advance(100, UnitMotion.Speed.NORMAL);
+        assertEquals(Set.of(queued.result().id()), playback.waiting(), "Even a large frame never interleaves the two");
+        playback.advance(.01, UnitMotion.Speed.NORMAL);
+        assertSame(queued, playback.attack().event, "The live queue goes on after the review");
+        playback.review(retained);
+        playback.advance(0, UnitMotion.Speed.INSTANT);
+        assertFalse(playback.reviewing(), "Skipping ends a review");
+        assertFalse(playback.busy());
     }
 
     static BoardScene.Unit unit(int id, int row) {

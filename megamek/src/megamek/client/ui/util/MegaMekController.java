@@ -46,6 +46,7 @@ import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.function.Supplier;
+import javax.swing.text.JTextComponent;
 
 import megamek.client.ui.boardeditor.BoardEditorPanel;
 import megamek.client.ui.clientGUI.GUIPreferences;
@@ -127,6 +128,12 @@ public class MegaMekController implements KeyEventDispatcher {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent evt) {
+
+        // Text controls own typing and editing shortcuts, including in nonmodal editor windows.
+        if (evt.getComponent() instanceof JTextComponent) {
+            stopAllRepeating();
+            return false;
+        }
 
         // Don't consider hotkeys when the clientGUI has a dialog visible
         if (((clientGUI != null) && clientGUI.shouldIgnoreHotKeys())
@@ -239,7 +246,7 @@ public class MegaMekController implements KeyEventDispatcher {
      * @param cmd    The key command string, obtained through KeyCommandBind
      * @param action The CommandAction
      */
-    public synchronized void registerCommandAction(String cmd, CommandAction action) {
+    public synchronized Runnable registerCommandAction(String cmd, CommandAction action) {
         ArrayList<CommandAction> actions = cmdActionMap.get(cmd);
         if (actions == null) {
             actions = new ArrayList<>();
@@ -248,6 +255,17 @@ public class MegaMekController implements KeyEventDispatcher {
         } else {
             actions.add(action);
         }
+        return () -> removeCommandAction(cmd, action);
+    }
+
+    private synchronized void removeCommandAction(String command, CommandAction action) {
+        var actions = cmdActionMap.get(command);
+        if (actions != null) {
+            actions.remove(action);
+            if (actions.isEmpty()) { cmdActionMap.remove(command); }
+        }
+        KeyCommandBind binding = KeyCommandBind.getBindByCmd(command);
+        if (binding != null) { stopRepeating(binding); }
     }
 
     /**
@@ -265,9 +283,9 @@ public class MegaMekController implements KeyEventDispatcher {
      * @see KeyBindReceiver
      * @see KeyBindAction
      */
-    public void registerCommandAction(KeyCommandBind commandBind,
+    public Runnable registerCommandAction(KeyCommandBind commandBind,
           KeyBindReceiver receiver, KeyBindAction performer) {
-        registerCommandAction(commandBind.cmd, new CommandAction() {
+        return registerCommandAction(commandBind.cmd, new CommandAction() {
             @Override
             public boolean shouldReceiveAction() {
                 return receiver.shouldReceiveKeyCommands();
@@ -293,9 +311,9 @@ public class MegaMekController implements KeyEventDispatcher {
      * @param performer     A method that takes action upon the keypress
      * @param releaseAction A method that takes action when the key is released again
      */
-    public void registerCommandAction(KeyCommandBind commandBind, Supplier<Boolean> shouldPerform,
+    public Runnable registerCommandAction(KeyCommandBind commandBind, Supplier<Boolean> shouldPerform,
           KeyBindAction performer, KeyBindAction releaseAction) {
-        registerCommandAction(commandBind.cmd, new CommandAction() {
+        return registerCommandAction(commandBind.cmd, new CommandAction() {
             @Override
             public boolean shouldReceiveAction() {
                 return shouldPerform.get();
@@ -370,10 +388,8 @@ public class MegaMekController implements KeyEventDispatcher {
 
     /** Stop all repeat timers. */
     public void stopAllRepeating() {
-        for (KeyCommandBind kcb : repeatingTasks.keySet()) {
-            repeatingTasks.get(kcb).cancel();
-            repeatingTasks.remove(kcb);
-        }
+        repeatingTasks.values().forEach(TimerTask::cancel);
+        repeatingTasks.clear();
     }
 
     /** Set whether key presses should be ignored or not. */

@@ -42,8 +42,7 @@ import megamek.client.Client;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.BoardView;
-import megamek.client.ui.clientGUI.boardview.IBoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.sprite.FiringSolutionSprite;
 import megamek.common.HexTarget;
 import megamek.common.ToHitData;
@@ -81,7 +80,7 @@ public class FiringSolutionSpriteHandler extends BoardViewSpriteHandler implemen
 
     public void showFiringSolutions(Entity entity, Optional<WeaponMounted> weapon, Optional<AmmoMounted> ammo) {
         clear();
-        if (clientGUI.boardViews().isEmpty()) {
+        if (clientGUI.boardStates().isEmpty()) {
             return;
         }
         currentEntity = entity;
@@ -167,9 +166,9 @@ public class FiringSolutionSpriteHandler extends BoardViewSpriteHandler implemen
             }
         }
 
-        IBoardView boardView = clientGUI.getBoardView(entity);
+        BoardClientState boardView = clientGUI.getBoardState(entity);
         solutions.values().stream()
-              .map(sln -> new FiringSolutionSprite((BoardView) boardView, sln))
+              .map(sln -> new FiringSolutionSprite(boardView, sln))
               .forEach(currentSprites::add);
         boardView.addSprites(currentSprites);
     }

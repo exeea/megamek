@@ -43,7 +43,7 @@ class GpuHexOverlaySmokeTest {
                         tick++;
                         BoardScene scene = fixture.source.takeFrame().scene();
                         if (tick == 1) {
-                            boardCamera.setIsometric(false);
+                            setTacticalView(true);
                             boardCamera.fit(scene);
                             probe = new GpuTactical();
                             probe.update(scene);
@@ -51,7 +51,7 @@ class GpuHexOverlaySmokeTest {
                             assertFalse(scene.tactical().fills().isEmpty());
                         } else if (tick == 12) {
                             capture("top");
-                            boardCamera.setIsometric(true);
+                            setTacticalView(false);
                             boardCamera.fit(scene);
                         } else if (tick == 24) {
                             capture("isometric");

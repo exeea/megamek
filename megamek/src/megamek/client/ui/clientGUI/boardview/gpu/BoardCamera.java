@@ -12,7 +12,7 @@ import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
 
-/** One orbit camera with top/isometric presets and shared geometry for every orientation. */
+/** One orbit camera for the 3D view and the Tactical View, with shared geometry for every orientation. */
 final class BoardCamera {
     private static final float ISOMETRIC_TILT = 54.73561f;
     // Manual orthographic zoom limits: smaller values zoom in, larger values zoom out.
@@ -64,6 +64,9 @@ final class BoardCamera {
                   && MathUtils.isEqual(tilt, other.tilt());
         }
     }
+    /** The 3D pose the Tactical View replaced; null while the 3D view is active. Render-thread state, never saved. */
+    private Pose tacticalReturn;
+    private boolean tacticalReturnFit;
     private Pose framingStart;
     private Pose framingTarget;
     private float framingElapsed;
@@ -93,6 +96,10 @@ final class BoardCamera {
         camera.viewportHeight = Math.max(1, height);
         camera.zoom *= displayScale / scale;
         overviewZoom *= displayScale / scale;
+        if (tacticalReturn != null) {
+            tacticalReturn = new Pose(tacticalReturn.focus(), tacticalReturn.zoom() * displayScale / scale,
+                  tacticalReturn.azimuth(), tacticalReturn.tilt());
+        }
         displayScale = scale;
         if (fitToWindow && scene != null) {
             float elapsed = entranceElapsed;
@@ -130,12 +137,65 @@ final class BoardCamera {
         update();
     }
 
+    /** Sets the isometric or the straight-down angle of the 3D view; the Tactical View ignores it. */
     void setIsometric(boolean value) {
+        if (tactical()) { return; }
         stopFraming();
         stopRotation();
         azimuth = value ? 45 : 0;
         tilt = value ? ISOMETRIC_TILT : 0;
         update();
+    }
+
+    boolean tactical() {
+        return tacticalReturn != null;
+    }
+
+    /**
+     * Enters or leaves the Tactical View, a fixed north-up view straight down. Entering keeps the focus and zoom (or
+     * the fit to the window); leaving restores the replaced 3D pose, including that fit, exactly. A turn or framing
+     * move in progress counts as finished, so the 3D view returns where it was heading. Pan and zoom work as usual in
+     * between; orbit, tilt and turns are ignored.
+     */
+    void setTactical(boolean enabled, BoardScene scene) {
+        if (enabled == tactical()) { return; }
+        if (enabled) {
+            tacticalReturn = framingTarget != null ? framingTarget
+                  : new Pose(focus.cpy(), camera.zoom, isRotating() ? rotationTarget : azimuth, tilt);
+            tacticalReturnFit = fitToWindow;
+            azimuth = 0;
+            tilt = 0;
+        } else {
+            focus.set(tacticalReturn.focus());
+            camera.zoom = tacticalReturn.zoom();
+            azimuth = tacticalReturn.azimuth();
+            tilt = tacticalReturn.tilt();
+            fitToWindow = tacticalReturnFit;
+            tacticalReturn = null;
+        }
+        stopFraming();
+        stopRotation();
+        overviewFocus = null;
+        if (fitToWindow && scene != null) {
+            fit(scene);
+        } else {
+            update();
+        }
+    }
+
+    /** A new board makes the saved 3D position meaningless: leaving the Tactical View then fits the new board. */
+    void boardChanged() {
+        if (tactical()) { tacticalReturnFit = true; }
+    }
+
+    /** The board's width from straight above in world units: its hexes span x from 0 to this. */
+    static float boardWidth(BoardScene scene) {
+        return (scene.width() * .75f + .25f) * BoardGeometry.WIDTH;
+    }
+
+    /** The board's height from straight above in world units: its hexes span y from minus this to 0. */
+    static float boardHeight(BoardScene scene) {
+        return (scene.height() + .5f) * BoardGeometry.HEIGHT;
     }
 
     boolean isIsometric() {
@@ -159,6 +219,7 @@ final class BoardCamera {
     }
 
     void orbit(float rotation, float inclination) {
+        if (tactical()) { return; }
         stopRotation();
         azimuth = wrapDegrees(azimuth + rotation);
         tilt(inclination);
@@ -166,6 +227,7 @@ final class BoardCamera {
 
     /** Changes only the viewing angle, so holding a tilt key does not interrupt a keyboard turn in progress. */
     void tilt(float inclination) {
+        if (tactical()) { return; }
         stopFraming();
         fitToWindow = false;
         tilt = MathUtils.clamp(tilt + inclination, 0, MAX_TILT);
@@ -179,6 +241,7 @@ final class BoardCamera {
      * @param direction {@code -1} to turn left, {@code 1} to turn right
      */
     void rotateStep(int direction) {
+        if (tactical()) { return; }
         stopFraming();
         fitToWindow = false;
         float remaining = isRotating() ? rotationSweep * (1 - rotationProgress()) : 0;
@@ -445,6 +508,7 @@ final class BoardCamera {
         return wrapped < 0 ? wrapped + 360 : wrapped;
     }
 
+    /** Fits the board; the 3D view also returns to the isometric angle, while the Tactical View keeps its top view. */
     void reset(BoardScene scene) {
         overviewFocus = null;
         setIsometric(true);
@@ -562,27 +626,37 @@ final class BoardCamera {
         }
     }
 
+    /**
+     * The window's corners cast along the view onto the plane at height {@code z}, clockwise from the top left: the
+     * ground the camera shows at that height (the minimap's frustum).
+     */
+    Vector3[] groundQuad(float z) {
+        Vector3 right = new Vector3(camera.direction).crs(camera.up).nor();
+        Vector3[] quad = new Vector3[4];
+        int[][] corners = { { -1, 1 }, { 1, 1 }, { 1, -1 }, { -1, -1 } };
+        for (int corner = 0; corner < 4; corner++) {
+            Vector3 origin = new Vector3(camera.position)
+                  .mulAdd(right, corners[corner][0] * camera.viewportWidth * camera.zoom / 2)
+                  .mulAdd(camera.up, corners[corner][1] * camera.viewportHeight * camera.zoom / 2);
+            quad[corner] = origin.mulAdd(camera.direction, (z - origin.z) / camera.direction.z);
+        }
+        return quad;
+    }
+
     /** Bounds of the camera's rays at both terrain height extremes, in board hex coordinates. */
     Rectangle visibleArea(BoardScene scene) {
         float low = BoardGeometry.floor(scene);
         float high = scene.tiles().stream().mapToInt(BoardScene.Tile::elevation).max().orElse(0) * BoardGeometry.LEVEL;
-        Vector3 right = new Vector3(camera.direction).crs(camera.up).nor();
         float minX = Float.POSITIVE_INFINITY;
         float minY = Float.POSITIVE_INFINITY;
         float maxX = Float.NEGATIVE_INFINITY;
         float maxY = Float.NEGATIVE_INFINITY;
-        for (int x : new int[] { -1, 1 }) {
-            for (int y : new int[] { -1, 1 }) {
-                Vector3 origin = new Vector3(camera.position)
-                      .mulAdd(right, x * camera.viewportWidth * camera.zoom / 2)
-                      .mulAdd(camera.up, y * camera.viewportHeight * camera.zoom / 2);
-                for (float z : new float[] { low, high }) {
-                    Vector3 point = new Vector3(origin).mulAdd(camera.direction, (z - origin.z) / camera.direction.z);
-                    minX = Math.min(minX, point.x);
-                    maxX = Math.max(maxX, point.x);
-                    minY = Math.min(minY, -point.y);
-                    maxY = Math.max(maxY, -point.y);
-                }
+        for (float z : new float[] { low, high }) {
+            for (Vector3 point : groundQuad(z)) {
+                minX = Math.min(minX, point.x);
+                maxX = Math.max(maxX, point.x);
+                minY = Math.min(minY, -point.y);
+                maxY = Math.max(maxY, -point.y);
             }
         }
         int left = Math.max(0, (int) Math.floor(minX / (BoardGeometry.WIDTH * 0.75f)) - 2);

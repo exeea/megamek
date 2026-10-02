@@ -165,14 +165,14 @@ class UnitLegBendTest {
         assertThrows(JsonMappingException.class, () -> descriptor(Map.of(role, direction)));
     }
 
-    private static UnitMotion.Sample sample(EntityMovementType type, float steps, float forward, float lateral, ProneCause prone) {
+    static UnitMotion.Sample sample(EntityMovementType type, float steps, float forward, float lateral, ProneCause prone) {
         return new UnitMotion.Sample(true, type, .5f, steps, 0, forward, 0, 0, prone,
               null, null, null, null, 1, null, null, lateral);
     }
 
     private static UnitModelDescriptor descriptor(Map<String, String> bends) throws Exception {
         var document = (ObjectNode) JSON.readTree("""
-              {"schema":2,"kind":"body","family":"mek-biped","mesh":"synthetic.g3dj",
+              {"schema":2,"kind":"body","family":"mek-biped","mesh":"synthetic.glb",
                "bounds":{"min":[-20,-15,0],"max":[20,15,48]},"rig":"biped-v1",
                "joints":{"root":"root","hips":"pelvis","torso":"CT",
                  "leftLeg":"LL","leftShin":"LL-shin","leftFoot":"LL-foot",
@@ -183,7 +183,8 @@ class UnitLegBendTest {
         return JSON.treeToValue(document, UnitModelDescriptor.class);
     }
 
-    private static final class Fixture implements AutoCloseable {
+    /** A synthetic biped on the leg rig, also UnitScreenScaleTest's walker. */
+    static final class Fixture implements AutoCloseable {
         final GpuUnitModel model;
         final ModelInstance instance;
         final UnitAnimator animator = new UnitAnimator();

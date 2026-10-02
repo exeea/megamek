@@ -2,39 +2,34 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.badlogic.gdx.utils.GdxNativesLoader;
+import com.badlogic.gdx.math.Matrix4;
+import com.badlogic.gdx.math.Vector3;
+import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 
+/** A Tactical View icon is sized in board units: a fixed share of its hex, inside the hex at every facing. */
 class GpuUnitIconsTest {
     @Test
-    void sharesMarkerTiltRuleAtEveryBearingAndRequiresDistantZoom() {
-        GdxNativesLoader.load();
-        BoardCamera camera = new BoardCamera();
-        for (int bearing = 0; bearing < 360; bearing += 30) {
-            for (float tilt : new float[] { 0, 29.9f, 30, 30.1f, 60 }) {
-                camera.setIsometric(false);
-                camera.orbit(bearing, tilt);
-                boolean expected = GpuMarkers.flat(camera.camera);
-                assertEquals(expected, GpuUnitIcons.useIcons(true, camera.camera, 40, 56, false));
-                assertFalse(GpuUnitIcons.useIcons(false, camera.camera, 40, 56, true));
-                assertFalse(GpuUnitIcons.useIcons(true, camera.camera, 80, 56, false));
+    void iconsFillTheSameShareOfTheirHexAndStayInsideItAtEveryFacing() {
+        Coords hex = new Coords(5, 5);
+        Vector3 center = BoardGeometry.center(hex, 0);
+        // 0.7 hex heights (0.6 hex widths), as the classic 2D board sizes its units against the hex (user
+        // correction; the mock's 24-58 pixel screen clamp is not used). The camera never enters the size, so the
+        // zoom invariance through the real render is left to GpuTacticalViewSmokeTest.verifyScreenSize.
+        Matrix4 north = GpuUnitIcons.place(new Matrix4(), center, 0, 0);
+        float side = new Vector3(-.5f, 0, 0).mul(north).dst(new Vector3(.5f, 0, 0).mul(north));
+        assertEquals(.6f, side / BoardGeometry.WIDTH, .006f, "Icon side per hex width");
+        for (int facing = 0; facing < 360; facing += 15) {
+            Matrix4 icon = GpuUnitIcons.place(new Matrix4(), center, 0, facing);
+            for (float x : new float[] { -.5f, .5f }) {
+                for (float y : new float[] { -.5f, .5f }) {
+                    Vector3 corner = new Vector3(x, y, 0).mul(icon);
+                    assertTrue(BoardGeometry.contains(hex, corner.x, corner.y),
+                          "Corner " + corner + " of the icon turned to " + facing + " degrees lies inside its hex");
+                }
             }
         }
-    }
-
-    @Test
-    void zoomHysteresisPreventsChatterAndHonorsTheTunedThreshold() {
-        GdxNativesLoader.load();
-        BoardCamera camera = new BoardCamera();
-        camera.setIsometric(false);
-        assertTrue(GpuUnitIcons.useIcons(true, camera.camera, 56, 56, false));
-        assertFalse(GpuUnitIcons.useIcons(true, camera.camera, 57, 56, false));
-        assertTrue(GpuUnitIcons.useIcons(true, camera.camera, 60, 56, true));
-        assertFalse(GpuUnitIcons.useIcons(true, camera.camera, 65, 56, true));
-        assertTrue(GpuUnitIcons.useIcons(true, camera.camera, 80, 90, false));
-        assertFalse(GpuUnitIcons.useIcons(true, camera.camera, 40, 24, true));
     }
 }

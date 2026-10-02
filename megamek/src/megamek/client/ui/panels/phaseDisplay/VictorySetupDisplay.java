@@ -343,7 +343,7 @@ public class VictorySetupDisplay extends StatusBarPhaseDisplay {
         String message = (pointsStillToPlace > 0)
               ? Messages.getString("VictorySetupDisplay.unplacedPoints", pointsStillToPlace)
               : Messages.getString("VictorySetupDisplay.noPointsPlaced");
-        int choice = JOptionPane.showConfirmDialog(clientgui.getFrame(), message,
+        int choice = clientgui.confirm(message,
               Messages.getString("VictorySetupDisplay.unplacedTitle"),
               JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
         boolean isGoingAhead = choice == JOptionPane.YES_OPTION;
@@ -358,7 +358,7 @@ public class VictorySetupDisplay extends StatusBarPhaseDisplay {
     @Override
     public void removeAllListeners() {
         game().removeGameListener(this);
-        clientgui.boardViews().forEach(boardView -> boardView.removeBoardViewListener(this));
+        clientgui.boardStates().forEach(boardView -> boardView.removeBoardViewListener(this));
     }
 
     private Game game() {

@@ -41,6 +41,7 @@ import java.awt.Insets;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.io.Serial;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -56,6 +57,8 @@ import javax.swing.JScrollPane;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.game.Game;
 import megamek.common.units.AutomaticEjectionRules;
@@ -206,7 +209,17 @@ public class AutomaticEjectionDialog extends JDialog implements ActionListener {
 
     @Override
     public void actionPerformed(ActionEvent event) {
-        if (event.getSource() == deployButton) {
+        finish(event.getSource() == deployButton);
+    }
+
+    /**
+     * Deploy or Cancel, here or in the native battle window: Deploy sends the changed settings; either one keeps the
+     * player's "stop asking me this".
+     *
+     * @param deploy {@code true} for Deploy
+     */
+    private void finish(boolean deploy) {
+        if (deploy) {
             applyEjectionChanges();
             deploymentCancelled = false;
         }
@@ -214,6 +227,45 @@ public class AutomaticEjectionDialog extends JDialog implements ActionListener {
             GUIP.setNagForAutoEject(false);
         }
         dispose();
+    }
+
+    /**
+     * Showing the dialog asks in the client's native battle window instead when that draws dialogs: the units to tick
+     * for automatic ejection, each starting as it is set, and the "stop asking me this" box. Deploy and Cancel act as
+     * they do here; Esc, like the close box, cancels the deployment and keeps asking.
+     */
+    @Override
+    public void setVisible(boolean visible) {
+        if (!visible || !answeredNatively()) {
+            super.setVisible(visible);
+        }
+    }
+
+    private boolean answeredNatively() {
+        List<DialogRow> rows = new ArrayList<>();
+        List<Integer> ejecting = new ArrayList<>();
+        for (Entity entity : unitsWithEjectionSystems) {
+            if (settingsOnOpening.get(entity.getId())) {
+                ejecting.add(rows.size());
+            }
+            rows.add(new DialogRow(entity.getShortName(), "", null, true));
+        }
+        DialogAnswer answer = clientGUI.askRows(Messages.getString("AutomaticEjectionDialog.instructions",
+              lethalCondition), getTitle(), rows, true, ejecting, null, dontAskAgain,
+              List.of(deployButton.getText(), cancelButton.getText()), -1);
+        if (answer == null) {
+            return false;
+        }
+        if (answer.button() == 0) {
+            for (int row = 0; row < rows.size(); row++) {
+                ejectionBoxes.get(unitsWithEjectionSystems.get(row).getId()).setSelected(answer.selected()
+                      .contains(row));
+            }
+        }
+        if (answer.button() >= 0) {
+            finish(answer.button() == 0);
+        }
+        return true;
     }
 
     /**

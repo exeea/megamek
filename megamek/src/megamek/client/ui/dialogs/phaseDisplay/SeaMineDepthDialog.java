@@ -39,14 +39,17 @@ import java.awt.Insets;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.io.Serial;
+import java.util.List;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JDialog;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.SwingConstants;
 
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.util.UIUtil;
 import megamek.codeUtilities.MathUtility;
 
@@ -58,6 +61,8 @@ public class SeaMineDepthDialog extends JDialog implements ActionListener {
     private static final long serialVersionUID = -7642956136536119067L;
     private final JButton butOk = new JButton(Messages.getString("Okay"));
     private final JComboBox<String> choDepth = new JComboBox<>();
+    private final JLabel labDepth = new JLabel(Messages.getString("SeaMineDepthDialog.labDepth"),
+          SwingConstants.RIGHT);
     private int depth = -1;
 
     public SeaMineDepthDialog(JFrame p, int totalDepth) {
@@ -79,7 +84,6 @@ public class SeaMineDepthDialog extends JDialog implements ActionListener {
         gridBagConstraints.weightx = 1.0;
         gridBagConstraints.weighty = 0.0;
         gridBagConstraints.gridwidth = GridBagConstraints.REMAINDER;
-        JLabel labDepth = new JLabel(Messages.getString("SeaMineDepthDialog.labDepth"), SwingConstants.RIGHT);
         gridBagLayout.setConstraints(labDepth, gridBagConstraints);
         getContentPane().add(labDepth);
         gridBagConstraints.fill = GridBagConstraints.BOTH;
@@ -113,5 +117,21 @@ public class SeaMineDepthDialog extends JDialog implements ActionListener {
             depth = MathUtility.parseInt((String) choDepth.getSelectedItem(), 0);
         }
         this.setVisible(false);
+    }
+
+    /**
+     * Showing the dialog asks in the owning client's native battle window instead when that draws dialogs: the chosen
+     * depth is confirmed as the OK button does, and Esc chooses none, as closing this window does.
+     */
+    @Override
+    public void setVisible(boolean visible) {
+        ClientGUI gui = visible ? ClientGUI.forFrame(getOwner()) : null;
+        Boolean confirmed = (gui == null) ? null : gui.askEntry(labDepth.getText(), getTitle(), choDepth,
+              List.of(butOk.getText()), JOptionPane.CLOSED_OPTION);
+        if (confirmed == null) {
+            super.setVisible(visible);
+        } else if (confirmed) {
+            butOk.doClick(0);
+        }
     }
 }

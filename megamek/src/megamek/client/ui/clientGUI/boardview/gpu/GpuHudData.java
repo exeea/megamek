@@ -1,0 +1,15 @@
+/* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
+package megamek.client.ui.clientGUI.boardview.gpu;
+
+/**
+ * The per-frame HUD panel bundle: one immutable snapshot from each EDT service. The source keeps the previous
+ * instance while every part is equal, so the render thread can compare bundles and parts by identity.
+ */
+record GpuHudData(GpuBoardActions.PhaseInfo phase, GpuMovePlan.Snapshot move, GpuFireOrders.Snapshot fire,
+      GpuPhysicalOptions.Snapshot physical, GpuUnitRecord.Snapshot record, GpuFirePreview.Snapshot preview,
+      GpuChat.Snapshot chat, GpuToasts.Snapshot toasts, GpuLosResult.Snapshot los, GpuPlayers.Snapshot players) {
+    static final GpuHudData EMPTY = new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, GpuMovePlan.Snapshot.EMPTY,
+          GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY,
+          GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY, GpuLosResult.Snapshot.NONE,
+          GpuPlayers.Snapshot.EMPTY);
+}

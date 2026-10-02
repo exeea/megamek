@@ -92,55 +92,60 @@ class GpuPlanetaryConditionsSmokeTest {
                             if (failure.get() != null) { throw new AssertionError(failure.get()); }
                             assertTrue(System.nanoTime() < deadline, "The dialog must return without blocking rendering");
                             super.render();
-                            TextButton conditions = GpuBoardTestUi.stage().getRoot().findActor("tuning-planetary-conditions");
-                            var uiField = GpuBattleView.class.getDeclaredField("ui");
-                            uiField.setAccessible(true);
-                            var ui = (GpuBoardUi) uiField.get(this);
+                            GpuBoardTuning tuning = GpuBoardTestUi.tuning(this);
+                            TextButton conditions = GpuBoardTestUi.tuning(this, "tuning-planetary-conditions");
                             var playbackField = GpuBattleView.class.getDeclaredField("playback");
                             playbackField.setAccessible(true);
                             var playback = (UnitPlayback) playbackField.get(this);
                             if (step == 0 && frames() >= 3) {
-                                GpuBoardTestUi.click("tuning");
-                                defaults = ui.atmosphereOptions();
-                                changeEffectControls();
+                                // The HUD's tuning panel shows the model's Atmosphere page in the capture below.
+                                GpuBoardTestUi.click("tuning-button");
+                                defaults = tuning.atmosphereOptions();
+                                changeEffectControls(tuning);
                                 step++;
                             } else if (step == 1) {
-                                GpuBoardTestUi.click("tuning-planetary-conditions");
+                                GpuBoardTestUi.click("tuning-atmosphere-tab");
+                                GpuBoardTestUi.pressTuning(conditions);
                                 assertTrue(conditions.isDisabled(), "One editor can be open at a time");
                                 step++;
                             } else if (step == 2 && !conditions.isDisabled()) {
-                                assertSettings(initial);
-                                assertEquals(0.8f, ui.atmosphereOptions().rays(), 0.00001f,
+                                assertSettings(tuning, initial);
+                                assertEquals(0.8f, tuning.atmosphereOptions().rays(), 0.00001f,
                                       "Cancel must preserve custom test controls");
-                                GpuBoardTestUi.click("tuning-planetary-conditions");
+                                GpuBoardTestUi.pressTuning(conditions);
                                 step++;
                             } else if (step == 3 && !conditions.isDisabled()) {
-                                assertSettings(expected);
-                                assertEquals(defaults, ui.atmosphereOptions(), "Apply restores all effect constants");
+                                assertSettings(tuning, expected);
+                                assertEquals(defaults, tuning.atmosphereOptions(),
+                                      "Apply restores all effect constants");
                                 assertEquals(0.5f, playback.gravityOverride, "The live renderer must pass preview gravity to jumps");
-                                assertTrue(conditions.getWidth() >= conditions.getLabel().getPrefWidth(), "Button text fits");
+                                // The panel's button for the model's: its text fits.
+                                TextButton shown = GpuBoardTestUi.stage().getRoot()
+                                      .findActor("tuning-planetary-conditions");
+                                assertTrue(shown.getWidth() >= shown.getLabel().getPrefWidth(), "Button text fits");
                                 GpuBoardTestUi.capture(new File(System.getProperty("megamek.gpu.screenshots"),
                                       "planetary-conditions-tuning.png"));
                                 SwingUtilities.invokeAndWait(fixture.source::refresh);
-                                changeEffectControls();
-                                slider("Ground fog").setValue(0.75f);
-                                slider("Time of day").setValue(12);
-                                slider("Gravity (g)").setValue(2);
-                                GpuBoardTestUi.click("tuning-planetary-conditions");
+                                changeEffectControls(tuning);
+                                slider(tuning, "Ground fog").setValue(0.75f);
+                                slider(tuning, "Time of day").setValue(12);
+                                slider(tuning, "Gravity (g)").setValue(2);
+                                GpuBoardTestUi.pressTuning(conditions);
                                 step++;
                             } else if (step == 4 && !conditions.isDisabled()) {
-                                assertSettings(expected);
-                                assertEquals(defaults, ui.atmosphereOptions(), "Applying unchanged conditions must reset overrides again");
+                                assertSettings(tuning, expected);
+                                assertEquals(defaults, tuning.atmosphereOptions(),
+                                      "Applying unchanged conditions must reset overrides again");
                                 assertEquals(0.5f, playback.gravityOverride);
-                                GpuBoardTestUi.click("atmosphere-DUSK");
-                                GpuBoardTestUi.click("tuning-planetary-conditions");
+                                GpuBoardTestUi.pressTuning(GpuBoardTestUi.tuning(tuning, "atmosphere-DUSK"));
+                                GpuBoardTestUi.pressTuning(conditions);
                                 step++;
                             } else if (step == 5 && !conditions.isDisabled()) {
-                                assertSettings(fixture.source.atmosphereFor(AtmospherePreset.DUSK));
-                                GpuBoardTestUi.click("tuning-defaults");
-                                assertSettings(initial);
+                                assertSettings(tuning, fixture.source.atmosphereFor(AtmospherePreset.DUSK));
+                                GpuBoardTestUi.pressTuning(tuning.defaults());
+                                assertSettings(tuning, initial);
                                 assertEquals(0, fixture.clicks.get());
-                                GpuBoardTestUi.click("tuning-planetary-conditions");
+                                GpuBoardTestUi.pressTuning(conditions);
                                 step++;
                             }
                         } catch (Throwable error) {
@@ -171,19 +176,19 @@ class GpuPlanetaryConditionsSmokeTest {
         return false;
     }
 
-    private static void changeEffectControls() {
+    private static void changeEffectControls(GpuBoardTuning tuning) {
         String[] names = { "God rays", "Cloud shadow min", "Cloud shadow max", "Sun glare", "Fog height variation",
               "Fog density variation", "Moon shadow contrast", "Taint strength", "Fog calm drift" };
         float[] values = { 0.8f, 0.3f, 0.9f, 0.2f, 0.5f, 0.4f, 0.3f, 1.5f, 0.12f };
-        for (int index = 0; index < names.length; index++) { slider(names[index]).setValue(values[index]); }
-        GpuBoardTestUi.stage().getRoot().<CheckBox>findActor("tuning-fixed-sun").setChecked(true);
+        for (int index = 0; index < names.length; index++) { slider(tuning, names[index]).setValue(values[index]); }
+        GpuBoardTestUi.<CheckBox>tuning(tuning, "tuning-fixed-sun").setChecked(true);
     }
 
-    private static Slider slider(String name) {
-        return GpuBoardTestUi.stage().getRoot().findActor(name);
+    private static Slider slider(GpuBoardTuning tuning, String name) {
+        return GpuBoardTestUi.tuning(tuning, name);
     }
 
-    private static void assertSettings(BoardAtmosphere.Settings settings) {
+    private static void assertSettings(GpuBoardTuning tuning, BoardAtmosphere.Settings settings) {
         String[] names = { "Time of day", "Cloud cover", "Ground fog", "Ground layer height", "Haze", "Exposure (EV)",
               "Rain", "Snow", "Hail", "Blowing sand", "Lightning", "Wind strength", "Wind direction", "Gravity (g)" };
         var effects = settings.effects();
@@ -191,8 +196,7 @@ class GpuPlanetaryConditionsSmokeTest {
               settings.exposure(), effects.rain(), effects.snow(), effects.hail(), effects.sand(), effects.lightning(),
               effects.wind(), effects.windDirection(), settings.gravity() };
         for (int index = 0; index < names.length; index++) {
-            Slider slider = GpuBoardTestUi.stage().getRoot().findActor(names[index]);
-            assertEquals(values[index], slider.getValue(), .001f, names[index]);
+            assertEquals(values[index], slider(tuning, names[index]).getValue(), .001f, names[index]);
         }
     }
 }

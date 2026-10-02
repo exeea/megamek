@@ -163,6 +163,9 @@ class GpuDamageTuningSmokeTest {
                     tank.setDeployed(true);
                     fixture.game.addEntity(tank, false);
                     var infantry = new ConvInfantry();
+                    // Every label style, including the chassis-only one a player may have chosen, needs a name.
+                    infantry.setChassis("Foot Platoon");
+                    infantry.setModel("Rifle");
                     infantry.setId(3);
                     infantry.setOwner(fixture.player);
                     infantry.setPosition(new Coords(4, 5));
@@ -189,15 +192,13 @@ class GpuDamageTuningSmokeTest {
     }
 
     private static void verify(GpuBattleView view, GpuBoardFixture fixture) throws Exception {
-        GpuBoardTestUi.click("tuning");
-        view.render();
-        CheckBox vsync = GpuBoardTestUi.stage().getRoot().findActor("tuning-vsync");
+        CheckBox vsync = GpuBoardTestUi.tuning(view, "tuning-vsync");
         assertTrue(vsync.isChecked());
-        GpuBoardTestUi.click("tuning-vsync");
+        GpuBoardTestUi.pressTuning(vsync);
         assertFalse(vsync.isChecked());
-        CheckBox override = GpuBoardTestUi.stage().getRoot().findActor("tuning-override-damage");
-        Slider slider = GpuBoardTestUi.stage().getRoot().findActor("Display damage");
-        SelectBox<UnitDamageDisplay.Location> location = GpuBoardTestUi.stage().getRoot().findActor("tuning-damage-location");
+        CheckBox override = GpuBoardTestUi.tuning(view, "tuning-override-damage");
+        Slider slider = GpuBoardTestUi.tuning(view, "Display damage");
+        SelectBox<UnitDamageDisplay.Location> location = GpuBoardTestUi.tuning(view, "tuning-damage-location");
         assertTrue(location.isDisabled());
         assertEquals(UnitDamageDisplay.Location.ALL, location.getSelected());
         var actual = displayedDamage(view, 1);
@@ -206,7 +207,7 @@ class GpuDamageTuningSmokeTest {
         assertEquals(0, slider.getValue());
         assertEquals(UnitDamageDisplay.Stage.ARMOR_STRIPPED, actual.stages().get("LT"));
 
-        GpuBoardTestUi.click("tuning-override-damage");
+        GpuBoardTestUi.pressTuning(override);
         assertTrue(override.isChecked());
         assertFalse(slider.isDisabled());
         assertFalse(location.isDisabled());
@@ -247,7 +248,7 @@ class GpuDamageTuningSmokeTest {
                 }
                 File output = new File(System.getProperty("megamek.gpu.screenshots"));
                 Files.createDirectories(output.toPath());
-                GpuBoardTestUi.capture(new File(output, "damage-tuning-panel.png"));
+                GpuBoardTestUi.capture(new File(output, "damage-tuning-preview.png"));
             }
         }
         location.setSelected(UnitDamageDisplay.Location.RIGHT_ARM);
@@ -272,24 +273,17 @@ class GpuDamageTuningSmokeTest {
         view.render();
         captureInfantry(view);
         view.render();
-        GpuBoardTestUi.click("tuning-damage-location");
-        assertTrue(location.getScrollPane().hasParent());
-        GpuBoardTestUi.stage().act(.3f);
-        GpuBoardTestUi.stage().draw();
-        GpuBoardTestUi.capture(new File(System.getProperty("megamek.gpu.screenshots"), "damage-location-choices.png"));
-        location.hideList();
-        GpuBoardTestUi.stage().act(.3f);
-        GpuBoardTestUi.click("tuning-override-damage");
+        GpuBoardTestUi.pressTuning(override);
         view.render();
         assertTrue(slider.isDisabled());
         assertEquals(actual, displayedDamage(view, 1), "Disabling the preview restores actual damage");
         assertTrue(displayedDamage(view, 2).isNone());
         assertInfantry(view, 0);
 
-        GpuBoardTestUi.click("tuning-override-damage");
+        GpuBoardTestUi.pressTuning(override);
         slider.setValue(1);
         view.render();
-        GpuBoardTestUi.click("tuning-defaults");
+        GpuBoardTestUi.pressTuning(GpuBoardTestUi.tuning(view, "tuning-defaults"));
         view.render();
         assertFalse(vsync.isChecked(), "Defaults keeps the VSync preference the user set");
         assertFalse(override.isChecked());

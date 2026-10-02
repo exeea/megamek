@@ -53,6 +53,9 @@ import megamek.client.ui.clientGUI.boardview.overlay.OverlayImage;
  */
 public interface IDisplayable {
 
+    /** Release subscriptions and timers owned by this overlay when its viewport is disposed. */
+    default void dispose() { }
+
     /**
      * Returns true when this IDisplayable is being dragged or resized using mouse movement. This will prevent the
      * {@link megamek.client.ui.clientGUI.boardview.BoardView} from reacting to this mouse action. The default for this

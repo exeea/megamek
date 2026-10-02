@@ -33,6 +33,8 @@
 package megamek.client.ui.dialogs.phaseDisplay;
 
 import java.awt.Container;
+import java.util.Arrays;
+import java.util.List;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.ButtonGroup;
@@ -43,6 +45,9 @@ import javax.swing.JRadioButton;
 import javax.swing.border.EmptyBorder;
 
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
 import megamek.client.ui.dialogs.buttonDialogs.AbstractButtonDialog;
 import megamek.client.ui.util.UIUtil;
 
@@ -60,6 +65,7 @@ public class CalledBlowDialog extends AbstractButtonDialog {
     private final String weaponName;
     private final String[] choices;
     private JRadioButton[] choiceButtons;
+    private JLabel message;
 
     /**
      * Constructs a modal called-blow dialog for the given physical weapon.
@@ -85,7 +91,7 @@ public class CalledBlowDialog extends AbstractButtonDialog {
         panel.setLayout(new BoxLayout(panel, BoxLayout.PAGE_AXIS));
         panel.setBorder(new EmptyBorder(verticalPadding, horizontalPadding, verticalPadding, horizontalPadding));
 
-        JLabel message = new JLabel(Messages.getString("PhysicalDisplay.CalledBlowDialog.message", weaponName));
+        message = new JLabel(Messages.getString("PhysicalDisplay.CalledBlowDialog.message", weaponName));
         message.setAlignmentX(LEFT_ALIGNMENT);
         panel.add(message);
         panel.add(Box.createVerticalStrut(verticalPadding));
@@ -99,6 +105,25 @@ public class CalledBlowDialog extends AbstractButtonDialog {
             panel.add(choiceButtons[index]);
         }
         return panel;
+    }
+
+    /**
+     * Showing the dialog asks in the owning client's native battle window instead when that draws dialogs: the same
+     * choices, starting on the selected one; OK confirms the chosen one as this dialog's OK button does.
+     */
+    @Override
+    public void setVisible(boolean visible) {
+        ClientGUI gui = visible ? ClientGUI.forFrame(getFrame()) : null;
+        DialogAnswer answer = (gui == null) ? null : gui.askRows(message.getText(), getTitle(),
+              Arrays.stream(choices).map(choice -> new DialogRow(choice, "", null, true)).toList(), false,
+              List.of(getSelectedIndex()), null,
+              List.of(resources.getString("Ok.text"), resources.getString("Cancel.text")), 1);
+        if (answer == null) {
+            super.setVisible(visible);
+        } else if (answer.button() == 0) {
+            answer.selected().forEach(row -> choiceButtons[row].setSelected(true));
+            okButtonActionPerformed(null);
+        }
     }
 
     /**

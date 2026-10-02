@@ -17,22 +17,36 @@ import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Quaternion;
 import com.badlogic.gdx.math.Vector3;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import megamek.common.annotations.Nullable;
 
 /** Schema 2: independent rigid assets, +Y forward / +Z up, with no legacy Z compression. No GL resources. */
 record UnitModelDescriptor(int schema, String kind, String family, String mesh, Bounds bounds, String rig,
           Map<String, String> joints, Map<String, String> locations, List<Hardpoint> hardpoints, List<Emitter> emitters,
-          List<LandingSupport> landingSupports, Map<String, String> legBends) {
+          List<LandingSupport> landingSupports, Map<String, String> legBends, @Nullable String detail) {
     private static final ObjectMapper JSON = new ObjectMapper();
-    /** Bare body/troop geometry only. Loadout modules have a separate measured cost. */
-    static final int TRIANGLE_LIMIT = 1500;
-    /** Equipment is reviewed separately: ideally under 100, always strictly under 150 triangles per module. */
-    static final int EQUIPMENT_TRIANGLE_LIMIT = 149;
+    /**
+     * A sanity ceiling for one asset level, not an art budget. With LOD levels the engine has no triangle budget of
+     * its own; the art budget per level ({@link #UNIT_TRIANGLE_BUDGETS}) is enforced for bodies and equipment pieces
+     * by the mm-data exporter that authors them, and only warned about here once a unit is assembled. An asset past
+     * this ceiling almost certainly came from a wrong export.
+     */
+    static final int MAX_TRIANGLES = 1_000_000;
+    /**
+     * The art budget for one assembled unit (bare body plus every fitted weapon) at each level of detail, LOD0 first.
+     * Exceeding it only logs a warning: the unit is still drawn in full, so the log shows which bodies and loadouts
+     * need lighter geometry.
+     */
+    static final List<Integer> UNIT_TRIANGLE_BUDGETS = List.of(5000, 2000, 500);
+    /** The {@code detail} value that marks a body as the LOD0 level of its own LOD1 body. */
+    static final String LOD0_DETAIL = "lod0";
 
     UnitModelDescriptor {
+        // Custom descriptors written before the numeric LOD convention remain readable.
+        if ("near".equals(detail)) { detail = LOD0_DETAIL; }
         require(schema == 2, "Unsupported modular model schema: " + schema);
         require(Set.of("body", "troop", "equipment").contains(kind), "Unknown model kind: " + kind);
         require((family != null) && !family.isBlank(), "Missing model family");
-        require((mesh != null) && mesh.endsWith(".g3dj"), "Expected a G3DJ mesh");
+        require((mesh != null) && mesh.endsWith(".glb"), "Expected a GLB mesh");
         require(bounds != null, "Missing rest bounds");
         require((rig != null) && !rig.isBlank(), "Missing rig identifier");
         joints = Map.copyOf(joints);
@@ -54,6 +68,13 @@ record UnitModelDescriptor(int schema, String kind, String family, String mesh, 
               "Landing supports belong to aircraft bodies");
         require(landingSupports.stream().map(LandingSupport::id).distinct().count() == landingSupports.size(),
               "Duplicate landing support ID");
+        require((detail == null) || (LOD0_DETAIL.equals(detail) && "body".equals(kind)),
+              "Only a body may be marked as a LOD0 level: " + detail);
+    }
+
+    /** @return whether this body is explicitly marked as a LOD0 level, so it cannot stand in as a LOD1 body */
+    boolean lod0Detail() {
+        return LOD0_DETAIL.equals(detail);
     }
 
     static UnitModelDescriptor read(Path file) throws IOException {
@@ -69,30 +90,37 @@ record UnitModelDescriptor(int schema, String kind, String family, String mesh, 
     }
 
     int validate(ModelData data) {
+        return validate(data, 0);
+    }
+
+    /** LOD0 owns sockets and effects. Optional levels need the shared rig and their own geometry budget. */
+    int validate(ModelData data, int level) {
         Map<String, ModelNode> modelNodes = new HashMap<>();
         for (ModelNode node : data.nodes) {
             collect(node, modelNodes);
         }
         Set<String> nodes = modelNodes.keySet();
         require(nodes.containsAll(joints.values()), "Rig references missing nodes");
-        require(nodes.containsAll(locations.keySet()), "Location references missing nodes");
-        for (var leg : UnitRig.LEGS) {
-            if (!legBends.containsKey(leg[0])) { continue; }
-            for (int index = 0; index < 2; index++) {
-                var parent = modelNodes.get(joints.get(leg[index]));
-                var child = modelNodes.get(joints.get(leg[index + 1]));
-                require(parent.children != null && java.util.Arrays.asList(parent.children).contains(child),
-                      "Leg bend requires a hip / knee / foot chain: " + leg[0]);
+        if (level == 0) {
+            require(nodes.containsAll(locations.keySet()), "Location references missing nodes");
+            for (var leg : UnitRig.LEGS) {
+                if (!legBends.containsKey(leg[0])) { continue; }
+                for (int index = 0; index < 2; index++) {
+                    var parent = modelNodes.get(joints.get(leg[index]));
+                    var child = modelNodes.get(joints.get(leg[index + 1]));
+                    require(parent.children != null && java.util.Arrays.asList(parent.children).contains(child),
+                          "Leg bend requires a hip / knee / foot chain: " + leg[0]);
+                }
             }
-        }
-        hardpoints.forEach(point -> require(nodes.contains(point.node()), "Missing hardpoint node: " + point.id()));
-        emitters.forEach(emitter -> require(nodes.contains(emitter.node()), "Missing emitter node: " + emitter.id()));
-        Set<String> supportNodes = new HashSet<>();
-        for (var support : landingSupports) {
-            support.validate(modelNodes);
-            for (String node : List.of(support.node(), support.shaft(), support.foot())) {
-                require(joints.containsValue(node), "Landing support must belong to the rig: " + node);
-                require(supportNodes.add(node), "Landing supports cannot share controls: " + node);
+            hardpoints.forEach(point -> require(nodes.contains(point.node()), "Missing hardpoint node: " + point.id()));
+            emitters.forEach(emitter -> require(nodes.contains(emitter.node()), "Missing emitter node: " + emitter.id()));
+            Set<String> supportNodes = new HashSet<>();
+            for (var support : landingSupports) {
+                support.validate(modelNodes);
+                for (String node : List.of(support.node(), support.shaft(), support.foot())) {
+                    require(joints.containsValue(node), "Landing support must belong to the rig: " + node);
+                    require(supportNodes.add(node), "Landing supports cannot share controls: " + node);
+                }
             }
         }
         for (var meshData : data.meshes) {
@@ -116,11 +144,17 @@ record UnitModelDescriptor(int schema, String kind, String family, String mesh, 
         }
         int triangles = triangleCount(data);
         require(triangles > 0, "Empty modular asset");
-        int limit = "equipment".equals(kind) ? EQUIPMENT_TRIANGLE_LIMIT : TRIANGLE_LIMIT;
-        require(triangles <= limit, kind + " asset exceeds triangle hard cap " + limit + ": " + triangles);
+        require(triangles <= MAX_TRIANGLES, kind + " asset exceeds the " + MAX_TRIANGLES + " triangle ceiling: "
+              + triangles);
         for (var material : data.materials) {
             require(Set.of("paint", "detail", "bark").contains(material.id), "Unknown material role: " + material.id);
-            require((material.textures == null) || material.textures.isEmpty(), "Textures are owned by unit appearance");
+            // Authored diffuse maps may be embedded or shared. Runtime camouflage still owns the paint role.
+            if (material.textures != null) {
+                for (var texture : material.textures) {
+                    require(texture.usage == com.badlogic.gdx.graphics.g3d.model.data.ModelTexture.USAGE_DIFFUSE,
+                          "Units support authored diffuse textures");
+                }
+            }
         }
         return triangles;
     }

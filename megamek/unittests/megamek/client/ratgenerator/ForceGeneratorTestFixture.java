@@ -74,6 +74,9 @@ final class ForceGeneratorTestFixture {
     /** Generous enough for a cold CI machine building the unit cache, short enough not to stall a run. */
     private static final long LOAD_TIMEOUT_MILLIS = 120_000;
 
+    /** The data folder in use before {@link #loadFromTestData}; {@link #reset} puts it back. */
+    private static File previousDataDir;
+
     private ForceGeneratorTestFixture() {
     }
 
@@ -87,6 +90,9 @@ final class ForceGeneratorTestFixture {
      * @throws Exception if the unit cache singleton cannot be reset
      */
     static RATGenerator loadFromTestData(int era) throws Exception {
+        if (previousDataDir == null) {
+            previousDataDir = Configuration.dataDir();
+        }
         Configuration.setDataDir(new File("testresources/data"));
 
         // Factions2 ignores Configuration.dataDir(), so point it at the test factions explicitly
@@ -160,6 +166,11 @@ final class ForceGeneratorTestFixture {
      * @throws Exception if the unit cache singleton cannot be reset
      */
     static void reset() throws Exception {
+        // Later test classes load boards, fonts and art from the real data folder
+        if (previousDataDir != null) {
+            Configuration.setDataDir(previousDataDir);
+            previousDataDir = null;
+        }
         Factions2.setInstance(null);
         resetMekSummaryCache();
         // Null restores the lazy default: the next unit load reads the real list again

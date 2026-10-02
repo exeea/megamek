@@ -34,15 +34,13 @@ package megamek.client.ui.clientGUI.boardview;
 
 import java.awt.Graphics2D;
 
+import megamek.common.Hex;
 import megamek.common.board.Coords;
 import megamek.common.game.Game;
-import megamek.common.Hex;
 
 /**
- * HexDrawPlugins can be given to a BoardView and will be called whenever the BoardView draws any of its hexes to the
- * hex image cache. In this way the draw process can be adapted to different situations (board editor, preview, game)
- * without changing the BoardView itself (and making it ever bigger). Also, since the results are cached, the draw
- * process can be used for many hexes without making the BoardView slow.
+ * Per-hex tactical painters belong to shared board presentation. Classic drawing, native raster capture and printable
+ * export invoke the same painters; they do not require a classic viewport.
  * <p>
  * Note that at the moment, these plugins will always draw last, i.e. above everything else that gets drawn to the image
  * cache. As sprites get drawn separately, they will draw above plugins.
@@ -52,7 +50,7 @@ public interface HexDrawPlugin {
     /**
      * Draws graphics content to the present hex image. Unlike sprites the contents drawn here will become part of the
      * cached hex images. Drawing should be done to the provided graphics2D using information from the hex, game and
-     * BoardView if necessary. Note that the available area of the hex image depends on the BoardView's scale. When the
+     * drawing context if necessary. The available area of the hex image depends on the context's scale. When the
      * scale is 1, the area is the usual hex shape within a rectangle of 84x72 (HEX_W x HEX_H). At other scales, the
      * rectangle is scaled accordingly.
      *
@@ -60,11 +58,11 @@ public interface HexDrawPlugin {
      * @param hex        The {@link Hex} currently drawn
      * @param game       the {@link Game}
      * @param coords     the location of the hex on the board
-     * @param boardView  The {@link BoardView} that is calling this method
+     * @param boardView  The shared drawing context
      *
-     * @see BoardView#getScale()
+     * @see BoardGlyphContext#getScale()
      * @see megamek.client.ui.tileset.HexTileset#HEX_W
-     * @see BoardView#clearHexImageCache()
+     * @see BoardClientState#repaint()
      */
-    void draw(Graphics2D graphics2D, Hex hex, Game game, Coords coords, BoardView boardView);
+    void draw(Graphics2D graphics2D, Hex hex, Game game, Coords coords, BoardGlyphContext boardView);
 }

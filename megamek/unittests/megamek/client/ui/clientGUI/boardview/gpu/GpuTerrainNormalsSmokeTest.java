@@ -19,7 +19,6 @@ import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.InputMultiplexer;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
@@ -29,10 +28,8 @@ import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.glutils.HdpiUtils;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
 import com.badlogic.gdx.utils.ScreenUtils;
-import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
@@ -80,24 +77,15 @@ class GpuTerrainNormalsSmokeTest {
                 public void create() {
                     GpuTerrain terrain = null;
                     GpuBoardSkin skin = null;
-                    Stage stage = null;
                     try {
                         checkAtlas();
                         skin = new GpuBoardSkin();
                         GpuBoardTuning tuning = new GpuBoardTuning(skin.skin);
-                        CheckBox toggle = tuning.panel().findActor("tuning-normal-maps");
+                        CheckBox toggle = GpuBoardTestUi.tuning(tuning, "tuning-normal-maps");
                         assertTrue(tuning.normalMaps(), "Normal maps start enabled");
-                        stage = new Stage(new ScreenViewport());
-                        stage.addActor(tuning.panel());
-                        var dock = new GpuPanelDock(skin.skin, () -> { }, null, tuning.panel());
-                        dock.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight(), 0, 0, 0, 0);
-                        dock.show(tuning.panel());
-                        Gdx.input.setInputProcessor(new InputMultiplexer(stage));
-                        stage.act(0);
-                        stage.draw();
-                        GpuBoardTestUi.click("tuning-normal-maps");
-                        assertFalse(tuning.normalMaps(), "The checkbox accepts a real pointer click");
-                        GpuBoardTestUi.click("tuning-defaults");
+                        GpuBoardTestUi.pressTuning(toggle);
+                        assertFalse(tuning.normalMaps(), "The checkbox switches normal mapping off");
+                        GpuBoardTestUi.pressTuning(tuning.defaults());
                         assertTrue(tuning.normalMaps(), "Defaults restores normal mapping");
                         terrain = new GpuTerrain();
                         BoardCamera camera = new BoardCamera();
@@ -146,9 +134,6 @@ class GpuTerrainNormalsSmokeTest {
                     } finally {
                         if (terrain != null) {
                             terrain.dispose();
-                        }
-                        if (stage != null) {
-                            stage.dispose();
                         }
                         if (skin != null) {
                             skin.dispose();

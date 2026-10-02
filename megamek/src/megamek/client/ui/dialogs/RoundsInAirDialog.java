@@ -124,9 +124,8 @@ public class RoundsInAirDialog extends JDialog {
     }
 
     /**
-     * Rebuilds the table from the current in-flight artillery, sorted so the soonest-landing rounds are at the top. Own
-     * and allied rounds are shown in full; enemy rounds (a redacted, team-safe feed from the server) show only their
-     * landing time, with the target hex and warhead listed as "Unknown". Safe to call repeatedly (e.g. on phase change).
+     * Rebuilds the table from the current in-flight artillery ({@link #rows(Game)}). Safe to call repeatedly (e.g. on
+     * phase change).
      */
     public void refresh() {
         // if we're not actually showing this control, there's no need to actually do a refresh
@@ -134,51 +133,69 @@ public class RoundsInAirDialog extends JDialog {
             return;
         }
         tableModel.setRowCount(0);
-        Game game = client.getGame();
-        List<RoundRow> rows = new ArrayList<>();
+        for (Row row : rows(client.getGame())) {
+            tableModel.addRow(new Object[] {
+                  row.team(), row.player(), row.firedBy(), row.landsIn(), row.targetHex(), row.warhead()
+            });
+        }
+    }
+
+    /**
+     * The rows this window lists, sorted so the soonest-landing rounds are at the top. Own and allied rounds are shown
+     * in full; enemy rounds (a redacted, team-safe feed from the server) show only their landing time, with the target
+     * hex and warhead listed as "Unknown". The GPU battle log lists the same rows.
+     *
+     * @param game The client's game
+     *
+     * @return One row per artillery round in the air that the local player is entitled to see
+     */
+    public static List<Row> rows(Game game) {
+        List<Row> rows = new ArrayList<>();
 
         // Own and allied rounds: full detail.
         for (Enumeration<ArtilleryAttackAction> attackEnumeration = game.getArtilleryAttacks();
               attackEnumeration.hasMoreElements(); ) {
             ArtilleryAttackAction attack = attackEnumeration.nextElement();
-            rows.add(new RoundRow(attack.getTurnsTilHit(), new Object[] {
+            rows.add(new Row(attack.getTurnsTilHit(),
                   teamName(game, attack.getPlayerId()),
                   playerName(game, attack.getPlayerId()),
                   firingUnitName(game, attack.getEntityId()),
                   landsInText(attack.getTurnsTilHit()),
                   targetHexText(game, attack),
-                  warheadName(attack)
-            }));
+                  warheadName(attack)));
         }
 
         // Enemy rounds: redacted - landing time only; the target hex and warhead are withheld (shown as "Unknown").
         String unknown = Messages.getString("RoundsInAirDialog.unknown");
         for (EnemyArtilleryInbound inbound : game.getEnemyArtilleryInbound()) {
-            rows.add(new RoundRow(inbound.turnsTilHit(), new Object[] {
+            rows.add(new Row(inbound.turnsTilHit(),
                   teamName(game, inbound.playerId()),
                   playerName(game, inbound.playerId()),
                   firingUnitName(game, inbound.firingEntityId()),
                   landsInText(inbound.turnsTilHit()),
                   unknown,
-                  unknown
-            }));
+                  unknown));
         }
 
         // Sort allied and enemy rounds together so the soonest-landing round is always at the top, regardless of side.
-        rows.sort(Comparator.comparingInt(RoundRow::turnsTilHit));
-        for (RoundRow row : rows) {
-            tableModel.addRow(row.cells());
-        }
+        rows.sort(Comparator.comparingInt(Row::turnsTilHit));
+        return rows;
     }
 
     /**
-     * One row of the table, carrying its landing time separately so allied and enemy rounds can be sorted together by
-     * soonest landing before being rendered.
+     * One row of the window: the cell texts in column order, with the landing time separately so allied and enemy
+     * rounds can be sorted together by soonest landing.
      *
      * @param turnsTilHit Turns until this round lands (the sort key)
-     * @param cells       The rendered cell values for the row, in column order
+     * @param team        The firing player's team
+     * @param player      The firing player
+     * @param firedBy     The firing unit
+     * @param landsIn     When the round lands
+     * @param targetHex   The target hex or its counter-battery or off-board label; "Unknown" for an enemy round
+     * @param warhead     The warhead; "Unknown" for an enemy round
      */
-    private record RoundRow(int turnsTilHit, Object[] cells) {}
+    public record Row(int turnsTilHit, String team, String player, String firedBy, String landsIn, String targetHex,
+          String warhead) {}
 
     private static String teamName(Game game, int playerId) {
         Player player = game.getPlayer(playerId);

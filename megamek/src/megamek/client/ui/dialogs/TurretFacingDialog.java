@@ -42,8 +42,11 @@ import java.awt.event.ActionListener;
 import java.awt.image.BufferedImage;
 import java.io.Serial;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.function.IntConsumer;
+import java.util.stream.IntStream;
 import javax.swing.ButtonGroup;
+import javax.swing.ButtonModel;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JDialog;
@@ -55,6 +58,9 @@ import javax.swing.SwingConstants;
 
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
+import megamek.client.ui.dialogs.phaseDisplay.DeployFacingChoiceDialog;
 import megamek.client.ui.panels.FacingPickerPanel;
 import megamek.codeUtilities.MathUtility;
 import megamek.common.Hex;
@@ -424,6 +430,29 @@ public class TurretFacingDialog extends JDialog implements ActionListener {
     private int directionalMountBaseFacing() {
         int weaponNumber = mek.getEquipmentNum(turret);
         return mek.isSecondaryArcWeapon(weaponNumber) ? mek.getSecondaryFacing() : mek.getFacing();
+    }
+
+    /**
+     * Showing the dialog asks in the owning client's native battle window instead when that draws dialogs: the six
+     * facings by name, those the mount cannot take disabled, starting on its present one; OK turns it as this dialog's
+     * Okay button does, and Cancel or Esc turns nothing.
+     */
+    @Override
+    public void setVisible(boolean visible) {
+        ButtonModel selected = buttonGroup.getSelection();
+        DialogAnswer answer = !visible ? null : clientgui.askRows("", getTitle(), IntStream.range(0, facings.size())
+                    .mapToObj(facing -> new DialogRow(DeployFacingChoiceDialog.facingName(facing), "", null,
+                          facings.get(facing).isEnabled())).toList(), false,
+              (selected == null) ? List.of() : List.of(MathUtility.parseInt(selected.getActionCommand(), 0)), null,
+              List.of(butOkay.getText(), butCancel.getText()), 1);
+        if (answer == null) {
+            super.setVisible(visible);
+        } else if (answer.button() == 0) {
+            answer.selected().forEach(facing -> facings.get(facing).setSelected(true));
+            butOkay.doClick(0);
+        } else {
+            dispose();
+        }
     }
 
     @Override

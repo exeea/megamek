@@ -175,7 +175,20 @@ public enum KeyCommandBind {
     CAMERA_TILT_UP("cameraTiltUp", true, VK_PAGE_UP),
     CAMERA_TILT_DOWN("cameraTiltDown", true, VK_PAGE_DOWN),
     CAMERA_RESET("cameraReset", VK_HOME),
-    CAMERA_FIT_BOARD("cameraFitBoard", VK_END);
+    CAMERA_FIT_BOARD("cameraFitBoard", VK_END),
+
+    // --------- The following binds are for the GPU board's battle HUD; the classic board ignores them. The playback
+    // binds share their keys with CENTER_ON_SELECTED and PREV/NEXT_TARGET, so the HUD tells them apart by phase.
+    MOVE_MODE_WALK("moveModeWalk", VK_1),
+    MOVE_MODE_RUN("moveModeRun", VK_2),
+    MOVE_MODE_JUMP("moveModeJump", VK_3),
+    FORCES_GRID("forcesGrid", VK_G),
+    CLEAR_ORDERS("clearOrders", VK_DELETE),
+    PLAYBACK_TOGGLE("playbackToggle", VK_SPACE),
+    PLAYBACK_PREV("playbackPrev", VK_LEFT),
+    PLAYBACK_NEXT("playbackNext", VK_RIGHT),
+    /** Shows every nameplate while the key is held. A bare modifier key; see {@link #matches}. */
+    SHOW_NAMEPLATES("showNameplates", VK_ALT);
 
     /** The command associated with this binding. */
     public String cmd;
@@ -252,8 +265,7 @@ public enum KeyCommandBind {
     public static List<KeyCommandBind> getBindByKey(int keycode, int modifiers) {
         return Stream.of(values())
               .filter(bind -> !bind.isMenuBar)
-              .filter(bind -> bind.key == keycode)
-              .filter(bind -> bind.modifiers == modifiers)
+              .filter(bind -> matches(bind.key, bind.modifiers, keycode, modifiers))
               .collect(Collectors.toList());
     }
 
@@ -265,11 +277,28 @@ public enum KeyCommandBind {
     public static List<KeyCommandBind> getAllBindsByKey(int keycode, int modifiers) {
         List<KeyCommandBind> binds = new ArrayList<>();
         for (KeyCommandBind bind : values()) {
-            if ((bind.key == keycode) && (bind.modifiers == modifiers)) {
+            if (matches(bind.key, bind.modifiers, keycode, modifiers)) {
                 binds.add(bind);
             }
         }
         return binds;
+    }
+
+    /**
+     * Returns true when a bind of the given key and modifiers matches a key event. The modifiers must be equal, except
+     * that a key which is itself a modifier key reports its own mask while it is down (Alt goes down as Alt with
+     * ALT_DOWN_MASK), so that mask is ignored and a bind of the bare key (Alt, no modifiers) matches its press and its
+     * release.
+     */
+    public static boolean matches(int bindKey, int bindModifiers, int keyCode, int modifiers) {
+        int ownMask = switch (keyCode) {
+            case VK_SHIFT -> SHIFT_DOWN_MASK;
+            case VK_CONTROL -> CTRL_DOWN_MASK;
+            case VK_ALT -> ALT_DOWN_MASK;
+            case VK_META -> META_DOWN_MASK;
+            default -> 0;
+        };
+        return (bindKey == keyCode) && ((bindModifiers & ~ownMask) == (modifiers & ~ownMask));
     }
 
     /** Returns the bind identified by the given cmd or null if there is no such bind. */
@@ -284,8 +313,13 @@ public enum KeyCommandBind {
 
     /** returns formatted mod + key for display */
     public static String getDesc(KeyCommandBind k) {
-        String mod = getModifiersExText(k.modifiers);
-        String key = getKeyText(k.key);
+        return getDesc(k.key, k.modifiers);
+    }
+
+    /** returns formatted mod + key for display, e.g. of a menu accelerator */
+    public static String getDesc(int keyCode, int modifiers) {
+        String mod = getModifiersExText(modifiers);
+        String key = getKeyText(keyCode);
         return (mod.isEmpty() ? "" : mod + "+") + key;
     }
 }

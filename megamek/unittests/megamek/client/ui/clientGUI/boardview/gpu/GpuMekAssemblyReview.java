@@ -16,14 +16,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.zip.ZipFile;
 
-import com.badlogic.gdx.files.FileHandle;
-import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
-import com.badlogic.gdx.graphics.g3d.loader.G3dModelLoader;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
-import com.badlogic.gdx.utils.JsonReader;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import megamek.client.ui.tileset.MekTileset;
 import megamek.common.Configuration;
@@ -46,14 +42,9 @@ final class GpuMekAssemblyReview {
         var tileset = new MekTileset(new File(Configuration.dataDir(), "images/units"));
         tileset.loadFromFile("mekset.txt");
         List<ModelInstance> instances = new ArrayList<>();
-        List<Model> references = new ArrayList<>();
-        List<ModelInstance> comparisons = new ArrayList<>();
-        List<String> comparisonNames = new ArrayList<>();
         List<ModelInstance> soloReviews = new ArrayList<>();
         List<String> soloNames = new ArrayList<>();
         List<Object> evidence = new ArrayList<>();
-        File referenceRoot = new File(System.getProperty("megamek.gpu.referenceModels"), "units");
-        var original = new JsonReader().parse(new FileHandle(new File(referenceRoot, "manifest.json"))).get("variants");
         // Label, body descriptor, unit file. The label names the review image, so one chassis can
         // appear more than once to show how different loadouts sit on the same body.
         String[][] cases = {
@@ -122,25 +113,11 @@ final class GpuMekAssemblyReview {
             var drawn = new ModelInstance(visual.instance.model);
             visual.showEquipment(drawn, selected.state().appearance());
             instances.add(drawn);
-            var previous = original.get(mek.getShortNameRaw());
-            // A chassis authored after the bakes were frozen has no legacy reference to sit beside.
-            // The Locust hangs its guns under its pods, which only the six-view sheet shows from below.
-            if (previous != null && !entry[0].startsWith("locust") && !entry[0].startsWith("panther")
-                  && !entry[0].startsWith("urbanmech")) {
-                Model old = new G3dModelLoader(new JsonReader()).loadModel(new FileHandle(new File(referenceRoot,
-                      previous.getString("asset"))));
-                references.add(old);
-                var oldInstance = new ModelInstance(old);
-                oldInstance.transform.scale(1, 1, 54);
-                comparisons.add(oldInstance);
-                comparisons.add(new ModelInstance(visual.instance.model));
-                comparisonNames.add(mek.getShortNameRaw());
-            } else {
-                var alone = new ModelInstance(visual.instance.model);
-                visual.showEquipment(alone, selected.state().appearance());
-                soloReviews.add(alone);
-                soloNames.add(mek.getShortNameRaw());
-            }
+            // Every case gets its own full review; the frozen pre-modular bakes it was once compared with are retired.
+            var alone = new ModelInstance(visual.instance.model);
+            visual.showEquipment(alone, selected.state().appearance());
+            soloReviews.add(alone);
+            soloNames.add(mek.getShortNameRaw());
             evidence.add(Map.of("unit", mek.getShortNameRaw(), "chassis", entry[1], "bindings", visual.equipment()));
             if (entry[0].equals("warhammer")) {
                 String name = mek.getShortNameRaw();
@@ -171,27 +148,18 @@ final class GpuMekAssemblyReview {
             // Three to a row, so a seventh case lands on its own spot instead of over the fourth.
             instances.get(index).transform.setToTranslation((1 - index % 3) * 82, (1 - index / 3) * 70, 0);
         }
-        new ObjectMapper().writerWithDefaultPrettyPrinter().writeValue(new File(System.getProperty("megamek.gpu.screenshots"),
-              "runtime-mek-bindings.json"), evidence);
+        // This review can run first in a fresh build, before any other review has made the output folder.
+        File output = new File(System.getProperty("megamek.gpu.screenshots"));
+        assertTrue(output.isDirectory() || output.mkdirs(), output.getPath());
+        new ObjectMapper().writerWithDefaultPrettyPrinter().writeValue(new File(output, "runtime-mek-bindings.json"),
+              evidence);
         GpuModularUnitModelsSmokeTest.renderReview(batch, instances, "runtime-meks", 310, 20);
-        try {
-            for (int pair = 0; pair < comparisons.size() / 2; pair++) {
-                var before = comparisons.get(pair * 2);
-                var after = comparisons.get(pair * 2 + 1);
-                before.transform.setTranslation(40, 0, 0);
-                after.transform.setTranslation(-40, 0, 0);
-                GpuModularUnitModelsSmokeTest.renderReview(batch, List.of(before, after),
-                      "runtime-compare-" + comparisonNames.get(pair), 180, 25);
-            }
-            for (int index = 0; index < soloReviews.size(); index++) {
-                // A twenty-tonner framed like an assault Mek fills a sliver of its cell, so it is framed closer.
-                boolean small = soloNames.get(index).startsWith("Locust") || soloNames.get(index).startsWith("Panther")
-                      || soloNames.get(index).startsWith("UrbanMe");
-                GpuModularUnitModelsSmokeTest.renderFullReview(batch, List.of(soloReviews.get(index)),
-                      "runtime-new-" + soloNames.get(index), soloNames.get(index), small ? 52 : 78, small ? 23 : 25);
-            }
-        } finally {
-            references.forEach(Model::dispose);
+        for (int index = 0; index < soloReviews.size(); index++) {
+            // A twenty-tonner framed like an assault Mek fills a sliver of its cell, so it is framed closer.
+            boolean small = soloNames.get(index).startsWith("Locust") || soloNames.get(index).startsWith("Panther")
+                  || soloNames.get(index).startsWith("UrbanMe");
+            GpuModularUnitModelsSmokeTest.renderFullReview(batch, List.of(soloReviews.get(index)),
+                  "runtime-new-" + soloNames.get(index), soloNames.get(index), small ? 52 : 78, small ? 23 : 25);
         }
         verifyFallbacks(library, tileset, batch);
         verifyArmFlip(library, tileset, batch);

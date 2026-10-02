@@ -15,6 +15,7 @@ import javax.swing.SwingUtilities;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
+import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.sprite.C3Sprite;
 import megamek.client.ui.clientGUI.boardview.sprite.CursorSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
@@ -222,11 +223,16 @@ class GpuTacticalTest {
                 assertFalse(captured.tactical().labels().isEmpty(), "Movement costs must remain readable labels");
                 assertEquals(before.tiles().stream().map(BoardScene.Tile::tactical).toList(),
                       captured.tiles().stream().map(BoardScene.Tile::tactical).toList());
-                fixture.view.getComponent();
-                fixture.view.zoomOut();
-                float zoom = fixture.view.getScale();
-                assertEquals(captured.tactical(), fixture.view.captureTacticalGeometry());
-                assertEquals(zoom, fixture.view.getScale());
+                BoardView classic = fixture.classicView();
+                try {
+                    classic.getComponent();
+                    classic.zoomOut();
+                    float zoom = classic.getScale();
+                    assertEquals(captured.tactical(), fixture.view.captureTacticalGeometry());
+                    assertEquals(zoom, classic.getScale());
+                } finally {
+                    classic.dispose();
+                }
                 sprites.forEach(sprite -> sprite.setHidden(true));
                 BoardTactical hidden = fixture.view.captureTacticalGeometry();
                 assertNotEquals(captured.tactical(), hidden);

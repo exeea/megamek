@@ -6,7 +6,6 @@ import java.awt.Shape;
 import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -31,7 +30,6 @@ import com.badlogic.gdx.graphics.g3d.attributes.IntAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
-import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
@@ -43,8 +41,6 @@ import megamek.common.board.Coords;
 final class GpuTactical implements Disposable {
     /** White dash travel in unscaled board pixels per second. 0f is static; negative values reverse direction. */
     static final float OUTLINE_SCROLL_SPEED = 4f;
-    /** top-view degrees for switch to tactical view on/off */
-    static final float FLAT_TILT_DEGREES = 15;
 
     private record TextImage(BoardScene.Pixels pixels, float x, float y) { }
     private record WallTriangle(BoardTactical.Wall wall, BoardTacticalGeometry.Triangle triangle) { }
@@ -69,10 +65,6 @@ final class GpuTactical implements Disposable {
 
     GpuTactical(float outlineSpeed) {
         this.outlineSpeed = outlineSpeed;
-    }
-
-    static boolean flat(Camera camera) {
-        return -camera.direction.z >= MathUtils.cosDeg(FLAT_TILT_DEGREES);
     }
 
     void update(BoardScene scene) {
@@ -237,29 +229,24 @@ final class GpuTactical implements Disposable {
     }
 
     void render(Camera camera, float deltaSeconds) {
-        render(camera, deltaSeconds, List.of());
+        render(camera, deltaSeconds, false);
     }
 
-    void render(Camera camera, float deltaSeconds, Collection<ModelInstance> icons) {
+    /** The Tactical View lays range walls flat on the surface; the 3D view keeps them upright at every angle. */
+    void render(Camera camera, float deltaSeconds, boolean tacticalView) {
         scrollDistance += deltaSeconds * outlineSpeed;
-        if (instance != null) {
-            boolean flat = flat(camera);
-            instance.getNode("flat-walls").parts.forEach(part -> part.enabled = flat);
-            instance.getNode("upright-walls").parts.forEach(part -> part.enabled = !flat);
-            for (Material part : instance.materials) {
-                TextureAttribute texture = part.get(TextureAttribute.class, TextureAttribute.Diffuse);
-                if (texture != null) {
-                    double offset = -scrollDistance * texture.scaleU;
-                    texture.offsetU = (float) (offset - Math.floor(offset));
-                }
+        if (instance == null) { return; }
+        instance.getNode("flat-walls").parts.forEach(part -> part.enabled = tacticalView);
+        instance.getNode("upright-walls").parts.forEach(part -> part.enabled = !tacticalView);
+        for (Material part : instance.materials) {
+            TextureAttribute texture = part.get(TextureAttribute.class, TextureAttribute.Diffuse);
+            if (texture != null) {
+                double offset = -scrollDistance * texture.scaleU;
+                texture.offsetU = (float) (offset - Math.floor(offset));
             }
         }
-        if (instance == null && icons.isEmpty()) { return; }
         batch.begin(camera);
-        if (instance != null) { batch.render(instance); }
-        for (var icon : icons) {
-            if (camera.frustum.boundsInFrustum(UnitBounds.world(icon))) { batch.render(icon); }
-        }
+        batch.render(instance);
         batch.end();
     }
 

@@ -39,8 +39,8 @@ import java.awt.RenderingHints;
 import java.awt.Shape;
 import java.awt.geom.RoundRectangle2D;
 
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.board.Coords;
@@ -66,7 +66,7 @@ public class BridgeRepairedSprite extends HexSprite {
      * @param boardView the parent board view
      * @param loc       the repaired bridge hex
      */
-    public BridgeRepairedSprite(BoardView boardView, Coords loc) {
+    public BridgeRepairedSprite(BoardGlyphContext boardView, Coords loc) {
         super(boardView, loc);
     }
 

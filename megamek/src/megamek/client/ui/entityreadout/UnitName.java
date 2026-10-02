@@ -33,6 +33,7 @@
 package megamek.client.ui.entityreadout;
 
 import java.awt.Color;
+import java.util.List;
 
 import megamek.client.ui.util.DiscordFormat;
 import megamek.client.ui.util.UIUtil;
@@ -62,6 +63,11 @@ record UnitName(String unitName, boolean notCanon) implements ViewElement {
     public String toDiscord() {
         return DiscordFormat.BOLD.toString() + DiscordFormat.UNDERLINE + DiscordFormat.CYAN + unitName
               + DiscordFormat.RESET + notCanonMarkerDiscord() + '\n';
+    }
+
+    @Override
+    public void addRows(List<EntityReadout.Row> rows) {
+        rows.add(new EntityReadout.Row(EntityReadout.Row.Kind.TITLE, List.of(toPlainText().strip())));
     }
 
     private String notCanonMarkerPlainText() {

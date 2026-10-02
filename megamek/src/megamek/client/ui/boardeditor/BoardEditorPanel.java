@@ -257,7 +257,7 @@ public class BoardEditorPanel extends JPanel
      */
     private boolean ignoreHotKeys = false;
 
-    private final DeploymentZoneDrawPlugin deploymentZoneDrawer = new DeploymentZoneDrawPlugin();
+    private final DeploymentZonePainter deploymentZoneDrawer = new DeploymentZonePainter();
 
     /**
      * Creates and lays out a new Board Editor frame.
@@ -266,13 +266,13 @@ public class BoardEditorPanel extends JPanel
         controller = c;
         try {
             bv = new BoardView(game, controller, null, 0);
-            bv.addOverlay(new KeyBindingsOverlay(bv));
+            bv.addOverlay(new KeyBindingsOverlay(bv.getClientState()));
             bv.addOverlay(new TraceOverlay(bv));
             bv.setUseLosTool(false);
             bv.setDisplayInvalidFields(true);
             bv.setTooltipProvider(new BoardEditorTooltip(bv));
             bvc = bv.getComponent(true);
-            bv.addHexDrawPlugin(deploymentZoneDrawer);
+            bv.addHexDrawPlugin((graphics, hex, game, coords, view) -> deploymentZoneDrawer.draw(graphics, hex, view.getScale()));
         } catch (IOException e) {
             JOptionPane.showMessageDialog(frame,
                   Messages.getString("BoardEditor.CouldNotInitialize") + e,
@@ -454,7 +454,8 @@ public class BoardEditorPanel extends JPanel
         });
     }
 
-    private void handleExit() {
+    /** Close either editor view through the same unsaved-changes prompt. */
+    public void handleExit() {
         // When the board has changes, ask the user
         if (hasChanges && (showSavePrompt() == DialogResult.CANCELLED)) {
             return;
@@ -1082,7 +1083,7 @@ public class BoardEditorPanel extends JPanel
         add(panButtons, BorderLayout.PAGE_END);
 
         minimapW = new MinimapDialog(frame);
-        minimapW.add(new MinimapPanel(minimapW, game, bv, null, null, 0));
+        minimapW.add(new MinimapPanel(minimapW, game, bv.getClientState(), null, null, 0));
         minimapW.setVisible(guip.getMinimapEnabled());
     }
 
@@ -2044,7 +2045,7 @@ public class BoardEditorPanel extends JPanel
         } else if (ae.getActionCommand().equals(ClientGUI.VIEW_TOGGLE_ISOMETRIC)) {
             GUIPreferences.getInstance().setIsometricEnabled(!GUIPreferences.getInstance().getIsometricEnabled());
         } else if (ae.getActionCommand().equals(ClientGUI.VIEW_CHANGE_THEME)) {
-            String newTheme = bv.changeTheme();
+            String newTheme = bv.getClientState().changeTheme();
             if (newTheme != null) {
                 choTheme.setSelectedItem(newTheme);
             }

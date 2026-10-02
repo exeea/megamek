@@ -32,7 +32,6 @@
  */
 package megamek.client.ui.clientGUI.boardview.overlay;
 
-import java.awt.Color;
 import java.awt.Font;
 import java.awt.Rectangle;
 import java.util.ArrayList;
@@ -40,7 +39,7 @@ import java.util.List;
 
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.preference.PreferenceChangeEvent;
@@ -66,7 +65,7 @@ public class PlanetaryConditionsOverlay extends AbstractBoardViewOverlay {
     /**
      * An overlay for the BoardView that displays a selection of Planetary Conditions for the current game situation.
      */
-    public PlanetaryConditionsOverlay(BoardView boardView) {
+    public PlanetaryConditionsOverlay(BoardClientState boardView) {
         super(boardView, new Font("SansSerif", Font.PLAIN, 13));
     }
 
@@ -81,21 +80,36 @@ public class PlanetaryConditionsOverlay extends AbstractBoardViewOverlay {
     protected List<String> assembleTextLines() {
         List<String> result = new ArrayList<>();
         addHeader(result);
-        Color colorHot = GUIP.getPlanetaryConditionsColorHot();
-        Color colorCold = GUIP.getPlanetaryConditionsColorCold();
 
-        if (clientGui != null && !boardView.getBoard().isSpace()) {
+        if (clientGui != null) {
             // In a game, not the Board Editor
-
-            String tempColor = "";
             PlanetaryConditions conditions = currentGame.getPlanetaryConditions();
-            int temp = conditions.getTemperature();
-
-            if (conditions.isExtremeTemperatureHeat()) {
-                tempColor = colorToHex(colorHot);
-            } else if (conditions.isExtremeTemperatureCold()) {
-                tempColor = colorToHex(colorCold);
+            List<String> lines = conditionLines(conditions, boardView.getBoard().isSpace());
+            // An extreme temperature always shows its line, which is then the first one
+            if (!lines.isEmpty() && conditions.isExtremeTemperatureHeat()) {
+                lines.set(0, colorToHex(GUIP.getPlanetaryConditionsColorHot()) + lines.get(0));
+            } else if (!lines.isEmpty() && conditions.isExtremeTemperatureCold()) {
+                lines.set(0, colorToHex(GUIP.getPlanetaryConditionsColorCold()) + lines.get(0));
             }
+            result.addAll(lines);
+        }
+
+        return result;
+    }
+
+    /**
+     * The condition lines this overlay shows below its header, as plain text without colour codes, following the
+     * planetary conditions display preferences. There are none in space.
+     *
+     * @param conditions the game's planetary conditions
+     * @param inSpace    true for a space board
+     *
+     * @return a new, modifiable list of the lines
+     */
+    public static List<String> conditionLines(PlanetaryConditions conditions, boolean inSpace) {
+        List<String> result = new ArrayList<>();
+        if (!inSpace) {
+            int temp = conditions.getTemperature();
 
             boolean showDefaultConditions = GUIP.getPlanetaryConditionsShowDefaults();
 
@@ -111,7 +125,7 @@ public class PlanetaryConditionsOverlay extends AbstractBoardViewOverlay {
                 tmpStr = tmpStr + (showIndicator ?
                       (!showValue ? temp + "\u00B0C   " : "") + conditions.getTemperatureIndicator() : // Degree
                       "");
-                result.add(tempColor + tmpStr);
+                result.add(tmpStr);
             }
 
             if (showDefaultConditions || (conditions.getGravity() != 1.0)) {
@@ -211,4 +225,5 @@ public class PlanetaryConditionsOverlay extends AbstractBoardViewOverlay {
         }
         super.preferenceChange(e);
     }
+
 }

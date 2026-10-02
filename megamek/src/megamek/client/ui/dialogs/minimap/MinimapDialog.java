@@ -101,4 +101,15 @@ public class MinimapDialog extends JDialog {
             saveSettings();
         }
     }
+
+    @Override
+    public void dispose() {
+        for (var component : getContentPane().getComponents()) {
+            if (component instanceof MinimapPanel panel) {
+                panel.dispose();
+            }
+        }
+        super.dispose();
+    }
+
 }

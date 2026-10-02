@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.Locale;
 
+import com.badlogic.gdx.graphics.Color;
 import megamek.common.Hex;
 import megamek.common.units.Terrains;
 
@@ -12,6 +13,8 @@ record BoardLiquid(Kind kind, String theme, int rapids) {
 
     static final BoardLiquid NONE = new BoardLiquid(Kind.NONE, "", 0);
     static final BoardLiquid WATER = new BoardLiquid(Kind.WATER, "", 0);
+    /** The green tint of a hazardous liquid's water art, in the board's liquid material and on the minimap. */
+    static final Color HAZARDOUS_TINT = new Color(0.4f, 1, 0.12f, 1);
 
     record Textures(String base, String foam) { }
 

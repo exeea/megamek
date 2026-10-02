@@ -32,13 +32,8 @@
  */
 package megamek.client.ui.clientGUI.boardview;
 
-import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
-import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Set;
-import java.util.TreeSet;
 
 import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListener;
@@ -48,13 +43,8 @@ import megamek.common.Player;
 
 public abstract class AbstractBoardView implements IBoardView {
 
-    protected final List<BoardViewListener> boardViewListeners = new ArrayList<>();
-    protected final LinkedHashSet<IDisplayable> overlays = new LinkedHashSet<>();
-    protected final TreeSet<Sprite> allSprites = new TreeSet<>();
     protected final int boardId;
-
-    // the player who owns this BoardView's client
-    protected Player localPlayer = null;
+    public abstract BoardClientState getClientState();
 
     AbstractBoardView(int boardId) {
         this.boardId = boardId;
@@ -66,77 +56,39 @@ public abstract class AbstractBoardView implements IBoardView {
      * @param event the board event.
      */
     public void processBoardViewEvent(BoardViewEvent event) {
-        // Copy the listener list to allow concurrent modification
-        for (BoardViewListener l : new ArrayList<>(boardViewListeners)) {
-            switch (event.getType()) {
-                case BoardViewEvent.BOARD_HEX_CLICKED:
-                case BoardViewEvent.BOARD_HEX_DOUBLE_CLICKED:
-                case BoardViewEvent.BOARD_HEX_DRAGGED:
-                case BoardViewEvent.BOARD_HEX_POPUP:
-                    l.hexMoused(event);
-                    break;
-                case BoardViewEvent.BOARD_HEX_CURSOR:
-                    l.hexCursor(event);
-                    break;
-                case BoardViewEvent.BOARD_HEX_HIGHLIGHTED:
-                    l.boardHexHighlighted(event);
-                    break;
-                case BoardViewEvent.BOARD_HEX_SELECTED:
-                    l.hexSelected(event);
-                    break;
-                case BoardViewEvent.BOARD_FIRST_LOS_HEX:
-                    l.firstLOSHex(event);
-                    break;
-                case BoardViewEvent.BOARD_SECOND_LOS_HEX:
-                    l.secondLOSHex(event);
-                    break;
-                case BoardViewEvent.FINISHED_MOVING_UNITS:
-                    l.finishedMovingUnits(event);
-                    break;
-                case BoardViewEvent.SELECT_UNIT:
-                    l.unitSelected(event);
-                    break;
-            }
-        }
+        getClientState().processBoardViewEvent(event);
     }
 
     @Override
-    public final void addBoardViewListener(BoardViewListener listener) {
-        if (!boardViewListeners.contains(listener)) {
-            boardViewListeners.add(listener);
-        }
+    public void addBoardViewListener(BoardViewListener listener) {
+        getClientState().addBoardViewListener(listener);
     }
 
     @Override
-    public final void removeBoardViewListener(BoardViewListener listener) {
-        boardViewListeners.remove(listener);
+    public void removeBoardViewListener(BoardViewListener listener) {
+        getClientState().removeBoardViewListener(listener);
+    }
+
+
+
+    @Override
+    public void addOverlay(IDisplayable overlay) {
+        getClientState().addOverlay(overlay);
     }
 
     @Override
-    public void dispose() {
-        boardViewListeners.clear();
-    }
-
-    @Override
-    public final void addOverlay(IDisplayable overlay) {
-        overlays.add(overlay);
-    }
-
-    @Override
-    public final void removeOverlay(IDisplayable overlay) {
-        overlays.remove(overlay);
+    public void removeOverlay(IDisplayable overlay) {
+        getClientState().removeOverlay(overlay);
     }
 
     @Override
     public void addSprites(Collection<? extends Sprite> sprites) {
-        allSprites.addAll(sprites);
-        repaint();
+        getClientState().addSprites(sprites);
     }
 
     @Override
     public void removeSprites(Collection<? extends Sprite> sprites) {
-        allSprites.removeAll(sprites);
-        repaint();
+        getClientState().removeSprites(sprites);
     }
 
     /**
@@ -144,24 +96,23 @@ public abstract class AbstractBoardView implements IBoardView {
      * is not communicated to the SpriteHandlers.
      */
     public void clearSprites() {
-        allSprites.clear();
-        repaint();
+        getClientState().clearSprites();
     }
 
     /**
      * Returns an unmodifiable view of this BoardView's sprites.
      */
     public Set<Sprite> getAllSprites() {
-        return Collections.unmodifiableSet(allSprites);
+        return getClientState().getAllSprites();
     }
 
     @Override
     public Player getLocalPlayer() {
-        return localPlayer;
+        return getClientState().getLocalPlayer();
     }
 
     public void setLocalPlayer(Player p) {
-        localPlayer = p;
+        getClientState().setLocalPlayer(p);
     }
 
     @Override

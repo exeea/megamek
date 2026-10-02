@@ -43,8 +43,8 @@ import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Graphics2D;
 
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.board.Coords;
 
@@ -62,7 +62,7 @@ public class MovementEnvelopeSprite extends HexSprite implements TacticalSprite 
     protected final Color drawColor;
     protected final int borders;
 
-    public MovementEnvelopeSprite(BoardView boardView1, Color c, Coords l, int borders) {
+    public MovementEnvelopeSprite(BoardGlyphContext boardView1, Color c, Coords l, int borders) {
         super(boardView1, l);
         drawColor = c;
         this.borders = borders;
@@ -88,7 +88,7 @@ public class MovementEnvelopeSprite extends HexSprite implements TacticalSprite 
 
     @Override
     public void drawTactical(Graphics2D graphics) {
-        Graphics2D local = BoardTacticalGraphics.at(graphics, bv.getHexLocation(getPosition()));
+        Graphics2D local = BoardTacticalGraphics.onHexPlane(graphics, bv.getHexLocation(getPosition()));
         try {
             paintTactical(local);
         } finally {

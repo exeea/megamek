@@ -124,21 +124,32 @@ public abstract class MekWithArms extends Mek {
     @Override
     public boolean hasShield() {
         for (MiscMounted m : getMisc()) {
-            MiscType type = m.getType();
-            if (((m.getLocation() == Mek.LOC_LEFT_ARM) || (m.getLocation() == Mek.LOC_RIGHT_ARM))
-                  && type.hasFlag(MiscType.F_SHIELD)
-                  && !m.isInoperable()
-                  && (getInternal(m.getLocation()) > 0)) {
-                for (int slot = 0; slot < getNumberOfCriticalSlots(m.getLocation()); slot++) {
-                    CriticalSlot cs = getCritical(m.getLocation(), slot);
-                    if ((cs != null)
-                          && (cs.getType() == CriticalSlot.TYPE_EQUIPMENT)
-                          && cs.getMount().equals(m) && !cs.isDestroyed()
-                          && !cs.isMissing()) {
-                        // when all crits of a shield are destroyed, it no longer hinders movement and stuff
-                        return true;
-                    }
-                }
+            if (isShieldActive(m)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * @return true when the equipment is a shield that still works: mounted on an arm that has structure left, not
+     *       inoperable, and with at least one of its slots neither destroyed nor missing. A shield's damage getters
+     *       ({@link MiscMounted#getCurrentDamageCapacity}) do not see a blown-off arm; this does. {@link #hasShield()}
+     *       and the unit record use it.
+     */
+    public boolean isShieldActive(MiscMounted m) {
+        if (((m.getLocation() != Mek.LOC_LEFT_ARM) && (m.getLocation() != Mek.LOC_RIGHT_ARM))
+              || !m.getType().hasFlag(MiscType.F_SHIELD) || m.isInoperable() || (getInternal(m.getLocation()) <= 0)) {
+            return false;
+        }
+        for (int slot = 0; slot < getNumberOfCriticalSlots(m.getLocation()); slot++) {
+            CriticalSlot cs = getCritical(m.getLocation(), slot);
+            if ((cs != null)
+                  && (cs.getType() == CriticalSlot.TYPE_EQUIPMENT)
+                  && cs.getMount().equals(m) && !cs.isDestroyed()
+                  && !cs.isMissing()) {
+                // when all crits of a shield are destroyed, it no longer hinders movement and stuff
+                return true;
             }
         }
         return false;

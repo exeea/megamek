@@ -39,8 +39,8 @@ import java.util.Map;
 import javax.swing.ImageIcon;
 
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Configuration;
@@ -96,7 +96,7 @@ public class BridgeBuildSprite extends HexSprite {
      * @param turnsRequired the total turns of work a finished bridge needs (the denominator)
      * @param exits         exits bitmask of the two hexsides the finished bridge will connect
      */
-    public BridgeBuildSprite(BoardView boardView, Coords location, int turnsWorked, int turnsRequired, int exits) {
+    public BridgeBuildSprite(BoardGlyphContext boardView, Coords location, int turnsWorked, int turnsRequired, int exits) {
         this(boardView, location, turnsWorked, turnsRequired, exits, false);
     }
 
@@ -113,7 +113,7 @@ public class BridgeBuildSprite extends HexSprite {
      * @param exits         exits bitmask of the two hexsides the finished bridge will connect
      * @param hazardOutline whether to ring the hex with a high-visibility yellow/black hazard outline
      */
-    public BridgeBuildSprite(BoardView boardView, Coords location, int turnsWorked, int turnsRequired, int exits,
+    public BridgeBuildSprite(BoardGlyphContext boardView, Coords location, int turnsWorked, int turnsRequired, int exits,
           boolean hazardOutline) {
         super(boardView, location);
         this.turnsWorked = turnsWorked;
@@ -154,11 +154,11 @@ public class BridgeBuildSprite extends HexSprite {
         // Solid black base, then caution-yellow dashes on top: the gaps reveal the black underneath for hazard tape.
         graph.setColor(HAZARD_BACKING_COLOR);
         graph.setStroke(new BasicStroke(HAZARD_OUTLINE_WIDTH));
-        graph.drawPolygon(BoardView.getHexPoly());
+        graph.drawPolygon(megamek.client.ui.clientGUI.boardview.HexDrawUtilities.rasterHex());
         graph.setColor(GUIPreferences.getInstance().getCautionColor());
         graph.setStroke(new BasicStroke(HAZARD_OUTLINE_WIDTH, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10.0f,
               new float[] { HAZARD_DASH_LENGTH, HAZARD_DASH_LENGTH }, 0.0f));
-        graph.drawPolygon(BoardView.getHexPoly());
+        graph.drawPolygon(megamek.client.ui.clientGUI.boardview.HexDrawUtilities.rasterHex());
         graph.setStroke(oldStroke);
     }
 

@@ -74,7 +74,7 @@ import megamek.client.ui.GBC;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.dialogs.buttonDialogs.AbstractButtonDialog;
 import megamek.client.ui.dialogs.buttonDialogs.BotConfigDialog;
 import megamek.client.ui.enums.DialogResult;
@@ -117,7 +117,9 @@ public class PlayerSettingsDialog extends AbstractButtonDialog {
     private static final String CMD_REMOVE_GROUND_OBJECT = "CMD_REMOVE_GROUND_OBJECT_%d";
     private static final String CMD_REMOVE_GROUND_OBJECT_PREFIX = "CMD_REMOVE_GROUND_OBJECT_";
 
-    public PlayerSettingsDialog(ClientGUI cg, Client cl, BoardView bv) {
+    public PlayerSettingsDialog(ClientGUI cg,
+                                Client cl,
+                                BoardClientState bv) {
         super(cg.getFrame(), "PlayerSettingsDialog", "PlayerSettingsDialog.title");
         client = cl;
         clientgui = cg;
@@ -275,7 +277,7 @@ public class PlayerSettingsDialog extends AbstractButtonDialog {
 
     private final transient Client client;
     private final transient ClientGUI clientgui;
-    private final transient BoardView bv;
+    private final transient BoardClientState bv;
     private Player player;
 
     // Initiative Section

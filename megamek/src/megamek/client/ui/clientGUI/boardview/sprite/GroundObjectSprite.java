@@ -37,8 +37,8 @@ import java.awt.Graphics2D;
 import java.awt.Image;
 import java.awt.Rectangle;
 
+import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Configuration;
 import megamek.common.board.Coords;
@@ -58,10 +58,10 @@ public class GroundObjectSprite extends HexSprite {
     }
 
     /**
-     * @param boardView1 - parent BoardView object this sprite will be displayed on.
+     * @param boardView1 - parent BoardGlyphContext object this sprite will be displayed on.
      * @param loc        - Hex location coordinates of building or bridge where warning will be visible.
      */
-    public GroundObjectSprite(BoardView boardView1, Coords loc) {
+    public GroundObjectSprite(BoardGlyphContext boardView1, Coords loc) {
         super(boardView1, loc);
         image = CARGO_IMAGE;
     }

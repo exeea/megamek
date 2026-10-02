@@ -36,7 +36,6 @@ import java.util.Collection;
 
 import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.sprite.CollapseWarningSprite;
 import megamek.common.board.BoardLocation;
 import megamek.common.preference.IPreferenceChangeListener;
@@ -53,14 +52,14 @@ public class CollapseWarningSpriteHandler extends BoardViewSpriteHandler impleme
 
     public void setCFWarningSprites(Collection<BoardLocation> warnList) {
         clear();
-        if (clientGUI.boardViews().isEmpty()) {
+        if (clientGUI.boardStates().isEmpty()) {
             return;
         }
         currentWarnList = warnList;
         if ((warnList != null) && GUIP.getShowCFWarnings()) {
             warnList.stream()
                   .map(location -> new CollapseWarningSprite(
-                        (BoardView) clientGUI.getBoardView(location), location.coords()))
+                        clientGUI.getBoardState(location), location.coords()))
                   .forEach(currentSprites::add);
         }
         currentSprites.forEach(sprite -> sprite.bv.addSprite(sprite));

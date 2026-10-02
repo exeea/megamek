@@ -1,0 +1,866 @@
+/* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
+package megamek.client.ui.clientGUI.boardview.gpu;
+
+import static java.util.concurrent.TimeUnit.SECONDS;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import java.awt.event.MouseEvent;
+import java.io.File;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.FutureTask;
+import java.util.stream.Collectors;
+import javax.swing.SwingUtilities;
+
+import megamek.client.Client;
+import megamek.client.event.BoardViewEvent;
+import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.BoardTactical;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuMovePlan.Band;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuMovePlan.Mode;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuMovePlan.Snapshot;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuMovePlan.Step;
+import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
+import megamek.client.ui.clientGUI.boardview.sprite.MovementEnvelopeSprite;
+import megamek.client.ui.panels.phaseDisplay.commands.MoveCommand;
+import megamek.common.Configuration;
+import megamek.common.Player;
+import megamek.common.board.Coords;
+import megamek.common.enums.GamePhase;
+import megamek.common.enums.MoveStepType;
+import megamek.common.equipment.EquipmentType;
+import megamek.common.game.Game;
+import megamek.common.game.GameTurn;
+import megamek.common.loaders.MekFileParser;
+import megamek.common.moves.MovePath;
+import megamek.common.moves.MoveStep;
+import megamek.common.units.ConvInfantry;
+import megamek.common.units.Entity;
+import megamek.common.units.EntityMovementType;
+import megamek.common.units.IAero;
+import megamek.common.units.Tank;
+import megamek.common.units.Terrain;
+import megamek.common.units.Terrains;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+
+/**
+ * The movement plan on a real MovementDisplay (GpuMovementFixture: a Sagittaire with walk 3, run 5 and jump 3 at
+ * (11, 11) facing north): the prototype's interaction-test.mjs lines 33-52 in MegaMek terms, the cheaper re-route of
+ * a turn, the explicit modes, a path changed elsewhere, the undo limit, a unit switch, a non-planner aerospace unit,
+ * the display's own hex picks (an escape pod landing, a bridge build) and the hover route searched after the capture;
+ * and the hold of all remaining units over scripted server turns (the fixture's Atlas is the second own unit).
+ * Commands go through the source as the HUD sends them.
+ */
+@Timeout(180)
+class GpuMovePlanTest {
+    /** The fixture's local player (GpuBoardFixture) and the opponent the hold tests add, as turn owners. */
+    private static final int LOCAL = 0;
+    private static final int OPPONENT = 1;
+    private static final Coords NORTH_1 = new Coords(11, 10);
+    private static final Coords NORTH_2 = new Coords(11, 9);
+    private static final Coords NORTH_3 = new Coords(11, 8);
+    /** Four hexes north: 4 MP, running. */
+    private static final Coords NORTH_4 = new Coords(11, 7);
+    /** Five hexes north, on a level 1 hill: 6 MP, beyond the run MP. */
+    private static final Coords NORTH_5 = new Coords(11, 6);
+    private static final Coords NORTH_EAST = new Coords(12, 11);
+    /** North-east of the hex north of the unit. */
+    private static final Coords AHEAD_RIGHT = new Coords(12, 10);
+    /** Rough ground two hexes north-east: 5 MP, the run MP. */
+    private static final Coords ROUGH = new Coords(12, 9);
+    /** The escape pod vehicle's clear hex, facing north, and the clear hex right behind it, in its rear arc. */
+    private static final Coords TANK = new Coords(13, 9);
+    private static final Coords BEHIND_TANK = new Coords(13, 10);
+    /** The bridge engineers' clear hex, with water to the south and the south-west, and the clear hex north of it. */
+    private static final Coords ENGINEERS = new Coords(10, 10);
+    private static final Coords NORTH_OF_ENGINEERS = new Coords(10, 9);
+    /** The water south of the engineers: a hex a bridge can occupy. */
+    private static final Coords BRIDGE_HEX = new Coords(10, 11);
+    private static File originalDataDir;
+
+    /** Earlier test classes can leave the data folder on testresources; the fixture needs the staged data. */
+    @BeforeAll
+    static void useStagedData() {
+        originalDataDir = Configuration.dataDir();
+        Configuration.setDataDir(null);
+    }
+
+    @AfterAll
+    static void restoreDataDir() {
+        Configuration.setDataDir(originalDataDir);
+    }
+
+    /** interaction-test.mjs 33-52: automatic walk and run, undo, explicit walk and back, a pin, its continuation, X. */
+    @Test
+    void plotsPinsContinuesUndoesTurnsAndChangesModeAsThePrototype() throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            GpuMovePlan plan = plan(moving);
+            // Line 33: a click plots automatic walking; the Walk button is outlined (the route's band), not pressed.
+            plan.planTo(NORTH_2, 0, false);
+            Snapshot walk = shown(moving);
+            assertEquals(List.of("11,10 f0 WALK", "11,9 f0 WALK"), route(walk.route()));
+            assertTrue(walk.active() && walk.planner() && walk.auto() && !walk.explicit() && !walk.external());
+            assertEquals(Mode.AUTO, walk.mode());
+            assertEquals(EntityMovementType.MOVE_WALK, walk.type());
+            assertEquals(Messages.getString("GpuBoard.hud.move.walk"), walk.typeLabel());
+            assertEquals(List.of(2, 3, 0), List.of(walk.cost(), walk.budget(), walk.facing()));
+            assertEquals(NORTH_2, walk.destination());
+            assertEquals(26, walk.envelope().size(), "The unit's envelope (GpuMoveEnvelopeCharacterizationTest)");
+
+            // Line 36: a longer route runs.
+            plan.planTo(NORTH_4, 0, false);
+            Snapshot run = shown(moving);
+            assertEquals(Band.RUN, run.route().getLast().band());
+            assertEquals(EntityMovementType.MOVE_RUN, run.type());
+            assertEquals(Messages.getString("GpuBoard.hud.move.run"), run.typeLabel());
+            assertEquals(List.of(4, 5), List.of(run.cost(), run.budget()));
+            assertTrue(run.auto());
+
+            // Line 38: Backspace restores the walking draft.
+            plan.undo();
+            assertEquals(route(walk.route()), route(shown(moving).route()));
+
+            // Line 41: 1 constrains to walking: pressed, the route cleared, the run band hidden.
+            plan.setMode(Mode.WALK);
+            Snapshot walking = shown(moving);
+            assertEquals(Mode.WALK, walking.mode());
+            assertTrue(walking.explicit() && !walking.auto());
+            assertEquals(List.of(), walking.route());
+            assertEquals(Set.of(Band.WALK), Set.copyOf(walking.envelope().values()));
+
+            // Line 43: 1 again is automatic walking and running.
+            plan.setMode(Mode.WALK);
+            Snapshot automatic = shown(moving);
+            assertEquals(Mode.AUTO, automatic.mode());
+            assertFalse(automatic.explicit());
+            assertEquals(Set.of(Band.WALK, Band.RUN), Set.copyOf(automatic.envelope().values()));
+
+            // Line 47: Shift+click pins a waypoint.
+            plan.planTo(NORTH_1, 0, true);
+            Snapshot pinned = shown(moving);
+            assertEquals(List.of(NORTH_1), pinned.pins());
+            assertEquals(List.of("11,10 f0 WALK"), route(pinned.route()));
+
+            // Line 50: the next click continues from the waypoint with the MP so far (from the unit it costs 2 MP),
+            // and the envelope is the waypoint's, with the MP left.
+            plan.planTo(NORTH_EAST, 0, false);
+            Snapshot continued = shown(moving);
+            assertEquals(List.of("11,10 f0 WALK", "11,10 f1 WALK", "11,10 f2 WALK", "12,11 f2 RUN"),
+                  route(continued.route()));
+            assertEquals(List.of(NORTH_1), continued.pins());
+            assertEquals(4, continued.cost());
+            assertEquals(17, continued.envelope().size());
+
+            // Line 52: X turns the final facing.
+            plan.turn(1);
+            Snapshot turned = shown(moving);
+            assertEquals((continued.facing() + 1) % 6, turned.facing());
+            assertEquals(NORTH_EAST, turned.destination());
+            assertEquals(5, turned.cost());
+        }
+    }
+
+    /** G9: the facing is the cheaper legal one of a re-route ending in it and a turn at the destination. */
+    @Test
+    void turningReRoutesWhenThatCostsLessThanTurningAtTheDestination() throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            GpuMovePlan plan = plan(moving);
+            // Rough ground at the run MP: turning either way there is beyond it, and so is every re-route.
+            plan.planTo(ROUGH, 0, false);
+            Snapshot rough = shown(moving);
+            assertEquals(List.of("11,10 f0 WALK", "11,9 f0 WALK", "11,9 f1 WALK", "12,9 f1 RUN"), route(rough.route()));
+            plan.turn(1);
+            plan.turn(-1);
+            assertEquals(route(rough.route()), route(shown(moving).route()));
+            verify(moving.gui, times(2)).addToast(ToastLevel.WARNING,
+                  Messages.getString("GpuBoard.hud.move.noMpToFace"));
+        }
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            // Light woods north of the unit: the hex ahead right costs 4 MP both through them (facing north-east)
+            // and around them (facing north).
+            onSwing(() -> {
+                moving.board.game.getBoard().getHex(NORTH_1).addTerrain(new Terrain(Terrains.WOODS, 1));
+                return null;
+            });
+            GpuMovePlan plan = plan(moving);
+            plan.planTo(AHEAD_RIGHT, 0, false);
+            Snapshot through = shown(moving);
+            assertEquals(List.of("11,10 f0 WALK", "11,10 f1 WALK", "12,10 f1 RUN"), route(through.route()));
+            assertEquals(4, through.cost());
+            plan.turn(-1);
+            Snapshot around = shown(moving);
+            // Turning left at the destination would cost 5 MP.
+            assertEquals(List.of("11,11 f1 WALK", "12,11 f1 WALK", "12,11 f0 WALK", "12,10 f0 RUN"),
+                  route(around.route()));
+            assertEquals(List.of(4, 0), List.of(around.cost(), around.facing()));
+            verify(moving.gui, never()).addToast(any(), anyString());
+            // Undo puts the route through the woods back.
+            plan.undo();
+            assertEquals(route(through.route()), route(shown(moving).route()));
+        }
+    }
+
+    /** G6, G10: an explicit walk refuses a running route; Run shows its whole reach and cuts an illegal tail. */
+    @Test
+    void explicitModesFilterTheRouteByItsMovementType() throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            GpuMovePlan plan = plan(moving);
+            plan.setMode(Mode.WALK);
+            plan.planTo(NORTH_4, 0, false);
+            assertEquals(List.of(), shown(moving).route());
+            verify(moving.gui).addToast(ToastLevel.WARNING, Messages.getString("GpuBoard.hud.move.notReachable",
+                  Messages.getString("GpuBoard.hud.move.walk").toUpperCase(Locale.ROOT)));
+            // The refusal left no undo step: one undo takes back the mode change.
+            plan.undo();
+            Snapshot undone = shown(moving);
+            assertEquals(Mode.AUTO, undone.mode());
+            assertFalse(undone.canUndo());
+            plan.setMode(Mode.WALK);
+            plan.planTo(NORTH_2, 0, false);
+            assertEquals(List.of("11,10 f0 WALK", "11,9 f0 WALK"), route(shown(moving).route()));
+
+            // Run: the walking and running reach as one run band; a walking route says it walks.
+            plan.setMode(Mode.RUN);
+            Snapshot running = shown(moving);
+            assertEquals(List.of(), running.route(), "A mode change clears the route");
+            assertEquals(Set.of(Band.RUN), Set.copyOf(running.envelope().values()));
+            plan.planTo(NORTH_2, 0, false);
+            assertEquals(Messages.getString("GpuBoard.hud.move.walkRunOnly"), shown(moving).typeLabel());
+
+            // Beyond the run MP: the illegal tail is cut off, with the mode's toast.
+            plan.planTo(NORTH_5, 0, false);
+            assertEquals(List.of("11,10 f0 WALK", "11,9 f0 WALK", "11,8 f0 WALK", "11,7 f0 RUN"),
+                  route(shown(moving).route()));
+            verify(moving.gui).addToast(ToastLevel.WARNING, Messages.getString("GpuBoard.hud.move.notReachable",
+                  Messages.getString("GpuBoard.hud.move.run").toUpperCase(Locale.ROOT)));
+
+            // Automatic movement names the run MP.
+            plan.setMode(Mode.RUN);
+            plan.planTo(NORTH_5, 0, false);
+            settle();
+            verify(moving.gui).addToast(ToastLevel.WARNING, Messages.getString("GpuBoard.hud.move.beyondRunningMp"));
+
+            // Jump: one landing hex, no waypoints; Jump again is automatic movement.
+            plan.setMode(Mode.JUMP);
+            Snapshot jumping = shown(moving);
+            assertEquals(Mode.JUMP, jumping.mode());
+            assertEquals(Set.of(Band.JUMP), Set.copyOf(jumping.envelope().values()));
+            plan.planTo(NORTH_2, 0, true);
+            settle();
+            verify(moving.gui).addToast(ToastLevel.WARNING, Messages.getString("GpuBoard.hud.move.jumpSingleHex"));
+            plan.planTo(NORTH_2, 0, false);
+            Snapshot jumped = shown(moving);
+            assertEquals(Band.JUMP, jumped.route().getLast().band());
+            assertFalse(jumped.canPin());
+            plan.setMode(Mode.JUMP);
+            assertEquals(Mode.AUTO, shown(moving).mode());
+        }
+    }
+
+    /** A.7: a path changed elsewhere is kept as pinned, continued by a click and undone step by step. */
+    @Test
+    void aPathChangedElsewhereTurnsThePlanExternal() throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            GpuMovePlan plan = plan(moving);
+            plan.planTo(NORTH_2, 0, false);
+            assertFalse(shown(moving).external());
+            // A Swing click extends MegaMek's path from its end.
+            onSwing(() -> {
+                for (int type : new int[] { BoardViewEvent.BOARD_HEX_DRAGGED, BoardViewEvent.BOARD_HEX_CLICKED }) {
+                    moving.display.hexMoused(new BoardViewEvent(moving.board.view, NORTH_3, type, 0,
+                          MouseEvent.BUTTON1));
+                }
+                return null;
+            });
+            Snapshot clicked = shown(moving);
+            assertTrue(clicked.external() && clicked.canUndo());
+            assertEquals(List.of(NORTH_3), clicked.pins(), "Everything so far is pinned");
+            assertEquals(List.of("11,10 f0 WALK", "11,9 f0 WALK", "11,8 f0 WALK"), route(clicked.route()));
+
+            plan.planTo(NORTH_4, 0, false);
+            assertEquals(List.of("11,10 f0 WALK", "11,9 f0 WALK", "11,8 f0 WALK", "11,7 f0 RUN"),
+                  route(shown(moving).route()));
+            plan.undo();
+            assertEquals(route(clicked.route()), route(shown(moving).route()), "The plan's own step is undone");
+            // Then MegaMek's Backspace: one step at a time.
+            plan.undo();
+            Snapshot backspace = shown(moving);
+            assertEquals(List.of("11,10 f0 WALK", "11,9 f0 WALK"), route(backspace.route()));
+            assertEquals(List.of(NORTH_2), backspace.pins());
+
+            // A gear chosen elsewhere (Swing's Jump command clears the path): the plan follows its mode.
+            moving.command(MoveCommand.MOVE_JUMP);
+            Snapshot jump = shown(moving);
+            assertEquals(Mode.JUMP, jump.mode());
+            assertTrue(jump.explicit());
+            assertEquals(List.of(), jump.route());
+            assertFalse(jump.external() || jump.canUndo());
+            assertEquals(List.of(), jump.pins());
+        }
+    }
+
+    /** G11: undo covers the last sixty plan commands. */
+    @Test
+    void undoKeepsTheLastSixtyPlanCommands() throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            GpuMovePlan plan = plan(moving);
+            for (int command = 0; command <= GpuMovePlan.UNDO_LIMIT; command++) {
+                plan.planTo(((command % 2) == 0) ? NORTH_1 : NORTH_2, 0, false);
+            }
+            assertEquals(NORTH_1, shown(moving).destination());
+            for (int command = 0; command < GpuMovePlan.UNDO_LIMIT; command++) {
+                plan.undo();
+            }
+            Snapshot oldest = shown(moving);
+            assertEquals(List.of("11,10 f0 WALK"), route(oldest.route()), "The first plot; its own undo step is gone");
+            assertFalse(oldest.canUndo());
+            plan.undo();
+            assertEquals(route(oldest.route()), route(shown(moving).route()));
+        }
+    }
+
+    /** G19: switching units discards the plan, its mode and its undo steps. */
+    @Test
+    void switchingUnitsDiscardsThePlan() throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            GpuMovePlan plan = plan(moving);
+            plan.setMode(Mode.WALK);
+            plan.planTo(NORTH_1, 0, true);
+            plan.planTo(NORTH_2, 0, false);
+            assertEquals(List.of(NORTH_1), shown(moving).pins());
+            for (Entity unit : List.of(moving.board.entity, moving.unit)) {
+                onSwing(() -> {
+                    moving.display.selectEntity(unit.getId());
+                    return null;
+                });
+                Snapshot selected = shown(moving);
+                assertEquals(unit.getId(), selected.entityId());
+                assertEquals(Mode.AUTO, selected.mode());
+                assertEquals(List.of(), selected.route());
+                assertEquals(List.of(), selected.pins());
+                assertFalse(selected.canUndo());
+            }
+        }
+    }
+
+    /** G20: a non-planner aerospace unit's route is MegaMek's path; the plan's commands leave it alone. */
+    @Test
+    void anAerospaceUnitsRouteIsMegaMeksPath() throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            selectAirborneFighter(moving);
+            onSwing(() -> {
+                // The classic board click (GpuBoardSource.click) plots it.
+                for (int type : new int[] { BoardViewEvent.BOARD_HEX_DRAGGED, BoardViewEvent.BOARD_HEX_CLICKED }) {
+                    moving.display.hexMoused(new BoardViewEvent(moving.board.view, new Coords(4, 9), type, 0,
+                          MouseEvent.BUTTON1));
+                }
+                return null;
+            });
+            GpuMovePlan plan = plan(moving);
+            Snapshot aero = shown(moving);
+            assertTrue(aero.active());
+            assertFalse(aero.planner() || aero.canPin() || aero.canUndo());
+            assertEquals(Mode.OTHER, aero.mode());
+            List<Coords> path = onSwing(() -> moving.display.getPlannedMovement().getStepVector().stream()
+                  .map(MoveStep::getPosition).toList());
+            assertEquals(List.of(new Coords(4, 11), new Coords(4, 10), new Coords(4, 9)), path);
+            assertEquals(path, aero.route().stream().map(Step::coords).toList(), "The route is the path");
+            assertEquals(List.of(), aero.pins());
+
+            plan.planTo(new Coords(4, 8), 0, false);
+            plan.setMode(Mode.WALK);
+            assertEquals(path, shown(moving).route().stream().map(Step::coords).toList());
+        }
+    }
+
+    /**
+     * E2d: while the display picks the landing hex of a vehicle's escape pod, the unit is no planner and the plan's
+     * commands are dropped; the board click the HUD then sends (MegaMek's board tool) launches the pod to that hex.
+     */
+    @Test
+    void anEscapePodLandingHexIsPickedByTheBoardClickAndNotPlotted() throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            // The launch ends the unit's turn, so the game gets turns (scripted, as for the hold tests).
+            scriptTurns(moving, LOCAL, OPPONENT);
+            Entity tank = selectEscapePodTank(moving);
+            GpuMovePlan plan = plan(moving);
+            assertTrue(shown(moving).planner(), "A ground vehicle is planned");
+            moving.command(MoveCommand.MOVE_LAUNCH_ESCAPE_POD);
+            Snapshot picking = shown(moving);
+            assertTrue(picking.active());
+            assertFalse(picking.planner() || picking.canPin() || picking.canUndo());
+            assertEquals(Mode.OTHER, picking.mode());
+            assertFalse(onSwing(moving::envelopeSprites).isEmpty(), "MegaMek's board highlights the pick's hexes");
+            assertEquals(Map.of(), picking.envelope(), "and shows no movement envelope");
+
+            // A command of an older frame is dropped: nothing is plotted and the pick still waits.
+            plan.planTo(BEHIND_TANK, 0, false);
+            assertEquals(List.of(), shown(moving).route());
+            assertTrue(onSwing(moving.display::isSelectingHex));
+
+            classicClick(moving, BEHIND_TANK);
+            verify(moving.client).moveEntity(eq(tank.getId()), argThat(path -> launchesPodTo(path, BEHIND_TANK)));
+        }
+    }
+
+    /**
+     * E2d: while the display picks the hexes of a bridge build, its own selection takes the board click; once MegaMek's
+     * cancel ends the pick, the unit is planned again and a click plots as before.
+     */
+    @Test
+    void aBridgeBuildPickTakesTheBoardClickAndPlanningResumesAfterIt() throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            Entity engineers = selectBridgeEngineers(moving);
+            GpuMovePlan plan = plan(moving);
+            moving.command(MoveCommand.MOVE_BUILD_BRIDGE);
+            assertFalse(shown(moving).planner());
+            plan.planTo(BRIDGE_HEX, 0, false);
+            assertEquals(List.of(), shown(moving).route(), "The plan plots nothing over the pick");
+
+            classicClick(moving, BRIDGE_HEX);
+            verify(moving.gui).addToast(ToastLevel.INFO, Messages.getString(
+                  "MovementDisplay.BuildBridge.toast.sectionSet", BRIDGE_HEX.getBoardNum()), engineers);
+            assertFalse(shown(moving).planner(), "The bridge's far end is picked next");
+
+            moving.command(MoveCommand.MOVE_CANCEL);
+            assertTrue(shown(moving).planner());
+            plan.planTo(NORTH_OF_ENGINEERS, 0, false);
+            assertEquals(List.of("10,9 f0 WALK"), route(shown(moving).route()));
+        }
+    }
+
+    /**
+     * BCS: MegaMek's own highlight of an escape pod pick reaches the native frame. Its envelope sprites live in the
+     * board state, which the source captures as tactical geometry, so no classic board view is needed (the fixture
+     * builds none). The frame draws the outline of the picked hexes and nothing else in that colour.
+     */
+    @Test
+    void theEscapePodPickHighlightReachesTheNativeFrame() throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            scriptTurns(moving, LOCAL, OPPONENT);
+            selectEscapePodTank(moving);
+            moving.command(MoveCommand.MOVE_LAUNCH_ESCAPE_POD);
+            Set<Coords> pick = onSwing(() -> moving.envelopeSprites().stream()
+                  .map(MovementEnvelopeSprite::getPosition).collect(Collectors.toSet()));
+            assertFalse(pick.isEmpty(), "MegaMek's board state highlights the pick's hexes");
+            onSwing(() -> {
+                moving.board.source.refresh();
+                return null;
+            });
+            int walk = GUIPreferences.getInstance().getMoveDefaultColor().getRGB() & 0xFFFFFF;
+            Set<Coords> drawn = moving.board.source.takeFrame().scene().tactical().fills().stream()
+                  .filter(fill -> ((fill.argb() & 0xFFFFFF) == walk) && (fill.planeAnchor() != null))
+                  .map(fill -> hexAt(fill.planeAnchor())).collect(Collectors.toSet());
+            Set<Coords> outline = pick.stream()
+                  .filter(hex -> hex.allAdjacent().stream().anyMatch(neighbour -> !pick.contains(neighbour)))
+                  .collect(Collectors.toSet());
+            assertEquals(outline, drawn, "The native frame draws the pick's outline, and only it");
+        }
+    }
+
+    /**
+     * G3, rule 9: the hover route is searched in its own job after the capture, never while a dialog waits, and is
+     * the route a click on the hex plots.
+     */
+    @Test
+    void theHoverRouteIsSearchedAfterTheCaptureAndIsWhatAClickPlots() throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            GpuMovePlan plan = plan(moving);
+            GpuBoardSource source = moving.board.source;
+            // While a dialog waits, captures still publish, but nothing is searched.
+            DialogRequest request = new DialogRequest(0, DialogKind.MESSAGE, "Confirm", "Continue?", false,
+                  List.of("Yes", "No"), 0, 1, List.of(), List.of(), "", false, "", null, null, List.of());
+            FutureTask<DialogAnswer> asked = new FutureTask<>(() -> source.ask(request));
+            SwingUtilities.invokeLater(asked);
+            DialogRequest shown = GpuDialogRoutingTest.awaitDialog(source);
+            assertEquals(List.of(), hoverAfterCapture(source, NORTH_2));
+            settle();
+            assertEquals(List.of(), hoverAfterCapture(source, NORTH_2), "No search inside the dialog's loop");
+            source.answer(shown.id(), new DialogAnswer(0, List.of(), null, false, List.of()));
+            asked.get(20, SECONDS);
+
+            // The capture asks for the search; the route appears once the job ran.
+            assertEquals(List.of(), hoverAfterCapture(source, NORTH_2));
+            settle();
+            List<Step> hovered = shown(moving).hover();
+            assertEquals(List.of("11,10 f0 WALK", "11,9 f0 WALK"), route(hovered));
+            plan.planTo(NORTH_2, 0, false);
+            Snapshot plotted = shown(moving);
+            assertEquals(route(hovered), route(plotted.route()));
+            assertEquals(List.of(), plotted.hover(), "No hover route while a route is plotted");
+
+            // A hex out of reach has no hover route and asks for no search.
+            plan.clearRoute();
+            assertEquals(List.of(), hoverAfterCapture(source, NORTH_5));
+            settle();
+            assertEquals(List.of(), shown(moving).hover());
+        }
+    }
+
+    /**
+     * G15: Hold all holds the selected unit at once and the other own unit on the next own turn, with MegaMek's skip
+     * (a move without steps); nothing on the opponent's turn, and nothing more in a turn the server has not ended yet.
+     * The count shows on every turn of the phase, and the hold ends with the last own unit.
+     */
+    @Test
+    void holdAllSkipsOnTheOwnTurnsOfThePhaseOnly() throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            Entity atlas = moving.board.entity;
+            scriptTurns(moving, LOCAL, OPPONENT, LOCAL, OPPONENT);
+            GpuMovePlan plan = plan(moving);
+            plan.holdAll();
+            Snapshot started = afterHold(moving);
+            verify(moving.gui).addToast(ToastLevel.INFO, Messages.getString("GpuBoard.hud.move.holdStarted", 2));
+            verify(moving.client).moveEntity(eq(moving.unit.getId()), argThat(GpuMovePlanTest::held));
+            // The skip ended the local turn; both units count until the server answers.
+            assertEquals(Snapshot.idle(2), started);
+            // Until then the client still has the turn, and the player can select the Atlas, whose Skip MegaMek keeps
+            // disabled until a new turn begins: the hold neither sends nor ends in this turn.
+            moving.board.source.selectUnit(atlas.getId());
+            Snapshot selected = afterHold(moving);
+            assertEquals(List.of(atlas.getId(), 2), List.of(selected.entityId(), selected.holdingRemaining()));
+            verify(moving.client, times(1)).moveEntity(anyInt(), any(MovePath.class));
+
+            // The opponent's turn: nothing is sent; the dock still shows the hold.
+            nextTurn(moving, moving.unit);
+            assertEquals(Snapshot.idle(1), afterHold(moving));
+            verify(moving.client, times(1)).moveEntity(anyInt(), any(MovePath.class));
+
+            // The next own turn starts without a unit ("auto-select next unit" off): Next unit picks the Atlas.
+            GUIPreferences preferences = GUIPreferences.getInstance();
+            boolean autoSelect = preferences.getAutoSelectNextUnit();
+            try {
+                onSwing(() -> {
+                    preferences.setAutoSelectNextUnit(false);
+                    return null;
+                });
+                nextTurn(moving);
+                afterHold(moving);
+            } finally {
+                onSwing(() -> {
+                    preferences.setAutoSelectNextUnit(autoSelect);
+                    return null;
+                });
+            }
+            verify(moving.client).moveEntity(eq(atlas.getId()), argThat(GpuMovePlanTest::held));
+
+            // The server's answer leaves no own unit to move: the hold is over.
+            nextTurn(moving, atlas);
+            assertEquals(Snapshot.EMPTY, afterHold(moving));
+            verify(moving.client, times(2)).moveEntity(anyInt(), any(MovePath.class));
+        }
+    }
+
+    /** G15: the hold ends with its movement phase; the next round's movement turns are the player's again. */
+    @Test
+    void holdEndsWithTheMovementPhase() throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            holdTheFirstTurn(moving);
+            assertEquals(1, afterHold(moving).holdingRemaining());
+            // The server ends the phase (scripted: the Atlas has not moved).
+            onSwing(() -> {
+                moving.board.game.setPhase(GamePhase.FIRING);
+                return null;
+            });
+            assertEquals(Snapshot.EMPTY, afterHold(moving));
+
+            // The next round's movement phase begins with the local player's turn; MegaMek selects the Atlas.
+            onSwing(() -> {
+                Game game = moving.board.game;
+                game.setRoundCount(game.getRoundCount() + 1);
+                moving.unit.setDone(false);
+                game.setPhase(GamePhase.MOVEMENT);
+                game.setTurnVector(List.of(new GameTurn(LOCAL), new GameTurn(OPPONENT)));
+                game.setTurnIndex(0, OPPONENT);
+                return null;
+            });
+            Snapshot planning = afterHold(moving);
+            assertTrue(planning.active());
+            assertEquals(moving.board.entity.getId(), planning.entityId());
+            assertEquals(0, planning.holdingRemaining());
+            verify(moving.client, times(1)).moveEntity(anyInt(), any(MovePath.class));
+        }
+    }
+
+    /**
+     * G15: a unit that cannot hold ends the hold with a toast: one whose Skip MegaMek disables (here: a route plotted
+     * as its turn began), and one whose skip MegaMek refuses (an airborne fighter must use its velocity).
+     */
+    @Test
+    void aUnitThatCannotHoldEndsTheHold() throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            Entity atlas = moving.board.entity;
+            holdTheFirstTurn(moving);
+            // The own turn begins with the Atlas selected, and a step north is plotted at once (a Swing click).
+            boolean skipEnabled = onSwing(() -> {
+                Game game = moving.board.game;
+                game.setTurnIndex(game.getTurnIndex() + 1, OPPONENT);
+                moving.display.plotTo(new Coords(5, 4), 0);
+                return moving.display.getCompletionButtons().getLast().isEnabled();
+            });
+            assertFalse(skipEnabled, "MegaMek disables Skip while the unit has a route");
+            Snapshot stopped = afterHold(moving);
+            verify(moving.gui).addToast(ToastLevel.WARNING,
+                  Messages.getString("GpuBoard.hud.move.holdStopped", atlas.getShortName()));
+            verify(moving.client, never()).moveEntity(eq(atlas.getId()), any(MovePath.class));
+            assertEquals(List.of(true, 0), List.of(stopped.active(), stopped.holdingRemaining()));
+            assertEquals(List.of("5,4 f0 WALK"), route(stopped.route()), "The player's route stays");
+        }
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            Entity fighter = selectAirborneFighter(moving);
+            scriptTurns(moving, LOCAL, OPPONENT);
+            GpuMovePlan plan = plan(moving);
+            plan.holdAll();
+            assertEquals(0, afterHold(moving).holdingRemaining());
+            verify(moving.gui).addToast(ToastLevel.WARNING,
+                  Messages.getString("GpuBoard.hud.move.holdStopped", fighter.getShortName()));
+            verify(moving.client, never()).moveEntity(anyInt(), any(MovePath.class));
+        }
+    }
+
+    /** G15: Stop on the opponent's turn ends the hold, and the next own turn is the player's. */
+    @Test
+    void stopEndsTheHold() throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            GpuMovePlan plan = holdTheFirstTurn(moving);
+            assertEquals(1, afterHold(moving).holdingRemaining());
+            plan.stopHolding();
+            assertEquals(Snapshot.EMPTY, afterHold(moving));
+            nextTurn(moving);
+            Snapshot planning = afterHold(moving);
+            assertTrue(planning.active());
+            assertEquals(moving.board.entity.getId(), planning.entityId());
+            assertEquals(0, planning.holdingRemaining());
+            verify(moving.client, never()).moveEntity(eq(moving.board.entity.getId()), any(MovePath.class));
+        }
+    }
+
+    /**
+     * G15, B.1 rule 4: while the phase display ignores input (as under the bot's hex picker) or a native dialog
+     * waits, the hold sends nothing and stays on; after the answer it holds the unit.
+     */
+    @Test
+    void aPendingDialogPausesTheHold() throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            int atlas = moving.board.entity.getId();
+            holdTheFirstTurn(moving);
+            // The own turn begins with the Atlas selected, and the display is set to ignore input at once.
+            onSwing(() -> {
+                Game game = moving.board.game;
+                game.setTurnIndex(game.getTurnIndex() + 1, OPPONENT);
+                moving.display.setIgnoringEvents(true);
+                return null;
+            });
+            assertEquals(1, afterHold(moving).holdingRemaining());
+            // A native dialog appears, and the display takes input again while it waits.
+            GpuBoardSource source = moving.board.source;
+            DialogRequest request = new DialogRequest(0, DialogKind.MESSAGE, "Confirm", "Continue?", false,
+                  List.of("Yes", "No"), 0, 1, List.of(), List.of(), "", false, "", null, null, List.of());
+            FutureTask<DialogAnswer> asked = new FutureTask<>(() -> source.ask(request));
+            SwingUtilities.invokeLater(asked);
+            DialogRequest shown = GpuDialogRoutingTest.awaitDialog(source);
+            onSwing(() -> {
+                moving.display.setIgnoringEvents(false);
+                return null;
+            });
+            assertEquals(1, afterHold(moving).holdingRemaining());
+            afterHold(moving);
+            verify(moving.client, never()).moveEntity(eq(atlas), any(MovePath.class));
+
+            source.answer(shown.id(), new DialogAnswer(0, List.of(), null, false, List.of()));
+            asked.get(20, SECONDS);
+            afterHold(moving);
+            verify(moving.client).moveEntity(eq(atlas), argThat(GpuMovePlanTest::held));
+        }
+    }
+
+    /** An airborne Cheetah F-11 of the local player at (4, 12), velocity 3 at altitude 5, selected in the display. */
+    private static Entity selectAirborneFighter(GpuMovementFixture moving) throws Exception {
+        Entity fighter = new MekFileParser(new File("testresources/megamek/common/units/Cheetah F-11.blk")).getEntity();
+        ((IAero) fighter).setCurrentVelocity(3);
+        ((IAero) fighter).setNextVelocity(3);
+        fighter.setAltitude(5);
+        return select(moving, fighter, 5, new Coords(4, 12));
+    }
+
+    /** A Bulldog Medium Tank with a Combat Vehicle Escape Pod in the rear, selected in the display at TANK. */
+    private static Entity selectEscapePodTank(GpuMovementFixture moving) throws Exception {
+        Entity tank = new MekFileParser(new File("testresources/megamek/common/units/Bulldog Medium Tank.blk"))
+              .getEntity();
+        tank.addEquipment(EquipmentType.get("ISCombatVehicleEscapePod"), Tank.LOC_REAR);
+        return select(moving, tank, 6, TANK);
+    }
+
+    /**
+     * A foot platoon with the Bridge-Building Engineers specialization (and so its bridge kit), selected in the
+     * display at ENGINEERS; asked for the bridge type, the player chooses a light bridge.
+     */
+    private static Entity selectBridgeEngineers(GpuMovementFixture moving) throws Exception {
+        ConvInfantry engineers = (ConvInfantry) new MekFileParser(
+              new File("testresources/megamek/common/units/Foot Platoon (AFFS) (Laser 3067+).blk")).getEntity();
+        engineers.setSpecializations(ConvInfantry.BRIDGE_ENGINEERS);
+        doReturn(Messages.getString("MovementDisplay.BuildBridgeDialog.light")).when(moving.gui)
+              .input(anyString(), anyString(), anyInt(), any(), any());
+        return select(moving, engineers, 7, ENGINEERS);
+    }
+
+    /** Puts a unit of the local player on the board facing north and selects it in the display. */
+    private static Entity select(GpuMovementFixture moving, Entity unit, int id, Coords position) throws Exception {
+        onSwing(() -> {
+            unit.setId(id);
+            unit.setOwner(moving.board.player);
+            unit.setPosition(position);
+            unit.setFacing(0);
+            unit.setDeployed(true);
+            moving.board.game.addEntity(unit, false);
+            moving.display.selectEntity(id);
+            return null;
+        });
+        return unit;
+    }
+
+    /** A left click as GpuHud sends it for movement it does not plan: MegaMek's board tool, press and click. */
+    private static void classicClick(GpuMovementFixture moving, Coords hex) throws Exception {
+        moving.board.source.hover(hex, 0);
+        moving.board.source.click(hex, false, 0);
+        settle();
+    }
+
+    /** A move that launches the escape pod to the hex (the step's data 0 and 1 are its x and y). */
+    private static boolean launchesPodTo(MovePath path, Coords hex) {
+        return path.getStepVector().stream().anyMatch(step -> (step.getType() == MoveStepType.LAUNCH_ESCAPE_POD)
+              && Integer.valueOf(hex.getX()).equals(step.getAdditionalData(0))
+              && Integer.valueOf(hex.getY()).equals(step.getAdditionalData(1)));
+    }
+
+    /** EDT, in one event: sets the hovered hex, captures, and returns the published hover route. */
+    private static List<Step> hoverAfterCapture(GpuBoardSource source, Coords hex) throws Exception {
+        return onSwing(() -> {
+            source.setHover(hex);
+            source.refresh();
+            return source.takeFrame().panels().move().hover();
+        });
+    }
+
+    /**
+     * The source's plan over the fixture's real display, which is the source's phase panel from now on, after a
+     * capture: the HUD only sends commands for a plan it was shown.
+     */
+    private static GpuMovePlan plan(GpuMovementFixture moving) throws Exception {
+        moving.board.panel = moving.display;
+        shown(moving);
+        return moving.board.source.moves();
+    }
+
+    /** The hex whose centre is the given annotation plane anchor, in tactical capture pixels (scale 1). */
+    private static Coords hexAt(BoardTactical.Point centre) {
+        int x = Math.round((centre.x() - 42) / 63f);
+        return new Coords(x, Math.round((centre.y() - 36 - ((x & 1) == 1 ? 36 : 0)) / 72f));
+    }
+
+    /** The plan the source published after every posted command, search and republish ran. */
+    private static Snapshot shown(GpuMovementFixture moving) throws Exception {
+        settle();
+        return onSwing(() -> {
+            moving.board.source.refresh();
+            return moving.board.source.takeFrame().panels().move();
+        });
+    }
+
+    /** Lets posted commands run, then the search job they asked for and its republish. */
+    private static void settle() throws Exception {
+        for (int pass = 0; pass < 3; pass++) {
+            onSwing(() -> null);
+        }
+    }
+
+    /**
+     * Scripted movement turns instead of a server: an opponent joins, the client follows the game's current turn as
+     * Client.isMyTurn, getMyTurn, getFirstEntityNum and getNextEntityNum do, and the turns go to these players in
+     * order; the first begins now.
+     */
+    private static void scriptTurns(GpuMovementFixture moving, int... players) throws Exception {
+        onSwing(() -> {
+            Game game = moving.board.game;
+            Player opponent = new Player(OPPONENT, "Opponent");
+            opponent.setTeam(2);
+            game.addPlayer(OPPONENT, opponent);
+            game.setTurnVector(Arrays.stream(players).mapToObj(GameTurn::new).toList());
+            Client client = moving.client;
+            when(client.isMyTurn()).thenAnswer(invocation -> (game.getTurn() != null)
+                  && game.getTurn().isValid(LOCAL, game));
+            when(client.getMyTurn()).thenAnswer(invocation -> game.getTurn());
+            when(client.getFirstEntityNum()).thenAnswer(invocation -> game.getFirstEntityNum(game.getTurn()));
+            when(client.getNextEntityNum(anyInt()))
+                  .thenAnswer(invocation -> game.getNextEntityNum(game.getTurn(), invocation.getArgument(0)));
+            game.setTurnIndex(0, Player.PLAYER_NONE);
+            return null;
+        });
+    }
+
+    /** The server's answer to a move: the units it moved are done, and the next scripted turn begins. */
+    private static void nextTurn(GpuMovementFixture moving, Entity... moved) throws Exception {
+        onSwing(() -> {
+            Game game = moving.board.game;
+            for (Entity unit : moved) {
+                unit.setDone(true);
+            }
+            game.setTurnIndex(game.getTurnIndex() + 1, game.getTurn().playerId());
+            return null;
+        });
+    }
+
+    /**
+     * Turns own, opponent, own, opponent: Hold all on the first holds the Sagittaire (its skip is sent), and the
+     * server answers with the opponent's turn.
+     */
+    private static GpuMovePlan holdTheFirstTurn(GpuMovementFixture moving) throws Exception {
+        scriptTurns(moving, LOCAL, OPPONENT, LOCAL, OPPONENT);
+        GpuMovePlan plan = plan(moving);
+        plan.holdAll();
+        settle();
+        verify(moving.client).moveEntity(eq(moving.unit.getId()), argThat(GpuMovePlanTest::held));
+        nextTurn(moving, moving.unit);
+        return plan;
+    }
+
+    /** The plan once a capture saw the change and the hold's own event, which that capture asked for, ran. */
+    private static Snapshot afterHold(GpuMovementFixture moving) throws Exception {
+        shown(moving);
+        return shown(moving);
+    }
+
+    /** A move without steps: MegaMek's skip, the unit holds its position. */
+    private static boolean held(MovePath path) {
+        return path.length() == 0;
+    }
+
+    /** Each step as "x,y f{facing} {band}". */
+    private static List<String> route(List<Step> steps) {
+        return steps.stream().map(step -> step.coords().getX() + "," + step.coords().getY() + " f" + step.facing()
+              + " " + step.band()).toList();
+    }
+}

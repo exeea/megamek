@@ -1,0 +1,213 @@
+/* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
+package megamek.client.ui.gdx;
+
+import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Vector2;
+import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.Group;
+import com.badlogic.gdx.scenes.scene2d.InputEvent;
+import com.badlogic.gdx.scenes.scene2d.InputListener;
+import com.badlogic.gdx.scenes.scene2d.Stage;
+import com.badlogic.gdx.scenes.scene2d.Touchable;
+import com.badlogic.gdx.scenes.scene2d.ui.Cell;
+import com.badlogic.gdx.scenes.scene2d.ui.Image;
+import com.badlogic.gdx.scenes.scene2d.ui.Label;
+import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
+import com.badlogic.gdx.scenes.scene2d.ui.Table;
+
+/**
+ * A popover (.panel.pop with its .hd and .ft): the opaque frame, at least 240 units wide, with an optional header of an
+ * upper-case title over a muted subtitle, its content, and an optional footer line. It opens at a point or above an
+ * anchor and stays 10 units inside its parent; a content taller than that scrolls. While open it gives its content the
+ * stage's keyboard focus, and any press outside it closes it, as {@link #cancel} does. Its view adds it to a layer
+ * once; it starts closed.
+ */
+public final class UiPopover extends Table {
+    private static final float MIN_WIDTH = 240;
+    /** The prototype keeps a popover this far inside the window. */
+    private static final float MARGIN = 10;
+    /** A popover opened above its anchor ends this far above the anchor's top. */
+    private static final float ABOVE = 8;
+    /** The title's line: 13 units at the face's normal line height, Roboto's 2400/2048 em (.pop .hd b). */
+    private static final float TITLE_LINE = 13 * 2400 / 2048f;
+    /** The subtitle's line: the 13-unit body text at its 1.35 line height (.pop .hd span sits on that line). */
+    private static final float BODY_LINE = 13 * 1.35f;
+    /** The footer's line: 11 units at 1.35 (.pop .ft). */
+    private static final float FOOT_LINE = 11 * 1.35f;
+    private final Table head = new Table();
+    private final Label title;
+    private final Label subtitle;
+    private final Image headRule;
+    private final ScrollPane scroll;
+    private final Image footRule;
+    private final Label foot;
+    private final Cell<Table> headCell;
+    private final Cell<Image> headRuleCell;
+    private final Cell<Image> footRuleCell;
+    private final Cell<Label> footCell;
+    /** Closes the popover on a press outside it; on the stage's root while the popover is open. */
+    private final InputListener outside = new InputListener() {
+        @Override
+        public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
+            if (!event.getTarget().isDescendantOf(UiPopover.this)) {
+                cancel();
+            }
+            return false;
+        }
+    };
+    /** Where it opened in its parent: its left edge, and its top, or its bottom when it opened above an anchor. */
+    private float left;
+    private float edge;
+    private boolean above;
+
+    /** A closed popover in the kit's style, without header, content or footer. */
+    public UiPopover(UiKit kit) {
+        setBackground(kit.skin.getDrawable("panel-pop"));
+        // The 2-unit rails and the popover's own 6 above and below; the side borders are 2 transparent units.
+        pad(8, 2, 8, 2);
+        top();
+        // Fractional line heights add up as in the prototype's CSS; the frame snaps its own edges to pixels.
+        setRound(false);
+        head.setRound(false);
+        setTouchable(Touchable.enabled);
+        setVisible(false);
+        // .pop .hd: the title (700 13 condensed, .08em) over the subtitle, padding 6 14 8, a rule and 4 below it.
+        title = kit.label("", "hud-title", 13, UiTheme.TEXT);
+        subtitle = kit.label("", "hud-small", 11.5f, UiTheme.MUTED);
+        head.pad(6, 14, 8, 14);
+        head.left().defaults().left();
+        head.add(title).height(TITLE_LINE).row();
+        head.add(subtitle);
+        headRule = new Image(kit.skin.getDrawable("rule"));
+        scroll = kit.scrollList(null);
+        // .pop .ft: margin 4, a rule, then 11 units muted with padding 7 14 3.
+        footRule = new Image(kit.skin.getDrawable("rule"));
+        foot = kit.label("", "hud-small", 11, UiTheme.MUTED);
+        // The scroll pane holding the content stays in its cell, so the content keeps the keyboard focus.
+        headCell = add(head).growX();
+        row();
+        headRuleCell = add(headRule).growX();
+        row();
+        add(scroll).growX();
+        row();
+        footRuleCell = add(footRule).growX();
+        row();
+        footCell = add(foot).growX().padLeft(14).padRight(14);
+        header(null, null);
+        footer(null);
+    }
+
+    /**
+     * The header's title, upper-cased, over the subtitle; a null title removes the header and a null subtitle its
+     * line. An open popover keeps the corner it opened at.
+     */
+    public UiPopover header(String text, String detail) {
+        boolean shown = text != null;
+        title.setText(shown ? UiTheme.upper(text) : "");
+        subtitle.setText(detail == null ? "" : detail);
+        head.getCell(subtitle).height(detail == null ? 0 : BODY_LINE);
+        head.invalidate();
+        headCell.setActor(shown ? head : null);
+        headRuleCell.setActor(shown ? headRule : null).height(shown ? 1 : 0).padBottom(shown ? 4 : 0);
+        return relayout();
+    }
+
+    /** The popover's content, such as a {@link UiMenuList}; it gets the keyboard focus while the popover is open. */
+    public UiPopover content(Actor actor) {
+        scroll.setActor(actor);
+        scroll.setScrollY(0);
+        if (isVisible() && getStage() != null) {
+            getStage().setKeyboardFocus(actor);
+        }
+        return relayout();
+    }
+
+    /** The footer line, or none for null. An open popover keeps the corner it opened at. */
+    public UiPopover footer(String text) {
+        boolean shown = text != null;
+        foot.setText(shown ? text : "");
+        footRuleCell.setActor(shown ? footRule : null).height(shown ? 1 : 0).padTop(shown ? 4 : 0);
+        footCell.setActor(shown ? foot : null).height(shown ? FOOT_LINE : 0).padTop(shown ? 7 : 0)
+              .padBottom(shown ? 3 : 0);
+        return relayout();
+    }
+
+    private UiPopover relayout() {
+        invalidate();
+        if (isVisible()) {
+            place();
+        }
+        return this;
+    }
+
+    @Override
+    public float getPrefWidth() {
+        return Math.max(MIN_WIDTH, super.getPrefWidth());
+    }
+
+    /**
+     * Opens the popover with its top-left corner at stage point ({@code x}, {@code y}), such as the pointer, moved as
+     * little as needed to stay 10 units inside its parent.
+     */
+    public void showAt(float x, float y) {
+        Vector2 corner = getParent().stageToLocalCoordinates(new Vector2(x, y));
+        show(corner.x, corner.y, false);
+    }
+
+    /**
+     * Opens the popover above {@code anchor}: its bottom 8 units above the anchor's top and its left edge {@code dx}
+     * units right of the anchor's (the prototype's More opens 150 to the left), kept 10 units inside its parent.
+     */
+    public void showAbove(Actor anchor, float dx) {
+        Vector2 corner = anchor.localToActorCoordinates(getParent(), new Vector2(0, anchor.getHeight()));
+        show(corner.x + dx, corner.y + ABOVE, true);
+    }
+
+    private void show(float x, float y, boolean fromBelow) {
+        left = x;
+        edge = y;
+        above = fromBelow;
+        setVisible(true);
+        toFront();
+        place();
+        Stage stage = getStage();
+        stage.removeCaptureListener(outside);
+        stage.addCaptureListener(outside);
+        stage.setKeyboardFocus(scroll.getActor());
+    }
+
+    /**
+     * Sizes the popover to its content, at most the parent's height less the margins, and moves it inside them. As in
+     * the prototype, one wider than the parent keeps its left edge in.
+     */
+    private void place() {
+        Group parent = getParent();
+        setSize(getPrefWidth(), Math.min(getPrefHeight(), Math.max(0, parent.getHeight() - 2 * MARGIN)));
+        validate();
+        float bottom = above ? edge : edge - getHeight();
+        setPosition(Math.max(MARGIN, Math.min(parent.getWidth() - getWidth() - MARGIN, left)),
+              MathUtils.clamp(bottom, MARGIN, Math.max(MARGIN, parent.getHeight() - getHeight() - MARGIN)));
+    }
+
+    /**
+     * Closes the popover; true when it was open. The stage's keyboard and scroll focus leave it, and an outside press
+     * no longer reaches it.
+     */
+    public boolean cancel() {
+        if (!isVisible()) {
+            return false;
+        }
+        setVisible(false);
+        Stage stage = getStage();
+        if (stage != null) {
+            stage.removeCaptureListener(outside);
+            if (stage.getKeyboardFocus() != null && stage.getKeyboardFocus().isDescendantOf(this)) {
+                stage.setKeyboardFocus(null);
+            }
+            if (stage.getScrollFocus() != null && stage.getScrollFocus().isDescendantOf(this)) {
+                stage.setScrollFocus(null);
+            }
+        }
+        return true;
+    }
+}

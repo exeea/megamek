@@ -35,6 +35,7 @@
 package megamek.common.game;
 
 import static megamek.common.compute.Compute.d6;
+import static megamek.common.compute.Compute.rollD6;
 import static megamek.common.options.OptionsConstants.ATOW_COMBAT_PARALYSIS;
 import static megamek.common.options.OptionsConstants.ATOW_COMBAT_SENSE;
 
@@ -60,6 +61,11 @@ public class InitiativeRoll implements Comparable<InitiativeRoll>, Serializable 
     private final Vector<Integer> originalRolls = new Vector<>();
     private final Vector<Boolean> wasRollReplaced = new Vector<>();
     private final Vector<InitiativeBonusBreakdown> bonuses = new Vector<>();
+    /**
+     * The two kept dice of each roll, null where unknown (observers). The field itself is null in data written before
+     * the dice were kept, so it is created on the next roll.
+     */
+    private Vector<int[]> keptDice = new Vector<>();
 
     public InitiativeRoll() {
 
@@ -79,6 +85,9 @@ public class InitiativeRoll implements Comparable<InitiativeRoll>, Serializable 
         originalRolls.addAll(other.originalRolls);
         wasRollReplaced.addAll(other.wasRollReplaced);
         bonuses.addAll(other.bonuses);
+        if (other.keptDice != null) {
+            keptDice.addAll(other.keptDice);
+        }
     }
 
     public void clear() {
@@ -86,6 +95,7 @@ public class InitiativeRoll implements Comparable<InitiativeRoll>, Serializable 
         originalRolls.removeAllElements();
         bonuses.removeAllElements();
         wasRollReplaced.removeAllElements();
+        keptDice = new Vector<>();
     }
 
     /**
@@ -95,12 +105,14 @@ public class InitiativeRoll implements Comparable<InitiativeRoll>, Serializable 
      * @param initiativeAptitudeSPA The initiative aptitude SPA (Combat Sense or Combat Paralysis), or empty string
      */
     public void addRoll(InitiativeBonusBreakdown breakdown, String initiativeAptitudeSPA) {
-        int roll = getInitiativeRoll(initiativeAptitudeSPA);
+        int[] dice = rollKeptDice(initiativeAptitudeSPA);
+        int roll = dice[0] + dice[1];
 
         rolls.addElement(roll);
         originalRolls.addElement(roll);
         bonuses.addElement(breakdown);
         wasRollReplaced.addElement(Boolean.FALSE);
+        keepDice(dice);
     }
 
     /**
@@ -131,11 +143,13 @@ public class InitiativeRoll implements Comparable<InitiativeRoll>, Serializable 
      * @param initiativeAptitudeSPA The initiative aptitude SPA (Combat Sense or Combat Paralysis), or empty string
      */
     public void replaceRoll(InitiativeBonusBreakdown breakdown, String initiativeAptitudeSPA) {
-        int roll = getInitiativeRoll(initiativeAptitudeSPA);
+        int[] dice = rollKeptDice(initiativeAptitudeSPA);
+        int roll = dice[0] + dice[1];
 
         rolls.setElementAt(roll, size() - 1);
         bonuses.setElementAt(breakdown, size() - 1);
         wasRollReplaced.setElementAt(Boolean.TRUE, size() - 1);
+        keepDice(dice);
     }
 
     /**
@@ -149,8 +163,10 @@ public class InitiativeRoll implements Comparable<InitiativeRoll>, Serializable 
         replaceRoll(InitiativeBonusBreakdown.fromTotal(bonus), initiativeAptitudeSPA);
     }
 
-    private int getInitiativeRoll(String initiativeAptitudeSPA) {
-        int roll = d6(2);
+    /** Rolls initiative and returns the two dice it keeps. */
+    private static int[] rollKeptDice(String initiativeAptitudeSPA) {
+        // Rolled even when an aptitude SPA replaces it with three dice, which keeps the dice sequence unchanged.
+        int[] dice = rollD6(2).getIntValues();
         if (!initiativeAptitudeSPA.isBlank()) {
             List<Integer> rolls = Arrays.asList(d6(), d6(), d6());
 
@@ -162,10 +178,19 @@ public class InitiativeRoll implements Comparable<InitiativeRoll>, Serializable 
                 rolls.sort(Comparator.naturalOrder());
             }
 
-            return rolls.getFirst() + rolls.get(1);
+            return new int[] { rolls.getFirst(), rolls.get(1) };
         }
 
-        return roll;
+        return dice;
+    }
+
+    /** Records the kept dice of the last roll, creating the list for data written before the dice were kept. */
+    private void keepDice(int[] dice) {
+        if (keptDice == null) {
+            keptDice = new Vector<>();
+        }
+        keptDice.setSize(size());
+        keptDice.setElementAt(dice, size() - 1);
     }
 
     public int size() {
@@ -174,6 +199,16 @@ public class InitiativeRoll implements Comparable<InitiativeRoll>, Serializable 
 
     public int getRoll(int index) {
         return rolls.elementAt(index) + bonuses.elementAt(index).total();
+    }
+
+    /**
+     * The two dice kept for the roll at this index: of three dice under Combat Sense or Combat Paralysis, the two that
+     * count; after a Tactical Genius reroll, the reroll's. Empty when unknown: an observer, or a roll read from data
+     * written before the dice were kept.
+     */
+    public List<Integer> getKeptDice(int index) {
+        int[] dice = ((keptDice == null) || (index >= keptDice.size())) ? null : keptDice.elementAt(index);
+        return (dice == null) ? List.of() : List.of(dice[0], dice[1]);
     }
 
     /**

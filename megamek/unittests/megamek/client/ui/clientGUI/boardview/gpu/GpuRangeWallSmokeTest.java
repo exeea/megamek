@@ -106,12 +106,13 @@ class GpuRangeWallSmokeTest {
                         camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                         camera.center(BoardGeometry.center(new Coords(1, 4), 0));
                         camera.zoom(0.65f);
-                        for (float tilt : new float[] { 0, GpuMarkers.FLAT_TILT_DEGREES - 0.1f,
-                              GpuMarkers.FLAT_TILT_DEGREES, GpuMarkers.FLAT_TILT_DEGREES + 0.1f, 55 }) {
+                        // Flat on the surface in the Tactical View (tilt 0), upright in 3D at a steep and a low angle.
+                        for (float tilt : new float[] { 0, 30, 55 }) {
+                            boolean flat = tilt == 0;
                             camera.setIsometric(false);
                             camera.orbit(45, tilt);
-                            byte[] initial = draw(moving, camera.camera, 0);
-                            byte[] advanced = draw(moving, camera.camera, 0.25f);
+                            byte[] initial = draw(moving, camera.camera, flat, 0);
+                            byte[] advanced = draw(moving, camera.camera, flat, 0.25f);
                             int changes = 0;
                             for (int i = 0; i < initial.length; i++) {
                                 if (initial[i] != advanced[i]) {
@@ -119,23 +120,26 @@ class GpuRangeWallSmokeTest {
                                 }
                             }
                             assertTrue(changes > 100, "Dashes must visibly move at tilt " + tilt);
-                            assertArrayEquals(initial, draw(stopped, camera.camera, 10), "0f must keep the static pattern");
-                            draw(splitFrames, camera.camera, 0.125f);
-                            assertArrayEquals(advanced, draw(splitFrames, camera.camera, 0.125f),
+                            assertArrayEquals(initial, draw(stopped, camera.camera, flat, 10),
+                                  "0f must keep the static pattern");
+                            draw(splitFrames, camera.camera, flat, 0.125f);
+                            assertArrayEquals(advanced, draw(splitFrames, camera.camera, flat, 0.125f),
                                   "Travel must depend on elapsed time rather than frame count");
-                            assertArrayEquals(advanced, draw(reverse, camera.camera, 0.75f),
+                            assertArrayEquals(advanced, draw(reverse, camera.camera, flat, 0.75f),
                                   "Negative speed must reverse travel along the same dash pattern");
-                            assertArrayEquals(initial, draw(moving, camera.camera, 0.75f), "The pattern repeats seamlessly");
-                            draw(splitFrames, camera.camera, 0.75f);
-                            draw(reverse, camera.camera, 0.25f);
+                            assertArrayEquals(initial, draw(moving, camera.camera, flat, 0.75f),
+                                  "The pattern repeats seamlessly");
+                            draw(splitFrames, camera.camera, flat, 0.75f);
+                            draw(reverse, camera.camera, flat, 0.25f);
                             moving.update(scene);
                             assertEquals(builds, moving.builds(), "Animation and camera changes reuse the meshes");
                         }
-                        byte[] advanced = draw(moving, camera.camera, 0.25f);
+                        byte[] advanced = draw(moving, camera.camera, false, 0.25f);
                         moving.update(new BoardScene(scene.boardId(), scene.width(), scene.height(), scene.tiles(),
                               List.of(), List.of(), -1, "", List.of(), null, List.of(), List.of(), List.of(), BoardTactical.EMPTY));
                         moving.update(scene);
-                        assertArrayEquals(advanced, draw(moving, camera.camera, 0), "Rebuilding must retain the dash phase");
+                        assertArrayEquals(advanced, draw(moving, camera.camera, false, 0),
+                              "Rebuilding must retain the dash phase");
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                     } catch (Throwable error) {
                         failure.set(error);
@@ -149,9 +153,9 @@ class GpuRangeWallSmokeTest {
         assertNull(failure.get(), () -> String.valueOf(failure.get()));
     }
 
-    private static byte[] draw(GpuTactical control, Camera camera, float seconds) {
+    private static byte[] draw(GpuTactical control, Camera camera, boolean flat, float seconds) {
         ScreenUtils.clear(0, 0, 0, 1, true);
-        control.render(camera, seconds);
+        control.render(camera, seconds, flat);
         Pixmap image = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
         try {
             byte[] pixels = new byte[image.getPixels().remaining()];
@@ -183,7 +187,8 @@ class GpuRangeWallSmokeTest {
                         fixture.view.removeSprites(sprites);
                         sprites = markers(fixture, mode, before, includeMapBorder);
                     });
-                    boardCamera.setIsometric(comparison % 6 < 3);
+                    // The isometric 3D view, or the Tactical View with its flat walls ("-top").
+                    setTacticalView(comparison % 6 >= 3);
                     var scene = fixture.source.takeFrame().scene();
                     assertEquals(before || mode < SensorRangeSprite.VISUAL ? 0 : includeMapBorder ? 18 : 9,
                           scene.tactical().walls().size());
