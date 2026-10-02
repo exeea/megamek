@@ -14,7 +14,7 @@ import megamek.common.units.Tank;
 
 /** Visual fine-tuning on top of BoardGeometry; keys follow the existing asset families. */
 enum UnitFamilyScale {
-    MEK("All Meks", 1.0f, 1.0f, 0.7f, 1.15f),
+    MEK("All Meks", 1.0f, 1.0f, 0.7f, 1.25f),
     // Weight-class multipliers stack with MEK and the model's authored proportions.
     MEK_LIGHT("Light Meks", MEK, 1.0f, 1.0f, 1.0f, 1.0f - 0.24f),
     MEK_MEDIUM("Medium Meks", MEK, 1.0f, 1.0f, 1.0f, 1.0f - 0.16f),
