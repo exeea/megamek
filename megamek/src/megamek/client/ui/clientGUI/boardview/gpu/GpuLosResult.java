@@ -41,7 +41,7 @@ final class GpuLosResult {
      * The modifier of a measurement waiting for its second point (rimshaderv1's pendingMeasurementModifiers): Ctrl
      * while a line of sight has its first point, Alt while the ruler has its start alone, else 0.
      */
-    private static int pending(BoardClientState view) {
+    static int pending(BoardClientState view) {
         if (view.getFirstLOS() != null) {
             return InputEvent.CTRL_DOWN_MASK;
         }

@@ -98,6 +98,11 @@ interface BoardSource extends AutoCloseable {
     void close();
     void setHover(Coords coords);
     void inspect(Coords coords);
+    /**
+     * A map preview's measurement with MegaMek's ruler: Ctrl for a line of sight, Alt for a distance; a plain click
+     * ends one that waits for its second point. A game measures through its HUD.
+     */
+    default void measure(Coords coords, int modifiers) { }
 
     // A map preview has no gameplay overlays, chat, selection, or editing input.
     default void setVisibleArea(Rectangle area) { }

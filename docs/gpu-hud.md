@@ -688,9 +688,14 @@ While the native window is active (`GpuBoardWindow.isActiveFor`), the HUD replac
 The board editor's 3D view and the lobby's map preview run the same `GpuBattleView` over a `GpuMapSource`, which has
 no game. `GpuBattleView` holds its HUD as a `GpuBoardHud`: the battle HUD (`GpuHud`) over a `GpuBoardSource`, else
 `GpuMapHud`. The map tools show the battle HUD's utilities that apply to a map (Tactical view, Wireframe, Tuning; in
-the editor also Menu with its menu bar, Tools and 2D Editor) and a hint line with the editor's title, the hovered hex's
-terrain and the keys of the editor or Free Flight. A left drag paints in the editor; a right click in the preview
-inspects the hex. The camera centres the board beside the editor's Swing tools (`BoardSource.toolsInset`).
+the editor also Menu with its menu bar, Tools and 2D Editor). At the bottom, the hovered or inspected hex's card
+(`GpuMapSource.hexCard`: the hex with its level and theme, then the terrains a player sees with their terrain factors,
+as the battle's hex tooltip names them; no automated terrains or terrain codes) stands over a hint line with the
+editor's title or what the preview's measurement waits for, and the keys of the editor, Free Flight or the preview's
+line of sight. A left drag paints in the editor. In the preview a right click inspects the hex, and a Ctrl or Alt
+click measures with MegaMek's Swing ruler, which the preview makes on its own board state at the first measurement
+(`BoardSource.measure`); a plain click ends a measurement that waits for its second point, and the board draws the
+ruler's line. The camera centres the board beside the editor's Swing tools (`BoardSource.toolsInset`).
 
 ## 10. The developer Tuning utility
 

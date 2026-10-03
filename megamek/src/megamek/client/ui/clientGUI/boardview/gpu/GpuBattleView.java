@@ -1666,7 +1666,7 @@ class GpuBattleView extends ApplicationAdapter {
                 return true;
             }
             // A short left or right click on the board of the press goes to the HUD: the tool click or the menu. A
-            // map preview's right click inspects the hex, whose terrain its hint line then shows.
+            // map preview's right click inspects the hex, whose card then shows; its left click measures.
             if (!dragged && button != Input.Buttons.MIDDLE && !ui.hit(x, y)
                   && gestureBoardGeneration == boardGeneration) {
                 Pick picked = pickSelection(x, y);
@@ -1675,6 +1675,8 @@ class GpuBattleView extends ApplicationAdapter {
                     hud.boardClick(picked.coords(), picked.entityId(), button, gestureModifiers, x, y);
                 } else if (button == Input.Buttons.RIGHT) {
                     source.inspect(picked.coords());
+                } else {
+                    source.measure(picked.coords(), gestureModifiers);
                 }
             }
             reset();

@@ -3,22 +3,31 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.Rectangle;
 import java.awt.Window;
+import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import javax.swing.JFrame;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 
+import megamek.client.ui.Messages;
 import megamek.client.ui.boardeditor.BoardEditorPanel;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardFocus;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
-import megamek.client.ui.clientGUI.boardview.toolTip.BoardEditorTooltipContent;
+import megamek.client.ui.clientGUI.boardview.RulerDialog;
+import megamek.client.ui.util.UIUtil;
+import megamek.codeUtilities.StringUtility;
+import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.event.GameListenerAdapter;
@@ -29,10 +38,27 @@ import megamek.common.game.Game;
 import megamek.common.preference.IPreferenceChangeListener;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.units.Entity;
+import megamek.common.units.Terrain;
+import megamek.common.units.Terrains;
+import megamek.logging.MMLogger;
 
 /** Native preview/editor input. The Game/Board and editor operations are the only authoritative state. */
 final class GpuMapSource implements BoardSource {
+    private static final MMLogger LOGGER = MMLogger.create(GpuMapSource.class);
+    /** A tab separates a row of the hex card from its detail ({@link #hexCard}). */
+    static final char COLUMN = '\t';
+
     private final Game game;
+    private final Window owner;
+    /**
+     * A preview's line of sight instrument, made at its first measurement: a board state over the preview's game, whose
+     * ruler line the scene draws, and MegaMek's ruler on it (the user's decision of 2026-10-03).
+     */
+    private BoardClientState measuring;
+    private RulerDialog ruler;
+    /** The measurement the scene's ruler line shows, and that line. */
+    private List<Coords> measured = List.of();
+    private BoardTactical rulerLine = BoardTactical.EMPTY;
     private final BoardEditorPanel editor;
     /** Only Swing owns the active brush stroke; render input carries the board generation it picked. */
     private Board editorStrokeBoard;
@@ -106,6 +132,7 @@ final class GpuMapSource implements BoardSource {
     GpuMapSource(Game game, Window owner, BoardEditorPanel editor) {
         if (!SwingUtilities.isEventDispatchThread()) { throw new IllegalStateException("Map capture belongs to the EDT"); }
         this.game = game;
+        this.owner = owner;
         this.editor = editor;
         atmosphere = new GpuAtmosphereControls(() -> owner, game::getBoard, game::getPlanetaryConditions, () -> closed);
         menus = new GpuMenuCommands(() -> closed, this::refresh);
@@ -133,6 +160,7 @@ final class GpuMapSource implements BoardSource {
             board = current;
             board.addBoardListener(boardListener);
             boardGeneration++;
+            closeMeasuring();
             contextCoords = null;
             images.clear();
             terrainMarkers.clear();
@@ -180,12 +208,12 @@ final class GpuMapSource implements BoardSource {
         }
         Coords hover = hoverCoords;
         if (editor != null) { editorBrush = new EditorBrush(hover, boardGeneration, editor.elevationBrush(hover)); }
-        phaseStatus = new PhaseStatus(editor == null ? "" : editor.getFrame().getTitle(), false);
+        phaseStatus = new PhaseStatus(editor == null ? measuringStatus() : editor.getFrame().getTitle(), false);
         Coords inspected = contextCoords == null ? hover : contextCoords;
-        String tooltip = inspected == null || !board.contains(inspected) ? ""
-              : GpuMenuCommands.plainText(BoardEditorTooltipContent.format(board, inspected));
+        String tooltip = inspected == null || !board.contains(inspected) ? "" : hexCard(board.getHex(inspected));
         BoardScene scene = new BoardScene(0, board.getWidth(), board.getHeight(), tiles, List.of(), List.of(),
-              Entity.NONE, "", List.of(), null, List.of(), List.of(), List.of(), editorTerrain);
+              Entity.NONE, "", List.of(), null, List.of(), List.of(), List.of(),
+              measuring == null ? editorTerrain : rulerLine());
         toolsWidth = editor == null ? 0 : editor.tools3DWidth();
         frame = new Frame(scene, List.of(), contextCoords == null ? null : new BoardScene.Context(contextCoords, List.of()),
               editor == null ? List.of() : menus.capture(editor.getMenuBar(), editor::getMenuBar, () -> true), tooltip,
@@ -231,6 +259,101 @@ final class GpuMapSource implements BoardSource {
 
     public boolean isEditor() {
         return editor != null;
+    }
+
+    /**
+     * The hovered or inspected hex as the map tools' card lists it, one row a line, a {@link #COLUMN} before a row's
+     * detail: its number with its level and theme; each terrain a player sees with its terrain factor, by MegaMek's
+     * display names as the battle's hex tooltip lists them, so automated and cosmetic terrains, which have none, stay
+     * out (the user's decision of 2026-10-03); then why an invalid hex is invalid.
+     */
+    static String hexCard(Hex hex) {
+        String level = Messages.getString("GpuBoard.map.level", hex.getLevel());
+        List<String> rows = new ArrayList<>(List.of(Messages.getString("GpuBoard.hud.context.hex",
+              hex.getCoords().getBoardNum()) + COLUMN
+              + (StringUtility.isNullOrBlank(hex.getTheme()) ? level : level + " \u00B7 " + hex.getTheme())));
+        for (int type : hex.getTerrainTypes()) {
+            Terrain terrain = hex.getTerrain(type);
+            String name = Terrains.getDisplayName(type, terrain.getLevel());
+            if (name != null) {
+                int factor = terrain.getTerrainFactor();
+                rows.add(name + COLUMN + (factor > 0 ? Messages.getString("GpuBoard.map.terrainFactor", factor) : ""));
+            }
+        }
+        if (rows.size() == 1) {
+            rows.add(Messages.getString("GpuBoard.hud.context.clearTerrain") + COLUMN);
+        }
+        List<String> errors = new ArrayList<>();
+        if (!hex.isValid(errors)) {
+            rows.add(UIUtil.WARNING_SIGN.strip() + " " + Messages.getString("BoardView1.invalidHex") + COLUMN);
+            errors.forEach(error -> rows.add(error + COLUMN));
+        }
+        return String.join("\n", rows);
+    }
+
+    @Override
+    public void measure(Coords coords, int modifiers) {
+        onSwing(() -> {
+            if (closed || editor != null || coords == null || !board.contains(coords)) {
+                return;
+            }
+            int measurement = GpuBoardSource.isMeasurement(modifiers) ? modifiers
+                  : measuring == null ? 0 : GpuLosResult.pending(measuring);
+            if (measurement != 0 && measuring() != null) {
+                measuring.mouseAction(coords, BoardClientState.BOARD_HEX_CLICK, measurement, 1);
+                refresh();
+            }
+        });
+    }
+
+    /** EDT: the preview's measuring board state with its ruler, made the first time; null when it cannot be made. */
+    private BoardClientState measuring() {
+        if (measuring == null) {
+            try {
+                measuring = new BoardClientState(game, null, null, 0, null);
+            } catch (IOException failure) {
+                LOGGER.error("The preview's line of sight could not start", failure);
+                return null;
+            }
+            JFrame frame = null;
+            for (Window window = owner; window != null && frame == null; window = window.getOwner()) {
+                frame = window instanceof JFrame classic ? classic : null;
+            }
+            ruler = new RulerDialog(frame, measuring, game);
+            // The native preview window would cover it; the battle window raises its client's ruler the same way.
+            ruler.setAlwaysOnTop(true);
+        }
+        return measuring;
+    }
+
+    /** The ruler's line, crosshairs and line of sight hexes as the scene draws them, captured when they change. */
+    private BoardTactical rulerLine() {
+        List<Coords> now = Arrays.asList(measuring.getRulerStart(), measuring.getRulerEnd(),
+              measuring.getFirstLOS());
+        if (!now.equals(measured)) {
+            measured = now;
+            rulerLine = measuring.captureTacticalGeometry();
+        }
+        return rulerLine;
+    }
+
+    /** The preview's status line: what a measurement waiting for its second point needs, else nothing. */
+    private String measuringStatus() {
+        int pending = measuring == null ? 0 : GpuLosResult.pending(measuring);
+        return pending == 0 ? "" : Messages.getString(pending == InputEvent.CTRL_DOWN_MASK
+              ? "GpuBoard.hud.hint.completeLos" : "GpuBoard.hud.hint.completeDistance");
+    }
+
+    /** Ends the preview's measurement with its ruler; the next one starts afresh. */
+    private void closeMeasuring() {
+        if (measuring != null) {
+            ruler.dispose();
+            measuring.close();
+            measuring = null;
+            ruler = null;
+            measured = List.of();
+            rulerLine = BoardTactical.EMPTY;
+        }
     }
 
     public void showEditorTools() {
@@ -323,6 +446,7 @@ final class GpuMapSource implements BoardSource {
         closed = true;
         finishEditorStroke();
         timer.stop();
+        closeMeasuring();
         atmosphere.close();
         game.removeGameListener(gameListener);
         if (board != null) { board.removeBoardListener(boardListener); }
