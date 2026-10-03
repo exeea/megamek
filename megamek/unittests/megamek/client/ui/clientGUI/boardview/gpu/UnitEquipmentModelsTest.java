@@ -52,6 +52,23 @@ class UnitEquipmentModelsTest {
         assertEquals("medium-long.json", catalog.resolve(mount("medium", EquipmentModelPolicy.WEAPON), plainMount).asset());
     }
 
+    @Test
+    void aLauncherLinkedToArtemisTakesTheGuidedVersionOfItsProfile() {
+        var catalog = new UnitEquipmentModels(new JsonReader().parse("""
+              {"schema":2,"equipment":{
+              "SRM 6":{"model":"box.json","profiles":{"housing":"housing.json","housing-guided":"housing-dome.json"}},
+              "LRM 10":{"model":"lrm.json","profiles":{"housing":"lrm-housing.json"}}},
+              "fallbacks":{"weapon":"weapon.json"}}
+              """));
+        var housing = new JsonReader().parse("{\"profile\":\"housing\"}");
+        assertEquals("housing-dome.json", catalog.resolve(launcher("SRM 6", true), housing).asset());
+        assertEquals("housing.json", catalog.resolve(launcher("SRM 6", false), housing).asset());
+        // With no guided version in the art, a linked launcher keeps the plain profile.
+        assertEquals("lrm-housing.json", catalog.resolve(launcher("LRM 10", true), housing).asset());
+        // A mount that asks for no profile is not changed by the link.
+        assertEquals("box.json", catalog.resolve(launcher("SRM 6", true), placement).asset());
+    }
+
     private static UnitEquipmentModels catalog(String id, String model) {
         return new UnitEquipmentModels(new JsonReader().parse("""
               {"schema":2,"equipment":{"%s":{"model":"%s"}},
@@ -61,5 +78,10 @@ class UnitEquipmentModelsTest {
 
     private static UnitModelEquipment.Mount mount(String id, EquipmentModelPolicy policy) {
         return new UnitModelEquipment.Mount(3, id, "LA", "LT", false, false, 0, policy, "laser", List.of());
+    }
+
+    private static UnitModelEquipment.Mount launcher(String id, boolean guided) {
+        return new UnitModelEquipment.Mount(4, id, "TU", "", false, false, 0, EquipmentModelPolicy.WEAPON, "missile",
+              List.of(), guided);
     }
 }

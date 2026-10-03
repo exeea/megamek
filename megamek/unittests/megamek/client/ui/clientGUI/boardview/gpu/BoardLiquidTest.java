@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
+import java.io.File;
+import java.util.ArrayList;
 import java.util.List;
 import javax.swing.SwingUtilities;
 
@@ -35,7 +37,9 @@ class BoardLiquidTest {
         }
         hex.removeAllTerrains();
         hex.addTerrain(new Terrain(Terrains.MAGMA, 1));
-        assertEquals(BoardLiquid.NONE, BoardLiquid.capture(hex), "Magma crust stays solid");
+        assertEquals(BoardLiquid.Kind.MAGMA_CRUST, BoardLiquid.capture(hex).kind());
+        assertFalse(BoardLiquid.capture(hex).present(), "Magma crust stays solid");
+        assertTrue(BoardLiquid.capture(hex).volcanic(), "Solid crust retains its hot material");
         hex.addTerrain(new Terrain(Terrains.MAGMA, 2));
         BoardLiquid lava = BoardLiquid.capture(hex);
         assertTrue(lava.molten());
@@ -46,6 +50,80 @@ class BoardLiquidTest {
             hex.addTerrain(new Terrain(type, 1));
             assertEquals(BoardLiquid.NONE, BoardLiquid.capture(hex), "Wet ground keeps its authored terrain surface");
         }
+    }
+
+    @Test
+    void crustBreakageAndRemovalRefreshTheMaterialAndSupportWithoutChangingGameElevation() throws Exception {
+        Hex hex = new Hex(2);
+        hex.addTerrain(new Terrain(Terrains.MAGMA, 1));
+        try (GpuBoardFixture fixture = GpuBoardFixture.create(new Board(1, 1, new Hex[] { hex }))) {
+            Coords coords = new Coords(0, 0);
+            for (int level : new int[] { 1, 2, 1, 0 }) {
+                SwingUtilities.invokeAndWait(() -> {
+                    Hex changed = hex.duplicate();
+                    changed.removeTerrain(Terrains.MAGMA);
+                    if (level > 0) { changed.addTerrain(new Terrain(Terrains.MAGMA, level)); }
+                    fixture.game.getBoard().setHex(coords, changed);
+                    fixture.source.refresh();
+                });
+                BoardScene scene = fixture.source.takeFrame().scene();
+                BoardScene.Tile tile = scene.tile(coords);
+                assertEquals(2, tile.elevation());
+                assertEquals(level == 2, tile.liquid().present());
+                assertEquals(level > 0, tile.liquid().volcanic());
+                assertTrue(tile.detailedGround());
+                assertEquals(level == 2, !new BoardSurface(scene, tile).waterFaces.isEmpty());
+                assertEquals(2 * BoardGeometry.level() - (level == 2 ? BoardGeometry.hexScale() : 0),
+                      BoardGeometry.surfaceZ(tile), .001);
+                Vector3 above = BoardGeometry.center(coords, 2).add(0, 0, 100);
+                assertEquals(coords, BoardGeometry.pick(scene, new Ray(above, new Vector3(0, 0, -1))));
+                if (level > 0) {
+                    assertNull(tile.decals(), "Legacy magma art must not cover the new material");
+                    assertFalse(BoardSurfaceBlend.natural(tile), "Ordinary soil/grass cannot blend across hot crust");
+                }
+            }
+        }
+    }
+
+    @Test
+    void isolatedPoolsKeepVisibleLiquidBetweenHigherBanks() {
+        Coords pool = new Coords(3, 3);
+        var pixels = new BoardScene.Pixels(new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB));
+        for (BoardLiquid.Kind kind : List.of(BoardLiquid.Kind.WATER, BoardLiquid.Kind.HAZARDOUS, BoardLiquid.Kind.MAGMA)) {
+            BoardScene scene = BoardSurfaceBlendTest.scene(c -> c.equals(pool)
+                  ? new BoardScene.Tile(pool, 0, -1, false, 0, BoardScene.Surface.ROCK,
+                        pixels, null, null, null, null, List.of(), List.of(), new BoardLiquid(kind, "", 0), null, true)
+                  : BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, 1, -1, 0));
+            assertVisiblePool(scene, pool);
+        }
+    }
+
+    @Test
+    void fireAndIceLavaPoolKeepsItsSurfaceThroughTheRealBoardCapture() throws Exception {
+        Board board = new Board();
+        board.load(new File("data/boards/unofficial/Drewbacca/16x17 Fire And Ice 2.board"));
+        try (GpuBoardFixture fixture = GpuBoardFixture.create(board)) {
+            BoardScene scene = fixture.source.takeFrame().scene();
+            Coords pool = new Coords(1, 15);
+            assertEquals(BoardLiquid.Kind.MAGMA, scene.tile(pool).liquid().kind());
+            assertEquals(0, scene.tile(pool).elevation());
+            assertVisiblePool(scene, pool);
+        }
+    }
+
+    private static void assertVisiblePool(BoardScene scene, Coords pool) {
+        Vector3 center = BoardGeometry.center(pool, 0);
+        for (TerrainLod lod : TerrainLod.values()) {
+            BoardSurface surface = new BoardSurface(scene, scene.tile(pool), lod);
+            for (int direction = 0; direction < 6; direction++) {
+                Vector3 point = new Vector3(center).lerp(BoardGeometry.corner(pool, 0, direction), .2f);
+                float liquid = BoardSurface.sampleHeight(surface.waterFaces, point.x, point.y, Float.NaN);
+                assertTrue(Float.isFinite(liquid), pool + " pool must retain a visible center at " + lod);
+                assertTrue(BoardSurface.sampleHeight(surface.faces, point.x, point.y, Float.NEGATIVE_INFINITY) < liquid,
+                      pool + " pool must stay above its bed and clear of its banks at " + lod);
+            }
+        }
+        assertEquals(pool, BoardGeometry.pick(scene, new Ray(new Vector3(center).add(0, 0, 500), new Vector3(0, 0, -1))));
     }
 
     @Test
@@ -63,7 +141,7 @@ class BoardLiquidTest {
 
         BoardScene lavaScene = scene(lava, lava, -1);
         BoardSurface molten = new BoardSurface(lavaScene, lavaScene.tile(high));
-        assertEquals(1, molten.waterfalls.size(), "Adjacent lava levels share a flowing face");
+        assertTrue(molten.waterfalls.isEmpty(), "A two-level lava drop shares the normal graded liquid surface");
         BoardScene mixedScene = scene(lava, BoardLiquid.WATER, -1);
         assertTrue(new BoardSurface(mixedScene, mixedScene.tile(high)).waterfalls.isEmpty(),
               "A rocky shoreline separates lava from water");
@@ -103,6 +181,69 @@ class BoardLiquidTest {
             assertEquals(2, last.waterDepth());
             assertFalse(last.liquid().textures(2, 1).foam().isEmpty());
         }
+    }
+
+    @Test
+    void volcanicSlopesShareGeometryAndPickingInEveryDirection() {
+        BoardSculptTest.withTransitions(true, () -> {
+            Coords high = new Coords(3, 3);
+            for (int direction = 0; direction < 6; direction++) {
+                for (int drop : new int[] { 1, 2, 3 }) {
+                    Coords low = high.translated(direction);
+                    BoardScene crust = slopeScene(BoardLiquid.Kind.MAGMA_CRUST, drop, low);
+                    BoardScene rock = slopeScene(BoardLiquid.Kind.NONE, drop, low);
+                    for (TerrainLod lod : new TerrainLod[] { TerrainLod.FULL, TerrainLod.MEDIUM, TerrainLod.COARSE }) {
+                        for (Coords coords : List.of(high, low)) {
+                            BoardSurface solid = new BoardSurface(crust, crust.tile(coords), lod);
+                            BoardSurface ordinary = new BoardSurface(rock, rock.tile(coords), lod);
+                            assertTrue(solid.relief.sculpted());
+                            assertEquals(ordinary.faces, solid.faces, "Crust keeps the canonical sculpted top");
+                            assertEquals(ordinary.walls(rock, -50), solid.walls(crust, -50),
+                                  "Crust keeps every slope and cliff, including both halves of the shared edge");
+                        }
+                    }
+                    BoardScene lava = slopeScene(BoardLiquid.Kind.MAGMA, drop, low);
+                    BoardSurface upper = new BoardSurface(lava, lava.tile(high));
+                    BoardSurface lower = new BoardSurface(lava, lava.tile(low));
+                    assertEquals(drop <= 2, upper.waterfalls.isEmpty(), "Lava slopes for 1/2 levels, falls from 3");
+                    if (drop > 2) { continue; }
+                    int edge = Math.floorMod(1 - direction, 6), opposite = (edge + 3) % 6;
+                    List<Vector3> a = upper.waterBoundary(edge), b = lower.waterBoundary(opposite);
+                    assertEquals(a.size(), b.size());
+                    for (int i = 0; i < a.size(); i++) {
+                        assertTrue(a.get(i).epsilonEquals(b.get(b.size() - 1 - i), .002f),
+                              "Lava mouth stays watertight in direction " + direction + " at drop " + drop);
+                    }
+                    Vector3 from = BoardGeometry.center(high, 0), to = BoardGeometry.center(low, 0);
+                    float previous = Float.POSITIVE_INFINITY;
+                    for (int i = 0; i <= 20; i++) {
+                        Vector3 p = new Vector3(from).lerp(to, i / 20f);
+                        BoardSurface own = i < 10 ? upper : lower;
+                        float height = own.waterHeight(p.x, p.y);
+                        assertTrue(Float.isFinite(height) && height <= previous + .01f,
+                              "Lava descends continuously instead of making a vertical step");
+                        previous = height;
+                    }
+                    Vector3 above = new Vector3(from).add(0, 0, 500);
+                    assertEquals(high, BoardGeometry.pick(lava, new Ray(above, new Vector3(0, 0, -1))));
+                }
+            }
+        });
+    }
+
+    private static BoardScene slopeScene(BoardLiquid.Kind kind, int drop, Coords low) {
+        BoardScene.Pixels pixels = new BoardScene.Pixels(new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB));
+        List<BoardScene.Tile> tiles = new ArrayList<>();
+        Coords high = new Coords(3, 3);
+        for (int x = 0; x < 7; x++) {
+            for (int y = 0; y < 7; y++) {
+                Coords coords = new Coords(x, y);
+                BoardLiquid liquid = coords.equals(high) || coords.equals(low) ? new BoardLiquid(kind, "", 0) : BoardLiquid.NONE;
+                tiles.add(new BoardScene.Tile(coords, coords.equals(high) ? drop : 0, -1, false, 0, BoardScene.Surface.ROCK,
+                      pixels, null, null, null, null, List.of(), List.of(), liquid, null, true));
+            }
+        }
+        return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
     }
 
     private static BoardScene scene(BoardLiquid high, BoardLiquid low, int depth) {

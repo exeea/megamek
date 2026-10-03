@@ -2,7 +2,6 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import com.badlogic.gdx.graphics.Camera;
-import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
@@ -99,17 +98,22 @@ final class GpuFieldOfView implements Disposable {
     }
 
     void bind(ShaderProgram shader, Camera camera) {
+        bindMask(shader, camera);
+        shader.setUniformf("u_fovOptions", previous.highlightAlpha() / 255f, previous.spotting() ? 1 : 0);
+        shader.setUniformf("u_dimmedDesaturation", DIMMED_DESATURATION);
+        float pixel = BoardCamera.worldUnitsPerPixel(camera) / BoardGeometry.height();
+        shader.setUniformf("u_fovEdge", Math.max(0.004f, Math.min(0.04f, pixel * 1.5f)));
+    }
+
+    /** Source opacity for camera glow uses the same visibility mask without tactical border/tint uniforms. */
+    void bindMask(ShaderProgram shader, Camera camera) {
         mask.bind(3);
         shader.setUniformi("u_fov", 3);
         shader.setUniformf("u_fovSize", previous.width(), previous.height());
-        shader.setUniformf("u_fovHexSize", BoardGeometry.WIDTH, BoardGeometry.HEIGHT);
+        shader.setUniformf("u_fovHexSize", BoardGeometry.width(), BoardGeometry.height());
         shader.setUniformMatrix("u_fovInverseView", camera.invProjectionView);
-        shader.setUniformf("u_fovOptions", previous.highlightAlpha() / 255f, previous.spotting() ? 1 : 0);
-        shader.setUniformf("u_dimmedDesaturation", DIMMED_DESATURATION);
         bindEffect(shader, "u_fovEffect", fovStyle, fovDarkness);
         bindEffect(shader, "u_sensorEffect", sensorStyle, sensorDarkness);
-        float pixel = camera instanceof OrthographicCamera ortho ? ortho.zoom / BoardGeometry.HEIGHT : 0.01f;
-        shader.setUniformf("u_fovEdge", Math.max(0.004f, Math.min(0.04f, pixel * 1.5f)));
     }
 
     private void bindEffect(ShaderProgram shader, String uniform, Style style, float darkness) {

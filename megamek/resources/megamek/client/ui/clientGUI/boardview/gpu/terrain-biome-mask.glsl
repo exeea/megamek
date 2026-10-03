@@ -1,0 +1,97 @@
+// Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
+// After terrain-hexes.glsl, which supplies the per-hex texture, hash, noise and hex distance.
+float biomeWetness(vec2 p) {
+    vec2 q = p + 1.3 * (vec2(biomeNoise(p / 4.0 + vec2(31.0, 0.0)),
+          biomeNoise(p / 4.0 + vec2(0.0, -23.0))) - .5);
+    return .55 * biomeNoise(q / 5.7) + .30 * biomeNoise(q / 2.0 + vec2(19.0, -7.0))
+          + .15 * biomeNoise(q / .65);
+}
+
+// One bounded stencil serves both the shoreline treatment and the connected liquid's optical mixture.
+// A negative waterLevel disables the liquid work for dry terrain. No additional textures or per-hex draws.
+void terrainCoverage(vec3 world, float edge, float waterLevel, out vec4 cover, out vec4 fringe, out vec4 liquids) {
+    cover = vec4(0.0); fringe = vec4(0.0); liquids = vec4(0.0);
+    if (u_biomeBoard.x < 1.0) return;
+    const float width = 30.0, height = 30.0 * 72.0 / 84.0;
+    int column = int(floor(world.x / (width * .75)));
+    // Only ground within two rings of a biome or aqueous hex can receive coverage, and its own hex's texel says so
+    // (GpuBiomeSurface): every other fragment is spared the stencil below.
+    int home = int(floor(-world.y / height - mod(float(column), 2.0) * .5));
+    ivec2 hex = clamp(ivec2(column, home), ivec2(0), ivec2(u_biomeBoard) - 1);
+    if (texelFetch(u_biomeHexes, hex, 0).r < .5) return;
+    bool aqueous = waterLevel > -1000.0;
+    vec2 mixed = world.xy;
+    if (aqueous) {
+        mixed += (vec2(biomeNoise(world.xy / 8.0), biomeNoise(world.xy / 7.1 + 17.0)) - .5) * 4.0;
+        mixed += (vec2(biomeNoise(mixed / 2.7 + 31.0), biomeNoise(mixed / 2.1 - 9.0)) - .5) * 2.0;
+    }
+    float filament = aqueous ? biomeNoise(mixed / 1.3) * 7.0 : 0.0;
+    float fineMix = 1.0 - smoothstep(.08, .4, length(fwidth(world.xy)));
+    // Soil/peat reaches onto the adjoining slope; crops and standing pools keep the narrower height support.
+    // Both masks share this stencil, with no extra texture fetches.
+    float edgeNoise = biomeNoise(world.xy / 3.2 + 41.0);
+    // Drainage below a wet plateau follows uneven peat fingers, not an equipotential waterline.
+    // Above it, keep the narrow bank fringe: standing water cannot climb into a higher hex.
+    float drainNoise = mix(edgeNoise, biomeNoise(world.xy / .85 + 9.0), .35 * fineMix);
+    float drainage = mix(1.4, max(3.6, u_levelHeight / u_metre * 1.4), smoothstep(.15, .85, drainNoise));
+    vec3 wetTiles = vec3(0.0);
+    float wetAbove = 0.0, wetBelow = 0.0;
+    float total = 0.0, fieldTotal = 0.0, fringeTotal = 0.0;
+    for (int dx = -1; dx <= 1; dx++) {
+        int x = column + dx;
+        float parity = mod(float(x), 2.0);
+        int row = int(floor(-world.y / height - parity * .5));
+        for (int dy = -1; dy <= 1; dy++) {
+            int y = row + dy;
+            vec2 center = boardHexCenter(x, y);
+            float distance = biomeHexDistance(world.xy - center);
+            float w = 1.0 - smoothstep(-edge, edge, distance);
+            float fw = 1.0 - smoothstep(-2.2, 2.2, distance);
+            float bw = 1.0 - smoothstep(-4.5, 4.5, distance + (edgeNoise - .5) * 2.0);
+            float lw = aqueous ? 1.0 - smoothstep(-5.0, 5.0, biomeHexDistance(mixed - center)) : 0.0;
+            // Fold narrow pigment filaments through the mixing band; uniform interiors remain unchanged.
+            lw = clamp(lw + 4.0 * lw * (1.0 - lw) * .13 * sin(lw * 42.0 + filament) * fineMix, 0.0, 1.0);
+            total += w;
+            fieldTotal += fw;
+            fringeTotal += bw;
+            if ((w > 0.0 || lw > 0.0) && x >= 0 && y >= 0 && float(x) < u_biomeBoard.x && float(y) < u_biomeBoard.y) {
+                vec4 tile = texelFetch(u_biomeHexes, ivec2(x, y), 0);
+                float level = tile.a * 255.0 - 64.0;
+                float z = level * u_levelHeight / u_metre;
+                int kind = int(tile.r * 255.0 + .5) & 15;
+                vec4 kinds = vec4(kind == 1, kind == 2, kind == 3, kind == 4);
+                cover += kinds * vec4(fw, w, w, w) * (1.0 - smoothstep(.15, 1.25, abs(world.z - z)));
+                vec4 reach = vec4(2.0, 2.8, 2.8, 2.8) + edgeNoise * .8;
+                if (world.z < z) reach.yzw = vec3(drainage);
+                fringe += kinds * vec4(bw, w, w, w) * (1.0 - smoothstep(vec4(.15),
+                      reach, vec4(abs(world.z - z))));
+                vec3 wet = kinds.yzw * w;
+                wetTiles += wet;
+                float wetWeight = dot(wet, vec3(1.0));
+                wetAbove += wetWeight * step(world.z + .15, z);
+                wetBelow += wetWeight * step(z + .15, world.z);
+                int liquid = int(tile.g * 255.0 + .5);
+                liquids += vec4(liquid == 1, liquid == 2, liquid == 3, liquid == 4) * lw
+                      * (1.0 - smoothstep(.05, .25, abs(waterLevel - level)));
+            }
+        }
+    }
+    cover /= max(vec4(fieldTotal, total, total, total), vec4(.0001));
+    fringe /= max(vec4(fringeTotal, total, total, total), vec4(.0001));
+    // Wet neighbours on both sides of this height share a peat bank across the whole drop.
+    // Only sediment connects: the narrower cover mask still confines pools and plants to their supported level.
+    float connected = smoothstep(0.0, .18, min(wetAbove, wetBelow) / max(total, .0001));
+    fringe.yzw = max(fringe.yzw, wetTiles / max(total, .0001) * connected);
+    liquids /= max(dot(liquids, vec4(1.0)), .0001);
+}
+
+void biomeCoverage(vec3 world, float edge, out vec4 cover, out vec4 fringe) {
+    vec4 liquids;
+    terrainCoverage(world, edge, -10000.0, cover, fringe, liquids);
+}
+
+vec4 liquidCoverage(vec3 world, float level) {
+    vec4 cover, fringe, liquids;
+    terrainCoverage(world, .01, level, cover, fringe, liquids);
+    return liquids;
+}

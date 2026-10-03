@@ -106,8 +106,9 @@ public final class UiTheme implements Disposable {
     /**
      * Material Symbols Rounded codepoints baked once as icon-name; the first thirteen keep the earlier names. Help is
      * help_center, the prototype's question mark in a rounded square; tune marks the developer tuning utility; walk is
-     * the prototype's footprints; list is its bulleted list (shot 11). arrow-right, arrow-up, arrow-down and
-     * triangle-left are image uses only: Labels draw U+2190-U+2193 and U+25C2 as text through FALLBACK_FONTS.
+     * the prototype's footprints; list is its bulleted list (shot 11); wireframe is the open grid of three lines each
+     * way (U+F016). arrow-right, arrow-up, arrow-down and triangle-left are image uses only: Labels draw U+2190-U+2193
+     * and U+25C2 as text through FALLBACK_FONTS.
      */
     public static final Map<String, Integer> ICONS = Map.ofEntries(
           Map.entry("target", 0xE1B3), Map.entry("move", 0xE569), Map.entry("group", 0xE241),
@@ -127,7 +128,7 @@ public final class UiTheme implements Disposable {
           Map.entry("layers", 0xE53B), Map.entry("replay", 0xE042), Map.entry("rewind", 0xE020),
           Map.entry("star", 0xE838), Map.entry("star-outline", 0xE838), Map.entry("tune", 0xE429),
           Map.entry("arrow-right", 0xE941), Map.entry("arrow-up", 0xE986), Map.entry("arrow-down", 0xE984),
-          Map.entry("triangle-left", 0xE5DE));
+          Map.entry("triangle-left", 0xE5DE), Map.entry("wireframe", 0xF016));
     /**
      * Icons the prototype draws filled. The shipped font has no filled named instance, so their outlines are closed:
      * every texel that the glyph's outline encloses becomes opaque.

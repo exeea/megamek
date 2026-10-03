@@ -2,240 +2,176 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
-import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
-import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.ScreenUtils;
-import megamek.common.Hex;
-import megamek.common.board.Board;
 import megamek.common.board.Coords;
-import megamek.common.units.Terrain;
-import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Actual Saxarba themes at several cliff heights, with shallow/deep beds and all six small rim maps. */
+/**
+ * The sculpted materials in native OpenGL: grassland banks of two levels are earth while cliffs of three are rock,
+ * concrete steps are cast slabs while a three-level concrete cliff is a slab on darker bedrock, rain darkens exposed
+ * ground and rock but never snow, and special ground art keeps its own colour on its top.
+ */
 @Tag("on-demand")
 class GpuTerrainMaterialsSmokeTest {
-    /** Edge length of the skirt region the run-off check fingerprints, in pixels. */
-    private static final int REGION = 64;
+    /** Half the edge of the sampled screen window, in pixels. */
+    private static final int WINDOW = 6;
 
     @Test
-    void rendersSmallRimMaterialsAndRiverbedsAcrossThemes() throws Exception {
-        String[] themes = { "grass", "mars", "desert", "lunar", "grass", "snow" };
-        Hex[] hexes = new Hex[18 * 6];
-        for (int y = 0; y < 6; y++) {
-            for (int x = 0; x < 18; x++) {
-                Hex hex = new Hex(Math.max(0, 3 - y));
-                hex.setTheme(themes[x / 3]);
-                if (y >= 4) {
-                    hex.addTerrain(new Terrain(Terrains.WATER, y - 4));
-                } else if (x / 3 == 4) {
-                    hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1));
-                } else if (x / 3 == 5) {
-                    hex.addTerrain(new Terrain(Terrains.SNOW, 2));
-                }
-                hexes[y * 18 + x] = hex;
-            }
-        }
+    void rendersSculptedMaterialsRainAndSpecialArt() {
         AtomicReference<Throwable> failure = new AtomicReference<>();
-        try (GpuBoardFixture fixture = GpuBoardFixture.create(new Board(18, 6, hexes))) {
-            SwingUtilities.invokeAndWait(fixture.source::refresh);
-            BoardScene scene = fixture.source.takeFrame().scene();
-            for (int family = 0; family < 6; family++) {
-                assertEquals(BoardScene.Surface.values()[family], scene.tile(new Coords(family * 3 + 1, 2)).surface());
+        var config = GpuBoardWindow.configuration(false);
+        config.setWindowedMode(960, 720);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                GpuTerrain terrain = new GpuTerrain();
+                try {
+                    File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
+                    assertTrue(output.isDirectory() || output.mkdirs());
+                    BoardCamera camera = new BoardCamera();
+                    camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                    camera.setIsometric(true);
+                    camera.camera.zoom = .18f;
+                    BoardAtmosphere.Settings settings = new BoardAtmosphere.Settings(13, 0, 0,
+                          BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0);
+                    terrain.setAtmosphere(BoardAtmosphere.lighting(settings));
+
+                    // Grassland: the same south face as a two-level bank and as a three-level cliff.
+                    float[] bank = wallColor(terrain, camera, step(BoardScene.Surface.GRASS, 2, true), 2, output, "bank");
+                    float[] cliff = wallColor(terrain, camera, step(BoardScene.Surface.GRASS, 3, true), 3, output, "cliff");
+                    assertTrue(bank[0] / bank[2] > cliff[0] / cliff[2] + .15f,
+                          "A two-level grassland step is an earth bank, a three-level one rock: bank "
+                                + ratio(bank) + ", cliff " + ratio(cliff));
+
+                    // Concrete: a two-level step is cast concrete down to its foot; from three levels a pale slab
+                    // one level thick caps darker bedrock.
+                    BoardScene pavedStep = step(BoardScene.Surface.CONCRETE, 2, true);
+                    BoardScene pavedCliff = step(BoardScene.Surface.CONCRETE, 3, true);
+                    float[] wall = sample(terrain, camera, pavedStep, facePoint(.25f), output, "concrete-wall");
+                    float[] slab = sample(terrain, camera, pavedCliff, facePoint(2.5f), output, "concrete-slab");
+                    float[] bedrock = sample(terrain, camera, pavedCliff, facePoint(1.1f), null, null);
+                    float rock = luminance(bedrock) * 1.2f;
+                    assertTrue(luminance(wall) > rock && luminance(slab) > rock,
+                          "Cast concrete is paler than the bedrock under a slab: wall " + ratio(wall) + ", slab "
+                                + ratio(slab) + ", bedrock " + ratio(bedrock));
+
+                    // Rain darkens every exposed family except snow.
+                    for (BoardScene.Surface family : BoardScene.Surface.values()) {
+                        BoardScene scene = step(family, 3, true);
+                        terrain.setWetness(0);
+                        float[] dry = wallColor(terrain, camera, scene, 3, output, null);
+                        terrain.setWetness(1);
+                        float[] wet = wallColor(terrain, camera, scene, 3, output, null);
+                        terrain.setWetness(0);
+                        float darker = luminance(dry) - luminance(wet);
+                        if (family == BoardScene.Surface.SNOW) {
+                            assertEquals(0, darker, .002f, "Snow never takes the liquid rain film");
+                        } else {
+                            assertTrue(darker > .01f, family + " cliffs darken in rain: " + darker);
+                        }
+                    }
+
+                    // Special ground art keeps its own texture on its sculpted top.
+                    float[] green = topColor(terrain, camera, step(BoardScene.Surface.GRASS, 3, false, 0xff30b030));
+                    float[] red = topColor(terrain, camera, step(BoardScene.Surface.GRASS, 3, false, 0xffb03030));
+                    assertTrue(red[0] - green[0] > .1f && green[1] - red[1] > .1f,
+                          "Retinted special art must retint its top: green " + ratio(green) + ", red " + ratio(red));
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) {
+                    failure.set(error);
+                } finally {
+                    terrain.dispose();
+                    Gdx.app.exit();
+                }
             }
-            new Lwjgl3Application(new ApplicationAdapter() {
-                GpuTerrain terrain;
-                BoardCamera camera;
-                int frame;
-                int skirtPixel;
-                int drySkirtPixel;
-                long wetSkirtRegion;
-                int concreteRimPixel;
-                float delta;
-
-                @Override
-                public void create() {
-                    try {
-                        GpuAssets assets = new GpuAssets();
-                        try {
-                            for (BoardScene.Surface surface : BoardScene.Surface.values()) {
-                                Texture texture = assets.cornice(surface.cornice);
-                                // One hex edge wide; the mask's own height is the artwork's business.
-                                assertEquals(128, texture.getWidth());
-                                // U tiles along the edge; V stays inside the strip and must not wrap.
-                                assertEquals(Texture.TextureWrap.Repeat, texture.getUWrap());
-                                assertEquals(Texture.TextureWrap.ClampToEdge, texture.getVWrap());
-                            }
-                            assertEquals(128, assets.material("terrain/water_bed").getWidth());
-                        } finally {
-                            assets.dispose();
-                        }
-                        terrain = new GpuTerrain();
-                        terrain.update(scene);
-                        camera = new BoardCamera();
-                        camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-                        camera.setIsometric(true);
-                        camera.fit(scene);
-                    } catch (Throwable error) {
-                        failure.set(error);
-                        Gdx.app.exit();
-                    }
-                }
-
-                @Override
-                public void render() {
-                    if (failure.get() != null) {
-                        return;
-                    }
-                    try {
-                        terrain.animate(delta, List.of());
-                        terrain.renderShadows(List.of());
-                        ScreenUtils.clear(0.035f, 0.055f, 0.075f, 1, true);
-                        terrain.render(camera.camera, false);
-                        terrain.renderTransparent(camera.camera);
-                        if (frame <= 6) {
-                            String name = frame == 0 ? "terrain-rims-isometric"
-                                  : frame == 5 ? "terrain-concrete-rim-straight"
-                                  : "terrain-skirt-" + BoardScene.Surface.values()[frame - 1].name();
-                            GpuBoardTestUi.capture(new File(System.getProperty("megamek.gpu.screenshots"), name + ".png"));
-                        }
-                        assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
-                        if (frame == 6) {
-                            terrain.update(tintScene(0xff32b432));
-                            camera.camera.zoom = 0.2f;
-                            camera.center(BoardGeometry.center(new Coords(0, 0), 3));
-                        } else if (frame == 7) {
-                            skirtPixel = rimPixel(camera);
-                            // The strip is a mask, so a new top-layer color must retint the skirt hanging from it.
-                            terrain.update(tintScene(0xffb43232));
-                        } else if (frame == 8) {
-                            assertNotEquals(skirtPixel, rimPixel(camera),
-                                  "Changing only ground pixels must retint the mask that hangs from them");
-                            terrain.update(pavedStep(true));
-                        } else if (frame == 9) {
-                            concreteRimPixel = rimPixel(camera);
-                            terrain.update(pavedStep(false));
-                        } else if (frame == 10) {
-                            assertEquals(concreteRimPixel, rimPixel(camera),
-                                  "The concrete skirt also remains present next to natural terrain");
-                            terrain.setWetness(0);
-                            terrain.update(tintScene(0xff32b432));
-                            // Close on the strip itself, so the dry and wet review frames show the run-off.
-                            camera.camera.zoom = 0.07f;
-                            camera.center(skirtPoint());
-                        } else if (frame == 11) {
-                            GpuBoardTestUi.capture(new File(System.getProperty("megamek.gpu.screenshots"), "terrain-skirt-dry.png"));
-                            drySkirtPixel = rimPixel(camera);
-                            terrain.setWetness(1);
-                        } else if (frame == 12) {
-                            GpuBoardTestUi.capture(new File(System.getProperty("megamek.gpu.screenshots"), "terrain-skirt-wet.png"));
-                            assertNotEquals(drySkirtPixel, rimPixel(camera),
-                                  "A wet cliff must take the same rain film as the ground it faces");
-                            wetSkirtRegion = skirtRegion(camera);
-                            // Two seconds of run-off: the rivulets must have travelled down by the next frame.
-                            delta = 2;
-                        } else if (frame == 13) {
-                            assertNotEquals(wetSkirtRegion, skirtRegion(camera),
-                                  "Run-off must travel down a wet cliff");
-                            Gdx.app.exit();
-                        } else if (frame < 6) {
-                            boolean concretePreview = frame == 4;
-                            camera.camera.zoom = concretePreview ? 0.2f : 0.35f;
-                            camera.center(BoardGeometry.center(new Coords(frame * 3 + 1, concretePreview ? 1 : 2),
-                                  concretePreview ? 2 : 1));
-                        }
-                        frame++;
-                    } catch (Throwable error) {
-                        failure.set(error);
-                        Gdx.app.exit();
-                    }
-                }
-
-                @Override
-                public void dispose() {
-                    if (terrain != null) {
-                        terrain.dispose();
-                    }
-                }
-            }, GpuBoardWindow.configuration(false));
-        }
-        assertNull(failure.get(), () -> String.valueOf(failure.get()));
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Sculpted materials", failure.get()); }
     }
 
-    private static BoardScene tintScene(int argb) {
-        BoardScene.Tile tile = new BoardScene.Tile(new Coords(0, 0), 3, -1, false, 0, BoardScene.Surface.GRASS,
-              solidPixels(argb), null, null, List.of(), List.of());
-        return new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
+    /** Rows 0-2 stand {@code levels} above rows 3-5, so the step's face looks south, toward the default camera. */
+    private static BoardScene step(BoardScene.Surface family, int levels, boolean detailed) {
+        return step(family, levels, detailed, 0xff8a8a70);
     }
 
-    private static BoardScene pavedStep(boolean pavedNeighbor) {
-        // Both tiles share one top-layer color, so only the neighbours' own skirts can differ.
-        BoardScene.Pixels pixels = solidPixels(0xff32b432);
-        BoardScene.Tile high = new BoardScene.Tile(new Coords(0, 0), 3, -1, false, 0, BoardScene.Surface.CONCRETE,
-              pixels, null, null, List.of(), List.of());
-        BoardScene.Tile low = new BoardScene.Tile(new Coords(0, 1), 0, -1, false, 0,
-              pavedNeighbor ? BoardScene.Surface.CONCRETE : BoardScene.Surface.GRASS,
-              pixels, null, null, List.of(), List.of());
-        return new BoardScene(0, 1, 2, List.of(high, low), List.of(), List.of(), -1, "", List.of());
-    }
-
-    private static BoardScene.Pixels solidPixels(int argb) {
+    private static BoardScene step(BoardScene.Surface family, int levels, boolean detailed, int argb) {
         BufferedImage image = new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB);
         for (int y = 0; y < 72; y++) {
-            for (int x = 0; x < 84; x++) {
-                image.setRGB(x, y, argb);
+            for (int x = 0; x < 84; x++) { image.setRGB(x, y, argb); }
+        }
+        BoardScene.Pixels pixels = new BoardScene.Pixels(image);
+        List<BoardScene.Tile> tiles = new ArrayList<>();
+        for (int x = 0; x < 6; x++) {
+            for (int y = 0; y < 6; y++) {
+                tiles.add(new BoardScene.Tile(new Coords(x, y), y < 3 ? levels : 0, -1, false, 0, family, pixels,
+                      null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, detailed));
             }
         }
-        return new BoardScene.Pixels(image);
+        return new BoardScene(0, 6, 6, tiles, List.of(), List.of(), -1, "", List.of());
     }
 
-    /** The skirt patch every check samples: mid-edge, clear of the wall and below the cliff top. */
-    private static Vector3 skirtPoint() {
-        Coords coords = new Coords(0, 0);
-        Vector3 point = BoardGeometry.corner(coords, 3, 4).lerp(BoardGeometry.corner(coords, 3, 5), 0.5f);
-        return point.add(0, -0.06f, -3);
+    /** Mid-height of the face between hexes (2, 2) and (2, 3), averaged over a small window. */
+    private static float[] wallColor(GpuTerrain terrain, BoardCamera camera, BoardScene scene, int levels, File output,
+          String name) {
+        return sample(terrain, camera, scene, facePoint(levels * .5f), output, name);
     }
 
-    private static int rimPixel(BoardCamera camera) {
-        Vector3 screen = camera.camera.project(skirtPoint());
-        Pixmap pixels = ScreenUtils.getFrameBufferPixmap((int) screen.x, (int) screen.y, 1, 1);
+    /** The middle of the logical edge between hexes (2, 2) and (2, 3), {@code levels} above the foot. */
+    private static Vector3 facePoint(float levels) {
+        Vector3 edge = BoardGeometry.corner(new Coords(2, 2), 0, 4).lerp(BoardGeometry.corner(new Coords(2, 2), 0, 5), .5f);
+        edge.z = levels * BoardGeometry.LEVEL;
+        return edge;
+    }
+
+    private static float[] topColor(GpuTerrain terrain, BoardCamera camera, BoardScene scene) {
+        return sample(terrain, camera, scene, BoardGeometry.center(new Coords(2, 1), 3), null, null);
+    }
+
+    private static float[] sample(GpuTerrain terrain, BoardCamera camera, BoardScene scene, Vector3 point, File output,
+          String name) {
+        terrain.update(scene);
+        camera.center(point);
+        terrain.renderShadows(camera.camera, List.of());
+        ScreenUtils.clear(.4f, .5f, .6f, 1, true);
+        terrain.render(camera.camera, false);
+        terrain.renderTransparent(camera.camera);
+        if (name != null) { GpuBoardTestUi.capture(new File(output, "terrain-materials-" + name + ".png")); }
+        Vector3 screen = camera.camera.project(new Vector3(point));
+        Pixmap pixels = ScreenUtils.getFrameBufferPixmap((int) screen.x - WINDOW, (int) screen.y - WINDOW,
+              2 * WINDOW + 1, 2 * WINDOW + 1);
         try {
-            return pixels.getPixel(0, 0);
-        } finally {
-            pixels.dispose();
-        }
-    }
-
-    /** Fingerprint of the skirt band around the sample point, so no travelling pattern is missed to its phase. */
-    private static long skirtRegion(BoardCamera camera) {
-        Vector3 screen = camera.camera.project(skirtPoint());
-        int originX = Math.max(0, (int) screen.x - REGION / 2), originY = Math.max(0, (int) screen.y - REGION / 2);
-        Pixmap pixels = ScreenUtils.getFrameBufferPixmap(originX, originY, REGION, REGION);
-        try {
-            long hash = 0;
-            for (int y = 0; y < REGION; y++) {
-                for (int x = 0; x < REGION; x++) {
-                    hash = hash * 31 + pixels.getPixel(x, y);
+            float[] sum = new float[3];
+            int count = 0;
+            for (int y = 0; y < pixels.getHeight(); y++) {
+                for (int x = 0; x < pixels.getWidth(); x++) {
+                    int rgba = pixels.getPixel(x, y);
+                    sum[0] += (rgba >>> 24) / 255f;
+                    sum[1] += (rgba >>> 16 & 255) / 255f;
+                    sum[2] += (rgba >>> 8 & 255) / 255f;
+                    count++;
                 }
             }
-            return hash;
+            return new float[] { sum[0] / count, sum[1] / count, sum[2] / count };
         } finally {
             pixels.dispose();
         }
     }
+
+    private static float luminance(float[] c) { return .2126f * c[0] + .7152f * c[1] + .0722f * c[2]; }
+
+    private static String ratio(float[] c) { return String.format("rgb(%.3f, %.3f, %.3f)", c[0], c[1], c[2]); }
 }

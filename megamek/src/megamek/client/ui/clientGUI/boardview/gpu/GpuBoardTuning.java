@@ -5,9 +5,16 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Input;
+import com.badlogic.gdx.scenes.scene2d.Action;
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.InputEvent;
+import com.badlogic.gdx.scenes.scene2d.InputListener;
+import com.badlogic.gdx.scenes.scene2d.actions.DelayAction;
+import com.badlogic.gdx.scenes.scene2d.actions.RunnableAction;
 import com.badlogic.gdx.scenes.scene2d.ui.ButtonGroup;
 import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
@@ -18,8 +25,11 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
+import com.badlogic.gdx.scenes.scene2d.utils.FocusListener;
 import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.Scaling;
+import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.common.planetaryConditions.Atmosphere;
 import megamek.common.planetaryConditions.AtmosphericTaint;
 
@@ -31,9 +41,16 @@ import megamek.common.planetaryConditions.AtmosphericTaint;
 final class GpuBoardTuning {
     private static final float SLIDER_WIDTH = 120;
     private static final float LABEL_WIDTH = 120;
+    private static final float SLIDER_DEBOUNCE_SECONDS = 0.25f;
+    private static final float SLIDER_REPEAT_DELAY = 0.3f;
+    private static final float SLIDER_REPEAT_INTERVAL = 0.05f;
 
-    private record Knob(String name, float min, float max, float step, String format) { }
-    private record Control(Knob knob, Slider slider, Label reading, TextButton toggle) { }
+    private record Knob(String name, float min, float max, float step, String format, String help) {
+        Knob(String name, float min, float max, float step, String format) {
+            this(name, min, max, step, format, "");
+        }
+    }
+    private record Control(Knob knob, Slider slider, Label reading, TextButton toggle, DelayAction applyDelay) { }
 
     /** One row of the panel: the board value it drives, its range and how its reading is written. */
     private static final List<Knob> KNOBS = List.of(
@@ -43,10 +60,12 @@ final class GpuBoardTuning {
           new Knob("Base level height", 4, 40, 1, "%.0f"),
           // A value of one hides the grid.
           new Knob("Hex frame shade", 0f, 1f, 0.05f, "%.2f"),
-          new Knob("Multi-hex unit scale", 0.25f, 1.5f, 0.05f, "%.2f"));
+          new Knob("Multi-hex unit scale", 0.25f, 1.5f, 0.05f, "%.2f"),
+          new Knob("Hex padding (m)", 0, BoardGeometry.MAX_PADDING, 0.5f, "%.1f"));
 
     private static final List<Knob> LIGHTING_KNOBS = List.of(
-          new Knob("Time of day", 0, 24, 0.25f, "clock"),
+          // One-minute steps, the same grid scenario times are chosen on (BoardAtmosphere.hourInWindow).
+          new Knob("Time of day", 0, 24, 1f / 60, "clock"),
           new Knob("Exposure (EV)", -2, 2, 0.1f, "%+.1f"));
 
     private static final List<Knob> ATMOSPHERE_KNOBS = List.of(
@@ -76,12 +95,36 @@ final class GpuBoardTuning {
 
     /** Construction cursor only; each page owns its own rows. */
     private Table rows = new Table();
+    private final Table cameraRows;
     private final Table general;
     private final Table atmospheric;
+    private final Table terrain;
     private final TextButton reset;
+    private final BoardCamera camera;
+    private final CheckBox firstPerson;
+    private final CheckBox wireframe;
+    private final List<Control> cameraFieldOfView;
     private final CheckBox normalMaps;
+    private final SelectBox<UnitDisplayMode> unitDisplayMode;
     private final CheckBox vsync;
+    /** The graphics card rows; null on computers without two cards to choose from. */
+    private SelectBox<GpuGraphicsCard> graphicsCard;
+    private Label cardInUse;
+    private Label cardPending;
     private final List<Control> geometry;
+    private final CheckBox transitions;
+    private final List<Control> relief;
+    private final List<Control> water;
+    private final CheckBox grass;
+    private final CheckBox terrainLod;
+    private final List<Control> terrainDetail;
+    private final Label terrainProgress;
+    private int terrainPercent = -1;
+    private final SelectBox<String> concreteShapes;
+    private final CheckBox fallsOffBoard;
+    private final CheckBox cliffsIntoWater;
+    private final SelectBox<String> geologyFamily;
+    private final List<Control> geology;
     private final List<Control> familySizes;
     private final CheckBox zoomScaling;
     private final List<Control> zoomScale;
@@ -109,17 +152,64 @@ final class GpuBoardTuning {
     private BoardAtmosphere.Settings lastScenario;
     private boolean conditionsPreview;
     private boolean syncing;
+    private final TextButton reloadAssets;
+    private final Label assetReloadStatus;
+    private final TextButton editShaders;
+    private boolean assetReloadRequested;
 
     GpuBoardTuning(Skin skin) {
         this(skin, null);
     }
 
-    GpuBoardTuning(Skin skin, GpuBoardSource source) {
-        general = rows;
+    GpuBoardTuning(Skin skin, BoardSource source) {
+        this(skin, source, new BoardCamera());
+    }
+
+    GpuBoardTuning(Skin skin, BoardSource source, BoardCamera camera) {
+        this.camera = camera;
+        cameraRows = rows;
+        rows.top().defaults().pad(0, 3, 0, 3);
+        firstPerson = checkbox(skin, "Free Flight", "tuning-free-flight");
+        firstPerson.addListener(new TextTooltip("Fly freely: WASD moves, Q/E lowers/raises, Shift speeds up, "
+              + "right drag looks around, middle drag pans, Shift swaps the drags, and the wheel moves forward/back. "
+              + "Turn off to restore the tactical view.", skin, "menu"));
+        cameraFieldOfView = controls(skin, List.of(new Knob("Camera FOV", BoardCamera.MIN_FIELD_OF_VIEW,
+              BoardCamera.MAX_FIELD_OF_VIEW, 1, "%.0f\u00b0")), this::applyCamera, 0);
+        cameraFieldOfView.getFirst().slider().setName("tuning-camera-fov");
+        cameraFieldOfView.getFirst().slider().addListener(new TextTooltip(
+              "Vertical field of view in degrees. Larger angles show more of the board. Requires Free Flight.", skin, "menu"));
+        firstPerson.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                if (!syncing) { applyCamera(); }
+            }
+        });
+        // Read by the board view each frame; the HUD's wireframe utility switches the same box.
+        wireframe = checkbox(skin, Messages.getString("GpuBoard.wireframe"), "camera-wireframe");
+        wireframe.addListener(new TextTooltip(Messages.getString("GpuBoard.wireframeHelp"), skin, "menu"));
+        general = rows = new Table();
         rows.top().defaults().pad(0, 3, 0, 3);
         section(skin, "Geometry");
         geometry = controls(skin, KNOBS, this::applyGeometry, 0);
+        geometry.get(6).slider().addListener(new TextTooltip("Gap the board opens between neighbouring hexes, in metres; "
+              + "each hex keeps its size. Where levels match the ground runs on through the gap; where they differ the gap "
+              + "holds a slope up to two levels and a cliff above its talus from three. Replaces hex transitions while on. "
+              + "Visual only; the game's levels and hexes are unchanged.", skin, "menu"));
+        transitions = checkbox(skin, "Hex transitions", "tuning-transitions");
+        transitions.addListener(new TextTooltip("Steps between hexes take room on both sides of their edge: slopes up to "
+              + "two levels, deep cliffs above a talus from three. Visual only; the game's levels and hexes are unchanged.",
+              skin, "menu"));
+        transitions.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                if (!syncing) { applyGeometry(); }
+            }
+        });
         normalMaps = checkbox(skin, "Normal maps", "tuning-normal-maps");
+        unitDisplayMode = choice(skin, "Unit display", "tuning-unit-display", UnitDisplayMode.values(), () -> { });
+        unitDisplayMode.addListener(new TextTooltip("All Meeples: every unit uses an extruded artwork token. "
+              + "Mek Meeples: only Meks use tokens; other units use 3D models. "
+              + "3D Models: use the existing models for all units.", skin, "menu"));
         vsync = checkbox(skin, "VSync", "tuning-vsync");
         // The window's own preference, shown once here and then left to the user; Defaults never touches it.
         vsync.setChecked(GpuBoardWindow.DEFAULT_VSYNC);
@@ -133,14 +223,38 @@ final class GpuBoardTuning {
                 // Gdx.graphics.setForegroundFPS(vsync.isChecked() ? 0 : 60);
             }
         });
+        Label graphics = new Label("Graphics: " + GpuGlsl.description(), skin, "small");
+        graphics.setName("tuning-graphics");
+        graphics.addListener(new TextTooltip("Detected when the board opens: the board compiles its shaders for the newest "
+              + "shading language the graphics driver offers, from GLSL 3.30 up to 4.60.", skin, "menu"));
+        rows.add(graphics).colspan(3).left().height(18).row();
+        if (!GpuGraphicsCard.cards().isEmpty()) {
+            graphicsCard = choice(skin, "Graphics card", "tuning-graphics-card", GpuGraphicsCard.values(),
+                  this::applyGraphicsCard);
+            syncing = true;
+            graphicsCard.setSelected(GpuGraphicsCard.preferred());
+            syncing = false;
+            graphicsCard.addListener(new TextTooltip("The card the board draws with. Windows keeps a program on the "
+                  + "card it started with, so a change applies the next time MegaMek starts.", skin, "menu"));
+            cardInUse = new Label("", skin, "small");
+            cardInUse.setName("tuning-graphics-card-in-use");
+            cardInUse.setEllipsis(true);
+            rows.add(cardInUse).colspan(3).left().minWidth(0).growX().height(18).row();
+            cardPending = new Label("Applies when MegaMek next starts", skin, "small");
+            cardPending.setName("tuning-graphics-card-pending");
+            rows.add(cardPending).colspan(3).left().height(18).row();
+            updateGraphicsCard();
+        }
         section(skin, "Unit family sizes");
         familySizes = controls(skin, Arrays.stream(UnitFamilyScale.values())
               .map(family -> new Knob(family.label, 0.25f, 3, 0.05f, "%.2f")).toList(), this::applyFamilySizes, 0);
         for (int index = 0; index < familySizes.size(); index++) {
             var slider = familySizes.get(index).slider();
             slider.setName("tuning-size-" + UnitFamilyScale.values()[index].name());
-            slider.addListener(new TextTooltip("Uniform size multiplier; 1.00 is neutral. Stacks with Unit scale. "
-                  + "Mek weight classes also multiply All Meks; ultralight Meks use Light Meks.", skin, "menu"));
+            slider.addListener(new TextTooltip("Uniform size multiplier; 1.00 draws the authored size. "
+                  + "Infantry and battle armor start at 1.80: their canonical figures, drawn larger to read "
+                  + "on the board. Stacks with Unit scale. Mek weight classes also multiply All Meks; "
+                  + "ultralight Meks use Light Meks.", skin, "menu"));
         }
         section(skin, "Zoom-out unit scaling");
         zoomScaling = checkbox(skin, "Scale units up when zoomed out", "tuning-zoom-scaling");
@@ -243,7 +357,7 @@ final class GpuBoardTuning {
         fixedSun.addListener(new TextTooltip("Keep the light at the same position on screen when rotating or tilting the board. "
               + "Time of day still sets its color and strength; Moonless and Pitch Black have no moonlight.", skin, "menu"));
         daylight.getFirst().slider().addListener(new TextTooltip(
-              "Starts at a random quarter-hour within the scenario's daylight, dawn/dusk or night window. "
+              "Starts at a random minute within the scenario's daylight, dawn/dusk or night window. "
                     + "It stays fixed during combat; adjust here to override. Defaults restores the scenario's choice.", skin, "menu"));
         daylight.get(1).slider().addListener(new TextTooltip(
               "Visual brightness offset. The Moonless preset uses -0.6 EV; Pitch Black uses -1 EV, both without moonlight. "
@@ -251,7 +365,10 @@ final class GpuBoardTuning {
         section(skin, "Planet properties");
         gravity = controls(skin, List.of(new Knob("Gravity (g)", 0, 10, 0.01f, "%.2f")), this::applyAtmosphere, 0);
         gravity.getFirst().slider().addListener(new TextTooltip(
-              "Visual gravity controls the height and timing of newly starting jump animations. "
+              "Visual gravity controls water waves, waterfall spray, and the height and timing of new jump animations. "
+                    + "At zero gravity, all liquids and vegetation disappear, the surface becomes rock, "
+                    + "rough ground becomes bedrock outcrops, and liquid depth lowers the ground level. "
+                    + "Air pressure becomes Vacuum and all weather effects are disabled. "
                     + "Moves and gameplay rules stay unchanged; an airborne jump finishes its existing arc.", skin, "menu"));
         pressure = choice(skin, "Air pressure", "tuning-atmosphere-pressure", Atmosphere.values(), this::applyAtmosphere);
         pressure.addListener(new TextTooltip("Visual atmosphere pressure: controls sky scattering, clouds and permitted weather. "
@@ -336,9 +453,183 @@ final class GpuBoardTuning {
                 applyDamage();
             }
         });
+        terrain = new Table();
+        rows = terrain;
+        rows.top().defaults().pad(0, 3, 0, 3);
+        terrainProgress = new Label("", skin, "small");
+        terrainProgress.setName("terrain-build-progress");
+        rows.add(terrainProgress).colspan(3).left().row();
+        section(skin, "Concrete shapes");
+        concreteShapes = choice(skin, "Rectangle fitting", "tuning-concrete-shapes",
+              new String[] { "None", "Water only", "Everywhere" }, this::applyConcreteShapes);
+        Label concreteHelp = new Label("None keeps sharp hex edges, including beside water. Water only makes docks and quays. "
+              + "Everywhere also fits concrete beside grass and other ground. Buildings keep their support.", skin, "small");
+        concreteHelp.setWrap(true);
+        rows.add(concreteHelp).colspan(3).minWidth(0).growX().padBottom(9).row();
+        section(skin, "River shape and land");
+        relief = controls(skin, List.of(
+              new Knob("River width (%)", 5, 100, 1, "%.0f%%",
+                    "Sets the width of the whole river. Deep water leaves room for units; depth-0 water can shrink to a tiny stream."),
+              new Knob("Shore spread", -20, 12, .5f, "%+.1f",
+                    "Moves the banks outward. Higher values make rivers and lakes wider; lower values leave more dry land."),
+              new Knob("Land retained", .5f, 1, .01f, "%.2f",
+                    "How much of each land hex stays dry. Higher values stop water from cutting as far into the land."),
+              new Knob("Corner shift limit", 0, 28, .5f, "%.1f",
+                    "How far water may reshape a land corner. Raise this to let the shoreline cross the hex outline more freely."),
+              new Knob("Shore room", 0, 16, .5f, "%.1f",
+                    "Extra dry space behind the bank on level ground. Raise this to give curved banks more room."),
+              new Knob("Shore reach", 64, 128, 1, "%.0f",
+                    "How much nearby terrain affects each stretch of shore. Higher values make broader, gentler curves."),
+              new Knob("Narrow channel pull", 0, 2, .05f, "%.2f",
+                    "Helps thin channels stay open and thin strips of land stay dry. Higher values protect both more strongly."),
+              new Knob("Hard ground pull", 1, 4, .1f, "%.1f",
+                    "How strongly roads and paving push water away. Higher values leave a wider gap beside fixed ground."),
+              new Knob("Pool radius", 8, 32, .5f, "%.1f",
+                    "Size of the pool around a water hex centre. Higher values widen ponds and the middle of rivers."),
+              new Knob("Island radius", 8, 32, .5f, "%.1f",
+                    "Dry space kept around a land hex centre. Higher values make islands and peninsulas broader."),
+              new Knob("Shore blend", 1, 20, .5f, "%.1f",
+                    "How gently ponds and islands join the rest of the shore. Higher values soften the joins."),
+              new Knob("Shore wander", 0, 16, .5f, "%.1f",
+                    "How much rivers wind from side to side and banks wander. Raise this for wavier streams; zero removes the extra wandering."),
+              new Knob("Wander length", 70, 280, 5, "%.0f",
+                    "Length of the bends along the shore. Higher values give longer, slower bends."),
+              new Knob("Shore lip", .5f, 10, .5f, "%.1f",
+                    "Width of the small slope from the dry bank down to the water. Higher values make that strip wider."),
+              new Knob("Transition room (m)", 0, 8, .1f, "%.1f",
+                    "Space used to join different ground heights. Higher values spread slopes out. Needs Hex transitions on and Hex padding off.")), this::applyRelief, 0, true);
+        section(skin, "Banks and river openings");
+        cliffsIntoWater = checkbox(skin, "Cliffs directly into water", "tuning-cliffs-into-water");
+        cliffsIntoWater.addListener(new TextTooltip("Keep more flat land above waterside cliffs and let their rock face "
+              + "continue down to the riverbed, without a dry beach. Applies to drops of three or more levels, counting "
+              + "water depth. Turn off to restore the beach and rubble slope.", skin, "menu"));
+        cliffsIntoWater.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                if (!syncing) { applyRelief(); }
+            }
+        });
+        water = new ArrayList<>(controls(skin, List.of(
+              new Knob("Wet margin", .1f, 4, .1f, "%.1f",
+                    "Small gap between the water and a raised bank. Higher values pull the water farther from slopes and corners."),
+              new Knob("Beach width", 1, 12, .5f, "%.1f",
+                    "Dry strip beside cliffs or land below the river. Higher values make that strip wider."),
+              new Knob("Bank width", 1, 10, .5f, "%.1f",
+                    "Dry strip beside land at the same height as the water. Higher values make the river narrower there."),
+              new Knob("Bank rounding", 1, 12, .5f, "%.1f",
+                    "How much banks curve instead of following straight hex edges. Higher values make the curves rounder."),
+              new Knob("Mouth opening", 0, 12, .5f, "%.1f",
+                    "Extra river width where two water hexes meet. Higher values widen these joins, up to the available beach width."),
+              new Knob("Plunge opening", 0, 12, .5f, "%.1f",
+                    "Extra room for water entering a hex below a waterfall. Higher values widen that opening."),
+              new Knob("Bed slope share", .1f, .95f, .05f, "%.2f",
+                    "How far slopes reach into a river hex. Higher values leave less flat riverbed and make water descend more gradually between levels.")), this::applyWater, 0, true));
+        section(skin, "Waterfalls");
+        fallsOffBoard = checkbox(skin, "Waterfalls off board", "tuning-falls-off-board");
+        fallsOffBoard.addListener(new TextTooltip("Let rivers pour over the edge of the board instead of ending there.", skin, "menu"));
+        water.addAll(controls(skin, List.of(
+              new Knob("Off-board drop", 1, 8, .5f, "%.1f",
+                    "How many ground levels a waterfall falls past the board edge before fading away."),
+              new Knob("Plunge pool swell", 0, 12, .5f, "%.1f",
+                    "How much a pool widens below a waterfall. Zero removes the extra widening."),
+              new Knob("Lip variation", 0, 7, .5f, "%.1f",
+                    "How uneven the top edge of a waterfall looks. Zero gives an even edge."),
+              new Knob("Fall lip width", .005f, .1f, .005f, "%.3f",
+                    "How far the water bends out before falling. Higher values make a broader turn over the edge."),
+              new Knob("Fall lip drop", .1f, 1, .05f, "%.2f",
+                    "How much of the waterfall height is used for the bend at its top. Fall lip width limits its size."),
+              new Knob("Underwater ledge", 0, 4, .25f, "%.2f",
+                    "Water depth over the ledge at the top of a waterfall. Higher values make that ledge more deeply submerged."),
+              new Knob("Valley extension", 0, 14, .5f, "%.1f",
+                    "How far joined waterfalls reach out where they meet around an inside corner.")), this::applyWater, 0, true));
+        fallsOffBoard.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                if (!syncing) { applyWater(); }
+            }
+        });
+        section(skin, "Terrain detail");
+        grass = checkbox(skin, "Grass blades", "tuning-grass");
+        grass.addListener(new TextTooltip("Show wind-blown grass blades on the ground. Uncheck to remove the blades.",
+              skin, "menu"));
+        terrainLod = checkbox(skin, "Terrain LoD", "tuning-terrain-lod");
+        terrainLod.addListener(new TextTooltip("Adjust terrain detail with zoom. Off keeps the full-detail mesh at every distance.",
+              skin, "menu"));
+        terrainLod.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                if (!syncing) {
+                    TerrainLod.setEnabled(terrainLod.isChecked());
+                    syncRelief();
+                }
+            }
+        });
+        terrainDetail = controls(skin, List.of(
+              new Knob("Full detail at (px)", 16, 256, 4, "%.0f",
+                    "LoD switches to the finest mesh when a hex reaches this width on screen. Lower values keep full detail farther away."),
+              new Knob("Medium detail at (px)", 4, 128, 2, "%.0f",
+                    "LoD switches to medium detail at this hex width on screen. Smaller hexes use coarser meshes; map size does not set quality.")),
+              this::applyRelief, 0, true);
+        section(skin, "Material geology");
+        geologyFamily = choice(skin, "Material", "tuning-geology-family",
+              new String[] { "Grass", "Dirt", "Sand", "Rock", "Concrete", "Snow", "Bedrock under slabs" }, this::syncGeology);
+        geology = controls(skin, List.of(
+              new Knob("Joint width (m)", .25f, 20, .05f, "%.2f",
+                    "Width of the large rock blocks in a cliff. Higher values make broader blocks."),
+              new Knob("Joint height (m)", .25f, 20, .05f, "%.2f",
+                    "Height of the large rock blocks in a cliff. Higher values make taller blocks."),
+              new Knob("Joint relief (m)", 0, 3, .05f, "%.2f",
+                    "How far rock blocks stick out from the cliff. Zero makes the blocks flat."),
+              new Knob("Fractures (m)", 0, 3, .05f, "%.2f",
+                    "Depth of the cracks between rock blocks. Higher values make deeper cracks."),
+              new Knob("Strata relief (m)", 0, 2, .05f, "%.2f",
+                    "How far horizontal rock layers stick out. Higher values make the layers more pronounced."),
+              new Knob("Bedding (m)", .25f, 10, .05f, "%.2f",
+                    "Vertical distance between rock layers. Higher values make thicker layers."),
+              new Knob("Buttresses (m)", 0, 3, .05f, "%.2f",
+                    "Size of broad bulges along a cliff face. Higher values make those bulges larger."),
+              new Knob("Recess (m)", 0, 3, .05f, "%.2f",
+                    "How far the cliff face sits back beneath its top edge. Higher values make a deeper recess."),
+              new Knob("Ground relief (m)", 0, 2, .05f, "%.2f",
+                    "Unevenness of the ground above the cliffs. Zero makes that ground flat."),
+              new Knob("Caprock scale", 0, 2, .05f, "%.2f",
+                    "Size of the hard rock ledge at the top of a cliff. Zero removes the ledge."),
+              new Knob("Talus scale", 0, 2, .05f, "%.2f",
+                    "Size of the rubble slope at the foot of a cliff. Higher values spread it farther out."),
+              new Knob("Corner rounding", 0, .5f, .01f, "%.2f",
+                    "How rounded cliff corners look. Higher values soften sharp corners."),
+              new Knob("Soil jointing", 0, 1, .05f, "%.2f",
+                    "How much rock texture shows through low soil banks. Zero makes those banks smoother."),
+              new Knob("Bank lean", 0, 1, .01f, "%.2f",
+                    "How far a soil bank leans back as it rises. Higher values make a gentler slope."),
+              new Knob("Cast slab share", 0, 1, .05f, "%.2f",
+                    "How much a tall cliff looks like a concrete slab over rock. Zero removes the slab effect."),
+              new Knob("Loose stones / hex", 0, 6, .1f, "%.1f",
+                    "Average number of loose stones per open hex of this material. Stones need room and full or medium detail."),
+              new Knob("Low shrubs / hex", 0, 6, .1f, "%.1f",
+                    "Average number of small shrubs per open hex of this material. Shrubs need room and full or medium detail.")), this::applyGeology, 0, true);
+        reloadAssets = new TextButton("Reload assets", skin, "menu-control");
+        reloadAssets.setName("tuning-reload-assets");
+        reloadAssets.setDisabled(source == null);
+        reloadAssets.setProgrammaticChangeEvents(false);
+        reloadAssets.addListener(new TextTooltip("Reload textures, GLB meshes, model descriptors, tilesets and shaders from disk. "
+              + "Save your edited files first. The board rebuilds with your current camera and tuning settings.", skin, "menu"));
+        assetReloadStatus = new Label("", skin, "small");
+        assetReloadStatus.setName("tuning-reload-status");
+        assetReloadStatus.setEllipsis(true);
+        reloadAssets.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                reloadAssets.setChecked(false);
+                reloadAssets.setDisabled(true);
+                assetReloadStatus.setText("Reloading...");
+                assetReloadRequested = true;
+            }
+        });
         reset = new TextButton("Defaults", skin, "menu-control");
         reset.setName("tuning-defaults");
-        reset.addListener(new TextTooltip("Restore both tabs: geometry, family sizes, visibility, light/fog effects, "
+        reset.addListener(new TextTooltip("Restore all tabs: camera projection, geometry, terrain, water, geology, "
+              + "family sizes, visibility, light/fog effects, "
               + "the game's current planetary conditions, and disable damage preview.",
               skin, "menu"));
         reset.setProgrammaticChangeEvents(false);
@@ -351,7 +642,32 @@ final class GpuBoardTuning {
                 restoreDefaults();
             }
         });
+        GpuShaderManager shaderEdits = GpuShaderManager.current();
+        editShaders = new TextButton("Edit shaders", skin, "menu-control");
+        editShaders.setName("tuning-edit-shaders");
+        editShaders.setDisabled(shaderEdits == null);
+        editShaders.setProgrammaticChangeEvents(false);
+        editShaders.addListener(new TextTooltip("Edit GLSL with live preview on this board. "
+              + "Invalid edits keep the last working shaders; save only when you are ready.", skin, "menu"));
+        editShaders.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                editShaders.setChecked(false);
+                if (shaderEdits != null) { shaderEdits.showEditor(); }
+            }
+        });
         restoreDefaults();
+    }
+
+    boolean takeAssetReloadRequest() {
+        boolean requested = assetReloadRequested;
+        assetReloadRequested = false;
+        return requested;
+    }
+
+    void assetReloadFinished(boolean success) {
+        reloadAssets.setDisabled(false);
+        assetReloadStatus.setText(success ? "OK" : "FAIL (logs)");
     }
 
     private Table section(Skin skin, String title) {
@@ -405,18 +721,99 @@ final class GpuBoardTuning {
     }
 
     private List<Control> controls(Skin skin, List<Knob> knobs, Runnable apply, int toggleCount) {
+        return controls(skin, knobs, apply, toggleCount, false);
+    }
+
+    private List<Control> controls(Skin skin, List<Knob> knobs, Runnable apply, int toggleCount, boolean debounce) {
         List<Control> result = new ArrayList<>();
+        Slider.SliderStyle normal = skin.get("menu", Slider.SliderStyle.class);
+        Slider.SliderStyle focused = new Slider.SliderStyle(normal);
+        focused.knob = normal.knobOver;
         for (Knob knob : knobs) {
             Slider slider = new Slider(knob.min(), knob.max(), knob.step(), false, skin, "menu");
             slider.setName(knob.name());
             Label reading = new Label("", skin, "small");
             reading.setAlignment(Align.right);
+            // Unpooled actions belong to this control and can be restarted or cancelled during a sync.
+            DelayAction applyDelay = new DelayAction(SLIDER_DEBOUNCE_SECONDS);
+            RunnableAction applyAction = new RunnableAction();
+            applyAction.setRunnable(apply);
+            applyDelay.setAction(applyAction);
+            var keyboard = new InputListener() {
+                private int heldKey = -1;
+                private float repeatIn;
+                private final Action repeat = new Action() {
+                    @Override
+                    public boolean act(float delta) {
+                        if (!slider.hasKeyboardFocus() || slider.isDisabled() || !Gdx.input.isKeyPressed(heldKey)) {
+                            stopRepeating();
+                            return true;
+                        }
+                        repeatIn -= delta;
+                        if (repeatIn <= 0) {
+                            repeatIn = SLIDER_REPEAT_INTERVAL;
+                            step();
+                        }
+                        return false;
+                    }
+                };
+
+                private void step() {
+                    int direction = heldKey == Input.Keys.LEFT ? -1 : 1;
+                    slider.setValue(slider.getValue() + direction * slider.getStepSize());
+                }
+
+                boolean isRepeating() { return repeat.getActor() != null; }
+
+                void stopRepeating() {
+                    heldKey = -1;
+                    slider.removeAction(repeat);
+                    if (!slider.isDragging() && slider.getActions().contains(applyDelay, true)) {
+                        slider.removeAction(applyDelay);
+                        apply.run();
+                    }
+                }
+
+                @Override
+                public boolean keyDown(InputEvent event, int key) {
+                    if (slider.isDisabled() || key != Input.Keys.LEFT && key != Input.Keys.RIGHT) { return false; }
+                    if (heldKey != key) {
+                        stopRepeating();
+                        heldKey = key;
+                        repeatIn = SLIDER_REPEAT_DELAY;
+                        step();
+                        slider.addAction(repeat);
+                    }
+                    return true;
+                }
+
+                @Override
+                public boolean keyUp(InputEvent event, int key) {
+                    if (key != heldKey) { return false; }
+                    stopRepeating();
+                    return true;
+                }
+            };
+            slider.addListener(keyboard);
             slider.addListener(new ChangeListener() {
                 @Override
                 public void changed(ChangeEvent event, Actor actor) {
-                    if (!syncing) {
+                    slider.removeAction(applyDelay);
+                    if (syncing) { return; }
+                    if (debounce && (slider.isDragging() || keyboard.isRepeating())) {
+                        reading.setText(String.format(Locale.ROOT, knob.format(), slider.getValue()));
+                        applyDelay.restart();
+                        slider.addAction(applyDelay);
+                    } else {
                         apply.run();
                     }
+                }
+            });
+            slider.addListener(new FocusListener() {
+                @Override
+                public void keyboardFocusChanged(FocusEvent event, Actor actor, boolean hasFocus) {
+                    slider.setStyle(hasFocus ? focused : normal);
+                    if (!hasFocus) { keyboard.stopRepeating(); }
                 }
             });
             TextButton toggle = null;
@@ -432,10 +829,17 @@ final class GpuBoardTuning {
                     }
                 });
             }
-            result.add(new Control(knob, slider, reading, toggle));
+            result.add(new Control(knob, slider, reading, toggle, applyDelay));
             rows.add(toggle == null ? new Label(knob.name(), skin, "menu") : toggle).left().width(LABEL_WIDTH);
             rows.add(slider).minWidth(60).prefWidth(SLIDER_WIDTH).growX().height(20);
             rows.add(reading).width(38).right().row();
+            if (!knob.help().isEmpty()) {
+                Label help = new Label(knob.help(), skin, "small");
+                help.setName("tuning-help-" + knob.name());
+                help.setWrap(true);
+                rows.add(help).colspan(3).minWidth(0).growX().padBottom(9).row();
+                slider.addListener(new TextTooltip(knob.help(), skin, "menu"));
+            }
         }
         return result;
     }
@@ -453,23 +857,80 @@ final class GpuBoardTuning {
         return atmospheric;
     }
 
-    /** The Defaults button: a ChangeEvent on it restores both tabs. */
+    /** The Terrain page's rows (terrain build progress, shapes, water, detail, geology): GpuTuningPanel's Terrain tab. */
+    Table terrainRows() {
+        return terrain;
+    }
+
+    /** The camera rows (Free Flight, the wireframe view, the field of view), shown on GpuTuningPanel's Camera tab. */
+    Table cameraRows() {
+        return cameraRows;
+    }
+
+    /** The Defaults button: a ChangeEvent on it restores the tabs' board values. */
     TextButton defaults() {
         return reset;
     }
 
+    /** Reload assets: a ChangeEvent on it asks the board view to reload (see {@link #takeAssetReloadRequest}). */
+    TextButton reloadAssets() {
+        return reloadAssets;
+    }
+
+    /** The outcome of the last asset reload. */
+    Label assetReloadStatus() {
+        return assetReloadStatus;
+    }
+
+    /** Edit shaders: a ChangeEvent on it opens the shader editor; disabled without one. */
+    TextButton editShaders() {
+        return editShaders;
+    }
+
+    /** True while the board draws as the thermal wireframe view. */
+    boolean wireframe() {
+        return wireframe.isChecked();
+    }
+
+    void setWireframe(boolean on) {
+        wireframe.setChecked(on);
+    }
+
     /**
      * Writes the current board values into the sliders, as the initial state and after a reset. VSync and the
-     * fixed sun/moon frame are the user's window preferences, not board values, so a reset leaves them alone.
+     * fixed sun/moon frame are the user's window preferences, and the graphics card the computer's, not board values,
+     * so a reset leaves them alone.
      */
     private void restoreDefaults() {
+        syncing = true;
+        firstPerson.setChecked(false);
+        syncing = false;
+        setValues(cameraFieldOfView, new float[] { BoardCamera.DEFAULT_FIELD_OF_VIEW });
+        applyCamera();
         normalMaps.setChecked(true);
+        unitDisplayMode.setSelected(UnitDisplayMode.DEFAULT);
+        grass.setChecked(true);
         boolean fixedSunKept = fixedSun.isChecked();
         BoardGeometry.Tuning defaults = BoardGeometry.DEFAULTS;
         float[] values = { defaults.hexScale(), defaults.unitScale(), defaults.unitHeightScale(),
-              defaults.levelHeight(), defaults.gridShade(), defaults.multiHexUnitScale() };
+              defaults.levelHeight(), defaults.gridShade(), defaults.multiHexUnitScale(), defaults.padding() };
         setValues(geometry, values);
+        syncing = true;
+        transitions.setChecked(defaults.transitions());
+        syncing = false;
         applyGeometry();
+        BoardRelief.tune(BoardRelief.DEFAULTS);
+        TerrainLod.tune(TerrainLod.DEFAULTS);
+        TerrainLod.setEnabled(TerrainLod.DEFAULT_ENABLED);
+        BoardConcrete.tune(BoardConcrete.DEFAULT_MODE);
+        syncing = true;
+        concreteShapes.setSelectedIndex(BoardConcrete.mode().ordinal());
+        syncing = false;
+        BoardSurface.tune(BoardSurface.DEFAULTS);
+        BoardRelief.tuneGeology(BoardRelief.defaultGeology());
+        syncRelief();
+        syncWater();
+        syncGeology();
         float[] familyDefaults = new float[familySizes.size()];
         for (int index = 0; index < familyDefaults.length; index++) {
             familyDefaults[index] = UnitFamilyScale.values()[index].defaultUnitScale;
@@ -503,9 +964,15 @@ final class GpuBoardTuning {
     private void setValues(List<Control> controls, float[] values) {
         syncing = true;
         for (int index = 0; index < controls.size(); index++) {
-            controls.get(index).slider().setValue(values[index]);
+            Control control = controls.get(index);
+            control.slider().removeAction(control.applyDelay());
+            control.slider().setValue(values[index]);
         }
         syncing = false;
+    }
+
+    private void applyConcreteShapes() {
+        BoardConcrete.tune(BoardConcrete.Mode.values()[concreteShapes.getSelectedIndex()]);
     }
 
     BoardAtmosphere.Settings atmosphere() {
@@ -537,6 +1004,14 @@ final class GpuBoardTuning {
 
     boolean normalMaps() {
         return normalMaps.isChecked();
+    }
+
+    UnitDisplayMode unitDisplayMode() {
+        return unitDisplayMode.getSelected();
+    }
+
+    boolean grass() {
+        return grass.isChecked();
     }
 
     boolean fixedSun() {
@@ -603,6 +1078,7 @@ final class GpuBoardTuning {
         syncing = true;
         moonlight.setChecked(settings.moonlight());
         pressure.setSelected(settings.pressure());
+        pressure.setDisabled(settings.gravity() == 0);
         atmosphericTaint.setSelected(settings.taint());
         // Preserve unusual loaded temperatures when editing an unrelated control.
         temperature.getFirst().slider().setRange(Math.min(-200, settings.temperature()), Math.max(200, settings.temperature()));
@@ -638,10 +1114,116 @@ final class GpuBoardTuning {
         updateReadings(rendering);
     }
 
+    /** Saves the card for MegaMek's next start; this run keeps the card it opened the board with. */
+    private void applyGraphicsCard() {
+        String card = graphicsCard.getSelected().name();
+        SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardGraphicsCard(card));
+        updateGraphicsCard();
+    }
+
+    private void updateGraphicsCard() {
+        // Drivers append their bus and instruction set: "NVIDIA GeForce RTX 4070 Laptop GPU/PCIe/SSE2".
+        String renderer = GpuGlsl.renderer().split("/")[0];
+        cardInUse.setText(renderer.isEmpty() ? "" : "In use: " + renderer);
+        cardPending.setVisible(graphicsCard.getSelected() != GpuGraphicsCard.applied());
+    }
+
+    private void applyCamera() {
+        camera.setFieldOfView(value(cameraFieldOfView, 0));
+        camera.setFirstPerson(firstPerson.isChecked());
+        syncCamera();
+        updateReadings(cameraFieldOfView);
+    }
+
+    /** Camera presets and the Camera menu can also change modes; the camera owns the current choice. */
+    void syncCamera() {
+        syncing = true;
+        firstPerson.setChecked(camera.firstPerson());
+        syncing = false;
+        cameraFieldOfView.getFirst().slider().setDisabled(!camera.firstPerson());
+    }
+
     private void applyGeometry() {
+        // The sliders apply while the panel is still being built, before the transitions box exists.
+        boolean steps = transitions != null ? transitions.isChecked() : BoardGeometry.DEFAULT_TRANSITIONS;
+        float padding = value(geometry, 6);
         BoardGeometry.tune(new BoardGeometry.Tuning(value(geometry, 0), value(geometry, 1), value(geometry, 2),
-              Math.round(value(geometry, 3)), value(geometry, 4), value(geometry, 5)));
+              Math.round(value(geometry, 3)), value(geometry, 4), value(geometry, 5), steps, padding));
+        // Padding replaces transitions while it is on.
+        if (transitions != null) { transitions.setDisabled(padding > 0); }
         updateReadings(geometry);
+    }
+
+    private void applyRelief() {
+        int full = Math.round(value(terrainDetail, 0));
+        TerrainLod.tune(new TerrainLod.Tuning(full, Math.min(full, Math.round(value(terrainDetail, 1)))));
+        BoardRelief.tune(new BoardRelief.Tuning(value(relief, 3), value(relief, 4), value(relief, 5), value(relief, 6),
+              value(relief, 7), value(relief, 8), value(relief, 9), value(relief, 10), value(relief, 11), value(relief, 12),
+              value(relief, 1), value(relief, 2), value(relief, 13), value(relief, 14),
+              value(relief, 0) / 100, cliffsIntoWater.isChecked()));
+        syncRelief();
+    }
+
+    private void syncRelief() {
+        BoardRelief.Tuning t = BoardRelief.tuning();
+        syncing = true;
+        cliffsIntoWater.setChecked(t.cliffsIntoWater());
+        terrainLod.setChecked(TerrainLod.enabled());
+        syncing = false;
+        setValues(relief, new float[] { 100 * t.riverWidth(), t.shoreSpread(), t.landKeep(), t.shoreShift(), t.shoreRoom(), t.shoreReach(),
+              t.shoreNarrow(), t.shoreHard(), t.shorePool(), t.shoreIsle(), t.shoreBlend(), t.shoreWander(),
+              t.wanderCell(), t.shoreLip(), t.transition() });
+        setValues(terrainDetail, new float[] { TerrainLod.tuning().fullPixels(), TerrainLod.tuning().mediumPixels() });
+        for (Control control : terrainDetail) { control.slider().setDisabled(!TerrainLod.enabled()); }
+        updateReadings(relief);
+        updateReadings(terrainDetail);
+    }
+
+    void terrainProgress(int percent) {
+        if (terrainPercent == percent) { return; }
+        terrainPercent = percent;
+        terrainProgress.setText(percent < 0 ? "" : Messages.getString("GpuBoard.preparingTerrain", percent));
+    }
+
+    private void applyWater() {
+        BoardSurface.tune(new BoardSurface.Tuning(fallsOffBoard.isChecked(), value(water, 7), value(water, 0),
+              value(water, 1), value(water, 8), value(water, 2), value(water, 3), value(water, 4), value(water, 5),
+              value(water, 9), value(water, 10), value(water, 11), value(water, 6), value(water, 12), value(water, 13)));
+        syncWater();
+    }
+
+    private void syncWater() {
+        BoardSurface.Tuning t = BoardSurface.tuning();
+        syncing = true;
+        fallsOffBoard.setChecked(t.fallsOffBoard());
+        syncing = false;
+        setValues(water, new float[] { t.hug(), t.beach(), t.shoreBank(), t.shoreRound(), t.mouthOpening(),
+              t.plungeOpening(), t.plateau(), t.bottomlessLevels(), t.plungePool(), t.lipJut(), t.fallLipWidth(),
+              t.fallLipDrop(), t.lipDepth(), t.valley() });
+        updateReadings(water);
+    }
+
+    private void applyGeology() {
+        List<BoardRelief.Geology> next = new ArrayList<>(BoardRelief.geology());
+        next.set(geologyFamily.getSelectedIndex(), new BoardRelief.Geology(value(geology, 0), value(geology, 1),
+              value(geology, 2), value(geology, 3), value(geology, 4), value(geology, 5), value(geology, 6),
+              value(geology, 7), value(geology, 8), value(geology, 9), value(geology, 10), value(geology, 11),
+              value(geology, 12), value(geology, 13), value(geology, 14), value(geology, 15), value(geology, 16)));
+        BoardRelief.tuneGeology(next);
+        updateReadings(geology);
+    }
+
+    private void syncGeology() {
+        BoardRelief.Geology g = BoardRelief.geology().get(geologyFamily.getSelectedIndex());
+        setValues(geology, new float[] { g.cellWidth(), g.cellHeight(), g.cells(), g.fractures(), g.strata(),
+              g.bedding(), g.buttress(), g.recess(), g.relief(), g.cap(), g.talus(), g.round(), g.bank(), g.lean(), g.cast(),
+              g.stones(), g.shrubs() });
+        boolean bedrock = geologyFamily.getSelectedIndex() == BoardScene.Surface.values().length;
+        geology.get(8).slider().setDisabled(bedrock);
+        geology.get(11).slider().setDisabled(bedrock);
+        geology.get(15).slider().setDisabled(bedrock);
+        geology.get(16).slider().setDisabled(bedrock);
+        updateReadings(geology);
     }
 
     private void applyFamilySizes() {

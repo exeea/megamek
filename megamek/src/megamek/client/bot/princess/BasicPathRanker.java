@@ -36,17 +36,7 @@ package megamek.client.bot.princess;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
 import java.text.NumberFormat;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.Set;
-import java.util.TreeMap;
-import java.util.TreeSet;
+import java.util.*;
 import java.util.stream.Stream;
 
 import megamek.client.bot.Messages;
@@ -503,7 +493,7 @@ public class BasicPathRanker extends PathRanker {
         List<Coords> positions = new ArrayList<>(units.size());
         for (Entity unit : units) {
             Coords position = unit.getPosition();
-            if ((null != position) && unit.isDeployed() && (unit.getBoardId() == boardId)) {
+            if ((position != null) && unit.isDeployed() && (unit.getBoardId() == boardId)) {
                 positions.add(position);
             }
         }
@@ -1680,8 +1670,7 @@ public class BasicPathRanker extends PathRanker {
         BehaviorType behaviorType = getOwner().getUnitBehaviorTracker().getBehaviorType(movingUnit, getOwner());
 
         if (behaviorType == BehaviorType.ForcedWithdrawal || behaviorType == BehaviorType.MoveToDestination) {
-            int newDistanceToHome = distanceToHomeEdge(path.getFinalCoords(), path.getFinalBoardId(),
-                  getOwner().getHomeEdge(movingUnit),
+            int newDistanceToHome = distanceToDestination(movingUnit, path.getFinalCoords(), path.getFinalBoardId(),
                   game);
             double selfPreservation = getOwner().getBehaviorSettings().getSelfPreservationValue();
             double selfPreservationMod;
@@ -2605,6 +2594,13 @@ public class BasicPathRanker extends PathRanker {
     public double checkPathForHazards(MovePath path, Entity movingUnit, Game game) {
         logger.trace("Checking Path ({}) for hazards.", path);
 
+        // TW p.55: a WiGE vehicle that lands anywhere but a clear, paved or water hex crashes, and as it cannot land
+        // there the crash destroys it (TW p.68). Checked before the flying check, as the path is airborne until then.
+        if (path.landsWiGEVehicleWhereItCrashes()) {
+            logger.trace("WiGE lands where it crashes ({}).", UNIT_DESTRUCTION_FACTOR);
+            return UNIT_DESTRUCTION_FACTOR;
+        }
+
         // If we're flying or swimming, we don't care about ground hazards.
         if (EntityMovementType.MOVE_FLYING.equals(path.getLastStepMovementType()) ||
               EntityMovementType.MOVE_OVER_THRUST.equals(path.getLastStepMovementType()) ||
@@ -2657,10 +2653,10 @@ public class BasicPathRanker extends PathRanker {
         // unit's ledger said stay, turn after turn. Price the water for the hex the unit stays in. The
         // elevation check keeps this to units actually in the water - a stationary path reports MOVE_NONE,
         // so a hovering VTOL would otherwise read as drowning.
-        if (null == previousCoords) {
+        if (previousCoords == null) {
             Coords finalCoords = path.getFinalCoords();
-            Hex finalHex = (null == finalCoords) ? null : game.getBoard(path.getFinalBoardId()).getHex(finalCoords);
-            if ((null != finalHex) && finalHex.containsTerrain(Terrains.WATER)
+            Hex finalHex = (finalCoords == null) ? null : game.getBoard(path.getFinalBoardId()).getHex(finalCoords);
+            if ((finalHex != null) && finalHex.containsTerrain(Terrains.WATER)
                   && !finalHex.containsTerrain(Terrains.ICE) && (movingUnit.getElevation() < 0)) {
                 totalHazard += waterHazard(movingUnit, finalHex, movingUnit.getElevation(),
                       movingUnit.isProne(), true, null);
@@ -2952,7 +2948,7 @@ public class BasicPathRanker extends PathRanker {
         // Fall-contingent breaches: unarmored locations that submerge only if the unit falls prone. Compute
         // the fall probability lazily so a fully-armored unit never triggers it. A unit standing still makes
         // no water-entry roll, so there is nothing to fall from.
-        if (null != movePath) {
+        if (movePath != null) {
             double fallProbability = -1;
             for (int location : submergedWhileProne) {
                 if (submergedInCurrentPose.contains(location) || (movingUnit.getArmor(location) > 0)) {
@@ -3046,7 +3042,7 @@ public class BasicPathRanker extends PathRanker {
         if (waterRoll.getValue() == TargetRoll.CHECK_FALSE) {
             return 0.0;
         }
-        boolean naturalAptPilot = movingUnit.hasAbility(OptionsConstants.PILOT_APTITUDE_PILOTING);
+        boolean naturalAptPilot = movingUnit.isUseNaturalAptitudePiloting();
         return 1.0 - (Compute.oddsAbove(waterRoll.getValue(), naturalAptPilot) / 100.0);
     }
 

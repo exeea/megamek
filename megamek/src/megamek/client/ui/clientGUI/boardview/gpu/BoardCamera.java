@@ -4,23 +4,31 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.awt.Rectangle;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.BiConsumer;
 
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.OrthographicCamera;
+import com.badlogic.gdx.graphics.PerspectiveCamera;
 import com.badlogic.gdx.math.Interpolation;
 import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.BoundingBox;
 import megamek.common.board.Coords;
 
-/** One orbit camera for the 3D view and the Tactical View, with shared geometry for every orientation. */
+/** One camera for the 3D view and the Tactical View: orbit presets and free flight over the same board geometry. */
 final class BoardCamera {
     private static final float ISOMETRIC_TILT = 54.73561f;
-    // Manual orthographic zoom limits: smaller values zoom in, larger values zoom out.
+    // Manual zoom limits: smaller values zoom in, larger values zoom out.
     private static final float MIN_ZOOM = 0.05f;
     private static final float MAX_ZOOM = 20f;
     static final float ENTRANCE_SECONDS = 1.2f;
     private static final float ENTRANCE_ZOOM = 1.35f;
     static final float MAX_TILT = 80;
+    static final float DEFAULT_FIELD_OF_VIEW = 60;
+    static final float MIN_FIELD_OF_VIEW = 1;
+    static final float MAX_FIELD_OF_VIEW = 100;
     /** One keyboard turn. Hex rows line up again every sixth of a circle, so each turn lands on a matching view. */
     static final float ROTATION_STEP = 60;
     static final float ROTATION_SECONDS = 0.25f;
@@ -33,7 +41,7 @@ final class BoardCamera {
     /** Degrees from overhead: at or below this tilt, keep visible actions still; otherwise only pan or zoom out. */
     static final float ATTACK_TOP_VIEW_TILT_DEGREES = 30;
     private static final float FRAMING_MARGIN_PIXELS = 64;
-    final OrthographicCamera camera = new OrthographicCamera();
+    final BoardProjectionCamera camera = new BoardProjectionCamera();
     final Vector3 focus = new Vector3();
     // Render-thread settings shared by both views and their Camera-menu checkboxes.
     boolean animateOnSelectionChange = ANIMATE_CAMERA_ON_SELECTION_CHANGE;
@@ -41,6 +49,12 @@ final class BoardCamera {
     boolean animateOnMove = ANIMATE_CAMERA_ON_MOVE;
     private float azimuth;
     private float tilt;
+    /** In first person, camera.position owns the eye; focus and zoom retain the tactical view to restore. */
+    private boolean firstPerson;
+    private float orbitAzimuth, orbitTilt;
+    private boolean orbitFit;
+    /** Render-thread movement constraint supplied by the board view, borrowing its installed terrain geometry. */
+    BiConsumer<Vector3, Vector3> flightCollision;
     private float overviewZoom;
     private Vector3 overviewFocus;
     private boolean overviewFit;
@@ -75,6 +89,10 @@ final class BoardCamera {
     private int framedCount;
     private float framedWidth, framedLeft, framedViewportWidth, framedHeight;
     private int framedGeometry;
+    /** Render-owned height limits of the immutable tile snapshot, shared by successive camera positions. */
+    private List<BoardScene.Tile> visibleTiles;
+    private int visibleGeometry = -1;
+    private float visibleLow, visibleHigh;
 
     BoardCamera() {
         camera.near = 1;
@@ -82,9 +100,155 @@ final class BoardCamera {
         camera.zoom = 1;
     }
 
-    /** Shared projected size for the orthographic board, including framebuffer/display scaling. */
-    static float pixelsPerUnit(OrthographicCamera camera) {
-        return Gdx.graphics.getBackBufferHeight() / (float) Math.max(1, Gdx.graphics.getHeight()) / camera.zoom;
+    /** Projected size at the orbit pivot, including framebuffer/display scaling. */
+    static float pixelsPerUnit(Camera camera) {
+        float scale = Gdx.graphics == null ? 1
+              : Gdx.graphics.getBackBufferHeight() / (float) Math.max(1, Gdx.graphics.getHeight());
+        return scale / worldUnitsPerPixel(camera);
+    }
+
+    static float worldUnitsPerPixel(Camera camera) {
+        Vector3 point = camera instanceof BoardProjectionCamera board
+              ? new Vector3(camera.position).mulAdd(camera.direction, board.distance()) : camera.position;
+        return worldUnitsPerPixel(camera, point);
+    }
+
+    static float pixelsPerUnit(Camera camera, Vector3 point) {
+        float scale = Gdx.graphics == null ? 1
+              : Gdx.graphics.getBackBufferHeight() / (float) Math.max(1, Gdx.graphics.getHeight());
+        return scale / worldUnitsPerPixel(camera, point);
+    }
+
+    /** World distance corresponding to one logical screen pixel at the supplied point's camera depth. */
+    static float worldUnitsPerPixel(Camera camera, Vector3 point) {
+        if (camera instanceof OrthographicCamera orthographic) { return orthographic.zoom; }
+        if (camera instanceof BoardProjectionCamera board && !board.perspective) { return board.zoom; }
+        float fieldOfView = camera instanceof BoardProjectionCamera board ? board.fieldOfView
+              : camera instanceof PerspectiveCamera perspective ? perspective.fieldOfView : DEFAULT_FIELD_OF_VIEW;
+        float depth = new Vector3(point).sub(camera.position).dot(camera.direction);
+        return 2 * Math.max(camera.near, depth) * (float) Math.tan(Math.toRadians(fieldOfView / 2))
+              / Math.max(1, camera.viewportHeight);
+    }
+
+    /** Bounds of visible points within a horizontal slab; horizon-crossing views conservatively retain it all. */
+    static BoundingBox viewportBounds(Camera view, BoundingBox bounds) {
+        if (view == null) { return new BoundingBox(bounds); }
+        BoundingBox visible = new BoundingBox().inf();
+        for (int x : new int[] { -1, 1 }) {
+            for (int y : new int[] { -1, 1 }) {
+                Vector3 origin = new Vector3(x, y, -1).prj(view.invProjectionView);
+                Vector3 ray = new Vector3(x, y, 1).prj(view.invProjectionView).sub(origin).nor();
+                if (ray.z >= -.00001f || origin.z < bounds.max.z) { return new BoundingBox(bounds); }
+                for (float z : new float[] { bounds.min.z, bounds.max.z }) {
+                    visible.ext(new Vector3(origin).mulAdd(ray, (z - origin.z) / ray.z));
+                }
+            }
+        }
+        visible.min.x = MathUtils.clamp(visible.min.x, bounds.min.x, bounds.max.x);
+        visible.min.y = MathUtils.clamp(visible.min.y, bounds.min.y, bounds.max.y);
+        visible.max.x = MathUtils.clamp(visible.max.x, bounds.min.x, bounds.max.x);
+        visible.max.y = MathUtils.clamp(visible.max.y, bounds.min.y, bounds.max.y);
+        visible.min.z = bounds.min.z;
+        visible.max.z = bounds.max.z;
+        visible.update();
+        return visible;
+    }
+
+    void setPerspective(boolean value) {
+        if (firstPerson && !value) {
+            setFirstPerson(false);
+            return;
+        }
+        if (camera.perspective == value) { return; }
+        stopFraming();
+        fitToWindow = false;
+        camera.perspective = value;
+        update();
+    }
+
+    boolean perspective() {
+        return camera.perspective;
+    }
+
+    void setFirstPerson(boolean value) {
+        if (firstPerson == value) { return; }
+        // Free flight starts from the 3D pose: the Tactical View's fixed top view cannot look around.
+        if (value && tactical()) { setTactical(false, null); }
+        stopFraming();
+        stopRotation();
+        framedAction = null;
+        if (value) {
+            orbitAzimuth = azimuth;
+            orbitTilt = tilt;
+            orbitFit = fitToWindow;
+            // Start at the equivalent perspective eye, with the same viewing direction and scale at the pivot.
+            setPerspective(true);
+            firstPerson = true;
+            fitToWindow = false;
+            moveEye(new Vector3());
+        } else {
+            firstPerson = false;
+            camera.perspective = false;
+            azimuth = orbitAzimuth;
+            tilt = orbitTilt;
+            fitToWindow = orbitFit;
+        }
+        update();
+    }
+
+    boolean firstPerson() { return firstPerson; }
+
+    /** Positive yaw looks right, positive pitch looks up. The eye stays fixed and the horizon never rolls. */
+    void look(float yaw, float pitch) {
+        if (!firstPerson) { return; }
+        azimuth = wrapDegrees(azimuth - yaw);
+        tilt = MathUtils.clamp(tilt + pitch, .5f, 179.5f);
+        update();
+    }
+
+    /** Free flight in world units: forward follows the gaze, sideways strafes, and vertical follows world up. */
+    void fly(float forward, float sideways, float vertical, float distance) {
+        if (!firstPerson) { return; }
+        Vector3 right = new Vector3(camera.direction).crs(camera.up).nor();
+        Vector3 movement = new Vector3(camera.direction).scl(forward).mulAdd(right, sideways).add(0, 0, vertical);
+        if (movement.isZero(.00001f)) { return; }
+        moveEye(movement.nor().scl(distance));
+        update();
+    }
+
+    private void moveEye(Vector3 movement) {
+        if (flightCollision == null) { camera.position.add(movement); }
+        else { flightCollision.accept(camera.position, movement); }
+    }
+
+    /** Recheck clearance when terrain, viewport or lens settings change, without disturbing a valid flight pose. */
+    void constrainFlight() {
+        if (!firstPerson || flightCollision == null) { return; }
+        Vector3 before = camera.position.cpy();
+        moveEye(new Vector3());
+        if (!before.equals(camera.position)) { update(); }
+    }
+
+    /** Enclose the near-plane corners even with a wide lens or viewport, so looking around cannot clip a cliff. */
+    float collisionRadius() {
+        float halfHeight = (float) Math.tan(Math.toRadians(camera.fieldOfView / 2));
+        float aspect = camera.viewportWidth / Math.max(1, camera.viewportHeight);
+        return Math.max(4 * BoardGeometry.hexScale(), (float) Math.sqrt(1 + halfHeight * halfHeight * (1 + aspect * aspect)) + .1f);
+    }
+
+    void setFieldOfView(float value) {
+        if (!Float.isFinite(value)) { return; }
+        float clamped = MathUtils.clamp(value, MIN_FIELD_OF_VIEW, MAX_FIELD_OF_VIEW);
+        if (MathUtils.isEqual(camera.fieldOfView, clamped)) { return; }
+        stopFraming();
+        fitToWindow = false;
+        camera.fieldOfView = clamped;
+        update();
+        constrainFlight();
+    }
+
+    float fieldOfView() {
+        return camera.fieldOfView;
     }
 
     void resize(int width, int height) {
@@ -101,6 +265,7 @@ final class BoardCamera {
                   tacticalReturn.azimuth(), tacticalReturn.tilt());
         }
         displayScale = scale;
+        constrainFlight();
         if (fitToWindow && scene != null) {
             float elapsed = entranceElapsed;
             fit(scene);
@@ -124,7 +289,14 @@ final class BoardCamera {
         float offset = (camera.viewportWidth - MathUtils.clamp(availableWidth, 1, camera.viewportWidth)) / 2 - viewLeftPixels;
         if (MathUtils.isEqual(viewOffsetPixels, offset)) { return; }
         float shift = viewOffsetPixels - offset;
-        Vector3 right = new Vector3(camera.direction).crs(camera.up).nor();
+        Vector3 right;
+        if (firstPerson) {
+            Vector3 outward = new Vector3(), up = new Vector3();
+            orientation(orbitAzimuth, orbitTilt, outward, up);
+            right = up.crs(outward).nor();
+        } else {
+            right = new Vector3(camera.direction).crs(camera.up).nor();
+        }
         focus.mulAdd(right, shift * camera.zoom);
         if (framingTarget != null) {
             Vector3 outward = new Vector3(), up = new Vector3();
@@ -140,6 +312,7 @@ final class BoardCamera {
     /** Sets the isometric or the straight-down angle of the 3D view; the Tactical View ignores it. */
     void setIsometric(boolean value) {
         if (tactical()) { return; }
+        setFirstPerson(false);
         stopFraming();
         stopRotation();
         azimuth = value ? 45 : 0;
@@ -160,6 +333,8 @@ final class BoardCamera {
     void setTactical(boolean enabled, BoardScene scene) {
         if (enabled == tactical()) { return; }
         if (enabled) {
+            // The Tactical View replaces the orbit pose that free flight left.
+            setFirstPerson(false);
             tacticalReturn = framingTarget != null ? framingTarget
                   : new Pose(focus.cpy(), camera.zoom, isRotating() ? rotationTarget : azimuth, tilt);
             tacticalReturnFit = fitToWindow;
@@ -199,11 +374,11 @@ final class BoardCamera {
     }
 
     boolean isIsometric() {
-        return MathUtils.isEqual(azimuth, 45) && MathUtils.isEqual(tilt, ISOMETRIC_TILT);
+        return !firstPerson && MathUtils.isEqual(azimuth, 45) && MathUtils.isEqual(tilt, ISOMETRIC_TILT);
     }
 
     boolean isTopDown() {
-        return tilt == 0;
+        return !firstPerson && tilt == 0;
     }
 
     float tilt() {
@@ -220,6 +395,10 @@ final class BoardCamera {
 
     void orbit(float rotation, float inclination) {
         if (tactical()) { return; }
+        if (firstPerson) {
+            look(rotation, -inclination);
+            return;
+        }
         stopRotation();
         azimuth = wrapDegrees(azimuth + rotation);
         tilt(inclination);
@@ -228,6 +407,10 @@ final class BoardCamera {
     /** Changes only the viewing angle, so holding a tilt key does not interrupt a keyboard turn in progress. */
     void tilt(float inclination) {
         if (tactical()) { return; }
+        if (firstPerson) {
+            look(0, -inclination);
+            return;
+        }
         stopFraming();
         fitToWindow = false;
         tilt = MathUtils.clamp(tilt + inclination, 0, MAX_TILT);
@@ -242,6 +425,10 @@ final class BoardCamera {
      */
     void rotateStep(int direction) {
         if (tactical()) { return; }
+        if (firstPerson) {
+            look(direction * ROTATION_STEP, 0);
+            return;
+        }
         stopFraming();
         fitToWindow = false;
         float remaining = isRotating() ? rotationSweep * (1 - rotationProgress()) : 0;
@@ -340,6 +527,7 @@ final class BoardCamera {
 
     /** Fit authorized volley participants into the board area to the left of any open side panel. */
     void frameAttacks(List<UnitAttack> attacks, float availableWidth) {
+        if (firstPerson) { return; }
         if (attacks.isEmpty()) {
             clearPlaybackFrame();
             return;
@@ -374,23 +562,26 @@ final class BoardCamera {
         float inclination = topView ? tilt : Math.min(tilt, ISOMETRIC_TILT);
         float plane = (float) attacks.stream().mapToDouble(attack ->
               (attack.event.attacker().location().elevation() + attack.event.destination().elevation()) / 2)
-              .average().orElse(0) * BoardGeometry.LEVEL;
-        animateTo(fittedPose(points, width, bearing, inclination, topView ? camera.zoom : .5f / displayScale, !topView),
+              .average().orElse(0) * BoardGeometry.level();
+        animateTo(fittedPose(points, width, bearing, inclination, topView ? camera.zoom : .5f / displayScale, !topView, plane),
               plane, animateCombatPlayback);
     }
 
     /** Keep the chosen viewing angle and zoom, widening only when the selected unit cannot fit. */
     void frameSelection(BoardScene.Unit unit, float availableWidth) {
+        if (firstPerson) { return; }
         viewableWidth(availableWidth);
         clearPlaybackFrame();
         List<Vector3> points = new ArrayList<>();
         addUnit(points, unit);
-        animateTo(fittedPose(points, availableWidth, azimuth, tilt, camera.zoom, tilt > ATTACK_TOP_VIEW_TILT_DEGREES),
-              unit.location().elevation() * BoardGeometry.LEVEL, animateOnSelectionChange);
+        animateTo(fittedPose(points, availableWidth, azimuth, tilt, camera.zoom, tilt > ATTACK_TOP_VIEW_TILT_DEGREES,
+                    unit.location().elevation() * BoardGeometry.level()),
+              unit.location().elevation() * BoardGeometry.level(), animateOnSelectionChange);
     }
 
     /** Explicit hex navigation shares the selection transition and animation setting. */
     void frameLocation(Vector3 position, float availableWidth) {
+        if (firstPerson) { return; }
         viewableWidth(availableWidth);
         clearPlaybackFrame();
         animateTo(new Pose(position.cpy(), camera.zoom, azimuth, tilt), position.z, animateOnSelectionChange);
@@ -398,6 +589,7 @@ final class BoardCamera {
 
     /** Fit the complete rendered route once, with the smallest pan and no unnecessary zoom or rotation. */
     void frameMovement(BoardScene.Movement move, UnitMotion motion, BoardScene scene, float availableWidth) {
+        if (firstPerson) { return; }
         float width = MathUtils.clamp(availableWidth, 1, camera.viewportWidth);
         viewableWidth(width);
         if (!beginFrame(move, move.path().size(), width)) { return; }
@@ -409,8 +601,8 @@ final class BoardCamera {
                 for (var occupied : unit.footprint()) {
                     for (int corner = 0; corner < 6; corner++) {
                         var base = pose.outlinePoint(occupied, corner, 0);
-                        points.add(base.cpy().add(0, 0, -.25f * BoardGeometry.LEVEL));
-                        points.add(base.add(0, 0, Math.max(1, unit.height() + 1) * BoardGeometry.LEVEL));
+                        points.add(base.cpy().add(0, 0, -.25f * BoardGeometry.level()));
+                        points.add(base.add(0, 0, Math.max(1, unit.height() + 1) * BoardGeometry.level()));
                     }
                 }
             }
@@ -421,13 +613,17 @@ final class BoardCamera {
             }
         }
         if (!points.isEmpty()) {
-            animateTo(fittedPose(points, width, azimuth, tilt, camera.zoom, false),
-                  move.path().getFirst().elevation() * BoardGeometry.LEVEL, animateOnMove);
+            animateTo(fittedPose(points, width, azimuth, tilt, camera.zoom, false,
+                        move.path().getFirst().elevation() * BoardGeometry.level()),
+                  move.path().getFirst().elevation() * BoardGeometry.level(), animateOnMove);
         }
     }
 
     private Pose fittedPose(List<Vector3> points, float availableWidth, float bearing, float inclination,
-          float minimumZoom, boolean centered) {
+          float minimumZoom, boolean centered, float plane) {
+        if (camera.perspective) {
+            return perspectiveFit(points, availableWidth, bearing, inclination, minimumZoom, centered, plane);
+        }
         float width = MathUtils.clamp(availableWidth, 1, camera.viewportWidth);
         Vector3 outward = new Vector3(), up = new Vector3();
         orientation(bearing, inclination, outward, up);
@@ -463,6 +659,94 @@ final class BoardCamera {
         return new Pose(new Vector3(origin).mulAdd(right, x).mulAdd(up, y), zoom, bearing, inclination);
     }
 
+    /** Fits depth as well as screen extent, including the off-center orbit pivot beside open panels. */
+    private Pose perspectiveFit(List<Vector3> points, float availableWidth, float bearing, float inclination,
+          float minimumZoom, boolean centered, float plane) {
+        float width = MathUtils.clamp(availableWidth, 1, camera.viewportWidth);
+        if (!centered && points.stream().allMatch(point -> insideView(point, width))) {
+            return new Pose(focus.cpy(), camera.zoom, azimuth, tilt);
+        }
+        Vector3 outward = new Vector3(), up = new Vector3();
+        orientation(bearing, inclination, outward, up);
+        Vector3 right = new Vector3(up).crs(outward).nor();
+        float minX = Float.POSITIVE_INFINITY, maxX = Float.NEGATIVE_INFINITY;
+        float minY = Float.POSITIVE_INFINITY, maxY = Float.NEGATIVE_INFINITY;
+        for (Vector3 point : points) {
+            Vector3 relative = new Vector3(point).sub(focus);
+            float x = relative.dot(right), y = relative.dot(up);
+            minX = Math.min(minX, x);
+            maxX = Math.max(maxX, x);
+            minY = Math.min(minY, y);
+            maxY = Math.max(maxY, y);
+        }
+        Vector3 pivot = new Vector3(focus).mulAdd(right, (minX + maxX) / 2).mulAdd(up, (minY + maxY) / 2);
+        pivot.mulAdd(outward, (plane - pivot.z) / outward.z);
+        float margin = Math.min(FRAMING_MARGIN_PIXELS * displayScale, Math.min(width, camera.viewportHeight) * .2f);
+        float halfWidth = width / 2 - margin, halfHeight = camera.viewportHeight / 2 - margin;
+        float focalLength = camera.viewportHeight / (2 * (float) Math.tan(Math.toRadians(camera.fieldOfView / 2)));
+        float distancePerZoom = camera.distance() / camera.zoom;
+        float distance = Math.max(camera.near, minimumZoom * distancePerZoom);
+        if (!centered) {
+            Vector3 panned = perspectivePivot(points, right, up, outward, distance, focalLength, halfWidth, halfHeight, plane);
+            if (panned != null) { return new Pose(panned, distance / distancePerZoom, bearing, inclination); }
+        }
+        for (Vector3 point : points) {
+            Vector3 relative = new Vector3(point).sub(pivot);
+            float depth = relative.dot(outward);
+            float horizontal = Math.abs(focalLength * relative.dot(right) - viewOffsetPixels * depth) / halfWidth;
+            float vertical = Math.abs(focalLength * relative.dot(up)) / halfHeight;
+            distance = Math.max(distance, depth + Math.max(camera.near * 2, Math.max(horizontal, vertical)));
+        }
+        if (!centered) {
+            Vector3 panned = perspectivePivot(points, right, up, outward, distance * 1.00001f,
+                  focalLength, halfWidth, halfHeight, plane);
+            if (panned != null) { pivot = panned; distance *= 1.00001f; }
+        }
+        return new Pose(pivot, distance / distancePerZoom, bearing, inclination);
+    }
+
+    /** Find the smallest pan at a fixed distance, keeping the orbit pivot on the action's support plane. */
+    private Vector3 perspectivePivot(List<Vector3> points, Vector3 right, Vector3 up, Vector3 outward,
+          float distance, float focalLength, float halfWidth, float halfHeight, float plane) {
+        float depthOffset = (plane - focus.z) / outward.z, slope = up.z / outward.z;
+        float lowerX = Float.NEGATIVE_INFINITY, upperX = Float.POSITIVE_INFINITY;
+        float[] vertical = { Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY };
+        for (Vector3 point : points) {
+            Vector3 relative = new Vector3(point).sub(focus);
+            float x = relative.dot(right), y = relative.dot(up), depth = relative.dot(outward) - depthOffset;
+            lowerX = Math.max(lowerX, x - halfWidth * distance / focalLength
+                  + (halfWidth - viewOffsetPixels) * depth / focalLength);
+            upperX = Math.min(upperX, x + halfWidth * distance / focalLength
+                  - (halfWidth + viewOffsetPixels) * depth / focalLength);
+            if (!restrict(vertical, halfHeight * slope - focalLength, halfHeight * (distance - depth) - focalLength * y)
+                  || !restrict(vertical, halfHeight * slope + focalLength, halfHeight * (distance - depth) + focalLength * y)
+                  || !restrict(vertical, slope, distance - depth - 2 * camera.near)) { return null; }
+        }
+        if (!restrict(vertical, 2 * halfWidth * slope / focalLength, upperX - lowerX)) { return null; }
+        float y = MathUtils.clamp(0, vertical[0], vertical[1]);
+        float x = MathUtils.clamp(0, lowerX + (halfWidth - viewOffsetPixels) * slope * y / focalLength,
+              upperX - (halfWidth + viewOffsetPixels) * slope * y / focalLength);
+        return focus.cpy().mulAdd(right, x).mulAdd(up, y).mulAdd(outward, depthOffset - slope * y);
+    }
+
+    /** Intersect a one-dimensional interval with coefficient * value <= limit. */
+    private static boolean restrict(float[] interval, float coefficient, float limit) {
+        if (Math.abs(coefficient) < .000001f) { return limit >= -.00001f; }
+        if (coefficient > 0) {
+            interval[1] = Math.min(interval[1], limit / coefficient);
+        } else {
+            interval[0] = Math.max(interval[0], limit / coefficient);
+        }
+        return interval[0] <= interval[1];
+    }
+
+    private boolean insideView(Vector3 point, float width) {
+        if (new Vector3(point).sub(camera.position).dot(camera.direction) <= camera.near) { return false; }
+        Vector3 screen = camera.project(new Vector3(point), 0, 0, camera.viewportWidth, camera.viewportHeight);
+        return screen.x >= viewLeftPixels && screen.x <= viewLeftPixels + width
+              && screen.y >= 0 && screen.y <= camera.viewportHeight;
+    }
+
     private void animateTo(Pose target, float plane, boolean animate) {
         var current = new Pose(focus.cpy(), camera.zoom, azimuth, tilt);
         if (current.sameAs(target)) {
@@ -473,7 +757,9 @@ final class BoardCamera {
         // sliding along the viewing ray so the fit stays unchanged on screen.
         Vector3 outward = new Vector3(), up = new Vector3();
         orientation(target.azimuth(), target.tilt(), outward, up);
-        target.focus().mulAdd(outward, (plane - target.focus().z) / outward.z);
+        if (!camera.perspective) {
+            target.focus().mulAdd(outward, (plane - target.focus().z) / outward.z);
+        }
         if (target.sameAs(framingTarget)) {
             return; // Repeated selection/centering notifications keep the same move and its original deadline.
         }
@@ -533,6 +819,10 @@ final class BoardCamera {
     }
 
     void zoom(float factor) {
+        if (firstPerson) {
+            fly(1, 0, 0, -(float) Math.log(factor) * BoardGeometry.height() * 3);
+            return;
+        }
         stopFraming();
         fitToWindow = false;
         camera.zoom = MathUtils.clamp(camera.zoom * factor, MIN_ZOOM, MAX_ZOOM);
@@ -541,6 +831,18 @@ final class BoardCamera {
 
     /** Zoom around the pointer's position on the focus plane. Coordinates are local to the board viewport. */
     void zoomAt(float factor, float x, float y) {
+        if (firstPerson) {
+            zoom(factor);
+            return;
+        }
+        if (camera.perspective) {
+            Vector3 before = pointOnPlane(x, y, focus.z);
+            zoom(factor);
+            Vector3 after = pointOnPlane(x, y, focus.z);
+            if (before != null && after != null) { focus.add(before.sub(after)); }
+            update();
+            return;
+        }
         float before = camera.zoom;
         zoom(factor);
         float difference = before - camera.zoom;
@@ -550,17 +852,39 @@ final class BoardCamera {
     }
 
     void fit(BoardScene scene) {
+        setFirstPerson(false);
         stopFraming();
         fitToWindow = true;
-        focus.set(scene.width() * BoardGeometry.WIDTH * 0.375f,
-              -(scene.height() + 0.5f) * BoardGeometry.HEIGHT / 2, 0);
+        // Follow the board's lowest level so an absolute elevation offset cannot move it behind the camera.
+        float plane = BoardGeometry.weatherBase(scene);
+        focus.set(scene.width() * BoardGeometry.width() * 0.375f,
+              -(scene.height() + 0.5f) * BoardGeometry.height() / 2, plane);
         update();
+        if (camera.perspective) {
+            List<Vector3> points = new ArrayList<>();
+            float floor = BoardGeometry.floor(scene) / BoardGeometry.level();
+            for (BoardScene.Tile tile : scene.tiles()) {
+                float top = tile.elevation();
+                for (BoardScene.Feature feature : tile.features()) {
+                    top = Math.max(top, tile.elevation() + feature.elevation() + feature.height());
+                }
+                addHex(points, tile.coords(), floor, top);
+            }
+            if (!points.isEmpty()) {
+                var pose = perspectiveFit(points, camera.viewportWidth - 2 * (viewOffsetPixels + viewLeftPixels),
+                      azimuth, tilt, 0, true, plane);
+                focus.set(pose.focus());
+                camera.zoom = pose.zoom();
+                update();
+            }
+            return;
+        }
         Vector3 right = new Vector3(camera.direction).crs(camera.up).nor();
         float minX = Float.POSITIVE_INFINITY;
         float minY = Float.POSITIVE_INFINITY;
         float maxX = Float.NEGATIVE_INFINITY;
         float maxY = Float.NEGATIVE_INFINITY;
-        float floor = BoardGeometry.floor(scene) / BoardGeometry.LEVEL;
+        float floor = BoardGeometry.floor(scene) / BoardGeometry.level();
         for (BoardScene.Tile tile : scene.tiles()) {
             float top = tile.elevation();
             for (BoardScene.Feature feature : tile.features()) {
@@ -585,10 +909,35 @@ final class BoardCamera {
     }
 
     void pan(float dx, float dy) {
+        if (firstPerson) {
+            Vector3 right = new Vector3(camera.direction).crs(camera.up).nor();
+            moveEye(right.scl(-dx / displayScale).mulAdd(camera.up, dy / displayScale));
+            update();
+            return;
+        }
         stopFraming();
         fitToWindow = false;
-        moveOnBoard(-dx * camera.zoom, dy * camera.zoom);
+        if (camera.perspective) {
+            float x = camera.viewportWidth / 2 - viewOffsetPixels, y = camera.viewportHeight / 2;
+            Vector3 before = pointOnPlane(x, y, focus.z);
+            Vector3 after = pointOnPlane(x + dx, y - dy, focus.z);
+            if (before != null && after != null) { focus.add(before.sub(after)); }
+        } else {
+            moveOnBoard(-dx * camera.zoom, dy * camera.zoom);
+        }
         update();
+    }
+
+    /** Screen coordinates use the bottom-left origin, without relying on a global graphics viewport. */
+    private Vector3 pointOnPlane(float x, float y, float plane) {
+        Vector3 right = new Vector3(camera.direction).crs(camera.up).nor();
+        // The perspective ray uses the exact camera basis; inverting a very deep frustum loses anchor precision.
+        Vector3 direction = new Vector3(camera.direction)
+              .mulAdd(right, (2 * x / camera.viewportWidth - 1) / camera.projection.val[Matrix4.M00])
+              .mulAdd(camera.up, (2 * y / camera.viewportHeight - 1) / camera.projection.val[Matrix4.M11]).nor();
+        if (direction.z >= -.00001f) { return null; }
+        float distance = (plane - camera.position.z) / direction.z;
+        return distance >= 0 ? new Vector3(camera.position).mulAdd(direction, distance) : null;
     }
 
     private void moveOnBoard(float dx, float dy) {
@@ -600,6 +949,7 @@ final class BoardCamera {
     }
 
     void center(Vector3 position) {
+        if (firstPerson) { return; }
         stopFraming();
         fitToWindow = false;
         focus.set(position);
@@ -607,6 +957,7 @@ final class BoardCamera {
     }
 
     void toggleOverview(BoardScene scene) {
+        setFirstPerson(false);
         stopFraming();
         if (overviewFocus == null) {
             overviewZoom = camera.zoom;
@@ -628,49 +979,56 @@ final class BoardCamera {
 
     /**
      * The window's corners cast along the view onto the plane at height {@code z}, clockwise from the top left: the
-     * ground the camera shows at that height (the minimap's frustum).
+     * ground the camera shows at that height (the minimap's frustum). A perspective corner ray that does not reach the
+     * plane between the near and far planes ends at the far plane.
      */
     Vector3[] groundQuad(float z) {
-        Vector3 right = new Vector3(camera.direction).crs(camera.up).nor();
         Vector3[] quad = new Vector3[4];
         int[][] corners = { { -1, 1 }, { 1, 1 }, { 1, -1 }, { -1, -1 } };
         for (int corner = 0; corner < 4; corner++) {
-            Vector3 origin = new Vector3(camera.position)
-                  .mulAdd(right, corners[corner][0] * camera.viewportWidth * camera.zoom / 2)
-                  .mulAdd(camera.up, corners[corner][1] * camera.viewportHeight * camera.zoom / 2);
-            quad[corner] = origin.mulAdd(camera.direction, (z - origin.z) / camera.direction.z);
+            Vector3 origin = new Vector3(corners[corner][0], corners[corner][1], -1).prj(camera.invProjectionView);
+            Vector3 far = new Vector3(corners[corner][0], corners[corner][1], 1).prj(camera.invProjectionView);
+            Vector3 ray = new Vector3(far).sub(origin);
+            float along = ray.z < -.00001f ? (z - origin.z) / ray.z : -1;
+            quad[corner] = along < 0 || along > 1 ? far : origin.mulAdd(ray, along);
         }
         return quad;
     }
 
     /** Bounds of the camera's rays at both terrain height extremes, in board hex coordinates. */
     Rectangle visibleArea(BoardScene scene) {
-        float low = BoardGeometry.floor(scene);
-        float high = scene.tiles().stream().mapToInt(BoardScene.Tile::elevation).max().orElse(0) * BoardGeometry.LEVEL;
-        float minX = Float.POSITIVE_INFINITY;
-        float minY = Float.POSITIVE_INFINITY;
-        float maxX = Float.NEGATIVE_INFINITY;
-        float maxY = Float.NEGATIVE_INFINITY;
-        for (float z : new float[] { low, high }) {
-            for (Vector3 point : groundQuad(z)) {
-                minX = Math.min(minX, point.x);
-                maxX = Math.max(maxX, point.x);
-                minY = Math.min(minY, -point.y);
-                maxY = Math.max(maxY, -point.y);
-            }
+        if (visibleTiles != scene.tiles() || visibleGeometry != BoardGeometry.revision()) {
+            visibleLow = BoardGeometry.floor(scene);
+            visibleHigh = scene.tiles().stream().mapToInt(BoardScene.Tile::elevation).max().orElse(0) * BoardGeometry.level();
+            visibleTiles = scene.tiles();
+            visibleGeometry = BoardGeometry.revision();
         }
-        int left = Math.max(0, (int) Math.floor(minX / (BoardGeometry.WIDTH * 0.75f)) - 2);
-        int top = Math.max(0, (int) Math.floor(minY / BoardGeometry.HEIGHT) - 2);
-        int rightHex = Math.min(scene.width(), (int) Math.ceil(maxX / (BoardGeometry.WIDTH * 0.75f)) + 2);
-        int bottom = Math.min(scene.height(), (int) Math.ceil(maxY / BoardGeometry.HEIGHT) + 2);
+        BoundingBox bounds = viewportBounds(camera, new BoundingBox(
+              new Vector3(-BoardGeometry.width(), -(scene.height() + 1) * BoardGeometry.height(), visibleLow),
+              new Vector3((scene.width() + 1) * BoardGeometry.width() * .75f, BoardGeometry.height(), visibleHigh)));
+        int left = Math.max(0, (int) Math.floor(bounds.min.x / (BoardGeometry.width() * 0.75f)) - 2);
+        int top = Math.max(0, (int) Math.floor(-bounds.max.y / BoardGeometry.height()) - 2);
+        int rightHex = Math.min(scene.width(), (int) Math.ceil(bounds.max.x / (BoardGeometry.width() * 0.75f)) + 2);
+        int bottom = Math.min(scene.height(), (int) Math.ceil(-bounds.min.y / BoardGeometry.height()) + 2);
         return new Rectangle(left, top, Math.max(0, rightHex - left), Math.max(0, bottom - top));
     }
 
     void update() {
         orientation(azimuth, tilt, camera.direction, camera.up);
         camera.direction.scl(-1);
-        camera.position.set(camera.direction).scl(-10000).add(focus);
-        camera.position.mulAdd(new Vector3(camera.direction).crs(camera.up).nor(), viewOffsetPixels * camera.zoom);
+        // Parallel rays still need their origins in front of all visible ground. At a tilted, zoomed-out view,
+        // the viewport spans depth as well as width; a fixed eye distance clips its lower half when panning.
+        float distance = camera.perspective ? camera.distance() : 10000
+              + camera.viewportHeight * camera.zoom * .5f * camera.up.z / Math.max(.01f, -camera.direction.z);
+        if (!firstPerson) {
+            camera.position.set(camera.direction).scl(-distance).add(focus);
+            camera.position.mulAdd(new Vector3(camera.direction).crs(camera.up).nor(), viewOffsetPixels * camera.zoom);
+        }
+        // Perspective depth precision falls with the square of distance over the near plane: keep the near plane a
+        // fiftieth of the way to the pivot, so depth comparisons (occluded outlines, text, fog edges) stay exact there
+        // while terrain rising close to a low camera is not clipped.
+        camera.near = camera.perspective && !firstPerson ? Math.max(1, distance / 50) : 1;
+        camera.far = firstPerson ? 100000 : Math.max(100000, distance * 4);
         camera.update();
         revision++;
     }

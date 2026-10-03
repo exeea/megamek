@@ -116,7 +116,8 @@ class GpuRiverSmokeTest {
                 Hex[] hexes = new Hex[100];
                 for (int y = 0; y < 10; y++) {
                     for (int x = 0; x < 10; x++) {
-                        Hex hex = new Hex(Math.max(0, 3 - y / 3));
+                        // Drops of two levels or less are graded slopes; a waterfall needs three (docs/gpu-water.md).
+                        Hex hex = new Hex(y < 3 ? 3 : 0);
                         if (river.contains(new Coords(x, y))) {
                             hex.addTerrain(new Terrain(Terrains.WATER, 1));
                         }

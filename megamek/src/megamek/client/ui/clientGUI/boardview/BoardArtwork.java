@@ -23,6 +23,7 @@ import java.util.function.Function;
 
 import megamek.MMConstants;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.gpu.BoardRough;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.tileset.TilesetManager;
 import megamek.client.ui.util.UIUtil;
@@ -349,7 +350,7 @@ public final class BoardArtwork implements AutoCloseable {
             Hex flat = board.getHex(key).duplicate();
             BufferedImage foliage = null;
             if (flat.containsAnyTerrainOf(Terrains.WOODS, Terrains.JUNGLE, Terrains.BUILDING, Terrains.FUEL_TANK,
-                  Terrains.INDUSTRIAL, Terrains.BRIDGE, Terrains.ARMS, Terrains.LEGS)) {
+                  Terrains.INDUSTRIAL, Terrains.BRIDGE, Terrains.ARMS, Terrains.LEGS, Terrains.ROUGH)) {
                 Hex trees = flat.duplicate();
                 trees.removeAllTerrains();
                 for (int type : SPRITE_TERRAINS) {
@@ -357,6 +358,7 @@ public final class BoardArtwork implements AutoCloseable {
                 }
                 foliage = drawDecals(trees, true);
             }
+            if (BoardRough.variant(flat) != 0) { flat.removeTerrain(Terrains.FLUFF); }
             for (int terrain : GROUND_TERRAINS) {
                 flat.removeTerrain(terrain);
             }
@@ -415,23 +417,26 @@ public final class BoardArtwork implements AutoCloseable {
 
     private static final int[] GROUND_TERRAINS = { Terrains.ROAD, Terrains.ROAD_FLUFF, Terrains.PAVEMENT, Terrains.SAND,
           Terrains.SNOW, Terrains.TUNDRA, Terrains.MUD, Terrains.SWAMP, Terrains.ICE, Terrains.MAGMA, Terrains.FIELDS,
-          Terrains.ROUGH, Terrains.RUBBLE };
+          Terrains.RUBBLE };
 
-    /** Feature meshes and the terrains that select their tileset art: foliage, structures, bridges, limbs. */
+    /**
+     * Feature meshes and the terrains that select their tileset art: foliage, structures, bridges, limbs, and rough,
+     * whose rocks the Tactical View hides with the other props.
+     */
     private static final int[] SPRITE_TERRAINS = { Terrains.WOODS, Terrains.JUNGLE, Terrains.FOLIAGE_ELEV,
           Terrains.FLUFF, Terrains.BUILDING, Terrains.BLDG_CF, Terrains.BLDG_ELEV, Terrains.BLDG_FLUFF,
           Terrains.BLDG_ARMOR, Terrains.BLDG_CLASS, Terrains.FUEL_TANK, Terrains.FUEL_TANK_CF, Terrains.FUEL_TANK_ELEV,
           Terrains.FUEL_TANK_MAGN, Terrains.INDUSTRIAL, Terrains.BRIDGE, Terrains.BRIDGE_CF, Terrains.BRIDGE_ELEV,
-          Terrains.ARMS, Terrains.LEGS };
+          Terrains.ARMS, Terrains.LEGS, Terrains.ROUGH };
 
     /** These have geometry or tactical markings in 3D; their painted symbols would duplicate that presentation. */
     private static final int[] MODEL_TERRAINS = { Terrains.WATER, Terrains.WATER_FLUFF, Terrains.RAPIDS, Terrains.HAZARDOUS_LIQUID,
           Terrains.BUILDING, Terrains.BLDG_CF, Terrains.BLDG_ELEV, Terrains.BLDG_FLUFF, Terrains.BLDG_ARMOR,
           Terrains.FUEL_TANK, Terrains.FUEL_TANK_CF, Terrains.FUEL_TANK_ELEV, Terrains.FUEL_TANK_MAGN,
           Terrains.BRIDGE, Terrains.BRIDGE_CF, Terrains.BRIDGE_ELEV, Terrains.BRIDGE_REPAIRED,
-          Terrains.WOODS, Terrains.JUNGLE, Terrains.FOLIAGE_ELEV, Terrains.INDUSTRIAL,
+          Terrains.WOODS, Terrains.JUNGLE, Terrains.FOLIAGE_ELEV, Terrains.INDUSTRIAL, Terrains.ROUGH,
           Terrains.CLIFF_TOP, Terrains.CLIFF_BOTTOM, Terrains.INCLINE_TOP, Terrains.INCLINE_BOTTOM,
-          Terrains.INCLINE_HIGH_TOP, Terrains.INCLINE_HIGH_BOTTOM };
+          Terrains.INCLINE_HIGH_TOP, Terrains.INCLINE_HIGH_BOTTOM, Terrains.FIRE, Terrains.SMOKE, Terrains.IMPASSABLE };
 
     @Override
     public void close() {

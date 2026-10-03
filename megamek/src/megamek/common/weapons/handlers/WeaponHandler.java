@@ -67,6 +67,7 @@ import megamek.common.compute.ComputeArc;
 import megamek.common.compute.ComputeSideTable;
 import megamek.common.enums.AimingMode;
 import megamek.common.enums.GamePhase;
+import megamek.common.enums.HitDamageType;
 import megamek.common.equipment.AmmoMounted;
 import megamek.common.equipment.AmmoType;
 import megamek.common.equipment.EquipmentType;
@@ -83,6 +84,7 @@ import megamek.common.rolls.Roll;
 import megamek.common.rolls.TargetRoll;
 import megamek.common.units.*;
 import megamek.common.weapons.DamageType;
+import megamek.common.weapons.infantry.InfantryWeapon;
 import megamek.logging.MMLogger;
 import megamek.server.Server;
 import megamek.server.SmokeCloud;
@@ -111,6 +113,8 @@ public class WeaponHandler implements AttackHandler, Serializable {
     private transient boolean animationReported;
     private transient Integer animationMissileHits;
     private transient java.util.Set<WeaponMounted> animatedCounters;
+    private transient java.util.UUID animationInterceptionId;
+    private transient int animationIntercepted;
     // Delayed artillery can be saved between firing and landing. Preserve the mounts observed at launch.
     private java.util.List<megamek.common.ResolvedAttack.Mount> animationFiringMounts;
     private transient java.util.Set<Integer> animatedArtillery;
@@ -168,10 +172,19 @@ public class WeaponHandler implements AttackHandler, Serializable {
     protected final void reportCounterAnimation(WeaponMounted counter) {
         if (animatedCounters == null) { animatedCounters = new java.util.HashSet<>(); }
         if (animatedCounters.add(counter)) {
+            if (animationInterceptionId == null) { animationInterceptionId = java.util.UUID.randomUUID(); }
             gameManager.sendAttackAnimation(counter.getEntity(), attackingEntity, megamek.common.ResolvedAttack.Kind.SHOT,
                   counter.getEquipmentNum(), counter.getLocation(), true,
-                  megamek.common.ResolvedAttack.Shot.capture(counter).asDefensive());
+                  megamek.common.ResolvedAttack.Shot.capture(counter).asDefensive().withInterception(animationInterceptionId, 0));
         }
+    }
+
+    /** A rules-observed loss, not all the missiles which happened to miss the target. */
+    protected final void recordMissileInterceptions(int count) { animationIntercepted += Math.max(0, count); }
+
+    private java.util.UUID interceptionId() {
+        return animationInterceptionId != null ? animationInterceptionId
+              : getParentBayHandler() == null ? null : getParentBayHandler().interceptionId();
     }
 
     /** Observe the resolved count before a handler converts missiles into damage points or damage clusters. */
@@ -182,13 +195,23 @@ public class WeaponHandler implements AttackHandler, Serializable {
 
     /** One visual result per resolved salvo, independent of the number of damage clusters. */
     protected final void reportAttackAnimation(boolean hit) {
+        // These attacks change exterior occupancy or damage an already attached target; they launch no projectile.
+        if (this instanceof SwarmAttackHandler || this instanceof SwarmWeaponAttackHandler) { return; }
         // A Swarm continuation reuses airborne missiles. It must not emit another full rack from the gun.
         // Its secondary flight needs a separate observed origin/visibility event before it can be animated.
         if (weaponAttackAction.isSwarmingMissiles()) { return; }
         if (!animationReported) {
             animationReported = true;
             var shot = megamek.common.ResolvedAttack.Shot.capture(weapon);
-            var resolved = shot == null ? null : shot.withResolution(ammoType, hit ? animationMissileHits : Integer.valueOf(0));
+            if (interceptionId() != null && animationIntercepted == 0 && animationMissileHits == null
+                  && ((amsBayEngaged || pdBayEngaged) && attackValue <= 0
+                        || (amsBayEngagedCap || pdBayEngagedCap) && CapMissileArmor <= 0)) {
+                // AV-only rules do not count partial missile losses, but complete interception is unambiguous.
+                animationIntercepted = firingMounts().stream().filter(mount -> mount.shot() != null)
+                      .mapToInt(mount -> mount.shot().missiles()).sum();
+            }
+            var resolved = shot == null ? null : shot.withResolution(ammoType, hit ? animationMissileHits : Integer.valueOf(0))
+                  .withInterception(interceptionId(), animationIntercepted);
             if (animationFiringMounts == null) {
                 gameManager.sendAttackAnimation(attackingEntity, target, megamek.common.ResolvedAttack.Kind.SHOT,
                       attackingEntity.getEquipmentNum(weapon), weapon.getLocation(), hit, resolved);
@@ -225,7 +248,7 @@ public class WeaponHandler implements AttackHandler, Serializable {
     protected boolean announcedEntityFiring = false;
     protected boolean missed = false;
     protected DamageType damageType;
-    protected int generalDamageType = HitData.DAMAGE_NONE;
+    protected HitDamageType generalDamageType = HitDamageType.DAMAGE_NONE;
     protected Vector<Integer> insertedAttacks = new Vector<>();
     protected int numWeapons; // for capital fighters/fighter squadrons
     protected int numWeaponsHit; // for capital fighters/fighter squadrons
@@ -301,6 +324,13 @@ public class WeaponHandler implements AttackHandler, Serializable {
             return totalHeat;
         }
 
+        // Sized and read from the unit whose declarations are being summed, which is the defender here, not the
+        // attacker holding this handler. Sizing them from the attacker crashed whenever the defender fired from a
+        // location the attacker does not have (issue #8899). Allocated once, so an arc counted for one weapon is
+        // not counted again for the next: rebuilding them per weapon defeated the whole point of the check.
+        boolean[] usedFrontArc = new boolean[entity.locations()];
+        boolean[] usedRearArc = new boolean[entity.locations()];
+
         for (Enumeration<AttackHandler> attack = game.getAttacks(); attack.hasMoreElements(); ) {
             AttackHandler attackHandler = attack.nextElement();
             WeaponAttackAction prevAttack = attackHandler.getWeaponAttackAction();
@@ -311,22 +341,18 @@ public class WeaponHandler implements AttackHandler, Serializable {
                 } else {
                     boolean rearMount = prevWeapon.isRearMounted();
                     int loc = prevWeapon.getLocation();
-
-                    // create an array of booleans of locations
-                    boolean[] usedFrontArc = new boolean[weaponEntity.locations()];
-                    boolean[] usedRearArc = new boolean[weaponEntity.locations()];
-                    for (int i = 0; i < weaponEntity.locations(); i++) {
-                        usedFrontArc[i] = false;
-                        usedRearArc[i] = false;
+                    if ((loc < 0) || (loc >= entity.locations())) {
+                        // A weapon with no real location, such as one held by a squadron rather than a hull
+                        continue;
                     }
                     if (!rearMount) {
                         if (!usedFrontArc[loc]) {
-                            totalHeat += weaponEntity.getHeatInArc(loc, rearMount);
+                            totalHeat += entity.getHeatInArc(loc, rearMount);
                             usedFrontArc[loc] = true;
                         }
                     } else {
                         if (!usedRearArc[loc]) {
-                            totalHeat += weaponEntity.getHeatInArc(loc, rearMount);
+                            totalHeat += entity.getHeatInArc(loc, rearMount);
                             usedRearArc[loc] = true;
                         }
                     }
@@ -412,7 +438,7 @@ public class WeaponHandler implements AttackHandler, Serializable {
         // We need to know how much heat has been assigned to offensive weapons fire by
         // the defender this round
         int weaponHeat = getLargeCraftHeat(entityTarget) + entityTarget.heatBuildup;
-        if (null != lCounters) {
+        if (lCounters != null) {
             for (WeaponMounted counter : lCounters) {
                 // Point defenses only fire vs attacks against the arc they protect
                 Entity pdEnt = counter.getEntity();
@@ -732,6 +758,7 @@ public class WeaponHandler implements AttackHandler, Serializable {
                         }
                         hits = 0;
                         int observedMissiles = 0;
+                        animationIntercepted = 0; // The preliminary calcHits above is replaced by these actual salvos.
                         boolean observedEverySalvo = true;
                         for (int i = 0; i < numWeaponsHit; i++) {
                             hits += calcHits(throwAwayReport);
@@ -750,6 +777,10 @@ public class WeaponHandler implements AttackHandler, Serializable {
                             r.newlines = 0;
                             vPhaseReport.addElement(r);
                             hits -= (CounterAV / nDamPerHit);
+                            if (observedEverySalvo) {
+                                recordMissileInterceptions(Math.min(observedMissiles, CounterAV / nDamPerHit));
+                                animationMissileHits = Math.max(0, observedMissiles - CounterAV / nDamPerHit);
+                            }
                         } else if (amsEngaged) {
                             Report r = new Report(3350);
                             r.subject = entityTarget.getId();
@@ -799,6 +830,7 @@ public class WeaponHandler implements AttackHandler, Serializable {
                                 }
                             }
                             numWeaponsHit = numWeaponsHit - AMSHits;
+                            recordMissileInterceptions(AMSHits);
                         } else if (amsEngaged || apdsEngaged) {
                             // remove the last reports because they showed the
                             // number of shots that hit
@@ -842,6 +874,7 @@ public class WeaponHandler implements AttackHandler, Serializable {
                                 vPhaseReport.add(r);
                             }
                             numWeaponsHit = numWeaponsHit - AMSHits;
+                            recordMissileInterceptions(AMSHits);
                         }
                         nCluster = 1;
                         if (!bMissed) {
@@ -915,6 +948,7 @@ public class WeaponHandler implements AttackHandler, Serializable {
                             report.add(diceRoll);
                             vPhaseReport.add(report);
                             hits = 0;
+                            recordMissileInterceptions(1);
                         } else {
                             report = new Report(3241);
                             report.add("missile");
@@ -1318,9 +1352,10 @@ public class WeaponHandler implements AttackHandler, Serializable {
                         hits = 0;
                         // Targeting a building.
                     } else if (target.getTargetType() == Targetable.TYPE_BUILDING) {
-                        // The building takes the full brunt of the attack, one damage grouping at a time.
-                        hits = handleBuildingDamageByGrouping(vPhaseReport, bldg, hits, nCluster,
-                              target.getPosition());
+                        // The building takes the full brunt of the attack, all its hits as one attack (TW p. 171)
+                        nDamage = nDamPerHit * hits;
+                        handleBuildingDamage(vPhaseReport, bldg, nDamage, target.getPosition());
+                        hits = 0;
                     } else if (entityTarget != null) {
                         handleEntityDamage(entityTarget, vPhaseReport, bldg, hits, nCluster, bldgAbsorbs);
                         gameManager.creditKill(entityTarget, attackingEntity);
@@ -1342,11 +1377,13 @@ public class WeaponHandler implements AttackHandler, Serializable {
                     report.subject = attackingEntity.getId();
                     report.newlines--;
                     vPhaseReport.add(report);
-                    // The missed volley hits the building one damage grouping at a time; bSalvo is forced on so the
-                    // building damage does not report a hit
+                    int nDamage = nDamPerHit * hits;
+                    // We want to set bSalvo to true to prevent
+                    // handleBuildingDamage from reporting a hit
                     boolean savedSalvo = bSalvo;
                     bSalvo = true;
-                    handleBuildingDamageByGrouping(vPhaseReport, bldg, hits, nCluster, target.getPosition());
+                    handleBuildingDamage(vPhaseReport, bldg, nDamage,
+                          target.getPosition());
                     bSalvo = savedSalvo;
                 }
             }
@@ -1367,8 +1404,8 @@ public class WeaponHandler implements AttackHandler, Serializable {
                     report.indent();
                     report.subject = attackingEntity.getId();
                     vPhaseReport.addElement(report);
-                    if (null != attackingEntity.getCrew()) {
-                        roll = attackingEntity.getCrew().rollGunnerySkill();
+                    if (attackingEntity.getCrew() != null){
+                        roll = attackingEntity.getCrew().rollGunnerySkill(game, weaponAttackAction);
                     } else {
                         roll = Compute.rollD6(2);
                     }
@@ -1738,14 +1775,8 @@ public class WeaponHandler implements AttackHandler, Serializable {
                 report.subject = subjectId;
                 report.indent();
             }
+            // The infantry inside are not hurt: only an intentional attack on a building reaches them (TW p. 172)
             vPhaseReport.addAll(buildingReport);
-            // Damage any infantry in the building.
-            Vector<Report> infantryReport = gameManager.damageInfantryIn(coverBuilding, nDamage,
-                  coverLoc, weaponType.getInfantryDamageClass());
-            for (Report report : infantryReport) {
-                report.indent(2);
-            }
-            vPhaseReport.addAll(infantryReport);
         }
         missed = true;
     }
@@ -1998,32 +2029,6 @@ public class WeaponHandler implements AttackHandler, Serializable {
         vPhaseReport.addAll(clearReports);
     }
 
-    /**
-     * Applies an attack on a building hex one Damage Value grouping at a time. TW p. 171 treats each grouping of a
-     * cluster weapon as a separate attack against the building, so the building's absorption and the share passed
-     * through to infantry inside (p. 172) are rounded per grouping rather than once on the whole volley. A weapon
-     * that does not fire a salvo is a single grouping.
-     *
-     * @param vPhaseReport the phase report to add to
-     * @param bldg         the building that was hit
-     * @param hits         the number of hits to resolve
-     * @param nCluster     the number of hits in one damage grouping
-     * @param coords       the building hex that was hit
-     *
-     * @return the hits left to resolve, always {@code 0}
-     */
-    protected int handleBuildingDamageByGrouping(Vector<Report> vPhaseReport, IBuilding bldg, int hits,
-          int nCluster, Coords coords) {
-        int groupingSize = bSalvo ? Math.max(1, nCluster) : hits;
-        int remainingHits = hits;
-        while (remainingHits > 0) {
-            int groupingHits = Math.min(groupingSize, remainingHits);
-            handleBuildingDamage(vPhaseReport, bldg, nDamPerHit * groupingHits, coords);
-            remainingHits -= groupingHits;
-        }
-        return 0;
-    }
-
     protected void handleBuildingDamage(Vector<Report> vPhaseReport, IBuilding bldg, int nDamage,
           Coords coords) {
         reportAttackAnimation(!bMissed);
@@ -2042,9 +2047,17 @@ public class WeaponHandler implements AttackHandler, Serializable {
 
         // Damage any infantry in hex, unless attack between units in same bldg
         if (toHit.getThruBldg() == null) {
-            vPhaseReport.addAll(gameManager.damageInfantryIn(bldg, nDamage, coords,
-                  weaponType.getInfantryDamageClass()));
+            vPhaseReport.addAll(gameManager.damageInfantryIn(bldg, nDamage, coords, infantryDamageClass()));
         }
+    }
+
+    /**
+     * The row of the damage table for infantry (TW p. 216) that this attack's damage is converted by when it reaches
+     * infantry inside a building. Damage from conventional infantry weapons is never reduced.
+     */
+    protected int infantryDamageClass() {
+        return (weaponType instanceof InfantryWeapon) ? WeaponType.WEAPON_INFANTRY_ORIGIN
+              : weaponType.getInfantryDamageClass();
     }
 
     protected boolean allShotsHit() {
@@ -2121,8 +2134,8 @@ public class WeaponHandler implements AttackHandler, Serializable {
         }
         // is this an underwater attack on a surface naval vessel?
         underWater = toHit.getHitTable() == ToHitData.HIT_UNDERWATER;
-        if (null != attackingEntity.getCrew()) {
-            roll = attackingEntity.getCrew().rollGunnerySkill();
+        if (attackingEntity.getCrew() != null){
+            roll = attackingEntity.getCrew().rollGunnerySkill(game, weaponAttackAction);
         } else {
             roll = Compute.rollD6(2);
         }
@@ -2437,7 +2450,7 @@ public class WeaponHandler implements AttackHandler, Serializable {
             nMissilesModifier -= 2;
         }
 
-        if (null != attackingEntity.getCrew()) {
+        if (attackingEntity.getCrew() != null){
             if (attackingEntity.hasAbility(OptionsConstants.GUNNERY_SANDBLASTER, weaponType.getName())) {
                 if (nRange > ranges[RangeType.RANGE_MEDIUM]) {
                     nMissilesModifier += 2;

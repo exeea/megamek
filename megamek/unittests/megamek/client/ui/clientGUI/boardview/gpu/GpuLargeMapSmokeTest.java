@@ -26,6 +26,7 @@ class GpuLargeMapSmokeTest {
             new Lwjgl3Application(new GpuBattleView(fixture.source) {
                 private long started;
                 private long last;
+                private long peakHeap;
                 private double overviewMillis;
                 private double closeupMillis;
                 private GLProfiler profiler;
@@ -34,6 +35,7 @@ class GpuLargeMapSmokeTest {
                 @Override
                 public void create() {
                     super.create();
+                    boardCamera.setIsometric(false);
                     profiler = new GLProfiler(Gdx.graphics);
                 }
 
@@ -49,6 +51,8 @@ class GpuLargeMapSmokeTest {
                             profiler.enable();
                         }
                         super.render();
+                        var runtime = Runtime.getRuntime();
+                        peakHeap = Math.max(peakHeap, runtime.totalMemory() - runtime.freeMemory());
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                         long now = System.nanoTime();
                         if (frames() >= 35 && frames() < 85) {
@@ -76,9 +80,14 @@ class GpuLargeMapSmokeTest {
                                   "Closeups must cull offscreen chunks: " + closeupDraws + " vs " + overviewDraws);
                             GpuBoardTestUi.capture(new File(output, "large-map-closeup.png"));
                             System.out.printf("200x200 native: %.2fs total, overview %.1fms/frame (%d draws), "
-                                        + "closeup %.1fms/frame (%d draws), %s%n",
+                                        + "closeup %.1fms/frame (%d draws), peak sampled heap %.1f / %.0f MiB, %s%n",
                                   (now - started) / 1e9, overviewMillis / 50, overviewDraws, closeupMillis / 50, closeupDraws,
+                                  peakHeap / 1048576.0, runtime.maxMemory() / 1048576.0,
                                   Gdx.gl.glGetString(GL20.GL_RENDERER));
+                            // Outside the timing windows: distinguish retained data from temporary build garbage.
+                            System.gc();
+                            System.out.printf("200x200 post-GC heap: %.1f MiB%n",
+                                  (runtime.totalMemory() - runtime.freeMemory()) / 1048576.0);
                             Gdx.app.exit();
                         }
                     } catch (Throwable error) {

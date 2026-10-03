@@ -84,7 +84,8 @@ class GpuDeploymentSmokeTest {
                             // A flat marker stays above a descending road cut and the foot of an approach,
                             // while the higher part of a rising approach occludes it.
                             checkProbe(terrain, atmosphere, camera, scene, new Coords(3, 1), 0, -30, true);
-                            checkProbe(terrain, atmosphere, camera, scene, new Coords(3, 2), 0, 20, true);
+                            // The plane floats a fixed clearance above the hex, so a rising approach covers it sooner.
+                            checkProbe(terrain, atmosphere, camera, scene, new Coords(3, 2), 0, 20, false);
                             checkProbe(terrain, atmosphere, camera, scene, new Coords(3, 2), 0, 30, false);
                             checkProbe(terrain, atmosphere, camera, scene, new Coords(6, 5), 0, 0, true);
                             checkProbe(terrain, atmosphere, camera, scene, new Coords(6, 6), 0, 0, true);
@@ -172,7 +173,8 @@ class GpuDeploymentSmokeTest {
         BoardScene.Tile tile = scene.tile(coords);
         Vector3 point = BoardGeometry.center(coords, tile.elevation()).add(dx * BoardGeometry.HEX_SCALE,
               dy * BoardGeometry.HEX_SCALE, 0);
-        point.z = BoardGeometry.surfaceZ(tile) + BoardGeometry.LEVEL / 3;
+        // Flat hex markers float a fixed clearance above the surface (BoardTacticalGeometry.floatingZ).
+        point.z = BoardGeometry.surfaceZ(tile) + BoardTacticalGeometry.HEX_PLANE_CLEARANCE;
         camera.camera.zoom = 0.25f * BoardGeometry.HEX_SCALE;
         camera.center(point);
         drawWorld(terrain, atmosphere, camera, scene);

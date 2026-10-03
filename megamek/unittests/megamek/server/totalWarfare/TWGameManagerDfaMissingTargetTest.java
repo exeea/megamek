@@ -39,12 +39,9 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
-
-import java.lang.reflect.Field;
-import java.util.Vector;
+import static org.mockito.Mockito.withSettings;
 
 import megamek.common.Hex;
-import megamek.common.PhysicalResult;
 import megamek.common.Player;
 import megamek.common.actions.DfaAttackAction;
 import megamek.common.board.Board;
@@ -87,7 +84,7 @@ class TWGameManagerDfaMissingTargetTest {
     }
 
     @BeforeEach
-    void setUp() throws ReflectiveOperationException {
+    void setUp() {
         game = new Game();
         game.setBoard(flatBoard(4, 4));
 
@@ -108,21 +105,10 @@ class TWGameManagerDfaMissingTargetTest {
 
         game.setPhase(GamePhase.PHYSICAL);
 
-        gameManager = mock(TWGameManager.class);
+        gameManager = mock(TWGameManager.class, withSettings().useConstructor());
         doCallRealMethod().when(gameManager).setGame(any());
         doCallRealMethod().when(gameManager).resolvePhysicalAttacks();
         gameManager.setGame(game);
-        givePhysicalResultList(gameManager);
-    }
-
-    /**
-     * A mocked manager skips field initialization, so hand it the physical result list its real constructor would
-     * have built.
-     */
-    private static void givePhysicalResultList(TWGameManager manager) throws ReflectiveOperationException {
-        Field physicalResults = TWGameManager.class.getDeclaredField("physicalResults");
-        physicalResults.setAccessible(true);
-        physicalResults.set(manager, new Vector<PhysicalResult>());
     }
 
     /** A board of the given size with plain level 0 hexes. */

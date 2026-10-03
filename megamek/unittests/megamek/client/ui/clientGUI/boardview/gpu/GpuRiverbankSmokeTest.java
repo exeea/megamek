@@ -111,7 +111,8 @@ class GpuRiverbankSmokeTest {
                 Vector3 bank = camera.camera.project(new Vector3(middle).mulAdd(outward, -2));
                 Vector3 land = camera.camera.project(new Vector3(middle).mulAdd(outward, 2));
                 for (int shift : new int[] { 8, 16, 24 }) {
-                    assertEquals(channel(pixels, land, shift), channel(pixels, bank, shift), 12,
+                    // The bank continues the dry artwork under a slightly darker wet margin at the waterline.
+                    assertEquals(channel(pixels, land, shift), channel(pixels, bank, shift), 16,
                           "Riverbank artwork must continue its dry neighbor at edge " + edge + ", channel " + shift);
                 }
             }

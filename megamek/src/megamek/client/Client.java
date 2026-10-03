@@ -82,6 +82,7 @@ import megamek.common.equipment.Flare;
 import megamek.common.equipment.ICarryable;
 import megamek.common.equipment.Minefield;
 import megamek.common.equipment.Mounted;
+import megamek.common.equipment.ObjectiveMarker;
 import megamek.common.event.GameCFREvent;
 import megamek.common.event.GamePollEvent;
 import megamek.common.event.GameReportEvent;
@@ -92,6 +93,8 @@ import megamek.common.event.board.GameBoardChangeEvent;
 import megamek.common.event.entity.GameEntityChangeEvent;
 import megamek.common.force.Force;
 import megamek.common.force.Forces;
+import megamek.common.game.BotHonorReport;
+import megamek.common.game.ForcedWithdrawalReports;
 import megamek.common.game.Game;
 import megamek.common.game.GameTurn;
 import megamek.common.game.IGame;
@@ -270,6 +273,8 @@ public class Client extends AbstractClient {
                 if (tilesetManager != null) {
                     tilesetManager.reset();
                 }
+                // Unit IDs restart in the next game, so last game's withdrawing units would tag the wrong units
+                game.getForcedWithdrawalReports().clear();
             case DEPLOYMENT:
             case TARGETING:
             case MOVEMENT:
@@ -1492,8 +1497,9 @@ public class Client extends AbstractClient {
     }
 
     /**
-     * Receives a bot's dishonored-players report, records it, and - the first time an enemy bot marks the local player
-     * dishonored - shows the player a toast so they know the bot's units will no longer show theirs mercy.
+     * Receives a bot's honor report and records it: which players it considers dishonored, and which of its units are
+     * withdrawing under Forced Withdrawal. The first time an enemy bot marks the local player dishonored, shows the
+     * player a toast so they know the bot's units will no longer show theirs mercy.
      *
      * <p>The notice is skipped when the player had already been flagged for this bot, so a player who confirmed the
      * pre-attack nag (which optimistically records the dishonor) does not get a redundant second notice. A player who
@@ -1503,7 +1509,11 @@ public class Client extends AbstractClient {
      */
     protected void receivePrincessDishonored(Packet packet) throws InvalidPacketDataException {
         int botPlayerId = packet.getIntValue(0);
-        List<Integer> dishonoredPlayerIds = packet.getIntList(1);
+        if (!(packet.getObject(1) instanceof BotHonorReport report)) {
+            throw new InvalidPacketDataException("BotHonorReport", packet.getObject(1), 1);
+        }
+        recordForcedWithdrawal(botPlayerId, report);
+        List<Integer> dishonoredPlayerIds = report.dishonoredPlayerIds();
         Player localPlayer = getLocalPlayer();
 
         if (localPlayer == null) {
@@ -1522,6 +1532,37 @@ public class Client extends AbstractClient {
             String botName = (bot != null) ? bot.getName() : Messages.getString("HonorNag.unknownBot");
             game.fireGameEvent(new GameToastEvent(this, GameToastEvent.Level.GAMEMASTER,
                   Messages.getString("HonorNag.dishonoredToast", botName), Entity.NONE));
+        }
+    }
+
+    /**
+     * Stores a bot's Forced Withdrawal state and redraws every unit of that bot whose WITHDRAWING tag appeared or went
+     * away, so the board shows the change without waiting for the unit's next update.
+     *
+     * @param botPlayerId the reporting bot's player ID
+     * @param report      what the bot reported
+     */
+    private void recordForcedWithdrawal(int botPlayerId, BotHonorReport report) {
+        ForcedWithdrawalReports withdrawalReports = game.getForcedWithdrawalReports();
+        List<Entity> botUnits = new ArrayList<>();
+        Set<Integer> withdrawingBefore = new HashSet<>();
+        for (Entity entity : game.getEntitiesVector()) {
+            if (entity.getOwnerId() == botPlayerId) {
+                botUnits.add(entity);
+                if (withdrawalReports.isWithdrawing(entity)) {
+                    withdrawingBefore.add(entity.getId());
+                }
+            }
+        }
+
+        withdrawalReports.record(botPlayerId, report);
+        LOGGER.debug("[HonorNag] Bot player {} reports forced withdrawal {}, withdrawing units {}", botPlayerId,
+              report.followsForcedWithdrawal(), report.withdrawingUnitIds());
+
+        for (Entity entity : botUnits) {
+            if (withdrawalReports.isWithdrawing(entity) != withdrawingBefore.contains(entity.getId())) {
+                game.processGameEvent(new GameEntityChangeEvent(this, entity));
+            }
         }
     }
 
@@ -1708,6 +1749,49 @@ public class Client extends AbstractClient {
      */
     public void sendDeployBridge(int entityId, int equipNum) {
         send(new Packet(PacketCommand.ENTITY_DEPLOY_BRIDGE, entityId, equipNum));
+    }
+
+    /**
+     * Sends a unit's order to scan a hex or unit in the End Phase (Objectives series, scanning). Sent as soon as the
+     * player gives it, in the pre-End declarations phase; a later order from the same unit replaces it.
+     *
+     * @param order the scan order
+     */
+    public void sendScanOrder(ScanAction order) {
+        send(new Packet(PacketCommand.ENTITY_SCAN_ORDER, order));
+    }
+
+    /**
+     * Withdraws the scan a unit ordered this turn, so it scans nothing when the End Phase resolves (Objectives
+     * series). Ordering a different target replaces an order; this clears it outright.
+     *
+     * @param entityId the unit whose order is withdrawn
+     */
+    public void sendScanWithdraw(int entityId) {
+        LOGGER.debug("Withdrawing the scan order for unit {}", entityId);
+        send(new Packet(PacketCommand.ENTITY_SCAN_WITHDRAW, entityId));
+    }
+
+    /**
+     * Sends a game master's marking of a unit as one the mission wants scanned (Objectives series).
+     *
+     * @param entityId   the unit
+     * @param designated {@code true} to ask for it to be scanned, {@code false} to drop the request
+     */
+    public void sendScanDesignation(int entityId, boolean designated) {
+        LOGGER.debug("Sending a scan designation for unit {}: {}", entityId, designated);
+        send(new Packet(PacketCommand.SCAN_DESIGNATION, entityId, designated));
+    }
+
+    /**
+     * Sends a game master's edit of the objective at a hex, at any time in the game (Objectives series).
+     *
+     * @param coords the hex
+     * @param marker the objective to put there, or {@code null} to remove the one that is there
+     */
+    public void sendObjectiveEdit(Coords coords, @Nullable ObjectiveMarker marker) {
+        LOGGER.debug("Sending a game master objective edit for hex {}", coords.getBoardNum());
+        send(new Packet(PacketCommand.OBJECTIVE_EDIT, coords, marker));
     }
 
     /**

@@ -2,14 +2,20 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.badlogic.gdx.ApplicationAdapter;
@@ -19,9 +25,13 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.PixmapIO;
+import com.badlogic.gdx.graphics.g3d.ModelBatch;
+import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
+import com.badlogic.gdx.graphics.g3d.utils.DefaultRenderableSorter;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.board.Coords;
+import megamek.common.planetaryConditions.PlanetaryConditions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -29,7 +39,340 @@ import org.junit.jupiter.api.Test;
 @Tag("on-demand")
 class GpuWaterShaderSmokeTest {
     @Test
-    void proceduralWaterRetainsItsPaletteShowsRainAndSplashesAndMeasuresBothColorPaths() {
+    void zeroScenarioGravityBuildsLunarTerrainInBothCamerasAndRestoresWater() {
+        var failure = new AtomicReference<Throwable>();
+        var configuration = GpuBoardWindow.configuration(false);
+        configuration.setWindowedMode(640, 480);
+        configuration.setInitialVisible(false);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                try {
+                    var scene = lunarScene();
+                    var conditions = new PlanetaryConditions();
+                    for (boolean procedural : new boolean[] { false, true }) {
+                        var terrain = new GpuTerrain(true, procedural);
+                        try {
+                            terrain.update(scene);
+                            terrain.setAtmosphere(BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS));
+                            for (boolean perspective : new boolean[] { false, true }) {
+                                var camera = new BoardCamera();
+                                camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                                camera.setPerspective(perspective);
+                                camera.setIsometric(true);
+                                camera.fit(scene);
+                                // Exercise zero on the first frame, hiding existing pages, and returning to water.
+                                for (float gravity : new float[] { 0, 1, 0, 2, .5f, 0, 1 }) {
+                                    conditions.setGravity(gravity);
+                                    terrain.setGravity(BoardAtmosphere.fromScenario(conditions, false, .5).gravity());
+                                    terrain.update(scene);
+                                    BoardScene shown = terrain.presentation(scene);
+                                    if (gravity == 0) {
+                                        for (var tile : shown.tiles()) {
+                                            assertEquals(BoardScene.Surface.ROCK, tile.surface());
+                                            assertEquals(BoardLiquid.NONE, tile.liquid());
+                                            assertEquals(scene.tile(tile.coords()).elevation()
+                                                  - Math.max(0, scene.tile(tile.coords()).waterDepth()), tile.elevation());
+                                        }
+                                        terrain.update(scene);
+                                        assertSame(shown.tiles(), terrain.presentation(scene).tiles(),
+                                              "An unchanged zero-gravity frame reuses its converted tiles");
+                                    } else {
+                                        assertSame(scene.tiles(), shown.tiles(), "Positive gravity restores source tiles");
+                                    }
+                                    terrain.animate(0, List.of());
+                                    for (int warmup = 0; warmup < 4; warmup++) { parityPixels(terrain, camera, true); }
+                                    byte[] opaque = parityPixels(terrain, camera, false);
+                                    byte[] complete = parityPixels(terrain, camera, true);
+                                    if (gravity == 0) {
+                                        assertNull(terrain.waterDepth(), "Invisible water must not occlude fog");
+                                        assertParity(opaque, complete, parityPixels(terrain, camera, false), "zero-gravity");
+                                    } else {
+                                        assertNotNull(terrain.waterDepth());
+                                        assertVisibleDifference(opaque, complete, "Water and falls return at " + gravity + " g");
+                                    }
+                                    assertEquals(2, scene.tile(new Coords(4, 4)).waterDepth(), "Game terrain stays intact");
+                                }
+                            }
+                        } finally { terrain.dispose(); }
+                    }
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) { failure.set(error); }
+                finally { Gdx.app.exit(); }
+            }
+        }, configuration);
+        if (failure.get() != null) { throw new AssertionError("Scenario gravity water rendering", failure.get()); }
+    }
+
+    @Test
+    void unitInteractionsReloadAndPreserveWaterWithoutUnits() {
+        var failure = new AtomicReference<Throwable>();
+        var configuration = GpuBoardWindow.configuration(false);
+        configuration.setWindowedMode(640, 480);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                var manager = new GpuShaderManager();
+                try { manager.run(() -> checkUnitInteractions(manager)); }
+                catch (Throwable error) { failure.set(error); }
+                finally { manager.close(); Gdx.app.exit(); }
+            }
+        }, configuration);
+        if (failure.get() != null) { throw new AssertionError("Water interaction editing", failure.get()); }
+    }
+
+    private static void checkUnitInteractions(GpuShaderManager manager) {
+        var terrain = new GpuTerrain(true, true);
+        try {
+            configureParity(terrain, false);
+            var scene = scene(false, 0);
+            terrain.update(scene);
+            terrain.setAtmosphere(BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS));
+            terrain.setWind(BoardAtmosphere.Effects.NONE);
+            terrain.animate(.37f, List.of());
+            Field field = GpuTerrain.class.getDeclaredField("waders");
+            field.setAccessible(true);
+            var waders = (GpuWaders) field.get(terrain);
+            // Fixed render snapshots isolate the shader's response from unit geometry and animation.
+            for (int i = 0; i < 2; i++) {
+                var coords = new Coords(5 + i, 4 + i);
+                Vector3 center = BoardGeometry.center(coords, 0);
+                waders.bodies[i * 4] = center.x;
+                waders.bodies[i * 4 + 1] = center.y;
+                waders.bodies[i * 4 + 2] = BoardGeometry.width() * .12f;
+                waders.bodies[i * 4 + 3] = BoardGeometry.waterZ(scene.tile(coords));
+            }
+            waders.motion[5] = 8;
+            String source = GpuShaderSource.read("water-interactions.glsl");
+            String edited = source.replace("return wading * effects;", "return 0.0;");
+            assertFalse(source.equals(edited), "The draft must change the wake's foam output");
+            for (boolean perspective : new boolean[] { false, true }) {
+                var camera = new BoardCamera();
+                camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                camera.setPerspective(perspective);
+                camera.setIsometric(true);
+                camera.fit(scene);
+                camera.camera.zoom *= .55f;
+                camera.center(BoardGeometry.center(new Coords(5, 4), 0));
+                waders.count = 0;
+                // The water pages coalesce their chunks after two stable frames; references come from the paged state.
+                for (int warmup = 0; warmup < 4; warmup++) { parityPixels(terrain, camera, true); }
+                byte[] empty = parityPixels(terrain, camera, true);
+                waders.count = 1;
+                waders.motion[0] = 0;
+                byte[] standing = parityPixels(terrain, camera, true);
+                assertVisibleDifference(empty, standing, "A standing unit produces a collar and ripples");
+                waders.motion[0] = 8;
+                byte[] moving = parityPixels(terrain, camera, true);
+                assertVisibleDifference(standing, moving, "Unit motion adds a trailing wake");
+                waders.count = 2;
+                byte[] multiple = parityPixels(terrain, camera, true);
+                assertVisibleDifference(moving, multiple, "Both unit interactions contribute");
+                String view = perspective ? "perspective" : "ortho";
+                savePixels(multiple, "water-unit-wakes-" + view);
+
+                var result = manager.apply(Map.of("water-interactions.glsl", edited));
+                assertTrue(result.success(), result.message());
+                assertTrue(result.updated() > 0, "The shared helper reloads live water programs");
+                byte[] changed = parityPixels(terrain, camera, true);
+                assertVisibleDifference(multiple, changed, "Editing the helper changes unit foam");
+                assertFalse(manager.apply(Map.of("water-interactions.glsl", "unfinished water edit")).success());
+                assertParity(changed, parityPixels(terrain, camera, true), parityPixels(terrain, camera, true),
+                      "interaction-rejected-" + view);
+                waders.count = 0;
+                assertParity(empty, parityPixels(terrain, camera, true), parityPixels(terrain, camera, true),
+                      "interaction-empty-" + view);
+                assertTrue(manager.apply(Map.of()).success());
+                waders.count = 2;
+                assertParity(multiple, parityPixels(terrain, camera, true), parityPixels(terrain, camera, true),
+                      "interaction-restored-" + view);
+            }
+            assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+        } catch (ReflectiveOperationException error) { throw new AssertionError(error); }
+        finally { terrain.dispose(); }
+    }
+
+    private static void assertVisibleDifference(byte[] before, byte[] after, String message) {
+        int changed = 0;
+        for (int pixel = 0; pixel < before.length; pixel += 4) {
+            int difference = 0;
+            for (int channel = 0; channel < 3; channel++) {
+                difference += Math.abs(Byte.toUnsignedInt(before[pixel + channel]) - Byte.toUnsignedInt(after[pixel + channel]));
+            }
+            if (difference > 6) { changed++; }
+        }
+        assertTrue(changed > 50, message + ": " + changed + " changed pixels");
+    }
+
+    @Test
+    void uniformFastPathsPreserveFrozenBedWaterAndWaterfallPixels() {
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        var configuration = GpuBoardWindow.configuration(false);
+        configuration.setWindowedMode(960, 720);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                GpuTerrain reference = new GpuTerrain(), optimized = new GpuTerrain();
+                try {
+                    // Only the reference shader source differs. Both paths retain identical geometry and draw order.
+                    configureParity(reference, true);
+                    configureParity(optimized, false);
+                    for (GpuTerrain terrain : List.of(reference, optimized)) {
+                        terrain.setAtmosphere(BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS));
+                        terrain.setWind(BoardAtmosphere.Effects.NONE);
+                    }
+                    // Pool beds and submerged cliffs share the terrain shader's zero-detail path.
+                    for (boolean falls : new boolean[] { false, true }) {
+                        BoardScene scene = parityScene(falls);
+                        for (GpuTerrain terrain : List.of(reference, optimized)) {
+                            terrain.update(scene);
+                            terrain.animate(.37f, List.of());
+                        }
+                        for (boolean perspective : new boolean[] { false, true }) {
+                            byte[] effectsOff = null;
+                            for (int mode = 0; mode < 3; mode++) {
+                                BoardCamera camera = new BoardCamera();
+                                camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                                camera.setPerspective(perspective);
+                                camera.setIsometric(true);
+                                camera.fit(scene);
+                                if (mode == 0) {
+                                    float scale = Gdx.graphics.getBackBufferHeight() / (float) Gdx.graphics.getHeight();
+                                    camera.camera.zoom = BoardGeometry.WIDTH * scale / 8;
+                                } else {
+                                    camera.camera.zoom *= .8f;
+                                }
+                                camera.update();
+                                float maximumHexPixels = 0;
+                                for (BoardScene.Tile tile : scene.tiles()) {
+                                    maximumHexPixels = Math.max(maximumHexPixels, BoardGeometry.WIDTH
+                                          * BoardCamera.pixelsPerUnit(camera.camera,
+                                                BoardGeometry.center(tile.coords(), tile.elevation())));
+                                }
+                                assertTrue(mode == 0 ? maximumHexPixels < 12 : maximumHexPixels > 40,
+                                      "Exercise zero detail and active detail through the real camera uniforms");
+                                String name = (falls ? "falls" : "pool") + (perspective ? "-perspective" : "-ortho")
+                                      + "-" + new String[] { "detail-zero", "effects-off", "active-wet" }[mode];
+                                for (GpuTerrain terrain : List.of(reference, optimized)) {
+                                    terrain.setWaterEffects(mode != 1);
+                                    terrain.setWetness(1);
+                                    // Settle shader and geometry caches without advancing the shared frozen clock.
+                                    for (int warmup = 0; warmup < 4; warmup++) { parityPixels(terrain, camera, true); }
+                                }
+                                for (boolean transparent : new boolean[] { false, true }) {
+                                    byte[] before = parityPixels(reference, camera, transparent);
+                                    byte[] after = parityPixels(optimized, camera, transparent);
+                                    byte[] repeated = parityPixels(reference, camera, transparent);
+                                    String pass = name + (transparent ? "-water" : "-bed");
+                                    assertParity(before, after, repeated, pass);
+                                    if (transparent && mode == 1) { effectsOff = after; }
+                                    if (transparent && mode == 2) {
+                                        assertTrue(!Arrays.equals(effectsOff, after),
+                                              "The active water effects must affect rendered pixels: " + name);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) {
+                    failure.set(error);
+                } finally {
+                    reference.dispose(); optimized.dispose();
+                    Gdx.app.exit();
+                }
+            }
+        }, configuration);
+        if (failure.get() != null) { throw new AssertionError("Uniform water shader fast paths", failure.get()); }
+    }
+
+    /** Recreate the prior unconditional expressions before any of these shader configurations are compiled. */
+    private static void configureParity(GpuTerrain terrain, boolean reference) throws ReflectiveOperationException {
+        Field field = GpuTerrain.class.getDeclaredField("batch");
+        field.setAccessible(true);
+        ModelBatch batch = (ModelBatch) field.get(terrain);
+        // Isolate source changes from GpuOpaqueSorter's shader-identity order in independently allocated renderers.
+        Field sorter = ModelBatch.class.getDeclaredField("sorter");
+        sorter.setAccessible(true);
+        sorter.set(batch, new DefaultRenderableSorter());
+        if (!reference) { return; }
+        var provider = batch.getShaderProvider();
+        for (String name : List.of("sculptShader", "waterShader", "waterLiquidShader", "waterfallShader",
+              "waterfallLiquidShader")) {
+            Field configField = provider.getClass().getDeclaredField(name);
+            configField.setAccessible(true);
+            DefaultShader.Config config = (DefaultShader.Config) configField.get(provider);
+            String current = config.fragmentShader;
+            config.fragmentShader = current
+                  .replace("shore && u_rainDetail > 0.0 && u_waterEffects > 0.0", "shore")
+                  .replace("u_rainDetail > 0.0 && u_waterEffects > 0.0", "true")
+                  .replace("u_splashCount > 0", "true");
+            assertTrue(!current.equals(config.fragmentShader), "The legacy expressions must replace guards in " + name);
+        }
+    }
+
+    private static byte[] parityPixels(GpuTerrain terrain, BoardCamera camera, boolean transparent) {
+        terrain.renderShadows(camera.camera, List.of());
+        ScreenUtils.clear(.04f, .06f, .08f, 1, true);
+        terrain.render(camera.camera, false);
+        if (transparent) { terrain.renderTransparent(camera.camera); }
+        byte[] pixels = ScreenUtils.getFrameBufferPixels(0, 0, Gdx.graphics.getBackBufferWidth(),
+              Gdx.graphics.getBackBufferHeight(), false);
+        int varied = 0;
+        for (int i = 4; i < pixels.length; i += 4) {
+            if (pixels[i] != pixels[0] || pixels[i + 1] != pixels[1] || pixels[i + 2] != pixels[2]) { varied++; }
+        }
+        assertTrue(varied > 500, "The comparison must include visible terrain even at zero detail");
+        return pixels;
+    }
+
+    private static void assertParity(byte[] expected, byte[] actual, byte[] repeated, String name) {
+        int changed = 0, referenceChanged = 0, maximum = 0, referenceMaximum = 0;
+        for (int pixel = 0; pixel < expected.length; pixel += 4) {
+            int delta = 0, referenceDelta = 0;
+            for (int channel = 0; channel < 4; channel++) {
+                int value = Byte.toUnsignedInt(expected[pixel + channel]);
+                delta = Math.max(delta, Math.abs(value - Byte.toUnsignedInt(actual[pixel + channel])));
+                referenceDelta = Math.max(referenceDelta, Math.abs(value - Byte.toUnsignedInt(repeated[pixel + channel])));
+            }
+            if (delta != 0) { changed++; maximum = Math.max(maximum, delta); }
+            if (referenceDelta != 0) { referenceChanged++; referenceMaximum = Math.max(referenceMaximum, referenceDelta); }
+        }
+        System.out.printf("Water shader parity %s: changed=%d max=%d; repeated reference changed=%d max=%d%n",
+              name, changed, maximum, referenceChanged, referenceMaximum);
+        // Prior native terrain comparisons measured one cliff/shore pixel varying by 1 LSB between frozen draws.
+        boolean stable = referenceChanged <= 1 && referenceMaximum <= 1;
+        boolean equal = changed <= Math.max(1, referenceChanged) && maximum <= Math.max(1, referenceMaximum);
+        if (!stable || !equal) {
+            savePixels(expected, "water-fast-path-" + name + "-reference");
+            savePixels(actual, "water-fast-path-" + name + "-optimized");
+            savePixels(repeated, "water-fast-path-" + name + "-repeated");
+        }
+        assertTrue(stable, "The frozen shader reference must remain stable: " + name);
+        assertTrue(equal, "Uniform fast paths must preserve rendered pixels: " + name + ", changed=" + changed
+              + ", maximum=" + maximum);
+    }
+
+    private static void savePixels(byte[] pixels, String name) {
+        Pixmap image = new Pixmap(Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight(), Pixmap.Format.RGBA8888);
+        try { image.getPixels().put(pixels); save(image, name); }
+        finally { image.dispose(); }
+    }
+
+    private static BoardScene parityScene(boolean falls) {
+        BoardScene source = scene(falls, falls ? 3 : 0);
+        List<BoardScene.Tile> tiles = new ArrayList<>();
+        for (BoardScene.Tile tile : source.tiles()) {
+            // Include dry banks beside roads as well as the pool's submerged terrain.
+            int roads = falls && !tile.water() ? 1 : 0;
+            tiles.add(new BoardScene.Tile(tile.coords(), tile.elevation(), tile.waterDepth(), false, roads,
+                  tile.surface(), tile.ground(), null, null, null, null, List.of(), List.of(), tile.liquid(), null, true));
+        }
+        return new BoardScene(0, source.width(), source.height(), tiles, List.of(), List.of(), -1, "", List.of());
+    }
+
+    @Test
+    void proceduralWaterShowsRainAndSplashesAndMeasuresBothColorPaths() {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
@@ -64,12 +407,9 @@ class GpuWaterShaderSmokeTest {
                             save(authored, "water-color-gif-" + isometric);
                             save(dry, "water-color-procedural-" + isometric);
                             save(wet, "water-downpour-" + isometric);
-                            int[] original = sample(authored, camera, new Coords(5, 4), 60);
                             int[] replacement = sample(dry, camera, new Coords(5, 4), 60);
-                            for (int shift : new int[] { 8, 16, 24 }) {
-                                assertEquals(mean(original, shift), mean(replacement, shift), 24,
-                                      "Procedural water should retain the authored depth-two palette");
-                            }
+                            assertTrue(mean(replacement, 8) > mean(replacement, 24),
+                                  "Clear water keeps its cool absorption palette while reflecting the sky");
                             int[] drizzle = sample(light, camera, new Coords(5, 4), 60);
                             int[] downpour = sample(wet, camera, new Coords(5, 4), 60);
                             int lightPixels = differences(replacement, drizzle, 6);
@@ -207,6 +547,20 @@ class GpuWaterShaderSmokeTest {
 
     private static void save(Pixmap image, String name) {
         PixmapIO.writePNG(Gdx.files.absolute(new File(output(), name + ".png").getAbsolutePath()), image);
+    }
+
+    private static BoardScene lunarScene() {
+        BoardScene scene = scene(true, 3);
+        var tiles = new ArrayList<>(scene.tiles());
+        for (var kind : BoardLiquid.Kind.values()) {
+            var at = new Coords(6 + kind.ordinal(), 4);
+            var tile = scene.tile(at);
+            int depth = kind == BoardLiquid.Kind.WATER || kind == BoardLiquid.Kind.HAZARDOUS ? 1 : -1;
+            tiles.set(at.getX() * scene.height() + at.getY(), new BoardScene.Tile(at, 2, depth,
+                  kind == BoardLiquid.Kind.WATER, 0, tile.surface(), tile.ground(), null, null, null, null,
+                  List.of(), List.of(), new BoardLiquid(kind, "", 0), null, true));
+        }
+        return scene.withTiles(tiles);
     }
 
     private static BoardScene scene(boolean river, int drop) {

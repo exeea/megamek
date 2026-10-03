@@ -24,6 +24,7 @@ import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
+import com.badlogic.gdx.scenes.scene2d.ui.SelectBox;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuLiveBoardSpaceSmokeTest.Live;
 import megamek.client.ui.gdx.UiTheme;
@@ -291,6 +292,9 @@ class GpuLivePlaybackSmokeTest {
         float[] stride = new float[1];
         GpuLiveBoardSpaceSmokeTest.run(firing.board.source, live -> {
             Playback play = new Playback(live);
+            // The gait is the 3D model's; Meks show as meeples by default.
+            GpuBoardTestUi.<SelectBox<UnitDisplayMode>>tuning(live.view, "tuning-unit-display")
+                  .setSelected(UnitDisplayMode.MODELS);
             live.zoom(new Coords(5, 3), hexPixels);
             float growth = UnitScreenScale.factor(live.hudView().hexPixels());
             assertEquals(hexPixels < UnitScreenScale.threshold ? 2 : 1, growth, .001f);

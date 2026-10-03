@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+
 import java.awt.Color;
 import java.awt.Image;
 import java.awt.Point;
@@ -18,14 +19,11 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.function.Consumer;
+import java.util.Set;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 import javax.swing.JComponent;
-import javax.swing.JFrame;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
@@ -33,7 +31,6 @@ import javax.swing.Timer;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardFieldOfView;
 import megamek.client.ui.clientGUI.boardview.BoardFocus;
@@ -43,13 +40,10 @@ import megamek.client.ui.clientGUI.boardview.sprite.FiringSolutionSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.MovementEnvelopeSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
 import megamek.client.ui.dialogs.RoundsInAirDialog;
-import megamek.client.ui.dialogs.clientDialogs.PlanetaryConditionsDialog;
 import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
 import megamek.client.ui.tileset.MMStaticDirectoryManager;
-import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Hex;
-import megamek.common.RangeType;
 import megamek.common.actions.ArtilleryAttackAction;
 import megamek.common.actions.EntityAction;
 import megamek.common.actions.WeaponAttackAction;
@@ -62,7 +56,6 @@ import megamek.common.event.board.BoardListenerAdapter;
 import megamek.common.event.entity.GameEntityChangeEvent;
 import megamek.common.game.GameTurn;
 import megamek.common.moves.MovePath;
-import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.IPreferenceChangeListener;
 import megamek.common.preference.PreferenceManager;
@@ -72,71 +65,13 @@ import megamek.common.units.EntityMovementType;
 import megamek.common.units.EntityVisibilityUtils;
 import megamek.common.units.Mek;
 import megamek.common.units.Targetable;
-import megamek.common.units.Terrains;
 import megamek.common.units.UnitLocation;
 
 /** Thin Swing adapter. Reuses MegaMek's tileset, visibility checks, movement path, and actual phase buttons. */
-final class GpuBoardSource implements AutoCloseable {
-    /** One key binding with its display text ({@code KeyCommandBind.getDesc}), copied on the Swing thread. */
-    public record Bind(KeyCommandBind command, int keyCode, int modifiers, String text) { }
-
-    /**
-     * Immutable preference snapshot published to the render thread: the existing preferences the native views read,
-     * whether the battle HUD shows its contacts panel, every key binding, the minimum and extreme range colours of the
-     * field-of-fire display and the movement envelope's sprint colour.
-     */
-    public record UiPreferences(float scale, String reportKeywords, String reportFilterKeywords,
-          boolean minimapEnabled, boolean contactsEnabled, boolean moveEnvelope, boolean conditionsVisible,
-          boolean turnDetails, List<Bind> binds, int minRangeRgb, int extremeRangeRgb, int moveSprintRgb) {
-        public UiPreferences {
-            binds = List.copyOf(binds);
-        }
-
-        static UiPreferences capture() {
-            var preferences = PreferenceManager.getClientPreferences();
-            GUIPreferences gui = GUIPreferences.getInstance();
-            return new UiPreferences(gui.getGUIScale(), preferences.getReportKeywords(),
-                  preferences.getReportFilterKeywords(), gui.getMinimapEnabled(), gui.getGpuContactsEnabled(),
-                  gui.getMoveEnvelope(), gui.getShowPlanetaryConditionsOverlay(), gui.getTurnDetailsOverlay(),
-                  Stream.of(KeyCommandBind.values()).map(bind -> new Bind(bind, bind.key, bind.modifiers,
-                        KeyCommandBind.getDesc(bind))).toList(),
-                  FieldOfFireSprite.getFieldOfFireColor(RangeType.RANGE_MINIMUM).getRGB(),
-                  FieldOfFireSprite.getFieldOfFireColor(RangeType.RANGE_EXTREME).getRGB(),
-                  gui.getMoveSprintColor().getRGB());
-        }
-    }
-    /**
-     * One published snapshot. {@code status} and {@code panels} are always the newest capture; {@code panels} bundles
-     * the HUD services' snapshots.
-     */
-    public record Frame(BoardScene scene, List<BoardScene.Animation> timeline, BoardScene.Context context,
-          List<BoardScene.Command> globalCommands, String tooltip,
-          BoardFocus centerRequest, long boardGeneration, String actorName,
-          BoardAtmosphere.Settings scenarioAtmosphere, GpuReportLog.Snapshot reports,
-          GpuBattleStatus.Snapshot status, GpuHudData panels) {
-        /** This frame with the animation events queued since the previous frame was taken. */
-        Frame withTimeline(List<BoardScene.Animation> events) {
-            return new Frame(scene, events, context, globalCommands, tooltip, centerRequest, boardGeneration,
-                  actorName, scenarioAtmosphere, reports, status, panels);
-        }
-
-        /** This frame showing {@code shown}, the scene the playback presents; this frame when it is its own. */
-        Frame withScene(BoardScene shown) {
-            return shown == scene ? this : new Frame(shown, timeline, context, globalCommands, tooltip,
-                  centerRequest, boardGeneration, actorName, scenarioAtmosphere, reports, status, panels);
-        }
-
-        List<BoardScene.Movement> movements() {
-            return timeline.stream().filter(BoardScene.Movement.class::isInstance).map(BoardScene.Movement.class::cast).toList();
-        }
-
-        List<BoardScene.Animation> animations() {
-            return timeline.stream().filter(event -> !(event instanceof BoardScene.SceneUpdate)
-                  && !(event instanceof BoardScene.Concealed)).toList();
-        }
-    }
-
+final class GpuBoardSource implements BoardSource {
     private final java.util.LinkedHashSet<java.util.UUID> receivedAttacks = new java.util.LinkedHashSet<>();
+    private final Map<Integer, BoardScene.Combat> removalAttempts = new HashMap<>();
+    private final Set<Integer> voluntaryReleases = new java.util.HashSet<>();
 
     private volatile BoardClientState view;
     private final Supplier<JComponent> phasePanel;
@@ -161,8 +96,7 @@ final class GpuBoardSource implements AutoCloseable {
     /** Set by the GL thread; each capture uses them only while the unit is still identified or owned. */
     private volatile int cardUnit = Entity.NONE;
     private volatile int focusUnit = Entity.NONE;
-    /** Local presentation only: refreshes, board changes and modal previews all retain this time choice. */
-    private final double atmosphereTimeSample = ThreadLocalRandom.current().nextDouble();
+    private final GpuAtmosphereControls atmosphere;
     private final BoardScene.PixelPool terrainImages = new BoardScene.PixelPool();
     private final List<BoardScene.Animation> pendingEvents = new ArrayList<>();
     private final Timer timer;
@@ -179,16 +113,14 @@ final class GpuBoardSource implements AutoCloseable {
     private List<BoardScene.Tile> tiles = List.of();
     private BoardFieldOfView fieldOfView = BoardFieldOfView.EMPTY;
     private boolean terrainDirty = true;
+    /** Swing-owned artwork invalidation; neighbouring exits and terrain blends also change after a hex edit. */
+    private Rectangle dirtyHexes;
     private volatile boolean closed;
     /** EDT-confined stack of native modal dialogs; only the newest is shown, so they are answered LIFO. */
     private final Deque<PendingDialog> pendingDialogs = new ArrayDeque<>();
     /** Its newest unanswered dialog for the GL thread, read without any monitor and never part of a {@link Frame}. */
     private volatile GpuBoardWindow.DialogRequest dialog;
     private long dialogSequence;
-    private PlanetaryConditionsDialog conditionsDialog;
-    /** Swing-owned visual selection for reopening the editor; never written to the game. */
-    private PlanetaryConditions previewConditions;
-    private double previewTimeSample = atmosphereTimeSample;
     private Frame frame;
     private Coords contextCoords;
     private volatile Coords hoverCoords;
@@ -214,23 +146,44 @@ final class GpuBoardSource implements AutoCloseable {
         requireSwingThread();
         this.view = view;
         this.phasePanel = phasePanel;
+        atmosphere = new GpuAtmosphereControls(
+              () -> view.getClientgui() == null ? null
+                    : view.getClientgui().getFrame(),
+              () -> this.view.game.getBoard(this.view.getBoardId()), () -> this.view.game.getPlanetaryConditions(),
+              () -> !acceptsInput());
         GUIPreferences preferences = GUIPreferences.getInstance();
         uiPreferences = UiPreferences.capture();
         actions = new GpuBoardActions(view, phasePanel, () -> !acceptsInput() || this.view != view, this::refresh);
         boardListener = new BoardListenerAdapter() {
             @Override
             public void boardNewBoard(BoardEvent event) {
-                dirtyTerrain();
+                boardChangedAllHexes(event);
             }
 
             @Override
             public void boardChangedHex(BoardEvent event) {
-                dirtyTerrain();
+                onSwing(() -> {
+                    if (closed || event.getSource() != board) { return; }
+                    // Changed hexes also change what the fire preview predicts.
+                    preview.invalidate();
+                    Coords coords = event.getCoords();
+                    if (coords == null) {
+                        terrainDirty = true;
+                    } else {
+                        Rectangle area = new Rectangle(coords.getX() - 1, coords.getY() - 1, 3, 3);
+                        dirtyHexes = dirtyHexes == null ? area : dirtyHexes.union(area);
+                    }
+                });
             }
 
             @Override
             public void boardChangedAllHexes(BoardEvent event) {
-                dirtyTerrain();
+                onSwing(() -> {
+                    if (!closed && event.getSource() == board) {
+                        terrainDirty = true;
+                        preview.invalidate();
+                    }
+                });
             }
         };
         gameListener = new GameListenerAdapter() {
@@ -336,13 +289,13 @@ final class GpuBoardSource implements AutoCloseable {
     }
 
     private void dirtyTerrain() {
-        if (SwingUtilities.isEventDispatchThread()) {
-            terrainDirty = true;
-            // Changed hexes also change what the fire preview predicts.
-            preview.invalidate();
-        } else {
-            SwingUtilities.invokeLater(this::dirtyTerrain);
-        }
+        onSwing(() -> {
+            if (!closed) {
+                terrainDirty = true;
+                // Changed hexes also change what the fire preview predicts.
+                preview.invalidate();
+            }
+        });
     }
 
     /** Replaces the published preferences only when they changed, so the render thread can compare by identity. */
@@ -378,13 +331,16 @@ final class GpuBoardSource implements AutoCloseable {
         // its first point and when it has just landed, so flying stays on the board through climbs and landings.
         int flightAltitude = entity.getAltitude() > 0 ? entity.getAltitude() : startAltitude;
         if (start != null && start.boardId() == view.getBoardId()) {
-            points.add(pathWaypoint(entity, start.coords(), start.elevation(), start.facing(),
+            points.add(unitWaypoint(entity, start.coords(), start.elevation(), start.facing(),
                   startAltitude > 0 ? startAltitude : flightAltitude, start.form()).withProneCause(start.proneCause())
                   .withFallSide(start.fallSide()).withHullDown(start.hullDown()));
+        } else if (frame != null) {
+            frame.scene().units().stream().filter(unit -> unit.id() == entityId && !unit.sensorContact())
+                  .findFirst().ifPresent(unit -> points.add(unit.location()));
         }
         for (UnitLocation location : path) {
             var observedForm = location.form() != null ? location.form() : points.isEmpty() ? null : points.getLast().form();
-            BoardScene.Waypoint point = pathWaypoint(entity, location.coords(), location.elevation(),
+            BoardScene.Waypoint point = unitWaypoint(entity, location.coords(), location.elevation(),
                   location.facing(), flightAltitude, observedForm).withProneCause(location.proneCause() != null ? location.proneCause()
                         : points.isEmpty() ? null : points.getLast().proneCause())
                   .withFallSide(location.proneCause() != null ? location.fallSide()
@@ -399,20 +355,26 @@ final class GpuBoardSource implements AutoCloseable {
         var finalForm = UnitLocation.Form.capture(entity);
         if (!points.isEmpty() && finalForm != null && path.stream().allMatch(location -> location.form() == null)) {
             var last = path.getLast();
-            points.add(pathWaypoint(entity, last.coords(), last.elevation(), last.facing(), flightAltitude, finalForm)
+            points.add(unitWaypoint(entity, last.coords(), last.elevation(), last.facing(), flightAltitude, finalForm)
                   .withProneCause(points.getLast().proneCause()).withFallSide(points.getLast().fallSide())
                   .withHullDown(points.getLast().hullDown()));
         }
         // Publish the final visible state and its movement together, so a frame cannot jump to the end first.
         Frame next = capture();
+        var captured = next.scene().units().stream()
+              .filter(unit -> unit.id() == entityId && !unit.sensorContact()).findFirst().orElse(null);
         if (!points.isEmpty()) {
             points.set(0, supportedEndpoint(points.getFirst(), frame, entityId));
             points.set(points.size() - 1, supportedEndpoint(points.getLast(), next, entityId));
+            if (captured != null && points.getLast().coords().equals(captured.location().coords())
+                  && (UnitMotion.changesPosture(points.getLast(), captured.location())
+                        || points.getLast().elevation() != captured.location().elevation())) {
+                // Legacy path steps can omit the fall at arrival; the final entity packet still confirms it.
+                points.add(captured.location());
+            }
         }
         synchronized (this) {
             if (view == movingView) {
-                var captured = next.scene().units().stream()
-                      .filter(unit -> unit.id() == entityId && !unit.sensorContact()).findFirst().orElse(null);
                 queueMovement(entity, captured, points, type, jumpMP, movementMP);
             }
             publishScene(next, false);
@@ -453,7 +415,7 @@ final class GpuBoardSource implements AutoCloseable {
     private BoardScene.Unit inForm(BoardScene.Unit unit, Entity entity, BoardScene.Waypoint location, UnitLocation.Form form) {
         var model = UnitModelSelection.inForm(unit.model(), entity, unit.part(), MMStaticDirectoryManager.getMekTileset(), form);
         return new BoardScene.Unit(unit.id(), unit.part(), unit.name(), location, unit.image(), false, unit.annotations(),
-              unit.height(), form == null ? unit.airborne() : form.airborne(), model, unit.outlineRgb(), unit.footprint());
+              unit.height(), form == null ? unit.airborne() : form.airborne(), model, unit.outlineRgb(), unit.footprint(), unit.attachment(), unit.heat());
     }
 
     /** Copy authorized, then-visible appearance once; no Entity reaches the GL thread. */
@@ -473,21 +435,44 @@ final class GpuBoardSource implements AutoCloseable {
             receivedAttacks.removeFirst();
         }
         reports.combat(result, attacker, event.target(), view.game.getRoundCount(), view.game.getPhase());
+        if (result.kind() == megamek.common.ResolvedAttack.Kind.DEATH && frame != null
+              && frame.scene().units().stream().anyMatch(unit -> unit.id() == attacker.getId() && unit.attachment() != null)) {
+            return; // Exterior casualties remain on their carrier until its resolved release, rather than collapsing in midair.
+        }
+        if (result.kind() == megamek.common.ResolvedAttack.Kind.STOP_SWARM) {
+            voluntaryReleases.add(attacker.getId());
+            return;
+        }
         var usedImages = new IdentityHashMap<Image, Boolean>();
         var firing = unit(attacker, -1, result.attacker().coords(), false, usedImages);
         if (result.shot() != null && result.shot().launch() != null) {
-            firing = inForm(firing, attacker, waypoint(result.attacker().coords(), result.attacker().elevation(), result.attacker().facing()),
+            firing = inForm(firing, attacker, unitWaypoint(attacker, result.attacker().coords(),
+                  result.attacker().elevation(), result.attacker().facing(), attacker.getAltitude(), result.attacker().form()),
                   result.attacker().form());
         }
         var receiving = target == null ? null : unit(target, -1, result.target().coords(), false, usedImages);
+        if (frame != null) {
+            var observed = frame.scene().units().stream().collect(Collectors.toMap(BoardScene.Unit::id,
+                  java.util.function.Function.identity(), (first, second) -> first));
+            if (observed.containsKey(firing.id())) { firing = firing.withAttachment(observed.get(firing.id()).attachment()); }
+            if (receiving != null && observed.containsKey(receiving.id())) {
+                receiving = receiving.withAttachment(observed.get(receiving.id()).attachment());
+            }
+        }
         var destination = receiving == null
               ? waypoint(result.target().coords(), result.target().elevation(), result.target().facing())
               : receiving.location();
+        if (result.kind() == megamek.common.ResolvedAttack.Kind.SHAKE_OFF) {
+            // Movement resolution sends this before the carrier's path. Keep its confirmed result with that path.
+            removalAttempts.put(attacker.getId(), new BoardScene.Combat(result, firing, receiving, destination));
+            return;
+        }
         // A resolved attack packet precedes its damage packets. This checkpoint closes the preceding action.
         Frame before = capture();
         synchronized (this) {
             publishScene(before, true);
-            queueAnimation(new BoardScene.Combat(result, firing, receiving, destination));
+            queueAnimation(new BoardScene.Combat(result, firing, receiving, destination,
+                  target != null && target.isConventionalInfantry()));
         }
     }
 
@@ -530,14 +515,104 @@ final class GpuBoardSource implements AutoCloseable {
                     queueAnimation(new BoardScene.Movement(unit.id(), next.scene().boardId(),
                           List.of(old.location(), unit.location()), EntityMovementType.MOVE_SAFE_THRUST, 0,
                           entity == null ? 0 : movementMP(entity, EntityMovementType.MOVE_SAFE_THRUST), unit));
+                } else if (old != null && old.attachment() == null && unit.attachment() == null
+                      && UnitMotion.forcedChange(old, unit)) {
+                    // No movement path accompanied this authoritative update (push, domino displacement, or fall).
+                    queueAnimation(new BoardScene.Movement(unit.id(), next.scene().boardId(),
+                          List.of(old.location(), unit.location()), EntityMovementType.MOVE_NONE, 0, 0, unit));
                 }
             }
+        }
+        if (frame != null && frame.boardGeneration() == next.boardGeneration()) {
+            queueAttachments(frame.scene(), next.scene());
         }
         if (frame == null || frame.boardGeneration() != next.boardGeneration() || !next.scene().samePlaybackState(frame.scene())
               || (!pendingEvents.isEmpty() && !(pendingEvents.getLast() instanceof BoardScene.SceneUpdate))) {
             queueAnimation(new BoardScene.SceneUpdate(next.scene()));
         }
         frame = next;
+    }
+
+    /** Close carrier movement at its destination before releasing any of its exterior passengers. */
+    private void queueAttachments(BoardScene previous, BoardScene next) {
+        Map<Integer, BoardScene.Unit> oldUnits = new HashMap<>(), newUnits = new HashMap<>();
+        previous.units().forEach(unit -> oldUnits.put(unit.id(), unit));
+        next.units().forEach(unit -> newUnits.put(unit.id(), unit));
+        List<BoardScene.AttachmentChange> changes = new ArrayList<>();
+        List<BoardScene.Unit> held = new ArrayList<>(next.units());
+        for (var before : oldUnits.values()) {
+            var after = newUnits.get(before.id());
+            var from = before.attachment();
+            var to = after == null ? null : after.attachment();
+            if (before.sensorContact() || after != null && after.sensorContact() || java.util.Objects.equals(from, to)) { continue; }
+            int carrierId = to == null ? from.carrierId() : to.carrierId();
+            var carrier = newUnits.get(carrierId);
+            if (carrier == null || carrier.sensorContact()) { continue; }
+            Entity passenger = view.game.getEntityFromAllSources(before.id());
+            if (after == null && (passenger == null || !passenger.isDestroyed() && !passenger.isDoomed())) { continue; }
+            if (passenger != null && (!EntityVisibilityUtils.detectedOrHasVisual(view.getLocalPlayer(), view.game, passenger)
+                  || sensorContact(passenger))) { continue; }
+            var release = to != null ? BoardScene.Release.BOARD : from.hostile() ? BoardScene.Release.THROWN : BoardScene.Release.CLIMB_DOWN;
+            boolean voluntary = to == null && voluntaryReleases.remove(before.id());
+            if (voluntary) { release = BoardScene.Release.CLIMB_DOWN; }
+            var movement = !pendingEvents.isEmpty() && pendingEvents.getLast() instanceof BoardScene.Movement move
+                  && move.entityId() == carrierId ? move : null;
+            var destination = after != null ? after.location() : passenger != null && passenger.getPosition() != null
+                  ? waypoint(passenger.getPosition(), passenger.getElevation(), passenger.getFacing()) : carrier.location();
+            if (to == null && !voluntary && movement != null) {
+                var tile = next.tile(destination.coords());
+                if (tile != null && tile.waterDepth() > 0 && !tile.frozen()) { release = BoardScene.Release.WATER; }
+                if (movement.type() == EntityMovementType.MOVE_JUMP) { release = BoardScene.Release.JUMP; }
+            }
+            changes.add(new BoardScene.AttachmentChange(next.boardId(), before, after, carrier, release, destination));
+            held.removeIf(unit -> unit.id() == before.id());
+            held.add(before);
+        }
+        var attempts = removalAttempts.values().stream().filter(attempt -> newUnits.containsKey(attempt.entityId())
+              && pendingEvents.stream().anyMatch(event -> event instanceof BoardScene.Movement
+                    && event.entityId() == attempt.entityId())).toList();
+        if (changes.isEmpty() && attempts.isEmpty()) { return; }
+        BoardScene.Movement continuation = null;
+        if (changes.size() == 1 && changes.getFirst().release() == BoardScene.Release.WATER
+              && !pendingEvents.isEmpty() && pendingEvents.getLast() instanceof BoardScene.Movement movement
+              && movement.entityId() == changes.getFirst().carrier().id() && movement.type() != EntityMovementType.MOVE_JUMP) {
+            var change = changes.getFirst();
+            int index = releaseStep(movement.path(), change.destination());
+            if (index > 0 && index < movement.path().size() - 1) {
+                // The unit can continue past the water-entry hex. Release there, never at its later endpoint.
+                var atWater = change.carrier().at(movement.path().get(index));
+                pendingEvents.set(pendingEvents.size() - 1, new BoardScene.Movement(movement.entityId(), movement.boardId(),
+                      movement.path().subList(0, index + 1), movement.type(), movement.jumpMP(), movement.movementMP(), atWater, movement.gravity()));
+                continuation = new BoardScene.Movement(movement.entityId(), movement.boardId(),
+                      movement.path().subList(index, movement.path().size()), movement.type(), movement.jumpMP(), movement.movementMP(),
+                      movement.unit(), movement.gravity());
+                held.replaceAll(unit -> unit.id() == atWater.id() ? atWater : unit);
+                changes.set(0, new BoardScene.AttachmentChange(change.boardId(), change.before(), change.after(), atWater,
+                      change.release(), change.destination()));
+            }
+        }
+        queueAnimation(new BoardScene.SceneUpdate(next.withUnits(held)));
+        for (var attempt : attempts) {
+            removalAttempts.remove(attempt.entityId());
+            var carrier = newUnits.get(attempt.entityId());
+            Entity target = attempt.target() == null ? null : view.game.getEntityFromAllSources(attempt.target().id());
+            if (carrier.sensorContact() || target == null || !visible(target) || sensorContact(target)) { continue; }
+            queueAnimation(new BoardScene.Combat(attempt.result(), carrier, attempt.target(), carrier.location()));
+        }
+        changes.forEach(this::queueAnimation);
+        if (continuation != null) {
+            var atWater = changes.getFirst().carrier();
+            queueAnimation(new BoardScene.SceneUpdate(next.withUnits(next.units().stream()
+                  .map(unit -> unit.id() == atWater.id() ? atWater : unit).toList())));
+            queueAnimation(continuation);
+        }
+    }
+
+    static int releaseStep(List<BoardScene.Waypoint> path, BoardScene.Waypoint destination) {
+        for (int index = 1; index < path.size(); index++) {
+            if (path.get(index).coords().equals(destination.coords())) { return index; }
+        }
+        return -1;
     }
 
     /** Copy the game's current capability once at the event boundary; the renderer never recalculates MP rules. */
@@ -573,6 +648,21 @@ final class GpuBoardSource implements AutoCloseable {
                 publishScene(next, true);
             }
         }
+    }
+
+    @Override
+    public void reloadAssets() throws java.io.IOException {
+        requireSwingThread();
+        if (closed) { return; }
+        megamek.common.util.ImageUtil.reloadImages();
+        MMStaticDirectoryManager.refreshMekTileset();
+        MMStaticDirectoryManager.refreshCamouflageDirectory();
+        view.reloadAssets();
+        unitImages.clear();
+        camouflage.clear();
+        terrainImages.clear();
+        terrainDirty = true;
+        refresh();
     }
 
     public synchronized Frame takeFrame() {
@@ -612,14 +702,16 @@ final class GpuBoardSource implements AutoCloseable {
             actions = new GpuBoardActions(owner, phasePanel,
                   () -> !acceptsInput() || !isCurrentView(owner) || generation != boardGeneration, this::refresh);
             view.setMovingUnits(false);
-            previewConditions = null;
-            previewTimeSample = atmosphereTimeSample;
+            atmosphere.reset();
             synchronized (this) {
                 pendingEvents.clear();
                 receivedAttacks.clear();
+                removalAttempts.clear();
+                voluntaryReleases.clear();
             }
             if (board != null) { board.addBoardListener(boardListener); }
             terrainDirty = true;
+            dirtyHexes = null;
         }
         if (board == null) {
             tiles = List.of();
@@ -638,36 +730,59 @@ final class GpuBoardSource implements AutoCloseable {
                   (area.x + area.width) / (double) currentBoard.getWidth(),
                   (area.y + area.height) / (double) currentBoard.getHeight() };
         });
-        boolean changedTerrain = terrainDirty;
-        if (terrainDirty) {
-            List<BoardScene.Tile> nextTiles = new ArrayList<>(Collections.nCopies(board.getWidth() * board.getHeight(), null));
-            view.capturePlanarHexes(new Rectangle(0, 0, board.getWidth(), board.getHeight()), false,
-                  hex -> nextTiles.set(hex.coords().getX() * board.getHeight() + hex.coords().getY(), tile(hex, null)));
+        boolean allTerrain = terrainDirty;
+        Rectangle changedHexes = dirtyHexes;
+        boolean changedTerrain = allTerrain || changedHexes != null;
+        if (changedTerrain) {
+            List<BoardScene.Tile> nextTiles = terrainDirty
+                  ? new ArrayList<>(Collections.nCopies(board.getWidth() * board.getHeight(), null))
+                  : new ArrayList<>(tiles);
+            Rectangle area = terrainDirty ? new Rectangle(0, 0, board.getWidth(), board.getHeight()) : dirtyHexes;
+            view.capturePlanarHexes(area, false, hex -> {
+                int index = hex.coords().getX() * board.getHeight() + hex.coords().getY();
+                nextTiles.set(index, BoardScene.captureTile(board.getHex(hex.coords()), hex, nextTiles.get(index), terrainImages,
+                      board::getHex));
+            });
             tiles = List.copyOf(nextTiles);
             terrainDirty = false;
+            dirtyHexes = null;
         }
         Rectangle area = visibleArea;
         long revision = view.getPlanarRevision();
-        if (changedTerrain || revision != capturedRevision || view.game.getPhase() != capturedPhase || !area.equals(capturedArea)) {
+        boolean allMarkings = allTerrain || revision != capturedRevision || view.game.getPhase() != capturedPhase;
+        boolean changedMarkings = changedTerrain || allMarkings;
+        if (changedMarkings || !area.equals(capturedArea)) {
             List<BoardScene.Tile> painted = new ArrayList<>(tiles);
             for (int index = 0; index < tiles.size(); index++) {
                 BoardScene.Tile old = tiles.get(index);
                 if (old.tactical() != null && !area.contains(old.coords().getX(), old.coords().getY())) {
-                    painted.set(index, new BoardScene.Tile(old.coords(), old.elevation(), old.waterDepth(), old.frozen(),
-                          old.roadExits(), old.surface(), old.ground(), old.normals(), old.decals(), old.decalsWithoutLimbs(),
-                          null, old.features(), old.text(), old.liquid(), old.foliage()));
+                    painted.set(index, old.withTactical(null));
                 }
             }
-            view.capturePlanarTactical(area, hex -> {
+            // A terrain edit repaints its changed hexes and newly exposed view only. Explicit painter/overlay
+            // invalidation remains global, including FoV changes caused by an edited blocker.
+            List<Rectangle> exposed = new ArrayList<>();
+            if (allMarkings || capturedArea == null || !area.intersects(capturedArea)) {
+                exposed.add(area);
+            } else {
+                exposed.addAll(List.of(SwingUtilities.computeDifference(area, capturedArea)));
+                if (changedHexes != null) {
+                    Rectangle local = changedHexes.intersection(area).intersection(capturedArea);
+                    if (!local.isEmpty()) { exposed.add(local); }
+                }
+            }
+            for (Rectangle region : exposed) { view.capturePlanarTactical(region, hex -> {
                 int index = hex.coords().getX() * board.getHeight() + hex.coords().getY();
                 BoardScene.Tile old = tiles.get(index);
                 BoardScene.Tile next = new BoardScene.Tile(old.coords(), old.elevation(), old.waterDepth(), old.frozen(),
                       old.roadExits(), old.surface(), old.ground(), old.normals(), old.decals(), old.decalsWithoutLimbs(),
-                      terrainImages.capture(hex.tactical(), old.tactical()), old.features(), hex.text(), old.liquid(), old.foliage());
+                      terrainImages.capture(hex.tactical(), old.tactical()), old.features(), hex.text(), old.liquid(),
+                      old.foliage(), old.detailedGround(), old.road(), old.fireSmoke(), old.biome(), old.impassable(),
+                      old.blackIce(), old.cliffTopExits());
                 if (!next.equals(old)) {
                     painted.set(index, next);
                 }
-            });
+            }); }
             if (!painted.equals(tiles)) {
                 tiles = List.copyOf(painted);
             }
@@ -680,8 +795,20 @@ final class GpuBoardSource implements AutoCloseable {
         List<BoardScene.Unit> units = new ArrayList<>();
         camouflage.begin();
         Map<Image, Boolean> usedImages = new IdentityHashMap<>();
+        var attachments = exteriorAttachments(view.game.getEntitiesVector(), entity ->
+              EntityVisibilityUtils.detectedOrHasVisual(view.getLocalPlayer(), view.game, entity) && !sensorContact(entity),
+              this::visible);
         for (Entity entity : view.game.getEntitiesVector()) {
-            if (!visible(entity)) {
+            var attachment = attachments.get(entity.getId());
+            if (attachment == null && (!visible(entity) || entity.getTransportId() != Entity.NONE)) {
+                continue;
+            }
+            if (attachment != null) {
+                Entity carrier = view.game.getEntity(attachment.carrierId());
+                var before = frame == null ? null : frame.scene().units().stream()
+                      .filter(unit -> unit.id() == entity.getId() && !unit.sensorContact()).findFirst().orElse(null);
+                units.add((entity.isDestroyed() || entity.isDoomed()) && before != null ? before
+                      : unit(entity, -1, carrier.getPosition(), false, usedImages).withAttachment(attachment));
                 continue;
             }
             boolean sensor = sensorContact(entity);
@@ -692,6 +819,20 @@ final class GpuBoardSource implements AutoCloseable {
             } else {
                 entity.getSecondaryPositions().forEach((part, coords) ->
                       units.add(unit(entity, part, coords, false, usedImages)));
+            }
+        }
+        if (frame != null) {
+            for (var passenger : frame.scene().units()) {
+                if (passenger.attachment() == null || !passenger.attachment().hostile()
+                      || units.stream().anyMatch(unit -> unit.id() == passenger.id())) { continue; }
+                Entity carrier = view.game.getEntity(passenger.attachment().carrierId());
+                Entity removed = view.game.getEntityFromAllSources(passenger.id());
+                if (view.game.getEntity(passenger.id()) == null && removed != null && (removed.isDestroyed() || removed.isDoomed())
+                      && EntityVisibilityUtils.detectedOrHasVisual(view.getLocalPlayer(), view.game, removed) && !sensorContact(removed)
+                      && carrier != null && visible(carrier) && !sensorContact(carrier) && carrier.getSwarmAttackerId() == passenger.id()) {
+                    // A removal packet can precede its carrier's path. Retain only the already authorized appearance.
+                    units.add(passenger);
+                }
             }
         }
         if (GpuUnitModels.ENABLED && GUIPreferences.getInstance().getShowWrecks()) {
@@ -863,6 +1004,27 @@ final class GpuBoardSource implements AutoCloseable {
               && EntityVisibilityUtils.detectedOrHasVisual(view.getLocalPlayer(), view.game, entity);
     }
 
+    /** The carrier owns exterior occupancy, so separately delivered passenger updates cannot release it early. */
+    static Map<Integer, BoardScene.Attachment> exteriorAttachments(List<Entity> entities,
+          java.util.function.Predicate<Entity> identified, java.util.function.Predicate<Entity> onBoard) {
+        Map<Integer, BoardScene.Attachment> result = new HashMap<>();
+        Map<Integer, Entity> byId = new HashMap<>();
+        entities.forEach(entity -> byId.put(entity.getId(), entity));
+        for (Entity carrier : entities) {
+            if (!onBoard.test(carrier) || !identified.test(carrier)) { continue; }
+            for (Entity passenger : carrier.getExternalUnits()) {
+                if (passenger instanceof megamek.common.battleArmor.BattleArmor && identified.test(passenger)) {
+                    result.put(passenger.getId(), new BoardScene.Attachment(carrier.getId(), false));
+                }
+            }
+            Entity swarmer = byId.get(carrier.getSwarmAttackerId());
+            if (swarmer instanceof megamek.common.units.Infantry && identified.test(swarmer)) {
+                result.put(swarmer.getId(), new BoardScene.Attachment(carrier.getId(), true));
+            }
+        }
+        return result;
+    }
+
     private List<BoardScene.FiringLine> firingLines() {
         List<BoardScene.FiringLine> result = new ArrayList<>();
         for (var sprite : view.getAttackSprites()) {
@@ -898,25 +1060,10 @@ final class GpuBoardSource implements AutoCloseable {
             if (sensorContact(entity)) {
                 return waypoint(coords, 0.5f, 0);
             }
-            return new BoardScene.Waypoint(coords, flightLevel(entity, coords) + (entity.height() + 1) * 0.5f, 0);
+            var position = unitWaypoint(entity, coords, 0);
+            return new BoardScene.Waypoint(coords, position.elevation() + (entity.height() + 1) * 0.5f, 0);
         }
         return waypoint(coords, target.getElevation() + Math.max(0.15f, target.getHeight() * 0.5f), 0);
-    }
-
-    private BoardScene.Tile tile(BoardArtwork.HexImage pixels, BoardScene.Tile previous) {
-        Hex hex = board.getHex(pixels.coords());
-        return new BoardScene.Tile(pixels.coords(), hex.getLevel(),
-              hex.containsTerrain(Terrains.WATER) ? Math.max(0, hex.terrainLevel(Terrains.WATER)) : -1,
-              hex.containsTerrain(Terrains.ICE),
-              hex.containsTerrain(Terrains.ROAD) ? hex.getTerrain(Terrains.ROAD).getExits() & 63 : 0,
-              BoardFeatures.surface(hex),
-              terrainImages.capture(pixels.terrain(), previous == null ? null : previous.ground()),
-              terrainImages.capture(pixels.normals(), previous == null ? null : previous.normals()),
-              terrainImages.captureOverlay(pixels.decals(), previous == null ? null : previous.decals()),
-              terrainImages.capture(pixels.decalsWithoutLimbs(), previous == null ? null : previous.decalsWithoutLimbs()),
-              terrainImages.capture(pixels.tactical(), previous == null ? null : previous.tactical()),
-              BoardFeatures.capture(hex, pixels.coords(), pixels.structureModels()), pixels.text(), BoardLiquid.capture(hex),
-              terrainImages.captureOverlay(pixels.foliage(), previous == null ? null : previous.foliage()));
     }
 
     boolean sensorContact(Entity entity) {
@@ -935,7 +1082,7 @@ final class GpuBoardSource implements AutoCloseable {
               : new BoardScene.UnitModel(model.asset(), model.fallback(), model.variant(), model.figures(), model.twist(), model.damage(), dead);
         var pixels = retained(view.getTilesetManager().wreckMarkerFor(entity, -1), usedImages);
         return new BoardScene.Unit(captured.id(), -1, captured.name(), captured.location(), pixels, false, null,
-              captured.height(), captured.airborne(), model, captured.outlineRgb(), captured.footprint());
+              captured.height(), captured.airborne(), model, captured.outlineRgb(), captured.footprint(), null, captured.heat());
     }
 
     /** One copy per AWT image, shared by identity by every frame and HUD list that shows it while it is in use. */
@@ -960,12 +1107,13 @@ final class GpuBoardSource implements AutoCloseable {
             footprint = List.of(coords);
         }
         BoardScene.Waypoint location = airborne
-              ? new BoardScene.Waypoint(coords, flightLevel(entity, coords), facing)
+              ? unitWaypoint(entity, coords, facing)
               : footprint.size() > 1 && UnitFootprint.terrainSupported(entity.getMovementMode())
                     ? new BoardScene.Waypoint(coords, UnitFootprint.support(board, coords, footprint, entity.getElevation()), facing)
                     : waypoint(coords, sensor ? 0 : entity.getElevation(), facing);
         if (!sensor) {
             location = location.withAeroState(aeroState(entity, entity.getElevation(), airborne))
+                  .withProneCause(entity.getProneCause())
                   .withFallSide(entity instanceof Mek ? entity.getFallSide() : null).withHullDown(entity.isHullDown());
             if (location.aeroState() != null) {
                 location = location.withFootprint(footprint);
@@ -984,7 +1132,7 @@ final class GpuBoardSource implements AutoCloseable {
               GpuUnitModels.ENABLED
                     ? camouflage.resolve(UnitModelSelection.capture(entity, part, sensor, MMStaticDirectoryManager.getMekTileset(),
                           sensor ? 0 : UnitModelSelection.twist(entity.getFacing(), facing))) : null,
-              outline.getRGB(), footprint);
+              outline.getRGB(), footprint, null, sensor || !entity.tracksHeat() ? -1 : Math.max(0, entity.heat));
     }
 
     private BoardScene.Waypoint waypoint(Coords coords, float relativeElevation, int facing) {
@@ -1002,31 +1150,26 @@ final class GpuBoardSource implements AutoCloseable {
     }
 
     /**
-     * Absolute level a flying visual floats at, with its token staying its own height above it. Aerospace altitude is
-     * already absolute above the board, exactly as the LOS height conversion treats it, and is the only height
-     * available for it because {@code Aero.getElevation()} reports the airborne sentinel while flying. VTOL and WiGE
-     * elevation is relative to the hex below them.
+     * Capture the current unit through the same elevation conversion as historical and planned movement.
      */
-    private float flightLevel(Entity entity, Coords coords) {
-        if (entity.getAltitude() > 0) {
-            return entity.getAltitude();
-        }
-        Hex hex = board == null ? null : board.getHex(coords);
-        return entity.getElevation() + (hex == null ? 0 : hex.getLevel());
+    private BoardScene.Waypoint unitWaypoint(Entity entity, Coords coords, int facing) {
+        return unitWaypoint(entity, coords, entity.getElevation(), facing, entity.getAltitude(), UnitLocation.Form.capture(entity));
     }
 
     /**
-     * Playback position of one movement path point. An aerospace reports the airborne elevation sentinel (999) in
-     * every step it takes while flying instead of a real level; those steps play at the given flight altitude, while a
-     * step carrying a real elevation (an aerospace taxiing, or set down on its landing hex) keeps it. Every other unit
+     * Single conversion for current units, playback, planned movement and firing. An aerospace reports the airborne
+     * sentinel (999) while flying instead of a real level; those steps play at the flight altitude above their hex.
+     * A step carrying a real elevation (an aerospace taxiing, or set down on its landing hex) keeps it. Every other unit
      * keeps its own per-step elevation, so VTOL and WiGE climbs and descents still animate.
+     * Published waypoint elevations are absolute render levels. Renderers must not add terrain height again;
+     * this visual conversion does not change the rules engine's altitude or LOS calculations.
      */
-    private BoardScene.Waypoint pathWaypoint(Entity entity, Coords coords, float elevation, int facing,
+    private BoardScene.Waypoint unitWaypoint(Entity entity, Coords coords, float elevation, int facing,
           int flightAltitude, UnitLocation.Form form) {
         boolean aero = form == null ? entity.isAero() : form.aero();
         if (form != null && form.altitude() > 0) { flightAltitude = form.altitude(); }
         BoardScene.Waypoint point = aero && elevation >= Aero.AERO_EFFECTIVE_ELEVATION && flightAltitude > 0
-              ? new BoardScene.Waypoint(coords, flightAltitude, facing)
+              ? waypoint(coords, flightAltitude, facing)
               : waypoint(coords, elevation, facing);
         // A real path elevation describes the displayed step; the final Entity may already have landed/taken off.
         return point.withAeroState(aeroState(aero, elevation, false)).withForm(form);
@@ -1044,64 +1187,6 @@ final class GpuBoardSource implements AutoCloseable {
             return BoardScene.AeroState.AIRBORNE;
         }
         return relativeElevation == 0 ? BoardScene.AeroState.LANDED : BoardScene.AeroState.ELEVATED;
-    }
-
-    /** Swing owns the dialog and its conditions copy; completion receives immutable settings, or null on cancel. */
-    void editPlanetaryConditions(Consumer<BoardAtmosphere.Settings> completed) {
-        SwingUtilities.invokeLater(() -> {
-            if (!acceptsInput() || conditionsDialog != null) {
-                completed.accept(null);
-                return;
-            }
-            BoardClientState initialView = view;
-            Board initialBoard = board;
-            BoardAtmosphere.Settings settings = null;
-            try {
-                var owner = view.getClientgui() == null ? null
-                      : view.getClientgui().getFrame();
-                var initial = new PlanetaryConditions(previewConditions == null ? view.game.getPlanetaryConditions() : previewConditions);
-                conditionsDialog = new PlanetaryConditionsDialog(owner instanceof JFrame frame ? frame : null, initial);
-                conditionsDialog.setAlwaysOnTop(true);
-                if (conditionsDialog.showDialog() && !closed && view == initialView && board == initialBoard) {
-                    var selected = conditionsDialog.getConditions();
-                    if (selected.getLight() != initial.getLight()) { previewTimeSample = atmosphereTimeSample; }
-                    previewConditions = new PlanetaryConditions(selected);
-                    settings = BoardAtmosphere.fromScenario(previewConditions, initialBoard.isSpace(), previewTimeSample);
-                }
-            } finally {
-                if (conditionsDialog != null) { conditionsDialog.dispose(); }
-                conditionsDialog = null;
-                completed.accept(settings);
-            }
-        });
-    }
-
-    /** Map a conditions snapshot or preview using this window's fixed visual time selection. */
-    BoardAtmosphere.Settings atmosphereFor(PlanetaryConditions conditions, boolean inSpace) {
-        return BoardAtmosphere.fromScenario(conditions, inSpace, atmosphereTimeSample);
-    }
-
-    /** Presets own their conditions and reuse the same immutable time sample as the scenario/editor. */
-    BoardAtmosphere.Settings atmosphereFor(AtmospherePreset preset) {
-        return preset.settings(atmosphereTimeSample);
-    }
-
-    /** Remember a complete visual selection on Swing, alongside the immediate immutable GL settings. */
-    BoardAtmosphere.Settings preview(AtmospherePreset preset) {
-        onSwing(() -> {
-            if (closed) { return; }
-            previewConditions = preset.conditions();
-            previewTimeSample = preset.timeSample(atmosphereTimeSample);
-        });
-        return atmosphereFor(preset);
-    }
-
-    void resetConditionsPreview() {
-        onSwing(() -> {
-            if (closed) { return; }
-            previewConditions = null;
-            previewTimeSample = atmosphereTimeSample;
-        });
     }
 
     /** One waiting {@link #ask}: its nested Swing loop keeps the caller's frame on the stack until it is answered. */
@@ -1278,7 +1363,7 @@ final class GpuBoardSource implements AutoCloseable {
 
     public void click(Coords coords, boolean doubleClick, int modifiers) {
         SwingUtilities.invokeLater(() -> {
-            if (acceptsInput() && coords != null && (view.game.getPhase().isOnMap()
+            if (acceptsInput() && isCurrentView(view) && coords != null && (view.game.getPhase().isOnMap()
                   || isMeasurement(modifiers))) {
                 view.mouseAction(coords, doubleClick ? BoardClientState.BOARD_HEX_DOUBLE_CLICK : BoardClientState.BOARD_HEX_CLICK,
                       modifiers, 1);
@@ -1295,6 +1380,11 @@ final class GpuBoardSource implements AutoCloseable {
         });
     }
 
+    public UiPreferences uiPreferences() { return uiPreferences; }
+    public GpuAtmosphereControls atmosphere() { return atmosphere; }
+
+    public boolean isGameplay() { return true; }
+
     public boolean isClosed() {
         return closed;
     }
@@ -1309,7 +1399,7 @@ final class GpuBoardSource implements AutoCloseable {
         closed = true;
         // A closing window always releases the EDT: every pending ask returns the cancelled answer.
         pendingDialogs.forEach(pending -> pending.complete(GpuBoardWindow.DialogAnswer.cancelled(pending.request)));
-        if (conditionsDialog != null) { conditionsDialog.dispose(); }
+        atmosphere.close();
         timer.stop();
         view.setMovingUnits(false);
         view.setVisibleArea(() -> new double[] { 0, 0, 1, 1 });
@@ -1340,6 +1430,7 @@ final class GpuBoardSource implements AutoCloseable {
     private boolean reportedBusy;
 
     /** Render-thread report about the timeline consumed with this frame; never a second animation clock. */
+    @Override
     public void playbackState(Frame consumed, boolean busy) {
         long serial = animationsTaken;
         if (reportedGeneration == consumed.boardGeneration() && reportedAnimationSerial == serial && reportedBusy == busy) {

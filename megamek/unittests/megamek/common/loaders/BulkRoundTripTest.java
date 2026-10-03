@@ -39,10 +39,13 @@ import static org.junit.jupiter.api.Assertions.fail;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.stream.Stream;
 
+import megamek.common.battlefieldSupport.BattlefieldSupportAsset;
+import megamek.common.battlefieldSupport.BattlefieldSupportAssetYaml;
 import megamek.common.units.Entity;
 import megamek.common.units.Mek;
 import org.junit.jupiter.api.BeforeAll;
@@ -81,7 +84,11 @@ public class BulkRoundTripTest {
         Entity original = summary.loadEntity();
         assertNotNull(original, "Failed to load entity: " + summary.getName());
 
-        String suffix = (original instanceof Mek) ? ".mtf" : ".blk";
+        String suffix = switch (original) {
+            case Mek ignored -> ".mtf";
+            case BattlefieldSupportAsset ignored -> ".bfs";
+            default -> ".blk";
+        };
 
         // Step 2: Save to file A
         File fileA = File.createTempFile("roundtrip_A_", suffix);
@@ -116,13 +123,15 @@ public class BulkRoundTripTest {
         }
     }
 
-    private static void persistUnit(File outFile, Entity entity) throws EntitySavingException {
+    private static void persistUnit(File outFile, Entity entity) throws EntitySavingException, IOException {
         if (entity instanceof Mek mek) {
             try (BufferedWriter out = new BufferedWriter(new FileWriter(outFile))) {
                 out.write(mek.getMtf());
             } catch (Exception e) {
                 fail("Failed to save MTF for " + entity.getDisplayName() + ": " + e.getMessage());
             }
+        } else if (entity instanceof BattlefieldSupportAsset asset) {
+            Files.writeString(outFile.toPath(), BattlefieldSupportAssetYaml.toYaml(asset.toAssetData()));
         } else {
             BLKFile.encode(outFile, entity);
         }

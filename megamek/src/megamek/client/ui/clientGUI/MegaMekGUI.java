@@ -68,7 +68,6 @@ import javax.swing.SwingUtilities;
 import javax.swing.ToolTipManager;
 import javax.swing.UIManager;
 import javax.swing.filechooser.FileFilter;
-import javax.xml.parsers.DocumentBuilder;
 
 import megamek.MMConstants;
 import megamek.MegaMek;
@@ -120,6 +119,7 @@ import megamek.common.KeyBindParser;
 import megamek.common.Player;
 import megamek.common.annotations.Nullable;
 import megamek.common.compute.Compute;
+import megamek.common.equipment.SensorChoiceHandler;
 import megamek.common.game.Game;
 import megamek.common.game.GameType;
 import megamek.common.game.IGame;
@@ -964,6 +964,7 @@ public class MegaMekGUI implements IPreferenceChangeListener {
         controller.boardEditor = editor;
         launch(editor.getFrame());
         editor.boardNew(GUIPreferences.getInstance().getBoardEdRndStart());
+        megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.toggleEditor(editor);
     }
 
     /**
@@ -974,6 +975,7 @@ public class MegaMekGUI implements IPreferenceChangeListener {
         controller.boardEditor = editor;
         launch(editor.getFrame());
         editor.loadBoard(new File(boardFile));
+        megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.toggleEditor(editor);
     }
 
     void showSkinEditor() {
@@ -999,6 +1001,7 @@ public class MegaMekGUI implements IPreferenceChangeListener {
         controller.boardEditor = editor;
         launch(editor.getFrame());
         editor.loadBoard();
+        megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.toggleEditor(editor);
     }
 
     /**
@@ -1193,10 +1196,8 @@ public class MegaMekGUI implements IPreferenceChangeListener {
                 gzi = is;
             }
 
-            // Using factory get an instance of document builder
-            final DocumentBuilder documentBuilder = MMXMLUtility.newSafeDocumentBuilder();
-            // Parse using builder to get DOM representation of the XML file
-            final Document xmlDocument = documentBuilder.parse(gzi);
+            // Parse to a DOM representation, raising the JAXP entity size limit if a large save exceeds it
+            final Document xmlDocument = MMXMLUtility.parseDocument(gzi);
 
             final Element gameElement = xmlDocument.getDocumentElement();
             gameElement.normalize();
@@ -1657,6 +1658,12 @@ public class MegaMekGUI implements IPreferenceChangeListener {
             WeaponOrderHandler.saveWeaponOrderFile();
         } catch (IOException e) {
             LOGGER.error(e, "Error saving custom weapon orders!");
+        }
+
+        try {
+            SensorChoiceHandler.saveSensorChoiceFile();
+        } catch (IOException exception) {
+            LOGGER.error(exception, "Error saving custom sensor choices!");
         }
         System.exit(0);
     }

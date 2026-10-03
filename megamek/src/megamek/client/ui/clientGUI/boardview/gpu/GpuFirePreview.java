@@ -35,7 +35,6 @@ import megamek.common.event.player.GamePlayerChangeEvent;
 import megamek.common.game.Game;
 import megamek.common.game.GameTurn;
 import megamek.common.moves.MovePath;
-import megamek.common.options.OptionsConstants;
 import megamek.common.rolls.TargetRoll;
 import megamek.common.units.Entity;
 import megamek.common.units.FirePreview;
@@ -443,19 +442,24 @@ final class GpuFirePreview implements AutoCloseable {
             return new Side(direction.notPreviewed().description(), 0, false, 0, 0, TargetRoll.IMPOSSIBLE, 0,
                   List.of());
         }
-        boolean aptitude = attacker.hasAbility(OptionsConstants.PILOT_APTITUDE_GUNNERY);
         boolean turret = (attacker instanceof Tank tank) && !tank.hasNoTurret();
         List<Side> salvos = new ArrayList<>();
         for (FirePreview.Salvo salvo : direction.salvos()) {
             List<Line> lines = new ArrayList<>();
             int available = 0;
             int best = TargetRoll.IMPOSSIBLE;
+            boolean bestAptitude = false;
             for (FirePreview.Shot shot : salvo.shots()) {
                 Mounted<?> weapon = attacker.getEquipment(shot.weaponId());
+                // Natural aptitude is the pilot's per weapon.
+                boolean aptitude = attacker.isUseNaturalAptitudeGunnery(attacker.getGame(), weapon);
                 int value = (shot.toHit() == null) ? TargetRoll.IMPOSSIBLE : shot.toHit().getValue();
                 if (shot.available()) {
                     available++;
-                    best = Math.min(best, value);
+                    if (value < best) {
+                        best = value;
+                        bestAptitude = aptitude;
+                    }
                 }
                 lines.add(new Line(weapon.getDesc(), attacker.getLocationAbbr(weapon.getLocation()), value,
                       shot.available() ? Compute.oddsAbove(value, aptitude) : 0,
@@ -463,7 +467,7 @@ final class GpuFirePreview implements AutoCloseable {
             }
             int rotation = (salvo.secondaryFacing() - facing + 6) % 6;
             salvos.add(new Side("", (rotation > 3) ? (rotation - 6) : rotation, turret, available,
-                  salvo.shots().size(), best, (available > 0) ? Compute.oddsAbove(best, aptitude) : 0, lines));
+                  salvo.shots().size(), best, (available > 0) ? Compute.oddsAbove(best, bestAptitude) : 0, lines));
         }
         return choose(salvos);
     }

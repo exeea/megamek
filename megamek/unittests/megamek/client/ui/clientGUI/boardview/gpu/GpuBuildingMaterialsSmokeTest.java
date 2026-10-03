@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.util.List;
@@ -17,6 +18,9 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
+import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.BoundingBox;
+import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.Hex;
 import megamek.common.board.Board;
@@ -41,7 +45,7 @@ class GpuBuildingMaterialsSmokeTest {
                         if ((x & 1) == 1 && y <= 4 && (y & 1) == 0) {
                             hex.addTerrain(new Terrain(Terrains.BUILDING, (x + 1) / 2, true, 0));
                             hex.addTerrain(new Terrain(Terrains.BLDG_CF, 100));
-                            hex.addTerrain(new Terrain(Terrains.BLDG_ELEV, 3));
+                            hex.addTerrain(new Terrain(Terrains.BLDG_ELEV, (x + 1) / 2));
                             hex.addTerrain(new Terrain(Terrains.BLDG_CLASS, y / 2));
                         } else if ((x == 1 || x == 3) && y == 6) {
                             hex.addTerrain(new Terrain(Terrains.FUEL_TANK, x == 1 ? 2 : 4, true, 0));
@@ -50,6 +54,15 @@ class GpuBuildingMaterialsSmokeTest {
                             hex.addTerrain(new Terrain(Terrains.FUEL_TANK_MAGN, 100));
                         } else if (x == 5 && y == 6) {
                             hex.addTerrain(new Terrain(Terrains.INDUSTRIAL, 2));
+                        } else if (x == 4 && y == 7) {
+                            // A road bank at deck height attaches to the span below; a span without an attached
+                            // road is a natural bridge with no GLB deck.
+                            hex.setLevel(2);
+                            hex.addTerrain(new Terrain(Terrains.ROAD, 1, true, 1 << 3));
+                        } else if (x == 4 && y == 8) {
+                            hex.addTerrain(new Terrain(Terrains.BRIDGE, 2, true, 9));
+                            hex.addTerrain(new Terrain(Terrains.BRIDGE_CF, 100));
+                            hex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, 2));
                         }
                         hexes[y * 9 + x] = hex;
                     }
@@ -60,7 +73,8 @@ class GpuBuildingMaterialsSmokeTest {
             BoardScene captured = fixture.source.takeFrame().scene();
             BoardScene scene = new BoardScene(0, 9, 9, captured.tiles(), List.of(), List.of(), -1, "", List.of(),
                   new BoardScene.Light(-24, -30));
-            assertEquals(15, scene.tiles().stream().mapToInt(tile -> tile.features().size()).sum());
+            assertEquals(15, scene.tiles().stream().flatMap(tile -> tile.features().stream())
+                  .filter(feature -> feature.asset().startsWith("buildings/")).count());
             new Lwjgl3Application(new ApplicationAdapter() {
                 GpuTerrain terrain;
                 BoardCamera camera;
@@ -72,6 +86,16 @@ class GpuBuildingMaterialsSmokeTest {
                         checkMaterials(scene);
                         terrain = new GpuTerrain();
                         terrain.update(scene);
+                        checkHeights(scene, terrain);
+                        BoardGeometry.Tuning previous = BoardGeometry.tuning();
+                        try {
+                            BoardGeometry.tune(new BoardGeometry.Tuning(1.5f, 1, 1, 12, previous.gridShade()));
+                            terrain.update(scene);
+                            checkHeights(scene, terrain);
+                        } finally {
+                            BoardGeometry.tune(previous);
+                            terrain.update(scene);
+                        }
                         camera = new BoardCamera();
                         camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                         camera.setIsometric(true);
@@ -133,12 +157,19 @@ class GpuBuildingMaterialsSmokeTest {
         try {
             for (var tile : scene.tiles()) {
                 for (var feature : tile.features()) {
+                    if (!feature.asset().startsWith("buildings/")) { continue; }
+                    assertTrue(tile.detailedGround(), "Structures must not replace the native ground: " + tile.coords());
+                    assertEquals(BoardScene.Surface.GRASS, tile.surface());
                     String family = tile.coords().getY() == 6
                           ? tile.coords().getX() == 5 ? "industrial" : "tank"
                           : tile.coords().getY() == 4 ? "fortress" : tile.coords().getY() == 2 ? "hangar"
                           : List.of("light", "medium", "heavy", "hard").get((tile.coords().getX() - 1) / 2);
                     String role = family.equals("fortress") || family.equals("hangar") ? "shell" : "wall";
-                    var wall = assets.model(feature.asset()).getMaterial(role);
+                    var model = assets.model(feature.asset());
+                    BoundingBox bounds = model.calculateBoundingBox(new BoundingBox());
+                    assertEquals(0, bounds.min.z, .0001f, feature.asset());
+                    assertEquals(18, bounds.max.z, .0001f, "Buildings must be one level tall in a GLB viewer");
+                    var wall = model.getMaterial(role);
                     assertNotNull(wall, feature.asset());
                     Texture texture = wall.get(TextureAttribute.class, TextureAttribute.Diffuse).textureDescription.texture;
                     assertSame(assets.material("buildings/" + family), texture, feature.asset());
@@ -147,6 +178,17 @@ class GpuBuildingMaterialsSmokeTest {
                     assertEquals(Texture.TextureWrap.Repeat, texture.getUWrap());
                 }
             }
+            BoundingBox bridge = assets.model("bridge").calculateBoundingBox(new BoundingBox());
+            assertEquals(18, bridge.getWidth(), .0001f);
+            assertEquals(72, bridge.getHeight(), .0001f);
+            assertEquals(-1.5f, bridge.min.z, .0001f, "Authored underside thickness");
+            assertEquals(2.5f, bridge.max.z, .0001f, "Authored rail height");
+            var deck = assets.model("bridge").getMaterial("bridge-deck");
+            assertSame(assets.road("asphalt").color(),
+                  deck.get(TextureAttribute.class, TextureAttribute.Diffuse).textureDescription.texture);
+            var sides = assets.model("bridge").getMaterial("bridge-structure");
+            assertSame(assets.sculpt("concrete").color(),
+                  sides.get(TextureAttribute.class, TextureAttribute.Diffuse).textureDescription.texture);
             for (var surface : BoardScene.Surface.values()) {
                 assertEquals(128, assets.material(surface.wall).getWidth());
                 assertEquals(128, assets.material(surface.wall).getHeight());
@@ -154,5 +196,33 @@ class GpuBuildingMaterialsSmokeTest {
         } finally {
             assets.dispose();
         }
+    }
+
+    private static void checkHeights(BoardScene scene, GpuTerrain terrain) {
+        for (var tile : scene.tiles()) {
+            for (var feature : tile.features()) {
+                if (!feature.asset().startsWith("buildings/")) { continue; }
+                BoundingBox placed = terrain.roofBounds(tile.coords());
+                assertNotNull(placed, feature.asset());
+                assertEquals(feature.height() * BoardGeometry.level(), placed.getDepth(), .001f,
+                      "Authored height must not multiply the game's building/tank/industrial level count");
+            }
+        }
+        Coords coords = new Coords(4, 8);
+        assertEquals(1, scene.tile(coords).features().stream().filter(f -> f.asset().equals("bridge")).count());
+        BoundingBox placed = terrain.roofBounds(coords);
+        assertNotNull(placed, "Bridge terrain must instantiate one complete GLB deck");
+        float deck = 2 * BoardGeometry.level() + GpuRoads.SURFACE_LIFT * BoardGeometry.hexScale();
+        // The authored deck kit sets the exact underside and rail heights, near the slab's 1.5 below and 2.5 above.
+        assertEquals(deck - 1.5f * BoardGeometry.hexScale(), placed.min.z, .15f * BoardGeometry.hexScale());
+        // A banked span carries the authored terminal block above its rails.
+        assertEquals(deck + Math.max(2.5f, BoardBridgeFooting.terminalHeight()) * BoardGeometry.hexScale(), placed.max.z,
+              .15f * BoardGeometry.hexScale());
+        Ray ray = new Ray(BoardGeometry.center(coords, 0).add(0, 10 * BoardGeometry.hexScale(), deck + 50),
+              new Vector3(0, 0, -1));
+        BoardGeometry.Hit hit = terrain.hit(scene, ray);
+        assertNotNull(hit);
+        assertEquals(coords, hit.coords());
+        assertEquals(50, Math.sqrt(hit.distance()), .001, "Picking must hit the elevated bridge deck");
     }
 }

@@ -9,6 +9,7 @@ import java.awt.event.InputEvent;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Stream;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
@@ -23,6 +24,7 @@ import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
+import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import megamek.client.ui.util.KeyCommandBind;
@@ -30,6 +32,44 @@ import megamek.client.ui.util.KeyCommandBind;
 /** Shared native UI input and artwork assertions; all calls run on the GL thread. */
 final class GpuBoardTestUi {
     private GpuBoardTestUi() { }
+
+    /**
+     * Whether the battle view still shows its loading screen. The board appears only once its terrain is ready, so
+     * scripted frames count from the first presented frame; a test's own tick counter must skip the loading frames.
+     */
+    static boolean loading(GpuBattleView view) {
+        try {
+            var field = GpuBattleView.class.getDeclaredField("loadingStage");
+            field.setAccessible(true);
+            return field.get(view) != null;
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException(error);
+        }
+    }
+
+    /**
+     * Render until the board is presented and its terrain has settled: the loading screen has gone and no build or
+     * detail job is pending, so a manually driven view inspects the outcome of its edits, not the frame before it.
+     */
+    static void present(GpuBattleView view) {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(120);
+        // At least one frame: the loading screen appears only once a frame finds the terrain unbuilt.
+        do {
+            assertTrue(System.nanoTime() < deadline, "Terrain loading must finish");
+            view.render();
+        } while (loading(view) || busy(view));
+    }
+
+    private static boolean busy(GpuBattleView view) {
+        try {
+            var field = GpuBattleView.class.getDeclaredField("terrain");
+            field.setAccessible(true);
+            GpuTerrain terrain = (GpuTerrain) field.get(view);
+            return terrain != null && terrain.busy();
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException(error);
+        }
+    }
 
     static Stage stage() {
         return (Stage) ((InputMultiplexer) Gdx.input.getInputProcessor()).getProcessors().first();
@@ -183,12 +223,15 @@ final class GpuBoardTestUi {
         return tuning(tuning(view), name);
     }
 
-    /** The control named {@code name} on either page of a tuning model, or its Defaults button. */
+    /** The control named {@code name} on any page of a tuning model, or one of its footer buttons. */
     @SuppressWarnings("unchecked")
     static <T extends Actor> T tuning(GpuBoardTuning tuning, String name) {
-        Actor control = name.equals(tuning.defaults().getName()) ? tuning.defaults()
-              : tuning.boardRows().findActor(name);
-        control = control != null ? control : tuning.atmosphereRows().findActor(name);
+        Actor control = Stream.of(tuning.defaults(), tuning.reloadAssets(), tuning.editShaders())
+              .filter(button -> name.equals(button.getName())).findFirst().orElse(null);
+        for (Table page : List.of(tuning.cameraRows(), tuning.boardRows(), tuning.atmosphereRows(),
+              tuning.terrainRows())) {
+            control = control != null ? control : page.findActor(name);
+        }
         assertTrue(control != null, "Missing tuning control " + name);
         return (T) control;
     }

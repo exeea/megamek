@@ -32,11 +32,7 @@
  */
 package megamek.client.ui.dialogs.MMDialogs;
 
-import java.awt.BorderLayout;
-import java.awt.Container;
-import java.awt.Dimension;
-import java.awt.FlowLayout;
-import java.awt.Image;
+import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
 import java.awt.image.BufferedImage;
@@ -138,7 +134,7 @@ public abstract class MMStoryDialog extends JDialog {
 
         Image img = storyImage();
 
-        if (null != img) {
+        if (img != null) {
 
             ImageIcon icon = new ImageIcon(img);
             imgWidth = icon.getIconWidth();

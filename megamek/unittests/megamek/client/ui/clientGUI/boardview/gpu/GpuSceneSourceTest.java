@@ -127,8 +127,8 @@ class GpuSceneSourceTest {
             SwingUtilities.invokeAndWait(() -> {
                 attack(fixture);
                 fixture.game.getBoard().setHex(changed, new Hex(1));
-                // Damage to the board arrives before the next resolved attack packet.
-                attack(fixture);
+                // Damage arrives before a separate action, not another shot in the same simultaneous volley.
+                attack(fixture, ResolvedAttack.Kind.PUNCH);
                 fixture.game.getBoard().setHex(changed, new Hex(2));
                 fixture.source.refresh();
             });
@@ -158,9 +158,13 @@ class GpuSceneSourceTest {
     }
 
     private static void attack(GpuBoardFixture fixture) {
+        attack(fixture, ResolvedAttack.Kind.SHOT);
+    }
+
+    private static void attack(GpuBoardFixture fixture, ResolvedAttack.Kind kind) {
         var entity = fixture.entity;
         var location = new UnitLocation(entity.getId(), entity.getPosition(), entity.getFacing(), entity.getElevation(), 0);
-        var result = new ResolvedAttack(UUID.randomUUID(), ResolvedAttack.Kind.SHOT, location, location,
+        var result = new ResolvedAttack(UUID.randomUUID(), kind, location, location,
               Targetable.TYPE_ENTITY, 0, "ISMediumLaser", 0, true);
         fixture.game.processGameEvent(new GameAttackResolvedEvent(fixture.game, result, entity, entity));
     }

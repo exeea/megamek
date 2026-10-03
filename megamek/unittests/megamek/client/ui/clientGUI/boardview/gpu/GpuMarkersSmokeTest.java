@@ -99,6 +99,7 @@ class GpuMarkersSmokeTest {
                     try {
                         super.render();
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                        if (frames() == 0) { return; }
                         checkOccupiedHex(this, scene);
                         tick++;
                         if (tick == 1) {
@@ -263,6 +264,7 @@ class GpuMarkersSmokeTest {
                     try {
                         super.render();
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                        if (frames() == 0) { return; }
                         tick++;
                         if (tick == 4) {
                             capture("markers-board-isometric.png");

@@ -4,9 +4,21 @@ uniform sampler2D u_rainNoise;
 uniform float u_wetness;
 uniform float u_rainScale;
 uniform float u_rainTime;
+#ifdef waterSurfaceFlag
+// A water page spans many chunks. Use each pixel's projected scale, never the page centre's distance.
+#define u_rippleDetail clamp((u_wavePixels * gl_FragCoord.w * abs(u_viewDirection.z) - 28.0) / 60.0, 0.0, 1.0)
+#define u_rainDetail clamp((u_wavePixels * gl_FragCoord.w - 12.0) / 28.0, 0.0, 1.0)
+#else
 uniform float u_rippleDetail;
 uniform float u_rainDetail;
+#endif
 uniform vec3 u_viewDirection;
+uniform vec3 u_viewPosition;
+uniform float u_perspective;
+
+vec3 viewDirection() {
+    return u_perspective > 0.5 ? normalize(v_cloudPosition - u_viewPosition) : u_viewDirection;
+}
 uniform vec3 u_rainSky;
 uniform vec3 u_rainHorizon;
 const int RAIN_IMPACT_LAYERS = 6;
@@ -45,19 +57,19 @@ vec2 rainRipples(vec2 position) { return rainRippleField(position).xy; }
 
 float rainPuddle(vec2 position, float wet, float response) {
     // Broad basins keep a stable shape as rain enlarges their edges and joins nearby patches.
-    float field = texture2D(u_rainNoise, position / 72.0).r * 0.75
-          + texture2D(u_rainNoise, position / 24.0 + 0.37).r * 0.25;
+    float field = texture(u_rainNoise, position / 72.0).r * 0.75
+          + texture(u_rainNoise, position / 24.0 + 0.37).r * 0.25;
     float threshold = mix(0.80, 0.34, wet * mix(0.35, 1.0, response));
     return smoothstep(threshold, threshold + 0.08, field) * wet;
 }
 
 vec3 rainReflection(vec3 ground, vec3 normal, float coverage) {
-    vec3 reflected = reflect(u_viewDirection, normal);
+    vec3 reflected = reflect(viewDirection(), normal);
     float skyHeight = clamp(reflected.z, 0.0, 1.0);
     // Broad, blurred sky variation. Uses the current atmosphere palette, not a second scene render.
-    float cloud = texture2D(u_rainNoise, reflected.xy * 0.11 + vec2(0.31, 0.57)).r;
+    float cloud = texture(u_rainNoise, reflected.xy * 0.11 + vec2(0.31, 0.57)).r;
     vec3 sky = mix(u_rainHorizon, u_rainSky, sqrt(skyHeight)) * mix(0.8, 1.12, cloud);
-    float grazing = 1.0 - clamp(dot(-u_viewDirection, normal), 0.0, 1.0);
+    float grazing = 1.0 - clamp(dot(-viewDirection(), normal), 0.0, 1.0);
     // A small artistic floor keeps the soft reflection readable in the overhead board camera.
     float fresnel = 0.12 + 0.55 * grazing * grazing * grazing * grazing * grazing;
     return mix(ground, sky, coverage * fresnel);

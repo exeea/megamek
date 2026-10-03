@@ -27,7 +27,7 @@ final class GpuClouds implements Disposable {
     static final float MAX_MOTION_STRENGTH = 1.0f;
 
 
-    private final ShaderProgram shadowShader;
+    private ShaderProgram shadowShader;
     private final Texture noise;
     private final FrameBuffer shadow;
     private final Mesh quad;
@@ -43,18 +43,18 @@ final class GpuClouds implements Disposable {
 
     GpuClouds(Mesh quad) {
         this.quad = quad;
-        shadowShader = GpuAtmosphere.shader("cloud-transmission.frag");
+        shadowShader = GpuShaderManager.program(() -> GpuAtmosphere.shader("cloud-transmission.frag"), next -> shadowShader = next);
         try {
             noise = GpuAtmosphere.noise();
         } catch (RuntimeException failure) {
-            shadowShader.dispose();
+            GpuShaderManager.dispose(shadowShader);
             throw failure;
         }
         try {
             shadow = GpuAtmosphere.buffer(SHADOW_SIZE, SHADOW_SIZE, false);
         } catch (RuntimeException failure) {
             noise.dispose();
-            shadowShader.dispose();
+            GpuShaderManager.dispose(shadowShader);
             throw failure;
         }
         shadow.getColorBufferTexture().setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
@@ -85,24 +85,24 @@ final class GpuClouds implements Disposable {
         motion.advance(settings.effects(), delta);
         sun.set(lighting.direction()).scl(-1);
         // The immutable terrain snapshot owns these elevations; wind/camera movement cannot change them.
-        if (tiles != board.tiles() || level != BoardGeometry.LEVEL) {
+        if (tiles != board.tiles() || level != BoardGeometry.level()) {
             tiles = board.tiles();
-            level = BoardGeometry.LEVEL;
+            level = BoardGeometry.level();
             floor = BoardGeometry.weatherBase(board);
             highest = tiles.stream().mapToInt(BoardScene.Tile::elevation).max().orElse(0) * level;
         }
-        base = highest + profile.altitude() * BoardGeometry.WIDTH;
-        float thickness = profile.thickness() * BoardGeometry.WIDTH;
+        base = highest + profile.altitude() * BoardGeometry.width();
+        float thickness = profile.thickness() * BoardGeometry.width();
         float sx = sun.x / sun.z;
         float sy = sun.y / sun.z;
         // Include the whole air column as well as the board: shafts and elevated surfaces sample the same atlas.
-        float margin = BoardGeometry.WIDTH * 2;
+        float margin = BoardGeometry.width() * 2;
         float minX = -margin + Math.min(sx * (base - floor), -sx * thickness);
-        float minY = -(board.height() + 1) * BoardGeometry.HEIGHT - margin
+        float minY = -(board.height() + 1) * BoardGeometry.height() - margin
               + Math.min(sy * (base - floor), -sy * thickness);
-        float spanX = (board.width() + 1) * BoardGeometry.WIDTH * 0.75f + margin * 2
+        float spanX = (board.width() + 1) * BoardGeometry.width() * 0.75f + margin * 2
               + Math.abs(sx) * (base + thickness - floor);
-        float spanY = (board.height() + 2) * BoardGeometry.HEIGHT + margin * 2
+        float spanY = (board.height() + 2) * BoardGeometry.height() + margin * 2
               + Math.abs(sy) * (base + thickness - floor);
         projection.idt();
         projection.val[Matrix4.M00] = 1 / spanX;
@@ -119,7 +119,7 @@ final class GpuClouds implements Disposable {
         noise.bind(0);
         shadowShader.setUniformi("u_cloudNoise", 0);
         shadowShader.setUniformf("u_cloudWeather", settings.clouds(), profile.stratus(),
-              profile.density() * DENSITY / BoardGeometry.WIDTH, 1 / (BoardGeometry.WIDTH * 1.6f));
+              profile.density() * DENSITY / BoardGeometry.width(), 1 / (BoardGeometry.width() * 1.6f));
         shadowShader.setUniformf("u_shadowStrength", strength);
         shadowShader.setUniformf("u_cloudLayer", base, thickness);
         shadowShader.setUniformf("u_cloudOffset", motion.offset);
@@ -149,6 +149,6 @@ final class GpuClouds implements Disposable {
     public void dispose() {
         shadow.dispose();
         noise.dispose();
-        shadowShader.dispose();
+        GpuShaderManager.dispose(shadowShader);
     }
 }

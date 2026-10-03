@@ -19,10 +19,23 @@ import megamek.common.weapons.bayWeapons.BayWeapon;
 public final class UnitModelEquipment {
     private UnitModelEquipment() { }
 
+    /**
+     * One mounted item as the unit model sees it.
+     *
+     * @param guided whether a missile launcher is linked to an Artemis fire-control system, so its art can carry the
+     *               targeting device
+     */
     public record Mount(int index, String internalName, String location, String secondLocation, boolean rear,
-          boolean omniPod, double size, EquipmentModelPolicy policy, String family, List<Integer> members) {
+          boolean omniPod, double size, EquipmentModelPolicy policy, String family, List<Integer> members,
+          boolean guided) {
         public Mount {
             members = List.copyOf(members);
+        }
+
+        /** A mount with no fire-control link. */
+        public Mount(int index, String internalName, String location, String secondLocation, boolean rear,
+              boolean omniPod, double size, EquipmentModelPolicy policy, String family, List<Integer> members) {
+            this(index, internalName, location, secondLocation, rear, omniPod, size, policy, family, members, false);
         }
     }
 
@@ -32,7 +45,14 @@ public final class UnitModelEquipment {
               ? weapon.getBayWeapons().stream().map(Mounted::getEquipmentNum).toList() : List.of();
         return new Mount(mounted.getEquipmentNum(), mounted.getType().getInternalName(),
               location(entity, mounted.getLocation()), location(entity, mounted.getSecondLocation()),
-              mounted.isRearMounted(), mounted.isOmniPodMounted(), mounted.getSize(), policy, family(mounted.getType()), members);
+              mounted.isRearMounted(), mounted.isOmniPodMounted(), mounted.getSize(), policy, family(mounted.getType()), members,
+              guided(mounted));
+    }
+
+    /** Whether this launcher is linked to an Artemis IV, Artemis V or prototype Artemis fire-control system. */
+    private static boolean guided(Mounted<?> mounted) {
+        return (mounted.getLinkedBy() != null) && (mounted.getLinkedBy().getType() instanceof MiscType misc)
+              && misc.hasAnyFlag(MiscTypeFlag.F_ARTEMIS, MiscTypeFlag.F_ARTEMIS_V, MiscTypeFlag.F_ARTEMIS_PROTO);
     }
 
     private static String location(Entity entity, int location) {

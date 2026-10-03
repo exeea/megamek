@@ -181,6 +181,8 @@ class GpuDamageTuningSmokeTest {
                     var view = new GpuBattleView(fixture.source);
                     try {
                         view.create();
+                        // The damage display exists only once the board is presented.
+                        GpuBoardTestUi.present(view);
                         view.render();
                         verify(view, fixture);
                     } catch (Throwable error) { failure.set(error); }

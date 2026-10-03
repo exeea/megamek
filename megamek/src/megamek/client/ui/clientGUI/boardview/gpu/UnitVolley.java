@@ -71,7 +71,21 @@ final class UnitVolley {
         }
         // Point defense accompanies the incoming target pass, including when its packet arrived first.
         for (var group : groups) {
-            if (!group.first().defensive() || clock > group.start) { continue; }
+            for (var counter : group.shots) {
+                if (!counter.defensive() || counter.interception() == null) { continue; }
+                for (var incoming : groups) {
+                    for (var salvo : incoming.shots) {
+                        if (salvo.defensive() || salvo.interception() == null
+                              || !salvo.interception().id().equals(counter.interception().id())) { continue; }
+                        counter.incoming = salvo;
+                        counter.delay = salvo.delay;
+                        counter.seconds = clock - counter.delay;
+                    }
+                }
+            }
+        }
+        for (var group : groups) {
+            if (!group.first().defensive() || group.first().interception() != null || clock > group.start) { continue; }
             for (var incoming : groups) {
                 if (incoming.first().defensive() || incoming.first().event.entityId() != group.first().event.result().target().entityId()
                       || incoming.first().event.result().target().entityId() != group.first().event.entityId()) { continue; }

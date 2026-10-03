@@ -91,10 +91,10 @@ final class UnitFootprint {
                 maxY = Math.max(maxY, point.y);
             }
             Polygon moved = new Polygon(vertices.clone());
-            int left = Math.max(0, (int) (minX / (BoardGeometry.WIDTH * .75f)) - 1);
-            int right = Math.min(scene.width() - 1, (int) (maxX / (BoardGeometry.WIDTH * .75f)) + 1);
-            int top = Math.max(0, (int) (-maxY / BoardGeometry.HEIGHT) - 1);
-            int bottom = Math.min(scene.height() - 1, (int) (-minY / BoardGeometry.HEIGHT) + 1);
+            int left = Math.max(0, (int) (minX / (BoardGeometry.width() * .75f)) - 1);
+            int right = Math.min(scene.width() - 1, (int) (maxX / (BoardGeometry.width() * .75f)) + 1);
+            int top = Math.max(0, (int) (-maxY / BoardGeometry.height()) - 1);
+            int bottom = Math.min(scene.height() - 1, (int) (-minY / BoardGeometry.height()) + 1);
             for (int x = left; x <= right; x++) {
                 for (int y = top; y <= bottom; y++) {
                     var tile = scene.tile(new Coords(x, y));
@@ -110,7 +110,7 @@ final class UnitFootprint {
             }
         }
         if (support != -Float.MAX_VALUE) {
-            position.z = Math.max(position.z, support * BoardGeometry.LEVEL);
+            position.z = Math.max(position.z, support * BoardGeometry.level());
         }
     }
 
@@ -131,7 +131,7 @@ final class UnitFootprint {
             }
         }
         if (occupied.isEmpty()) {
-            return new Layout(BoardGeometry.WIDTH, BoardGeometry.HEIGHT, 0, 0);
+            return new Layout(BoardGeometry.width(), BoardGeometry.height(), 0, 0);
         }
         point.set((minX + maxX) / 2, (minY + maxY) / 2, 0).rotate(Vector3.Z, -facing);
         return new Layout(maxX - minX, maxY - minY, point.x, point.y);

@@ -109,6 +109,7 @@ public class NarcExplosiveHandler extends MissileWeaponHandler {
                 r.add("pod");
                 r.add(diceRoll);
                 vPhaseReport.add(r);
+                recordMissileInterceptions(1);
                 return 0;
             }
             r = new Report(3241);

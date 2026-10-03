@@ -84,7 +84,6 @@ final class GpuMarkers implements Disposable {
     static final boolean RUBBLE_CLEAR_OUTLINE = true;
     static final boolean DUG_IN_OUTLINE = true;
     static final int SENSOR_RGB = BoardMarker.Kind.SENSOR_CONTACT.rgb();
-    static final int COLLAPSE_RGB = BoardMarker.Kind.COLLAPSE_WARNING.rgb();
     private static final int ART_SIZE = 96;
     private static final Font LABEL_FONT = new Font(Font.SANS_SERIF, Font.BOLD, 16);
 
@@ -98,7 +97,9 @@ final class GpuMarkers implements Disposable {
     private Map<Coords, List<BoardMarker>> groups = Map.of();
     private float clock;
 
-    GpuMarkers() {
+    /** Full games prepare these during loading; map-only views skip the shared tactical artwork entirely. */
+    void prepareModels() {
+        if (!models.isEmpty()) { return; }
         Map<BoardMarker.Kind, BoardScene.Pixels> artwork = new EnumMap<>(BoardMarker.Kind.class);
         for (var kind : BoardMarker.Kind.values()) {
             artwork.put(kind, artwork(kind));
@@ -114,6 +115,7 @@ final class GpuMarkers implements Disposable {
     }
 
     GpuUnitModel model(BoardMarker.Kind kind) {
+        prepareModels();
         return models.get(kind);
     }
 
@@ -166,7 +168,7 @@ final class GpuMarkers implements Disposable {
                 });
                 Vector3 support = new Vector3(base).add(groupOffset(camera, index, count, occupied.isValid()));
                 transform(instance.transform, camera, support, clock, size,
-                      BoardGeometry.LEVEL * CLEARANCE_LEVELS);
+                      BoardGeometry.level() * CLEARANCE_LEVELS);
                 labelAnchors.put(marker, anchor(instance, camera, size));
             }
         }
@@ -174,7 +176,7 @@ final class GpuMarkers implements Disposable {
 
     static float markerSize(Camera camera, int count, boolean occupied) {
         if (flat(camera) && (occupied || count > 1)) {
-            float size = BoardGeometry.HEIGHT * (occupied ? TOP_UNIT_MARKER_SIZE_IN_HEXES : TOP_GROUP_SIZE_IN_HEXES);
+            float size = BoardGeometry.height() * (occupied ? TOP_UNIT_MARKER_SIZE_IN_HEXES : TOP_GROUP_SIZE_IN_HEXES);
             if (occupied) {
                 int perSide = (count + 1) / 2;
                 return perSide == 1 ? size : Math.min(size, 2 * topRadius(true)
@@ -185,11 +187,11 @@ final class GpuMarkers implements Disposable {
         }
         int columns = Math.min(count, GROUP_COLUMNS);
         return Math.min(size() * (count == 1 ? 1 : GROUP_SCALE),
-              BoardGeometry.HEIGHT / ((columns - 1) * GROUP_SPACING + 1 + THICKNESS_RATIO));
+              BoardGeometry.height() / ((columns - 1) * GROUP_SPACING + 1 + THICKNESS_RATIO));
     }
 
     private static float topRadius(boolean occupied) {
-        return BoardGeometry.HEIGHT * (occupied ? TOP_UNIT_MARKER_RADIUS_IN_HEXES : TOP_GROUP_RADIUS_IN_HEXES);
+        return BoardGeometry.height() * (occupied ? TOP_UNIT_MARKER_RADIUS_IN_HEXES : TOP_GROUP_RADIUS_IN_HEXES);
     }
 
     /** Overhead symbols flank units, or form a ring in empty hexes. Angled symbols form a grid above the unit. */
@@ -236,7 +238,7 @@ final class GpuMarkers implements Disposable {
 
     static Vector3 locationSupport(Coords coords, float elevation, BoundingBox occupied) {
         return BoardGeometry.center(coords, occupied.isValid()
-              ? Math.max(elevation, occupied.max.z / BoardGeometry.LEVEL) : elevation);
+              ? Math.max(elevation, occupied.max.z / BoardGeometry.level()) : elevation);
     }
 
     /** A contact occupies the unit's position, never a small location-marker slot or a neighbouring roof. */
@@ -244,8 +246,8 @@ final class GpuMarkers implements Disposable {
         int count = groups.getOrDefault(coords, List.of()).size();
         float hexes = flat(camera) && count > 0
               ? (count > 4 ? SENSOR_DENSE_SIZE_IN_HEXES : SENSOR_CROWDED_SIZE_IN_HEXES) : SENSOR_SIZE_IN_HEXES;
-        float size = BoardGeometry.HEIGHT * hexes;
-        transform(instance.transform, camera, position, clock, size, 0.5f * BoardGeometry.HEX_SCALE);
+        float size = BoardGeometry.height() * hexes;
+        transform(instance.transform, camera, position, clock, size, 0.5f * BoardGeometry.hexScale());
         return anchor(instance, camera, size);
     }
 
@@ -332,7 +334,7 @@ final class GpuMarkers implements Disposable {
     }
 
     static float size() {
-        return BoardGeometry.HEIGHT * SIZE_IN_HEXES;
+        return BoardGeometry.height() * SIZE_IN_HEXES;
     }
 
     static boolean flat(Camera camera) {
@@ -340,7 +342,7 @@ final class GpuMarkers implements Disposable {
     }
 
     static void transform(Matrix4 out, Camera camera, Vector3 support, float seconds) {
-        transform(out, camera, support, seconds, size(), BoardGeometry.LEVEL * CLEARANCE_LEVELS);
+        transform(out, camera, support, seconds, size(), BoardGeometry.level() * CLEARANCE_LEVELS);
     }
 
     /** Artwork lies in local XY, extruded from Z=0 to 1. Clear the entire support in either camera mode. */

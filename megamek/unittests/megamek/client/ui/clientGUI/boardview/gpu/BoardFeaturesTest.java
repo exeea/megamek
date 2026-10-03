@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 
 import megamek.common.Hex;
@@ -12,8 +14,76 @@ import megamek.common.board.Coords;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardFeaturesTest {
+    @ParameterizedTest
+    @ValueSource(strings = { "", "desert", "snow", "volcano", "dirt", "lunar" })
+    void modeledBridgesKeepTheUnderlyingTerrainMaterial(String theme) {
+        Hex hex = new Hex(-2);
+        hex.setTheme(theme);
+        var surface = BoardFeatures.surface(hex);
+        hex.addTerrain(new Terrain(Terrains.BRIDGE, 1, true, 9));
+        hex.addTerrain(new Terrain(Terrains.BRIDGE_CF, 100));
+        hex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, 2));
+        hex.addTerrain(new Terrain(Terrains.BRIDGE_REPAIRED, 1));
+        assertTrue(BoardFeatures.detailedGround(hex, Map.of()), "Bridge geometry must not force the legacy ground artwork");
+        assertEquals(surface, BoardFeatures.surface(hex));
+        assertFalse(BoardLiquid.capture(hex).present(), "A suspended bridge does not imply liquid beneath it");
+        hex.addTerrain(new Terrain(Terrains.WATER, 2));
+        assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
+        assertTrue(BoardLiquid.capture(hex).present(), "Authored water beneath a bridge must remain water");
+        hex.removeTerrain(Terrains.WATER);
+        hex.addTerrain(new Terrain(Terrains.RUBBLE, 1));
+        assertFalse(BoardFeatures.detailedGround(hex, Map.of()), "Unmodeled ground markings still keep their artwork");
+    }
+
+    @ParameterizedTest
+    @EnumSource(BoardScene.Surface.class)
+    void modeledStructuresKeepTheirGroundWithoutErasingOtherTerrainMarkings(BoardScene.Surface surface) {
+        Hex hex = new Hex(0);
+        hex.setTheme(surface.name().toLowerCase(Locale.ROOT));
+        if (surface == BoardScene.Surface.CONCRETE) { hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1)); }
+        assertEquals(surface, BoardFeatures.surface(hex));
+        assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
+        for (int terrain : new int[] { Terrains.BUILDING, Terrains.BLDG_CF, Terrains.BLDG_ELEV,
+              Terrains.BLDG_CLASS, Terrains.BLDG_ARMOR, Terrains.BLDG_BASEMENT_TYPE, Terrains.BLDG_FLUFF,
+              Terrains.FUEL_TANK, Terrains.FUEL_TANK_CF, Terrains.FUEL_TANK_ELEV, Terrains.FUEL_TANK_MAGN,
+              Terrains.INDUSTRIAL }) {
+            hex.addTerrain(new Terrain(terrain, 1));
+        }
+        var models = new HashMap<>(Map.of(Terrains.BUILDING, "building",
+              Terrains.FUEL_TANK, "tank", Terrains.INDUSTRIAL, "industrial"));
+        for (int type : new int[] { Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL }) {
+            String model = models.remove(type);
+            assertFalse(BoardFeatures.detailedGround(hex, models), "Every structure needs a replacement model: " + type);
+            models.put(type, model);
+        }
+        assertTrue(BoardFeatures.detailedGround(hex, models), "Models must retain the native " + surface + " ground");
+        assertEquals(surface, BoardFeatures.surface(hex));
+        for (int terrain : new int[] { Terrains.ROAD_FLUFF, Terrains.RUBBLE,
+              Terrains.FORTIFIED, Terrains.GROUND_FLUFF, Terrains.FLUFF }) {
+            hex.addTerrain(new Terrain(terrain, 1));
+            assertFalse(BoardFeatures.detailedGround(hex, models), "Keep separate terrain markings: " + terrain);
+            hex.removeTerrain(terrain);
+        }
+    }
+
+    @Test
+    void waterDecorationDoesNotChangeTheBedMaterialOrInventWater() {
+        Hex hex = new Hex(-2);
+        hex.setTheme("volcano");
+        hex.addTerrain(new Terrain(Terrains.WATER_FLUFF, 1));
+        assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
+        assertEquals(BoardScene.Surface.ROCK, BoardFeatures.surface(hex));
+        assertFalse(BoardLiquid.capture(hex).present());
+        hex.addTerrain(new Terrain(Terrains.WATER, 2));
+        assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
+        assertTrue(BoardLiquid.capture(hex).present());
+    }
+
     @Test
     void treeCountsFollowAuthoritativeCoverReductionUntilTheHexIsClear() {
         Coords coords = new Coords(2, 3);
@@ -43,6 +113,7 @@ class BoardFeaturesTest {
         Coords coords = new Coords(2, 3);
         hex.addTerrain(new Terrain(Terrains.ARMS, 2));
         hex.addTerrain(new Terrain(Terrains.LEGS, 1));
+        assertTrue(BoardFeatures.detailedGround(hex, Map.of()), "A dropped limb must not replace the grass ground");
         var before = BoardFeatures.capture(hex, coords, Map.of()).stream()
               .filter(feature -> feature.kind() == BoardScene.FeatureKind.LIMB).toList();
         assertEquals(3, before.size());
@@ -79,7 +150,7 @@ class BoardFeaturesTest {
     }
 
     @Test
-    void desertAndSandyWoodsUseOnlyPalmsAtEveryDensity() {
+    void desertAndSandyWoodsGrowDesertSpeciesAtEveryDensity() {
         Coords coords = new Coords(3, 2);
         for (int density = 1; density <= 3; density++) {
             Hex hex = new Hex(0);
@@ -88,8 +159,9 @@ class BoardFeaturesTest {
             hex.setTheme("Desert");
             var themed = BoardFeatures.capture(hex, coords, Map.of());
             assertFalse(themed.isEmpty());
-            assertTrue(themed.stream().allMatch(feature -> feature.asset().equals("palm")
-                  || feature.asset().equals("palm-bent")), "Desert woodland must retain palm silhouettes");
+            assertTrue(themed.stream().allMatch(feature -> feature.asset().startsWith("palm")
+                  || feature.asset().startsWith("cactus") || feature.asset().equals("tree-dead")),
+                  "Desert woodland grows cacti, palms and dead trees");
             hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1));
             assertEquals(themed, BoardFeatures.capture(hex, coords, Map.of()), "Ground paving must not change the biome's trees");
             hex.removeTerrain(Terrains.PAVEMENT);
@@ -103,14 +175,44 @@ class BoardFeaturesTest {
     }
 
     @Test
-    void woodlandMixesSilhouettesWhileRubbleAndRoughAddOnlySmallScatter() {
+    void woodsStandAtLeastTheirFoliageHeightAndTheirTreesFitTheGround() {
+        Coords coords = new Coords(4, 4);
+        for (int density = 1; density <= 3; density++) {
+            Hex hex = new Hex(0);
+            hex.addTerrain(new Terrain(Terrains.WOODS, density));
+            hex.addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, density == 3 ? 3 : 2));
+            for (var tree : BoardFeatures.capture(hex, coords, Map.of())) {
+                assertTrue(tree.height() >= (density == 3 ? 3 : 2), "Trees are as tall as the woods block sight");
+                assertTrue(tree.scale() >= 1.2f, "Woods are drawn oversized, so their cover reads at a glance");
+            }
+        }
+        Hex highland = new Hex(3);
+        highland.addTerrain(new Terrain(Terrains.WOODS, 2));
+        highland.addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, 2));
+        long conifers = BoardFeatures.capture(highland, coords, Map.of()).stream()
+              .filter(tree -> tree.asset().startsWith("pine")).count();
+        assertTrue(conifers > 9 / 2, "Highland woods are mostly conifers");
+        Hex snowfield = new Hex(0);
+        snowfield.addTerrain(new Terrain(Terrains.WOODS, 2));
+        snowfield.addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, 2));
+        snowfield.addTerrain(new Terrain(Terrains.SNOW, 1));
+        assertTrue(BoardFeatures.capture(snowfield, coords, Map.of()).stream()
+              .filter(tree -> tree.asset().startsWith("pine")).count() > 9 / 2, "Snowfields grow snow-laden conifers");
+        highland.setTheme("rock");
+        assertTrue(BoardFeatures.capture(highland, coords, Map.of()).stream()
+              .allMatch(tree -> tree.asset().startsWith("pine") || tree.asset().equals("tree-dead")),
+              "Rocky ground grows hardy conifers and dead trees");
+    }
+
+    @Test
+    void woodlandMixesSilhouettesWhileRubbleKeepsSmallScatter() {
         Hex hex = new Hex(0);
         Coords coords = new Coords(3, 2);
         hex.addTerrain(new Terrain(Terrains.WOODS, 2));
         hex.addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, 2));
         assertTrue(BoardFeatures.capture(hex, coords, Map.of()).stream().map(BoardScene.Feature::asset).distinct().count() >= 5);
         for (String theme : new String[] { "", "snow", "desert" }) {
-            for (int terrain : new int[] { Terrains.RUBBLE, Terrains.ROUGH }) {
+            for (int terrain : new int[] { Terrains.RUBBLE }) {
                 hex.removeAllTerrains();
                 hex.setTheme(theme);
                 hex.addTerrain(new Terrain(terrain, 4));
@@ -153,12 +255,21 @@ class BoardFeaturesTest {
         assertEquals(BoardScene.Surface.SAND, BoardFeatures.surface(hex));
         hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1));
         assertEquals(BoardScene.Surface.CONCRETE, BoardFeatures.surface(hex));
+        for (int scatter : new int[] { Terrains.ROUGH, Terrains.RUBBLE }) {
+            hex.removeAllTerrains();
+            hex.setTheme("");
+            hex.addTerrain(new Terrain(scatter, 1));
+            assertEquals(BoardScene.Surface.GRASS, BoardFeatures.surface(hex), "Scatter keeps the underlying geology");
+            hex.setTheme("rock");
+            assertEquals(BoardScene.Surface.ROCK, BoardFeatures.surface(hex));
+            hex.addTerrain(new Terrain(Terrains.SAND, 1));
+            assertEquals(BoardScene.Surface.SAND, BoardFeatures.surface(hex));
+        }
         hex.removeAllTerrains();
-        hex.addTerrain(new Terrain(Terrains.ROUGH, 1));
-        assertEquals(BoardScene.Surface.ROCK, BoardFeatures.surface(hex));
-        hex.removeAllTerrains();
+        hex.setTheme("");
         hex.addTerrain(new Terrain(Terrains.FIELDS, 1));
+        assertEquals(BoardScene.Biome.FIELD, BoardFeatures.biome(hex));
         assertTrue(BoardFeatures.capture(hex, new Coords(0, 0), Map.of()).stream()
-              .anyMatch(feature -> feature.asset().equals("field") && feature.height() == 1));
+              .noneMatch(feature -> feature.asset().equals("field")), "Instanced crops replace the legacy field prop");
     }
 }

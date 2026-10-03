@@ -18,15 +18,19 @@ import javax.imageio.stream.ImageInputStream;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
-import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.GL30;
+import com.badlogic.gdx.graphics.GLTexture;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.TextureArray;
+import com.badlogic.gdx.graphics.TextureArrayData;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.JsonReader;
+import com.badlogic.gdx.utils.JsonValue;
+import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Configuration;
 
 /** GL-thread ownership of shared models, repeating terrain materials, and animated liquid frames. */
@@ -35,13 +39,146 @@ final class GpuAssets implements Disposable {
     private final Map<String, Model> models = new HashMap<>();
     private final Map<String, List<Model>> modelLods = new HashMap<>();
     private final Map<Interior, Model> interiors = new HashMap<>();
+    private final Map<String, GpuBuilding> buildings = new HashMap<>();
     private final Map<String, Texture> materials = new HashMap<>();
-    private final Map<String, Color> materialTints = new HashMap<>();
+    private final Map<String, Cliff> cliffs = new HashMap<>();
+    private final Map<Boolean, TextureArray> magmas = new HashMap<>();
+    private final Map<String, Sculpt> sculpts = new HashMap<>();
+    private final Map<String, JsonValue> sculptEntries = new HashMap<>();
+    private TextureArray sculptArray;
+    private TextureArray roadArray;
+    private JsonValue sculptManifest;
+    private Texture flatColor;
+    private Texture flatNormal;
     private final Map<BoardLiquid.Textures, Animation<Texture>> liquids = new HashMap<>();
-    private BoardRim.Images incline;
-    private BoardRim.Images highIncline;
+    private BoardScene.Pixels incline;
+    private BoardScene.Pixels highIncline;
 
     private record Interior(String asset, int levels) { }
+
+    /** Three aligned, repeating maps. Surface channels are height, roughness, occlusion and relief range. */
+    record Cliff(Texture color, Texture normal, Texture surface) { }
+
+    /**
+     * Molten lava's or solid crust's aligned maps as the four layers of one array, so they take one texture unit:
+     * colour; normal; surface (height, roughness, occlusion, relief range); heat (R heat, GB signed flow, A heat
+     * bleeding onto crack walls). Null while the data set lacks any of them: magma then keeps its legacy artwork/GIF.
+     */
+    TextureArray magma(boolean molten) {
+        if (magmas.containsKey(molten)) { return magmas.get(molten); }
+        var files = new ArrayList<FileHandle>();
+        for (String map : List.of("", "-normal", "-surface", "-heat")) {
+            files.add(materialFile("magma/" + (molten ? "lava" : "crust") + map));
+        }
+        TextureArray maps = files.stream().allMatch(FileHandle::exists) ? repeatingArray(files, 4) : null;
+        magmas.put(molten, maps);
+        return maps;
+    }
+
+    /**
+     * A sculpted-terrain material from {@code textures/sculpt}: albedo with height in alpha, a tangent-space normal
+     * with occlusion in alpha, and the metres one repeat spans (from the set's manifest).
+     */
+    record Sculpt(Texture color, Texture normal, float tile) { }
+
+    /** Existing colour/height and normal/AO maps, interleaved in one sampler for complete boundary materials. */
+    TextureArray sculptArray(List<String> names) {
+        if (sculptArray == null) {
+            var files = new ArrayList<FileHandle>();
+            for (String name : names) {
+                files.add(materialFile("sculpt/" + name));
+                files.add(materialFile("sculpt/" + name + "-normal"));
+            }
+            sculptArray = repeatingArray(files, 2);
+        }
+        return sculptArray;
+    }
+
+    /**
+     * Colour, normal and surface maps of every road material, three layers each in {@link GpuRoads#MATERIALS} order,
+     * so that one draw holds all of a chunk's road coats. Null while a data set lacks any of them: its roads then keep
+     * their original materials.
+     */
+    TextureArray roadArray() {
+        if (roadArray == null) {
+            var files = new ArrayList<FileHandle>();
+            for (String name : GpuRoads.MATERIALS) {
+                for (String map : List.of("", "-normal", "-surface")) { files.add(materialFile("roads/" + name + map)); }
+            }
+            if (!files.stream().allMatch(FileHandle::exists)) { return null; }
+            roadArray = repeatingArray(files, 3);
+        }
+        return roadArray;
+    }
+
+    /** Sets of {@code maps} aligned repeating maps, filtered like the separate material textures. */
+    private static TextureArray repeatingArray(List<FileHandle> files, int maps) {
+        var array = new TextureArray(new SculptArrayData(files, maps));
+        array.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
+        array.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
+        // GLTexture.setAnisotropicFilter always sets GL_TEXTURE_2D, so it would leave an array isotropic (blurred
+        // at grazing angles) and change whichever 2D texture the unit holds; set the array's own parameter.
+        float anisotropy = Math.min(8, GLTexture.getMaxAnisotropicFilterLevel());
+        if (anisotropy > 1) {
+            array.bind();
+            Gdx.gl.glTexParameterf(GL30.GL_TEXTURE_2D_ARRAY, GL20.GL_TEXTURE_MAX_ANISOTROPY_EXT, anisotropy);
+        }
+        return array;
+    }
+
+    /** Uploaded once per renderer; missing maps get the same neutral fallback as ordinary sculpt materials. */
+    private static final class SculptArrayData implements TextureArrayData {
+        /** Neutral colour, flat normal and middling surface, by a layer's place in its material's set of maps. */
+        private static final int[] FALLBACKS = { 0xa0a0a0ff, 0x8080ffff, 0x808080ff };
+        private final List<FileHandle> files;
+        private final int maps;
+        private boolean prepared;
+        private int width = 2, height = 2;
+
+        SculptArrayData(List<FileHandle> files, int maps) {
+            this.files = List.copyOf(files);
+            this.maps = maps;
+            // TextureArray allocates storage before calling prepare(), so its dimensions must already be known.
+            for (var file : files) {
+                if (!file.exists()) { continue; }
+                var pixels = new Pixmap(file);
+                try { width = pixels.getWidth(); height = pixels.getHeight(); }
+                finally { pixels.dispose(); }
+                break;
+            }
+        }
+
+        @Override public boolean isPrepared() { return prepared; }
+        @Override public void prepare() { prepared = true; }
+        @Override public int getWidth() { return width; }
+        @Override public int getHeight() { return height; }
+        @Override public int getDepth() { return files.size(); }
+        @Override public boolean isManaged() { return false; }
+        @Override public int getInternalFormat() { return GL20.GL_RGBA; }
+        @Override public int getGLType() { return GL20.GL_UNSIGNED_BYTE; }
+
+        @Override
+        public void consumeTextureArrayData() {
+            for (int layer = 0; layer < files.size(); layer++) {
+                var pixels = new Pixmap(width, height, Pixmap.Format.RGBA8888);
+                try {
+                    pixels.setBlending(Pixmap.Blending.None);
+                    if (files.get(layer).exists()) {
+                        var source = new Pixmap(files.get(layer));
+                        try { pixels.drawPixmap(source, 0, 0, source.getWidth(), source.getHeight(), 0, 0, width, height); }
+                        finally { source.dispose(); }
+                    } else {
+                        pixels.setColor(FALLBACKS[layer % maps]);
+                        pixels.fill();
+                    }
+                    Gdx.gl30.glTexSubImage3D(GL30.GL_TEXTURE_2D_ARRAY, 0, 0, 0, layer, width, height, 1,
+                          GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, pixels.getPixels());
+                } finally { pixels.dispose(); }
+            }
+            Gdx.gl.glGenerateMipmap(GL30.GL_TEXTURE_2D_ARRAY);
+            prepared = false;
+        }
+    }
 
     record Animation<T>(List<T> frames, float[] ends, float duration) {
         T at(float time) {
@@ -66,6 +203,22 @@ final class GpuAssets implements Disposable {
 
     Model model(String name) {
         return lodModel(name, 0);
+    }
+
+    /** Custom kits override the exact tileset path for buildings, fuel tanks and industrial structures. */
+    GpuBuilding.Assembly building(String asset, int levels, long seed) {
+        if (!asset.startsWith("buildings/")) { return null; }
+        if (!buildings.containsKey(asset)) {
+            File customRoot = new File(Configuration.dataDir(), "models/buildings");
+            FileHandle file = new FileHandle(BoardArtwork.customBuildingFile(asset));
+            buildings.put(asset, file.file().isFile() ? new GpuBuilding(file, customRoot.toPath(), this::createModel) : null);
+        }
+        GpuBuilding building = buildings.get(asset);
+        return building == null ? null : building.assemble(levels, seed);
+    }
+
+    void retainBuildings(java.util.Set<GpuBuilding.Assembly> live) {
+        buildings.values().stream().filter(java.util.Objects::nonNull).forEach(building -> building.retain(live));
     }
 
     private Model createModel(ModelData data) {
@@ -93,68 +246,113 @@ final class GpuAssets implements Disposable {
         return texture(materialFile(name));
     }
 
-    /**
-     * A skirt strip covers V from zero at the cliff top to one at its lower edge, so it tiles only along U.
-     * Clamping there stops the sampler from wrapping the last row into the first one and ringing its edge.
-     * The art is uploaded as authored: straight alpha, as the skirt material blends it.
-     */
-    Texture cornice(String name) {
-        FileHandle file = materialFile(name);
-        return materials.computeIfAbsent("cornice:" + file.file().toPath().normalize(), key -> {
-            Texture texture = new Texture(file, true);
-            texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
-            texture.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.ClampToEdge);
-            return texture;
+    Texture scatter() {
+        return materials.computeIfAbsent("scatter-atlas", key -> GpuScatter.atlas(root));
+    }
+
+    Cliff road(String name) {
+        return relief("roads", name, "terrain/" + (name.equals("asphalt") ? "concrete" : name.equals("gravel") ? "rock" : "dirt"));
+    }
+
+    Cliff ice() {
+        Cliff maps = relief("ice", "sheet", "terrain/snow");
+        if (maps.normal() != null) { return maps; }
+        flatMaps();
+        return new Cliff(maps.color(), flatNormal, flatColor);
+    }
+
+    private Cliff relief(String folder, String family, String fallback) {
+        return cliffs.computeIfAbsent(folder + "/" + family, key -> {
+            FileHandle color = materialFile(key);
+            FileHandle normal = materialFile(key + "-normal");
+            FileHandle surface = materialFile(key + "-surface");
+            // Older/custom data sets retain their original material until a complete set is supplied.
+            if (!color.exists() || !normal.exists() || !surface.exists()) {
+                return new Cliff(material(fallback), null, null);
+            }
+            return new Cliff(texture(color), texture(normal), texture(surface));
         });
     }
 
-    /** Average the source once; callers can match its palette without drawing its surface detail elsewhere. */
-    Color materialTint(String name) {
-        return materialTints.computeIfAbsent(name, key -> {
-            Pixmap pixels = new Pixmap(materialFile(key));
-            long red = 0, green = 0, blue = 0, weight = 0;
-            try {
-                for (int y = 0; y < pixels.getHeight(); y++) {
-                    for (int x = 0; x < pixels.getWidth(); x++) {
-                        int rgba = pixels.getPixel(x, y), alpha = rgba & 255;
-                        red += (long) (rgba >>> 24) * alpha;
-                        green += (long) ((rgba >>> 16) & 255) * alpha;
-                        blue += (long) ((rgba >>> 8) & 255) * alpha;
-                        weight += alpha;
-                    }
-                }
-                return weight == 0 ? new Color(Color.WHITE)
-                      : new Color(red / (255f * weight), green / (255f * weight), blue / (255f * weight), 1);
-            } finally { pixels.dispose(); }
+    /**
+     * One sculpt material. A data pack without the set still renders: a neutral albedo and a flat normal stand in,
+     * so geometry, light and the per-level grade remain.
+     */
+    Sculpt sculpt(String name) {
+        return sculpts.computeIfAbsent(name, key -> {
+            JsonValue entry = sculptEntry(key);
+            if (entry == null) {
+                flatMaps();
+                return new Sculpt(flatColor, flatNormal, 4);
+            }
+            return new Sculpt(texture(materialFile("sculpt/" + key)), texture(materialFile("sculpt/" + key + "-normal")),
+                  entry.getFloat("tile"));
         });
+    }
+
+    /** Array-backed materials need the repeat scale without decoding and uploading a second set of 2D textures. */
+    float sculptTile(String name) {
+        JsonValue entry = sculptEntry(name);
+        return entry == null ? 4 : entry.getFloat("tile");
+    }
+
+    private JsonValue sculptEntry(String name) {
+        if (!sculptEntries.containsKey(name)) {
+            FileHandle manifest = new FileHandle(new File(root, "textures/sculpt/manifest.json"));
+            if (sculptManifest == null && manifest.exists()) { sculptManifest = new JsonReader().parse(manifest); }
+            JsonValue entry = sculptManifest == null ? null : sculptManifest.get("materials").get(name);
+            if (!materialFile("sculpt/" + name).exists() || !materialFile("sculpt/" + name + "-normal").exists()) {
+                entry = null;
+            }
+            // Like the textures, metadata belongs to this asset owner; asset reload creates a fresh owner.
+            sculptEntries.put(name, entry);
+        }
+        return sculptEntries.get(name);
+    }
+
+    private static Texture solid(int rgba) {
+        Pixmap pixels = new Pixmap(2, 2, Pixmap.Format.RGBA8888);
+        try {
+            pixels.setColor(rgba);
+            pixels.fill();
+            Texture texture = new Texture(pixels);
+            texture.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
+            return texture;
+        } finally {
+            pixels.dispose();
+        }
+    }
+
+    private void flatMaps() {
+        if (flatColor == null) {
+            flatColor = solid(0xa0a0a0ff);
+            flatNormal = solid(0x8080ffff);
+        }
     }
 
     private FileHandle materialFile(String name) {
         return new FileHandle(new File(root, "textures/" + name + ".png"));
     }
 
-    /**
-     * The rim masks serve every family: alpha is coverage and gray is lightness about mid gray, so a dark mask
-     * shades the exposed rim of any material. A drop of up to two levels wears this incline mask.
-     */
-    BoardRim.Images inclineMask() {
+    /** Original rim lightness mask for drops up to two levels, without normalization or generated normals. */
+    BoardScene.Pixels inclineMask() {
         if (incline == null) {
             incline = loadRimMask("terrain/incline_dark");
         }
         return incline;
     }
 
-    /** The coarser rim of a drop above two levels, the board's own high-incline split. Neither carries normals. */
-    BoardRim.Images highInclineMask() {
+    /** The coarser lightness mask of a drop above two levels, the board's own high-incline split. */
+    BoardScene.Pixels highInclineMask() {
         if (highIncline == null) {
             highIncline = loadRimMask("terrain/high_incline_dark");
         }
         return highIncline;
     }
 
-    private BoardRim.Images loadRimMask(String asset) {
+    private BoardScene.Pixels loadRimMask(String asset) {
         try {
-            return new BoardRim.Images(new BoardScene.Pixels(ImageIO.read(materialFile(asset).file())), null);
+            return new BoardScene.Pixels(ImageIO.read(materialFile(asset).file()));
         } catch (IOException error) {
             throw new UncheckedIOException("Cannot load the cliff-top rim mask", error);
         }
@@ -168,7 +366,12 @@ final class GpuAssets implements Disposable {
                   .startsWith(new File(root, "textures").toPath().toAbsolutePath().normalize());
             Texture.TextureWrap wrap = repeating ? Texture.TextureWrap.Repeat : Texture.TextureWrap.ClampToEdge;
             texture.setWrap(wrap, wrap);
-            if (repeating) {
+            if (repeating && (file.parent().name().equals("cliffs") || file.parent().name().equals("ground")
+                  || file.parent().name().equals("sculpt") || file.parent().name().equals("roads")
+                  || file.parent().name().equals("ice"))) {
+                // Cliff relief needs its full resolution; mipmaps and supported anisotropy handle distance.
+                texture.setAnisotropicFilter(8);
+            } else if (repeating) {
                 int level = Math.max(0, (int) Math.ceil(Math.log(Math.max(texture.getWidth(), texture.getHeight()) / 128.0) / Math.log(2)));
                 texture.bind();
                 // Match the board artwork's texel density while retaining editable source images.
@@ -351,6 +554,8 @@ final class GpuAssets implements Disposable {
 
     @Override
     public void dispose() {
+        buildings.values().stream().filter(java.util.Objects::nonNull).forEach(GpuBuilding::dispose);
+        buildings.clear();
         interiors.values().forEach(Model::dispose);
         interiors.clear();
         models.values().forEach(Model::dispose);
@@ -359,7 +564,20 @@ final class GpuAssets implements Disposable {
         models.clear();
         modelLods.clear();
         materials.clear();
-        materialTints.clear();
+        cliffs.clear();
+        magmas.values().stream().filter(java.util.Objects::nonNull).forEach(TextureArray::dispose);
+        magmas.clear();
+        sculpts.clear();
+        sculptEntries.clear();
+        if (sculptArray != null) { sculptArray.dispose(); sculptArray = null; }
+        if (roadArray != null) { roadArray.dispose(); roadArray = null; }
+        sculptManifest = null;
+        if (flatColor != null) {
+            flatColor.dispose();
+            flatNormal.dispose();
+            flatColor = null;
+            flatNormal = null;
+        }
         liquids.clear();
         incline = null;
         highIncline = null;

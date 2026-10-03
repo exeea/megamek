@@ -749,6 +749,9 @@ class FirePreviewTest {
     }
 
     private static byte[] serialize(Entity unit) throws IOException {
+        // The names are cached on first use; a filled cache does not change the unit.
+        unit.getShortName();
+        unit.getDisplayName();
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         try (ObjectOutputStream out = new ObjectOutputStream(bytes)) {
             out.writeObject(unit);

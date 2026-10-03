@@ -177,7 +177,7 @@ class GpuFiringIntegrationTest {
         var effects = new GpuAttackEffects();
         try {
             for (int round = 0; round < 6; round++) {
-                shot.seconds = UnitAttack.ANTICIPATION_SECONDS + shot.roundDelay(round, 6) + .00001f;
+                shot.seconds = UnitAttack.ANTICIPATION_SECONDS + shot.roundDelay(round, shot.event.result().shot()) + .00001f;
                 effects.update(shot, library, Map.of(source.id() + ":-1", placed, target.id() + ":-1", victim));
                 effects.render(renderer.camera);
                 assertEquals(round + 1, effects.emissions(shot).size(), "A barrel must wait for its actual round's firing time");

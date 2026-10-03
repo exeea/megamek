@@ -41,6 +41,8 @@ class GpuKeyboardSmokeTest {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             GpuBoardSource source = mock(GpuBoardSource.class);
             source.uiPreferences = GpuHudInputTest.preferences();
+            // The view reads the preferences through the accessor; the test rebinds through the field.
+            when(source.uiPreferences()).thenAnswer(invocation -> source.uiPreferences);
             when(source.takeFrame()).thenAnswer(invocation -> fixture.source.takeFrame());
             new Lwjgl3Application(new GpuBattleView(source) {
                 private int tick;
@@ -49,7 +51,7 @@ class GpuKeyboardSmokeTest {
                 public void render() {
                     try {
                         super.render();
-                        if (++tick != 3) {
+                        if (frames() < 3 || ++tick != 1) {
                             return;
                         }
                         GpuHud hud = (GpuHud) field("ui");
@@ -111,6 +113,36 @@ class GpuKeyboardSmokeTest {
                             verify(source).key(KeyEvent.VK_W, true, 0);
                             verify(source, never()).key(KeyEvent.VK_I, true, 0);
                             verify(source, never()).key(KeyEvent.VK_F9, true, 0);
+
+                            // Free Flight: Shift held before W accelerates flight and never reaches the client;
+                            // opposing flight keys cancel. The default binds again, so W scrolls north.
+                            source.uiPreferences = GpuHudInputTest.preferences();
+                            super.render();
+                            boardCamera.setFirstPerson(true);
+                            boardCamera.look(0, 90 - boardCamera.tilt());
+                            clearInvocations(source);
+                            var start = boardCamera.camera.position.cpy();
+                            processor.keyDown(Input.Keys.W);
+                            super.render();
+                            processor.keyUp(Input.Keys.W);
+                            float normalDistance = start.dst(boardCamera.camera.position);
+                            start.set(boardCamera.camera.position);
+                            press(keyboard, InputEvent.SHIFT_DOWN_MASK);
+                            processor.keyDown(Input.Keys.W);
+                            super.render();
+                            press(keyboard, 0);
+                            processor.keyUp(Input.Keys.W);
+                            assertEquals(normalDistance * 4, start.dst(boardCamera.camera.position), .01f,
+                                  "Shift held before W must accelerate flight and never plot unit movement");
+                            start.set(boardCamera.camera.position);
+                            processor.keyDown(Input.Keys.W);
+                            processor.keyDown(Input.Keys.S);
+                            super.render();
+                            processor.keyUp(Input.Keys.W);
+                            processor.keyUp(Input.Keys.S);
+                            assertEquals(start, boardCamera.camera.position, "Opposing flight keys cancel");
+                            verify(source, never()).key(anyInt(), anyBoolean(), anyInt());
+                            boardCamera.setFirstPerson(false);
                             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                         } finally {
                             Gdx.input = realInput;

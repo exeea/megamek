@@ -42,6 +42,7 @@ import megamek.common.loaders.MekFileParser;
 import megamek.common.options.OptionsConstants;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.units.Aero;
+import megamek.common.units.ConvInfantry;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementType;
 import megamek.common.units.Terrain;
@@ -52,6 +53,47 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class GpuBoardSourceTest {
+    @Test
+    void heatSnapshotsFollowGameHeatOnlyForUnitsThatTrackIt() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            Entity fighter = new MekFileParser(new File("testresources/megamek/common/units/Cheetah F-11.blk")).getEntity();
+            Entity supportFighter = new MekFileParser(new File("testresources/megamek/common/units/Mosquito Light Fighter.blk")).getEntity();
+            var infantry = new ConvInfantry();
+            infantry.setChassis("Thermal infantry");
+            fighter.setId(2);
+            infantry.setId(3);
+            supportFighter.setId(4);
+            infantry.initializeInternal(28, ConvInfantry.LOC_INFANTRY);
+            SwingUtilities.invokeAndWait(() -> {
+                for (Entity entity : List.of(fighter, infantry, supportFighter)) {
+                    entity.setOwner(fixture.player);
+                    entity.setPosition(new Coords(entity.getId() + 3, 6));
+                    entity.setDeployed(true);
+                    fixture.game.addEntity(entity, false);
+                }
+            });
+            assertTrue(fixture.entity.tracksHeat());
+            assertTrue(fighter.tracksHeat());
+            assertFalse(infantry.tracksHeat());
+            assertFalse(supportFighter.tracksHeat());
+            for (int heat : new int[] { 0, 17, 35 }) {
+                SwingUtilities.invokeAndWait(() -> {
+                    fixture.entity.heat = fighter.heat = infantry.heat = supportFighter.heat = heat;
+                    fixture.source.refresh();
+                });
+                BoardScene scene = fixture.source.takeFrame().scene();
+                for (int id : new int[] { 1, 2 }) {
+                    var captured = unit(scene, id);
+                    assertEquals(heat, captured.heat());
+                    assertEquals(heat, captured.at(captured.location()).heat());
+                    assertEquals(heat, captured.withAttachment(null).heat());
+                }
+                assertEquals(-1, unit(scene, 3).heat(), "A non-tracking unit's heat field must not drive its appearance");
+                assertEquals(-1, unit(scene, 4).heat(), "Non-tracking aircraft also use the fixed signature");
+            }
+        }
+    }
+
     @Test
     void minimapNavigationAndViewportRecreationDoNotDependOnAnInactiveRenderer() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
@@ -207,6 +249,7 @@ class GpuBoardSourceTest {
                 fixture.source.refresh();
                 var tile = fixture.source.takeFrame().scene().tile(coords);
                 assertEquals(3, tile.features().size());
+                assertTrue(tile.detailedGround(), "Modeled structures must preserve native ground in theme: " + theme);
                 // Default single-hex buildings may select a prefab rather than the connected-building family.
                 HexTileset tileset = new HexTileset(fixture.game, new File(Configuration.dataDir(), "models/board/tileset"));
                 try {
@@ -245,6 +288,27 @@ class GpuBoardSourceTest {
             BoardScene.Tile unlabeled = fixture.source.takeFrame().scene().tile(new Coords(0, 0));
             assertFalse(unlabeled.text().stream().anyMatch(label -> label.text().equals("0101")));
             assertTrue(samePixels(labeled.ground(), unlabeled.ground()));
+        } finally {
+            SwingUtilities.invokeAndWait(() -> preferences.setCoordsEnabled(coords));
+        }
+    }
+
+    @Test
+    void cliffExitsSurviveTacticalArtworkRefreshes() throws Exception {
+        Board board = new Board();
+        board.load(new File("testresources/megamek/client/ui/clientGUI/boardview/gpu/cliffs.board"));
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        boolean coords = preferences.getCoordsEnabled();
+        try (GpuBoardFixture fixture = GpuBoardFixture.create(board)) {
+            for (boolean labels : new boolean[] { true, false }) {
+                SwingUtilities.invokeAndWait(() -> {
+                    preferences.setCoordsEnabled(labels);
+                    fixture.source.refresh();
+                });
+                BoardScene scene = fixture.source.takeFrame().scene();
+                assertEquals(56, scene.tile(new Coords(8, 12)).cliffTopExits());
+                assertEquals(24, scene.tile(new Coords(9, 12)).cliffTopExits());
+            }
         } finally {
             SwingUtilities.invokeAndWait(() -> preferences.setCoordsEnabled(coords));
         }
@@ -344,8 +408,9 @@ class GpuBoardSourceTest {
         }
     }
 
-    @Test
-    void airborneUnitsFloatAtTheirFlightHeight() throws Exception {
+    @ParameterizedTest
+    @ValueSource(ints = { -2, 0, 2, 10 })
+    void airborneUnitsFloatAboveTheirHex(int groundLevel) throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             Entity vtol = new MekFileParser(new File("testresources/megamek/common/units/Cobra Transport VTOL.blk"))
                   .getEntity();
@@ -360,9 +425,11 @@ class GpuBoardSourceTest {
                     fixture.game.addEntity(entity, false);
                 }
                 vtol.setPosition(new Coords(4, 4));
+                fixture.game.getBoard().setHex(vtol.getPosition(), new Hex(groundLevel));
                 vtol.setElevation(3);
                 fighter.setPosition(new Coords(6, 6));
-                fighter.setAltitude(5);
+                fixture.game.getBoard().setHex(fighter.getPosition(), new Hex(groundLevel));
+                fighter.setAltitude(1);
                 fixture.source.refresh();
             });
             BoardScene scene = fixture.source.takeFrame().scene();
@@ -372,10 +439,10 @@ class GpuBoardSourceTest {
             assertEquals(3 + fixture.game.getBoard().getHex(new Coords(4, 4)).getLevel(),
                   flyingVtol.location().elevation(), 0.001f, "A VTOL floats on its hex-relative elevation");
             BoardScene.Unit flyingFighter = unit(scene, 3);
-            assertTrue(flyingFighter.airborne(), "A fighter at altitude 5 flies");
+            assertTrue(flyingFighter.airborne(), "A fighter at altitude 1 flies");
             assertEquals(1, flyingFighter.height());
-            assertEquals(5, flyingFighter.location().elevation(), 0.001f,
-                  "Aerospace altitude is absolute; the airborne elevation sentinel is never drawn");
+            assertEquals(groundLevel + 1, flyingFighter.location().elevation(), 0.001f,
+                  "Aerospace visuals float above the hex; the airborne elevation sentinel is never drawn");
 
             SwingUtilities.invokeAndWait(() -> {
                 vtol.setElevation(0);
@@ -407,6 +474,8 @@ class GpuBoardSourceTest {
                 fighter.setDeployed(true);
                 fixture.game.addEntity(fighter, false);
                 fighter.setPosition(new Coords(6, 6));
+                fixture.game.getBoard().setHex(new Coords(6, 6), new Hex(2));
+                fixture.game.getBoard().setHex(new Coords(7, 6), new Hex(10));
                 fighter.setAltitude(5);
                 fixture.source.refresh();
             });
@@ -422,8 +491,8 @@ class GpuBoardSourceTest {
             GpuBoardSource.Frame frame = fixture.source.takeFrame();
             assertEquals(1, frame.movements().size());
             for (BoardScene.Waypoint point : frame.movements().getFirst().path()) {
-                assertEquals(5, point.elevation(), 0.001f,
-                      "A flying fighter's path plays at its altitude, not the airborne sentinel");
+                assertEquals(5 + fixture.game.getBoard().getHex(point.coords()).getLevel(), point.elevation(), 0.001f,
+                      "Each flight waypoint adds its own hex elevation");
                 assertEquals(BoardScene.AeroState.AIRBORNE, point.aeroState());
             }
         }
@@ -441,6 +510,9 @@ class GpuBoardSourceTest {
             flying.setPosition(new Coords(5, 5));
             flying.setAltitude(5);
             SwingUtilities.invokeAndWait(() -> {
+                fixture.game.getBoard().setHex(new Coords(5, 5), new Hex(10));
+                fixture.game.getBoard().setHex(new Coords(6, 5), new Hex(10));
+                fixture.game.getBoard().setHex(new Coords(6, 6), new Hex(10));
                 fighter.setOwner(fixture.player);
                 fighter.setDeployed(true);
                 fixture.game.addEntity(fighter, false);
@@ -448,6 +520,7 @@ class GpuBoardSourceTest {
                 ((Aero) fighter).land();
                 fixture.source.refresh();
             });
+            fixture.source.takeFrame(); // Discard setup events from raising the terrain under the fixture's Atlas.
             // The whole move carries the airborne sentinel except the step that sets the fighter down.
             Vector<UnitLocation> path = new Vector<>();
             path.add(new UnitLocation(5, new Coords(5, 5), 0, Aero.AERO_EFFECTIVE_ELEVATION, 0));
@@ -459,8 +532,8 @@ class GpuBoardSourceTest {
             GpuBoardSource.Frame frame = fixture.source.takeFrame();
             assertEquals(1, frame.movements().size());
             List<BoardScene.Waypoint> played = frame.movements().getFirst().path();
-            assertEquals(5, played.getFirst().elevation(), 0.001f,
-                  "A landing move starts at the altitude the fighter flew at");
+            assertEquals(15, played.getFirst().elevation(), 0.001f,
+                  "A landing move starts at the flight altitude above its starting hex");
             for (BoardScene.Waypoint point : played) {
                 assertTrue(point.elevation() < Aero.AERO_EFFECTIVE_ELEVATION,
                       "No playback point keeps the airborne sentinel");
@@ -591,7 +664,7 @@ class GpuBoardSourceTest {
     }
 
     @Test
-    void groundIncludesRoughAndRubbleArtworkForNormalMapping() throws Exception {
+    void groundLeavesRoughToItsBouldersAndKeepsRubbleArtwork() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             Coords coords = new Coords(0, 16);
             AtomicReference<BufferedImage> plain = new AtomicReference<>();
@@ -611,8 +684,8 @@ class GpuBoardSourceTest {
                 rubble.set(groundArt(fixture, coords));
                 hex.removeTerrain(Terrains.RUBBLE);
             });
-            assertFalse(samePixels(new BoardScene.Pixels(plain.get()), new BoardScene.Pixels(rough.get())),
-                  "Rough terrain's painted stones must reach the ground artwork");
+            assertTrue(samePixels(new BoardScene.Pixels(plain.get()), new BoardScene.Pixels(rough.get())),
+                  "Rough's native boulders must not also be painted into the ground");
             assertFalse(samePixels(new BoardScene.Pixels(plain.get()), new BoardScene.Pixels(rubble.get())),
                   "Rubble's painted stones must reach the ground artwork");
         }
@@ -703,8 +776,9 @@ class GpuBoardSourceTest {
                   .allMatch(feature -> feature.asset().startsWith("building") && feature.height() == 3));
             assertTrue(scene.tile(woods).features().size() >= 4);
             assertTrue(scene.tile(woods).features().stream()
-                  .allMatch(feature -> feature.height() <= 2 && feature.height() > 1
-                        && feature.kind() == BoardScene.FeatureKind.TREE));
+                  .allMatch(feature -> feature.height() >= 2 && feature.height() <= 2.2f
+                        && feature.kind() == BoardScene.FeatureKind.TREE),
+                  "Trees reach the board's foliage height, with a small variation above it");
         }
     }
 
@@ -828,6 +902,7 @@ class GpuBoardSourceTest {
             });
             BoardScene.Unit contact = fixture.source.takeFrame().scene().units().getFirst();
             assertTrue(contact.sensorContact());
+            assertEquals(-1, contact.heat(), "A sensor blip must not reveal heat");
             assertEquals(1, contact.height());
             assertEquals(Messages.getString("BoardView1.sensorReturn"), contact.name());
             assertEquals(0, contact.location().facing());
@@ -913,6 +988,28 @@ class GpuBoardSourceTest {
             assertTrue(fixture.source.takeFrame().movements().isEmpty());
             assertFalse(frame.movements().getFirst().path().isEmpty());
             assertEquals(new Coords(6, 5), fixture.entity.getPosition());
+        }
+    }
+
+    @Test
+    void publishesForcedDisplacementAndFallsOnceWithoutAMovementPath() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            fixture.source.takeFrame();
+            var before = fixture.entity.getPosition();
+            SwingUtilities.invokeAndWait(() -> {
+                fixture.entity.setPosition(before.translated(0));
+                fixture.entity.setProne(megamek.common.units.ProneCause.FORCED);
+                fixture.source.refresh();
+            });
+            var frame = fixture.source.takeFrame();
+            assertEquals(1, frame.movements().size());
+            var movement = frame.movements().getFirst();
+            assertTrue(movement.forced());
+            assertEquals(before, movement.path().getFirst().coords());
+            assertEquals(before.translated(0), movement.path().getLast().coords());
+            assertEquals(megamek.common.units.ProneCause.FORCED, movement.path().getLast().proneCause());
+            SwingUtilities.invokeAndWait(fixture.source::refresh);
+            assertTrue(fixture.source.takeFrame().movements().isEmpty());
         }
     }
 }

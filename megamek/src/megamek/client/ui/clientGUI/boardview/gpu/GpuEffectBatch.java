@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.VertexAttribute;
@@ -15,6 +16,8 @@ final class GpuEffectBatch implements Disposable {
     private static final int STRIDE = 7;
     private final int capacity;
     private final String fragment;
+    private final Color smokeLight = new Color(Color.WHITE);
+    private final Vector3 quadWidth = new Vector3(), quadLength = new Vector3(), quadOrigin = new Vector3();
     private float[] vertices;
     private Mesh mesh;
     private ShaderProgram shader;
@@ -29,6 +32,26 @@ final class GpuEffectBatch implements Disposable {
     }
 
     void begin() { offset = 0; }
+
+    void billboard(Camera camera, Vector3 center, float radius, float kind, float alpha) {
+        quadWidth.set(camera.direction).crs(camera.up).nor().scl(radius);
+        quadLength.set(camera.up).scl(radius);
+        quad(center, quadWidth, quadLength, -1, kind, alpha);
+    }
+
+    /** A camera-facing streak; an end-on view retains a small head instead of collapsing to zero area. */
+    void ribbon(Camera camera, Vector3 start, Vector3 finish, float width, float kind, float alpha) {
+        quadLength.set(finish).sub(start);
+        if (quadLength.isZero(.001f)) { return; }
+        quadWidth.set(quadLength).crs(camera.direction);
+        if (quadWidth.len2() < quadLength.len2() * .0001f) {
+            quadWidth.set(camera.direction).crs(camera.up);
+            quadLength.set(camera.up).scl(width * 2);
+            quadOrigin.set(finish).mulAdd(quadLength, -.5f);
+        } else { quadOrigin.set(start); }
+        quadWidth.nor().scl(width);
+        quad(quadOrigin, quadWidth, quadLength, 0, kind, alpha);
+    }
 
     void quad(Vector3 origin, Vector3 width, Vector3 length, float from, float kind, float alpha) {
         if (alpha <= 0 || offset == capacity * 4 * STRIDE) { return; }
@@ -48,6 +71,9 @@ final class GpuEffectBatch implements Disposable {
 
     int size() { return offset / (4 * STRIDE); }
 
+    /** Display-encoded light on smoke; flames and jets stay emissive. White draws smoke as authored. */
+    void setSmokeLight(Color light) { smokeLight.set(light); }
+
     void render(Camera camera, int smokeCount) {
         if (offset == 0) { return; }
         mesh.setVertices(vertices, 0, offset);
@@ -59,6 +85,9 @@ final class GpuEffectBatch implements Disposable {
         try {
             shader.bind();
             shader.setUniformMatrix("u_projView", camera.combined);
+            if (shader.hasUniform("u_light")) {
+                shader.setUniformf("u_light", smokeLight.r, smokeLight.g, smokeLight.b);
+            }
             int smoke = Math.min(smokeCount, size());
             Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
             if (smoke > 0) { mesh.render(shader, GL20.GL_TRIANGLES, 0, smoke * 6); }
@@ -72,14 +101,8 @@ final class GpuEffectBatch implements Disposable {
     }
 
     private void create() {
-        String path = "megamek/client/ui/clientGUI/boardview/gpu/";
-        shader = new ShaderProgram(Gdx.files.classpath(path + "effects.vert"), Gdx.files.classpath(path + fragment + ".frag"));
-        if (!shader.isCompiled()) {
-            String log = shader.getLog();
-            shader.dispose();
-            shader = null;
-            throw new IllegalStateException(fragment + " shader: " + log);
-        }
+        shader = GpuShaderManager.program(() -> GpuGlsl.compile(fragment,
+              GpuShaderSource.read("effects.vert"), fragment(fragment + ".frag")), next -> shader = next);
         vertices = new float[capacity * 4 * STRIDE];
         short[] indices = new short[capacity * 6];
         int[] corners = { 0, 1, 2, 2, 3, 0 };
@@ -90,10 +113,19 @@ final class GpuEffectBatch implements Disposable {
         mesh.setIndices(indices);
     }
 
+    static String fragment(String file) {
+        String source = GpuShaderSource.read(file);
+        if (source.contains("// PARTICLE_APPEARANCE")) {
+            source = source.replace("// PARTICLE_APPEARANCE", GpuShaderSource.read("particles-smoke.glsl") + "\n"
+                  + GpuShaderSource.read("particles-fire.glsl") + "\n" + GpuShaderSource.read("particles-jet.glsl"));
+        }
+        return source;
+    }
+
     @Override
     public void dispose() {
         if (mesh != null) { mesh.dispose(); mesh = null; }
-        if (shader != null) { shader.dispose(); shader = null; }
+        if (shader != null) { GpuShaderManager.dispose(shader); shader = null; }
         vertices = null;
         offset = 0;
     }

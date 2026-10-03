@@ -47,6 +47,7 @@ import megamek.common.compute.ComputeSideTable;
 import megamek.common.enums.AimingMode;
 import megamek.common.equipment.AmmoMounted;
 import megamek.common.equipment.AmmoType;
+import megamek.common.equipment.EquipmentActivation;
 import megamek.common.equipment.HandheldWeapon;
 import megamek.common.equipment.INarcPod;
 import megamek.common.equipment.MiscType;
@@ -57,16 +58,7 @@ import megamek.common.game.Game;
 import megamek.common.interfaces.ILocationExposureStatus;
 import megamek.common.options.OptionsConstants;
 import megamek.common.rolls.TargetRoll;
-import megamek.common.units.AbstractBuildingEntity;
-import megamek.common.units.ConvInfantry;
-import megamek.common.units.Entity;
-import megamek.common.units.EntityMovementType;
-import megamek.common.units.IBuilding;
-import megamek.common.units.Infantry;
-import megamek.common.units.Mek;
-import megamek.common.units.Tank;
-import megamek.common.units.Targetable;
-import megamek.common.units.Terrains;
+import megamek.common.units.*;
 import megamek.common.weapons.Weapon;
 import megamek.common.weapons.attacks.InfantryAttack;
 import megamek.common.weapons.battleArmor.clan.CLBALBX;
@@ -85,9 +77,10 @@ public class ComputeToHit {
      * To-hit number for attacker firing a weapon at the target.
      */
     public static ToHitData toHitCalc(Game game, int attackerId, Targetable target, int weaponId, int aimingAt,
-          AimingMode aimingMode, boolean isNemesisConfused, boolean exchangeSwarmTarget, Targetable oldTarget,
-          Targetable originalTarget, boolean isStrafing, boolean isPointblankShot, List<ECMInfo> allECMInfo,
-          boolean evenIfAlreadyFired, int ammoId, int ammoCarrier) {
+          AimingMode aimingMode, boolean isNemesisConfused, boolean exchangeSwarmTarget,
+          @Nullable Targetable oldTarget, @Nullable Targetable originalTarget, boolean isStrafing,
+          boolean isPointblankShot, List<ECMInfo> allECMInfo, boolean evenIfAlreadyFired, int ammoId,
+          int ammoCarrier) {
 
         final Entity weaponEntity = game.getEntity(attackerId);
         final Entity ae = weaponEntity.getAttackingEntity();
@@ -114,6 +107,12 @@ public class ComputeToHit {
         }
 
         Targetable swarmSecondaryTarget = target;
+        if (exchangeSwarmTarget && ((oldTarget == null) || (originalTarget == null))) {
+            // The swarm's earlier target may have left the game, so its lookup returns null
+            logger.warn("{} Swarm attack is missing its previous target (old: {}, original: {})", attackerId,
+                  oldTarget, originalTarget);
+            return new ToHitData(TargetRoll.AUTOMATIC_FAIL, Messages.getString("MovementDisplay.NoTarget"));
+        }
         if (exchangeSwarmTarget) {
             // this is a swarm attack against a new target
             // first, exchange original and new targets to get all mods
@@ -154,8 +153,9 @@ public class ComputeToHit {
             bMekTankStealthActive = ae.isStealthActive();
         }
 
+        // TW p.114: includes a VTOL or WiGE that flew this turn and then landed
         boolean isFlakAttack = (te != null) &&
-              Compute.isFlakAttack(ae, te) &&
+              Compute.isFlakToHitTarget(ae, te) &&
               (weaponType instanceof CLBALBX ||
                     ((ammoType != null) &&
                           ((((ammoType.getAmmoType() == AmmoType.AmmoTypeEnum.AC_LBX) ||
@@ -260,25 +260,15 @@ public class ComputeToHit {
 
         Mounted<?> mLinker = weapon.getLinkedBy();
 
-        boolean bApollo = ((mLinker != null) &&
-              (mLinker.getType() instanceof MiscType) &&
-              !mLinker.isDestroyed() &&
-              !mLinker.isMissing() &&
-              !mLinker.isBreached() &&
-              mLinker.getType().hasFlag(MiscType.F_APOLLO)) &&
+        boolean bApollo = EquipmentActivation.isGuidanceActive(mLinker, MiscType.F_APOLLO) &&
               (ammoType != null) &&
               (ammoType.getAmmoType() == AmmoType.AmmoTypeEnum.MRM);
 
-        boolean bArtemisV = ((mLinker != null) &&
-              (mLinker.getType() instanceof MiscType) &&
-              !mLinker.isDestroyed() &&
-              !mLinker.isMissing() &&
-              !mLinker.isBreached() &&
-              mLinker.getType().hasFlag(MiscType.F_ARTEMIS_V) &&
+        boolean bArtemisV = EquipmentActivation.isGuidanceActive(mLinker, MiscType.F_ARTEMIS_V) &&
               !isECMAffected &&
               !bMekTankStealthActive &&
               (ammoType != null) &&
-              (munition.contains(AmmoType.Munitions.M_ARTEMIS_V_CAPABLE)));
+              (munition.contains(AmmoType.Munitions.M_ARTEMIS_V_CAPABLE));
 
         boolean bSemiGuided = ((ammoType != null) &&
               ((ammoType.getAmmoType() == AmmoType.AmmoTypeEnum.LRM) ||
@@ -313,26 +303,16 @@ public class ComputeToHit {
                 }
 
                 mLinker = bayW.getLinkedBy();
-                bApollo = ((mLinker != null) &&
-                      (mLinker.getType() instanceof MiscType) &&
-                      !mLinker.isDestroyed() &&
-                      !mLinker.isMissing() &&
-                      !mLinker.isBreached() &&
-                      mLinker.getType().hasFlag(MiscType.F_APOLLO)) &&
+                bApollo = EquipmentActivation.isGuidanceActive(mLinker, MiscType.F_APOLLO) &&
                       (bAmmo != null) &&
                       (bAmmo.getAmmoType() == AmmoType.AmmoTypeEnum.MRM);
 
-                bArtemisV = ((mLinker != null) &&
-                      (mLinker.getType() instanceof MiscType) &&
-                      !mLinker.isDestroyed() &&
-                      !mLinker.isMissing() &&
-                      !mLinker.isBreached() &&
-                      mLinker.getType().hasFlag(MiscType.F_ARTEMIS_V) &&
+                bArtemisV = EquipmentActivation.isGuidanceActive(mLinker, MiscType.F_ARTEMIS_V) &&
                       !isECMAffected &&
                       !bMekTankStealthActive &&
                       (ammoType != null) &&
                       (bAmmo != null) &&
-                      (bAmmo.getMunitionType().contains(AmmoType.Munitions.M_ARTEMIS_V_CAPABLE)));
+                      (bAmmo.getMunitionType().contains(AmmoType.Munitions.M_ARTEMIS_V_CAPABLE));
             }
         }
 
@@ -431,16 +411,7 @@ public class ComputeToHit {
             losMods = new ToHitData();
         } else if (!isIndirect || (spotter == null)) {
             if (!exchangeSwarmTarget) {
-                Coords firingPosition = weaponEntity.getWeaponFiringPosition(weapon);
-                int firingHeight = weaponEntity.getWeaponFiringHeight(weapon);
-                los = LosEffects.calculateLOS(game,
-                      game.getEntity(ae.getId()),
-                      target,
-                      firingPosition,
-                      target.getPosition(),
-                      firingHeight,
-                      ae.getBoardId(),
-                      false);
+                los = weaponLineOfSight(game, weaponEntity, game.getEntity(ae.getId()), weapon, target);
             } else {
                 // Swarm should draw LoS between targets, not attacker, since we don't want LoS to be blocked
                 if (oldTarget.getTargetType() == Targetable.TYPE_ENTITY) {
@@ -1021,6 +992,35 @@ public class ComputeToHit {
     private record OverheadArmsLos(LosEffects los, ToHitData losMods) {}
 
     /**
+     * Line of sight for a direct-fire weapon. Most units use the normal LOS check, which tries every hex of a
+     * multi-hex unit on both sides and keeps the best line: a grounded DropShip covers seven hexes, so it can be seen
+     * and fire through any of them, not just its center hex. A building entity or gun emplacement weapon fires from
+     * its own hex and floor, so that firing position is kept, but every hex of the target is still tried.
+     *
+     * @param game         the current {@link Game}
+     * @param weaponEntity the entity carrying the firing weapon
+     * @param attacker     the attacking entity used as the line-of-sight origin, which may be {@code null}
+     * @param weapon       the firing weapon
+     * @param target       the target of the attack
+     *
+     * @return the line of sight for this weapon to the target
+     */
+    static LosEffects weaponLineOfSight(Game game, Entity weaponEntity, @Nullable Entity attacker,
+          WeaponMounted weapon, Targetable target) {
+        if (!weaponEntity.isBuildingEntityOrGunEmplacement()) {
+            logger.debug("[WeaponLOS] {} {}: LOS checked across every hex of both units",
+                  weaponEntity.getShortName(), weapon.getName());
+            return LosEffects.calculateLOS(game, attacker, target);
+        }
+        Coords firingPosition = weaponEntity.getWeaponFiringPosition(weapon);
+        int firingHeight = weaponEntity.getWeaponFiringHeight(weapon);
+        logger.debug("[WeaponLOS] {} {}: fires from {} at height {}, LOS checked to every hex of the target",
+              weaponEntity.getShortName(), weapon.getName(), firingPosition, firingHeight);
+        return LosEffects.calculateLOSToBestTargetHex(game, attacker, target, firingPosition, firingHeight,
+              weaponEntity.getBoardId(), false);
+    }
+
+    /**
      * Applies the Overhead Arms quirk (BMM p.85) to weapon-fire line of sight. A standing {@code Mek} with this quirk
      * treats its arm-mounted weapons as one level higher when determining the effect of terrain on line of sight
      * (intervening woods, partial cover). The quirk may not create line of sight where none exists, so it only takes
@@ -1061,8 +1061,8 @@ public class ComputeToHit {
         }
         Coords firingPosition = weaponEntity.getWeaponFiringPosition(weapon);
         int elevatedFiringHeight = weaponEntity.getWeaponFiringHeight(weapon) + 1;
-        LosEffects elevatedLos = LosEffects.calculateLOS(game, attacker, target, firingPosition,
-              target.getPosition(), elevatedFiringHeight, weaponEntity.getBoardId(), false);
+        LosEffects elevatedLos = LosEffects.calculateLOSToBestTargetHex(game, attacker, target, firingPosition,
+              elevatedFiringHeight, weaponEntity.getBoardId(), false);
         ToHitData elevatedLosMods = elevatedLos.losModifiers(game, eiSystemStatus, underWater);
         // A higher vantage point can never be more blocked than a lower one, but guard the result so the
         // quirk can never turn an otherwise-legal shot into an impossible one.
@@ -1110,7 +1110,7 @@ public class ComputeToHit {
         }
 
         // Attacks against buildings from inside automatically hit.
-        if ((null != los.getThruBldg()) && isBuilding) {
+        if ((los.getThruBldg() != null) &&isBuilding){
             return Messages.getString("WeaponAttackAction.InsideBuilding");
         }
 
@@ -1691,8 +1691,10 @@ public class ComputeToHit {
                 // Unless the target has been tagged, or the spotter has an active command
                 // console
                 toHit.append(Compute.getSpotterMovementModifier(game, spotter.getId()));
+                // a Recon Camera that spotted this target spares the shot the penalty (TO:AUE p.150)
                 if (spotter.isAttackingThisTurn() &&
                       !spotter.getCrew().hasActiveCommandConsole() &&
+                      !ReconCameraRules.isCameraSpotting(spotter, target) &&
                       !Compute.isTargetTagged(target, game)) {
                     toHit.addModifier(1, Messages.getString("WeaponAttackAction.SpotterAttacking"));
                 }
@@ -1850,7 +1852,7 @@ public class ComputeToHit {
           ToHitData losMods, ToHitData toHit, WeaponType weaponType, WeaponMounted weapon, AmmoType ammoType,
           boolean isArtilleryFLAK, boolean usesAmmo, SpecialResolutionTracker srt) {
 
-        if (null == ammoType) {
+        if (ammoType == null) {
             return new ToHitData(TargetRoll.AUTOMATIC_FAIL, "No ammo type!");
         }
         Entity te = null;

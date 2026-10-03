@@ -170,8 +170,10 @@ final class GpuBattleStatus {
             // check keeps such units pending, because that option only delays their turn.
             boolean pending = remaining.stream().anyMatch(turn -> turn.isValidEntity(entity, game)
                   || turn.isValidEntity(entity, game, false));
+            // The local player's view adds the scan and recon camera words (upstream), as the board labels show them.
             List<UnitStatusWords.StatusWord> words = UnitStatusWords.statusWords(entity,
-                  ComputeECM.isAffectedByECM(entity, entity.getPosition(), entity.getPosition(), ecm));
+                  ComputeECM.isAffectedByECM(entity, entity.getPosition(), entity.getPosition(), ecm),
+                  local);
             List<UnitStatusWords.StatusWord> tiles = UnitStatusWords.statusTiles(entity, game.isOnSpaceMap(entity), local);
             units.add(unit(game, entity, side, activeTurn != null && activeTurn.isValidEntity(entity, game), pending,
                   icon.apply(entity), words, tiles, attacks.getOrDefault(entity.getId(), 0)));
@@ -347,6 +349,15 @@ final class GpuBattleStatus {
         return rolls;
     }
 
+    /** The unit's weight class name; "" for a weight MegaMek has no class for (it throws then: an unfinished unit). */
+    private static String weightClass(Entity entity) {
+        try {
+            return entity.getWeightClassName();
+        } catch (IllegalArgumentException unknown) {
+            return "";
+        }
+    }
+
     /** The values the classic unit display and tooltip show; no rule is recomputed here. */
     private static UnitStatus unit(Game game, Entity entity, Side side, boolean canActNow, boolean pending,
           BoardScene.Pixels icon, List<UnitStatusWords.StatusWord> statusWords, List<UnitStatusWords.StatusWord> statusTiles,
@@ -364,8 +375,9 @@ final class GpuBattleStatus {
         }
         List<String> destroyedLocations = IntStream.range(0, entity.locations()).filter(entity::isLocationBad)
               .mapToObj(entity::getLocationAbbr).toList();
+        // An entity built without a model name (scenario code, tests) shows as one with a blank model name.
         return new UnitStatus(entity.getId(), side, false, entity.getShortName(), entity.getChassis(),
-              entity.getModel(), entity.getWeight(), entity.getWeightClassName(),
+              Objects.requireNonNullElse(entity.getModel(), ""), entity.getWeight(), weightClass(entity),
               formation == null ? "" : formation.getName(), entity.getCrew().getName(),
               entity.getCrew().getGunnery(), entity.getCrew().getPiloting(), entity.getArmorRemainingPercent(),
               entity.getInternalRemainingPercent(), entity.heat,

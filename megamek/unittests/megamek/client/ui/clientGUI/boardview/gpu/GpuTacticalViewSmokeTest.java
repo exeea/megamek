@@ -16,6 +16,7 @@ import java.awt.Component;
 import java.awt.Rectangle;
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -122,6 +123,8 @@ class GpuTacticalViewSmokeTest {
                         SwingUtilities.invokeAndWait(() -> preferences.setValue(GUIPreferences.GUI_SCALE, preference));
                         view = new GpuBattleView(fixture.source);
                         view.create();
+                        // The board arrives once its terrain is built behind the loading screen.
+                        GpuBoardTestUi.present(view);
                         verify(view, fixture);
                     } catch (Throwable error) {
                         failure.set(error);
@@ -373,7 +376,7 @@ class GpuTacticalViewSmokeTest {
         view.boardCamera.zoom(BoardGeometry.HEIGHT / 300 / view.boardCamera.camera.zoom);
         render(view);
         capture("tactical-view-icons-closeup.png");
-        OrthographicCamera camera = view.boardCamera.camera;
+        BoardProjectionCamera camera = view.boardCamera.camera;
         Pixmap frame = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(),
               Gdx.graphics.getBackBufferHeight());
         try {
@@ -508,7 +511,7 @@ class GpuTacticalViewSmokeTest {
 
     /** Window coordinates (y down) of a world point. */
     private static Vector3 screen(GpuBattleView view, Vector3 world) {
-        OrthographicCamera camera = view.boardCamera.camera;
+        BoardProjectionCamera camera = view.boardCamera.camera;
         Vector3 point = camera.project(world.cpy(), 0, 0, camera.viewportWidth, camera.viewportHeight);
         point.y = Gdx.graphics.getHeight() - point.y;
         return point;
@@ -764,8 +767,8 @@ class GpuTacticalViewSmokeTest {
     }
 
     /**
-     * Flat mode leaves exactly the featureless board in the colour, camera-depth and shadow passes, and adds one
-     * lit quad per sprite hex after the water.
+     * Flat mode draws the same terrain in the colour, camera-depth and shadow passes, without the 3D board's feature
+     * meshes, and adds one lit quad per sprite hex after the water.
      */
     private static void verifyPasses(BoardScene captured) throws Exception {
         var light = new BoardScene.Light(-24, -30);
@@ -803,9 +806,13 @@ class GpuTacticalViewSmokeTest {
                 transparent[index] = vertices(profiler, () -> terrain.renderTransparent(camera.camera));
             }
             long sprites = captured.tiles().stream().filter(tile -> tile.foliage() != null).count();
-            assertEquals(shadows[2], shadows[1], "Only the featureless board casts shadows");
-            assertEquals(depths[2], depths[1], "Only the featureless board writes camera depth");
-            assertEquals(colour[2], colour[1], "No feature mesh or scatter enters the colour pass");
+            System.out.printf("TACTICAL-PASSES (3D, flat, featureless) shadow=%s depth=%s colour=%s transparent=%s%n",
+                  Arrays.toString(shadows), Arrays.toString(depths), Arrays.toString(colour),
+                  Arrays.toString(transparent));
+            // Features shape the terrain under them (foundations, roads, woods floors), so the featureless board is
+            // no vertex baseline: flat mode draws the same terrain in every pass; the 3D board adds feature meshes.
+            assertEquals(colour[1], shadows[1], "Flat mode casts shadows only from what it draws");
+            assertEquals(colour[1], depths[1], "Flat mode writes camera depth only for what it draws");
             assertTrue(shadows[0] > shadows[1] && depths[0] > depths[1] && colour[0] > colour[1],
                   "The 3D board draws its feature meshes");
             assertEquals(6 * sprites, transparent[1] - transparent[2], "One lit quad per sprite hex");
@@ -836,9 +843,11 @@ class GpuTacticalViewSmokeTest {
     }
 
     private static BoardScene.Tile featureless(BoardScene.Tile tile, BoardScene.Pixels sprite) {
+        // Only the features and the sprite change: roads, biome and the ground's detail shape the terrain itself.
         return new BoardScene.Tile(tile.coords(), tile.elevation(), tile.waterDepth(), tile.frozen(), tile.roadExits(),
               tile.surface(), tile.ground(), tile.normals(), tile.decals(), tile.decalsWithoutLimbs(), tile.tactical(),
-              List.of(), tile.text(), tile.liquid(), sprite);
+              List.of(), tile.text(), tile.liquid(), sprite, tile.detailedGround(), tile.road(), tile.fireSmoke(),
+              tile.biome(), tile.impassable(), tile.blackIce(), tile.cliffTopExits(), tile.bare());
     }
 
     /** The atlas page that holds a hex's sprite art; a full terrain rebuild replaces every page. */

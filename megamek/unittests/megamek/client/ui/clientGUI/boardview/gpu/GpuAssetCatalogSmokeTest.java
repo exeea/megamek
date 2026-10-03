@@ -172,10 +172,10 @@ class GpuAssetCatalogSmokeTest {
                             GpuBoardTestUi.capture(new File(output, "terrain-edges-reverse.png"));
                             boardCamera.center(BoardGeometry.center(new Coords(6, 6), 2));
                         } else if (frames() == 15) {
-                            GpuBoardTestUi.capture(new File(output, "cornices-volcano-lunar-mars-concrete.png"));
+                            GpuBoardTestUi.capture(new File(output, "edges-volcano-lunar-mars-concrete.png"));
                             boardCamera.orbit(180, 0);
                         } else if (frames() == 18) {
-                            GpuBoardTestUi.capture(new File(output, "cornices-volcano-lunar-mars-concrete-reverse.png"));
+                            GpuBoardTestUi.capture(new File(output, "edges-volcano-lunar-mars-concrete-reverse.png"));
                             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                             Gdx.app.exit();
                         }

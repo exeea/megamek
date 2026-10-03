@@ -4,5 +4,5 @@ uniform sampler2D u_liquidNextFrame;
 uniform float u_liquidBlend;
 
 vec4 liquidSample(vec2 uv) {
-    return mix(texture2D(u_diffuseTexture, uv), texture2D(u_liquidNextFrame, uv), u_liquidBlend);
+    return mix(texture(u_diffuseTexture, uv), texture(u_liquidNextFrame, uv), u_liquidBlend);
 }

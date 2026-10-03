@@ -34,7 +34,13 @@ import megamek.common.units.TripodMek;
 /** Swing-owned capture after visibility filtering. Structure changes are independent of pose and damage changes. */
 record UnitModelState(Structure structure, Appearance appearance, Pose pose) {
     record Structure(EntityMovementMode movement, List<UnitModelEquipment.Mount> equipment, List<Integer> members,
-          int activeTroopers, boolean externalSearchlight, MekAnatomy anatomy, BodyForm bodyForm) {
+          int activeTroopers, boolean externalSearchlight, MekAnatomy anatomy, BodyForm bodyForm,
+          UnitFamilyScale family) {
+        Structure(EntityMovementMode movement, List<UnitModelEquipment.Mount> equipment, List<Integer> members,
+              int activeTroopers, boolean externalSearchlight, MekAnatomy anatomy, BodyForm bodyForm) {
+            this(movement, equipment, members, activeTroopers, externalSearchlight, anatomy, bodyForm,
+                  anatomy == null ? UnitFamilyScale.DEFAULT : UnitFamilyScale.MEK);
+        }
         Structure(EntityMovementMode movement, List<UnitModelEquipment.Mount> equipment, List<Integer> members,
               int activeTroopers, boolean externalSearchlight, MekAnatomy anatomy) {
             this(movement, equipment, members, activeTroopers, externalSearchlight, anatomy, null);
@@ -80,7 +86,11 @@ record UnitModelState(Structure structure, Appearance appearance, Pose pose) {
     }
 
     record Appearance(Set<Integer> inoperableEquipment, boolean searchlightOn, Camo camo,
-          Map<Integer, Appearance> fighters) {
+          Map<Integer, Appearance> fighters, float bodyLoss) {
+        Appearance(Set<Integer> inoperableEquipment, boolean searchlightOn, Camo camo,
+              Map<Integer, Appearance> fighters) {
+            this(inoperableEquipment, searchlightOn, camo, fighters, 0);
+        }
         Appearance(Set<Integer> inoperableEquipment, boolean searchlightOn, Camo camo) {
             this(inoperableEquipment, searchlightOn, camo, Map.of());
         }
@@ -174,8 +184,9 @@ record UnitModelState(Structure structure, Appearance appearance, Pose pose) {
         boolean externalLamp = entity.hasExternalSearchlight() && (!entity.getsAutoExternalSearchlight()
               || entity.getQuirks().booleanOption(OptionsConstants.QUIRK_POS_SEARCHLIGHT));
         return new UnitModelState(new Structure(movement, equipment, members, troopers,
-              externalLamp, anatomy, form),
-              new Appearance(inoperable, entity.isUsingSearchlight(), appearance, fighterAppearances),
+              externalLamp, anatomy, form, UnitFamilyScale.forEntity(entity)),
+              new Appearance(inoperable, entity.isUsingSearchlight(), appearance, fighterAppearances,
+                    UnitModelSelection.bodyLoss(entity)),
               new Pose(entity instanceof Mek ? entity.getProneCause() : ProneCause.NONE,
                     entity.getFacing(), entity.getSecondaryFacing(), megamek.common.units.UnitLocation.Form.capture(entity),
                     entity.isDestroyed() || entity.isDoomed(),

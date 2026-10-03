@@ -48,6 +48,7 @@ import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JProgressBar;
 import javax.swing.SwingUtilities;
+import javax.swing.Timer;
 
 import megamek.client.ui.GBC;
 import megamek.client.ui.Messages;
@@ -56,16 +57,18 @@ import megamek.common.loaders.MekSummaryCache;
 public class UnitLoadingDialog extends JDialog {
     @Serial
     private static final long serialVersionUID = -3454307876761238915L;
+
+    // Determines how often to update the loading dialog.
+    // Setting this too low causes noticeable loading delays.
+    private static final int UPDATE_FREQUENCY = 50;
+
     private final JLabel lCacheCount = new JLabel();
     private final JLabel lFileCount = new JLabel();
     private final JLabel lZipCount = new JLabel();
     private final JProgressBar progressBar = new JProgressBar();
     private final MekSummaryCache mekSummaryCache;
+    private final Timer updateTimer = new Timer(UPDATE_FREQUENCY, event -> updateCounts());
     private MekSummaryCache.Listener mekSummaryCacheListener;
-
-    // Determines how often to update the loading dialog.
-    // Setting this too low causes noticeable loading delays.
-    private static final long UPDATE_FREQUENCY = 50;
 
     private volatile boolean loadingDone = false;
 
@@ -79,8 +82,11 @@ public class UnitLoadingDialog extends JDialog {
 
     public UnitLoadingDialog(JFrame frame, MekSummaryCache mekSummaryCache, String loadingMessage,
           boolean waitForUpcomingLoad) {
-        super(frame, Messages.getString("UnitLoadingDialog.pleaseWait"));
+        // Callers opening cache-dependent tools need to wait without blocking Swing's event queue.
+        // Passive lobby loading uses showForBackgroundLoad() instead and defers constructing those tools.
+        super(frame, Messages.getString("UnitLoadingDialog.pleaseWait"), true);
         this.mekSummaryCache = Objects.requireNonNull(mekSummaryCache);
+        setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
 
         getContentPane().setLayout(new GridBagLayout());
         JLabel lLoading = new JLabel(loadingMessage);
@@ -101,18 +107,27 @@ public class UnitLoadingDialog extends JDialog {
         getContentPane().add(lZipText, GBC.std());
         getContentPane().add(lZipCount, GBC.eol());
 
+        updateCounts();
+        // Leave room for growing counts without resizing the window during a rebuild.
+        lCacheCount.setPreferredSize(new JLabel("000000").getPreferredSize());
         pack();
         setResizable(false);
         // move to middle of screen
         setLocationRelativeTo(frame);
 
         if (!waitForUpcomingLoad && mekSummaryCache.isInitialized()) {
-            loadingDone = true;
-            updateCounts();
+            dispose();
             return;
         }
 
         startMonitoring(waitForUpcomingLoad);
+    }
+
+    /** Shows dismissible progress without preventing the user from configuring the lobby while units load. */
+    public void showForBackgroundLoad() {
+        setModal(false);
+        setDefaultCloseOperation(DISPOSE_ON_CLOSE);
+        setVisible(true);
     }
 
     @Override
@@ -126,13 +141,12 @@ public class UnitLoadingDialog extends JDialog {
     @Override
     public void dispose() {
         loadingDone = true;
+        updateTimer.stop();
         unregisterListener();
         super.dispose();
     }
 
     private void startMonitoring(boolean waitForUpcomingLoad) {
-        updateCounts();
-
         mekSummaryCacheListener = this::finishMonitoring;
         mekSummaryCache.addListener(mekSummaryCacheListener);
 
@@ -144,20 +158,10 @@ public class UnitLoadingDialog extends JDialog {
             finishMonitoring();
         }
 
-        Runnable r = () -> {
-            while (!loadingDone) {
-                SwingUtilities.invokeLater(this::updateCounts);
-                try {
-                    Thread.sleep(UPDATE_FREQUENCY);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return;
-                }
-            }
-        };
-        Thread t = new Thread(r, "Unit Loader Dialog");
-        t.setDaemon(true);
-        t.start();
+        if (!loadingDone) {
+            // Swing timers coalesce delayed ticks instead of filling the event queue with stale updates.
+            updateTimer.start();
+        }
     }
 
     static boolean shouldFinishMonitoringAfterRegistration(boolean waitForUpcomingLoad, boolean cacheInitialized) {
@@ -166,8 +170,7 @@ public class UnitLoadingDialog extends JDialog {
 
     private void finishMonitoring() {
         loadingDone = true;
-        unregisterListener();
-        SwingUtilities.invokeLater(() -> setVisible(false));
+        SwingUtilities.invokeLater(this::dispose);
     }
 
     private void unregisterListener() {

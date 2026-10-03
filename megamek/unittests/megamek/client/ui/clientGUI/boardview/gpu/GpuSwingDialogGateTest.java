@@ -92,6 +92,7 @@ import megamek.client.ui.dialogs.phaseDisplay.VariableRangeTargetingDialog;
 import megamek.client.ui.dialogs.phaseDisplay.VibrabombSettingDialog;
 import megamek.client.ui.panels.phaseDisplay.ActionPhaseDisplay;
 import megamek.client.ui.panels.phaseDisplay.DeployMinefieldDisplay;
+import megamek.client.ui.panels.phaseDisplay.DeploymentHelper;
 import megamek.client.ui.panels.phaseDisplay.FiringDisplay;
 import megamek.client.ui.panels.phaseDisplay.PhysicalDisplay;
 import megamek.client.ui.panels.phaseDisplay.TargetingPhaseDisplay;
@@ -109,6 +110,7 @@ import megamek.common.loaders.MULParser;
 import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.units.AbstractBuildingEntity;
+import megamek.common.units.Dropship;
 import megamek.common.units.Entity;
 import megamek.common.units.Infantry;
 import megamek.common.units.Mek;
@@ -287,7 +289,7 @@ class GpuSwingDialogGateTest {
             gate.drive("R5 VictoryHexPropertiesPane", DialogKind.FORM, MESSAGE_BOX, () -> {
                 ObjectiveMarker point = new ObjectiveMarker();
                 point.setName("Objective 0505");
-                return VictoryHexPropertiesPane.edit(frame, point, GpuVictoryHexFormTest.players());
+                return VictoryHexPropertiesPane.edit(frame, point, GpuVictoryHexFormTest.players(), false);
             });
             // R9: a scenario's story
             gate.drive("R9 MMNarrativeStoryDialog", DialogKind.MESSAGE, type(MMNarrativeStoryDialog.class), () -> {
@@ -377,7 +379,8 @@ class GpuSwingDialogGateTest {
     void aListPromptOfEachRoutedClassAndTheBotherNagAskNativelyOverTheBattleWindowAndInSwingOnTheClassicClient()
           throws Exception {
         assumeFalse(GraphicsEnvironment.isHeadless(), "Shows Swing dialogs");
-        // MovementDisplay: the player a traitor unit goes to
+        // MovementDisplay: the player a traitor unit goes to; the crane helpers' carrier and facing, which get only the
+        // client frame; the deployment helper's elevation above the listed ones
         try (GpuMovementFixture moving = GpuMovementFixture.create()) {
             JFrame frame = clientFrame(moving.gui);
             when(moving.gui.getFrame()).thenReturn(frame);
@@ -393,6 +396,24 @@ class GpuSwingDialogGateTest {
                           MoveCommand.MOVE_TRAITOR.getCmd()));
                     return null;
                 });
+                Class<?> crane = Class.forName("megamek.client.ui.panels.phaseDisplay.CraneCommandDialogs");
+                Method chooseCarrier = crane.getDeclaredMethod("chooseCarrier", JFrame.class, Entity.class,
+                      List.class);
+                chooseCarrier.setAccessible(true);
+                Dropship union = new Dropship();
+                union.setChassis("Union");
+                Dropship leopard = new Dropship();
+                leopard.setChassis("Leopard");
+                gate.drive("Z1 CraneCommandDialogs, the carrier", DialogKind.CHOICE, MESSAGE_BOX,
+                      () -> chooseCarrier.invoke(null, frame, moving.unit, List.of(union, leopard)));
+                Method chooseFacing = crane.getDeclaredMethod("chooseFacing", JFrame.class, Entity.class);
+                chooseFacing.setAccessible(true);
+                gate.drive("Z1 CraneCommandDialogs, the unload facing", DialogKind.CHOICE, MESSAGE_BOX,
+                      () -> chooseFacing.invoke(null, frame, moving.unit));
+                Method highElevation = DeploymentHelper.class.getDeclaredMethod("showHighElevationChoiceDialog");
+                highElevation.setAccessible(true);
+                gate.drive("Z1 DeploymentHelper, the elevation", DialogKind.INPUT, MESSAGE_BOX,
+                      () -> highElevation.invoke(new DeploymentHelper(moving.gui)));
             } finally {
                 dispose(frame);
             }

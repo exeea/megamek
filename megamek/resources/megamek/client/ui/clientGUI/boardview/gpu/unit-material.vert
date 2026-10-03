@@ -6,9 +6,9 @@ uniform vec2 u_camoImageSize;
 uniform mat4 u_paintTransform;
 uniform mat3 u_paintNormalMatrix;
 uniform vec4 u_damageTransform;
-varying vec3 v_paintPosition;
-varying vec2 v_damageUV;
-varying float v_damageMask;
+out vec3 v_paintPosition;
+out vec2 v_damageUV;
+out float v_damageMask;
 
 void unitMaterialCoordinates() {
     v_damageMask = 1.0;

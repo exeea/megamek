@@ -489,7 +489,7 @@ public class MiscType extends EquipmentType {
 
     @Override
     public double getTonnage(Entity entity, int location, double size, RoundWeight defaultRounding) {
-        if ((tonnage != TONNAGE_VARIABLE) || (null == entity)) {
+        if ((tonnage != TONNAGE_VARIABLE) || (entity == null)) {
             return tonnage;
         }
         // check for known formulas
@@ -521,7 +521,7 @@ public class MiscType extends EquipmentType {
             // pg 350, TO
             // 10% of engine weight rounded to the nearest half ton
             Engine e = entity.getEngine();
-            if (null == e) {
+            if (e == null) {
                 return 0;
             }
             return defaultRounding.round(e.getWeightEngine(entity, defaultRounding) / 10.0, entity);
@@ -536,7 +536,7 @@ public class MiscType extends EquipmentType {
             } else {
                 if (hasFlag(MiscTypeFlag.S_SUPERCHARGER)) {
                     Engine e = entity.getEngine();
-                    if (null == e) {
+                    if (e == null) {
                         return 0;
                     }
                     // pg 344, TO
@@ -1075,7 +1075,7 @@ public class MiscType extends EquipmentType {
 
     @Override
     public int getNumCriticalSlots(Entity entity, double size) {
-        if ((criticalSlots != CRITICAL_SLOTS_VARIABLE) || (null == entity)) {
+        if ((criticalSlots != CRITICAL_SLOTS_VARIABLE) || (entity == null)) {
             return criticalSlots;
         }
         // check for known formulas
@@ -1375,7 +1375,7 @@ public class MiscType extends EquipmentType {
             return 2.5 * Math.ceil(0.2 * entity.getWeight());
         }
         double returnBV = 0.0;
-        if ((bv != BV_VARIABLE) || (null == entity)) {
+        if ((bv != BV_VARIABLE) || (entity == null)) {
             returnBV = bv;
             // Mast Mounts give extra BV to equipment mounted in the mast
             if ((entity instanceof VTOL) &&
@@ -1660,6 +1660,7 @@ public class MiscType extends EquipmentType {
         EquipmentType.addType(MiscType.createISVehicularMineDispenser());
         EquipmentType.addType(MiscType.createMiningDrill());
         EquipmentType.addType(MiscType.createISReconCamera());
+        EquipmentType.addType(MiscType.createBombReconCamera());
         EquipmentType.addType(MiscType.createISCombatVehicleEscapePod());
         EquipmentType.addType(MiscType.createISSmallNavalCommScannerSuite());
         EquipmentType.addType(MiscType.createISLargeNavalCommScannerSuite());
@@ -6269,8 +6270,11 @@ public class MiscType extends EquipmentType {
         return misc;
     }
 
+    /**
+     * The Recon Camera (TO:AUE p.150). Its rules live in {@link ReconCameraRules}; it spots by
+     * default and can be switched to reveal hidden units, which only an airborne aerospace unit can do.
+     */
     public static MiscType createISReconCamera() {
-        // TODO: implement game rules
         MiscType misc = new MiscType();
         misc.name = "Recon Camera";
         misc.setInternalName("ISReconCamera");
@@ -6288,13 +6292,46 @@ public class MiscType extends EquipmentType {
               F_RECON_CAMERA);
         misc.rulesRefs = rulesRefs(SourceBookCode.TO_AUE, 150);
         misc.techAdvancement.setTechBase(TechBase.ALL)
-              .setTechRating(TechRating.B)
+              .setTechRating(TechRating.C)
               .setAvailability(AvailabilityValue.B, AvailabilityValue.B, AvailabilityValue.B, AvailabilityValue.B)
               .setISAdvancement(DATE_PS, DATE_PS, DATE_NONE, DATE_NONE, DATE_NONE)
               .setISApproximate(false, false, false, false, false)
               .setClanAdvancement(DATE_PS, DATE_PS, DATE_NONE, DATE_NONE, DATE_NONE)
-              .setClanApproximate(false, false, false, false, false);
+              .setClanApproximate(false, false, false, false, false)
+              .setStaticTechLevel(SimpleTechLevel.ADVANCED);
+        addReconCameraModes(misc);
         return misc;
+    }
+
+    /**
+     * The camera a Recon Camera bomb pod gives the fighter carrying it (TO:AUE p.150: "Recon Cameras can be mounted on
+     * external hardpoints as a bomb type"). It is added only by the bomb loadout, so it carries no unit equipment
+     * flags and never appears in construction.
+     */
+    public static MiscType createBombReconCamera() {
+        MiscType misc = new MiscType();
+        misc.name = "Recon Camera Pod";
+        misc.setInternalName("BombReconCamera");
+        misc.tonnage = 0;
+        misc.criticalSlots = 0;
+        misc.cost = 0;
+        misc.flags = misc.flags.or(F_RECON_CAMERA);
+        misc.rulesRefs = rulesRefs(SourceBookCode.TO_AUE, 150);
+        misc.techAdvancement.setTechBase(TechBase.ALL)
+              .setTechRating(TechRating.C)
+              .setAvailability(AvailabilityValue.B, AvailabilityValue.B, AvailabilityValue.B, AvailabilityValue.B)
+              .setISAdvancement(DATE_PS, DATE_PS, DATE_NONE, DATE_NONE, DATE_NONE)
+              .setISApproximate(false, false, false, false, false)
+              .setClanAdvancement(DATE_PS, DATE_PS, DATE_NONE, DATE_NONE, DATE_NONE)
+              .setClanApproximate(false, false, false, false, false)
+              .setStaticTechLevel(SimpleTechLevel.ADVANCED);
+        addReconCameraModes(misc);
+        return misc;
+    }
+
+    private static void addReconCameraModes(MiscType camera) {
+        camera.setModes(ReconCameraRules.MODE_SPOT, ReconCameraRules.MODE_REVEAL);
+        camera.setInstantModeSwitch(true);
     }
 
     public static MiscType createRemoteSensorDispenser() {
@@ -6556,6 +6593,12 @@ public class MiscType extends EquipmentType {
               F_WS_EQUIPMENT,
               F_SS_EQUIPMENT,
               F_HEAVY_EQUIPMENT);
+        // Missile fire control may be switched on or off (BMM p.12, Electronics). Switching it off gives up the
+        // guidance bonus, which matters most for the Apollo: its -1 on the cluster roll is paid for with a +1 to
+        // hit that MRMs carry. The switch is declared now and takes effect in the End Phase, as it does for every
+        // other electronics system; that is what setInstantModeSwitch(false) does.
+        misc.setModes(Mounted.MODE_ON, Mounted.MODE_OFF);
+        misc.setInstantModeSwitch(false);
         misc.rulesRefs = rulesRefs(
               rulesRef(SourceBookCode.TM, 206),
               rulesRef(SourceBookCode.BMM, 110),
@@ -6595,6 +6638,12 @@ public class MiscType extends EquipmentType {
               F_SS_EQUIPMENT,
               F_HEAVY_EQUIPMENT,
               F_PROTOTYPE);
+        // Missile fire control may be switched on or off (BMM p.12, Electronics). Switching it off gives up the
+        // guidance bonus, which matters most for the Apollo: its -1 on the cluster roll is paid for with a +1 to
+        // hit that MRMs carry. The switch is declared now and takes effect in the End Phase, as it does for every
+        // other electronics system; that is what setInstantModeSwitch(false) does.
+        misc.setModes(Mounted.MODE_ON, Mounted.MODE_OFF);
+        misc.setInstantModeSwitch(false);
         misc.rulesRefs = rulesRefs(SourceBookCode.IO_AE, 64);
         misc.techAdvancement.setTechBase(TechBase.IS)
               .setTechRating(TechRating.E)
@@ -6629,6 +6678,12 @@ public class MiscType extends EquipmentType {
               F_WS_EQUIPMENT,
               F_SS_EQUIPMENT,
               F_HEAVY_EQUIPMENT);
+        // Missile fire control may be switched on or off (BMM p.12, Electronics). Switching it off gives up the
+        // guidance bonus, which matters most for the Apollo: its -1 on the cluster roll is paid for with a +1 to
+        // hit that MRMs carry. The switch is declared now and takes effect in the End Phase, as it does for every
+        // other electronics system; that is what setInstantModeSwitch(false) does.
+        misc.setModes(Mounted.MODE_ON, Mounted.MODE_OFF);
+        misc.setInstantModeSwitch(false);
         misc.rulesRefs = rulesRefs(
               rulesRef(SourceBookCode.TM, 206),
               rulesRef(SourceBookCode.BMM, 110),
@@ -6668,6 +6723,12 @@ public class MiscType extends EquipmentType {
               F_WS_EQUIPMENT,
               F_SS_EQUIPMENT,
               F_HEAVY_EQUIPMENT);
+        // Missile fire control may be switched on or off (BMM p.12, Electronics). Switching it off gives up the
+        // guidance bonus, which matters most for the Apollo: its -1 on the cluster roll is paid for with a +1 to
+        // hit that MRMs carry. The switch is declared now and takes effect in the End Phase, as it does for every
+        // other electronics system; that is what setInstantModeSwitch(false) does.
+        misc.setModes(Mounted.MODE_ON, Mounted.MODE_OFF);
+        misc.setInstantModeSwitch(false);
         misc.rulesRefs = rulesRefs(
               rulesRef(SourceBookCode.TO_AUE, 95),
               rulesRef(SourceBookCode.BMM, 110),
@@ -6707,6 +6768,12 @@ public class MiscType extends EquipmentType {
               F_WS_EQUIPMENT,
               F_SS_EQUIPMENT,
               F_HEAVY_EQUIPMENT);
+        // Missile fire control may be switched on or off (BMM p.12, Electronics). Switching it off gives up the
+        // guidance bonus, which matters most for the Apollo: its -1 on the cluster roll is paid for with a +1 to
+        // hit that MRMs carry. The switch is declared now and takes effect in the End Phase, as it does for every
+        // other electronics system; that is what setInstantModeSwitch(false) does.
+        misc.setModes(Mounted.MODE_ON, Mounted.MODE_OFF);
+        misc.setInstantModeSwitch(false);
         misc.rulesRefs = rulesRefs(
               rulesRef(SourceBookCode.TO_AUE, 143),
               rulesRef(SourceBookCode.BMM, 113),

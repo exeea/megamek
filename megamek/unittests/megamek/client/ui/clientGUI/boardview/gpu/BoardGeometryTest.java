@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -19,6 +20,33 @@ class BoardGeometryTest {
     @BeforeAll
     static void loadMathNatives() {
         GdxNativesLoader.load();
+    }
+
+    @Test
+    void terrainImpactsUseThePickedMaterialAndCacheItForPlayback() {
+        for (var material : BoardScene.Surface.values()) {
+            for (int water : new int[] { -1, 2 }) {
+                var tile = new BoardScene.Tile(new Coords(0, 0), 0, water, false, 0, material,
+                      null, null, null, List.of(), List.of());
+                var board = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
+                var cache = new BoardSurface.Cache();
+                var ray = new Ray(BoardGeometry.center(tile.coords(), 0).add(0, 0, 100), new Vector3(0, 0, -1));
+                var hit = BoardGeometry.hit(board, ray, board.tiles(), BoardGeometry.floor(board), cache);
+                boolean sparks = water < 0 && (material == BoardScene.Surface.ROCK || material == BoardScene.Surface.CONCRETE);
+                assertEquals(sparks, hit.hardSurface(), "The exposed material matters, including water over rock");
+                var at = ray.origin.cpy().mulAdd(ray.direction, (float) Math.sqrt(hit.distance()));
+                var attack = new UnitAttack(UnitPlaybackTest.attack(UnitPlaybackTest.unit(1, 1), UnitPlaybackTest.unit(2, 0),
+                      megamek.common.ResolvedAttack.Kind.SHOT, false));
+                var picks = new java.util.concurrent.atomic.AtomicInteger();
+                attack.landscape = probe -> {
+                    picks.incrementAndGet();
+                    return BoardGeometry.hit(board, probe, board.tiles(), BoardGeometry.floor(board), cache);
+                };
+                assertEquals(sparks, attack.hardImpact(at));
+                assertEquals(sparks, attack.hardImpact(at.cpy()));
+                assertEquals(1, picks.get(), "An impact must not repeat terrain picking on every animation frame");
+            }
+        }
     }
 
     private BoardScene scene(int raisedLevel) {
@@ -49,6 +77,26 @@ class BoardGeometryTest {
     }
 
     @Test
+    void theTileUnderAPointIsTheHexWhoseFootprintHoldsIt() {
+        BoardScene scene = scene(0);
+        for (BoardScene.Tile tile : scene.tiles()) {
+            Coords coords = tile.coords();
+            // Just inside each of the six edges' midpoints, and just beyond it in the neighbour or off the board.
+            for (int corner = 0; corner < 6; corner++) {
+                Vector3 edge = BoardGeometry.corner(coords, 0, corner)
+                      .add(BoardGeometry.corner(coords, 0, (corner + 1) % 6)).scl(.5f);
+                Vector3 center = BoardGeometry.center(coords, 0);
+                Vector3 inside = new Vector3(edge).lerp(center, .02f);
+                Vector3 outside = new Vector3(edge).lerp(center, -.02f);
+                assertEquals(tile, BoardGeometry.tile(scene, inside.x, inside.y));
+                BoardScene.Tile beyond = BoardGeometry.tile(scene, outside.x, outside.y);
+                assertTrue(beyond == null || !beyond.coords().equals(coords), "A point beyond an edge is elsewhere");
+            }
+        }
+        assertNull(BoardGeometry.tile(scene, -BoardGeometry.WIDTH, BoardGeometry.HEIGHT));
+    }
+
+    @Test
     void weatherStartsAtTheLowestHexLevelRegardlessOfDepthOrBoardElevation() {
         for (int base : new int[] { -3, 0, 4 }) {
             for (int wetLevel : new int[] { base, base + 2 }) {
@@ -72,6 +120,35 @@ class BoardGeometryTest {
         Ray ray = new Ray(new Vector3(center).add(200, 0, 0), new Vector3(-1, 0, 0));
         assertEquals(raised, BoardGeometry.pick(scene, ray));
         assertNull(BoardGeometry.pick(scene, new Ray(new Vector3(-500, 500, 100), new Vector3(0, 0, -1))));
+    }
+
+    @Test
+    void lowAnglePickingDoesNotPrepareTerrainBehindTheNearestCliff() {
+        var tiles = new ArrayList<BoardScene.Tile>();
+        for (int x = 0; x < 12; x++) {
+            for (int y = 0; y < 5; y++) {
+                tiles.add(new BoardScene.Tile(new Coords(x, y), 2, -1, false, 0, BoardScene.Surface.GRASS,
+                      null, null, null, List.of(), List.of()));
+            }
+        }
+        var board = new BoardScene(0, 12, 5, tiles, List.of(), List.of(), -1, "", List.of());
+        float floor = BoardGeometry.floor(board);
+        for (boolean reverse : new boolean[] { false, true }) {
+            var candidates = reverse ? tiles.reversed() : tiles;
+            for (int column : new int[] { 0, 11 }) {
+                var target = new Coords(column, 2);
+                int direction = column == 0 ? 1 : -1;
+                var ray = new Ray(BoardGeometry.center(target, 1).add(-200 * direction, 0, 0), new Vector3(direction, 0, 0));
+                var queried = new ArrayList<Coords>();
+                var hit = BoardGeometry.hit(board, ray, candidates, floor, coords -> {
+                    queried.add(coords);
+                    return BoardTacticalGeometry.Surface.of(new BoardSurface(board, board.tile(coords)), board, floor);
+                });
+                assertEquals(target, hit.coords(), "Candidate order must not change the nearest rendered cliff");
+                assertFalse(queried.contains(new Coords(11 - column, 2)), "Occluded distant surfaces must not be rebuilt");
+                assertTrue(queried.size() < 6, "A nearby cliff must bound the expensive surface queries");
+            }
+        }
     }
 
     @Test

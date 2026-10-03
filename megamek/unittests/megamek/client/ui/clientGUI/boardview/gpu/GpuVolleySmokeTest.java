@@ -224,6 +224,9 @@ class GpuVolleySmokeTest {
                     if (!launch.hit(missile)) { continue; }
                     for (int loc = 0; loc < 2; loc++) {
                         var part = UnitBounds.subtree(target.getNode(loc == 0 ? "LA" : "RT")).mul(target.transform);
+                        // Barycentric surface points and transformed bounds can differ by two float ULPs in Z.
+                        part.ext(part.min.cpy().sub(.00001f, .00001f, .00001f));
+                        part.ext(part.max.cpy().add(.00001f, .00001f, .00001f));
                         if (part.contains(launch.targets()[missile])) { locatedHits[loc]++; }
                     }
                 }

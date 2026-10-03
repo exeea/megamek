@@ -4,6 +4,8 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -72,6 +74,8 @@ class GpuHexOverlayTest {
                 fixture.game.getBoard().setEmbeddedBoard(1, embedded);
                 fixture.source.refresh();
                 BoardScene marked = fixture.source.takeFrame().scene();
+                marked.tactical().fills().forEach(fill -> assertNotNull(fill.planeAnchor(),
+                      "Sheet borders and embedded-board indicators belong to their owner's flat plane"));
                 assertEquals(raster(before), raster(marked));
                 assertTrue(covers(marked.tactical(), Color.CYAN, new Coords(16, 8), 10.5, 18),
                       "The second sheet's left edge must be drawn at the actual hex seam");
@@ -81,7 +85,8 @@ class GpuHexOverlayTest {
                       "Interior hexes must not acquire sheet borders");
                 assertTrue(covers(marked.tactical(), new Color(0, 140, 0, 120), embedded, 42, 36));
                 List<BoardTacticalGeometry.Triangle> triangles = new ArrayList<>();
-                BoardTacticalGeometry.drape(marked, triangles::add);
+                // On the column top itself: with hex transitions its edges would drape down its slopes.
+                BoardSculptTest.withTransitions(false, () -> BoardTacticalGeometry.drape(marked, triangles::add));
                 assertTrue(triangles.stream().filter(t -> t.argb() == new Color(0, 140, 0, 120).getRGB())
                       .allMatch(t -> t.a().z > 3 * BoardGeometry.LEVEL && t.b().z > 3 * BoardGeometry.LEVEL
                             && t.c().z > 3 * BoardGeometry.LEVEL));
@@ -115,6 +120,7 @@ class GpuHexOverlayTest {
             SwingUtilities.invokeAndWait(() -> {
                 fixture.source.refresh();
                 BoardScene ecm = fixture.source.takeFrame().scene();
+                assertFieldPlanes(ecm);
                 Coords sample = new Coords(4, 4);
                 Color tint = ECMEffects.getECMColor(fixture.player);
                 assertTrue(covers(ecm.tactical(), tint, sample, 42, 36));
@@ -139,6 +145,7 @@ class GpuHexOverlayTest {
                 fixture.view.updateEcmList();
                 fixture.source.refresh();
                 BoardScene eccm = fixture.source.takeFrame().scene();
+                assertFieldPlanes(eccm);
                 assertTrue(covers(eccm.tactical(), tint, sample, 42, 36));
                 assertTrue(eccm.tile(sample).tactical() == null, "ECCM needs no raster artwork");
 
@@ -192,6 +199,20 @@ class GpuHexOverlayTest {
                       "An emitter on another board must not leave a source outline at matching coordinates");
             });
         }
+    }
+
+    private static void assertFieldPlanes(BoardScene scene) {
+        int sources = 0, coverage = 0;
+        for (var fill : scene.tactical().fills()) {
+            if (fill.border() != null) {
+                sources++;
+                assertEquals(fill.border().anchor(), fill.planeAnchor(), "Source rings stay on their owner's plane");
+            } else {
+                coverage++;
+                assertNull(fill.planeAnchor(), "Area coverage remains a terrain tint");
+            }
+        }
+        assertTrue(sources > 0 && coverage > 0, "Exercise both source rings and field coverage");
     }
 
     private static BoardArtwork.HexImage artwork(GpuBoardFixture fixture, Coords coords) {

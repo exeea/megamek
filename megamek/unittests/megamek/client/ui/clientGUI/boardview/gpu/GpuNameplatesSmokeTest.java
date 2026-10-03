@@ -23,7 +23,6 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.math.Intersector;
@@ -639,7 +638,7 @@ class GpuNameplatesSmokeTest {
     }
 
     /** Zooms the fitted view in by {@code factor} around the middle of the board's two sides. */
-    private static void closeUp(OrthographicCamera camera, float factor) {
+    private static void closeUp(BoardProjectionCamera camera, float factor) {
         camera.position.set(BoardGeometry.center(new Coords(15, 8), 0)).mulAdd(camera.direction, -10000);
         camera.zoom /= factor;
         camera.update();

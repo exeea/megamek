@@ -99,11 +99,11 @@ final class GpuFireControl implements Disposable {
             Color color = color(line.rgb(), 1);
             List<Vector3> path = BoardFiringGeometry.trajectory(scene, line);
             for (int i = 1; i < path.size(); i++) {
-                tube(mesh, path.get(i - 1), path.get(i), .725f * BoardGeometry.HEX_SCALE * TARGET_ARROW_SIZE, color);
+                tube(mesh, path.get(i - 1), path.get(i), .725f * BoardGeometry.hexScale() * TARGET_ARROW_SIZE, color);
             }
             Vector3 end = path.getLast();
             Vector3 direction = new Vector3(end).sub(path.get(path.size() - 2)).nor();
-            float length = Math.min(12 * BoardGeometry.HEX_SCALE, path.getFirst().dst(end) * 0.2f) * TARGET_ARROW_SIZE;
+            float length = Math.min(12 * BoardGeometry.hexScale(), path.getFirst().dst(end) * 0.2f) * TARGET_ARROW_SIZE;
             cone(mesh, new Vector3(end).mulAdd(direction, -length), end, length * 0.2f, color);
         }
         Model model = builder.end();
@@ -162,8 +162,8 @@ final class GpuFireControl implements Disposable {
     /** No time input: range letters are always flat and upright, including while orbiting or switching cameras. */
     static void labelTransform(Matrix4 out, Camera camera, BoardScene.Tile tile) {
         Vector3 right = new Vector3(camera.direction).crs(camera.up).nor();
-        float clearance = BoardGeometry.LEVEL * RANGE_LABEL_CLEARANCE_LEVELS
-              + (BoardGeometry.WIDTH * Math.abs(right.z) + BoardGeometry.HEIGHT * Math.abs(camera.up.z)) / 2;
+        float clearance = BoardGeometry.level() * RANGE_LABEL_CLEARANCE_LEVELS
+              + (BoardGeometry.width() * Math.abs(right.z) + BoardGeometry.height() * Math.abs(camera.up.z)) / 2;
         Vector3 center = BoardGeometry.center(tile.coords(), tile.elevation()).add(0, 0, clearance);
         out.set(center, GpuMarkers.orientation(camera, true));
     }
@@ -248,8 +248,8 @@ final class GpuFireControl implements Disposable {
                 labelTransform(labelMatrix, camera, tile);
                 labelBatch.setTransformMatrix(labelMatrix);
                 labelBatch.setColor(color(label.rgb(), 1));
-                labelBatch.draw(labelTextures.region(label.label()), -BoardGeometry.WIDTH / 2,
-                      -BoardGeometry.HEIGHT / 2, BoardGeometry.WIDTH, BoardGeometry.HEIGHT);
+                labelBatch.draw(labelTextures.region(label.label()), -BoardGeometry.width() / 2,
+                      -BoardGeometry.height() / 2, BoardGeometry.width(), BoardGeometry.height());
             }
             labelBatch.end();
         }

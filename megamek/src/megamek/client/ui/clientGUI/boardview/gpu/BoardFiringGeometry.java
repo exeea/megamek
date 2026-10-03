@@ -56,8 +56,8 @@ final class BoardFiringGeometry {
     private static RangeVertex rangeVertex(BoardScene.RangeBorder border, int corner) {
         Vector3 point = BoardGeometry.corner(border.coords(), 0, corner);
         // Integer lattice coordinates avoid floating-point mismatches at shared hex corners.
-        return new RangeVertex(Math.round(point.x / (BoardGeometry.WIDTH / 4)),
-              Math.round(point.y / (BoardGeometry.HEIGHT / 2)), border.label(), border.rgb());
+        return new RangeVertex(Math.round(point.x / (BoardGeometry.width() / 4)),
+              Math.round(point.y / (BoardGeometry.height() / 2)), border.label(), border.rgb());
     }
 
     /** Inset adjoining walls meet at convex and reflex corners without sharing the terrain's edge plane. */
@@ -66,7 +66,7 @@ final class BoardFiringGeometry {
         Vector3 along = new Vector3(wall.bottomB().x - wall.bottomA().x,
               wall.bottomB().y - wall.bottomA().y, 0).nor();
         Vector3 inward = new Vector3(Vector3.Z).crs(along);
-        float offset = BoardGeometry.MARKER_INSET * BoardGeometry.WIDTH / 2;
+        float offset = BoardGeometry.MARKER_INSET * BoardGeometry.width() / 2;
         float miter = offset * MITER;
         int mask = side.border().edges();
         boolean convexStart = (mask & (1 << BoardGeometry.edgeDirection(side.edge() - 1))) != 0;
@@ -83,7 +83,7 @@ final class BoardFiringGeometry {
         if (!line.indirect() || start.dst2(end) < 0.01f) {
             return List.of(start, end);
         }
-        float lift = Math.max(3 * BoardGeometry.LEVEL, start.dst(end) * 0.2f);
+        float lift = Math.max(3 * BoardGeometry.level(), start.dst(end) * 0.2f);
         for (Coords coords : Coords.intervening(line.source().coords(), line.target().coords())) {
             BoardScene.Tile tile = scene.tile(coords);
             if (tile == null || coords.equals(line.source().coords()) || coords.equals(line.target().coords())) {
@@ -97,7 +97,7 @@ final class BoardFiringGeometry {
             for (BoardScene.Feature feature : tile.features()) {
                 roof = Math.max(roof, tile.elevation() + feature.elevation() + feature.height());
             }
-            float clearance = (roof + 1) * BoardGeometry.LEVEL;
+            float clearance = (roof + 1) * BoardGeometry.level();
             // A concave parabola's lowest clearance over a flat hex is at entry or exit, not its centre.
             for (float t : interval) {
                 if (t > 0 && t < 1) {
@@ -106,8 +106,8 @@ final class BoardFiringGeometry {
             }
         }
         // Bound tessellation error below the one-level clearance even beside a very tall, nearby ridge.
-        int segments = Math.max(32, (int) Math.ceil(Math.sqrt(lift / (0.05f * BoardGeometry.LEVEL))));
-        segments = Math.max(segments, (int) Math.ceil(start.dst(end) / (BoardGeometry.HEIGHT / 4)));
+        int segments = Math.max(32, (int) Math.ceil(Math.sqrt(lift / (0.05f * BoardGeometry.level()))));
+        segments = Math.max(segments, (int) Math.ceil(start.dst(end) / (BoardGeometry.height() / 4)));
         List<Vector3> result = new ArrayList<>(segments + 1);
         for (int i = 0; i <= segments; i++) {
             float t = i / (float) segments;
@@ -154,6 +154,6 @@ final class BoardFiringGeometry {
             }
         }
         return BoardGeometry.corner(coords, level + (top ? RANGE_HEIGHT : 0), corner)
-              .add(0, 0, RANGE_CLEARANCE * BoardGeometry.HEX_SCALE);
+              .add(0, 0, RANGE_CLEARANCE * BoardGeometry.hexScale());
     }
 }

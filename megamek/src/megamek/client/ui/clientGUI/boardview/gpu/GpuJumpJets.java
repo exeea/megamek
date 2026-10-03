@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.badlogic.gdx.graphics.Camera;
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.model.Node;
 import com.badlogic.gdx.math.MathUtils;
@@ -56,12 +57,12 @@ final class GpuJumpJets implements Disposable {
             this.seed = seed;
         }
 
-        void update(ModelInstance instance, Node node, UnitModelDescriptor.Emitter emitter,
-              UnitMotion.Sample motion, float nozzleWidth) {
+        void update(Vector3 nozzle, Vector3 exhaust, UnitMotion.Sample motion, float nozzleWidth) {
             power = motion.jets();
             time = power.seconds();
-            UnitModelAttachment.emitter(instance, node, emitter, position, direction);
-            width = nozzleWidth * node.globalTransform.getScaleX() * instance.transform.getScaleX();
+            position.set(nozzle);
+            direction.set(exhaust);
+            width = nozzleWidth;
             if (sequence != power.sequence() || time < previousTime) {
                 smoke.clear();
                 previousTime = -1;
@@ -101,6 +102,18 @@ final class GpuJumpJets implements Disposable {
 
     /** Call after bone animation, placement and hover. No sensor-contact or absent body is a source of effects. */
     void update(String key, GpuUnitModel model, ModelInstance instance, BoardScene.Unit unit, UnitMotion.Sample motion) {
+        if (model.meeple()) {
+            if (!unit.sensorContact() && motion.jets() != null) {
+                var bounds = UnitBounds.local(instance);
+                var scale = UnitAttachments.scale(instance.transform);
+                var direction = new Vector3(0, 0, -1).rot(instance.transform).nor();
+                for (int side = -1; side <= 1; side += 2) {
+                    emit(key + "/meeple/" + side, MeepleVisual.nozzle(instance, side), direction, motion,
+                          Math.max(.6f, Math.min(bounds.getWidth() * scale.x, bounds.getHeight() * scale.y) * .035f));
+                }
+            }
+            return;
+        }
         if (unit.sensorContact() || unit.model().state() == null || motion.jets() == null && motion.group() == null) {
             return;
         }
@@ -137,6 +150,13 @@ final class GpuJumpJets implements Disposable {
         if (node == null || motion.jets() == null || !visible(node)) {
             return;
         }
+        var nozzle = new Vector3();
+        var exhaust = new Vector3();
+        UnitModelAttachment.emitter(instance, node, emitter, nozzle, exhaust);
+        emit(key, nozzle, exhaust, motion, width * node.globalTransform.getScaleX() * instance.transform.getScaleX());
+    }
+
+    private void emit(String key, Vector3 nozzle, Vector3 exhaust, UnitMotion.Sample motion, float width) {
         Jet jet = jets.get(key);
         if (jet == null) {
             if (jets.size() == MAX_EMITTERS) {
@@ -145,7 +165,7 @@ final class GpuJumpJets implements Disposable {
             jet = new Jet(key.hashCode());
             jets.put(key, jet);
         }
-        jet.update(instance, node, emitter, motion, width);
+        jet.update(nozzle, exhaust, motion, width);
     }
 
     private static boolean visible(Node node) {
@@ -183,6 +203,8 @@ final class GpuJumpJets implements Disposable {
         jets.clear();
         sortedSmoke.clear();
     }
+
+    void setSmokeLight(Color light) { batch.setSmokeLight(light); }
 
     void render(Camera camera) {
         if (jets.isEmpty()) {

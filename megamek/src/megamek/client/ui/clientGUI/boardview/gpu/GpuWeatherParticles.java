@@ -13,14 +13,24 @@ import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.utils.Disposable;
 
 /** A bounded, GPU-animated particle pool. Shares the world's depth buffer and never covers the tactical UI. */
 final class GpuWeatherParticles implements Disposable {
     private static final int BASE_PARTICLES = 768;
     private static final int PARTICLES = BASE_PARTICLES * 6;
-    private static final int[] DENSITY_MULTIPLIERS = { 6, 6, 4 };
-    private final ShaderProgram shader;
+    enum Kind {
+        RAIN("weather-rain.glsl", 6), SNOW("weather-snow.glsl", 6), HAIL("weather-hail.glsl", 4);
+
+        final String source;
+        final int density;
+
+        Kind(String source, int density) { this.source = source; this.density = density; }
+    }
+
+    private static final Kind[] KINDS = Kind.values();
+    private final ShaderProgram[] shaders = new ShaderProgram[KINDS.length];
     private final Mesh mesh;
     private final Vector3 right = new Vector3();
     private final Vector3 origin = new Vector3();
@@ -31,13 +41,6 @@ final class GpuWeatherParticles implements Disposable {
     private float top;
 
     GpuWeatherParticles() {
-        String path = "megamek/client/ui/clientGUI/boardview/gpu/weather-particles";
-        shader = new ShaderProgram(Gdx.files.classpath(path + ".vert"), Gdx.files.classpath(path + ".frag"));
-        if (!shader.isCompiled()) {
-            String log = shader.getLog();
-            shader.dispose();
-            throw new IllegalStateException("GPU precipitation shader: " + log);
-        }
         float[] vertices = new float[PARTICLES * 4 * 5];
         short[] indices = new short[PARTICLES * 6];
         Random random = new Random(20260918);
@@ -59,6 +62,23 @@ final class GpuWeatherParticles implements Disposable {
         mesh = new Mesh(true, PARTICLES * 4, indices.length, VertexAttribute.Position(), VertexAttribute.TexCoords(0));
         mesh.setVertices(vertices);
         mesh.setIndices(indices);
+        try {
+            for (Kind kind : KINDS) {
+                shaders[kind.ordinal()] = GpuShaderManager.program(() -> shader(kind), next -> shaders[kind.ordinal()] = next);
+            }
+        } catch (RuntimeException failure) {
+            dispose();
+            throw failure;
+        }
+    }
+
+    static ShaderProgram shader(Kind kind) {
+        return GpuGlsl.compile("GPU precipitation " + kind, source("weather-particles.vert", kind.source),
+              source("weather-particles.frag", kind.source));
+    }
+
+    static String source(String stage, String condition) {
+        return GpuShaderSource.read(stage).replace("// WEATHER_CONDITION", GpuShaderSource.read(condition));
     }
 
     void render(Camera camera, BoardScene scene, BoardAtmosphere.Effects effects, Color light, float clock) {
@@ -73,36 +93,33 @@ final class GpuWeatherParticles implements Disposable {
         Gdx.gl.glEnable(GL20.GL_BLEND);
         Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
         try {
-            shader.bind();
-            shader.setUniformMatrix("u_projView", camera.combined);
-            shader.setUniformf("u_origin", origin);
-            shader.setUniformf("u_extent", extent);
-            shader.setUniformf("u_right", right);
-            shader.setUniformf("u_up", camera.up);
-            shader.setUniformf("u_clock", clock);
-            shader.setUniformf("u_level", BoardGeometry.LEVEL);
-            shader.setUniformf("u_light", Math.min(1, light.r + 0.25f), Math.min(1, light.g + 0.25f),
-                  Math.min(1, light.b + 0.25f));
             float windX = MathUtils.sinDeg(effects.windDirection());
             float windY = MathUtils.cosDeg(effects.windDirection());
-            mesh.bind(shader);
-            for (int kind = 0; kind < DENSITY_MULTIPLIERS.length; kind++) {
+            float wind = effects.wind() * 5;
+            for (Kind kind : KINDS) {
                 float strength = switch (kind) {
-                    case 0 -> effects.rain();
-                    case 1 -> effects.snow();
-                    default -> effects.hail();
+                    case RAIN -> effects.rain();
+                    case SNOW -> effects.snow();
+                    case HAIL -> effects.hail();
                 };
                 if (strength > 0) {
-                    shader.setUniformf("u_kind", kind);
-                    float wind = effects.wind() * 5;
+                    ShaderProgram shader = shaders[kind.ordinal()];
+                    shader.bind();
+                    shader.setUniformMatrix("u_projView", camera.combined);
+                    shader.setUniformf("u_origin", origin);
+                    shader.setUniformf("u_extent", extent);
+                    shader.setUniformf("u_right", right);
+                    shader.setUniformf("u_up", camera.up);
+                    shader.setUniformf("u_clock", clock);
+                    shader.setUniformf("u_level", BoardGeometry.level());
+                    shader.setUniformf("u_light", light.r, light.g, light.b);
                     shader.setUniformf("u_wind", windX * wind, windY * wind);
-                    float density = strength * (1 + (DENSITY_MULTIPLIERS[kind] - 1) * strength * strength);
+                    float density = strength * (1 + (kind.density - 1) * strength * strength);
                     int count = Math.max(1, Math.round(BASE_PARTICLES * density));
-                    mesh.render(shader, GL20.GL_TRIANGLES, 0, count * 6, false);
+                    mesh.render(shader, GL20.GL_TRIANGLES, 0, count * 6);
                 }
             }
         } finally {
-            mesh.unbind(shader);
             Gdx.gl.glDepthMask(true);
             Gdx.gl.glDisable(GL20.GL_BLEND);
         }
@@ -110,9 +127,9 @@ final class GpuWeatherParticles implements Disposable {
 
     /** Bound the volume to the board and the camera's footprint at both ends of the weather layer. */
     private boolean bounds(Camera camera, BoardScene scene) {
-        if (tiles != scene.tiles() || level != BoardGeometry.LEVEL) {
+        if (tiles != scene.tiles() || level != BoardGeometry.level()) {
             tiles = scene.tiles();
-            level = BoardGeometry.LEVEL;
+            level = BoardGeometry.level();
             bottom = BoardGeometry.weatherBase(scene);
             top = Float.NEGATIVE_INFINITY;
             for (BoardScene.Tile tile : tiles) {
@@ -123,36 +140,20 @@ final class GpuWeatherParticles implements Disposable {
                 top = Math.max(top, (roof + 12) * level);
             }
         }
-        float minX = Float.POSITIVE_INFINITY, minY = Float.POSITIVE_INFINITY;
-        float maxX = Float.NEGATIVE_INFINITY, maxY = Float.NEGATIVE_INFINITY;
-        for (int corner = 0; corner < 4; corner++) {
-            Vector3 near = camera.frustum.planePoints[corner];
-            for (int end = 0; end < 2; end++) {
-                float height = end == 0 ? bottom : top;
-                float distance = (height - near.z) / camera.direction.z;
-                float x = near.x + distance * camera.direction.x;
-                float y = near.y + distance * camera.direction.y;
-                minX = Math.min(minX, x);
-                minY = Math.min(minY, y);
-                maxX = Math.max(maxX, x);
-                maxY = Math.max(maxY, y);
-            }
-        }
-        minX = Math.max(-BoardGeometry.WIDTH, minX);
-        minY = Math.max(-(scene.height() + 1) * BoardGeometry.HEIGHT, minY);
-        maxX = Math.min((scene.width() + 1) * BoardGeometry.WIDTH * 0.75f, maxX);
-        maxY = Math.min(BoardGeometry.HEIGHT, maxY);
-        if (maxX <= minX || maxY <= minY) {
+        BoundingBox visible = BoardCamera.viewportBounds(camera, new BoundingBox(
+              new Vector3(-BoardGeometry.width(), -(scene.height() + 1) * BoardGeometry.height(), bottom),
+              new Vector3((scene.width() + 1) * BoardGeometry.width() * .75f, BoardGeometry.height(), top)));
+        if (visible.getWidth() <= 0 || visible.getHeight() <= 0) {
             return false;
         }
-        origin.set(minX, minY, bottom);
-        extent.set(maxX - minX, maxY - minY, top - bottom);
+        origin.set(visible.min);
+        visible.getDimensions(extent);
         return true;
     }
 
     @Override
     public void dispose() {
         mesh.dispose();
-        shader.dispose();
+        for (ShaderProgram shader : shaders) { GpuShaderManager.dispose(shader); }
     }
 }

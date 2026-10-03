@@ -8,7 +8,6 @@ import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Mesh;
-import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
@@ -17,10 +16,12 @@ import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.Shader;
 import com.badlogic.gdx.graphics.g3d.shaders.DepthShader;
 import com.badlogic.gdx.graphics.g3d.utils.DepthShaderProvider;
+import com.badlogic.gdx.graphics.g3d.utils.ShaderProvider;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.graphics.glutils.HdpiUtils;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
@@ -29,25 +30,33 @@ import com.badlogic.gdx.utils.ScreenUtils;
 /** Occluded parts of visible units and opted-in markers. Owns GL resources; never changes scene materials or depth. */
 final class GpuUnitVisibility implements Disposable {
     static final float DEFAULT_OUTLINE_INTENSITY = 0.55f;
-    private final ShaderProgram shader;
+    private ShaderProgram shader;
     private final Mesh quad;
     private final ModelBatch colorBatch;
     private final Rectangle screenBounds = new Rectangle();
     private final Vector3 corner = new Vector3();
     private Texture unitDepth;
     private FrameBuffer unitColors;
+    private boolean depthCurrent;
 
     GpuUnitVisibility() {
-        shader = GpuAtmosphere.shader("unit-visibility.frag");
+        shader = GpuShaderManager.program(() -> GpuAtmosphere.shader("unit-visibility.frag"), next -> shader = next);
         quad = GpuAtmosphere.screenQuad();
+        colorBatch = new ModelBatch(GpuShaderManager.provider("Unit outlines", GpuUnitVisibility::colorProvider),
+              new GpuOpaqueSorter());
+    }
+
+    private static ShaderProvider colorProvider() {
         DepthShader.Config config = new DepthShader.Config();
         config.defaultCullFace = GL20.GL_BACK;
         config.depthBufferOnly = true;
-        config.fragmentShader = Gdx.files.classpath("megamek/client/ui/clientGUI/boardview/gpu/unit-color.frag").readString();
-        colorBatch = new ModelBatch(new DepthShaderProvider(config) {
+        config.fragmentShader = GpuShaderSource.read("unit-color.frag");
+        return new DepthShaderProvider(config) {
             @Override
             protected Shader createShader(Renderable renderable) {
-                return new DepthShader(renderable, this.config) {
+                return new DepthShader(renderable, this.config, GpuGlsl.compile("GPU unit outline",
+                      DepthShader.createPrefix(renderable, this.config),
+                      GpuGlsl.libGdx(DepthShader.getDefaultVertexShader(), true), this.config.fragmentShader)) {
                     private final int outlineColor = register("u_outlineColor");
 
                     @Override
@@ -57,7 +66,7 @@ final class GpuUnitVisibility implements Disposable {
                     }
                 };
             }
-        }, new GpuOpaqueSorter());
+        };
     }
 
     void render(Camera camera, List<ModelInstance> units, Texture sceneDepth, int bottom, float intensity, float scale) {
@@ -66,6 +75,12 @@ final class GpuUnitVisibility implements Disposable {
 
     void render(Camera camera, List<ModelInstance> units, Texture sceneDepth, int bottom, float intensity, float scale,
           UnitBounds.Frame bounds) {
+        render(camera, units, sceneDepth, bottom, intensity, scale, bounds, null);
+    }
+
+    void render(Camera camera, List<ModelInstance> units, Texture sceneDepth, int bottom, float intensity, float scale,
+          UnitBounds.Frame bounds, Texture effectOpacity) {
+        depthCurrent = false;
         if (intensity <= 0 || units.isEmpty()) {
             return;
         }
@@ -90,6 +105,7 @@ final class GpuUnitVisibility implements Disposable {
         units.forEach(unit -> GpuUnitInstance.renderDepth(colorBatch, unit));
         colorBatch.end();
         unitColors.end();
+        depthCurrent = true;
 
         HdpiUtils.glViewport(0, bottom, (int) camera.viewportWidth, (int) camera.viewportHeight);
         Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
@@ -105,11 +121,21 @@ final class GpuUnitVisibility implements Disposable {
             sceneDepth.bind(0);
             unitDepth.bind(1);
             unitColors.getColorBufferTexture().bind(2);
+            (effectOpacity == null ? sceneDepth : effectOpacity).bind(3);
             shader.setUniformi("u_sceneDepth", 0);
             shader.setUniformi("u_unitDepth", 1);
             shader.setUniformi("u_unitColors", 2);
+            shader.setUniformi("u_effectOpacity", 3);
+            shader.setUniformf("u_effectSize", effectOpacity == null ? 0 : effectOpacity.getWidth(),
+                  effectOpacity == null ? 0 : effectOpacity.getHeight());
             // A small world-space tolerance avoids highlighting an exposed surface due to depth rounding.
-            shader.setUniformf("u_bias", Math.max(0.0000005f, 0.05f * BoardGeometry.HEX_SCALE / (camera.far - camera.near)));
+            shader.setUniformf("u_bias", 0.05f * BoardGeometry.hexScale());
+            shader.setUniformf("u_projectionDepth", camera.projection.val[Matrix4.M22], camera.projection.val[Matrix4.M23],
+                  camera.projection.val[Matrix4.M32], camera.projection.val[Matrix4.M33]);
+            // World positions and hexes of both the unit and what stands before it, for the own-hex exemption.
+            shader.setUniformMatrix("u_inverseView", camera.invProjectionView);
+            shader.setUniformf("u_groundBoard", 0, 0, BoardGeometry.width(), BoardGeometry.height());
+            shader.setUniformf("u_levelHeight", BoardGeometry.level());
             shader.setUniformf("u_step", 1.5f * scale / camera.viewportWidth, 1.5f * scale / camera.viewportHeight);
             shader.setUniformf("u_intensity", MathUtils.clamp(intensity, 0, 1));
             quad.render(shader, GL20.GL_TRIANGLES);
@@ -123,17 +149,35 @@ final class GpuUnitVisibility implements Disposable {
         }
     }
 
+    /**
+     * The see-through colour's alpha for a unit standing in tile: the height, in quarter levels offset by 128, below
+     * which that hex's own relief, grass and scatter stay. The pass never counts them as hiding the unit.
+     */
+    static float ownHex(BoardScene.Tile tile) {
+        float top = tile.elevation() + BoardRelief.decoration(tile) / BoardGeometry.level();
+        return MathUtils.clamp((float) Math.ceil(top * 4) + 128, 1, 255) / 255;
+    }
+
+    /** Borrow this frame's existing unit capture; disabled/empty outlines must never expose stale camera depth. */
+    Texture depthTexture() {
+        return depthCurrent ? unitDepth : null;
+    }
+
     /** Project a conservative union, including the two-sample halo and rounding on HiDPI displays. */
     private void screenBounds(Camera camera, List<ModelInstance> units, float scale, UnitBounds.Frame bounds) {
         screenBounds.set(0, 0, camera.viewportWidth, camera.viewportHeight);
-        if (!(camera instanceof OrthographicCamera)) { return; }
         float minX = Float.POSITIVE_INFINITY, minY = Float.POSITIVE_INFINITY;
         float maxX = Float.NEGATIVE_INFINITY, maxY = Float.NEGATIVE_INFINITY;
         for (ModelInstance unit : units) {
             var box = bounds == null ? UnitBounds.world(unit) : bounds.get(unit);
             for (int i = 0; i < 8; i++) {
                 corner.set((i & 1) == 0 ? box.min.x : box.max.x, (i & 2) == 0 ? box.min.y : box.max.y,
-                      (i & 4) == 0 ? box.min.z : box.max.z).prj(camera.combined);
+                      (i & 4) == 0 ? box.min.z : box.max.z);
+                // A perspective projection mirrors points behind the eye: keep the whole viewport for such a unit.
+                if ((corner.x - camera.position.x) * camera.direction.x
+                      + (corner.y - camera.position.y) * camera.direction.y
+                      + (corner.z - camera.position.z) * camera.direction.z <= camera.near) { return; }
+                corner.prj(camera.combined);
                 float x = (corner.x + 1) * camera.viewportWidth / 2;
                 float y = (corner.y + 1) * camera.viewportHeight / 2;
                 minX = Math.min(minX, x); minY = Math.min(minY, y);
@@ -149,6 +193,7 @@ final class GpuUnitVisibility implements Disposable {
     }
 
     private void disposeBuffers() {
+        depthCurrent = false;
         if (unitDepth != null) { unitDepth.dispose(); unitDepth = null; }
         if (unitColors != null) { unitColors.dispose(); unitColors = null; }
     }
@@ -158,6 +203,6 @@ final class GpuUnitVisibility implements Disposable {
         disposeBuffers();
         colorBatch.dispose();
         quad.dispose();
-        shader.dispose();
+        GpuShaderManager.dispose(shader);
     }
 }

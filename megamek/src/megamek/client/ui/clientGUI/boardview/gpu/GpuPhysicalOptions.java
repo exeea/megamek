@@ -20,7 +20,6 @@ import megamek.common.actions.PunchAttackAction;
 import megamek.common.annotations.Nullable;
 import megamek.common.compute.Compute;
 import megamek.common.game.Game;
-import megamek.common.options.OptionsConstants;
 import megamek.common.rolls.PilotingRollData;
 import megamek.common.units.Entity;
 import megamek.common.units.Targetable;
@@ -198,7 +197,7 @@ final class GpuPhysicalOptions {
         if (target == null) {
             return List.of();
         }
-        boolean aptitude = actor.hasAbility(OptionsConstants.PILOT_APTITUDE_PILOTING);
+        boolean aptitude = actor.isUseNaturalAptitudePiloting();
         List<Option> options = new ArrayList<>();
         for (PhysicalOption option : physical.physicalOptions(target)) {
             ToHitData roll = option.toHit();

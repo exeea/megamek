@@ -11,13 +11,9 @@ import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import javax.swing.AbstractButton;
-import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
-import javax.swing.JMenu;
-import javax.swing.JMenuItem;
 import javax.swing.JPopupMenu;
-import javax.swing.JRadioButtonMenuItem;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 
@@ -35,36 +31,29 @@ import megamek.client.ui.panels.phaseDisplay.ActionPhaseDisplay;
 import megamek.client.ui.panels.phaseDisplay.DeploymentDisplay;
 import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
 import megamek.client.ui.panels.phaseDisplay.StatusBarPhaseDisplay;
-import megamek.client.ui.panels.phaseDisplay.commands.MoveCommand;
-import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.widget.MegaMekButton;
 import megamek.common.OffBoardDirection;
 import megamek.common.Player;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.units.Entity;
-import org.apache.commons.text.StringEscapeUtils;
 
 /** Read-only descriptions of existing controls. Every execution rechecks current Swing/game state. */
 final class GpuBoardActions {
-    private static final Set<String> MOVEMENT_COMMANDS = java.util.Arrays.stream(MoveCommand.values())
-          .map(MoveCommand::getCmd).collect(java.util.stream.Collectors.toUnmodifiableSet());
     private record Turn(JComponent panel, GamePhase phase, int index, int actor) { }
 
     private final BoardClientState view;
     private final Supplier<JComponent> panel;
     private final BooleanSupplier ignoringInput;
-    private final Runnable changed;
+    private final GpuMenuCommands menus;
 
     /** {@code ignoringInput} is the owner's EDT guard: closed, replaced, or not accepting input (modal shown). */
     GpuBoardActions(BoardClientState view, Supplier<JComponent> panel, BooleanSupplier ignoringInput, Runnable changed) {
         this.view = view;
         this.panel = panel;
         this.ignoringInput = ignoringInput;
-        this.changed = changed;
+        menus = new GpuMenuCommands(ignoringInput, changed);
     }
-
-    record PhaseStatus(String text, boolean blocking) { }
 
     /** Phase command ids of the phase display's Done and Skip buttons and of the clear command. */
     static final String DONE_ID = "phase.done";
@@ -133,14 +122,14 @@ final class GpuBoardActions {
     }
 
     /** Read presentation text from the existing phase controller on the EDT, including startup and waiting panels. */
-    static PhaseStatus phaseStatus(JComponent panel) {
+    static BoardSource.PhaseStatus phaseStatus(JComponent panel) {
         if (panel instanceof StatusBarPhaseDisplay phase) {
-            return new PhaseStatus(plainText(phase.getStatusBarText()), false);
+            return new BoardSource.PhaseStatus(plainText(phase.getStatusBarText()), false);
         }
         List<String> labels = new ArrayList<>();
         collectStatusLabels(panel, labels);
         String text = String.join("\n", labels);
-        return new PhaseStatus(text, !text.isEmpty());
+        return new BoardSource.PhaseStatus(text, !text.isEmpty());
     }
 
     private static void collectStatusLabels(Container panel, List<String> labels) {
@@ -269,7 +258,7 @@ final class GpuBoardActions {
         }
         Turn owner = turn();
         Supplier<Container> menu = () -> new MapMenu(coords, view.getBoardId(), owner.panel(), view.getClientgui());
-        return menuCommands(menu.get(), menu, owner, List.of());
+        return menuCommands(menu.get(), menu, owner);
     }
 
     List<BoardScene.Command> globalCommands() {
@@ -277,11 +266,11 @@ final class GpuBoardActions {
         if (gui == null || gui.getMenuBar() == null) {
             return List.of();
         }
-        List<BoardScene.Command> result = menuCommands(gui.getMenuBar(), gui::getMenuBar, null, List.of());
+        List<BoardScene.Command> result = menuCommands(gui.getMenuBar(), gui::getMenuBar, null);
         if (gui.getClient() instanceof megamek.client.Client) {
             Supplier<Container> commands = () -> view.game.getPhase().isOnMap() || view.game.getPhase().isReport()
                   ? new GameCommandsMenu(gui).createPopup() : new JPopupMenu();
-            List<BoardScene.Command> children = menuCommands(commands.get(), commands, null, List.of());
+            List<BoardScene.Command> children = menuCommands(commands.get(), commands, null);
             result.add(new BoardScene.Command("game-commands", Messages.getString("GameCommands.title"),
                   Messages.getString("GameCommands.tooltip"), !children.isEmpty(), false, children, () -> { }));
         }
@@ -301,7 +290,7 @@ final class GpuBoardActions {
         List<BoardScene.Command> result = new ArrayList<>();
         for (BotCommandsPanel.PopupCommand command : bots.popupCommands(bot)) {
             Supplier<Container> popup = () -> command.popup().get();
-            List<BoardScene.Command> items = menuCommands(popup.get(), popup, null, List.of());
+            List<BoardScene.Command> items = menuCommands(popup.get(), popup, null);
             AbstractButton button = command.button();
             if (!items.isEmpty()) {
                 result.add(describe(button.getActionCommand(), button, false, items, () -> { }));
@@ -338,54 +327,10 @@ final class GpuBoardActions {
               && menuShortcut(gui.getMenuBar(), key);
     }
 
-    private static boolean menuShortcut(Container menu, KeyStroke key) {
-        for (Component component : menu.getComponents()) {
-            if (!(component instanceof JMenuItem item) || !item.isVisible() || !item.isEnabled()
-                  || ClientGUI.VIEW_UNIT_OVERVIEW.equals(item.getActionCommand())) {
-                continue;
-            }
-            if (item instanceof JMenu group) {
-                if (menuShortcut(group.getPopupMenu(), key)) {
-                    return true;
-                }
-            } else if (key.equals(item.getAccelerator())) {
-                item.doClick(0);
-                return true;
-            }
-        }
-        return false;
-    }
+    static boolean menuShortcut(Container menu, KeyStroke key) { return GpuMenuCommands.menuShortcut(menu, key); }
 
-    private List<BoardScene.Command> menuCommands(Container menu, Supplier<Container> refresh, Turn owner,
-          List<String> parents) {
-        List<BoardScene.Command> result = new ArrayList<>();
-        for (Component component : menu.getComponents()) {
-            if (!(component instanceof JMenuItem item) || !item.isVisible()
-                  || ClientGUI.VIEW_UNIT_OVERVIEW.equals(item.getActionCommand())) {
-                continue;
-            }
-            String key = menuKey(item);
-            List<String> path = new ArrayList<>(parents);
-            path.add(key);
-            List<BoardScene.Command> children = item instanceof JMenu group
-                  ? menuCommands(group.getPopupMenu(), refresh, owner, path) : List.of();
-            result.add(describe(String.join("/", path), item, false, children, () -> {
-                if (owner != null && !current(owner)) {
-                    return;
-                }
-                // Rebuild contextual choices to check visibility, targets and availability at execution time.
-                JMenuItem action = findItem(refresh.get(), path);
-                if (action != null && action.isEnabled()) {
-                    action.doClick(0);
-                }
-            }));
-        }
-        return result;
-    }
-
-    /** A menu item's key, "{action command}:{text}"; a menu command's id is its menu path of keys joined by "/". */
-    private static String menuKey(JMenuItem item) {
-        return Objects.toString(item.getActionCommand(), "") + ":" + item.getText();
+    private List<BoardScene.Command> menuCommands(Container menu, Supplier<Container> refresh, Turn owner) {
+        return menus.capture(menu, refresh, () -> owner == null || current(owner));
     }
 
     /**
@@ -408,48 +353,14 @@ final class GpuBoardActions {
         return null;
     }
 
-    private static JMenuItem findItem(Container menu, List<String> path) {
-        for (Component component : menu.getComponents()) {
-            if (component instanceof JMenuItem item && item.isVisible() && item.isEnabled()
-                  && menuKey(item).equals(path.getFirst())) {
-                if (path.size() == 1) {
-                    return item;
-                }
-                return item instanceof JMenu group ? findItem(group.getPopupMenu(), path.subList(1, path.size())) : null;
-            }
-        }
-        return null;
-    }
-
     /** A menu item also carries its accelerator text and, for a check or radio item, its selection. */
     private BoardScene.Command describe(String id, AbstractButton button, boolean commit,
           List<BoardScene.Command> children, Runnable action) {
-        KeyStroke accelerator = button instanceof JMenuItem item ? item.getAccelerator() : null;
-        Boolean selected = button instanceof JCheckBoxMenuItem || button instanceof JRadioButtonMenuItem
-              ? button.isSelected() : null;
-        return new BoardScene.Command(id, plainText(button.getText()), plainText(button.getToolTipText()),
-              button.isEnabled(), commit, MOVEMENT_COMMANDS.contains(button.getActionCommand())
-                    || Set.of("fireTwist", "fireStrafe").contains(button.getActionCommand()), children,
-              dispatch(action),
-              accelerator == null ? "" : KeyCommandBind.getDesc(accelerator.getKeyCode(), accelerator.getModifiers()),
-              selected);
+        return menus.describe(id, button, commit, children, action);
     }
 
     /** Runs on the EDT unless the owner ignores input by then: a command queued before a dialog opened is dropped. */
-    private Runnable dispatch(Runnable action) {
-        return () -> SwingUtilities.invokeLater(() -> {
-            if (!ignoringInput.getAsBoolean()) {
-                action.run();
-                changed.run();
-            }
-        });
-    }
+    private Runnable dispatch(Runnable action) { return menus.dispatch(action); }
 
-    static String plainText(String text) {
-        String stripped = text == null ? "" : text.replaceAll("(?is)<head>.*?</head>", "")
-              .replaceAll("(?i)<(?:br\\s*/?|/tr|/p|/div)>", "\n")
-              .replaceAll("(?i)</t[dh]>", "  ").replaceAll("<[^>]*>", "")
-              .replace("&apos;", "'");
-        return StringEscapeUtils.unescapeHtml4(stripped).replace('\u00A0', ' ').strip();
-    }
+    static String plainText(String text) { return GpuMenuCommands.plainText(text); }
 }

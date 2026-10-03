@@ -48,6 +48,7 @@ import megamek.common.board.Coords;
 import megamek.common.compute.Compute;
 import megamek.common.compute.ComputeECM;
 import megamek.common.equipment.AmmoType;
+import megamek.common.equipment.EquipmentActivation;
 import megamek.common.equipment.Minefield;
 import megamek.common.equipment.MiscType;
 import megamek.common.equipment.Mounted;
@@ -210,10 +211,7 @@ public class ATMHandler extends MissileWeaponHandler {
         // if the attacker is affected by ECM or the target is protected by ECM
         // then act as if affected.
 
-        if (((mLinker != null) && (mLinker.getType() instanceof MiscType)
-              && !mLinker.isDestroyed() && !mLinker.isMissing()
-              && !mLinker.isBreached() && mLinker.getType().hasFlag(
-              MiscType.F_ARTEMIS))
+        if (EquipmentActivation.isGuidanceActive(mLinker, MiscType.F_ARTEMIS)
               && (ammoType.getMunitionType().contains(AmmoType.Munitions.M_ARTEMIS_CAPABLE))) {
             if (bECMAffected) {
                 // ECM prevents bonus
@@ -284,17 +282,17 @@ public class ATMHandler extends MissileWeaponHandler {
         if (allShotsHit()) {
             // We want buildings and large craft to be able to affect this number with AMS
             // treat as a Streak launcher (cluster roll 11) to make this happen
-            missilesHit = Compute.missilesHit(weaponType.getRackSize(),
+            missilesHit = clusterMissilesHit(weaponType.getRackSize(),
                   nMissilesModifier, weapon.isHotLoaded(), true,
                   isAdvancedAMS());
         } else {
             if (attackingEntity instanceof BattleArmor) {
-                missilesHit = Compute.missilesHit(weaponType.getRackSize()
+                missilesHit = clusterMissilesHit(weaponType.getRackSize()
                             * ((BattleArmor) attackingEntity).getShootingStrength(),
                       nMissilesModifier, weapon.isHotLoaded(), false,
                       isAdvancedAMS());
             } else {
-                missilesHit = Compute.missilesHit(weaponType.getRackSize(),
+                missilesHit = clusterMissilesHit(weaponType.getRackSize(),
                       nMissilesModifier, weapon.isHotLoaded(), false,
                       isAdvancedAMS());
             }

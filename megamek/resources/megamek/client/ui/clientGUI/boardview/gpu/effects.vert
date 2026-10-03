@@ -1,11 +1,12 @@
+#version 330 core
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Shared quad geometry for particle and beam programs.
-attribute vec3 a_position;
-attribute vec2 a_texCoord0;
-attribute vec2 a_texCoord1;
+in vec3 a_position;
+in vec2 a_texCoord0;
+in vec2 a_texCoord1;
 uniform mat4 u_projView;
-varying vec2 v_uv;
-varying vec2 v_effect;
+out vec2 v_uv;
+out vec2 v_effect;
 void main() {
     v_uv = a_texCoord0;
     v_effect = a_texCoord1;

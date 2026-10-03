@@ -297,6 +297,20 @@ public enum PacketCommand {
     ENTITY_EJECTION_SETTING_CHANGE,
     /** A player's declaration for an infantry action in a building, in the Pre-End Declarations phase. */
     INFANTRY_ACTION_DECLARATION,
+    /** A unit's order to scan a hex or unit in the End Phase (Objectives series); carries a {@code ScanAction}. */
+    ENTITY_SCAN_ORDER,
+    /**
+     * A game master's edit of the objective at a hex, at any time in the game: the hex and the marker to put there,
+     * or {@code null} to remove it (Objectives series).
+     */
+    OBJECTIVE_EDIT,
+    /**
+     * A game master's marking of an enemy unit as one the mission wants scanned, or the removal of that marking:
+     * the unit's id and whether it is wanted (Objectives series).
+     */
+    SCAN_DESIGNATION,
+    /** A unit's withdrawal of the scan it ordered this turn, before the End Phase resolves it; carries its id. */
+    ENTITY_SCAN_WITHDRAW,
 
     /** Server-confirmed, visibility-filtered attack presentation; never an attack order. */
     ENTITY_ATTACK_RESOLVED;

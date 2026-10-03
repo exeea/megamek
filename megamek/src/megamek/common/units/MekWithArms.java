@@ -232,7 +232,7 @@ public abstract class MekWithArms extends Mek {
                 continue;
             }
             Mounted<?> mounted = cs.getMount();
-            if (null == mounted) {
+            if (mounted == null) {
                 continue;
             }
             EquipmentType type = mounted.getType();
@@ -261,7 +261,7 @@ public abstract class MekWithArms extends Mek {
                 continue;
             }
             Mounted<?> mounted = cs.getMount();
-            if (null == mounted) {
+            if (mounted == null) {
                 continue;
             }
             EquipmentType type = mounted.getType();

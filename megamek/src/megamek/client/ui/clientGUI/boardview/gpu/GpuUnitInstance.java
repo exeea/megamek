@@ -1,11 +1,14 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.util.ArrayList;
 import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Map;
 
+import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.graphics.OrthographicCamera;
+import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
@@ -16,9 +19,11 @@ import com.badlogic.gdx.graphics.g3d.attributes.DepthTestAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.IntAttribute;
 import com.badlogic.gdx.graphics.g3d.model.Node;
+import com.badlogic.gdx.graphics.g3d.model.NodePart;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.Pool;
+import megamek.logging.MMLogger;
 
 /** The normal posed instance, with an opaque depth/outline view that borrows exactly the same mesh buffers. */
 final class GpuUnitInstance extends ModelInstance {
@@ -31,32 +36,64 @@ final class GpuUnitInstance extends ModelInstance {
 
         Attachment(float diameter) { this.diameter = diameter; }
     }
+    private static final MMLogger LOGGER = MMLogger.create(GpuUnitInstance.class);
     private final RenderableProvider depth = this::depthParts;
+    /** Only parts participating in LOD selection; other assembly geometry stays visible. */
+    private final List<NodePart> detailParts = new ArrayList<>();
+    private GpuUnitModel.DetailLevels levels = GpuUnitModel.DetailLevels.NONE;
+    private float figureHeight;
+    private int requestedLevel;
+    private int detailLevel;
     private final Map<Node, Attachment> attachments = new IdentityHashMap<>();
+    private final Vector3 detailPosition = new Vector3();
     private float detailPixels = Float.NaN;
     private boolean forcedDetail;
     private int detailRevision;
+    private GpuUnitModel visual;
+
+    GpuUnitModel visual() { return visual; }
 
     GpuUnitInstance(Model model) { super(model); }
 
     GpuUnitInstance(GpuUnitModel model) {
         this(model.instance.model);
+        visual = model;
         for (var binding : model.equipment()) {
             Node node = getNode(binding.node());
             if (!binding.embedded() && node != null) {
                 attachments.put(node, new Attachment(UnitBounds.subtree(node).getDimensions(new Vector3()).len()));
             }
         }
+        levels = model.detailLevels();
+        figureHeight = model.figureHeight();
+        sortDetailParts(nodes, levels);
     }
 
-    /** Render selection only: rigs, emitters, picking, damage flags and shared mesh buffers stay intact. */
-    void equipmentDetail(OrthographicCamera camera, boolean forceFull) {
-        if (attachments.isEmpty()) { return; }
-        float pixels = BoardCamera.pixelsPerUnit(camera)
+    /** A reused mesh can belong to several levels, without duplicated buffers or parts. */
+    private void sortDetailParts(Iterable<Node> nodes, GpuUnitModel.DetailLevels levels) {
+        for (Node node : nodes) {
+            for (NodePart part : node.parts) {
+                Mesh mesh = part.meshPart.mesh;
+                if (levels.lod0().contains(mesh) || levels.lod1().contains(mesh) || levels.lod2().contains(mesh)) {
+                    detailParts.add(part);
+                }
+            }
+            sortDetailParts(node.getChildren(), levels);
+        }
+    }
+
+    /**
+     * Render selection only: rigs, emitters, picking, damage flags and shared mesh buffers stay intact. Small
+     * equipment is hidden, and authored LOD1/LOD2 geometry is selected once the unit is small on screen.
+     */
+    void equipmentDetail(Camera camera, boolean forceFull) {
+        if (attachments.isEmpty() && detailParts.isEmpty()) { return; }
+        float pixels = BoardCamera.pixelsPerUnit(camera, transform.getTranslation(detailPosition))
               * Math.max(transform.getScaleX(), Math.max(transform.getScaleY(), transform.getScaleZ()));
         if (pixels == detailPixels && forceFull == forcedDetail) { return; }
         detailPixels = pixels;
         forcedDetail = forceFull;
+        bodyDetail(pixels, forceFull);
         for (Attachment attachment : attachments.values()) {
             float threshold = EQUIPMENT_HIDE_PIXELS * (attachment.hidden ? 1 + EQUIPMENT_LOD_HYSTERESIS : 1 - EQUIPMENT_LOD_HYSTERESIS);
             boolean next = !forceFull && attachment.diameter * pixels < threshold;
@@ -69,7 +106,35 @@ final class GpuUnitInstance extends ModelInstance {
 
     int hiddenEquipment() { return (int) attachments.values().stream().filter(attachment -> attachment.hidden).count(); }
 
+    /**
+     * Selects detail from screen height. Missing mesh levels reuse preceding ones; units in focus use LOD0.
+     *
+     * @param pixelsPerModelUnit framebuffer pixels per model unit at the instance's current scale
+     * @param forceFull          {@code true} for the selected unit or one in an attack
+     */
+    void bodyDetail(float pixelsPerModelUnit, boolean forceFull) {
+        if (detailParts.isEmpty()) { return; }
+        float unitPixels = figureHeight * pixelsPerModelUnit;
+        requestedLevel = forceFull ? 0 : FormationLod.level(unitPixels, requestedLevel, levels.lod1Pixels(), levels.lod2Pixels());
+        int next = levels.resolvedLevel(requestedLevel);
+        if (next == detailLevel) { return; }
+        detailLevel = next;
+        var visible = levels.meshes(next);
+        detailParts.forEach(part -> part.enabled = visible.contains(part.meshPart.mesh));
+        detailRevision++;
+        LOGGER.debug("[FormationLod] unit now shows LOD{} ({} pixels tall{})", next,
+              Math.round(unitPixels), forceFull ? ", held at LOD0 while in focus" : "");
+    }
+
+    /** @return the numeric LOD currently drawn */
+    int detailLevel() { return detailLevel; }
+
     int detailRevision() { return detailRevision; }
+
+    /** Removed locations no longer participate in detail switching; repairs already rebuild the instance. */
+    void removeDetailParts(List<NodePart> removed) {
+        if (detailParts.removeAll(removed)) { detailRevision++; }
+    }
 
     @Override
     protected void getRenderables(Node node, Array<Renderable> renderables, Pool<Renderable> pool) {

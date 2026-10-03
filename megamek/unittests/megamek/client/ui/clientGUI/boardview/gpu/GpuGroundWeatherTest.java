@@ -52,9 +52,13 @@ class GpuGroundWeatherTest {
         assertTrue(single.fog.epsilonEquals(split.fog, 0.0001f), "Changing wind cannot teleport existing banks");
         split.advance(wind(1, 240), Float.NaN);
         assertTrue(single.fog.epsilonEquals(split.fog, 0.0001f));
+        var unwrapped = new GpuAtmosphere.GroundMotion();
+        unwrapped.advance(wind(1, 0), 0.1f);
+        float remaining = 256 - 255.999f;
         split.fog.set(0, 255.999f);
         split.advance(wind(1, 0), 0.1f);
-        assertTrue(split.fog.y > 0 && split.fog.y < 0.02f, "Wrap at the exact repeating texture period");
+        assertEquals(unwrapped.fog.y - remaining, split.fog.y, 0.00002f,
+              "Wrapping preserves the full frame displacement at the repeating texture period");
     }
 
     @Test
@@ -69,7 +73,8 @@ class GpuGroundWeatherTest {
             for (int j = 0; j < 10; j++) { fast.advance(BoardAtmosphere.Effects.NONE, 0.01f); }
             last = regular.fog.cpy().sub(before);
             if (first == null) { first = last.cpy(); }
-            assertTrue(last.len() < 0.004f, "Calm advection stays gentle without random frame jitter");
+            assertEquals(GpuAtmosphere.FOG_CALM_DRIFT * 0.1f / 2, last.len(), 0.00001f,
+                  "Calm drift keeps its configured speed in two-hex noise cells while changing direction");
         }
         assertTrue(regular.fog.epsilonEquals(fast.fog, 0.0001f));
         assertTrue(Math.abs(first.nor().crs(last.nor())) > 0.3f, "Calm banks follow a changing flow vector");

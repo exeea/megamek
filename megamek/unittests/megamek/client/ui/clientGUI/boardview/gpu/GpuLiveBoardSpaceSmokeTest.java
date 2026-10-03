@@ -866,6 +866,8 @@ class GpuLiveBoardSpaceSmokeTest {
                   / DisplayScale.read(.1f, new GpuDisplayScale().contentScale()), "", "", true, true, true, false,
                   false, GpuHudInputTest.preferences().binds(), preferences.minRangeRgb(),
                   preferences.extremeRangeRgb(), preferences.moveSprintRgb());
+            // The view reads the preferences through the accessor; tests change them through the field.
+            when(source.uiPreferences()).thenAnswer(invocation -> source.uiPreferences);
             when(source.takeFrame()).thenAnswer(invocation -> frame.get());
             when(source.moves()).thenReturn(mock(GpuMovePlan.class));
             when(source.fire()).thenReturn(mock(GpuFireOrders.class));
@@ -898,6 +900,14 @@ class GpuLiveBoardSpaceSmokeTest {
             graphics = Gdx.graphics;
             timed = spy(graphics);
             doAnswer(invocation -> delta).when(timed).getDeltaTime();
+            // The HUD draws once the board is presented, after the terrain is built behind the loading screen; no
+            // time passes until then, so every check starts from the board's first shown frame.
+            Gdx.graphics = timed;
+            try {
+                GpuBoardTestUi.present(view);
+            } finally {
+                Gdx.graphics = graphics;
+            }
         }
 
         /** Publishes the real source's next capture as the local player's turn. */

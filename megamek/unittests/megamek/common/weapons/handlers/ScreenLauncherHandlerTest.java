@@ -53,7 +53,9 @@ import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.equipment.AmmoMounted;
+import megamek.common.equipment.EquipmentMode;
 import megamek.common.equipment.EquipmentType;
+import megamek.common.equipment.Mounted;
 import megamek.common.equipment.WeaponMounted;
 import megamek.common.equipment.WeaponType;
 import megamek.common.game.Game;
@@ -125,6 +127,7 @@ public class ScreenLauncherHandlerTest {
         AmmoMounted mockAmmo = mock(AmmoMounted.class);
 
         doReturn(mockWeaponType).when(mockWeapon).getType();
+        doReturn(EquipmentMode.getMode(Mounted.MODE_NONE)).when(mockWeapon).curMode();
         doReturn("Screen Launcher").when(mockWeaponType).getName();
         doReturn("ISScreenLauncher").when(mockWeaponType).getInternalName();
         doReturn(mockAmmo).when(mockWeapon).getLinked();

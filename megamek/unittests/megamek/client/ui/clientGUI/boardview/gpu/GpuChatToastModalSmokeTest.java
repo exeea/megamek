@@ -799,7 +799,7 @@ class GpuChatToastModalSmokeTest {
                 ObjectiveMarker marker = new ObjectiveMarker();
                 marker.setName("Objective 0505");
                 FutureTask<VictoryHexPropertiesPane.Result> edit = new FutureTask<>(() ->
-                      VictoryHexPropertiesPane.edit(owner, marker, GpuVictoryHexFormTest.players()));
+                      VictoryHexPropertiesPane.edit(owner, marker, GpuVictoryHexFormTest.players(), false));
                 SwingUtilities.invokeLater(edit);
                 GpuHudTestStage.run(harness -> {
                     GpuModalDialog modal = new GpuModalDialog(harness.kit, fixture.source,

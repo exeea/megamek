@@ -25,6 +25,8 @@ import megamek.logging.MMLogger;
 
 /** One attachment/fitting implementation for every family, using the actual immutable loadout. */
 final class UnitEquipmentAssembly {
+    /** Above a family's own spot (10), so a weapon the fist can hold as a gun stays in the fist. */
+    private static final int HELD_PRIORITY = 20;
     private static final MMLogger LOGGER = MMLogger.create(UnitEquipmentAssembly.class);
     private static final JsonValue DEFAULT_PLACEMENT = new JsonValue(JsonValue.ValueType.object);
     private static final Pattern HEAT_SINK = Pattern.compile("(?i)heat ?sink");
@@ -35,6 +37,12 @@ final class UnitEquipmentAssembly {
      * back vents stay on the torso, and a chassis without leg spots is unchanged.
      */
     private static final List<String> LEGS = List.of("LL", "RL");
+    /**
+     * Arms take vents of their own, apart from the torso's two a face: an arm holding slotted heat sinks shows every
+     * vent spot the body offers on it (the Thunderbolt IIC's upper arm and forearm backs). A body without arm spots
+     * is unchanged.
+     */
+    private static final List<String> ARMS = List.of("LA", "RA");
     /** House rule: at most two vents on the front and two on the back. */
     private static final int VENTS_PER_FACE = 2;
     /** Clear space kept around a vent, so a weapon beside it does not sit on its edge. */
@@ -111,6 +119,7 @@ final class UnitEquipmentAssembly {
         for (Pending item : pending) {
             attach(library, assembled, item, areas, bindings, holding.contains(item.point().location()));
         }
+        warnOverUnitBudget(descriptor, body, pending);
         shareJumpJets(assembled, sharedJets, drawnJets, bindings);
         // An arm holding a gun shows the chassis's gun body in place of its hand; any other arm keeps its hand.
         for (String arm : new String[] { "LA", "RA" }) {
@@ -124,12 +133,45 @@ final class UnitEquipmentAssembly {
     }
 
     /**
+     * Logs a warning for each level of detail at which this assembled unit, body plus fitted equipment, passes its
+     * {@link UnitModelDescriptor#UNIT_TRIANGLE_BUDGETS budget}. The unit is still drawn in full; the warning names
+     * the body and splits the count, so it shows whether the body or the loadout needs lightening. A level is only
+     * checked when the body authors it: a body without its own LOD1 or LOD2 never draws at that budget. Equipment
+     * without a level of its own counts at its nearest more detailed one. Jump jets sharing a drawn nozzle add no
+     * geometry and are not counted.
+     *
+     * @param descriptor the unit's assembly descriptor, which names its body
+     * @param body       the bare body
+     * @param drawn      the equipment modules attached to the unit
+     */
+    private static void warnOverUnitBudget(JsonValue descriptor, GpuUnitModels.ModularAsset body, List<Pending> drawn) {
+        List<Integer> budgets = UnitModelDescriptor.UNIT_TRIANGLE_BUDGETS;
+        for (int level = 0; level < budgets.size(); level++) {
+            boolean isAuthoredLevel = (level == 0) || (body.model(level) != body.model(level - 1));
+            if (!isAuthoredLevel) {
+                continue;
+            }
+            int equipment = 0;
+            for (Pending item : drawn) {
+                equipment += item.module().triangles(level);
+            }
+            int total = body.triangles(level) + equipment;
+            if (total > budgets.get(level)) {
+                LOGGER.warn("[UnitBudget] {}: LOD{} draws {} triangles (body {} + {} fitted modules {}), over the"
+                            + " {} budget; drawn anyway", descriptor.getString("body", "?"), level, total,
+                      body.triangles(level), drawn.size(), equipment, budgets.get(level));
+            }
+        }
+    }
+
+    /**
      * Weapons first, vents after. The body offers vent spots: the ones the chassis author drew, listed first, and
      * spares on the flat of each torso face. Vents go in the torsos holding this variant's slotted heat sinks (and on
      * the front, in legs holding them when the body offers a spot on that leg), the two
      * with the most, or both in one when only one holds any; a variant whose sinks all sit in the engine keeps the
      * author's vents where the author put them. Each vent takes the first spot of its torso that no weapon covers and
-     * no other vent has taken. A vent with no free spot is left off, and every unused spot is removed.
+     * no other vent has taken. A vent with no free spot is left off, and every unused spot is removed. An arm holding
+     * heat sinks keeps every uncovered vent spot the body offers on it, outside that count (see ARMS).
      */
     private static void chooseVents(JsonValue descriptor, UnitModelState.Structure structure, Model assembled,
           List<Binding> bindings) {
@@ -150,10 +192,16 @@ final class UnitEquipmentAssembly {
             }
         }
         Map<String, Integer> sinks = new HashMap<>();
+        Set<String> sinkArms = new HashSet<>();
         for (var mount : structure.equipment()) {
-            boolean ventable = TORSO.contains(mount.location()) || LEGS.contains(mount.location());
-            if (ventable && HEAT_SINK.matcher(mount.internalName()).find()) {
+            if (!HEAT_SINK.matcher(mount.internalName()).find()) {
+                continue;
+            }
+            if (TORSO.contains(mount.location()) || LEGS.contains(mount.location())) {
                 sinks.merge(mount.location(), 1, Integer::sum);
+            } else if (ARMS.contains(mount.location())) {
+                // Counted apart, so arm sinks neither change the torso's vents nor switch off the author's defaults.
+                sinkArms.add(mount.location());
             }
         }
         Set<String> kept = new HashSet<>();
@@ -189,6 +237,24 @@ final class UnitEquipmentAssembly {
             }
         }
         for (JsonValue vent : vents) {
+            String location = vent.getString("location");
+            if (!ARMS.contains(location)) {
+                continue;
+            }
+            String name = vent.getString("node");
+            if (!sinkArms.contains(location)) {
+                LOGGER.debug("Arm vent spot {} left off: {} slots no heat sinks", name, location);
+                continue;
+            }
+            BoundingBox box = ventBox(assembled, vent);
+            if (box == null || overlapsAny(box, weapons)) {
+                LOGGER.debug("Arm vent spot {} is covered by a weapon", name);
+                continue;
+            }
+            kept.add(name);
+            LOGGER.debug("Vent kept at {} ({} arm, {})", name, location, vent.getString("side"));
+        }
+        for (JsonValue vent : vents) {
             String name = vent.getString("node");
             Node node = assembled.getNode(name, true);
             if (node != null && !kept.contains(name)) {
@@ -201,7 +267,7 @@ final class UnitEquipmentAssembly {
      * The torso each vent on this face belongs in, one entry per vent. The torsos with the most slotted heat sinks
      * win; with none slotted, the author's own vents keep their places.
      */
-    private static List<String> ventLocations(JsonValue descriptor, JsonValue vents, String side,
+    static List<String> ventLocations(JsonValue descriptor, JsonValue vents, String side,
           Map<String, Integer> sinks) {
         List<String> wanted = new ArrayList<>();
         if (sinks.isEmpty()) {
@@ -211,8 +277,9 @@ final class UnitEquipmentAssembly {
                 return wanted;
             }
             for (JsonValue vent : vents) {
+                // An arm's vents show only for the heat sinks in that arm (see ARMS), never as a default.
                 if (side.equals(vent.getString("side")) && vent.getBoolean("authored", false)
-                      && wanted.size() < VENTS_PER_FACE) {
+                      && !ARMS.contains(vent.getString("location")) && wanted.size() < VENTS_PER_FACE) {
                     wanted.add(vent.getString("location"));
                 }
             }
@@ -356,7 +423,8 @@ final class UnitEquipmentAssembly {
                       || (!requiredForm.isEmpty() && !requiredForm.equals(form))) {
                     continue;
                 }
-                int priority = (anyLocation ? -1000 : 0) + (requiredForm.isEmpty() ? 0 : 100) + (family.isEmpty() ? 0 : 10);
+                int priority = (anyLocation ? -1000 : 0) + (requiredForm.isEmpty() ? 0 : 100) + (family.isEmpty() ? 0 : 10)
+                      + heldPriority(catalog, mount, settings);
                 if (priority > best) {
                     candidates.clear();
                     best = priority;
@@ -403,6 +471,21 @@ final class UnitEquipmentAssembly {
     }
 
     /**
+     * A hand that can hold this weapon as a gun outranks every other spot on its arm, even one the chassis keeps for
+     * the weapon's family: a large laser stays in the fist while the chassis's forearm laser spots take the medium
+     * lasers, which have no held shape.
+     *
+     * @return {@link #HELD_PRIORITY} for a held-gun mount that draws this weapon as a held gun, otherwise {@code 0}
+     */
+    private static int heldPriority(UnitEquipmentModels catalog, UnitModelEquipment.Mount mount, JsonValue settings) {
+        if (!UnitEquipmentModels.HELD.equals(settings.getString("profile", ""))) {
+            return 0;
+        }
+        var held = catalog.resolve(mount, settings);
+        return ((held != null) && held.held()) ? HELD_PRIORITY : 0;
+    }
+
+    /**
      * A chassis rule draws one weapon with another weapon's art at a spot of its own, whichever location carries it:
      * every Atlas LRM 20 is drawn as a five-tube rack stood on the waist. The weapon keeps its own location, so it
      * still goes with that location when the location is destroyed.
@@ -424,7 +507,7 @@ final class UnitEquipmentAssembly {
             JsonValue placement = rule.get("placement");
             var drawnAs = new UnitModelEquipment.Mount(mount.index(), rule.getString("drawAs"), mount.location(),
                   mount.secondLocation(), mount.rear(), mount.omniPod(), mount.size(), mount.policy(), mount.family(),
-                  mount.members());
+                  mount.members(), mount.guided());
             var visual = catalog.resolve(drawnAs, placement);
             GpuUnitModels.ModularAsset module = visual == null ? null : library.modular(visual.asset());
             var point = points.get(placement.getString("hardpoint"));
@@ -491,7 +574,12 @@ final class UnitEquipmentAssembly {
         }
         // Wings span the torso and clear its rear face; they must not compete with guns or exhaust for face space.
         // A chassis rule's spot is its own, so it neither takes room from nor gives room to that location's face.
-        var area = point.id().equals("partial-wing") || item.placement().getBoolean("rule", false)
+        // A held gun's barrel leaves the gun body's own face, ahead of the arm, so the weapons on the forearm behind
+        // it cannot crowd it off that face (or out of sight).
+        boolean isPartialWing = point.id().equals("partial-wing");
+        boolean isChassisRule = item.placement().getBoolean("rule", false);
+        boolean isHeldBarrel = item.visual().held();
+        var area = (isPartialWing || isChassisRule || isHeldBarrel)
               ? new MountFrame(socket)
               // Two locations can share one face, as a Locust's head and centre weapons share its chin turret; the
               // packer then keeps them apart instead of drawing one over the other.

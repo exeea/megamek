@@ -1,5 +1,16 @@
 # Attack controls in the GPU board
 
+[Docs index](README.md) · [Complete class responsibilities](gpu-code-map.md)
+
+## What does what
+
+| Owner | Responsibility |
+| --- | --- |
+| `FiringDisplay / PhysicalDisplay / TargetingPhaseDisplay` | Own selected weapons, ammo, target calculations, queued orders and completion actions. |
+| `GpuBoardActions` | Capture attack-panel data and dispatch commands after checking the live phase/selection. |
+| `GpuAttackPanel` | Lay out and display the native weapon/physical controls. |
+| `BoardFiringGeometry / GpuFireControl` | Build and draw range boundaries and queued-attack geometry from client-supplied tactical data. |
+
 The GPU board shows an attack console on the right during an acting unit's attack
 phase: the battle HUD's weapons panel, with the target cards over the board, the solution card and the
 command dock ([gpu-hud.md](gpu-hud.md)). Physical attacks use the dock's physical options; TARGETING and

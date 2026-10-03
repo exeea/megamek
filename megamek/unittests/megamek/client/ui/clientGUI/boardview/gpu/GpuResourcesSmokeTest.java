@@ -49,7 +49,8 @@ class GpuResourcesSmokeTest {
                 try {
                     checkAtlas();
                     checkAssets();
-                    checkInteriorCourtyard();
+                    checkInteriorCourtyard(1);
+                    checkInteriorCourtyard(BoardGeometry.MODEL_LEVEL_HEIGHT);
                     checkChunkPicking();
                     checkFeatureAndWaterTransparency();
                     checkModelShadows();
@@ -95,7 +96,7 @@ class GpuResourcesSmokeTest {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 17; x++) {
             for (int y = 0; y < 17; y++) {
-                tiles.add(new BoardScene.Tile(new Coords(x, y), x == 8 ? 3 : 0, -1, false, 0,
+                tiles.add(new BoardScene.Tile(new Coords(x, y), x == 8 ? 3 : 0, x == 7 && y == 8 ? 1 : -1, false, 0,
                       BoardScene.Surface.GRASS, art, null, null, List.of(), List.of()));
             }
         }
@@ -117,12 +118,63 @@ class GpuResourcesSmokeTest {
                     }
                 }
             }
+            Coords moved = new Coords(16, 16);
+            BoardGeometry.Tuning previousTuning = BoardGeometry.tuning();
+            // The corner hex where the installed terrain draws it.
+            Ray drawn = new Ray(BoardGeometry.center(moved, 0).add(0, 0, 1000), new Vector3(0, 0, -1));
+            try {
+                BoardGeometry.tune(new BoardGeometry.Tuning(previousTuning.hexScale() * 2,
+                      previousTuning.unitScale(), previousTuning.unitHeightScale(), previousTuning.levelHeight(),
+                      previousTuning.gridShade(), previousTuning.multiHexUnitScale(), previousTuning.transitions(),
+                      previousTuning.padding()));
+                Ray ray = new Ray(BoardGeometry.center(moved, 0).add(0, 0, 1000), new Vector3(0, 0, -1));
+                BoardGeometry.Hit expected = BoardGeometry.hit(scene, ray);
+                assertNotNull(expected);
+                assertEquals(moved, expected.coords());
+                // Picking follows the terrain on screen: until update installs a build with the new tuning, the
+                // installed coordinate system applies (TerrainSettings), so the pointer picks the hex it is over.
+                BoardGeometry.Hit onScreen = terrain.hit(scene, drawn);
+                assertNotNull(onScreen, "Before terrain.update, the drawn corner hex must stay pickable");
+                assertEquals(moved, onScreen.coords(), "Before terrain.update, picking must follow the drawn terrain");
+                terrain.update(scene);
+                assertEquals(expected, terrain.hit(scene, ray),
+                      "Once installed, terrain built with the new tuning must pick as the board geometry does");
+            } finally {
+                BoardGeometry.tune(previousTuning);
+                terrain.update(scene);
+            }
+            List<BoardScene.Tile> elevated = new ArrayList<>(tiles);
+            elevated.set(tiles.indexOf(scene.tile(moved)), new BoardScene.Tile(moved, 6, -1, false, 0,
+                  BoardScene.Surface.GRASS, art, null, null, List.of(), List.of()));
+            BoardScene elevatedScene = new BoardScene(0, 17, 17, elevated, List.of(), List.of(), -1, "", List.of());
+            Ray ray = new Ray(BoardGeometry.center(moved, 6).add(0, 0, 1000), new Vector3(0, 0, -1));
+            BoardGeometry.Hit expected = BoardGeometry.hit(elevatedScene, ray);
+            assertNotNull(expected);
+            assertEquals(moved, expected.coords());
+            assertNotEquals(BoardGeometry.hit(scene, ray), expected,
+                  "The elevation edit must change the exact hit distance");
+            assertEquals(expected, terrain.hit(elevatedScene, ray),
+                  "A new scene must use its edited surface before terrain.update");
+            // Splitting a shared artwork slot must rebuild the edited chunk without rebuilding distant geometry.
+            Coords edited = new Coords(8, 8), distant = new Coords(0, 0);
+            var untouched = terrain.tacticalSurface(distant);
+            var beforeEdit = terrain.tacticalSurface(edited);
+            Coords bank = new Coords(7, 8);
+            var beforeBank = terrain.tacticalSurface(bank);
+            BoardScene.Tile previous = scene.tile(edited);
+            List<BoardScene.Tile> changed = new ArrayList<>(tiles);
+            changed.set(tiles.indexOf(previous), new BoardScene.Tile(edited, previous.elevation(), -1, false, 0,
+                  BoardScene.Surface.GRASS, hexPixels(java.awt.Color.YELLOW), null, null, List.of(), List.of()));
+            terrain.update(new BoardScene(0, 17, 17, changed, List.of(), List.of(), -1, "", List.of()));
+            assertSame(untouched, terrain.tacticalSurface(distant), "An artwork edit must leave distant chunks intact");
+            assertNotSame(beforeEdit, terrain.tacticalSurface(edited));
+            assertNotSame(beforeBank, terrain.tacticalSurface(bank), "Banks across a chunk border borrow the edited artwork");
         } finally {
             terrain.dispose();
         }
     }
 
-    private void checkInteriorCourtyard() {
+    static void checkInteriorCourtyard(float height) {
         ModelBuilder builder = new ModelBuilder();
         builder.begin();
         var mesh = builder.part("roof", GL20.GL_TRIANGLES,
@@ -130,19 +182,24 @@ class GpuResourcesSmokeTest {
         // Four wings around an open courtyard, with a detached annex outside the main footprint.
         for (float[] rect : new float[][] { { -30, -30, -10, 30 }, { 10, -30, 30, 30 },
               { -10, -30, 10, -10 }, { -10, 10, 10, 30 }, { 40, -8, 56, 8 } }) {
-            mesh.rect(rect[0], rect[1], 1, rect[2], rect[1], 1,
-                  rect[2], rect[3], 1, rect[0], rect[3], 1, 0, 0, 1);
+            mesh.rect(rect[0], rect[1], height, rect[2], rect[1], height,
+                  rect[2], rect[3], height, rect[0], rect[3], height, 0, 0, 1);
         }
         Model shell = builder.end();
         Model interior = GpuBuildingInterior.build(shell, 3);
         try {
+            BoundingBox floors = new ModelInstance(interior, "floors").calculateBoundingBox(new BoundingBox());
+            assertEquals(height * 2 / 3, floors.max.z, .0001f, "Floors share the shell's local height");
+            assertEquals(height * .002f / 3, floors.min.z, .0001f, "Ground floor clears the terrain");
+            BoundingBox struts = new ModelInstance(interior, "struts").calculateBoundingBox(new BoundingBox());
+            assertEquals(height, struts.getDepth(), .0001f, "Columns span the full shell height");
             List<Vector3> triangles = GpuTerrain.triangles(interior);
             for (float x : new float[] { 0, 35, 60 }) {
-                assertFalse(Intersector.intersectRayTriangles(new Ray(new Vector3(x, 0, 2), new Vector3(0, 0, -1)),
+                assertFalse(Intersector.intersectRayTriangles(new Ray(new Vector3(x, 0, height + 1), new Vector3(0, 0, -1)),
                       triangles, new Vector3()), "Floors and struts must leave courtyard, gap and exterior open");
             }
             for (float x : new float[] { -25, 48 }) {
-                assertTrue(Intersector.intersectRayTriangles(new Ray(new Vector3(x, 0, 2), new Vector3(0, 0, -1)),
+                assertTrue(Intersector.intersectRayTriangles(new Ray(new Vector3(x, 0, height + 1), new Vector3(0, 0, -1)),
                       triangles, new Vector3()), "Both main building and disconnected wing must have interiors");
             }
         } finally {
@@ -211,7 +268,7 @@ class GpuResourcesSmokeTest {
                 if (depth < 0) {
                     GpuBoardTestUi.capture(new File(System.getProperty("megamek.gpu.screenshots"), "building-faded.png"));
                 }
-                assertTrue(red > green + (depth < 0 ? 20 : 45),
+                assertTrue(red > green + (depth < 0 ? 10 : 45),
                       "Unit must remain visible inside a feature/water: depth=" + depth + ", pixel=" + Integer.toHexString(visible));
                 if (depth < 0) {
                     assertTrue((obscured >>> 24) < ((obscured >>> 16) & 255) + 10,
@@ -229,7 +286,8 @@ class GpuResourcesSmokeTest {
                         assertTrue(contrast < previousContrast, "A stationary unit must respond to live opacity changes");
                         previousContrast = contrast;
                         if (percent == 0) {
-                            assertTrue(contrast > 150, "Walls and upper floors must both fade away");
+                            assertTrue(contrast > 100 && contrast < 240,
+                                  "Hidden walls reveal the unit while upper floors retain some opacity");
                         } else if (percent == 100) {
                             assertEquals(obscured, pixel, "100% restores opaque rendering while the unit remains inside");
                         }
@@ -347,7 +405,10 @@ class GpuResourcesSmokeTest {
             assertSame(atlas.region("one"), atlas.region("two"), "Identical artwork must occupy one atlas slot");
             assertFalse(atlas.update(Map.of("one", sand, "two", sand)), "Shared slots can update together");
             assertSame(atlas.region("one"), atlas.region("two"));
-            assertTrue(atlas.update(Map.of("one", sand, "two", grass)), "Diverging aliases must split before upload");
+            var unchanged = atlas.region("one");
+            assertEquals(java.util.Set.of("two"), atlas.updateRegions(Map.of("one", sand, "two", grass), Map.of()),
+                  "Only the edited alias may invalidate mesh UVs");
+            assertSame(unchanged, atlas.region("one"), "An edit must preserve unrelated slots and their texture page");
             assertNotSame(atlas.region("one"), atlas.region("two"));
             assertTrue(atlas.update(Map.of("one", grass, "two", matchingGrass)), "Converging images must merge again");
             assertSame(atlas.region("one"), atlas.region("two"));

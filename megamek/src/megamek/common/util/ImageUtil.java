@@ -49,10 +49,15 @@ import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.WeakHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import javax.imageio.ImageIO;
-import javax.swing.UIManager;
+import javax.swing.*;
 
 import megamek.MMConstants;
 import megamek.client.ui.util.ImageAtlasMap;
@@ -85,7 +90,7 @@ public final class ImageUtil {
 
         }
 
-        GRAPHICS_CONFIGURATION = (null != graphicsDevice) ? graphicsDevice.getDefaultConfiguration() : null;
+        GRAPHICS_CONFIGURATION = (graphicsDevice != null) ? graphicsDevice.getDefaultConfiguration() : null;
     }
 
     public static final int IMAGE_SCALE_BICUBIC = 1;
@@ -99,7 +104,7 @@ public final class ImageUtil {
      *       it
      */
     public static BufferedImage createAcceleratedImage(Image base) {
-        if ((null == GRAPHICS_CONFIGURATION) || (null == base)) {
+        if ((GRAPHICS_CONFIGURATION == null) || (base == null)) {
             return null;
         }
         BufferedImage acceleratedImage = GRAPHICS_CONFIGURATION.createCompatibleImage(base.getWidth(null),
@@ -221,6 +226,23 @@ public final class ImageUtil {
 
     /** Image loaders */
     private static final List<ImageLoader> IMAGE_LOADERS;
+    /** Toolkit.getImage also caches files after the tileset's own image caches are discarded. */
+    private static final Set<Image> toolkitImages = Collections.newSetFromMap(new WeakHashMap<>());
+
+    private static synchronized Image toolkitImage(String filename) {
+        Image image = Toolkit.getDefaultToolkit().getImage(filename);
+        if (image != null) { toolkitImages.add(image); }
+        return image;
+    }
+
+    /** Reread image files and atlas mappings on the next load; callers also discard their derived artwork. */
+    public static synchronized void reloadImages() {
+        toolkitImages.forEach(Image::flush);
+        toolkitImages.clear();
+        for (ImageLoader loader : IMAGE_LOADERS) {
+            if (loader instanceof AtlasImageLoader atlas) { atlas.imgFileToAtlasMap = ImageAtlasMap.readFromFile(); }
+        }
+    }
 
     static {
         IMAGE_LOADERS = new ArrayList<>();
@@ -234,7 +256,7 @@ public final class ImageUtil {
      */
     @Deprecated(since = "0.51.0", forRemoval = true)
     public static void addImageLoader(ImageLoader loader) {
-        if (null != loader && !IMAGE_LOADERS.contains(loader)) {
+        if (loader != null && !IMAGE_LOADERS.contains(loader)) {
             IMAGE_LOADERS.addFirst(loader);
         }
     }
@@ -249,12 +271,12 @@ public final class ImageUtil {
      * @return The image if possible, a placeholder image otherwise
      */
     public static Image loadImageFromFile(String fileName) {
-        if (null == fileName) {
+        if (fileName == null) {
             return failStandardImage();
         }
         for (ImageLoader loader : IMAGE_LOADERS) {
             Image img = loader.loadImage(fileName);
-            if (null != img) {
+            if (img != null) {
                 return img;
             }
         }
@@ -308,7 +330,7 @@ public final class ImageUtil {
                 return null;
             }
 
-            Image result = Toolkit.getDefaultToolkit().getImage(fileName);
+            Image result = toolkitImage(fileName);
 
             if (result == null) {
                 return null;
@@ -339,7 +361,7 @@ public final class ImageUtil {
          * @return {@link Coords} parsed.
          */
         protected @Nullable Coords parseCoords(@Nullable String coords) {
-            if (null == coords || coords.isEmpty()) {
+            if (coords == null || coords.isEmpty()) {
                 return null;
             }
 
@@ -381,7 +403,7 @@ public final class ImageUtil {
             Coords start = parseCoords(coords.substring(0, coordsSplitter));
             Coords size = parseCoords(coords.substring(coordsSplitter + 1));
 
-            if ((null == start) || (null == size) || (0 == size.getX()) || (0 == size.getY())) {
+            if ((start == null) || (size == null) || (0 == size.getX()) || (0 == size.getY())) {
                 return null;
             }
 
@@ -393,9 +415,9 @@ public final class ImageUtil {
             }
 
             LOGGER.info("Loading atlas: {}", baseFile);
-            Image base = Toolkit.getDefaultToolkit().getImage(baseFile.getPath());
+            Image base = toolkitImage(baseFile.getPath());
 
-            if (null == base) {
+            if (base == null) {
                 return null;
             }
 
@@ -424,7 +446,7 @@ public final class ImageUtil {
      * return an image from the corresponding key which includes an atlas and offset.
      */
     public static class AtlasImageLoader extends TileMapImageLoader {
-        ImageAtlasMap imgFileToAtlasMap;
+        volatile ImageAtlasMap imgFileToAtlasMap;
 
         public AtlasImageLoader() {
             imgFileToAtlasMap = ImageAtlasMap.readFromFile();
@@ -452,7 +474,7 @@ public final class ImageUtil {
                 } else {
                     start = parseCoords(coords.substring(0, coordsSplitter));
                     size = parseCoords(coords.substring(coordsSplitter + 1));
-                    if ((null == start) || (null == size) || (0 == size.getX()) || (0 == size.getY())) {
+                    if ((start == null) || (size == null) || (0 == size.getX()) || (0 == size.getY())) {
                         return null;
                     }
                     // If we don't have any negative values, this entry isn't doing any image
@@ -470,13 +492,14 @@ public final class ImageUtil {
             // Check to see if the base file is in an atlas
             File fn = new File(baseName);
             Path p = fn.toPath();
-            if ((imgFileToAtlasMap == null) || !imgFileToAtlasMap.containsKey(p)) {
+            ImageAtlasMap mapping = imgFileToAtlasMap;
+            if ((mapping == null) || !mapping.containsKey(p)) {
                 return null;
             }
 
             // Check to see if we need to flip the image
             if (tileAdjusting) {
-                Image img = super.loadImage(imgFileToAtlasMap.get(p));
+                Image img = super.loadImage(mapping.get(p));
                 BufferedImage result = ImageUtil.createAcceleratedImage(Math.abs(size.getX()), Math.abs(size.getY()));
                 Graphics2D g2d = result.createGraphics();
                 g2d.drawImage(img,
@@ -493,7 +516,7 @@ public final class ImageUtil {
                 return img;
             } else {
                 // Otherwise just return the image loaded from the atlas
-                return super.loadImage(imgFileToAtlasMap.get(p));
+                return super.loadImage(mapping.get(p));
             }
         }
     }
@@ -506,22 +529,10 @@ public final class ImageUtil {
      * @return if the image is animated
      */
     private static boolean waitUntilLoaded(Image result) {
-        FinishedLoadingObserver observer = new FinishedLoadingObserver(Thread.currentThread());
+        FinishedLoadingObserver observer = new FinishedLoadingObserver();
         // Check to see if the image is loaded
         if (!Toolkit.getDefaultToolkit().prepareImage(result, -1, -1, observer)) {
-            long startTime = java.lang.System.currentTimeMillis();
-            long maxRuntime = 10000;
-            long runTime = 0;
-            while (!observer.isLoaded() && runTime < maxRuntime) {
-
-                try {
-                    Thread.sleep(10);
-                } catch (InterruptedException ignored) {
-                    // Do nothing
-                }
-
-                runTime = java.lang.System.currentTimeMillis() - startTime;
-            }
+            observer.await();
         }
         return observer.isAnimated();
     }
@@ -532,27 +543,27 @@ public final class ImageUtil {
               ImageObserver.FRAMEBITS |
               ImageObserver.ALLBITS;
 
-        private final Thread mainThread;
-        private volatile boolean loaded = false;
+        private final CountDownLatch loaded = new CountDownLatch(1);
         private volatile boolean animated = false;
 
-        public FinishedLoadingObserver(Thread mainThread) {
-            this.mainThread = mainThread;
+        void await() {
+            try {
+                loaded.await(10, TimeUnit.SECONDS);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
 
         @Override
         public boolean imageUpdate(Image img, int informationFlags, int x, int y, int width, int height) {
             if ((informationFlags & DONE) > 0) {
-                loaded = true;
                 animated = ((informationFlags & ImageObserver.FRAMEBITS) > 0);
-                mainThread.interrupt();
+                // Loading can finish after the waiter returns. Never interrupt its thread: on Swing that
+                // would also unwind any modal dialog's event loop that happens to be running there.
+                loaded.countDown();
                 return false;
             }
             return true;
-        }
-
-        public boolean isLoaded() {
-            return loaded;
         }
 
         public boolean isAnimated() {

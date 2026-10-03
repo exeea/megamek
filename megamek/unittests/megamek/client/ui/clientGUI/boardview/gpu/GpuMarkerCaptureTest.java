@@ -199,6 +199,12 @@ class GpuMarkerCaptureTest {
             BoardScene after = fixture.source.takeFrame().scene();
             assertEquals(1, after.markers().size());
             assertEquals(BoardMarker.Kind.ORBITAL_INCOMING, after.markers().getFirst().kind());
+            var footprint = after.tactical().fills().stream()
+                  .filter(fill -> fill.argb() == new Color(BoardMarker.Kind.ORBITAL_INCOMING.rgb()).getRGB()).toList();
+            assertEquals(7, footprint.size());
+            assertEquals(Set.copyOf(new Coords(3, 3).allAtDistanceOrLess(1)), footprint.stream()
+                  .map(fill -> BoardTacticalGeometry.anchorCoords(after, fill.planeAnchor())).collect(Collectors.toSet()),
+                  "Every affected hex uses its own annotation plane");
             Coords neighbor = new Coords(3, 2);
             assertTrue(!java.util.Objects.equals(before.tile(neighbor).tactical(), after.tile(neighbor).tactical())
                         || !before.tactical().fills().equals(after.tactical().fills()),

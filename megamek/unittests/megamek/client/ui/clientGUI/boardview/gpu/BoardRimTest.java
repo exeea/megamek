@@ -4,8 +4,8 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -27,65 +27,87 @@ class BoardRimTest {
     void restoreGeometry() { BoardGeometry.tune(BoardGeometry.DEFAULTS); }
 
     @Test
-    void neutralDetailPreservesBaseReliefAndNeutralBaseAcceptsDetail() {
-        Vector3 base = new Vector3(0.4f, -0.2f, 1).nor();
-        Vector3 detail = new Vector3(-0.3f, 0.5f, 1).nor();
-        Vector3 result = new Vector3();
-        for (float alpha : new float[] { 0, 0.2f, 0.62f, 1 }) {
-            BoardRim.blendNormal(base, Vector3.Z, alpha, result);
-            assertTrue(base.epsilonEquals(result, 0.00001f));
+    void concurrentCompositionMatchesSerialArtwork() throws Exception {
+        BoardRim parallel = new BoardRim(), serial = new BoardRim();
+        BoardScene.Pixels mask = pixels(0xff606060);
+        var scenes = java.util.stream.IntStream.range(0, 48)
+              .mapToObj(i -> scene(i % 6, false, i % 2 == 0, ground, neutral)).toList();
+        var expected = scenes.stream().map(scene -> serial.material(scene, scene.tile(CENTER),
+              BoardGeometry.floor(scene), mask, mask)).toList();
+        TerrainSettings settings = TerrainSettings.capture();
+        try (var workers = new java.util.concurrent.ForkJoinPool(2)) {
+            var actual = workers.submit(() -> scenes.parallelStream().map(scene -> settings.call(() ->
+                  parallel.material(scene, scene.tile(CENTER), BoardGeometry.floor(scene), mask, mask))).toList()).get();
+            assertEquals(expected, actual, "Parallel cache publication must preserve the exact composed pixels");
         }
-        BoardRim.blendNormal(Vector3.Z, detail, 1, result);
-        assertTrue(detail.epsilonEquals(result, 0.00001f));
-        BoardRim.blendNormal(base, detail, 0, result);
-        assertTrue(base.epsilonEquals(result, 0.00001f));
     }
 
     @Test
-    void rotatesDetailOnAllSixEdgesAndKeepsTheCentreUntouchedAtDifferentScales() {
-        GpuAssets assets = assets(pixels(0xff606060), pixels(0xffc080ee));
+    void rimsLeaveMissingGroundNormalsAbsent() {
+        for (int neighborElevation : new int[] { 0, -1 }) {
+            BoardScene scene = scene(0, false, neighborElevation, ground, null);
+            BoardRim.Images material = new BoardRim().material(scene, scene.tile(CENTER), BoardGeometry.floor(scene),
+                  assets(pixels(0xff606060)));
+            assertNotEquals(ground.rgba(probe(0, 0.5f, 9)), material.color().rgba(probe(0, 0.5f, 9)));
+            assertNull(material.normal(), "A rim must not create normals for ground that has none");
+        }
+    }
+
+    @Test
+    void rotatesColorOnAllSixEdgesAndPreservesGroundNormalsAtDifferentScales() {
+        GpuAssets assets = assets(pixels(0xff606060));
+        BoardScene.Pixels normal = pixels(0xffb060ee);
         for (float scale : new float[] { 0.5f, 1, 2 }) {
             BoardGeometry.tune(new BoardGeometry.Tuning(scale, 0.7f, 1, 18, 0.8f));
             for (int edge = 0; edge < 6; edge++) {
-                BoardScene scene = scene(edge, false, false);
+                BoardScene scene = scene(edge, false, false, ground, normal);
                 BoardRim.Images material = new BoardRim().material(scene, scene.tile(CENTER), BoardGeometry.floor(scene), assets);
                 int index = probe(edge, 0.5f, 9);
                 assertEquals(Math.round(0x50 * shade(0x60, 1)), material.color().rgba(index) >>> 24, 1,
-                      "A dark mask shades the top layer by its lightness about mid gray");
-                int encoded = material.normal().rgba(index);
-                Vector3 normal = new Vector3((encoded >>> 24) - 128, (encoded >>> 16 & 255) - 128,
-                      (encoded >>> 8 & 255) - 128).nor();
-                Vector3 along = BoardGeometry.corner(CENTER, 2, edge + 1).sub(BoardGeometry.corner(CENTER, 2, edge)).nor();
-                assertTrue(new Vector3(normal.x, normal.y, 0).nor().dot(new Vector3(along.x, -along.y, 0)) > 0.999f,
-                      "A rotated rim must rotate its normal directions, not only its image");
+                      "The original mask shades the top layer by its lightness about mid gray");
+                assertSame(normal, material.normal(), "Rim color must leave the ground's existing normals untouched");
                 int centre = 36 * 84 + 42;
                 assertEquals(ground.rgba(centre), material.color().rgba(centre));
-                assertEquals(neutral.rgba(centre), material.normal().rgba(centre));
             }
         }
     }
 
     @Test
-    void midGrayLeavesTheTopLayerAloneAndCoverageWeightsTheShade() {
+    void midGrayPreservesGroundAndOriginalMaskAlphaWeightsTheShade() {
         BoardScene scene = scene(0, false, false);
         int index = probe(0, 0.5f, 9);
-        BoardRim.Images neutral = new BoardRim().material(scene, scene.tile(CENTER), BoardGeometry.floor(scene),
-              assets(pixels(0xff808080), null));
-        assertEquals(ground.rgba(index), neutral.color().rgba(index), "Mid gray must leave the top layer as it is");
+        BoardRim.Images transparent = new BoardRim().material(scene, scene.tile(CENTER), BoardGeometry.floor(scene),
+              assets(pixels(0x00c03080)));
+        assertEquals(ground.rgba(index), transparent.color().rgba(index), "Transparent pixels leave the ground untouched");
+        BoardRim.Images gray = new BoardRim().material(scene, scene.tile(CENTER), BoardGeometry.floor(scene),
+              assets(pixels(0xff808080)));
+        assertEquals(ground.rgba(index), gray.color().rgba(index), "Mid gray leaves the top layer unchanged");
         BoardRim.Images faded = new BoardRim().material(scene, scene.tile(CENTER), BoardGeometry.floor(scene),
-              assets(pixels(0x80606060), null));
+              assets(pixels(0x80606060)));
         assertEquals(Math.round(0x50 * shade(0x60, 0x80 / 255f)), faded.color().rgba(index) >>> 24, 1,
               "Half coverage takes half the shade");
     }
 
-    /** What one rim sample does to a top-layer channel: gray about mid gray, weighted by coverage and opacity. */
+    @Test
+    void brightRimsSaturateEachChannelWithoutCorruptingColorOrCoverage() {
+        BoardScene scene = scene(0, false, false, pixels(0x80f08020), neutral);
+        BoardRim.Images material = new BoardRim().material(scene, scene.tile(CENTER), BoardGeometry.floor(scene),
+              assets(pixels(0xffffffff)));
+        int pixel = material.color().rgba(probe(0, 0.5f, 9));
+        assertEquals(255, pixel >>> 24, "A highlight saturates red instead of wrapping to a dark value");
+        assertEquals(Math.round(128 * shade(255, 1)), pixel >>> 16 & 255);
+        assertEquals(Math.round(32 * shade(255, 1)), pixel >>> 8 & 255);
+        assertEquals(128, pixel & 255, "RGB overflow must never set alpha bits");
+    }
+
+    /** The libGDX branch's lightness rule, weighted by the original mask's coverage and opacity. */
     private static float shade(int gray, float coverage) {
         return 1 + coverage * BoardRim.BLEND_OPACITY * (gray / 128f - 1);
     }
 
     @Test
     void roadMouthStaysOpenAndRemovingTheCliffRestoresOriginalMaps() {
-        GpuAssets assets = assets(pixels(0xff606060), neutral);
+        GpuAssets assets = assets(pixels(0xff606060));
         BoardRim rims = new BoardRim();
         for (int edge = 0; edge < 6; edge++) {
             BoardScene scene = scene(edge, true, false);
@@ -103,22 +125,24 @@ class BoardRimTest {
 
     @Test
     void usesTheInclineMaskUpToTwoLevelsAndTheHighMaskBeyond() {
-        GpuAssets assets = assets(pixels(0xff606060), null, pixels(0xffc0c0c0), null);
+        GpuAssets assets = assets(pixels(0xff606060), pixels(0xffc0c0c0));
         BoardScene twoLevels = scene(0, false, 0, ground, neutral);
         BoardRim.Images gentle = new BoardRim().material(twoLevels, twoLevels.tile(CENTER),
               BoardGeometry.floor(twoLevels), assets);
         assertEquals(Math.round(0x50 * shade(0x60, 1)), gentle.color().rgba(probe(0, 0.5f, 9)) >>> 24, 1,
               "A two-level drop wears the incline mask");
+        assertSame(neutral, gentle.normal());
         BoardScene threeLevels = scene(0, false, -1, ground, neutral);
         BoardRim.Images steep = new BoardRim().material(threeLevels, threeLevels.tile(CENTER),
               BoardGeometry.floor(threeLevels), assets);
         assertEquals(Math.round(0x50 * shade(0xc0, 1)), steep.color().rgba(probe(0, 0.5f, 9)) >>> 24, 1,
               "A three-level drop wears the high mask");
+        assertSame(neutral, steep.normal());
     }
 
     @Test
     void reusesMaterialsForUnchangedInputsAndReleasesUnusedCombinations() {
-        GpuAssets assets = assets(pixels(0xfff0f0f0), neutral);
+        GpuAssets assets = assets(pixels(0xfff0f0f0));
         BoardRim rims = new BoardRim();
         BoardScene scene = scene(0, false, false);
         BoardRim.Images first = rims.material(scene, scene.tile(CENTER), BoardGeometry.floor(scene), assets);
@@ -131,16 +155,18 @@ class BoardRimTest {
     }
 
     @Test
-    void smallCustomTexturesKeepRimCoverageAndMissingDetailNormalsPreserveBaseRelief() {
+    void smallCustomTexturesKeepRimCoverageAndAlignExistingGroundNormals() {
         BoardScene.Pixels smallGround = pixels(0xff505050, 2, 2);
         BoardScene.Pixels smallNormal = pixels(0xffb060ee, 2, 2);
         BoardScene scene = scene(0, false, false, smallGround, smallNormal);
         BoardRim.Images material = new BoardRim().material(scene, scene.tile(CENTER), BoardGeometry.floor(scene),
-              assets(pixels(0xff606060), null));
+              assets(pixels(0xff606060)));
         assertEquals(84, material.color().width());
         assertEquals(72, material.color().height());
         assertEquals(Math.round(0x50 * shade(0x60, 1)), material.color().rgba(probe(0, 0.5f, 9)) >>> 24, 1);
         assertEquals(smallGround.rgba(0), material.color().rgba(36 * 84 + 42));
+        assertEquals(material.color().width(), material.normal().width(), "Atlas colors and normals must align");
+        assertEquals(material.color().height(), material.normal().height());
         for (int index = 0; index < 84 * 72; index++) {
             assertEquals(smallNormal.rgba(0), material.normal().rgba(index));
         }
@@ -179,15 +205,14 @@ class BoardRimTest {
         return (int) (v * 72) * 84 + (int) (u * 84);
     }
 
-    private static GpuAssets assets(BoardScene.Pixels mask, BoardScene.Pixels normal) {
-        return assets(mask, normal, mask, normal);
+    private static GpuAssets assets(BoardScene.Pixels mask) {
+        return assets(mask, mask);
     }
 
-    private static GpuAssets assets(BoardScene.Pixels incline, BoardScene.Pixels inclineNormal,
-          BoardScene.Pixels high, BoardScene.Pixels highNormal) {
+    private static GpuAssets assets(BoardScene.Pixels incline, BoardScene.Pixels high) {
         GpuAssets assets = mock(GpuAssets.class);
-        when(assets.inclineMask()).thenReturn(new BoardRim.Images(incline, inclineNormal));
-        when(assets.highInclineMask()).thenReturn(new BoardRim.Images(high, highNormal));
+        when(assets.inclineMask()).thenReturn(incline);
+        when(assets.highInclineMask()).thenReturn(high);
         return assets;
     }
 

@@ -75,7 +75,7 @@ final class ForceGeneratorTestFixture {
     private static final long LOAD_TIMEOUT_MILLIS = 120_000;
 
     /** The data folder in use before {@link #loadFromTestData}; {@link #reset} puts it back. */
-    private static File previousDataDir;
+    private static File originalDataDirectory;
 
     private ForceGeneratorTestFixture() {
     }
@@ -90,8 +90,8 @@ final class ForceGeneratorTestFixture {
      * @throws Exception if the unit cache singleton cannot be reset
      */
     static RATGenerator loadFromTestData(int era) throws Exception {
-        if (previousDataDir == null) {
-            previousDataDir = Configuration.dataDir();
+        if (originalDataDirectory == null) {
+            originalDataDirectory = Configuration.dataDir();
         }
         Configuration.setDataDir(new File("testresources/data"));
 
@@ -161,20 +161,23 @@ final class ForceGeneratorTestFixture {
     }
 
     /**
-     * Clears the singletons this fixture touched, so later test classes start from a clean slate.
+     * Restores the data directory and clears the singletons this fixture touched.
      *
      * @throws Exception if the unit cache singleton cannot be reset
      */
     static void reset() throws Exception {
-        // Later test classes load boards, fonts and art from the real data folder
-        if (previousDataDir != null) {
-            Configuration.setDataDir(previousDataDir);
-            previousDataDir = null;
+        try {
+            Factions2.setInstance(null);
+            resetMekSummaryCache();
+            // Null restores the lazy default: the next unit load reads the real list again
+            MekFileParser.setCanonUnitNames(null);
+        } finally {
+            // Later test classes load boards, fonts and art from the real data folder
+            if (originalDataDirectory != null) {
+                Configuration.setDataDir(originalDataDirectory);
+                originalDataDirectory = null;
+            }
         }
-        Factions2.setInstance(null);
-        resetMekSummaryCache();
-        // Null restores the lazy default: the next unit load reads the real list again
-        MekFileParser.setCanonUnitNames(null);
     }
 
     /**

@@ -3,11 +3,17 @@ package megamek.client.ui.clientGUI.boardview;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 import megamek.client.ui.Messages;
 import megamek.common.Player;
 import megamek.common.actions.LayExplosivesAttackAction;
+import megamek.common.actions.ScanAction;
 import megamek.common.annotations.Nullable;
+import megamek.common.compute.VirtualRealityPilotingPod;
+import megamek.common.compute.VirtualRealityPilotingPod.Interference;
+import megamek.common.compute.VirtualRealityPilotingPod.InterferenceState;
+import megamek.common.game.Game;
 import megamek.common.equipment.HandheldWeapon;
 import megamek.common.units.AbstractBuildingEntity;
 import megamek.common.units.Aero;
@@ -19,6 +25,8 @@ import megamek.common.units.EntityVisibilityUtils;
 import megamek.common.units.FighterSquadron;
 import megamek.common.units.IAero;
 import megamek.common.units.Infantry;
+import megamek.common.units.Mek;
+import megamek.common.units.ReconCameraRules;
 import megamek.common.units.Tank;
 
 /**
@@ -113,6 +121,22 @@ public final class UnitStatusWords {
      * @return the words, never null
      */
     public static List<StatusWord> statusWords(Entity entity, boolean affectedByEcm) {
+        return statusWords(entity, affectedByEcm, null);
+    }
+
+    /**
+     * The status words the board label of this unit shows to {@code localPlayer}: {@link #statusWords(Entity,
+     * boolean)} plus the words told only to one side, the ordered scans ("SCANNING", "SCANNED") and the Recon Camera
+     * spots ("CAMERA_SPOTTING" or "CAMERA_SPOTTED", each followed by "CAMERA").
+     *
+     * @param entity        the unit
+     * @param affectedByEcm whether hostile ECM affects the unit in its hex, as the board view computes it for its
+     *                      sprites
+     * @param localPlayer   the player the board is shown to, or null
+     *
+     * @return the words, never null
+     */
+    public static List<StatusWord> statusWords(Entity entity, boolean affectedByEcm, @Nullable Player localPlayer) {
         List<StatusWord> words = new ArrayList<>();
 
         // Determine if the entity has a locked turret and if it is a gun emplacement
@@ -147,6 +171,26 @@ public final class UnitStatusWords {
             words.add(word(Severity.PRECAUTION, "HIDDEN"));
         }
 
+        // An End Phase scan order, told only to the side that gave it
+        if ((entity.getPendingScan() != null) && isOwnedBy(entity, localPlayer)) {
+            words.add(word(Severity.PRECAUTION, "SCANNING"));
+        }
+        if (isTargetOfAnOrderedScan(entity, localPlayer)) {
+            words.add(word(Severity.PRECAUTION, "SCANNED"));
+        }
+
+        // A Recon Camera spot that hit this turn, shown to the camera's side on the camera and on its target. The
+        // board label draws its words from the bottom up, so the second word goes in first to read "CAMERA" above it.
+        if ((entity.getReconCameraSpotTargetId() != Entity.NONE)
+              && ReconCameraRules.isOnCameraSide(entity, localPlayer)) {
+            words.add(word(Severity.PRECAUTION, "CAMERA_SPOTTING"));
+            words.add(word(Severity.PRECAUTION, "CAMERA"));
+        }
+        if (entity.isReconCameraSpottedFor(localPlayer)) {
+            words.add(word(Severity.PRECAUTION, "CAMERA_SPOTTED"));
+            words.add(word(Severity.PRECAUTION, "CAMERA"));
+        }
+
         if (entity.isGyroDestroyed()) {
             words.add(word(Severity.WARNING, "NO_GYRO"));
         }
@@ -173,6 +217,19 @@ public final class UnitStatusWords {
 
         if (affectedByEcm) {
             words.add(word(Severity.CAUTION, "Jammed"));
+        }
+
+        Game game = entity.getGame();
+        if ((game != null) && game.getForcedWithdrawalReports().isWithdrawing(entity)) {
+            words.add(word(Severity.CAUTION, "Withdrawing"));
+        }
+        if ((entity instanceof Mek mek) && mek.hasVirtualRealityPilotingPod()) {
+            Interference podInterference = VirtualRealityPilotingPod.getInterference(mek);
+            if (podInterference.isBlinded()) {
+                words.add(word(Severity.WARNING, "vrppBlinded"));
+            } else if (podInterference.state() == InterferenceState.DEGRADED) {
+                words.add(word(Severity.CAUTION, "vrppDegraded"));
+            }
         }
 
         // Turret Lock
@@ -275,6 +332,27 @@ public final class UnitStatusWords {
     private static StatusWord fortifying(int stage, int stages) {
         return new StatusWord("fortifyProgress", Messages.getString("BoardView1.fortifyProgress", stage, stages),
               Severity.PRECAUTION);
+    }
+
+    /** Whether one of the local player's units has been told to scan this unit in the End Phase. */
+    private static boolean isTargetOfAnOrderedScan(Entity entity, @Nullable Player localPlayer) {
+        Game game = entity.getGame();
+        if (game == null) {
+            return false;
+        }
+        for (Entity scanner : game.getEntitiesVector()) {
+            ScanAction order = scanner.getPendingScan();
+            if ((order != null) && order.isUnitTarget() && (order.getTargetId() == entity.getId())
+                  && isOwnedBy(scanner, localPlayer)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Whether the unit belongs to the local player; false without a local player, even for an ownerless unit. */
+    private static boolean isOwnedBy(Entity entity, @Nullable Player localPlayer) {
+        return (localPlayer != null) && Objects.equals(localPlayer, entity.getOwner());
     }
 
     static boolean isStaticEntity(Entity entity) {

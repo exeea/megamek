@@ -127,13 +127,7 @@ class GpuSunGlareBenchmarkSmokeTest {
     }
 
     private static ShaderProgram compile(String vertex, String fragment) {
-        var program = new ShaderProgram(vertex, fragment);
-        if (!program.isCompiled()) {
-            String log = program.getLog();
-            program.dispose();
-            throw new AssertionError(log);
-        }
-        return program;
+        return GpuGlsl.compile("sun glare comparison", vertex, fragment);
     }
 
     private static String replaceGlare(String fragment, String glare) {

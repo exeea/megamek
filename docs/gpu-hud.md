@@ -332,7 +332,7 @@ view changes (open panels, the camera) stay on the GL thread. Names in quotes ar
 | `GpuUnitCard` | bottom left | the inspected unit, else the focus unit: paperdoll, vitals, chips; the mini card while the sheet is open; the contact card for a sensor contact | "Unit record", Locate |
 | `GpuRecordSheet` | left, at the grid's width | the unit sheet (section 7) | the record service's unit actions |
 | `GpuConditionsCard` | beside the left column | the planetary conditions overlay's lines while its View preference is on | its close button runs that View item |
-| `GpuUtilityBar` | top right | "Tactical view", "Map", "Log" (amber count of the round's reviewable events the board has presented), "Help", "Menu"; the Tactical View chip and north mark | the camera's Tactical View, View > minimap, the HUD's toggles |
+| `GpuUtilityBar` | top right | "Tactical view", "Wireframe" (an open grid icon: three lines each way, no border), "Map", "Log" (amber count of the round's reviewable events the board has presented), "Help", "Menu"; the Tactical View chip and north mark | the camera's Tactical View, the tuning model's wireframe view, View > minimap, the HUD's toggles |
 | `GpuInitiativeCard` | centre, initiative phase | each side's reported roll, "Wins", "Moves first", the turn order in pages of eight (double blind hides the order and "Moves first") | none |
 | `GpuMinimap` | under the utilities | the board in its tileset colours, units at their animated positions, the planned route, the camera's ground area | a left press or drag centres the camera, a middle drag orbits it as on the board; no order changes |
 | `GpuContactsPanel` | right column | enemy units; with the movement fire preview, where the unit fires from, each enemy's best salvo both ways and the guide toggles | selection rule, unit menu |
@@ -459,7 +459,7 @@ The Tactical View is the board seen straight down with flat tileset art. The sce
 stay the 3D view's own; only unit models become icons and feature meshes become flat art.
 
 - **Switch it** with `TOGGLE_ISO` (T), the "Tactical view" utility, the Menu's "Tactical view" item, or the chip's
-  "Back to 3D". The chip ("Tactical view" with "Back to 3D") shows centred at the top when the top row has room, and
+  "Back to 3D". Entering it ends Free Flight; switching Free Flight on leaves it. The chip ("Tactical view" with "Back to 3D") shows centred at the top when the top row has room, and
   the north mark "N ↑" centred below it, under the board labels.
 - **Camera.** `BoardCamera.setTactical(enabled, scene)` saves the full 3D pose (focus, zoom, azimuth, tilt, whether
   the view fits the window) and turns the same orthographic camera straight down, north up. Pan, zoom, reset, fit
@@ -681,12 +681,21 @@ While the native window is active (`GpuBoardWindow.isActiveFor`), the HUD replac
   chokepoints, the dialogs made native and a list prompt of each routed class with the window presented, and the same
   openers on the classic client.
 
+### The map tools of the board editor and the map preview
+
+The board editor's 3D view and the lobby's map preview run the same `GpuBattleView` over a `GpuMapSource`, which has
+no game. `GpuBattleView` holds its HUD as a `GpuBoardHud`: the battle HUD (`GpuHud`) over a `GpuBoardSource`, else
+`GpuMapHud`. The map tools show the battle HUD's utilities that apply to a map (Tactical view, Wireframe, Tuning; in
+the editor also Menu with its menu bar, Tools and 2D Editor) and a hint line with the editor's title, the hovered hex's
+terrain and the keys of the editor or Free Flight. A left drag paints in the editor; a right click in the preview
+inspects the hex. The camera centres the board beside the editor's Swing tools (`BoardSource.toolsInset`).
+
 ## 10. The developer Tuning utility
 
 A developer and tester tool, to be removed before release.
 - **Button:** "Tuning", last in the utility row. It opens a panel at the right gap, 90 below the window's top, 360
-  wide and at most the window's height less 160, with the pages Board, Atmosphere and Camera, and Defaults in its
-  footer.
+  wide and at most the window's height less 160, with the pages Board, Atmosphere, Terrain and Camera, and in its
+  footer Defaults, Reload assets with its outcome, and Edit shaders (the GLSL editor).
 - **Model:** `GpuBoardTuning` keeps every value as a Scene2D control that is never drawn; `GpuBattleView` reads the
   values from it. `GpuTuningPanel` mirrors the model's rows in the hud-v3 look, and an edit goes to the model's own
   control. Its tooltips are the model's texts; the row texts are English literals.
@@ -695,7 +704,8 @@ A developer and tester tool, to be removed before release.
 | --- | --- |
 | Board | Geometry (with Normal maps and VSync), Unit family sizes, Zoom-out unit scaling, Route pulse (on/off, speed, intensity), Unit visibility, Outside field of view, Outside sensor range, Unit damage |
 | Atmosphere | Atmosphere presets with "Planetary conditions…" (the Swing editor), Lighting (time of day, exposure, moonlight, fixed sun), Planet properties, Clouds and ground air, Weather effects, Light and fog effects |
-| Camera | Fixed sun/moon, framing on selection, framing on movement (combat framing is the dock's Follow toggle) |
+| Terrain | Terrain build progress, concrete shapes, river shape and land, banks and river openings, waterfalls, terrain detail (grass blades, terrain LoD), material geology |
+| Camera | Fixed sun/moon, framing on selection, framing on movement (combat framing is the dock's Follow toggle); the model's camera rows: Free Flight, the thermal wireframe view, the Free Flight field of view |
 
 **Removing it before release:**
 1. Delete `GpuTuningPanel` and `GpuTuningPanelSmokeTest`.
@@ -704,8 +714,10 @@ A developer and tester tool, to be removed before release.
 3. Delete `GpuHudState.Dialog.TUNING` and the `GpuBoard.hud.tuning.*` message keys.
 4. Remove the panel steps from the tests that click `tuning-button` or measure it: GpuAtmosphereSmokeTest,
    GpuBoardSmokeTest, GpuHudLayoutSmokeTest, GpuHudRoutingSmokeTest and GpuPlanetaryConditionsSmokeTest.
-5. Keep `GpuBoardTuning`: the board reads its values. Its `boardRows()`, `atmosphereRows()` and `defaults()` also
-   serve `GpuBoardTestUi.tuning`, which many smoke tests use. Keep `UiKit.checkbox` too: `GpuModalDialog` uses it.
+5. Keep `GpuBoardTuning`: the board reads its values, and the Wireframe utility and Free Flight switch its camera
+   rows. Its `cameraRows()`, `boardRows()`, `atmosphereRows()`, `terrainRows()` and footer buttons also serve
+   `GpuBoardTestUi.tuning`, which many smoke tests use. Keep `UiKit.checkbox` too: `GpuModalDialog` uses it.
+6. Move Reload assets and Edit shaders to another developer surface first, or drop them with the panel.
 
 The tuning model's "Planetary conditions…" button is the only caller of `GpuBoardSource.editPlanetaryConditions`, so
 without the panel the visual conditions preview is gone from the native window.

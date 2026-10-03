@@ -452,6 +452,8 @@ class GpuHudRoutingSmokeTest {
                             });
                             view = new GpuBattleView(fixture.source);
                             view.create();
+                            // The HUD draws once the board is presented, after the terrain is built.
+                            GpuBoardTestUi.present(view);
                             FutureTask<List<ICarryable>> placing = new FutureTask<>(
                                   () -> GpuListPromptBridgeTest.placeAt(display, fixture, EMPTY_HEX));
                             SwingUtilities.invokeLater(placing);
@@ -528,6 +530,8 @@ class GpuHudRoutingSmokeTest {
                             });
                             view = new GpuBattleView(fixture.source);
                             view.create();
+                            // The HUD draws once the board is presented, after the terrain is built.
+                            GpuBoardTestUi.present(view);
                             settle(fixture, view);
                             GpuHud hud = (GpuHud) field(view, "ui");
                             Vector3 atlas = view.screenPosition(OWN_HEX);
@@ -881,8 +885,8 @@ class GpuHudRoutingSmokeTest {
             UiButton utility = routing.find("utility-contacts");
             List<String> row = new ArrayList<>();
             ((Table) routing.find("utility-bar")).getChildren().forEach(child -> row.add(child.getName()));
-            assertEquals(List.of("utility-tactical", "utility-map", "utility-contacts", "utility-log", "utility-help",
-                  "utility-menu"), row, "Contacts follows Map");
+            assertEquals(List.of("utility-tactical", "utility-wireframe", "utility-map", "utility-contacts",
+                  "utility-log", "utility-help", "utility-menu"), row, "Contacts follows Map");
             assertTrue(shown(contacts) && utility.isChecked(), "shown and pressed by default");
             GUIPreferences preferences = GUIPreferences.getInstance();
             boolean before = preferences.getGpuContactsEnabled();
@@ -1314,6 +1318,8 @@ class GpuHudRoutingSmokeTest {
             // One HUD unit per window pixel, as in the prototype's 1920 x 1080 captures.
             source.uiPreferences = GpuHudInputTest.preferences(.1f
                   / DisplayScale.read(.1f, new GpuDisplayScale().contentScale()));
+            // The view reads the preferences through the accessor; tests change them through the field.
+            when(source.uiPreferences()).thenAnswer(invocation -> source.uiPreferences);
             when(source.takeFrame()).thenAnswer(invocation -> frame.get());
             when(source.dialog()).thenAnswer(invocation -> dialog.get());
             when(source.moves()).thenReturn(moves);
@@ -1361,6 +1367,8 @@ class GpuHudRoutingSmokeTest {
         void show(GpuBoardSource.Frame next) {
             reset();
             frame.set(next);
+            // The HUD draws once the board is presented, after the terrain is built.
+            GpuBoardTestUi.present(view);
             view.render();
         }
 

@@ -387,7 +387,7 @@ public class FighterSquadron extends AeroSpaceFighter {
         Map<String, Integer> groups = new HashMap<>();
         for (WeaponMounted mounted : weaponGroupContributors()) {
             String key = mounted.getType().getInternalName() + ":" + weaponGroupLocation(mounted);
-            if (null == groups.get(key)) {
+            if (groups.get(key) == null) {
                 groups.put(key, mounted.getNWeapons());
             } else if (!mounted.getType().hasFlag(WeaponType.F_SPACE_BOMB)) {
                 groups.put(key, groups.get(key) + mounted.getNWeapons());
@@ -397,7 +397,7 @@ public class FighterSquadron extends AeroSpaceFighter {
         // equipment or add new ones if there is none
         Set<String> newSet = groups.keySet();
         for (String key : newSet) {
-            if (null != weaponGroups.get(key) && null != getEquipment(weaponGroups.get(key))) {
+            if (weaponGroups.get(key) != null && getEquipment(weaponGroups.get(key)) != null) {
                 // then this equipment is already loaded, so we just need to
                 // correctly update the number of weapons
                 getEquipment(weaponGroups.get(key)).setNWeapons(groups.get(key));

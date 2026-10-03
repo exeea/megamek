@@ -32,7 +32,10 @@
  */
 package megamek.client.ui.panels.phaseDisplay;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
@@ -40,10 +43,14 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import megamek.common.Player;
 import megamek.common.actions.*;
+import megamek.common.game.BotHonorReport;
+import megamek.common.game.ForcedWithdrawalReports;
 import megamek.common.game.Game;
 import megamek.common.units.Entity;
 import megamek.common.units.Targetable;
@@ -61,12 +68,14 @@ class HonorNagHelperTest {
 
     private static final int ATTACKER_OWNER_ID = 1;
     private static final int BOT_OWNER_ID = 2;
+    private static final int TARGET_ID = 20;
 
     private Game game;
     private Player attackerOwner;
     private Player botOwner;
     private Entity attacker;
     private Entity target;
+    private ForcedWithdrawalReports withdrawalReports;
 
     @BeforeEach
     void setUp() {
@@ -88,12 +97,27 @@ class HonorNagHelperTest {
         when(attacker.isMilitary()).thenReturn(true);
 
         target = mock(Entity.class);
+        when(target.getId()).thenReturn(TARGET_ID);
         when(target.getOwner()).thenReturn(botOwner);
+        when(target.getOwnerId()).thenReturn(BOT_OWNER_ID);
         when(target.isCrippled()).thenReturn(false);
         when(target.isMilitary()).thenReturn(true);
 
-        // No bot has flagged the attacker as dishonored yet.
+        // No bot has flagged the attacker as dishonored yet, nor reported any unit withdrawing.
         when(game.isPlayerDishonoredBy(BOT_OWNER_ID, ATTACKER_OWNER_ID)).thenReturn(false);
+        withdrawalReports = new ForcedWithdrawalReports();
+        when(game.getForcedWithdrawalReports()).thenReturn(withdrawalReports);
+    }
+
+    /**
+     * Records a report from the bot, which follows Forced Withdrawal, naming the given units as withdrawing.
+     */
+    private void botReportsWithdrawing(Entity... withdrawingUnits) {
+        List<Integer> withdrawingUnitIds = new ArrayList<>();
+        for (Entity unit : withdrawingUnits) {
+            withdrawingUnitIds.add(unit.getId());
+        }
+        withdrawalReports.record(BOT_OWNER_ID, new BotHonorReport(List.of(), true, Set.copyOf(withdrawingUnitIds)));
     }
 
     @Test
@@ -114,9 +138,53 @@ class HonorNagHelperTest {
     }
 
     @Test
-    void attackingBrokenEnemyDishonors() {
+    void attackingWithdrawingEnemyDishonors() {
         when(target.isCrippled()).thenReturn(true);
+        botReportsWithdrawing(target);
         assertTrue(HonorNagHelper.wouldBeDishonored(game, attacker, target));
+    }
+
+    @Test
+    void crippledEnemyTheBotHasNotReportedWithdrawingDoesNotDishonor() {
+        // The bot judges attacks against the units it listed as withdrawing when the turn began. A unit crippled
+        // since then is not on that list, so shooting it costs nothing yet.
+        when(target.isCrippled()).thenReturn(true);
+        assertFalse(HonorNagHelper.wouldBeDishonored(game, attacker, target));
+    }
+
+    @Test
+    void crewCrippledEnemyReportedWithdrawingDishonors() {
+        // Damage alone does not decide it: a Mek crippled only through pilot injuries still withdraws, because the
+        // bot counts crew damage. Its report is what matters.
+        when(target.isCrippled()).thenReturn(false);
+        botReportsWithdrawing(target);
+        assertTrue(HonorNagHelper.wouldBeDishonored(game, attacker, target));
+    }
+
+    @Test
+    void botIgnoringForcedWithdrawalDoesNotJudgeTheAttacker() {
+        // A Berserk bot fights to the death, so fighting on while crippled or as a civilian is no dishonor to it.
+        when(attacker.isCrippled()).thenReturn(true);
+        when(attacker.isMilitary()).thenReturn(false);
+        withdrawalReports.record(BOT_OWNER_ID, new BotHonorReport(List.of(), false, Set.of()));
+        assertFalse(HonorNagHelper.wouldBeDishonored(game, attacker, target));
+        assertNull(HonorNagHelper.warningFor(game, attacker, target));
+    }
+
+    @Test
+    void botIgnoringForcedWithdrawalStillProtectsAUnitOrderedToWithdraw() {
+        // A gamemaster's order to withdraw overrides the bot's setting, so attacking that unit is still dishonorable,
+        // and the warning names only the target, not the attacker's own condition.
+        when(attacker.isCrippled()).thenReturn(true);
+        when(attacker.getShortName()).thenReturn("Hunchback HBK-4G");
+        when(target.getShortName()).thenReturn("Atlas AS7-D");
+        withdrawalReports.record(BOT_OWNER_ID, new BotHonorReport(List.of(), false, Set.of(TARGET_ID)));
+
+        String warning = HonorNagHelper.warningFor(game, attacker, target);
+
+        assertNotNull(warning);
+        assertTrue(warning.contains("Atlas AS7-D you are targeting"), warning);
+        assertFalse(warning.contains("Hunchback HBK-4G"), warning);
     }
 
     @Test
@@ -192,7 +260,7 @@ class HonorNagHelperTest {
 
     @Test
     void physicalAttackInListIsEvaluated() {
-        when(target.isCrippled()).thenReturn(true);
+        botReportsWithdrawing(target);
         PhysicalAttackAction physicalAttack = mock(PhysicalAttackAction.class);
         when(physicalAttack.getEntity(game)).thenReturn(attacker);
         when(physicalAttack.getTarget(game)).thenReturn(target);
@@ -243,5 +311,84 @@ class HonorNagHelperTest {
 
         // Healthy military attacker versus healthy enemy: a legitimate shot, no warning.
         assertFalse(HonorNagHelper.wouldBeDishonored(game, List.of((EntityAction) weaponAttack)));
+    }
+
+    @Test
+    void theWarningNamesEveryRuleOneAttackBreaks() {
+        // A crippled truck shooting a crippled enemy breaks all three at once. Telling the player about only one of
+        // them means they fix that one and get warned all over again.
+        when(attacker.isMilitary()).thenReturn(false);
+        when(attacker.isCrippled()).thenReturn(true);
+        when(attacker.getShortName()).thenReturn("Ranger Truck");
+        when(target.getShortName()).thenReturn("Archer ARC-2R");
+        botReportsWithdrawing(target);
+
+        String warning = HonorNagHelper.warningFor(game, attacker, target);
+
+        assertNotNull(warning);
+        assertTrue(warning.contains("Ranger Truck counts as a civilian unit"), warning);
+        assertTrue(warning.contains("Ranger Truck is crippled"), warning);
+        assertTrue(warning.contains("Archer ARC-2R you are targeting is crippled and withdrawing"), warning);
+    }
+
+    @Test
+    void theWarningNamesEachUnitWhenSeveralAreTargeted() {
+        // The case from the Discord thread: a combat tank and a truck sharing a hex, both fired on in one turn.
+        // Each has to be named, or the player cannot tell which of them is the problem.
+        when(attacker.getShortName()).thenReturn("Kestrel VTOL");
+        when(attacker.isMilitary()).thenReturn(false);
+        when(target.getShortName()).thenReturn("Manticore Heavy Tank");
+
+        Entity truck = mock(Entity.class);
+        when(truck.getId()).thenReturn(TARGET_ID + 1);
+        when(truck.getOwner()).thenReturn(botOwner);
+        when(truck.getOwnerId()).thenReturn(BOT_OWNER_ID);
+        when(truck.isMilitary()).thenReturn(false);
+        when(truck.getShortName()).thenReturn("Heavy Truck");
+        botReportsWithdrawing(target, truck);
+
+        WeaponAttackAction atTank = mock(WeaponAttackAction.class);
+        when(atTank.getEntity(game)).thenReturn(attacker);
+        when(atTank.getTarget(game)).thenReturn(target);
+        WeaponAttackAction atTruck = mock(WeaponAttackAction.class);
+        when(atTruck.getEntity(game)).thenReturn(attacker);
+        when(atTruck.getTarget(game)).thenReturn(truck);
+
+        String warning = HonorNagHelper.warningFor(game,
+              List.of((EntityAction) atTank, (EntityAction) atTruck));
+
+        assertNotNull(warning);
+        assertTrue(warning.contains("Manticore Heavy Tank"), warning);
+        assertTrue(warning.contains("Heavy Truck"), warning);
+        assertTrue(warning.contains("Kestrel VTOL"), warning);
+    }
+
+    @Test
+    void oneUnitFiringSeveralWeaponsGivesOneReason() {
+        // Five weapons at one target is one problem, not five identical lines.
+        when(attacker.getShortName()).thenReturn("Kestrel VTOL");
+        when(attacker.isMilitary()).thenReturn(false);
+        when(target.getShortName()).thenReturn("Archer ARC-2R");
+
+        List<EntityAction> volley = new ArrayList<>();
+        for (int shot = 0; shot < 5; shot++) {
+            WeaponAttackAction weaponAttack = mock(WeaponAttackAction.class);
+            when(weaponAttack.getEntity(game)).thenReturn(attacker);
+            when(weaponAttack.getTarget(game)).thenReturn(target);
+            volley.add(weaponAttack);
+        }
+
+        String warning = HonorNagHelper.warningFor(game, volley);
+
+        assertNotNull(warning);
+        int firstMention = warning.indexOf("Kestrel VTOL");
+        // Assert it is there before asserting it is there only once: absent would satisfy the second check on its own.
+        assertTrue(firstMention >= 0, "the reason should name the unit: " + warning);
+        assertEquals(firstMention, warning.lastIndexOf("Kestrel VTOL"), "the reason should appear once: " + warning);
+    }
+
+    @Test
+    void nothingDishonorableGivesNoWarning() {
+        assertNull(HonorNagHelper.warningFor(game, attacker, target));
     }
 }

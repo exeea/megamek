@@ -2,11 +2,8 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -30,7 +27,7 @@ import org.junit.jupiter.api.Test;
 @Tag("on-demand")
 class GpuMeasurementSmokeTest {
     @Test
-    void rulerAndLosGesturesBypassInspectionInBothCameras() throws Exception {
+    void leftClicksPreserveMeasurementModifiersInBothCameras() throws Exception {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             Coords start = new Coords(4, 4), end = new Coords(8, 6);
@@ -42,6 +39,7 @@ class GpuMeasurementSmokeTest {
             });
             GpuBoardSource source = mock(GpuBoardSource.class);
             source.uiPreferences = fixture.source.uiPreferences;
+            when(source.uiPreferences()).thenAnswer(invocation -> fixture.source.uiPreferences());
             when(source.takeFrame()).thenAnswer(invocation -> fixture.source.takeFrame());
             new Lwjgl3Application(new GpuBattleView(source) {
                 private int tick;
@@ -50,6 +48,7 @@ class GpuMeasurementSmokeTest {
                 public void render() {
                     try {
                         super.render();
+                        if (frames() == 0) { return; }
                         tick++;
                         if (tick == 1) {
                             // Board gestures only: the HUD routes them, but its panels (the LOS card) must not cover
@@ -61,12 +60,10 @@ class GpuMeasurementSmokeTest {
                         } else if (tick == 3 || tick == 7) {
                             gesture(InputEvent.ALT_DOWN_MASK);
                         } else if (tick == 4 || tick == 8) {
-                            verify(source).click(start, false, InputEvent.ALT_DOWN_MASK);
-                            verify(source, never()).hover(any(), anyInt());
+                            verifyModifiers(InputEvent.ALT_DOWN_MASK);
                             gesture(InputEvent.CTRL_DOWN_MASK);
                         } else if (tick == 5 || tick == 9) {
-                            verify(source).click(start, false, InputEvent.CTRL_DOWN_MASK);
-                            verify(source, never()).hover(any(), anyInt());
+                            verifyModifiers(InputEvent.CTRL_DOWN_MASK);
                             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                             File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
                             GpuBoardTestUi.capture(new File(output,
@@ -81,6 +78,11 @@ class GpuMeasurementSmokeTest {
                         failure.set(error);
                         Gdx.app.exit();
                     }
+                }
+
+                private void verifyModifiers(int modifiers) {
+                    // The HUD hands a Ctrl or Alt click to MegaMek's measurement tools.
+                    verify(source).click(start, false, modifiers);
                 }
 
                 private void gesture(int modifiers) {

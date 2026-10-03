@@ -87,7 +87,7 @@ public class AmmoBayWeaponHandler extends BayWeaponHandler {
         for (WeaponMounted bayW : weapon.getBayWeapons()) {
             // check the currently loaded ammo
             AmmoMounted bayWAmmo = bayW.getLinkedAmmo();
-            if (null == bayWAmmo || bayWAmmo.getUsableShotsLeft() < 1) {
+            if (bayWAmmo == null || bayWAmmo.getUsableShotsLeft() < 1) {
                 // try loading something else
                 weaponEntity.loadWeaponWithSameAmmo(bayW);
                 bayWAmmo = bayW.getLinkedAmmo();
@@ -119,13 +119,13 @@ public class AmmoBayWeaponHandler extends BayWeaponHandler {
                     recordFiringMount(bayW);
                     int shots = bayW.getCurrentShots();
                     for (int i = 0; i < shots; i++) {
-                        if (null == bayWAmmo
-                              || bayWAmmo.getUsableShotsLeft() < 1) {
+                        if (bayWAmmo == null
+                            || bayWAmmo.getUsableShotsLeft() < 1) {
                             // try loading something else
                             weaponEntity.loadWeaponWithSameAmmo(bayW);
                             bayWAmmo = bayW.getLinkedAmmo();
                         }
-                        if (null != bayWAmmo) {
+                        if (bayWAmmo != null) {
                             bayWAmmo.setShotsLeft(bayWAmmo.getBaseShotsLeft() - 1);
                         }
                     }

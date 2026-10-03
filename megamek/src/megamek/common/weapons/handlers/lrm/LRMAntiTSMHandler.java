@@ -41,7 +41,6 @@ import megamek.common.Report;
 import megamek.common.ToHitData;
 import megamek.common.actions.WeaponAttackAction;
 import megamek.common.battleArmor.BattleArmor;
-import megamek.common.compute.Compute;
 import megamek.common.game.Game;
 import megamek.common.loaders.EntityLoadingException;
 import megamek.common.options.OptionsConstants;
@@ -98,12 +97,12 @@ public class LRMAntiTSMHandler extends LRMSmokeWarheadHandler {
         if (allShotsHit()) {
             // We want buildings and large craft to be able to affect this number with AMS
             // treat as a Streak launcher (cluster roll 11) to make this happen
-            missilesHit = Compute.missilesHit(weaponType.getRackSize(),
+            missilesHit = clusterMissilesHit(weaponType.getRackSize(),
                   nMissilesModifier, weapon.isHotLoaded(), true,
                   isAdvancedAMS());
         } else {
             // anti tsm hit with half the normal number, round up
-            missilesHit = Compute.missilesHit(weaponType.getRackSize(),
+            missilesHit = clusterMissilesHit(weaponType.getRackSize(),
                   nMissilesModifier, weapon.isHotLoaded(), false, isAdvancedAMS());
             missilesHit = (int) Math.ceil((double) missilesHit / 2);
         }

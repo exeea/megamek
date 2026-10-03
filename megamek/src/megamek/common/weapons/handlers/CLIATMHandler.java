@@ -317,17 +317,17 @@ public class CLIATMHandler extends ATMHandler {
         if (allShotsHit()) {
             // We want buildings and large craft to be able to affect this number with AMS
             // treat as a Streak launcher (cluster roll 11) to make this happen
-            missilesHit = Compute.missilesHit(weaponType.getRackSize(),
+            missilesHit = clusterMissilesHit(weaponType.getRackSize(),
                   nMissilesModifier, weapon.isHotLoaded(), true,
                   isAdvancedAMS());
         } else {
             if (attackingEntity instanceof BattleArmor) {
-                missilesHit = Compute.missilesHit(weaponType.getRackSize()
+                missilesHit = clusterMissilesHit(weaponType.getRackSize()
                             * ((BattleArmor) attackingEntity).getShootingStrength(),
                       nMissilesModifier, weapon.isHotLoaded(), false,
                       isAdvancedAMS());
             } else {
-                missilesHit = Compute.missilesHit(weaponType.getRackSize(),
+                missilesHit = clusterMissilesHit(weaponType.getRackSize(),
                       nMissilesModifier, weapon.isHotLoaded(), false,
                       isAdvancedAMS());
             }
@@ -914,8 +914,10 @@ public class CLIATMHandler extends ATMHandler {
                 }
                 // Targeting a building.
                 if (target.getTargetType() == Targetable.TYPE_BUILDING) {
-                    // The building takes the full brunt of the attack, one damage grouping at a time.
-                    handleBuildingDamageByGrouping(vPhaseReport, bldg, hits, nCluster, target.getPosition());
+                    // The building takes the full brunt of the attack, all its hits as one attack (TW p. 171)
+                    nDamage = nDamPerHit * hits;
+                    handleBuildingDamage(vPhaseReport, bldg, nDamage,
+                          target.getPosition());
                     // And we're done!
                     return false;
                 }

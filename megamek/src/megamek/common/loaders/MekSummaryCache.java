@@ -111,9 +111,10 @@ public class MekSummaryCache {
     /** Battlefield Support Assets keyed by the UUID of the base unit they link to. */
     private final Map<String, MekSummary> assetByLinkedUnitId;
     private Map<String, String> failedFiles;
-    private int cacheCount;
-    private int fileCount;
-    private int zipCount;
+    // Written by the loader thread and polled by the loading dialog on the EDT.
+    private volatile int cacheCount;
+    private volatile int fileCount;
+    private volatile int zipCount;
 
     private final List<Listener> listeners = new ArrayList<>();
 
@@ -427,7 +428,7 @@ public class MekSummaryCache {
                         File fSource = ms.getSourceFile();
                         if (fSource.exists()) {
                             vMeks.addElement(ms);
-                            if (null == ms.getEntryName()) {
+                            if (ms.getEntryName() == null) {
                                 sKnownFiles.add(fSource.toString());
                             } else {
                                 sKnownFiles.add(ms.getEntryName());
@@ -714,7 +715,7 @@ public class MekSummaryCache {
             File source = mekSummary.getSourceFile();
             if (source.exists()) {
                 units.add(mekSummary);
-                if (null == mekSummary.getEntryName()) {
+                if (mekSummary.getEntryName() == null) {
                     knownFiles.add(source.toString());
                 } else {
                     knownFiles.add(mekSummary.getEntryName());
@@ -1369,7 +1370,7 @@ public class MekSummaryCache {
                 String line;
                 String lookupName;
                 String entryName;
-                while (null != (line = br.readLine())) {
+                while ((line = br.readLine()) != null) {
                     if (line.startsWith("#")) {
                         continue;
                     }
@@ -1379,7 +1380,7 @@ public class MekSummaryCache {
                         entryName = line.substring(index + 1);
                         if (!nameMap.containsKey(lookupName)) {
                             MekSummary ms = nameMap.get(entryName);
-                            if (null != ms) {
+                            if (ms != null) {
                                 nameMap.put(lookupName, ms);
                             }
                         }

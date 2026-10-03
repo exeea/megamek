@@ -7,9 +7,9 @@ import com.badlogic.gdx.graphics.Color;
 import megamek.common.Hex;
 import megamek.common.units.Terrains;
 
-/** Immutable liquid appearance captured from terrain; depth and elevation stay on the tile. */
+/** Immutable liquid/crust appearance captured from terrain; depth and elevation stay on the tile. */
 record BoardLiquid(Kind kind, String theme, int rapids) {
-    enum Kind { NONE, WATER, HAZARDOUS, MAGMA }
+    enum Kind { NONE, WATER, HAZARDOUS, MAGMA, MAGMA_CRUST }
 
     static final BoardLiquid NONE = new BoardLiquid(Kind.NONE, "", 0);
     static final BoardLiquid WATER = new BoardLiquid(Kind.WATER, "", 0);
@@ -22,6 +22,9 @@ record BoardLiquid(Kind kind, String theme, int rapids) {
         if (hex.terrainLevel(Terrains.MAGMA) == 2) {
             return new BoardLiquid(Kind.MAGMA, "", 0);
         }
+        if (hex.terrainLevel(Terrains.MAGMA) == 1) {
+            return new BoardLiquid(Kind.MAGMA_CRUST, "", 0);
+        }
         boolean hazardous = hex.containsTerrain(Terrains.HAZARDOUS_LIQUID);
         if (!hazardous && !hex.containsTerrain(Terrains.WATER)) { return NONE; }
         String theme = hex.getTheme() == null ? "" : hex.getTheme().toLowerCase(Locale.ROOT);
@@ -31,9 +34,11 @@ record BoardLiquid(Kind kind, String theme, int rapids) {
               Math.clamp(hex.terrainLevel(Terrains.RAPIDS), 0, 2));
     }
 
-    boolean present() { return kind != Kind.NONE; }
+    boolean present() { return kind != Kind.NONE && kind != Kind.MAGMA_CRUST; }
 
     boolean molten() { return kind == Kind.MAGMA; }
+
+    boolean volcanic() { return molten() || kind == Kind.MAGMA_CRUST; }
 
     boolean connects(BoardLiquid other) {
         return present() && other.present() && molten() == other.molten();

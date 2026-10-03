@@ -60,9 +60,11 @@ final class GpuHintLine implements GpuHud.Component {
     private final Label instructions;
     private final Label status;
     private final Cell<Label> statusCell;
+    private final BoardCamera camera;
 
-    GpuHintLine(GpuHudKit kit, GpuBoardSource source, GpuHudState state) {
+    GpuHintLine(GpuHudKit kit, GpuBoardSource source, GpuHudState state, BoardCamera camera) {
         ui = kit.ui;
+        this.camera = camera;
         root.setName("hint-line");
         // Presses pass through the line to the board (#hint: pointer-events none).
         root.setTouchable(Touchable.disabled);
@@ -101,7 +103,8 @@ final class GpuHintLine implements GpuHud.Component {
 
     @Override
     public void update(GpuHud.Inputs inputs) {
-        List<String> items = items(inputs);
+        // While the camera flies, Free Flight's keys replace the board's gestures (the old GL UI's help line).
+        List<String> items = camera.firstPerson() ? flight() : items(inputs);
         if (!items.equals(shown)) {
             shown = items;
             root.clearChildren();
@@ -154,6 +157,14 @@ final class GpuHintLine implements GpuHud.Component {
                   text("GpuBoard.hud.hint.camera")));
         }
         return items;
+    }
+
+    /** Free Flight's name and keys, from its help text ("Free Flight: WASD move | …"). */
+    private static List<String> flight() {
+        String help = text("GpuBoard.firstPersonHelp");
+        int colon = help.indexOf(": ");
+        return colon < 0 ? List.of(text("GpuBoard.firstPerson"), help)
+              : List.of(help.substring(0, colon), help.substring(colon + 2));
     }
 
     /**

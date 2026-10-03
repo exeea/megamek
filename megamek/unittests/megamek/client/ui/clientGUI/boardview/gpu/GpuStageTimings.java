@@ -7,12 +7,22 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.profiling.GLProfiler;
 import org.lwjgl.opengl.ARBTimerQuery;
 import org.lwjgl.opengl.GL;
 import org.lwjgl.opengl.GL15;
 
 /** Native benchmark only. Polls completed timestamp queries; never stalls to obtain a result. */
 final class GpuStageTimings implements AutoCloseable {
+    /** libGDX 1.14.2 restores GL30 but leaves its interceptor in GL20 on the LWJGL3 backend. */
+    static void stopCounting(GLProfiler profiler, GL20 rawGl20) {
+        profiler.disable();
+        Gdx.graphics.setGL20(rawGl20);
+        Gdx.gl = Gdx.gl20 = rawGl20;
+    }
+
     private static final int MAX_STAGES = 24;
     private final boolean gpu;
     private final long timestampMask;
@@ -28,6 +38,7 @@ final class GpuStageTimings implements AutoCloseable {
         int count;
         long start;
         boolean pending;
+        boolean measured;
     }
 
     private static final class Samples {
@@ -50,15 +61,21 @@ final class GpuStageTimings implements AutoCloseable {
     }
 
     void beginFrame() {
+        beginFrame(true);
+    }
+
+    /** Exercise query objects during warmup too: their first driver use can otherwise stall the first sample. */
+    void beginFrame(boolean measured) {
         poll();
         for (Frame frame : frames) {
             if (!frame.pending) {
                 active = frame;
                 active.count = 0;
+                active.measured = measured;
                 return;
             }
         }
-        dropped++;
+        if (measured) { dropped++; }
     }
 
     void stage(String name) {
@@ -81,6 +98,7 @@ final class GpuStageTimings implements AutoCloseable {
             if (!frame.pending || (gpu && GL15.glGetQueryObjecti(frame.queries[frame.count], GL15.GL_QUERY_RESULT_AVAILABLE) == 0)) {
                 continue;
             }
+            if (!frame.measured) { frame.pending = false; continue; }
             long previous = gpu ? ARBTimerQuery.glGetQueryObjectui64(frame.queries[0], GL15.GL_QUERY_RESULT) : 0;
             for (int i = 0; i < frame.count; i++) {
                 var result = samples.computeIfAbsent(frame.names[i], ignored -> new Samples());
@@ -105,6 +123,8 @@ final class GpuStageTimings implements AutoCloseable {
               gpu ? String.format(Locale.ROOT, "%.4f", percentile(result.gpu, .5)) : "n/a",
               gpu ? String.format(Locale.ROOT, "%.4f", percentile(result.gpu, .95)) : "n/a")));
         samples.clear();
+        // A trailing query can still be unavailable after screenshot readback. Never attribute it to the next view.
+        for (Frame frame : frames) { frame.measured = false; }
         dropped = 0;
     }
 

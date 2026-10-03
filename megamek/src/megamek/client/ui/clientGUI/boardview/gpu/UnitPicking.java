@@ -80,6 +80,38 @@ final class UnitPicking {
         return nearest;
     }
 
+    /** Length-weighted centre of the posed mesh's intersection with a horizontal water surface. */
+    boolean waterline(ModelInstance instance, String location, float level, Vector3 result) {
+        var vertices = new Vector3[] { new Vector3(), new Vector3(), new Vector3() };
+        var cuts = new Vector3[] { new Vector3(), new Vector3() };
+        var world = new Matrix4();
+        float[] length = { 0 };
+        result.setZero();
+        UnitDamageDisplay.forParts(instance, location, (node, part) -> {
+            if (!part.enabled) { return; }
+            world.set(instance.transform).mul(node.globalTransform);
+            Geometry geometry = meshes.computeIfAbsent(part.meshPart.mesh, UnitPicking::read);
+            int end = part.meshPart.offset + part.meshPart.size;
+            for (int index = part.meshPart.offset; index + 2 < end; index += 3) {
+                for (int corner = 0; corner < 3; corner++) { vertex(geometry, index + corner, vertices[corner]); vertices[corner].mul(world); }
+                int crossings = 0;
+                for (int edge = 0; edge < 3 && crossings < 2; edge++) {
+                    Vector3 a = vertices[edge], b = vertices[(edge + 1) % 3];
+                    if ((a.z < level) == (b.z < level) || Math.abs(a.z - b.z) < .00001f) { continue; }
+                    cuts[crossings++].set(a).lerp(b, (level - a.z) / (b.z - a.z));
+                }
+                if (crossings == 2) {
+                    float weight = cuts[0].dst(cuts[1]);
+                    result.mulAdd(cuts[0], weight * .5f).mulAdd(cuts[1], weight * .5f);
+                    length[0] += weight;
+                }
+            }
+        });
+        if (length[0] == 0) { return false; }
+        result.scl(1 / length[0]);
+        return true;
+    }
+
     private float distance(Node node, Matrix4 root, Ray ray) {
         Matrix4 world = new Matrix4(root).mul(node.globalTransform);
         if (Math.abs(world.det()) < .0000001f) {

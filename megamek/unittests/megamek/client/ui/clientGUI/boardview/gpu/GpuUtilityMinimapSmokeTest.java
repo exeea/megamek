@@ -80,8 +80,8 @@ class GpuUtilityMinimapSmokeTest {
                   "Minimap", "", true, false, false, List.of(), minimapRuns::incrementAndGet, "Ctrl+M", true);
             global = List.of(new BoardScene.Command("View:View", "View", "", true, false, false, List.of(item),
                   () -> { }, "", null));
-            utilities = new GpuUtilityBar(hud.kit, source, state, camera);
-            hint = new GpuHintLine(hud.kit, source, state);
+            utilities = new GpuUtilityBar(hud.kit, source, state, camera, new GpuBoardTuning(hud.kit.ui.skin));
+            hint = new GpuHintLine(hud.kit, source, state, camera);
             minimap = new GpuMinimap(hud.kit, source, state, camera);
             for (Actor actor : List.of(utilities.north(), utilities.actor(), utilities.chip(), hint.actor(),
                   minimap.actor())) {
@@ -280,8 +280,9 @@ class GpuUtilityMinimapSmokeTest {
         assertFalse(parts.state.logOpen());
         List<String> row = new ArrayList<>();
         ((Table) parts.utilities.actor()).getChildren().forEach(child -> row.add(child.getName()));
-        assertEquals(List.of("utility-tactical", "utility-map", "utility-contacts", "utility-log", "utility-help",
-              "utility-menu"), row, "Menu takes the place of Settings, Contacts follows Map, and there is no Home");
+        assertEquals(List.of("utility-tactical", "utility-wireframe", "utility-map", "utility-contacts",
+              "utility-log", "utility-help", "utility-menu"), row, "Wireframe follows Tactical view, Menu takes the "
+              + "place of Settings, Contacts follows Map, and there is no Home");
 
         click(hud, "utility-tactical");
         assertTrue(board.camera.tactical(), "Tactical view enters the Tactical View");

@@ -369,7 +369,6 @@ final class GpuFireOrders implements AutoCloseable {
         }
         List<EntityAction> queue = fd.getAttacks();
         List<Integer> lettered = letters(actor, queue);
-        boolean aptitude = actor.hasAbility(OptionsConstants.PILOT_APTITUDE_GUNNERY);
         Entity focus = focus(fd);
         // One roll per queued attack, for its line and its weapon's row (as queued() finds it: the first). An attack on
         // a target that has left the game has no roll (MegaMek logs an error for one): it is left out, as a draft's.
@@ -378,7 +377,7 @@ final class GpuFireOrders implements AutoCloseable {
         for (EntityAction action : queue) {
             if ((action instanceof WeaponAttackAction attack) && (attack.getTarget(game) != null)) {
                 ToHitData toHit = attack.toHit(game, true);
-                attacks.add(attack(game, actor, attack, toHit, aptitude));
+                attacks.add(attack(game, actor, attack, toHit, actor.isUseNaturalAptitudeGunnery(game, attack)));
                 if (attack.getEntityId() == actor.getId()) {
                     shots.putIfAbsent(attack.getWeaponId(), new Shot(unitTarget(attack), toHit));
                 }
@@ -396,7 +395,7 @@ final class GpuFireOrders implements AutoCloseable {
                   : (focus != null) ? new Shot(focus.getId(), fd.toHitFor(weapon, focus))
                   : new Shot(Entity.NONE, null);
             shots.put(eqNum, shot);
-            rows.add(row(game, actor, weapon, eqNum, shot, queued, aptitude));
+            rows.add(row(game, actor, weapon, eqNum, shot, queued, actor.isUseNaturalAptitudeGunnery(game, weapon)));
         }
         List<Target> targets = new ArrayList<>();
         for (int index = 0; index < lettered.size(); index++) {
@@ -420,10 +419,10 @@ final class GpuFireOrders implements AutoCloseable {
                     : "",
               heat(game, actor),
               (selected == null) ? null : solution(game, actor, selected, selectedNum, shots.get(selectedNum),
-                    shown, aptitude),
+                    shown, actor.isUseNaturalAptitudeGunnery(game, selected)),
               ((selected == null) && shown) ? frontArc(game, actor) : null,
               badges(badgeKey(fd, actor, queue, focus), carded),
-              hoverBest(game, fd, actor, hover, queue, carded, aptitude), drafted(actor.getId()),
+              hoverBest(game, fd, actor, hover, queue, carded), drafted(actor.getId()),
               GpuBattleStatus.unitsToAct(game, source.currentView().getLocalPlayer()), remaining, aim(fd, actor)));
     }
 
@@ -458,8 +457,7 @@ final class GpuFireOrders implements AutoCloseable {
         }
         Game game = source.currentView().game;
         badges = rolls(game, fd, actor, selectedWeapon(fd, actor), queue,
-              carded(letters(actor, queue), (focus == null) ? Entity.NONE : focus.getId()),
-              actor.hasAbility(OptionsConstants.PILOT_APTITUDE_GUNNERY));
+              carded(letters(actor, queue), (focus == null) ? Entity.NONE : focus.getId()));
         badgeKey = key;
         source.refresh();
     }
@@ -1201,11 +1199,11 @@ final class GpuFireOrders implements AutoCloseable {
         if ((draft == null) || (unit == null)) {
             return null;
         }
-        boolean aptitude = unit.hasAbility(OptionsConstants.PILOT_APTITUDE_GUNNERY);
         List<Attack> attacks = new ArrayList<>();
         for (EntityAction action : draft.actions()) {
             if ((action instanceof WeaponAttackAction attack) && (attack.getTarget(game) != null)) {
-                attacks.add(attack(game, unit, attack, attack.toHit(game, true), aptitude));
+                attacks.add(attack(game, unit, attack, attack.toHit(game, true),
+                      unit.isUseNaturalAptitudeGunnery(game, attack)));
             }
         }
         return attacks.isEmpty() ? null : new Snapshot(true, false, unitId, Entity.NONE, -1, List.of(), List.of(),
@@ -1545,8 +1543,9 @@ final class GpuFireOrders implements AutoCloseable {
      * (H23), best first, at most BADGES.
      */
     private List<Badge> rolls(Game game, FiringDisplay fd, Entity actor, WeaponMounted weapon,
-          List<EntityAction> queue, Set<Integer> carded, boolean aptitude) {
+          List<EntityAction> queue, Set<Integer> carded) {
         int range = weapon.getType().getRanges(weapon, weapon.getLinkedAmmo())[RangeType.RANGE_LONG];
+        boolean aptitude = actor.isUseNaturalAptitudeGunnery(game, weapon);
         List<Badge> rolls = new ArrayList<>();
         for (Entity enemy : game.getValidTargets(actor)) {
             if (actor.isEnemyOf(enemy) && !carded.contains(enemy.getId()) && source.identified(enemy)
@@ -1564,7 +1563,7 @@ final class GpuFireOrders implements AutoCloseable {
      * the focus (P2), with "no shot" when none can hit; null without one.
      */
     private @Nullable Badge hoverBest(Game game, FiringDisplay fd, Entity actor, @Nullable Coords hover,
-          List<EntityAction> queue, Set<Integer> carded, boolean aptitude) {
+          List<EntityAction> queue, Set<Integer> carded) {
         int board = source.currentView().getBoardId();
         Entity enemy = (hover == null) ? null : game.getValidTargets(actor).stream()
               .filter(unit -> hover.equals(unit.getPosition()) && (unit.getBoardId() == board)
@@ -1576,7 +1575,8 @@ final class GpuFireOrders implements AutoCloseable {
         Badge best = null;
         for (WeaponMounted weapon : WeaponPanel.listedWeapons(actor)) {
             if (weapon.getEntity() == actor) {
-                Badge roll = badge(enemy.getId(), rollAt(game, fd, actor, weapon, queue, enemy), aptitude);
+                Badge roll = badge(enemy.getId(), rollAt(game, fd, actor, weapon, queue, enemy),
+                      actor.isUseNaturalAptitudeGunnery(game, weapon));
                 if (roll.reason().isEmpty() && ((best == null) || (roll.value() < best.value()))) {
                     best = roll;
                 }

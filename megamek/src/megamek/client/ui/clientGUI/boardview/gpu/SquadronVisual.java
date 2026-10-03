@@ -52,7 +52,7 @@ final class SquadronVisual {
                 }
             }
             assembled.calculateTransforms();
-            return new GpuUnitModel(assembled, null, true, bindings, 1f / 27, null, rigs,
+            return new GpuUnitModel(assembled, null, true, bindings, null, rigs,
                   UnitFamilyScale.forFamily(descriptor.getString("family")));
         } catch (RuntimeException error) {
             assembled.dispose();

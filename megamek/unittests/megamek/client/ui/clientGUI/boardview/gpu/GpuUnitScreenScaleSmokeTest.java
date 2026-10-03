@@ -18,7 +18,6 @@ import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
@@ -66,6 +65,8 @@ class GpuUnitScreenScaleSmokeTest {
                         SwingUtilities.invokeAndWait(() -> preferences.setValue(GUIPreferences.GUI_SCALE, preference));
                         view = new GpuBattleView(fixture.source);
                         view.create();
+                        // The board arrives once its terrain is built behind the loading screen.
+                        GpuBoardTestUi.present(view);
                         verify(view);
                     } catch (Throwable error) {
                         failure.set(error);
@@ -187,7 +188,7 @@ class GpuUnitScreenScaleSmokeTest {
                 board.view(false);
                 var atlas = scene.units().stream().filter(unit -> unit.id() == GpuHudFixtures.ATLAS).findFirst()
                       .orElseThrow();
-                OrthographicCamera camera = board.camera.camera;
+                BoardProjectionCamera camera = board.camera.camera;
                 board.camera.center(board.poses.get(atlas).position());
                 board.camera.zoom(BoardGeometry.WIDTH / (UnitScreenScale.THRESHOLD / 1.5f) / camera.zoom);
                 board.draw(view -> { });
@@ -242,7 +243,7 @@ class GpuUnitScreenScaleSmokeTest {
 
     /** Window coordinates (y down) of a world point. */
     private static Vector3 screen(GpuBattleView view, Vector3 world) {
-        OrthographicCamera camera = view.boardCamera.camera;
+        BoardProjectionCamera camera = view.boardCamera.camera;
         Vector3 point = camera.project(world.cpy(), 0, 0, camera.viewportWidth, camera.viewportHeight);
         point.y = Gdx.graphics.getHeight() - point.y;
         return point;

@@ -58,7 +58,9 @@ class GpuLargeMapTest {
                 fixture.source.refresh();
             });
             BoardScene overview = fixture.source.takeFrame().scene();
-            assertNotNull(overview.tile(new Coords(192, 190)).tactical());
+            assertTrue(GpuHexOverlayTest.covers(overview.tactical(), preferences.getMapsheetColor(),
+                  new Coords(192, 190), 10.5, 18), "Far sheet borders must survive full-board capture as native geometry");
+            assertNull(overview.tile(new Coords(192, 190)).tactical(), "Native sheet borders need no per-hex raster");
             Set<BoardScene.Pixels> markings = new HashSet<>();
             overview.tiles().forEach(tile -> {
                 if (tile.tactical() != null) {
@@ -70,7 +72,9 @@ class GpuLargeMapTest {
             assertTrue(markings.size() < 1_000, "Sheet borders must share atlas artwork even in full overview");
             long captured = System.nanoTime();
             Coords far = new Coords(190, 190);
-            SpecialHexDisplay marker = SpecialHexDisplay.createArtyAutoHit(fixture.player);
+            // Auto-hit is now a native icon; a hit still exercises compatibility-raster capture and eviction.
+            SpecialHexDisplay marker = new SpecialHexDisplay(SpecialHexDisplay.Type.ARTILLERY_HIT,
+                  SpecialHexDisplay.NO_ROUND, fixture.player, "Large-board capture");
             SwingUtilities.invokeAndWait(() -> {
                 fixture.source.setVisibleArea(new Rectangle(185, 185, 15, 15));
                 fixture.game.getBoard().addSpecialHexDisplay(far, marker, true);

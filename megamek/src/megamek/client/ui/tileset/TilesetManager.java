@@ -340,7 +340,8 @@ public class TilesetManager implements IPreferenceChangeListener {
 
     public Image textureFor(Entity entity, int secondaryPos) {
         EntityImage entityImage = getFromCache(entity, secondaryPos);
-        return entityImage == null ? getGenericImage(entity, secondaryPos) : entityImage.getTexture();
+        // GPU units apply damage to their own geometry; keep the camouflaged identification artwork clean.
+        return entityImage == null ? getGenericImage(entity, secondaryPos) : entityImage.getBase();
     }
 
     /** Retrieves the image from the cache and loads it if not present. */

@@ -59,6 +59,9 @@ import megamek.common.Player;
 import megamek.common.battleArmor.BattleArmor;
 import megamek.common.board.Coords;
 import megamek.common.compute.ComputeECM;
+import megamek.common.compute.VirtualRealityPilotingPod;
+import megamek.common.compute.VirtualRealityPilotingPod.Interference;
+import megamek.common.compute.VirtualRealityPilotingPod.InterferenceState;
 import megamek.common.enums.GamePhase;
 import megamek.common.equipment.ICarryable;
 import megamek.common.equipment.INarcPod;
@@ -432,7 +435,7 @@ public class ExtraPanel extends PicMap implements ActionListener, ItemListener {
 
             refreshSensorChoices(en);
 
-            if (null != en.getActiveSensor()) {
+            if (en.getActiveSensor() != null) {
                 String sensorDesc = "";
                 if (gameOptions.booleanOption(OptionsConstants.ADVANCED_TAC_OPS_SENSORS)
                       || (gameOptions.booleanOption(OptionsConstants.ADVANCED_AERO_RULES_STRATOPS_ADVANCED_SENSORS))
@@ -521,6 +524,16 @@ public class ExtraPanel extends PicMap implements ActionListener, ItemListener {
             affected.add(Messages.getString("MekDisplay.InEnemyAngelECMField"));
         } else if (ComputeECM.isAffectedByECM(en, pos, pos)) {
             affected.add(Messages.getString("MekDisplay.InEnemyECMField"));
+        }
+
+        // Virtual Reality Piloting Pod under hostile interference (IO:AE p.63)
+        if (en instanceof Mek mek && mek.hasVirtualRealityPilotingPod()) {
+            Interference podInterference = VirtualRealityPilotingPod.getInterference(mek);
+            if (podInterference.isBlinded()) {
+                affected.add(Messages.getString("MekDisplay.VrppBlinded", podInterference.source()));
+            } else if (podInterference.state() == InterferenceState.DEGRADED) {
+                affected.add(Messages.getString("MekDisplay.VrppDegraded", podInterference.source()));
+            }
         }
 
         // Active Stealth Armor? If yes, we're under ECM
@@ -674,6 +687,8 @@ public class ExtraPanel extends PicMap implements ActionListener, ItemListener {
     public static void setNextSensor(ClientGUI clientgui, Entity entity, int sensorIdx) {
         Sensor sensor = entity.getSensors().elementAt(sensorIdx);
         entity.setNextSensor(sensor);
+        // The player picked this themselves, so their sensor preference must not override it later
+        entity.setCustomSensorChoice(true);
         String sensorMsg = Messages.getString("MekDisplay.willSwitchAtEnd",
               "Active Sensors",
               sensor.getDisplayName());

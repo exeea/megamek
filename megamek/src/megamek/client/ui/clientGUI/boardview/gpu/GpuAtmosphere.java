@@ -6,6 +6,7 @@ import java.util.Random;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.GL30;
 import com.badlogic.gdx.graphics.Mesh;
@@ -18,6 +19,7 @@ import com.badlogic.gdx.graphics.glutils.GLOnlyTextureData;
 import com.badlogic.gdx.graphics.glutils.HdpiUtils;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.BufferUtils;
@@ -35,6 +37,8 @@ final class GpuAtmosphere implements Disposable {
     /** Fog travel at full wind strength, in hex widths per second: the whole layer's speed ceiling. */
     static final float FOG_WIND_DRIFT = 0.6f;
     static final float MAX_SAND_OPACITY = 0.25f;
+    /** Particle colors are authored bright, so they take this share of the light on level ground. */
+    private static final float PARTICLE_ALBEDO = 0.4f;
 
     /** Local visual controls; weather and pressure still come from the scenario snapshot. */
     record Options(float rays, boolean fixedSun, float minCloudShadow, float maxCloudShadow, float sunGlare,
@@ -93,13 +97,16 @@ final class GpuAtmosphere implements Disposable {
         }
     }
 
-    private static final String SHADERS = "megamek/client/ui/clientGUI/boardview/gpu/";
     private final Mesh quad;
-    private final ShaderProgram fogShader;
-    private final ShaderProgram compositeShader;
+    private ShaderProgram fogShader;
+    private ShaderProgram compositeShader;
     private FrameBuffer sceneColor;
     private Texture sceneDepth;
     private FrameBuffer fog;
+    private GpuHeatGlow heatGlow;
+    private List<BoardScene.Tile> heatTiles;
+    private boolean molten;
+    private boolean sceneHdr;
     private GpuWeatherParticles particles;
     private GpuClouds clouds;
     private boolean cloudsActive;
@@ -114,6 +121,7 @@ final class GpuAtmosphere implements Disposable {
     private List<BoardScene.Tile> groundTiles;
     private float groundLevel;
     private float groundBase;
+    private float groundHollow;
     private Texture groundNoise;
     private final GroundMotion groundMotion = new GroundMotion();
     private final Vector3 groundProjection = new Vector3();
@@ -156,11 +164,11 @@ final class GpuAtmosphere implements Disposable {
     }
 
     GpuAtmosphere() {
-        fogShader = shader("atmosphere-fog.frag");
+        fogShader = GpuShaderManager.program(() -> shader("atmosphere-fog.frag"), next -> fogShader = next);
         try {
-            compositeShader = shader("atmosphere-composite.frag");
+            compositeShader = GpuShaderManager.program(() -> shader("atmosphere-composite.frag"), next -> compositeShader = next);
         } catch (RuntimeException failure) {
-            fogShader.dispose();
+            GpuShaderManager.dispose(fogShader);
             throw failure;
         }
         quad = screenQuad();
@@ -168,33 +176,50 @@ final class GpuAtmosphere implements Disposable {
     }
 
     static ShaderProgram shader(String fragment) {
-        String source = Gdx.files.classpath(SHADERS + fragment).readString("UTF-8");
-        if (source.contains("// CLOUD_SHADOW")) {
-            source = source.replace("// CLOUD_SHADOW", Gdx.files.classpath(SHADERS + "cloud-shadow.glsl").readString("UTF-8"));
-        }
-        if (source.contains("// SCATTERING_PHASE")) {
-            source = source.replace("// SCATTERING_PHASE", Gdx.files.classpath(SHADERS + "scattering-phase.glsl").readString("UTF-8"));
-        }
-        if (source.contains("// GROUND_LAYER")) {
-            source = source.replace("// GROUND_LAYER", Gdx.files.classpath(SHADERS + "ground-layer.glsl").readString("UTF-8"));
-        }
-        String vertex = Gdx.files.classpath(SHADERS + "atmosphere.vert").readString("UTF-8");
+        String source = fragment(fragment);
+        String vertex = GpuShaderSource.read("atmosphere.vert");
         String prefix = "";
         if (source.contains("// SUN_VISIBILITY")) {
-            String visibility = Gdx.files.classpath(SHADERS + "sun-visibility.glsl").readString("UTF-8");
+            String visibility = GpuShaderSource.read("sun-visibility.glsl");
             vertex = vertex.replace("// SUN_VISIBILITY", visibility);
             source = source.replace("// SUN_VISIBILITY", visibility);
             var units = BufferUtils.newIntBuffer(1);
             Gdx.gl.glGetIntegerv(GL20.GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS, units);
             if (units.get(0) > 0) { prefix = "#define VERTEX_SUN_VISIBILITY\n"; }
         }
-        ShaderProgram result = new ShaderProgram(prefix + vertex, prefix + source);
-        if (!result.isCompiled()) {
-            String log = result.getLog();
-            result.dispose();
-            throw new IllegalStateException("GPU atmosphere shader " + fragment + ": " + log);
+        return GpuGlsl.compile("GPU atmosphere " + fragment, prefix, vertex, source);
+    }
+
+    static String fragment(String file) {
+        String source = GpuShaderSource.read(file);
+        if (source.contains("// CLOUD_SHADOW")) {
+            source = source.replace("// CLOUD_SHADOW", GpuShaderSource.read("cloud-shadow.glsl"));
         }
-        return result;
+        if (source.contains("// SCATTERING_PHASE")) {
+            source = source.replace("// SCATTERING_PHASE", GpuShaderSource.read("scattering-phase.glsl"));
+        }
+        if (source.contains("// GROUND_LAYER")) {
+            source = source.replace("// GROUND_LAYER", GpuShaderSource.read("ground-layer.glsl"));
+        }
+        if (source.contains("// CAMERA_DEPTH")) {
+            source = source.replace("// CAMERA_DEPTH", GpuShaderSource.read("camera-depth.glsl"));
+        }
+        if (source.contains("// WEATHER_SAND")) {
+            source = source.replace("// WEATHER_SAND", GpuShaderSource.read("weather-sand.glsl"));
+        }
+        if (source.contains("// ATMOSPHERE_FOV")) {
+            source = source.replace("// ATMOSPHERE_FOV", GpuShaderSource.read("atmosphere-fov.glsl"));
+        }
+        if (source.contains("// ATMOSPHERE_GRADE")) {
+            source = source.replace("// ATMOSPHERE_GRADE", GpuShaderSource.read("atmosphere-grade.glsl"));
+        }
+        if (source.contains("// ATMOSPHERE_GLARE")) {
+            source = source.replace("// ATMOSPHERE_GLARE", GpuShaderSource.read("atmosphere-glare.glsl"));
+        }
+        if (source.contains("// HEAT_RADIANCE")) {
+            source = source.replace("// HEAT_RADIANCE", GpuShaderSource.read("heat-radiance.glsl"));
+        }
+        return source;
     }
 
     /** Periodic two-channel noise, used by clouds and ground weather. The caller owns the texture. */
@@ -243,6 +268,21 @@ final class GpuAtmosphere implements Disposable {
         return lighting;
     }
 
+    /** The composite's exposure: the scenario or tuning compensation alone, since the light arrives pre-exposed. */
+    float exposure() {
+        return (float) Math.pow(2, settings.exposure());
+    }
+
+    /** Display-encoded light for unlit particles: rain, snow and hail over the composite, smoke in the scene. */
+    Color particleLight() {
+        Color ground = lighting.groundLight();
+        return new Color(particle(ground.r), particle(ground.g), particle(ground.b), 1);
+    }
+
+    private static float particle(float ground) {
+        return (float) Math.pow(Math.min(1, PARTICLE_ALBEDO * ground), 1 / 2.2);
+    }
+
     /** Apply after the camera's final pose, before either geometry shadows or cloud transmission. */
     void updateLight(Camera camera) {
         lighting = options.fixedSun() ? worldLighting.relativeTo(camera) : worldLighting;
@@ -259,7 +299,12 @@ final class GpuAtmosphere implements Disposable {
 
     /** Prepare clouds and surface weather before scene capture; cameras share their field and wind timeline. */
     void prepareClouds(GpuTerrain terrain, BoardScene board, float delta) {
+        if (heatTiles != board.tiles()) {
+            heatTiles = board.tiles();
+            molten = heatTiles.stream().anyMatch(tile -> tile.liquid().molten());
+        }
         terrain.setWetness(BoardAtmosphere.wetness(settings));
+        terrain.setWind(settings.effects());
         cloudsActive = settings.clouds() > 0 && lighting.hasDirectLight();
         if (cloudsActive) {
             if (clouds == null) { clouds = new GpuClouds(quad); }
@@ -273,9 +318,12 @@ final class GpuAtmosphere implements Disposable {
     void begin(int width, int height, float delta) {
         int pixelsWide = Math.max(1, HdpiUtils.toBackBufferX(width));
         int pixelsHigh = Math.max(1, HdpiUtils.toBackBufferY(height));
-        if (sceneColor == null || sceneColor.getWidth() != pixelsWide || sceneColor.getHeight() != pixelsHigh) {
+        if (sceneColor == null || sceneColor.getWidth() != pixelsWide || sceneColor.getHeight() != pixelsHigh
+              || sceneHdr != molten) {
             disposeBuffers();
-            sceneColor = buffer(pixelsWide, pixelsHigh, false);
+            sceneHdr = molten;
+            sceneColor = sceneHdr ? GpuHeatGlow.buffer(pixelsWide, pixelsHigh) : buffer(pixelsWide, pixelsHigh, false);
+            sceneColor.getColorBufferTexture().setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
             try {
                 sceneDepth = attachDepthTexture(sceneColor);
             } catch (RuntimeException failure) {
@@ -341,6 +389,12 @@ final class GpuAtmosphere implements Disposable {
         if (hasScattering()) {
             renderFog(camera, terrain, board);
         }
+        boolean glowActive = sceneHdr;
+        if (glowActive) {
+            if (heatGlow == null) { heatGlow = new GpuHeatGlow(quad); }
+            heatGlow.render(sceneColor.getColorBufferTexture(), sceneDepth,
+                  hasScattering() ? fog.getColorBufferTexture() : null, camera, fieldOfView);
+        }
         HdpiUtils.glViewport(0, bottom, (int) camera.viewportWidth, (int) camera.viewportHeight);
         screenState();
         Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
@@ -358,22 +412,30 @@ final class GpuAtmosphere implements Disposable {
         }
         compositeShader.setUniformi("u_scene", 0);
         compositeShader.setUniformi("u_depth", 1);
+        Texture water = hasScattering() || settings.effects().sand() > 0 ? terrain.waterDepth() : null;
+        if (water != null) { water.bind(6); }
+        compositeShader.setUniformi("u_waterDepth", water == null ? 1 : 6);
         compositeShader.setUniformi("u_fog", hasScattering() ? 2 : 0);
+        if (glowActive) { heatGlow.texture().bind(5); }
+        compositeShader.setUniformi("u_heatGlow", glowActive ? 5 : 0);
+        compositeShader.setUniformf("u_heatEnabled", sceneHdr ? 1 : 0);
+        compositeShader.setUniformf("u_heatGlowStrength", glowActive ? 0.12f : 0);
         compositeShader.setUniformf("u_fogEnabled", hasScattering() ? 1 : 0);
         if (hasScattering()) {
             // renderFog just projected its volume. Sand may subsequently bind a different, lower volume.
             compositeShader.setUniform4fv("u_scatteringBounds", layerScreenBounds, 0, 4);
         }
         compositeShader.setUniformf("u_fogSize", hasScattering() ? fog.getWidth() : 1, hasScattering() ? fog.getHeight() : 1);
-        compositeShader.setUniformf("u_depthRange", camera.far - camera.near);
-        compositeShader.setUniformf("u_edgeScale", BoardGeometry.LEVEL);
-        compositeShader.setUniformf("u_exposure", lighting.exposureScale(settings.exposure()));
+        compositeShader.setUniformf("u_projectionDepth", camera.projection.val[Matrix4.M22],
+              camera.projection.val[Matrix4.M23], camera.projection.val[Matrix4.M32], camera.projection.val[Matrix4.M33]);
+        compositeShader.setUniformf("u_edgeScale", BoardGeometry.level());
+        compositeShader.setUniformf("u_exposure", exposure());
         compositeShader.setUniformf("u_tint", lighting.tint().r, lighting.tint().g, lighting.tint().b);
         compositeShader.setUniformf("u_saturation", lighting.saturation());
         compositeShader.setUniformf("u_sky", lighting.sky().r, lighting.sky().g, lighting.sky().b);
         compositeShader.setUniformf("u_horizon", lighting.horizon().r, lighting.horizon().g, lighting.horizon().b);
         compositeShader.setUniformMatrix("u_inverseView", camera.invProjectionView);
-        compositeShader.setUniformf("u_groundBoard", board.width(), board.height(), BoardGeometry.WIDTH, BoardGeometry.HEIGHT);
+        compositeShader.setUniformf("u_groundBoard", board.width(), board.height(), BoardGeometry.width(), BoardGeometry.height());
         bindSand(camera, board);
         bindSunGlare(camera);
         // Strike promptly when enabled, then at seven-second intervals, with a quick attack and longer decay.
@@ -385,18 +447,20 @@ final class GpuAtmosphere implements Disposable {
         Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
     }
 
-    /** Angular projection for the orthographic board: panning/zooming cannot move a distant light source. */
+    /** A distant light follows the viewing angle and perspective FOV, independently of camera position. */
     private void bindSunGlare(Camera camera) {
         float aspect = camera.viewportWidth / Math.max(1, camera.viewportHeight);
         float forward = -camera.direction.dot(lighting.direction());
-        float energy = Math.max(worldLighting.direct().r, Math.max(worldLighting.direct().g, worldLighting.direct().b));
-        if (options.sunGlare() == 0 || !lighting.sunlight() || energy <= 0 || forward <= 0.15f) {
+        // The glare takes the sun's normalized color, and its brightness up to that of a full-strength sun.
+        float peak = Math.max(worldLighting.direct().r, Math.max(worldLighting.direct().g, worldLighting.direct().b));
+        if (options.sunGlare() == 0 || !lighting.sunlight() || peak <= 0 || forward <= 0.15f) {
             compositeShader.setUniformf("u_sunGlare", 0, 0, 0, aspect);
             return;
         }
         glareRight.set(camera.direction).crs(camera.up).nor();
-        // An approximately 80-degree vertical angular field keeps a low sun near the tilted board's upper edge.
-        float projection = 1.7f * forward;
+        // Orthographic views retain the approximately 80-degree angular field used for their distant sky.
+        float projection = (camera.projection.val[Matrix4.M33] == 0
+              ? 2 / camera.projection.val[Matrix4.M11] : 1.7f) * forward;
         float x = 0.5f - glareRight.dot(lighting.direction()) / (projection * aspect);
         float y = 0.5f - camera.up.dot(lighting.direction()) / projection;
         float facing = MathUtils.clamp((forward - 0.15f) / 0.6f, 0, 1);
@@ -409,9 +473,9 @@ final class GpuAtmosphere implements Disposable {
         float clear = 1 - settings.clouds() * (settings.pressure().isThin() ? 0.35f : 0.95f);
         float visibility = clear * clear * (1 - settings.fog() * 0.8f) * (1 - settings.haze() * 0.4f);
         compositeShader.setUniformf("u_sunGlare", x, y,
-              options.sunGlare() * energy * horizon * facing * edge * visibility, aspect);
-        compositeShader.setUniformf("u_glareColor", worldLighting.direct().r / energy,
-              worldLighting.direct().g / energy, worldLighting.direct().b / energy);
+              options.sunGlare() * Math.min(1, peak) * horizon * facing * edge * visibility, aspect);
+        compositeShader.setUniformf("u_glareColor", worldLighting.direct().r / peak,
+              worldLighting.direct().g / peak, worldLighting.direct().b / peak);
     }
 
     /** Borrowed hardware camera depth in the red channel, valid after end(). */
@@ -432,29 +496,41 @@ final class GpuAtmosphere implements Disposable {
     }
 
     private void updateGroundBase(BoardScene board) {
-        if (groundTiles != board.tiles() || groundLevel != BoardGeometry.LEVEL) {
+        if (groundTiles != board.tiles() || groundLevel != BoardGeometry.level()) {
             groundTiles = board.tiles();
-            groundLevel = BoardGeometry.LEVEL;
+            groundLevel = BoardGeometry.level();
             groundBase = BoardGeometry.weatherBase(board);
+            groundHollow = (float) board.tiles().stream().mapToDouble(BoardRelief::headroom).max().orElse(0);
         }
     }
 
     private void bindGroundLayer(ShaderProgram shader, Camera camera, BoardScene board, float top, int noiseUnit) {
         shader.setUniformMatrix("u_inverseView", camera.invProjectionView);
-        shader.setUniformf("u_groundBoard", board.width(), board.height(), BoardGeometry.WIDTH, BoardGeometry.HEIGHT);
-        shader.setUniformf("u_direction", camera.direction);
-        shader.setUniformf("u_boundsMin", -BoardGeometry.WIDTH, -(board.height() + 1) * BoardGeometry.HEIGHT,
+        shader.setUniformf("u_groundBoard", board.width(), board.height(), BoardGeometry.width(), BoardGeometry.height());
+        shader.setUniformf("u_groundHollow", groundHollow);
+        shader.setUniformf("u_boundsMin", -BoardGeometry.width(), -(board.height() + 1) * BoardGeometry.height(),
               groundBase);
-        shader.setUniformf("u_boundsMax", (board.width() + 1) * BoardGeometry.WIDTH * 0.75f, BoardGeometry.HEIGHT, top);
+        shader.setUniformf("u_boundsMax", (board.width() + 1) * BoardGeometry.width() * 0.75f, BoardGeometry.height(), top);
         layerScreenBounds[0] = Float.POSITIVE_INFINITY;
         layerScreenBounds[1] = Float.POSITIVE_INFINITY;
         layerScreenBounds[2] = Float.NEGATIVE_INFINITY;
         layerScreenBounds[3] = Float.NEGATIVE_INFINITY;
-        // Orthographic projection preserves the convex box: outside these bounds the air column is empty.
+        // Projected corners bound a convex volume while it lies entirely in front of the near plane.
         for (int corner = 0; corner < 8; corner++) {
-            groundProjection.set((corner & 1) == 0 ? -BoardGeometry.WIDTH : (board.width() + 1) * BoardGeometry.WIDTH * 0.75f,
-                  (corner & 2) == 0 ? -(board.height() + 1) * BoardGeometry.HEIGHT : BoardGeometry.HEIGHT,
+            groundProjection.set((corner & 1) == 0 ? -BoardGeometry.width() : (board.width() + 1) * BoardGeometry.width() * 0.75f,
+                  (corner & 2) == 0 ? -(board.height() + 1) * BoardGeometry.height() : BoardGeometry.height(),
                   (corner & 4) == 0 ? groundBase : top);
+            if (camera.projection.val[Matrix4.M33] == 0
+                  && (groundProjection.x - camera.position.x) * camera.direction.x
+                        + (groundProjection.y - camera.position.y) * camera.direction.y
+                        + (groundProjection.z - camera.position.z) * camera.direction.z <= camera.near) {
+                // A volume crossing the near plane can cover the whole screen; the per-pixel ray still clips it.
+                layerScreenBounds[0] = 0;
+                layerScreenBounds[1] = 0;
+                layerScreenBounds[2] = 1;
+                layerScreenBounds[3] = 1;
+                break;
+            }
             camera.project(groundProjection, 0, 0, 1, 1);
             layerScreenBounds[0] = Math.min(layerScreenBounds[0], groundProjection.x);
             layerScreenBounds[1] = Math.min(layerScreenBounds[1], groundProjection.y);
@@ -480,17 +556,19 @@ final class GpuAtmosphere implements Disposable {
     private void bindSand(Camera camera, BoardScene board) {
         float strength = settings.effects().sand();
         if (strength > 0) { updateGroundBase(board); }
-        float height = settings.groundLayerHeight() * BoardGeometry.LEVEL;
-        compositeShader.setUniformf("u_sand", strength, height, groundBase, 1 / BoardGeometry.LEVEL);
+        float height = settings.groundLayerHeight() * BoardGeometry.level();
+        compositeShader.setUniformf("u_sand", strength, height, groundBase, 1 / BoardGeometry.level());
+        compositeShader.setUniformf("u_groundHollow", groundHollow);
         compositeShader.setUniformf("u_sandMaxOpacity", MAX_SAND_OPACITY);
         if (strength <= 0) { return; }
         bindGroundLayer(compositeShader, camera, board, groundBase + height * 3, 4);
         compositeShader.setUniformf("u_sandWind", MathUtils.sinDeg(settings.effects().windDirection()),
-              MathUtils.cosDeg(settings.effects().windDirection()), groundMotion.grains, 1 / BoardGeometry.WIDTH);
+              MathUtils.cosDeg(settings.effects().windDirection()), groundMotion.grains, 1 / BoardGeometry.width());
         compositeShader.setUniformf("u_sandOffset", groundMotion.sand);
-        // Borrow scene illumination so dust does not glow on moonless maps.
-        compositeShader.setUniformf("u_sandLight", lighting.ambient().r + lighting.direct().r * 0.35f,
-              lighting.ambient().g + lighting.direct().g * 0.35f, lighting.ambient().b + lighting.direct().b * 0.35f);
+        // Dust scatters the light that reaches the ground, so it does not glow on moonless maps.
+        Color ground = lighting.groundLight();
+        Color dust = BoardAtmosphere.SAND_DUST;
+        compositeShader.setUniformf("u_sandLight", ground.r * dust.r, ground.g * dust.g, ground.b * dust.b);
     }
 
     /** Draw after restoring opaque depth, before tactical markings and screen annotations. */
@@ -499,32 +577,35 @@ final class GpuAtmosphere implements Disposable {
             if (particles == null) {
                 particles = new GpuWeatherParticles();
             }
-            particles.render(camera, board, settings.effects(), lighting.ambient(), clock);
+            particles.render(camera, board, settings.effects(), particleLight(), clock);
         }
     }
 
     private void renderFog(Camera camera, GpuTerrain terrain, BoardScene board) {
         updateGroundBase(board);
         float base = groundBase;
-        float height = settings.groundLayerHeight() * BoardGeometry.LEVEL;
+        float height = settings.groundLayerHeight() * BoardGeometry.level();
         fog.begin();
         screenState();
         fogShader.bind();
         sceneDepth.bind(0);
         fogShader.setUniformi("u_depth", 0);
-        float variation = options.fogHeightVariation() * BoardGeometry.LEVEL;
+        Texture water = terrain.waterDepth();
+        (water == null ? sceneDepth : water).bind(4);
+        fogShader.setUniformi("u_waterDepth", 4);
+        float variation = options.fogHeightVariation() * BoardGeometry.level();
         float top = base + Math.max((height + variation) * 3, settings.haze() > 0 ? height * 6 : 0);
         bindGroundLayer(fogShader, camera, board,
               Math.max(top, hasRays() ? clouds.base() : base), 3);
-        fogShader.setUniformf("u_fog", settings.fog() * 0.7f / BoardGeometry.LEVEL, height, base);
-        fogShader.setUniformf("u_haze", settings.haze() * 0.035f / BoardGeometry.WIDTH);
-        fogShader.setUniformf("u_fogVariation", variation, options.fogDensityVariation(), BoardGeometry.LEVEL * 0.25f);
-        fogShader.setUniformf("u_noiseScale", 0.5f / BoardGeometry.WIDTH);
+        fogShader.setUniformf("u_fog", settings.fog() * 0.7f / BoardGeometry.level(), height, base);
+        fogShader.setUniformf("u_haze", settings.haze() * 0.035f / BoardGeometry.width());
+        fogShader.setUniformf("u_fogVariation", variation, options.fogDensityVariation(), BoardGeometry.level() * 0.25f);
+        fogShader.setUniformf("u_noiseScale", 0.5f / BoardGeometry.width());
         fogShader.setUniformf("u_fogOffset", groundMotion.fog);
         fogShader.setUniformf("u_fogColor", lighting.fog().r, lighting.fog().g, lighting.fog().b);
         fogShader.setUniformf("u_maxOpacity", BoardAtmosphere.MAX_FOG_OPACITY);
         fogShader.setUniformf("u_rays", hasRays()
-              ? BoardAtmosphere.clouds(settings).scattering() * options.rays() / BoardGeometry.WIDTH : 0);
+              ? BoardAtmosphere.clouds(settings).scattering() * options.rays() / BoardGeometry.width() : 0);
         fogShader.setUniformf("u_sunColor", lighting.direct().r, lighting.direct().g, lighting.direct().b);
         fogShader.setUniformf("u_sunDirection", -lighting.direction().x, -lighting.direction().y, -lighting.direction().z);
         fogShader.setUniformi("u_cloudShadow", 0);
@@ -563,6 +644,7 @@ final class GpuAtmosphere implements Disposable {
             fog.dispose();
             fog = null;
         }
+        if (heatGlow != null) { heatGlow.disposeBuffers(); }
     }
 
     @Override
@@ -572,9 +654,10 @@ final class GpuAtmosphere implements Disposable {
             particles.dispose();
         }
         if (clouds != null) { clouds.dispose(); }
+        if (heatGlow != null) { heatGlow.dispose(); }
         if (groundNoise != null) { groundNoise.dispose(); }
         quad.dispose();
-        fogShader.dispose();
-        compositeShader.dispose();
+        GpuShaderManager.dispose(fogShader);
+        GpuShaderManager.dispose(compositeShader);
     }
 }

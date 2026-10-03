@@ -74,12 +74,15 @@ class GpuLiquidSmokeTest {
             shader.animate(0.05f, List.of());
             List<int[]> middle = samples(shader, camera, scene, true);
             for (int family = 0; family < LIQUIDS.size(); family++) {
+                // PBR lava uses the continuous board clock in both modes, not authored GIF interpolation.
+                if (LIQUIDS.get(family).molten()) { continue; }
                 for (int pixel = 0; pixel < first.get(family).length; pixel++) {
                     for (int shift : new int[] { 8, 16, 24 }) {
                         float expected = (((first.get(family)[pixel] >>> shift) & 255)
                               + ((next.get(family)[pixel] >>> shift) & 255)) / 2f;
                         assertEquals(expected, (middle.get(family)[pixel] >>> shift) & 255, 2,
-                              "Stationary material must interpolate the changing artwork without shifting it");
+                              "Stationary material must interpolate the changing artwork without shifting it: family "
+                                    + family + ", pixel " + pixel + ", channel " + shift);
                     }
                 }
             }
@@ -108,10 +111,12 @@ class GpuLiquidSmokeTest {
                 camera.setIsometric(isometric);
                 camera.fit(scene);
                 terrain.renderShadows(camera.camera, List.of());
+                // Detail refinement and water-page builds must finish before the animation comparison starts.
+                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                 List<int[]> before = samples(terrain, camera, scene, true);
                 GpuBoardTestUi.capture(new File(output, "liquids-" + (procedural ? "procedural" : shader ? "shader" : "gif")
                       + "-" + (isometric ? "isometric" : "top") + ".png"));
-                terrain.animate(0.45f, List.of());
+                terrain.animate(1.25f, List.of());
                 List<int[]> after = samples(terrain, camera, scene, true);
                 for (int family = 0; family < LIQUIDS.size() - 1; family++) {
                     int changed = 0;
@@ -158,7 +163,7 @@ class GpuLiquidSmokeTest {
               "Hazardous liquid should be green: " + channel(pixels, 24) + "," + channel(pixels, 16) + "," + channel(pixels, 8));
     }
 
-    /** The vertical sheet must retain the upstream pool's hue, including the color seen through its transparent surface. */
+    /** A fall breaks into white water, yet keeps its liquid's hue: toxic falls stay green, Martian ones rust. */
     private static void assertWaterfallPalette(BoardCamera camera, BoardScene scene, List<int[]> pools) {
         Pixmap image = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
         try {
@@ -176,12 +181,20 @@ class GpuLiquidSmokeTest {
                 }
                 float poolSum = channel(pools.get(family), 24) + channel(pools.get(family), 16) + channel(pools.get(family), 8);
                 float fallSum = channel(pixels, 24) + channel(pixels, 16) + channel(pixels, 8);
-                for (int shift : new int[] { 8, 16, 24 }) {
-                    assertEquals(channel(pools.get(family), shift) / poolSum, channel(pixels, shift) / fallSum, 0.05,
-                          "Waterfall hue must follow the upstream pool, family " + family + ", channel " + shift);
-                }
+                assertEquals(strongest(pools.get(family)), strongest(pixels),
+                      "Waterfall must keep the upstream pool's dominant hue, family " + family);
+                assertTrue(fallSum > poolSum, "Falling water must read lighter than the pool it leaves, family "
+                      + family + ": " + poolSum + " -> " + fallSum);
             }
         } finally { image.dispose(); }
+    }
+
+    private static int strongest(int[] pixels) {
+        int result = 8;
+        for (int shift : new int[] { 16, 24 }) {
+            if (channel(pixels, shift) > channel(pixels, result)) { result = shift; }
+        }
+        return result;
     }
 
     private static int channel(int[] pixels, int shift) {
@@ -237,7 +250,8 @@ class GpuLiquidSmokeTest {
                     Coords top = pool(family);
                     if (coords.equals(top) || coords.equals(top.translated(3))) {
                         liquid = LIQUIDS.get(family);
-                        elevation = coords.equals(top) ? 2 : 0;
+                        // One- and two-level water steps are now graded rapids; palette checks need an actual fall.
+                        elevation = coords.equals(top) ? 3 : 0;
                         frozen = family == 8;
                     }
                 }

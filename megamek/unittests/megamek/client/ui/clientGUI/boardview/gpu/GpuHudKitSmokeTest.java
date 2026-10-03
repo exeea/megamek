@@ -136,7 +136,8 @@ class GpuHudKitSmokeTest {
                                 for (BoardScene.Unit unit : scene.units()) {
                                     Vector2 center = board.screen(
                                           board.instances.get(unit).transform.getTranslation(new Vector3()));
-                                    assertTrue(changedTexels(bare, units, center) >= 13, unit.name()
+                                    // A 13 x 13 window: the woods' canopies may hide a unit's own anchor.
+                                    assertTrue(changedTexels(bare, units, center, 6) >= 13, unit.name()
                                           + " is drawn at " + center + " in the 3D view");
                                 }
                             } finally {
@@ -158,7 +159,7 @@ class GpuHudKitSmokeTest {
                                 assertNotNull(icons.instance(unit), "An icon for " + unit.name());
                                 Vector2 center = board.screen(
                                       icons.instance(unit).transform.getTranslation(new Vector3()));
-                                assertTrue(changedTexels(bare, drawn, center) >= 13, unit.name()
+                                assertTrue(changedTexels(bare, drawn, center, 2) >= 13, unit.name()
                                       + "'s icon is drawn at " + center + " in the " + view + " view");
                             }
                         } finally {
@@ -482,11 +483,11 @@ class GpuHudKitSmokeTest {
         return panel;
     }
 
-    /** Texels in a 5 x 5 window at the point (back-buffer pixels, y up) whose color changed by more than 30. */
-    private static int changedTexels(Pixmap before, Pixmap after, Vector2 point) {
+    /** Texels within the radius of the point (back-buffer pixels, y up) whose color changed by more than 30. */
+    private static int changedTexels(Pixmap before, Pixmap after, Vector2 point, int radius) {
         int count = 0;
-        for (int dy = -2; dy <= 2; dy++) {
-            for (int dx = -2; dx <= 2; dx++) {
+        for (int dy = -radius; dy <= radius; dy++) {
+            for (int dx = -radius; dx <= radius; dx++) {
                 int x = Math.round(point.x) + dx;
                 int y = Math.round(point.y) + dy;
                 int a = before.getPixel(x, y);

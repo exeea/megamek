@@ -32,13 +32,7 @@
  */
 package megamek.client.ui.dialogs.unitDisplay;
 
-import java.awt.Color;
-import java.awt.Component;
-import java.awt.Dimension;
-import java.awt.GridBagConstraints;
-import java.awt.GridBagLayout;
-import java.awt.Image;
-import java.awt.Rectangle;
+import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.KeyListener;
@@ -2072,7 +2066,7 @@ public class WeaponPanel extends PicMap implements ListSelectionListener, Action
         int maxRange = weaponType.getMaxRange(weapon);
 
         // change range and attack values based upon ammo
-        if (null != ammo) {
+        if (ammo != null) {
             double[] changes = changeAttackValues(ammo.getType(), avShort, avMed, avLong, avExt, maxRange);
             avShort = (int) changes[0];
             avMed = (int) changes[1];
@@ -2132,7 +2126,7 @@ public class WeaponPanel extends PicMap implements ListSelectionListener, Action
                 int mMaxR = bayWType.getMaxRange(m);
 
                 // deal with any ammo adjustments
-                if (null != mAmmo) {
+                if (mAmmo != null) {
                     double[] changes = changeAttackValues(mAmmo.getType(), mAVShort, mAVMed,
                           mAVLong, mAVExt, mMaxR);
                     mAVShort = changes[0];

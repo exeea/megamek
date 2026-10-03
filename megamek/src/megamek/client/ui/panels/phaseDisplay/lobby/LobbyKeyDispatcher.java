@@ -34,6 +34,8 @@ package megamek.client.ui.panels.phaseDisplay.lobby;
 
 import java.awt.KeyEventDispatcher;
 import java.awt.event.KeyEvent;
+import javax.swing.SwingUtilities;
+import javax.swing.text.JTextComponent;
 
 import megamek.client.ui.util.UIUtil;
 
@@ -49,6 +51,11 @@ public record LobbyKeyDispatcher(ChatLounge lobby) implements KeyEventDispatcher
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent evt) {
+
+        // This dispatcher is global: editors and other windows must keep their own clipboard shortcuts.
+        if (evt.getComponent() instanceof JTextComponent || !SwingUtilities.isDescendingFrom(evt.getComponent(), lobby)) {
+            return false;
+        }
 
         // Don't consider hotkeys when the clientGUI has a dialog visible and only react to key presses (not release)
         if (((lobby.getClientGUI() != null) && lobby.getClientGUI().shouldIgnoreHotKeys())

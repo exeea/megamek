@@ -153,6 +153,12 @@ public class Compute {
                                                    ARC_VGL_REAR, ARC_VGL_LR, ARC_VGL_LF
     };
 
+    /** Movement types that mean a unit spent VTOL or WiGE MP this turn (TW p.114 flak). */
+    private static final Set<EntityMovementType> FLIGHT_MOVEMENT_TYPES = EnumSet.of(
+          EntityMovementType.MOVE_VTOL_WALK,
+          EntityMovementType.MOVE_VTOL_RUN,
+          EntityMovementType.MOVE_VTOL_SPRINT);
+
     private static MMRandom random = MMRandom.generate(MMRandom.R_DEFAULT);
 
     private static final int[][] clusterHitsTable = new int[][] {
@@ -910,7 +916,7 @@ public class Compute {
         if ((destElevation < destHex.terrainLevel(Terrains.BLDG_ELEV))
               && !(entity instanceof Infantry)) {
             IBuilding bldg = board.getBuildingAt(dest);
-            boolean insideHangar = (null != bldg)
+            boolean insideHangar = (bldg != null)
                   && bldg.isIn(src)
                   && (bldg.getBldgClass() == IBuilding.HANGAR)
                   && (destHex.terrainLevel(Terrains.BLDG_ELEV) > entity
@@ -1136,26 +1142,21 @@ public class Compute {
         ToHitData bestMods = new ToHitData(TargetRoll.IMPOSSIBLE, "");
 
         for (Entity other : game.getEntitiesVector()) {
+            // a Recon Camera that spotted the target counts as a spotter without the attack penalty (TO:AUE p.150)
+            boolean isCameraSpotter = ReconCameraRules.isCameraSpotting(other, target);
             if (((other.isSpotting() && (other.getSpotTargetId() == target
-                  .getId())) || (taggedBy == other.getId()))
+                  .getId())) || isCameraSpotter || (taggedBy == other.getId()))
                   && !attacker.isEnemyOf(other)) {
                 // what are this guy's mods to the attack?
-                LosEffects los = LosEffects.calculateLOS(game, other, target, true);
-                ToHitData mods = los.losModifiers(game);
-                // If the target isn't spotted, can't target
-                if (game.getOptions().booleanOption(OptionsConstants.ADVANCED_DOUBLE_BLIND)
-                      && !Compute.inVisualRange(game, los, other, target)
-                      && !Compute.inSensorRange(game, los, other, target, null)) {
-                    mods.addModifier(TargetRoll.IMPOSSIBLE,
-                          "outside of visual and sensor range");
-                }
-                los.setTargetCover(LosEffects.COVER_NONE);
+                ToHitData mods = isCameraSpotter && ReconCameraRules.isAerospaceCamera(other)
+                      ? new ToHitData() // the camera spot itself was the look from above; no line of sight to judge
+                      : spotterLineOfSightModifiers(game, other, target);
                 mods.append(Compute.getAttackerMovementModifier(game,
                       other.getId()));
 
                 // a spotter suffers a penalty if it's also making an attack this round
-                // unless it has a command console or has TAG-ged the target
-                if (other.isAttackingThisTurn() && !other.getCrew().hasActiveCommandConsole() &&
+                // unless it has a command console, has TAG-ged the target or spotted it with a Recon Camera
+                if (other.isAttackingThisTurn() && !other.getCrew().hasActiveCommandConsole() && !isCameraSpotter &&
                       (!isTargetTagged(attacker, target, game) || (taggedBy != -1))) {
                     mods.addModifier(1, "spotter is making an attack this turn");
                 }
@@ -1170,6 +1171,23 @@ public class Compute {
         }
 
         return spotter;
+    }
+
+    /**
+     * The line of sight modifiers a spotter adds to an indirect attack, impossible under double-blind when the spotter
+     * can neither see nor sense the target.
+     */
+    private static ToHitData spotterLineOfSightModifiers(Game game, Entity spotter, Targetable target) {
+        LosEffects los = LosEffects.calculateLOS(game, spotter, target, true);
+        ToHitData mods = los.losModifiers(game);
+        // If the target isn't spotted, can't target
+        if (game.getOptions().booleanOption(OptionsConstants.ADVANCED_DOUBLE_BLIND)
+              && !Compute.inVisualRange(game, los, spotter, target)
+              && !Compute.inSensorRange(game, los, spotter, target, null)) {
+            mods.addModifier(TargetRoll.IMPOSSIBLE,
+                  "outside of visual and sensor range");
+        }
+        return mods;
     }
 
     /**
@@ -1383,7 +1401,7 @@ public class Compute {
         }
 
         // allow naval units on surface to be attacked from above or below
-        if ((null != targetEntity) && (targBottom == 0) && (targetEntity.getUnitType() == UnitType.NAVAL)) {
+        if ((targetEntity != null) && (targBottom == 0) && (targetEntity.getUnitType() == UnitType.NAVAL)) {
             targetInPartialWater = true;
         }
 
@@ -2049,25 +2067,48 @@ public class Compute {
             distance += (2 * attacker.getAltitude());
         }
 
-        if (game.isOnSpaceMap(attacker) && !attacker.getPosition().equals(targetPos.getFirst())) {
-            // Atmospheric hexes count as extra range
-            Board attackerBoard = game.getBoard(attacker);
-            Coords currentCoords = attacker.getPosition();
-            currentCoords = Coords.nextHex(currentCoords, targetPos.getFirst());
-            int safetyCounter = 0;
-            while (!currentCoords.equals(targetPos.getFirst()) && (safetyCounter < 1000)) {
-                safetyCounter++; // prevent infinite loops
-                currentCoords = Coords.nextHex(currentCoords, targetPos.getFirst());
-                if (BoardHelper.isAtmosphericRow(game, attackerBoard, currentCoords)
-                      || BoardHelper.isGroundRowHex(attackerBoard, currentCoords)) {
-                    distance += BoardHelper.highAltAtmosphereRowRangeIncrease(game);
-                } else if (BoardHelper.isSpaceAtmosphereInterface(game, attackerBoard, currentCoords)) {
-                    distance += BoardHelper.highAltSpaceAtmosphereRangeIncrease(game);
-                }
-            }
+        if (game.isOnSpaceMap(attacker)) {
+            Coords targetPosition = targetPos.isEmpty() ? null : targetPos.getFirst();
+            distance += spaceMapAtmosphereRangeIncrease(game, attacker, targetPosition);
         }
 
         return distance;
+    }
+
+    /**
+     * Returns the extra range a space-map attack pays for crossing atmospheric hexes between the attacker and the
+     * target.
+     *
+     * <p>A unit that is in the game but has no hex of its own - an ejected pilot who has been picked up, for
+     * example - has nothing to walk towards, so it adds no extra range. The plain distance to such a unit is already
+     * out of reach (see {@link #smallestDistance(Collection, Collection)}).</p>
+     *
+     * @param game           The current {@link Game}
+     * @param attacker       the attacking unit, which is on a space map
+     * @param targetPosition the target's hex, or {@code null} if the target has none
+     *
+     * @return the extra range from atmospheric hexes along the way, or {@code 0} if either side has no hex
+     */
+    private static int spaceMapAtmosphereRangeIncrease(Game game, Entity attacker, @Nullable Coords targetPosition) {
+        Coords attackerPosition = attacker.getPosition();
+        if ((attackerPosition == null) || (targetPosition == null) || attackerPosition.equals(targetPosition)) {
+            return 0;
+        }
+        int rangeIncrease = 0;
+        Board attackerBoard = game.getBoard(attacker);
+        Coords currentCoords = Coords.nextHex(attackerPosition, targetPosition);
+        int safetyCounter = 0;
+        while (!currentCoords.equals(targetPosition) && (safetyCounter < 1000)) {
+            safetyCounter++; // prevent infinite loops
+            currentCoords = Coords.nextHex(currentCoords, targetPosition);
+            if (BoardHelper.isAtmosphericRow(game, attackerBoard, currentCoords)
+                  || BoardHelper.isGroundRowHex(attackerBoard, currentCoords)) {
+                rangeIncrease += BoardHelper.highAltAtmosphereRowRangeIncrease(game);
+            } else if (BoardHelper.isSpaceAtmosphereInterface(game, attackerBoard, currentCoords)) {
+                rangeIncrease += BoardHelper.highAltSpaceAtmosphereRangeIncrease(game);
+            }
+        }
+        return rangeIncrease;
     }
 
     static int smallestDistance(Collection<Coords> firstList, Collection<Coords> secondList) {
@@ -2382,7 +2423,8 @@ public class Compute {
                     mods.addModifier(2, Messages.getString("WeaponAttackAction.AeProne"));
                 }
 
-                if (l3ProneFiringArm != Entity.LOC_NONE) {
+                if (l3ProneFiringArm != Entity.LOC_NONE && !Game.rulesManager.getRulesTarget()
+                                                                             .proneFireWithOneArm(false)) {
                     mods.addModifier(1, Messages.getString("WeaponAttackAction.AePronePropping"));
                 }
             }
@@ -2434,7 +2476,8 @@ public class Compute {
                 mods.addModifier(2, Messages.getString("WeaponAttackAction.AeProne"));
             }
 
-            if (l3ProneFiringArm != Entity.LOC_NONE) {
+            if (l3ProneFiringArm != Entity.LOC_NONE && !Game.rulesManager.getRulesTarget()
+                                                                         .proneFireWithOneArm(false)) {
                 mods.addModifier(1, Messages.getString("WeaponAttackAction.AePronePropping"));
             }
         }
@@ -2869,7 +2912,31 @@ public class Compute {
 
 
     /**
-     * Modifier to attacks due to target movement
+     * The most a gamemaster can add to or take from a unit's target movement modifier: the whole range of the
+     * movement table under the option with the wider one, plus the jump bonus. A larger delta could never do more
+     * than reach the floor or the ceiling that {@link #getTargetMovementModifier(Game, int)} holds the total to.
+     */
+    public static final int MAX_GAMEMASTER_TARGET_MODIFIER = 8;
+
+    /**
+     * The highest target movement modifier a ground unit can earn in this game: the top of the movement table, +6
+     * or +7 under the MaxTech movement modifiers option, plus the +1 for jumping or being airborne. A gamemaster's
+     * change is held to this ceiling.
+     *
+     * @param game the game whose options decide the table, or {@code null} for the standard table
+     *
+     * @return the ceiling of the target movement modifier
+     */
+    public static int maxTargetMovementModifier(@Nullable Game game) {
+        boolean usesMaxTechTable = (game != null)
+              && game.getOptions().booleanOption(OptionsConstants.ADVANCED_MAX_TECH_MOVEMENT_MODS);
+        return (usesMaxTechTable ? 7 : 6) + 1;
+    }
+
+    /**
+     * Modifier to attacks due to target movement, with any gamemaster change for the round applied on top and the
+     * total held between no modifier and {@link #maxTargetMovementModifier(Game)}. Aerospace targets take no
+     * movement modifier here and so take no gamemaster change either.
      *
      * @param game     current game
      * @param entityId targetId
@@ -2879,6 +2946,62 @@ public class Compute {
      * @see ToHitData
      */
     public static ToHitData getTargetMovementModifier(Game game, int entityId) {
+        ToHitData toHit = getEarnedTargetMovementModifier(game, entityId);
+        Entity entity = game.getEntity(entityId);
+        if ((entity != null) && !entity.isAero()) {
+            appendGamemasterTargetModifier(toHit, entity, game);
+        }
+        return toHit;
+    }
+
+    /**
+     * Adds the gamemaster's change to the earned movement modifier, as the one line that makes the total land
+     * where the clamp says: never below zero (or below the -1 a unit that did not move earns under the standing
+     * still option), never above the movement table's ceiling, and never lower than a gamemaster asked for. A
+     * change that ends up making no difference adds no line.
+     */
+    private static void appendGamemasterTargetModifier(ToHitData toHit, Entity entity, Game game) {
+        int delta = entity.getGamemasterTargetModifier();
+        if (delta == 0) {
+            return;
+        }
+        int earned = toHit.getValue();
+        int floor = Math.min(0, earned);
+        int ceiling = Math.max(earned, maxTargetMovementModifier(game));
+        int held = Math.clamp((long) earned + delta, floor, ceiling);
+        if (held != earned) {
+            toHit.addModifier(held - earned, Messages.getString("Compute.gamemasterTargetModifier"));
+        }
+    }
+
+    /**
+     * The largest reduction a gamemaster's target movement modifier change can make on this unit this round: the
+     * earned modifier taken back down to the floor {@link #getTargetMovementModifier(Game, int)} holds the total
+     * to. A unit that earned {@code +2} by moving can be reduced by {@code 2}; one that earned nothing, or the
+     * {@code -1} for standing still, cannot be reduced at all. The damage editor uses this as the bottom of its
+     * Target Modifier control, so every reduction it offers applies in full.
+     *
+     * @param game     current game
+     * @param entityId targetId
+     *
+     * @return the lowest delta that still changes the modifier, zero or negative
+     */
+    public static int minGamemasterTargetModifier(Game game, int entityId) {
+        int earned = getEarnedTargetMovementModifier(game, entityId).getValue();
+        return Math.min(0, earned) - earned;
+    }
+
+    /**
+     * Modifier to attacks due to target movement, as the unit earned it by moving this round, before any
+     * gamemaster change. The damage editor shows this beside its Target Modifier control, so a gamemaster can see
+     * what a reduction has to work with: a unit that earned nothing cannot be taken below nothing.
+     *
+     * @param game     current game
+     * @param entityId targetId
+     *
+     * @return toHitData for the target's movement modifiers
+     */
+    public static ToHitData getEarnedTargetMovementModifier(Game game, int entityId) {
         Entity entity = game.getEntity(entityId);
 
         if (entity == null) {
@@ -3478,7 +3601,7 @@ public class Compute {
                 fChance = 1.0f;
             } else {
                 fChance = (float) Compute.oddsAbove(hitData.getValue(),
-                      attacker.hasAbility(OptionsConstants.PILOT_APTITUDE_GUNNERY))
+                      attacker.isUseNaturalAptitudeGunnery(game, weapon))
                       / 100.0f;
             }
         }
@@ -3609,7 +3732,7 @@ public class Compute {
                         weaponTarget.getPosition(),
                         allECMInfo))
                   && (wt.getDamage() == WeaponType.DAMAGE_BY_CLUSTER_TABLE)
-                  && (wt.hasFlag(WeaponType.F_MISSILE)) && null != at) {
+                && (wt.hasFlag(WeaponType.F_MISSILE)) && at != null) {
                 // Check for linked artemis guidance system
                 if ((wt.getAmmoType() == AmmoTypeEnum.LRM)
                       || (wt.getAmmoType() == AmmoTypeEnum.LRM_IMP)
@@ -3617,9 +3740,7 @@ public class Compute {
                       || (wt.getAmmoType() == AmmoTypeEnum.SRM)
                       || (wt.getAmmoType() == AmmoTypeEnum.SRM_IMP)) {
                     lnk_guide = weapon.getLinkedBy();
-                    if ((lnk_guide != null) && (lnk_guide.getType() instanceof MiscType) && !lnk_guide.isDestroyed()
-                          && !lnk_guide.isMissing() && !lnk_guide.isBreached()
-                          && lnk_guide.getType().hasFlag(MiscType.F_ARTEMIS)) {
+                    if (EquipmentActivation.isGuidanceActive(lnk_guide, MiscType.F_ARTEMIS)) {
 
                         // Don't use artemis if this is indirect fire
                         // -> Hook for Artemis V Level 3 Clan tech here; use
@@ -3658,11 +3779,7 @@ public class Compute {
 
             if (wt.getAmmoType() == AmmoTypeEnum.MRM) {
                 lnk_guide = weapon.getLinkedBy();
-                if ((lnk_guide != null)
-                      && (lnk_guide.getType() instanceof MiscType)
-                      && !lnk_guide.isDestroyed() && !lnk_guide.isMissing()
-                      && !lnk_guide.isBreached()
-                      && lnk_guide.getType().hasFlag(MiscType.F_APOLLO)) {
+                if (EquipmentActivation.isGuidanceActive(lnk_guide, MiscType.F_APOLLO)) {
                     // 90% damage expected with Apollo, but instead divide by 3 if Saturation mode
                     boolean saturation = weaponAttackAction.getTargetType() == Targetable.TYPE_SATURATION;
                     fHits *= (saturation) ? .333f : .9f;
@@ -4189,18 +4306,18 @@ public class Compute {
         int finalSpin = 0;
 
         // Basic protections against null values
-        if ((null == attackAction) || (null == game)) {
+        if ((attackAction == null) || (game == null)) {
             LOGGER.warn("null parameter passed to Compute.spinUpCannon");
             return finalSpin;
         }
 
         Entity shooter = attackAction.getEntity(game);
-        if (null == shooter) {
+        if (shooter == null) {
             LOGGER.warn("attack action with no shooter passed to Compute.spinUpCannon");
             return finalSpin;
         }
         Mounted<?> weapon = shooter.getEquipment(attackAction.getWeaponId());
-        if (null == weapon) {
+        if (weapon == null) {
             LOGGER.warn("attack action with an invalid weapon id passed to Compute.spinUpCannon");
             return finalSpin;
         }
@@ -4231,7 +4348,7 @@ public class Compute {
 
         // Get the to-hit number for this attack, computing it only once
         ToHitData toHitData = attackAction.toHit(game);
-        if (null == toHitData) {
+        if (toHitData == null) {
             LOGGER.warn("no to-hit data for attack action passed to Compute.spinUpCannon");
             return finalSpin;
         }
@@ -5144,12 +5261,12 @@ public class Compute {
     public static int getSensorRangeBracket(Entity ae, Targetable target, List<ECMInfo> allECMInfo) {
 
         Sensor sensor = ae.getActiveSensor();
-        if (null == sensor) {
+        if (sensor == null) {
             return 0;
         }
         // only works for entities
         Entity te = null;
-        if (null != target) {
+        if (target != null) {
             if (target.getTargetType() != Targetable.TYPE_ENTITY) {
                 return 0;
             }
@@ -5168,10 +5285,10 @@ public class Compute {
         }
 
         int check = ae.getSensorCheck();
-        if ((null != ae.getCrew()) && ae.hasAbility(OptionsConstants.UNOFFICIAL_SENSOR_GEEK)) {
+        if ((ae.getCrew() != null) && ae.hasAbility(OptionsConstants.UNOFFICIAL_SENSOR_GEEK)) {
             check -= 2;
         }
-        if (null != te) {
+        if (te != null) {
             check += sensor.getModsForStealth(te);
             // Metal Content...
             if (ae.getGame().getOptions().booleanOption(OptionsConstants.ADVANCED_METAL_CONTENT)) {
@@ -5216,7 +5333,7 @@ public class Compute {
         }
 
         Sensor sensor = ae.getActiveSensor();
-        if (null == sensor) {
+        if (sensor == null) {
             return 0;
         }
 
@@ -5299,12 +5416,12 @@ public class Compute {
      */
     @Nullable
     public static SensorRangeHelper getSensorRanges(Game game, Entity e) {
-        if (null == e.getActiveSensor()) {
+        if (e.getActiveSensor() == null) {
             return null;
         }
 
         int check = e.getSensorCheck();
-        if ((null != e.getCrew()) && e.hasAbility(OptionsConstants.UNOFFICIAL_SENSOR_GEEK)) {
+        if ((e.getCrew() != null) && e.hasAbility(OptionsConstants.UNOFFICIAL_SENSOR_GEEK)) {
             check -= 2;
         }
 
@@ -5364,8 +5481,8 @@ public class Compute {
      *       units is not an aerospace unit, does not have a valid position, or the two units are not in the same hex.
      */
     public static int shouldMoveBackHex(Entity e1, Entity e2) {
-        if (null == e1.getPosition()
-              || null == e2.getPosition()
+        if (e1.getPosition() == null
+            || e2.getPosition() == null
               || e1.getBoardId() != e2.getBoardId()
               || !e1.getPosition().equals(e2.getPosition())
               || !e1.isAero()
@@ -5417,6 +5534,12 @@ public class Compute {
      * @param advancedAMS - the roll can now go below 2, indicating no damage
      */
     public static int missilesHit(int missiles, int nMod, boolean hotLoaded, boolean streak, boolean advancedAMS) {
+        return missilesHit(missiles, nMod, hotLoaded, streak, advancedAMS, 0, null);
+    }
+
+    /** Observe missiles removed by defense using this same roll; the callback never participates in resolution. */
+    public static int missilesHit(int missiles, int nMod, boolean hotLoaded, boolean streak, boolean advancedAMS,
+          int defenseModifier, java.util.function.IntConsumer intercepted) {
         // No missiles fired means no hits. This also guards against a battle armor squad whose
         // shooting strength has been reduced to zero (e.g. all troopers disabled by Improved
         // Magnetic Pulse missiles), which otherwise falls through to the hit-table lookup below.
@@ -5448,17 +5571,27 @@ public class Compute {
             nRoll = 11;
         }
         nRoll += nMod;
+        int undefendedRoll = Math.clamp(nRoll - defenseModifier, 2, 12);
         if (!advancedAMS) {
             nRoll = Math.clamp(nRoll, 2, 12);
         } else {
             nRoll = min(nRoll, 12);
         }
         if (nRoll < 2) {
+            if (intercepted != null) {
+                int remaining = missiles;
+                for (int i = clusterHitsTable.length - 1; i >= 0; i--) {
+                    int racks = remaining / clusterHitsTable[i][0];
+                    intercepted.accept(racks * clusterHitsTable[i][undefendedRoll - 1]);
+                    remaining %= clusterHitsTable[i][0];
+                }
+            }
             return 0;
         }
 
         for (int[] element : clusterHitsTable) {
             if (element[0] == missiles) {
+                if (intercepted != null) { intercepted.accept(Math.max(0, element[undefendedRoll - 1] - element[nRoll - 1])); }
                 return element[nRoll - 1];
             }
         }
@@ -5467,10 +5600,13 @@ public class Compute {
         // if so, take largest, subtract value and try again
         for (int i = clusterHitsTable.length - 1; i >= 0; i--) {
             if (missiles > clusterHitsTable[i][0]) {
+                if (intercepted != null) {
+                    intercepted.accept(Math.max(0, clusterHitsTable[i][undefendedRoll - 1] - clusterHitsTable[i][nRoll - 1]));
+                }
                 return clusterHitsTable[i][nRoll - 1]
                       + Compute.missilesHit(
                       missiles - clusterHitsTable[i][0], nMod,
-                      hotLoaded, streak, advancedAMS);
+                      hotLoaded, streak, advancedAMS, defenseModifier, intercepted);
             }
         }
         throw new RuntimeException(
@@ -5719,7 +5855,7 @@ public class Compute {
             }
             attackCoords = c;
         }
-        if (null == attackCoords) {
+        if (attackCoords == null) {
             attackCoords = attacker.getPosition();
         }
 
@@ -6172,7 +6308,7 @@ public class Compute {
         Entity entityWithClubs = game.getEntity(entityId);
         if (entityWithClubs != null) {
             for (Mounted<?> club : entityWithClubs.getClubs()) {
-                if (null != club) {
+                if (club != null) {
                     if (ClubAttackAction.toHit(game, entityId, target, club,
                           ToHitData.HIT_NORMAL, false).getValue() != TargetRoll.IMPOSSIBLE) {
                         return true;
@@ -6474,7 +6610,9 @@ public class Compute {
                 continue;
             }
             entities = game.getEntities(tempcoords);
-            if (entities.hasNext()) {
+            // Every unit in the hex, not just the first. TO:AUE p.183 makes every unit at the same distance a
+            // candidate, chosen at random among them, so stopping at the first one silently narrowed the field.
+            while (entities.hasNext()) {
                 tempEntity = entities.next();
                 if (!tempEntity.getTargetedBySwarm(aeId, weaponId)) {
                     // we found a target
@@ -6489,6 +6627,7 @@ public class Compute {
         }
         return null;
     }
+
 
     public static @Nullable Coords getFinalPosition(Coords currentPosition, int... v) {
         if ((v == null) || (v.length != 6) || (currentPosition == null)) {
@@ -7159,7 +7298,7 @@ public class Compute {
               ((unitToUnload.getAnyTypeMaxJumpMP() > 0) && !unitToUnload.isImmobileForJump()) ||
               (unitToUnload.isInfantry() && ((Infantry) unitToUnload).canExitVTOLWithGliderWings());
         return (hex != null) && !unitToUnload.isLocationProhibited(position, boardId, unitToUnload.getElevation())
-              && (null == stackingViolation(game, unitToUnload.getId(), position, unitToUnload.climbMode()))
+               && (stackingViolation(game, unitToUnload.getId(), position, unitToUnload.climbMode()) == null)
               && ((Math.abs(hex.getLevel() - elev) < 3) || canIgnoreElevation);
     }
 
@@ -7182,10 +7321,13 @@ public class Compute {
         }
 
         List<Entity> mountable = new ArrayList<>();
+        // Non-infantry mount from within two levels of the transport (TW p.90). Infantry mount as though the carrier
+        // were a Large Support Vehicle, which needs the same level (TW p.89 and p.224).
+        int maximumLevelDifference = entity.isInfantry() ? 0 : 2;
         // the rules don't say that the unit must be facing loader, so lets take the ring
         for (Coords c : pos.allAdjacent()) {
             Hex hex = game.getBoard(boardId).getHex(c);
-            if (null == hex) {
+            if (hex == null) {
                 continue;
             }
             for (Entity other : game.getEntitiesVector(c, boardId)) {
@@ -7196,7 +7338,7 @@ public class Compute {
                       || other.getTowedBy() != Entity.NONE)
                       && other.canLoad(entity)
                       && !other.isAirborne()
-                      && (Math.abs((hex.getLevel() + other.getElevation()) - elev) < 3)
+                      && (Math.abs((hex.getLevel() + other.getElevation()) - elev) <= maximumLevelDifference)
                       && !mountable.contains(other)) {
                     mountable.add(other);
                 }
@@ -7754,11 +7896,50 @@ public class Compute {
     }
 
     public static boolean isFlakAttack(Entity attacker, Entity target) {
-        boolean validLocation = !(attacker.isSpaceborne()
+        return isValidFlakLocation(attacker, target) && (target.isAirborne() || target.isAirborneVTOLorWIGE());
+    }
+
+    /**
+     * Returns whether a flak weapon (LB-X cluster, flak ammo, HAG and the like) gets its to-hit bonus against the
+     * target. TW p.114 (errata v12.0): flak applies "against a unit that presently has an Altitude or Elevation, or
+     * that expended any VTOL or WiGE MP or Thrust Points that turn (even if it landed at the end of that Movement
+     * Phase)". A VTOL or WiGE that flew and then landed is therefore still a flak target for the rest of the turn.
+     *
+     * <p>This is the to-hit check only. Artillery flak, which bursts at the target's height, keeps using
+     * {@link #isFlakAttack(Entity, Entity)}.</p>
+     *
+     * @param attacker the attacking unit
+     * @param target   the unit being attacked
+     *
+     * @return {@code true} if a flak weapon gets its to-hit bonus against the target
+     */
+    public static boolean isFlakToHitTarget(Entity attacker, Entity target) {
+        return isFlakAttack(attacker, target)
+              || (isValidFlakLocation(attacker, target) && expendedFlightMovementThisTurn(target));
+    }
+
+    /**
+     * Returns whether the unit spent VTOL or WiGE MP this turn, even if it has since landed. A WiGE (including a LAM
+     * in AirMek mode) that lands keeps a VTOL movement type. A VTOL's landing step is typed as a walk, so for units
+     * that move as VTOLs any movement counts, the same test the airborne target movement modifier uses (see
+     * {@link #getTargetMovementModifier(Game, int)}).
+     *
+     * @param unit the unit to check
+     *
+     * @return {@code true} if the unit flew this turn
+     */
+    private static boolean expendedFlightMovementThisTurn(Entity unit) {
+        boolean flewThisTurn = FLIGHT_MOVEMENT_TYPES.contains(unit.moved);
+        boolean movedAsVtol = (unit.getMovementMode() == EntityMovementMode.VTOL)
+              && (unit.moved != EntityMovementType.MOVE_NONE);
+        return flewThisTurn || movedAsVtol;
+    }
+
+    private static boolean isValidFlakLocation(Entity attacker, Entity target) {
+        return !(attacker.isSpaceborne()
               || target.isSpaceborne()
               || attacker.isOffBoard()
               || target.isOffBoard());
-        return validLocation && (target.isAirborne() || target.isAirborneVTOLorWIGE());
     }
 
     public static int turnsTilHit(int distance) {
@@ -7889,6 +8070,59 @@ public class Compute {
         }
 
         return true;
+    }
+
+    /**
+     * Whether a moving enemy reveals a hidden unit in a way that lets it take a point-blank shot (TW p.260).
+     *
+     * <p>A hidden unit revealed by enemy movement may immediately make the shot, and the rule allows the target to
+     * "continue its move after the attack" when it has MP left. That is only possible part way through a move, so a
+     * ground unit reveals as it passes rather than only when it stops. Requiring the mover to stop meant walking
+     * past a hidden unit did nothing at all.</p>
+     *
+     * <p>An airborne aerospace mover is different: it reveals what it flies over, so the range depends on whether it
+     * carries an Active Probe.</p>
+     *
+     * <p>A VTOL or WiGE flying over a hex does not reveal a unit hidden in that hex (TW errata v12.0, p.260, Airborne
+     * Units). It still reveals a unit it passes next to, and one in the hex where it ends its move, as a ground unit
+     * would.</p>
+     *
+     * @param mover      the unit that is moving
+     * @param distance   hexes between the mover's current step and the hidden unit
+     * @param overflight {@code true} when this step is a VTOL or WiGE flying over the hex without ending its move
+     *                   there; see {@link #isNonAerospaceOverflight(Entity, MoveStep, boolean)}
+     *
+     * @return {@code true} if the hidden unit is revealed and may take its shot
+     */
+    public static boolean revealsHiddenUnitForPointblankShot(Entity mover, int distance, boolean overflight) {
+        if (distance > 1) {
+            return false;
+        }
+        if (mover.isAirborne()) {
+            return distance == ((mover.getBAPRange() > 0) ? 1 : 0);
+        }
+        return !(overflight && (distance == 0));
+    }
+
+    /**
+     * Whether a step is a non-aerospace airborne unit flying over a hex: a unit using VTOL or WiGE movement (VTOLs,
+     * WiGEs, LAMs in AirMek mode, powered flight infantry) that is above the terrain of the step's hex and does not
+     * end its move there. Such a unit does not reveal units hidden in the hexes it flies over (TW errata v12.0,
+     * p.260, Airborne Units).
+     *
+     * @param mover   the unit that is moving
+     * @param step    the step being taken
+     * @param endStep {@code true} when this is the last step of the move
+     *
+     * @return {@code true} if the step flies over its hex
+     */
+    public static boolean isNonAerospaceOverflight(Entity mover, MoveStep step, boolean endStep) {
+        if (endStep) {
+            return false;
+        }
+        EntityMovementMode movementMode = mover.getMovementMode();
+        boolean fliesLikeVTOLOrWiGE = movementMode.isVTOL() || movementMode.isWiGE();
+        return fliesLikeVTOLOrWiGE && (step.getClearance() > 0);
     }
 
     /**

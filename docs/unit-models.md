@@ -1,55 +1,209 @@
-# Sprite-referenced 3D units
+# Unit models
 
-Authored 3D unit models are controlled by the code switch
-`GpuUnitModels.ENABLED`, currently `true`. Set it to `false` to use the existing
-sprite rendering in both GPU camera views. Asset generation and direct asset
-review tests remain available while the switch is off.
+[Docs index](README.md) · [GPU architecture](gpu-board.md).
+Runtime classes are in `client/ui/clientGUI/boardview/gpu`.
 
-The GPU board can resolve 3D models from the optional fourth field in
-`mm-data/data/images/units/mekset.txt`. Exact model overrides take precedence;
-sprite-only overrides still inherit a chassis model. Type-specific defaults
-provide biped, quad, tripod, infantry and Battle Armor fallbacks.
+Units are assembled from a body and the captured equipment loadout. A stock Atlas
+and a custom refit can share the same body while drawing different fitted weapons.
+The sections below identify the selection, import, assembly and animation owners.
 
-The first asset library includes four authored Mek chassis and all 112 of their
-catalogued variants, plus four infantry poses and four BA poses. Infantry uses
-up to six figures and BA up to four, derived from surviving personnel. The
-largest complete asset is 996 triangles; the 112 Mek assemblies use 310–672
-triangles. Their silhouettes are authored from the existing chassis illustrations
-as well as the top-view sprites. The build records both reference hashes and
-provides front, side, top, and three-quarter review renders. Other Mek chassis
-use generic models; 734 remain on the explicit authoring queue.
+## Where to change what
 
-Conventional infantry selects its artwork from the unit's movement mode:
-motorized uses reinforced jeeps; mechanized uses tracked, wheeled, or hover APCs;
-jump infantry carries small back-mounted jump jets. With 1–4 compressed slots,
-one vehicle replaces a troop; with 5–6 slots, two vehicles replace troops. Zero
-survivors produce an empty formation. Foot infantry and Battle Armor keep their
-existing geometry, and unsupported infantry movement types use foot poses.
-These are baked visual groups, not additional entities or transport game rules.
-The optional `movementFormations` map in the infantry descriptor is keyed by
-`EntityMovementMode` names; old descriptors keep their numeric `formations`.
+| Owner | Responsibility |
+| --- | --- |
+| `MekTileset`, `UnitModelSelection` | Choose model identity and capture the unit's visible appearance/loadout. |
+| `UnitModelDescriptor`, `RigidGlb`, `MeshLod` | Decode the descriptor, rigid geometry and compatible mesh levels. |
+| `GpuUnitModels`, `GpuUnitModel`, `ModelTextures` | Cache shared model/texture resources. |
+| `UnitEquipmentAssembly`, `UnitEquipmentModels` | Attach captured equipment through the descriptor's hardpoints/recipes. |
+| `GpuUnitInstance`, `UnitRig`, `UnitAnimator` | Hold per-unit instances and pose named rigid parts. |
+| `UnitPlayback`, `UnitMotion` | Sequence resolved events and evaluate the displayed movement route. |
+| `MekVisual`, `FamilyVisual`, `InfantryVisual`, `BattleArmorVisual`, `SquadronVisual` | Apply body-family, troop-formation and squadron presentation. |
+| `UnitGroundContact`, `UnitLandingSupports`, `UnitPicking` | Ground and intersect the actual posed models. |
+| `UnitDamageDisplay`, `UnitCamouflage`, `GpuUnitCamouflage` | Apply an instance's visible damage and paint without changing shared geometry. |
+| `FormationLod` | Choose projected detail with hysteresis while retaining the same animation state. |
 
-`MekModelCatalog` exports the current unit/equipment data and actual selected
-sprites through MegaMek's existing loaders. Blender builds the source chassis
-and equipment modules offline, then bakes each variant into G3DJ. The renderer
-uses the same movement timeline, placement, shadows and camera scene as before.
-It receives immutable model-selection data after visibility filtering. A sensor
-contact has no model identity. Invalid assets fall back without preventing the
-board from opening.
+## Model selection and assembly
 
-From mm-data, run `tools/build_unit_models.ps1 -Preview` to export, build and
-validate. Full format, editing instructions, scope and limitations are in
-`mm-data/data/models/units/README.md`. The generated Blender review scene is at
-`mm-data/.work/mek-models/review/unit-models.blend`.
-Run Blender with `--python tools/render_unit_variants.py -- --infantry` in mm-data
-for movement and slot-count review sheets under `.work/mek-models/infantry`.
-
-Focused checks from this checkout:
+`MekTileset` resolves model identity alongside sprite identity. The optional fourth
+field in `mm-data/data/images/units/mekset.txt` names a recipe relative to
+`data/models`:
 
 ```text
-./gradlew :megamek:test --tests '*MekTilesetModelsTest' --tests '*UnitModelSelectionTest' --tests '*MekModelCatalogTest'
-./gradlew :megamek:gpuBoardSmoke --tests '*GpuUnitModelsSmokeTest'
+chassis "Atlas" "meks/Atlas.png" "units/modular/meks/atlas.json"
+exact "default_medium" "defaults/default_medium.png" "units/modular/meks/fallback-biped-{weightClass}.json"
 ```
 
-No Blender or Python installation is required at runtime. The normal data-staging
-tasks include all generated unit assets.
+Exact model entries take precedence over chassis models; sprite-only overrides
+can still inherit the chassis model. Generic Mek recipes expand `{weightClass}`
+to light, medium, heavy, assault or superheavy. `GpuUnitModels.get` tries the
+selected recipe, then the type-specific fallback; if both fail, the flat sprite
+remains available.
+
+`UnitModelSelection` captures the selected model and the unit's visible appearance
+data: loadout, surviving personnel, facing and damage. A sensor-only contact has no
+model identity. `GpuBoardSource` performs visibility filtering before this presentation
+data reaches the renderer.
+
+[GpuUnitModels](../megamek/src/megamek/client/ui/clientGUI/boardview/gpu/GpuUnitModels.java)
+loads and caches the shared assets. `UnitModelDescriptor` reads the JSON contract;
+`UnitEquipmentAssembly` and `UnitEquipmentModels` assemble equipment using the
+captured loadout. `MekVisual` filters the body for its actual anatomy and attaches
+alternate detail meshes to the same animated joints. Equipment uses the recipe
+and `equipment.json`, with weapon-family fallbacks for unmapped weapons.
+`FamilyVisual` selects the appropriate vehicle/aircraft form and removes absent
+turrets. Invalid descriptors or parts are logged and cached as failed for that
+asset library; a loadout-specific failure does not invalidate the shared recipe.
+`GpuUnitModels.ENABLED` controls authored models; disabling them retains the flat
+sprite path in both camera views. Raised sensor symbols use `GpuCutout`
+independently and do not reveal a concealed unit's model.
+
+## Asset format and validation
+
+Unit recipes and part descriptors require `"schema": 2`. Older pre-built
+descriptor formats and G3DJ unit meshes are rejected.
+
+- `GpuUnitModels.load` reads recipes whose `kind` is `mek`, `family`,
+  `squadron` or `formation`, delegating to the corresponding visual assembler.
+- `UnitModelDescriptor` validates parts whose `kind` is `body`, `troop` or
+  `equipment`; their `mesh` must name a GLB. Every detail level needs the
+  shared rig. LOD0 also owns the named locations, hardpoints, emitters and
+  landing-support nodes. Mesh data must contain position, normal, color and UVs;
+  accepted material roles are `paint`, `detail` and `bark`.
+
+`RigidGlb` decodes binary glTF 2.0 on the CPU through JglTF, before allocating
+GPU resources. It converts glTF's Y-up coordinates and linear colors to the
+board's Z-up/display-color convention. Preserve node and part names: descriptors,
+damage and animation use them to find rigid geometry.
+
+The importer rejects skins, animation clips, morph targets, external geometry
+buffers, required extensions and non-opaque or double-sided materials.
+Back faces must be explicit geometry. Diffuse textures may be embedded PNG/JPEG
+data or local relative images inside the permitted model directory.
+`ModelTextures` shares them by image and sampler; `paint` receives runtime
+camouflage while `detail` retains authored artwork.
+
+`RigidGlb.loadLods` requires top-level identity groups named after the component:
+`atlas.glb` contains `atlas-lod0`, optionally `atlas-lod1` and `atlas-lod2`.
+Each group contains child rig/mesh nodes rather than its own mesh. LOD0 is required;
+malformed declared levels produce an asset error. `MeshLod.load` resolves missing
+levels toward the preceding available mesh once at load time, sharing its buffers.
+A missing LOD1 does not prevent an authored LOD2 from being used. Separate-level
+references in older custom schema-2 recipes remain readable. The scatter kit's
+per-shape groups are handled separately by `BoardShape.loadKit`.
+
+The full format and authoring instructions are in
+[mm-data/data/models/units/README.md](../../mm-data/data/models/units/README.md).
+The `:megamek:exportEquipmentModelCatalog` task exports the current equipment data;
+[build_modular_unit_models.py](../../mm-data/tools/build_modular_unit_models.py)
+builds the assets with Python from the mm-data root. Gameplay loads the generated
+assets directly. Data staging copies them from the sibling `mm-data` checkout.
+
+## Triangle budgets and hard limits
+
+`UnitModelDescriptor.UNIT_TRIANGLE_BUDGETS` defines the assembled-unit art budgets:
+5,000 triangles at LOD0, 2,000 at LOD1 and 500 at LOD2, including body and fitted
+equipment. After assembly, `UnitEquipmentAssembly.warnOverUnitBudget` checks
+the body's distinct authored levels and logs `[UnitBudget]` with the body and
+equipment counts. An over-budget unit is still drawn in full. This checks assembled
+bodies and equipment, rather than an aggregate formation or squadron budget.
+
+The separate `UnitModelDescriptor.MAX_TRIANGLES` sanity ceiling rejects an
+asset level above one million triangles. `RigidGlb` also limits each imported
+level's combined mesh to 65,535 vertices for its 16-bit indices. These checks
+catch invalid exports; they do not trim a loadout to its art budget.
+
+## Scale and formation layout
+
+Single-hex models share the Atlas authoring conversion:
+`2 * LEVEL / 54.858`, uniformly on all axes. Bodies retain authored relative
+sizes rather than each being normalized to its own height. Board level height,
+unit scale and `UnitFamilyScale` size multipliers resize all axes; only the
+explicit height multipliers stretch Z. Multi-hex units use occupied-footprint
+fitting and their own uniform scale.
+
+`UnitFamilyScale` is the source of family defaults and Mek weight-class
+multipliers. Infantry and Battle Armor are authored at canonical scale and
+enlarged for readability, with vehicles and formation spacing scaled alongside
+them. Changing a body asset's height to compensate would affect all instances
+using that asset.
+
+`InfantryFootprint.layout` fits the authored formation onto the finished rim,
+including slope room and shifted river corners. It contracts/shifts the layout
+while retaining figure size and relative spacing. Troop clearance accounts for
+all watch headings; vehicles retain their parked heading. A changed support
+surface updates standing and arrival layouts.
+
+## Animation and damage
+
+`UnitPlayback` is the shared render timeline for movement, attacks and attachment
+changes. It accepts resolved game events and controls when their visual consequences
+appear. This lets a movement or salvo play coherently while the client continues to
+receive newer game state.
+
+`UnitMotion` evaluates movement along the captured route. `UnitAnimator` calculates
+per-unit rigid poses from rest transforms and the playback clock. `UnitRig` supplies
+the joint structure, while `MekVisual`, `InfantryVisual` and `BattleArmorVisual`
+handle the corresponding body/formation presentation. Facing, torso twist, prone poses
+and equipment effects are derived from the captured state and animation sequence.
+
+A descriptor's `upperBodyNode` lets `UpperBodyTurn` twist the torso while legs
+retain the unit's facing; without it the body turns as one piece. Walking gait
+follows distance traveled, including acceleration/braking. Hull-down, prone,
+forced falls and jump posture use the shared timeline, including pause/skip.
+Troops share articulated base meshes, with stable member identities for idle
+variation and casualties. Each member rises and settles around its own movement.
+
+Lost-location node names match game location abbreviations. Damage overlays
+prioritize destroyed over structure over armor and are applied after baked vertex
+color; intact cockpit glazing keeps its authored appearance. Patterns are seeded
+by unit and part so they remain attached through movement and instance rebuilds.
+Tuning's damage preview changes presentation only and must restore live state
+when disabled.
+
+`UnitDamageDisplay` applies lost locations and damaged artwork to an individual
+instance. Shared model buffers remain reusable by other units. Camouflage follows the
+same ownership distinction through `UnitCamouflage` and `GpuUnitCamouflage`.
+
+## Ground contact, formations and attachments
+
+After board placement, `UnitGroundContact` and `UnitLandingSupports` adjust the model
+against the shared terrain surfaces. `UnitPicking` intersects the current rigid parts
+and their pose. Both cameras draw and pick the same instances.
+
+Infantry and Battle Armor are represented by formations derived from surviving
+personnel. Movement type can select troop/vehicle arrangements; these figures remain
+a visual representation of one game entity. Infantry descriptors can provide
+`movementFormations` keyed by `EntityMovementMode`; motorized/mechanized forms
+use their corresponding vehicles, jump forms use articulated jump-equipped troops,
+and unsupported modes retain the foot formation. Surviving personnel determine
+the occupied slots, including an empty formation at zero survivors.
+
+For exterior passengers and hostile swarmers, `GpuBoardSource` captures the carrier
+relationship into `BoardScene`. `UnitAttachments` places figures on the carrier's
+posed parts, and `UnitAttachmentMotion` supplies boarding/release motion.
+`UnitPlayback` orders those transitions with carrier movement and combat so a packet
+arrival does not detach riders at the wrong point in the displayed route.
+[Battle Armor attachments](battle-armor-attachments.md) describes grip assignment,
+visibility and the packet-order constraints for boarding, unloading and swarming.
+
+## Detail and resource ownership
+
+`FormationLod` selects a unit's mesh level from projected size with hysteresis;
+formations measure an individual figure. Detail changes reuse the same animation
+state and shared buffers. Selected units and attack-playback participants retain
+the detailed representation. Meks and formations switch among LOD0, LOD1 and LOD2.
+Current nominal LOD1/LOD2 boundaries are 96/32 pixels for Meks and 48/16 for
+individual formation members, with 10% hysteresis. Vehicles and other bodies
+assembled through `FamilyVisual` retain their LOD0 path.
+Missing optional meshes fall back independently; a detail switch must retain
+lost parts and the current pose.
+
+Small attached equipment has its own projected-diameter culling in
+`GpuUnitInstance`, shared by color, shadow and outline passes. Selection and
+attack playback retain full equipment; culled drawing does not discard emitter
+transforms or damage state.
+
+`GpuUnitInstance` holds per-unit pose/material state while borrowing model geometry.
+`ModelTextures` owns shared texture caching, and the asset library owns disposal.
+Changing one unit's pose or damage must therefore operate on its instance, while
+reloading or closing the renderer is responsible for shared resource lifetime.

@@ -176,6 +176,28 @@ class GpuGameplayStateTest {
     }
 
     @Test
+    void nativeLocalEditsKeepTacticalPaintingLocal() throws Exception {
+        try (var options = new GpuFieldOfViewTest.Options()) {
+            onClient(() -> {
+                try (var views = mockConstruction(BoardView.class); var session = Session.create()) {
+                    var painted = new HashSet<Coords>();
+                    session.state().addHexDrawPlugin((graphics, hex, game, coords, context) -> painted.add(coords));
+                    session.state().select(session.unit().getPosition());
+                    session.source().refresh();
+                    painted.clear();
+                    var edited = new Coords(4, 4);
+                    session.game().getBoard().setHex(edited, new Hex(3));
+                    session.source().refresh();
+                    assertTrue(painted.contains(edited));
+                    assertTrue(painted.size() <= 9, "A local edit repainted " + painted.size() + " tactical hexes");
+                    assertTrue(views.constructed().isEmpty());
+                }
+                return null;
+            });
+        }
+    }
+
+    @Test
     void replacingTheMapRetiresCapturedCommandsEvenWhenThePresentationStateIsReused() throws Exception {
         Session session = onClient(Session::create);
         AtomicInteger clicks = new AtomicInteger();
@@ -200,6 +222,48 @@ class GpuGameplayStateTest {
             onClient(() -> { assertEquals(1, clicks.get()); return null; });
         } finally {
             onClient(() -> { session.close(); return null; });
+        }
+    }
+
+    @Test
+    void boardSelectionImmediatelyRejectsPreviousMapCommandsAndPicksBeforeCapture() throws Exception {
+        Session session = onClient(Session::create);
+        AtomicInteger clicks = new AtomicInteger();
+        BoardClientState replacement = onClient(() -> {
+            captureTimer(session.source()).stop();
+            var button = new JButton("Hold position");
+            button.addActionListener(event -> clicks.incrementAndGet());
+            session.state().getClientgui().getMainPanel().add(button);
+            session.source().refresh();
+            var frame = session.source().takeFrame();
+            session.game().setBoard(1, Board.createEmptyBoard(8, 8));
+            var next = new BoardClientState(session.game(), null, session.state().getClientgui(), 1,
+                  session.state().getTilesetManager());
+            next.setLocalPlayer(session.unit().getOwner());
+            // Both tasks are already queued when the user changes the selected board. No capture has run yet.
+            frame.scene().commands().getFirst().action().run();
+            session.source().click(new Coords(2, 2), false, InputEvent.CTRL_DOWN_MASK);
+            when(session.state().getClientgui().getCurrentBoardState()).thenReturn(Optional.of(next));
+            return next;
+        });
+        try {
+            onClient(() -> {
+                assertEquals(0, clicks.get(), "A command from an unselected map must not invoke a phase action");
+                assertNull(session.state().getFirstLOS(), "A stale pick must not start measurement on the old board");
+                assertNull(replacement.getFirstLOS(), "A stale pick must not be redirected to the newly selected board");
+                session.source().refresh();
+                var current = session.source().takeFrame();
+                current.scene().commands().getFirst().action().run();
+                session.source().click(new Coords(2, 2), false, InputEvent.CTRL_DOWN_MASK);
+                return null;
+            });
+            onClient(() -> {
+                assertEquals(1, clicks.get(), "Fresh commands on the selected board remain usable");
+                assertEquals(new Coords(2, 2), replacement.getFirstLOS());
+                return null;
+            });
+        } finally {
+            onClient(() -> { replacement.close(); session.close(); return null; });
         }
     }
 
@@ -257,7 +321,7 @@ class GpuGameplayStateTest {
         Session session = onClient(Session::create);
         try {
             var listener = mock(BoardViewListenerAdapter.class);
-            GpuBoardSource.Frame moving = onClient(() -> {
+            BoardSource.Frame moving = onClient(() -> {
                 session.state().addBoardViewListener(listener);
                 var idle = session.source().takeFrame();
                 session.source().playbackState(idle, false);

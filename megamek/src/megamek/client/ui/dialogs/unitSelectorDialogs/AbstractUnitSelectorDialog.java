@@ -330,8 +330,10 @@ public abstract class AbstractUnitSelectorDialog extends JDialog implements Runn
         tableUnits.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent event) {
-                if ((event.getClickCount() == 2) && (event.getButton() == MouseEvent.BUTTON1) && hasSelectedRows()) {
-                    select(true);
+                if ((event.getClickCount() == 2) && (event.getButton() == MouseEvent.BUTTON1)
+                      && (tableUnits.rowAtPoint(event.getPoint()) >= 0) && hasSelectedRows()
+                      && (buttonSelectClose != null) && buttonSelectClose.isEnabled()) {
+                    buttonSelectClose.doClick();
                 }
             }
         });
@@ -1124,7 +1126,7 @@ public abstract class AbstractUnitSelectorDialog extends JDialog implements Runn
         // This prevents the UI from freezing, and allows the
         // "Please wait..." dialog to behave properly on various Java VMs.
         meks = condenseLinkedAssets(mscInstance.getAllMeks());
-        unitLoadingDialog.setVisible(false);
+        SwingUtilities.invokeLater(() -> unitLoadingDialog.setVisible(false));
 
         // break out if there are no units to filter
         if (meks == null) {

@@ -1,8 +1,7 @@
+#version 330 core
+layout(location = 0) out vec4 fragColor;
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
-#ifdef GL_ES
-precision highp float;
-#endif
-varying vec2 v_uv;
+in vec2 v_uv;
 uniform vec4 u_cloudBounds;
 uniform sampler2D u_cloudNoise;
 uniform vec4 u_cloudWeather; // coverage, stratus fraction, extinction per world unit, world-to-noise scale
@@ -16,7 +15,7 @@ float cloudNoise(vec3 p) {
     vec3 f = fract(p);
     f = f * f * (3.0 - 2.0 * f);
     vec2 uv = cell.xy + vec2(37.0, 17.0) * cell.z + f.xy;
-    vec2 pair = texture2D(u_cloudNoise, (uv + 0.5) / 256.0).rg;
+    vec2 pair = texture(u_cloudNoise, (uv + 0.5) / 256.0).rg;
     return mix(pair.x, pair.y, f.z);
 }
 
@@ -49,5 +48,5 @@ void main() {
         opticalDepth += cloudDensity(position) * stepLength * u_cloudWeather.z;
     }
     float transmission = mix(1.0, exp(-opticalDepth), u_shadowStrength);
-    gl_FragColor = vec4(transmission, transmission, transmission, 1.0);
+    fragColor = vec4(transmission, transmission, transmission, 1.0);
 }

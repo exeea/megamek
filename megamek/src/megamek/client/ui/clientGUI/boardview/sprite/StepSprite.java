@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2025 The MegaMek Team. All Rights Reserved.
+ * Copyright (C) 2014-2026 The MegaMek Team. All Rights Reserved.
  *
  * This file is part of MegaMek.
  *
@@ -131,7 +131,7 @@ public class StepSprite extends Sprite implements TacticalSprite {
 
     @Override
     public void drawTactical(Graphics2D graphics) {
-        Graphics2D local = BoardTacticalGraphics.at(graphics, bv.getHexLocation(step.getPosition()));
+        Graphics2D local = BoardTacticalGraphics.onHexPlane(graphics, bv.getHexLocation(step.getPosition()));
         try {
             paintTactical(local);
         } finally {
@@ -262,6 +262,10 @@ public class StepSprite extends Sprite implements TacticalSprite {
                 String load = Messages.getString("BoardView1.Load");
                 drawAnnouncement(g2D, load, step, col);
                 break;
+            case DEPLOY:
+                String deploy = Messages.getString("MovementDisplay.moveDeploy");
+                drawAnnouncement(g2D, deploy, step, col);
+                break;
             case PICKUP_CARGO:
                 String pickup = Messages.getString("MovementDisplay.movePickupCargo");
                 drawAnnouncement(g2D, pickup, step, col);
@@ -320,7 +324,7 @@ public class StepSprite extends Sprite implements TacticalSprite {
                 // show new movement mode
                 String mode = Messages.getString("BoardView1.ConversionMode."
                       + step.getMovementMode());
-                graph.setFont(new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 12));
+                graph.setFont(fitCentred(graph, new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 12), mode));
                 int modeX = 42 - (graph.getFontMetrics(graph.getFont()).stringWidth(mode) / 2);
                 graph.setColor(Color.darkGray);
                 graph.drawString(mode, modeX, modePos - 1);
@@ -364,7 +368,7 @@ public class StepSprite extends Sprite implements TacticalSprite {
         if (step.isPastDanger()) {
             text = "(" + text + ")";
         }
-        graph.setFont(new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 12));
+        graph.setFont(fitCentred(graph, new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 12), text));
         int posX = 42 - (graph.getFontMetrics(graph.getFont()).stringWidth(text) / 2);
         int posY = 38 + graph.getFontMetrics(graph.getFont()).getHeight();
         graph.setColor(Color.darkGray);
@@ -380,7 +384,7 @@ public class StepSprite extends Sprite implements TacticalSprite {
     private void drawConditions(MoveStep step, Graphics graph, Color col) {
         if (step.isEvading()) {
             String evade = Messages.getString("BoardView1.Evade");
-            graph.setFont(new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 12));
+            graph.setFont(fitCentred(graph, new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 12), evade));
             int evadeX = 42 - (graph.getFontMetrics(graph.getFont()).stringWidth(evade) / 2);
             graph.setColor(Color.darkGray);
             graph.drawString(evade, evadeX, 64);
@@ -391,7 +395,7 @@ public class StepSprite extends Sprite implements TacticalSprite {
         if (step.isRolled()) {
             // Announce roll
             String roll = Messages.getString("BoardView1.Roll");
-            graph.setFont(new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 12));
+            graph.setFont(fitCentred(graph, new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 12), roll));
             int rollX = 42 - (graph.getFontMetrics(graph.getFont()).stringWidth(roll) / 2);
             graph.setColor(Color.darkGray);
             graph.drawString(roll, rollX, 18);
@@ -431,14 +435,24 @@ public class StepSprite extends Sprite implements TacticalSprite {
         return step;
     }
 
-    private Font getMovementFont() {
+    private static Font getMovementFont() {
         String fontName = GUIP.getMoveFontType();
         int fontStyle = GUIP.getMoveFontStyle();
         int fontSize = GUIP.getMoveFontSize();
         return new Font(fontName, fontStyle, fontSize);
     }
 
-    private void drawMovementCost(MoveStep step, boolean isLastStep,
+    /**
+     * Returns the font shrunk, if needed, so the text fits across the hex when drawn centred.
+     */
+    private static Font fitCentred(Graphics graph, Font font, String text) {
+        return HexLabelFitter.fitToWidth(graph, font, text, HexLabelFitter.centredLabelWidth());
+    }
+
+    /**
+     * Draws the MP cost label of the step. The font is shrunk when the label would not fit in the hex.
+     */
+    static void drawMovementCost(MoveStep step, boolean isLastStep,
           Point stepPos, Graphics graph, Color col, boolean shiftFlag) {
         Entity stepEntity = step.getEntity();
 
@@ -511,8 +525,10 @@ public class StepSprite extends Sprite implements TacticalSprite {
 
         // Convert the buffer to a String and draw it.
         String costString = costStringBuf.toString();
-        graph.setFont(getMovementFont());
         int costX = stepPos.x + 42;
+        int availableWidth = shiftFlag ? HexLabelFitter.centredLabelWidth() : HexLabelFitter.labelWidthFrom(costX);
+        Font movementFont = getMovementFont();
+        graph.setFont(HexLabelFitter.fitToWidth(graph, movementFont, costString, availableWidth));
         if (shiftFlag) {
             costX -= (graph.getFontMetrics(graph.getFont()).stringWidth(costString) / 2);
         }
@@ -520,6 +536,8 @@ public class StepSprite extends Sprite implements TacticalSprite {
         graph.drawString(costString, costX, stepPos.y + 39);
         graph.setColor(col);
         graph.drawString(costString, costX - 1, stepPos.y + 38);
+        // The TMM line below is placed using the current font height; keep it where it was before any shrinking
+        graph.setFont(movementFont);
     }
 
     private void drawTMMAndRolls(MoveStep step, Game game, Point stepPos, Graphics graph, Color col,
@@ -548,7 +566,7 @@ public class StepSprite extends Sprite implements TacticalSprite {
             int subscriptY = stepPos.y + 39 + (graph.getFontMetrics(graph.getFont()).getHeight() / 2);
             String subscriptString = subscriptStringBuf.toString();
             Font subscriptFont = getMovementFont().deriveFont(getMovementFont().getSize() * 0.5f);
-            graph.setFont(subscriptFont);
+            graph.setFont(fitCentred(graph, subscriptFont, subscriptString));
             int subscriptX = stepPos.x + 42;
             if (shiftFlag) {
                 subscriptX -= (graph.getFontMetrics(graph.getFont()).stringWidth(subscriptString) / 2);

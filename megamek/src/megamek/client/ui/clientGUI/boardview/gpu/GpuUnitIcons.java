@@ -163,7 +163,7 @@ final class GpuUnitIcons implements Disposable {
      * {@link #HEAD_LIFT} of its side, so nameplates, badges and leaders sit above the icon at every zoom.
      */
     static Vector3 head(Matrix4 icon, Camera camera) {
-        return icon.getTranslation(new Vector3()).mulAdd(camera.up, HEAD_LIFT * SIZE_IN_HEXES * BoardGeometry.HEIGHT);
+        return icon.getTranslation(new Vector3()).mulAdd(camera.up, HEAD_LIFT * SIZE_IN_HEXES * BoardGeometry.height());
     }
 
     /**
@@ -181,8 +181,8 @@ final class GpuUnitIcons implements Disposable {
      * turns with the animated facing, so the tick and the sprite always agree.
      */
     static Matrix4 place(Matrix4 transform, Vector3 position, float ground, float facing) {
-        float side = SIZE_IN_HEXES * BoardGeometry.HEIGHT;
-        return transform.setToTranslation(position.x, position.y, ground + .25f * BoardGeometry.HEX_SCALE)
+        float side = SIZE_IN_HEXES * BoardGeometry.height();
+        return transform.setToTranslation(position.x, position.y, ground + .25f * BoardGeometry.hexScale())
               .rotate(Vector3.Z, -facing).scale(side, side, 1);
     }
 

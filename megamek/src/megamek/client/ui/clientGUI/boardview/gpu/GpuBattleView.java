@@ -5,14 +5,15 @@ import java.awt.Toolkit;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.Application;
 import com.badlogic.gdx.ApplicationAdapter;
@@ -20,26 +21,25 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.InputMultiplexer;
+import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Cursor.SystemCursor;
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.graphics.g2d.BitmapFont;
-import com.badlogic.gdx.graphics.g2d.BitmapFontCache;
-import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
+import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.ui.Value;
 import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.ScreenUtils;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
@@ -48,6 +48,7 @@ import megamek.client.ui.clientGUI.boardview.BoardFocus;
 import megamek.client.ui.clientGUI.boardview.BoardHexText;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.client.ui.gdx.DisplayScale;
+import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
@@ -60,6 +61,8 @@ class GpuBattleView extends ApplicationAdapter {
     static final float HOVER_PERIOD_SECONDS = UnitAnimator.HOVER_PERIOD_SECONDS;
     /** Height of that wave in terrain levels, so a floating token drifts off its flight height. */
     static final float HOVER_LEVELS = UnitAnimator.HOVER_LEVELS;
+    /** Hover and editor-brush outline inset as a fraction of the hex radius: 0 is the border, .1 keeps 90%. */
+    static final float HOVER_HEX_INSET = .1f;
     /** Hide all declared firing arrows while combat is playing, regardless of selection. */
     static final boolean HIDE_TARGET_ARROWS_DURING_ATTACKS = true;
     /** hud-v3's unitRect (view3d.js): in 3D a unit's screen rectangle is .55 of a hex wide. */
@@ -76,10 +79,15 @@ class GpuBattleView extends ApplicationAdapter {
     /** Degrees a middle drag orbits the camera per layout unit, on the board and on the minimap (C.4). */
     static final float ORBIT_DEGREES = .3f;
     private static final MMLogger LOGGER = MMLogger.create(GpuBattleView.class);
-    private GpuBoardSource source;
+    void zoomEditor(int direction) { boardCamera.zoom(direction < 0 ? 1 / 1.2f : 1.2f); }
+
+    private BoardSource source;
     private Stage loadingStage;
     private GpuBoardSkin loadingTheme;
     private Label loadingLabel;
+    private Label loadingDetails;
+    private GpuLoadingGrid loadingGrid;
+    private Label loadingWaiting, loadingActive, loadingReady;
     private volatile String loadingMessage = Messages.getString("ClientGUI.waitingOnTheServer");
     private final GpuDisplayScale displayScale = new GpuDisplayScale();
     final BoardCamera boardCamera = new BoardCamera();
@@ -89,7 +97,11 @@ class GpuBattleView extends ApplicationAdapter {
     private final BoardSurface.Cache groundSurfaces = new BoardSurface.Cache();
     private final Map<Integer, UnitMotion> motions = playback.motions;
     private final GpuAttackEffects attackEffects = new GpuAttackEffects();
-    private final Map<BoardScene.Pixels, GpuUnitModel> spriteModels = new HashMap<>();
+    private final GpuTerrainEffects terrainEffects = new GpuTerrainEffects();
+    private final GpuEffectDepth effectDepth = new GpuEffectDepth();
+    private final GpuWaterImpacts waterImpacts = new GpuWaterImpacts();
+    private record UnitSprite(BoardScene.Pixels pixels, boolean meeple) { }
+    private final Map<UnitSprite, GpuUnitModel> spriteModels = new HashMap<>();
     private final GpuUnitModels unitModels = GpuUnitModels.ENABLED ? new GpuUnitModels() : null;
     private final UnitDamageDisplay damageDisplay = new UnitDamageDisplay();
     private final GpuJumpJets jumpJets = new GpuJumpJets();
@@ -111,6 +123,8 @@ class GpuBattleView extends ApplicationAdapter {
     private final Map<String, BoardScene.LocationDamage> unitDamage = new HashMap<>();
     private final Map<Integer, KeyCommandBind> cameraKeys = new HashMap<>();
     private final BoardInput boardInput = new BoardInput();
+    /** Render-thread snapshot of modifiers delivered to the separate Swing tools window. */
+    private int editorToolsModifiers;
     private final List<Hover> hover = new ArrayList<>();
     private GpuTerrain terrain;
     private GpuFireControl fireControl;
@@ -120,29 +134,31 @@ class GpuBattleView extends ApplicationAdapter {
     private final GpuFieldOfView fieldOfView;
     private GpuAtmosphere atmosphere;
     private GpuUnitVisibility unitVisibility;
+    private GpuWireframe wireframe;
     private GpuMarkers markers;
     private GpuTextures<BoardScene.Pixels> unitTextures;
     private ModelBatch unitBatch;
     private SpriteBatch annotationBatch;
     private ShapeRenderer lines;
     /** The hud-v3 HUD (C.4); its skin also holds the hex labels' font. */
-    private GpuHud ui;
+    private GpuBoardHud ui;
     private GpuBoardSkin theme;
     /** The presentation settings the board reads; the HUD's developer tuning panel edits them. */
     private GpuBoardTuning tuning;
     private BoardScene scene;
-    private record HexTextChunk(BitmapFontCache glyphs, BoundingBox bounds) { }
-    private final Map<Integer, List<HexTextChunk>> hexTextByHeight = new TreeMap<>();
-    private List<BoardScene.Tile> textTiles;
-    private int textTuning = -1;
+    private GpuHexText hexText;
+    private GpuHexGrid hexGrid;
     private Coords hovered;
     private int hoveredUnit = Entity.NONE;
     /** While a move animates the hovered hex is not published, so no route is previewed (rebuild plan A.17 Q5). */
     private boolean hoverHeld;
+    /** Height of the latest pointer's terrain/object hit, owned by the render thread like hovered. */
+    private float hoverZ = Float.NaN;
     private SystemCursor cursor = SystemCursor.Arrow;
     private boolean fitted;
     private long frames;
     private float hoverClock;
+    private final UnitAttachments attachments = new UnitAttachments(groundSurfaces);
     private long boardGeneration;
     private long centerSequence = -1;
     private boolean entrancePending;
@@ -156,8 +172,14 @@ class GpuBattleView extends ApplicationAdapter {
     private float layoutScale;
     private float layoutPreference;
     private long hoverCameraRevision;
+    private int cameraTerrainRevision = -1;
+    private boolean reloadingAssets;
+    private boolean waitingForAssetCapture;
+    private boolean assetReloadFailed;
+    private boolean disposed;
+    private final GpuShaderManager shaderEdits = new GpuShaderManager();
 
-    GpuBattleView(GpuBoardSource source) {
+    GpuBattleView(BoardSource source) {
         this.source = source;
         fieldOfView = new GpuFieldOfView();
     }
@@ -167,13 +189,9 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     /** Attach the first map after the native loading window is already visible. Runs on the render thread. */
-    void attachSource(GpuBoardSource next) {
+    void attachSource(BoardSource next) {
         source = next;
-        createBoard();
-        loadingStage.dispose();
-        loadingStage = null;
-        loadingTheme.dispose();
-        loadingTheme = null;
+        shaderEdits.run(this::createBoard);
     }
 
     void prepareEntrance() {
@@ -198,46 +216,92 @@ class GpuBattleView extends ApplicationAdapter {
 
     @Override
     public void create() {
+        shaderEdits.run(this::createView);
+    }
+
+    private void createView() {
         if (source == null) {
-            loadingTheme = new GpuBoardSkin();
-            loadingStage = new Stage(new ScreenViewport());
-            Table content = new Table();
-            content.setFillParent(true);
-            loadingLabel = new Label(loadingMessage, loadingTheme.skin);
-            loadingLabel.setName("board-loading-message");
-            loadingLabel.setWrap(true);
-            loadingLabel.setAlignment(Align.center);
-            content.add(new Label("MEGAMEK", loadingTheme.skin, "kicker")).padBottom(18).row();
-            content.add(loadingLabel).width(600);
-            loadingStage.addActor(content);
+            createLoadingStage();
             Gdx.input.setInputProcessor(new InputMultiplexer(loadingStage));
             return;
         }
         createBoard();
     }
 
+    private void createLoadingStage() {
+        if (loadingStage != null) { return; }
+        if (theme == null && loadingTheme == null) { loadingTheme = new GpuBoardSkin(); }
+        var skin = theme != null ? theme.skin : loadingTheme.skin;
+        loadingStage = new Stage(new ScreenViewport());
+        Table content = new Table();
+        content.setFillParent(true);
+        content.top().padTop(Value.percentHeight(.06f, content));
+        loadingLabel = new Label(loadingMessage, skin, "hud-phase");
+        loadingLabel.setName("board-loading-message");
+        loadingLabel.setWrap(true);
+        loadingLabel.setAlignment(Align.center);
+        loadingDetails = new Label("", skin, "hud-title");
+        loadingDetails.setName("board-loading-details");
+        loadingDetails.setWrap(true);
+        loadingDetails.setAlignment(Align.top | Align.center);
+        loadingGrid = new GpuLoadingGrid(skin);
+        Table legend = new Table();
+        loadingWaiting = new Label("", skin);
+        loadingActive = new Label("", skin);
+        loadingReady = new Label("", skin);
+        loadingWaiting.setName("board-loading-waiting");
+        loadingActive.setName("board-loading-active");
+        loadingReady.setName("board-loading-ready");
+        loadingWaiting.setColor(UiTheme.MUTED);
+        loadingActive.setColor(GpuLoadingGrid.LOADING);
+        loadingReady.setColor(GpuLoadingGrid.READY);
+        for (Label entry : List.of(loadingWaiting, loadingActive, loadingReady)) {
+            legend.add(entry).padLeft(12).padRight(12);
+        }
+        content.add(new Label("MEGAMEK", skin, "hud-small")).padBottom(12).row();
+        content.add(loadingLabel).width(Value.percentWidth(.9f, content)).maxWidth(900)
+              .height(loadingLabel.getStyle().font.getLineHeight() * 2).row();
+        content.add(loadingGrid).width(Value.percentWidth(.90f, content)).maxWidth(960)
+              .height(Value.percentHeight(.42f, content)).maxHeight(360).padTop(14).row();
+        content.add(legend).padTop(10).row();
+        content.add(loadingDetails).width(Value.percentWidth(.9f, content)).maxWidth(900).padTop(14);
+        loadingStage.addActor(content);
+    }
+
     private void createBoard() {
         boardCamera.setIsometric(true);
-        terrain = new GpuTerrain(unitModels, unitBounds);
-        fireControl = new GpuFireControl();
-        tactical = new GpuTactical();
-        atmosphere = new GpuAtmosphere();
-        unitVisibility = new GpuUnitVisibility();
+        createSceneRenderers();
+        boardCamera.flightCollision = (eye, movement) -> {
+            if (terrain != null) { terrain.moveCamera(eye, movement, boardCamera.collisionRadius()); }
+        };
         markers = new GpuMarkers();
+        if (source.isGameplay()) { markers.prepareModels(); }
         unitTextures = new GpuTextures<>();
         overlay = new GpuBoardOverlay();
-        unitBatch = new ModelBatch(GpuUnitShader.provider(), new GpuOpaqueSorter());
+        // One skin for the window: the loading screen's, when it showed, becomes the HUD's (M1 row 1). The loading
+        // screen borrows it again while the terrain builds.
+        theme = loadingTheme == null ? new GpuBoardSkin() : loadingTheme;
+        loadingTheme = null;
+        tuning = new GpuBoardTuning(theme.skin, source, boardCamera);
+        // The HUD draws with the view's batch, which it does not own: the battle HUD over a game, the map tools over
+        // the board editor and the map preview. The batch outlives an asset reload, which recreates the renderers.
         annotationBatch = new SpriteBatch();
-        lines = new ShapeRenderer();
-        theme = new GpuBoardSkin();
-        tuning = new GpuBoardTuning(theme.skin, source);
-        // The HUD draws with the view's batch, which it does not own.
-        ui = new GpuHud(source, theme.skin, annotationBatch, boardCamera, tuning, history);
-        Gdx.input.setInputProcessor(new InputMultiplexer(ui.stage, boardInput) {
+        ui = source instanceof GpuBoardSource game
+              ? new GpuHud(game, theme.skin, annotationBatch, boardCamera, tuning, history)
+              : new GpuMapHud(source, theme.skin, annotationBatch, boardCamera, tuning, history);
+        Gdx.input.setInputProcessor(new InputMultiplexer(ui.stage(), boardInput) {
             // The HUD's Stage takes the presses on its widgets; every key goes through BoardInput, which asks the
             // HUD first (C.4), so no key reaches the Stage twice.
             @Override
+            public boolean touchDown(int x, int y, int pointer, int button) {
+                // Finish wheel edits before a toolbar or menu action can consume the click.
+                boardInput.finishElevationScroll();
+                return super.touchDown(x, y, pointer, button);
+            }
+
+            @Override
             public boolean keyDown(int key) {
+                boardInput.finishElevationScroll();
                 return boardInput.keyDown(key);
             }
 
@@ -254,6 +318,40 @@ class GpuBattleView extends ApplicationAdapter {
         resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
     }
 
+    /** Recreate every board shader owner; lazy effect programs compile again when their effects are drawn. */
+    private void createSceneRenderers() {
+        terrain = new GpuTerrain(unitModels, unitBounds);
+        fireControl = new GpuFireControl();
+        tactical = new GpuTactical(terrain::tacticalSurface);
+        atmosphere = new GpuAtmosphere();
+        unitVisibility = new GpuUnitVisibility();
+        wireframe = new GpuWireframe();
+        unitBatch = new ModelBatch(GpuShaderManager.provider("Units", GpuUnitShader::provider), new GpuOpaqueSorter());
+        hexText = new GpuHexText();
+        hexGrid = new GpuHexGrid();
+        lines = new ShapeRenderer();
+    }
+
+    /** Render-thread only. Null released owners so a failed shader compile can be retried safely. */
+    private void disposeSceneRenderers() {
+        // Join the terrain worker before releasing the model buffers it borrows.
+        if (terrain != null) { terrain.dispose(); terrain = null; }
+        if (fireControl != null) { fireControl.dispose(); fireControl = null; }
+        if (tactical != null) { tactical.dispose(); tactical = null; }
+        if (atmosphere != null) { atmosphere.dispose(); atmosphere = null; }
+        if (unitVisibility != null) { unitVisibility.dispose(); unitVisibility = null; }
+        if (wireframe != null) { wireframe.dispose(); wireframe = null; }
+        if (unitBatch != null) { unitBatch.dispose(); unitBatch = null; }
+        if (hexText != null) { hexText.dispose(); hexText = null; }
+        if (hexGrid != null) { hexGrid.dispose(); hexGrid = null; }
+        if (lines != null) { lines.dispose(); lines = null; }
+        attackEffects.dispose();
+        terrainEffects.dispose();
+        jumpJets.dispose();
+        waterImpacts.dispose();
+        effectDepth.dispose();
+    }
+
     @Override
     public void resize(int width, int height) {
         if (loadingStage != null && width > 0 && height > 0) {
@@ -262,7 +360,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (ui == null || width <= 0 || height <= 0) {
             return;
         }
-        float preference = source.uiPreferences.scale();
+        float preference = source.uiPreferences().scale();
         float scale = DisplayScale.read(preference, displayScale.contentScale());
         int pixelWidth = Gdx.graphics.getBackBufferWidth();
         int pixelHeight = Gdx.graphics.getBackBufferHeight();
@@ -279,10 +377,94 @@ class GpuBattleView extends ApplicationAdapter {
         ui.resize(width, height, scale);
         // The board fills the window; the HUD's panels float over it (rebuild plan A.1 A1).
         boardCamera.resize(width, height, scene, scale);
+        // In Swing's units (the monitor's scale without the GUI scale): the board editor measures its tools by it.
+        float swingScale = scale / preference;
+        source.setViewport(Math.round(width / swingScale), Math.round(height / swingScale), pixelWidth, pixelHeight);
     }
 
     @Override
     public void render() {
+        shaderEdits.run(() -> {
+            renderBoard();
+            shaderEdits.renderPreview();
+        });
+    }
+
+    private void renderBoard() {
+        if (!waitingForAssetCapture && shaderEdits.update() && terrain != null) { terrain.shadersChanged(); }
+        if (tuning != null && tuning.takeAssetReloadRequest()) { reloadAssets(); }
+        if (waitingForAssetCapture || assetReloadFailed) {
+            if (source.isClosed()) { Gdx.app.exit(); return; }
+            ScreenUtils.clear(.045f, .065f, .075f, 1, true);
+            resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+            ui.draw();
+            return;
+        }
+        try (TerrainSettings.Scope settings = TerrainSettings.use(terrain == null ? null : terrain.settings())) {
+            renderFrame(settings);
+        } catch (RuntimeException failure) {
+            if (!reloadingAssets) { throw failure; }
+            assetReloadFailed(failure);
+        }
+    }
+
+    /** The EDT rereads artwork first; only its completion hands GPU disposal back to the render thread. */
+    private void reloadAssets() {
+        pause();
+        reloadingAssets = true;
+        waitingForAssetCapture = true;
+        assetReloadFailed = false;
+        var application = Gdx.app;
+        SwingUtilities.invokeLater(() -> {
+            try {
+                source.reloadAssets();
+                application.postRunnable(() -> shaderEdits.run(() -> {
+                    if (disposed || source.isClosed()) { return; }
+                    waitingForAssetCapture = false;
+                    try {
+                        disposeSceneRenderers();
+                        clearUnitInstances();
+                        spriteModels.values().forEach(GpuUnitModel::dispose);
+                        spriteModels.clear();
+                        if (unitModels != null) { unitModels.dispose(); }
+                        camouflage.dispose();
+                        damageDisplay.dispose();
+                        unitTextures.dispose();
+                        unitIcons.dispose();
+                        groundSurfaces.clear();
+                        attachments.clear();
+                        BoardRocks.reload();
+                        BoardRough.reload();
+                        BoardScatter.reload();
+                        BoardObstacles.reload();
+                        BoardBridgeFooting.reload();
+                        createSceneRenderers();
+                        cameraTerrainRevision = -1;
+                    } catch (RuntimeException failure) {
+                        assetReloadFailed(failure);
+                    }
+                }));
+            } catch (java.io.IOException | RuntimeException failure) {
+                application.postRunnable(() -> {
+                    if (!disposed && !source.isClosed()) { assetReloadFailed(failure); }
+                });
+            }
+        });
+    }
+
+    private void assetReloadFailed(Exception failure) {
+        LOGGER.error("Cannot reload GPU board assets", failure);
+        // Lazy programs can fail inside a scene/shadow pass. Keep the retry panel on the window framebuffer.
+        FrameBuffer.unbind();
+        Gdx.gl.glDepthMask(true);
+        Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
+        reloadingAssets = false;
+        waitingForAssetCapture = false;
+        assetReloadFailed = true;
+        tuning.assetReloadFinished(false);
+    }
+
+    private void renderFrame(TerrainSettings.Scope settings) {
         if (source == null) {
             ScreenUtils.clear(.045f, .065f, .075f, 1, true);
             loadingLabel.setText(loadingMessage);
@@ -299,7 +481,7 @@ class GpuBattleView extends ApplicationAdapter {
         }
         // Moving to another monitor can change DPI without changing the window's dimensions.
         resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-        GpuBoardSource.Frame frame = source.takeFrame();
+        BoardSource.Frame frame = source.takeFrame();
         if (frame.scene() == null) {
             // Without a board the HUD still draws: a dialog asked now holds the EDT until it is answered here.
             ScreenUtils.clear(.045f, .065f, .075f, 1, true);
@@ -307,16 +489,26 @@ class GpuBattleView extends ApplicationAdapter {
             ui.draw();
             return;
         }
+        // Wait for Swing's measured tools inset before the editor's first camera fit.
+        if (source.isEditor() && source.toolsInset() < 0) {
+            ScreenUtils.clear(.045f, .065f, .075f, 1, true);
+            ui.draw();
+            return;
+        }
         renderStage("scene update");
         if (scene != null && (boardGeneration != frame.boardGeneration() || scene.boardId() != frame.scene().boardId() || scene.width() != frame.scene().width()
               || scene.height() != frame.scene().height())) {
+            terrain.boardChanged();
             playback.clear();
             history.clear();
             animators.clear();
             groundSurfaces.clear();
+            attachments.clear();
             jumpJets.clear();
+            waterImpacts.clear();
             unitPicking.clear();
             hovered = null;
+            boardInput.reset();
             fitted = false;
             boardCamera.boardChanged();
         }
@@ -324,10 +516,11 @@ class GpuBattleView extends ApplicationAdapter {
               || scene.boardId() != frame.scene().boardId());
         List<BoardScene.Tile> previousTiles = scene == null ? null : scene.tiles();
         scene = frame.scene();
+        if (unitModels != null) { unitModels.setDisplayMode(tuning.unitDisplayMode()); }
         history.accept(frame.timeline(), scene, frame.reports(), this::hasInfantryTransports);
         scene = history.live(scene);
         // The HUD's state before the camera frames: it opens and closes the columns the board area lies between.
-        ui.updateState(frame, playbackBusy(), source.dialog());
+        if (ui instanceof GpuHud hud) { hud.updateState(frame, playbackBusy(), dialog()); }
         playback.gravityOverride = tuning.gravityOverride();
         boardCamera.viewableArea(ui.cameraLeft(), ui.cameraWidth());
         if (!fitted) { updateCameraFocus(scene, frame.centerRequest()); }
@@ -335,32 +528,70 @@ class GpuBattleView extends ApplicationAdapter {
         history.advance(Gdx.graphics.getDeltaTime(), state -> preparePlaybackCamera(state, scene));
         source.playbackState(frame, playbackBusy());
         scene = playback.present(scene);
-        boolean changedTiles = previousTiles != scene.tiles();
         camouflage.retain(scene.units());
         if (unitModels != null) {
             unitModels.retainAssemblies(scene.units().stream().filter(unit -> !unit.sensorContact())
                   .map(BoardScene.Unit::id).collect(Collectors.toSet()));
         }
         boardGeneration = frame.boardGeneration();
-        terrain.update(scene);
+        var atmosphereSettings = tuning.atmosphere();
+        terrain.setGravity(atmosphereSettings.gravity());
+        terrain.update(scene, boardCamera.camera);
+        boolean detailChanged = terrain.refine(boardCamera.camera);
+        settings.set(terrain.settings());
+        tuning.terrainProgress(terrain.buildProgress());
+        if (!terrain.ready(scene)) {
+            ScreenUtils.clear(.045f, .065f, .075f, 1, true);
+            createLoadingStage();
+            loadingLabel.setText(Messages.getString("GpuBoard.loadingOverall", Math.max(0, terrain.buildProgress())));
+            var sections = terrain.buildSections();
+            loadingGrid.update(sections);
+            loadingWaiting.setText(Messages.getString("GpuBoard.loadingLegend.waiting",
+                  Collections.frequency(sections.states(), TerrainLoadProgress.SectionState.WAITING)));
+            loadingActive.setText(Messages.getString("GpuBoard.loadingLegend.active",
+                  Collections.frequency(sections.states(), TerrainLoadProgress.SectionState.LOADING)));
+            loadingReady.setText(Messages.getString("GpuBoard.loadingLegend.ready",
+                  Collections.frequency(sections.states(), TerrainLoadProgress.SectionState.READY), sections.states().size()));
+            loadingDetails.setText(terrain.buildDetails().stream().map(TerrainLoadProgress.Status::text)
+                  .collect(Collectors.joining("\n")));
+            loadingStage.act(Math.min(Gdx.graphics.getDeltaTime(), .1f));
+            loadingStage.draw();
+            renderStage(null);
+            return;
+        }
+        if (loadingStage != null) {
+            loadingStage.dispose();
+            loadingStage = null;
+            if (loadingTheme != null) { loadingTheme.dispose(); }
+            loadingTheme = null;
+        }
+        scene = terrain.presentation(scene);
+        boolean changedTiles = previousTiles != scene.tiles();
+        if (changedTiles || cameraTerrainRevision != BoardGeometry.revision()) {
+            boardCamera.constrainFlight();
+            cameraTerrainRevision = BoardGeometry.revision();
+        }
         fireControl.update(scene, HIDE_TARGET_ARROWS_DURING_ATTACKS && !playback.attacks().isEmpty(), frame.status(),
               frame.panels().fire());
-        tactical.update(scene);
+        tactical.update(scene, detailChanged, hovered, !frame.panels().move().route().isEmpty());
         fieldOfView.update(scene.fieldOfView());
         fieldOfView.configure(tuning.fovStyle(), tuning.fovDarkness(), tuning.sensorStyle(), tuning.sensorDarkness());
-        atmosphere.configure(tuning.atmosphere());
+        atmosphere.configure(atmosphereSettings);
+        attackEffects.setWind(atmosphereSettings.effects());
         atmosphere.setOptions(tuning.atmosphereOptions());
         terrain.setNormalMaps(tuning.normalMaps());
+        terrain.setGrass(tuning.grass());
         if (unitTextures.update(scene.units().stream().filter(unit -> !unit.sensorContact()
               && (unitModels == null || unitModels.get(unit.model(), unit.id()) == null)).map(BoardScene.Unit::image).distinct()
               .collect(Collectors.toMap(pixels -> pixels, pixels -> pixels)))) {
             spriteModels.values().forEach(GpuUnitModel::dispose);
             spriteModels.clear();
             unitPicking.clear();
+            attachments.geometryChanged();
         }
         Set<BoardScene.Pixels> images = scene.units().stream().map(BoardScene.Unit::image).collect(Collectors.toSet());
         boolean removedSprites = spriteModels.entrySet().removeIf(entry -> {
-            if (images.contains(entry.getKey())) {
+            if (images.contains(entry.getKey().pixels())) {
                 return false;
             }
             entry.getValue().dispose();
@@ -368,6 +599,7 @@ class GpuBattleView extends ApplicationAdapter {
         });
         if (removedSprites) {
             unitPicking.clear();
+            attachments.geometryChanged();
         }
         updateCameraFocus(scene, frame.centerRequest(), instantAction);
         // The first visible frame's delta may still include the hidden window's loading time.
@@ -376,6 +608,8 @@ class GpuBattleView extends ApplicationAdapter {
         if (ui.isTextEditing()) {
             // The camera keys work with every panel open and pause only while a text field takes the keys (Q9).
             cameraKeys.clear();
+        } else if (boardCamera.firstPerson()) {
+            advanceFirstPerson(Gdx.graphics.getDeltaTime());
         } else {
             float distance = 500 * Gdx.graphics.getDeltaTime();
             float inclination = TILT_DEGREES_PER_SECOND * Gdx.graphics.getDeltaTime();
@@ -407,8 +641,24 @@ class GpuBattleView extends ApplicationAdapter {
         markers.beginFrame(scene.markers(), Gdx.graphics.getDeltaTime());
         prepareUnits();
         applyHover();
+        for (var unit : scene.units()) {
+            var instance = unitInstances.get(unit.id() + ":" + unit.part());
+            if (MeepleVisual.isMeeple(instance)) {
+                MeepleAnimator.attacks(unit, instance, playback.attacks(), unitInstances);
+                var visual = ((GpuUnitInstance) instance).visual();
+                unitAnchors.put(unit, visual.anchor(instance, boardCamera.camera));
+            }
+        }
         for (var attack : playback.attacks()) { attack.landscape = ray -> terrain.hit(scene, ray); }
         aimAttack();
+        attachments.place(scene, unitModels, unitInstances, animators, playback.attachment(), boardCamera.camera, unitAnchors, hoverClock);
+        for (var unit : scene.units()) {
+            if (unit.attachment() == null) { continue; }
+            scene.units().stream().filter(host -> host.id() == unit.attachment().carrierId()).findFirst().ifPresent(host -> {
+                var pose = unitFootprints.get(host);
+                if (pose != null) { unitFootprints.put(unit, new UnitFootprint.Pose(unit, pose.position(), pose.facing())); }
+            });
+        }
         updateEquipmentDetail();
         // Icons and flat terrain art are the Tactical View; the 3D view keeps its meshes at every angle and zoom.
         if (unitIcons.update(boardCamera.tactical(), boardCamera.camera, scene, frame.status(),
@@ -427,13 +677,17 @@ class GpuBattleView extends ApplicationAdapter {
         outlined.addAll(markers.outlinedInstances());
         outlined.removeIf(instance -> instance == null || !boardCamera.camera.frustum.boundsInFrustum(unitBounds.get(instance)));
         float seeThrough = tuning.seeThrough();
-        // The units' poses and anchors, the icons and the camera are final for this frame.
+        boolean wireframeView = tuning.wireframe() && GpuWireframe.supported();
+        // The units' poses and anchors, the icons and the camera are final for this frame. The tuning model follows
+        // the camera, which can leave Free Flight by itself (its keys, the Tactical View).
         renderStage("board-space HUD");
+        tuning.syncCamera();
         updateHud(frame);
         renderStage("cutaways and light");
         atmosphere.updateLight(boardCamera.camera);
         terrain.setAtmosphere(atmosphere.lighting());
-        terrain.animate(Gdx.graphics.getDeltaTime(), units, tuning.buildingOpacity());
+        terrain.animate(Gdx.graphics.getDeltaTime(), units, tuning.buildingOpacity(),
+              ui.hit(Gdx.input.getX(), Gdx.input.getY()) ? null : hovered, hoverFloorZ());
         renderStage("geometry shadows");
         terrain.renderShadows(boardCamera.camera, unitIcons.active() ? List.of() : units);
         renderStage("cloud transmission");
@@ -442,29 +696,47 @@ class GpuBattleView extends ApplicationAdapter {
         ScreenUtils.clear(0.035f, 0.055f, 0.075f, 1, true);
         atmosphere.begin((int) boardCamera.camera.viewportWidth, (int) boardCamera.camera.viewportHeight,
               Gdx.graphics.getDeltaTime());
-        terrain.render(boardCamera.camera, false);
+        if (wireframeView) {
+            wireframe.fill(boardCamera.camera, terrain);
+        } else {
+            terrain.render(boardCamera.camera, false);
+        }
         renderStage("units");
-        renderUnits();
+        renderUnits(wireframeView);
         renderStage("transparent effects");
         if (!unitIcons.active()) { renderTethers(); }
-        terrain.renderTransparent(boardCamera.camera);
+        if (!wireframeView) { terrain.renderTransparent(boardCamera.camera); }
+        Color smokeLight = atmosphere.particleLight();
+        terrainEffects.update(scene, groundSurfaces, atmosphereSettings.effects(), animationSeconds());
+        effectDepth.begin();
+        terrainEffects.render(boardCamera.camera, effectDepth, smokeLight, atmosphere.lighting().direction());
+        jumpJets.setSmokeLight(smokeLight);
+        attackEffects.setSmokeLight(smokeLight);
+        attackEffects.setLightDirection(atmosphere.lighting().direction());
         if (!unitIcons.active()) { jumpJets.render(boardCamera.camera); }
-        attackEffects.render(boardCamera.camera);
+        attackEffects.render(boardCamera.camera, effectDepth);
+        if (!terrain.waterVisible()) { waterImpacts.clear(); }
+        else if (!unitIcons.active()) {
+            waterImpacts.render(boardCamera.camera, scene, motions, unitInstances, smokeLight, playback.attachment());
+        }
         renderStage("atmosphere composite");
         atmosphere.end(boardCamera.camera, terrain, scene, 0, fieldOfView);
+        if (wireframeView) { wireframe.lines(boardCamera.camera, terrain); }
         renderStage("weather particles");
         atmosphere.renderWeather(boardCamera.camera, scene);
         renderStage("unit outlines");
         unitVisibility.render(boardCamera.camera, outlined, atmosphere.depthTexture(), 0, seeThrough, layoutScale,
-              unitBounds);
+              unitBounds, terrainEffects.opacityTexture());
         renderStage("tactical overlays");
         terrain.render(boardCamera.camera, true);
         // The board overlay over the terrain's marks; in 3D after the route's ghost, whose depth hides the marks under
         // it. In the Tactical View the overlay lies under the icons and the ghost icon over them.
         if (!unitIcons.active()) { overlay.renderGhost(boardCamera.camera, shownUnit); }
         overlay.render(boardCamera.camera);
+        if (!(ui instanceof GpuHud)) { renderMapRings(); }
         fireControl.render(boardCamera.camera);
         tactical.render(boardCamera.camera, Gdx.graphics.getDeltaTime(), unitIcons.active());
+        hexGrid.render(boardCamera, scene);
         renderHexText();
         unitIcons.render(boardCamera.camera);
         if (unitIcons.active()) { overlay.renderGhost(boardCamera.camera, shownUnit); }
@@ -474,8 +746,12 @@ class GpuBattleView extends ApplicationAdapter {
         renderStage("annotations and UI");
         renderAnnotations();
         renderEntrance();
-        ui.draw();
+        try (TerrainSettings.Scope ignored = TerrainSettings.use(null)) { ui.draw(); }
         renderStage(null);
+        if (reloadingAssets) {
+            reloadingAssets = false;
+            tuning.assetReloadFinished(true);
+        }
         frames++;
     }
 
@@ -485,10 +761,48 @@ class GpuBattleView extends ApplicationAdapter {
      */
     private void updateHud(GpuBoardSource.Frame frame) {
         GpuHud.HudView view = hudView(frame.scene() != null);
-        ui.update(frame, view, source.dialog(), source.uiPreferences);
-        if (frame.scene() != null) {
-            overlay.update(frame.withScene(scene), view, source.uiPreferences, ui.state);
+        // The HUD shows the tuning controls' own values, not the settings of the terrain on display.
+        try (TerrainSettings.Scope ignored = TerrainSettings.use(null)) {
+            ui.update(frame, view, dialog(), source.uiPreferences());
         }
+        if (ui instanceof GpuHud hud && frame.scene() != null) {
+            overlay.update(frame.withScene(scene), view, source.uiPreferences(), hud.state);
+        }
+    }
+
+    /** The pending native dialog of a game's source; a map has none. */
+    private GpuBoardWindow.DialogRequest dialog() {
+        return source instanceof GpuBoardSource game ? game.dialog() : null;
+    }
+
+    /**
+     * The board editor and the map preview have no battle overlay: the hovered hex's outline, or with Ctrl in the
+     * editor the brush's hexes, inset by {@link #HOVER_HEX_INSET} at the height a unit would stand there.
+     */
+    private void renderMapRings() {
+        if (hovered == null || scene.tile(hovered) == null || ui.hit(Gdx.input.getX(), Gdx.input.getY())) {
+            return;
+        }
+        List<Coords> hexes = source.isEditor() && editorModifiers() == InputEvent.CTRL_DOWN_MASK
+              ? source.editorBrush(hovered, boardGeneration) : List.of(hovered);
+        Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
+        Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
+        lines.setProjectionMatrix(boardCamera.camera.combined);
+        lines.begin(ShapeRenderer.ShapeType.Line);
+        lines.setColor(Color.WHITE);
+        for (Coords coords : hexes) {
+            if (scene.tile(coords) == null) {
+                continue;
+            }
+            float z = BoardTacticalGeometry.floatingZ(scene, coords);
+            Vector3 center = BoardGeometry.center(coords, 0);
+            for (int edge = 0; edge < 6; edge++) {
+                Vector3 from = BoardGeometry.inset(BoardGeometry.corner(coords, 0, edge), center, HOVER_HEX_INSET);
+                Vector3 to = BoardGeometry.inset(BoardGeometry.corner(coords, 0, edge + 1), center, HOVER_HEX_INSET);
+                lines.line(from.x, from.y, z, to.x, to.y, z);
+            }
+        }
+        lines.end();
     }
 
     /**
@@ -506,7 +820,7 @@ class GpuBattleView extends ApplicationAdapter {
         float width = hexPixels * (unitIcons.active()
               ? GpuUnitIcons.SIZE_IN_HEXES * BoardGeometry.HEIGHT / BoardGeometry.WIDTH : UNIT_RECT_WIDTH);
         // Stage units per viewport pixel: the HUD's stage spans the board camera's viewport.
-        float stage = ui.stage.getWidth() / boardCamera.camera.viewportWidth;
+        float stage = ui.stage().getWidth() / boardCamera.camera.viewportWidth;
         for (Map.Entry<BoardScene.Unit, Vector3> entry : unitAnchors.entrySet()) {
             UnitFootprint.Pose pose = unitFootprints.get(entry.getKey());
             if (!drawn || entry.getKey().part() > 0 || pose == null) {
@@ -568,7 +882,7 @@ class GpuBattleView extends ApplicationAdapter {
                 }
                 String key = unit.id() + ":" + unit.part();
                 var instance = unitInstances.get(key);
-                var model = unitModels.get(unit.model(), unit.id());
+                var model = instance instanceof GpuUnitInstance displayed ? displayed.visual() : null;
                 if (instance != null && model != null) {
                     jumpJets.update(key, model, instance, unit, sample);
                 }
@@ -611,14 +925,15 @@ class GpuBattleView extends ApplicationAdapter {
             }
             BoardScene.Tile tile = scene.tile(unit.location().coords());
             if (tile != null && tile.waterDepth() == 0 && !tile.frozen() && !airborne
-                  && MathUtils.isEqual(position.z, tile.elevation() * BoardGeometry.LEVEL)) {
+                  && MathUtils.isEqual(position.z, tile.elevation() * BoardGeometry.level())) {
                 position.z = BoardGeometry.groundZ(tile);
             }
             float footprintFacing = facing;
             GpuUnitModel visual = unit.sensorContact() ? markers.model(BoardMarker.Kind.SENSOR_CONTACT)
                   : unitModels == null ? null : unitModels.get(unit.model(), unit.id());
             boolean authored = !unit.sensorContact() && visual != null;
-            boolean dead = authored && unit.model().state() != null && unit.model().state().pose().dead();
+            boolean dead = !unit.sensorContact() && unit.model() != null && unit.model().state() != null
+                  && unit.model().state().pose().dead();
             var death = playback.attacks().stream().filter(attack -> attack.death() && attack.event.entityId() == unit.id())
                   .findFirst().orElse(null);
             float collapse = death == null ? dead ? 1 : 0 : death.deathProgress();
@@ -628,12 +943,14 @@ class GpuBattleView extends ApplicationAdapter {
                 if (Float.isFinite(ground)) { position.z = MathUtils.lerp(position.z, ground, collapse); }
             }
             if (visual == null) {
-                visual = spriteModels.computeIfAbsent(unit.image(), pixels ->
-                      GpuUnitModel.sprite(pixels, unitTextures.region(pixels)));
+                visual = spriteModels.computeIfAbsent(new UnitSprite(unit.image(), tuning.unitDisplayMode().meeple(unit.model())),
+                      sprite -> sprite.meeple() ? GpuUnitModel.meeple(sprite.pixels(), unitTextures.region(sprite.pixels()))
+                            : GpuUnitModel.sprite(sprite.pixels(), unitTextures.region(sprite.pixels())));
             }
             String key = unit.id() + ":" + unit.part();
             ModelInstance instance = unitInstances.get(key);
             if (instance == null || instance.model != visual.instance.model) {
+                animators.remove(key);
                 instance = newUnitInstance(key, visual);
             }
             BoardScene.LocationDamage shownDamage = unitDamage.getOrDefault(key, BoardScene.LocationDamage.NONE);
@@ -643,8 +960,19 @@ class GpuBattleView extends ApplicationAdapter {
                   : UnitDamageDisplay.preview(unit.model().damage(), mek, tuning.damageOverride(),
                         visual.damageLocation(tuning.damageLocation()))
                   : BoardScene.LocationDamage.NONE;
-            UnitModelState.Appearance appearance = authored && unit.model().state() != null
+            UnitModelState.Appearance appearance = !unit.sensorContact() && unit.model() != null && unit.model().state() != null
                   ? unit.model().state().appearance() : null;
+            if (visual.meeple()) {
+                // Fresh materials make repair/camouflage changes reversible; mesh buffers remain shared.
+                float loss = tuning.damageOverride() >= 0 ? tuning.damageOverride() : appearance == null ? 0 : appearance.bodyLoss();
+                var bodyDamage = UnitDamageDisplay.preview(BoardScene.LocationDamage.NONE, false, loss);
+                if (!bodyDamage.equals(shownDamage) || !java.util.Objects.equals(appearance, equipmentAppearance.get(key))) {
+                    instance = newUnitInstance(key, visual);
+                    MeepleVisual.appearance(instance, visual, appearance, tuning.damageOverride(), unit.id(), camouflage, damageDisplay);
+                    unitDamage.put(key, bodyDamage);
+                    equipmentAppearance.put(key, appearance);
+                }
+            }
             if (authored && (!damage.equals(shownDamage)
                   || !java.util.Objects.equals(appearance, equipmentAppearance.get(key)))) {
                 UpperBodyTurn previousTurn = upperBodyTurns.get(key);
@@ -660,12 +988,15 @@ class GpuBattleView extends ApplicationAdapter {
                     visual.turnUpperBody(instance, previousTurn.degrees());
                 }
             }
-            if (dead) { damageDisplay.wreck(instance, visual, unit.id()); }
+            if (dead && authored) { damageDisplay.wreck(instance, visual, unit.id()); }
             // Presentation-only color for the see-through pass; the normal model materials retain their artwork.
             if (!(instance.userData instanceof Color)) {
                 instance.userData = new Color();
             }
             Color.rgb888ToColor((Color) instance.userData, unit.outlineRgb());
+            // The hex the unit stands in right now, also while it walks through other hexes.
+            BoardScene.Tile standing = BoardGeometry.tile(scene, position.x, position.y);
+            ((Color) instance.userData).a = standing == null ? 0 : GpuUnitVisibility.ownHex(standing);
             if (authored && appearance == null && !unit.image().equals(unitTints.get(key))) {
                 Color tint = GpuCutout.averageColor(unit.image());
                 float brightest = Math.max(tint.r, Math.max(tint.g, tint.b));
@@ -690,7 +1021,7 @@ class GpuBattleView extends ApplicationAdapter {
                     facing = 0; // Troops and their transports have cosmetic member headings, no gameplay facing.
                 }
                 var turn = upperBodyTurns.get(key);
-                animators.computeIfAbsent(key, ignored -> new UnitAnimator(groundSurfaces)).apply(visual, instance, unit,
+                animators.computeIfAbsent(key, ignored -> new UnitAnimator(groundSurfaces, () -> scene)).apply(visual, instance, unit,
                       sample, hoverClock, animationSeconds(),
                       history.speed() == UnitMotion.Speed.INSTANT, turn == null ? 0 : turn.degrees(),
                       UnitScreenScale.growth(placement, growth));
@@ -706,10 +1037,12 @@ class GpuBattleView extends ApplicationAdapter {
             }
             Vector3 anchor = unit.sensorContact()
                   ? markers.placeSensor(unit.location().coords(), instance, boardCamera.camera, position)
+                  : visual.meeple() ? MeepleAnimator.place(visual, instance, placement, sample, boardCamera.camera, position, facing,
+                        playback.conversion(), boardCamera.isTopDown())
                   : visual.place(instance, boardCamera.camera, position, facing, placement);
             anchor = UnitScreenScale.grow(placement, instance, anchor, growth);
             UnitAnimator animator = animators.get(key);
-            if (authored && animator != null && animator.groundSupports(scene, placement, sample)) {
+            if (authored && animator != null && unit.attachment() == null && animator.groundSupports(scene, placement, sample)) {
                 anchor = visual.anchor(instance, boardCamera.camera);
             }
             if (airborne && collapse == 0) {
@@ -752,6 +1085,13 @@ class GpuBattleView extends ApplicationAdapter {
             // can follow a unit-list click, whose pending focus request must still be applied.
             centerSequence = centerSequence < 0 ? request.sequence() : 0;
         }
+        if (boardCamera.firstPerson()) {
+            // Consume automatic requests during free flight so leaving it restores the user's tactical view.
+            centerSequence = request.sequence();
+            cameraSelection = scene.selectedId();
+            cameraFollowingPlayback = false;
+            return;
+        }
         boolean firing = playback.attack() != null && playback.attack().shot();
         boolean instant = history.speed() == UnitMotion.Speed.INSTANT;
         if (!instant && !firing && playback.movement() == null) { boardCamera.clearPlaybackFrame(); }
@@ -788,7 +1128,8 @@ class GpuBattleView extends ApplicationAdapter {
             return;
         }
         boolean requested = centerSequence != request.sequence();
-        boolean changedSelection = cameraSelection != scene.selectedId() || cameraFollowingPlayback && instantAction == null;
+        boolean changedSelection = cameraSelection != scene.selectedId()
+              || cameraFollowingPlayback && instantAction == null;
         var selection = changedSelection && scene.selectedId() != Entity.NONE
               ? scene.units().stream().filter(unit -> unit.id() == scene.selectedId()).findFirst().orElse(null) : null;
         if (selection == null && requested && request.entityId() != Entity.NONE) {
@@ -895,13 +1236,13 @@ class GpuBattleView extends ApplicationAdapter {
         if (instance == null || instance.model != model.instance.model) {
             instance = newUnitInstance(key, model);
         }
-        animators.computeIfAbsent(key, ignored -> new UnitAnimator()).apply(model, instance, unit,
+        animators.computeIfAbsent(key, ignored -> new UnitAnimator(groundSurfaces, () -> scene)).apply(model, instance, unit,
               motions.get(unit.id()).sample(), hoverClock, 0, true, unit.model().twist());
     }
 
     /** Level a floating visual's stem ends at, or NaN when no stem is drawn for this token at this time. */
     static float tetherGround(BoardScene.Unit unit, int tileElevation, Vector3 center, boolean moving) {
-        float ground = tileElevation * BoardGeometry.LEVEL;
+        float ground = tileElevation * BoardGeometry.level();
         return unit.airborne() && !moving && center.z > ground ? ground : Float.NaN;
     }
 
@@ -1016,7 +1357,7 @@ class GpuBattleView extends ApplicationAdapter {
         return turn.targetDegrees();
     }
 
-    private void renderUnits() {
+    private void renderUnits(boolean thermal) {
         unitBatch.begin(boardCamera.camera);
         if (!unitIcons.active()) {
             for (BoardScene.Unit unit : unitAnchors.keySet()) {
@@ -1024,6 +1365,8 @@ class GpuBattleView extends ApplicationAdapter {
                 if (boardCamera.camera.frustum.boundsInFrustum(unitBounds.get(instance))) {
                     if (unit.sensorContact()) {
                         unitBatch.render(instance);
+                    } else if (thermal) {
+                        wireframe.units.add(instance, unit, unitBounds.get(instance));
                     } else {
                         unitBatch.render(instance, terrain.environment());
                     }
@@ -1033,6 +1376,7 @@ class GpuBattleView extends ApplicationAdapter {
         // Every marker writes normal scene depth, independently of its optional see-through outline.
         markers.instances().forEach(unitBatch::render);
         unitBatch.end();
+        if (thermal) { wireframe.units.render(boardCamera.camera); }
     }
 
     /**
@@ -1089,73 +1433,13 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     private void renderHexText() {
-        if (textTiles != scene.tiles() || textTuning != BoardGeometry.revision()) {
-            cacheHexText();
-        }
-        Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
-        Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
-        annotationBatch.setProjectionMatrix(boardCamera.camera.combined);
-        annotationBatch.begin();
-        for (var group : hexTextByHeight.entrySet()) {
-            annotationBatch.setTransformMatrix(new Matrix4().setToTranslation(0, 0,
-                  group.getKey() * BoardGeometry.LEVEL + 0.6f));
-            for (HexTextChunk chunk : group.getValue()) {
-                if (boardCamera.camera.frustum.boundsInFrustum(chunk.bounds())) {
-                    chunk.glyphs().draw(annotationBatch);
-                }
-            }
-        }
-        annotationBatch.end();
-        annotationBatch.setTransformMatrix(new Matrix4());
+        hexText.update(scene, theme.skin.getFont("default-font"), terrain::roofBounds);
+        hexText.render(annotationBatch, boardCamera, atmosphere.depthTexture(), unitVisibility.depthTexture(), 0);
     }
 
-    /** Immutable label vertices share the font atlas and are reused in both views until their source changes. */
-    private void cacheHexText() {
-        BitmapFont font = theme.skin.getFont("default-font");
-        float scaleX = font.getData().scaleX;
-        float scaleY = font.getData().scaleY;
-        Color color = new Color(font.getColor());
-        Map<Integer, Map<Coords, HexTextChunk>> groups = new TreeMap<>();
-        try {
-            for (BoardScene.Tile tile : scene.tiles()) {
-                for (BoardHexText label : tile.text()) {
-                    int height = tile.elevation() + label.elevation();
-                    Coords cell = new Coords(tile.coords().getX() / GpuTerrain.CHUNK_SIZE,
-                          tile.coords().getY() / GpuTerrain.CHUNK_SIZE);
-                    HexTextChunk chunk = groups.computeIfAbsent(height, key -> new HashMap<>())
-                          .computeIfAbsent(cell, key -> new HexTextChunk(new BitmapFontCache(font, false), new BoundingBox().inf()));
-                    float centerX = BoardGeometry.centerX(tile.coords());
-                    float centerY = BoardGeometry.centerY(tile.coords());
-                    float z = height * BoardGeometry.LEVEL;
-                    chunk.bounds().ext(centerX - BoardGeometry.WIDTH, centerY - BoardGeometry.WIDTH, z - 1)
-                          .ext(centerX + BoardGeometry.WIDTH, centerY + BoardGeometry.WIDTH, z + 1);
-                    font.getData().setScale(label.font().getSize2D() / GpuBoardSkin.FONT_RESOLUTION);
-                    int argb = label.argb();
-                    font.setColor(((argb >>> 16) & 255) / 255f, ((argb >>> 8) & 255) / 255f,
-                          (argb & 255) / 255f, ((argb >>> 24) & 255) / 255f);
-                    GlyphLayout layout = new GlyphLayout(font, label.text());
-                    float x = centerX;
-                    float baseline = centerY + BoardGeometry.HEIGHT / 2 - label.baseline() * BoardGeometry.HEX_SCALE;
-                    var roof = label.elevation() > 0 ? terrain.roofBounds(tile.coords()) : null;
-                    if (roof != null) {
-                        float fit = Math.min(1, Math.max(8, roof.getWidth() - 4 * BoardGeometry.HEX_SCALE) / layout.width);
-                        font.getData().setScale(font.getData().scaleX * fit);
-                        layout.setText(font, label.text());
-                        x = roof.getCenterX();
-                        baseline = roof.getCenterY() - layout.height / 2;
-                    }
-                    chunk.glyphs().addText(layout, x - layout.width / 2,
-                          label.fromTop() ? baseline : baseline + layout.height);
-                }
-            }
-        } finally {
-            font.getData().setScale(scaleX, scaleY);
-            font.setColor(color);
-        }
-        hexTextByHeight.clear();
-        groups.forEach((height, chunks) -> hexTextByHeight.put(height, List.copyOf(chunks.values())));
-        textTiles = scene.tiles();
-        textTuning = BoardGeometry.revision();
+    /** The level floor under the pointer's terrain or object hit, NaN without one. */
+    private float hoverFloorZ() {
+        return Float.isNaN(hoverZ) ? Float.NaN : MathUtils.floor(hoverZ / BoardGeometry.level() + .0001f) * BoardGeometry.level();
     }
 
     private boolean hovers(BoardScene.Unit unit) {
@@ -1168,6 +1452,28 @@ class GpuBattleView extends ApplicationAdapter {
      */
     private boolean marked(BoardScene.Unit unit) {
         return unit.id() == scene.selectedId() || unit.id() == overlay.focus();
+    }
+
+    /** Held camera binds share the existing focus and release routing; free flight uses wall-clock movement. */
+    private void advanceFirstPerson(float seconds) {
+        float forward = 0, sideways = 0, vertical = 0, pitch = 0;
+        for (KeyCommandBind command : cameraKeys.values()) {
+            switch (command) {
+                case SCROLL_NORTH -> forward += 1;
+                case SCROLL_SOUTH -> forward -= 1;
+                case SCROLL_EAST -> sideways += 1;
+                case SCROLL_WEST -> sideways -= 1;
+                case CAMERA_ROTATE_LEFT -> vertical -= 1;
+                case CAMERA_ROTATE_RIGHT -> vertical += 1;
+                case CAMERA_TILT_UP -> pitch += 1;
+                case CAMERA_TILT_DOWN -> pitch -= 1;
+                default -> { }
+            }
+        }
+        float elapsed = MathUtils.clamp(seconds, 0, .1f);
+        if (pitch != 0) { boardCamera.look(0, pitch * TILT_DEGREES_PER_SECOND * elapsed); }
+        float speed = (modifiers() & InputEvent.SHIFT_DOWN_MASK) != 0 ? 4 : 1;
+        boardCamera.fly(forward, sideways, vertical, BoardGeometry.height() * 3 * speed * elapsed);
     }
 
     Vector3 screenPosition(Coords coords) {
@@ -1189,22 +1495,24 @@ class GpuBattleView extends ApplicationAdapter {
         private int gestureModifiers;
         private int startX;
         private int startY;
+        private Coords elevationScrollHex;
+        private float elevationScroll;
         private record KeyPress(int code, int modifiers) { }
         private final Map<Integer, KeyPress> pressedKeys = new HashMap<>();
 
-        private record Pick(Coords coords, int entityId) { }
+        private record Pick(Coords coords, int entityId, float surfaceZ) { }
 
         private Coords pick(int x, int y) {
             return pickSelection(x, y).coords();
         }
 
         private Pick pickSelection(int x, int y) {
-            if (scene == null) {
-                return new Pick(null, Entity.NONE);
+            if (scene == null || reloadingAssets || assetReloadFailed) {
+                return new Pick(null, Entity.NONE, Float.NaN);
             }
             var ray = boardCamera.camera.getPickRay(x, y, 0, 0,
                   boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight);
-            var ground = terrain.hit(scene, ray);
+            var ground = terrain.selectionHit(scene, ray);
             float nearest = ground == null ? Float.POSITIVE_INFINITY : ground.distance();
             Coords coords = ground == null ? null : ground.coords();
             int entityId = Entity.NONE;
@@ -1237,11 +1545,14 @@ class GpuBattleView extends ApplicationAdapter {
                     }
                 }
             }
-            return new Pick(coords, entityId);
+            float surfaceZ = ground != null && nearest == ground.distance()
+                  ? ray.getEndPoint(new Vector3(), (float) Math.sqrt(nearest)).z : Float.NaN;
+            return new Pick(coords, entityId, surfaceZ);
         }
 
         @Override
         public boolean touchDown(int x, int y, int pointer, int button) {
+            if (reloadingAssets || assetReloadFailed) { return true; }
             if (boardGesture || ui.hit(x, y)) {
                 return false;
             }
@@ -1256,9 +1567,15 @@ class GpuBattleView extends ApplicationAdapter {
             dragged = false;
             panning = button == Input.Buttons.RIGHT || button == Input.Buttons.MIDDLE;
             boolean shiftDown = (gestureModifiers & InputEvent.SHIFT_DOWN_MASK) != 0;
-            // Right drags pan and middle drags orbit; Shift at the press swaps them (C.4).
-            orbiting = panning && (button == Input.Buttons.MIDDLE) != shiftDown;
+            // Right drags pan and middle drags orbit; Shift at the press swaps them (C.4). Free Flight looks around
+            // with the right drag instead.
+            int orbitButton = boardCamera.firstPerson() ? Input.Buttons.RIGHT : Input.Buttons.MIDDLE;
+            orbiting = panning && (button == orbitButton) != shiftDown;
             ui.boardPress();
+            if (button == Input.Buttons.LEFT && source.isEditor()) {
+                // The board editor paints from the press on; a left drag goes on painting.
+                source.paintEditor(pick(x, y), gestureModifiers, gestureBoardGeneration);
+            }
             return true;
         }
 
@@ -1267,13 +1584,26 @@ class GpuBattleView extends ApplicationAdapter {
             if (!boardGesture) {
                 return false;
             }
+            if (source.isEditor() && gestureButton == Input.Buttons.LEFT) {
+                // The board editor's left drag paints every hex it crosses, from the press on.
+                if (!ui.hit(x, y)) {
+                    source.paintEditor(pick(x, y), modifiers(), gestureBoardGeneration);
+                }
+                return true;
+            }
             if (!dragged && Math.abs(x - startX) + Math.abs(y - startY) < DRAG_THRESHOLD * layoutScale) {
                 return true;
             }
             // Past the threshold a gesture is a drag: a left one does nothing more and cancels its click (C.4).
             dragged = true;
             if (orbiting) {
-                boardCamera.orbit((x - dragX) * ORBIT_DEGREES / layoutScale, (y - dragY) * ORBIT_DEGREES / layoutScale);
+                if (boardCamera.firstPerson()) {
+                    boardCamera.look((x - dragX) * ORBIT_DEGREES / layoutScale,
+                          (dragY - y) * ORBIT_DEGREES / layoutScale);
+                } else {
+                    boardCamera.orbit((x - dragX) * ORBIT_DEGREES / layoutScale,
+                          (y - dragY) * ORBIT_DEGREES / layoutScale);
+                }
             } else if (panning) {
                 boardCamera.pan(x - dragX, y - dragY);
             }
@@ -1287,12 +1617,24 @@ class GpuBattleView extends ApplicationAdapter {
             if (!boardGesture || button != gestureButton) {
                 return false;
             }
-            // A short left or right click on the board of the press goes to the HUD: the tool click or the menu.
+            if (source.isEditor()) {
+                if (button == Input.Buttons.LEFT) {
+                    source.endEditorStroke();
+                }
+                reset();
+                return true;
+            }
+            // A short left or right click on the board of the press goes to the HUD: the tool click or the menu. A
+            // map preview's right click inspects the hex, whose terrain its hint line then shows.
             if (!dragged && button != Input.Buttons.MIDDLE && !ui.hit(x, y)
                   && gestureBoardGeneration == boardGeneration) {
                 Pick picked = pickSelection(x, y);
-                // The shared phase tool handles a press; releasing Shift first must not turn it into placement.
-                ui.boardClick(picked.coords(), picked.entityId(), button, gestureModifiers, x, y);
+                if (ui instanceof GpuHud hud) {
+                    // The shared phase tool handles a press; releasing Shift first must not turn it into placement.
+                    hud.boardClick(picked.coords(), picked.entityId(), button, gestureModifiers, x, y);
+                } else if (button == Input.Buttons.RIGHT) {
+                    source.inspect(picked.coords());
+                }
             }
             reset();
             return true;
@@ -1303,14 +1645,21 @@ class GpuBattleView extends ApplicationAdapter {
             orbiting = false;
             dragged = false;
             boardGesture = false;
+            clearElevationScroll();
+        }
+
+        private void clearElevationScroll() {
+            elevationScrollHex = null;
+            elevationScroll = 0;
         }
 
         @Override
         public boolean mouseMoved(int x, int y) {
             boolean overHud = ui.hit(x, y);
-            Pick picked = overHud ? new Pick(null, Entity.NONE) : pickSelection(x, y);
+            Pick picked = overHud ? new Pick(null, Entity.NONE, Float.NaN) : pickSelection(x, y);
             hovered = picked.coords();
             hoveredUnit = picked.entityId();
+            hoverZ = picked.surfaceZ();
             source.setHover(hoverHeld ? null : hovered);
             // Desktop pointers: a hand over units, a move cursor over the minimap, which drags the camera (Q5).
             cursor(overHud ? ui.dragsCamera(x, y) ? SystemCursor.AllResize : SystemCursor.Arrow
@@ -1318,9 +1667,36 @@ class GpuBattleView extends ApplicationAdapter {
             return false;
         }
 
+        private void finishElevationScroll() {
+            if (elevationScrollHex != null) {
+                source.endEditorStroke();
+                clearElevationScroll();
+            }
+        }
+
         @Override
         public boolean scrolled(float amountX, float amountY) {
+            if (reloadingAssets || assetReloadFailed) { return true; }
             if (!ui.hit(Gdx.input.getX(), Gdx.input.getY())) {
+                if (source.isEditor() && editorModifiers() == InputEvent.CTRL_DOWN_MASK) {
+                    if (!boardGesture && !ui.isTextEditing()) {
+                        Coords coords = pick(Gdx.input.getX(), Gdx.input.getY());
+                        if (coords != null) {
+                            if (!coords.equals(elevationScrollHex)) {
+                                elevationScroll = 0;
+                                elevationScrollHex = coords;
+                            }
+                            elevationScroll -= amountY;
+                            int levels = (int) elevationScroll;
+                            elevationScroll -= levels;
+                            if (levels != 0) {
+                                source.adjustEditorElevation(coords, levels, boardGeneration);
+                            }
+                        }
+                    }
+                    return true;
+                }
+                finishElevationScroll();
                 boardCamera.zoomAt((float) Math.pow(1.12, amountY), Gdx.input.getX(),
                       Gdx.graphics.getHeight() - Gdx.input.getY());
                 return true;
@@ -1339,8 +1715,19 @@ class GpuBattleView extends ApplicationAdapter {
             if (ui.keyDown(key, awt, modifiers)) {
                 return true;
             }
+            if (reloadingAssets || assetReloadFailed) { return true; }
             // The binds the client captured on the Swing thread; the bind fields are Swing's (rebuild plan D).
-            Set<KeyCommandBind> binds = GpuHud.binds(source.uiPreferences.binds(), awt, modifiers);
+            List<GpuBoardSource.Bind> captured = source.uiPreferences().binds();
+            Set<KeyCommandBind> binds = GpuHud.binds(captured, awt, modifiers);
+            if (boardCamera.firstPerson() && modifiers == InputEvent.SHIFT_DOWN_MASK) {
+                // Shift accelerates flight, including when held before pressing a movement key.
+                for (KeyCommandBind command : GpuHud.binds(captured, awt, 0)) {
+                    if (heldCameraCommand(command)) {
+                        cameraKeys.put(key, command);
+                        return true;
+                    }
+                }
+            }
             for (KeyCommandBind command : binds) {
                 if (cameraCommand(key, command)) {
                     return true;
@@ -1394,6 +1781,9 @@ class GpuBattleView extends ApplicationAdapter {
 
         @Override
         public boolean keyUp(int key) {
+            if (key == Input.Keys.CONTROL_LEFT || key == Input.Keys.CONTROL_RIGHT) {
+                finishElevationScroll();
+            }
             // Every release reaches the HUD; one whose press it consumed ends there.
             if (ui.keyUp(key, awtKey(key))) {
                 return true;
@@ -1412,6 +1802,14 @@ class GpuBattleView extends ApplicationAdapter {
         public boolean keyTyped(char character) {
             return ui.keyTyped(character);
         }
+    }
+
+    private static boolean heldCameraCommand(KeyCommandBind command) {
+        return switch (command) {
+            case SCROLL_NORTH, SCROLL_SOUTH, SCROLL_EAST, SCROLL_WEST,
+                 CAMERA_ROTATE_LEFT, CAMERA_ROTATE_RIGHT, CAMERA_TILT_UP, CAMERA_TILT_DOWN -> true;
+            default -> false;
+        };
     }
 
     /** Shows a system pointer on desktop platforms; mobile platforms have none to change (user correction 4). */
@@ -1530,6 +1928,18 @@ class GpuBattleView extends ApplicationAdapter {
         }
     }
 
+    /** The EDT finishes the undo entry before a palette action; reset its fractional wheel input on the GL thread. */
+    void editorToolsInput(int modifiers, boolean finishStroke) {
+        editorToolsModifiers = modifiers;
+        if (finishStroke) {
+            boardInput.clearElevationScroll();
+        }
+    }
+
+    private int editorModifiers() {
+        return modifiers() | editorToolsModifiers;
+    }
+
     static int modifiers() {
         int result = 0;
         if (Gdx.input.isKeyPressed(Input.Keys.SHIFT_LEFT) || Gdx.input.isKeyPressed(Input.Keys.SHIFT_RIGHT)) {
@@ -1557,26 +1967,20 @@ class GpuBattleView extends ApplicationAdapter {
 
     @Override
     public void dispose() {
+        try { shaderEdits.run(this::disposeView); }
+        finally { shaderEdits.close(); }
+    }
+
+    private void disposeView() {
+        disposed = true;
         if (loadingStage != null) {
             loadingStage.dispose();
-            loadingTheme.dispose();
+            if (loadingTheme != null) { loadingTheme.dispose(); }
         }
         playback.clear();
         groundSurfaces.clear();
-        animators.clear();
-        unitInstances.clear();
-        unitBounds.begin();
-        unitAnchors.clear();
-        unitTints.clear();
-        unitDamage.clear();
-        equipmentAppearance.clear();
-        upperBodyTurns.clear();
-        armFlips.clear();
-        unitFootprints.clear();
-        hover.clear();
-        unitPicking.clear();
-        hexTextByHeight.clear();
-        textTiles = null;
+        clearUnitInstances();
+        disposeSceneRenderers();
         if (ui != null) {
             ui.dispose();
         }
@@ -1593,38 +1997,15 @@ class GpuBattleView extends ApplicationAdapter {
         }
         camouflage.dispose();
         damageDisplay.dispose();
-        jumpJets.dispose();
         unitIcons.dispose();
-        attackEffects.dispose();
-        if (unitBatch != null) {
-            unitBatch.dispose();
-        }
         if (annotationBatch != null) {
             annotationBatch.dispose();
         }
         if (unitTextures != null) {
             unitTextures.dispose();
         }
-        if (terrain != null) {
-            terrain.dispose();
-        }
-        if (fireControl != null) {
-            fireControl.dispose();
-        }
-        if (tactical != null) {
-            tactical.dispose();
-        }
-        if (atmosphere != null) {
-            atmosphere.dispose();
-        }
-        if (unitVisibility != null) {
-            unitVisibility.dispose();
-        }
         if (markers != null) {
             markers.dispose();
-        }
-        if (lines != null) {
-            lines.dispose();
         }
         fieldOfView.dispose();
         if (overlay != null) {
@@ -1633,6 +2014,22 @@ class GpuBattleView extends ApplicationAdapter {
         if (source != null) {
             source.close();
         }
+    }
+
+    /** Instances borrow model buffers and textures, so drop them before either cache is disposed. */
+    private void clearUnitInstances() {
+        animators.clear();
+        unitInstances.clear();
+        unitBounds.begin();
+        unitAnchors.clear();
+        unitTints.clear();
+        unitDamage.clear();
+        equipmentAppearance.clear();
+        upperBodyTurns.clear();
+        armFlips.clear();
+        unitFootprints.clear();
+        hover.clear();
+        unitPicking.clear();
     }
     void cameraCommand(KeyCommandBind command) { boardInput.cameraCommand(-1, command); }
 

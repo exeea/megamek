@@ -1,0 +1,84 @@
+# Terrain material contacts
+
+[Docs index](README.md) · [Terrain geometry and materials](gpu-terrain-materials.md)
+
+A contact has two layers: geometry supplies a coherent surface and its role, then the
+material field decides which neighboring covers contribute at each world position.
+A color blend cannot fix contradictory rim/foot heights or mismatched support triangles.
+
+## What does what
+
+| Code | Responsibility |
+| --- | --- |
+| `BoardSurfaceBlend` | Query world-space family coverage using the owning footprint, neighboring terrain and sample height. |
+| `BoardLiquid` | Identify volcanic crust/lava-bank appearances without inventing game terrain types. |
+| `BoardRelief / BoardConcrete` | Supply actual boundaries, corner shifts and rim/foot inputs shared by both sides. |
+| `GpuSurfaceBlend` | Subdivide shading carriers, pack up to four family contributions and select material palettes. |
+| `GpuAssets` | Own the shared material texture arrays and neutral fallback layers. |
+| `terrain-materials.glsl` | Combine cover/soil/rock/deposit roles and their color, normal, height, roughness, occlusion and emission. |
+
+## Where cover may spread
+
+Grass, dirt, sand, rock, snow, magma crust and cooled lava banks share a deterministic
+world-space field. The footprint containing a sample owns the neighbor query, even
+when another hex's mesh emitted that sample. This is what makes both sides of a seam
+evaluate the same cover.
+
+The horizontal field starts with `WIDTH_METRES` (4.5 m) and varies in world space.
+Height limits keep the receiving soil/snow near the actual cliff foot: its influence
+reaches only 0.9 m up the face. A tall cliff can contribute its own material to the
+ground below. At stacked junctions the GPU palette can retain four families.
+
+Concrete walls remain complete cast slabs for differences of up to two levels.
+From three levels, their rock foundation can enter the natural contact field while
+the slab panels retain their constructed material. Fitted boundaries use the same
+corner shifts as `BoardConcrete`; concrete contribution to neighboring ground is
+loose aggregate.
+
+Authored special ground, buildings and frozen surfaces retain protected handling.
+Roads use their own overlays and joins. Changing a family's eligibility belongs in
+the CPU query as well as its shader representation.
+
+## Contacts inside one family
+
+The ground, soil mantle, exposed face and deposit are separate shading roles even
+when both neighboring hexes have the same family.
+
+| Family | Roles that must meet coherently |
+| --- | --- |
+| Grass | Turf, mineral soil, granite and scree |
+| Dirt | Bare dirt, mineral soil, exposed rock and gravel |
+| Sand | Sand, sandstone and broken sandstone |
+| Rock | Weathered top, exposed granite and scree |
+| Snow | Snow cover, exposed rock and scree |
+| Concrete | Pavement/cast slab, supporting granite and deposits |
+| Volcanic | Crust/cooled banks and rock, with heat blended by the same coverage |
+
+Role weights vary with slope, rim/foot distance, deposition and material height.
+Color, normal, roughness and occlusion must follow those same weights. Use the shared
+projection helpers so a top becoming a cliff does not reset texture phase or stretch
+the material down the face. Avoid adding a separate transition image for every pair.
+
+## Water and volcanic boundaries
+
+Water banks query eligible adjoining land rather than spreading one water hex's family
+over its entire shore. Recessed banks and exposed bars participate; opposite shores
+must not paint each other. Beneath water, coverage becomes sediment/stone and living
+ground cover fades out. Clip dry/submerged portions before refining their materials so
+absorption and caustics apply only where water actually covers the surface.
+
+Molten banks do not receive water absorption or caustics. Volcanic interiors and boundary
+palettes call the same solid-material helper. Heat is added after reflected lighting
+and fades with volcanic coverage; moving lava remains in its own liquid surface path.
+
+## Changes that must stay coupled
+
+`GpuSurfaceBlend` refines attributes by interpolating existing faces. Preserve their
+planes, area and support height; coincident top/cliff vertices may deliberately carry
+different roles and UV meanings. Camera detail can change sampling density, but the
+coverage field and projection stay world-anchored.
+
+Neighbor-aware scene keys invalidate material coverage and related grass placement
+after edits. Uniform interiors keep the ordinary material path; only affected boundaries
+need the extra palette attributes. Texture arrays remain owned and disposed by
+`GpuAssets`.

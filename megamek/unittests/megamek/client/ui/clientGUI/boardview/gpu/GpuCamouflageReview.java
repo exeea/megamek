@@ -146,7 +146,7 @@ final class GpuCamouflageReview {
             var view = new GpuBattleView(fixture.source);
             try {
                 view.create();
-                view.render();
+                renderReady(view);
                 var instances = (Map<?, ?>) field(view, "unitInstances");
                 var before = (ModelInstance) instances.get("1:-1");
                 assertNotNull(before);
@@ -166,7 +166,7 @@ final class GpuCamouflageReview {
                 });
                 for (boolean top : new boolean[] { false, true }) {
                     view.boardCamera.setIsometric(!top);
-                    view.render();
+                    renderReady(view);
                     var after = (ModelInstance) instances.get("1:-1");
                     assertSame(before.model, after.model, "A board appearance update must retain its assembled geometry");
                     assertSame(turn, turns.get("1:-1"), "Changing paint must preserve torso animation playback");
@@ -183,12 +183,25 @@ final class GpuCamouflageReview {
                     fixture.entity.setPosition(null);
                     fixture.source.refresh();
                 });
-                view.render();
+                renderReady(view);
                 assertEquals(0, paints.textureCount());
             } finally {
                 view.dispose();
             }
         }
+    }
+
+    /** A displayed board now arrives asynchronously; appearance assertions need its completed terrain upload. */
+    static void renderReady(GpuBattleView view) throws Exception {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
+        do {
+            view.render();
+            var terrain = (GpuTerrain) field(view, "terrain");
+            var scene = (BoardScene) field(view, "scene");
+            if (scene != null && terrain.ready(scene) && !terrain.busy()) { return; }
+            Thread.sleep(1);
+        } while (System.nanoTime() < deadline);
+        throw new AssertionError("Board did not finish preparing for unit appearance review");
     }
 
     static Object field(Object object, String name) throws Exception {

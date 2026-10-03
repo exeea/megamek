@@ -1,0 +1,271 @@
+/* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
+package megamek.client.ui.clientGUI.boardview.gpu;
+
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
+
+import com.badlogic.gdx.ApplicationAdapter;
+import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
+import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.g3d.ModelBatch;
+import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
+import com.badlogic.gdx.graphics.g3d.utils.BaseShaderProvider;
+import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.utils.ScreenUtils;
+import megamek.common.board.Coords;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+
+/** Actual material pixels, shared-clock motion, normal maps, darkness, live edits and both camera projections. */
+@Tag("on-demand")
+class GpuMagmaSmokeTest {
+    private static final Coords CRUST = new Coords(2, 2), LAVA = new Coords(6, 2);
+
+    @Test
+    void volcanicMaterialsKeepTheirHeatAtNightAndMoveOnlyLiquid() {
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        var configuration = GpuBoardWindow.configuration(false);
+        configuration.setWindowedMode(1280, 900);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                var terrain = new GpuTerrain();
+                var frame = new GpuReviewFrame(settings(13));
+                try {
+                    File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
+                    assertTrue(output.isDirectory() || output.mkdirs());
+                    BoardScene scene = scene(false);
+                    terrain.update(scene);
+                    terrain.animate(0, List.of());
+                    var fftField = GpuTerrain.class.getDeclaredField("lavaOcean");
+                    fftField.setAccessible(true);
+                    GpuOcean lavaWaves = (GpuOcean) fftField.get(terrain);
+                    assertNotNull(lavaWaves.texture(), "Lava must run the actual inverse FFT, not silently fall back");
+                    var camera = new BoardCamera();
+                    camera.resize(1280, 900);
+                    camera.fit(scene);
+                    camera.camera.zoom *= .7f;
+                    camera.update();
+                    terrain.setAtmosphere(frame.lighting());
+                    int[] dayCrust = sample(terrain, camera, scene, CRUST);
+                    int[] dayLava = sample(terrain, camera, scene, LAVA);
+                    terrain.animate(3, List.of());
+                    assertArrayEquals(dayCrust, sample(terrain, camera, scene, CRUST), "Solid crust must not drift");
+                    int[] moved = sample(terrain, camera, scene, LAVA);
+                    assertTrue(difference(dayLava, moved) > 1.5,
+                          "Closed lava pools must visibly convect: mean channel change " + difference(dayLava, moved));
+                    assertArrayEquals(moved, sample(terrain, camera, scene, LAVA), "Drawing does not advance time");
+                    terrain.animate(0, List.of());
+                    assertArrayEquals(moved, sample(terrain, camera, scene, LAVA), "A second view cannot advance the FFT");
+                    terrain.setNormalMaps(false);
+                    int[] flat = sample(terrain, camera, scene, CRUST);
+                    terrain.setNormalMaps(true);
+                    assertTrue(difference(dayCrust, flat) > .4, "Normal/height maps must affect the rendered relief");
+                    terrain.setAtmosphere(new BoardAtmosphere.Lighting(new Vector3(0, 0, -1), Color.BLACK, Color.BLACK,
+                          Color.BLACK, Color.BLACK, Color.BLACK, Color.WHITE, 1, 0, false));
+                    int[] darkCrust = sample(terrain, camera, scene, CRUST);
+                    int[] darkLava = sample(terrain, camera, scene, LAVA);
+                    int[] crustCoverage = readCrust(camera, scene);
+                    GpuReviewFrame.save(new File(output, "magma-unlit.png"));
+                    assertTrue(hot(crustCoverage) > .015,
+                          "Crust fissures emit without any ambient or direct light: hot fraction " + hot(crustCoverage));
+                    double coldCrust = Arrays.stream(crustCoverage)
+                          .filter(p -> (p >>> 24) < 40 && (p >>> 16 & 255) < 40 && (p >>> 8 & 255) < 40)
+                          .count() / (double) crustCoverage.length;
+                    assertTrue(coldCrust > .5,
+                          "Most solid plate faces must stay cold, not glow like lava: cold fraction " + coldCrust);
+                    assertTrue(hot(darkLava) > hot(crustCoverage) + .05, "Lava exposes more heat than intact crust");
+                    assertTrue(difference(dayCrust, darkCrust) > 1, "Cold basalt still responds to day/night lighting");
+                    terrain.renderTransparent(camera.camera);
+                    assertArrayEquals(darkLava, read(camera, scene, LAVA), "Lava writes the opaque depth pass");
+                    checkGravity(terrain, camera, scene, lavaWaves);
+                    int[] restoredCrust = sample(terrain, camera, scene, CRUST);
+                    GpuReviewFrame.save(new File(output, "magma-unlit-after-gravity.png"));
+                    assertArrayEquals(darkCrust, restoredCrust, "Restoring gravity must preserve solid crust emission");
+                    assertArrayEquals(crustCoverage, readCrust(camera, scene), "All sampled crust retains its emitted heat");
+                    // A short interval has no pop. The random phase means this is not necessarily a cycle wrap.
+                    terrain.animate(4.999f, List.of());
+                    int[] beforeWrap = sample(terrain, camera, scene, LAVA);
+                    terrain.animate(.002f, List.of());
+                    assertTrue(difference(beforeWrap, sample(terrain, camera, scene, LAVA)) < .5,
+                          "The molten surface must remain continuous over a short interval");
+                    for (boolean perspective : new boolean[] { false, true }) {
+                        camera.setPerspective(perspective);
+                        camera.setIsometric(true);
+                        camera.fit(scene);
+                        for (int hour : new int[] { 13, 0 }) {
+                            frame.configure(settings(hour));
+                            frame.render(terrain, camera, scene);
+                            GpuReviewFrame.save(new File(output, "magma-" + (hour == 0 ? "night" : "day")
+                                  + (perspective ? "-perspective" : "-isometric") + ".png"));
+                        }
+                    }
+                    camera.setPerspective(false);
+                    camera.setIsometric(false);
+                    camera.fit(scene);
+                    frame.configure(settings(13));
+                    frame.render(terrain, camera, scene);
+                    GpuReviewFrame.save(new File(output, "magma-top.png"));
+                    for (Coords focus : List.of(CRUST, LAVA)) {
+                        camera.setIsometric(true);
+                        camera.camera.zoom = .12f;
+                        camera.center(BoardGeometry.center(focus, scene.tile(focus).elevation()));
+                        for (int hour : new int[] { 13, 0 }) {
+                            frame.configure(settings(hour));
+                            frame.render(terrain, camera, scene);
+                            GpuReviewFrame.save(new File(output, "magma-detail-" + (focus.equals(CRUST) ? "crust" : "lava")
+                                  + (hour == 0 ? "-night" : "-day") + ".png"));
+                        }
+                    }
+                    camera.setIsometric(false);
+                    camera.fit(scene);
+                    frame.configure(settings(13));
+                    frame.render(terrain, camera, scene);
+                    int[] beforeCooling = sample(terrain, camera, scene, LAVA);
+                    BoardScene edited = scene(true);
+                    terrain.update(edited);
+                    assertTrue(difference(sample(terrain, camera, edited, LAVA), beforeCooling) > 3,
+                          "Live cooling replaces the molten material at the same camera and clock");
+                    terrain.animate(2, List.of());
+                    int[] cooled = sample(terrain, camera, edited, LAVA);
+                    terrain.animate(2, List.of());
+                    assertArrayEquals(cooled, sample(terrain, camera, edited, LAVA), "Live cooling removes lava motion");
+                    assertNull(lavaWaves.texture(), "Cooling the last pool releases the FFT targets");
+                    terrain.update(scene);
+                    terrain.animate(0, List.of());
+                    assertNotNull(lavaWaves.texture(), "Reheating recreates the simulation at the shared clock");
+                    assertTrue(difference(cooled, sample(terrain, camera, scene, LAVA)) > 3);
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) {
+                    failure.set(error);
+                } finally {
+                    frame.dispose();
+                    terrain.dispose();
+                    Gdx.app.exit();
+                }
+            }
+        }, configuration);
+        if (failure.get() != null) { throw new AssertionError("Volcanic terrain", failure.get()); }
+    }
+
+    private static BoardAtmosphere.Settings settings(float hour) {
+        return new BoardAtmosphere.Settings(hour, 0, 0, BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0);
+    }
+
+    private static void checkGravity(GpuTerrain terrain, BoardCamera camera, BoardScene scene, GpuOcean waves)
+          throws ReflectiveOperationException {
+        float start = flowTime(terrain);
+        terrain.setGravity(.25f);
+        terrain.animate(2, List.of());
+        sample(terrain, camera, scene, LAVA);
+        assertEquals(start + 1, flowTime(terrain), 1e-5,
+              "At quarter gravity the rendered lava must advect at half its 1 g speed");
+        terrain.setGravity(4);
+        terrain.animate(0, List.of());
+        sample(terrain, camera, scene, LAVA);
+        assertEquals(start + 1, flowTime(terrain), 1e-5, "Changing gravity must not restart the advection phase");
+        terrain.animate(.5f, List.of());
+        sample(terrain, camera, scene, LAVA);
+        assertEquals(start + 2, flowTime(terrain), 1e-5,
+              "At fourfold gravity the rendered lava must advect at twice its 1 g speed");
+        terrain.setGravity(0);
+        terrain.animate(0, List.of());
+        int[] frozen = sample(terrain, camera, scene, LAVA);
+        terrain.animate(1, List.of());
+        assertArrayEquals(frozen, sample(terrain, camera, scene, LAVA), "Zero gravity stops both lava motion paths");
+        assertNull(waves.texture(), "Zero gravity releases the lava simulation");
+        assertEquals(start + 2, flowTime(terrain), 1e-5, "A paused molten surface retains its phase");
+        terrain.update(scene);
+        terrain.animate(0, List.of());
+        assertNull(waves.texture(), "The zero-gravity terrain presentation removes lava along with water");
+        assertTrue(scene.tile(LAVA).liquid().molten(), "The scenario's source tiles are unchanged");
+        terrain.setGravity(1);
+        terrain.update(scene);
+        terrain.animate(0, List.of());
+        assertNotNull(waves.texture(), "Restoring gravity returns the molten surface");
+        sample(terrain, camera, scene, LAVA);
+        assertEquals(start + 2, flowTime(terrain), 1e-5, "Restoring the board does not advance advection");
+    }
+
+    /** Read the actual liquid shader input, catching missing or raw-clock uniform bindings as well as timing bugs. */
+    private static float flowTime(GpuTerrain terrain) throws ReflectiveOperationException {
+        var field = GpuTerrain.class.getDeclaredField("batch");
+        field.setAccessible(true);
+        var provider = ((ModelBatch) field.get(terrain)).getShaderProvider();
+        if (provider instanceof GpuShaderProvider editable) { provider = editable.active(); }
+        var shaders = BaseShaderProvider.class.getDeclaredField("shaders");
+        shaders.setAccessible(true);
+        for (Object shader : (Iterable<?>) shaders.get(provider)) {
+            var program = ((BaseShader) shader).program;
+            int uniform = program.getUniformLocation("u_magmaTime");
+            if (uniform >= 0) { return org.lwjgl.opengl.GL20.glGetUniformf(program.getHandle(), uniform); }
+        }
+        throw new AssertionError("No live lava advection program");
+    }
+
+    private static BoardScene scene(boolean cooled) {
+        var pixels = new BoardScene.Pixels(new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB));
+        List<BoardScene.Tile> tiles = new ArrayList<>();
+        for (int x = 0; x < 9; x++) {
+            for (int y = 0; y < 6; y++) {
+                boolean inside = y > 0 && y < 5 && x > 0 && x < 8 && x != 4;
+                BoardLiquid liquid = inside ? new BoardLiquid(x < 4 || cooled ? BoardLiquid.Kind.MAGMA_CRUST
+                      : BoardLiquid.Kind.MAGMA, "", 0) : BoardLiquid.NONE;
+                // A gentle grade at the back and a three-level spill in front exercise both forms of flow.
+                tiles.add(new BoardScene.Tile(new Coords(x, y), y < 2 ? 3 : y < 4 ? 2 : -1, -1, false, 0, BoardScene.Surface.ROCK,
+                      pixels, null, null, null, null, List.of(), List.of(), liquid, null, true));
+            }
+        }
+        return new BoardScene(0, 9, 6, tiles, List.of(), List.of(), -1, "", List.of());
+    }
+
+    private static int[] sample(GpuTerrain terrain, BoardCamera camera, BoardScene scene, Coords tile) {
+        ScreenUtils.clear(.02f, .025f, .035f, 1, true);
+        terrain.render(camera.camera, false);
+        return read(camera, scene, tile);
+    }
+
+    private static int[] read(BoardCamera camera, BoardScene scene, Coords tile) {
+        Vector3 screen = camera.camera.project(BoardGeometry.center(tile, 0).add(0, 0, BoardGeometry.surfaceZ(scene.tile(tile))));
+        Pixmap image = ScreenUtils.getFrameBufferPixmap(Math.round(screen.x) - 24, Math.round(screen.y) - 24, 48, 48);
+        try {
+            int[] result = new int[48 * 48];
+            for (int y = 0; y < 48; y++) {
+                for (int x = 0; x < 48; x++) { result[y * 48 + x] = image.getPixel(x, y); }
+            }
+            return result;
+        } finally { image.dispose(); }
+    }
+
+    private static double hot(int[] pixels) {
+        return Arrays.stream(pixels).filter(p -> (p >>> 24) > 90 && (p >>> 24) > (p >>> 16 & 255) * 1.3
+              && (p >>> 16 & 255) > (p >>> 8 & 255) * 1.5).count() / (double) pixels.length;
+    }
+
+    /** Sample the three crust tile interiors: one tiny crop can land almost wholly inside a cold plate. */
+    private static int[] readCrust(BoardCamera camera, BoardScene scene) {
+        return List.of(new Coords(1, 2), CRUST, new Coords(3, 2)).stream()
+              .flatMapToInt(coords -> Arrays.stream(read(camera, scene, coords))).toArray();
+    }
+
+    private static double difference(int[] a, int[] b) {
+        double sum = 0;
+        for (int i = 0; i < a.length; i++) {
+            for (int shift : new int[] { 24, 16, 8 }) { sum += Math.abs((a[i] >>> shift & 255) - (b[i] >>> shift & 255)); }
+        }
+        return sum / (a.length * 3);
+    }
+}

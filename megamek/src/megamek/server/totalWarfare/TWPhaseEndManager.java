@@ -76,6 +76,9 @@ record TWPhaseEndManager(TWGameManager gameManager) {
                 // code for the one path that needs it. The phase END does run; it is what moves the
                 // game on. Markers themselves arrive with the scenario file; what this pass adds is the
                 // scenario's starting victory points and the warning that nothing can end the game.
+                // scenario units placed with at: skip deployment, which is where a building is written into
+                // its hexes; without this the building fights as a unit on what the map shows as open ground
+                new ScenarioBuildingPlacementHandler(gameManager).placePreDeployedBuildings();
                 gameManager.placeLobbyObjectives();
                 // deliberately not cleared afterwards: nothing reports again until the first initiative
                 // report, so these lines have to survive in the phase report until then. Clearing here
@@ -140,6 +143,8 @@ record TWPhaseEndManager(TWGameManager gameManager) {
                 break;
             case MOVEMENT:
                 gameManager.detectHiddenUnits();
+                // Recon Cameras flown in Reveal mode (TO:AUE p.150)
+                new ReconCameraHandler(gameManager).revealHiddenUnits();
                 ServerHelper.detectMinefields(gameManager.getGame(), gameManager.getMainPhaseReport(), gameManager);
                 gameManager.updateSpacecraftDetection();
                 gameManager.detectSpacecraft();
@@ -198,6 +203,7 @@ record TWPhaseEndManager(TWGameManager gameManager) {
                 gameManager.resolveScheduledOrbitalBombardments();
                 gameManager.applyBuildingDamage();
                 gameManager.checkForPSRFromDamage();
+                gameManager.resolveUnJams();
                 gameManager.cleanupDestroyedNarcPods();
                 gameManager.addReport(gameManager.resolvePilotingRolls());
                 gameManager.addReport(gameManager.resolveCrewConsciousness());
@@ -336,6 +342,9 @@ record TWPhaseEndManager(TWGameManager gameManager) {
                 // Sync remaining ECM fields to clients
                 gameManager.sendSyncTemporaryECMFields();
 
+                // Scans first: a reading carried home this round is in the tally before control is
+                // resolved and before the victory check reads it
+                gameManager.resolveScans();
                 // Resolve objective control and score victory points before the victory check so the
                 // check sees this round's tally
                 gameManager.resolveObjectives();

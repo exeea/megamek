@@ -85,14 +85,28 @@ final class GpuFamilyMotionReview {
         GpuModularUnitModelsSmokeTest.renderReview(batch, gallery, "runtime-family-ramp-contact", 350, 12);
     }
 
+    /** One mesh holds at most 65,535 vertices and every triangle here adds three, so the ramp is split into parts. */
+    private static final int TRIANGLES_PER_PART = 20_000;
+
     static ModelInstance terrain(BoardScene scene) {
         var builder = new com.badlogic.gdx.graphics.g3d.utils.ModelBuilder();
         builder.begin();
-        var part = builder.part("ramp", com.badlogic.gdx.graphics.GL20.GL_TRIANGLES,
-              com.badlogic.gdx.graphics.VertexAttributes.Usage.Position | com.badlogic.gdx.graphics.VertexAttributes.Usage.Normal,
-              new com.badlogic.gdx.graphics.g3d.Material(com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute.createDiffuse(.32f, .4f, .3f, 1)));
+        long attributes = com.badlogic.gdx.graphics.VertexAttributes.Usage.Position
+              | com.badlogic.gdx.graphics.VertexAttributes.Usage.Normal;
+        var material = new com.badlogic.gdx.graphics.g3d.Material(
+              com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute.createDiffuse(.32f, .4f, .3f, 1));
+        com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder part = null;
+        int parts = 0;
+        int triangles = 0;
         for (var tile : scene.tiles()) {
             for (var face : new BoardSurface(scene, tile).faces) {
+                // A full part starts another, which libGDX gives its own mesh once the current one is half used.
+                if ((part == null) || (triangles == TRIANGLES_PER_PART)) {
+                    part = builder.part("ramp-" + parts++, com.badlogic.gdx.graphics.GL20.GL_TRIANGLES, attributes,
+                          material);
+                    triangles = 0;
+                }
+                triangles++;
                 var normal = face.b().cpy().sub(face.a()).crs(face.c().cpy().sub(face.a())).nor();
                 part.triangle(new com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder.VertexInfo().setPos(face.a()).setNor(normal),
                       new com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder.VertexInfo().setPos(face.b()).setNor(normal),

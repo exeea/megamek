@@ -163,8 +163,8 @@ class GpuPodEjectionDialogsTest {
             List<Entity> units = List.of(atlas, archer);
             AutomaticEjectionDialog dialog = onSwing(() -> new AutomaticEjectionDialog(declaring.frame, declaring.gui,
                   units, "vacuum"));
-            assertEquals(List.of("Atlas AS7-D", "[x] Eject automatically", "Archer ARC-2R", "[ ] Eject automatically",
-                  "[ ] Stop asking me this"), onSwing(() -> texts(dialog)).subList(3, 8));
+            assertEquals(List.of("Atlas AS7-D", "No kit", "[x] Eject automatically", "Archer ARC-2R", "No kit",
+                  "[ ] Eject automatically", "[ ] Stop asking me this"), onSwing(() -> texts(dialog)).subList(4, 11));
             onSwing(() -> {
                 List<JCheckBox> boxes = components(dialog.getContentPane(), JCheckBox.class);
                 boxes.get(0).setSelected(false);
@@ -296,10 +296,12 @@ class GpuPodEjectionDialogsTest {
             }, ticked(0, 1));
             DialogRequest request = asked.request();
             assertEquals(DialogKind.MULTI, request.kind());
-            assertEquals("Ejection will kill your crews", request.title());
+            assertEquals("Ejection will kill unprotected crews", request.title());
             assertTrue(request.message().startsWith("Anyone who ejects into vacuum out there will die"),
                   request.message());
             assertEquals(List.of("Atlas AS7-D", "Archer ARC-2R"), labels(request));
+            assertEquals(List.of("No kit", "No kit"), request.rows().stream().map(DialogRow::detail).toList(),
+                  "Each row names what its crew is wearing, as the Swing crew column does");
             assertEquals(List.of(0), request.initiallySelected(), "Ticked as each unit is set to eject");
             assertEquals("Stop asking me this", request.checkbox());
             assertEquals(List.of("Deploy", "Cancel"), request.buttons());

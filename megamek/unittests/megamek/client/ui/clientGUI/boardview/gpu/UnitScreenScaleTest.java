@@ -63,8 +63,7 @@ class UnitScreenScaleTest {
         var family = UnitFamilyScale.INFANTRY;
         float size = family.UNIT_SCALE;
         float height = family.HEIGHT_SCALE;
-        var model = new GpuUnitModel(new Model(), null, true, List.of(), 1f / 54, new Vector3(100, 100, 54), List.of(),
-              family);
+        var model = new GpuUnitModel(new Model(), null, true, List.of(), new Vector3(100, 100, 54), List.of(), family);
         var camera = new OrthographicCamera();
         var coords = new Coords(2, 2);
         try {

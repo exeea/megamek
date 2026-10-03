@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2000-2004 Ben Mazur (bmazur@sev.org)
- * Copyright (C) 2008-2025 The MegaMek Team. All Rights Reserved.
+ * Copyright (C) 2008-2026 The MegaMek Team. All Rights Reserved.
  *
  * This file is part of MegaMek.
  *
@@ -44,6 +44,8 @@ import java.awt.GridLayout;
 import java.awt.Image;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
 import java.awt.event.FocusEvent;
 import java.awt.event.FocusListener;
 import java.awt.event.KeyEvent;
@@ -185,6 +187,28 @@ public class PlanetaryConditionsDialog extends ClientDialog implements FocusList
 
         pack();
         center();
+        restorePosition();
+    }
+
+    /**
+     * Reopens where the user last left the dialog, kept on a visible monitor. Without a saved place it centres on its
+     * owner as before. The place is saved as soon as the dialog is moved.
+     */
+    private void restorePosition() {
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        if (preferences.getPlanetaryConditionsPosX() != -1 || preferences.getPlanetaryConditionsPosY() != -1) {
+            setLocation(preferences.getPlanetaryConditionsPosX(), preferences.getPlanetaryConditionsPosY());
+            UIUtil.updateWindowBounds(this);
+        }
+        addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentMoved(ComponentEvent event) {
+                if (isShowing()) {
+                    preferences.setPlanetaryConditionsPosX(getX());
+                    preferences.setPlanetaryConditionsPosY(getY());
+                }
+            }
+        });
     }
 
     private JPanel headerSection() {

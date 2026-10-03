@@ -58,10 +58,14 @@ import megamek.client.ui.util.StringDrawer;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Player;
 import megamek.common.actions.LayExplosivesAttackAction;
+import megamek.common.actions.ScanAction;
 import megamek.common.annotations.Nullable;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.compute.Compute;
+import megamek.common.compute.VirtualRealityPilotingPod;
+import megamek.common.compute.VirtualRealityPilotingPod.Interference;
+import megamek.common.compute.VirtualRealityPilotingPod.InterferenceState;
 import megamek.common.equipment.HandheldWeapon;
 import megamek.common.units.AbstractBuildingEntity;
 import megamek.common.units.Aero;
@@ -74,6 +78,7 @@ import megamek.common.units.Infantry;
 import megamek.common.units.Mek;
 import megamek.common.units.ProtoMek;
 import megamek.common.units.QuadVee;
+import megamek.common.units.ReconCameraRules;
 import megamek.common.units.Tank;
 
 /**
@@ -389,7 +394,62 @@ public final class UnitAnnotations {
         }
     }
 
+    /**
+     * Whether this unit is under orders to scan something in the End Phase. The label is drawn only for the player
+     * who gave the order, because a scan order is not something the other side should be able to read off the board.
+     *
+     * @param entity the unit this sprite is drawn for
+     *
+     * @return {@code true} when the scanning label belongs on this unit
+     */
+    private boolean hasOrderedAScan(Entity entity) {
+        return (entity.getPendingScan() != null) && isOwnedByTheLocalPlayer(entity);
+    }
 
+    /**
+     * Whether one of the local player's units has been told to scan this unit in the End Phase. A scan aimed at a
+     * hex marks nothing here, which is why the scout carries its own label as well.
+     *
+     * @param entity the unit this sprite is drawn for
+     *
+     * @return {@code true} when the scanned label belongs on this unit
+     */
+    private boolean isTheTargetOfAnOrderedScan(Entity entity) {
+        for (Entity scanner : bv.getGame().getEntitiesVector()) {
+            ScanAction order = scanner.getPendingScan();
+            boolean ordersThisUnit = (order != null)
+                  && order.isUnitTarget()
+                  && (order.getTargetId() == entity.getId());
+            if (ordersThisUnit && isOwnedByTheLocalPlayer(scanner)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether this unit's Recon Camera spotted a unit this turn, told only to the camera's side.
+     *
+     * @param entity the unit this sprite is drawn for
+     *
+     * @return {@code true} when the camera spotting label belongs on this unit
+     */
+    private boolean isSpottingWithItsCamera(Entity entity) {
+        boolean hasSpotted = entity.getReconCameraSpotTargetId() != Entity.NONE;
+        return hasSpotted && ReconCameraRules.isOnCameraSide(entity, bv.getLocalPlayer());
+    }
+
+    /**
+     * Whether a Recon Camera on the local player's side spotted this unit this turn.
+     *
+     * @param entity the unit this sprite is drawn for
+     *
+     * @return {@code true} when the camera spotted label belongs on this unit
+     */
+    private boolean isSpottedByAFriendlyCamera(Entity entity) {
+        // read from the spotted unit, so the mark shows even when the camera itself is not visible to this player
+        return entity.isReconCameraSpottedFor(bv.getLocalPlayer());
+    }
 
     /**
      * @param entity the unit to check
@@ -586,7 +646,8 @@ public final class UnitAnnotations {
             stStr.add(new Status(tileColor(tile), tile.label(), SMALL));
         }
 
-        for (UnitStatusWords.StatusWord word : UnitStatusWords.statusWords(entity, isAffectedByECM())) {
+        for (UnitStatusWords.StatusWord word
+              : UnitStatusWords.statusWords(entity, isAffectedByECM(), bv.getLocalPlayer())) {
             stStr.add(new Status(color(word.severity()), word.label(), false));
         }
 

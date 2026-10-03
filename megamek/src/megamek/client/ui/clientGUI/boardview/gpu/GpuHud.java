@@ -36,7 +36,7 @@ import megamek.common.units.Entity;
  * components, key dispatch with the Esc chain and the hotkeys, and board-click routing. It presents snapshots and calls
  * the source's existing commands; the client keeps every rule.
  */
-final class GpuHud implements Disposable {
+final class GpuHud implements GpuBoardHud {
     /** The prototype's spacing between stacked panels. */
     private static final float STACK = 12;
     /** The minimap's top, and the top of panels beside the right column; it does not follow the gap. */
@@ -261,8 +261,8 @@ final class GpuHud implements Disposable {
         GpuPaperdolls paperdolls = new GpuPaperdolls();
         GpuUnitCard unitCard = new GpuUnitCard(kit, source, state, contextMenu, paperdolls);
         recordSheet = new GpuRecordSheet(kit, source, state, contextMenu, paperdolls);
-        GpuUtilityBar utilities = new GpuUtilityBar(kit, source, state, camera);
-        GpuHintLine hint = new GpuHintLine(kit, source, state);
+        GpuUtilityBar utilities = new GpuUtilityBar(kit, source, state, camera, tuningModel);
+        GpuHintLine hint = new GpuHintLine(kit, source, state, camera);
         GpuMinimap minimap = new GpuMinimap(kit, source, state, camera);
         GpuContactsPanel contacts = new GpuContactsPanel(kit, source, state, contextMenu, this::select);
         // The guides follow the contacts panel's toggles and open row; hex-anchored labels need the board camera.
@@ -365,7 +365,13 @@ final class GpuHud implements Disposable {
     }
 
     /** The window's logical size and the display scale; one stage unit is one prototype CSS pixel. */
-    void resize(int width, int height, float displayScale) {
+    @Override
+    public Stage stage() {
+        return stage;
+    }
+
+    @Override
+    public void resize(int width, int height, float displayScale) {
         scale = displayScale;
         ((ScreenViewport) stage.getViewport()).setUnitsPerPixel(1 / displayScale);
         stage.getViewport().update(width, height, true);
@@ -377,7 +383,8 @@ final class GpuHud implements Disposable {
      * One frame's snapshots. Applies the frame's state ({@link #updateState}), updates every component and lays them
      * out.
      */
-    void update(GpuBoardSource.Frame frame, HudView view, GpuBoardWindow.DialogRequest dialog,
+    @Override
+    public void update(GpuBoardSource.Frame frame, HudView view, GpuBoardWindow.DialogRequest dialog,
           GpuBoardSource.UiPreferences preferences) {
         // The panels stay where the last layout put them until this frame's layout. A cleared selection presents the
         // local turn without an acting unit (GpuHudState.presented).
@@ -446,7 +453,8 @@ final class GpuHud implements Disposable {
     }
 
     /** Draws the HUD over the board. The kit's sprite masks follow the units, reports and toasts of the snapshots. */
-    void draw() {
+    @Override
+    public void draw() {
         Set<BoardScene.Pixels> sprites = new HashSet<>();
         if (inputs != null) {
             state.presentedUnits().stream().map(GpuBattleStatus.UnitStatus::icon).forEach(sprites::add);
@@ -462,7 +470,8 @@ final class GpuHud implements Disposable {
     }
 
     /** True over a HUD widget, and everywhere while a dialog is pending (its scrim takes every press). */
-    boolean hit(int x, int y) {
+    @Override
+    public boolean hit(int x, int y) {
         if (inputs != null && inputs.dialog() != null) {
             return true;
         }
@@ -471,13 +480,15 @@ final class GpuHud implements Disposable {
     }
 
     /** True over the minimap's canvas, which a drag moves the camera on (the prototype's grab pointer). */
-    boolean dragsCamera(int x, int y) {
+    @Override
+    public boolean dragsCamera(int x, int y) {
         Vector2 point = stage.screenToStageCoordinates(new Vector2(x, y));
         Actor target = stage.hit(point.x, point.y, true);
         return target != null && "minimap-canvas".equals(target.getName());
     }
 
-    boolean isTextEditing() {
+    @Override
+    public boolean isTextEditing() {
         return stage.getKeyboardFocus() instanceof TextField;
     }
 
@@ -487,7 +498,8 @@ final class GpuHud implements Disposable {
      * key; the CANCEL bind runs the Esc chain; a focused text field takes every other key; a focused grip or menu gets
      * the key first; then the hotkeys.
      */
-    boolean keyDown(int key, int awt, int modifiers) {
+    @Override
+    public boolean keyDown(int key, int awt, int modifiers) {
         swallowTyped = false;
         boolean consumed = inputs != null && dispatch(key, binds(awt, modifiers));
         if (consumed) {
@@ -522,7 +534,8 @@ final class GpuHud implements Disposable {
      * True when the release belongs to a press the HUD consumed. Releasing the nameplate key ends the nameplates,
      * whatever other modifier is still held.
      */
-    boolean keyUp(int key, int awt) {
+    @Override
+    public boolean keyUp(int key, int awt) {
         if (inputs != null && inputs.preferences().binds().stream()
               .anyMatch(bind -> bind.command() == KeyCommandBind.SHOW_NAMEPLATES && bind.keyCode() == awt)) {
             state.altHeld = false;
@@ -532,7 +545,8 @@ final class GpuHud implements Disposable {
     }
 
     /** A typed character; true while a text field or a pending dialog takes the keyboard. */
-    boolean keyTyped(char character) {
+    @Override
+    public boolean keyTyped(char character) {
         if (swallowTyped) {
             swallowTyped = false;
             return true;
@@ -542,7 +556,8 @@ final class GpuHud implements Disposable {
     }
 
     /** The window lost the focus: no key is held any more. */
-    void focusLost() {
+    @Override
+    public void focusLost() {
         state.altHeld = false;
         consumedKeys.clear();
     }
@@ -739,7 +754,8 @@ final class GpuHud implements Disposable {
      * A press on the board, outside every panel; GpuBattleView calls it on every board pointer-down, before a drag
      * pans or orbits. As a press outside them in the prototype, it ends a keyboard focus and closes the open menu.
      */
-    void boardPress() {
+    @Override
+    public void boardPress() {
         if (inputs != null && inputs.dialog() == null) {
             stage.setKeyboardFocus(null);
             contextMenu.cancel();
@@ -857,7 +873,8 @@ final class GpuHud implements Disposable {
     }
 
     /** Window pixels left of the unobstructed board: the left column and its two gaps (rebuild plan A.1 A5). */
-    float cameraLeft() {
+    @Override
+    public float cameraLeft() {
         return (2 * metrics.gap() + leftWidth()) * scale;
     }
 
@@ -867,7 +884,8 @@ final class GpuHud implements Disposable {
     }
 
     /** Window pixels between the left and right columns and their gaps. */
-    float cameraWidth() {
+    @Override
+    public float cameraWidth() {
         return Math.max(1, (metrics.width() - 4 * metrics.gap() - leftWidth() - rightWidth()) * scale);
     }
 

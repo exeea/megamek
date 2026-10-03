@@ -10,13 +10,60 @@ import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.GdxNativesLoader;
+import megamek.common.Configuration;
 import megamek.common.board.Coords;
 import megamek.common.units.BipedMek;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class UnitFamilyScaleTest {
+    @ParameterizedTest
+    @CsvSource({ "1, 1, 18", ".9, 1, 18", "1, 1.3, 12", ".9, 1.3, 12", "1, .7, 30", ".9, .7, 30" })
+    void referenceAssaultIsTwoLevelsBeforeUniformUnitScaling(float size, float hex, int level) throws Exception {
+        GdxNativesLoader.load();
+        var original = BoardGeometry.tuning();
+        var model = model(UnitFamilyScale.MEK);
+        var reference = UnitModelDescriptor.read(Configuration.dataDir().toPath()
+              .resolve("models/units/modular/bodies/atlas.json"));
+        float authoredHeight = reference.bounds().max().get(2) - reference.bounds().min().get(2);
+        try {
+            BoardGeometry.tune(new BoardGeometry.Tuning(hex, size, 1, level, .8f));
+            Vector3 placed = place(model, mek(100));
+            assertEquals(2 * size, authoredHeight * placed.z / BoardGeometry.LEVEL, .00001f);
+            assertEquals(placed.x, placed.y, .00001f);
+            assertEquals(placed.x, placed.z, .00001f, "The authored proportions must survive world-unit conversion");
+        } finally {
+            BoardGeometry.tune(original);
+            model.dispose();
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(UnitFamilyScale.class)
+    void everyFamilyUsesTheSameUniformConversionBeforeItsReadabilityMultiplier(UnitFamilyScale family) {
+        GdxNativesLoader.load();
+        var original = BoardGeometry.tuning();
+        var reference = model(UnitFamilyScale.DEFAULT);
+        var model = model(family);
+        try {
+            BoardGeometry.tune(BoardGeometry.DEFAULTS);
+            for (boolean multiHex : new boolean[] { false, true }) {
+                var unit = unit(multiHex);
+                Vector3 baseline = place(reference, unit);
+                Vector3 scaled = place(model, unit);
+                assertEquals(baseline.x, baseline.z, .00001f, "Fitting a footprint must not flatten its model");
+                assertScale(baseline.scl(family.unitScale()), scaled);
+                assertEquals(scaled.x, scaled.z, .00001f);
+            }
+        } finally {
+            BoardGeometry.tune(original);
+            reference.dispose();
+            model.dispose();
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = { false, true })
     void familyScaleStacksWithBoardTuningWithoutMovingTheUnitOrChangingOtherFamilies(boolean multiHex) {
@@ -26,13 +73,7 @@ class UnitFamilyScaleTest {
         float originalSize = family.UNIT_SCALE, originalHeight = family.HEIGHT_SCALE;
         var model = model(family);
         var other = model(UnitFamilyScale.BATTLE_ARMOR);
-        var coords = new Coords(2, 2);
-        var footprint = new ArrayList<>(List.of(coords));
-        if (multiHex) {
-            for (int direction = 0; direction < 6; direction++) { footprint.add(coords.translated(direction)); }
-        }
-        var unit = new BoardScene.Unit(1, -1, "Scale review", new BoardScene.Waypoint(coords, 2, 0),
-              null, false, null, 1, false, null, 0, footprint);
+        var unit = unit(multiHex);
         try {
             BoardGeometry.tune(new BoardGeometry.Tuning(1.3f, .55f, 1.2f, 20, .8f, .81f));
             Vector3 baseline = place(model, unit);
@@ -60,6 +101,29 @@ class UnitFamilyScaleTest {
             BoardGeometry.tune(original);
             model.dispose();
             other.dispose();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    void levelHeightResizesUnitsEvenlySoTheyStayAsManyLevelsTall(boolean multiHex) {
+        GdxNativesLoader.load();
+        var original = BoardGeometry.tuning();
+        var model = model(UnitFamilyScale.MEK);
+        var unit = unit(multiHex);
+        try {
+            BoardGeometry.tune(new BoardGeometry.Tuning(1.3f, .55f, 1.2f, 20, .8f, .81f));
+            Vector3 baseline = place(model, unit);
+            float levels = baseline.z / BoardGeometry.LEVEL;
+            var board = BoardGeometry.tuning();
+            BoardGeometry.tune(new BoardGeometry.Tuning(board.hexScale(), board.unitScale(), board.unitHeightScale(),
+                  30, board.gridShade(), board.multiHexUnitScale()));
+            // Half as high again per level: the whole unit grows by half, not only its height.
+            assertScale(new Vector3(baseline).scl(1.5f), place(model, unit));
+            assertEquals(levels, model.instance.transform.getScaleZ() / BoardGeometry.LEVEL, .0001f);
+        } finally {
+            BoardGeometry.tune(original);
+            model.dispose();
         }
     }
 
@@ -113,6 +177,16 @@ class UnitFamilyScaleTest {
         }
     }
 
+    private static BoardScene.Unit unit(boolean multiHex) {
+        var coords = new Coords(2, 2);
+        var footprint = new ArrayList<>(List.of(coords));
+        if (multiHex) {
+            for (int direction = 0; direction < 6; direction++) { footprint.add(coords.translated(direction)); }
+        }
+        return new BoardScene.Unit(1, -1, "Scale review", new BoardScene.Waypoint(coords, 2, 0),
+              null, false, null, 1, false, null, 0, footprint);
+    }
+
     private static BoardScene.Unit mek(double weight) {
         var mek = new BipedMek();
         mek.setWeight(weight);
@@ -127,7 +201,7 @@ class UnitFamilyScaleTest {
     }
 
     private static GpuUnitModel model(UnitFamilyScale family, boolean modular) {
-        return new GpuUnitModel(new Model(), null, modular, List.of(), 1f / 54, new Vector3(100, 100, 54), List.of(), family);
+        return new GpuUnitModel(new Model(), null, modular, List.of(), new Vector3(100, 100, 54), List.of(), family);
     }
 
     private static Vector3 place(GpuUnitModel model, BoardScene.Unit unit) {

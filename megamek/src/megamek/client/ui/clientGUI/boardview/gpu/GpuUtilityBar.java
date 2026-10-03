@@ -19,10 +19,10 @@ import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
 
 /**
- * Top-right utilities (Tactical view, Map, Contacts, Log, Help, Menu), the Tactical View chip and the Tactical View's
- * north mark (C.1 G4). They show the camera, the minimap and contacts preferences, the log's presented events and the
- * HUD's open panels, and run the camera's Tactical View, the View menu's minimap item, the contacts preference and the
- * HUD's own toggles.
+ * Top-right utilities (Tactical view, Wireframe, Map, Contacts, Log, Help, Menu), the Tactical View chip and the
+ * Tactical View's north mark (C.1 G4). They show the camera, the wireframe view, the minimap and contacts preferences,
+ * the log's presented events and the HUD's open panels, and run the camera's Tactical View, the tuning model's
+ * wireframe view, the View menu's minimap item, the contacts preference and the HUD's own toggles.
  */
 final class GpuUtilityBar implements GpuHud.Component {
     /** The row's gap (#sys). */
@@ -40,10 +40,12 @@ final class GpuUtilityBar implements GpuHud.Component {
 
     private final GpuHudState state;
     private final BoardCamera camera;
+    private final GpuBoardTuning tuning;
     private final Table root = new Table();
     private final Label north;
     private final Table chip = new Table();
     private final UiButton tactical;
+    private final UiButton wireframe;
     private final UiButton map;
     private final UiButton contacts;
     private final UiButton log;
@@ -55,19 +57,22 @@ final class GpuUtilityBar implements GpuHud.Component {
     private GpuHud.Inputs inputs;
     private boolean narrowShown;
 
-    GpuUtilityBar(GpuHudKit kit, GpuBoardSource source, GpuHudState state, BoardCamera camera) {
+    GpuUtilityBar(GpuHudKit kit, GpuBoardSource source, GpuHudState state, BoardCamera camera,
+          GpuBoardTuning tuning) {
         this.state = state;
         this.camera = camera;
+        this.tuning = tuning;
         root.setName("utility-bar");
         chip.setName("tactical-chip");
         UiKit ui = kit.ui;
         tactical = utility(ui, "tactical", "GpuBoard.hud.util.tactical", "utility-tactical");
+        wireframe = utility(ui, "wireframe", "GpuBoard.hud.util.wireframe", "utility-wireframe");
         map = utility(ui, "map", "GpuBoard.hud.util.map", "utility-map");
         contacts = utility(ui, "enemy", "GpuBoard.hud.common.contacts", "utility-contacts");
         log = utility(ui, "report", "GpuBoard.hud.util.log", "utility-log");
         help = utility(ui, "help", "GpuBoard.hud.util.help", "utility-help");
         menu = utility(ui, "menu", "GpuBoard.hud.menu.title", "utility-menu");
-        utilities = List.of(tactical, map, contacts, log, help, menu);
+        utilities = List.of(tactical, wireframe, map, contacts, log, help, menu);
         for (UiButton utility : utilities) {
             root.add(utility).padLeft(utility == tactical ? 0 : GAP);
         }
@@ -75,6 +80,8 @@ final class GpuUtilityBar implements GpuHud.Component {
         // The style at W <= 1350, which the developer Tuning utility at the row's end (G17) also takes.
         narrow = ui.skin.get("hud-utility-narrow", TextButton.TextButtonStyle.class);
         onChange(tactical, () -> setTactical(!camera.tactical()));
+        // The thermal wireframe view of rimshaderv1's old Camera menu, a switch of the tuning model the board reads.
+        onChange(wireframe, () -> tuning.setWireframe(!tuning.wireframe()));
         onChange(map, () -> runMinimap(inputs));
         // The contacts panel's preference, remembered as the minimap's is; the client's settings change on Swing.
         onChange(contacts, () -> source.command(() -> GUIPreferences.getInstance().toggleGpuContactsEnabled()));
@@ -96,7 +103,8 @@ final class GpuUtilityBar implements GpuHud.Component {
         north.setTouchable(Touchable.disabled);
     }
 
-    private static UiButton utility(UiKit ui, String icon, String label, String name) {
+    /** A top-right utility: its icon over its caption, the message {@code label}. The map tools share them. */
+    static UiButton utility(UiKit ui, String icon, String label, String name) {
         UiButton button = ui.button("hud-utility", icon, Messages.getString(label), null);
         button.setName(name);
         return button;
@@ -128,6 +136,7 @@ final class GpuUtilityBar implements GpuHud.Component {
         // K12: the round's reviewable events the board has presented, which the log lists (C.6; game.js S.events)
         int reviewable = state.history.played().size();
         tactical.pressed(tacticalView);
+        wireframe.pressed(tuning.wireframe()).setDisabled(!GpuWireframe.supported());
         map.pressed(inputs.preferences().minimapEnabled()).setDisabled(minimap == null || !minimap.enabled());
         contacts.pressed(inputs.preferences().contactsEnabled());
         log.pressed(state.logOpen()).badge(reviewable > 0 ? String.valueOf(reviewable) : null);

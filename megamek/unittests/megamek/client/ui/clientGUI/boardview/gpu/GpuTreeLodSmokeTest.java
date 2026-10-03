@@ -24,7 +24,7 @@ import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.environment.DirectionalLight;
-import com.badlogic.gdx.graphics.g3d.utils.DepthShaderProvider;
+import com.badlogic.gdx.graphics.g3d.shaders.DepthShader;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
 import com.badlogic.gdx.math.Vector3;
@@ -53,7 +53,7 @@ class GpuTreeLodSmokeTest {
             public void create() {
                 GpuAssets assets = new GpuAssets();
                 GpuTerrain terrain = new GpuTerrain();
-                ModelBatch depth = new ModelBatch(new DepthShaderProvider());
+                ModelBatch depth = new ModelBatch(GpuTreeInstances.depthProvider(new DepthShader.Config()));
                 GLProfiler profiler = new GLProfiler(Gdx.graphics);
                 Model occupant = new ModelBuilder().createBox(4, 4, 40, new Material(), VertexAttributes.Usage.Position);
                 try {
@@ -85,10 +85,13 @@ class GpuTreeLodSmokeTest {
                               new Vector3(0, 0, -1)));
                         int nearCount = 0;
                         int nearShadowCount = 0;
-                        for (int level : new int[] { 0, 1, 2, 0, 2, 1, 0 }) {
-                            camera.camera.zoom = level == 0 ? 0.1f : zoomForSize(diameter, level == 1 ? 50 : 12);
+                        for (int level : new int[] { 0, 1, 2, 3, 0, 3, 2, 1, 0 }) {
+                            camera.camera.zoom = level == 0 ? 0.1f : zoomForSize(diameter, PIXELS[level]);
                             camera.update();
                             terrain.animate(0, List.of(), 1);
+                            // A level change alone keeps the shadow map until the next refit; redraw it to count
+                            // the selected level's geometry.
+                            terrain.refreshShadows();
                             int shadowCount = count(profiler, () -> terrain.renderShadows(camera.camera, List.of()));
                             int colorCount = count(profiler, () -> terrain.render(camera.camera, false));
                             if (level == 0) {
@@ -110,9 +113,10 @@ class GpuTreeLodSmokeTest {
                         }
                         // An occupied tree stays opaque through both LoD thresholds, including camera depth
                         // for the unit outline. The same selected geometry casts its shadow.
-                        for (int level : new int[] { 1, 2, 0 }) {
-                            camera.camera.zoom = level == 0 ? 0.1f : zoomForSize(diameter, level == 1 ? 50 : 12);
+                        for (int level : new int[] { 1, 2, 3, 0 }) {
+                            camera.camera.zoom = level == 0 ? 0.1f : zoomForSize(diameter, PIXELS[level]);
                             camera.update();
+                            terrain.refreshShadows();
                             assertEquals(nearShadowCount - 3 * (triangles[0] - triangles[level]),
                                   count(profiler, () -> terrain.renderShadows(camera.camera, List.of())));
                             assertEquals(0, count(profiler, () -> terrain.renderTransparent(camera.camera)));

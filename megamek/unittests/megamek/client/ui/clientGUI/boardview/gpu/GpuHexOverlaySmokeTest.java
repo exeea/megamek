@@ -40,6 +40,7 @@ class GpuHexOverlaySmokeTest {
                 public void render() {
                     try {
                         super.render();
+                        if (frames() == 0) { return; }
                         tick++;
                         BoardScene scene = fixture.source.takeFrame().scene();
                         if (tick == 1) {

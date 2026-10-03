@@ -41,7 +41,6 @@ import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.awt.image.ImageObserver;
 import java.io.Serial;
-import java.net.URI;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
@@ -53,8 +52,6 @@ import javax.swing.*;
 import javax.swing.event.HyperlinkEvent;
 
 import megamek.MMConstants;
-import megamek.common.units.Entity;
-import megamek.common.units.TrainLayout;
 import megamek.client.ui.Messages;
 import megamek.client.ui.buttons.MMToggleButton;
 import megamek.client.ui.clientGUI.GUIPreferences;
@@ -62,6 +59,8 @@ import megamek.client.ui.comboBoxes.MMComboBox;
 import megamek.client.ui.widget.RawImagePanel;
 import megamek.common.Player;
 import megamek.common.annotations.Nullable;
+import megamek.common.units.Entity;
+import megamek.common.units.TrainLayout;
 import megamek.logging.MMLogger;
 
 public final class UIUtil {
@@ -1487,31 +1486,21 @@ public final class UIUtil {
     }
 
     /**
-     * Ensures an on-screen window fits within the bounds of a display.
+     * Ensures a restored window can be reached on a monitor the user can see: its title bar must lie on some monitor's
+     * work area (the taskbar excluded), otherwise it moves onto the nearest monitor and shrinks to fit it. A window left
+     * on a monitor that has since been unplugged comes back this way.
      */
     public static void updateWindowBounds(Window window) {
-        final Rectangle bounds = new Rectangle();
-        Stream.of(GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices())
-              .map(GraphicsDevice::getConfigurations)
-              .flatMap(Stream::of)
-              .map(GraphicsConfiguration::getBounds)
-              .forEach(bounds::add);
-
-        final Dimension size = window.getSize();
-        final Point location = window.getLocation();
-
-        if ((location.x < bounds.getMinX()) || ((location.x + size.width) > bounds.getMaxX())) {
-            location.x = 0;
+        List<Rectangle> workAreas = new ArrayList<>();
+        Toolkit toolkit = Toolkit.getDefaultToolkit();
+        for (GraphicsDevice device : GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices()) {
+            GraphicsConfiguration configuration = device.getDefaultConfiguration();
+            Rectangle area = configuration.getBounds();
+            Insets insets = toolkit.getScreenInsets(configuration);
+            workAreas.add(new Rectangle(area.x + insets.left, area.y + insets.top,
+                  area.width - insets.left - insets.right, area.height - insets.top - insets.bottom));
         }
-
-        if ((location.y < bounds.getMinY()) || ((location.y + size.height) > bounds.getMaxY())) {
-            location.y = 0;
-        }
-
-        size.setSize(Math.min(size.width, bounds.width), Math.min(size.height, bounds.height));
-
-        window.setLocation(location);
-        window.setSize(size);
+        window.setBounds(ScreenFit.fit(window.getBounds(), workAreas));
     }
 
     /*

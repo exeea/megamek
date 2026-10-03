@@ -1,5 +1,8 @@
 package megamek.common.weapons.handlers.mrm;
 
+import java.util.List;
+import java.util.Vector;
+
 import megamek.common.Hex;
 import megamek.common.Report;
 import megamek.common.ToHitData;
@@ -19,11 +22,6 @@ import megamek.common.units.Entity;
 import megamek.common.units.Targetable;
 import megamek.common.weapons.handlers.DamageFalloff;
 import megamek.server.totalWarfare.TWGameManager;
-
-import java.util.List;
-import java.util.Vector;
-
-import static megamek.common.equipment.AmmoType.INCENDIARY_MOD;
 
 /*
  * Copyright (C) 2026 The MegaMek Team. All Rights Reserved.
@@ -154,7 +152,7 @@ public class MRMSaturationHandler extends MRMHandler {
 
         // any AMS attacks by enemies in the target hex?
         List<WeaponMounted> lCounters = weaponAttackAction.getCounterEquipment();
-        if (null != lCounters) {
+        if (lCounters != null) {
             // Track firing for each counter, as this attack can be engaged multiple times
             // (unlike other missile attacks)
             boolean localAMSEngaged, localAPDSEngaged;
@@ -221,6 +219,7 @@ public class MRMSaturationHandler extends MRMHandler {
                             bayW.setUsedThisRound(true);
                         }
                         localAMSEngaged = true;
+                        reportCounterAnimation(bayW);
                     }
                 } else {
                     // build up some heat
@@ -262,6 +261,7 @@ public class MRMSaturationHandler extends MRMHandler {
                     if (isAPDS) {
                         localAPDSEngaged = true;
                     }
+                    reportCounterAnimation(counter);
                 }
                 // Determine APDS mod
                 if (localAPDSEngaged) {
@@ -303,7 +303,7 @@ public class MRMSaturationHandler extends MRMHandler {
                 apdsMod += localAPDSMod;
             }
         }
-        return apdsMod + amsMod;
+        return recordDefenseModifier(apdsMod + amsMod);
     }
 
     /**
@@ -325,7 +325,7 @@ public class MRMSaturationHandler extends MRMHandler {
         nMissilesModifier += getAMSHitsMod(vPhaseReport);
 
         // No need for artificial Streak calcs as this type of attack can only target a hex
-        int missilesHit = Compute.missilesHit(weaponType.getRackSize(), nMissilesModifier,
+        int missilesHit = clusterMissilesHit(weaponType.getRackSize(), nMissilesModifier,
               weapon.isHotLoaded(), false, isAdvancedAMS());
 
         return missilesHit;

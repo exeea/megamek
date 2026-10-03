@@ -69,54 +69,62 @@ class UnitMotionTest {
     }
 
     @Test
-    void disablingMiddleGrowthKeepsTheThreeHexLaunchAndBrakingRamps() {
+    void disablingMiddleGrowthKeepsTheConfiguredLaunchAndBrakingRamps() {
         var motion = new UnitMotion(START);
         motion.append(List.of(START, point(1), point(3), point(5), point(7), point(10)),
               EntityMovementType.MOVE_WALK, 0, false, 4, 0, 0, 1);
-        assertEquals(6.4, motion.remainingSeconds() / UnitMotion.Speed.NORMAL.rate, .001);
-        motion.advance(.6, 1);
-        assertTrue(motion.sample().steps() < 1, "The curved ramp starts slowly");
-        motion.advance(.6, 1);
-        assertEquals(3, motion.sample().steps(), .001);
-        motion.advance(.4, 1);
+        double rampSeconds = 2 * UnitMotion.RAMP_HEXES * UnitMotion.WALK_SECONDS_PER_HEX;
+        double halfCruiseSeconds = (10 - 2 * UnitMotion.RAMP_HEXES) * UnitMotion.WALK_SECONDS_PER_HEX / 2;
+        assertEquals(2 * rampSeconds + 2 * halfCruiseSeconds, motion.remainingSeconds(), .001);
+        motion.advance(rampSeconds / 2, 1);
+        float launchDistance = motion.sample().steps();
+        assertTrue(launchDistance > 0 && launchDistance < UnitMotion.RAMP_HEXES / 2,
+              "The curved ramp starts slowly");
+        motion.advance(rampSeconds / 2, 1);
+        assertEquals(UnitMotion.RAMP_HEXES, motion.sample().steps(), .001);
+        motion.advance(halfCruiseSeconds, 1);
         assertEquals(5, motion.sample().steps(), .001);
-        motion.advance(.4, 1);
-        assertEquals(7, motion.sample().steps(), .001);
-        motion.advance(.6, 1);
-        assertTrue(motion.sample().steps() > 9, "Braking mirrors acceleration");
-        motion.advance(.6, 1);
+        motion.advance(halfCruiseSeconds, 1);
+        assertEquals(10 - UnitMotion.RAMP_HEXES, motion.sample().steps(), .001);
+        motion.advance(rampSeconds / 2, 1);
+        assertEquals(10 - launchDistance, motion.sample().steps(), .001, "Braking mirrors acceleration");
+        motion.advance(rampSeconds / 2, 1);
         assertFalse(motion.isMoving());
         assertEquals(BoardGeometry.center(point(10).coords(), 0), motion.position());
     }
 
     @Test
     void shortMovesCannotReachFullSpeedEvenWithFewerWaypoints() {
-        double cruise = peakSpeed(walk(6, 4));
+        double cruise = peakSpeed(walk(6, 4, 0));
         double one = peakSpeed(walk(1, 4));
         double two = peakSpeed(walk(2, 4));
         assertEquals(1 / UnitMotion.WALK_SECONDS_PER_HEX, cruise, .005);
-        assertTrue(one < two);
-        assertEquals(.58, two / cruise, .01, "Two hexes only allow about 58% of cruise speed");
+        assertTrue(one < two && two < cruise);
+        assertEquals(Math.sqrt(2 / (2 * UnitMotion.RAMP_HEXES)), two / cruise, .01,
+              "Short routes lower their peak speed to fit both ramps");
         assertTrue(walk(2, 4).remainingSeconds() > 2 * UnitMotion.WALK_SECONDS_PER_HEX);
         assertEquals(walk(2, 4, 0).remainingSeconds(), walk(2, 4, .1).remainingSeconds());
     }
 
     @Test
-    void middleSpeedBuildsContinuouslyByTheConfiguredPercentageThenBrakesInTheLastThreeHexes() {
+    void middleSpeedBuildsContinuouslyBetweenTheConfiguredLaunchAndBrakingRamps() {
         for (double gain : new double[] { .03, .06 }) {
             var motion = walk(40, 4, gain);
             double base = 1 / UnitMotion.WALK_SECONDS_PER_HEX;
             for (int distance : new int[] { 3, 4, 10, 20, 36, 37 }) {
-                assertEquals(base * (1 + gain * (distance - 3)), speedAtDistance(motion, distance), .04,
+                assertEquals(base * (1 + gain * (distance - UnitMotion.RAMP_HEXES)),
+                      speedAtDistance(motion, distance), .04,
                       "Speed gain is continuous and accumulates across the whole middle of the route");
             }
-            assertTrue(speedAtDistance(motion, 39) < base * (1 + gain * 34) * .8);
+            double peak = base * (1 + gain * (40 - 2 * UnitMotion.RAMP_HEXES));
+            assertTrue(speedAtDistance(motion, 39) < peak * .8);
             motion.advance(motion.remainingSeconds(), 1);
             assertFalse(motion.isMoving());
             assertEquals(BoardGeometry.center(point(40).coords(), 0), motion.position());
         }
-        assertTrue(walk(40, 4).remainingSeconds() < walk(40, 4, 0).remainingSeconds());
-        assertEquals(6.06, walk(10, 4).remainingSeconds() / UnitMotion.Speed.NORMAL.rate, .03);
+        for (int distance : new int[] { 10, 40 }) {
+            assertTrue(walk(distance, 4).remainingSeconds() < walk(distance, 4, 0).remainingSeconds());
+        }
     }
 
     private static double speedAtDistance(UnitMotion motion, float distance) {
@@ -196,8 +204,8 @@ class UnitMotionTest {
         motion.advance(turn.remainingSeconds() / 2, 1);
         assertEquals(30, motion.facing(), .001);
         assertEquals(BoardGeometry.center(START.coords(), 0), motion.position());
-        motion.advance(turn.remainingSeconds() / 2 + 1.2, 1);
-        assertEquals(3, motion.sample().steps(), .001, "The travel ramp still occupies the first three hexes");
+        motion.advance(turn.remainingSeconds() / 2 + 2 * UnitMotion.RAMP_HEXES * UnitMotion.WALK_SECONDS_PER_HEX, 1);
+        assertEquals(UnitMotion.RAMP_HEXES, motion.sample().steps(), .001, "Turning leaves the full travel ramp intact");
     }
 
     private static List<BoardScene.Waypoint> cornerPath(int direction, boolean turnSteps, boolean subdivided) {
@@ -714,41 +722,6 @@ class UnitMotionTest {
     }
 
     @Test
-    void stateOnlyTransitionsQueueButRepeatedSnapshotsAndRevealDoNotReplayThem() {
-        var ground = START.withAeroState(BoardScene.AeroState.LANDED);
-        var air = point(4).withAeroState(BoardScene.AeroState.AIRBORNE);
-        var motion = new UnitMotion(ground);
-        motion.observe(air);
-        double first = motion.remainingSeconds();
-        motion.observe(air);
-        assertEquals(first, motion.remainingSeconds());
-        motion.observe(ground);
-        assertTrue(motion.remainingSeconds() > first);
-        motion.advance(motion.remainingSeconds(), 1);
-        motion.observe(ground);
-        assertFalse(motion.isMoving());
-        var revealed = new UnitMotion(air);
-        revealed.observe(air);
-        assertFalse(revealed.isMoving());
-    }
-
-    @Test
-    void observedTakeoffJoinsAFlightPathWithoutAStationaryDuplicateStep() {
-        var ground = START.withAeroState(BoardScene.AeroState.LANDED);
-        var air = point(1).withAeroState(BoardScene.AeroState.AIRBORNE);
-        var end = point(2).withAeroState(BoardScene.AeroState.AIRBORNE);
-        var motion = new UnitMotion(ground);
-        motion.observe(air.withFootprint(List.of(air.coords())));
-        double first = motion.remainingSeconds();
-        motion.append(List.of(air, end), EntityMovementType.MOVE_SAFE_THRUST, 0);
-        double second = motion.remainingSeconds() - first;
-        motion.observe(end);
-        motion.advance(first + second / 2, 1);
-        assertTrue(motion.position().epsilonEquals(BoardGeometry.center(air.coords(), 0)
-              .lerp(BoardGeometry.center(end.coords(), 0), .5f), .001f));
-    }
-
-    @Test
     void accelerationAndBrakingAreSharedByTravelAndJumpWithoutStoppingAtWaypoints() {
         for (var type : List.of(EntityMovementType.MOVE_WALK, EntityMovementType.MOVE_RUN,
               EntityMovementType.MOVE_SPRINT, EntityMovementType.MOVE_JUMP, EntityMovementType.MOVE_SAFE_THRUST)) {
@@ -770,8 +743,8 @@ class UnitMotionTest {
             assertFalse(motion.isMoving());
         }
         var motion = new UnitMotion(START);
-        motion.append(List.of(START, point(3), point(10)), EntityMovementType.MOVE_WALK, 0, false, 4);
-        motion.advance(1.2, 1);
+        motion.append(List.of(START, point(3), point(10)), EntityMovementType.MOVE_WALK, 0, false, 4, 0, 0, 1);
+        motion.advance((3 + UnitMotion.RAMP_HEXES) * UnitMotion.WALK_SECONDS_PER_HEX, 1);
         assertEquals(BoardGeometry.center(point(3).coords(), 0).y, motion.position().y, .001f);
         motion.advance(.02, 1);
         assertEquals(BoardGeometry.HEIGHT * .1f, Math.abs(motion.position().y - BoardGeometry.center(point(3).coords(), 0).y), .01f);

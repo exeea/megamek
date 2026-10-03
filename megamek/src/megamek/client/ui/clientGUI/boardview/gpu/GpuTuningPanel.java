@@ -80,7 +80,7 @@ final class GpuTuningPanel implements GpuHud.Component {
      * {@code tuning} is the model the board view reads, built with the source its "Planetary conditions…" button uses;
      * the panel edits it and the camera's framing flags.
      */
-    GpuTuningPanel(GpuHudKit kit, GpuBoardSource source, GpuHudState state, BoardCamera camera, GpuBoardTuning tuning) {
+    GpuTuningPanel(GpuHudKit kit, BoardSource source, GpuHudState state, BoardCamera camera, GpuBoardTuning tuning) {
         ui = kit.ui;
         this.state = state;
         this.camera = camera;
@@ -151,11 +151,13 @@ final class GpuTuningPanel implements GpuHud.Component {
         close.setName("tuning-close");
         frame.add(ui.header(text("GpuBoard.hud.tuning.title"), null, close)).growX().row();
         UiKit.Segmented tabs = ui.segmented("hud-tab", false, text("GpuBoard.hud.tuning.board"),
-              text("GpuBoard.hud.tuning.atmosphere"), text("GpuBoard.hud.tuning.camera"));
+              text("GpuBoard.hud.tuning.atmosphere"), text("GpuBoard.hud.tuning.terrain"),
+              text("GpuBoard.hud.tuning.camera"));
         tabs.left().pad(2, 14, 0, 14);
         frame.add(tabs).growX().row();
         List<ScrollPane> pages = List.of(page("tuning-board", mirror(tuning.boardRows())),
-              page("tuning-atmosphere", mirror(tuning.atmosphereRows())), page("tuning-camera", cameraPage()));
+              page("tuning-atmosphere", mirror(tuning.atmosphereRows())),
+              page("tuning-terrain", mirror(tuning.terrainRows())), page("tuning-camera", cameraPage()));
         Cell<ScrollPane> shown = frame.add(pages.getFirst()).grow().minHeight(0);
         frame.row();
         for (int index = 0; index < pages.size(); index++) {
@@ -169,7 +171,15 @@ final class GpuTuningPanel implements GpuHud.Component {
             });
         }
         tabs.select(0);
-        ui.footer(frame).add(button(tuning.defaults(), "hud-mini")).expandX().left();
+        // The model's footer buttons: Defaults, Reload assets with its outcome, and the shader editor (M1 rows 8, 9).
+        Table foot = ui.footer(frame);
+        foot.add(button(tuning.defaults(), "hud-mini")).left();
+        foot.add(button(tuning.reloadAssets(), "hud-mini")).padLeft(6);
+        Label reloaded = ui.label("", "hud-small", 11.5f, UiTheme.MUTED);
+        reloaded.setEllipsis(true);
+        shows.add(() -> reloaded.setText(tuning.assetReloadStatus().getText()));
+        foot.add(reloaded).minWidth(0).growX().left().padLeft(6);
+        foot.add(button(tuning.editShaders(), "hud-mini")).right();
         panelCell = root.add(frame);
         choices = new UiPopover(ui);
         choices.setName("tuning-choices");
@@ -234,7 +244,10 @@ final class GpuTuningPanel implements GpuHud.Component {
         return page;
     }
 
-    /** The Camera page: the fixed sun and the board camera's framing animations on selection and on movement. */
+    /**
+     * The Camera page: the fixed sun, the board camera's framing animations on selection and on movement, and the
+     * model's camera rows (Free Flight, the wireframe view, the field of view).
+     */
     private Table cameraPage() {
         Table page = new Table();
         page.defaults().left().pad(5, 0, 5, 0);
@@ -246,6 +259,7 @@ final class GpuTuningPanel implements GpuHud.Component {
         page.add(checkbox("camera-animate-movement", text("GpuBoard.animateMovement"),
               text("GpuBoard.cameraAnimationHelp"), () -> camera.animateOnMove,
               value -> camera.animateOnMove = value)).row();
+        page.add(mirror(tuning.cameraRows())).growX().padTop(6).row();
         return page;
     }
 
