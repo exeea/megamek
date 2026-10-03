@@ -1,8 +1,6 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import java.util.List;
-
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.GL20;
@@ -15,7 +13,7 @@ import org.lwjgl.opengl.GL11;
 /**
  * The board without its units as green lines on a dark ground: the camera depth pass's own triangles and levels of
  * detail, first as a hidden-line depth fill, then in line mode. Units show thermal signatures. Water surfaces, roads,
- * decals, ground cover and cut-away buildings are outside that pass and draw no lines.
+ * decals, ground cover, scatter terrain and cut-away buildings are omitted and draw no lines.
  */
 final class GpuWireframe implements Disposable {
     final GpuThermalUnits units = new GpuThermalUnits();
@@ -41,7 +39,7 @@ final class GpuWireframe implements Disposable {
         Gdx.gl.glEnable(GL20.GL_POLYGON_OFFSET_FILL);
         Gdx.gl.glPolygonOffset(1, 1);
         try {
-            terrain.renderDepth(camera, List.of(), batch);
+            terrain.renderWireframe(camera, batch);
         } finally {
             Gdx.gl.glDisable(GL20.GL_POLYGON_OFFSET_FILL);
             Gdx.gl.glPolygonOffset(0, 0);
@@ -53,7 +51,7 @@ final class GpuWireframe implements Disposable {
     void lines(Camera camera, GpuTerrain terrain) {
         GL11.glPolygonMode(GL11.GL_FRONT_AND_BACK, GL11.GL_LINE);
         try {
-            terrain.renderDepth(camera, List.of(), batch);
+            terrain.renderWireframe(camera, batch);
         } finally {
             GL11.glPolygonMode(GL11.GL_FRONT_AND_BACK, GL11.GL_FILL);
             // The composite leaves depth testing on for the passes after it; the batch's render context turns it off.

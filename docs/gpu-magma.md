@@ -13,6 +13,7 @@
 | `liquid-flow.glsl` | Shared water/lava advection phases, weights and material coordinates. |
 | `magma-solid.glsl / magma-flow.glsl / magma-lighting.glsl` | Own crust relief, molten advection and heat/lighting; terrain boundaries reuse these evaluations. |
 | `GpuAtmosphere / GpuHeatGlow` | Preserve molten HDR energy, select visible hot highlights and composite a reduced-resolution camera halo. |
+| `GpuLavaLighting / lava-lighting.glsl` | Derive bounded local diffuse emitters from installed volcanic tiles for terrain, units and props. |
 
 MAGMA level 1 is solid basalt crust with incandescent fissures. Level 2 is opaque
 flowing lava, including falling sheets and exposed board-edge cuts. The captured
@@ -104,12 +105,23 @@ composite. With tactical FoV active, each source texel is attenuated by the shar
 visibility opacity before downsampling, preventing hidden heat from bleeding into
 a visible neighbour. The final composite retains its normal FoV treatment.
 
-The halo models camera glare; it does not dynamically illuminate nearby terrain
-or units. Its warm-radiance selector is an approximation rather than a material
+The halo models camera glare. Its warm-radiance selector is an approximation rather than a material
 mask: sufficiently bright warm fire may also glow on a molten board, while ordinary
 white reflections are excluded. Non-emissive opaque surfaces preserve the existing
 clamped lighting path, apart from buffer quantization. Blending translucent objects
 over HDR highlights can differ from the former per-draw LDR clipping.
+
+Local illumination is a separate diffuse contribution in the existing lit shaders.
+`GpuLavaLighting` derives up to 32 disk-like emitters from the installed terrain
+snapshot each frame, culling by camera and the captured client LOS. Molten tiles
+emit strongly; cooling crust retains 3.5% source power. The camera-centred budget
+fades its outer sources by distance when full. The same environment attribute reaches
+terrain, units, buildings and props without extra textures, render passes or game state.
+Changing terrain or board scale refreshes positions; removing lava clears the count.
+This is a short-range, bounded lighting approximation, with no obstacle shadow rays
+or global illumination. Light can leak through nearby geometry, and a very large
+lava field exceeds the local emitter budget. The camera halo and local lighting
+both respect captured visibility, through their own existing render paths.
 
 Relief uses normals and bounded parallax, not geometric displacement, so silhouettes
 and picking remain the existing board geometry. Crust traces up to twelve depth

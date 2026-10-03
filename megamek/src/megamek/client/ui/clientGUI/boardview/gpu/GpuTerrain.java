@@ -396,6 +396,7 @@ final class GpuTerrain implements Disposable {
                 }
             };
             GpuCloudShadow.register(result);
+            GpuLavaLighting.register(result);
             GpuBuildingCutaway.register(result);
             GpuLiquidShader.register(result);
             GpuMagmaShader.register(result);
@@ -557,6 +558,7 @@ final class GpuTerrain implements Disposable {
     /** Every tree of the board, drawn instanced; each pass gathers the trees of the chunks it draws. */
     private final GpuTreeInstances trees;
     private final Environment environment = new Environment();
+    private final GpuLavaLighting lavaLighting = new GpuLavaLighting();
     private final List<Chunk> chunks = new ArrayList<>();
     // At most four in-flight chunks and eight replaced chunks. A small worker pool leaves CPU capacity for
     // rendering/input instead of borrowing every common-pool worker. All GL ownership stays on the render thread.
@@ -708,6 +710,7 @@ final class GpuTerrain implements Disposable {
     private static String rainFragment(String source) {
         String functions = GpuShaderSource.read("light-model.glsl");
         functions += GpuShaderSource.read("rain-surface.glsl");
+        functions += GpuShaderSource.read("lava-lighting.glsl");
         functions += GpuShaderSource.read("surface-lighting.glsl");
         functions += GpuShaderSource.read("terrain-meadow.glsl");
         functions += GpuShaderSource.read("terrain-patterns.glsl");
@@ -776,6 +779,7 @@ final class GpuTerrain implements Disposable {
         this.frameBounds = frameBounds;
         this.liquidShaderAnimation = liquidShaderAnimation;
         this.proceduralWater = proceduralWater;
+        environment.set(lavaLighting);
         assets = new GpuAssets();
         trees = new GpuTreeInstances((name, level) -> foliage(assets.lodModel(name, level)));
     }
@@ -3901,6 +3905,7 @@ final class GpuTerrain implements Disposable {
         shadingPass++;
         if (!drawTactical) {
             updateDetail(camera);
+            lavaLighting.update(coverScene, camera);
             // Upload before the render context tracks bound texture units for this pass.
             biomes.update(coverScene);
         }
@@ -4136,10 +4141,17 @@ final class GpuTerrain implements Disposable {
     /** Camera depth retains the cutaway so atmosphere effects do not hide units behind faded surfaces. */
     void renderDepth(Camera camera, List<ModelInstance> units, ModelBatch pass) {
         updateDetail(camera);
-        renderDepth(camera, units, pass, false);
+        renderDepth(camera, units, pass, false, true);
     }
 
-    private void renderDepth(Camera camera, List<ModelInstance> units, ModelBatch pass, boolean shadows) {
+    /** Wireframe fill and lines share the camera's cutaway and detail selection, without scatter terrain. */
+    void renderWireframe(Camera camera, ModelBatch pass) {
+        updateDetail(camera);
+        renderDepth(camera, List.of(), pass, false, false);
+    }
+
+    private void renderDepth(Camera camera, List<ModelInstance> units, ModelBatch pass, boolean shadows,
+          boolean includeScatter) {
         pass.begin(camera);
         trees.begin(shadows ? GpuTreeInstances.Pass.SHADOW : GpuTreeInstances.Pass.DEPTH);
         // A shadow map whose texel spans half a metre or more cannot resolve leaves: its trees cast the shadow of
@@ -4151,7 +4163,7 @@ final class GpuTerrain implements Disposable {
             if (!flatTrees) { trees.add(chunk.stand, Math.max(chunk.treeLod, coarsest), visible); }
             if (visible) {
                 pass.render(chunk.depthTerrain);
-                if (chunk.scatterVisible) {
+                if (includeScatter && chunk.scatterVisible) {
                     chunk.scatter.forEach(pass::render);
                 }
                 pass.render(shadows ? chunk.shadowProps : chunk.solidProps);
@@ -4243,7 +4255,7 @@ final class GpuTerrain implements Disposable {
                 renderUnitShadows(lightCamera, units);
             } else {
                 shadow.begin();
-                renderDepth(lightCamera, boardWide ? List.of() : units, depthBatch, true);
+                renderDepth(lightCamera, boardWide ? List.of() : units, depthBatch, true, true);
                 shadow.end();
                 if (boardWide) {
                     if (boardShadow == null) {
@@ -4264,7 +4276,7 @@ final class GpuTerrain implements Disposable {
                 }
                 if (!staticShadowValid) {
                     shadow.begin();
-                    renderDepth(lightCamera, List.of(), depthBatch, true);
+                    renderDepth(lightCamera, List.of(), depthBatch, true, true);
                     shadow.end();
                     shadow.getFrameBuffer().transfer(staticShadow, buffers);
                     staticShadowValid = true;

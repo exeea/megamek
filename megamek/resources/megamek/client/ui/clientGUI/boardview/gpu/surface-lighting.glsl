@@ -110,7 +110,7 @@ float sculptShadow(vec3 normal, vec3 light) {
 }
 
 void surfaceLighting(vec3 normal, float film, float roughness, out vec3 ambient, out vec3 direct, out vec3 sheen) {
-    ambient = skyLight(normal, GROUND_ALBEDO);
+    ambient = skyLight(normal, GROUND_ALBEDO) + lavaIrradiance(v_cloudPosition, normal);
     direct = vec3(0.0);
     sheen = vec3(0.0);
 #if numDirectionalLights > 0

@@ -456,7 +456,7 @@ void main() {
     albedo = toLinear(albedo);
 #ifdef lightingFlag
     // Sky from above; from below, light reflected by the sunlit ground: warm in the desert, white on snow.
-    vec3 ambient = skyLight(normal, bounce) * occlusion * cavity;
+    vec3 ambient = skyLight(normal, bounce) * occlusion * cavity + lavaIrradiance(v_cloudPosition, normal) * cavity;
     vec3 direct = vec3(0.0), sheen = vec3(0.0);
 #if numDirectionalLights > 0
     vec3 light = -u_dirLights[0].direction;

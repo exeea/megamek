@@ -131,6 +131,10 @@ class GpuScatterSmokeTest {
                                   count(profiler, () -> terrain.renderDepth(camera.camera, List.of(), depth))[0]
                                         - count(profiler, () -> plain.renderDepth(camera.camera, List.of(), depth))[0],
                                   "Depth pass at LoD step " + step);
+                            assertEquals(
+                                  count(profiler, () -> plain.renderWireframe(camera.camera, depth))[0],
+                                  count(profiler, () -> terrain.renderWireframe(camera.camera, depth))[0],
+                                  "Wireframe omits scatter at LoD step " + step);
                             int shadowVertices = count(profiler, () -> terrain.renderShadows(camera.camera, List.of()))[0]
                                   - count(profiler, () -> plain.renderShadows(camera.camera, List.of()))[0];
                             assertEquals(vertices, shadowVertices, "Shadow pass at LoD step " + step);
