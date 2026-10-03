@@ -42,6 +42,8 @@ public final class UiKit {
     public static final float DIALOG_WIDTH = 620;
     /** A dialog is at most this much less high than the window (.dlg: max-height calc(100vh - 140px)). */
     public static final float DIALOG_MARGIN = 140;
+    /** The name of a header's count, for a view that keeps it current. */
+    public static final String HEADER_COUNT = "header-count";
     /** Styles whose captions the prototype upper-cases (.b, .b.main, .b.mini, .b.brk.sm, .ltabs). */
     private static final Set<String> UPPER_CASE = Set.of("hud", "hud-main", "hud-mini", "hud-utility-small",
           "hud-tab-caps");
@@ -103,8 +105,7 @@ public final class UiKit {
 
     /**
      * A list that scrolls vertically in the "hud-list" style: a thin bar over the list, no flick and no overscroll. It
-     * takes the stage's scroll focus while the pointer is over it, so the wheel scrolls it without a click, and gives
-     * the focus back when the pointer leaves it, so the wheel then reaches what lies there, such as the view's camera.
+     * takes the wheel while the pointer is over it ({@link #wheelWhileHovered}); a press takes it too (ScrollPane).
      */
     public ScrollPane scrollList(Actor list) {
         ScrollPane scroll = new ScrollPane(list, skin, "hud-list");
@@ -112,25 +113,33 @@ public final class UiKit {
         scroll.setScrollbarsOnTop(true);
         scroll.setOverscroll(false, false);
         scroll.setFlickScroll(false);
-        scroll.addListener(new InputListener() {
+        wheelWhileHovered(scroll);
+        return scroll;
+    }
+
+    /**
+     * Gives {@code actor} the stage's scroll focus while the pointer is over it, so the wheel reaches it without a
+     * click, and gives the focus back when the pointer leaves it and its children, so the wheel then reaches what lies
+     * there, such as the view's camera.
+     */
+    public static void wheelWhileHovered(Actor actor) {
+        actor.addListener(new InputListener() {
             @Override
             public void enter(InputEvent event, float x, float y, int pointer, Actor fromActor) {
-                if (scroll.getStage() != null) {
-                    scroll.getStage().setScrollFocus(scroll);
+                if (actor.getStage() != null) {
+                    actor.getStage().setScrollFocus(actor);
                 }
             }
 
             @Override
             public void exit(InputEvent event, float x, float y, int pointer, Actor toActor) {
-                // A press on the list takes the focus too (ScrollPane); moving onto one of its rows keeps it.
-                Stage stage = scroll.getStage();
-                if (stage != null && stage.getScrollFocus() == scroll
-                      && (toActor == null || !toActor.isDescendantOf(scroll))) {
+                Stage stage = actor.getStage();
+                if (stage != null && stage.getScrollFocus() == actor
+                      && (toActor == null || !toActor.isDescendantOf(actor))) {
                     stage.setScrollFocus(null);
                 }
             }
         });
-        return scroll;
     }
 
     /** A label in a hud font at another size and color. */
@@ -170,7 +179,11 @@ public final class UiKit {
      * top; headers, lists and footers bring their own padding. A panel that pads its content itself sets its padding.
      */
     public Table panel() {
-        Table panel = new Table();
+        return panel(new Table());
+    }
+
+    /** The panel's look on {@code panel}, a table that lays out more than its cells. */
+    public Table panel(Table panel) {
         panel.setBackground(skin.getDrawable("panel"));
         panel.pad(2);
         panel.top();
@@ -189,7 +202,9 @@ public final class UiKit {
         heading.setEllipsis(true);
         header.add(heading).minHeight(25).minWidth(0);
         if (count != null) {
-            header.add(label(count, "hud-medium", 12, UiTheme.MUTED)).padLeft(8);
+            Label counted = label(count, "hud-medium", 12, UiTheme.MUTED);
+            counted.setName(HEADER_COUNT);
+            header.add(counted).padLeft(8);
         }
         header.add().expandX();
         for (Actor tool : tools) {

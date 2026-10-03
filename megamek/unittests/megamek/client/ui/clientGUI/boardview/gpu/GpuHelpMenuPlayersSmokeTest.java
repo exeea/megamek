@@ -255,8 +255,6 @@ class GpuHelpMenuPlayersSmokeTest {
                 choose(root, open, menu("viewRoundsInAir"));
                 choose(root, open, menu("viewRoundsInAir"));
                 assertTrue(state.logOpen(), "the rounds in the air are the log's artillery in flight; it stays open");
-                choose(root, open, menu("viewLOSSetting"));
-                verify(dialogs.los).open();
                 float zoom = camera.camera.zoom;
                 choose(root, open, menu("viewZoomIn"));
                 assertEquals(zoom / 1.2f, camera.camera.zoom, 1e-4f, "Zoom In zooms the board camera");
@@ -279,6 +277,11 @@ class GpuHelpMenuPlayersSmokeTest {
                 choose(root, open, menu("viewGameOptions"));
                 SwingUtilities.invokeAndWait(() -> { });
                 assertEquals(List.of(ClientGUI.VIEW_GAME_OPTIONS), ran, "an item without a redirect runs Swing's");
+                // Line of sight stays MegaMek's ruler (the user's decision of 2026-10-03).
+                choose(root, open, menu("viewLOSSetting"));
+                SwingUtilities.invokeAndWait(() -> { });
+                assertEquals(List.of(ClientGUI.VIEW_GAME_OPTIONS, ClientGUI.VIEW_LOS_SETTING), ran,
+                      "the Ruler / LOS Tool runs Swing's ruler");
 
                 GpuMenuPanel boardless = new GpuMenuPanel(hud.kit, dialogs.source, state, camera);
                 Table other = (Table) boardless.actor();

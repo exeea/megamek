@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static megamek.client.ui.gdx.UiKit.onChange;
 import static megamek.client.ui.gdx.UiKit.text;
 
+import java.awt.event.InputEvent;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -138,8 +139,11 @@ final class GpuHintLine implements GpuHud.Component {
                   key(preferences, KeyCommandBind.DONE), text("BotCommandPanel.HexPicker.done"),
                   key(preferences, KeyCommandBind.CANCEL), text("BotCommandPanel.HexPicker.cancel"));
         }
+        // A measurement waiting for its second point takes the next left click (GpuHud.boardClick).
+        int pending = inputs.frame().panels().los().pending();
         List<String> items = new ArrayList<>(List.of(text("GpuBoard.hud.mouse.leftClick"),
-              text(leftClick(status, planning))));
+              text(pending == InputEvent.CTRL_DOWN_MASK ? "GpuBoard.hud.hint.completeLos"
+                    : pending != 0 ? "GpuBoard.hud.hint.completeDistance" : leftClick(status, planning))));
         if (inputs.view().tactical()) {
             items.addAll(List.of(text("GpuBoard.hud.mouse.rightDrag"), text("GpuBoard.hud.hint.panMap"),
                   text("GpuBoard.hud.mouse.wheel"), text("GpuBoard.hud.hint.zoom"),

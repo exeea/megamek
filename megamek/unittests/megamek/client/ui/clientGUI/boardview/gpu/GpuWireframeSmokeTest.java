@@ -11,8 +11,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.SwingUtilities;
 
@@ -25,7 +28,9 @@ import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
+import com.badlogic.gdx.graphics.g3d.RenderableProvider;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
@@ -101,6 +106,18 @@ class GpuWireframeSmokeTest {
         float originalZoom = view.boardCamera.camera.zoom;
         view.boardCamera.zoom(.08f);
         render(view, "wireframe-unit.png");
+        // The cosmetic scatter draws no lines (the user's decision of 2026-10-03).
+        Set<Object> scatter = visibleScatter(view);
+        assertFalse(scatter.isEmpty(), "The board around the unit has scatter in view");
+        List<Object> drawn = new ArrayList<>();
+        var recording = new ModelBatch() {
+            @Override public void render(RenderableProvider provider) { drawn.add(provider); }
+        };
+        try {
+            ((GpuTerrain) field(view, "terrain")).renderDepth(view.boardCamera.camera, List.of(), recording);
+        } finally { recording.dispose(); }
+        assertFalse(drawn.isEmpty(), "The wireframe draws the board");
+        assertTrue(drawn.stream().noneMatch(scatter::contains), "The wireframe draws no scatter");
         Vector3 point = view.boardCamera.camera.project(new Vector3(body), 0, 0,
               view.boardCamera.camera.viewportWidth, view.boardCamera.camera.viewportHeight);
         float density = (float) Gdx.graphics.getBackBufferWidth() / Gdx.graphics.getWidth();
@@ -153,6 +170,18 @@ class GpuWireframeSmokeTest {
         Mix restored = render(view, "wireframe-restored.png");
         assertTrue(restored.other > .6, "Leaving the wireframe restores shading: " + restored);
         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Restored frames");
+    }
+
+    /** The scatter that the board's visible chunks show at the camera's detail. */
+    private static Set<Object> visibleScatter(GpuBattleView view) throws Exception {
+        Set<Object> scatter = new HashSet<>();
+        for (Object chunk : (List<?>) field(field(view, "terrain"), "chunks")) {
+            if ((boolean) field(chunk, "scatterVisible")
+                  && view.boardCamera.camera.frustum.boundsInFrustum((BoundingBox) field(chunk, "bounds"))) {
+                scatter.addAll((List<?>) field(chunk, "scatter"));
+            }
+        }
+        return scatter;
     }
 
     /** Click a HUD utility: the wireframe view's or the Tactical View's switch. */

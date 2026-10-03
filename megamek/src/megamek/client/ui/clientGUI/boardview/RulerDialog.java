@@ -59,19 +59,15 @@ import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListener;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.Hex;
 import megamek.common.LosEffects;
 import megamek.common.Player;
-import megamek.common.ToHitData;
-import megamek.common.annotations.Nullable;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.equipment.MiscType;
 import megamek.common.game.Game;
 import megamek.common.options.OptionsConstants;
-import megamek.common.rolls.TargetRoll;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityVisibilityUtils;
 import megamek.common.units.Terrains;
@@ -95,10 +91,6 @@ public class RulerDialog extends JDialog implements BoardViewListener {
 
     public static Color color1 = DARK_COLOR_1;
     public static Color color2 = DARK_COLOR_2;
-
-    /** The bounds of the two height spinners; the GPU view's LOS card keeps its heights within them too. */
-    public static final int MIN_HEIGHT = -100;
-    public static final int MAX_HEIGHT = 200;
 
     // Range panel font sizing. Base sizes scale with the user's GUI scale (UIUtil.scaleForGUI).
     // Fraction sizes kick in when the rendered panel is taller than the base sizes alone would
@@ -127,11 +119,11 @@ public class RulerDialog extends JDialog implements BoardViewListener {
     private final JTextField tf_los2 = new JTextField();
     private final JButton butClose = new JButton();
     private JLabel heightLabel1;
-    private final JSpinner height1 = new JSpinner(new SpinnerNumberModel(1, MIN_HEIGHT, MAX_HEIGHT, 1));
+    private final JSpinner height1 = new JSpinner(new SpinnerNumberModel(1, -100, 200, 1));
     private final JLabel effectiveHeight1 = new JLabel();
     private final JLabel heightInfo1 = new JLabel();
     private JLabel heightLabel2;
-    private final JSpinner height2 = new JSpinner(new SpinnerNumberModel(1, MIN_HEIGHT, MAX_HEIGHT, 1));
+    private final JSpinner height2 = new JSpinner(new SpinnerNumberModel(1, -100, 200, 1));
     private final JLabel effectiveHeight2 = new JLabel();
     private final JLabel heightInfo2 = new JLabel();
 
@@ -551,15 +543,6 @@ public class RulerDialog extends JDialog implements BoardViewListener {
      * interact with it (e.g., height fields, combo boxes).
      */
     private void showWithoutFocus() {
-        // Over the native battle window its LOS card shows the measurement; this dialog stays hidden there until the
-        // card asks for the elevation diagram (showDiagram).
-        if ((bv.getClientgui() != null) && GpuBoardWindow.isActiveFor(bv.getClientgui())) {
-            return;
-        }
-        showUnfocused();
-    }
-
-    private void showUnfocused() {
         updateThemeColors();
         applyColorsToUI();
         if (!isVisible()) {
@@ -572,22 +555,14 @@ public class RulerDialog extends JDialog implements BoardViewListener {
     }
 
     /**
-     * Shows the ruler with its elevation diagram open for a measurement from {@code from} (the attacker) to {@code to}
-     * at those heights, as the GPU view's LOS card asks; over the native window the ruler otherwise stays hidden. The
-     * ruler takes the two points as two clicks would, then the heights, and its line on the board follows.
+     * Measures from {@code from} to {@code to} as two clicks would, ending a measurement that waits for its second
+     * point, and shows the ruler: the GPU view's "Line of sight from {unit}", for which line of sight stays this tool.
      */
-    public void showDiagram(Coords from, int fromHeight, Coords to, int toHeight) {
-        if (!from.equals(start) || !to.equals(end)) {
-            clear();
-            addPoint(from);
-            addPoint(to);
-        }
-        height1.setValue(fromHeight);
-        height2.setValue(toHeight);
-        if (!diagramExpanded) {
-            toggleDiagram();
-        }
-        showUnfocused();
+    public void measure(Coords from, Coords to) {
+        clear();
+        bv.setFirstLOS(null);
+        addPoint(from);
+        addPoint(to);
         bv.drawRuler(start, end, startColor, endColor);
     }
 
@@ -950,10 +925,9 @@ public class RulerDialog extends JDialog implements BoardViewListener {
         boolean sensorReturn = isSensorReturn(entity);
         // For sensor returns: hide identity and use generic height/type so state isn't revealed.
         // The player knows *something* is there and can still compute LOS/range using its position.
-        LosEnd unitEnd = LosEnd.of(entity);
-        int twHeight = sensorReturn ? 1 : unitEnd.height();
+        int twHeight = sensorReturn ? 1 : LOSHeightCalculation.twHeightFromEntity(entity);
         DiagramUnitType unitType = sensorReturn ? DiagramUnitType.OTHER : DiagramUnitType.fromEntity(entity);
-        boolean isAtAltitude = !sensorReturn && unitEnd.altitude();
+        boolean isAtAltitude = !sensorReturn && (entity.getAltitude() > 0) && unitType.isAltitudeUnit();
         String heightTerm = sensorReturn
               ? Messages.getString("Ruler.Height")
               : getHeightLabelSuffix(isAtAltitude, entity, unitType);
@@ -1020,91 +994,10 @@ public class RulerDialog extends JDialog implements BoardViewListener {
         return Messages.getString("Ruler.Height");
     }
 
-    /**
-     * One end of a ruler measurement: its hex, the TW height (or altitude) measured there, whether it counts as a Mek
-     * and as a unit at altitude, and the unit whose own line of sight applies when both ends hold one. Without a unit
-     * the ruler measures the hex at that height and adds only the states of units the local player fully sees there.
-     */
-    public record LosEnd(Coords hex, int height, boolean mek, boolean altitude, @Nullable Entity unit) {
-        /** A unit at its hex with its own TW height (or altitude) and class, as the ruler picks it up. */
-        public static LosEnd of(Entity unit) {
-            return of(unit, unit.getPosition());
-        }
-
-        /**
-         * A unit measured at one of the hexes it occupies (a large unit's secondary hex included), as the ruler keeps
-         * its clicked point and takes only the unit's height, class and altitude.
-         */
-        public static LosEnd of(Entity unit, Coords hex) {
-            DiagramUnitType unitType = DiagramUnitType.fromEntity(unit);
-            return new LosEnd(hex, LOSHeightCalculation.twHeightFromEntity(unit), unitType.isMek(),
-                  (unit.getAltitude() > 0) && unitType.isAltitudeUnit(), unit);
-        }
-    }
-
-    /**
-     * One view of the ruler: the to-hit total ({@link TargetRoll#IMPOSSIBLE} without a line of sight) and its detail,
-     * the modifiers or the reason there is no line of sight.
-     */
-    public record LosView(int total, String detail) {
-        static LosView of(ToHitData modifiers) {
-            return new LosView(modifiers.getValue(), modifiers.getDesc());
-        }
-
-        /** Whether this view has a line of sight. */
-        public boolean clear() {
-            return total != TargetRoll.IMPOSSIBLE;
-        }
-
-        /** The ruler's row: "total = modifiers", or the reason there is no line of sight. */
-        public String row() {
-            return clear() ? total + " = " + detail : detail;
-        }
-    }
-
-    /** The ruler's two views: the attacker's view of the target and the target's view back. */
-    public record LosViews(LosView attacker, LosView target) { }
-
-    /**
-     * Computes the ruler's two views between two ends. When both ends hold a unit this is the fire phase line of sight
-     * of those units; otherwise the ends' hexes are measured at their heights, and target states the local player
-     * does not fully see stay hidden.
-     *
-     * @param game        the current game
-     * @param localPlayer the player looking, or null for no visibility filtering
-     * @param attacker    the attacking end
-     * @param target      the target end
-     *
-     * @return the attacker's and the target's view
-     */
-    public static LosViews lineOfSight(Game game, @Nullable Player localPlayer, LosEnd attacker, LosEnd target) {
-        if ((attacker.unit() != null) && (target.unit() != null)) {
-            // Entity-based path: identical to fire phase LOS calculation
-            return new LosViews(LosView.of(LOSModifierCalculator.entityBasedModifiers(game, attacker.unit(),
-                  target.unit())), LosView.of(LOSModifierCalculator.entityBasedModifiers(game, target.unit(),
-                  attacker.unit())));
-        }
-        // Manual path: scenario testing with spinner overrides or no entities
-        return new LosViews(LosView.of(LOSModifierCalculator.fullModifiers(game, attacker.hex(), target.hex(),
-              attacker.height(), target.height(), attacker.mek(), target.mek(),
-              attacker.altitude(), target.altitude(), localPlayer)),
-              LosView.of(LOSModifierCalculator.fullModifiers(game, target.hex(), attacker.hex(),
-                    target.height(), attacker.height(), target.mek(), attacker.mek(),
-                    target.altitude(), attacker.altitude(), localPlayer)));
-    }
-
-    /**
-     * One of the two points as a ruler end. Its unit counts only while the spinner shows that unit's height, and never
-     * for a sensor return, whose hex is measured bare so its real height, cover and states stay hidden.
-     */
-    private LosEnd point(boolean isFirstPoint) {
-        Entity unit = isSpinnerAtEntityHeight(isFirstPoint) ? getSelectedEntity(isFirstPoint) : null;
-        return new LosEnd(isFirstPoint ? start : end, (int) (isFirstPoint ? height1 : height2).getValue(),
-              (isFirstPoint ? unitType1 : unitType2).isMek(), isFirstPoint ? atAltitude1 : atAltitude2,
-              (unit != null) && !isSensorReturn(unit) ? unit : null);
-    }
-
     private void setText() {
+        int h1 = (int) height1.getValue();
+        int h2 = (int) height2.getValue();
+
         // Refresh the title each turn so the LOS rule and board name in the title bar follow the
         // current game state (TacOps option toggles, multi-board games).
         setTitle(getRulerTitle(game));
@@ -1113,22 +1006,54 @@ public class RulerDialog extends JDialog implements BoardViewListener {
             return;
         }
 
-        // Point 1 is the attacker while flip is true (it always is; the Flip button swaps the point data instead)
-        LosEnd attacker = point(flip);
-        LosEnd target = point(!flip);
-        LosViews views = lineOfSight(game, bv.getLocalPlayer(), attacker, target);
+        // Determine if we can use entity-based LOS (same as fire phase)
+        boolean attackerIsFirst = flip;
+        Entity attackerEntity = getSelectedEntity(attackerIsFirst);
+        Entity targetEntity = getSelectedEntity(!attackerIsFirst);
+        boolean spinnerMatch1 = isSpinnerAtEntityHeight(true);
+        boolean spinnerMatch2 = isSpinnerAtEntityHeight(false);
+        boolean useEntityPath = (attackerEntity != null) && (targetEntity != null)
+              && spinnerMatch1 && spinnerMatch2;
+
+        String toHit1;
+        String toHit2;
+        if (useEntityPath) {
+            // Entity-based path: identical to fire phase LOS calculation
+            toHit1 = LOSModifierCalculator.computeEntityBasedModifiers(game, attackerEntity, targetEntity);
+            toHit2 = LOSModifierCalculator.computeEntityBasedModifiers(game, targetEntity, attackerEntity);
+        } else {
+            // Manual path: scenario testing with spinner overrides or no entities
+            boolean isMek1 = unitType1.isMek();
+            boolean isMek2 = unitType2.isMek();
+            Coords attackerPos = flip ? start : end;
+            Coords targetPos = flip ? end : start;
+            int attackerHeight = flip ? h1 : h2;
+            int targetHeight = flip ? h2 : h1;
+            boolean attackerIsMek = flip ? isMek1 : isMek2;
+            boolean targetIsMek = flip ? isMek2 : isMek1;
+            boolean attackerIsAlt = flip ? atAltitude1 : atAltitude2;
+            boolean targetIsAlt = flip ? atAltitude2 : atAltitude1;
+
+            Player localPlayer = bv.getLocalPlayer();
+            toHit1 = LOSModifierCalculator.computeFullModifiers(game, attackerPos, targetPos,
+                  attackerHeight, targetHeight, attackerIsMek, targetIsMek,
+                  attackerIsAlt, targetIsAlt, localPlayer);
+            toHit2 = LOSModifierCalculator.computeFullModifiers(game, targetPos, attackerPos,
+                  targetHeight, attackerHeight, targetIsMek, attackerIsMek,
+                  targetIsAlt, attackerIsAlt, localPlayer);
+        }
 
         tf_start.setText(start.toString());
         tf_end.setText(end.toString());
         rangeLabel.setText("<- " + distance + " ->");
-        tf_los1.setText(views.attacker().row());
-        tf_los2.setText(views.target().row());
+        tf_los1.setText(toHit1);
+        tf_los2.setText(toHit2);
 
         // When using entity-based path, compute the authoritative LOS result for the diagram
         Boolean entityLosBlocked = null;
         boolean entityDeadZone = false;
-        if ((attacker.unit() != null) && (target.unit() != null)) {
-            LosEffects entityLos = LosEffects.calculateLOS(game, attacker.unit(), target.unit());
+        if (useEntityPath) {
+            LosEffects entityLos = LosEffects.calculateLOS(game, attackerEntity, targetEntity);
             entityLosBlocked = !entityLos.canSee();
             entityDeadZone = entityLos.isBlockedByDeadZone();
         }
@@ -1629,11 +1554,6 @@ public class RulerDialog extends JDialog implements BoardViewListener {
 
         bv.setFirstLOS(null);
         bv.drawRuler(start, end, startColor, endColor);
-    }
-
-    /** Closes the ruler as its Close button does: the measurement and its line on the board end. */
-    public void close() {
-        butClose_actionPerformed();
     }
 
     void heightSpinnerChanged() {

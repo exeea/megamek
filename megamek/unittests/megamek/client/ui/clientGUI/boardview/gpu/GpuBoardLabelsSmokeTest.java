@@ -496,7 +496,7 @@ class GpuBoardLabelsSmokeTest {
                 GpuBoardSource.Frame frame = frameOf(null, turn(GamePhase.MOVEMENT, false, TIMBER_WOLF,
                       GpuHudFixtures.status().units()), panels(GpuMovePlan.Snapshot.EMPTY,
                       GpuFireOrders.Snapshot.EMPTY, inPlace(new Contact(TIMBER_WOLF, false, 9, side(2, 6, 72.22),
-                            side(4, 5, 83.33), true, true))), GpuReportLog.Snapshot.EMPTY);
+                            side(4, 5, 83.33)))), GpuReportLog.Snapshot.EMPTY);
                 labels.update(hud, frame, view);
                 Pixmap still = draw(hud, "labels-guides");
                 // Side by side, 3 apart: outgoing right of the line from the shooter to the target, incoming left
@@ -546,19 +546,101 @@ class GpuBoardLabelsSmokeTest {
                 outgoing.dispose();
                 labels.click(hud, "contacts-incoming");
 
-                // Only the preview's six best of each direction: a row off the board's list gets neither.
+                // A row without a shot either way gets neither a guide nor a badge.
                 labels.update(hud, frameOf(null, frame.status(), panels(GpuMovePlan.Snapshot.EMPTY,
-                      GpuFireOrders.Snapshot.EMPTY, inPlace(new Contact(TIMBER_WOLF, false, 9, side(2, 6, 72.22),
-                            side(4, 5, 83.33), false, false))), GpuReportLog.Snapshot.EMPTY), view);
-                Pixmap none = draw(hud, "labels-guides-off-list");
+                      GpuFireOrders.Snapshot.EMPTY, inPlace(new Contact(TIMBER_WOLF, false, 9, Side.NONE,
+                            Side.NONE))), GpuReportLog.Snapshot.EMPTY), view);
+                Pixmap none = draw(hud, "labels-guides-no-shot");
                 assertEquals(0, share(none, 423, 320, 748, GpuBoardLabelsSmokeTest::mint)
                       + share(none, 417, 320, 748, GpuBoardLabelsSmokeTest::coral));
-                assertTrue(all(labels.root, "tn-badge").isEmpty(), "No badge off the list");
+                assertTrue(all(labels.root, "tn-badge").isEmpty(), "No badge without a shot");
                 none.dispose();
             } finally {
                 labels.dispose();
             }
         });
+    }
+
+    /**
+     * The user's decisions of 2026-10-03: every shot is badged, and the guides are the preview's best 50 of each
+     * direction, so a crowded battle stays legible. 60 enemies the Warhammer shoots, which all shoot back.
+     */
+    @Test
+    void everyShotIsBadgedAndTheBestFiftyOfEachDirectionGetGuides() {
+        GpuHudTestStage.run(hud -> {
+            Labels labels = new Labels(hud, null);
+            try {
+                Map<Integer, Rectangle> units = new HashMap<>(Map.of(WARHAMMER, new Rectangle(100, 100, 20, 40)));
+                List<Contact> contacts = new ArrayList<>();
+                for (int index = 0; index < 60; index++) {
+                    units.put(1000 + index, new Rectangle(150 + 25 * (index % 30), 500 + 150 * (index / 30), 20, 40));
+                    contacts.add(new Contact(1000 + index, false, 9, side(2, 6, 72.22), side(4, 5, 83.33)));
+                }
+                GpuFirePreview.Snapshot preview = new GpuFirePreview.Snapshot(true, true, WARHAMMER, false,
+                      new Coords(18, 12), 0, 0, "None", 0, 0, "", false, 60, 60, contacts);
+                labels.update(hud, frameOf(null, turn(GamePhase.MOVEMENT, false, TIMBER_WOLF,
+                      GpuHudFixtures.status().units()), panels(GpuMovePlan.Snapshot.EMPTY,
+                      GpuFireOrders.Snapshot.EMPTY, preview), GpuReportLog.Snapshot.EMPTY), view(false, units));
+                assertEquals(60, all(labels.root, "tn-badge").size(), "Every shot is badged");
+                assertEquals(100, guides(labels), "50 outgoing and 50 incoming guides");
+            } finally {
+                labels.dispose();
+            }
+        });
+    }
+
+    /**
+     * The user's decision of 2026-10-03: a guide leaves its shooter at the side its weapons fire from, outside the
+     * shooter's rectangle: its front at a target ahead, its back at a target in its rear arc, which only rear-mounted
+     * weapons reach. Without a camera the board is north up: the Warhammer, facing north, fires out of its rectangle's
+     * top at the Timber Wolf three hexes north of it, and out of its bottom with the Timber Wolf three hexes south.
+     */
+    @Test
+    void aGuideLeavesItsShooterAtTheSideItsWeaponsFireFrom() throws Exception {
+        BoardScene scene = GpuBoardSpaceHarness.scene();
+        GpuHudTestStage.run(hud -> {
+            Labels labels = new Labels(hud, null);
+            try {
+                Coords wolf = scene.units().stream().filter(unit -> unit.id() == TIMBER_WOLF).findFirst()
+                      .orElseThrow().location().coords();
+                GpuHud.HudView view = view(false, Map.of(WARHAMMER, new Rectangle(400, 200, 40, 100), TIMBER_WOLF,
+                      new Rectangle(400, 700, 40, 100)));
+                // From three hexes south of the Timber Wolf it lies ahead; from three hexes north, behind.
+                for (int toward : new int[] { 3, 0 }) {
+                    Coords from = wolf.translated(toward).translated(toward).translated(toward);
+                    GpuFirePreview.Snapshot preview = new GpuFirePreview.Snapshot(true, true, WARHAMMER, false, from,
+                          scene.boardId(), 0, "None", 0, 0, "", false, 1, 0,
+                          List.of(new Contact(TIMBER_WOLF, false, 3, side(2, 6, 72.22), Side.NONE)));
+                    labels.update(hud, frameOf(scene, turn(GamePhase.MOVEMENT, false, TIMBER_WOLF,
+                          GpuHudFixtures.status().units()), panels(GpuMovePlan.Snapshot.EMPTY,
+                          GpuFireOrders.Snapshot.EMPTY, preview), GpuReportLog.Snapshot.EMPTY), view);
+                    assertEquals(new Vector2(420, toward == 3 ? 303 : 197), start(labels),
+                          toward == 3 ? "out of its front, the top" : "out of its back, the bottom");
+                }
+            } finally {
+                labels.dispose();
+            }
+        });
+    }
+
+    /** The strokes the board labels draw in their #fx layer. */
+    private static List<?> strokes(Labels labels) throws ReflectiveOperationException {
+        Actor strokes = labels.labels.fx();
+        var list = strokes.getClass().getDeclaredField("list");
+        list.setAccessible(true);
+        return (List<?>) list.get(strokes);
+    }
+
+    private static int guides(Labels labels) throws ReflectiveOperationException {
+        return strokes(labels).size();
+    }
+
+    /** Where the first stroke starts. */
+    private static Vector2 start(Labels labels) throws ReflectiveOperationException {
+        Object stroke = strokes(labels).getFirst();
+        var from = stroke.getClass().getDeclaredMethod("from");
+        from.setAccessible(true);
+        return (Vector2) from.invoke(stroke);
     }
 
     /**
@@ -575,8 +657,8 @@ class GpuBoardLabelsSmokeTest {
                       new Rectangle(700, 400, 40, 100), TIMBER_WOLF, new Rectangle(732, 406, 40, 100));
                 GpuFirePreview.Snapshot preview = new GpuFirePreview.Snapshot(true, true, WARHAMMER, false,
                       new Coords(18, 12), 0, 0, "None", 0, 0, "", false, 2, 0, List.of(
-                      new Contact(KING_CRAB, false, 8, side(5, 8, 41.67), Side.NONE, true, false),
-                      new Contact(TIMBER_WOLF, false, 9, side(2, 10, 16.67), Side.NONE, true, false)));
+                      new Contact(KING_CRAB, false, 8, side(5, 8, 41.67), Side.NONE),
+                      new Contact(TIMBER_WOLF, false, 9, side(2, 10, 16.67), Side.NONE)));
                 GpuBoardSource.Frame frame = frameOf(null, turn(GamePhase.MOVEMENT, false, TIMBER_WOLF,
                       GpuHudFixtures.status().units()), panels(GpuMovePlan.Snapshot.EMPTY,
                       GpuFireOrders.Snapshot.EMPTY, preview), GpuReportLog.Snapshot.EMPTY);
@@ -1186,7 +1268,7 @@ class GpuBoardLabelsSmokeTest {
     /** Shot 04's preview with the Archer still a sensor contact, as the fixture's battle status has it. */
     private static GpuFirePreview.Snapshot sensorArcher(GpuFirePreview.Snapshot preview) {
         List<Contact> contacts = preview.contacts().stream().map(contact -> contact.id() == CONTACT
-              ? new Contact(CONTACT, true, contact.distance(), Side.NONE, Side.NONE, false, false) : contact).toList();
+              ? new Contact(CONTACT, true, contact.distance(), Side.NONE, Side.NONE) : contact).toList();
         return new GpuFirePreview.Snapshot(preview.active(), preview.complete(), preview.unitId(),
               preview.fromDestination(), preview.from(), preview.boardId(), preview.facing(), preview.moved(),
               preview.attackerModifier(), preview.tmm(), preview.unavailable(), preview.breachNotPredicted(),

@@ -54,7 +54,7 @@ class GpuHudLayoutSmokeTest {
           new Layout("movement", GamePhase.MOVEMENT, false, false, with("contacts-panel")),
           new Layout("firing", GamePhase.FIRING, false, false, with("weapons-panel", "solution-card")),
           new Layout("firing-extras", GamePhase.FIRING, true, false,
-                with("weapons-panel", "solution-card", "conditions-card", "tactical-chip", "los-card")),
+                with("weapons-panel", "solution-card", "conditions-card", "tactical-chip")),
           new Layout("initiative-extras", GamePhase.INITIATIVE, true, false,
                 with("log-panel", "initiative-card", "conditions-card", "tactical-chip")),
           new Layout("overlays", GamePhase.MOVEMENT, false, true,
@@ -63,7 +63,7 @@ class GpuHudLayoutSmokeTest {
     /** Every slotted component actor, by name. */
     private static final List<String> SLOTTED = List.of("phase-header", "initiative-card", "conditions-card",
           "forces-panel", "unit-card", "record-sheet", "utility-bar", "tuning-button", "tactical-chip", "hint-line",
-          "minimap", "contacts-panel", "weapons-panel", "log-panel", "solution-card", "command-dock", "los-card",
+          "minimap", "contacts-panel", "weapons-panel", "log-panel", "solution-card", "command-dock",
           "chat-button", "chat-panel", "force-overview", "help-dialog", "menu-panel", "players-panel",
           "toast-stack");
 
@@ -189,7 +189,6 @@ class GpuHudLayoutSmokeTest {
             case "tactical-chip" -> new float[] { 153, 32 };
             case "conditions-card" -> new float[] { 260, 140 };
             case "initiative-card" -> new float[] { 560, 290 };
-            case "los-card" -> new float[] { 300, 200 };
             case "record-sheet" -> new float[] { 260, 400 };
             case "help-dialog" -> new float[] { 620, 560 };
             case "toast-stack" -> new float[] { 420, 40 };

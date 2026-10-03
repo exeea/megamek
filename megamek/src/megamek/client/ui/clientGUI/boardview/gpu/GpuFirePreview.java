@@ -55,9 +55,6 @@ final class GpuFirePreview implements AutoCloseable {
      * enemy moves restarts one job after it instead of one per move.
      */
     static final long SETTLE_NANOS = 250_000_000L;
-    /** Rows per direction the board draws (the prototype's six). */
-    static final int BOARD_ROWS = 6;
-
     /**
      * One weapon: {@code value} is the TargetRoll value (n, AUTOMATIC_SUCCESS, AUTOMATIC_FAIL, IMPOSSIBLE; IMPOSSIBLE
      * too when the weapon was not previewed); odds 0-100; {@code detail} is the modifier list, the rules' impossible
@@ -79,8 +76,7 @@ final class GpuFirePreview implements AutoCloseable {
     }
 
     /** One visible enemy. Name, sprite, variant and side come from the battle status unit with the same id. */
-    record Contact(int id, boolean sensor, int distance, Side outgoing, Side incoming, boolean boardOutgoing,
-          boolean boardIncoming) { }
+    record Contact(int id, boolean sensor, int distance, Side outgoing, Side incoming) { }
 
     /**
      * The preview of one plan; {@code unitId} is the previewed own unit and {@code from} is null while inactive.
@@ -264,26 +260,15 @@ final class GpuFirePreview implements AutoCloseable {
 
     /**
      * The prototype's order: rows with an outgoing shot first, sensor contacts last, then the best outgoing value,
-     * distance and id. The first {@link #BOARD_ROWS} rows with an outgoing shot, and separately the first ones with an
-     * incoming shot, are flagged for the board; every row is kept.
+     * distance and id.
      */
     static List<Contact> rank(List<Contact> rows) {
-        List<Contact> sorted = rows.stream()
+        return rows.stream()
               .sorted(Comparator.comparing((Contact row) -> row.outgoing().available() == 0)
               .thenComparing(Contact::sensor)
               .thenComparingInt(row -> row.outgoing().best())
               .thenComparingInt(Contact::distance)
               .thenComparingInt(Contact::id)).toList();
-        List<Contact> result = new ArrayList<>();
-        int outgoing = 0;
-        int incoming = 0;
-        for (Contact row : sorted) {
-            boolean boardOutgoing = (row.outgoing().available() > 0) && (outgoing++ < BOARD_ROWS);
-            boolean boardIncoming = (row.incoming().available() > 0) && (incoming++ < BOARD_ROWS);
-            result.add(new Contact(row.id(), row.sensor(), row.distance(), row.outgoing(), row.incoming(),
-                  boardOutgoing, boardIncoming));
-        }
-        return List.copyOf(result);
     }
 
     private Key key(Player local, Entity unit, @Nullable MovePath plan, Predicate<Entity> visible,
@@ -408,18 +393,18 @@ final class GpuFirePreview implements AutoCloseable {
             if (header.notPreviewed() != null) {
                 for (int id : key.enemyIds()) {
                     rows.add(new Contact(id, false, from.distance(game.getEntity(id).getPosition()), Side.NONE,
-                          Side.NONE, false, false));
+                          Side.NONE));
                 }
             }
             for (FirePreview.Exchange exchange : exchanges) {
                 Entity enemy = game.getEntity(exchange.enemyId());
                 rows.add(new Contact(enemy.getId(), false, from.distance(enemy.getPosition()),
                       side(unit, end.facing(), exchange.outgoing()),
-                      side(enemy, enemy.getFacing(), exchange.incoming()), false, false));
+                      side(enemy, enemy.getFacing(), exchange.incoming())));
             }
             for (int id : key.sensorIds()) {
-                rows.add(new Contact(id, true, from.distance(game.getEntity(id).getPosition()), Side.NONE, Side.NONE,
-                      false, false));
+                rows.add(new Contact(id, true, from.distance(game.getEntity(id).getPosition()), Side.NONE,
+                      Side.NONE));
             }
             List<Contact> ranked = rank(rows);
             int targets = (int) ranked.stream().filter(row -> row.outgoing().available() > 0).count();

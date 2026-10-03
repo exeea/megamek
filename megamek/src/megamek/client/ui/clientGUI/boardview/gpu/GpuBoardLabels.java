@@ -34,6 +34,8 @@ import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.gdx.UiTheme.EdgeBox;
 import megamek.common.board.Coords;
+import megamek.common.compute.Compute;
+import megamek.common.compute.ComputeArc;
 import megamek.common.units.Entity;
 
 /**
@@ -72,6 +74,13 @@ final class GpuBoardLabels implements GpuHud.Component {
     private static final float GUIDE_DASH = 7;
     private static final float GUIDE_SECONDS = 1.1f;
     private static final float PAIR = 3;
+    /**
+     * Guides of each direction at most, the preview's best first, besides the open row's: every shot is badged, but a
+     * crowded battle keeps its guides legible (the user's decision of 2026-10-03).
+     */
+    private static final int GUIDES = 50;
+    /** A guide or trace leaves its shooter this far beyond the shooter's screen rectangle. */
+    private static final float MUZZLE_GAP = 3;
     /** Traces: 1.6 wide, dash 2 5 with round caps; the Tactical View's are 2 wide, dash 5 5 (flat.js:55). */
     private static final float TRACE_WIDTH = 1.6f;
     private static final float TRACE_DASH = 2;
@@ -212,7 +221,7 @@ final class GpuBoardLabels implements GpuHud.Component {
         Set<Integer> badged = new LinkedHashSet<>();
         plan(scene, panels.move(), view, inputs.panelBounds());
         preview(scene, panels.preview(), view, badged);
-        fire(panels.fire(), view, badged);
+        fire(scene, panels.fire(), view, badged);
         badgeActors.entrySet().removeIf(entry -> {
             boolean gone = !badged.contains(entry.getKey());
             if (gone) {
@@ -379,45 +388,58 @@ final class GpuBoardLabels implements GpuHud.Component {
         int open = state.cardUnit();
         boolean outgoing = contacts == null || contacts.outgoingGuides();
         boolean incoming = contacts == null || contacts.incomingGuides();
+        boolean shown = scene != null && preview.from() != null && preview.boardId() == scene.boardId();
         Vector2 source = !preview.fromDestination() ? middle(preview.unitId(), view)
-              : scene != null && preview.from() != null && preview.boardId() == scene.boardId()
-              ? lifted(scene, preview.from(), preview.unitId(), MIDDLE, view) : null;
+              : shown ? lifted(scene, preview.from(), preview.unitId(), MIDDLE, view) : null;
+        // The shooter where it fires from: its own rectangle, or its ghost's at the route's end.
+        Rectangle body = !preview.fromDestination() ? view.unitRects().get(preview.unitId())
+              : shown ? ghost(scene, preview.from(), preview.unitId(), view) : null;
+        int outgoingGuides = 0;
+        int incomingGuides = 0;
         for (GpuFirePreview.Contact contact : preview.contacts()) {
             if (contact.sensor()) {
                 continue;
             }
-            // The six best of each direction (the preview's board flags) and the open row.
+            // Every shot and threat; the open row's stand out.
             boolean opened = contact.id() == open;
             GpuFirePreview.Side out = contact.outgoing();
-            boolean shot = out.available() > 0 && (contact.boardOutgoing() || opened);
-            boolean threat = contact.incoming().available() > 0 && (contact.boardIncoming() || opened);
+            boolean shot = out.available() > 0;
+            boolean threat = contact.incoming().available() > 0;
             if (shot) {
                 badge(contact.id(), view, text(TARGET_NUMBER, shown(out.best())), percent(out.odds()), "",
                       opened ? openBadgeBox : badgeBox, badged);
             }
             Vector2 target = middle(contact.id(), view);
-            boolean drawOut = outgoing && shot;
-            boolean drawIn = incoming && threat;
+            boolean drawOut = outgoing && shot && (opened || outgoingGuides < GUIDES);
+            boolean drawIn = incoming && threat && (opened || incomingGuides < GUIDES);
             if (source == null || target == null || !drawOut && !drawIn) {
                 continue;
             }
             float width = opened ? GUIDE_OPEN_WIDTH : GUIDE_WIDTH;
             // A pair sits side by side: the outgoing guide right of the line from the shooter to the target.
             Vector2 aside = new Vector2(target).sub(source).nor().rotate90(-1).scl(drawOut && drawIn ? PAIR : 0);
+            BoardScene.Unit enemy = unit(scene, contact.id());
+            Coords enemyHex = enemy == null ? null : enemy.location().coords();
             if (drawOut) {
-                strokes.add(new Vector2(source).add(aside), new Vector2(target).add(aside), width, GUIDE_OUT,
-                      GUIDE_DASH, GUIDE_DASH, true, false);
+                outgoingGuides++;
+                Vector2 muzzle = muzzle(scene, body, preview.from(), preview.facing() + out.twist(), enemyHex,
+                      source, view);
+                strokes.add(muzzle.add(aside), new Vector2(target).add(aside), width, GUIDE_OUT, GUIDE_DASH,
+                      GUIDE_DASH, true, false);
             }
             if (drawIn) {
-                strokes.add(new Vector2(target).sub(aside), new Vector2(source).sub(aside), width, GUIDE_IN,
-                      GUIDE_DASH, GUIDE_DASH, true, false);
+                incomingGuides++;
+                Vector2 muzzle = enemy == null ? target : muzzle(scene, view.unitRects().get(contact.id()), enemyHex,
+                      Math.round(enemy.location().facing()) + contact.incoming().twist(), preview.from(), target, view);
+                strokes.add(muzzle.sub(aside), new Vector2(source).sub(aside), width, GUIDE_IN, GUIDE_DASH,
+                      GUIDE_DASH, true, false);
             }
         }
     }
 
     // Weapon declaration: TN badges on other enemies, traces and the heads of the carded units (A.8 H23, H32).
 
-    private void fire(GpuFireOrders.Snapshot fire, GpuHud.HudView view, Set<Integer> badged) {
+    private void fire(BoardScene scene, GpuFireOrders.Snapshot fire, GpuHud.HudView view, Set<Integer> badged) {
         if (!fire.active()) {
             return;
         }
@@ -432,12 +454,17 @@ final class GpuBoardLabels implements GpuHud.Component {
                   reason ? "" : percent(badge.odds()), reason ? badge.reason() : "",
                   reason ? offBadgeBox : badgeBox, badged);
         }
-        Vector2 from = trace(fire.actorId(), view);
+        Vector2 middle = trace(fire.actorId(), view);
+        GpuFireOrders.FrontArc arc = fire.frontArc();
         for (GpuFireOrders.Target target : fire.targets()) {
             Vector2 to = trace(target.id(), view);
-            if (from == null || to == null) {
+            if (middle == null || to == null) {
                 continue;
             }
+            BoardScene.Unit aimed = unit(scene, target.id());
+            // The torso's facing: the front arc's hexside.
+            Vector2 from = arc == null || aimed == null ? middle : muzzle(scene, view.unitRects().get(fire.actorId()),
+                  arc.origin(), arc.facing(), aimed.location().coords(), middle, view);
             if (view.tactical()) {
                 strokes.add(from, to, FLAT_TRACE_WIDTH, target.primary() ? FLAT_TRACE : FLAT_TRACE_SECONDARY,
                       FLAT_TRACE_DASH, FLAT_TRACE_DASH, false, false);
@@ -516,6 +543,72 @@ final class GpuBoardLabels implements GpuHud.Component {
     }
 
     /**
+     * Where a guide or trace leaves its shooter (the user's decision of 2026-10-03): from the shooter's middle, its
+     * icon's centre in the Tactical View, toward the side its weapons fire from, out of its screen rectangle
+     * {@code body} and a gap beyond, so the line never crosses its icon, meeple or model. The side is its front, the
+     * hexside its torso faces ({@code facing}, from {@code hex}), or its back at a target in its rear arc, which only
+     * rear-mounted weapons reach. Without the shooter's rectangle and hex or the target's hex: {@code fallback}.
+     */
+    private Vector2 muzzle(BoardScene scene, Rectangle body, Coords hex, int facing, Coords target, Vector2 fallback,
+          GpuHud.HudView view) {
+        if (body == null || hex == null || target == null || hex.equals(target)) {
+            return new Vector2(fallback);
+        }
+        int side = Math.floorMod(facing, 6);
+        if (ComputeArc.isInArc(hex, side, target, Compute.ARC_REAR)) {
+            side = (side + 3) % 6;
+        }
+        Vector2 middle = view.tactical() ? body.getCenter(new Vector2())
+              : new Vector2(body.x + body.width / 2, body.y + MIDDLE * body.height);
+        Vector2 direction = direction(scene, hex, side);
+        float exit = Float.POSITIVE_INFINITY;
+        if (direction.x != 0) {
+            exit = ((direction.x > 0 ? body.x + body.width : body.x) - middle.x) / direction.x;
+        }
+        if (direction.y != 0) {
+            exit = Math.min(exit, ((direction.y > 0 ? body.y + body.height : body.y) - middle.y) / direction.y);
+        }
+        return middle.mulAdd(direction, Math.max(0, exit) + MUZZLE_GAP);
+    }
+
+    /** The screen direction of a hexside at a hex as the camera shows the board; north up without a camera. */
+    private Vector2 direction(BoardScene scene, Coords hex, int side) {
+        float angle = side * 60 * MathUtils.degreesToRadians;
+        Vector2 flat = new Vector2(MathUtils.sin(angle), MathUtils.cos(angle));
+        BoardScene.Tile tile = scene == null ? null : scene.tile(hex);
+        if (tile != null) {
+            Vector3 centre = new Vector3(BoardGeometry.centerX(hex), BoardGeometry.centerY(hex),
+                  BoardGeometry.surfaceZ(tile));
+            Vector2 from = screen(centre);
+            float radius = BoardGeometry.width() / 2;
+            Vector2 to = screen(centre.cpy().add(flat.x * radius, flat.y * radius, 0));
+            if (from != null && to != null && !from.epsilonEquals(to)) {
+                return to.sub(from).nor();
+            }
+        }
+        return flat;
+    }
+
+    /**
+     * The unit's screen rectangle over another hex, as its ghost there shows: standing on the hex, or centred on it in
+     * the Tactical View; null without the rectangle or the hex on screen.
+     */
+    private Rectangle ghost(BoardScene scene, Coords hex, int unit, GpuHud.HudView view) {
+        Rectangle rect = view.unitRects().get(unit);
+        Vector2 ground = hex(scene, hex);
+        if (rect == null || ground == null) {
+            return null;
+        }
+        return new Rectangle(ground.x - rect.width / 2, view.tactical() ? ground.y - rect.height / 2 : ground.y,
+              rect.width, rect.height);
+    }
+
+    /** The scene's unit with this id, its first part; null where the scene does not draw it. */
+    private static BoardScene.Unit unit(BoardScene scene, int id) {
+        return scene == null ? null : scene.units().stream().filter(unit -> unit.id() == id).findFirst().orElse(null);
+    }
+
+    /**
      * A point over a hex at {@code fraction} of the unit's screen height, as the prototype anchors the unit's pose
      * there (the Tactical View lifts it like a head); null off the board or behind the camera.
      */
@@ -531,11 +624,16 @@ final class GpuBoardLabels implements GpuHud.Component {
     /** A hex's visible surface, water included, in this component's units; null without a camera or behind it. */
     private Vector2 hex(BoardScene scene, Coords coords) {
         BoardScene.Tile tile = scene == null ? null : scene.tile(coords);
-        if (camera == null || tile == null || root.getWidth() <= 0) {
+        return tile == null ? null : screen(new Vector3(BoardGeometry.centerX(coords), BoardGeometry.centerY(coords),
+              BoardGeometry.surfaceZ(tile)));
+    }
+
+    /** A world point in this component's units; null without a camera or behind it. */
+    private Vector2 screen(Vector3 world) {
+        if (camera == null || root.getWidth() <= 0) {
             return null;
         }
-        Vector2 point = GpuNameplates.project(camera.camera, new Vector3(BoardGeometry.centerX(coords),
-              BoardGeometry.centerY(coords), BoardGeometry.surfaceZ(tile)));
+        Vector2 point = GpuNameplates.project(camera.camera, world);
         return point == null ? null : point.scl(root.getWidth() / camera.camera.viewportWidth,
               root.getHeight() / camera.camera.viewportHeight);
     }

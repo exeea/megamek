@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
+import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
@@ -75,6 +76,8 @@ final class GpuTuningPanel implements GpuHud.Component {
     private Slider.SliderStyle sliders;
     private GpuHud.Metrics sized;
     private boolean narrowShown;
+    /** The frame rate the header shows. */
+    private int fpsShown = -1;
 
     /**
      * {@code tuning} is the model the board view reads, built with the source its "Planetary conditions…" button uses;
@@ -149,7 +152,18 @@ final class GpuTuningPanel implements GpuHud.Component {
         frame.setTouchable(Touchable.enabled);
         UiButton close = ui.closeButton(() -> state.dialog = GpuHudState.Dialog.NONE);
         close.setName("tuning-close");
-        frame.add(ui.header(text("GpuBoard.hud.tuning.title"), null, close)).growX().row();
+        Table header = ui.header(text("GpuBoard.hud.tuning.title"), "", close);
+        // The frame rate beside the title, in the count's smaller type (the user's decision of 2026-10-03).
+        Label fps = header.findActor(UiKit.HEADER_COUNT);
+        fps.setName("tuning-fps");
+        shows.add(() -> {
+            int rate = Gdx.graphics.getFramesPerSecond();
+            if (rate != fpsShown) {
+                fpsShown = rate;
+                fps.setText(text("GpuBoard.hud.tuning.fps", String.valueOf(rate)));
+            }
+        });
+        frame.add(header).growX().row();
         UiKit.Segmented tabs = ui.segmented("hud-tab", false, text("GpuBoard.hud.tuning.board"),
               text("GpuBoard.hud.tuning.atmosphere"), text("GpuBoard.hud.tuning.terrain"),
               text("GpuBoard.hud.tuning.camera"));

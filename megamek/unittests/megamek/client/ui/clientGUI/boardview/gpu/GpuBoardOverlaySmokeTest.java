@@ -21,6 +21,7 @@ import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
@@ -206,6 +207,39 @@ class GpuBoardOverlaySmokeTest {
                       hexInEnvelope, flatBare, flat, solidBare, solid)) {
                     image.dispose();
                 }
+            } finally {
+                overlay.dispose();
+                board.dispose();
+            }
+        });
+    }
+
+    /**
+     * A step's face lies back over the hex below it beside their edge, where that hex's own top gives way. The
+     * envelope's border along the step lies on that face, not under it at the lower hex's level, where the terrain hid
+     * it (the user's report of 2026-10-03). Probed at the middle of the border's side, seen from the step's foot.
+     */
+    @Test
+    void theEnvelopeBorderLiesOnTheFaceOfAStep() throws Exception {
+        BoardScene scene = GpuBoardSpaceHarness.scene();
+        GpuHudTestStage.run(hud -> {
+            GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
+            GpuBoardOverlay overlay = new GpuBoardOverlay();
+            try {
+                board.units = false;
+                Vector3 face = stepFace(scene);
+                Coords foot = BoardGeometry.tile(scene, face.x, face.y).coords();
+                frame(board, false, foot, 118, 960, 600);
+                GpuBattleStatus.Snapshot moving = GpuHudFixtures.status();
+                GpuHudData envelope = panels(move(ATLAS, List.of(), List.of(), List.of(),
+                      Map.of(foot, GpuMovePlan.Band.WALK), true), GpuFireOrders.Snapshot.EMPTY);
+                Pixmap bare = draw(hud, board, overlay, scene, moving, GpuHudData.EMPTY, true, null, "step-bare");
+                Pixmap bordered = draw(hud, board, overlay, scene, moving, envelope, true, null, "step-border");
+                Vector2 probe = board.screen(face.cpy().add(0, 0, .035f * RADIUS));
+                float shown = difference(bare, bordered, probe);
+                bare.dispose();
+                bordered.dispose();
+                assertTrue(shown > 20, "The border shows on the step's face over " + foot + ": " + shown);
             } finally {
                 overlay.dispose();
                 board.dispose();
@@ -546,6 +580,37 @@ class GpuBoardOverlaySmokeTest {
     /** A hex's centre {@code radii} hex radii above its level, where the overlay lifts its marks. */
     private static Vector3 lifted(BoardScene scene, Coords coords, float radii) {
         return ground(scene, coords).add(0, 0, radii * RADIUS);
+    }
+
+    /**
+     * The middle of the north side of a hex whose north neighbour lies higher, just inside the edge as the overlay
+     * draws a border, where the step's face lies back over the hex well above its own level (BoardGeometry
+     * stepsBetweenTops); its height is the drawn ground a vertical ray meets there. Hexes with features, which could
+     * hide the side, and water are passed over.
+     */
+    private static Vector3 stepFace(BoardScene scene) {
+        for (BoardScene.Tile tile : scene.tiles()) {
+            Coords coords = tile.coords();
+            BoardScene.Tile upper = scene.tile(coords.translated(0));
+            if (coords.getX() < 2 || coords.getX() > scene.width() - 3 || coords.getY() < 3
+                  || coords.getY() > scene.height() - 3 || upper == null || upper.elevation() <= tile.elevation()
+                  || tile.liquid().present() || !tile.features().isEmpty() || !upper.features().isEmpty()) {
+                continue;
+            }
+            Vector3 centre = BoardGeometry.center(coords, 0);
+            Vector3 side = BoardGeometry.inset(BoardGeometry.corner(coords, 0, 1), centre, .03f).cpy()
+                  .lerp(BoardGeometry.inset(BoardGeometry.corner(coords, 0, 2), centre, .03f), .5f);
+            float high = 100 * BoardGeometry.level();
+            BoardGeometry.Hit hit = BoardGeometry.hit(scene, new Ray(new Vector3(side.x, side.y, high),
+                  new Vector3(0, 0, -1)));
+            if (hit != null) {
+                side.z = high - (float) Math.sqrt(hit.distance());
+                if (side.z > BoardGeometry.groundZ(tile) + .2f * BoardGeometry.level()) {
+                    return side;
+                }
+            }
+        }
+        throw new AssertionError("The fixture board has no step whose face lies over the hex below it");
     }
 
     /** The middle of a hex side whose neighbour lies lower, away from the given hexes and the fixture's units. */

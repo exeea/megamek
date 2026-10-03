@@ -84,12 +84,19 @@ final class GpuBoardOverlay implements Disposable {
     private static final float GHOST_OPACITY = .75f;
     /** The Tactical View's ghost is the unit's icon at half strength (rebuild plan A.7 G4). */
     private static final float GHOST_ICON_OPACITY = .5f;
+    /** The marks the board hides show at this opacity (rimshaderv1's occluded selection outlines). */
+    private static final float HIDDEN_OPACITY = .5f;
 
     private final ModelBatch batch = new ModelBatch((camera, renderables) -> { });
     private final BoardSurface.Cache surfaces = new BoardSurface.Cache();
     /** Light for the 3D ghost: enough ambient to keep it bright, one light from above to show its shape. */
     private final Environment ghostLight = new Environment();
     private ModelInstance overlay;
+    /**
+     * The acting unit's, the focused enemy's and the hovered unit's rings once more, drawn only where the terrain or a
+     * model hides them, so that a unit behind a building keeps its mark (3D only); null without such a ring.
+     */
+    private ModelInstance hidden;
     private ModelInstance dropEdges;
     private List<BoardScene.Tile> dropTiles;
     private int dropRevision = -1;
@@ -149,7 +156,8 @@ final class GpuBoardOverlay implements Disposable {
         // The source captures a new scene at every refresh; one that shows the same keeps the meshes.
         boolean sameScene = sameDrawing(scene, frame.scene());
         scene = frame.scene();
-        Coords ring = view.tactical() || view.hoveredUnit() != Entity.NONE
+        // The view draws a building floor's column instead of the hex's ring (GpuBattleView.renderHoverRings).
+        Coords ring = view.tactical() || view.hoveredUnit() != Entity.NONE || !Float.isNaN(view.hoverTop())
               || showsEnvelope(panels.move(), preferences.moveEnvelope()) ? null : view.hovered();
         if (sameScene && frame.status() == status && state.presentedUnits() == units
               && panels.move() == move && panels.fire() == fire && panels.physical() == physical
@@ -181,6 +189,10 @@ final class GpuBoardOverlay implements Disposable {
         if (overlay != null) {
             overlay.model.dispose();
             overlay = null;
+        }
+        if (hidden != null) {
+            hidden.model.dispose();
+            hidden = null;
         }
         if (scene == null) {
             return;
@@ -264,6 +276,9 @@ final class GpuBoardOverlay implements Disposable {
         }
         if (overlay != null) {
             batch.render(overlay);
+        }
+        if (hidden != null) {
+            batch.render(hidden);
         }
         Renderable pulsing = pulse.renderable(camera);
         if (pulsing != null) {
@@ -368,6 +383,7 @@ final class GpuBoardOverlay implements Disposable {
     /** The prototype's layers in its drawing order; the batch keeps that order. */
     private ModelInstance build() {
         Sink sink = new Sink(material(tactical));
+        Sink behind = new Sink(hiddenMaterial());
         GamePhase phase = status.phase();
         Map<Integer, GpuBattleStatus.UnitStatus> listed = units.stream()
               .collect(Collectors.toMap(GpuBattleStatus.UnitStatus::id, unit -> unit, (a, b) -> a));
@@ -386,7 +402,7 @@ final class GpuBoardOverlay implements Disposable {
         int focus = glows && eligible(listed.get(focusId), shown.get(focusId), true) ? focusId : Entity.NONE;
         focused = focus;
         if (!tactical) {
-            unitRings(sink, listed, hexes, shown, actor, focus, phase.isMovement());
+            unitRings(sink, behind, listed, hexes, shown, actor, focus, phase.isMovement());
         }
         if (move.active()) {
             if (showsEnvelope(move, envelopeShown)) {
@@ -426,8 +442,9 @@ final class GpuBoardOverlay implements Disposable {
             flatGlow(sink, hexes.get(actor), FLAT_SELECTED);
             flatGlow(sink, hexes.get(focus), FLAT_TARGET);
         } else {
-            hover(sink, hexes, actor);
+            hover(sink, behind, hexes, actor);
         }
+        hidden = behind.end();
         return sink.end();
     }
 
@@ -437,9 +454,13 @@ final class GpuBoardOverlay implements Disposable {
               && (listing.side() == GpuBattleStatus.Side.ENEMY) == enemy;
     }
 
-    /** overlay.js:21-31: contacts, wrecks, the acting and focused glows and the side rings; moved units fade. */
-    private void unitRings(Sink sink, Map<Integer, GpuBattleStatus.UnitStatus> listed, Map<Integer, Set<Coords>> hexes,
-          Map<Integer, BoardScene.Unit> shown, int actor, int focus, boolean movement) {
+    /**
+     * overlay.js:21-31: contacts, wrecks, the acting and focused glows and the side rings; moved units fade. The glows'
+     * rings also go {@code behind}.
+     */
+    private void unitRings(Sink sink, Sink behind, Map<Integer, GpuBattleStatus.UnitStatus> listed,
+          Map<Integer, Set<Coords>> hexes, Map<Integer, BoardScene.Unit> shown, int actor, int focus,
+          boolean movement) {
         for (Map.Entry<Integer, Set<Coords>> entry : hexes.entrySet()) {
             int id = entry.getKey();
             GpuBattleStatus.UnitStatus listing = listed.get(id);
@@ -459,7 +480,7 @@ final class GpuBoardOverlay implements Disposable {
                 for (Coords coords : entry.getValue()) {
                     BoardScene.Tile tile = scene.tile(coords);
                     if (tile != null) {
-                        glow(sink, tile, id == actor ? MINT : CORAL);
+                        glow(sink, behind, tile, id == actor ? MINT : CORAL);
                     }
                 }
             } else {
@@ -470,12 +491,13 @@ final class GpuBoardOverlay implements Disposable {
         }
     }
 
-    /** overlay.js:20: a fill and three rings of rising strength. */
-    private void glow(Sink sink, BoardScene.Tile tile, Color color) {
+    /** overlay.js:20: a fill and three rings of rising strength; the strongest also {@code behind}. */
+    private void glow(Sink sink, Sink behind, BoardScene.Tile tile, Color color) {
         fill(sink, tile, .08f, .025f, alpha(color, .16f));
         ring(sink, tile, .2f, -.03f, .035f, alpha(color, .14f));
         ring(sink, tile, .1f, 0, .04f, alpha(color, .3f));
         ring(sink, tile, .045f, .04f, .05f, alpha(color, 1));
+        ring(behind, tile, .045f, .04f, .05f, alpha(color, 1));
     }
 
     /** flat.js:65: a 3-pixel outline with a 12-pixel blur, the blur drawn as three fading halos. */
@@ -813,14 +835,15 @@ final class GpuBoardOverlay implements Disposable {
 
     /**
      * overlay.js:56-57: a white ring on the hovered hex while no unit is hovered and no envelope is shown (see
-     * {@link #update}), a bright one on a hovered unit.
+     * {@link #update}), a bright one on a hovered unit, which also goes {@code behind}.
      */
-    private void hover(Sink sink, Map<Integer, Set<Coords>> hexes, int actor) {
+    private void hover(Sink sink, Sink behind, Map<Integer, Set<Coords>> hexes, int actor) {
         if (hovered != null && scene.tile(hovered) != null) {
             ring(sink, scene.tile(hovered), .035f, .05f, .02f, alpha(Color.WHITE, .45f));
         }
         if (hoveredUnit != Entity.NONE && hoveredUnit != actor) {
             rings(sink, hexes.get(hoveredUnit), .06f, .05f, .06f, alpha(Color.WHITE, .85f));
+            rings(behind, hexes.get(hoveredUnit), .06f, .05f, .06f, alpha(Color.WHITE, .85f));
         }
     }
 
@@ -959,10 +982,14 @@ final class GpuBoardOverlay implements Disposable {
 
     /**
      * Sets a point's height to its hex's own surface there, water included, as units stand on it, lifted by
-     * {@code dy} radii. The hex's own surface keeps a ring that reaches past the hex edge at the hex's level.
+     * {@code dy} radii. In the hex's footprint that is the drawn ground, which beside a step can be the step's face
+     * lying back over the hex rather than its top (the user's report of 2026-10-03: the envelope's border lay under
+     * those faces). The hex's own surface keeps a ring that reaches past the hex edge at the hex's level.
      */
     private Vector3 on(BoardScene.Tile tile, Vector3 point, float dy) {
         float ground = tile.frozen() ? BoardGeometry.surfaceZ(tile)
+              : BoardGeometry.contains(tile.coords(), point.x, point.y)
+              ? UnitLandingSupports.surface(scene, point.x, point.y, surfaces)
               : surfaces.get(scene, tile).height(point.x, point.y);
         if (tile.liquid().present()) {
             ground = Math.max(ground, BoardGeometry.waterZ(tile));
@@ -990,11 +1017,22 @@ final class GpuBoardOverlay implements Disposable {
               IntAttribute.createCullFace(GL20.GL_NONE));
     }
 
+    /** {@link #material}'s marks where the terrain or a model hides them: only behind the drawn depth, faintly. */
+    private static Material hiddenMaterial() {
+        return new Material(ColorAttribute.createDiffuse(Color.WHITE),
+              new BlendingAttribute(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA, HIDDEN_OPACITY),
+              new DepthTestAttribute(GL20.GL_GREATER, false), IntAttribute.createCullFace(GL20.GL_NONE));
+    }
+
     @Override
     public void dispose() {
         if (overlay != null) {
             overlay.model.dispose();
             overlay = null;
+        }
+        if (hidden != null) {
+            hidden.model.dispose();
+            hidden = null;
         }
         if (dropEdges != null) {
             dropEdges.model.dispose();

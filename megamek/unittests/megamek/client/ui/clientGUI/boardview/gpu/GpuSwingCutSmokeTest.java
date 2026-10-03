@@ -64,10 +64,10 @@ import org.junit.jupiter.api.Test;
  * The Swing cut (I3) in a scripted battle over the real native window. Through every phase, with each auxiliary
  * window's preference switched on and the client's phase rules run, no Swing window of the client shows over the
  * battle window: the HUD stands for the minimap, the players, the rounds in the air, the force display, the bot
- * commands, the Unit Display and the report, and a Ctrl measurement shows the LOS card while MegaMek's ruler stays
- * hidden. A Swing dialog outside the allowlist is not raised. With the default preferences the minimap keeps the
- * player's choice through the report phases. Back on the classic board every window shows again as its preference
- * says.
+ * commands, the Unit Display and the report. A Ctrl measurement shows MegaMek's ruler, which line of sight stays
+ * (the user's decision of 2026-10-03). A Swing dialog outside the allowlist is not raised. With the default
+ * preferences the minimap keeps the player's choice through the report phases. Back on the classic board every window
+ * shows again as its preference says.
  */
 @Tag("on-demand")
 class GpuSwingCutSmokeTest {
@@ -142,7 +142,7 @@ class GpuSwingCutSmokeTest {
                           phase + ": the HUD's minimap shows");
                 }
 
-                // Every window wanted in every phase, and a measurement: only the native window shows.
+                // Every window wanted in every phase, and a measurement: only the native window and the ruler.
                 onSwing(() -> {
                     SHOWN.forEach(key -> preferences.setValue(key, GUIPreferences.SHOW));
                     return null;
@@ -161,9 +161,8 @@ class GpuSwingCutSmokeTest {
                         return null;
                     });
                     settle();
-                    assertEquals(List.of(), shown(client), phase + ": no Swing window over the native window");
-                    assertTrue(onGl(() -> GpuBoardTestUi.shown(GpuBoardTestUi.stage().getRoot()
-                          .findActor("los-card"))), phase + ": the LOS card shows the measurement");
+                    assertEquals(List.of(client.ruler()), shown(client),
+                          phase + ": no Swing window over the native window but the measurement's ruler");
                     if (phase == GamePhase.MOVEMENT) {
                         onGl(() -> {
                             File directory = new File(System.getProperty("megamek.gpu.screenshots",

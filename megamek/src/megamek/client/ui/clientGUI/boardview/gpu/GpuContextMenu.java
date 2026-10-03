@@ -3,9 +3,11 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static megamek.client.ui.gdx.UiKit.text;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.function.BiConsumer;
 import java.util.function.IntConsumer;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -27,10 +29,12 @@ import megamek.common.units.Entity;
 
 /**
  * Context menus and select lists in one popover (C.1 G12; r1 3.17, r2 8.1, shot 13): the unit menus at the pointer
- * (M2-M4), the hex menu with MegaMek's own map menu under "More actions" (M5, M10), the weapon row and queued attack
- * menus (H36, H37), the dock's More above its button (A.7 G14, H38) and the select lists of select faces (C.3). Items
- * run existing commands only: the HUD's selection rule, the source's locate and centre requests, and the movement,
- * fire and line-of-sight services. Opening a menu never changes orders.
+ * (M2-M4), the hex menu with MegaMek's own map menu in sections (M5, M10), the weapon row and queued attack menus
+ * (H36, H37), the dock's More above its button (A.7 G14, H38) and the select lists of select faces (C.3). A group
+ * opens its submenu beside its item, as a desktop menu does (the user's decision of 2026-10-03): the menus before it
+ * stay open, a press outside them all closes them, and Esc closes the deepest. Items run existing commands only: the
+ * HUD's selection rule, the source's locate and centre requests, and the movement, fire and line-of-sight services.
+ * Opening a menu never changes orders.
  */
 final class GpuContextMenu implements GpuHud.Component {
     /** The dock's More opens this far left of its button (app.js pop:more). */
@@ -44,11 +48,13 @@ final class GpuContextMenu implements GpuHud.Component {
     private final IntConsumer select;
     private final Table root = new Table();
     private final UiPopover popover;
+    /** The submenus by depth, from 1, made the first time a menu opens that deep; each lies beside its item. */
+    private final List<UiPopover> submenus = new ArrayList<>();
     private GpuHud.Inputs inputs;
     /** The hex whose menu is open; its terrain line and map menu come with later frames. Null otherwise. */
     private Coords hex;
-    /** The open hex menu's "More actions" item; null while another menu or a group shows. */
-    private UiButton moreActions;
+    /** Whether the open hex menu lists MegaMek's map menu, which a later frame brings. */
+    private boolean mapListed;
     /** The frame parts the open hex menu last showed; a capture publishes new ones. */
     private String shownTooltip;
     private BoardScene.Context shownContext;
@@ -79,15 +85,24 @@ final class GpuContextMenu implements GpuHud.Component {
         this.inputs = inputs;
         if (!popover.isVisible()) {
             closed();
-        } else if (moreActions != null) {
+        } else if (hex != null) {
             showHex();
         }
     }
 
-    /** One Esc step (C.4), and a press outside it: closes the open menu; true when one was open. */
+    /** A press outside it, or another menu: closes the open menu with its submenus; true when one was open. */
     boolean cancel() {
         boolean open = popover.cancel();
         closed();
+        return open;
+    }
+
+    /** One Esc step (C.4): closes the open menu's deepest submenu, or the menu; true when one was open. */
+    boolean back() {
+        boolean open = popover.back();
+        if (!popover.isVisible()) {
+            closed();
+        }
         return open;
     }
 
@@ -95,7 +110,6 @@ final class GpuContextMenu implements GpuHud.Component {
     private void closed() {
         if (hex != null) {
             hex = null;
-            moreActions = null;
             source.inspect(null);
         }
     }
@@ -175,7 +189,7 @@ final class GpuContextMenu implements GpuHud.Component {
         item(list, text("GpuBoard.hud.common.unitRecord"), null, true,
               () -> GpuRecordSheet.showUnit(state, id, acting()));
         item(list, text(CENTER_CAMERA), null, true, () -> source.locateUnit(id));
-        lineOfSight(list, id, unit.position());
+        lineOfSight(list, unit.position());
         int distance = distance(state.presented(acting()), unit);
         show(title(unit), distance < 0 ? text("GpuBoard.hud.context.visualContact")
               : text("GpuBoard.hud.context.visualContactHex", distance), list);
@@ -186,7 +200,7 @@ final class GpuContextMenu implements GpuHud.Component {
         UiMenuList list = new UiMenuList(ui);
         item(list, text(CENTER_CAMERA), null, true, () -> source.locateUnit(unit.id()));
         item(list, text("GpuBoard.hud.context.inspectSensorReturn"), null, true, () -> state.inspected = unit.id());
-        lineOfSight(list, Entity.NONE, unit.position());
+        lineOfSight(list, unit.position());
         show(text("GpuBoard.hud.common.sensorContact"), unit.position() == null
               ? text("GpuBoard.hud.common.unidentified")
               : text("GpuBoard.hud.context.unidentifiedHex", unit.position().getBoardNum()), list);
@@ -199,6 +213,19 @@ final class GpuContextMenu implements GpuHud.Component {
     private void hexMenu(Coords coords) {
         hex = coords;
         source.inspect(coords);
+        shownTooltip = null;
+        shownContext = null;
+        popover.header(text("GpuBoard.hud.context.hex", coords.getBoardNum()), null).content(hexItems());
+        showHex();
+    }
+
+    /**
+     * The open hex menu's items: plan and pin in the local planning turn, centre, line of sight, and MegaMek's map menu
+     * once captured. The map menu's commands are listed in sections rather than behind a menu of menus (the user's
+     * decision of 2026-10-03).
+     */
+    private UiMenuList hexItems() {
+        Coords coords = hex;
         UiMenuList list = new UiMenuList(ui);
         GpuMovePlan.Snapshot move = inputs.frame().panels().move();
         if (GpuHud.planning(inputs)) {
@@ -210,19 +237,36 @@ final class GpuContextMenu implements GpuHud.Component {
         }
         item(list, text("GpuBoard.hud.context.centerHere"), null, true,
               () -> source.command(() -> source.currentView().centerOnHex(coords)));
-        lineOfSight(list, Entity.NONE, coords);
-        String title = text("GpuBoard.hud.context.hex", coords.getBoardNum());
-        String more = text("GpuBoard.hud.context.moreActions");
-        moreActions = list.item(more, null, null, true, false, () -> group(more, title, mapActions(), true));
-        shownTooltip = null;
-        shownContext = null;
-        popover.header(title, null).content(list);
-        showHex();
+        lineOfSight(list, coords);
+        List<BoardScene.Command> map = mapActions();
+        mapListed = !map.isEmpty();
+        sections(list, map);
+        return list;
     }
 
     /**
-     * The open hex menu's subtitle and "More actions" from the newest capture: its tooltip and context, compared by
-     * identity because each capture publishes new ones.
+     * MegaMek's map menu (M10) in the hex menu: each group's commands in a section of their own and the other commands
+     * together, each section after a separator; a group within a section opens as a submenu. A disabled group's
+     * commands cannot run, so it shows none.
+     */
+    private void sections(UiMenuList list, List<BoardScene.Command> commands) {
+        boolean loose = false;
+        for (BoardScene.Command command : commands) {
+            boolean group = !command.children().isEmpty();
+            if (group && !command.enabled()) {
+                continue;
+            }
+            if (group || !loose) {
+                list.separator();
+            }
+            loose = !group;
+            commands(popover, list, group ? command.children() : List.of(command), true);
+        }
+    }
+
+    /**
+     * The open hex menu's subtitle and map menu from the newest capture: its tooltip and context, compared by identity
+     * because each capture publishes new ones. The map menu is listed once it arrives.
      */
     private void showHex() {
         String tooltip = inputs.frame().tooltip();
@@ -230,7 +274,9 @@ final class GpuContextMenu implements GpuHud.Component {
         if (tooltip != shownTooltip || context != shownContext) {
             shownTooltip = tooltip;
             shownContext = context;
-            moreActions.setDisabled(mapActions().isEmpty());
+            if (!mapListed && inputs.frame().scene() != null && !mapActions().isEmpty()) {
+                popover.content(hexItems());
+            }
             BoardScene scene = inputs.frame().scene();
             BoardScene.Tile tile = scene == null ? null : scene.tile(hex);
             popover.header(text("GpuBoard.hud.context.hex", hex.getBoardNum()),
@@ -329,10 +375,10 @@ final class GpuContextMenu implements GpuHud.Component {
             item(list, text("GpuBoard.hud.context.calledShot"), null, true, () -> source.fire().calledShot(eqNum));
         }
         if (aim != null && aim.weapons().contains(eqNum)) {
-            String title = text("GpuBoard.hud.context.aimAtLocation");
             String aimed = aim.location() >= 0 && aim.location() < aim.locations().size()
                   ? aim.locations().get(aim.location()) : null;
-            list.item(title, aimed, null, true, true, () -> aim(row.name(), eqNum, aim));
+            submenu(popover, list, text("GpuBoard.hud.context.aimAtLocation"), aimed, null, true,
+                  (menu, choices) -> aim(choices, eqNum, aim));
         }
         if (row.ammo().size() > 1) {
             for (int index = 0; index < row.ammo().size(); index++) {
@@ -349,11 +395,10 @@ final class GpuContextMenu implements GpuHud.Component {
     }
 
     /**
-     * The aimed shot's choice in place of MegaMek's dialog (R4): the locations of the focus it lists, those it disables
-     * dim and the one aimed at checked, then "Don't aim", in the open popover under the dialog's title.
+     * The aimed shot's choice in place of MegaMek's dialog (R4), in {@code list}: the locations of the focus it lists,
+     * those it disables dim and the one aimed at checked, then "Don't aim".
      */
-    private void aim(String weapon, int eqNum, GpuFireOrders.Aim aim) {
-        UiMenuList list = new UiMenuList(ui);
+    private void aim(UiMenuList list, int eqNum, GpuFireOrders.Aim aim) {
         for (int location = 0; location < aim.locations().size(); location++) {
             int chosen = location;
             item(list, aim.locations().get(location), null, location == aim.location(), aim.enabled().get(location),
@@ -362,7 +407,6 @@ final class GpuContextMenu implements GpuHud.Component {
         list.separator();
         item(list, text("AimedShotDialog.dontAim"), null, aim.location() == Entity.LOC_NONE, true,
               () -> source.fire().aim(eqNum, Entity.LOC_NONE));
-        popover.header(text("FiringDisplay.AimedShotDialog.title"), weapon).content(list);
     }
 
     /**
@@ -421,11 +465,11 @@ final class GpuContextMenu implements GpuHud.Component {
     void more(GpuCommandDock.More more, Actor button) {
         cancel();
         UiMenuList list = new UiMenuList(ui);
-        commands(list, more.items(), false, more.title());
+        commands(popover, list, more.items(), false);
         if (!more.items().isEmpty() && !more.commands().isEmpty()) {
             list.separator();
         }
-        commands(list, more.commands(), false, more.title());
+        commands(popover, list, more.commands(), false);
         popover.header(more.title(), more.subtitle()).content(list);
         popover.showAbove(button, MORE_SHIFT);
     }
@@ -447,35 +491,61 @@ final class GpuContextMenu implements GpuHud.Component {
     }
 
     /**
-     * Commands as items with their detail, or their shortcut ({@code shortcuts}, for MegaMek's map menu, whose
-     * details are tooltips); a group opens its commands in place under its own title.
+     * Commands as items of {@code menu}'s list with their detail, or their shortcut ({@code shortcuts}, for MegaMek's
+     * map menu, whose details are tooltips); a group opens its commands as a submenu beside its item.
      */
-    private void commands(UiMenuList list, List<BoardScene.Command> commands, boolean shortcuts, String parent) {
+    private void commands(UiPopover menu, UiMenuList list, List<BoardScene.Command> commands, boolean shortcuts) {
         for (BoardScene.Command command : commands) {
             String detail = shortcuts ? command.shortcut() : command.detail();
             if (command.children().isEmpty()) {
                 item(list, command.label(), detail, command.selected(), command.enabled(), command.action());
             } else {
-                list.item(command.label(), detail, command.selected(), true, command.enabled(),
-                      () -> group(command.label(), parent, command.children(), shortcuts));
+                submenu(menu, list, command.label(), detail, command.selected(), command.enabled(),
+                      (submenu, children) -> commands(submenu, children, command.children(), shortcuts));
             }
         }
     }
 
-    /** Shows a group's commands in the open popover, the title of the menu it came from as the subtitle. */
-    private void group(String title, String parent, List<BoardScene.Command> commands, boolean shortcuts) {
-        moreActions = null;
-        UiMenuList list = new UiMenuList(ui);
-        commands(list, commands, shortcuts, title);
-        popover.header(title, parent).content(list);
+    /**
+     * An item of {@code menu}'s list that opens a submenu beside it, as a desktop menu does: {@code fill} fills the
+     * submenu's list, {@code menu} stays open, and a submenu it opened before closes.
+     */
+    private void submenu(UiPopover menu, UiMenuList list, String text, String detail, Boolean checked,
+          boolean enabled, BiConsumer<UiPopover, UiMenuList> fill) {
+        UiButton[] item = new UiButton[1];
+        item[0] = list.item(text, detail, checked, true, enabled, () -> {
+            UiPopover submenu = level(depth(menu) + 1);
+            UiMenuList children = new UiMenuList(ui);
+            fill.accept(submenu, children);
+            submenu.header(null, null).content(children);
+            menu.cascade(submenu, item[0]);
+        });
     }
 
-    /** "Line of sight from {acting}" (M8), answered by a toast; never from outside the board or into its own hexes. */
-    private void lineOfSight(UiMenuList list, int targetId, Coords to) {
+    /** The submenu popover {@code depth} levels below the menu, from 1, made the first time a menu opens that deep. */
+    private UiPopover level(int depth) {
+        while (submenus.size() < depth) {
+            UiPopover submenu = new UiPopover(ui);
+            submenu.setName("context-submenu-" + (submenus.size() + 1));
+            root.addActor(submenu);
+            submenus.add(submenu);
+        }
+        return submenus.get(depth - 1);
+    }
+
+    private int depth(UiPopover menu) {
+        return menu == popover ? 0 : submenus.indexOf(menu) + 1;
+    }
+
+    /**
+     * "Line of sight from {acting}" (M8), which MegaMek's ruler measures and shows; never from outside the board or
+     * into its own hexes.
+     */
+    private void lineOfSight(UiMenuList list, Coords to) {
         UnitStatus acting = state.presented(acting());
         if (acting != null && acting.position() != null && to != null && !occupies(acting, to)) {
             item(list, text("GpuBoard.hud.context.lineOfSight", name(acting)), null, true,
-                  () -> source.los().lineOfSight(acting.id(), targetId, to));
+                  () -> source.los().lineOfSight(acting.id(), to));
         }
     }
 

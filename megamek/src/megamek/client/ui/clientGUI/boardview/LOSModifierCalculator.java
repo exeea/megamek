@@ -74,14 +74,14 @@ final class LOSModifierCalculator {
      * @param attacker the attacking entity
      * @param target   the target entity
      *
-     * @return the to-hit modifiers, {@link TargetRoll#IMPOSSIBLE} with the reason when there is no line of sight
+     * @return a formatted string of the to-hit modifier total and breakdown
      */
-    static ToHitData entityBasedModifiers(Game game, Entity attacker, Entity target) {
+    static String computeEntityBasedModifiers(Game game, Entity attacker, Entity target) {
         LosEffects losEffects = LosEffects.calculateLOS(game, attacker, target);
         ToHitData thd = losEffects.losModifiers(game);
 
         if (thd.getValue() == TargetRoll.IMPOSSIBLE) {
-            return thd;
+            return thd.getDesc();
         }
 
         // Attacker hex terrain modifiers
@@ -107,7 +107,13 @@ final class LOSModifierCalculator {
         // rather than picking the first entity at the hex (which may be wrong in multi-unit hexes)
         int hexDistance = attacker.getPosition().distance(target.getPosition());
         addKnownTargetEntityStateModifiers(thd, losEffects, target, hexDistance);
-        return thd;
+
+        String result = "";
+        if (thd.getValue() != TargetRoll.IMPOSSIBLE) {
+            result = thd.getValue() + " = ";
+        }
+        result += thd.getDesc();
+        return result;
     }
 
     /**
@@ -146,25 +152,10 @@ final class LOSModifierCalculator {
 
     /**
      * Computes the combined to-hit modifiers for a hypothetical attack, with altitude unit support and double-blind
-     * visibility filtering, as the ruler's row (see {@link #fullModifiers}).
-     *
-     * @return a formatted string of the to-hit modifier total and breakdown
-     */
-    static String computeFullModifiers(Game game, Coords attackerPos, Coords targetPos,
-          int attackerHeight, int targetHeight, boolean attackerIsMek, boolean targetIsMek,
-          boolean attackerIsAltitude, boolean targetIsAltitude, @Nullable Player localPlayer) {
-        return RulerDialog.LosView.of(fullModifiers(game, attackerPos, targetPos, attackerHeight, targetHeight,
-              attackerIsMek, targetIsMek, attackerIsAltitude, targetIsAltitude, localPlayer)).row();
-    }
-
-    /**
-     * Computes the combined to-hit modifiers for a hypothetical attack, with altitude unit support and double-blind
      * visibility filtering. When {@code localPlayer} is non-null, enemy entity state (prone, immobile, hull-down,
      * stuck) is only revealed for units the local player has fully seen.
-     *
-     * @return the to-hit modifiers, {@link TargetRoll#IMPOSSIBLE} with the reason when there is no line of sight
      */
-    static ToHitData fullModifiers(Game game, Coords attackerPos, Coords targetPos,
+    static String computeFullModifiers(Game game, Coords attackerPos, Coords targetPos,
           int attackerHeight, int targetHeight, boolean attackerIsMek, boolean targetIsMek,
           boolean attackerIsAltitude, boolean targetIsAltitude, @Nullable Player localPlayer) {
         // LosEffects needs the physical (non-hull-down) heights to correctly detect partial
@@ -187,7 +178,7 @@ final class LOSModifierCalculator {
 
         // If LOS is blocked, no point adding terrain modifiers
         if (thd.getValue() == TargetRoll.IMPOSSIBLE) {
-            return thd;
+            return thd.getDesc();
         }
 
         // Attacker hex terrain modifiers (matching Compute.getAttackerTerrainModifier)
@@ -211,7 +202,13 @@ final class LOSModifierCalculator {
         // entities on the board at the target hex (filtered by double-blind visibility)
         int hexDistance = attackerPos.distance(targetPos);
         addTargetEntityStateModifiers(thd, losEffects, game, targetPos, hexDistance, localPlayer);
-        return thd;
+
+        String result = "";
+        if (thd.getValue() != TargetRoll.IMPOSSIBLE) {
+            result = thd.getValue() + " = ";
+        }
+        result += thd.getDesc();
+        return result;
     }
 
     /**

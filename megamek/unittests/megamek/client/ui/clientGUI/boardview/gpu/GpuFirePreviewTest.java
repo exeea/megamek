@@ -289,15 +289,15 @@ class GpuFirePreviewTest {
         assertEquals("[3 d7 out twist 0 turret false 4/6 best 5 83% [Medium Laser@LA=9, Medium Laser@RA=9, LRM 20@LT=5,"
               + " LRM 20@RT=5, Medium Laser (R)@CT=x, Medium Laser (R)@CT=x]"
               + " in twist 0 turret true 3/4 best 6 72% [Machine Gun@FR=f, SRM 4@TU=8, SRM 4@TU=8, Large Laser@TU=6]"
-              + " board true/true,"
+              + ","
               + " 2 d6 out twist 0 turret false 4/6 best 6 72% [Medium Laser@LA=7, Medium Laser@RA=7, LRM 20@LT=6,"
               + " LRM 20@RT=6, Medium Laser (R)@CT=x, Medium Laser (R)@CT=x]"
               + " in twist 0 turret false 5/7 best 5 83% [Medium Laser@LA=6, Medium Laser@RA=6, LRM 20@LT=5,"
-              + " SRM 6@LT=6, AC/20@RT=6, Medium Laser (R)@CT=x, Medium Laser (R)@CT=x] board true/true]", rows(walk));
+              + " SRM 6@LT=6, AC/20@RT=6, Medium Laser (R)@CT=x, Medium Laser (R)@CT=x]]", rows(walk));
     }
 
     @Test
-    void moreThanSixTargetsCapTheBoardRowsAndKeepEveryRow() throws Exception {
+    void moreThanSixTargetsAreAllPreviewed() throws Exception {
         for (int id = 4; id <= 9; id++) {
             unit("Bulldog Medium Tank.blk", id, 1, new Coords(id, 6), 3);
         }
@@ -307,7 +307,6 @@ class GpuFirePreviewTest {
 
         assertEquals(8, standing.contacts().size());
         assertEquals(8, standing.targets());
-        assertEquals(6, standing.contacts().stream().filter(GpuFirePreview.Contact::boardOutgoing).count());
     }
 
     @Test
@@ -388,7 +387,7 @@ class GpuFirePreviewTest {
     }
 
     @Test
-    void rankFlagsTheSixBestOfEachDirectionAndKeepsEveryRow() {
+    void rankPutsShotsFirstAndSensorContactsLastAndKeepsEveryRow() {
         List<GpuFirePreview.Contact> rows = new ArrayList<>();
         rows.add(contact(100, true, 3, GpuFirePreview.Side.NONE, GpuFirePreview.Side.NONE));
         for (int id = 1; id <= 8; id++) {
@@ -401,10 +400,6 @@ class GpuFirePreviewTest {
         List<GpuFirePreview.Contact> ranked = GpuFirePreview.rank(rows);
 
         assertEquals(List.of(7, 6, 5, 4, 3, 2, 1, 8, 100), ranked.stream().map(GpuFirePreview.Contact::id).toList());
-        assertEquals(List.of(true, true, true, true, true, true, false, false, false),
-              ranked.stream().map(GpuFirePreview.Contact::boardOutgoing).toList());
-        assertEquals(List.of(true, true, true, true, true, true, false, false, false),
-              ranked.stream().map(GpuFirePreview.Contact::boardIncoming).toList());
     }
 
     @Test
@@ -485,8 +480,8 @@ class GpuFirePreviewTest {
     private static String rows(GpuFirePreview.Snapshot snapshot) {
         List<String> result = new ArrayList<>();
         for (GpuFirePreview.Contact row : snapshot.contacts()) {
-            result.add(row.id() + " d" + row.distance() + " out " + side(row.outgoing()) + " in " + side(row.incoming())
-                  + " board " + row.boardOutgoing() + "/" + row.boardIncoming());
+            result.add(row.id() + " d" + row.distance() + " out " + side(row.outgoing()) + " in "
+                  + side(row.incoming()));
         }
         return result.toString();
     }
@@ -513,7 +508,7 @@ class GpuFirePreviewTest {
 
     private static GpuFirePreview.Contact contact(int id, boolean sensor, int distance, GpuFirePreview.Side outgoing,
           GpuFirePreview.Side incoming) {
-        return new GpuFirePreview.Contact(id, sensor, distance, outgoing, incoming, false, false);
+        return new GpuFirePreview.Contact(id, sensor, distance, outgoing, incoming);
     }
 
     private MovePath plan(MoveStepType... steps) {

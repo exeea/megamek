@@ -100,9 +100,9 @@ final class GpuBoardSkin implements Disposable {
     }
 
     /**
-     * The battle HUD's own drawables: the Tactical View chip's rails, the minimap's close backdrop, the inspected and
-     * the selected weapon rows, the dock's waiting box, target pills and letters, the log's discs, the fire preview's
-     * boxes and toggles, the unit panel's marks and boxes, and the heat hatch.
+     * The battle HUD's own drawables: the Tactical View chip's rails, the inspected and the selected weapon rows, the
+     * dock's waiting box, target pills and letters, the log's discs, the fire preview's boxes and toggles, the unit
+     * panel's marks and boxes, and the heat hatch.
      */
     private void battleDrawables() {
         Texture white = skin.get("white", Texture.class);
@@ -110,8 +110,6 @@ final class GpuBoardSkin implements Disposable {
         HudFrame rails = pad(new HudFrame(white, rgba(22, 30, 30, .92f), RAIL, null, 0, null), 8, 8);
         rails.setLeftWidth(14);
         theme.add("panel-rails", rails, Drawable.class);
-        // The minimap's close button lies on the map: the panel's fill under it, so it reads over any hexes.
-        theme.box("minimap-close", UiTheme.PANEL, null, 0, 3, null, 0, 0, 30).setMinWidth(30);
         // The inspected enemy row (.row.insp): the row's fill within coral edges; a friendly unit's edges are mint.
         theme.box("row-foe", rgba(255, 255, 255, .015f), CORAL, 1, 3, null, 7, 10, 0);
         theme.box("row-friend", rgba(255, 255, 255, .015f), MINT, 1, 3, null, 7, 10, 0);

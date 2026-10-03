@@ -23,8 +23,8 @@ import megamek.common.enums.GamePhase;
 
 /**
  * Phase header, top left: round, phase ring, phase name, who line and the movement activation ribbon (C.1 G1), and the
- * playback speeds at the round line's right, one pill of sections from 0.5x to Instant, for every phase and turn (the
- * user's decisions of 2026-10-03: also to hurry the other players' moves).
+ * playback speeds in the frame's top right corner, one pill of sections from 0.5x to Instant, for every phase and turn
+ * (the user's decisions of 2026-10-03: also to hurry the other players' moves).
  */
 final class GpuPhaseHeader implements GpuHud.Component {
     /** The phase name's size (#phase .name), and at W <= 1350. */
@@ -44,12 +44,16 @@ final class GpuPhaseHeader implements GpuHud.Component {
     /** The playback's speeds, Instant last as "I". */
     private static final List<UnitMotion.Speed> SPEEDS = List.of(UnitMotion.Speed.HALF, UnitMotion.Speed.NORMAL,
           UnitMotion.Speed.DOUBLE, UnitMotion.Speed.QUADRUPLE, UnitMotion.Speed.INSTANT);
-    /** The speeds' distance from the frame, and the room the round keeps from them. */
+    /**
+     * The speeds' distance from the frame's top and right edges, in its top right corner above the text's lines (the
+     * user's decision of 2026-10-03), and the room the round keeps from them.
+     */
+    private static final float SPEEDS_TOP = 5;
     private static final float SPEEDS_RIGHT = 6;
     private static final float ROUND_GAP = 8;
     private final Ring ring = new Ring();
     private final UiKit.Segmented speeds;
-    /** The round line: the round at the left, the speeds at the right. */
+    /** The round line, which the speeds keep clear of. */
     private final Table top = new Table();
     /** The round and the line's width the round text was chosen for. */
     private int shownRound = -1;
@@ -66,7 +70,15 @@ final class GpuPhaseHeader implements GpuHud.Component {
     GpuPhaseHeader(GpuHudKit kit, GpuBoardSource source, GpuHudState state) {
         ui = kit.ui;
         this.state = state;
-        root = ui.panel();
+        root = ui.panel(new Table() {
+            @Override
+            public void layout() {
+                super.layout();
+                speeds.setSize(speeds.getPrefWidth(), speeds.getPrefHeight());
+                speeds.setPosition(getWidth() - SPEEDS_RIGHT - speeds.getWidth(),
+                      getHeight() - SPEEDS_TOP - speeds.getHeight());
+            }
+        });
         root.setName("phase-header");
         // #phase padding 12 14, inside the 2-unit rails and the transparent side borders. The texts may run into
         // the right padding, as the prototype's grid column grows into it for a long phase name.
@@ -94,7 +106,6 @@ final class GpuPhaseHeader implements GpuHud.Component {
         round.setName("phase-round");
         round.setEllipsis(true);
         top.add(round).growX().minWidth(0).left();
-        top.add(speeds).right().padRight(SPEEDS_RIGHT);
         text.add(top).height(14).row();
         nameCell = text.add(name).height(24);
         text.row();
@@ -104,6 +115,7 @@ final class GpuPhaseHeader implements GpuHud.Component {
         root.add(text).growX().minWidth(0);
         root.row();
         ribbonCell = root.add((Actor) null).colspan(2).growX().padRight(14);
+        root.addActor(speeds);
     }
 
     @Override

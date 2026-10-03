@@ -442,6 +442,8 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     public void addSprite(Sprite sprite) { addSprites(List.of(sprite)); }
     public void removeSprite(Sprite sprite) { removeSprites(List.of(sprite)); }
     public Set<Sprite> getAllSprites() { return Collections.unmodifiableSet(allSprites); }
+    /** The plotted path's step sprites: its arrows, costs and announcements. */
+    public List<StepSprite> getPathSprites() { return Collections.unmodifiableList(pathSprites); }
     public void addSprites(Collection<? extends Sprite> sprites) {
         allSprites.addAll(sprites);
         for (Sprite sprite : sprites) {

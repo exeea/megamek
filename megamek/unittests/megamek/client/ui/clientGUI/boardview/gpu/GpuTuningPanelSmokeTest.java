@@ -243,6 +243,8 @@ class GpuTuningPanelSmokeTest {
                     }
                     hud.click("tuning-board-tab");
                     hud.capture("tuning-hud-" + size[0] + "x" + size[1]);
+                    String fps = hud.<Label>find("tuning-fps").getText().toString();
+                    assertTrue(fps.matches("\\d+ fps"), "The frame rate beside the title: " + fps + " " + at);
 
                     hud.key(KeyCommandBind.KEY_BINDS);
                     assertSame(GpuHudState.Dialog.HELP, hud.hud.state.dialog, "Help replaces the panel " + at);

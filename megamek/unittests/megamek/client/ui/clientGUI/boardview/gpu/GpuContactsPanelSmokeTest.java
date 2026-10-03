@@ -181,7 +181,7 @@ class GpuContactsPanelSmokeTest {
             assertEquals("Hex 1514 \u00B7 facing N \u00B7 not moved yet", panel.texts("contacts-from").get(3));
             shoot(hud, panel, "contacts-16-chat", "16-chat.jpg");
 
-            // Shot 14: 56 targets; the board shows six of each direction.
+            // Shot 14: 56 targets and 56 threats.
             panel = fresh(hud);
             GpuBattleStatus.Snapshot large = large();
             panel.update(hud, large, shot14());
@@ -481,7 +481,7 @@ class GpuContactsPanelSmokeTest {
               contact(LOCUST, 11, side(0, 0, 7, TargetRoll.IMPOSSIBLE, 0), Side.NONE), sensor(CONTACT, 13)));
     }
 
-    /** Shot 14: 56 enemies in range of the Atlas's run, in the mock's first rows' pattern; the board shows six. */
+    /** Shot 14: 56 enemies in range of the Atlas's run, in the mock's first rows' pattern. */
     private static GpuFirePreview.Snapshot shot14() {
         List<Contact> rows = new ArrayList<>();
         for (int index = 0; index < 56; index++) {
@@ -491,7 +491,7 @@ class GpuContactsPanelSmokeTest {
                   line("AC/20", "RT", best, odds), line("LRM 20", "LT", best, odds), line("SRM 6", "LT", best, odds),
                   line("Medium Laser", "LA", 8, 41.67), line("Medium Laser", "RA", 8, 41.67),
                   blocked("Medium Laser", "CT(R)"), blocked("Medium Laser", "CT(R)")),
-                  side(0, 4 - index % 2, 7, 5 + index % 3, 83.33), index < 6, index < 6));
+                  side(0, 4 - index % 2, 7, 5 + index % 3, 83.33)));
         }
         return new GpuFirePreview.Snapshot(true, true, ATLAS, true, new Coords(16, 10), 0, 0, "Ran", 2, 1, "", false,
               56, 56, rows);
@@ -511,12 +511,11 @@ class GpuContactsPanelSmokeTest {
     }
 
     private static Contact contact(int id, int distance, Side outgoing, Side incoming) {
-        return new Contact(id, false, distance, outgoing, incoming, outgoing.available() > 0,
-              incoming.available() > 0);
+        return new Contact(id, false, distance, outgoing, incoming);
     }
 
     private static Contact sensor(int id, int distance) {
-        return new Contact(id, true, distance, Side.NONE, Side.NONE, false, false);
+        return new Contact(id, true, distance, Side.NONE, Side.NONE);
     }
 
     private static Side side(int twist, int available, int total, int best, double odds, Line... lines) {

@@ -21,7 +21,6 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.InputMultiplexer;
-import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Cursor.SystemCursor;
 import com.badlogic.gdx.graphics.GL20;
@@ -45,7 +44,6 @@ import com.badlogic.gdx.utils.ScreenUtils;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.BoardFocus;
-import megamek.client.ui.clientGUI.boardview.BoardHexText;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.client.ui.gdx.DisplayScale;
 import megamek.client.ui.gdx.UiTheme;
@@ -733,7 +731,7 @@ class GpuBattleView extends ApplicationAdapter {
         // it. In the Tactical View the overlay lies under the icons and the ghost icon over them.
         if (!unitIcons.active()) { overlay.renderGhost(boardCamera.camera, shownUnit); }
         overlay.render(boardCamera.camera);
-        if (!(ui instanceof GpuHud)) { renderMapRings(); }
+        renderHoverRings();
         fireControl.render(boardCamera.camera);
         tactical.render(boardCamera.camera, Gdx.graphics.getDeltaTime(), unitIcons.active());
         hexGrid.render(boardCamera, scene);
@@ -776,33 +774,56 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     /**
-     * The board editor and the map preview have no battle overlay: the hovered hex's outline, or with Ctrl in the
-     * editor the brush's hexes, inset by {@link #HOVER_HEX_INSET} at the height a unit would stand there.
+     * The hover rings the view draws itself, inset by {@link #HOVER_HEX_INSET}: the board editor and the map preview
+     * have no battle overlay, so there the hovered hex's outline, or with Ctrl in the editor the brush's hexes, at the
+     * height a unit would stand there; and in every view a building floor under the pointer as rimshaderv1's column:
+     * its outline half a hex above the floor's level, joined by its corners to a faint outline on the hex.
      */
-    private void renderMapRings() {
-        if (hovered == null || scene.tile(hovered) == null || ui.hit(Gdx.input.getX(), Gdx.input.getY())) {
+    private void renderHoverRings() {
+        float top = hoverTop();
+        if (hovered == null || scene.tile(hovered) == null || ui.hit(Gdx.input.getX(), Gdx.input.getY())
+              || ui instanceof GpuHud && Float.isNaN(top)) {
             return;
         }
-        List<Coords> hexes = source.isEditor() && editorModifiers() == InputEvent.CTRL_DOWN_MASK
-              ? source.editorBrush(hovered, boardGeneration) : List.of(hovered);
         Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
         Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
         lines.setProjectionMatrix(boardCamera.camera.combined);
         lines.begin(ShapeRenderer.ShapeType.Line);
         lines.setColor(Color.WHITE);
-        for (Coords coords : hexes) {
-            if (scene.tile(coords) == null) {
-                continue;
+        if (source.isEditor() && editorModifiers() == InputEvent.CTRL_DOWN_MASK) {
+            for (Coords coords : source.editorBrush(hovered, boardGeneration)) {
+                if (scene.tile(coords) != null) {
+                    ring(coords, BoardTacticalGeometry.floatingZ(scene, coords));
+                }
             }
-            float z = BoardTacticalGeometry.floatingZ(scene, coords);
-            Vector3 center = BoardGeometry.center(coords, 0);
-            for (int edge = 0; edge < 6; edge++) {
-                Vector3 from = BoardGeometry.inset(BoardGeometry.corner(coords, 0, edge), center, HOVER_HEX_INSET);
-                Vector3 to = BoardGeometry.inset(BoardGeometry.corner(coords, 0, edge + 1), center, HOVER_HEX_INSET);
-                lines.line(from.x, from.y, z, to.x, to.y, z);
+        } else {
+            float base = BoardTacticalGeometry.floatingZ(scene, hovered);
+            ring(hovered, Float.isNaN(top) ? base : top);
+            if (!Float.isNaN(top)) {
+                lines.setColor(1, 1, 1, .25f);
+                ring(hovered, base);
+                Vector3 center = BoardGeometry.center(hovered, 0);
+                for (int edge = 0; edge < 6; edge++) {
+                    Vector3 corner = BoardGeometry.inset(BoardGeometry.corner(hovered, 0, edge), center,
+                          HOVER_HEX_INSET);
+                    lines.line(corner.x, corner.y, base, corner.x, corner.y, top);
+                }
             }
         }
         lines.end();
+        Gdx.gl.glDisable(GL20.GL_BLEND);
+    }
+
+    /** A hex's outline, inset by {@link #HOVER_HEX_INSET}, at height {@code z}. */
+    private void ring(Coords coords, float z) {
+        Vector3 center = BoardGeometry.center(coords, 0);
+        for (int edge = 0; edge < 6; edge++) {
+            Vector3 from = BoardGeometry.inset(BoardGeometry.corner(coords, 0, edge), center, HOVER_HEX_INSET);
+            Vector3 to = BoardGeometry.inset(BoardGeometry.corner(coords, 0, edge + 1), center, HOVER_HEX_INSET);
+            lines.line(from.x, from.y, z, to.x, to.y, z);
+        }
     }
 
     /**
@@ -840,7 +861,7 @@ class GpuBattleView extends ApplicationAdapter {
                         Math.abs(head.x - ground.x) + width, Math.abs(head.y - ground.y)));
         }
         return new GpuHud.HudView(boardCamera.tactical(), playbackBusy(), rects, heads, positions, hovered, hoveredUnit,
-              hexPixels);
+              hexPixels, hoverTop());
     }
 
     /**
@@ -1437,9 +1458,29 @@ class GpuBattleView extends ApplicationAdapter {
         hexText.render(annotationBatch, boardCamera, atmosphere.depthTexture(), unitVisibility.depthTexture(), 0);
     }
 
+    /** The camera zoom of {@code notches} of the mouse wheel, on the board and on the minimap. */
+    static float wheelZoom(float notches) {
+        return (float) Math.pow(1.12, notches);
+    }
+
     /** The level floor under the pointer's terrain or object hit, NaN without one. */
     private float hoverFloorZ() {
         return Float.isNaN(hoverZ) ? Float.NaN : MathUtils.floor(hoverZ / BoardGeometry.level() + .0001f) * BoardGeometry.level();
+    }
+
+    /**
+     * The height of the hovered hex's outline on a building floor under the pointer (rimshaderv1's hover column): half
+     * a hex above the floor's level when that is more than a hex above the hex's own ground, else NaN. None in the
+     * Tactical View, whose buildings are flat art.
+     */
+    private float hoverTop() {
+        if (hovered == null || scene == null || scene.tile(hovered) == null || Float.isNaN(hoverZ)
+              || boardCamera.tactical()) {
+            return Float.NaN;
+        }
+        float base = BoardTacticalGeometry.floatingZ(scene, hovered);
+        float top = Math.max(base, hoverFloorZ() + .5f * BoardGeometry.hexScale());
+        return top > base + BoardGeometry.hexScale() ? top : Float.NaN;
     }
 
     private boolean hovers(BoardScene.Unit unit) {
@@ -1697,8 +1738,7 @@ class GpuBattleView extends ApplicationAdapter {
                     return true;
                 }
                 finishElevationScroll();
-                boardCamera.zoomAt((float) Math.pow(1.12, amountY), Gdx.input.getX(),
-                      Gdx.graphics.getHeight() - Gdx.input.getY());
+                boardCamera.zoomAt(wheelZoom(amountY), Gdx.input.getX(), Gdx.graphics.getHeight() - Gdx.input.getY());
                 return true;
             }
             return false;

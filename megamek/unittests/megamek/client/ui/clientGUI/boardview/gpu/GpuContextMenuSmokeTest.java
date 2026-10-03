@@ -154,7 +154,7 @@ class GpuContextMenuSmokeTest {
             verify(menu.source).locateUnit(KING_CRAB);
             menu.menu.open(new Coords(12, 3), KING_CRAB, 784, hud.height() - 193);
             click(hud, menu.item("Line of sight from Atlas"));
-            verify(menu.los).lineOfSight(ATLAS, KING_CRAB, new Coords(12, 3));
+            verify(menu.los).lineOfSight(ATLAS, new Coords(12, 3));
             verify(menu.fire, never()).assign(anyInt(), anyInt());
         });
     }
@@ -229,29 +229,24 @@ class GpuContextMenuSmokeTest {
             hud.draw();
             hud.capture("context-menu-contact").dispose();
             click(hud, menu.item("Line of sight from Atlas"));
-            verify(menu.los).lineOfSight(ATLAS, Entity.NONE, new Coords(9, 3));
+            verify(menu.los).lineOfSight(ATLAS, new Coords(9, 3));
 
-            // M5: in the local planning turn a hex plans or pins; MegaMek's map menu follows under More actions.
+            // M5: in the local planning turn a hex plans or pins; MegaMek's map menu follows once the hex's context
+            // arrives, its commands in sections rather than behind a menu of menus (the user's decision of 2026-10-03).
             verifyNoInteractions(menu.moves);
             menu.menu.open(HEX, Entity.NONE, 700, 600);
             verify(menu.source).inspect(HEX);
             String title = "HEX 1512";
             String subtitle = "Light woods (TF: 50) · Road (TF: 150) · Woods/Jungle elevation: 2 · level 0";
             assertEquals(List.of(title, subtitle, "Plan move here", "Plan and pin as waypoint [Shift+click]",
-                  "Center camera here", "Line of sight from Atlas", "More actions ›" + OFF),
-                  lines(menu.popover));
+                  "Center camera here", "Line of sight from Atlas"), lines(menu.popover));
             menu.update(hud, frame(MOVEMENT, move(GpuMovePlan.Mode.AUTO), context()));
-            assertEquals("More actions ›", lines(menu.popover).get(6), "filled once the hex's context arrives");
+            assertEquals(List.of(title, subtitle, "Plan move here", "Plan and pin as waypoint [Shift+click]",
+                  "Center camera here", "Line of sight from Atlas", "---", "Clear minefield", "---",
+                  "Mark as objective [Ctrl+O]", "✓ Show elevation"), lines(menu.popover),
+                  "the map menu's command, then its group's commands in a section of their own");
             hud.draw();
             hud.capture("context-menu-hex").dispose();
-            click(hud, menu.item("More actions"));
-            assertEquals(List.of("MORE ACTIONS", "Hex 1512", "Clear minefield", "Special hex ›"),
-                  lines(menu.popover), "the old UI's tool and weapon items stay out");
-            click(hud, menu.item("Special hex"));
-            assertEquals(List.of("SPECIAL HEX", "More actions", "Mark as objective [Ctrl+O]", "✓ Show elevation"),
-                  lines(menu.popover));
-            hud.draw();
-            hud.capture("context-menu-hex-group").dispose();
             assertTrue(menu.menu.cancel());
             verify(menu.source).inspect(null);
             menu.menu.open(HEX, Entity.NONE, 700, 600);
@@ -270,8 +265,8 @@ class GpuContextMenuSmokeTest {
             assertEquals("Plan and pin as waypoint [Shift+click]" + OFF, lines(menu.popover).get(3));
             menu.update(hud, frame(status(MOVEMENT, unit -> unit), GpuMovePlan.Snapshot.EMPTY));
             menu.menu.open(HEX, Entity.NONE, 700, 600);
-            assertEquals(List.of(title, subtitle, "Center camera here", "Line of sight from Atlas",
-                  "More actions ›" + OFF), lines(menu.popover));
+            assertEquals(List.of(title, subtitle, "Center camera here", "Line of sight from Atlas"),
+                  lines(menu.popover));
             // No line of sight into the acting unit's own hex.
             menu.menu.open(new Coords(14, 13), Entity.NONE, 700, 600);
             assertFalse(lines(menu.popover).contains("Line of sight from Atlas"));
@@ -357,7 +352,7 @@ class GpuContextMenuSmokeTest {
     }
 
     @Test
-    void aimAtLocationListsTheAimedShotHandlersChoicesInPlace() {
+    void aimAtLocationListsTheAimedShotHandlersChoicesInItsSubmenu() {
         GpuHudTestStage.run(hud -> {
             // R4: the handler aims at the focused King Crab's head and offers every location but the covered legs.
             GpuFireOrders.Aim aim = new GpuFireOrders.Aim(List.of("Head", "Center Torso", "Right Torso",
@@ -369,18 +364,18 @@ class GpuContextMenuSmokeTest {
                   "Assign to B · BattleMaster", "Assign to King Crab", "---", "Show solution and arc",
                   "Next mode [Pulse]", "Previous mode", "Aim at location… › [Head]"), lines(menu.popover));
             click(hud, menu.item("Aim at location…"));
-            assertEquals(List.of("AIMED SHOT", "Medium Laser", "✓ Head", "Center Torso", "Right Torso", "Left Torso",
-                  "Right Arm", "Left Arm", "Right Leg" + OFF, "Left Leg" + OFF, "---", "Don't aim"),
-                  lines(menu.popover));
-            assertTrue(menu.popover.isVisible(), "the choice opens in place");
+            UiPopover locations = menu.root.findActor("context-submenu-1");
+            assertEquals(List.of("✓ Head", "Center Torso", "Right Torso", "Left Torso", "Right Arm", "Left Arm",
+                  "Right Leg" + OFF, "Left Leg" + OFF, "---", "Don't aim"), lines(locations));
+            assertTrue(menu.popover.isVisible(), "the weapon menu stays open beside it");
             hud.draw();
             hud.capture("context-menu-aim").dispose();
-            click(hud, menu.item("Left Arm"));
+            click(hud, find(locations, "Left Arm"));
             verify(menu.fire).aim(LASER, Mek.LOC_LEFT_ARM);
-            assertFalse(menu.popover.isVisible());
+            assertFalse(menu.popover.isVisible() || locations.isVisible(), "a choice closes both");
             menu.menu.weapon(LASER, false, () -> { }, 1400, 600);
             click(hud, menu.item("Aim at location…"));
-            click(hud, menu.item("Don't aim"));
+            click(hud, find(locations, "Don't aim"));
             verify(menu.fire).aim(LASER, Entity.LOC_NONE);
 
             // A weapon that cannot aim, and no offer at all, show no item.
@@ -389,6 +384,59 @@ class GpuContextMenuSmokeTest {
             menu.update(hud, frame(firing(), fire(true)));
             menu.menu.weapon(LASER, false, () -> { }, 1400, 600);
             assertTrue(lines(menu.popover).stream().noneMatch(line -> line.startsWith("Aim at location")));
+        });
+    }
+
+    /**
+     * The user's decision of 2026-10-03: a group opens its submenu beside its item, as a desktop menu does. The menu
+     * stays open; a submenu's own group opens the next level and keeps the chain; another group of the menu replaces
+     * the chain below it; Esc closes the deepest; a press outside closes them all, and so does a choice.
+     */
+    @Test
+    void groupsOpenCascadingSubmenusBesideTheirItems() {
+        GpuHudTestStage.run(hud -> {
+            Menu menu = new Menu(hud).update(hud, frame(MOVEMENT, move(GpuMovePlan.Mode.AUTO)));
+            List<String> ran = new ArrayList<>();
+            UiButton button = UiTestStage.place(hud.window, hud.kit.ui.button("hud", "more", null, null), 600, 300);
+            GpuCommandDock.More more = new GpuCommandDock.More("More movement", "Atlas", List.of(
+                  group("Load", command("Load cargo", "", true, ran), group("Deeper",
+                        command("Deepest", "", true, ran))),
+                  group("Unload", command("Unload cargo", "", true, ran))), List.of());
+            menu.menu.more(more, button);
+            UiPopover first = menu.root.findActor("context-submenu-1");
+            click(hud, menu.item("Load"));
+            assertTrue(menu.popover.isVisible() && first.isVisible(), "the menu stays open beside its submenu");
+            assertEquals(List.of("Load cargo", "Deeper ›"), lines(first));
+            Rectangle parent = UiTestStage.bounds(menu.popover);
+            Rectangle child = UiTestStage.bounds(first);
+            Rectangle item = UiTestStage.bounds(menu.item("Load"));
+            assertEquals(parent.x + parent.width - 2, child.x, .01f, "right of the menu, over its side border");
+            assertEquals(item.y + item.height + 8, child.y + child.height, .01f, "its first row level with the item");
+
+            click(hud, find(first, "Deeper"));
+            UiPopover second = menu.root.findActor("context-submenu-2");
+            assertTrue(menu.popover.isVisible() && first.isVisible() && second.isVisible(),
+                  "a submenu's group keeps the chain open");
+            assertEquals(List.of("Deepest"), lines(second));
+            click(hud, menu.item("Unload"));
+            assertFalse(second.isVisible(), "another group of the menu closes the chain below it");
+            assertEquals(List.of("Unload cargo"), lines(first), "and opens its own submenu");
+            assertTrue(menu.menu.back(), "Esc closes the deepest submenu");
+            assertTrue(menu.popover.isVisible() && !first.isVisible());
+            assertSame(UiMenuList.class, hud.stage.getKeyboardFocus().getClass(), "the menu takes the keys back");
+
+            click(hud, menu.item("Load"));
+            click(hud, find(first, "Deeper"));
+            press(hud, 20, 20);
+            assertFalse(menu.popover.isVisible() || first.isVisible() || second.isVisible(),
+                  "a press outside closes them all");
+            menu.menu.more(more, button);
+            click(hud, menu.item("Load"));
+            click(hud, find(first, "Deeper"));
+            click(hud, find(second, "Deepest"));
+            assertEquals(List.of("Deepest"), ran);
+            assertFalse(menu.popover.isVisible() || first.isVisible() || second.isVisible(),
+                  "a choice closes them all");
         });
     }
 
@@ -548,6 +596,11 @@ class GpuContextMenuSmokeTest {
                           () -> { }, "Ctrl+O", null),
                     new BoardScene.Command("elevation", "Show elevation", "", true, false, false, List.of(),
                           () -> { }, "", true)), () -> { }, "", null)));
+    }
+
+    /** A group of MegaMek's commands. */
+    private static BoardScene.Command group(String label, BoardScene.Command... children) {
+        return new BoardScene.Command(label, label, "", true, false, false, List.of(children), () -> { }, "", null);
     }
 
     private static BoardScene.Command command(String label, String detail, boolean enabled, List<String> ran) {

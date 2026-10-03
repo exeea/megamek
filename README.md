@@ -1,7 +1,5 @@
 # MegaMek—TableTop BattleTech on your computer
 
-[Developer documentation](docs/README.md): codebase, rendering, assets and controls.
-
 ## Table of Contents
 
 1. [About](#about)

@@ -3618,19 +3618,11 @@ public class ClientGUI extends AbstractClientGUI
         }
     }
 
-    /** Closes the board's ruler as its Close button does: the measurement and its line on the board end. */
-    public void closeRuler(int boardId) {
+    /** Measures from {@code from} to {@code to} with the board's ruler, which shows (RulerDialog.measure). */
+    public void measureLineOfSight(int boardId, Coords from, Coords to) {
         RulerDialog ruler = rulers.get(boardId);
         if (ruler != null) {
-            ruler.close();
-        }
-    }
-
-    /** Shows the board's ruler with its elevation diagram for this measurement (the GPU view's LOS card asks it). */
-    public void showRulerDiagram(int boardId, Coords from, int fromHeight, Coords to, int toHeight) {
-        RulerDialog ruler = rulers.get(boardId);
-        if (ruler != null) {
-            ruler.showDiagram(from, fromHeight, to, toHeight);
+            ruler.measure(from, to);
         }
     }
 

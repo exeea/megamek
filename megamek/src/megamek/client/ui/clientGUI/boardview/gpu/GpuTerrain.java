@@ -4161,7 +4161,10 @@ final class GpuTerrain implements Disposable {
         environment.set(ColorAttribute.createAmbientLight(lighting.ambient()));
     }
 
-    /** Camera depth retains the cutaway so atmosphere effects do not hide units behind faded surfaces. */
+    /**
+     * Camera depth, the wireframe's: it retains the cutaway so atmosphere effects do not hide units behind faded
+     * surfaces, and leaves out the cosmetic scatter, which the wireframe hides (the user's decision of 2026-10-03).
+     */
     void renderDepth(Camera camera, List<ModelInstance> units, ModelBatch pass) {
         updateDetail(camera);
         renderDepth(camera, units, pass, false);
@@ -4180,7 +4183,7 @@ final class GpuTerrain implements Disposable {
             if (visible) {
                 pass.render(chunk.depthTerrain);
                 if (!flatFeatures) {
-                    if (chunk.scatterVisible) {
+                    if (shadows && chunk.scatterVisible) {
                         chunk.scatter.forEach(pass::render);
                     }
                     pass.render(shadows ? chunk.shadowProps : chunk.solidProps);

@@ -41,7 +41,6 @@ import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
-import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
@@ -577,6 +576,33 @@ class GpuHudInputTest {
     }
 
     /**
+     * rimshaderv1's board: a measurement waiting for its second point (Ctrl for a line of sight, Alt for a distance)
+     * takes a plain left click with its modifier, ahead of the phase's own gestures, and the hint line names it; with
+     * none waiting, a plain click plans again.
+     */
+    @Test
+    void aPlainClickEndsAMeasurementWaitingForItsSecondPoint() {
+        GpuBattleStatus.Snapshot moving = status(3, GamePhase.MOVEMENT, true, FIRST, 1, unit(FIRST, OWN, true, true));
+        for (int pending : new int[] { CTRL_DOWN_MASK, ALT_DOWN_MASK }) {
+            GpuHudData waiting = new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, move(true, List.of()),
+                  GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY,
+                  GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY,
+                  new GpuLosResult.Snapshot(pending), GpuPlayers.Snapshot.EMPTY);
+            update(moving, waiting, null);
+            click(HEX, Entity.NONE, 0);
+            verify(source).click(HEX, false, pending);
+            assertEquals(UiKit.text(pending == CTRL_DOWN_MASK ? "GpuBoard.hud.hint.completeLos"
+                        : "GpuBoard.hud.hint.completeDistance"),
+                  GpuHintLine.items(new GpuHud.Inputs(frame(moving, waiting), GpuHud.HudView.EMPTY, null,
+                        preferences(), GpuHud.Metrics.of(1920, 1080), List.of())).get(1));
+        }
+        verifyNoInteractions(moves);
+        update(moving, panels(move(true, List.of()), GpuPhysicalOptions.Snapshot.EMPTY), null);
+        click(HEX, Entity.NONE, 0);
+        verify(moves).planTo(HEX, 0, false);
+    }
+
+    /**
      * Where the window has no room for the hint line (W <= 1350), a pick shows in its chip on the dock: its
      * instructions, the picked hexes once there are some, and its Done and Cancel buttons, which end the pick with and
      * without the order. A panel of the middle area (the LOS card) ends above the chip, as above the dock. In a wider
@@ -606,18 +632,6 @@ class GpuHudInputTest {
         verify(players).endPick(true);
         hud.stage.getRoot().findActor("pick-cancel").fire(new ChangeListener.ChangeEvent());
         verify(players).endPick(false);
-        GpuLosResult.Card card = new GpuLosResult.Card(1, HEX, FIRST, 2, false, new Coords(9, 9), FOE, 1, false, 5,
-              GpuLosResultTest.seen(2, "1 (1 intervening light woods)"), GpuLosResultTest.seen(1, ""));
-        update(moving, new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, move(true, List.of(STEP)),
-              GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY,
-              GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY,
-              new GpuLosResult.Snapshot(card), picking.players()), null);
-        Actor los = hud.stage.getRoot().findActor("los-card");
-        Vector2 losBottom = los.localToStageCoordinates(new Vector2());
-        Vector2 chipTop = chip.localToStageCoordinates(new Vector2(0, chip.getHeight()));
-        assertTrue(shown(los) && losBottom.y >= chipTop.y, "the LOS card ends above the chip: " + losBottom + ", "
-              + chipTop);
-
         GpuPlayers.Pick started = new GpuPlayers.Pick(pick.instructions(), "");
         update(moving, new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, move(true, List.of(STEP)),
               GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY,

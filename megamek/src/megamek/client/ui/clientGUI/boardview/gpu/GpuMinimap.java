@@ -20,7 +20,6 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
-import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Stack;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
@@ -35,7 +34,8 @@ import megamek.logging.MMLogger;
  * Minimap under the utilities (C.1 G4): the board in the average colours of its tileset art, the presented units, the
  * planned route and the ground the camera shows. The map fills the panel inside its rails, with the close button over
  * its top-right corner (the user's decision of 2026-10-02: no caption, no north mark). A left press or drag on it
- * centres the camera there, a middle drag orbits the camera as the board's does, and neither changes an order.
+ * centres the camera there, a middle drag orbits the camera and the wheel zooms it as the board's do, about the view's
+ * centre (the user's decision of 2026-10-03), and none changes an order.
  */
 final class GpuMinimap implements GpuHud.Component {
     private static final MMLogger LOGGER = MMLogger.create(GpuMinimap.class);
@@ -104,11 +104,10 @@ final class GpuMinimap implements GpuHud.Component {
         close = ui.closeButton(() -> GpuUtilityBar.runMinimap(inputs));
         close.setName("minimap-close");
         canvas = new Canvas();
-        Container<UiButton> backdrop = new Container<>(close).fill();
-        backdrop.setBackground(ui.skin.getDrawable("minimap-close"));
-        // Presses beside the close button reach the map under it: a Table takes presses on its children only.
+        // Presses beside the close button reach the map under it: a Table takes presses on its children only. The
+        // button lies straight on the panel's corner, as every panel's does (the user's decision of 2026-10-03).
         Table corner = new Table();
-        corner.top().right().add(backdrop).size(CLOSE_SIZE).pad(CLOSE_INSET);
+        corner.top().right().add(close).size(CLOSE_SIZE).pad(CLOSE_INSET);
         root.add(new Stack(canvas, corner)).growX();
         contact = ui.label("?", "hud-name", CONTACT_MINIMUM, UiTheme.BLIP);
         contactScale = contact.getFontScaleX() / CONTACT_MINIMUM;
@@ -266,7 +265,15 @@ final class GpuMinimap implements GpuHud.Component {
                     lastX = x;
                     lastY = y;
                 }
+
+                @Override
+                public boolean scrolled(InputEvent event, float x, float y, float amountX, float amountY) {
+                    // The board's step, about the view's centre: the pointer lies over the map, not over the board.
+                    camera.zoom(GpuBattleView.wheelZoom(amountY));
+                    return true;
+                }
             });
+            UiKit.wheelWhileHovered(this);
         }
 
         void height(float value) {

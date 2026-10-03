@@ -14,8 +14,8 @@ import org.lwjgl.opengl.GL11;
 
 /**
  * The board without its units as green lines on a dark ground: the camera depth pass's own triangles and levels of
- * detail, first as a hidden-line depth fill, then in line mode. Units show thermal signatures. Water surfaces, roads,
- * decals, ground cover and cut-away buildings are outside that pass and draw no lines.
+ * detail, first as a hidden-line depth fill, then in line mode. Units show thermal signatures. The cosmetic scatter,
+ * water surfaces, roads, decals, ground cover and cut-away buildings are outside that pass and draw no lines.
  */
 final class GpuWireframe implements Disposable {
     final GpuThermalUnits units = new GpuThermalUnits();

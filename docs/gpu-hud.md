@@ -93,7 +93,7 @@ actor, calls MegaMek's own code and republishes the frame.
 | `GpuFirePreview` | `panels.preview()`: the movement fire preview | none (time-sliced jobs, 12.4) |
 | `GpuChat` | `panels.chat()` | `send` |
 | `GpuToasts` | `panels.toasts()` | none; `ClientGUI.addToast` feeds it through `GpuBoardWindow.toast` |
-| `GpuLosResult` | `panels.los()`: the open LOS card | `lineOfSight`, `open`, `measure`, `closeCard` |
+| `GpuLosResult` | `panels.los()`: the measurement waiting for its second point | `lineOfSight` (ruler measures from the unit) |
 | `GpuPlayers` | `panels.players()` | `setPanelOpen` |
 | `GpuReportLog` | `reports` | none |
 
@@ -258,7 +258,8 @@ the held nameplate key, the log's open state and the playback history. It is pre
    markers and terrain along the pointer's ray. In the Tactical View a unit icon wins over the ground, and a hex
    holding a unit picks that unit. The release calls `GpuHud.boardClick` with the modifiers held at the press:
    - right: the context menu at the pointer; opening it never changes orders;
-   - left with Ctrl or Alt: MegaMek's measurement, whose result opens the LOS card;
+   - left with Ctrl or Alt: MegaMek's measurement, which its Swing ruler shows over the native window; while one
+     waits for its second point, a plain left click ends it;
    - left: by phase, below.
 4. The wheel zooms at the pointer over the board, and scrolls a panel under the pointer.
 5. Hovering picks the hex and the unit. The pointer is a hand over units and a move cursor over the minimap (desktop
@@ -312,8 +313,7 @@ CANCEL (Esc by default) takes one step per press:
 6. the forces overview: closed;
 7. chat: closed;
 8. a bot order's hex pick: cancelled, no order sent;
-9. the dock's confirm strip, then the LOS card, then the unit sheet (its popover, then the expanded row, then the
-   sheet);
+9. the dock's confirm strip, then the unit sheet (its popover, then the expanded row, then the sheet);
 10. the weapons panel: the armed weapon disarmed, else the weapon deselected (the solution card closes with it);
 11. the local planner turn's route: cleared;
 12. the inspected unit: no longer inspected;
@@ -327,39 +327,42 @@ view changes (open panels, the camera) stay on the GL thread. Names in quotes ar
 
 | Component | Where | Shows | Runs |
 | --- | --- | --- | --- |
-| `GpuPhaseHeader` | top left | round, phase ring, phase name, whose turn; in movement the activation ribbon (hidden under double blind); the playback speeds at the round line's right as one pill of sections (0.5x, 1x, 2x, 4x, I for Instant), in every phase and turn; the round shortens to its number ("01") only where the line has no room for "Round 01" | the playback history's speed |
+| `GpuPhaseHeader` | top left | round, phase ring, phase name, whose turn; in movement the activation ribbon (hidden under double blind); the playback speeds in the frame's top right corner as one pill of sections (0.5x, 1x, 2x, 4x, I for Instant), in every phase and turn; the round shortens to its number ("01") only where the line has no room for "Round 01" | the playback history's speed |
 | `GpuForcesPanel` | left column | own and allied units, or the contacts, as grouped rows or a grid with search, grouping and filter | selection rule, unit menu, the phase's next-unit command |
 | `GpuUnitCard` | bottom left | the inspected unit, else the focus unit: paperdoll, vitals, chips; the mini card while the sheet is open; the contact card for a sensor contact | "Unit record", Locate |
 | `GpuRecordSheet` | left, at the grid's width | the unit sheet (section 7) | the record service's unit actions |
 | `GpuConditionsCard` | beside the left column | the planetary conditions overlay's lines while its View preference is on | its close button runs that View item |
-| `GpuUtilityBar` | top right | "Tactical view", "Wireframe" (an open grid icon: three lines each way, no border), "Map", "Log" (amber count of the round's reviewable events the board has presented), "Help", "Menu"; the Tactical View chip and north mark | the camera's Tactical View, the tuning model's wireframe view, View > minimap, the HUD's toggles |
+| `GpuUtilityBar` | top right | "Tactical view", "Wireframe" (an open grid icon: three lines each way, no border), "Map", "Log" (amber count of the round's reviewable events the board has presented), "Help", "Menu"; the Tactical View chip and north mark | the camera's Tactical View, the tuning model's wireframe view (without the cosmetic scatter), View > minimap, the HUD's toggles |
 | `GpuInitiativeCard` | centre, initiative phase | each side's reported roll, "Wins", "Moves first", the turn order in pages of eight (double blind hides the order and "Moves first") | none |
-| `GpuMinimap` | under the utilities | the board in its tileset colours, units at their animated positions, the planned route, the camera's ground area | a left press or drag centres the camera, a middle drag orbits it as on the board; no order changes |
+| `GpuMinimap` | under the utilities | the board in its tileset colours, units at their animated positions, the planned route, the camera's ground area; its close button straight on the panel's corner | a left press or drag centres the camera, a middle drag orbits it and the wheel zooms it as on the board, about the view's centre; no order changes |
 | `GpuContactsPanel` | right column | enemy units; with the movement fire preview, where the unit fires from, each enemy's best salvo both ways and the guide toggles | selection rule, unit menu |
 | `GpuWeaponsPanel` | right column, local weapon declaration | target pills, one row per weapon with its roll and slots (an assigned slot in its target's colour), the heat if the queued weapons fire; no assign line while a weapon is armed, which its row shows selected; on another player's turn the focus unit's draft, read-only. Declaring never ends the turn by default: MegaMek's auto-end firing (`GUIPreferences.AUTO_END_FIRING`, now stored as `AutoEndFiringAfterLastWeapon` so that the old `AutoEndFiring` value is ignored) defaults to off, so FIRE WEAPONS sends the attacks | fire orders |
 | `GpuSolutionCard` | under or beside the right column | the selected weapon's shot: roll, range brackets, arc, modifiers, or why there is no shot; a long target name ends in an ellipsis, the roll after it stays whole | close deselects the weapon |
 | `GpuLogPanel` | right column, log width | the round's events as cards, Summary and Full log, filters, search, totals, earlier rounds, report keywords, copy, artillery in flight | review a step, locate, replay |
 | `GpuCommandDock` | bottom centre | one variant per phase and turn: initiative, movement plan, waiting, weapon fire, physical, no physical attack, playback, generic; in the local TARGETING turn the generic option row leads with the off-board targets ("Off-board West"), the edges whose arrows `OffBoardTargetOverlay` shows; the playback transport has no speeds (the phase header holds them) | phase commands (an off-board target runs the overlay's own click), movement, fire and physical services, the playback, the Follow camera toggle |
 | `GpuHintLine` | under the dock (hidden at W <= 1350); there a bot order's hex pick shows in its chip on the dock | what a left click does now, the gestures and their keys; the pick's instructions and picked hexes | the chip's Done and Cancel end the pick |
-| `GpuLosCard` | beside the right column | the measured hexes and heights (with height steps), range, both views; a blocked view in coral; "Elevation diagram" | `measure`; `showDiagram` (MegaMek's Swing ruler with its elevation diagram, for the card's hexes and heights); close also ends the board's ruler |
 | `GpuChatPanel` | bottom right, with its button | chat lines, the field and Send, an unread dot on the button | the board chat's send, which keeps its history |
 | `GpuToastStack` | centre, above the dock | MegaMek's toasts: at most 5, levels INFO, SUCCESS, WARNING, ERROR, GAMEMASTER | presses pass through |
 | `GpuForceOverview` | over the board; the panels it covers are hidden (the prototype blurs them) | a card for every presented unit, grouped, filtered and searchable | locate, selection rule, unit menu |
 | `GpuHelpDialog` | centred | "Controls": the binds by group with their current keys, then the mouse gestures | none |
 | `GpuMenuPanel` | centred | "Players", then the menu bar's groups as `GpuBoardActions` captures them (File, Game, Board, View, Help, Commands, Maps) | each item's own action, or a redirect (below) |
 | `GpuPlayersPanel` | centred | the players as the Swing player list shows them; each bot's commands under it | bot commands |
-| `GpuContextMenu` | popover | unit menus, the hex menu with MegaMek's map menu under "More actions", weapon-row and queued-attack menus, the dock's More, select lists | existing commands only |
+| `GpuContextMenu` | popover | unit menus, the hex menu with MegaMek's map menu in sections (a group's commands between separators, no menu of menus), weapon-row and queued-attack menus, the dock's More, select lists; a group opens its submenu beside its item as a desktop menu does: the menus before it stay open, another group replaces the chain below its menu, Esc closes the deepest and a press outside closes all | existing commands only |
 | `GpuModalDialog` | top layer | the pending dialog (1.6) | answer |
 | `GpuNameplates` | board labels | a team pip per unit; a name tag for the focus, hovered and inspected unit, the physical target and sensor contacts; every tag while the nameplate key is held; target cards replace their targets' plates | none |
-| `GpuBoardLabels` | board labels | to-hit badges, fire-preview guides, traces of the queued attacks, leaders to the target cards, the destination tip, waypoint numbers, playback pop-ups (a unit's stack: the newest at its place, each older one 4 over the next) | none |
+| `GpuBoardLabels` | board labels | to-hit badges (every shot), fire-preview guides (the best 50 of each direction), traces of the queued attacks, each guide and trace leaving its shooter outside its rectangle at its front, or its back at a target in its rear arc; leaders to the target cards, the destination tip, waypoint numbers, playback pop-ups (a unit's stack: the newest at its place, each older one 4 over the next) | none |
 | `GpuTargetCards` | board labels | a card per target in letter order, placed by `GpuCardPlacement` clear of panels and units, its frame neutral; the target's letter square carries its colour, as in the weapons panel and the sheet (`GpuHudKit.targetColour`: MekBay's twelve target colours from A); the focus without attacks has no letter; the attack rows (no fire-order number) are a reorderable `UiList` | fire orders; a row with a grip drags to another place of the card (from any part of it, as the prototype's draggable `.or`), its focused grip moves it on Alt+Up/Down, each a single `move` |
-| `GpuTuningPanel` | dialogs layer | developer tuning (section 10) | the tuning model |
+| `GpuTuningPanel` | dialogs layer | developer tuning (section 10); the frame rate beside its title | the tuning model |
 
 Two board-space components are world meshes that `GpuBattleView` draws:
 - `GpuBoardOverlay`: reach envelopes, the route and its ghost, unit rings and glows, range bands and their borders,
   the front arc or the displayed weapon's arc, the physical-attack neighbours and the Tactical View's elevation-drop
   edges. Short, medium and long range use the hud-v3 colours, minimum and extreme the client's field-of-fire
   colours. It rebuilds its meshes only when what it draws changed. Over the route it draws the route's pulse (below).
+  Where the terrain or a model hides the acting unit's ring or the hovered unit's rings, it draws them again at
+  half opacity behind what hides them (rimshaderv1's occluded outlines). The envelope's border lies on the drawn
+  ground, on a step's face where one lies back over a lower hex. `GpuBattleView` rings the hovered hex; over a
+  building floor the ring lies at that floor with a faint ring at the ground and faint corner posts between them.
 - `GpuFireControl`: the firing lines and the flat range labels ([attack controls](gpu-attack-controls.md)). During
   the local weapon declaration the actor's lines are the HUD's traces instead; every other line is drawn in its
   attacker's side colour. Lines hide while an attack plays (`GpuBattleView.HIDE_TARGET_ARROWS_DURING_ATTACKS`).
@@ -406,7 +409,7 @@ The Menu's items that open a native surface instead of Swing (`GpuMenuPanel`):
 | Player List | Players |
 | Round Report | Log |
 | Rounds in the Air | Log (its Summary lists the artillery in flight) |
-| Ruler / LOS Tool | the LOS card |
+| Ruler / LOS Tool | Swing ruler |
 | Isometric View (labelled "Tactical view") | the Tactical View |
 | Zoom In, Zoom Out, Toggle Overview Zoom | the board camera |
 | Reset Window Positions | not shown |
@@ -424,7 +427,7 @@ client captured (`UiPreferences.binds()`). The defaults:
 | `ROUND_REPORT` | Ctrl+R | Log |
 | `KEY_BINDS` | Ctrl+K | Help |
 | `BOT_COMMANDS` | Ctrl+Shift+G | Players |
-| `LOS_SETTING` | L | the LOS card of the current measurement, or a hint how to measure |
+| `LOS_SETTING` | L | Swing ruler, as View > Ruler / LOS Tool |
 | `UNIT_OVERVIEW`, `FORCE_DISPLAY` | Ctrl+U, Ctrl+F | forces overview |
 | `UNIT_DISPLAY` | Ctrl+D | unit sheet (closes the overview) |
 | `UD_GENERAL` ... `UD_EXTRAS` | F1-F6 | the sheet's tabs |
@@ -652,7 +655,6 @@ While the native window is active (`GpuBoardWindow.isActiveFor`), the HUD replac
 | Unit Display window | unit card and sheet |
 | Force display, unit overview strips | forces panel and forces overview |
 | Rounds in the air | the log's artillery in flight |
-| Ruler and its LOS result | LOS card |
 | Chat box overlay | chat panel |
 | Toast overlay | toast stack |
 | Keybindings overlay | Help |
@@ -664,9 +666,9 @@ While the native window is active (`GpuBoardWindow.isActiveFor`), the HUD replac
 
 - `ClientGUI` keeps the minimap, player list, rounds in the air, force display, bot commands and Unit Display windows
   hidden while the native window is active; they show again on the classic board as their preferences say.
-  `RulerDialog` stays hidden under the LOS card, and the card's close ends the ruler's measurement. The card's
-  "Elevation diagram" shows it (`RulerDialog.showDiagram`) with its diagram open for the card's hexes and heights; the
-  allowlist raises it, and its Close ends the measurement and the card.
+  Line of sight stays with the Swing `RulerDialog` with its elevation diagram:
+  it shows over the native window for a measurement, as on the classic board, and the allowlist raises it. The
+  context menu's "Line of sight from {unit}" measures with it (`RulerDialog.measure`).
 - The frame carries no Swing overlay layers, so each toast shows once, in the native stack.
 - **Allowlist.** `GpuBoardWindow.allowedOverBattle(Dialog)` decides which Swing dialogs may still show over the
   presented window: the classes in `GpuBoardWindow.SWING_DIALOGS` (the Menu's settings and tools, the Game Master
@@ -782,12 +784,6 @@ checkout. `test` excludes `@Tag("on-demand")`, runs `checkstyleMain` first and s
   targeting display has selected; the commands follow MegaMek's selection, which its Skip command and weapon keys
   cycle.
 - **TARGETING and OFFBOARD** keep MegaMek's board tool and keys, with the generic dock.
-- **The ruler's elevation diagram** is MegaMek's Swing ruler window (user item 6, U2), opened by the LOS card's button.
-  Its own height spinners do not change the card, and a new measurement hides it until the button is pressed again,
-  as the classic ruler hides when a measurement starts over.
-- **MegaMek's step sprites** still draw under the planned route: the capture's sprite filter cannot reach
-  `BoardClientState`'s path sprites. (It does leave out MegaMek's firing solutions, and its movement envelope while the
-  plan draws one.)
 - **Dialogs.** A native dialog shows no severity icon, does not answer the confirm dialog's Y and N keys, and shows
   monospaced alerts in Roboto. A nested outer dialog loses typed text when it shows again. A Swing dialog missing from
   the allowlist is not raised, so it may open behind the native window; the error log names it. A dialog with no

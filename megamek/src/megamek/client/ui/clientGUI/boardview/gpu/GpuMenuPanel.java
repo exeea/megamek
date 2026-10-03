@@ -134,7 +134,6 @@ final class GpuMenuPanel implements GpuHud.Component {
                     state.toggleLog();
                 }
             }
-            case ClientGUI.VIEW_LOS_SETTING -> source.los().open();
             case ClientGUI.VIEW_TOGGLE_ISOMETRIC -> camera.setTactical(!camera.tactical(), scene);
             case ClientGUI.VIEW_ZOOM_IN -> camera.zoom(1 / GpuBattleView.ZOOM_STEP);
             case ClientGUI.VIEW_ZOOM_OUT -> camera.zoom(GpuBattleView.ZOOM_STEP);

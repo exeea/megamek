@@ -351,6 +351,20 @@ class GpuUtilityMinimapSmokeTest {
             assertEquals(azimuth, board.camera.azimuth(), "The drag pans only");
             assertEquals(tilt, board.camera.tilt(), "The drag pans only");
             assertEquals(z, board.camera.focus.z, "The drag keeps the focus plane");
+            // The wheel over the map zooms the camera by the board's step, about the view's centre (the user's
+            // decision of 2026-10-03); off the map the wheel is not the map's.
+            // The stage fires enter and exit in act, as each frame does.
+            hud.stage.mouseMoved(x, y);
+            hud.stage.act(0);
+            Vector3 focus = board.camera.focus.cpy();
+            float zoom = board.camera.camera.zoom;
+            assertTrue(hud.stage.scrolled(0, 2), "The map takes the wheel under the pointer");
+            assertEquals(zoom * GpuBattleView.wheelZoom(2), board.camera.camera.zoom, zoom * 1e-4f,
+                  "Two notches zoom out by the board's step");
+            assertTrue(focus.epsilonEquals(board.camera.focus, .001f), "The wheel keeps the view's centre");
+            hud.stage.mouseMoved(x - 1000, y);
+            hud.stage.act(0);
+            assertFalse(hud.stage.scrolled(0, 1), "Off the map the wheel is not the map's");
             System.out.printf("Minimap press at %s centred the camera at %s (%s view)%n", pressed, centre,
                   tactical ? "tactical" : "3D");
         }

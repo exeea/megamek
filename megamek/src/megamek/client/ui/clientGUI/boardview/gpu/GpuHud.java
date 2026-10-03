@@ -23,8 +23,8 @@ import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
-import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
+import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.board.Coords;
@@ -62,7 +62,6 @@ final class GpuHud implements GpuBoardHud {
      */
     static final float FORCES_WIDTH = 250;
     private static final float INITIATIVE_WIDTH = 560;
-    private static final float LOS_WIDTH = 300;
     private static final float CHAT_WIDTH = 340;
     private static final float CHAT_HEIGHT = 320;
     /**
@@ -111,18 +110,27 @@ final class GpuHud implements GpuBoardHud {
     /**
      * The board view's facts of one frame, by unit id: the view mode and whether the playback still animates; each
      * drawn unit's screen rectangle and label anchor (head) in stage units, y up, left out while its head lies behind
-     * the camera; each drawn unit's animated board position in world units; the hovered hex and unit; and a hex's
-     * width on the screen, corner to corner, in stage units.
+     * the camera; each drawn unit's animated board position in world units; the hovered hex and unit; a hex's
+     * width on the screen, corner to corner, in stage units; and the height of the ring the view draws on a building
+     * floor under the pointer, NaN while the pointer is on the hovered hex's ground (GpuBattleView.hoverTop).
      */
     record HudView(boolean tactical, boolean playbackBusy, Map<Integer, Rectangle> unitRects,
           Map<Integer, Vector2> unitHeads, Map<Integer, Vector2> unitPositions, Coords hovered, int hoveredUnit,
-          float hexPixels) {
+          float hexPixels, float hoverTop) {
         static final HudView EMPTY = new HudView(false, false, Map.of(), Map.of(), Map.of(), null, Entity.NONE, 0);
 
         HudView {
             unitRects = Map.copyOf(unitRects);
             unitHeads = Map.copyOf(unitHeads);
             unitPositions = Map.copyOf(unitPositions);
+        }
+
+        /** The facts while no building floor is under the pointer. */
+        HudView(boolean tactical, boolean playbackBusy, Map<Integer, Rectangle> unitRects,
+              Map<Integer, Vector2> unitHeads, Map<Integer, Vector2> unitPositions, Coords hovered, int hoveredUnit,
+              float hexPixels) {
+            this(tactical, playbackBusy, unitRects, unitHeads, unitPositions, hovered, hoveredUnit, hexPixels,
+                  Float.NaN);
         }
     }
 
@@ -163,7 +171,6 @@ final class GpuHud implements GpuBoardHud {
     private final GpuRecordSheet recordSheet;
     private final GpuWeaponsPanel weapons;
     private final GpuCommandDock dock;
-    private final GpuLosCard losCard;
     private final GpuChatPanel chat;
     private final GpuLogPanel log;
     private final GpuModalDialog modal;
@@ -187,7 +194,6 @@ final class GpuHud implements GpuBoardHud {
     private final Container<Actor> solutionSlot;
     private final Container<Actor> logSlot;
     private final Container<Actor> dockSlot;
-    private final Container<Actor> losSlot;
     private final Container<Actor> chatButtonSlot;
     private final Container<Actor> chatSlot;
     private final Container<Actor> overviewSlot;
@@ -271,7 +277,6 @@ final class GpuHud implements GpuBoardHud {
         GpuSolutionCard solution = new GpuSolutionCard(kit, source, state);
         log = new GpuLogPanel(kit, source, state, contextMenu);
         dock = new GpuCommandDock(kit, source, state, camera, contextMenu);
-        losCard = new GpuLosCard(kit, source, state);
         chat = new GpuChatPanel(kit, source, state);
         GpuForceOverview overview = new GpuForceOverview(kit, source, state, contextMenu, this::select);
         GpuHelpDialog help = new GpuHelpDialog(kit, source, state);
@@ -281,7 +286,7 @@ final class GpuHud implements GpuBoardHud {
         modal = new GpuModalDialog(kit, source, state);
         List<Component> parts = new ArrayList<>(List.of(nameplates, boardLabels, targetCards, phaseHeader,
               initiativeCard, conditionsCard, forces, unitCard, recordSheet, utilities, hint, minimap, contacts,
-              weapons, solution, log, dock, losCard, chat, overview, help, menu, players, contextMenu, toasts, modal));
+              weapons, solution, log, dock, chat, overview, help, menu, players, contextMenu, toasts, modal));
 
         // The Tactical View's north mark first: the prototype draws it on the board, under the labels (G4). Then the
         // prototype's #fx strokes (guides, traces, leaders) under every board label, the nameplates included (G8b).
@@ -306,7 +311,6 @@ final class GpuHud implements GpuBoardHud {
         logSlot = panel(panels, log.actor()).top().fillX();
         solutionSlot = panel(panels, solution.actor()).top().fillX();
         initiativeSlot = panel(panels, initiativeCard.actor()).top().fillX();
-        losSlot = panel(panels, losCard.actor()).top().fillX();
         // Presses pass through the hint line to the board, as in the prototype; board labels keep clear of it.
         hintSlot = slot(panels, hint.actor());
         panelSlots.add(hintSlot);
@@ -598,7 +602,7 @@ final class GpuHud implements GpuBoardHud {
         if (focus != null && !inDialog && !focus.isDescendantOf(contextMenu.actor())
               && !focus.isDescendantOf(recordSheet.overlay())) {
             stage.setKeyboardFocus(null);
-        } else if (contextMenu.cancel()) {
+        } else if (contextMenu.back()) {
             return true;
         } else if (state.dialog != GpuHudState.Dialog.NONE) {
             state.dialog = GpuHudState.Dialog.NONE;
@@ -611,7 +615,7 @@ final class GpuHud implements GpuBoardHud {
             state.chatOpen = false;
         } else if (picking(inputs)) {
             source.players().endPick(false);
-        } else if (dock.cancel() || losCard.cancel() || recordSheet.cancel()) {
+        } else if (dock.cancel() || recordSheet.cancel()) {
             // The sheet's step: its popover, the expanded weapon row, then the sheet (U3).
             return true;
         } else if (weapons.cancel()) {
@@ -673,8 +677,12 @@ final class GpuHud implements GpuBoardHud {
         } else if (binds.contains(KeyCommandBind.BOT_COMMANDS)) {
             state.toggle(GpuHudState.Dialog.PLAYERS);
         } else if (binds.contains(KeyCommandBind.LOS_SETTING)) {
-            // View > LOS settings: the LOS card of the ruler's measurement, or a hint how to measure (plan O7).
-            source.los().open();
+            // View > Ruler / LOS Tool: MegaMek's ruler, which line of sight stays (the user's decision of 2026-10-03).
+            BoardScene.Command ruler = GpuBoardActions.menuItem(inputs.frame().globalCommands(),
+                  ClientGUI.VIEW_LOS_SETTING);
+            if (ruler != null && ruler.enabled()) {
+                ruler.action().run();
+            }
         } else if (binds.contains(KeyCommandBind.UNIT_OVERVIEW) || binds.contains(KeyCommandBind.FORCE_DISPLAY)) {
             state.overview = !state.overview;
         } else if (binds.contains(KeyCommandBind.UNIT_DISPLAY)) {
@@ -765,18 +773,21 @@ final class GpuHud implements GpuBoardHud {
     /**
      * A short board click (C.4) on {@code coords} and the unit {@code unitId} picked there ({@code Entity.NONE} for
      * none), at screen pixel ({@code x}, {@code y}). A right click opens the context menu and never changes orders;
-     * Ctrl or Alt keeps MegaMek's measurement tools; while a bot order picks hexes, a left click picks one, as the
-     * classic board's click does.
+     * Ctrl or Alt keeps MegaMek's measurement tools, and a plain left click ends a measurement waiting for its second
+     * point with that measurement's modifier (rimshaderv1's board); while a bot order picks hexes, a left click picks
+     * one, as the classic board's click does.
      */
     void boardClick(Coords coords, int unitId, int button, int modifiers, int x, int y) {
         if (inputs == null || inputs.dialog() != null || coords == null || inputs.frame().scene() == null) {
             return;
         }
+        int clickModifiers = GpuBoardSource.isMeasurement(modifiers) ? modifiers
+              : modifiers | inputs.frame().panels().los().pending();
         if (button == Input.Buttons.RIGHT) {
             Vector2 point = stage.screenToStageCoordinates(new Vector2(x, y));
             contextMenu.open(coords, unitId, point.x, point.y);
-        } else if (button == Input.Buttons.LEFT && (GpuBoardSource.isMeasurement(modifiers) || picking(inputs))) {
-            source.click(coords, false, modifiers);
+        } else if (button == Input.Buttons.LEFT && (GpuBoardSource.isMeasurement(clickModifiers) || picking(inputs))) {
+            source.click(coords, false, clickModifiers);
         } else if (button == Input.Buttons.LEFT) {
             leftClick(coords, GpuHudState.unit(inputs.frame().status(), unitId), modifiers);
         }
@@ -1005,7 +1016,6 @@ final class GpuHud implements GpuBoardHud {
         place(northSlot, (width - northWidth) / 2, GpuUtilityBar.NORTH_TOP, northWidth, northSlot.getPrefHeight());
 
         // Panels of the middle area, each below what it would overlap; one without room for its minimum is hidden.
-        losSlot.setVisible(!covered);
         float initiativeWidth = Math.min(INITIATIVE_WIDTH, bandRight - bandLeft);
         stack(initiativeSlot, centred(initiativeWidth, bandLeft, bandRight), height * INITIATIVE_TOP,
               initiativeWidth, List.of(conditionsSlot, chipSlot));
@@ -1013,8 +1023,6 @@ final class GpuHud implements GpuBoardHud {
             stack(solutionSlot, width - gap - 2 * m.right() - STACK, SECOND_ROW, m.right(),
                   List.of(conditionsSlot, chipSlot));
         }
-        stack(losSlot, width - gap - rightWidth - STACK - LOS_WIDTH, SECOND_ROW, LOS_WIDTH,
-              List.of(conditionsSlot, chipSlot, initiativeSlot, solutionSlot));
 
         // Overlays: chat, forces overview, centred dialogs and toasts.
         place(chatSlot, width - gap - CHAT_WIDTH, height - CHAT_BOTTOM - CHAT_HEIGHT, CHAT_WIDTH, CHAT_HEIGHT);

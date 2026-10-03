@@ -1116,42 +1116,6 @@ class GpuHudRoutingSmokeTest {
             assertEquals(GpuUtilityBar.NORTH_TOP, stageHeight - corner.y - north.getHeight(), .51f, "its top");
             routing.capture("i1a2-tactical-north");
             routing.view.setTacticalView(false);
-
-            List<GpuBattleStatus.InitiativeSide> sides = List.of(
-                  new GpuBattleStatus.InitiativeSide("GPU review", 0xFF82E2CE, OWN, 3, 3, 0, List.of(), List.of(),
-                        List.of(0)),
-                  new GpuBattleStatus.InitiativeSide("Opposing force", 0xFFEC9189, ENEMY, 10, 10, 0, List.of(),
-                        List.of(), List.of(1)));
-            GpuLosResult.Card card = new GpuLosResult.Card(1, OWN_HEX, OWN_ID, 2, false, FOE_HEX, FOE_ID, 1, false,
-                  3, GpuLosResultTest.seen(3, "3 (1 intervening light woods)"),
-                  GpuLosResultTest.seen(3, "3 (1 intervening light woods)"));
-            GpuHudData panels = new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, GpuMovePlan.Snapshot.EMPTY,
-                  GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY,
-                  GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY,
-                  new GpuLosResult.Snapshot(card), GpuPlayers.Snapshot.EMPTY);
-            GpuBoardSource.Frame initiative = routing.frame(new GpuBattleStatus.Snapshot(3,
-                  GamePhase.INITIATIVE_REPORT, false, 0, Entity.NONE, List.of(), 0,
-                  List.of(GpuHudInputTest.unit(OWN_ID, OWN, false, true),
-                        GpuHudInputTest.unit(FOE_ID, ENEMY, false, false)), sides, false), panels);
-            // The HUD's own stage sizes; the view keeps them until the window changes. Last in this test.
-            for (int[] size : new int[][] { { 900, 600 }, { 960, 640 } }) {
-                routing.hud.resize(size[0], size[1], 1);
-                routing.show(initiative);
-                routing.view.render();
-                Actor losCard = routing.find("los-card");
-                Actor dock = routing.find("command-dock");
-                String layout = size[0] + " x " + size[1] + ": LOS card " + UiTestStage.bounds(losCard)
-                      + " in a slot " + losCard.getParent().getHeight() + " high, initiative card "
-                      + UiTestStage.bounds(routing.find("initiative-card")) + ", dock " + UiTestStage.bounds(dock);
-                System.out.println(layout);
-                if (size[0] == 900) {
-                    assertFalse(shown(losCard), "no room for the LOS card's header, so it hides: " + layout);
-                } else {
-                    assertTrue(shown(losCard), layout);
-                    assertTrue(UiTestStage.bounds(losCard).y >= UiTestStage.bounds(dock).y + dock.getHeight(),
-                          "above the dock: " + layout);
-                }
-            }
         });
     }
 
