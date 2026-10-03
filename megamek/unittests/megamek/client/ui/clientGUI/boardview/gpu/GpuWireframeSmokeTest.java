@@ -114,7 +114,7 @@ class GpuWireframeSmokeTest {
             @Override public void render(RenderableProvider provider) { drawn.add(provider); }
         };
         try {
-            ((GpuTerrain) field(view, "terrain")).renderDepth(view.boardCamera.camera, List.of(), recording);
+            ((GpuTerrain) field(view, "terrain")).renderWireframe(view.boardCamera.camera, recording);
         } finally { recording.dispose(); }
         assertFalse(drawn.isEmpty(), "The wireframe draws the board");
         assertTrue(drawn.stream().noneMatch(scatter::contains), "The wireframe draws no scatter");
