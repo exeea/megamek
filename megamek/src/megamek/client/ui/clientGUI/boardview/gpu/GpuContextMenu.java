@@ -35,7 +35,6 @@ import megamek.common.units.Entity;
 final class GpuContextMenu implements GpuHud.Component {
     /** The dock's More opens this far left of its button (app.js pop:more). */
     private static final float MORE_SHIFT = -150;
-    private static final String FOOTER = "GpuBoard.hud.context.footer";
     private static final String CENTER_CAMERA = "GpuBoard.hud.common.centerCamera";
     private static final String SEPARATOR = " \u00B7 ";
 
@@ -217,7 +216,7 @@ final class GpuContextMenu implements GpuHud.Component {
         moreActions = list.item(more, null, null, true, false, () -> group(more, title, mapActions(), true));
         shownTooltip = null;
         shownContext = null;
-        popover.header(title, null).content(list).footer(text(FOOTER));
+        popover.header(title, null).content(list);
         showHex();
     }
 
@@ -417,7 +416,7 @@ final class GpuContextMenu implements GpuHud.Component {
 
     /**
      * Shows the dock's More popover above its {@code button}, 150 units to its left: the dock's own items, a separator
-     * and MegaMek's other phase commands, each with its detail, then the dock's footer.
+     * and MegaMek's other phase commands, each with its detail.
      */
     void more(GpuCommandDock.More more, Actor button) {
         cancel();
@@ -427,7 +426,7 @@ final class GpuContextMenu implements GpuHud.Component {
             list.separator();
         }
         commands(list, more.commands(), false, more.title());
-        popover.header(more.title(), more.subtitle()).content(list).footer(more.footer());
+        popover.header(more.title(), more.subtitle()).content(list);
         popover.showAbove(button, MORE_SHIFT);
     }
 
@@ -442,7 +441,7 @@ final class GpuContextMenu implements GpuHud.Component {
             int choice = index;
             item(list, choices.get(index), null, index == selected, true, () -> choose.accept(choice));
         }
-        popover.header(null, null).content(list).footer(null);
+        popover.header(null, null).content(list);
         Vector2 corner = face.localToStageCoordinates(new Vector2());
         popover.showAt(corner.x, corner.y);
     }
@@ -513,9 +512,9 @@ final class GpuContextMenu implements GpuHud.Component {
         });
     }
 
-    /** A unit menu's content, with the footer every context menu has. */
+    /** A unit menu's content. */
     private void show(String title, String subtitle, UiMenuList list) {
-        popover.header(title, subtitle).content(list).footer(text(FOOTER));
+        popover.header(title, subtitle).content(list);
     }
 
     /** The prototype's acting(): the acting unit during the local turn, otherwise the own focus unit (C.5). */

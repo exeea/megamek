@@ -34,6 +34,7 @@ import java.awt.event.KeyEvent;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -55,6 +56,8 @@ import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
+import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
+import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import megamek.client.Client;
@@ -83,6 +86,7 @@ import megamek.common.loaders.MekFileParser;
 import megamek.common.units.Entity;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.invocation.Invocation;
 
 /**
@@ -659,7 +663,301 @@ class GpuHudRoutingSmokeTest {
             UiButton row = routing.find("forces-unit-" + OTHER_OWN_ID);
             assertSame(row.getSkin().getDrawable("row-friend"), row.getBackground(), "a friendly unit's mint edges");
             routing.capture("i1a2-forces-own-turn-inspected");
+
+            // The card's ✕ closes the card and deselects (the user's decision of 2026-10-02): no card and no
+            // highlighted row while the actor keeps its turn; a click on a unit shows the card again.
+            routing.press(routing.find("unit-card-close"));
+            routing.view.render();
+            assertEquals(List.of(Entity.NONE, Entity.NONE), List.of(state.inspected, state.cardUnit()), "the ✕");
+            assertFalse(shown(routing.find("unit-card")), "closes the card");
+            for (int id : List.of(OWN_ID, OTHER_OWN_ID)) {
+                UiButton unitRow = routing.find("forces-unit-" + id);
+                assertFalse(unitRow.isChecked() || unitRow.getBackground() == unitRow.getSkin().getDrawable("row-friend"),
+                      "and highlights no row: " + id);
+            }
+            verify(routing.source, never()).selectUnit(anyInt());
+            routing.press(routing.find("forces-unit-" + OTHER_OWN_ID));
+            routing.view.render();
+            assertEquals(OTHER_OWN_ID, state.cardUnit(), "A click shows the card again");
+            assertTrue(shown(routing.find("unit-card")));
         });
+    }
+
+    /**
+     * The user's decisions of 2026-10-02: the card's ✕, on the selected unit as on an inspected one, clears the
+     * selection. In the local turn no unit is then selected at all: no card, no dock, no selected row; a hex does
+     * nothing, an enemy is only inspected, and the keys of MegaMek's current unit stay with the HUD while a menu-bar
+     * bind still reaches MegaMek. A click on the own unit selects it again, afresh.
+     */
+    @Test
+    void theCardsCloseButtonClearsTheSelection() throws Exception {
+        run(routing -> {
+            GpuHudState state = routing.hud.state;
+            List<Key> keys = keys();
+            for (Scenario scenario : List.of(SCENARIOS.get(2), SCENARIOS.get(6), SCENARIOS.get(11))) {
+                routing.show(scenario);
+                assertEquals(OWN_ID, state.cardUnit(), scenario + ": the acting unit is the selected one");
+                boolean dock = shown(routing.find("command-dock"));
+                routing.press(routing.find("unit-card-close"));
+                routing.view.render();
+                assertEquals(List.of(Entity.NONE, Entity.NONE), List.of(state.inspected, state.cardUnit()),
+                      scenario + ": the ✕ clears the selection");
+                assertFalse(shown(routing.find("unit-card")), scenario + ": no card");
+                assertFalse(shown(routing.find("command-dock")), scenario + ": no dock");
+                assertFalse(routing.<UiButton>find("forces-unit-" + OWN_ID).isChecked(), scenario + ": no row");
+                clearInvocations(routing.source, routing.moves, routing.fire);
+
+                routing.click(EMPTY_HEX, Input.Buttons.LEFT, 0, 0);
+                routing.click(FOE_HEX, Input.Buttons.LEFT, 0, 0);
+                routing.view.render();
+                assertEquals(FOE_ID, state.inspected, scenario + ": an enemy is inspected");
+                assertFalse(shown(routing.find("command-dock")), scenario + ": and the selection stays cleared");
+                for (KeyCommandBind bind : List.of(KeyCommandBind.TURN_LEFT, KeyCommandBind.DONE,
+                      KeyCommandBind.UNDO_LAST_STEP, KeyCommandBind.FIRE, KeyCommandBind.NEXT_TARGET,
+                      KeyCommandBind.PHYS_PUNCH, KeyCommandBind.CENTER_ON_SELECTED)) {
+                    assertEquals(Handler.HUD, routing.press(key(keys, bind)), scenario + ": " + bind);
+                }
+                assertEquals(Handler.SWING, routing.press(key(keys, KeyCommandBind.HEX_COORDS)),
+                      scenario + ": a menu-bar bind reaches MegaMek");
+                verifyNoInteractions(routing.moves);
+                verify(routing.source, never()).click(any(), anyBoolean(), anyInt());
+                verify(routing.source, never()).selectUnit(anyInt());
+                verify(routing.fire, never()).selectUnit(anyInt());
+                verify(routing.fire, never()).focusTarget(anyInt());
+
+                routing.click(OWN_HEX, Input.Buttons.LEFT, 0, 0);
+                routing.view.render();
+                if (scenario.phase().isFiring()) {
+                    verify(routing.fire).selectUnit(OWN_ID);
+                } else {
+                    verify(routing.source).selectUnit(OWN_ID);
+                }
+                assertEquals(OWN_ID, state.cardUnit(), scenario + ": a click selects the unit again");
+                assertEquals(dock, shown(routing.find("command-dock")), scenario + ": with its dock");
+            }
+        });
+    }
+
+    /** The default key of {@code bind}. */
+    private static Key key(List<Key> keys, KeyCommandBind bind) {
+        return keys.stream().filter(key -> key.binds().contains(bind)).findFirst().orElseThrow();
+    }
+
+    /**
+     * The user's decision of 2026-10-02 (item 33.1): the unit the card shows is the one highlighted row of the forces
+     * and contacts lists, in the initiative phase, the own movement turn and the opponent's. Panel clicks and board
+     * clicks switch it from a friendly unit to the enemy and back: a friendly unit's forces row, the enemy's contacts
+     * row (and its row in the forces list's contacts), never a second row; in the own turn the acting unit keeps its
+     * "Acting now" line meanwhile. The forces grid's tiles follow the same rule.
+     */
+    @Test
+    void theCardsUnitIsTheOneHighlightedRowOfTheLists() throws Exception {
+        run(routing -> {
+            GpuHudState state = routing.hud.state;
+            for (Scenario scenario : List.of(new Scenario("initiative", GamePhase.INITIATIVE, false, false),
+                  SCENARIOS.get(2), SCENARIOS.get(4))) {
+                boolean own = scenario.myTurn();
+                // In the own turn the second own unit has moved; otherwise it waits for its turn as the first does.
+                routing.show(routing.frame(GpuHudInputTest.status(3, scenario.phase(), own,
+                      own ? OWN_ID : Entity.NONE, 1, GpuHudInputTest.unit(OWN_ID, OWN, own, true),
+                      GpuHudInputTest.unit(OTHER_OWN_ID, OWN, false, !own),
+                      GpuHudInputTest.unit(FOE_ID, ENEMY, false, false)),
+                      GpuHudInputTest.panels(GpuHudInputTest.move(scenario.planner(), List.of()),
+                            GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY,
+                            GpuUnitRecord.Snapshot.EMPTY)));
+                // The C.5 focus: the Atlas, or after the own turn the next own unit.
+                assertHighlighted(routing, state.focus(), scenario + ": the focus");
+
+                // Panel clicks: the other friendly unit, the enemy's contacts row, the first friendly unit.
+                routing.press(routing.find("forces-unit-" + OTHER_OWN_ID));
+                assertHighlighted(routing, OTHER_OWN_ID, scenario + ": a friendly forces row");
+                if (own) {
+                    assertEquals("Acting now", routing.<GpuHudKit.UnitRow>find("forces-unit-" + OWN_ID).line
+                          .getText().toString(), scenario + ": the actor keeps its line");
+                }
+                routing.press(routing.find("contacts-unit-" + FOE_ID));
+                assertHighlighted(routing, FOE_ID, scenario + ": the enemy's contacts row");
+                if (own) {
+                    assertEquals("Acting now", routing.<GpuHudKit.UnitRow>find("forces-unit-" + OWN_ID).line
+                          .getText().toString(), scenario + ": the actor keeps its line, unhighlighted");
+                }
+                routing.press(routing.find("forces-unit-" + OWN_ID));
+                assertHighlighted(routing, OWN_ID, scenario + ": the first friendly forces row");
+
+                // Board clicks: the other friendly unit picked in the list, then the enemy, then the Atlas.
+                routing.press(routing.find("forces-unit-" + OTHER_OWN_ID));
+                routing.click(FOE_HEX, Input.Buttons.LEFT, 0, 0);
+                routing.view.render();
+                assertHighlighted(routing, FOE_ID, scenario + ": the enemy clicked on the board");
+                routing.click(OWN_HEX, Input.Buttons.LEFT, 0, 0);
+                routing.view.render();
+                assertHighlighted(routing, OWN_ID, scenario + ": the Atlas clicked on the board");
+
+                // The forces list's contacts tab lists the enemy too: both of its rows, and still no friendly one.
+                routing.press(routing.find("forces-tab-contacts"));
+                routing.click(FOE_HEX, Input.Buttons.LEFT, 0, 0);
+                routing.view.render();
+                assertHighlighted(routing, FOE_ID, scenario + ": the enemy in both lists");
+                routing.press(routing.find("forces-tab-friendly"));
+                if (scenario.phase() == GamePhase.INITIATIVE) {
+                    routing.capture("ux2-highlight-initiative-enemy");
+                }
+                routing.key(Input.Keys.ESCAPE, 0);
+                routing.view.render();
+                assertEquals(Entity.NONE, state.inspected, scenario + ": Esc ends the inspection");
+                assertHighlighted(routing, OWN_ID, scenario + ": the focus again");
+
+                // The grid's tiles: the focus's in mint; another friendly unit's click picks it (outside the turn) or
+                // inspects it (inside, mint edges); no friendly tile while the enemy is shown.
+                state.forcesGrid = true;
+                routing.view.render();
+                assertTile(routing, OWN_ID, "field-focused", scenario + ": the focus's tile");
+                assertTile(routing, OTHER_OWN_ID, "row", scenario + ": another tile");
+                routing.press(routing.find("forces-tile-" + OTHER_OWN_ID));
+                assertTile(routing, OTHER_OWN_ID, own ? "row-friend" : "field-focused", scenario + ": its click");
+                assertTile(routing, OWN_ID, "row", scenario + ": one tile");
+                routing.press(routing.find("contacts-unit-" + FOE_ID));
+                assertTile(routing, OTHER_OWN_ID, "row", scenario + ": no friendly tile while the enemy is shown");
+                assertTile(routing, OWN_ID, "row", scenario + ": nor the focus's");
+                state.forcesGrid = false;
+            }
+        });
+    }
+
+    /**
+     * Item 33.2: a list takes the mouse wheel only while the pointer is over it. Over the forces list the wheel scrolls
+     * the list and leaves the camera; once the pointer has moved on to the board the wheel zooms the camera and leaves
+     * the list, also after a press on one of the list's rows.
+     */
+    @Test
+    void aListTakesTheWheelOnlyWhileThePointerIsOverIt() throws Exception {
+        run(routing -> {
+            // Thirty more own units, more than the list has room for.
+            List<GpuBattleStatus.UnitStatus> units = new ArrayList<>(List.of(GpuHudInputTest.unit(OWN_ID, OWN, false,
+                  true), GpuHudInputTest.unit(FOE_ID, ENEMY, false, false)));
+            for (int id = 10; id < 40; id++) {
+                units.add(GpuHudInputTest.unit(id, OWN, false, true));
+            }
+            routing.show(routing.frame(GpuHudInputTest.status(3, GamePhase.INITIATIVE_REPORT, false, Entity.NONE, 1,
+                  units.toArray(GpuBattleStatus.UnitStatus[]::new)), GpuHudData.EMPTY));
+            ScrollPane list = routing.find("forces-list");
+            assertTrue(list.isScrollY(), "the forces list scrolls");
+            BoardCamera camera = routing.view.boardCamera;
+            Vector3 overList = routing.screen(list);
+            Vector3 board = routing.screen(EMPTY_HEX);
+            for (boolean pressed : new boolean[] { false, true }) {
+                list.setScrollY(0);
+                list.updateVisualScroll();
+                routing.move(overList);
+                if (pressed) {
+                    // A press on a row takes the wheel as well (ScrollPane), and the row selects its unit.
+                    routing.press(routing.find("forces-unit-12"));
+                }
+                float zoom = camera.camera.zoom;
+                float top = list.getScrollY();
+                routing.wheel(overList, 1);
+                assertTrue(list.getScrollY() > top, "the wheel over the list scrolls it, pressed " + pressed);
+                assertEquals(zoom, camera.camera.zoom, "and leaves the camera");
+                float scrolled = list.getScrollY();
+                routing.move(board);
+                routing.wheel(board, 1);
+                assertNotEquals(zoom, camera.camera.zoom, "on the board the wheel zooms, pressed " + pressed);
+                assertEquals(scrolled, list.getScrollY(), "and leaves the list");
+                assertNull(routing.hud.stage.getScrollFocus(), "no widget holds the wheel");
+            }
+        });
+    }
+
+    /**
+     * Item 33.4: the Contacts utility after Map shows and hides the contacts panel. It is pressed while the panel
+     * shows, which it does by default; its press switches the client's remembered preference on the Swing thread, as
+     * Map's does the minimap's, and the published preference hides or shows the panel.
+     */
+    @Test
+    void theContactsUtilitySwitchesTheRememberedContactsPanel() throws Exception {
+        run(routing -> {
+            routing.show(SCENARIOS.get(4));
+            Actor contacts = routing.find("contacts-panel");
+            UiButton utility = routing.find("utility-contacts");
+            List<String> row = new ArrayList<>();
+            ((Table) routing.find("utility-bar")).getChildren().forEach(child -> row.add(child.getName()));
+            assertEquals(List.of("utility-tactical", "utility-map", "utility-contacts", "utility-log", "utility-help",
+                  "utility-menu"), row, "Contacts follows Map");
+            assertTrue(shown(contacts) && utility.isChecked(), "shown and pressed by default");
+            GUIPreferences preferences = GUIPreferences.getInstance();
+            boolean before = preferences.getGpuContactsEnabled();
+            clearInvocations(routing.source);
+            routing.press(utility);
+            ArgumentCaptor<Runnable> command = ArgumentCaptor.forClass(Runnable.class);
+            verify(routing.source).command(command.capture());
+            try {
+                boolean published = GpuDialogRoutingTest.onSwing(() -> {
+                    command.getValue().run();
+                    return GpuBoardSource.UiPreferences.capture().contactsEnabled();
+                });
+                assertEquals(!before, preferences.getGpuContactsEnabled(), "the press switches the preference");
+                assertEquals(!before, published, "which the source publishes");
+            } finally {
+                GpuDialogRoutingTest.onSwing(() -> {
+                    preferences.setValue(GUIPreferences.GPU_CONTACTS_ENABLED, before);
+                    return null;
+                });
+            }
+
+            GpuBoardSource.UiPreferences shown = routing.source.uiPreferences;
+            routing.source.uiPreferences = contacts(shown, false);
+            routing.view.render();
+            assertFalse(shown(contacts), "the published preference hides the panel");
+            assertFalse(utility.isChecked(), "and releases the utility");
+            routing.capture("ux2-contacts-hidden");
+            routing.source.uiPreferences = shown;
+            routing.view.render();
+            assertTrue(shown(contacts) && utility.isChecked(), "and shows it again");
+        });
+    }
+
+    /** The preferences with the contacts panel shown or hidden. */
+    private static GpuBoardSource.UiPreferences contacts(GpuBoardSource.UiPreferences p, boolean enabled) {
+        return new GpuBoardSource.UiPreferences(p.scale(), p.reportKeywords(), p.reportFilterKeywords(),
+              p.minimapEnabled(), enabled, p.moveEnvelope(), p.conditionsVisible(), p.turnDetails(), p.binds(),
+              p.minRangeRgb(), p.extremeRangeRgb(), p.moveSprintRgb());
+    }
+
+    /**
+     * The one highlighted row of the shown forces and contacts lists is the unit's: its forces row, or for an enemy its
+     * contacts row and its forces row while the forces list shows its contacts; the card shows the unit.
+     */
+    private static void assertHighlighted(Routing routing, int unitId, String when) {
+        Set<String> expected = new HashSet<>();
+        boolean enemy = unitId == FOE_ID;
+        if (!enemy || shown(routing.find("forces-unit-" + unitId))) {
+            expected.add("forces-unit-" + unitId);
+        }
+        if (enemy) {
+            expected.add("contacts-unit-" + unitId);
+        }
+        Set<String> highlighted = new HashSet<>();
+        for (int id : List.of(OWN_ID, FOE_ID, OTHER_OWN_ID)) {
+            for (String name : List.of("forces-unit-" + id, "contacts-unit-" + id)) {
+                GpuHudKit.UnitRow row = routing.find(name);
+                if (row != null && shown(row) && (row.isChecked()
+                      || row.getBackground() == row.getSkin().getDrawable("row-friend")
+                      || row.getBackground() == row.getSkin().getDrawable("row-foe"))) {
+                    highlighted.add(name);
+                }
+            }
+        }
+        assertEquals(expected, highlighted, when + ": the highlighted rows");
+        Label name = routing.find("unit-card-name");
+        assertEquals(UiTheme.upper("Unit " + unitId), name.getText().toString(), when + ": the card");
+    }
+
+    /** The forces grid's tile of the unit shows the named skin drawable. */
+    private static void assertTile(Routing routing, int unitId, String drawable, String when) {
+        Table tile = routing.find("forces-tile-" + unitId);
+        assertNotNull(tile, when);
+        Skin skin = routing.<UiButton>find("utility-map").getSkin();
+        assertSame(skin.getDrawable(drawable), tile.getBackground(), when);
     }
 
     /** The unit is the shown, selected one: the focus, its forces row pressed in mint, the card showing it. */
@@ -1194,7 +1492,20 @@ class GpuHudRoutingSmokeTest {
 
         /** One wheel notch towards the user (zoom in) with the pointer at {@code point}. */
         void wheel(Vector3 point) throws Exception {
-            with(0, Math.round(point.x), Math.round(point.y), () -> processor.scrolled(0, -1));
+            wheel(point, -1);
+        }
+
+        /** Wheel notches, positive away from the user (down a list), with the pointer at {@code point}. */
+        void wheel(Vector3 point, float notches) throws Exception {
+            with(0, Math.round(point.x), Math.round(point.y), () -> processor.scrolled(0, notches));
+        }
+
+        /** Moves the mouse to {@code point} without a button, then draws a frame, which fires its enter and exit. */
+        void move(Vector3 point) throws Exception {
+            int x = Math.round(point.x);
+            int y = Math.round(point.y);
+            with(0, x, y, () -> processor.mouseMoved(x, y));
+            view.render();
         }
 
         /** The window point (y down) of a hex centre, which no HUD panel covers. */

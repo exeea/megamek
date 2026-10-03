@@ -162,7 +162,9 @@ final class GpuPlaybackHistory {
         }
         skipping &= playback.busy();
         if (replaying) {
-            dwell += seconds * speed.rate / UnitMotion.Speed.NORMAL.rate;
+            // At Instant a replay steps every frame.
+            dwell += speed == UnitMotion.Speed.INSTANT ? STEP_SECONDS
+                  : seconds * speed.rate / UnitMotion.Speed.NORMAL.rate;
             if (dwell >= STEP_SECONDS && !playback.reviewing()) {
                 // The history's lists take no null: a card collapsed during the replay ends it here.
                 int next = cursor == null ? 0 : played.indexOf(cursor) + 1;
@@ -278,11 +280,12 @@ final class GpuPlaybackHistory {
         return skipping ? UnitMotion.Speed.INSTANT : speed;
     }
 
-    /** The dock's speeds, 0.5x to 4x; Instant is {@link #skip}. */
+    /**
+     * The phase header's speeds, 0.5x to 4x and Instant (the user's decision of 2026-10-03); "Skip to results" is an
+     * Instant for the current playback only ({@link #skip}).
+     */
     void speed(UnitMotion.Speed value) {
-        if (value != UnitMotion.Speed.INSTANT) {
-            speed = value;
-        }
+        speed = value;
     }
 
     /** All the round's reviewable steps in report order. */

@@ -623,28 +623,37 @@ final class GpuFireOrders implements AutoCloseable {
         command((fd, actor) -> declare(fd, actor, eqNum, targetId));
     }
 
-    /** H29: swaps the weapon's attack with its neighbour {@code delta} away when both attack the same target. */
+    /**
+     * H29: the weapon's attack fires {@code delta} places later (earlier when negative) among the attacks on its
+     * target, in one requeue, as its card's row dropped there or Alt+Up/Down asks; the other attacks keep their order
+     * and places. A move past the target's first or last attack does nothing.
+     */
     void move(int eqNum, int delta) {
         command((fd, actor) -> {
             List<EntityAction> queue = new ArrayList<>(fd.getAttacks());
+            WeaponAttackAction attack = queued(queue, actor, eqNum);
+            if (attack == null) {
+                return;
+            }
             List<Integer> slots = new ArrayList<>();
+            List<EntityAction> same = new ArrayList<>();
             for (int index = 0; index < queue.size(); index++) {
-                if (queue.get(index) instanceof WeaponAttackAction) {
+                if ((queue.get(index) instanceof WeaponAttackAction other)
+                      && (other.getTargetType() == attack.getTargetType())
+                      && (other.getTargetId() == attack.getTargetId())) {
                     slots.add(index);
+                    same.add(other);
                 }
             }
-            WeaponAttackAction attack = queued(queue, actor, eqNum);
-            int at = slots.indexOf(queue.indexOf(attack));
+            int at = same.indexOf(attack);
             int to = at + delta;
-            if ((attack == null) || (to < 0) || (to >= slots.size())) {
+            if ((delta == 0) || (to < 0) || (to >= same.size())) {
                 return;
             }
-            WeaponAttackAction other = (WeaponAttackAction) queue.get(slots.get(to));
-            if ((other.getTargetType() != attack.getTargetType()) || (other.getTargetId() != attack.getTargetId())) {
-                return;
+            same.add(to, same.remove(at));
+            for (int index = 0; index < slots.size(); index++) {
+                queue.set(slots.get(index), same.get(index));
             }
-            queue.set(slots.get(to), attack);
-            queue.set(slots.get(at), other);
             fd.replaceAttacks(queue);
         });
     }

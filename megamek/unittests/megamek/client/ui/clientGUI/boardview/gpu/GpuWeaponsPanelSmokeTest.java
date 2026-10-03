@@ -405,7 +405,6 @@ class GpuWeaponsPanelSmokeTest {
             column.place(hud, COLUMN_X, COLUMN_TOP, 310, -1);
             hud.draw();
             assertEquals(List.of("WEAPONS", "Atlas AS7-D · 2 drafted"), column.texts("weapons-header"));
-            assertEquals(Messages.getString("GpuBoard.hud.dock.draftsNextTurn"), column.line("weapons-assign"));
             ScrollPane list = column.find("weapons-list");
             List<String> rows = new ArrayList<>();
             collect(list, rows);
@@ -459,8 +458,9 @@ class GpuWeaponsPanelSmokeTest {
             assertEquals(LRM, column.state.armedWeapon);
             verify(fire).selectWeapon(LRM);
             column.update(hud, firing(), shot05()).place(hud, COLUMN_X, COLUMN_TOP, 310, -1);
-            assertEquals("Armed · LRM 20 · click an identified enemy · Escape disarms",
-                  column.line("weapons-assign"));
+            // No assign line while a weapon is armed: its row shows it selected (the user's decision of 2026-10-03).
+            Actor assignLine = ((Group) column.weapons.actor()).findActor("weapons-assign");
+            assertTrue(assignLine == null || !GpuBoardTestUi.shown(assignLine), "no line for the armed weapon");
             click(hud, column.find("weapons-pill-" + BATTLEMASTER));
             verify(fire).focusTarget(BATTLEMASTER);
             verify(fire).assign(LRM, BATTLEMASTER);
@@ -502,8 +502,6 @@ class GpuWeaponsPanelSmokeTest {
             click(hud, column.find("solution-close"));
             verify(fire).selectWeapon(-1);
             assertEquals(-1, column.state.armedWeapon);
-            assertEquals(Messages.getString("GpuBoard.hud.common.closeTip", "Escape"),
-                  tooltip(column.find("solution-close")));
         });
     }
 

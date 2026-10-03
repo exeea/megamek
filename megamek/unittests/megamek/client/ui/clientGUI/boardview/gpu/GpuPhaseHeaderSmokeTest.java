@@ -33,6 +33,7 @@ import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
+import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.util.PlayerColour;
 import megamek.common.enums.GamePhase;
 import megamek.common.planetaryConditions.Fog;
@@ -82,11 +83,6 @@ class GpuPhaseHeaderSmokeTest {
                 Group root = (Group) card.actor();
                 assertEquals(List.of(List.of("YOUR FORCE", "2", "1", "=", "3", "MOVES FIRST"),
                       List.of("PRINCESS", "5", "5", "=", "10", "WINS")), sideTexts(root));
-                // Shot 01's note under the turn order (P1 H2).
-                Label note = root.findActor("initiative-note");
-                assertTrue(shown(note));
-                assertEquals("The loser moves first; the winner reacts. Weapon attacks resolve after all forces finish"
-                      + " declaring.", note.getText().toString());
                 // The pager: the second page holds activations 9 and 10, and the first page comes back.
                 click(hud.stage, root.findActor("turn-order-next"));
                 assertEquals(List.of("9\u201310", "2"), page(root));
@@ -121,6 +117,20 @@ class GpuPhaseHeaderSmokeTest {
                       opponent, 1, List.of()), List.of(), "g1-opponent");
                 hud.compare("g1-header-04", shot, header.actor(), "04-opponent-turn.jpg", 20, 20);
                 shot.dispose();
+                // The playback's speeds at the round line's right, in every phase and also on the opponent's turn
+                // (the user's decision of 2026-10-03): the history's speed is pressed and a click sets it.
+                Group head = (Group) header.actor();
+                assertTrue(head.<UiButton>findActor("phase-speed-normal").isChecked(), "1x is the history's speed");
+                click(hud.stage, head.findActor("phase-speed-double"));
+                assertEquals(UnitMotion.Speed.DOUBLE, state.history.speed());
+                render(hud, state, header, conditions, card, status(GamePhase.MOVEMENT, false, Entity.NONE,
+                      opponent, 1, List.of()), List.of(), "g1-opponent-2x").dispose();
+                assertTrue(head.<UiButton>findActor("phase-speed-double").isChecked(), "2x is pressed");
+                assertEquals("ROUND 03", head.<Label>findActor("phase-round").getText().toString(),
+                      "with room the round reads in full");
+                click(hud.stage, head.findActor("phase-speed-instant"));
+                assertEquals(UnitMotion.Speed.INSTANT, state.history.speed(), "I is Instant");
+                state.history.speed(UnitMotion.Speed.NORMAL);
                 // Shot 14: the dense ribbon of a 100 v 100 battle, 48 of its 200 activations from the current first
                 // one; then the window that has scrolled on to start eight before activation 21.
                 List<GpuBattleStatus.Slot> battle = new ArrayList<>();
@@ -139,6 +149,15 @@ class GpuPhaseHeaderSmokeTest {
                       GpuHudFixtures.ATLAS, turns, 0, List.of()), List.of(), "g1-firing-1280x720");
                 hud.compare("g1-header-15", shot, header.actor(), "15-compact-1280x720.jpg", 16, 16);
                 shot.dispose();
+                // The round text follows the line's width of the frame before: a second frame settles it.
+                render(hud, state, header, conditions, card, status(GamePhase.FIRING, true, GpuHudFixtures.ATLAS,
+                      turns, 0, List.of()), List.of(), "g1-firing-1280x720").dispose();
+                Rectangle frame = GpuHudTestStage.bounds(header.actor());
+                Rectangle last = GpuHudTestStage.bounds(((Group) header.actor()).findActor("phase-speed-instant"));
+                assertTrue(last.x + last.width <= frame.x + frame.width - 2, "The speeds fit the narrow header");
+                Label round = ((Group) header.actor()).findActor("phase-round");
+                assertEquals("03", round.getText().toString(), "without room only the round's number");
+                assertTrue(round.getPrefWidth() <= round.getWidth() + .5f, "which fits");
             } finally {
                 header.dispose();
                 card.dispose();
@@ -322,7 +341,7 @@ class GpuPhaseHeaderSmokeTest {
     }
 
     private static GpuBoardSource.UiPreferences preferences(boolean conditions) {
-        return new GpuBoardSource.UiPreferences(1, "", "", true, false, conditions, false, List.of(), 0, 0, 0);
+        return new GpuBoardSource.UiPreferences(1, "", "", true, true, false, conditions, false, List.of(), 0, 0, 0);
     }
 
     /** The panels of a frame whose phase display reports the given planetary condition lines. */

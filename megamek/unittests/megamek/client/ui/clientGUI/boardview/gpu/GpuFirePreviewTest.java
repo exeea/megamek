@@ -284,8 +284,8 @@ class GpuFirePreviewTest {
         GpuFirePreview.Snapshot walk = completed(preview, plan(MoveStepType.FORWARDS, MoveStepType.FORWARDS,
               MoveStepType.TURN_RIGHT));
 
-        assertEquals("unit 1 from (8, 11) facing 1 Walked attacker 1 tmm 0 targets 2 threats 2 capped false"
-              + " destination true ''", header(walk));
+        assertEquals("unit 1 from (8, 11) facing 1 Walked attacker 1 tmm 0 targets 2 threats 2 destination true ''",
+              header(walk));
         assertEquals("[3 d7 out twist 0 turret false 4/6 best 5 83% [Medium Laser@LA=9, Medium Laser@RA=9, LRM 20@LT=5,"
               + " LRM 20@RT=5, Medium Laser (R)@CT=x, Medium Laser (R)@CT=x]"
               + " in twist 0 turret true 3/4 best 6 72% [Machine Gun@FR=f, SRM 4@TU=8, SRM 4@TU=8, Large Laser@TU=6]"
@@ -307,7 +307,6 @@ class GpuFirePreviewTest {
 
         assertEquals(8, standing.contacts().size());
         assertEquals(8, standing.targets());
-        assertTrue(standing.capped(), "the footer names the six-per-direction cap");
         assertEquals(6, standing.contacts().stream().filter(GpuFirePreview.Contact::boardOutgoing).count());
     }
 
@@ -479,7 +478,7 @@ class GpuFirePreviewTest {
         return String.join(" ", "unit " + snapshot.unitId(), "from " + snapshot.from().toFriendlyString(),
               "facing " + snapshot.facing(),
               snapshot.moved(), "attacker " + snapshot.attackerModifier(), "tmm " + snapshot.tmm(),
-              "targets " + snapshot.targets(), "threats " + snapshot.threats(), "capped " + snapshot.capped(),
+              "targets " + snapshot.targets(), "threats " + snapshot.threats(),
               "destination " + snapshot.fromDestination(), "'" + snapshot.unavailable() + "'");
     }
 

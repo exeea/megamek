@@ -16,9 +16,9 @@ import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 
 /**
- * A popover (.panel.pop with its .hd and .ft): the opaque frame, at least 240 units wide, with an optional header of an
- * upper-case title over a muted subtitle, its content, and an optional footer line. It opens at a point or above an
- * anchor and stays 10 units inside its parent; a content taller than that scrolls. While open it gives its content the
+ * A popover (.panel.pop with its .hd): the opaque frame, at least 240 units wide, with an optional header of an
+ * upper-case title over a muted subtitle, and its content. It opens at a point or above an anchor and stays 10
+ * units inside its parent; a content taller than that scrolls. While open it gives its content the
  * stage's keyboard focus, and any press outside it closes it, as {@link #cancel} does. Its view adds it to a layer
  * once; it starts closed.
  */
@@ -32,19 +32,13 @@ public final class UiPopover extends Table {
     private static final float TITLE_LINE = 13 * 2400 / 2048f;
     /** The subtitle's line: the 13-unit body text at its 1.35 line height (.pop .hd span sits on that line). */
     private static final float BODY_LINE = 13 * 1.35f;
-    /** The footer's line: 11 units at 1.35 (.pop .ft). */
-    private static final float FOOT_LINE = 11 * 1.35f;
     private final Table head = new Table();
     private final Label title;
     private final Label subtitle;
     private final Image headRule;
     private final ScrollPane scroll;
-    private final Image footRule;
-    private final Label foot;
     private final Cell<Table> headCell;
     private final Cell<Image> headRuleCell;
-    private final Cell<Image> footRuleCell;
-    private final Cell<Label> footCell;
     /** Closes the popover on a press outside it; on the stage's root while the popover is open. */
     private final InputListener outside = new InputListener() {
         @Override
@@ -60,7 +54,7 @@ public final class UiPopover extends Table {
     private float edge;
     private boolean above;
 
-    /** A closed popover in the kit's style, without header, content or footer. */
+    /** A closed popover in the kit's style, without header or content. */
     public UiPopover(UiKit kit) {
         setBackground(kit.skin.getDrawable("panel-pop"));
         // The 2-unit rails and the popover's own 6 above and below; the side borders are 2 transparent units.
@@ -80,21 +74,13 @@ public final class UiPopover extends Table {
         head.add(subtitle);
         headRule = new Image(kit.skin.getDrawable("rule"));
         scroll = kit.scrollList(null);
-        // .pop .ft: margin 4, a rule, then 11 units muted with padding 7 14 3.
-        footRule = new Image(kit.skin.getDrawable("rule"));
-        foot = kit.label("", "hud-small", 11, UiTheme.MUTED);
         // The scroll pane holding the content stays in its cell, so the content keeps the keyboard focus.
         headCell = add(head).growX();
         row();
         headRuleCell = add(headRule).growX();
         row();
         add(scroll).growX();
-        row();
-        footRuleCell = add(footRule).growX();
-        row();
-        footCell = add(foot).growX().padLeft(14).padRight(14);
         header(null, null);
-        footer(null);
     }
 
     /**
@@ -119,16 +105,6 @@ public final class UiPopover extends Table {
         if (isVisible() && getStage() != null) {
             getStage().setKeyboardFocus(actor);
         }
-        return relayout();
-    }
-
-    /** The footer line, or none for null. An open popover keeps the corner it opened at. */
-    public UiPopover footer(String text) {
-        boolean shown = text != null;
-        foot.setText(shown ? text : "");
-        footRuleCell.setActor(shown ? footRule : null).height(shown ? 1 : 0).padTop(shown ? 4 : 0);
-        footCell.setActor(shown ? foot : null).height(shown ? FOOT_LINE : 0).padTop(shown ? 7 : 0)
-              .padBottom(shown ? 3 : 0);
         return relayout();
     }
 

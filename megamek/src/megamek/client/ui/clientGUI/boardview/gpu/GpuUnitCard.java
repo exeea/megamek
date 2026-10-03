@@ -115,7 +115,7 @@ final class GpuUnitCard implements GpuHud.Component {
 
     /** What the card shows; it is rebuilt when this changes. Snapshots keep their identity while unchanged. */
     private record Shown(GpuBattleStatus.UnitStatus unit, GpuUnitRecord.Snapshot record, GpuFireOrders.Heat heat,
-          boolean inspecting, boolean low, GamePhase phase, boolean mini, Deltas deltas,
+          boolean low, GamePhase phase, boolean mini, Deltas deltas,
           List<GpuBoardSource.Bind> binds) { }
 
     private final GpuHudKit kit;
@@ -183,11 +183,6 @@ final class GpuUnitCard implements GpuHud.Component {
         overlay.addActor(hoverCard);
     }
 
-    /** The unit the card and the record sheet show: the inspected unit, else the own focus unit (C.5). */
-    static int cardUnit(GpuHudState state) {
-        return state.inspected != Entity.NONE ? state.inspected : state.focus();
-    }
-
     /** A unit as its row names it: the chassis, or the whole name when there is none. */
     static String unitName(GpuBattleStatus.UnitStatus unit) {
         return unit.chassis().isEmpty() ? unit.name() : unit.chassis();
@@ -205,7 +200,7 @@ final class GpuUnitCard implements GpuHud.Component {
 
     @Override
     public void update(GpuHud.Inputs inputs) {
-        GpuBattleStatus.UnitStatus unit = state.presented(cardUnit(state));
+        GpuBattleStatus.UnitStatus unit = state.presented(state.cardUnit());
         root.setVisible(unit != null);
         if (unit == null) {
             shownId = Entity.NONE;
@@ -232,7 +227,7 @@ final class GpuUnitCard implements GpuHud.Component {
         previousRecord = unitRecord;
         GpuFireOrders.Snapshot fire = inputs.frame().panels().fire();
         GpuFireOrders.Heat forecast = fire.active() && fire.actorId() == unit.id() ? fire.heat() : null;
-        Shown next = new Shown(unit, unitRecord, forecast, state.inspected == unit.id(), inputs.metrics().lowHeight(),
+        Shown next = new Shown(unit, unitRecord, forecast, inputs.metrics().lowHeight(),
               inputs.frame().status().phase(), GpuRecordSheet.open(state), deltas.shown(now),
               inputs.preferences().binds());
         if (!next.equals(shown)) {
@@ -265,7 +260,7 @@ final class GpuUnitCard implements GpuHud.Component {
         boolean low = next.low();
         // #unit padding inside the 2-unit rails and transparent side borders (12 14 12; low 10 12 12).
         root.pad(low ? 12 : 14, low ? 14 : 16, 14, low ? 14 : 16);
-        root.add(header(unit, next, preferences, low)).growX().height(low ? 40 : 44).row();
+        root.add(header(unit, next, low)).growX().height(low ? 40 : 44).row();
         Table body = new Table();
         body.top().left();
         body.add(dollSlot(unit, next, low)).width(dollWidth(next.record())).growY().top();
@@ -306,7 +301,7 @@ final class GpuUnitCard implements GpuHud.Component {
 
     /**
      * A sensor contact's card (7), 184 units: what the client knows, the blip, Unit record disabled, Locate and the
-     * inspection's ✕.
+     * ✕.
      */
     private void contact(GpuBattleStatus.UnitStatus unit, Shown next, GpuBoardSource.UiPreferences preferences) {
         root.pad(14, 16, 14, 16);
@@ -314,20 +309,16 @@ final class GpuUnitCard implements GpuHud.Component {
         header.left();
         header.add(new Label(UiTheme.upper(text("GpuBoard.hud.common.sensorContact")), ui.skin, "hud-heading"))
               .left().expandX();
-        if (next.inspecting()) {
-            header.add(closeButton(preferences)).size(28).right();
-        }
+        header.add(closeButton()).size(28).right();
         header.row();
         String hex = unit.position() == null ? "" : unit.position().getBoardNum();
         Label subtitle = ui.label(text("GpuBoard.hud.common.identityUnknown", hex), "hud-body", 12, UiTheme.MUTED);
-        ui.tip(subtitle).getActor().setText(text("GpuBoard.hud.unit.contactNote"));
         header.add(subtitle).left().colspan(2);
         root.add(header).growX().height(44).row();
         Table blip = new Table();
         blip.setBackground(new UiTheme.EdgeBox(ui.skin.get("white", Texture.class), null,
               UiTheme.alpha(UiTheme.BLIP, .35f), 1, 1, 1, 1).dashed(3));
         blip.add(ui.label("?", "hud-heading", 28, UiTheme.BLIP));
-        ui.tip(blip).getActor().setText(text("GpuBoard.hud.unit.contactNote"));
         root.add(blip).size(WIDE_DOLL, 60).left().padTop(8).row();
         Table buttons = new Table();
         UiButton record = ui.button("hud-plain", "report", text("GpuBoard.hud.common.unitRecord"), null);
@@ -339,9 +330,8 @@ final class GpuUnitCard implements GpuHud.Component {
         root.add(buttons).growX().padTop(10);
     }
 
-    /** The header (4.1): name and damage level over the sub-line; ✕ while inspecting. */
-    private Table header(GpuBattleStatus.UnitStatus unit, Shown next, GpuBoardSource.UiPreferences preferences,
-          boolean low) {
+    /** The header (4.1): name, damage level and the ✕ over the sub-line. */
+    private Table header(GpuBattleStatus.UnitStatus unit, Shown next, boolean low) {
         Table header = new Table();
         header.left();
         boolean enemy = unit.side() == GpuBattleStatus.Side.ENEMY;
@@ -352,9 +342,7 @@ final class GpuUnitCard implements GpuHud.Component {
         ui.tip(name).getActor().setText(unit.name());
         header.add(name).minWidth(0).growX().left().height(low ? 22 : 24);
         header.add(damageLevel(unit, next.record())).right().padLeft(8);
-        if (next.inspecting()) {
-            header.add(closeButton(preferences)).size(28).padLeft(2).padRight(-6);
-        }
+        header.add(closeButton()).size(28).padLeft(2).padRight(-6);
         header.row();
         Label subtitle = ui.label(subtitle(unit), "hud-body", low ? 11 : 12, UiTheme.MUTED);
         subtitle.setEllipsis(true);
@@ -410,16 +398,17 @@ final class GpuUnitCard implements GpuHud.Component {
         return level;
     }
 
-    /** The inspection's ✕; its tooltip names the current CANCEL key, which ends the inspection as well. */
-    private UiButton closeButton(GpuBoardSource.UiPreferences preferences) {
-        UiButton close = ui.closeButton(() -> state.inspected = Entity.NONE);
+    /** The card's ✕, on a selected and on an inspected unit: it clears the selection (GpuHudState.clearSelection). */
+    private UiButton closeButton() {
+        UiButton close = ui.closeButton(state::clearSelection);
         close.setName("unit-card-close");
-        ui.tip(close).getActor().setText(text("GpuBoard.hud.unit.stopInspecting",
-              GpuHintLine.key(preferences, KeyCommandBind.CANCEL)));
         return close;
     }
 
-    /** Locate (4.1): the unit's camera frame; disabled with its reason off the board. */
+    /**
+     * Locate (4.1): the unit's camera frame; disabled with its reason off the board. The icon alone names itself and
+     * its key in its tooltip.
+     */
     private UiButton locate(GpuBattleStatus.UnitStatus unit, boolean labelled,
           GpuBoardSource.UiPreferences preferences) {
         UiButton locate = labelled ? ui.button("hud-plain", "locate", text("GpuBoard.hud.common.locate"), null)
@@ -427,8 +416,12 @@ final class GpuUnitCard implements GpuHud.Component {
         locate.setName(unit.sensorContact() ? "unit-card-contact-locate" : "unit-card-locate");
         boolean placed = unit.position() != null;
         locate.setDisabled(!placed);
-        ui.tip(locate).getActor().setText(placed ? text("GpuBoard.hud.unit.locateTip",
-              GpuHintLine.key(preferences, KeyCommandBind.CENTER_ON_SELECTED)) : text("GpuBoard.hud.unit.notPlaced"));
+        if (!placed) {
+            ui.tip(locate).getActor().setText(text("GpuBoard.hud.unit.notPlaced"));
+        } else if (!labelled) {
+            ui.tip(locate).getActor().setText(text("GpuBoard.hud.unit.locateTip",
+                  GpuHintLine.key(preferences, KeyCommandBind.CENTER_ON_SELECTED)));
+        }
         onChange(locate, () -> {
             if (!locate.isDisabled()) {
                 source.locateUnit(shownId);
@@ -444,8 +437,6 @@ final class GpuUnitCard implements GpuHud.Component {
         UiButton record = ui.button("hud-plain", "report", text("GpuBoard.hud.common.unitRecord"), null);
         record.setName("unit-card-record");
         record.pressed(state.recordOpen);
-        ui.tip(record).getActor().setText(text("GpuBoard.hud.unit.recordTip",
-              GpuHintLine.key(preferences, KeyCommandBind.UNIT_DISPLAY)));
         onChange(record, () -> state.recordOpen = !state.recordOpen);
         UiButton locate = locate(unit, true, preferences);
         float height = low ? 30 : 34;

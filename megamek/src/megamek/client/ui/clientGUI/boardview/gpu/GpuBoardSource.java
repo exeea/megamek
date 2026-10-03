@@ -82,12 +82,12 @@ final class GpuBoardSource implements AutoCloseable {
 
     /**
      * Immutable preference snapshot published to the render thread: the existing preferences the native views read,
-     * every key binding, the minimum and extreme range colours of the field-of-fire display and the movement
-     * envelope's sprint colour.
+     * whether the battle HUD shows its contacts panel, every key binding, the minimum and extreme range colours of the
+     * field-of-fire display and the movement envelope's sprint colour.
      */
     public record UiPreferences(float scale, String reportKeywords, String reportFilterKeywords,
-          boolean minimapEnabled, boolean moveEnvelope, boolean conditionsVisible, boolean turnDetails,
-          List<Bind> binds, int minRangeRgb, int extremeRangeRgb, int moveSprintRgb) {
+          boolean minimapEnabled, boolean contactsEnabled, boolean moveEnvelope, boolean conditionsVisible,
+          boolean turnDetails, List<Bind> binds, int minRangeRgb, int extremeRangeRgb, int moveSprintRgb) {
         public UiPreferences {
             binds = List.copyOf(binds);
         }
@@ -96,8 +96,8 @@ final class GpuBoardSource implements AutoCloseable {
             var preferences = PreferenceManager.getClientPreferences();
             GUIPreferences gui = GUIPreferences.getInstance();
             return new UiPreferences(gui.getGUIScale(), preferences.getReportKeywords(),
-                  preferences.getReportFilterKeywords(), gui.getMinimapEnabled(), gui.getMoveEnvelope(),
-                  gui.getShowPlanetaryConditionsOverlay(), gui.getTurnDetailsOverlay(),
+                  preferences.getReportFilterKeywords(), gui.getMinimapEnabled(), gui.getGpuContactsEnabled(),
+                  gui.getMoveEnvelope(), gui.getShowPlanetaryConditionsOverlay(), gui.getTurnDetailsOverlay(),
                   Stream.of(KeyCommandBind.values()).map(bind -> new Bind(bind, bind.key, bind.modifiers,
                         KeyCommandBind.getDesc(bind))).toList(),
                   FieldOfFireSprite.getFieldOfFireColor(RangeType.RANGE_MINIMUM).getRGB(),

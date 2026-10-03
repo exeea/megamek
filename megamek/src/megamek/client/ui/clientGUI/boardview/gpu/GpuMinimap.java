@@ -20,21 +20,22 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
+import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
+import com.badlogic.gdx.scenes.scene2d.ui.Stack;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
-import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
 import com.badlogic.gdx.scenes.scene2d.ui.Widget;
-import megamek.client.ui.Messages;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
-import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.board.Coords;
 import megamek.logging.MMLogger;
 
 /**
  * Minimap under the utilities (C.1 G4): the board in the average colours of its tileset art, the presented units, the
- * planned route and the ground the camera shows. A press or drag on it centres the camera there and changes no order.
+ * planned route and the ground the camera shows. The map fills the panel inside its rails, with the close button over
+ * its top-right corner (the user's decision of 2026-10-02: no caption, no north mark). A left press or drag on it
+ * centres the camera there, a middle drag orbits the camera as the board's does, and neither changes an order.
  */
 final class GpuMinimap implements GpuHud.Component {
     private static final MMLogger LOGGER = MMLogger.create(GpuMinimap.class);
@@ -42,10 +43,13 @@ final class GpuMinimap implements GpuHud.Component {
     private static final Color ROUTE = Color.valueOf("D4FFF0");
     private static final Color FRUSTUM = new Color(1, 1, 1, .85f);
     private static final Color DESTROYED = Color.valueOf("555555");
-    private static final Color NORTH = new Color(1, 1, 1, .7f);
-    private static final float CANVAS_HEIGHT = 150;
-    /** The canvas height when the window is 800 or less tall. */
-    private static final float LOW_CANVAS_HEIGHT = 120;
+    /** The map's height: the panel keeps the prototype's 210 units (#minimap, y 90-300) with its 2-unit rails. */
+    private static final float CANVAS_HEIGHT = 206;
+    /** The map's height when the window is 800 or less tall: the prototype's 180-unit panel. */
+    private static final float LOW_CANVAS_HEIGHT = 176;
+    /** The close button's room over the map's top-right corner. */
+    private static final float CLOSE_SIZE = 30;
+    private static final float CLOSE_INSET = 2;
     /** The drawn board keeps this margin inside the canvas. */
     private static final float MARGIN = 6;
     /** Hexes fill this share of their size, which leaves the prototype's fine dark seams between them. */
@@ -78,12 +82,9 @@ final class GpuMinimap implements GpuHud.Component {
     private final GpuHudState state;
     private final BoardCamera camera;
     private final Table root;
-    private final Label title;
     private final UiButton close;
-    private final TextTooltip closeTip;
     private final Canvas canvas;
     private final TextureRegion pixel;
-    private final Label north;
     private final Label contact;
     private final float contactScale;
     /** Each hex art's average colour, kept for the art on the current board. */
@@ -91,30 +92,24 @@ final class GpuMinimap implements GpuHud.Component {
     /** The first frame of each liquid animation file the board has shown, by its tileset path; empty if unreadable. */
     private final Map<String, Optional<BoardScene.Pixels>> liquids = new HashMap<>();
     private GpuHud.Inputs inputs;
-    private GpuBoardSource.UiPreferences tipPreferences;
 
     GpuMinimap(GpuHudKit kit, GpuBoardSource source, GpuHudState state, BoardCamera camera) {
         this.state = state;
         this.camera = camera;
         ui = kit.ui;
         pixel = new TextureRegion(ui.skin.get("white", Texture.class));
+        // The panel's frame around the map: its 2-unit rails and side borders.
         root = ui.panel();
         root.setName("minimap");
-        // The 2-unit rails and the panel's padding 0 12 12 inside its 2-unit side borders.
-        root.pad(2, 14, 14, 14);
-        title = ui.label("", "hud-caption", 12, UiTheme.TEXT);
-        title.setEllipsis(true);
         close = ui.closeButton(() -> GpuUtilityBar.runMinimap(inputs));
         close.setName("minimap-close");
-        closeTip = ui.tip(close);
-        Table header = new Table();
-        header.pad(8, 2, 6, 2);
-        header.add(title).left().expandX().fillX().minWidth(0);
-        header.add(close).size(30);
         canvas = new Canvas();
-        root.add(header).growX().row();
-        root.add(canvas).growX();
-        north = ui.label(Messages.getString("GpuBoard.hud.minimap.north"), "hud-medium", 10, NORTH);
+        Container<UiButton> backdrop = new Container<>(close).fill();
+        backdrop.setBackground(ui.skin.getDrawable("minimap-close"));
+        // Presses beside the close button reach the map under it: a Table takes presses on its children only.
+        Table corner = new Table();
+        corner.top().right().add(backdrop).size(CLOSE_SIZE).pad(CLOSE_INSET);
+        root.add(new Stack(canvas, corner)).growX();
         contact = ui.label("?", "hud-name", CONTACT_MINIMUM, UiTheme.BLIP);
         contactScale = contact.getFontScaleX() / CONTACT_MINIMUM;
     }
@@ -127,14 +122,8 @@ final class GpuMinimap implements GpuHud.Component {
     @Override
     public void update(GpuHud.Inputs inputs) {
         this.inputs = inputs;
-        title.setText(UiTheme.upper(Messages.getString(inputs.view().tactical()
-              ? "GpuBoard.hud.minimap.titleTactical" : "GpuBoard.hud.minimap.title")));
         BoardScene.Command command = GpuUtilityBar.minimapCommand(inputs);
         close.setDisabled(command == null || !command.enabled());
-        if (inputs.preferences() != tipPreferences) {
-            tipPreferences = inputs.preferences();
-            GpuUtilityBar.tip(closeTip, "GpuBoard.hud.minimap.hideTip", tipPreferences, KeyCommandBind.MINIMAP);
-        }
         canvas.height(inputs.metrics().lowHeight() ? LOW_CANVAS_HEIGHT : CANVAS_HEIGHT);
     }
 
@@ -247,18 +236,35 @@ final class GpuMinimap implements GpuHud.Component {
         Canvas() {
             setName("minimap-canvas");
             addListener(new InputListener() {
+                /** Whether the press is a middle one, whose drag orbits; and its last point. */
+                private boolean orbiting;
+                private float lastX;
+                private float lastY;
+
                 @Override
                 public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
-                    if (button != Input.Buttons.LEFT) {
+                    orbiting = button == Input.Buttons.MIDDLE;
+                    if (orbiting) {
+                        lastX = x;
+                        lastY = y;
+                    } else if (button == Input.Buttons.LEFT) {
+                        centre(x, y);
+                    } else {
                         return false;
                     }
-                    centre(x, y);
                     return true;
                 }
 
                 @Override
                 public void touchDragged(InputEvent event, float x, float y, int pointer) {
-                    centre(x, y);
+                    if (!orbiting) {
+                        centre(x, y);
+                        return;
+                    }
+                    // As the board's middle drag: the stage's y points up, the screen's down.
+                    camera.orbit((x - lastX) * GpuBattleView.ORBIT_DEGREES, (lastY - y) * GpuBattleView.ORBIT_DEGREES);
+                    lastX = x;
+                    lastY = y;
                 }
             });
         }
@@ -327,11 +333,6 @@ final class GpuMinimap implements GpuHud.Component {
                     clipEnd();
                 }
             }
-            // The north mark at the canvas's top right, 5 units down and 6 in.
-            north.pack();
-            north.setPosition(getX() + getWidth() - MARGIN - north.getWidth(),
-                  getY() + getHeight() - 5 - north.getHeight());
-            north.draw(batch, alpha);
             batch.setPackedColor(previous);
         }
 

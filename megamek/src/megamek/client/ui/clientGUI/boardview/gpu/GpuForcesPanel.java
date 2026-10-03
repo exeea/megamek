@@ -95,9 +95,10 @@ final class GpuForcesPanel implements GpuHud.Component {
 
     /**
      * Everything the list shows. The snapshots keep their identity while unchanged, so comparing this each frame is
-     * cheap, and the list is rebuilt only when it differs. {@code revision} counts the collapsed groups' changes.
+     * cheap, and the list is rebuilt only when it differs. {@code card} is the unit the card shows
+     * ({@link GpuHudState#cardUnit}); {@code revision} counts the collapsed groups' changes.
      */
-    private record View(List<UnitStatus> units, GpuBattleStatus.Snapshot status, int focus, int inspected,
+    private record View(List<UnitStatus> units, GpuBattleStatus.Snapshot status, int focus, int card,
           boolean grid, boolean contacts, Grouping grouping, Filter filter, String query, int revision, float width,
           Map<Integer, Integer> drafted, int fireActor, int fireAttacks, List<GpuReportLog.CombatEvent> combat,
           List<GpuBoardSource.Bind> binds, GpuPlayers.Snapshot players) { }
@@ -130,11 +131,9 @@ final class GpuForcesPanel implements GpuHud.Component {
     private final Label footText;
     private final Container<Actor> footRight = new Container<>();
     private final UiButton next;
-    private final TextTooltip nextTip;
     private final UiButton stripNext;
-    private final TextTooltip stripNextTip;
     private final Label rightClick;
-    /** The units' rows and tiles, kept across rebuilds so that their pointer state and tooltips stay with them. */
+    /** The units' rows and tiles, kept across rebuilds so that their pointer state stays with them. */
     private final Map<Integer, UnitRow> rows = new HashMap<>();
     private final Map<Integer, Tile> tiles = new HashMap<>();
     /** The collapsed groups, by name; list and grid share them, as in the prototype. */
@@ -226,12 +225,10 @@ final class GpuForcesPanel implements GpuHud.Component {
         foot.add(footText).growX().minWidth(0).left();
         foot.add(footRight).padLeft(10);
         next = nextButton("forces-next");
-        nextTip = ui.tip(next);
         rightClick = ui.label(text("GpuBoard.hud.forces.rightClickHint"), "hud-small", 11.5f, UiTheme.MUTED);
 
         // The strip (unit panel design 3.3): the title, the pending count, Next pending and ⌄, which closes the sheet.
         stripNext = nextButton("forces-strip-next");
-        stripNextTip = ui.tip(stripNext);
         UiButton restore = ui.button("hud-icon", "chevron-down", null, null);
         restore.setName("forces-restore");
         ui.tip(restore).getActor().setText(text("GpuBoard.hud.forces.restoreTip"));
@@ -254,6 +251,8 @@ final class GpuForcesPanel implements GpuHud.Component {
         onChange(button, () -> {
             BoardScene.Command command = nextCommand();
             if (command != null && command.enabled()) {
+                // The next unit is the selected one, also when MegaMek's current unit comes again.
+                state.restoreSelection();
                 command.action().run();
             }
         });
@@ -271,9 +270,9 @@ final class GpuForcesPanel implements GpuHud.Component {
         boolean grid = state.forcesGrid;
         selectsCell.setActor(grid ? selects : null);
         GpuFireOrders.Snapshot fire = inputs.frame().panels().fire();
-        View view = new View(state.presentedUnits(), inputs.frame().status(), state.focus(), state.inspected, grid,
+        View view = new View(state.presentedUnits(), inputs.frame().status(), state.focus(), state.cardUnit(), grid,
               contacts, grouping, filter, searching ? search.field.getText().strip().toLowerCase(Locale.ROOT) : "",
-              revision, grid ? inputs.metrics().grid() : inputs.metrics().left(), fire.drafted(),
+              revision, grid ? inputs.metrics().grid() : inputs.metrics().forces(), fire.drafted(),
               fire.active() ? fire.actorId() : Entity.NONE, fire.attacks().size(), state.history.playedAttacks(),
               inputs.preferences().binds(), inputs.frame().panels().players());
         if (!view.equals(shown)) {
@@ -315,9 +314,6 @@ final class GpuForcesPanel implements GpuHud.Component {
               : "GpuBoard.hud.forces.gridViewTip", GpuHintLine.key(preferences, KeyCommandBind.FORCES_GRID)));
         overviewTip.getActor().setText(text("GpuBoard.hud.forces.overviewTip",
               GpuHintLine.key(preferences, KeyCommandBind.UNIT_OVERVIEW)));
-        nextTip.getActor().setText(text("GpuBoard.hud.forces.nextPendingTip",
-              GpuHintLine.key(preferences, KeyCommandBind.NEXT_UNIT)));
-        stripNextTip.getActor().setText(nextTip.getActor().getText());
         groupingSelect.setText(text(shown.grouping().key));
         filterSelect.setText(text(shown.filter().key));
         long hostile = units.stream().filter(unit -> unit.side() == Side.ENEMY).count();
@@ -517,9 +513,11 @@ final class GpuForcesPanel implements GpuHud.Component {
             created.addListener(UnitRow.menuOpener(menu, id, this::unit));
             return created;
         });
-        int acting = acting();
-        row.show(unit, line(unit), shown.status().phase(), unit.id() == shown.inspected(), unit(acting));
-        row.pressed(unit.id() == acting);
+        // The one highlighted unit is the card's (the user's decision of 2026-10-02): the focus pressed in mint, an
+        // inspected unit with its edges. The acting unit keeps its line, "Acting now", without the highlight.
+        boolean card = unit.id() == shown.card();
+        row.show(unit, line(unit), shown.status().phase(), card && unit.id() != shown.focus(), unit(acting()));
+        row.pressed(card && unit.id() == shown.focus());
         return row;
     }
 
@@ -529,7 +527,7 @@ final class GpuForcesPanel implements GpuHud.Component {
         return tile;
     }
 
-    /** The prototype's acting() (C.5), whose row is selected and reads "Acting now" or "Up next". */
+    /** The prototype's acting() (C.5), whose row reads "Acting now" or "Up next". */
     private int acting() {
         return UnitRow.acting(shown.status(), shown.focus());
     }
@@ -650,7 +648,7 @@ final class GpuForcesPanel implements GpuHud.Component {
 
     /**
      * A grid tile (.tile): sprite, name, the status line's first part and a 2-unit armor bar along the bottom. It
-     * selects like a row, and opens the same menu and tooltip.
+     * selects like a row, and opens the same menu.
      */
     private final class Tile extends Table {
         private final GpuHudKit.UnitSprite sprite = kit.sprite(36, 30);
@@ -660,10 +658,13 @@ final class GpuForcesPanel implements GpuHud.Component {
         private final Drawable over = ui.skin.getDrawable("row-over");
         // A mint border over a faint mint fill, without the row's inset bar (.tile.sel).
         private final Drawable picked = ui.skin.getDrawable("field-focused");
+        // An inspected unit's edges, as its row has them: mint for a friendly unit, coral for an enemy.
+        private final Drawable friend = ui.skin.getDrawable("row-friend");
+        private final Drawable foe = ui.skin.getDrawable("row-foe");
         private final Drawable bar = ui.skin.getDrawable("white");
         private final ClickListener pointer;
-        private final TextTooltip tooltip;
-        private boolean selected;
+        /** The tile's highlight while the card shows its unit, else null. */
+        private Drawable highlight;
         private float armor;
         private Color barColor = UiTheme.MINT;
 
@@ -691,7 +692,6 @@ final class GpuForcesPanel implements GpuHud.Component {
             };
             addListener(pointer);
             addListener(UnitRow.menuOpener(menu, id, GpuForcesPanel.this::unit));
-            tooltip = ui.tip(this);
         }
 
         void show(UnitStatus unit, Line line) {
@@ -702,16 +702,17 @@ final class GpuForcesPanel implements GpuHud.Component {
             int end = line.text().indexOf(SEPARATOR);
             status.setText(end < 0 ? line.text() : line.text().substring(0, end));
             status.setColor(line.tone().color);
-            selected = unit.id() == acting();
+            // The card's unit, as the rows highlight it: the focus selected, an inspected unit with its edges.
+            highlight = unit.id() != shown.card() ? null : unit.id() == shown.focus() ? picked
+                  : unit.side() == Side.ENEMY ? foe : friend;
             armor = unit.sensorContact() ? 0 : (float) Math.max(0, unit.armor());
             barColor = unit.side() == Side.ENEMY ? UiTheme.CORAL : UiTheme.MINT;
             getColor().a = unit.destroyed() ? .4f : 1;
-            tooltip.getActor().setText(UnitRow.tip(unit, line));
         }
 
         @Override
         public void act(float delta) {
-            setBackground(selected ? picked : pointer.isOver() ? over : up);
+            setBackground(highlight != null ? highlight : pointer.isOver() ? over : up);
             super.act(delta);
         }
 

@@ -16,6 +16,9 @@ import static megamek.client.ui.gdx.UiTheme.pad;
 import static megamek.client.ui.gdx.UiTheme.rgba;
 import static megamek.client.ui.gdx.UiTheme.tint;
 
+import java.io.File;
+
+import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
@@ -33,14 +36,14 @@ import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.scenes.scene2d.utils.TiledDrawable;
 import com.badlogic.gdx.utils.Disposable;
 import megamek.client.ui.gdx.UiTheme;
-import megamek.client.ui.gdx.UiTheme.Dashes;
 import megamek.client.ui.gdx.UiTheme.EdgeBox;
 import megamek.client.ui.gdx.UiTheme.HudFrame;
 import megamek.common.Configuration;
 
 /**
- * The battle window's skin: the toolkit's UiTheme, plus the battle HUD's own drawables, the 3D hex labels' font and
- * the styles of the tuning model's controls, registered into the theme's Skin; the theme owns every texture and font.
+ * The battle window's skin: the toolkit's UiTheme, plus the battle HUD's own drawables and enemy icon, the 3D hex
+ * labels' font and the styles of the tuning model's controls, registered into the theme's Skin; the theme owns every
+ * texture and font.
  */
 final class GpuBoardSkin implements Disposable {
     // Range bands of the solution card (#solution .rng).
@@ -49,6 +52,8 @@ final class GpuBoardSkin implements Disposable {
     static final Color BAND_LONG = Color.valueOf("9FB2F0");
     /** The hex labels' font size in texels: UiTheme.font rasterises the 15 units of default-font at 4x. */
     static final int FONT_RESOLUTION = 60;
+    /** The Contacts utility's icon-enemy: the skull of mm-data's misc images, black on transparent. */
+    private static final String ENEMY_ICON = "challenge_estimate_full.png";
 
     /** The theme's Skin, which holds the battle entries as well. */
     final Skin skin;
@@ -60,6 +65,12 @@ final class GpuBoardSkin implements Disposable {
         // Noto Sans stays the default font: the 3D hex labels and the window's loading message use it.
         BitmapFont font = theme.font("default-font", "Noto Sans/NotoSans-Regular.ttf", 15);
         theme.add("default", new Label.LabelStyle(font, TEXT), Label.LabelStyle.class);
+        Pixmap enemy = new Pixmap(new FileHandle(new File(Configuration.miscImagesDir(), ENEMY_ICON)));
+        try {
+            theme.addIcon("enemy", enemy);
+        } finally {
+            enemy.dispose();
+        }
         battleDrawables();
         tuningStyles();
     }
@@ -89,9 +100,9 @@ final class GpuBoardSkin implements Disposable {
     }
 
     /**
-     * The battle HUD's own drawables: the Tactical View chip's rails, the inspected and the selected weapon rows, the
-     * dock's waiting box, target pills and letters, the log's discs, the fire preview's boxes and toggles, the unit
-     * panel's marks and boxes, and the heat hatch.
+     * The battle HUD's own drawables: the Tactical View chip's rails, the minimap's close backdrop, the inspected and
+     * the selected weapon rows, the dock's waiting box, target pills and letters, the log's discs, the fire preview's
+     * boxes and toggles, the unit panel's marks and boxes, and the heat hatch.
      */
     private void battleDrawables() {
         Texture white = skin.get("white", Texture.class);
@@ -99,6 +110,8 @@ final class GpuBoardSkin implements Disposable {
         HudFrame rails = pad(new HudFrame(white, rgba(22, 30, 30, .92f), RAIL, null, 0, null), 8, 8);
         rails.setLeftWidth(14);
         theme.add("panel-rails", rails, Drawable.class);
+        // The minimap's close button lies on the map: the panel's fill under it, so it reads over any hexes.
+        theme.box("minimap-close", UiTheme.PANEL, null, 0, 3, null, 0, 0, 30).setMinWidth(30);
         // The inspected enemy row (.row.insp): the row's fill within coral edges; a friendly unit's edges are mint.
         theme.box("row-foe", rgba(255, 255, 255, .015f), CORAL, 1, 3, null, 7, 10, 0);
         theme.box("row-friend", rgba(255, 255, 255, .015f), MINT, 1, 3, null, 7, 10, 0);
@@ -106,17 +119,11 @@ final class GpuBoardSkin implements Disposable {
         theme.box("row-weapon-selected", Color.CLEAR, Color.WHITE, 2, 3, null, 7, 10, 0);
         // The dock's waiting box (#dock .waiting).
         theme.box("waiting", rgba(255, 255, 255, .05f), alpha(QUIET, .3f), 1, 3, null, 0, 0, 46);
-        // Target pills (.pill, .pill.on) and their 19-unit letter squares (.pill i, .pill.on i).
+        // Target pills (.pill, .pill.on).
         theme.box("pill", Color.CLEAR, alpha(QUIET, .35f), 1, 3, null, 3, 8, 0).setLeftWidth(3);
         theme.box("pill-on", Color.valueOf("E2EDE6"), Color.WHITE, 1, 3, null, 3, 8, 0).setLeftWidth(3);
-        theme.box("letter", CORAL, null, 0, 2, null, 0, 0, 19).setMinWidth(19);
-        theme.box("letter-on", Color.valueOf("263A34"), null, 0, 2, null, 0, 0, 19).setMinWidth(19);
-        // Letter squares: primary (.tcard .L, .pill.pri i) and a new assignment (.L.n, dashed).
+        // The letter square (.tcard .L, .pill i), tinted to each target's colour (GpuHudKit.letter).
         theme.box("letter-primary", MAIN, null, 0, 2, null, 0, 0, 19).setMinWidth(19);
-        Drawable dashed = new Dashes(white, Color.valueOf("8A9593"), 1, 3, 2, true);
-        dashed.setMinWidth(19);
-        dashed.setMinHeight(19);
-        theme.add("letter-new", dashed, Drawable.class);
         // The log's event discs (.ev .no, .ev.red .no).
         theme.box("disc", alpha(MINT, .15f), null, 0, 14, null, 0, 0, 28).setMinWidth(28);
         theme.box("disc-foe", alpha(CORAL, .15f), null, 0, 14, null, 0, 0, 28).setMinWidth(28);

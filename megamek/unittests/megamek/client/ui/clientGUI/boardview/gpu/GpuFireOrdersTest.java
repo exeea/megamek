@@ -240,6 +240,28 @@ class GpuFireOrdersTest {
         }
     }
 
+    /** A row dropped two places away (H29): the attack takes that place and the others keep their order. */
+    @Test
+    void moveTakesAnAttackSeveralPlacesInOneCommand() throws Exception {
+        try (GpuFiringFixture firing = firing()) {
+            int cannon = eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
+            int right = eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
+            int left = eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
+            for (int weapon : List.of(cannon, right, left)) {
+                command(firing, fire -> fire.assign(weapon, firing.ahead.getId()));
+            }
+            assertEquals(List.of("AC/20 RT@42", "Medium Laser RA@42", "Medium Laser LA@42"), queue(firing));
+            command(firing, fire -> fire.move(left, -2));
+            assertEquals(List.of("Medium Laser LA@42", "AC/20 RT@42", "Medium Laser RA@42"), queue(firing),
+                  "The left arm's laser fires first, the others in their order (no swap with the cannon)");
+            command(firing, fire -> fire.move(left, 3));
+            assertEquals(List.of("Medium Laser LA@42", "AC/20 RT@42", "Medium Laser RA@42"), queue(firing),
+                  "Nothing moves past the last attack");
+            command(firing, fire -> fire.move(left, 2));
+            assertEquals(List.of("AC/20 RT@42", "Medium Laser RA@42", "Medium Laser LA@42"), queue(firing));
+        }
+    }
+
     /**
      * A queued attack on a unit that has left the game (destroyed and removed) has no roll: MegaMek logs an error for a
      * to-hit without a target (seen in a live game, P1), so the orders leave the attack out, as a draft's.

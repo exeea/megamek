@@ -11,7 +11,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -33,7 +32,6 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
-import com.badlogic.gdx.scenes.scene2d.utils.DragListener;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.scenes.scene2d.utils.NinePatchDrawable;
 import com.badlogic.gdx.scenes.scene2d.utils.UIUtils;
@@ -43,17 +41,18 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuFireOrders.WeaponRow;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiFlow;
 import megamek.client.ui.gdx.UiKit;
+import megamek.client.ui.gdx.UiList;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.common.units.Entity;
 
 /**
  * Target cards over the board while the local unit declares its attacks (C.1 G9; r1 3.13, r2 5, plan A.8 H24-H29,
  * H31): one card per target in letter order, then one for the focused enemy without attacks. A card shows the letter,
- * the name and the primary state, then the target's attacks in fire order (grip, number, weapon, ammunition, roll,
- * remove) over a footer; with more than two targets only the focused card, or one opened by "Show attacks", lists
+ * the name and the primary state, then the target's attacks in fire order (grip, weapon, ammunition, roll, remove)
+ * over a footer; with more than two targets only the focused card, or one opened by "Show attacks", lists
  * them. GpuCardPlacement keeps the cards clear of the HUD panels and the units; {@link #placed()} gives their
- * rectangles to the board labels' leaders. A focused grip reorders on Alt+Up/Down, a row dropped on another of its
- * card moves there; every change goes through the fire orders.
+ * rectangles to the board labels' leaders. The rows are a reorderable UiList: a row with a grip drags to another place
+ * of the card, and its focused grip moves it on Alt+Up/Down; every move goes through the fire orders.
  */
 final class GpuTargetCards implements GpuHud.Component {
     /** The cards keep this far inside the window (layout.js: bounds 8, 8, W - 16, H - 16). */
@@ -88,8 +87,13 @@ final class GpuTargetCards implements GpuHud.Component {
     /** An attack row: the attack, its place in the fire order (1 first) and its weapon's row, null without one. */
     private record Row(Attack attack, int number, WeaponRow weapon) { }
 
-    /** A card as built: what it shows, its table, its rows from the top, and the rows' grips by weapon. */
-    private record Card(CardView view, Table table, List<Table> rows, Map<Integer, Grip> grips) { }
+    /** A card as built: what it shows, its table, the rows' grips by weapon, and the list of its rows (or null). */
+    private record Card(CardView view, Table table, Map<Integer, Grip> grips, UiList list) {
+        /** Whether a row of the card is dragged or still moves: the card waits for it before it is built anew. */
+        boolean busy() {
+            return list != null && list.busy();
+        }
+    }
 
     private final GpuHudKit kit;
     private final UiKit ui;
@@ -100,7 +104,6 @@ final class GpuTargetCards implements GpuHud.Component {
     private final TextButton.TextButtonStyle setPrimaryStyle;
     private final TextButton.TextButtonStyle removeStyle;
     private final TextButton.TextButtonStyle showStyle;
-    private final Drawable dragged;
     private final Drawable focusRing;
     /** The shown cards by target id, in letter order with the focus card last. */
     private final Map<Integer, Card> cards = new LinkedHashMap<>();
@@ -126,7 +129,6 @@ final class GpuTargetCards implements GpuHud.Component {
         showStyle.up = padded("pill");
         showStyle.over = padded("button-over");
         showStyle.down = showStyle.over;
-        dragged = ui.skin.newDrawable("white", UiTheme.rgba(255, 255, 255, .08f));
         focusRing = new UiTheme.EdgeBox(white, null, UiTheme.MINT, 2, 2, 2, 2);
     }
 
@@ -168,13 +170,19 @@ final class GpuTargetCards implements GpuHud.Component {
         int order = 0;
         for (CardView view : views.values()) {
             Card card = cards.get(view.id());
-            if (card == null || !card.view().equals(view)) {
+            // A card whose row is dragged or still moves keeps it: the new orders show once the rows rest.
+            if (card == null || !card.view().equals(view) && !card.busy()) {
                 card = rebuild(card, view);
                 cards.put(view.id(), card);
             }
             card.table().setZIndex(order++);
         }
         place(fire, inputs);
+    }
+
+    /** The Esc chain's first step: a row dragged on a card goes home. True when one was. */
+    boolean cancelDrag() {
+        return cards.values().stream().anyMatch(card -> card.list() != null && card.list().cancel());
     }
 
     /** One card's view: its target (null for the focus without attacks), its rows while expanded and its width. */
@@ -281,7 +289,8 @@ final class GpuTargetCards implements GpuHud.Component {
     // ------------------------------------------------------------------ building
 
     /**
-     * A card (.tcard.panel): coral corners on a secondary target (.foe), the header and its rule, then the attack
+     * A card (.tcard.panel), its frame neutral for every target (the user's decision of 2026-10-03; the letter carries
+     * the target's colour): the header and its rule, then the attack
      * rows and the footer, the empty card's hint, or the collapsed line. A click on it focuses its enemy and assigns
      * the armed weapon there, as a click on the unit does (H28, H16).
      */
@@ -290,26 +299,31 @@ final class GpuTargetCards implements GpuHud.Component {
         Target target = view.target();
         Table table = ui.panel();
         table.setName("target-card-" + id);
-        if (target != null && !target.primary()) {
-            table.setBackground(ui.skin.getDrawable("panel-foe"));
-        }
         table.setTouchable(Touchable.enabled);
         table.add(header(view)).growX().row();
         table.add(rule()).growX().height(1).row();
-        List<Table> rows = new ArrayList<>();
         Map<Integer, Grip> grips = new HashMap<>();
+        UiList list = null;
         if (!view.expanded()) {
             table.add(collapsed(view)).growX();
         } else if (view.rows().isEmpty()) {
             table.add(footer(text(view.selected() ? "GpuBoard.hud.cards.emptyHintArmed"
                   : "GpuBoard.hud.cards.emptyHint"))).growX();
         } else {
-            for (Row row : view.rows()) {
-                Table line = row(row, view, rows, grips);
-                rows.add(line);
-                table.add(line).growX().row();
-                table.add(rule()).growX().height(1).row();
+            list = new UiList(ui);
+            list.setName("card-rows");
+            List<Row> rows = view.rows();
+            for (int index = 0; index < rows.size(); index++) {
+                // The row with its rule (.or's border-bottom), which moves with it. As the prototype's draggable .or,
+                // a row with controls drags from anywhere; its grip marks it.
+                Table entry = new Table();
+                entry.add(row(rows.get(index), view, list, index, grips)).growX().row();
+                entry.add(rule()).growX().height(1);
+                list.add(entry, grips.containsKey(rows.get(index).attack().eqNum()) ? entry : null);
             }
+            // H29: a dropped row and Alt+Up/Down move the attack among its target's, in one requeue.
+            list.reorderable((from, to) -> source.fire().move(rows.get(from).attack().eqNum(), to - from));
+            table.add(list).growX().row();
             table.add(footer(target != null && target.primary() ? text("GpuBoard.hud.cards.footPrimary")
                   : text("GpuBoard.hud.cards.footSecondary", signed(target == null ? 0 : target.secondaryModifier()))))
                   .growX();
@@ -323,24 +337,25 @@ final class GpuTargetCards implements GpuHud.Component {
                 }
             }
         });
-        return new Card(view, table, List.copyOf(rows), Map.copyOf(grips));
+        return new Card(view, table, Map.copyOf(grips), list);
     }
 
     /**
-     * The header (.th): the letter tile (white for the primary, coral for a secondary target, a dashed "+" for the
-     * focus without attacks), the upper-case name, and "Primary", "Set primary" or "No attacks" at the right.
+     * The header (.th): the target's letter in its colour, the upper-case name, and "Primary", "Set primary" or "No
+     * attacks" at the right. The focus without attacks has no letter yet, and no "+" square that would look like a
+     * button (the user's decision of 2026-10-03).
      */
     private Table header(CardView view) {
         Target target = view.target();
         Table header = new Table();
         header.pad(9, 12, 8, 12);
-        header.add(target == null ? kit.letter("+", GpuHudKit.Letter.NEW, true)
-              : kit.letter(String.valueOf(target.letter()), target.primary() ? GpuHudKit.Letter.PRIMARY
-                    : GpuHudKit.Letter.SECONDARY, true));
+        if (target != null) {
+            header.add(kit.letter(target.letter(), true)).padRight(8);
+        }
         Label name = ui.label(UiTheme.upper(view.name()), "hud-title", 14, UiTheme.TEXT);
         name.setName("card-name");
         name.setEllipsis(true);
-        header.add(name).growX().minWidth(0).left().padLeft(8);
+        header.add(name).growX().minWidth(0).left();
         Actor primary;
         if (target == null) {
             primary = ui.label(UiTheme.upper(text("GpuBoard.hud.cards.noAttacks")), "hud-title", 11, UiTheme.MUTED);
@@ -365,31 +380,28 @@ final class GpuTargetCards implements GpuHud.Component {
     }
 
     /**
-     * An attack row (.or): the grip, the number in fire order, the weapon over its ammunition (a select when it can
-     * switch bins) or its location and kind, the roll and the remove mark. A right click opens the queued-attack
-     * menu (H28, H37); dragging the row onto another of the card moves it there (H29). A handheld weapon's attack
-     * has no number on the actor, so it has no controls.
+     * An attack row (.or), the {@code index}th of the card's {@code list}: the grip (no fire-order number, which only
+     * took room: the user's decision of 2026-10-03), the weapon over its ammunition (a select when it can switch bins) or its location and kind, the roll and the remove
+     * mark. A right click opens the queued-attack menu (H28, H37); a drag takes the row to another place of the card
+     * (H29). A handheld weapon's attack has no number on the actor, so it has no controls.
      */
-    private Table row(Row row, CardView view, List<Table> rows, Map<Integer, Grip> grips) {
+    private Table row(Row row, CardView view, UiList list, int index, Map<Integer, Grip> grips) {
         Attack attack = row.attack();
         int eqNum = attack.eqNum();
         boolean controls = eqNum >= 0 && view.editable();
-        int index = rows.size();
         Table line = new Table();
         line.setName("card-row-" + row.number());
-        // The whole row takes the right click and the drag, as the prototype's .or does.
+        // The whole row takes the right click, as the prototype's .or does.
         line.setTouchable(Touchable.enabled);
         line.pad(7, 12, 7, 12);
         if (controls) {
-            Grip grip = new Grip(eqNum);
+            Grip grip = new Grip(list, index);
             grip.setName("card-grip-" + eqNum);
             grips.put(eqNum, grip);
             line.add(grip).size(12, 16);
         } else {
             line.add().size(12, 16);
         }
-        line.add(ui.label(String.format(Locale.ROOT, "%02d", row.number()), "hud-heading", 12, UiTheme.MUTED))
-              .width(18).left().padLeft(9);
         Table weapon = new Table();
         weapon.left().defaults().left();
         Label name = ui.label(UiTheme.upper(attack.weapon()), "hud-heading", 13, UiTheme.TEXT);
@@ -411,7 +423,6 @@ final class GpuTargetCards implements GpuHud.Component {
         if (controls) {
             UiButton remove = mark(removeStyle, "close", 15);
             remove.setName("card-remove-" + eqNum);
-            ui.tip(remove).getActor().setText(text("GpuBoard.hud.cards.removeTip"));
             onChange(remove, () -> source.fire().remove(eqNum));
             line.add(remove).size(15).padLeft(9);
             line.addListener(new ClickListener(Input.Buttons.RIGHT) {
@@ -420,7 +431,6 @@ final class GpuTargetCards implements GpuHud.Component {
                     menu.attack(eqNum, event.getStageX(), event.getStageY());
                 }
             });
-            line.addListener(new RowDrag(line, eqNum, index, rows));
         } else {
             line.add().size(15).padLeft(9);
         }
@@ -527,12 +537,13 @@ final class GpuTargetCards implements GpuHud.Component {
     // ------------------------------------------------------------------ reordering
 
     /**
-     * A row's grip (.or .g): six dots that take the keyboard focus when pressed and show the mint ring while they
-     * hold it; Alt+Up/Down then fires the attack one place earlier or later within its target (plan Q1, H29). The key
-     * is consumed even where the attack cannot move, so it never reaches MegaMek's called-shot keys.
+     * A row's grip (.or .g): six dots that mark the row as draggable in its card's list, take the keyboard focus when
+     * pressed and show the mint ring while they hold it; Alt+Up/Down then moves the row one place earlier or later
+     * through the list, which flies it as a drop does (plan Q1, H29). The key is consumed even where the row cannot
+     * move, so it never reaches MegaMek's called-shot keys.
      */
     private final class Grip extends Container<UiKit.Icon> {
-        Grip(int eqNum) {
+        Grip(UiList list, int index) {
             super(ui.icon("grip", 12, MARK));
             setTouchable(Touchable.enabled);
             ui.tip(this).getActor().setText(text("GpuBoard.hud.cards.gripTip"));
@@ -546,7 +557,7 @@ final class GpuTargetCards implements GpuHud.Component {
                 @Override
                 public boolean keyDown(InputEvent event, int keycode) {
                     if (UIUtils.alt() && (keycode == Input.Keys.UP || keycode == Input.Keys.DOWN)) {
-                        source.fire().move(eqNum, keycode == Input.Keys.UP ? -1 : 1);
+                        list.move(index, keycode == Input.Keys.UP ? -1 : 1);
                         return true;
                     }
                     return false;
@@ -561,45 +572,6 @@ final class GpuTargetCards implements GpuHud.Component {
                 // The focus outline (:focus-visible): 2 units of mint around the grip's box.
                 batch.setColor(1, 1, 1, getColor().a * parentAlpha);
                 focusRing.draw(batch, getX() - 2, getY() - 2, getWidth() + 4, getHeight() + 4);
-            }
-        }
-    }
-
-    /**
-     * Drag and drop within a card (.or[draggable]): the dragged row lights up (.or.drag) and, dropped on another row
-     * of its card, takes that row's place, one step at a time through the fire orders' move (the prototype's
-     * dropOrder). A drag is no click: the card's click lets go when it starts.
-     */
-    private final class RowDrag extends DragListener {
-        private final Table line;
-        private final int eqNum;
-        private final int index;
-        private final List<Table> rows;
-
-        RowDrag(Table line, int eqNum, int index, List<Table> rows) {
-            this.line = line;
-            this.eqNum = eqNum;
-            this.index = index;
-            this.rows = rows;
-        }
-
-        @Override
-        public void dragStart(InputEvent event, float x, float y, int pointer) {
-            event.getStage().cancelTouchFocusExcept(this, line);
-            line.setBackground(dragged);
-        }
-
-        @Override
-        public void dragStop(InputEvent event, float x, float y, int pointer) {
-            line.setBackground((Drawable) null);
-            Vector2 point = new Vector2(event.getStageX(), event.getStageY());
-            for (int other = 0; other < rows.size(); other++) {
-                Vector2 local = rows.get(other).stageToLocalCoordinates(new Vector2(point));
-                if (other != index && local.y >= 0 && local.y < rows.get(other).getHeight()) {
-                    for (int step = 0; step < Math.abs(other - index); step++) {
-                        source.fire().move(eqNum, Integer.signum(other - index));
-                    }
-                }
             }
         }
     }

@@ -178,7 +178,8 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String SOFT_CENTER = "SoftCenter";
     public static final String AUTO_CENTER = "AutoCenter";
     public static final String AUTO_SELECT_NEXT = "AutoSelectNextUnit";
-    public static final String AUTO_END_FIRING = "AutoEndFiring";
+    /** Stored under a new name, so that the old "AutoEndFiring" (on by default) is ignored: everyone starts off. */
+    public static final String AUTO_END_FIRING = "AutoEndFiringAfterLastWeapon";
     public static final String AUTO_DECLARE_SEARCHLIGHT = "AutoDeclareSearchlight";
 
     public static final String WARNING_COLOR = "WarningColor";
@@ -375,6 +376,8 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String MINI_MAP_SHOW_FACING_ARROW = "MinimapShowFacingArrow";
     public static final String MINI_MAP_PAINT_BORDERS = "MinimapPaintBorders";
     public static final String MINI_MAP_MOVE_PATH_PERSISTENCE = "MinimapMovePathPersistence";
+    /** The 3D board's battle HUD shows its contacts panel; its Contacts utility switches it as Map does the minimap. */
+    public static final String GPU_CONTACTS_ENABLED = "GpuContactsEnabled";
     public static final String FIRE_DISPLAY_TAB_DURING_PHASES = "FireDisplayTabDuringPhases";
     public static final String MOVE_DISPLAY_TAB_DURING_PHASES = "MoveDisplayTabDuringPhases";
     public static final String HIGH_PERFORMANCE_GRAPHICS = "HighPerformanceGraphics";
@@ -715,7 +718,8 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(FLOATING_ISO, false);
         store.setDefault(LEVEL_HIGHLIGHT, false);
 
-        store.setDefault(AUTO_END_FIRING, true);
+        // Declarations wait for FIRE WEAPONS unless the player turns this on (the user's decision of 2026-10-03).
+        store.setDefault(AUTO_END_FIRING, false);
         store.setDefault(AUTO_DECLARE_SEARCHLIGHT, true);
         store.setDefault(CUSTOM_UNIT_HEIGHT, 400);
         store.setDefault(CUSTOM_UNIT_WIDTH, 600);
@@ -872,6 +876,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(MINI_MAP_SHOW_FACING_ARROW, true);
         store.setDefault(MINI_MAP_PAINT_BORDERS, true);
         store.setDefault(MINI_MAP_MOVE_PATH_PERSISTENCE, 2);
+        store.setDefault(GPU_CONTACTS_ENABLED, true);
         store.setDefault(GIF_GAME_SUMMARY_RECORDING, GifRecordingMode.ASK.name());
         // Migrate the pre-0.51.01 boolean GIF setting: an explicit player choice carries over (true -> ALWAYS,
         // false -> NEVER); players who never touched it get the new ask-at-game-start default.
@@ -1501,6 +1506,10 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public boolean getMinimapEnabled() {
         return store.getBoolean(MINI_MAP_ENABLED);
+    }
+
+    public boolean getGpuContactsEnabled() {
+        return store.getBoolean(GPU_CONTACTS_ENABLED);
     }
 
     public int getMinimapAutoDisplayReportPhase() {
@@ -2460,6 +2469,10 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void toggleMinimapEnabled() {
         setMinimapEnabled(!getMinimapEnabled());
+    }
+
+    public void toggleGpuContactsEnabled() {
+        store.setValue(GPU_CONTACTS_ENABLED, !getGpuContactsEnabled());
     }
 
     public void toggleBotCommandsEnabled() {

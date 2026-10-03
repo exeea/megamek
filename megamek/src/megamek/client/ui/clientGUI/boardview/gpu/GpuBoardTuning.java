@@ -85,6 +85,8 @@ final class GpuBoardTuning {
     private final List<Control> familySizes;
     private final CheckBox zoomScaling;
     private final List<Control> zoomScale;
+    private final CheckBox routePulse;
+    private final List<Control> pulse;
     private final List<Control> visibility;
     private final ButtonGroup<TextButton> fovModes;
     private final List<Control> fieldOfView;
@@ -156,6 +158,24 @@ final class GpuBoardTuning {
             @Override
             public void changed(ChangeEvent event, Actor actor) {
                 applyZoomScaling();
+            }
+        });
+        section(skin, "Route pulse");
+        routePulse = checkbox(skin, "Pulse the planned route", "tuning-route-pulse");
+        routePulse.addListener(new TextTooltip("In the movement turn a glow runs along the plotted route from the unit "
+              + "to its destination, where the ghost surges and a ring ripples out; then it rests and runs again.",
+              skin, "menu"));
+        pulse = controls(skin, List.of(new Knob("Pulse speed", .25f, 3, .05f, "%.2f"),
+              new Knob("Pulse intensity", 0, 2, .05f, "%.2f")), this::applyPulse, 0);
+        pulse.getFirst().slider().addListener(new TextTooltip(String.format(Locale.ROOT, "How fast the glow "
+              + "travels: at 1.00 it takes %.2f s a hex, %.1f s at least and %.1f s at most.",
+              GpuRoutePulse.SECONDS_PER_HEX, GpuRoutePulse.MIN_TRAVEL, GpuRoutePulse.MAX_TRAVEL), skin, "menu"));
+        pulse.get(1).slider().addListener(new TextTooltip("The brightness of the glow, its trail, the ripple and the "
+              + "ghost's surge; 0 hides them.", skin, "menu"));
+        routePulse.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                applyPulse();
             }
         });
         section(skin, "Unit visibility");
@@ -459,6 +479,9 @@ final class GpuBoardTuning {
         zoomScaling.setChecked(UnitScreenScale.ENABLED);
         setValues(zoomScale, new float[] { UnitScreenScale.THRESHOLD, UnitScreenScale.MAX });
         applyZoomScaling();
+        routePulse.setChecked(GpuRoutePulse.ENABLED);
+        setValues(pulse, new float[] { GpuRoutePulse.SPEED, GpuRoutePulse.INTENSITY });
+        applyPulse();
         setValues(visibility, new float[] { GpuTerrain.DEFAULT_BUILDING_OPACITY * 100,
               GpuUnitVisibility.DEFAULT_OUTLINE_INTENSITY * 100 });
         updateReadings(visibility);
@@ -638,6 +661,14 @@ final class GpuBoardTuning {
         UnitScreenScale.max = value(zoomScale, 1);
         zoomScale.forEach(control -> control.slider().setDisabled(!zoomScaling.isChecked()));
         updateReadings(zoomScale);
+    }
+
+    private void applyPulse() {
+        GpuRoutePulse.enabled = routePulse.isChecked();
+        GpuRoutePulse.speed = value(pulse, 0);
+        GpuRoutePulse.intensity = value(pulse, 1);
+        pulse.forEach(control -> control.slider().setDisabled(!routePulse.isChecked()));
+        updateReadings(pulse);
     }
 
     private void applyFieldOfView() {

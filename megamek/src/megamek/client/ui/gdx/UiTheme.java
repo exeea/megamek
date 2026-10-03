@@ -101,6 +101,8 @@ public final class UiTheme implements Disposable {
     private static final String ICON_FONT = "Icons/MaterialSymbolsRounded[FILL,GRAD,opsz,wght].ttf";
     private static final int ICON_SIZE = 48;
     private static final int ICON_CELL = 64;
+    /** The font icons' live area in their cell: Material Symbols keep 20 of their 24 units, texels 12 to 52. */
+    private static final int ICON_LIVE = 40;
     /**
      * Material Symbols Rounded codepoints baked once as icon-name; the first thirteen keep the earlier names. Help is
      * help_center, the prototype's question mark in a rounded square; tune marks the developer tuning utility; walk is
@@ -203,6 +205,21 @@ public final class UiTheme implements Disposable {
         segment.checkedOverFontColor = FILL_INK;
         segment.checkedDownFontColor = FILL_INK;
         skin.add("hud-seg", segment);
+        // The sections of a pill: bare, the hovered one lighter, the pressed one filled.
+        TextButton.TextButtonStyle section = new TextButton.TextButtonStyle();
+        section.font = skin.getFont("hud-medium");
+        section.over = skin.getDrawable("pill-section-over");
+        section.down = section.over;
+        section.checked = skin.getDrawable("pill-section-on");
+        section.checkedOver = section.checked;
+        section.checkedDown = section.checked;
+        section.fontColor = ACCENT;
+        section.overFontColor = Color.WHITE;
+        section.checkedFontColor = FILL_INK;
+        section.checkedOverFontColor = FILL_INK;
+        section.checkedDownFontColor = FILL_INK;
+        section.disabledFontColor = DISABLED;
+        skin.add("hud-pill", section);
         TextButton.TextButtonStyle hudMain = new TextButton.TextButtonStyle();
         hudMain.font = skin.getFont("hud-main");
         hudMain.up = skin.getDrawable("button-main");
@@ -341,6 +358,10 @@ public final class UiTheme implements Disposable {
         box("chip-bad", Color.CLEAR, Color.valueOf("7A3F3A"), 1, 3, null, 2, 7, 0);
         // A utility's count badge (.b.util .badge).
         box("badge", AMBER, null, 0, 8.5f, null, 0, 4, 17).setMinWidth(17);
+        // A pill split in sections (UiKit.segmented "hud-pill"): one frame, the hovered and the pressed section in it.
+        box("pill-frame", faint, QUIET, 1, 3, null, 0, 0, 0);
+        box("pill-section-over", rgba(255, 255, 255, .06f), null, 0, 2, null, 0, 0, 0);
+        box("pill-section-on", FILL, null, 0, 2, null, 0, 0, 0);
         Drawable rule = skin.newDrawable("white", LINE);
         rule.setMinHeight(1);
         skin.add("rule", rule, Drawable.class);
@@ -382,8 +403,9 @@ public final class UiTheme implements Disposable {
     }
 
     /**
-     * The styles only UiKit's widgets use: the 30-unit icon button (.b.ib), the normal-case buttons (.brow .b), list
-     * rows (.row), drop-down faces (.fsel, .amsel), underline tabs (.tabs, .ltabs), the search field and the dot.
+     * The styles only the toolkit's widgets use: the 30-unit icon button (.b.ib), the normal-case buttons (.brow .b),
+     * list rows (.row), drop-down faces (.fsel, .amsel), underline tabs (.tabs, .ltabs), the search field, the dot,
+     * and UiList's flying row, its shadow and its slot.
      */
     private void kitStyles(TextButton.TextButtonStyle hud) {
         Texture white = skin.get("white", Texture.class);
@@ -469,6 +491,12 @@ public final class UiTheme implements Disposable {
 
         // The unread dot (.b.util .dotb).
         box("dot", AMBER, null, 0, 3.5f, null, 0, 0, 7).setMinWidth(7);
+
+        // A reorderable list's flying row: the selected row's look (.row.sel) on an opaque raised face over a soft
+        // shadow; and the slot it will drop into, recessed and outlined in mint.
+        box("row-lifted", rgba(31, 46, 46, .96f), MINT, 1, 3, MINT, 0, 0, 0);
+        shadow("shadow", 9, 3, .5f);
+        box("row-slot", rgba(0, 0, 0, .22f), alpha(MINT, .5f), 1, 3, null, 0, 0, 0);
     }
 
     /**
@@ -526,12 +554,45 @@ public final class UiTheme implements Disposable {
 
     /** Coverage of texel (x, y) by a rounded square inset in a size-texel box, from its signed distance. */
     private static float coverage(int x, int y, int size, float inset, float radius) {
+        return MathUtils.clamp(.5f - distance(x, y, size, inset, radius), 0, 1);
+    }
+
+    /** The signed distance in texels (negative inside) of texel (x, y)'s centre from a rounded square's edge. */
+    private static float distance(int x, int y, int size, float inset, float radius) {
         float half = size / 2f;
         float edge = half - inset - radius;
         float qx = Math.abs(x + .5f - half) - edge;
         float qy = Math.abs(y + .5f - half) - edge;
-        float outside = (float) Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - radius;
-        return MathUtils.clamp(.5f - outside, 0, 1);
+        return (float) Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - radius;
+    }
+
+    /**
+     * Registers a soft shadow (CSS box-shadow's blur) of a rounded box as a nine-patch: black whose alpha eases from
+     * {@code alpha} to none across {@code blur} units on each side of the box's edge, rasterised at twice the stage
+     * density. Its padding is the blur: drawn that much larger than the box on every side, the falloff centres on the
+     * box's edge. Its minimum size is the smallest it draws without overlapping its corners.
+     */
+    private void shadow(String name, float blur, float radius, float alpha) {
+        int soft = Math.round(blur * 2);
+        int round = Math.round(radius * 2);
+        // Corners hold the falloff outside and inside the edge and the rounding, so the stretched middle is uniform.
+        int split = 2 * soft + round + 2;
+        int size = 2 * split + 4;
+        Pixmap pixels = new Pixmap(size, size, Pixmap.Format.RGBA8888);
+        pixels.setBlending(Pixmap.Blending.None);
+        for (int y = 0; y < size; y++) {
+            for (int x = 0; x < size; x++) {
+                float across = MathUtils.clamp((distance(x, y, size, soft, round) + soft) / (2 * soft), 0, 1);
+                pixels.drawPixel(x, y, Color.rgba8888(0, 0, 0, alpha * (1 - across * across * (3 - 2 * across))));
+            }
+        }
+        Texture texture = new Texture(pixels);
+        pixels.dispose();
+        texture.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear);
+        add(name + "-texture", texture, Texture.class);
+        NinePatch patch = new NinePatch(texture, split, split, split, split);
+        patch.scale(.5f, .5f);
+        add(name, pad(new NinePatchDrawable(patch), blur, blur), Drawable.class);
     }
 
     /** Premultiplied source-over of a straight-alpha color at the given coverage. */
@@ -635,6 +696,59 @@ public final class UiTheme implements Disposable {
                   i / columns * ICON_CELL + margin, ICON_SIZE, ICON_SIZE);
             skin.add("icon-" + names.get(i), new TextureRegionDrawable(region), Drawable.class);
         }
+    }
+
+    /**
+     * Adds a symbol image as icon-{@code name}, for a view's own symbol that the icon font lacks. The image's alpha is
+     * the symbol and its colour is ignored, so a black or a white image will do. Its longer side spans the font icons'
+     * live area, centred, so it lines up, scales and tints as they do. Call it on the GL thread; the theme owns the
+     * icon's mipmapped texture and the caller keeps the image.
+     */
+    public void addIcon(String name, Pixmap image) {
+        // Checked before the texture exists, which a refused name would leave unowned.
+        if (skin.has("icon-" + name, Drawable.class)) {
+            throw new IllegalStateException("The skin already has the icon-" + name);
+        }
+        Pixmap cell = iconCell(image);
+        Texture texture = add("icon-" + name + "-texture", new Texture(cell, true), Texture.class);
+        cell.dispose();
+        texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
+        int margin = (ICON_CELL - ICON_SIZE) / 2;
+        add("icon-" + name, new TextureRegionDrawable(new TextureRegion(texture, margin, margin, ICON_SIZE,
+              ICON_SIZE)), Drawable.class);
+    }
+
+    /**
+     * A symbol image as a sheet cell: white, its coverage the image's alpha box-filtered so that the image's longer
+     * side spans the live area.
+     */
+    private static Pixmap iconCell(Pixmap image) {
+        int width = image.getWidth();
+        int height = image.getHeight();
+        // Image texels per cell texel, and the cell's corner in image texels.
+        float step = Math.max(width, height) / (float) ICON_LIVE;
+        float left = (width - ICON_CELL * step) / 2;
+        float top = (height - ICON_CELL * step) / 2;
+        Pixmap cell = new Pixmap(ICON_CELL, ICON_CELL, Pixmap.Format.RGBA8888);
+        cell.setBlending(Pixmap.Blending.None);
+        for (int y = 0; y < ICON_CELL; y++) {
+            float top0 = top + y * step;
+            for (int x = 0; x < ICON_CELL; x++) {
+                float left0 = left + x * step;
+                // The image texels under this cell texel, each weighted by the area they share.
+                float alpha = 0;
+                for (int row = Math.max(0, (int) top0); row < Math.min(height, top0 + step); row++) {
+                    float rowShare = Math.min(top0 + step, row + 1) - Math.max(top0, row);
+                    for (int column = Math.max(0, (int) left0); column < Math.min(width, left0 + step); column++) {
+                        float share = rowShare * (Math.min(left0 + step, column + 1) - Math.max(left0, column));
+                        alpha += share * (image.getPixel(column, row) & 0xFF);
+                    }
+                }
+                // Transparent white around the symbol, as in the font sheet, so the mipmaps average coverage only.
+                cell.drawPixel(x, y, Color.rgba8888(1, 1, 1, alpha / (255 * step * step)));
+            }
+        }
+        return cell;
     }
 
     /**

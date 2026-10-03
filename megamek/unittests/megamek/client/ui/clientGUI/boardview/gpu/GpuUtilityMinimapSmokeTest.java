@@ -6,7 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import java.util.ArrayList;
@@ -22,11 +25,14 @@ import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.ui.Button;
+import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.gdx.UiButton;
+import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
@@ -66,6 +72,8 @@ class GpuUtilityMinimapSmokeTest {
         final GpuUtilityBar utilities;
         final GpuHintLine hint;
         final GpuMinimap minimap;
+        /** The client's preferences the frames carry. */
+        GpuBoardSource.UiPreferences preferences = PREFERENCES;
 
         Parts(GpuHudTestStage hud, BoardCamera camera) {
             BoardScene.Command item = new BoardScene.Command("View:View/" + ClientGUI.VIEW_MINI_MAP + ":Minimap",
@@ -92,7 +100,7 @@ class GpuUtilityMinimapSmokeTest {
                   "", null, reports, status, GpuHudInputTest.panels(move, GpuFireOrders.Snapshot.EMPTY,
                         GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY));
             GpuHud.Inputs inputs = new GpuHud.Inputs(frame, new GpuHud.HudView(tactical, false, Map.of(), Map.of(),
-                  Map.of(), null, Entity.NONE, 0), null, PREFERENCES, GpuHud.Metrics.of(width, height), List.of());
+                  Map.of(), null, Entity.NONE, 0), null, preferences, GpuHud.Metrics.of(width, height), List.of());
             utilities.update(inputs);
             hint.update(inputs);
             minimap.update(inputs);
@@ -144,7 +152,7 @@ class GpuUtilityMinimapSmokeTest {
 
                 GpuMovePlan.Snapshot none = GpuMovePlan.Snapshot.EMPTY;
                 GpuReportLog.Snapshot quiet = GpuReportLog.Snapshot.EMPTY;
-                // Shot 01: initiative in 3D, the minimap titled Battlefield, Map pressed.
+                // Shot 01: initiative in 3D, the minimap filling its panel, Map and Contacts pressed.
                 render(hud, board, parts, scene, initiative, none, quiet, false, 1920, 1080,
                       "g4-initiative-1920x1080", "01-initiative.jpg", true);
                 // Shot 03: the own movement turn with a planned route on the minimap and the planner's hint.
@@ -212,6 +220,47 @@ class GpuUtilityMinimapSmokeTest {
         });
     }
 
+    /**
+     * Item 33.4: the Contacts utility shows MekBay's enemy icon and is pressed while the client's contacts preference
+     * shows the panel; the row is captured pressed and released, and the minimap and chip as the user asked them.
+     */
+    @Test
+    void theContactsUtilityFollowsThePreferenceWithTheEnemyIcon() throws Exception {
+        BoardScene scene = GpuBoardSpaceHarness.scene();
+        GpuHudTestStage.run(hud -> {
+            GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
+            Parts parts = new Parts(hud, board.camera);
+            try {
+                UiButton contacts = hud.stage.getRoot().findActor("utility-contacts");
+                assertSame(hud.kit.ui.skin.getDrawable("icon-enemy"), ((Image) contacts.icons.getFirst())
+                      .getDrawable(), "MekBay's enemy icon");
+                GpuBattleStatus.Snapshot moving = GpuHudFixtures.status();
+                for (boolean enabled : new boolean[] { true, false }) {
+                    parts.preferences = contacts(PREFERENCES, enabled);
+                    board.view(false);
+                    board.camera.zoom(.55f);
+                    show(hud, board, parts, scene, moving, move(), false);
+                    assertEquals(enabled, contacts.isChecked(), "pressed while the panel shows");
+                    hud.capture("ux2-utilities-contacts-" + (enabled ? "on" : "off")).dispose();
+                }
+                parts.preferences = PREFERENCES;
+                board.view(true);
+                show(hud, board, parts, scene, moving, move(), true);
+                hud.capture("ux2-tactical-chip").dispose();
+            } finally {
+                parts.minimap.dispose();
+                board.dispose();
+            }
+        });
+    }
+
+    /** The preferences with the contacts panel shown or hidden. */
+    private static GpuBoardSource.UiPreferences contacts(GpuBoardSource.UiPreferences p, boolean enabled) {
+        return new GpuBoardSource.UiPreferences(p.scale(), p.reportKeywords(), p.reportFilterKeywords(),
+              p.minimapEnabled(), enabled, p.moveEnvelope(), p.conditionsVisible(), p.turnDetails(), p.binds(),
+              p.minRangeRgb(), p.extremeRangeRgb(), p.moveSprintRgb());
+    }
+
     /** The utilities run the camera's Tactical View, the View menu's minimap item and the HUD's panel toggles. */
     private static void checkUtilities(GpuHudTestStage hud, GpuBoardSpaceHarness board, Parts parts,
           BoardScene scene, GpuBattleStatus.Snapshot status) {
@@ -231,18 +280,33 @@ class GpuUtilityMinimapSmokeTest {
         assertFalse(parts.state.logOpen());
         List<String> row = new ArrayList<>();
         ((Table) parts.utilities.actor()).getChildren().forEach(child -> row.add(child.getName()));
-        assertEquals(List.of("utility-tactical", "utility-map", "utility-log", "utility-help", "utility-menu"), row,
-              "Menu takes the place of Settings, and there is no Home utility");
+        assertEquals(List.of("utility-tactical", "utility-map", "utility-contacts", "utility-log", "utility-help",
+              "utility-menu"), row, "Menu takes the place of Settings, Contacts follows Map, and there is no Home");
 
         click(hud, "utility-tactical");
         assertTrue(board.camera.tactical(), "Tactical view enters the Tactical View");
         show(hud, board, parts, scene, status, move(), true);
         assertTrue(parts.utilities.chip().isVisible());
-        click(hud, "tactical-back");
-        assertFalse(board.camera.tactical(), "Back to 3D returns to the 3D view");
+        // The chip names the mode only (the user's decision of 2026-10-02): the pressed utility switches back.
+        List<String> chip = new ArrayList<>();
+        boolean button = false;
+        for (Actor child : ((Table) parts.utilities.chip()).getChildren()) {
+            if (child instanceof Label label) {
+                chip.add(label.getText().toString());
+            }
+            button |= child instanceof Button;
+        }
+        assertEquals(List.of(UiTheme.upper(text("GpuBoard.hud.util.tactical"))), chip, "The chip's caption");
+        assertFalse(button, "No Back to 3D button");
+        click(hud, "utility-tactical");
+        assertFalse(board.camera.tactical(), "Tactical view again returns to the 3D view");
         show(hud, board, parts, scene, status, move(), false);
         assertFalse(parts.utilities.chip().isVisible());
         verifyNoInteractions(parts.source);
+        // The Contacts utility posts the switch of the client's contacts preference to the Swing thread.
+        click(hud, "utility-contacts");
+        verify(parts.source).command(any());
+        clearInvocations(parts.source);
     }
 
     /**
@@ -634,7 +698,7 @@ class GpuUtilityMinimapSmokeTest {
         List<GpuBoardSource.Bind> binds = Stream.of(KeyCommandBind.values())
               .map(bind -> new GpuBoardSource.Bind(bind, bind.keyDefault, bind.modifiersDefault,
                     KeyCommandBind.getDesc(bind.keyDefault, bind.modifiersDefault))).toList();
-        return new GpuBoardSource.UiPreferences(1, "", "", true, false, false, false, binds, 0, 0, 0);
+        return new GpuBoardSource.UiPreferences(1, "", "", true, true, false, false, false, binds, 0, 0, 0);
     }
 
     private static String text(String key) {

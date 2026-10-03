@@ -14,7 +14,6 @@ import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
-import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
@@ -61,9 +60,6 @@ final class GpuHintLine implements GpuHud.Component {
     private final Label instructions;
     private final Label status;
     private final Cell<Label> statusCell;
-    private final TextTooltip doneTip;
-    private final TextTooltip cancelTip;
-    private GpuBoardSource.UiPreferences tipPreferences;
 
     GpuHintLine(GpuHudKit kit, GpuBoardSource source, GpuHudState state) {
         ui = kit.ui;
@@ -88,8 +84,6 @@ final class GpuHintLine implements GpuHud.Component {
         cancel.setName("pick-cancel");
         onChange(done, () -> source.players().endPick(true));
         onChange(cancel, () -> source.players().endPick(false));
-        doneTip = ui.tip(done);
-        cancelTip = ui.tip(cancel);
         chip.add(texts).growX().minWidth(0);
         chip.add(done).padLeft(12);
         chip.add(cancel).padLeft(6);
@@ -122,12 +116,6 @@ final class GpuHintLine implements GpuHud.Component {
             instructions.setText(pick.instructions());
             status.setText(pick.status());
             statusCell.setActor(pick.status().isEmpty() ? null : status);
-        }
-        if (inputs.preferences() != tipPreferences) {
-            // The buttons' tooltips name their keys (plan A.19), which change only with the preferences.
-            tipPreferences = inputs.preferences();
-            doneTip.getActor().setText(key(tipPreferences, KeyCommandBind.DONE));
-            cancelTip.getActor().setText(key(tipPreferences, KeyCommandBind.CANCEL));
         }
     }
 

@@ -9,12 +9,10 @@ import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
-import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
 import megamek.client.ui.clientGUI.boardview.RulerDialog;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
-import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.board.Coords;
 
 /**
@@ -36,13 +34,11 @@ final class GpuLosCard implements GpuHud.Component {
     private final GpuBoardSource source;
     private final Table root;
     private final Table body = new Table();
-    private final TextTooltip closeTip;
     private final End from;
     private final End to;
     private final Label range;
     private final Label attackerView;
     private final Label targetView;
-    private GpuBoardSource.UiPreferences preferences;
     /** The card on show; null while the service has none open. */
     private GpuLosResult.Card shown;
 
@@ -54,7 +50,6 @@ final class GpuLosCard implements GpuHud.Component {
         root.setVisible(false);
         UiButton close = ui.closeButton(() -> source.los().closeCard());
         close.setName("los-close");
-        closeTip = ui.tip(close);
         root.add(ui.header(text("GpuBoard.hud.los.title"), null, close)).growX().row();
         body.top().left().pad(0, 14, 12, 14);
         body.defaults().left().growX().minWidth(0);
@@ -111,11 +106,6 @@ final class GpuLosCard implements GpuHud.Component {
 
     @Override
     public void update(GpuHud.Inputs inputs) {
-        if (inputs.preferences() != preferences) {
-            preferences = inputs.preferences();
-            closeTip.getActor().setText(text("GpuBoard.hud.common.closeTip",
-                  GpuHintLine.key(preferences, KeyCommandBind.CANCEL)));
-        }
         GpuLosResult.Card card = inputs.frame().panels().los().card();
         if (card == shown) {
             return;

@@ -19,7 +19,6 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
-import megamek.client.ui.clientGUI.boardview.gpu.GpuHudKit.Letter;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiKit.Tone;
 import megamek.client.ui.gdx.UiTestStage;
@@ -262,8 +261,8 @@ class GpuHudKitSmokeTest {
               .growX().row();
         Table pills = new Table();
         pills.left().pad(0, 14, 6, 14);
-        pills.add(pill(kit, "A", "Timber Wolf", Letter.FOCUSED)).padRight(6);
-        pills.add(pill(kit, "B", "BattleMaster", Letter.SECONDARY));
+        pills.add(pill(kit, 'A', "Timber Wolf", true)).padRight(6);
+        pills.add(pill(kit, 'B', "BattleMaster", false));
         weapons.add(pills).growX().row();
         weapons.add(ui.label("Assign weapon › A · Timber Wolf", "hud-small", 11.5f, UiTheme.MUTED))
               .left().pad(0, 14, 8, 14).row();
@@ -287,11 +286,10 @@ class GpuHudKitSmokeTest {
         return weapons;
     }
 
-    private static Table pill(GpuHudKit kit, String letter, String name, Letter kind) {
-        boolean on = kind == Letter.FOCUSED;
+    private static Table pill(GpuHudKit kit, char letter, String name, boolean on) {
         Table pill = new Table();
         pill.setBackground(kit.ui.skin.getDrawable(on ? "pill-on" : "pill"));
-        pill.add(kit.letter(letter, kind, false)).padRight(6);
+        pill.add(kit.letter(letter, false)).padRight(6);
         pill.add(kit.ui.label(name, "hud-medium", 11.5f, on ? Color.valueOf("17201D") : UiTheme.TEXT));
         if (on) {
             pill.add(kit.ui.icon("star", 11, UiTheme.AMBER)).padLeft(6);
@@ -439,9 +437,10 @@ class GpuHudKitSmokeTest {
         states.add(chip).row();
         Table marks = new Table();
         marks.defaults().padRight(6);
-        for (Letter kind : Letter.values()) {
-            marks.add(kit.letter(kind == Letter.NEW ? "+" : "A", kind, false));
-            marks.add(kit.letter(kind == Letter.NEW ? "+" : "B", kind, true)).padRight(12);
+        // The twelve target colours (MekBay's palette), as pill and card squares.
+        for (char letter = 'A'; letter <= 'L'; letter++) {
+            marks.add(kit.letter(letter, false));
+            marks.add(kit.letter(letter, true)).padRight(12);
         }
         states.add(marks).row();
         GpuBattleStatus.UnitStatus timberWolf = STATUS.units().get(5);

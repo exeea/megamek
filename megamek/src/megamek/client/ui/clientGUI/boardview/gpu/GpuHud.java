@@ -55,10 +55,32 @@ final class GpuHud implements Disposable {
     /** The solution card moves beside the right column when the list would keep less than this height. */
     private static final float SOLUTION_ROOM = 430;
     private static final float CONDITIONS_WIDTH = 260;
+    /**
+     * The forces list's width, at most the left column's (the user's request of 2026-10-02: the prototype's column of
+     * 300 left the rows much room to spare). The phase header and the unit card keep the column; the forces grid
+     * keeps its own width.
+     */
+    static final float FORCES_WIDTH = 250;
     private static final float INITIATIVE_WIDTH = 560;
     private static final float LOS_WIDTH = 300;
     private static final float CHAT_WIDTH = 340;
     private static final float CHAT_HEIGHT = 320;
+    /**
+     * The binds MegaMek applies without a unit besides its menu bar's ({@link #unitless}): the camera, the chat, the
+     * pause, the report keys, the turn timer and the HUD's own panels.
+     */
+    private static final Set<KeyCommandBind> UNITLESS_BINDS = EnumSet.of(KeyCommandBind.SCROLL_NORTH,
+          KeyCommandBind.SCROLL_SOUTH, KeyCommandBind.SCROLL_EAST, KeyCommandBind.SCROLL_WEST,
+          KeyCommandBind.CAMERA_ROTATE_LEFT, KeyCommandBind.CAMERA_ROTATE_RIGHT, KeyCommandBind.CAMERA_TILT_UP,
+          KeyCommandBind.CAMERA_TILT_DOWN, KeyCommandBind.CAMERA_RESET, KeyCommandBind.CAMERA_FIT_BOARD,
+          KeyCommandBind.TOGGLE_CHAT, KeyCommandBind.TOGGLE_CHAT_CMD, KeyCommandBind.PAUSE, KeyCommandBind.UNPAUSE,
+          KeyCommandBind.REPORT_KEY_NEXT, KeyCommandBind.REPORT_KEY_PREV, KeyCommandBind.REPORT_KEY_SELECT_NEXT,
+          KeyCommandBind.REPORT_KEY_SELECT_PREVIOUS, KeyCommandBind.REPORT_FILTER_KEY_SELECT_NEXT,
+          KeyCommandBind.REPORT_KEY_FILTER, KeyCommandBind.EXTEND_TURN_TIMER, KeyCommandBind.BOT_COMMANDS,
+          KeyCommandBind.FORCES_GRID, KeyCommandBind.PLAYBACK_TOGGLE, KeyCommandBind.PLAYBACK_PREV,
+          KeyCommandBind.PLAYBACK_NEXT, KeyCommandBind.SHOW_NAMEPLATES, KeyCommandBind.UD_GENERAL,
+          KeyCommandBind.UD_PILOT, KeyCommandBind.UD_ARMOR, KeyCommandBind.UD_WEAPONS, KeyCommandBind.UD_SYSTEMS,
+          KeyCommandBind.UD_EXTRAS);
 
     /**
      * The prototype's layout sizes for one window, in stage units (its CSS pixels): the gap, the left and right column
@@ -78,6 +100,11 @@ final class GpuHud implements Disposable {
         /** The forces grid's width, min(660, W / 2 - 330) and at least the left column. */
         float grid() {
             return Math.max(left, Math.min(660, width / 2 - 330));
+        }
+
+        /** The forces list's width: FORCES_WIDTH, and at most the left column. */
+        float forces() {
+            return Math.min(FORCES_WIDTH, left);
         }
     }
 
@@ -352,8 +379,9 @@ final class GpuHud implements Disposable {
      */
     void update(GpuBoardSource.Frame frame, HudView view, GpuBoardWindow.DialogRequest dialog,
           GpuBoardSource.UiPreferences preferences) {
-        // The panels stay where the last layout put them until this frame's layout.
-        inputs = new Inputs(frame, view, dialog, preferences, metrics, panelBounds());
+        // The panels stay where the last layout put them until this frame's layout. A cleared selection presents the
+        // local turn without an acting unit (GpuHudState.presented).
+        inputs = new Inputs(state.presented(frame), view, dialog, preferences, metrics, panelBounds());
         updateState(frame, view.playbackBusy(), dialog);
         for (Component component : components) {
             component.update(inputs);
@@ -386,7 +414,7 @@ final class GpuHud implements Disposable {
             publishedFocus = state.focus();
             source.setFocusUnit(publishedFocus);
         }
-        int card = state.inspected != Entity.NONE ? state.inspected : state.focus();
+        int card = state.cardUnit();
         if (card != publishedCard) {
             publishedCard = card;
             source.setCardUnit(card);
@@ -479,7 +507,7 @@ final class GpuHud implements Disposable {
             return true;
         }
         if (binds.contains(KeyCommandBind.CANCEL)) {
-            return escape();
+            return escape() || state.turnLocked(inputs.frame().status());
         }
         Actor focus = stage.getKeyboardFocus();
         if (focus instanceof TextField) {
@@ -543,6 +571,10 @@ final class GpuHud implements Disposable {
      * display.
      */
     private boolean escape() {
+        // A row dragged in a list (a target card's attacks, the sheet's weapons) goes home first.
+        if (targetCards.cancelDrag() || recordSheet.cancelDrag()) {
+            return true;
+        }
         GamePhase phase = inputs.frame().status().phase();
         Actor focus = stage.getKeyboardFocus();
         // A popover's content holds the focus while it is open; its owner's step closes it. So do the list of an open
@@ -606,7 +638,8 @@ final class GpuHud implements Disposable {
         GpuBattleStatus.Snapshot status = inputs.frame().status();
         GamePhase phase = status.phase();
         boolean moving = planning(inputs);
-        boolean firing = status.myTurn() && phase.isFiring();
+        boolean locked = state.turnLocked(status);
+        boolean firing = status.myTurn() && phase.isFiring() && !locked;
         GpuMovePlan.Mode mode = binds.contains(KeyCommandBind.MOVE_MODE_WALK) ? GpuMovePlan.Mode.WALK
               : binds.contains(KeyCommandBind.MOVE_MODE_RUN) ? GpuMovePlan.Mode.RUN
               : binds.contains(KeyCommandBind.MOVE_MODE_JUMP) ? GpuMovePlan.Mode.JUMP : null;
@@ -647,7 +680,13 @@ final class GpuHud implements Disposable {
         } else if (binds.contains(KeyCommandBind.DONE) && picking(inputs)) {
             source.players().endPick(true);
         } else if (binds.contains(KeyCommandBind.DONE)) {
-            dock.main();
+            if (!locked) {
+                dock.main();
+            }
+        } else if (binds.contains(KeyCommandBind.NEXT_UNIT) || binds.contains(KeyCommandBind.PREV_UNIT)) {
+            // MegaMek's next or previous unit becomes the selected one, also when it is the current unit again.
+            state.restoreSelection();
+            return false;
         } else if (moving && mode != null) {
             source.moves().setMode(mode);
         } else if (moving && (binds.contains(KeyCommandBind.TURN_LEFT) || binds.contains(KeyCommandBind.TURN_RIGHT))) {
@@ -671,9 +710,19 @@ final class GpuHud implements Disposable {
         } else if (!phase.isReport() && binds.contains(KeyCommandBind.CENTER_ON_SELECTED) && framed != Entity.NONE) {
             source.locateUnit(framed);
         } else {
-            return false;
+            // MegaMek gets the rest, but with the selection cleared in the local turn only the binds of no unit.
+            return locked && !binds.stream().allMatch(GpuHud::unitless);
         }
         return true;
+    }
+
+    /**
+     * Whether MegaMek may get {@code bind} while the player cleared the selection in the local turn: its menu bar's
+     * binds and {@link #UNITLESS_BINDS} act on no unit. Every other bind stays with the HUD, so MegaMek's current unit
+     * never acts.
+     */
+    private static boolean unitless(KeyCommandBind bind) {
+        return bind.isMenuBar || UNITLESS_BINDS.contains(bind);
     }
 
     /** The unit sheet's tab of the Unit Display's keys F1 to F6 ({@code UD_GENERAL} to {@code UD_EXTRAS}), or null. */
@@ -727,7 +776,9 @@ final class GpuHud implements Disposable {
         GamePhase phase = status.phase();
         boolean own = unit != null && unit.side() == GpuBattleStatus.Side.OWN;
         boolean shift = (modifiers & InputEvent.SHIFT_DOWN_MASK) != 0;
-        if (!status.myTurn()) {
+        if (!status.myTurn() || state.turnLocked(status)) {
+            // Outside the local turn, and in it with the selection cleared: a unit is selected or inspected, a hex
+            // does nothing.
             if (unit != null) {
                 select(unit.id());
             }
@@ -770,7 +821,8 @@ final class GpuHud implements Disposable {
      * PHYSICAL turn is selected through that phase's command (the fire orders' in FIRING, the display's own selection
      * elsewhere). Outside the local turn, where MegaMek selects nothing, an own unit becomes the focus (C.5), which the
      * card and the panels show as the selected unit (the user's decision of 2026-10-02). Any other unit is inspected.
-     * Selecting ends an inspection; selecting the acting unit again posts nothing, so its plan stays.
+     * Selecting ends an inspection and a cleared selection (the card's ✕); selecting the acting unit again posts
+     * nothing, so its plan stays, unless the selection was cleared.
      */
     void select(int unitId) {
         GpuBattleStatus.Snapshot status = inputs == null ? GpuBattleStatus.Snapshot.EMPTY : inputs.frame().status();
@@ -780,6 +832,7 @@ final class GpuHud implements Disposable {
         }
         boolean own = unit.side() == GpuBattleStatus.Side.OWN;
         if (own && !status.myTurn()) {
+            state.restoreSelection();
             state.inspected = Entity.NONE;
             state.pick(unitId);
             return;
@@ -788,7 +841,12 @@ final class GpuHud implements Disposable {
         boolean firing = phase.isFiring();
         boolean ready = status.myTurn() && own && unit.canActNow()
               && (firing || phase.isMovement() || phase.isPhysical() || phase.isTargeting() || phase.isOffboard());
+        // Only a selection ends a cleared one; an inspected unit leaves it cleared. With the selection cleared the
+        // presented status has no actor, so MegaMek selects even its current unit again, afresh.
         state.inspected = ready ? Entity.NONE : unitId;
+        if (ready) {
+            state.restoreSelection();
+        }
         if (ready && unitId != status.actorId()) {
             if (firing) {
                 source.fire().selectUnit(unitId);
@@ -838,7 +896,8 @@ final class GpuHud implements Disposable {
         // blurs it (shot 12).
         boolean covered = state.overview;
         unitSlot.setVisible(!covered);
-        dockSlot.setVisible(!covered);
+        // The dock acts for the selected unit: none while the player cleared the selection in the local turn.
+        dockSlot.setVisible(!covered && !state.turnLocked(inputs.frame().status()));
         hintSlot.setVisible(!covered && !m.narrow());
         pickSlot.setVisible(!covered && m.narrow() && picking(inputs));
         initiativeSlot.setVisible(!covered);
@@ -849,7 +908,7 @@ final class GpuHud implements Disposable {
         logSlot.setVisible(!covered && logOpen);
         weaponsSlot.setVisible(!covered && weaponsOpen);
         solutionSlot.setVisible(!covered && weaponsOpen);
-        contactsSlot.setVisible(!covered && !logOpen && !weaponsOpen);
+        contactsSlot.setVisible(!covered && !logOpen && !weaponsOpen && inputs.preferences().contactsEnabled());
         chatSlot.setVisible(state.chatOpen);
         overviewSlot.setVisible(state.overview);
         helpSlot.setVisible(state.dialog == GpuHudState.Dialog.HELP);
@@ -866,7 +925,7 @@ final class GpuHud implements Disposable {
         place(phaseSlot, gap, gap, m.left(), phaseHeight);
         float cardHeight = height(unitSlot);
         place(unitSlot, gap, height - gap - cardHeight, m.left(), cardHeight);
-        float forcesWidth = state.forcesGrid && !sheet ? m.grid() : m.left();
+        float forcesWidth = state.forcesGrid && !sheet ? m.grid() : m.forces();
         float forcesTop = gap + phaseHeight + STACK;
         float forcesBottom = cardHeight > 0 ? height - gap - cardHeight - STACK : height - gap;
         float forcesHeight = sheet ? height(forcesSlot) : forcesBottom - forcesTop;
@@ -897,11 +956,10 @@ final class GpuHud implements Disposable {
               chatHeight);
 
         // Middle band between the columns: the dock, the hint line under it and a pick's chip on it, centred in the
-        // window where the band allows.
-        float bandLeft = gap + forcesWidth + gap;
+        // window where the band allows. It starts after the left column, which the unit card fills, or the wider grid.
+        float bandLeft = gap + Math.max(forcesWidth, m.left()) + gap;
         float bandRight = width - gap - rightWidth - gap;
         float dockWidth = Math.min(m.dock(), bandRight - bandLeft);
-        dock.fitWidth(dockWidth, m.dock());
         float dockHeight = height(dockSlot);
         place(dockSlot, centred(dockWidth, bandLeft, bandRight), height - DOCK_BOTTOM - dockHeight, dockWidth,
               dockHeight);

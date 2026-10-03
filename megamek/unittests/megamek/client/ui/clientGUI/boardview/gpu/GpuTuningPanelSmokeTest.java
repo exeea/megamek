@@ -334,6 +334,25 @@ class GpuTuningPanelSmokeTest {
                 assertEquals(1.5f, UnitScreenScale.factor(60), NEAR, "and come back on");
                 hud.capture("tuning-zoom-scaling");
 
+                // The route pulse (user item 55): the panel's switch and sliders set the values the overlay's pulse
+                // takes on its next frame, from the constants.
+                UiKit.Checkbox pulse = hud.find("tuning-route-pulse");
+                assertEquals(GpuRoutePulse.ENABLED, pulse.isTicked(), "the pulse's switch starts at its constant");
+                if (!pulse.isTicked()) {
+                    hud.click(pulse);
+                }
+                hud.drag("Pulse speed", 2);
+                hud.drag("Pulse intensity", .5f);
+                assertEquals(2, GpuRoutePulse.speed, NEAR);
+                assertEquals(.5f, GpuRoutePulse.intensity, NEAR);
+                assertEquals("2.00", reading(hud, "Pulse speed"), "the reading is the model's");
+                hud.click(pulse);
+                assertFalse(GpuRoutePulse.enabled, "switched off");
+                assertTrue(hud.<Slider>find("Pulse intensity").isDisabled(), "its values rest while it is off");
+                hud.click(pulse);
+                assertTrue(GpuRoutePulse.enabled, "and back on");
+                hud.capture("tuning-route-pulse");
+
                 // Unit visibility.
                 hud.drag("Building opacity", 40);
                 hud.drag("See-through", 25);
@@ -380,6 +399,9 @@ class GpuTuningPanelSmokeTest {
                 assertEquals(UnitScreenScale.THRESHOLD, UnitScreenScale.threshold, NEAR);
                 assertEquals(UnitScreenScale.MAX, UnitScreenScale.max, NEAR);
                 assertEquals(UnitScreenScale.ENABLED, hud.<UiKit.Checkbox>find("tuning-zoom-scaling").isTicked());
+                assertEquals(GpuRoutePulse.ENABLED, GpuRoutePulse.enabled, "the route pulse's constants");
+                assertEquals(GpuRoutePulse.SPEED, GpuRoutePulse.speed, NEAR);
+                assertEquals(GpuRoutePulse.INTENSITY, GpuRoutePulse.intensity, NEAR);
                 assertEquals("1.00", reading(hud, "Hex scale"), "the panel shows the restored value");
             }
         });

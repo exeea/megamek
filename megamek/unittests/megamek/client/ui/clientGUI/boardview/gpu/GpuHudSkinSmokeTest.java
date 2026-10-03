@@ -63,7 +63,7 @@ class GpuHudSkinSmokeTest {
           "bracket-over", "bracket-checked", "button", "button-over", "button-checked", "button-disabled",
           "button-main", "button-main-over", "button-main-disabled", "row", "row-over", "row-selected", "row-foe",
           "row-weapon-selected", "field", "field-focused", "select", "waiting", "chip", "chip-warn", "chip-bad",
-          "pill", "pill-on", "letter", "letter-on", "badge", "disc", "disc-foe", "hatch", "rule");
+          "pill", "pill-on", "letter-primary", "badge", "disc", "disc-foe", "hatch", "rule");
     /**
      * "AS7-D" and the other non-ASCII characters of hud-v3's and the GPU HUD's texts. Roboto has most of them; the
      * arrows U+2190-U+2193, the marks U+25C2 and U+2715 and the stars U+2605 and U+2606 come from GpuBoardSkin's
@@ -616,8 +616,7 @@ class GpuHudSkinSmokeTest {
     private static Table pill(Skin skin, String letter, String name, boolean on) {
         Table pill = new Table();
         pill.setBackground(skin.getDrawable(on ? "pill-on" : "pill"));
-        pill.add(label(skin, letter, "hud-name", 11, on ? Color.WHITE : Color.valueOf("1D1413"),
-              on ? "letter-on" : "letter")).size(19).padRight(6);
+        pill.add(label(skin, letter, "hud-name", 11, Color.valueOf("111111"), "letter-primary")).size(19).padRight(6);
         pill.add(label(skin, name, "hud-medium", 11.5f, on ? Color.valueOf("17201D") : UiTheme.TEXT, null));
         return pill;
     }

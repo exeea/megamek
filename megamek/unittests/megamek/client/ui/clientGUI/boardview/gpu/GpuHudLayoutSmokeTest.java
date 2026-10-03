@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -149,6 +150,19 @@ class GpuHudLayoutSmokeTest {
                 shot.dispose();
             }
         }
+        // The forces panel is as tall as its content (the user's rule of 2026-10-02): a long list ends 12 above the
+        // unit card, a short one keeps its own height under the phase header.
+        Rectangle forces = slots.get("forces-panel");
+        Rectangle card = slots.get("unit-card");
+        if (!layout.overlays() && forces != null && card != null) {
+            assertEquals(12, forces.y - card.y - card.height, .5f, "A long forces list ends 12 above the card in " + name);
+            swap(hud, harness, "forces-panel", true, new float[] { 300, 150 });
+            hud.update(frame, GpuHud.HudView.EMPTY, null, GpuHudInputTest.preferences());
+            hud.draw();
+            Rectangle shortList = GpuHudTestStage.bounds(hud.stage.getRoot().findActor("forces-panel"));
+            assertEquals(150, shortList.height, .5f, "A short forces list keeps its height in " + name);
+            assertEquals(forces.y + forces.height, shortList.y + shortList.height, .5f, "and its top in " + name);
+        }
     }
 
     /** The prototype's size of a stand-in, width by height; fill-width slots ignore the width. */
@@ -164,14 +178,15 @@ class GpuHudLayoutSmokeTest {
             case "command-dock" -> new float[] { metrics.dock(),
                   moving ? 174 : layout.phase() == GamePhase.FIRING ? 158 : 116 };
             case "hint-line" -> new float[] { 590, 13 };
-            // Tactical view about 85 wide, then Map, Log, Help and Menu at the utility minimum, 8 apart.
-            case "utility-bar" -> new float[] { 85 + 4 * utility + 4 * 8, 56 };
+            // Tactical view about 85 wide, then Map, Contacts, Log, Help and Menu at the utility minimum, 8 apart.
+            case "utility-bar" -> new float[] { 85 + 5 * utility + 5 * 8, 56 };
             case "tuning-button" -> new float[] { utility, 56 };
-            // Minimap: header 36, canvas 150 (120 at 800 or less) and padding (208 / 178 measured).
-            case "minimap" -> new float[] { metrics.right(), metrics.lowHeight() ? 178 : 208 };
+            // Minimap: the prototype's 210 (180 at 800 or less), which its map fills inside the rails.
+            case "minimap" -> new float[] { metrics.right(), metrics.lowHeight() ? 180 : 210 };
             case "solution-card" -> new float[] { metrics.right(), 145 };
             case "chat-button" -> new float[] { 80, 36 };
-            case "tactical-chip" -> new float[] { 236, 42 };
+            // The chip without the prototype's Back to 3D button (the user's decision of 2026-10-02), as measured.
+            case "tactical-chip" -> new float[] { 153, 32 };
             case "conditions-card" -> new float[] { 260, 140 };
             case "initiative-card" -> new float[] { 560, 290 };
             case "los-card" -> new float[] { 300, 200 };

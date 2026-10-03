@@ -372,6 +372,10 @@ class GpuHudInteractionSmokeTest {
                     assertFalse(focus.epsilonEquals(live.camera().focus, .01f), "The minimap drag pans");
                     play.act();
                     assertEquals(route, play.move().route(), "and keeps the draft");
+                    // A middle drag on the minimap orbits as on the board.
+                    azimuth = live.camera().azimuth();
+                    play.drag(Math.round(from.x), Math.round(from.y), 80, 20, Input.Buttons.MIDDLE, 0);
+                    assertNotEquals(azimuth, live.camera().azimuth(), .5f, "A middle drag on the minimap orbits");
                     live.zoom(new Coords(13, 13), HEX);
 
                     // 73-74: the chat's draft survives new frames and keeps the focus.
@@ -469,6 +473,10 @@ class GpuHudInteractionSmokeTest {
                     play.click(grip);
                     assertSame(grip, live.hud.stage.getKeyboardFocus(), "The grip has the focus");
                     play.key(Input.Keys.DOWN, InputEvent.ALT_DOWN_MASK);
+                    // The row flies one place down; once it lands the fire orders move the attack.
+                    for (int frames = 0; frames < 6 && orders(play.fire()).equals(before); frames++) {
+                        play.act();
+                    }
                     List<String> after = orders(play.fire());
                     assertNotEquals(before, after, "Alt+Down reorders");
                     assertEquals(before.size(), after.size());

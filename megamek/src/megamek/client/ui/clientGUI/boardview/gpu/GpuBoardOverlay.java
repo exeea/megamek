@@ -25,6 +25,7 @@ import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
+import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.DepthTestAttribute;
@@ -46,12 +47,13 @@ import megamek.common.units.Entity;
 /**
  * The hud-v3 board overlay (rebuild plan C.1 G7; overlay.js in 3D, flat.js in the Tactical View) as world meshes:
  * reach envelopes, the route and its ghost, unit rings and glows, range bands, the front arc or the displayed weapon's
- * arc, the physical-attack neighbours and the Tactical View's elevation-drop edges. It draws the frame's snapshots and
- * decides no rule; it rebuilds only when what it draws changed. Owns its meshes and batch on the GL thread.
+ * arc, the physical-attack neighbours and the Tactical View's elevation-drop edges; over them the plotted route's
+ * {@link GpuRoutePulse}. It draws the frame's snapshots and decides no rule; it rebuilds only when what it draws
+ * changed. Owns its meshes, its pulse and its batch on the GL thread.
  */
 final class GpuBoardOverlay implements Disposable {
     /** One prototype pixel in hex radii at the Tactical View zoom GpuUnitIcons follows: an icon of 38 = 1.25 radii. */
-    private static final float PIXEL = 1.25f / 38;
+    static final float PIXEL = 1.25f / 38;
     // overlay.js:10-12, the 3D palette.
     private static final Color MINT = new Color(.45f, .92f, .80f, 1);
     private static final Color RUN = new Color(.93f, .76f, .40f, 1);
@@ -121,6 +123,10 @@ final class GpuBoardOverlay implements Disposable {
     private ModelInstance ghost;
     private ModelInstance ghostSource;
     private long ghostBuild;
+    /** Each ghost material's opacity at rest, which the pulse's surge raises. */
+    private float[] ghostOpacity;
+    /** The plotted route's pulse, drawn over the route each frame; the meshes above never change for it. */
+    private final GpuRoutePulse pulse = new GpuRoutePulse();
 
     GpuBoardOverlay() {
         ghostLight.set(new ColorAttribute(ColorAttribute.AmbientLight, .6f, .6f, .6f, 1));
@@ -131,10 +137,14 @@ final class GpuBoardOverlay implements Disposable {
      * Shows the frame's overlay. The meshes are rebuilt only when what they draw changed: the scene's units, terrain
      * or range bands and borders, the status, the presented units, the movement, fire or physical snapshot, the
      * envelope preference, the range and sprint colours or the view state. {@code view} gives the Tactical View flag
-     * and the hovered hex and unit; {@code state} the inspected unit and the presented units (C.6).
+     * and the hovered hex and unit; {@code state} the inspected unit and the presented units (C.6). Called once a
+     * frame, it also moves the route's pulse on by the frame's time.
      */
-    void update(GpuBoardSource.Frame frame, GpuHud.HudView view, GpuBoardSource.UiPreferences preferences,
+    void update(GpuBoardSource.Frame captured, GpuHud.HudView view, GpuBoardSource.UiPreferences preferences,
           GpuHudState state) {
+        pulse.advance(Gdx.graphics.getDeltaTime());
+        // As the HUD presents it: no route, envelope or orders while the player cleared the selection in the turn.
+        GpuBoardSource.Frame frame = state.presented(captured);
         GpuHudData panels = frame.panels();
         // The source captures a new scene at every refresh; one that shows the same keeps the meshes.
         boolean sameScene = sameDrawing(scene, frame.scene());
@@ -167,6 +177,7 @@ final class GpuBoardOverlay implements Disposable {
         mover = null;
         arrival = null;
         focused = Entity.NONE;
+        pulse.begin(tactical, BoardGeometry.WIDTH / 2);
         if (overlay != null) {
             overlay.model.dispose();
             overlay = null;
@@ -191,6 +202,11 @@ final class GpuBoardOverlay implements Disposable {
     /** How often the overlay was rebuilt; the drop edges are built again only when the board's levels change. */
     long builds() {
         return builds;
+    }
+
+    /** The plotted route's pulse. */
+    GpuRoutePulse pulse() {
+        return pulse;
     }
 
     /**
@@ -234,7 +250,10 @@ final class GpuBoardOverlay implements Disposable {
         return move.active() && preference && !move.envelope().isEmpty();
     }
 
-    /** Draws over the terrain and units with the board camera: depth-tested in 3D, flat on top in the Tactical View. */
+    /**
+     * Draws over the terrain and units with the board camera: depth-tested in 3D, flat on top in the Tactical View;
+     * the route's pulse last, over the route.
+     */
     void render(Camera camera) {
         if (scene == null || overlay == null && !(tactical && dropEdges != null)) {
             return;
@@ -246,6 +265,10 @@ final class GpuBoardOverlay implements Disposable {
         if (overlay != null) {
             batch.render(overlay);
         }
+        Renderable pulsing = pulse.renderable(camera);
+        if (pulsing != null) {
+            batch.render(pulsing);
+        }
         batch.end();
     }
 
@@ -254,7 +277,7 @@ final class GpuBoardOverlay implements Disposable {
      * ({@code shown} gives it for a scene unit, or null), sharing its meshes, at the route's destination in the final
      * facing. In 3D a translucent cyan copy of the model, drawn before {@link #render} so that the marks under it stay
      * hidden, as in the prototype; in the Tactical View the unit's icon at half strength, drawn after the icons.
-     * Nothing without a plotted route of the planner.
+     * When the route's pulse lands, the ghost surges. Nothing without a plotted route of the planner.
      */
     void renderGhost(Camera camera, Function<BoardScene.Unit, ModelInstance> shown) {
         ModelInstance source = mover == null ? null : shown.apply(mover);
@@ -264,12 +287,16 @@ final class GpuBoardOverlay implements Disposable {
         if (ghost == null || ghostSource != source || ghostBuild != builds) {
             // The copy owns copies of the shown materials; the meshes stay the shown model's.
             ghost = new ModelInstance(source);
-            for (Material material : ghost.materials) {
+            ghostOpacity = new float[ghost.materials.size];
+            for (int index = 0; index < ghost.materials.size; index++) {
+                Material material = ghost.materials.get(index);
                 ghostly(material);
+                ghostOpacity[index] = ((BlendingAttribute) material.get(BlendingAttribute.Type)).opacity;
             }
             ghostSource = source;
             ghostBuild = builds;
         }
+        surge(pulse.surge());
         // Moves the shown placement from the unit's hex to the destination; facings turn clockwise, Z rotations not.
         Vector3 from = BoardGeometry.center(mover.location().coords(), mover.location().elevation());
         Vector3 to = BoardGeometry.center(arrival.coords(), arrival.elevation());
@@ -290,8 +317,28 @@ final class GpuBoardOverlay implements Disposable {
     }
 
     /**
-     * Turns a copied material into the ghost's: in the Tactical View the icon's own at half strength; in 3D a lit,
-     * translucent cyan that keeps only a cut-out (alpha-tested) texture, so that a flat sprite keeps its outline.
+     * The pulse's surge on the ghost's copied materials: its glow rises and it turns more opaque, then both ease back
+     * as the surge does. It never grows: units keep their size.
+     */
+    private void surge(float surge) {
+        float opaque = Math.min(1, surge) * GpuRoutePulse.GHOST_SURGE_OPACITY;
+        for (int index = 0; index < ghost.materials.size; index++) {
+            Material material = ghost.materials.get(index);
+            ((BlendingAttribute) material.get(BlendingAttribute.Type)).opacity =
+                  ghostOpacity[index] + (1 - ghostOpacity[index]) * opaque;
+            Color glow = ((ColorAttribute) material.get(ColorAttribute.Emissive)).color;
+            if (tactical) {
+                glow.set(pulse.arrivalColour()).mul(GpuRoutePulse.ICON_SURGE * surge);
+            } else {
+                glow.set(GpuRoutePulse.GHOST_SURGE).mul(surge).add(GHOST_GLOW);
+            }
+        }
+    }
+
+    /**
+     * Turns a copied material into the ghost's: in the Tactical View the icon's own at half strength, with a glow for
+     * the pulse's surge (none at rest); in 3D a lit, translucent cyan that keeps only a cut-out (alpha-tested) texture,
+     * so that a flat sprite keeps its outline.
      */
     private void ghostly(Material material) {
         if (tactical) {
@@ -301,6 +348,7 @@ final class GpuBoardOverlay implements Disposable {
             } else {
                 blending.opacity *= GHOST_ICON_OPACITY;
             }
+            material.set(ColorAttribute.createEmissive(Color.BLACK));
             return;
         }
         Attribute alphaTest = material.get(FloatAttribute.AlphaTest);
@@ -498,7 +546,7 @@ final class GpuBoardOverlay implements Disposable {
      * flat.js:43-47). It runs from the unit's hex through every hex a step enters, coloured by the band of that
      * step, and ends in the destination ring or outline, the facing arrow and the waypoints. A jump is one arc from
      * where it starts to where it lands, as in the prototype, although MegaMek's jump path lists every hex it passes.
-     * A plotted route also places the ghost.
+     * A plotted route also places the ghost and hands the pulse its line and marks.
      */
     private void route(Sink sink, BoardScene.Unit moving) {
         Coords origin = moving.location().coords();
@@ -526,15 +574,24 @@ final class GpuBoardOverlay implements Disposable {
         }
         GpuMovePlan.Step end = steps.getLast();
         int facing = plotted && move.facing() >= 0 ? move.facing() : end.facing();
+        BoardScene.Tile destination = scene.tile(points.getLast());
         if (plotted && end.boardId() == scene.boardId() && scene.tile(end.coords()) != null) {
             mover = moving;
             arrival = new BoardScene.Waypoint(end.coords(), end.level(), facing);
+            // The pulse runs to the ghost; it keeps its rhythm while the plan stays the same.
+            int hexes = 0;
+            for (int i = 1; i < points.size(); i++) {
+                hexes += points.get(i - 1).distance(points.get(i));
+            }
+            pulse.arrive(List.of(moving.id(), origin, steps), hexes,
+                  on(destination, BoardGeometry.center(points.getLast(), 0), 0),
+                  moveColor(bands.getLast() == null ? end.band() : bands.getLast()));
         }
-        BoardScene.Tile destination = scene.tile(points.getLast());
         if (points.size() == 1) {
             arrow(sink, destination, facing, 1);
             return;
         }
+        boolean pulsing = mover != null;
         List<Vector3> at = new ArrayList<>();
         for (Coords coords : points) {
             at.add(on(scene.tile(coords), BoardGeometry.center(coords, 0), .07f));
@@ -545,6 +602,10 @@ final class GpuBoardOverlay implements Disposable {
             Vector3 a = at.get(i - 1);
             Vector3 b = at.get(i);
             float length = Vector3.dst(a.x, a.y, 0, b.x, b.y, 0) / radius;
+            boolean jump = !tactical && bands.get(i) == GpuMovePlan.Band.JUMP;
+            if (pulsing) {
+                trace(a, b, jump, travelled, length, color);
+            }
             if (tactical) {
                 // flat.js:44: one 3-pixel line dashed 7 on, 5 off along the whole route.
                 float period = 12 * PIXEL;
@@ -553,22 +614,30 @@ final class GpuBoardOverlay implements Disposable {
                     float from = Math.max(start, travelled);
                     float to = Math.min(start + 7 * PIXEL, travelled + length);
                     if (to > from) {
-                        segment(sink, above(a, b, (from - travelled) / length), above(a, b, (to - travelled) / length),
-                              1.5f * PIXEL, color);
+                        dash(sink, above(a, b, (from - travelled) / length), above(a, b, (to - travelled) / length),
+                              1.5f * PIXEL, (from + to) / 2, color, pulsing);
                     }
                 }
-                travelled += length;
-            } else if (bands.get(i) == GpuMovePlan.Band.JUMP) {
+            } else if (jump) {
                 for (int j = 1; j <= 14; j++) {
                     float t = j / 15f;
-                    disc(sink, lerp(a, b, t).add(0, 0, MathUtils.sin(MathUtils.PI * t) * 1.2f * radius), .05f, 10,
-                          color);
+                    Vector3 dot = arc(a, b, t);
+                    disc(sink, dot, .05f, 10, color);
+                    if (pulsing) {
+                        pulse.mark(dot, dot, .05f, travelled + t * length, color);
+                    }
                 }
             } else {
                 for (float d = .12f; d < length - .1f; d += .42f) {
-                    segment(sink, above(a, b, d / length), above(a, b, Math.min(1, (d + .24f) / length)), .04f, color);
+                    dash(sink, above(a, b, d / length), above(a, b, Math.min(1, (d + .24f) / length)), .04f,
+                          travelled + d + .12f, color, pulsing);
                 }
             }
+            if (pulsing && !tactical) {
+                // The step's disc at its hex's centre, drawn below.
+                pulse.mark(b, b, .085f, travelled + length, color);
+            }
+            travelled += length;
         }
         Color last = moveColor(bands.getLast());
         if (tactical) {
@@ -626,6 +695,34 @@ final class GpuBoardOverlay implements Disposable {
             point.z = Math.max(point.z, ground + .07f * radius);
         }
         return point;
+    }
+
+    /** overlay.js:86: a point of a jump's arc, a sine 1.2 hex radii high over the line between its ends. */
+    private Vector3 arc(Vector3 a, Vector3 b, float t) {
+        return lerp(a, b, t).add(0, 0, MathUtils.sin(MathUtils.PI * t) * 1.2f * radius);
+    }
+
+    /** A dash of the route, {@code distance} hex radii along it; the pulse lights it as it passes. */
+    private void dash(Sink sink, Vector3 from, Vector3 to, float halfWidth, float distance, Color color,
+          boolean pulsing) {
+        segment(sink, from, to, halfWidth, color);
+        if (pulsing) {
+            pulse.mark(from, to, halfWidth, distance, color);
+        }
+    }
+
+    /**
+     * Hands the pulse the route's line from {@code a} to {@code b} as the route is drawn, kept over the ground or along
+     * the jump's arc, from {@code from} hex radii along the route.
+     */
+    private void trace(Vector3 a, Vector3 b, boolean jump, float from, float length, Color color) {
+        int steps = jump ? 24 : Math.max(1, MathUtils.ceil(length / .25f));
+        for (int step = 0; step <= steps; step++) {
+            float t = step / (float) steps;
+            Vector3 point = jump ? arc(a, b, t) : above(a, b, t);
+            float ground = UnitLandingSupports.surface(scene, point.x, point.y, surfaces);
+            pulse.point(point, Float.isFinite(ground) ? ground : point.z - .07f * radius, from + t * length, color);
+        }
     }
 
     private static Vector3 point(Vector3 center, Vector3 ahead, float along, Vector3 across, float aside) {
@@ -907,6 +1004,7 @@ final class GpuBoardOverlay implements Disposable {
         // The ghost owns no GL object: its meshes and textures are the shown model's.
         ghost = null;
         ghostSource = null;
+        pulse.dispose();
         surfaces.clear();
         batch.dispose();
     }

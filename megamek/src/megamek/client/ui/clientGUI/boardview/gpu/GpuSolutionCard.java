@@ -14,7 +14,6 @@ import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.HorizontalGroup;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
-import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuFireOrders.Modifier;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuFireOrders.Solution;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuFireOrders.Target;
@@ -22,7 +21,6 @@ import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiFlow;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
-import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.rolls.TargetRoll;
 import megamek.common.units.Entity;
 
@@ -42,8 +40,8 @@ final class GpuSolutionCard implements GpuHud.Component {
     /** #solution .rng: 600 11 condensed, 10 apart, 6 above the modifiers. */
     private static final float RANGE_SIZE = 11;
 
-    /** What the card shows: the solution, its weapon's name, the letters, the focused enemy's name, Esc's key. */
-    private record View(Solution solution, String weapon, List<Target> targets, String focusName, String cancelKey) { }
+    /** What the card shows: the solution, its weapon's name, the letters, the focused enemy's name. */
+    private record View(Solution solution, String weapon, List<Target> targets, String focusName) { }
 
     private final UiKit ui;
     private final GpuHudState state;
@@ -51,7 +49,6 @@ final class GpuSolutionCard implements GpuHud.Component {
     private final Label title;
     /** The title's part after the target's name, the roll or "unavailable", which never ends in an ellipsis. */
     private final Label roll;
-    private final TextTooltip closeTip;
     private final HorizontalGroup ranges = new HorizontalGroup();
     private final UiFlow modifiers;
     private final Cell<Actor> modifierCell;
@@ -69,7 +66,6 @@ final class GpuSolutionCard implements GpuHud.Component {
         root.pad(2, 16, 14, 16);
         UiButton close = ui.closeButton(() -> GpuWeaponsPanel.deselect(source, state));
         close.setName("solution-close");
-        closeTip = ui.tip(close);
         Table header = ui.header("", null, close);
         header.setName("solution-header");
         // #solution .phd: padding 9 0 4, the smaller title (.t.sm: 13.5 units)
@@ -114,8 +110,7 @@ final class GpuSolutionCard implements GpuHud.Component {
         int targetId = solution == null ? Entity.NONE : solution.targetId();
         String focusName = state.presentedUnits().stream().filter(unit -> unit.id() == targetId)
               .map(GpuBattleStatus.UnitStatus::name).findFirst().orElse("");
-        View view = new View(solution, weapon, fire.targets(), focusName,
-              GpuHintLine.key(inputs.preferences(), KeyCommandBind.CANCEL));
+        View view = new View(solution, weapon, fire.targets(), focusName);
         if (!view.equals(shown)) {
             shown = view;
             rebuild();
@@ -128,7 +123,6 @@ final class GpuSolutionCard implements GpuHud.Component {
     private void rebuild() {
         Solution solution = shown.solution();
         root.setVisible(solution != null);
-        closeTip.getActor().setText(text("GpuBoard.hud.common.closeTip", shown.cancelKey()));
         ranges.clearChildren();
         modifiers.clearChildren();
         result.clearChildren();
@@ -153,12 +147,11 @@ final class GpuSolutionCard implements GpuHud.Component {
         }
         boolean listed = target && shot && !solution.modifiers().isEmpty();
         modifierCell.setActor(listed ? modifiers : null);
-        resultCell.padTop(listed ? LINE_GAP : 0);
-        if (!target) {
-            result.run(text("GpuBoard.hud.solution.noTarget"), "hud-body", UiTheme.MUTED);
-        } else if (!shot) {
+        // Without a target the card ends with the weapon's ranges.
+        resultCell.setActor(target ? result : null).padTop(listed ? LINE_GAP : 0);
+        if (target && !shot) {
             result.run(solution.reason(), "hud-body", UiTheme.CORAL);
-        } else {
+        } else if (target) {
             showModifiers(solution.modifiers());
             result.run(text("GpuBoard.hud.solution.roll", solution.distance(), shown(solution.value())) + " "
                   + SEPARATOR, "hud-body", UiTheme.ACCENT).run(percent(solution.odds()), "hud-medium", Color.WHITE);

@@ -93,9 +93,9 @@ final class GpuFirePreview implements AutoCloseable {
      */
     record Snapshot(boolean active, boolean complete, int unitId, boolean fromDestination, Coords from, int boardId,
           int facing, String moved, int attackerModifier, int tmm, String unavailable, boolean breachNotPredicted,
-          int targets, int threats, boolean capped, List<Contact> contacts) {
+          int targets, int threats, List<Contact> contacts) {
         static final Snapshot NONE = new Snapshot(false, false, Entity.NONE, false, null, Board.BOARD_NONE, -1, "", 0,
-              0, "", false, 0, 0, false, List.of());
+              0, "", false, 0, 0, List.of());
 
         Snapshot {
             contacts = List.copyOf(contacts);
@@ -104,7 +104,7 @@ final class GpuFirePreview implements AutoCloseable {
         /** The same preview while its successor is being computed. */
         Snapshot updating() {
             return new Snapshot(active, false, unitId, fromDestination, from, boardId, facing, moved, attackerModifier,
-                  tmm, unavailable, breachNotPredicted, targets, threats, capped, contacts);
+                  tmm, unavailable, breachNotPredicted, targets, threats, contacts);
         }
     }
 
@@ -318,7 +318,7 @@ final class GpuFirePreview implements AutoCloseable {
     private static Snapshot header(Key key, Entity unit, boolean complete, String unavailable) {
         FirePreview.End end = key.end();
         return new Snapshot(true, complete, key.unitId(), key.fromDestination(), end.position(), end.boardId(),
-              end.facing(), unit.getMovementString(end.moved()), 0, 0, unavailable, false, 0, 0, false, List.of());
+              end.facing(), unit.getMovementString(end.moved()), 0, 0, unavailable, false, 0, 0, List.of());
     }
 
     /** One preview computation, run in slices of at most sliceNanos of EDT time each. */
@@ -429,7 +429,7 @@ final class GpuFirePreview implements AutoCloseable {
                   unit.getMovementString(end.moved()), value(header.attackerMovement()),
                   value(header.targetMovement()),
                   (header.notPreviewed() == null) ? "" : header.notPreviewed().description(), header.wet(), targets,
-                  threats, (targets > BOARD_ROWS) || (threats > BOARD_ROWS), ranked);
+                  threats, ranked);
         }
     }
 

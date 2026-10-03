@@ -25,7 +25,6 @@ import com.badlogic.gdx.scenes.scene2d.ui.HorizontalGroup;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
-import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.utils.Align;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuPlaybackHistory.Step;
@@ -88,7 +87,6 @@ final class GpuLogPanel implements GpuHud.Component {
     private final UiButton roundSelect;
     private final UiButton searchToggle;
     private final UiButton close;
-    private final TextTooltip closeTip;
     private final UiKit.Segmented tabs;
     private final UiKit.Segmented filters;
     private final Cell<Actor> searchCell;
@@ -157,7 +155,6 @@ final class GpuLogPanel implements GpuHud.Component {
             }
         });
         close.setName("log-close");
-        closeTip = ui.tip(close);
         headerCell = root.add((Actor) null).growX();
         root.row();
 
@@ -238,13 +235,10 @@ final class GpuLogPanel implements GpuHud.Component {
 
         Table foot = ui.footer(root);
         foot.setName("log-footer");
-        Label footText = ui.label(text("GpuBoard.hud.log.footer"), "hud-small", 11.5f, UiTheme.MUTED);
-        footText.setWrap(true);
-        foot.add(footText).growX().minWidth(0).left();
         UiButton copy = ui.button("hud-mini", null, text("GpuBoard.hud.log.copy"), null);
         copy.setName("log-copy");
         onChange(copy, () -> Gdx.app.getClipboard().setContents(copyText()));
-        foot.add(copy).padLeft(10).top();
+        foot.add(copy).expandX().right();
     }
 
     @Override
@@ -355,7 +349,7 @@ final class GpuLogPanel implements GpuHud.Component {
         });
     }
 
-    /** Takes the configured keywords (Client Settings, Report) and the close key's text when the preferences change. */
+    /** Takes the configured keywords (Client Settings, Report) when the preferences change. */
     private void preferences(GpuBoardSource.UiPreferences next) {
         if (next != preferences) {
             preferences = next;
@@ -364,8 +358,6 @@ final class GpuLogPanel implements GpuHud.Component {
             keyword = Math.min(keyword, Math.max(0, keywords.size() - 1));
             filterKeyword = Math.min(filterKeyword, Math.max(0, filterKeywords.size() - 1));
             filtering &= !filterKeywords.isEmpty();
-            closeTip.getActor().setText(text("GpuBoard.hud.common.closeTip",
-                  GpuHintLine.key(next, KeyCommandBind.ROUND_REPORT)));
         }
     }
 

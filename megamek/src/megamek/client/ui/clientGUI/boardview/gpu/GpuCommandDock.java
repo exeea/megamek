@@ -49,9 +49,6 @@ final class GpuCommandDock implements GpuHud.Component {
     /** An open confirm strip (A.8 H5, H6): a twist in that direction, which clears the queued attacks, or Resolve. */
     private record Confirm(boolean twist, int direction) { }
 
-    /** A tooltip that names a bind's key (plan A.19): its text with the key, or the key alone without a text. */
-    private record KeyTip(TextTooltip tip, String text, KeyCommandBind bind) { }
-
     /**
      * What decides the dock's cells; they are rebuilt only when it changes. {@code buttons} are the ids of the option
      * row's physical options or phase commands.
@@ -61,11 +58,10 @@ final class GpuCommandDock implements GpuHud.Component {
 
     /**
      * The More popover's content (plan A.7 G14, A.8 H38, C.2), which G12 shows above the More button: a title and
-     * subtitle, the dock's own items, MegaMek's other phase commands after a separator (an unavailable one says so in
-     * its detail), and a footer.
+     * subtitle, the dock's own items, and MegaMek's other phase commands after a separator (an unavailable one says so
+     * in its detail).
      */
-    record More(String title, String subtitle, List<BoardScene.Command> items, List<BoardScene.Command> commands,
-          String footer) {
+    record More(String title, String subtitle, List<BoardScene.Command> items, List<BoardScene.Command> commands) {
         More {
             items = List.copyOf(items);
             commands = List.copyOf(commands);
@@ -91,9 +87,6 @@ final class GpuCommandDock implements GpuHud.Component {
           GpuMovePlan.Mode.JUMP);
     private static final List<KeyCommandBind> MODE_KEYS = List.of(KeyCommandBind.MOVE_MODE_WALK,
           KeyCommandBind.MOVE_MODE_RUN, KeyCommandBind.MOVE_MODE_JUMP);
-    /** The transport's speeds (plan J4); Instant is "Skip to results". */
-    private static final List<UnitMotion.Speed> SPEEDS = List.of(UnitMotion.Speed.HALF, UnitMotion.Speed.NORMAL,
-          UnitMotion.Speed.DOUBLE, UnitMotion.Speed.QUADRUPLE);
     /**
      * MegaMek commands that a control of the dock, the forces panel's "Next pending" or the weapons panel stands for;
      * More lists every other phase command.
@@ -163,11 +156,6 @@ final class GpuCommandDock implements GpuHud.Component {
     private final UiButton play;
     private final UiButton next;
     private final Label counter;
-    private final List<UiButton> speeds = new ArrayList<>();
-    /** The speeds' own line under the transport, while the dock is narrower than the prototype's (P1 H4). */
-    private final Table speedRow = new Table();
-    private final Cell<Actor> speedCell;
-    private boolean speedLine;
     private final UiButton replay;
     private final UiButton follow;
     // Foot line.
@@ -178,8 +166,7 @@ final class GpuCommandDock implements GpuHud.Component {
     private final Label legendText;
     private final Table footRight = new Table();
     private final UiButton steps;
-    // Tooltips: those that name a key follow the preferences; the mode buttons' also follow the explicit mode.
-    private final List<KeyTip> keyTips = new ArrayList<>();
+    /** The mode buttons' tooltips, each on its button only while that mode is chosen. */
     private final List<TextTooltip> modeTips = new ArrayList<>();
     private final TextTooltip stepsTip;
     /** The option row's physical options (PHYSICAL) or phase commands (GENERIC), rebuilt with the shape. */
@@ -193,7 +180,6 @@ final class GpuCommandDock implements GpuHud.Component {
     private GpuHud.Inputs inputs;
     private Variant variant = Variant.GENERIC;
     private Shape shown;
-    private GpuBoardSource.UiPreferences tipPreferences;
 
     /**
      * {@code camera} holds the playback's "Follow camera" flag (J6); {@code menu} shows the More popover above the
@@ -223,14 +209,12 @@ final class GpuCommandDock implements GpuHud.Component {
 
         main = button("hud-main", null, "", null, "dock-main");
         onChange(main, this::main);
-        keyTip(main, null, KeyCommandBind.DONE);
         secondary = button("hud", null, "", null, "dock-secondary");
         secondary.pad(0, 14, 0, 14);
         onChange(secondary, this::secondary);
         more = button("hud", "more", null, null, "dock-more");
         more.pad(0, 8, 0, 8);
         onChange(more, this::openMore);
-        ui.tip(more).getActor().setText(text("GpuBoard.hud.common.more"));
 
         // Movement: .b.mode buttons at 14 units with their MP, the tall squares and the undo square.
         plainStyle = ui.skin.get("hud", TextButton.TextButtonStyle.class);
@@ -248,12 +232,9 @@ final class GpuCommandDock implements GpuHud.Component {
         }
         turnLeft = turn("twist-left", text("Left"), -1);
         turnRight = turn("twist-right", text("Right"), 1);
-        keyTip(turnLeft, "GpuBoard.hud.dock.turnLeftTip", KeyCommandBind.TURN_LEFT);
-        keyTip(turnRight, "GpuBoard.hud.dock.turnRightTip", KeyCommandBind.TURN_RIGHT);
         undo = button("hud", "undo", null, null, "dock-undo");
         undo.pad(0, 8, 0, 8);
         onChange(undo, () -> source.moves().undo());
-        keyTip(undo, "GpuBoard.hud.dock.undoTip", KeyCommandBind.UNDO_LAST_STEP);
         waypoint = button("hud-mini", null, text("GpuBoard.hud.dock.waypoint"), null, "dock-waypoint");
         onChange(waypoint, () -> source.moves().pinDestination());
         ui.tip(waypoint).getActor().setText(text("GpuBoard.hud.dock.waypointTip"));
@@ -266,8 +247,6 @@ final class GpuCommandDock implements GpuHud.Component {
         trailingIcon(twistRight, "twist-right", 17, 7);
         onChange(twistLeft, () -> twist(-1));
         onChange(twistRight, () -> twist(1));
-        keyTip(twistLeft, "GpuBoard.hud.dock.twistLeftTip", KeyCommandBind.TWIST_LEFT);
-        keyTip(twistRight, "GpuBoard.hud.dock.twistRightTip", KeyCommandBind.TWIST_RIGHT);
         torsoCaption = ui.label("", "hud-caption", 9.5f, UiTheme.MUTED);
         torsoCaption.setName("dock-torso");
         torsoValue = ui.label("", "hud-title", 13, UiTheme.MINT);
@@ -277,7 +256,6 @@ final class GpuCommandDock implements GpuHud.Component {
         clear = button("hud", null, text("GpuBoard.hud.dock.clear"), null, "dock-clear");
         clear.pad(0, 12, 0, 12);
         onChange(clear, this::clearOrders);
-        keyTip(clear, "GpuBoard.hud.dock.clearTip", KeyCommandBind.CLEAR_ORDERS);
         resolve = button("hud", null, text("GpuBoard.hud.dock.resolvePhase"), null, "dock-resolve");
         resolve.pad(0, 14, 0, 14);
         onChange(resolve, this::resolve);
@@ -312,24 +290,12 @@ final class GpuCommandDock implements GpuHud.Component {
         next = button("hud", null, "\u203A", null, "dock-next");
         onChange(previous, () -> state.history.step(-1));
         onChange(next, () -> state.history.step(1));
-        keyTip(previous, "GpuBoard.hud.dock.previousEventTip", KeyCommandBind.PLAYBACK_PREV);
-        keyTip(next, "GpuBoard.hud.dock.nextEventTip", KeyCommandBind.PLAYBACK_NEXT);
         play = button("hud", "play", "", null, "dock-play");
         play.getCell(play.getLabel()).padLeft(7);
         onChange(play, state.history::togglePaused);
-        keyTip(play, "GpuBoard.hud.dock.playPauseTip", KeyCommandBind.PLAYBACK_TOGGLE);
         counter = ui.label("", "hud-medium", 12, UiTheme.MUTED);
         counter.setEllipsis(true);
         counter.setName("dock-counter");
-        for (UnitMotion.Speed speed : SPEEDS) {
-            UiButton button = button("hud", null, text("GpuBoard.hud.dock.speed",
-                  speed.rate / UnitMotion.Speed.NORMAL.rate), null,
-                  "dock-speed-" + speed.name().toLowerCase(Locale.ROOT));
-            button.pad(0, 6, 0, 6);
-            UiKit.size(button.getLabel(), "hud-button", 11.5f);
-            onChange(button, () -> state.history.speed(speed));
-            speeds.add(button);
-        }
         replay = button("hud", "rewind", text("GpuBoard.hud.common.replay"), null, "dock-replay");
         replay.pad(0, 12, 0, 12);
         // The dock's Replay replays the current playback, or in the review the whole round (J8).
@@ -359,8 +325,6 @@ final class GpuCommandDock implements GpuHud.Component {
 
         root.add(head).growX().padBottom(7).row();
         row1Cell = root.add((Actor) null).growX();
-        root.row();
-        speedCell = root.add((Actor) null).growX();
         root.row();
         confirmCell = root.add((Actor) null).growX();
         root.row();
@@ -408,10 +372,6 @@ final class GpuCommandDock implements GpuHud.Component {
         stroke.add(new Image(ui.skin.newDrawable("white", color))).size(5, 2).padLeft(4);
         legend.add(stroke).padRight(5);
         legend.add(ui.label(text, "hud-small", 11.5f, color)).padRight(10);
-    }
-
-    private void keyTip(Actor actor, String text, KeyCommandBind bind) {
-        keyTips.add(new KeyTip(ui.tip(actor), text, bind));
     }
 
     @Override
@@ -466,26 +426,10 @@ final class GpuCommandDock implements GpuHud.Component {
         if (shape.steps()) {
             stepsTip.getActor().setText(String.join("\n", panels.phase().turnDetails()));
         }
-        showTips();
         // Wrapped labels (the confirm strip's question, an unavailable option's reason) measure their height at their
         // width: laid out at its current width, the dock gives the HUD its settled height in this very frame.
         if (root.getWidth() > 0) {
             root.validate();
-        }
-    }
-
-    /**
-     * Takes the width the HUD gives the dock, before the HUD reads its height, and the prototype's width at this window
-     * size (#dock: 500-580). Where the band between the columns makes the dock narrower than that, the transport's
-     * speeds take a line of their own under it instead of shrinking to slivers (#dock .r1 .b.sp: min-width 40; P1 H4).
-     */
-    void fitWidth(float width, float prototype) {
-        boolean line = width < prototype;
-        if (line != speedLine) {
-            speedLine = line;
-            if (shown != null && shown.variant() == Variant.PLAYBACK) {
-                layout(shown);
-            }
         }
     }
 
@@ -549,11 +493,9 @@ final class GpuCommandDock implements GpuHud.Component {
             head.add(stop).padLeft(8);
         }
         row1.clearChildren();
-        speedRow.clearChildren();
         row2.clearChildren();
         choices.clear();
         row1.defaults().padLeft(GAP);
-        speedRow.defaults().padLeft(GAP);
         row2.defaults().padLeft(GAP).height(ACTION);
         switch (shape.variant()) {
             case PLAN -> {
@@ -585,16 +527,11 @@ final class GpuCommandDock implements GpuHud.Component {
             }
             case PLAYBACK -> {
                 row1.add(previous).width(SQUARE).height(PLAIN);
-                // The play button keeps its caption's width and the speeds share the rest (.sp is also flex: 1); in
-                // a narrow dock the speeds take a line of their own and the play button the rest (.b.wide: flex 1).
-                Cell<UiButton> playCell = row1.add(play).height(PLAIN);
+                // The play button takes the rest (.b.wide: flex 1); the speeds live in the phase header (the user's
+                // decision of 2026-10-03).
+                row1.add(play).growX().height(PLAIN);
                 row1.add(next).width(SQUARE).height(PLAIN);
                 row1.add(counter).minWidth(0).height(PLAIN).padLeft(GAP + 6).padRight(6);
-                if (speedLine) {
-                    playCell.growX();
-                }
-                Table line = speedLine ? speedRow : row1;
-                speeds.forEach(speed -> line.add(speed).growX().uniformX().minWidth(0).height(PLAIN));
                 row2.add(replay).minWidth(0);
             }
             case WAITING -> row2.add(waiting).growX().minWidth(0);
@@ -628,14 +565,12 @@ final class GpuCommandDock implements GpuHud.Component {
             row2.add(more).width(SQUARE);
         }
         // The first button of a row starts at its edge.
-        for (Table row : List.of(row1, speedRow, row2)) {
+        for (Table row : List.of(row1, row2)) {
             if (row.getCells().notEmpty()) {
                 row.getCells().first().padLeft(0);
             }
         }
         row1Cell.setActor(row1.getCells().isEmpty() ? null : row1).padBottom(row1.getCells().isEmpty() ? 0 : GAP);
-        speedCell.setActor(speedRow.getCells().isEmpty() ? null : speedRow)
-              .padBottom(speedRow.getCells().isEmpty() ? 0 : GAP);
         confirmCell.setActor(shape.confirm() ? confirm : null).padBottom(shape.confirm() ? GAP : 0);
         row2Cell.setActor(row2.getCells().isEmpty() ? null : row2);
 
@@ -664,7 +599,7 @@ final class GpuCommandDock implements GpuHud.Component {
         span(initiativeResult(status), UiTheme.MINT);
         main(text("GpuBoard.hud.dock.continue"), enabled(done()));
         secondary(text("GpuBoard.hud.dock.rerollInitiative"), true);
-        foot("", text("GpuBoard.hud.dock.initiativeFoot"));
+        foot("", "");
     }
 
     /**
@@ -720,9 +655,15 @@ final class GpuCommandDock implements GpuHud.Component {
             if (button.getStyle() != style) {
                 button.setStyle(style);
             }
-            String key = GpuHintLine.key(inputs.preferences(), MODE_KEYS.get(i));
-            modeTips.get(i).getActor().setText(explicit ? text("GpuBoard.hud.dock.modeAutoTip", key)
-                  : text("GpuBoard.hud.dock.modeTip", modeWord(mode), key));
+            // Only the chosen mode has a tooltip: a second click returns to the automatic mode.
+            TextTooltip tip = modeTips.get(i);
+            if (explicit) {
+                tip.getActor().setText(text("GpuBoard.hud.dock.modeAutoTip",
+                      GpuHintLine.key(inputs.preferences(), MODE_KEYS.get(i))));
+                button.addListener(tip);
+            } else if (button.removeListener(tip)) {
+                tip.hide();
+            }
         }
         undo.setDisabled(!move.canUndo());
         main(text("GpuBoard.hud.dock.confirmMove"), route && enabled(done()));
@@ -753,12 +694,8 @@ final class GpuCommandDock implements GpuHud.Component {
               : text("GpuBoard.hud.phase.opponentTurn", slot.playerName()), slot.side() == GpuBattleStatus.Side.ENEMY);
         span(name(unit), UiTheme.MINT);
         GpuFireOrders.Snapshot fire = inputs.frame().panels().fire();
-        if (fire.active() && !fire.editable()) {
-            foot(text("GpuBoard.hud.dock.weaponAttacks", name(state.presented(fire.actorId())), fire.attacks().size()),
-                  SEPARATOR + text("GpuBoard.hud.dock.draftsNextTurn"));
-        } else {
-            foot("", text("GpuBoard.hud.dock.waitingFoot"));
-        }
+        foot(fire.active() && !fire.editable() ? text("GpuBoard.hud.dock.weaponAttacks",
+              name(state.presented(fire.actorId())), fire.attacks().size()) : "", "");
     }
 
     /**
@@ -772,8 +709,7 @@ final class GpuCommandDock implements GpuHud.Component {
         String name = name(state.presented(fire.actorId()));
         head(targets > 0 ? text("GpuBoard.hud.dock.weaponAttacksTargets", name, attacks, targets)
               : text("GpuBoard.hud.dock.weaponAttacks", name, attacks), false);
-        span(text(attacks > 0 ? "GpuBoard.hud.dock.reviewTargets" : "GpuBoard.hud.dock.draftOrders"),
-              UiTheme.MINT);
+        span(attacks > 0 ? "" : text("GpuBoard.hud.dock.draftOrders"), UiTheme.MINT);
         twistLeft.setDisabled(!fire.canTwistLeft());
         twistRight.setDisabled(!fire.canTwistRight());
         // The read-out's word is the service's ("Torso", or "Turret" for a turret); its value follows the twist.
@@ -819,7 +755,7 @@ final class GpuCommandDock implements GpuHud.Component {
               : picked.size() > 1 ? text("GpuBoard.hud.dock.declarePunches")
               : text("GpuBoard.hud.dock.declare", attack(picked.getFirst())), !picked.isEmpty());
         secondary(text("GpuBoard.hud.dock.noAttack"), enabled(noAction()));
-        foot("", picked.isEmpty() ? text("GpuBoard.hud.physical.unavailableHint") : consequence(picked.getFirst()));
+        foot("", picked.isEmpty() ? "" : consequence(picked.getFirst()));
     }
 
     /**
@@ -870,9 +806,6 @@ final class GpuCommandDock implements GpuHud.Component {
         GpuPlaybackHistory.Step current = history.current();
         counter.setText(text("GpuBoard.hud.dock.reviewable", current == null ? 0 : played.indexOf(current) + 1,
               played.size()));
-        for (int i = 0; i < SPEEDS.size(); i++) {
-            speeds.get(i).pressed(history.speed() == SPEEDS.get(i));
-        }
         replay.setDisabled(played.isEmpty());
         if (phase.isEndReport()) {
             main(text("GpuBoard.hud.dock.readyNextRound"), enabled(done()));
@@ -883,10 +816,8 @@ final class GpuCommandDock implements GpuHud.Component {
                   : "GpuBoard.hud.dock.continueEndPhase"), enabled(done()));
         }
         follow.pressed(camera.animateCombatPlayback);
-        // The event under the cursor, as the log's card names it (J6), else what the playback does.
-        String event = GpuEventLine.current(inputs.frame().reports(), history);
-        foot("", !event.isEmpty() ? event
-              : text(phase.isEndReport() ? "GpuBoard.hud.dock.reviewFoot" : "GpuBoard.hud.dock.resolvingFoot"));
+        // The event under the cursor, as the log's card names it (J6).
+        foot("", GpuEventLine.current(inputs.frame().reports(), history));
     }
 
     /**
@@ -914,18 +845,6 @@ final class GpuCommandDock implements GpuHud.Component {
             secondary(skip.label(), skip.enabled());
         }
         foot("", lines.length > 1 ? lines[1].strip() : "");
-    }
-
-    /** The tooltips that name a key (plan A.19), rewritten when the preferences change. */
-    private void showTips() {
-        GpuBoardSource.UiPreferences preferences = inputs.preferences();
-        if (preferences != tipPreferences) {
-            tipPreferences = preferences;
-            for (KeyTip tip : keyTips) {
-                String key = GpuHintLine.key(preferences, tip.bind());
-                tip.tip().getActor().setText(tip.text() == null ? key : text(tip.text(), key));
-            }
-        }
     }
 
     // ------------------------------------------------------------------ actions
@@ -1079,30 +998,28 @@ final class GpuCommandDock implements GpuHud.Component {
         if (inputs == null || !hasMore()) {
             return null;
         }
-        String footer = text("GpuBoard.hud.dock.moreFoot");
         List<BoardScene.Command> items = new ArrayList<>();
         return switch (variant) {
             case PLAN -> {
                 GpuMovePlan.Snapshot move = inputs.frame().panels().move();
                 boolean back = move.mode() == GpuMovePlan.Mode.BACK;
                 items.add(item("dock.walkBackwards", text("GpuBoard.hud.dock.walkBackwards"),
-                      text(back ? "GpuBoard.hud.dock.on" : "GpuBoard.hud.dock.reverse"),
-                      enabled(command(MoveCommand.MOVE_BACK_UP.getCmd())),
+                      back ? text("GpuBoard.hud.dock.on") : "", enabled(command(MoveCommand.MOVE_BACK_UP.getCmd())),
                       () -> source.moves().setMode(GpuMovePlan.Mode.BACK)));
                 items.add(item("dock.clearRoute", text("GpuBoard.hud.dock.clearRoute"),
                       GpuHintLine.key(inputs.preferences(), KeyCommandBind.CANCEL), !move.route().isEmpty(),
                       () -> source.moves().clearRoute()));
-                items.add(item("dock.holdAll", text("GpuBoard.hud.dock.holdAll"),
-                      text("GpuBoard.hud.dock.holdAllDetail"), enabled(skip()), () -> source.moves().holdAll()));
+                items.add(item("dock.holdAll", text("GpuBoard.hud.dock.holdAll"), "", enabled(skip()),
+                      () -> source.moves().holdAll()));
                 items.add(unitRecord(move.entityId()));
                 yield new More(text("GpuBoard.hud.dock.moreMovement"), name(state.presented(move.entityId())), items,
-                      others(MOVE_SHOWN).map(GpuCommandDock::entry).toList(), footer);
+                      others(MOVE_SHOWN).map(GpuCommandDock::entry).toList());
             }
             case FIRE -> {
                 int actor = inputs.frame().panels().fire().actorId();
                 items.add(unitRecord(actor));
                 yield new More(text("GpuBoard.hud.common.more"), name(state.presented(actor)), items,
-                      others(FIRE_SHOWN).map(GpuCommandDock::entry).toList(), footer);
+                      others(FIRE_SHOWN).map(GpuCommandDock::entry).toList());
             }
             case PHYSICAL, NO_PHYSICAL -> {
                 GpuPhysicalOptions.Snapshot physical = inputs.frame().panels().physical();
@@ -1112,13 +1029,13 @@ final class GpuCommandDock implements GpuHud.Component {
                             () -> choose(option.id()))));
                 items.add(unitRecord(physical.actorId()));
                 yield new More(text("GpuBoard.hud.common.more"), name(state.presented(physical.actorId())), items,
-                      others(PHYSICAL_SHOWN).map(GpuCommandDock::entry).toList(), footer);
+                      others(PHYSICAL_SHOWN).map(GpuCommandDock::entry).toList());
             }
             default -> {
                 List<BoardScene.Command> row = rowCommands();
                 yield new More(text("GpuBoard.hud.common.more"), inputs.frame().status().phase().localizedName(),
                       items, others(Set.of()).filter(command -> !row.contains(command)).map(GpuCommandDock::entry)
-                      .toList(), footer);
+                      .toList());
             }
         };
     }
@@ -1269,10 +1186,7 @@ final class GpuCommandDock implements GpuHud.Component {
         if (!option.table().isEmpty()) {
             parts.add(option.table());
         }
-        if (!option.consequences().isEmpty()) {
-            parts.addAll(option.consequences());
-            parts.add(text("GpuBoard.hud.physical.psrAsOfNow"));
-        }
+        parts.addAll(option.consequences());
         return String.join(SEPARATOR, parts);
     }
 
@@ -1281,15 +1195,6 @@ final class GpuCommandDock implements GpuHud.Component {
             case RUN -> "GpuBoard.hud.dock.run";
             case JUMP -> "GpuBoard.hud.dock.jump";
             default -> "GpuBoard.hud.dock.walk";
-        });
-    }
-
-    /** A mode button's mode in running text: "walk", "run" or "jump". */
-    private static String modeWord(GpuMovePlan.Mode mode) {
-        return text(switch (mode) {
-            case RUN -> "GpuBoard.hud.move.run";
-            case JUMP -> "GpuBoard.hud.move.jump";
-            default -> "GpuBoard.hud.move.walk";
         });
     }
 

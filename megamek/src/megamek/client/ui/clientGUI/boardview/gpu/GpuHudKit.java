@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.IntFunction;
+import java.util.stream.Stream;
 
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.Color;
@@ -26,7 +27,6 @@ import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
-import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
 import com.badlogic.gdx.scenes.scene2d.ui.Widget;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.utils.Align;
@@ -63,8 +63,15 @@ final class GpuHudKit implements Disposable {
     private static final Color SEGMENT = new Color(1, 1, 1, .09f);
     private static final Color TICK = new Color(0, 0, 0, .7f);
 
-    /** Letter squares: a primary target, a secondary one, a new assignment, and the focused pill's letter. */
-    enum Letter { PRIMARY, SECONDARY, NEW, FOCUSED }
+    /**
+     * The targets' colours by letter from A, wrapping: MekBay's DEFAULT_ENCOUNTER_TARGET_COLORS (the user's decision
+     * of 2026-10-03). A letter square shows its target's colour wherever the letter appears.
+     */
+    private static final Color[] TARGET_COLOURS = Stream.of("C0F7FF", "FFEBCA", "C6FFE1", "ECC6FF", "DDFFC0",
+          "FFC6C6", "6FB3BD", "EACC80", "8ED2AD", "AB77C6", "A9D087", "D5A790").map(Color::valueOf)
+          .toArray(Color[]::new);
+    /** The letter on a target's colour (.pill i, .tcard .L). */
+    private static final Color LETTER_INK = Color.valueOf("111111");
 
     /** The toolkit's widgets over the same skin; components build their generic widgets with it. */
     final UiKit ui;
@@ -77,24 +84,23 @@ final class GpuHudKit implements Disposable {
         ui = new UiKit(skin);
     }
 
-    /** A letter square: 19 units in a target pill (.pill i), 24 on a target card (.tcard .L). */
-    Container<Label> letter(String letter, Letter kind, boolean card) {
-        Color text = switch (kind) {
-            case PRIMARY -> Color.valueOf("111111");
-            case SECONDARY -> Color.valueOf("1D1413");
-            case NEW -> UiTheme.MUTED;
-            case FOCUSED -> Color.WHITE;
-        };
-        String background = switch (kind) {
-            case PRIMARY -> "letter-primary";
-            case SECONDARY -> "letter";
-            case NEW -> "letter-new";
-            case FOCUSED -> "letter-on";
-        };
-        Label label = ui.label(letter, "hud-name", card ? 13 : 11, text);
+    /** The colour of target {@code letter} (A, B, ...). */
+    static Color targetColour(char letter) {
+        return TARGET_COLOURS[Math.floorMod(letter - 'A', TARGET_COLOURS.length)];
+    }
+
+    /** A target's letter square in the target's colour: 19 units in a target pill, 24 on a target card. */
+    Container<Label> letter(char letter, boolean card) {
+        return square(String.valueOf(letter), LETTER_INK,
+              ui.skin.newDrawable("letter-primary", UiTheme.tint(targetColour(letter), UiTheme.MAIN, 1)), card);
+    }
+
+    /** A letter square of {@code text} on {@code background}: 19 units in a target pill (.pill i), 24 on a card. */
+    Container<Label> square(String text, Color ink, Drawable background, boolean card) {
+        Label label = ui.label(text, "hud-name", card ? 13 : 11, ink);
         label.setAlignment(Align.center);
         Container<Label> tile = new Container<>(label).size(card ? 24 : 19);
-        tile.setBackground(ui.skin.getDrawable(background));
+        tile.setBackground(background);
         return tile;
     }
 
@@ -175,6 +181,27 @@ final class GpuHudKit implements Disposable {
         units.stream().sorted(order).forEach(unit -> groups.putIfAbsent(key.apply(unit), new ArrayList<>()));
         units.forEach(unit -> groups.get(key.apply(unit)).add(unit));
         return groups;
+    }
+
+    /**
+     * Orders one layer of board labels for drawing (the user's decision of 2026-10-02): {@code labels} in their order,
+     * then the hovered unit's label and last the label of the unit the card shows, so a highlighted unit's label is
+     * never buried under another unit's. {@code hovered} and {@code shown} may be null or not in {@code labels}. A
+     * label already in its place is not moved, so an unchanged frame moves nothing.
+     */
+    static void stack(List<? extends Actor> labels, Actor hovered, Actor shown) {
+        int index = 0;
+        for (Actor label : labels) {
+            if (label != hovered && label != shown) {
+                label.setZIndex(index++);
+            }
+        }
+        if (hovered != null && labels.contains(hovered)) {
+            hovered.toFront();
+        }
+        if (shown != null && labels.contains(shown)) {
+            shown.toFront();
+        }
     }
 
     /**
@@ -300,7 +327,6 @@ final class GpuHudKit implements Disposable {
         private final Drawable friend = ui.skin.getDrawable("row-friend");
         private final Cell<Label> nameCell;
         private final Cell<Label> extraCell;
-        private TextTooltip tooltip;
         private boolean inspected;
         /** The shown unit is the local player's or an ally's; its inspected edges are mint. */
         private boolean friendly;
@@ -379,10 +405,6 @@ final class GpuHudKit implements Disposable {
             inspected(inspecting);
             getColor().a = unit.destroyed() ? .4f : acted ? .72f : 1;
             right.setActor(slot(unit, acted, from));
-            if (tooltip == null) {
-                tooltip = ui.tip(this);
-            }
-            tooltip.getActor().setText(tip(unit, line));
             return this;
         }
 
@@ -478,12 +500,6 @@ final class GpuHudKit implements Disposable {
         /** A unit's sprite color (.spr): coral for an enemy, the friendly mask color otherwise. */
         static Color spriteColor(UnitStatus unit) {
             return unit.side() == GpuBattleStatus.Side.ENEMY ? UiTheme.CORAL : FRIEND_SPRITE;
-        }
-
-        /** The tooltip of a unit's row or tile (A.19): its chassis and model, or a sensor contact, and its line. */
-        static String tip(UnitStatus unit, Line line) {
-            return unit.sensorContact() ? Messages.getString("GpuBoard.hud.common.contactTip", line.text())
-                  : Messages.getString("GpuBoard.hud.common.unitTip", unit.chassis(), unit.model(), line.text());
         }
 
         /**

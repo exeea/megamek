@@ -51,8 +51,8 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * The context menus (G12) in the component harness: every menu kind with its texts, details, disabled items,
- * separators and footer (A.13 M1-M7, M10, A.7 G14, C.3), the King Crab menu beside the hud-v3 shot 13, the placement
+ * The context menus (G12) in the component harness: every menu kind with its texts, details, disabled items and
+ * separators (A.13 M1-M7, M10, A.7 G14, C.3), the King Crab menu beside the hud-v3 shot 13, the placement
  * at the pointer, under a select face and above the More button, the keyboard, the press outside, and the commands
  * the items post. The orders are display values read off shot 13, as E3b would publish them.
  */
@@ -74,7 +74,6 @@ class GpuContextMenuSmokeTest {
     private static final int ARMOR_PIERCING = 12;
     /** Hex 1512, two hexes ahead of the Atlas. */
     private static final Coords HEX = GpuContextMenuTest.HEX;
-    private static final String FOOTER = "Opening this menu never changes your orders";
     private static final String OFF = " (off)";
 
     /** A menu under test with the services it posts to, as the HUD builds it in its window-wide popover slot. */
@@ -123,7 +122,7 @@ class GpuContextMenuSmokeTest {
             // Shot 13: the King Crab's menu at the pointer, with the popover's corner where the mock's is.
             menu.menu.open(new Coords(12, 3), KING_CRAB, 784, hud.height() - 193);
             assertEquals(List.of("KING CRAB KGC-000", "Visual contact · 11 hex", "Set as attack target", "---",
-                  "Inspect unit", "Unit record", "Center camera", "Line of sight from Atlas", FOOTER),
+                  "Inspect unit", "Unit record", "Center camera", "Line of sight from Atlas"),
                   lines(menu.popover));
             Rectangle area = UiTestStage.bounds(menu.popover);
             assertEquals(784, area.x, .01f);
@@ -169,7 +168,7 @@ class GpuContextMenuSmokeTest {
             menu.menu.open(new Coords(18, 2), BATTLEMASTER, 900, 700);
             assertEquals(List.of("BATTLEMASTER BLR-1G", "Visual contact · 13 hex", "Assign armed AC/20 here",
                   "Edit attacks on this target", "Make primary target", "Remove target and its attacks", "---",
-                  "Inspect unit", "Unit record", "Center camera", "Line of sight from Atlas", FOOTER),
+                  "Inspect unit", "Unit record", "Center camera", "Line of sight from Atlas"),
                   lines(menu.popover));
             hud.draw();
             hud.capture("context-menu-enemy-armed").dispose();
@@ -189,11 +188,11 @@ class GpuContextMenuSmokeTest {
             menu.menu.open(new Coords(14, 4), TIMBER_WOLF, 900, 700);
             assertEquals(List.of("TIMBER WOLF PRIME", "Visual contact · 9 hex", "Edit attacks on this target",
                   "Remove target and its attacks", "---", "Inspect unit", "Unit record", "Center camera",
-                  "Line of sight from Atlas", FOOTER), lines(menu.popover));
+                  "Line of sight from Atlas"), lines(menu.popover));
             menu.update(hud, frame(firing(), fire(false)));
             menu.menu.open(new Coords(14, 4), TIMBER_WOLF, 900, 700);
             assertEquals(List.of("TIMBER WOLF PRIME", "Visual contact · 9 hex", "Inspect unit", "Unit record",
-                  "Center camera", "Line of sight from Atlas", FOOTER), lines(menu.popover));
+                  "Center camera", "Line of sight from Atlas"), lines(menu.popover));
         });
     }
 
@@ -206,7 +205,7 @@ class GpuContextMenuSmokeTest {
                   KeyCommandBind.CENTER_ON_SELECTED.modifiersDefault);
             menu.menu.open(new Coords(14, 13), ATLAS, 700, 600);
             assertEquals(List.of("ATLAS AS7-D", "Your unit", "Select unit" + OFF, "Center camera [" + space + "]",
-                  "Unit record", FOOTER), lines(menu.popover));
+                  "Unit record"), lines(menu.popover));
             hud.draw();
             hud.capture("context-menu-friendly").dispose();
             click(hud, menu.item("Unit record"));
@@ -226,7 +225,7 @@ class GpuContextMenuSmokeTest {
             // M4: a sensor contact's line of sight measures its bare hex.
             menu.menu.open(new Coords(9, 3), CONTACT, 700, 600);
             assertEquals(List.of("SENSOR CONTACT", "Unidentified · hex 1004", "Center camera",
-                  "Inspect sensor return", "Line of sight from Atlas", FOOTER), lines(menu.popover));
+                  "Inspect sensor return", "Line of sight from Atlas"), lines(menu.popover));
             hud.draw();
             hud.capture("context-menu-contact").dispose();
             click(hud, menu.item("Line of sight from Atlas"));
@@ -239,18 +238,18 @@ class GpuContextMenuSmokeTest {
             String title = "HEX 1512";
             String subtitle = "Light woods (TF: 50) · Road (TF: 150) · Woods/Jungle elevation: 2 · level 0";
             assertEquals(List.of(title, subtitle, "Plan move here", "Plan and pin as waypoint [Shift+click]",
-                  "Center camera here", "Line of sight from Atlas", "More actions ›" + OFF, FOOTER),
+                  "Center camera here", "Line of sight from Atlas", "More actions ›" + OFF),
                   lines(menu.popover));
             menu.update(hud, frame(MOVEMENT, move(GpuMovePlan.Mode.AUTO), context()));
             assertEquals("More actions ›", lines(menu.popover).get(6), "filled once the hex's context arrives");
             hud.draw();
             hud.capture("context-menu-hex").dispose();
             click(hud, menu.item("More actions"));
-            assertEquals(List.of("MORE ACTIONS", "Hex 1512", "Clear minefield", "Special hex ›", FOOTER),
+            assertEquals(List.of("MORE ACTIONS", "Hex 1512", "Clear minefield", "Special hex ›"),
                   lines(menu.popover), "the old UI's tool and weapon items stay out");
             click(hud, menu.item("Special hex"));
-            assertEquals(List.of("SPECIAL HEX", "More actions", "Mark as objective [Ctrl+O]", "✓ Show elevation",
-                  FOOTER), lines(menu.popover));
+            assertEquals(List.of("SPECIAL HEX", "More actions", "Mark as objective [Ctrl+O]", "✓ Show elevation"),
+                  lines(menu.popover));
             hud.draw();
             hud.capture("context-menu-hex-group").dispose();
             assertTrue(menu.menu.cancel());
@@ -272,7 +271,7 @@ class GpuContextMenuSmokeTest {
             menu.update(hud, frame(status(MOVEMENT, unit -> unit), GpuMovePlan.Snapshot.EMPTY));
             menu.menu.open(HEX, Entity.NONE, 700, 600);
             assertEquals(List.of(title, subtitle, "Center camera here", "Line of sight from Atlas",
-                  "More actions ›" + OFF, FOOTER), lines(menu.popover));
+                  "More actions ›" + OFF), lines(menu.popover));
             // No line of sight into the acting unit's own hex.
             menu.menu.open(new Coords(14, 13), Entity.NONE, 700, 600);
             assertFalse(lines(menu.popover).contains("Line of sight from Atlas"));
@@ -289,7 +288,7 @@ class GpuContextMenuSmokeTest {
             assertEquals(List.of("AC/20", "RT · 20 dmg · 7 heat", "Assign to A · Timber Wolf [assigned]",
                   "Assign to B · BattleMaster", "Assign to King Crab", "Remove this attack", "---",
                   "Hide solution and arc", "Called shot", "[RT] AC/20  (8) [loaded]",
-                  "[RT] AC/20 Armor-Piercing  (4)", FOOTER), lines(menu.popover));
+                  "[RT] AC/20 Armor-Piercing  (4)"), lines(menu.popover));
             hud.draw();
             hud.capture("context-menu-weapon").dispose();
             click(hud, menu.item("Assign to B · BattleMaster"));
@@ -317,7 +316,7 @@ class GpuContextMenuSmokeTest {
             menu.menu.weapon(LASER, false, () -> { }, 1400, 600);
             assertEquals(List.of("MEDIUM LASER", "LA · 5 dmg · 3 heat", "Assign to A · Timber Wolf",
                   "Assign to B · BattleMaster", "Assign to King Crab", "---", "Show solution and arc",
-                  "Next mode [Pulse]", "Previous mode", "Called shot", FOOTER), lines(menu.popover));
+                  "Next mode [Pulse]", "Previous mode", "Called shot"), lines(menu.popover));
             click(hud, menu.item("Assign to King Crab"));
             verify(menu.fire).assign(LASER, KING_CRAB);
             menu.menu.weapon(LASER, false, () -> { }, 1400, 600);
@@ -330,8 +329,8 @@ class GpuContextMenuSmokeTest {
             // H37: an attack moves only among the attacks on its target.
             menu.menu.attack(SRM, 1400, 600);
             String declared = Messages.getString("GpuBoard.hud.context.declaredAttack");
-            assertEquals(List.of("SRM 6", declared, "Fire earlier [Alt+↑]", "Fire later [Alt+↓]", "Remove attack",
-                  FOOTER), lines(menu.popover));
+            assertEquals(List.of("SRM 6", declared, "Fire earlier [Alt+↑]", "Fire later [Alt+↓]", "Remove attack"),
+                  lines(menu.popover));
             hud.draw();
             hud.capture("context-menu-attack").dispose();
             click(hud, menu.item("Fire earlier"));
@@ -349,7 +348,7 @@ class GpuContextMenuSmokeTest {
             // Read-only orders: no assignment, nothing to reorder.
             menu.update(hud, frame(firing(), fire(false)));
             menu.menu.weapon(AC20, true, () -> { }, 1400, 600);
-            assertEquals(List.of("AC/20", "RT · 20 dmg · 7 heat", "Hide solution and arc", FOOTER),
+            assertEquals(List.of("AC/20", "RT · 20 dmg · 7 heat", "Hide solution and arc"),
                   lines(menu.popover));
             menu.menu.attack(SRM, 1400, 600);
             assertEquals(List.of("Fire earlier [Alt+↑]" + OFF, "Fire later [Alt+↓]" + OFF, "Remove attack" + OFF),
@@ -368,10 +367,10 @@ class GpuContextMenuSmokeTest {
             menu.menu.weapon(LASER, false, () -> { }, 1400, 600);
             assertEquals(List.of("MEDIUM LASER", "LA · 5 dmg · 3 heat", "Assign to A · Timber Wolf",
                   "Assign to B · BattleMaster", "Assign to King Crab", "---", "Show solution and arc",
-                  "Next mode [Pulse]", "Previous mode", "Aim at location… › [Head]", FOOTER), lines(menu.popover));
+                  "Next mode [Pulse]", "Previous mode", "Aim at location… › [Head]"), lines(menu.popover));
             click(hud, menu.item("Aim at location…"));
             assertEquals(List.of("AIMED SHOT", "Medium Laser", "✓ Head", "Center Torso", "Right Torso", "Left Torso",
-                  "Right Arm", "Left Arm", "Right Leg" + OFF, "Left Leg" + OFF, "---", "Don't aim", FOOTER),
+                  "Right Arm", "Left Arm", "Right Leg" + OFF, "Left Leg" + OFF, "---", "Don't aim"),
                   lines(menu.popover));
             assertTrue(menu.popover.isVisible(), "the choice opens in place");
             hud.draw();
@@ -401,14 +400,13 @@ class GpuContextMenuSmokeTest {
             List<String> ran = new ArrayList<>();
             UiButton more = UiTestStage.place(hud.window, hud.kit.ui.button("hud", "more", null, null), 1100, 900);
             menu.menu.more(new GpuCommandDock.More("More movement", "Atlas",
-                  List.of(command("Walk backwards", "reverse", true, ran), command("Clear route", "Esc", false, ran),
-                        command("Hold all remaining units", "ends your moves", true, ran)),
+                  List.of(command("Walk backwards", "", true, ran), command("Clear route", "Esc", false, ran),
+                        command("Hold all remaining units", "", true, ran)),
                   List.of(command("Go prone", "unavailable", false, ran), command("Hull down", "unavailable", false,
-                        ran), command("Get up", "Ctrl+U", true, ran)), "Dimmed commands are unavailable now"), more);
-            assertEquals(List.of("MORE MOVEMENT", "Atlas", "Walk backwards [reverse]", "Clear route [Esc]" + OFF,
-                  "Hold all remaining units [ends your moves]", "---", "Go prone [unavailable]" + OFF,
-                  "Hull down [unavailable]" + OFF, "Get up [Ctrl+U]", "Dimmed commands are unavailable now"),
-                  lines(menu.popover));
+                        ran), command("Get up", "Ctrl+U", true, ran))), more);
+            assertEquals(List.of("MORE MOVEMENT", "Atlas", "Walk backwards", "Clear route [Esc]" + OFF,
+                  "Hold all remaining units", "---", "Go prone [unavailable]" + OFF, "Hull down [unavailable]" + OFF,
+                  "Get up [Ctrl+U]"), lines(menu.popover));
             Rectangle button = UiTestStage.bounds(more);
             Rectangle area = UiTestStage.bounds(menu.popover);
             assertEquals(button.x - 150, area.x, .01f);
@@ -595,15 +593,15 @@ class GpuContextMenuSmokeTest {
         List<GpuBoardSource.Bind> binds = Stream.of(KeyCommandBind.values()).map(bind -> new GpuBoardSource.Bind(bind,
               bind.keyDefault, bind.modifiersDefault, KeyCommandBind.getDesc(bind.keyDefault, bind.modifiersDefault)))
               .toList();
-        return new GpuBoardSource.UiPreferences(1, "", "", true, false, false, false, binds, 0, 0, 0);
+        return new GpuBoardSource.UiPreferences(1, "", "", true, true, false, false, false, binds, 0, 0, 0);
     }
 
     // ---------------------------------------------------------------- reading and pressing the menu
 
     /**
      * The open menu as the player reads it, top to bottom: the header's title and subtitle, each item as its text
-     * with "✓ " when checked, " ›" when it opens a group, its detail in brackets and " (off)" when disabled, "---" for
-     * a separator, and the footer.
+     * with "✓ " when checked, " ›" when it opens a group, its detail in brackets and " (off)" when disabled, and "---"
+     * for a separator.
      */
     private static List<String> lines(UiPopover popover) {
         List<String> lines = new ArrayList<>();

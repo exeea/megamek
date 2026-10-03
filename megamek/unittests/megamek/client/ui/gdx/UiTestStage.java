@@ -137,6 +137,30 @@ public final class UiTestStage {
         return live;
     }
 
+    /**
+     * Acts {@code stage} in 60 Hz frames until no UiList moves a row any more (a dropped or keyboard-moved row has
+     * landed and its view heard the move), at most three seconds. A list whose row the pointer still holds stays busy.
+     */
+    public static void settle(Stage stage) {
+        for (int frame = 0; frame < 180 && moving(stage.getRoot()); frame++) {
+            stage.act(1 / 60f);
+        }
+    }
+
+    private static boolean moving(Actor actor) {
+        if (actor instanceof UiList list && list.busy()) {
+            return true;
+        }
+        if (actor instanceof Group group) {
+            for (Actor child : group.getChildren()) {
+                if (moving(child)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     /** Clears to a mid-tone olive, roughly the grass behind the prototype's panels, and draws one frame. */
     public void draw() {
         ScreenUtils.clear(.42f, .5f, .3f, 1, true);

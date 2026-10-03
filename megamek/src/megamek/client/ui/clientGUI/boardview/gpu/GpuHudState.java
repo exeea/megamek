@@ -73,6 +73,11 @@ final class GpuHudState {
     /** A report phase opened the closed log, so the next phase that is no report closes it again. */
     private boolean logAuto;
     private int focus = Entity.NONE;
+    /** The player cleared the selection with the card's ✕ (clearSelection). */
+    private boolean selectionCleared;
+    /** The last status {@link #presented} masked, and the mask, kept so that the snapshot keeps its identity. */
+    private GpuBattleStatus.Snapshot maskedStatus;
+    private GpuBattleStatus.Snapshot presentedStatus;
     /** The player picked the focus outside the local turn; the next C.5 event ends the pick. */
     private boolean picked;
     private GpuBattleStatus.Snapshot status;
@@ -103,6 +108,64 @@ final class GpuHudState {
     /** The own focus unit (C.5), or {@code Entity.NONE}. */
     int focus() {
         return focus;
+    }
+
+    /**
+     * The unit the card and the record sheet show: the inspected unit, else the own focus unit (C.5) unless the player
+     * closed the card. It is also the one unit the forces and contacts lists highlight and the board labels draw in
+     * front (the user's decisions of 2026-10-02).
+     */
+    int cardUnit() {
+        return inspected != Entity.NONE ? inspected : selectionCleared ? Entity.NONE : focus;
+    }
+
+    /**
+     * The card's ✕ (the user's decisions of 2026-10-02): ends the inspection and clears the selection. No unit is
+     * shown or highlighted, and in the local turn no unit acts ({@link #presented}) until the player selects one, or a
+     * turn, a phase or the focus moves on.
+     */
+    void clearSelection() {
+        inspected = Entity.NONE;
+        selectionCleared = true;
+    }
+
+    /** A unit the player selects ends a cleared selection. */
+    void restoreSelection() {
+        selectionCleared = false;
+    }
+
+    /** In the local turn with the selection cleared: MegaMek's current unit stays its own, but no input reaches it. */
+    boolean turnLocked(GpuBattleStatus.Snapshot status) {
+        return selectionCleared && status.myTurn();
+    }
+
+    /**
+     * The frame as the HUD and the board overlay present it. Outside the local turn there is no fire preview: no
+     * to-hit badges or guides from the last own unit while another player moves or fires (the user's decision of
+     * 2026-10-03). While {@link #turnLocked} no unit acts either: no actor, no route or envelope, no fire orders or
+     * physical options, and no map menu (MegaMek builds it for its current unit).
+     */
+    GpuBoardSource.Frame presented(GpuBoardSource.Frame frame) {
+        GpuBattleStatus.Snapshot status = frame.status();
+        GpuHudData panels = frame.panels();
+        boolean locked = turnLocked(status);
+        if (!locked && (status.myTurn() || panels.preview() == GpuFirePreview.Snapshot.NONE)) {
+            return frame;
+        }
+        if (locked && status != maskedStatus) {
+            maskedStatus = status;
+            presentedStatus = new GpuBattleStatus.Snapshot(status.round(), status.phase(), true,
+                  status.localPlayerId(), Entity.NONE, status.turns(), status.turnIndex(), status.units(),
+                  status.initiative(), status.turnOrderHidden());
+        }
+        GpuHudData shown = new GpuHudData(panels.phase(), locked ? GpuMovePlan.Snapshot.EMPTY : panels.move(),
+              locked ? GpuFireOrders.Snapshot.EMPTY : panels.fire(),
+              locked ? GpuPhysicalOptions.Snapshot.EMPTY : panels.physical(), panels.record(),
+              GpuFirePreview.Snapshot.NONE, panels.chat(), panels.toasts(), panels.los(), panels.players());
+        return new GpuBoardSource.Frame(frame.scene(), frame.timeline(), locked ? null : frame.context(),
+              frame.globalCommands(), frame.tooltip(), frame.centerRequest(), frame.boardGeneration(),
+              locked ? "" : frame.actorName(), frame.scenarioAtmosphere(), frame.reports(),
+              locked ? presentedStatus : status, shown);
     }
 
     /**
@@ -180,6 +243,7 @@ final class GpuHudState {
         List<Integer> candidates = next.units().stream()
               .filter(unit -> unit.side() == GpuBattleStatus.Side.OWN && !unit.sensorContact() && unit.pending())
               .map(GpuBattleStatus.UnitStatus::id).sorted().toList();
+        int before = focus;
         boolean newTurn = next.turnIndex() != previous.turnIndex();
         boolean turnBegins = next.myTurn() && (phaseStart || !previous.myTurn() || newTurn);
         boolean turnEnded = !phaseStart && previous.myTurn() && (!next.myTurn() || newTurn);
@@ -209,6 +273,8 @@ final class GpuHudState {
                 focus = next.actorId();
             }
         }
+        // A cleared selection ends with the next turn, phase or focus unit.
+        selectionCleared &= !phaseStart && !turnBegins && !turnEnded && focus == before;
         return select;
     }
 

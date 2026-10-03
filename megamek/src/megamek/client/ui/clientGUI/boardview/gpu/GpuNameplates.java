@@ -10,6 +10,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import com.badlogic.gdx.graphics.Camera;
@@ -36,8 +37,9 @@ import megamek.common.units.Entity;
  * Unit nameplates and pips over the board, the lowest HUD layer (rebuild plan C.1 G8a, A.16 P1-P4, hud-v3
  * overlay.js buildLabels). Every unit with a head anchor gets a team pip, or a tag with its name while it is the focus
  * unit, hovered, inspected, the physical target or a sensor contact, and every unit while the nameplate key is held.
- * The weapon target cards replace their targets' plates, and a unit whose head lies behind the camera has none. It
- * reads the presented snapshots only, on the render thread, and takes no presses.
+ * The weapon target cards replace their targets' plates, and a unit whose head lies behind the camera has none. The
+ * hovered unit's marker and the marker of the unit the card shows are drawn over the others. It reads the presented
+ * snapshots only, on the render thread, and takes no presses.
  */
 final class GpuNameplates implements GpuHud.Component {
     /** Beyond this many units an unhovered sensor contact shows only "?". */
@@ -159,7 +161,6 @@ final class GpuNameplates implements GpuHud.Component {
         int physicalTarget = physical.active() ? physical.targetId() : Entity.NONE;
         boolean many = units.size() > MANY_UNITS;
         Set<Integer> shown = new HashSet<>();
-        Plate focused = null;
         for (UnitStatus unit : units) {
             Vector2 head = view.unitHeads().get(unit.id());
             if (head == null || carded.contains(unit.id())) {
@@ -176,7 +177,6 @@ final class GpuNameplates implements GpuHud.Component {
                 // The name keeps the tag's weight; the phase word is the lighter sub-line.
                 boolean leading = line.startsWith(name);
                 plate.tag(Look.FOCUS, leading ? name : line, leading ? line.substring(name.length()).strip() : "");
-                focused = plate;
             } else if (hovered || state.altHeld || unit.id() == state.inspected || unit.id() == physicalTarget) {
                 plate.tag(enemy ? Look.ENEMY : Look.FRIEND, name(unit),
                       sub(unit, hovered && enemy ? focus : null, fire));
@@ -195,8 +195,15 @@ final class GpuNameplates implements GpuHud.Component {
                 iterator.remove();
             }
         }
-        if (focused != null) {
-            focused.tag.toFront();
+        // Each layer keeps the units' order with the hovered unit's marker and then the card unit's last, so the
+        // highlighted unit's plate is never buried under another (the user's decision of 2026-10-02).
+        List<Actor> markers = units.stream().map(unit -> plates.get(unit.id())).filter(Objects::nonNull)
+              .map(Plate::marker).toList();
+        Plate hovered = plates.get(view.hoveredUnit());
+        Plate card = plates.get(state.cardUnit());
+        for (Group layer : List.of(pips, tags)) {
+            GpuHudKit.stack(markers.stream().filter(marker -> marker.getParent() == layer).toList(),
+                  hovered == null ? null : hovered.marker(), card == null ? null : card.marker());
         }
     }
 
@@ -293,8 +300,13 @@ final class GpuNameplates implements GpuHud.Component {
         }
 
         void place(Vector2 head) {
-            Actor shown = tag.getParent() != null ? tag : pip;
+            Actor shown = marker();
             shown.setPosition(Math.round(head.x - shown.getWidth() / 2), Math.round(head.y));
+        }
+
+        /** The shown marker: the tag, else the pip. */
+        Actor marker() {
+            return tag.getParent() != null ? tag : pip;
         }
     }
 

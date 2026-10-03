@@ -27,6 +27,7 @@ import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuHudState.SheetTab;
@@ -105,6 +106,7 @@ class GpuUnitCardSmokeTest {
                                     onDemand(harness, hud, frame, name);
                                     linked(harness, hud, frame, name);
                                     actions(harness, hud, fixture, frame, name);
+                                    weaponDrag(harness, hud, frame, name);
                                 }
                             }
                             if (unit.getValue() == CENTURION && index == 0) {
@@ -180,6 +182,34 @@ class GpuUnitCardSmokeTest {
         Actor row = hud.stage.getRoot().findActor("record-weapon-4");
         point(hud, row, new Vector2(row.getWidth() / 2, row.getHeight() / 2));
         capture(harness, hud, frame, ATLAS, SheetTab.WEAPONS, name + "-weapons-hover");
+        hud.stage.mouseMoved(0, 0);
+    }
+
+    /**
+     * A weapon row dragged in the WEAPONS tab (H29 in the sheet): the third row's grip, shown under the pointer, held
+     * a row and a half lower: the row floats over the table with its shadow and the next row rose into its place.
+     */
+    private static void weaponDrag(GpuHudTestStage harness, GpuHud hud, GpuBoardSource.Frame frame, String name) {
+        show(hud, frame, ATLAS, SheetTab.WEAPONS);
+        Table row = hud.stage.getRoot().findActor("record-weapon-2");
+        point(hud, row, new Vector2(row.getWidth() / 2, row.getHeight() / 2));
+        hud.stage.act(0);
+        Actor grip = row.getChildren().first();
+        Vector2 from = grip.localToStageCoordinates(new Vector2(grip.getWidth() / 2, grip.getHeight() / 2));
+        Vector2 to = new Vector2(from.x, from.y - 1.4f * (row.getHeight() + 1));
+        Vector2 press = hud.stage.stageToScreenCoordinates(from.cpy());
+        hud.stage.touchDown(Math.round(press.x), Math.round(press.y), 0, Input.Buttons.LEFT);
+        for (int step = 1; step <= 6; step++) {
+            Vector2 point = hud.stage.stageToScreenCoordinates(from.cpy().lerp(to, step / 6f));
+            hud.stage.touchDragged(Math.round(point.x), Math.round(point.y), 0);
+        }
+        for (int step = 0; step < 24; step++) {
+            hud.stage.act(1 / 60f);
+        }
+        capture(harness, hud, frame, ATLAS, SheetTab.WEAPONS, name + "-weapons-drag");
+        Vector2 drop = hud.stage.stageToScreenCoordinates(to.cpy());
+        hud.stage.touchUp(Math.round(drop.x), Math.round(drop.y), 0, Input.Buttons.LEFT);
+        UiTestStage.settle(hud.stage);
         hud.stage.mouseMoved(0, 0);
     }
 

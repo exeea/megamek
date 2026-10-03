@@ -10,7 +10,7 @@ import static megamek.client.ui.gdx.UiTheme.rgba;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -41,8 +41,9 @@ import megamek.common.units.Entity;
  * H32, A.10 J10; hud-v3 overlay.js buildLabels, drawFx and showShot): the fire preview's TN badges and flowing guides,
  * the selected weapon's TN badges, the traces of the queued attacks with the target cards' leaders, the destination
  * tip, the waypoint numbers and the playback pop-ups. The guides, traces and leaders are the prototype's #fx layer,
- * {@link #fx()}, which lies under every board label; the rest is {@link #actor()}. Units are placed by the frame's
- * HudView and hexes by the board camera; the component presents snapshots only and posts no command.
+ * {@link #fx()}, which lies under every board label; the rest is {@link #actor()}. The badges of the hovered unit and
+ * of the unit the card shows are drawn over the others. Units are placed by the frame's HudView and hexes by the board
+ * camera; the component presents snapshots only and posts no command.
  */
 final class GpuBoardLabels implements GpuHud.Component {
     /** overlay.js mid(): a unit's middle at .55 of its height; the tip at .9 of the unit's height over its hex. */
@@ -91,6 +92,8 @@ final class GpuBoardLabels implements GpuHud.Component {
     private static final double POP_PACE = 2;
     /** overlay.js frozenFx: while the playback is paused or reviewing, the newest pop-up is held at .35 s at most. */
     private static final float POP_FROZEN_AGE = .35f;
+    /** Pop-ups of one unit stack: an older one rides this far over the next newer one (stackPops). */
+    private static final float POP_GAP = 4;
     /** The stroke ramp's texel centres: clear outside, opaque inside. */
     private static final float CLEAR = .25f;
     private static final float OPAQUE = .75f;
@@ -133,7 +136,14 @@ final class GpuBoardLabels implements GpuHud.Component {
     private final Table tip = new Table();
     private final Group pins = new Group();
     private final Group badges = new Group();
-    private final Group pops = new Group();
+    /** The playback pop-ups, oldest first: they age, then stack. */
+    private final Group pops = new Group() {
+        @Override
+        public void act(float delta) {
+            super.act(delta);
+            stackPops();
+        }
+    };
     private final List<Pin> pinActors = new ArrayList<>();
     private final Map<Integer, Badge> badgeActors = new HashMap<>();
     /** The heads of the units that get a target card this frame, for the leaders. */
@@ -146,8 +156,8 @@ final class GpuBoardLabels implements GpuHud.Component {
 
     /**
      * {@code camera} places the labels that belong to hexes (the destination tip, the waypoint numbers, guides from
-     * the destination); {@code contacts} owns the guide toggles and the open preview row (F3, F9); the pop-ups come
-     * from the state's playback history.
+     * the destination); {@code contacts} owns the guide toggles (F3), and the open preview row is the enemy the card
+     * shows (F9); the pop-ups come from the state's playback history.
      */
     GpuBoardLabels(GpuHudKit kit, GpuBoardSource source, GpuHudState state, BoardCamera camera,
           GpuContactsPanel contacts) {
@@ -198,7 +208,8 @@ final class GpuBoardLabels implements GpuHud.Component {
         BoardScene scene = inputs.frame().scene();
         strokes.reset();
         cardHeads.clear();
-        Set<Integer> badged = new HashSet<>();
+        // The badged units in the order of the preview's and the orders' lists.
+        Set<Integer> badged = new LinkedHashSet<>();
         plan(scene, panels.move(), view, inputs.panelBounds());
         preview(scene, panels.preview(), view, badged);
         fire(panels.fire(), view, badged);
@@ -209,9 +220,9 @@ final class GpuBoardLabels implements GpuHud.Component {
             }
             return gone;
         });
-        for (Actor pop : pops.getChildren()) {
-            ((Pop) pop).place(view);
-        }
+        GpuHudKit.stack(badged.stream().map(badgeActors::get).toList(), badgeActors.get(view.hoveredUnit()),
+              badgeActors.get(state.cardUnit()));
+        stackPops();
         // The playback's pop-ups: each step the history presented since the last frame, a shot as it lands.
         for (GpuPlaybackHistory.Step step : state.history.takeShown()) {
             if (step.attack() != null) {
@@ -364,7 +375,8 @@ final class GpuBoardLabels implements GpuHud.Component {
         if (!preview.active()) {
             return;
         }
-        int open = contacts == null ? Entity.NONE : contacts.openContact();
+        // The open row is the enemy the card shows (GpuContactsPanel).
+        int open = state.cardUnit();
         boolean outgoing = contacts == null || contacts.outgoingGuides();
         boolean incoming = contacts == null || contacts.incomingGuides();
         Vector2 source = !preview.fromDestination() ? middle(preview.unitId(), view)
@@ -462,9 +474,25 @@ final class GpuBoardLabels implements GpuHud.Component {
             // An attack at a hex or a building: no unit, so the view gives the pop-up no place.
             return;
         }
-        Pop pop = new Pop(unit, UiTheme.upper(title), sub, hit);
-        pops.addActor(pop);
-        if (inputs != null) {
+        pops.addActor(new Pop(unit, UiTheme.upper(title), sub, hit));
+        stackPops();
+    }
+
+    /**
+     * Places the pop-ups so that those of one unit never cover each other, as a volley's hits did (the user's report
+     * of 2026-10-02): the newest keeps its place and each older one rides POP_GAP over the next newer one. The lift
+     * follows from their ages and heights, so it holds while they rise together.
+     */
+    private void stackPops() {
+        if (inputs == null) {
+            return;
+        }
+        Map<Integer, Pop> newer = new HashMap<>();
+        for (int i = pops.getChildren().size - 1; i >= 0; i--) {
+            Pop pop = (Pop) pops.getChildren().get(i);
+            Pop next = newer.put(pop.unit, pop);
+            pop.lift = next == null ? 0
+                  : Math.max(0, next.lift + pop.getHeight() + POP_GAP - (pop.age - next.age) * POP_SPEED);
             pop.place(inputs.view());
         }
     }
@@ -776,6 +804,8 @@ final class GpuBoardLabels implements GpuHud.Component {
         /** The age the pop-up shows, held while frozen, and the time since it appeared, which always runs. */
         private float age;
         private float life;
+        /** How far it rides over its rising place, so it clears the unit's newer pop-ups (stackPops). */
+        private float lift;
 
         Pop(int unit, String titleText, String subText, boolean hit) {
             this.unit = unit;
@@ -804,7 +834,7 @@ final class GpuBoardLabels implements GpuHud.Component {
                 anchor.set(middle);
                 anchored = true;
             }
-            float top = anchor.y + POP_RISE + age * POP_SPEED;
+            float top = anchor.y + POP_RISE + age * POP_SPEED + lift;
             setPosition(Math.round(anchor.x + POP_DX), Math.round(top - getHeight()));
         }
 
@@ -817,10 +847,9 @@ final class GpuBoardLabels implements GpuHud.Component {
             super.act(delta);
             life += delta;
             age = frozen ? Math.min(age, POP_FROZEN_AGE) : age + delta;
+            // The layer places the pop-ups that stay once all of them aged.
             if (life >= popLife && !(frozen && newest())) {
                 remove();
-            } else if (inputs != null) {
-                place(inputs.view());
             }
         }
 

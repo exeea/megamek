@@ -161,11 +161,8 @@ class GpuForceOverviewSmokeTest {
                   texts(overview.card(CONTACT)));
             assertEquals(UiTheme.AMBER, label(overview.card(ATLAS), "NEEDS ORDERS").getColor());
             assertEquals(UiTheme.ACCENT, label(overview.card(TIMBER_WOLF), "OPERATIONAL").getColor());
-            // Shot 12's footer, with the client's keys of UNIT_OVERVIEW and CANCEL.
-            assertEquals(List.of("Select a card to locate it · right-click for unit actions · "
-                  + GpuHintLine.key(PREFERENCES, KeyCommandBind.UNIT_OVERVIEW) + " or "
-                  + GpuHintLine.key(PREFERENCES, KeyCommandBind.CANCEL)
-                  + " closes · camera keys keep working unless the search field has focus"),
+            // Shot 12's footer.
+            assertEquals(List.of("Select a card to locate it · right-click for unit actions"),
                   texts(overview.find("force-overview-footer")));
             Pixmap image = hud.capture("force-overview-12");
             try {

@@ -73,6 +73,8 @@ class GpuBattleView extends ApplicationAdapter {
     static final float ZOOM_STEP = 1.2f;
     /** A pointer that moved this far, times the layout scale, drags: the camera moves and no click follows (C.4). */
     private static final float DRAG_THRESHOLD = 6;
+    /** Degrees a middle drag orbits the camera per layout unit, on the board and on the minimap (C.4). */
+    static final float ORBIT_DEGREES = .3f;
     private static final MMLogger LOGGER = MMLogger.create(GpuBattleView.class);
     private GpuBoardSource source;
     private Stage loadingStage;
@@ -1271,7 +1273,7 @@ class GpuBattleView extends ApplicationAdapter {
             // Past the threshold a gesture is a drag: a left one does nothing more and cancels its click (C.4).
             dragged = true;
             if (orbiting) {
-                boardCamera.orbit((x - dragX) * 0.3f / layoutScale, (y - dragY) * 0.3f / layoutScale);
+                boardCamera.orbit((x - dragX) * ORBIT_DEGREES / layoutScale, (y - dragY) * ORBIT_DEGREES / layoutScale);
             } else if (panning) {
                 boardCamera.pan(x - dragX, y - dragY);
             }

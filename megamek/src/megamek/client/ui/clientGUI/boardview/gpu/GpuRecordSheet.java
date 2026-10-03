@@ -29,7 +29,6 @@ import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiPopover;
 import megamek.client.ui.gdx.UiTheme;
-import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.units.Entity;
 
 /**
@@ -133,7 +132,7 @@ final class GpuRecordSheet implements GpuHud.Component {
      * forces strip and the HUD layout follow this one rule (the card is the mini card exactly while it holds).
      */
     static boolean open(GpuHudState state) {
-        GpuBattleStatus.UnitStatus unit = state.presented(GpuUnitCard.cardUnit(state));
+        GpuBattleStatus.UnitStatus unit = state.presented(state.cardUnit());
         return state.recordOpen && unit != null && !unit.sensorContact();
     }
 
@@ -176,7 +175,7 @@ final class GpuRecordSheet implements GpuHud.Component {
             popover.cancel();
             return;
         }
-        GpuBattleStatus.UnitStatus unit = state.presented(GpuUnitCard.cardUnit(state));
+        GpuBattleStatus.UnitStatus unit = state.presented(state.cardUnit());
         GpuUnitRecord.Snapshot record = state.presentedRecord();
         boolean ready = record.unitId() == unit.id();
         if (unit.id() != shownUnit) {
@@ -199,7 +198,8 @@ final class GpuRecordSheet implements GpuHud.Component {
         Shown next = new Shown(unit, ready ? record : null, state.sheetTab, width, state.selectedLocation,
               state.expandedWeapon, state.expandedOrdinal, Set.copyOf(state.collapsedSections), tabInputs,
               tabs.selection());
-        if (!next.equals(shown)) {
+        // A weapon row that is dragged or still moves keeps the body: the new record shows once the rows rest.
+        if (!next.equals(shown) && !tabs.busy()) {
             // The body keeps its scroll position while the same unit's tab changes (a new value, a selection).
             boolean sameTab = shown != null && shown.tab() == next.tab() && shown.unit().id() == next.unit().id();
             shown = next;
@@ -279,15 +279,17 @@ final class GpuRecordSheet implements GpuHud.Component {
                   ? TAB_ICONS.get(tab.ordinal()) : null, icons);
             button.setName("record-tab-" + tab.name().toLowerCase(java.util.Locale.ROOT));
             button.pressed(active);
+            // A tooltip where it tells more than the tab shows: why the unit does not use it, the name and key of an
+            // icon tab, and the weapons' usable count.
             String reason = unused.get(tab);
-            String tip = text("GpuBoard.hud.unit.tabTip", label,
-                  GpuHintLine.key(inputs.preferences(), tab.key));
-            if (tab == SheetTab.WEAPONS && !weaponsTip(record).isEmpty()) {
-                tip = text("GpuBoard.hud.unit.tabTipDetail", tip, weaponsTip(record));
-            }
-            ui.tip(button).getActor().setText(reason == null ? tip : reason);
+            boolean usable = tab == SheetTab.WEAPONS && !weaponsTip(record).isEmpty();
             if (reason != null) {
+                ui.tip(button).getActor().setText(reason);
                 button.getColor().a = .45f;
+            } else if (icons && !active || usable) {
+                String tip = text("GpuBoard.hud.unit.tabTip", label, GpuHintLine.key(inputs.preferences(), tab.key));
+                ui.tip(button).getActor().setText(usable ? text("GpuBoard.hud.unit.tabTipDetail", tip,
+                      weaponsTip(record)) : tip);
             }
             onChange(button, () -> state.sheetTab = tab);
             tabRow.add(button).minWidth(0).padLeft(tabRow.hasChildren() ? (icons ? ICON_TAB_GAP : gap) : 0)
@@ -299,8 +301,6 @@ final class GpuRecordSheet implements GpuHud.Component {
         tabRow.add().expandX();
         UiButton close = ui.closeButton(this::close);
         close.setName("record-sheet-close");
-        ui.tip(close).getActor().setText(text("GpuBoard.hud.common.closeTip",
-              GpuHintLine.key(inputs.preferences(), KeyCommandBind.CANCEL)));
         float rowHeight = icons ? ICON_TAB_ROW : TAB_ROW;
         tabRow.add(close).size(CLOSE).padLeft(CLOSE_GAP).padBottom((rowHeight - CLOSE) / 2).bottom();
         tabRow.setHeight(rowHeight);
@@ -401,7 +401,7 @@ final class GpuRecordSheet implements GpuHud.Component {
      * popover layer; one at a time.
      */
     void popover(String title, String subtitle, Actor content, Actor anchor) {
-        popover.header(title, subtitle).content(content).footer(null);
+        popover.header(title, subtitle).content(content);
         Vector2 corner = anchor.localToStageCoordinates(new Vector2(anchor.getWidth(), anchor.getHeight()));
         popover.showAt(corner.x + 6, corner.y);
     }
@@ -409,6 +409,11 @@ final class GpuRecordSheet implements GpuHud.Component {
     /** Closes the popover once one of its controls acted: its content shows the record of before. */
     void closePopover() {
         popover.cancel();
+    }
+
+    /** The Esc chain's first step: a weapon row dragged on the sheet goes home. True when one was. */
+    boolean cancelDrag() {
+        return open(state) && tabs.cancelDrag();
     }
 
     /**

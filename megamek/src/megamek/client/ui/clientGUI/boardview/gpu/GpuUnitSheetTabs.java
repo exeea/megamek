@@ -20,7 +20,6 @@ import java.util.stream.Collectors;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Texture;
-import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
@@ -31,7 +30,6 @@ import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
-import com.badlogic.gdx.scenes.scene2d.utils.DragListener;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.scenes.scene2d.utils.UIUtils;
 import com.badlogic.gdx.utils.Align;
@@ -46,6 +44,7 @@ import megamek.client.ui.dialogs.unitDisplay.WeaponListModel;
 import megamek.client.ui.entityreadout.EntityReadout;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
+import megamek.client.ui.gdx.UiList;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.ResolvedAttack;
@@ -105,12 +104,17 @@ final class GpuUnitSheetTabs implements Disposable {
     private final Drawable detailBox;
     private final Drawable linkedTint;
     private final GpuTextures<BoardScene.Pixels> portraits = new GpuTextures<>(true);
-    /** The keyboard's selection in the focused list: a critical slot, or a weapon row's index. */
+    /**
+     * The keyboard's selection in the focused list: a critical slot, or a weapon by its equipment number (-1: none),
+     * which a reordered weapon keeps.
+     */
     private GpuCriticalTable.SlotKey selectedSlot;
     private int selectedWeapon = -1;
     private boolean readoutOpen;
     private List<GpuCriticalTable.SlotKey> slotOrder = List.of();
     private List<GpuUnitRecord.RecordWeapon> weaponOrder = List.of();
+    /** The WEAPONS tab's rows, reorderable for an own unit; null on another tab. */
+    private UiList weaponList;
     /** The ARMOR tab's locations in MegaMek's order, each shield after its arm, for the doll's arrow keys. */
     private List<String> dollOrder = List.of();
     /**
@@ -182,6 +186,16 @@ final class GpuUnitSheetTabs implements Disposable {
     /** The keyboard selection, part of what the sheet compares before it rebuilds. */
     Object selection() {
         return List.of(selectedSlot == null ? "" : selectedSlot, selectedWeapon, readoutOpen, sheet.listsFocused());
+    }
+
+    /** Whether a weapon row is dragged or still moves: the sheet keeps its body until the rows rest. */
+    boolean busy() {
+        return weaponList != null && weaponList.busy();
+    }
+
+    /** The Esc chain's first step: a dragged weapon row goes home. True when one was. */
+    boolean cancelDrag() {
+        return weaponList != null && weaponList.cancel();
     }
 
     /** A new card unit: the list selection starts over (the tab, location and expanded row follow 2.3). */
@@ -258,6 +272,7 @@ final class GpuUnitSheetTabs implements Disposable {
         body = into;
         slotOrder = List.of();
         weaponOrder = List.of();
+        weaponList = null;
         dollOrder = List.of();
         dolls.clear();
         links.clear();
@@ -1186,21 +1201,24 @@ final class GpuUnitSheetTabs implements Disposable {
         }
         body.add(header).width(width).height(22).row();
         body.add(new Image(ui.skin.getDrawable("rule"))).height(1).row();
-        weaponOrder = record.weapons();
+        List<GpuUnitRecord.RecordWeapon> weapons = record.weapons();
+        weaponOrder = weapons;
+        UiList list = new UiList(ui);
+        list.setName("record-weapons");
+        weaponList = list;
         // The name's room: the row less its left pad, the grip and the columns with their gaps.
         float nameRoom = width - 4 - GRIP - 6 - (float) columns.stream().mapToDouble(column -> column.width + 6).sum();
         Map<String, Integer> ordinals = new HashMap<>();
-        for (int index = 0; index < record.weapons().size(); index++) {
-            GpuUnitRecord.RecordWeapon weapon = record.weapons().get(index);
+        for (int index = 0; index < weapons.size(); index++) {
+            GpuUnitRecord.RecordWeapon weapon = weapons.get(index);
             int ordinal = ordinals.merge(weapon.name(), 1, Integer::sum) - 1;
             boolean expanded = weapon.name().equals(state.expandedWeapon) && ordinal == state.expandedOrdinal;
-            Table row = weaponRow(weapon, index, ordinal, columns, nameRoom, expanded, inputs);
-            body.add(row).width(width).minHeight(30).row();
-            body.add(new Image(ui.skin.getDrawable("rule"))).height(1).row();
-            if (expanded) {
-                body.add(weaponDetail(weapon, density, inputs)).width(width - 16).padLeft(16).padBottom(8).row();
-            }
+            weaponRow(list, weapon, index, ordinal, columns, nameRoom, expanded, density, inputs);
         }
+        // An own unit's weapons move by drag or Alt+Up/Down into its custom order (the Unit Display's list drag).
+        int unit = record.unitId();
+        list.reorderable((from, to) -> source.record().moveWeapon(unit, weapons.get(from).eqNum(), to - from));
+        body.add(list).width(width).row();
     }
 
     private Label head(String text, Color color) {
@@ -1228,34 +1246,24 @@ final class GpuUnitSheetTabs implements Disposable {
      * only for states that do not make it unavailable; the declared target's letter. At narrow density (graft 22) the
      * row has two lines: the name with its state letter and location, then its statistics. A click expands it; the
      * focused list's selection moves with the arrows, and Alt+Up/Down or the grip, shown on hover and focus, reorder an
-     * own unit's weapons; hovering it links its location (graft 6).
+     * own unit's weapons through {@code list}; hovering it links its location (graft 6). The row joins the list with
+     * its rule and, expanded, its detail, which move with it.
      */
-    private Table weaponRow(GpuUnitRecord.RecordWeapon weapon, int index, int ordinal, List<Column> columns,
-          float nameRoom, boolean expanded, Inputs inputs) {
+    private void weaponRow(UiList list, GpuUnitRecord.RecordWeapon weapon, int index, int ordinal,
+          List<Column> columns, float nameRoom, boolean expanded, Density density, Inputs inputs) {
         Strike strike = strike(weapon);
         boolean struck = strike != Strike.NONE;
         Table row = new Table();
         row.setName("record-weapon-" + index);
         row.left().padLeft(4);
-        if (expanded || index == selectedWeapon && sheet.listsFocused()) {
+        boolean focused = weapon.eqNum() == selectedWeapon && sheet.listsFocused();
+        if (expanded || focused) {
             row.setBackground(selectedRow);
         }
         boolean narrow = columns.contains(Column.ST);
         UiKit.Icon grip = ui.icon("grip", 12, UiTheme.DISABLED);
         boolean movable = control(GpuUnitRecord.WEAPON_ORDER) != null;
-        boolean focused = index == selectedWeapon && sheet.listsFocused();
         grip.setVisible(movable && focused);
-        grip.addListener(new DragListener() {
-            @Override
-            public void dragStop(InputEvent event, float x, float y, int pointer) {
-                // Dropped on another row: the weapon takes its place (the Unit Display's list drag).
-                int target = weaponRowAt(event.getStageY());
-                if (target >= 0 && target != index) {
-                    source.record().moveWeapon(record.unitId(), weapon.eqNum(), target - index);
-                    selectedWeapon = target;
-                }
-            }
-        });
         row.add(grip).width(GRIP).padRight(6);
         Table name = new Table();
         name.left();
@@ -1289,8 +1297,8 @@ final class GpuUnitSheetTabs implements Disposable {
                     case L -> ui.label(range(weapon, 3), "hud-name", 12.5f, GpuBoardSkin.BAND_LONG);
                     case AMMO -> ui.label(weapon.row().totalShots() < 0 ? "—"
                           : Integer.toString(weapon.row().loadedShots()), "hud-body", 12.5f, UiTheme.ACCENT);
-                    case DECL -> inputs.declared().containsKey(weapon.eqNum()) ? kit.letter(
-                          String.valueOf(inputs.declared().get(weapon.eqNum())), GpuHudKit.Letter.SECONDARY, false)
+                    case DECL -> inputs.declared().containsKey(weapon.eqNum())
+                          ? kit.letter(inputs.declared().get(weapon.eqNum()), false)
                           : null;
                 };
             }
@@ -1321,12 +1329,18 @@ final class GpuUnitSheetTabs implements Disposable {
         row.addListener(new ClickListener() {
             @Override
             public void clicked(InputEvent event, float x, float y) {
-                selectedWeapon = index;
+                selectedWeapon = weapon.eqNum();
                 expand(weapon, ordinal);
                 sheet.focusLists();
             }
         });
-        return row;
+        Table entry = new Table();
+        entry.add(row).growX().minHeight(30).row();
+        entry.add(new Image(ui.skin.getDrawable("rule"))).growX().height(1).row();
+        if (expanded) {
+            entry.add(weaponDetail(weapon, density, inputs)).growX().padLeft(16).padBottom(8);
+        }
+        list.add(entry, movable ? grip : null);
     }
 
     /** A weapon's strike: red when destroyed with its location or alone, grey when unavailable (5.5). */
@@ -1539,7 +1553,7 @@ final class GpuUnitSheetTabs implements Disposable {
     /**
      * The field of fire button (12: FIELD_FIRE "also offered as buttons"), pressed while the board shows the field of
      * fire it stands for: a local firing actor's weapon is selected first, so that the field is this weapon's; for any
-     * other weapon it is the View menu's switch alone.
+     * other weapon it is the View menu's switch alone, whose tooltip says that it shows the selected weapon's field.
      */
     private UiButton fieldOfFireButton(GpuUnitRecord.RecordWeapon weapon, Inputs inputs) {
         UiButton button = ui.button("hud-mini", null, text("GpuBoard.hud.unit.fieldOfFire"), null);
@@ -1548,10 +1562,11 @@ final class GpuUnitSheetTabs implements Disposable {
         boolean selected = !inputs.firingActor() || inputs.firingWeapon() == weapon.eqNum();
         button.pressed(shown && selected);
         button.setDisabled(fieldOfFire == null);
-        String key = inputs.binds().stream().filter(bind -> bind.command() == KeyCommandBind.FIELD_FIRE)
-              .map(GpuBoardSource.Bind::text).findFirst().orElse("");
-        ui.tip(button).getActor().setText(text(inputs.firingActor() ? "GpuBoard.hud.unit.fieldOfFireTip"
-              : "GpuBoard.hud.unit.fieldOfFireSelectedTip", key));
+        if (!inputs.firingActor()) {
+            String key = inputs.binds().stream().filter(bind -> bind.command() == KeyCommandBind.FIELD_FIRE)
+                  .map(GpuBoardSource.Bind::text).findFirst().orElse("");
+            ui.tip(button).getActor().setText(text("GpuBoard.hud.unit.fieldOfFireSelectedTip", key));
+        }
         onChange(button, () -> {
             Runnable toggle = fieldOfFire;
             if (button.isDisabled() || toggle == null) {
@@ -1991,16 +2006,17 @@ final class GpuUnitSheetTabs implements Disposable {
         if (tab == SheetTab.WEAPONS && !weaponOrder.isEmpty()) {
             boolean alt = UIUtils.alt();
             int delta = keycode == Input.Keys.UP ? -1 : keycode == Input.Keys.DOWN ? 1 : 0;
-            if (alt && delta != 0 && selectedWeapon >= 0 && control(GpuUnitRecord.WEAPON_ORDER) != null) {
-                source.record().moveWeapon(record.unitId(), weaponOrder.get(selectedWeapon).eqNum(), delta);
-                selectedWeapon = Math.clamp(selectedWeapon + delta, 0, weaponOrder.size() - 1);
+            int at = weaponOrder.stream().map(GpuUnitRecord.RecordWeapon::eqNum).toList().indexOf(selectedWeapon);
+            if (alt && delta != 0 && at >= 0 && control(GpuUnitRecord.WEAPON_ORDER) != null) {
+                // The row flies there; the weapon keeps the selection.
+                weaponList.move(at, delta);
                 return true;
             } else if (delta != 0) {
-                selectedWeapon = Math.clamp(selectedWeapon + delta, 0, weaponOrder.size() - 1);
+                selectedWeapon = weaponOrder.get(Math.clamp(at + delta, 0, weaponOrder.size() - 1)).eqNum();
                 return true;
-            } else if (open(keycode) && selectedWeapon >= 0) {
-                GpuUnitRecord.RecordWeapon weapon = weaponOrder.get(selectedWeapon);
-                int ordinal = (int) weaponOrder.subList(0, selectedWeapon).stream()
+            } else if (open(keycode) && at >= 0) {
+                GpuUnitRecord.RecordWeapon weapon = weaponOrder.get(at);
+                int ordinal = (int) weaponOrder.subList(0, at).stream()
                       .filter(other -> other.name().equals(weapon.name())).count();
                 expand(weapon, ordinal);
                 return true;
@@ -2042,18 +2058,6 @@ final class GpuUnitSheetTabs implements Disposable {
         return false;
     }
 
-    /** The index of the weapon row at the stage height {@code stageY}, or -1 outside the rows. */
-    private int weaponRowAt(float stageY) {
-        for (int index = 0; index < weaponOrder.size(); index++) {
-            Actor row = body.findActor("record-weapon-" + index);
-            float y = row == null ? -1 : row.stageToLocalCoordinates(new Vector2(0, stageY)).y;
-            if (y >= 0 && y < row.getHeight()) {
-                return index;
-            }
-        }
-        return -1;
-    }
-
     /**
      * The View menu's sensor ranges as a button (12: SENSOR_RANGE "also offered as buttons"), pressed while they show;
      * the board draws them for the selected unit.
@@ -2063,9 +2067,6 @@ final class GpuUnitSheetTabs implements Disposable {
         button.setName("record-sensor-ranges");
         button.pressed(inputs.sensorRanges());
         button.setDisabled(sensorRanges == null);
-        String key = inputs.binds().stream().filter(bind -> bind.command() == KeyCommandBind.SENSOR_RANGE)
-              .map(GpuBoardSource.Bind::text).findFirst().orElse("");
-        ui.tip(button).getActor().setText(text("GpuBoard.hud.unit.sensorRangesTip", key));
         onChange(button, () -> {
             if (!button.isDisabled() && sensorRanges != null) {
                 sensorRanges.run();

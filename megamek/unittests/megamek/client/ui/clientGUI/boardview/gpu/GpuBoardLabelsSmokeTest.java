@@ -37,6 +37,7 @@ import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
@@ -95,7 +96,9 @@ class GpuBoardLabelsSmokeTest {
 
         Labels(GpuHudTestStage hud, BoardCamera camera) {
             GpuBoardSource source = mock(GpuBoardSource.class);
-            contacts = new GpuContactsPanel(hud.kit, source, state, mock(GpuContextMenu.class), id -> { });
+            // The HUD's selection rule inspects an enemy (GpuHud.select): a row's click hands it the row's unit.
+            contacts = new GpuContactsPanel(hud.kit, source, state, mock(GpuContextMenu.class),
+                  id -> state.inspected = id);
             plates = new GpuNameplates(hud.kit, source, state);
             labels = new GpuBoardLabels(hud.kit, source, state, camera, contacts);
             root = (Table) labels.actor();
@@ -206,9 +209,8 @@ class GpuBoardLabelsSmokeTest {
                 GpuHud.HudView view = draw(hud, board, overlay, icons, labels, frame);
                 labels.click(hud, "contacts-preview-" + TIMBER_WOLF);
                 view = draw(hud, board, overlay, icons, labels, frame);
-                assertEquals(TIMBER_WOLF, labels.contacts.openContact());
-                assertEquals(List.of("WALK " + DOT + " 2 / 3 MP " + DOT + " AUTO",
-                      "Heat +1 " + DOT + " TMM +0 " + DOT + " preview only",
+                assertEquals(TIMBER_WOLF, labels.state.inspected, "The open row is the inspected enemy");
+                assertEquals(List.of("WALK " + DOT + " 2 / 3 MP " + DOT + " AUTO", "Heat +1 " + DOT + " TMM +0",
                       "Facing N " + DOT + " 0 pinned waypoints"), texts(labels.tip()));
                 Vector2 destination = board.screen(ground(scene, walk.destination()));
                 assertEquals(Math.round(destination.x + 56), GpuHudTestStage.bounds(labels.tip()).x, 1,
@@ -234,8 +236,7 @@ class GpuBoardLabelsSmokeTest {
                 labels.state.update(moving, GpuUnitRecord.Snapshot.EMPTY, false);
                 frame(board, false, unit(scene, PANTHER).location().coords(), 118, 1147, 660);
                 draw(hud, board, overlay, icons, labels, frame);
-                assertEquals(List.of("RUN " + DOT + " 5 / 6 MP " + DOT + " AUTO",
-                      "Heat +2 " + DOT + " TMM +1 " + DOT + " preview only",
+                assertEquals(List.of("RUN " + DOT + " 5 / 6 MP " + DOT + " AUTO", "Heat +2 " + DOT + " TMM +1",
                       "Facing NE " + DOT + " 1 pinned waypoint"), texts(labels.tip()));
                 destination = board.screen(ground(scene, run.destination()));
                 Rectangle tip = GpuHudTestStage.bounds(labels.tip());
@@ -516,7 +517,7 @@ class GpuBoardLabelsSmokeTest {
                 still.dispose();
                 later.dispose();
 
-                // The open row: its guides are 2.6 wide, its badge has the white .on frame.
+                // The open row, the inspected enemy's: its guides are 2.6 wide, its badge has the white .on frame.
                 labels.click(hud, "contacts-preview-" + TIMBER_WOLF);
                 labels.update(hud, frame, view);
                 hud.stage.act(.55f);
@@ -558,6 +559,81 @@ class GpuBoardLabelsSmokeTest {
                 labels.dispose();
             }
         });
+    }
+
+    /**
+     * The user's decision of 2026-10-02: the badge of the unit the card shows lies over every other badge, the hovered
+     * unit's over the rest, and without either the badges keep the preview's order. Two badges overlap here; the King
+     * Crab's comes first in that order, so the Timber Wolf's lies over it until the King Crab is selected.
+     */
+    @Test
+    void theShownUnitsBadgeLiesOverTheOthersAndTheOrderReturnsWithoutIt() {
+        GpuHudTestStage.run(hud -> {
+            Labels labels = new Labels(hud, null);
+            try {
+                Map<Integer, Rectangle> units = Map.of(WARHAMMER, new Rectangle(300, 200, 40, 100), KING_CRAB,
+                      new Rectangle(700, 400, 40, 100), TIMBER_WOLF, new Rectangle(732, 406, 40, 100));
+                GpuFirePreview.Snapshot preview = new GpuFirePreview.Snapshot(true, true, WARHAMMER, false,
+                      new Coords(18, 12), 0, 0, "None", 0, 0, "", false, 2, 0, List.of(
+                      new Contact(KING_CRAB, false, 8, side(5, 8, 41.67), Side.NONE, true, false),
+                      new Contact(TIMBER_WOLF, false, 9, side(2, 10, 16.67), Side.NONE, true, false)));
+                GpuBoardSource.Frame frame = frameOf(null, turn(GamePhase.MOVEMENT, false, TIMBER_WOLF,
+                      GpuHudFixtures.status().units()), panels(GpuMovePlan.Snapshot.EMPTY,
+                      GpuFireOrders.Snapshot.EMPTY, preview), GpuReportLog.Snapshot.EMPTY);
+                labels.update(hud, frame, view(units, Entity.NONE));
+                Actor crab = badge(labels, view(units, Entity.NONE), KING_CRAB);
+                Actor wolf = badge(labels, view(units, Entity.NONE), TIMBER_WOLF);
+                Rectangle overlap = new Rectangle();
+                assertTrue(Intersector.intersectRectangles(GpuHudTestStage.bounds(crab),
+                      GpuHudTestStage.bounds(wolf), overlap) && overlap.width > 10 && overlap.height > 10,
+                      "The two badges overlap: " + overlap);
+                assertTrue(crab.getZIndex() < wolf.getZIndex(), "The preview's order draws the Timber Wolf's last");
+                Pixmap normal = draw(hud, "labels-badges-order-normal");
+                assertTrue(onShare(normal, overlap) < .1f, "No .on badge over the overlap");
+                normal.dispose();
+
+                // The King Crab inspected (its row open): its .on badge lies over the Timber Wolf's.
+                labels.state.inspected = KING_CRAB;
+                labels.update(hud, frame, view(units, Entity.NONE));
+                assertTrue(crab.getZIndex() > wolf.getZIndex(), "The shown unit's badge is drawn last");
+                Pixmap shown = draw(hud, "labels-badges-order-shown");
+                assertTrue(onShare(shown, overlap) > .5f, "The .on badge covers the overlap");
+                shown.dispose();
+                // The hovered Timber Wolf comes before the shown unit, which still wins.
+                labels.update(hud, frame, view(units, TIMBER_WOLF));
+                assertTrue(crab.getZIndex() > wolf.getZIndex(), "The shown unit wins over the hovered one");
+
+                // Deselected, a hovered King Crab is drawn last; without the hover the preview's order returns.
+                labels.state.inspected = Entity.NONE;
+                labels.update(hud, frame, view(units, KING_CRAB));
+                assertTrue(crab.getZIndex() > wolf.getZIndex(), "The hovered unit's badge is drawn last");
+                labels.update(hud, frame, view(units, Entity.NONE));
+                assertTrue(crab.getZIndex() < wolf.getZIndex(), "The order returns to the preview's");
+                draw(hud, "labels-badges-order-returned").dispose();
+            } finally {
+                labels.dispose();
+            }
+        });
+    }
+
+    /** Synthetic facts with the {@code hovered} unit: each unit's head at its rectangle's top centre. */
+    private static GpuHud.HudView view(Map<Integer, Rectangle> units, int hovered) {
+        GpuHud.HudView view = view(false, units);
+        return new GpuHud.HudView(false, false, view.unitRects(), view.unitHeads(), Map.of(), null, hovered, 118);
+    }
+
+    /** The share of the pixels in {@code area} that show the .on badge's dark red fill (rgba 60 30 28 .95). */
+    private static float onShare(Pixmap image, Rectangle area) {
+        int count = 0;
+        int total = 0;
+        for (int y = Math.round(area.y) + 2; y < area.y + area.height - 2; y++) {
+            for (int x = Math.round(area.x) + 2; x < area.x + area.width - 2; x++) {
+                Color color = pixel(image, x, y);
+                total++;
+                count += color.r > color.g + .05f && color.r < .4f ? 1 : 0;
+            }
+        }
+        return count / (float) total;
     }
 
     @Test
@@ -719,6 +795,24 @@ class GpuBoardLabelsSmokeTest {
                 labels.labels.freeze(false);
                 hud.stage.act(.01f);
                 assertTrue(labels.pops().isEmpty(), "Once play goes on, its time is up");
+
+                // A volley's hits on one unit stack (the user's report of 2026-10-02): the newest keeps its place and
+                // each older one rides 4 over the next newer one while they rise; another unit's pop-up stays apart.
+                for (int shot = 0; shot < 3; shot++) {
+                    labels.labels.show(hit(KING_CRAB, "Medium Laser", 5, new ResolvedAttack.Impact("CT", false, 5)));
+                }
+                labels.labels.show(hit(TIMBER_WOLF, "AC/20", 20, new ResolvedAttack.Impact("CT", false, 20)));
+                List<Actor> volley = labels.pops();
+                draw(hud, "labels-pops-stacked").dispose();
+                for (float age : new float[] { 0, .5f }) {
+                    assertEquals(355 + 40 + age * 30, top(volley.get(2)), 1, "The newest hit keeps its place");
+                    for (int hit = 0; hit < 2; hit++) {
+                        assertEquals(top(volley.get(hit + 1)) + 4, GpuHudTestStage.bounds(volley.get(hit)).y, 1,
+                              "Each older hit rides 4 over the next newer one at " + age + " s");
+                    }
+                    assertEquals(355 + 40 + age * 30, top(volley.get(3)), 1, "Another unit's pop-up is not lifted");
+                    hud.stage.act(.5f);
+                }
             } finally {
                 labels.dispose();
             }
@@ -1086,7 +1180,7 @@ class GpuBoardLabelsSmokeTest {
         return new GpuFirePreview.Snapshot(preview.active(), preview.complete(), preview.unitId(),
               preview.fromDestination(), hex, preview.boardId(), preview.facing(), preview.moved(),
               preview.attackerModifier(), preview.tmm(), preview.unavailable(), preview.breachNotPredicted(),
-              preview.targets(), preview.threats(), preview.capped(), preview.contacts());
+              preview.targets(), preview.threats(), preview.contacts());
     }
 
     /** Shot 04's preview with the Archer still a sensor contact, as the fixture's battle status has it. */
@@ -1096,13 +1190,13 @@ class GpuBoardLabelsSmokeTest {
         return new GpuFirePreview.Snapshot(preview.active(), preview.complete(), preview.unitId(),
               preview.fromDestination(), preview.from(), preview.boardId(), preview.facing(), preview.moved(),
               preview.attackerModifier(), preview.tmm(), preview.unavailable(), preview.breachNotPredicted(),
-              preview.targets(), preview.threats(), preview.capped(), contacts);
+              preview.targets(), preview.threats(), contacts);
     }
 
     /** The Warhammer previewed where it stands, against one enemy. */
     private static GpuFirePreview.Snapshot inPlace(Contact contact) {
         return new GpuFirePreview.Snapshot(true, true, WARHAMMER, false, new Coords(18, 12), 0, 0, "None", 0, 0, "",
-              false, 1, 1, false, List.of(contact));
+              false, 1, 1, List.of(contact));
     }
 
     private static Side side(int available, int best, double odds) {

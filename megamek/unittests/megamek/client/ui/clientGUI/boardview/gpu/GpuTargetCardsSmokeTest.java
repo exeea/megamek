@@ -44,6 +44,7 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiMenuList;
 import megamek.client.ui.gdx.UiPopover;
+import megamek.client.ui.gdx.UiTestStage;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.common.Configuration;
 import megamek.common.board.Coords;
@@ -172,11 +173,12 @@ class GpuTargetCardsSmokeTest {
                           panels(hud, PANELS_05));
                     Table wolf = layer.card(TIMBER_WOLF);
                     Table master = layer.card(BATTLEMASTER);
-                    assertEquals(List.of("A", "TIMBER WOLF", "PRIMARY", "01", "AC/20", "[RT] AC/20  (8)", "7+", "58%",
-                          "02", "SRM 6", "[LT] SRM 6  (9)", "7+", "58%", "03", "MEDIUM LASER", "LA · Energy", "7+",
-                          "58%", "04", "MEDIUM LASER", "RA · Energy", "7+", "58%"), rows(wolf));
+                    // No fire-order numbers in the rows (the user's decision of 2026-10-03).
+                    assertEquals(List.of("A", "TIMBER WOLF", "PRIMARY", "AC/20", "[RT] AC/20  (8)", "7+", "58%",
+                          "SRM 6", "[LT] SRM 6  (9)", "7+", "58%", "MEDIUM LASER", "LA · Energy", "7+", "58%",
+                          "MEDIUM LASER", "RA · Energy", "7+", "58%"), rows(wolf));
                     assertEquals(FOOT_PRIMARY, line(wolf, "card-foot"));
-                    assertEquals(List.of("B", "BATTLEMASTER", "SET PRIMARY", "05", "LRM 20", "[LT] LRM 20  (11)", "8+",
+                    assertEquals(List.of("B", "BATTLEMASTER", "SET PRIMARY", "LRM 20", "[LT] LRM 20  (11)", "8+",
                           "42%"), rows(master));
                     assertEquals(FOOT_SECONDARY, line(master, "card-foot"));
                     assertEquals(300, wolf.getWidth(), .01f, "an expanded card is 300 wide at 1920");
@@ -196,9 +198,9 @@ class GpuTargetCardsSmokeTest {
                 GpuHud.HudView view = draw(hud, board, overlay, icons, layer, firing(scene, declaring, shot06()),
                       panels(hud, PANELS_05));
                 Table wolf = layer.card(TIMBER_WOLF);
-                assertEquals(List.of("A", "TIMBER WOLF", "PRIMARY", "01", "SRM 6", "[LT] SRM 6  (9)", "7+", "58%", "02",
-                      "MEDIUM LASER", "LA · Energy", "7+", "58%", "03", "MEDIUM LASER", "RA · Energy", "7+",
-                      "58%"), rows(wolf));
+                assertEquals(List.of("A", "TIMBER WOLF", "PRIMARY", "SRM 6", "[LT] SRM 6  (9)", "7+", "58%",
+                      "MEDIUM LASER", "LA · Energy", "7+", "58%", "MEDIUM LASER", "RA · Energy", "7+", "58%"),
+                      rows(wolf));
                 assertEquals(List.of("B", "BATTLEMASTER", "SET PRIMARY", "1 attack assigned", "Show attacks"),
                       rows(layer.card(BATTLEMASTER)));
                 assertEquals(List.of("C", "KING CRAB", "SET PRIMARY", "1 attack assigned", "Show attacks"),
@@ -235,7 +237,8 @@ class GpuTargetCardsSmokeTest {
     /**
      * What the controls post (H18, H13, H28, H37, H30, H25, H29): the remove mark, "Set primary", a click on the card
      * (which assigns the armed weapon once), a row's right-click menu, the ammunition select by carrier and number,
-     * "Show attacks", which keeps its card open, and a row dropped on another, one step at a time.
+     * "Show attacks", which keeps its card open, and a row dragged by its grip onto another's place, in one move once
+     * it lands.
      */
     @Test
     void theControlsPostTheirCommands() {
@@ -253,7 +256,6 @@ class GpuTargetCardsSmokeTest {
             Table master = layer.card(BATTLEMASTER);
 
             UiButton remove = wolf.findActor("card-remove-" + LASER_LA);
-            assertEquals(Messages.getString("GpuBoard.hud.cards.removeTip"), tooltip(remove));
             click(hud, remove);
             verify(fire).remove(LASER_LA);
             click(hud, master.findActor("card-primary"));
@@ -285,9 +287,11 @@ class GpuTargetCardsSmokeTest {
             click(hud, bins.get(1));
             verify(fire).setAmmo(AC20, new GpuUnitRecord.AmmoChoice(ATLAS, 12, "[RT] AC/20 Armor-Piercing  (4)"));
 
-            // H29: the left arm's laser dropped on the first row takes its place, one step at a time.
+            // H29: the left arm's laser dragged onto the first row takes its place, in one move once it lands.
             drag(hud, wolf.findActor("card-row-3"), wolf.findActor("card-row-1"));
-            verify(fire, times(2)).move(LASER_LA, -1);
+            verify(fire, never()).move(LASER_LA, -2);
+            UiTestStage.settle(hud.stage);
+            verify(fire).move(LASER_LA, -2);
             verify(fire, never()).focusTarget(TIMBER_WOLF);
 
             // H25: with three targets the others collapse; "Show attacks" opens the King Crab's card and focuses it.
@@ -309,9 +313,62 @@ class GpuTargetCardsSmokeTest {
     }
 
     /**
-     * Plan Q1, H29: a pressed grip takes the keyboard focus and shows its mint ring; Alt+Up and Alt+Down post the
-     * fire orders' move and are consumed, the key without Alt is not; when the new order arrives, the grip of the same
-     * attack keeps the focus and the letters stay.
+     * H29 over the board of shot 05: a row dragged and then cancelled (the Esc chain's first step) goes home without a
+     * move. The AC/20's grip dragged a row and a half down lifts its row, which floats over the Timber Wolf's card
+     * under the pointer with its shadow, while the SRM's row rises into its place and the slot opens below it (written
+     * to cards-drag.png, beside the shot's card); the drop lands it there in one move.
+     */
+    @Test
+    void aDraggedRowFloatsOverItsCardWhileTheOthersMakeRoom() throws Exception {
+        BoardScene scene = banded(GpuBoardSpaceHarness.scene());
+        GpuHudTestStage.run(hud -> {
+            GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
+            GpuBoardOverlay overlay = new GpuBoardOverlay();
+            GpuUnitIcons icons = new GpuUnitIcons();
+            try {
+                GpuBoardSource source = mock(GpuBoardSource.class);
+                GpuFireOrders fire = mock(GpuFireOrders.class);
+                when(source.fire()).thenReturn(fire);
+                Layer layer = new Layer(hud, source, board.camera);
+                GpuBattleStatus.Snapshot declaring = GpuBoardOverlaySmokeTest.status(GamePhase.FIRING, ATLAS);
+                frame(board, false, unit(scene, ATLAS).location().coords(), 118, 925, 790);
+                GpuBoardSource.Frame orders = firing(scene, declaring, shot05());
+                draw(hud, board, overlay, icons, layer, orders, panels(hud, PANELS_05));
+                Table wolf = layer.card(TIMBER_WOLF);
+                Rectangle srm = GpuHudTestStage.bounds(wolf.findActor("card-row-2"));
+                // The right arm laser's row held by its middle (a row drags from any part of it, as the .or does).
+                Vector2 home = hold(hud, wolf.findActor("card-row-4"), 60);
+                assertTrue(layer.cards.cancelDrag(), "Esc's first step ends the drag");
+                assertFalse(layer.cards.cancelDrag());
+                release(hud, home);
+                UiTestStage.settle(hud.stage);
+                verify(fire, never()).move(anyInt(), anyInt());
+
+                // 70 units down from the grip's centre: past the SRM row's middle, short of the next one's.
+                Vector2 drop = hold(hud, wolf.findActor("card-grip-" + AC20), -70);
+                for (int frame = 0; frame < 24; frame++) {
+                    hud.stage.act(1 / 60f);
+                }
+                draw(hud, board, overlay, icons, layer, orders, panels(hud, PANELS_05));
+                Rectangle risen = GpuHudTestStage.bounds(wolf.findActor("card-row-2"));
+                assertEquals(srm.y + 48, risen.y, .5f, "the SRM's row rose into the AC/20's place");
+                capture(hud, "cards-drag", "05-weapon-declaration.jpg", new Crop("wolf", wolf, 1005, 40)).dispose();
+                release(hud, drop);
+                UiTestStage.settle(hud.stage);
+                verify(fire).move(AC20, 1);
+                layer.dispose();
+            } finally {
+                icons.dispose();
+                overlay.dispose();
+                board.dispose();
+            }
+        });
+    }
+
+    /**
+     * Plan Q1, H29: a pressed grip takes the keyboard focus and shows its mint ring; Alt+Down and Alt+Up fly the row
+     * through the card's list and post the fire orders' move once it lands, and are consumed, the key without Alt is
+     * not; when the new order arrives, the grip of the same attack keeps the focus and the letters stay.
      */
     @Test
     void aFocusedGripReordersOnAltUpAndDownAndKeepsTheFocus() {
@@ -340,20 +397,11 @@ class GpuTargetCardsSmokeTest {
                 image.dispose();
             }
 
-            Input input = Gdx.input;
-            Gdx.input = mock(Input.class);
-            try {
-                when(Gdx.input.isKeyPressed(Input.Keys.ALT_LEFT)).thenReturn(true);
-                assertTrue(hud.stage.keyDown(Input.Keys.DOWN), "Alt+Down is the grip's");
-                verify(fire).move(SRM, 1);
-                assertTrue(hud.stage.keyDown(Input.Keys.UP), "never forwarded as a called shot");
-                verify(fire).move(SRM, -1);
-                when(Gdx.input.isKeyPressed(Input.Keys.ALT_LEFT)).thenReturn(false);
-                assertFalse(hud.stage.keyDown(Input.Keys.UP), "Up without Alt goes on to the HUD's keys");
-                verify(fire, times(2)).move(anyInt(), anyInt());
-            } finally {
-                Gdx.input = input;
-            }
+            assertTrue(key(hud, Input.Keys.DOWN, true), "Alt+Down is the grip's");
+            verify(fire, never()).move(anyInt(), anyInt());
+            UiTestStage.settle(hud.stage);
+            verify(fire).move(SRM, 1);
+            assertSame(grip, hud.stage.getKeyboardFocus(), "the grip keeps the focus while its row flies");
 
             // The orders come back with the SRM after the left arm's laser: its grip, in row 03 now, keeps the focus.
             layer.update(hud, firing(swapped(shot05(), 1, 2)), view, List.of());
@@ -361,9 +409,15 @@ class GpuTargetCardsSmokeTest {
             Table wolf = layer.card(TIMBER_WOLF);
             Actor moved = wolf.findActor("card-grip-" + SRM);
             assertSame(moved, hud.stage.getKeyboardFocus(), "the attack's grip keeps the focus");
-            assertEquals(List.of("03", "SRM 6"), rows(wolf.findActor("card-row-3")).subList(0, 2));
+            assertEquals("SRM 6", rows(wolf.findActor("card-row-3")).getFirst(), "the third attack in fire order");
             assertEquals(List.of("A", "TIMBER WOLF"), rows(wolf).subList(0, 2), "letters never follow the order");
             assertEquals("B", rows(layer.card(BATTLEMASTER)).getFirst());
+            assertTrue(key(hud, Input.Keys.UP, true), "never forwarded as a called shot");
+            UiTestStage.settle(hud.stage);
+            verify(fire).move(SRM, -1);
+            assertFalse(key(hud, Input.Keys.UP, false), "Up without Alt goes on to the HUD's keys");
+            UiTestStage.settle(hud.stage);
+            verify(fire, times(2)).move(anyInt(), anyInt());
             layer.dispose();
         });
     }
@@ -396,24 +450,19 @@ class GpuTargetCardsSmokeTest {
 
                 Actor grip = layer.card(archer).findActor("card-grip-" + right);
                 click(hud, grip);
-                Input input = Gdx.input;
-                Gdx.input = mock(Input.class);
-                try {
-                    when(Gdx.input.isKeyPressed(Input.Keys.ALT_LEFT)).thenReturn(true);
-                    assertTrue(hud.stage.keyDown(Input.Keys.UP));
-                } finally {
-                    Gdx.input = input;
-                }
+                assertTrue(key(hud, Input.Keys.UP, true));
+                UiTestStage.settle(hud.stage);
                 show(hud, layer, GpuWeaponsPanelSmokeTest.settled(firing), view);
                 assertEquals(List.of("Medium Laser RA@42", "AC/20 RT@42", "Medium Laser LA@44"),
                       GpuFireOrdersTest.queue(firing));
                 Table card = layer.card(archer);
-                assertEquals(List.of("01", "MEDIUM LASER"), rows(card.findActor("card-row-1")).subList(0, 2));
+                assertEquals("MEDIUM LASER", rows(card.findActor("card-row-1")).getFirst());
                 assertSame(card.findActor("card-grip-" + right), hud.stage.getKeyboardFocus());
                 assertEquals(List.of("A", "ARCHER ARC-2R"), rows(card).subList(0, 2), "the Archer stays A");
                 assertEquals(List.of("B", "CRAB CRB-20"), rows(layer.card(crab.getId())).subList(0, 2));
 
                 drag(hud, card.findActor("card-row-2"), card.findActor("card-row-1"));
+                UiTestStage.settle(hud.stage);
                 show(hud, layer, GpuWeaponsPanelSmokeTest.settled(firing), view);
                 assertEquals(List.of("AC/20 RT@42", "Medium Laser RA@42", "Medium Laser LA@44"),
                       GpuFireOrdersTest.queue(firing));
@@ -763,6 +812,40 @@ class GpuTargetCardsSmokeTest {
         Vector2 point = screen(hud, actor);
         hud.stage.touchDown((int) point.x, (int) point.y, 0, button);
         hud.stage.touchUp((int) point.x, (int) point.y, 0, button);
+    }
+
+    /**
+     * Presses an actor at its centre and drags it {@code dy} units up (down when negative) in small steps, holding it
+     * there; returns that stage point.
+     */
+    private static Vector2 hold(GpuHudTestStage hud, Actor actor, float dy) {
+        Vector2 from = actor.localToStageCoordinates(new Vector2(actor.getWidth() / 2, actor.getHeight() / 2));
+        Vector2 to = new Vector2(from.x, from.y + dy);
+        Vector2 press = hud.stage.stageToScreenCoordinates(from.cpy());
+        hud.stage.touchDown(Math.round(press.x), Math.round(press.y), 0, Input.Buttons.LEFT);
+        for (int step = 1; step <= 7; step++) {
+            Vector2 point = hud.stage.stageToScreenCoordinates(from.cpy().lerp(to, step / 7f));
+            hud.stage.touchDragged(Math.round(point.x), Math.round(point.y), 0);
+        }
+        return to;
+    }
+
+    /** Releases the held pointer at a stage point. */
+    private static void release(GpuHudTestStage hud, Vector2 point) {
+        Vector2 screen = hud.stage.stageToScreenCoordinates(point.cpy());
+        hud.stage.touchUp(Math.round(screen.x), Math.round(screen.y), 0, Input.Buttons.LEFT);
+    }
+
+    /** A key press through the stage with Alt held or not, as the window reports it. */
+    private static boolean key(GpuHudTestStage hud, int key, boolean alt) {
+        Input input = Gdx.input;
+        Gdx.input = mock(Input.class);
+        try {
+            when(Gdx.input.isKeyPressed(Input.Keys.ALT_LEFT)).thenReturn(alt);
+            return hud.stage.keyDown(key);
+        } finally {
+            Gdx.input = input;
+        }
     }
 
     /** A drag from the actor's left (where the grip is) onto the middle of {@code target}, in small steps. */

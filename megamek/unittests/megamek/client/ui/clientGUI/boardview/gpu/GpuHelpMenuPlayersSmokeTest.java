@@ -116,7 +116,8 @@ class GpuHelpMenuPlayersSmokeTest {
                   ? new GpuBoardSource.Bind(bind.command(), 0, 0, "") : bind);
             GpuBoardSource.UiPreferences changed = new GpuBoardSource.UiPreferences(preferences.scale(),
                   preferences.reportKeywords(), preferences.reportFilterKeywords(), preferences.minimapEnabled(),
-                  preferences.moveEnvelope(), preferences.conditionsVisible(), preferences.turnDetails(), binds,
+                  preferences.contactsEnabled(), preferences.moveEnvelope(), preferences.conditionsVisible(),
+                  preferences.turnDetails(), binds,
                   preferences.minRangeRgb(), preferences.extremeRangeRgb(), preferences.moveSprintRgb());
             help.update(inputs(hud, frame(List.of(), GpuPlayers.Snapshot.EMPTY), changed, false));
             lines = lines(root);

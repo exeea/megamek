@@ -24,7 +24,6 @@ import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
-import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.Side;
@@ -34,7 +33,6 @@ import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiKit.Tone;
 import megamek.client.ui.gdx.UiTheme;
-import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.units.Entity;
 
 /**
@@ -96,7 +94,7 @@ final class GpuForceOverview implements GpuHud.Component {
      * cheap, and the cards are shown again only when it differs. {@code width} is the panel's.
      */
     private record View(List<UnitStatus> units, GpuBattleStatus.Snapshot status, int focus, Grouping grouping,
-          Show show, String query, float width, GpuPlayers.Snapshot players, List<GpuBoardSource.Bind> binds) { }
+          Show show, String query, float width, GpuPlayers.Snapshot players) { }
 
     private final GpuHudKit kit;
     private final UiKit ui;
@@ -107,12 +105,10 @@ final class GpuForceOverview implements GpuHud.Component {
     private final Table root;
     private final Cell<Table> headerCell;
     private final UiButton close;
-    private final TextTooltip closeTip;
     private final UiKit.Segmented groupings;
     private final UiKit.Segmented sides;
     private final UiKit.SearchField search;
     private final Table body = new Table();
-    private final Label footer;
     /** The units' cards, kept across layouts so that a press and the pointer state stay with them. */
     private final Map<Integer, Card> cards = new HashMap<>();
     private Grouping grouping = Grouping.FORMATION;
@@ -137,7 +133,6 @@ final class GpuForceOverview implements GpuHud.Component {
         root.setName("force-overview");
         close = ui.closeButton(() -> state.overview = false);
         close.setName("force-overview-close");
-        closeTip = ui.tip(close);
         headerCell = root.add((Table) null).growX();
         root.row();
 
@@ -178,7 +173,7 @@ final class GpuForceOverview implements GpuHud.Component {
         // .ovfoot pads its line 9 16 11.
         foot.pad(9, 16, 11, 16);
         foot.setName("force-overview-footer");
-        footer = ui.label("", "hud-small", 11.5f, UiTheme.MUTED);
+        Label footer = ui.label(text("GpuBoard.hud.overview.footer"), "hud-small", 11.5f, UiTheme.MUTED);
         footer.setEllipsis(true);
         // Its CSS line box: 11.5 units at 1.35.
         foot.add(footer).growX().minWidth(0).height(15.5f).left();
@@ -202,18 +197,14 @@ final class GpuForceOverview implements GpuHud.Component {
         GpuHud.Metrics metrics = inputs.metrics();
         View view = new View(state.presentedUnits(), inputs.frame().status(), state.focus(), grouping, show,
               search.field.getText().strip().toLowerCase(Locale.ROOT), metrics.width() - 2 * metrics.gap(),
-              inputs.frame().panels().players(), inputs.preferences().binds());
+              inputs.frame().panels().players());
         if (!view.equals(shown)) {
             shown = view;
-            refresh(inputs.preferences());
+            refresh();
         }
     }
 
-    private void refresh(GpuBoardSource.UiPreferences preferences) {
-        String overviewKey = GpuHintLine.key(preferences, KeyCommandBind.UNIT_OVERVIEW);
-        String escapeKey = GpuHintLine.key(preferences, KeyCommandBind.CANCEL);
-        closeTip.getActor().setText(text("GpuBoard.hud.overview.closeTip", overviewKey, escapeKey));
-        footer.setText(text("GpuBoard.hud.overview.footer", overviewKey, escapeKey));
+    private void refresh() {
         String units = text("GpuBoard.hud.overview.count", shown.units().size());
         if (!units.equals(count)) {
             count = units;
@@ -392,7 +383,6 @@ final class GpuForceOverview implements GpuHud.Component {
         private final Label movement = ui.label("", "hud-small", 11, UiTheme.MUTED);
         private final Label skills = ui.label("", "hud-small", 11, UiTheme.MUTED);
         private final ClickListener pointer;
-        private final TextTooltip tooltip;
         private Cell<Actor> heatCell;
         /** The form laid out: a sensor contact's or an identified unit's; null before the first. */
         private Boolean contact;
@@ -419,8 +409,6 @@ final class GpuForceOverview implements GpuHud.Component {
             };
             addListener(pointer);
             addListener(UnitRow.menuOpener(menu, id, GpuForceOverview.this::unit));
-            tooltip = ui.tip(this);
-            tooltip.getActor().setText(text("GpuBoard.hud.overview.cardTip"));
         }
 
         void show(UnitStatus unit) {
@@ -496,13 +484,10 @@ final class GpuForceOverview implements GpuHud.Component {
             head.add(lines).growX().minWidth(0);
             add(head).growX().minWidth(0).row();
             if (contact) {
-                // The tooltip "Select and locate" names an identified unit's card only.
-                removeListener(tooltip);
                 add(ui.label(text("GpuBoard.hud.overview.sensorReturnOnly"), "hud-small", 11, UiTheme.MUTED))
                       .left().height(15).padTop(9);
                 return;
             }
-            addListener(tooltip);
             Table bars = new Table();
             bars.defaults().growX().uniformX().minWidth(0);
             bars.add(armor);

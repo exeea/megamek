@@ -319,8 +319,8 @@ class GpuLiveBoardSpaceSmokeTest {
     private static GpuBoardSource.UiPreferences scaled(GpuBoardSource.UiPreferences preferences, float factor) {
         GpuBoardSource.UiPreferences p = preferences;
         return new GpuBoardSource.UiPreferences(p.scale() * factor, p.reportKeywords(), p.reportFilterKeywords(),
-              p.minimapEnabled(), p.moveEnvelope(), p.conditionsVisible(), p.turnDetails(), p.binds(),
-              p.minRangeRgb(), p.extremeRangeRgb(), p.moveSprintRgb());
+              p.minimapEnabled(), p.contactsEnabled(), p.moveEnvelope(), p.conditionsVisible(), p.turnDetails(),
+              p.binds(), p.minRangeRgb(), p.extremeRangeRgb(), p.moveSprintRgb());
     }
 
     /** A 3D head is the top of the unit's model above its middle, in stage units, y up (C.4 HudView). */
@@ -863,9 +863,9 @@ class GpuLiveBoardSpaceSmokeTest {
             GpuBoardSource.UiPreferences preferences = real.uiPreferences;
             // One HUD unit per window pixel, as in the prototype's 1920 x 1080 captures; envelopes and the minimap on.
             source.uiPreferences = new GpuBoardSource.UiPreferences(.1f
-                  / DisplayScale.read(.1f, new GpuDisplayScale().contentScale()), "", "", true, true, false, false,
-                  GpuHudInputTest.preferences().binds(), preferences.minRangeRgb(), preferences.extremeRangeRgb(),
-                  preferences.moveSprintRgb());
+                  / DisplayScale.read(.1f, new GpuDisplayScale().contentScale()), "", "", true, true, true, false,
+                  false, GpuHudInputTest.preferences().binds(), preferences.minRangeRgb(),
+                  preferences.extremeRangeRgb(), preferences.moveSprintRgb());
             when(source.takeFrame()).thenAnswer(invocation -> frame.get());
             when(source.moves()).thenReturn(mock(GpuMovePlan.class));
             when(source.fire()).thenReturn(mock(GpuFireOrders.class));

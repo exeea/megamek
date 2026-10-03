@@ -236,7 +236,7 @@ class GpuForcesPanelSmokeTest {
                 default -> copy(unit, unit.id(), unit.formation(), false, true, false, "", 0);
             })), fire(1, 5), GpuReportLog.Snapshot.EMPTY, List.of(next(true, () -> { }))));
             GpuHud.Metrics compact = GpuHud.Metrics.of(1280, 720);
-            panel.place(hud, compact.gap(), 108, compact.left(), 478 - 12);
+            panel.place(hud, compact.gap(), 108, compact.forces(), 478 - 12);
             assertEquals("Acting now \u00B7 5 drafted \u00B7 Walked \u00B7 2 MP \u00B7 N", panel.line(1));
             assertEquals("Pending \u00B7 held position", panel.line(2));
             assertEquals("Pending \u00B7 Ran \u00B7 5 MP \u00B7 N", panel.line(3));
@@ -260,7 +260,7 @@ class GpuForcesPanelSmokeTest {
                 for (boolean grid : new boolean[] { false, true }) {
                     panel.state.forcesGrid = grid;
                     panel.update(hud, frame(large(), next(true, () -> { })));
-                    panel.place(hud, metrics.gap(), top, grid ? metrics.grid() : metrics.left(), bottom);
+                    panel.place(hud, metrics.gap(), top, grid ? metrics.grid() : metrics.forces(), bottom);
                     hud.draw();
                     hud.capture("forces-layout-" + (grid ? "grid-" : "list-") + size[0] + "x" + size[1]).dispose();
                     hud.assertLayout(panel.root, utilities);

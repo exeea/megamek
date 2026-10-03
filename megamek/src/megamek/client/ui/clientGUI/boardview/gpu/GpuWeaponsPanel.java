@@ -39,7 +39,6 @@ import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiFlow;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
-import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.rolls.TargetRoll;
 import megamek.common.units.Entity;
 
@@ -75,8 +74,7 @@ final class GpuWeaponsPanel implements GpuHud.Component {
      * nothing. {@code names} are the presented names of the actor, the focus and the attacks' targets.
      */
     private record View(boolean editable, int actorId, int focusId, int selected, List<WeaponRow> weapons,
-          List<Target> targets, List<Attack> attacks, GpuFireOrders.Heat heat, int armed, Map<Integer, String> names,
-          String cancelKey) { }
+          List<Target> targets, List<Attack> attacks, GpuFireOrders.Heat heat, int armed, Map<Integer, String> names) { }
 
     private final GpuHudKit kit;
     private final UiKit ui;
@@ -89,6 +87,8 @@ final class GpuWeaponsPanel implements GpuHud.Component {
     private final Container<HorizontalGroup> pillBox;
     private final Cell<Actor> pillCell;
     private final UiFlow assign;
+    private final Container<UiFlow> assignBox;
+    private final Cell<Actor> assignCell;
     private final Table list = new Table();
     private final ScrollPane scroll;
     private final Table heatSection = new Table();
@@ -157,7 +157,9 @@ final class GpuWeaponsPanel implements GpuHud.Component {
         // .assign: padding 0 14 8 above a hairline
         assign = new UiFlow(ui, ASSIGN_SIZE, ASSIGN_SIZE * LINE);
         assign.setName("weapons-assign");
-        root.add(new Container<>(assign).fillX().pad(0, 14, 8, 14)).growX().row();
+        assignBox = new Container<>(assign).fillX().pad(0, 14, 8, 14);
+        assignCell = root.add((Actor) null).growX();
+        root.row();
         root.add(new Image(ui.skin.getDrawable("rule"))).growX().height(1).row();
         list.top();
         scroll = ui.scrollList(list);
@@ -205,8 +207,7 @@ final class GpuWeaponsPanel implements GpuHud.Component {
             return;
         }
         View view = new View(next.editable(), next.actorId(), next.focusTargetId(), next.selectedWeapon(),
-              next.weapons(), next.targets(), next.attacks(), next.heat(), state.armedWeapon, names(next),
-              GpuHintLine.key(inputs.preferences(), KeyCommandBind.CANCEL));
+              next.weapons(), next.targets(), next.attacks(), next.heat(), state.armedWeapon, names(next));
         // H39: a newly selected row scrolls into view; a selected row in view stays there when the rebuilt panel
         // moves it (a target pill more wraps the pills onto another line)
         boolean scrollTo = next.selectedWeapon() != selected;
@@ -279,6 +280,7 @@ final class GpuWeaponsPanel implements GpuHud.Component {
         if (view.editable()) {
             count.setText(text("GpuBoard.hud.weapons.queued", view.attacks().size(), view.weapons().size()));
             pillCell.setActor(pillBox);
+            assignCell.setActor(assignBox);
             for (int id : fire.carded()) {
                 pills.addActor(pill(id, target(view.targets(), id), view));
             }
@@ -296,7 +298,7 @@ final class GpuWeaponsPanel implements GpuHud.Component {
             count.setText(text("GpuBoard.hud.weapons.drafted", view.names().getOrDefault(view.actorId(), ""),
                   view.attacks().size()));
             pillCell.setActor(null);
-            assign.run(text("GpuBoard.hud.dock.draftsNextTurn"), "hud-small", UiTheme.MUTED);
+            assignCell.setActor(null);
             for (Attack attack : view.attacks()) {
                 list.add(draftRow(attack, view)).growX().minWidth(0).pad(ROW_GAP, 10, 0, 10).row();
             }
@@ -316,13 +318,8 @@ final class GpuWeaponsPanel implements GpuHud.Component {
         pill.setBackground(target == null ? pillNew : focused ? pillOn : pillPlain);
         // .pill: padding 3 8 3 3 inside its 1-unit border
         pill.pad(4, 4, 4, 9);
-        Container<Label> letter = kit.letter(target == null ? "+" : String.valueOf(target.letter()), focused
-              ? GpuHudKit.Letter.FOCUSED : target.primary() ? GpuHudKit.Letter.PRIMARY : GpuHudKit.Letter.SECONDARY,
-              false);
-        if (target == null) {
-            letter.setBackground(newLetter);
-        }
-        pill.add(letter);
+        // A target's letter in its colour; the focused enemy without attacks shows the new assignment's "+".
+        pill.add(target == null ? kit.square("+", Color.WHITE, newLetter, false) : kit.letter(target.letter(), false));
         String name = name(view, id);
         pill.add(ui.label(name, "hud-medium", 11.5f, focused ? ON_INK : UiTheme.TEXT)).padLeft(6);
         if (target != null && target.primary()) {
@@ -342,13 +339,13 @@ final class GpuWeaponsPanel implements GpuHud.Component {
         return pill;
     }
 
-    /** The assign line (H10): the armed weapon and how to use it, the enemy a "+" assigns to, or how to begin. */
+    /**
+     * The assign line (H10): the enemy a "+" assigns to, or how to begin. None while a weapon is armed, which its row
+     * already shows selected (the user's decision of 2026-10-03).
+     */
     private void showAssign(View view) {
-        WeaponRow armed = row(view.weapons(), view.armed());
-        if (armed != null) {
-            assign.run(text("GpuBoard.hud.weapons.armed", armed.name()), "hud-medium", UiTheme.MINT)
-                  .run(SEPARATOR + text("GpuBoard.hud.weapons.armedHint", view.cancelKey()), "hud-small",
-                        UiTheme.MUTED);
+        if (row(view.weapons(), view.armed()) != null) {
+            assignCell.setActor(null);
         } else if (view.focusId() != Entity.NONE) {
             Target target = target(view.targets(), view.focusId());
             assign.run(target == null ? text("GpuBoard.hud.weapons.assignLineFocus", name(view, view.focusId()))
@@ -514,6 +511,9 @@ final class GpuWeaponsPanel implements GpuHud.Component {
             Target target = target(view.targets(), attack.targetId());
             // An attack on a hex or building has no letter.
             slot = slotButton(target == null ? "—" : String.valueOf(target.letter()));
+            if (target != null) {
+                slot.setStyle(targetSlot(target.letter()));
+            }
             slot.pressed(true);
             boolean remove = focus == Entity.NONE || focus == attack.targetId();
             tip = remove ? text("GpuBoard.hud.context.removeThisAttack")
@@ -541,6 +541,16 @@ final class GpuWeaponsPanel implements GpuHud.Component {
         slot.setName("weapons-slot-" + eqNum);
         ui.tip(slot).getActor().setText(tip);
         return slot;
+    }
+
+    /** An assigned slot's style: filled in its target's colour, as the target's letter square (MekBay's palette). */
+    private TextButton.TextButtonStyle targetSlot(char letter) {
+        TextButton.TextButtonStyle style = new TextButton.TextButtonStyle(slotStyle);
+        style.checked = ui.skin.newDrawable(slotStyle.checked,
+              UiTheme.tint(GpuHudKit.targetColour(letter), UiTheme.FILL, 1));
+        style.checkedOver = style.checked;
+        style.checkedDown = style.checked;
+        return style;
     }
 
     private UiButton slotButton(String text) {

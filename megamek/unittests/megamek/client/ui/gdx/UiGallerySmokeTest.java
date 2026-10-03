@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
@@ -35,10 +36,10 @@ import org.junit.jupiter.api.Test;
 /**
  * The toolkit's gallery, the proof that a view needs nothing but the toolkit: every hud-v3 button style and state,
  * badge and dot, segments and tabs, selects, chips, checkboxes, meters, the search field, the icon sheet, panels built
- * from the base components (header and close, list, footer, empty state), a dialog, and shot 13's context menu as a
- * popover with a menu list, on a bare theme without any board or battle object, beside crops of the hud-v3 shots 08
- * and 13; and the contracts of buttons, checkboxes, the search field, the dialog's frame, the menu list's keys and the
- * popover's placement and closing.
+ * from the base components (header and close, list, footer, empty state), a reorderable list with a row held mid-drag,
+ * a dialog, and shot 13's context menu as a popover with a menu list, on a bare theme without any board or battle
+ * object, beside crops of the hud-v3 shots 08 and 13; and the contracts of buttons, checkboxes, the search field, the
+ * dialog's frame, the menu list's keys and the popover's placement and closing.
  */
 @Tag("on-demand")
 class UiGallerySmokeTest {
@@ -65,10 +66,10 @@ class UiGallerySmokeTest {
     void everyBaseComponentBesideTheMock() {
         UiTestStage.run(ui -> {
             UiKit kit = ui.kit;
+            addEnemyIcon(ui.theme);
             Table log = place(ui.window, log(kit), 20, 20);
             UiPopover menu = menu(kit);
             ui.window.addActor(menu);
-            menu.showAt(440, ui.window.getHeight() - 20);
             Table utilities = place(ui.window, utilities(kit), 1348, 18);
             place(ui.window, styles(kit), 1348, 110);
             Table dock = place(ui.window, dock(kit), 20, 300);
@@ -79,6 +80,12 @@ class UiGallerySmokeTest {
             place(ui.window, icons(kit), 20, 900);
             place(ui.window, tooltip(kit), 1348, 300);
             place(ui.window, dialog(kit), 1120, 400);
+            Table reorderable = place(ui.window, reorderable(kit), 1120, 660);
+            ui.draw();
+            // The third row held by its grip a row and a half higher: the second slid down past the open slot. The
+            // press comes before the popover opens, which a press outside would close.
+            holdMidDrag(ui.stage, reorderable.findActor("gallery-grip-2"), 1.4f * 41);
+            menu.showAt(440, ui.window.getHeight() - 20);
             ui.draw();
             Pixmap gallery = ui.capture("ui-gallery");
             try {
@@ -166,7 +173,7 @@ class UiGallerySmokeTest {
             UiButton second = list.item("Second", null, null, false, true, () -> chosen.add("Second"));
             list.separator();
             UiButton last = list.item("Last", "L", true, false, true, () -> chosen.add("Last"));
-            UiPopover popover = new UiPopover(ui.kit).header("Menu", null).content(list).footer("Footer");
+            UiPopover popover = new UiPopover(ui.kit).header("Menu", null).content(list);
             ui.window.addActor(popover);
             popover.showAt(400, 700);
             ui.draw();
@@ -229,6 +236,50 @@ class UiGallerySmokeTest {
             assertTrue(list.keyDown(Input.Keys.DOWN));
             showScrolled(ui, scroll);
             assertInView(scroll, items.getFirst(), "Down wraps to the first item, above the view");
+        });
+    }
+
+    /**
+     * A scrolling list holds the stage's wheel (its scroll focus) only while the pointer is over it, so that the wheel
+     * reaches a view's own use of it elsewhere, such as a board's zoom: entering the list takes it, moving onto another
+     * row or pressing one keeps it, and leaving the list gives it back.
+     */
+    @Test
+    void aScrollingListHoldsTheWheelOnlyWhileThePointerIsOverIt() {
+        UiTestStage.run(ui -> {
+            Table list = new Table();
+            List<UiButton> rows = new ArrayList<>();
+            for (int item = 0; item < 30; item++) {
+                rows.add(row(ui.kit, "Row " + item));
+                list.add(rows.getLast()).growX().row();
+            }
+            ScrollPane scroll = ui.kit.scrollList(list);
+            Table frame = new Table();
+            frame.add(scroll).size(240, 200);
+            place(ui.window, frame, 100, 100);
+            ui.draw();
+            Stage stage = ui.stage;
+            Rectangle area = UiTestStage.bounds(scroll);
+            Vector2 inside = new Vector2(area.x + area.width / 2, area.y + area.height - 10);
+            Vector2 below = new Vector2(area.x + area.width / 2, area.y + 10);
+            Vector2 outside = new Vector2(area.x + area.width + 200, area.y + area.height / 2);
+            move(ui, inside);
+            assertSame(scroll, stage.getScrollFocus(), "entering the list takes the wheel");
+            assertTrue(stage.scrolled(0, 1) && scroll.getScrollY() > 0, "the wheel scrolls the list");
+            move(ui, below);
+            assertSame(scroll, stage.getScrollFocus(), "another row keeps it");
+            move(ui, outside);
+            assertNull(stage.getScrollFocus(), "leaving the list gives the wheel back");
+            float scrolled = scroll.getScrollY();
+            assertFalse(stage.scrolled(0, 1), "so no widget takes the wheel there");
+            assertEquals(scrolled, scroll.getScrollY());
+
+            move(ui, inside);
+            click(stage, rows.get(3));
+            ui.draw();
+            assertSame(scroll, stage.getScrollFocus(), "a press on a row keeps it");
+            move(ui, outside);
+            assertNull(stage.getScrollFocus(), "and leaving gives it back");
         });
     }
 
@@ -386,7 +437,7 @@ class UiGallerySmokeTest {
         return dock;
     }
 
-    /** The context menu of shot 13, a popover with its header, a menu list with a separator, and its footer. */
+    /** The context menu of shot 13, a popover with its header and a menu list with a separator. */
     private static UiPopover menu(UiKit kit) {
         UiMenuList list = new UiMenuList(kit);
         list.item("Set as attack target", null, null, false, true, () -> { });
@@ -394,8 +445,7 @@ class UiGallerySmokeTest {
         list.item("Inspect unit", null, null, false, true, () -> { });
         list.item("Center camera", null, null, false, true, () -> { });
         list.item("Line of sight from Atlas", null, null, false, true, () -> { });
-        return new UiPopover(kit).header("King Crab KGC-000", "Visual contact · 7 hex").content(list)
-              .footer("Opening this menu never changes your orders");
+        return new UiPopover(kit).header("King Crab KGC-000", "Visual contact · 7 hex").content(list);
     }
 
     /**
@@ -525,6 +575,46 @@ class UiGallerySmokeTest {
     }
 
     /**
+     * A panel with a reorderable list (UiList): four rows, each a grip (named gallery-grip-n), which drags it, and a
+     * label, over a rule.
+     */
+    private static Table reorderable(UiKit kit) {
+        UiList list = new UiList(kit).reorderable((from, to) -> { });
+        List<String> names = List.of("Alpha", "Bravo", "Charlie", "Delta");
+        for (int index = 0; index < names.size(); index++) {
+            Table row = new Table();
+            row.pad(0, 12, 0, 12);
+            UiKit.Icon grip = kit.icon("grip", 12, UiTheme.MUTED);
+            grip.setName("gallery-grip-" + index);
+            row.add(grip).size(12, 16);
+            row.add(kit.label(names.get(index), "hud-body", 13, UiTheme.TEXT)).growX().left().height(40).padLeft(10);
+            Table entry = new Table();
+            entry.add(row).growX().row();
+            entry.add(new Image(kit.skin.getDrawable("rule"))).growX().height(1);
+            list.add(entry, grip);
+        }
+        Table panel = kit.panel();
+        panel.add(kit.header("Reorderable list", "4")).growX().row();
+        panel.add(list).growX();
+        panel.setWidth(300);
+        return panel;
+    }
+
+    /** Presses {@code grip} and holds it {@code rise} units higher, then lets the other rows slide into place. */
+    private static void holdMidDrag(Stage stage, Actor grip, float rise) {
+        Vector2 from = grip.localToStageCoordinates(new Vector2(grip.getWidth() / 2, grip.getHeight() / 2));
+        Vector2 press = stage.stageToScreenCoordinates(from.cpy());
+        stage.touchDown(Math.round(press.x), Math.round(press.y), 0, Input.Buttons.LEFT);
+        for (int step = 1; step <= 6; step++) {
+            Vector2 point = stage.stageToScreenCoordinates(new Vector2(from.x, from.y + rise * step / 6));
+            stage.touchDragged(Math.round(point.x), Math.round(point.y), 0);
+        }
+        for (int frame = 0; frame < 24; frame++) {
+            stage.act(1 / 60f);
+        }
+    }
+
+    /**
      * A tooltip's box as the tooltip manager shows it on hover (UiKit.tip: hud-small text on the panel surface,
      * wrapped at 340 units); no smoke test hovers, so the gallery draws the box itself.
      */
@@ -561,12 +651,31 @@ class UiGallerySmokeTest {
         return dialog;
     }
 
-    /** Every baked icon with its name. */
+    /**
+     * Adds an image icon as a view does: the battle HUD's enemy icon, mm-data's black skull, which the icon font
+     * lacks.
+     */
+    private static void addEnemyIcon(UiTheme theme) {
+        Pixmap image = new Pixmap(Gdx.files.local("data/images/misc/challenge_estimate_full.png"));
+        try {
+            theme.addIcon("enemy", image);
+        } finally {
+            image.dispose();
+        }
+    }
+
+    /** Every icon of the sheet with its name: the baked Material symbols and the image icons a view added. */
     private static Table icons(UiKit kit) {
         Table icons = new Table();
         icons.defaults().width(64).padBottom(6);
         int column = 0;
-        for (String name : UiTheme.ICONS.keySet().stream().sorted().toList()) {
+        List<String> names = new ArrayList<>();
+        kit.skin.getAll(Drawable.class).keys().forEach(name -> {
+            if (name.startsWith("icon-")) {
+                names.add(name.substring("icon-".length()));
+            }
+        });
+        for (String name : names.stream().sorted().toList()) {
             Table cell = new Table();
             cell.add(kit.icon(name, 19, UiTheme.ACCENT)).row();
             cell.add(kit.label(name, "hud-small", 10, UiTheme.MUTED)).padTop(2);
@@ -614,6 +723,13 @@ class UiGallerySmokeTest {
                 count.incrementAndGet();
             }
         };
+    }
+
+    /** Moves the mouse to a stage point without a button and draws a frame, which fires its enter and exit. */
+    private static void move(UiTestStage ui, Vector2 point) {
+        Vector2 screen = ui.stage.stageToScreenCoordinates(point.cpy());
+        ui.stage.mouseMoved(Math.round(screen.x), Math.round(screen.y));
+        ui.draw();
     }
 
     /** A left click at the actor's center, through the stage's own input. */

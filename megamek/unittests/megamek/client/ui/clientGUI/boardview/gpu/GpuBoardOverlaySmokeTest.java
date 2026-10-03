@@ -575,7 +575,7 @@ class GpuBoardOverlaySmokeTest {
     }
 
     /** The mean absolute channel difference of the back-buffer texels within {@code half} of a point. */
-    private static float difference(Pixmap before, Pixmap after, Vector2 point, int half) {
+    static float difference(Pixmap before, Pixmap after, Vector2 point, int half) {
         float total = 0;
         for (int dy = -half; dy <= half; dy++) {
             for (int dx = -half; dx <= half; dx++) {
@@ -586,7 +586,7 @@ class GpuBoardOverlaySmokeTest {
     }
 
     /** The largest channel difference of one texel within {@code half} of a point. */
-    private static float peak(Pixmap before, Pixmap after, Vector2 point, int half) {
+    static float peak(Pixmap before, Pixmap after, Vector2 point, int half) {
         float largest = 0;
         for (int dy = -half; dy <= half; dy++) {
             for (int dx = -half; dx <= half; dx++) {
@@ -625,7 +625,7 @@ class GpuBoardOverlaySmokeTest {
     // Snapshots.
 
     /** The authored 3D model MegaMek's tileset picks for the Atlas AS7-D, captured off the GL thread. */
-    private static BoardScene.UnitModel atlasModel() throws Exception {
+    static BoardScene.UnitModel atlasModel() throws Exception {
         MekTileset tileset = new MekTileset(Configuration.unitImagesDir());
         tileset.loadFromFile("mekset.txt");
         Entity atlas = new MekFileParser(new File("testresources/megamek/common/units/Atlas AS7-D.mtf")).getEntity();
@@ -634,7 +634,7 @@ class GpuBoardOverlaySmokeTest {
     }
 
     /** The unit's authored model, placed on its hex as GpuBattleView places it. */
-    private static ModelInstance authored(GpuUnitModels models, BoardScene.UnitModel selection, BoardScene.Unit unit,
+    static ModelInstance authored(GpuUnitModels models, BoardScene.UnitModel selection, BoardScene.Unit unit,
           GpuBoardSpaceHarness board) {
         GpuUnitModel model = models.get(selection, unit.id());
         assertNotNull(model, "The authored model of " + unit.name());
@@ -681,13 +681,13 @@ class GpuBoardOverlaySmokeTest {
               EntityMovementType.MOVE_WALK, "", true, 1, 0, true, List.of(), true, true, envelope, 0);
     }
 
-    private static GpuMovePlan.Snapshot withRoute(GpuMovePlan.Snapshot plan, List<GpuMovePlan.Step> route,
+    static GpuMovePlan.Snapshot withRoute(GpuMovePlan.Snapshot plan, List<GpuMovePlan.Step> route,
           List<GpuMovePlan.Step> hover, boolean planner) {
         return move(plan.entityId(), route, hover, List.of(), plan.envelope(), planner);
     }
 
     /** Hexes within {@code walk} hexes walk, within {@code run} run: a drawing input, not a movement rule. */
-    private static Map<Coords, GpuMovePlan.Band> envelope(BoardScene scene, Coords from, int walk, int run) {
+    static Map<Coords, GpuMovePlan.Band> envelope(BoardScene scene, Coords from, int walk, int run) {
         Map<Coords, GpuMovePlan.Band> envelope = new LinkedHashMap<>();
         for (BoardScene.Tile tile : scene.tiles()) {
             int distance = from.distance(tile.coords());
@@ -758,7 +758,7 @@ class GpuBoardOverlaySmokeTest {
               scene.fieldOfView(), bands);
     }
 
-    private static GpuHudData panels(GpuMovePlan.Snapshot move, GpuFireOrders.Snapshot fire) {
+    static GpuHudData panels(GpuMovePlan.Snapshot move, GpuFireOrders.Snapshot fire) {
         return GpuHudInputTest.panels(move, fire, GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY);
     }
 
@@ -768,23 +768,23 @@ class GpuBoardOverlaySmokeTest {
               fixture.turns(), fixture.turnIndex(), fixture.units(), fixture.initiative(), false);
     }
 
-    private static GpuHudState state(GpuBattleStatus.Snapshot status) {
+    static GpuHudState state(GpuBattleStatus.Snapshot status) {
         GpuHudState state = new GpuHudState(new GpuPlaybackHistory(new UnitPlayback()));
         state.update(status, GpuUnitRecord.Snapshot.EMPTY, false);
         return state;
     }
 
-    private static GpuBoardSource.Frame frame(BoardScene scene, GpuBattleStatus.Snapshot status, GpuHudData panels) {
+    static GpuBoardSource.Frame frame(BoardScene scene, GpuBattleStatus.Snapshot status, GpuHudData panels) {
         return new GpuBoardSource.Frame(scene, List.of(), null, List.of(), "", null, 0, "", null,
               GpuReportLog.Snapshot.EMPTY, status, panels);
     }
 
-    private static GpuHud.HudView view(boolean tactical, Coords hovered, int hoveredUnit) {
+    static GpuHud.HudView view(boolean tactical, Coords hovered, int hoveredUnit) {
         return new GpuHud.HudView(tactical, false, Map.of(), Map.of(), Map.of(), hovered, hoveredUnit, 0);
     }
 
     static GpuBoardSource.UiPreferences preferences(boolean envelope) {
-        return new GpuBoardSource.UiPreferences(1, "", "", true, envelope, false, false, List.of(),
+        return new GpuBoardSource.UiPreferences(1, "", "", true, true, envelope, false, false, List.of(),
               FieldOfFireSprite.getFieldOfFireColor(RangeType.RANGE_MINIMUM).getRGB(),
               FieldOfFireSprite.getFieldOfFireColor(RangeType.RANGE_EXTREME).getRGB(),
               GUIPreferences.getInstance().getMoveSprintColor().getRGB());

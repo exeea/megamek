@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.List;
+import java.util.Locale;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Pixmap;
@@ -15,11 +16,16 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.Widget;
 import megamek.client.ui.Messages;
+import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.common.enums.GamePhase;
 
-/** Phase header, top left: round, phase ring, phase name, who line and the movement activation ribbon (C.1 G1). */
+/**
+ * Phase header, top left: round, phase ring, phase name, who line and the movement activation ribbon (C.1 G1), and the
+ * playback speeds at the round line's right, one pill of sections from 0.5x to Instant, for every phase and turn (the
+ * user's decisions of 2026-10-03: also to hurry the other players' moves).
+ */
 final class GpuPhaseHeader implements GpuHud.Component {
     /** The phase name's size (#phase .name), and at W <= 1350. */
     private static final float NAME_SIZE = 23;
@@ -35,7 +41,19 @@ final class GpuPhaseHeader implements GpuHud.Component {
     private final Table root;
     private final UiKit ui;
     private final GpuHudState state;
+    /** The playback's speeds, Instant last as "I". */
+    private static final List<UnitMotion.Speed> SPEEDS = List.of(UnitMotion.Speed.HALF, UnitMotion.Speed.NORMAL,
+          UnitMotion.Speed.DOUBLE, UnitMotion.Speed.QUADRUPLE, UnitMotion.Speed.INSTANT);
+    /** The speeds' distance from the frame, and the room the round keeps from them. */
+    private static final float SPEEDS_RIGHT = 6;
+    private static final float ROUND_GAP = 8;
     private final Ring ring = new Ring();
+    private final UiKit.Segmented speeds;
+    /** The round line: the round at the left, the speeds at the right. */
+    private final Table top = new Table();
+    /** The round and the line's width the round text was chosen for. */
+    private int shownRound = -1;
+    private float shownWidth = -1;
     private final Label round;
     private final Label name;
     private final Label who;
@@ -63,7 +81,21 @@ final class GpuPhaseHeader implements GpuHud.Component {
         text.defaults().left().growX().minWidth(0);
         // The CSS line boxes: 12 units at line-height normal, 23 (20 when narrow) at 1.05 and 12 again, 1 and 3
         // units apart; the name's glyphs sit a unit lower in its box than the browser's, so its gap moves below it.
-        text.add(round).height(14).row();
+        speeds = ui.segmented("hud-pill", false, SPEEDS.stream().map(GpuPhaseHeader::speedLabel)
+              .toArray(String[]::new));
+        for (int i = 0; i < SPEEDS.size(); i++) {
+            UnitMotion.Speed speed = SPEEDS.get(i);
+            UiButton button = speeds.buttons.get(i);
+            button.setName("phase-speed-" + speed.name().toLowerCase(Locale.ROOT));
+            button.pad(0, 5, 0, 5);
+            UiKit.size(button.getLabel(), "hud-small", 10);
+            UiKit.onChange(button, () -> state.history.speed(speed));
+        }
+        round.setName("phase-round");
+        round.setEllipsis(true);
+        top.add(round).growX().minWidth(0).left();
+        top.add(speeds).right().padRight(SPEEDS_RIGHT);
+        text.add(top).height(14).row();
         nameCell = text.add(name).height(24);
         text.row();
         text.add(who).height(14).padTop(4);
@@ -79,20 +111,36 @@ final class GpuPhaseHeader implements GpuHud.Component {
         return root;
     }
 
+    /** A speed's section: its multiplier ("2×"), or "I" for Instant. */
+    private static String speedLabel(UnitMotion.Speed speed) {
+        return speed == UnitMotion.Speed.INSTANT ? Messages.getString("GpuBoard.hud.phase.instant")
+              : Messages.getString("GpuBoard.hud.phase.speed", speed.rate / UnitMotion.Speed.NORMAL.rate);
+    }
+
     @Override
     public void update(GpuHud.Inputs inputs) {
         GpuBattleStatus.Snapshot status = inputs.frame().status();
         GamePhase phase = status.phase();
         ring.progress = progress(phase) / 6f;
-        // No number before the first combat round (the start-of-game deployment and the setup phases before it).
-        round.setText(status.round() > 0
-              ? UiTheme.upper(Messages.getString("GpuBoard.hud.phase.round", status.round())) : "");
+        // No number before the first combat round (the start-of-game deployment and the setup phases before it); only
+        // the number where the round line has no room for the word (the user's decision of 2026-10-03).
+        if (status.round() != shownRound || top.getWidth() != shownWidth) {
+            shownRound = status.round();
+            shownWidth = top.getWidth();
+            round.setText(status.round() > 0
+                  ? UiTheme.upper(Messages.getString("GpuBoard.hud.phase.round", status.round())) : "");
+            float room = shownWidth - speeds.getPrefWidth() - SPEEDS_RIGHT - ROUND_GAP;
+            if (status.round() > 0 && shownWidth > 0 && round.getPrefWidth() > room) {
+                round.setText(Messages.getString("GpuBoard.hud.phase.roundShort", status.round()));
+            }
+        }
         if (narrow != inputs.metrics().narrow()) {
             narrow = inputs.metrics().narrow();
             name.setFontScale(nameScale * (narrow ? NARROW_NAME_SIZE / NAME_SIZE : 1));
             nameCell.height(narrow ? 21 : 24);
         }
         name.setText(UiTheme.upper(name(phase)));
+        speeds.select(SPEEDS.indexOf(state.history.speed()));
         GpuBattleStatus.Slot current = status.turnIndex() >= 0 && status.turnIndex() < status.turns().size()
               ? status.turns().get(status.turnIndex()) : null;
         // A turn without a player (UnloadStrandedTurn) is nobody's: it shows the status line, as turnColor dims it.

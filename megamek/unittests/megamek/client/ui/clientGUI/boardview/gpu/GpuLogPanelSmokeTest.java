@@ -170,8 +170,7 @@ class GpuLogPanelSmokeTest {
                   " \u00B7 5 damage", roll(8, 8), "5 \u2192 CT",
                   "Medium Laser at King Crab; needs 8, rolls 8 : hits, King Crab takes 5 damage to Center Torso.",
                   "LOCATE", "REPLAY"), cards.get(3), "The newest step is current: its impacts, report and actions");
-            assertEquals(List.of("Events are linked to units on the board \u00B7 review never re-applies damage",
-                  "COPY"), texts(panel.find("log-footer")));
+            assertEquals(List.of("COPY"), texts(panel.find("log-footer")));
             shoot(hud, panel, "log-08-playback", "08-weapon-playback.jpg");
 
             // Shot 10: the round report, the LRM card reviewed.
@@ -268,8 +267,8 @@ class GpuLogPanelSmokeTest {
             // Report keywords (K13): N finds the next card with the keyword; the row shows with the search.
             panel = new Panel(hud);
             play(panel.state.history, round);
-            panel.preferences = new GpuBoardSource.UiPreferences(1, "Piloting\nlaser", "Hit Damage", true, false,
-                  false, false, GpuHudInputTest.preferences().binds(), 0, 0, 0);
+            panel.preferences = new GpuBoardSource.UiPreferences(1, "Piloting\nlaser", "Hit Damage", true, true,
+                  false, false, false, GpuHudInputTest.preferences().binds(), 0, 0, 0);
             panel.show(hud, status, round.log());
             assertTrue(panel.log.key(Set.of(KeyCommandBind.REPORT_KEY_SELECT_NEXT)));
             assertTrue(panel.log.key(Set.of(KeyCommandBind.REPORT_KEY_NEXT)));
@@ -298,8 +297,8 @@ class GpuLogPanelSmokeTest {
                   Map.of(), round.log().combat(), round.log().psr(), round.log().moves(), List.of(inbound));
             play(panel.state.history, new Round(log, round.events()));
             GpuBattleStatus.Snapshot status = status(GamePhase.END_REPORT, 4);
-            panel.preferences = new GpuBoardSource.UiPreferences(1, "laser", "Piloting\nheat", true, false, false,
-                  false, GpuHudInputTest.preferences().binds(), 0, 0, 0);
+            panel.preferences = new GpuBoardSource.UiPreferences(1, "laser", "Piloting\nheat", true, true, false,
+                  false, false, GpuHudInputTest.preferences().binds(), 0, 0, 0);
             panel.show(hud, status, log);
             List<String> list = panel.list();
             int artillery = list.indexOf(UiTheme.upper(Messages.getString("GpuBoard.hud.log.artilleryInFlight")));

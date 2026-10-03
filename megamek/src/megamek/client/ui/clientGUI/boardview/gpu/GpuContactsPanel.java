@@ -39,8 +39,9 @@ import megamek.common.units.Entity;
 /**
  * Contacts and the movement fire preview in the right column (C.1 G5). Without an active preview it lists the enemy
  * units; with one it shows where the previewed unit fires from, each enemy's best salvo both ways and the open row's
- * weapons, with the Outgoing and Incoming guide toggles. It presents the snapshots and opens unit menus; the client
- * computes every value.
+ * weapons, with the Outgoing and Incoming guide toggles. The highlighted row, and the preview's open row, is the unit
+ * the card shows (the user's decisions of 2026-10-02): a row's click inspects its enemy. It presents the snapshots and
+ * opens unit menus; the client computes every value.
  */
 final class GpuContactsPanel implements GpuHud.Component {
     private static final String UNIDENTIFIED = "GpuBoard.hud.common.unidentified";
@@ -61,9 +62,12 @@ final class GpuContactsPanel implements GpuHud.Component {
      */
     private record PreviewRow(Container<UnitRow> box, UnitRow row, TextTooltip incomingTip) { }
 
-    /** Everything the list shows; the snapshots keep their identity while unchanged, so the comparison is cheap. */
+    /**
+     * Everything the list shows; the snapshots keep their identity while unchanged, so the comparison is cheap.
+     * {@code card} is the unit the card shows ({@link GpuHudState#cardUnit}).
+     */
     private record View(GpuFirePreview.Snapshot preview, List<UnitStatus> units, GpuBattleStatus.Snapshot status,
-          int focus, int inspected, int open) { }
+          int focus, int card) { }
 
     private final GpuHudKit kit;
     private final UiKit ui;
@@ -84,9 +88,10 @@ final class GpuContactsPanel implements GpuHud.Component {
     private final Label fromThreats;
     private final Label fromLine;
     private final Table list = new Table();
-    private final Cell<Actor> footCell;
+    /** The contact list's footer (its rule and line), which the fire preview does not have. */
+    private final Table footer = new Table();
+    private final Cell<Actor> footerCell;
     private final Label contactsFoot;
-    private final Label previewFoot;
     private final Drawable openFill;
     private final Drawable detailEdges;
     /** The plain contact rows, kept across rebuilds so that their pointer state and tooltips stay with them. */
@@ -94,7 +99,6 @@ final class GpuContactsPanel implements GpuHud.Component {
     private final Map<Integer, PreviewRow> previewRows = new HashMap<>();
     private boolean outgoing = true;
     private boolean incoming = true;
-    private int open = Entity.NONE;
     private View shown;
 
     /**
@@ -161,14 +165,12 @@ final class GpuContactsPanel implements GpuHud.Component {
         scroll.setName("contacts-list");
         root.add(scroll).growX().row();
 
-        Table foot = ui.footer(root);
+        Table foot = ui.footer(footer);
         foot.setName("contacts-footer");
         contactsFoot = ui.label("", "hud-small", 11.5f, UiTheme.MUTED);
         contactsFoot.setEllipsis(true);
-        // .pfoot.small wraps its long line.
-        previewFoot = ui.label("", "hud-small", 10.5f, UiTheme.MUTED);
-        previewFoot.setWrap(true);
-        footCell = foot.add((Actor) null).growX().minWidth(0).left();
+        foot.add(contactsFoot).growX().minWidth(0).left();
+        footerCell = root.add((Actor) null).growX();
     }
 
     @Override
@@ -179,7 +181,7 @@ final class GpuContactsPanel implements GpuHud.Component {
     @Override
     public void update(GpuHud.Inputs inputs) {
         View view = new View(inputs.frame().panels().preview(), state.presentedUnits(), inputs.frame().status(),
-              state.focus(), state.inspected, open);
+              state.focus(), state.cardUnit());
         if (!view.equals(shown)) {
             shown = view;
             rebuild();
@@ -194,11 +196,6 @@ final class GpuContactsPanel implements GpuHud.Component {
     /** The Incoming toggle (F3): the board shows the guides from enemies that can fire back while pressed. */
     boolean incomingGuides() {
         return incoming;
-    }
-
-    /** The enemy whose preview row is open, or {@code Entity.NONE}; the board badges and guides it as well (F9). */
-    int openContact() {
-        return open;
     }
 
     /**
@@ -227,15 +224,12 @@ final class GpuContactsPanel implements GpuHud.Component {
               .filter(unit -> unit.side() == GpuBattleStatus.Side.ENEMY).toList();
         boolean previewing = shown.preview().active();
         list.clearChildren();
+        footerCell.setActor(previewing ? null : footer);
         if (previewing) {
             headerCell.setActor(previewHeader);
             fromCell.setActor(from);
             showFrom(shown.preview());
             previewRows(shown.preview());
-            GpuFirePreview.Snapshot preview = shown.preview();
-            previewFoot.setText((preview.capped() ? text("GpuBoard.hud.contacts.footerSixBest") + SEPARATOR : "")
-                  + text("GpuBoard.hud.contacts.footer"));
-            footCell.setActor(previewFoot);
         } else {
             Table header = ui.header(text("GpuBoard.hud.common.contacts"), String.valueOf(enemies.size()));
             header.setName("contacts-header");
@@ -244,7 +238,6 @@ final class GpuContactsPanel implements GpuHud.Component {
             enemies.forEach(unit -> list.add(contactRow(unit)).growX().minWidth(0).pad(0, 10, 6, 10).row());
             contactsFoot.setText(text(enemies.stream().anyMatch(UnitStatus::sensorContact)
                   ? "GpuBoard.hud.contacts.includesUnidentified" : "GpuBoard.hud.contacts.allIdentified"));
-            footCell.setActor(contactsFoot);
         }
         Set<Integer> ids = new HashSet<>(enemies.stream().map(UnitStatus::id).toList());
         contactRows.keySet().retainAll(ids);
@@ -298,7 +291,8 @@ final class GpuContactsPanel implements GpuHud.Component {
                 continue;
             }
             PreviewRow item = previewRows.computeIfAbsent(contact.id(), this::previewRow);
-            boolean opened = contact.id() == open;
+            // The open row is the enemy the card shows; the board badges and guides it as well (F9).
+            boolean opened = contact.id() == shown.card();
             boolean detail = opened && !contact.sensor() && !contact.outgoing().lines().isEmpty();
             showPreviewRow(item, contact, unit, preview, opened, fade);
             list.add(item.box()).growX().minWidth(0).pad(0, 10, detail ? 2 : 6, 10).row();
@@ -311,7 +305,15 @@ final class GpuContactsPanel implements GpuHud.Component {
     private PreviewRow previewRow(int id) {
         UnitRow row = kit.unitRow(34, 30);
         row.setName("contacts-preview-" + id);
-        onChange(row, () -> open = open == id ? Entity.NONE : id);
+        // A click inspects the enemy through the HUD's rule, which opens its row; on the open row it ends the
+        // inspection, which closes the row (F6).
+        onChange(row, () -> {
+            if (state.inspected == id) {
+                state.inspected = Entity.NONE;
+            } else {
+                select.accept(id);
+            }
+        });
         row.addListener(UnitRow.menuOpener(menu, id, this::unit));
         // The name (.prow .nm b) is 13 units, half a unit smaller than the forces row's, on the font's normal line
         // height; with the coral return-fire line (the fourth line) the row is 70 units tall, as in shot 02 (Table
@@ -462,7 +464,7 @@ final class GpuContactsPanel implements GpuHud.Component {
             return created;
         });
         GpuBattleStatus.Snapshot status = shown.status();
-        return row.show(unit, UnitRow.contactLine(unit, status), status.phase(), unit.id() == shown.inspected(),
+        return row.show(unit, UnitRow.contactLine(unit, status), status.phase(), unit.id() == shown.card(),
               unit(UnitRow.acting(status, shown.focus())));
     }
 

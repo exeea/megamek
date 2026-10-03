@@ -12,7 +12,9 @@ import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
+import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
+import com.badlogic.gdx.scenes.scene2d.actions.Actions;
 import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
@@ -83,16 +85,26 @@ public final class UiKit {
         });
     }
 
-    /** A tooltip on {@code actor} in the theme's "hud" style, empty until its view sets the text. */
+    /**
+     * A tooltip on {@code actor} in the theme's "hud" style, empty until its view sets the text. It goes when the actor
+     * hides: libGDX hides a tooltip whose actor leaves the stage, but not one whose actor or panel hides under a resting
+     * pointer, which then stays stuck. Its label acts only while it shows.
+     */
     public TextTooltip tip(Actor actor) {
         TextTooltip tip = new TextTooltip("", skin, "hud");
         actor.addListener(tip);
+        tip.getActor().addAction(Actions.forever(Actions.run(() -> {
+            if (!actor.ascendantsVisible()) {
+                tip.hide();
+            }
+        })));
         return tip;
     }
 
     /**
      * A list that scrolls vertically in the "hud-list" style: a thin bar over the list, no flick and no overscroll. It
-     * takes the stage's scroll focus when the pointer enters it, so the wheel scrolls it without a click.
+     * takes the stage's scroll focus while the pointer is over it, so the wheel scrolls it without a click, and gives
+     * the focus back when the pointer leaves it, so the wheel then reaches what lies there, such as the view's camera.
      */
     public ScrollPane scrollList(Actor list) {
         ScrollPane scroll = new ScrollPane(list, skin, "hud-list");
@@ -105,6 +117,16 @@ public final class UiKit {
             public void enter(InputEvent event, float x, float y, int pointer, Actor fromActor) {
                 if (scroll.getStage() != null) {
                     scroll.getStage().setScrollFocus(scroll);
+                }
+            }
+
+            @Override
+            public void exit(InputEvent event, float x, float y, int pointer, Actor toActor) {
+                // A press on the list takes the focus too (ScrollPane); moving onto one of its rows keeps it.
+                Stage stage = scroll.getStage();
+                if (stage != null && stage.getScrollFocus() == scroll
+                      && (toActor == null || !toActor.isDescendantOf(scroll))) {
+                    stage.setScrollFocus(null);
                 }
             }
         });
@@ -133,7 +155,10 @@ public final class UiKit {
         return new Label(UiTheme.upper(text), skin, "hud-caption");
     }
 
-    /** A Material icon at a CSS size; inside a button it takes the button's text color. */
+    /**
+     * A theme icon (a Material symbol, or an image icon a view added) at a CSS size; inside a button it takes the
+     * button's text color.
+     */
     public Icon icon(String name, float size, Color color) {
         Icon icon = new Icon(skin.getDrawable("icon-" + name), size);
         icon.setColor(color);
@@ -387,12 +412,20 @@ public final class UiKit {
 
         private Segmented(String style, boolean flex, String... labels) {
             boolean tabs = style.startsWith("hud-tab");
+            // A pill ("hud-pill"): one frame whose sections touch, a hairline between two of them.
+            boolean pill = style.equals("hud-pill");
             if (tabs) {
                 setBackground(skin.getDrawable("tabs"));
+            } else if (pill) {
+                setBackground(skin.getDrawable("pill-frame"));
+                pad(1);
             }
             for (String text : labels) {
+                if (pill && !buttons.isEmpty()) {
+                    add(new Image(skin.getDrawable("rule"))).width(1).fillY();
+                }
                 UiButton button = button(style, null, text, null);
-                Cell<UiButton> cell = add(button).padLeft(buttons.isEmpty() ? 0 : tabs ? 18 : 6);
+                Cell<UiButton> cell = add(button).padLeft(buttons.isEmpty() || pill ? 0 : tabs ? 18 : 6);
                 if (flex) {
                     cell.growX().uniformX();
                 } else if (!tabs) {

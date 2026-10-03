@@ -447,6 +447,49 @@ class GpuNameplatesSmokeTest {
         });
     }
 
+    /**
+     * The user's decision of 2026-10-02: the tag of the unit the card shows lies over every other tag and the hovered
+     * unit's over the rest; without either the tags keep the units' order. With the nameplate key held every unit has
+     * a tag; the King Crab's overlaps the Timber Wolf's, which comes first.
+     */
+    @Test
+    void theShownUnitsTagLiesOverTheOthersAndTheOrderReturnsWithoutIt() {
+        GpuHudTestStage.run(hud -> {
+            List<UnitStatus> roster = GpuHudFixtures.status().units();
+            GpuBattleStatus.Snapshot moving = status(GpuHudFixtures.status(), GamePhase.MOVEMENT, false, TIMBER_WOLF,
+                  roster);
+            GpuHudData none = panels(GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY);
+            Map<Integer, Vector2> heads = grid(roster);
+            heads.put(TIMBER_WOLF, new Vector2(900, 500));
+            heads.put(KING_CRAB, new Vector2(930, 506));
+            Plates plates = new Plates(hud);
+            plates.state.altHeld = true;
+            plates.update(hud, moving, none, heads, false, Entity.NONE);
+            Table wolf = plates.tag(TIMBER_WOLF);
+            Table crab = plates.tag(KING_CRAB);
+            assertTrue(GpuHudTestStage.bounds(wolf).overlaps(GpuHudTestStage.bounds(crab)), "The two tags overlap");
+            assertTrue(wolf.getZIndex() < crab.getZIndex(), "In the units' order the King Crab's is drawn last");
+
+            // The Timber Wolf inspected: its tag lies over the King Crab's, also while the King Crab is hovered.
+            plates.state.inspected = TIMBER_WOLF;
+            plates.update(hud, moving, none, heads, false, Entity.NONE);
+            assertTrue(wolf.getZIndex() > crab.getZIndex(), "The shown unit's tag is drawn last");
+            hud.draw();
+            opaque();
+            hud.capture("nameplates-order-shown").dispose();
+            plates.update(hud, moving, none, heads, false, KING_CRAB);
+            assertTrue(wolf.getZIndex() > crab.getZIndex(), "The shown unit wins over the hovered one");
+
+            // Deselected, the hovered Timber Wolf's tag is drawn last; without the hover the units' order returns.
+            plates.state.inspected = Entity.NONE;
+            plates.update(hud, moving, none, heads, false, TIMBER_WOLF);
+            assertTrue(wolf.getZIndex() > crab.getZIndex(), "The hovered unit's tag is drawn last");
+            plates.update(hud, moving, none, heads, false, Entity.NONE);
+            assertTrue(wolf.getZIndex() < crab.getZIndex(), "The order returns to the units'");
+            plates.dispose();
+        });
+    }
+
     @Test
     void theNameplateKeyShowsEveryPlateWhileItIsHeld() {
         GpuHudTestStage.run(harness -> {

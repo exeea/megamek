@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -33,6 +34,7 @@ import com.badlogic.gdx.Files;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Graphics;
 import com.badlogic.gdx.Input;
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Files;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Texture;
@@ -110,6 +112,8 @@ class GpuHudInputTest {
         // desktop mipmap path reads Gdx.gl20).
         Gdx.app = mock(Application.class);
         Gdx.files = mock(Files.class);
+        // The HUD skin reads its enemy icon from the classpath.
+        when(Gdx.files.classpath(anyString())).thenAnswer(call -> new Lwjgl3Files().classpath(call.getArgument(0)));
         Gdx.graphics = mock(Graphics.class);
         Gdx.gl = mock(GL20.class);
         Gdx.gl20 = Gdx.gl;
@@ -693,7 +697,7 @@ class GpuHudInputTest {
     static GpuBoardSource.UiPreferences preferences(float scale) {
         List<GpuBoardSource.Bind> binds = Stream.of(KeyCommandBind.values())
               .map(bind -> new GpuBoardSource.Bind(bind, bind.keyDefault, bind.modifiersDefault, "")).toList();
-        return new GpuBoardSource.UiPreferences(scale, "", "", true, false, false, false, binds, 0, 0, 0);
+        return new GpuBoardSource.UiPreferences(scale, "", "", true, true, false, false, false, binds, 0, 0, 0);
     }
 
     static GpuBattleStatus.Snapshot status(int round, GamePhase phase, boolean myTurn, int actor, int turnIndex,

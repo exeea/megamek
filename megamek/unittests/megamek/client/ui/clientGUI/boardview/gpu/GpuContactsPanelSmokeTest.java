@@ -8,6 +8,7 @@ import static megamek.client.ui.clientGUI.boardview.gpu.GpuHudFixtures.CONTACT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -131,7 +132,7 @@ class GpuContactsPanelSmokeTest {
             click(hud, panel, "contacts-preview-" + TIMBER_WOLF, Input.Buttons.LEFT);
             panel.update(hud, MOCK, shot02());
             panel.place(hud, LEFT, TOP, WIDTH, BOTTOM);
-            assertEquals(TIMBER_WOLF, panel.contacts.openContact());
+            assertEquals(TIMBER_WOLF, panel.state.inspected, "The row's click inspects the enemy, which opens it");
             assertEquals(List.of("CONTACTS", "OUTGOING", "INCOMING"), panel.texts("contacts-header"));
             assertEquals(List.of("FROM DESTINATION", "3 targets \u00B7 ", "3 threats",
                   "Hex 1512 \u00B7 facing N \u00B7 Walked +1 \u00B7 TMM +0"), panel.texts("contacts-from"));
@@ -180,16 +181,13 @@ class GpuContactsPanelSmokeTest {
             assertEquals("Hex 1514 \u00B7 facing N \u00B7 not moved yet", panel.texts("contacts-from").get(3));
             shoot(hud, panel, "contacts-16-chat", "16-chat.jpg");
 
-            // Shot 14: 56 targets; the board shows six of each direction, which the footer says.
+            // Shot 14: 56 targets; the board shows six of each direction.
             panel = fresh(hud);
             GpuBattleStatus.Snapshot large = large();
             panel.update(hud, large, shot14());
             panel.place(hud, LEFT, TOP, WIDTH, BOTTOM);
             assertEquals(List.of("FROM DESTINATION", "56 targets \u00B7 ", "56 threats",
                   "Hex 1711 \u00B7 facing N \u00B7 Ran +2 \u00B7 TMM +1"), panel.texts("contacts-from"));
-            assertEquals(List.of("Board shows the six best of each direction \u00B7 Includes torso twist \u00B7 each "
-                  + "target evaluated separately \u00B7 MegaMek to-hit, if the move succeeds"),
-                  panel.texts("contacts-footer"));
             shoot(hud, panel, "contacts-14-large", "14-large-battle-100v100.jpg");
         });
     }
@@ -243,7 +241,7 @@ class GpuContactsPanelSmokeTest {
                 for (GpuFirePreview.Snapshot shown : List.of(preview, GpuFirePreview.Snapshot.NONE)) {
                     panel.update(hud, large, shown);
                     panel.place(hud, left, 90 + map + 12, metrics.right(), size[1] - 70);
-                    if (shown.active() && panel.contacts.openContact() != 300) {
+                    if (shown.active() && panel.state.inspected != 300) {
                         // An open row: the detail's lines must stay inside the narrow column too.
                         click(hud, panel, "contacts-preview-300", Input.Buttons.LEFT);
                         panel.update(hud, large, shown);
@@ -266,26 +264,39 @@ class GpuContactsPanelSmokeTest {
             GpuFirePreview.Snapshot preview = shot02();
             show(hud, panel, MOCK, preview);
 
-            // A row opens its detail and closes it again; only one row is open (F6).
+            // The open row is the inspected enemy (F6 and the user's decisions of 2026-10-02): a row's click inspects
+            // its enemy, which opens its detail and gives it the coral edges; another row's click moves both; the open
+            // row's click ends the inspection, which closes it; only one row is open.
             click(hud, panel, "contacts-preview-" + KING_CRAB, Input.Buttons.LEFT);
             show(hud, panel, MOCK, preview);
-            assertEquals(KING_CRAB, panel.contacts.openContact());
+            assertEquals(KING_CRAB, panel.state.inspected);
             assertNotNull(panel.find("contacts-detail-" + KING_CRAB));
+            assertSame(hud.kit.ui.skin.getDrawable("row-foe"),
+                  panel.<GpuHudKit.UnitRow>find("contacts-preview-" + KING_CRAB).getBackground());
             click(hud, panel, "contacts-preview-" + TIMBER_WOLF, Input.Buttons.LEFT);
             show(hud, panel, MOCK, preview);
+            assertEquals(TIMBER_WOLF, panel.state.inspected);
             assertNull(panel.find("contacts-detail-" + KING_CRAB));
             assertNotNull(panel.find("contacts-detail-" + TIMBER_WOLF));
+            assertNotSame(hud.kit.ui.skin.getDrawable("row-foe"),
+                  panel.<GpuHudKit.UnitRow>find("contacts-preview-" + KING_CRAB).getBackground(), "one highlight");
             click(hud, panel, "contacts-preview-" + TIMBER_WOLF, Input.Buttons.LEFT);
             show(hud, panel, MOCK, preview);
-            assertEquals(Entity.NONE, panel.contacts.openContact());
+            assertEquals(Entity.NONE, panel.state.inspected);
+            assertNull(panel.find("contacts-detail-" + TIMBER_WOLF));
+            // An enemy inspected elsewhere, on the board or in the forces list, opens its row too.
+            panel.state.inspected = KING_CRAB;
+            show(hud, panel, MOCK, preview);
+            assertNotNull(panel.find("contacts-detail-" + KING_CRAB));
+            panel.state.inspected = Entity.NONE;
             // A sensor contact's row has no detail and no menu; a right click on a unit's row opens its menu (C13).
             click(hud, panel, "contacts-preview-" + CONTACT, Input.Buttons.LEFT);
             click(hud, panel, "contacts-preview-" + CONTACT, Input.Buttons.RIGHT);
-            assertEquals(Entity.NONE, panel.contacts.openContact());
+            assertEquals(Entity.NONE, panel.state.inspected);
             verify(panel.menu, never()).open(any(), eq(CONTACT), anyFloat(), anyFloat());
             click(hud, panel, "contacts-preview-" + KING_CRAB, Input.Buttons.RIGHT);
             verify(panel.menu).open(eq(unit(MOCK, KING_CRAB).position()), eq(KING_CRAB), anyFloat(), anyFloat());
-            assertEquals(Entity.NONE, panel.contacts.openContact(), "A right click opens nothing else");
+            assertEquals(Entity.NONE, panel.state.inspected, "A right click opens nothing else");
 
             // The guide toggles start pressed and flip the board's guides (F3).
             assertTrue(panel.contacts.outgoingGuides() && panel.contacts.incomingGuides());
@@ -483,20 +494,20 @@ class GpuContactsPanelSmokeTest {
                   side(0, 4 - index % 2, 7, 5 + index % 3, 83.33), index < 6, index < 6));
         }
         return new GpuFirePreview.Snapshot(true, true, ATLAS, true, new Coords(16, 10), 0, 0, "Ran", 2, 1, "", false,
-              56, 56, true, rows);
+              56, 56, rows);
     }
 
     private static GpuFirePreview.Snapshot preview(boolean destination, Coords from, int facing, String moved,
           int modifier, int tmm, int unit, int targets, int threats, List<Contact> contacts) {
         return new GpuFirePreview.Snapshot(true, true, unit, destination, from, 0, facing, moved, modifier, tmm, "",
-              false, targets, threats, false, contacts);
+              false, targets, threats, contacts);
     }
 
     /** The same preview, unavailable for {@code reason} or with a breach warning. */
     private static GpuFirePreview.Snapshot with(GpuFirePreview.Snapshot preview, String reason, boolean breach) {
         return new GpuFirePreview.Snapshot(true, true, preview.unitId(), preview.fromDestination(), preview.from(),
               preview.boardId(), preview.facing(), preview.moved(), preview.attackerModifier(), preview.tmm(), reason,
-              breach, preview.targets(), preview.threats(), preview.capped(), preview.contacts());
+              breach, preview.targets(), preview.threats(), preview.contacts());
     }
 
     private static Contact contact(int id, int distance, Side outgoing, Side incoming) {

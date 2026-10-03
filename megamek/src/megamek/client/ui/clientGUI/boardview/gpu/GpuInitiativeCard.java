@@ -100,13 +100,6 @@ final class GpuInitiativeCard implements GpuHud.Component {
         hidden = ui.label(Messages.getString("GpuBoard.hud.phase.turnOrderHidden"), "hud-small", 11.5f,
               UiTheme.MUTED);
         orderCell = body.add((Actor) order);
-        body.row();
-
-        // .note: 12 muted, 8 below the turn order
-        Label note = ui.label(Messages.getString("GpuBoard.hud.initiative.note"), "hud-small", 12, UiTheme.MUTED);
-        note.setName("initiative-note");
-        note.setWrap(true);
-        body.add(note).padTop(8);
     }
 
     private void turnPage(int step) {

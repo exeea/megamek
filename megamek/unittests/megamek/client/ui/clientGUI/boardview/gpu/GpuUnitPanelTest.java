@@ -18,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -36,6 +37,7 @@ import com.badlogic.gdx.Files;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Graphics;
 import com.badlogic.gdx.Input;
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Files;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.g2d.Batch;
@@ -55,6 +57,7 @@ import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuCriticalTable.Strike;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuHudState.SheetTab;
 import megamek.client.ui.gdx.UiButton;
+import megamek.client.ui.gdx.UiTestStage;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.common.ResolvedAttack;
 import megamek.common.enums.GamePhase;
@@ -117,6 +120,8 @@ class GpuUnitPanelTest {
         // The stage fires the mouse's enter and exit events in act() on a desktop only.
         when(Gdx.app.getType()).thenReturn(Application.ApplicationType.Desktop);
         Gdx.files = mock(Files.class);
+        // The HUD skin reads its enemy icon from the classpath.
+        when(Gdx.files.classpath(anyString())).thenAnswer(call -> new Lwjgl3Files().classpath(call.getArgument(0)));
         Gdx.graphics = mock(Graphics.class);
         Gdx.gl = mock(GL20.class);
         Gdx.gl20 = Gdx.gl;
@@ -335,6 +340,24 @@ class GpuUnitPanelTest {
         assertFalse(hud.state.recordOpen);
     }
 
+    /** Esc while a weapon row is dragged sends the row home first; the sheet stays, and the next Esc closes it. */
+    @Test
+    void escapeFirstSendsADraggedWeaponRowHome() throws Exception {
+        show(ATLAS, SheetTab.WEAPONS, true, GamePhase.FIRING);
+        hover(find("record-weapon-1"));
+        Vector2 start = centre(((Table) find("record-weapon-1")).getChildren().first());
+        Vector2 end = centre(find("record-weapon-3"));
+        hud.stage.touchDown((int) start.x, (int) start.y, 0, Input.Buttons.LEFT);
+        hud.stage.touchDragged((int) end.x, (int) end.y, 0);
+        assertTrue(escape(), "Esc ends the drag");
+        assertTrue(hud.state.recordOpen, "and only the drag");
+        hud.stage.touchUp((int) end.x, (int) end.y, 0, Input.Buttons.LEFT);
+        UiTestStage.settle(hud.stage);
+        verify(records, never()).moveWeapon(anyInt(), anyInt(), anyInt());
+        assertTrue(escape());
+        assertFalse(hud.state.recordOpen, "the next Esc closes the sheet");
+    }
+
     @Test
     void arrowsMoveTheSelectionOnlyWhileTheSheetsListsHaveTheFocus() throws Exception {
         show(ATLAS, SheetTab.WEAPONS, true, GamePhase.FIRING);
@@ -423,7 +446,7 @@ class GpuUnitPanelTest {
         click(find("record-step-previous-" + GpuUnitRecord.HEAT_SINKS));
         verify(records).setSystem(ATLAS, GpuUnitRecord.HEAT_SINKS, sinks - 1);
 
-        // Alt+Down on the focused weapon row moves it one place; its grip dropped two rows lower, two places.
+        // Alt+Down on the focused weapon row flies it one place down, then moves the weapon once it lands.
         List<GpuUnitRecord.RecordWeapon> weapons = record.weapons();
         show(ATLAS, SheetTab.WEAPONS, true, GamePhase.FIRING);
         click(find("record-weapon-0"));
@@ -431,10 +454,20 @@ class GpuUnitPanelTest {
         when(Gdx.input.isKeyPressed(Input.Keys.ALT_LEFT)).thenReturn(true);
         assertTrue(hud.keyDown(Input.Keys.DOWN, KeyEvent.VK_DOWN, KeyEvent.ALT_DOWN_MASK));
         when(Gdx.input.isKeyPressed(Input.Keys.ALT_LEFT)).thenReturn(false);
+        verify(records, never()).moveWeapon(anyInt(), anyInt(), anyInt());
+        UiTestStage.settle(hud.stage);
         verify(records).moveWeapon(ATLAS, weapons.get(0).eqNum(), 1);
+        // The mocked record keeps its order, as a refused move would: after a second the rows go back to it. Then
+        // the second row's grip, shown under the pointer, dragged onto the fourth row's place moves it two places.
+        for (int frame = 0; frame < 80; frame++) {
+            hud.stage.act(1 / 60f);
+        }
+        UiTestStage.settle(hud.stage);
         update(ATLAS, GamePhase.FIRING);
+        hover(find("record-weapon-1"));
         Table second = find("record-weapon-1");
         drag(second.getChildren().first(), find("record-weapon-3"));
+        UiTestStage.settle(hud.stage);
         verify(records).moveWeapon(ATLAS, weapons.get(1).eqNum(), 2);
     }
 

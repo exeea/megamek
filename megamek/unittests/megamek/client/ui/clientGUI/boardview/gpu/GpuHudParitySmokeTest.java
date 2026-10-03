@@ -124,8 +124,10 @@ class GpuHudParitySmokeTest {
     private static final Region HEADER = top("phase-header", 20, 20, 300, 84);
     private static final Region HEADER_RIBBON = top("phase-header", 20, 20, 300, 100);
     private static final Region MINIMAP = top("minimap", 1590, 90, 310, 210);
-    private static final Region FORCES = top("forces-panel", 20, 116, 300, 508);
-    private static final Region FORCES_RIBBON = top("forces-panel", 20, 132, 300, 508);
+    // The forces list is narrower than the mock's column of 300 (the user's request of 2026-10-02).
+    private static final int FORCES_WIDTH = Math.round(GpuHud.FORCES_WIDTH);
+    private static final Region FORCES = top("forces-panel", 20, 116, FORCES_WIDTH, 508);
+    private static final Region FORCES_RIBBON = top("forces-panel", 20, 132, FORCES_WIDTH, 508);
     private static final Region CARD = bottom("unit-card", 20, 837, 300, 223);
     private static final Region CARD_CHIP = bottom("unit-card", 20, 808, 300, 252);
     private static final Region PLAN_DOCK = bottom("command-dock", 670, 875, 580, 174);
@@ -337,7 +339,8 @@ class GpuHudParitySmokeTest {
                 live.zoom(new Coords(13, 10), 75);
                 shot(live, "15", "15-compact-1280x720.jpg", top("phase-header", 16, 16, 250, 81),
                       top("solution-card", 712, 90, 270, 146), top("minimap", 994, 90, 270, 180),
-                      top("forces-panel", 16, 109, 250, 356), top("weapons-panel", 994, 282, 270, 368),
+                      top("forces-panel", 16, 109, Math.min(FORCES_WIDTH, 250), 356),
+                      top("weapons-panel", 994, 282, 270, 368),
                       bottom("unit-card", 16, 477, 250, 227), bottom("command-dock", 391, 531, 499, 158));
             });
         }
@@ -659,8 +662,9 @@ class GpuHudParitySmokeTest {
     static void start(Live live, UnaryOperator<GpuBattleStatus.Snapshot> status) throws Exception {
         GpuBoardSource.UiPreferences p = live.source.uiPreferences;
         live.source.uiPreferences = new GpuBoardSource.UiPreferences(p.scale(), p.reportKeywords(),
-              p.reportFilterKeywords(), p.minimapEnabled(), p.moveEnvelope(), p.conditionsVisible(), p.turnDetails(),
-              live.real.uiPreferences.binds(), p.minRangeRgb(), p.extremeRangeRgb(), p.moveSprintRgb());
+              p.reportFilterKeywords(), p.minimapEnabled(), p.contactsEnabled(), p.moveEnvelope(),
+              p.conditionsVisible(), p.turnDetails(), live.real.uiPreferences.binds(), p.minRangeRgb(),
+              p.extremeRangeRgb(), p.moveSprintRgb());
         doAnswer(invocation -> {
             live.real.setCardUnit(invocation.getArgument(0));
             return null;

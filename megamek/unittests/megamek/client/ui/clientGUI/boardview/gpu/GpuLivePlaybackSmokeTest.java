@@ -99,15 +99,15 @@ class GpuLivePlaybackSmokeTest {
                 assertTrue(play.texts("forces-unit-" + ATLAS).stream().noneMatch(text -> text.contains(counted)),
                       "The Atlas's review line counts no shot yet");
 
-                // The dock's speeds are the board's: at 2x a shot's clock runs twice as fast.
-                play.click(live.actor("dock-speed-double"));
+                // The phase header's speeds are the board's: at 2x a shot's clock runs twice as fast.
+                play.click(live.actor("phase-speed-double"));
                 assertTrue(play.until(() -> play.playback.attack() != null && play.playback.attack().seconds > 0));
                 UnitAttack shooting = play.playback.attack();
                 float clock = shooting.seconds;
                 play.frames(1);
                 assertEquals(FRAME * UnitMotion.Speed.DOUBLE.rate, shooting.seconds - clock, 1e-4,
-                      "The board plays at the dock's speed");
-                play.click(live.actor("dock-speed-normal"));
+                      "The board plays at the header's speed");
+                play.click(live.actor("phase-speed-normal"));
 
                 // The Atlas's shot lands at the Archer.
                 assertTrue(play.until(() -> play.played(volley.shots().getFirst())), "The Atlas's shot lands");

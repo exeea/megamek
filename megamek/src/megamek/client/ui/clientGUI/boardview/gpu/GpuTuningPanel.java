@@ -89,7 +89,6 @@ final class GpuTuningPanel implements GpuHud.Component {
         root.top().right();
         button = ui.button("hud-utility", "tune", text("GpuBoard.hud.tuning.title"), null);
         button.setName("tuning-button");
-        ui.tip(button).getActor().setText(text("GpuBoard.hud.tuning.tip"));
         onChange(button, () -> state.toggle(GpuHudState.Dialog.TUNING));
         wide = ui.skin.get("hud-utility", TextButton.TextButtonStyle.class);
         // At W <= 1350, as the other utilities.

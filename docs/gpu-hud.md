@@ -7,7 +7,7 @@ The HUD shows immutable snapshots of them and calls MegaMek's existing commands;
 | Code | Where |
 | --- | --- |
 | Battle HUD (package-private) | `megamek/src/megamek/client/ui/clientGUI/boardview/gpu`: `GpuHud`, `GpuHudState`, the components and services below |
-| UI toolkit (public) | `megamek/src/megamek/client/ui/gdx`: `UiTheme`, `UiKit`, `UiButton`, `UiPopover`, `UiMenuList`, `UiFlow`, `DisplayScale` |
+| UI toolkit (public) | `megamek/src/megamek/client/ui/gdx`: `UiTheme`, `UiKit`, `UiButton`, `UiPopover`, `UiMenuList`, `UiList`, `UiFlow`, `DisplayScale` |
 | Paperdoll data | mm-data `data/images/paperdolls` (JSON), sources in mm-data `tools/paperdolls` |
 | Tests | `megamek/unittests/megamek/client/ui/clientGUI/boardview/gpu` and `megamek/unittests/megamek/client/ui/gdx` |
 
@@ -176,9 +176,15 @@ large that 960 x 640 stage units do not fit. The native window cannot be smaller
 | --- | --- | --- | --- |
 | gap | 20 | 20 | 16 |
 | left column | 300 | 270 | 250 |
+| forces list | 250 | 250 | 250 |
 | right column | 310 | 290 | 270 |
 | dock | 580 | 540 | 500 |
 | log | 380 | 340 | 310 |
+
+The forces list is `GpuHud.FORCES_WIDTH` wide, at most the left column: narrower than the prototype's column, which
+left its rows much room (the user's request of 2026-10-02). The phase header and the unit card keep the column, the
+forces grid its own width, and the dock's band still starts after the column. The forces panel is as tall as its
+content: a long list ends 12 units above the unit card and scrolls.
 
 Height <= 800 is the low-height layout. The layers, bottom to top: board labels (the Tactical View's north mark,
 guides, traces and leaders, nameplates, other board labels, target cards), panels, chat, forces overview, dialogs
@@ -215,13 +221,25 @@ the held nameplate key, the log's open state and the playback history. It is pre
   initiative report only list the round's order.
 - **Own units outside the local turn.** A click on an own unit (board, row, card or menu) makes it the focus, shown
   and selected in mint. Enemy units are inspected.
+- **Cleared selection.** The card's ✕, on the selected unit as on an inspected one, ends the inspection and clears
+  the selection (`GpuHudState.clearSelection`; the user's decisions of 2026-10-02): no card and no highlighted unit.
+  In the local turn no unit is then selected at all. MegaMek's phase display keeps its current unit (it has no
+  selection without one), but the HUD presents the turn without it (`GpuHudState.presented`, used by the HUD and the
+  board overlay): no acting unit, no dock, no route or envelope, no fire orders, preview or physical options, no map
+  menu. No input reaches that unit: a hex click does nothing, a unit click selects (an own unit that can act) or
+  inspects (any other, which keeps the selection cleared), and the HUD keeps every key from MegaMek except the menu
+  bar's binds (`KeyCommandBind.isMenuBar`) and `GpuHud.UNITLESS_BINDS` (camera, chat, pause, report keys, turn timer,
+  the HUD's panels). A selection (board, row, menu, Next pending, MegaMek's next or previous unit) or the next turn,
+  phase or focus unit ends it; MegaMek then selects the unit afresh.
+- **No fire preview outside the local turn.** `GpuHudState.presented` also drops the fire preview while another
+  player moves or fires: no to-hit badges or guides from the last own unit (the user's decision of 2026-10-03).
 - **Presented units.** While the playback still presents live events, every component shows the units and the record
   of the last status captured while the playback was idle, so armor and damage never run ahead of the animation.
   Phase, turns and initiative are always the newest.
 - **Log.** A closed log opens for the report phases after the initiative phase and closes again with the next phase
   that is not a report. A log the player opened stays open.
 - **Playback history.** `GpuBattleView` owns one `GpuPlaybackHistory` over its `UnitPlayback` and hands it to the
-  HUD. The board feeds it; the dock's transport and speeds, the log's cards and Replay, the playback keys and the
+  HUD. The board feeds it; the dock's transport, the phase header's speeds, the log's cards and Replay, the playback keys and the
   board's pop-ups all act on it. A review presents a retained shot again and never applies an event, so damage, heat
   and ammunition stay as the client reports them. Live events that arrive during a review play after it, in order.
 
@@ -234,7 +252,8 @@ the held nameplate key, the log's open state and the playback history. It is pre
    pending, the scrim takes every press.
 2. A press on the board calls `GpuHud.boardPress()`, which ends a keyboard focus and closes the context menu. Right
    drags pan and middle drags orbit; Shift held at the press swaps the two. A drag starts past 6 pixels times the
-   layout scale. A left drag moves nothing and cancels its click.
+   layout scale. A left drag moves nothing and cancels its click. A middle drag on the minimap's map orbits the
+   camera as well, by the same `GpuBattleView.ORBIT_DEGREES` per unit.
 3. A short release (not the middle button) on the board of its press picks the nearest of the unit models, location
    markers and terrain along the pointer's ray. In the Tactical View a unit icon wins over the ground, and a hex
    holding a unit picks that unit. The release calls `GpuHud.boardClick` with the modifiers held at the press:
@@ -269,11 +288,13 @@ local turn an own unit becomes the focus. Any other unit is inspected.
 1. `GpuHud.keyDown`: a pending dialog takes every key (the CANCEL bind presses its cancel button);
 2. the CANCEL bind runs the Esc chain (2.3);
 3. a focused text field takes every other key;
-4. a focused grip or open list gets the key first (menus navigate, Alt+Up/Down moves an attack on a target card);
+4. a focused grip or open list gets the key first (menus navigate, Alt+Up/Down moves an attack on a target card, and
+   a weapon row of the sheet's focused list);
 5. the HUD hotkeys (section 4);
 6. the camera binds;
 7. everything else goes to Swing: `GpuBoardSource.key` runs `MegaMekController`'s binds on the EDT unless the client
-   ignores hotkeys, then the menu bar's accelerators.
+   ignores hotkeys, then the menu bar's accelerators. With the selection cleared in the local turn only the binds of
+   no unit go (section 1.8); the HUD keeps the others.
 
 A key's release goes to the HUD first; the release of a key whose press the HUD consumed ends there. A forwarded
 release carries the modifiers of its press. Typed characters reach only a focused text field or a pending dialog. The
@@ -284,18 +305,19 @@ held camera keys work with every panel open and pause only while a text field ha
 CANCEL (Esc by default) takes one step per press:
 
 1. a pending dialog: its cancel button;
-2. a keyboard focus outside the context menu, the sheet's popover and an open dialog: dropped;
-3. the context menu or a select list: closed;
-4. Help, Menu, Players or Tuning: closed, with the focus inside it;
-5. the forces overview: closed;
-6. chat: closed;
-7. a bot order's hex pick: cancelled, no order sent;
-8. the dock's confirm strip, then the LOS card, then the unit sheet (its popover, then the expanded row, then the
+2. a row dragged in a list (a target card's attack, a weapon of the sheet): it glides home and nothing moves;
+3. a keyboard focus outside the context menu, the sheet's popover and an open dialog: dropped;
+4. the context menu or a select list: closed;
+5. Help, Menu, Players or Tuning: closed, with the focus inside it;
+6. the forces overview: closed;
+7. chat: closed;
+8. a bot order's hex pick: cancelled, no order sent;
+9. the dock's confirm strip, then the LOS card, then the unit sheet (its popover, then the expanded row, then the
    sheet);
-9. the weapons panel: the armed weapon disarmed, else the weapon deselected (the solution card closes with it);
-10. the local planner turn's route: cleared;
-11. the inspected unit: no longer inspected;
-12. otherwise: in FIRING, TARGETING, OFFBOARD and PHYSICAL the key stops here, because MegaMek's CANCEL would clear the
+10. the weapons panel: the armed weapon disarmed, else the weapon deselected (the solution card closes with it);
+11. the local planner turn's route: cleared;
+12. the inspected unit: no longer inspected;
+13. otherwise: in FIRING, TARGETING, OFFBOARD and PHYSICAL the key stops here, because MegaMek's CANCEL would clear the
     declared attacks. In every other phase it goes to the phase display.
 
 ## 3. Components
@@ -305,19 +327,19 @@ view changes (open panels, the camera) stay on the GL thread. Names in quotes ar
 
 | Component | Where | Shows | Runs |
 | --- | --- | --- | --- |
-| `GpuPhaseHeader` | top left | round, phase ring, phase name, whose turn; in movement the activation ribbon (hidden under double blind) | none |
+| `GpuPhaseHeader` | top left | round, phase ring, phase name, whose turn; in movement the activation ribbon (hidden under double blind); the playback speeds at the round line's right as one pill of sections (0.5x, 1x, 2x, 4x, I for Instant), in every phase and turn; the round shortens to its number ("01") only where the line has no room for "Round 01" | the playback history's speed |
 | `GpuForcesPanel` | left column | own and allied units, or the contacts, as grouped rows or a grid with search, grouping and filter | selection rule, unit menu, the phase's next-unit command |
-| `GpuUnitCard` | bottom left | the inspected unit, else the focus unit: paperdoll, vitals, chips; the mini card while the sheet is open; the contact card for a sensor contact | "Unit details", Locate |
+| `GpuUnitCard` | bottom left | the inspected unit, else the focus unit: paperdoll, vitals, chips; the mini card while the sheet is open; the contact card for a sensor contact | "Unit record", Locate |
 | `GpuRecordSheet` | left, at the grid's width | the unit sheet (section 7) | the record service's unit actions |
 | `GpuConditionsCard` | beside the left column | the planetary conditions overlay's lines while its View preference is on | its close button runs that View item |
 | `GpuUtilityBar` | top right | "Tactical view", "Map", "Log" (amber count of the round's reviewable events the board has presented), "Help", "Menu"; the Tactical View chip and north mark | the camera's Tactical View, View > minimap, the HUD's toggles |
-| `GpuInitiativeCard` | centre, initiative phase | each side's reported roll, "Wins", "Moves first", the turn order in pages of eight (double blind hides the order and "Moves first"), the note on who moves and when attacks resolve | none |
-| `GpuMinimap` | under the utilities | the board in its tileset colours, units at their animated positions, the planned route, the camera's ground area | a press or drag centres the camera; no order changes |
+| `GpuInitiativeCard` | centre, initiative phase | each side's reported roll, "Wins", "Moves first", the turn order in pages of eight (double blind hides the order and "Moves first") | none |
+| `GpuMinimap` | under the utilities | the board in its tileset colours, units at their animated positions, the planned route, the camera's ground area | a left press or drag centres the camera, a middle drag orbits it as on the board; no order changes |
 | `GpuContactsPanel` | right column | enemy units; with the movement fire preview, where the unit fires from, each enemy's best salvo both ways and the guide toggles | selection rule, unit menu |
-| `GpuWeaponsPanel` | right column, local weapon declaration | target pills, one row per weapon with its roll and slots, the heat if the queued weapons fire; on another player's turn the focus unit's draft, read-only | fire orders |
+| `GpuWeaponsPanel` | right column, local weapon declaration | target pills, one row per weapon with its roll and slots (an assigned slot in its target's colour), the heat if the queued weapons fire; no assign line while a weapon is armed, which its row shows selected; on another player's turn the focus unit's draft, read-only. Declaring never ends the turn by default: MegaMek's auto-end firing (`GUIPreferences.AUTO_END_FIRING`, now stored as `AutoEndFiringAfterLastWeapon` so that the old `AutoEndFiring` value is ignored) defaults to off, so FIRE WEAPONS sends the attacks | fire orders |
 | `GpuSolutionCard` | under or beside the right column | the selected weapon's shot: roll, range brackets, arc, modifiers, or why there is no shot; a long target name ends in an ellipsis, the roll after it stays whole | close deselects the weapon |
 | `GpuLogPanel` | right column, log width | the round's events as cards, Summary and Full log, filters, search, totals, earlier rounds, report keywords, copy, artillery in flight | review a step, locate, replay |
-| `GpuCommandDock` | bottom centre | one variant per phase and turn: initiative, movement plan, waiting, weapon fire, physical, no physical attack, playback, generic; in the local TARGETING turn the generic option row leads with the off-board targets ("Off-board West"), the edges whose arrows `OffBoardTargetOverlay` shows; where the band between the columns makes the dock narrower than the prototype's (500), the playback speeds take a line of their own under the transport | phase commands (an off-board target runs the overlay's own click), movement, fire and physical services, the playback, the Follow camera toggle |
+| `GpuCommandDock` | bottom centre | one variant per phase and turn: initiative, movement plan, waiting, weapon fire, physical, no physical attack, playback, generic; in the local TARGETING turn the generic option row leads with the off-board targets ("Off-board West"), the edges whose arrows `OffBoardTargetOverlay` shows; the playback transport has no speeds (the phase header holds them) | phase commands (an off-board target runs the overlay's own click), movement, fire and physical services, the playback, the Follow camera toggle |
 | `GpuHintLine` | under the dock (hidden at W <= 1350); there a bot order's hex pick shows in its chip on the dock | what a left click does now, the gestures and their keys; the pick's instructions and picked hexes | the chip's Done and Cancel end the pick |
 | `GpuLosCard` | beside the right column | the measured hexes and heights (with height steps), range, both views; a blocked view in coral; "Elevation diagram" | `measure`; `showDiagram` (MegaMek's Swing ruler with its elevation diagram, for the card's hexes and heights); close also ends the board's ruler |
 | `GpuChatPanel` | bottom right, with its button | chat lines, the field and Send, an unread dot on the button | the board chat's send, which keeps its history |
@@ -329,18 +351,50 @@ view changes (open panels, the camera) stay on the GL thread. Names in quotes ar
 | `GpuContextMenu` | popover | unit menus, the hex menu with MegaMek's map menu under "More actions", weapon-row and queued-attack menus, the dock's More, select lists | existing commands only |
 | `GpuModalDialog` | top layer | the pending dialog (1.6) | answer |
 | `GpuNameplates` | board labels | a team pip per unit; a name tag for the focus, hovered and inspected unit, the physical target and sensor contacts; every tag while the nameplate key is held; target cards replace their targets' plates | none |
-| `GpuBoardLabels` | board labels | to-hit badges, fire-preview guides, traces of the queued attacks, leaders to the target cards, the destination tip, waypoint numbers, playback pop-ups | none |
-| `GpuTargetCards` | board labels | a card per target in letter order, placed by `GpuCardPlacement` clear of panels and units | fire orders; a focused grip reorders on Alt+Up/Down |
+| `GpuBoardLabels` | board labels | to-hit badges, fire-preview guides, traces of the queued attacks, leaders to the target cards, the destination tip, waypoint numbers, playback pop-ups (a unit's stack: the newest at its place, each older one 4 over the next) | none |
+| `GpuTargetCards` | board labels | a card per target in letter order, placed by `GpuCardPlacement` clear of panels and units, its frame neutral; the target's letter square carries its colour, as in the weapons panel and the sheet (`GpuHudKit.targetColour`: MekBay's twelve target colours from A); the focus without attacks has no letter; the attack rows (no fire-order number) are a reorderable `UiList` | fire orders; a row with a grip drags to another place of the card (from any part of it, as the prototype's draggable `.or`), its focused grip moves it on Alt+Up/Down, each a single `move` |
 | `GpuTuningPanel` | dialogs layer | developer tuning (section 10) | the tuning model |
 
 Two board-space components are world meshes that `GpuBattleView` draws:
 - `GpuBoardOverlay`: reach envelopes, the route and its ghost, unit rings and glows, range bands and their borders,
   the front arc or the displayed weapon's arc, the physical-attack neighbours and the Tactical View's elevation-drop
   edges. Short, medium and long range use the hud-v3 colours, minimum and extreme the client's field-of-fire
-  colours. It rebuilds its meshes only when what it draws changed.
+  colours. It rebuilds its meshes only when what it draws changed. Over the route it draws the route's pulse (below).
 - `GpuFireControl`: the firing lines and the flat range labels ([attack controls](gpu-attack-controls.md)). During
   the local weapon declaration the actor's lines are the HUD's traces instead; every other line is drawn in its
   attacker's side colour. Lines hide while an attack plays (`GpuBattleView.HIDE_TARGET_ARROWS_DURING_ATTACKS`).
+
+**The route's pulse** (`GpuRoutePulse`, user item 55). In the local movement turn a plotted route pulses: a glowing
+head leaves the unit, runs the route and settles into the destination; the ghost then surges and a ring ripples out of
+the destination ring; after a rest the next pulse leaves. The hover preview, a route MegaMek's board clicks plan (G20)
+and a cleared selection have none.
+- **3D.** The head is a pool of light on the ground under it and four soft glows facing the camera, from a wide faint
+  bloom to a white-hot core, in the band colour of the step it runs (whiter at the core), with a tapering streak
+  behind it. The route's dashes, jump dots and step discs light up just ahead of it and fade over the 2.5 hexes
+  behind; about every other one lets a small mote of light rise and drift off. A jump's head rides its arc. On
+  landing the head flares, the destination hex flashes, a ring with a bright edge and a fading wake runs out to 1.65
+  hex radii with a fainter echo, and the ghost's glow rises toward white while it turns more opaque, then eases back.
+  The ghost never grows: units keep their size.
+- **Tactical View.** The same as flat glows on the dashed line; the destination ring ripples and the ghost icon
+  brightens in the route's last colour.
+- **Timing.** 0.16 s a hex, at least 0.5 s and at most 1.8 s for a route, divided by the speed in use; the head
+  speeds up over the first quarter of that time and settles to rest over the last 35 %. The surge rises in 0.08 s and
+  ends 0.9 s after the landing, then the pulse rests 0.6 s. A rebuild for the same plan keeps the rhythm; another plan
+  starts it from the unit. A route that only turns in place has no head: its ghost surges and its ring ripples.
+- **How.** While it builds its meshes, the overlay hands the pulse the route's line (kept over the ground, or along the
+  jump's arc) and its marks. Each frame `update` moves the pulse on by the frame's time (at most 0.1 s), `render`
+  draws its quads after the static meshes (one dynamic mesh of up to 256 quads through the overlay's ModelBatch, with a
+  64 x 64 glow texture made once per overlay), and `renderGhost` sets the surge on the ghost's own material copies.
+  The quads use premultiplied blending: each adds light and covers a share of what lies under it, so the colours stay
+  visible on bright ground. They are depth-tested in 3D without writing depth (the head's glows come toward the
+  camera so the ground does not cut them) and lie flat on top in the Tactical View, under the icons. The static meshes
+  are never rebuilt for the pulse, a frame allocates nothing, and `GpuBattleView` is unchanged.
+- **Constants** (`GpuRoutePulse`): `ENABLED`, `SPEED`, `INTENSITY`, `SECONDS_PER_HEX`, `MIN_TRAVEL`, `MAX_TRAVEL`,
+  `SURGE`, `REST`, `HEAD_SIZE` and `FLAT_HEAD_SIZE`, `TRAIL`, `GHOST_SURGE`, `GHOST_SURGE_OPACITY`, `ICON_SURGE`,
+  `RING_RADIUS`, `RING_SECONDS`. They are the defaults of the values in use (`enabled`, `speed`, `intensity`), which the
+  Tuning utility's Board page edits under "Route pulse"; Defaults restores the constants.
+- **Limits.** Beyond the destination hex the ring lies at the hex's level: over lower ground it floats, and higher
+  ground hides it.
 
 The Menu's items that open a native surface instead of Swing (`GpuMenuPanel`):
 
@@ -429,7 +483,8 @@ stay the 3D view's own; only unit models become icons and feature meshes become 
   returns the hex under the pointer, also where a 3D canopy would overhang the next hex. Height labels keep the roof
   position of the hidden building.
 - **Board overlay.** It uses the `flat.js` colours, draws the route's ghost as the unit's icon at half strength, and
-  adds elevation-drop edges.
+  adds elevation-drop edges. The route's pulse is a flat glow on the dashed line, a ripple of the destination ring and
+  a brighter ghost icon (section 3).
 - **Tests.** `BoardCameraTacticalTest` covers the camera. `GpuUnitIconsTest` checks the icon's side (0.6 of its hex's
   width, within 1 %) and its corners inside the hex at every facing in 15-degree steps. `GpuTacticalViewSmokeTest`
   renders a 12 x 10 board with woods, jungle, buildings, a fuel tank, an industrial hex and a bridged river at
@@ -474,7 +529,8 @@ Tests:
 The unit panel replaces Swing's Unit Display window in GPU mode.
 - **Card** (`GpuUnitCard`, bottom left): the inspected unit, else the focus unit. It shows the paperdoll with a
   number per location (a Mek's rear armor in a strip under it), four vitals rows by unit family, one line of chips
-  for what the doll cannot show, and the "Unit details" and Locate buttons. Hovering the doll shows a hover card.
+  for what the doll cannot show, and the "Unit record" and Locate buttons. Hovering the doll shows a hover card. An
+  card has a ✕ that clears the selection (the cleared selection, section 1.8).
 - **Sheet** (`GpuRecordSheet`, `GpuUnitSheetTabs`): six tabs, opened by `UNIT_DISPLAY` and F1-F6. Its close button
   sits at the right end of the tab row; while it is open the card shrinks to its one-line mini form.
 
@@ -483,7 +539,7 @@ The unit panel replaces Swing's Unit Display window in GPU mode.
 | Status (F1) | this round, pending changes, heat, movement, conditions |
 | Crew (F2) | the pilot and the crew's advantages |
 | Armor (F3) | front armor beside rear armor over structure (Meks), or one drawing |
-| Weapons (F4) | the weapons, with ammunition and mode controls |
+| Weapons (F4) | the weapons, with ammunition and mode controls; an own unit's rows are a reorderable `UiList` (the grip drags a row, Alt+Up/Down moves the selected one) into its custom weapon order |
 | Critical table (F5, Meks) or Systems (F5, other units) | the record-sheet slots (`GpuCriticalTable`) or the systems |
 | Extras (F6) | sensors, networks, transport and the unit's readout |
 
@@ -531,9 +587,10 @@ classes).
 | Class | Provides |
 | --- | --- |
 | `UiTheme` | colour tokens (`TEXT`, `MUTED`, `MINT`, `CORAL`, `AMBER`, `BLIP`, ...), the fonts, the icon sheet, the `hud-*` styles, the drawables `HudFrame`, `EdgeBox` and `Dashes`, the builders `box`, `flat`, `font`, `scrollStyle`, and the registration guard `add(name, resource, type)` |
-| `UiKit` | `label`, `caption`, `icon`, `panel`, `header`, `closeButton`, `dialog`, `footer`, `empty`, `button`, `segmented`, `select`, `checkbox`, `menuRow`, `chip`, `search`, `meter`, `scrollList`, `tip`, `fill`; statics `text`, `onChange`, `size`; `DIALOG_WIDTH` (620) and `DIALOG_MARGIN` (140) |
+| `UiKit` | `label`, `caption`, `icon`, `panel`, `header`, `closeButton`, `dialog`, `footer`, `empty`, `button`, `segmented` (tabs, separate segments, or `hud-pill`: one pill split in sections), `select`, `checkbox`, `menuRow`, `chip`, `search`, `meter`, `scrollList`, `tip` (hides when its actor or panel hides, so no tooltip stays stuck), `fill`; statics `text`, `onChange`, `size`; `DIALOG_WIDTH` (620) and `DIALOG_MARGIN` (140) |
 | `UiButton` | the button with icons, detail lines, a pressed state, a badge and a dot; the only toolkit class that may be subclassed |
 | `UiPopover`, `UiMenuList` | the popover frame (opens at a point or above an anchor, closes on an outside press) and its keyboard menu list |
+| `UiList` | a vertical list of any rows; `reorderable(moved)` turns on drag-to-reorder by each row's handle (`add(row, handle)`): the lifted row follows the pointer above everything with a shadow, bounded to the list (and a scroll pane's view of it), a slot opens where it would drop and the other rows slide (springs), a scroll pane scrolls near its edges; `move(index, delta)` flies a row as the keyboard asks; `cancel()` (Esc) sends a dragged row home; `busy()` while a row moves. The view hears one `moved(from, to)` once the rows rest; the list keeps that order until the view gives it new rows and glides back after a second when none come |
 | `UiFlow` | wrapped runs of differently styled text |
 | `DisplayScale` | the one scale rule (1.7) |
 
@@ -627,16 +684,16 @@ While the native window is active (`GpuBoardWindow.isActiveFor`), the HUD replac
 ## 10. The developer Tuning utility
 
 A developer and tester tool, to be removed before release.
-- **Button:** "Tuning", last in the utility row, tooltip "GPU tuning (developer)". It opens a panel at the right gap,
-  90 below the window's top, 360 wide and at most the window's height less 160, with the pages Board, Atmosphere and
-  Camera, and Defaults in its footer.
+- **Button:** "Tuning", last in the utility row. It opens a panel at the right gap, 90 below the window's top, 360
+  wide and at most the window's height less 160, with the pages Board, Atmosphere and Camera, and Defaults in its
+  footer.
 - **Model:** `GpuBoardTuning` keeps every value as a Scene2D control that is never drawn; `GpuBattleView` reads the
   values from it. `GpuTuningPanel` mirrors the model's rows in the hud-v3 look, and an edit goes to the model's own
   control. Its tooltips are the model's texts; the row texts are English literals.
 
 | Page | Sections |
 | --- | --- |
-| Board | Geometry (with Normal maps and VSync), Unit family sizes, Zoom-out unit scaling, Unit visibility, Outside field of view, Outside sensor range, Unit damage |
+| Board | Geometry (with Normal maps and VSync), Unit family sizes, Zoom-out unit scaling, Route pulse (on/off, speed, intensity), Unit visibility, Outside field of view, Outside sensor range, Unit damage |
 | Atmosphere | Atmosphere presets with "Planetary conditions…" (the Swing editor), Lighting (time of day, exposure, moonlight, fixed sun), Planet properties, Clouds and ground air, Weather effects, Light and fog effects |
 | Camera | Fixed sun/moon, framing on selection, framing on movement (combat framing is the dock's Follow toggle) |
 
@@ -686,9 +743,10 @@ checkout. `test` excludes `@Tag("on-demand")`, runs `checkstyleMain` first and s
 | Modal bridge and Swing cut | `GpuModalBridgeTest`, `GpuDialogRoutingTest`, `GpuListPromptBridgeTest`, `GpuChatToastModalSmokeTest`, `GpuSwingCutTest`, `GpuSwingCutSmokeTest` (a scripted round with real Swing windows under the native window), `GpuVictoryHexFormTest`, `GpuStoryDialogTest`, `GpuHexPickTest` (the bot orders' hex pick), `GpuTurretFacingRoutingTest`, `GpuSwingDialogGateTest` (every prompt opener with the window presented and on the classic client; the allowlist) |
 | Live view | `GpuLiveBoardSpaceSmokeTest` (board labels, overlay, traces, minimap, 100 v 100), `GpuLivePlaybackSmokeTest` (presented units, review, speeds, stride), `GpuHudParitySmokeTest` (the live view of a real battle beside each of the 16 hud-v3 shots: every anchored panel within 2 units of the mock's frame; `parity-NN-sbs.png`) |
 | Layout and coverage | `GpuHudLayoutSmokeTest` (900 x 600, 1280 x 720, 1920 x 1080), `GpuMenuCoverageSmokeTest` (every menu item and every phase command of real phase displays reachable) |
+| Board overlay | `GpuBoardOverlaySmokeTest` (beside the mock's shots; envelopes, route, hover preview, ghost, drop edges, rebuilds), `GpuRoutePulseSmokeTest` (the route's pulse frame by frame: the head from the unit to the destination, the surge, the rhythm across rebuilds, a jump's arc, a turn in place, none without a plotted route or switched off, the Tactical View, and the real view's own frames moving it on without a rebuild; `pulse-*.png` and its measured cost in `pulse-cost.txt`) |
 | Services | `GpuHudServicesTest`, `GpuMovePlanTest`, `GpuFireOrdersTest`, `GpuFireDraftsTest`, `GpuOffBoardTargetsTest` (the classic off-board arrows pinned; the dock's command sends the same attack; the native choice and its Esc), `GpuPhysicalOptionsTest`, `GpuUnitRecordTest`, `GpuFirePreviewTest`, `GpuLosResultTest`, `GpuHudMessagesTest`, `GpuChatRoundLinesTest`, `GpuBattleStatusTest`, `GpuReportLogTest`, `GpuPlaybackHistoryTest`, `GpuBotCommandsTest` |
 | Components | one smoke test per component, e.g. `GpuPhaseHeaderSmokeTest`, `GpuForcesPanelSmokeTest`, `GpuCommandDockSmokeTest`, `GpuWeaponsPanelSmokeTest`, `GpuTargetCardsSmokeTest`, `GpuLogPanelSmokeTest`, `GpuUnitCardSmokeTest`, `GpuTuningPanelSmokeTest`; `GpuCardPlacementTest`, `GpuContextMenuTest` |
-| Toolkit and skin | `UiGallerySmokeTest`, `DisplayScaleTest`, `GpuHudKitSmokeTest`, `GpuHudSkinSmokeTest`, `GpuPaperdollTest`, `GpuPaperdollsTest`, `GpuPaperdollSmokeTest` |
+| Toolkit and skin | `UiGallerySmokeTest`, `UiListSmokeTest`, `DisplayScaleTest`, `GpuHudKitSmokeTest`, `GpuHudSkinSmokeTest`, `GpuPaperdollTest`, `GpuPaperdollsTest`, `GpuPaperdollSmokeTest` |
 
 ## 12. Known limits
 
@@ -752,6 +810,7 @@ All on Windows 11; GPU numbers on an Intel Iris Xe, often with other builds runn
 | What | Measured |
 | --- | --- |
 | Board overlay rebuild at 100 v 100 | 2.7-3.2 ms in 3D, 1.7-2.1 ms in the Tactical View; an unchanged recapture at most 0.22 ms and no rebuild |
+| The route's pulse, per frame (1920 x 1080, `GpuRoutePulseSmokeTest`) | the overlay's draw takes 0.026-0.039 ms more GPU time with the pulse (median of 100 timestamped frames each: 43 quads while the head travels, 75 while the ring ripples) and under 0.02 ms more submission time; filling and uploading the quads 0.001-0.004 ms median (CPU timings under JaCoCo) |
 | The frame's "board-space HUD" stage (HudView, `GpuHud.update`, overlay update) at about 200 units | 0.39-0.66 ms median; while the pointer sweeps, 2.1-3.6 ms median, at most 10.4 ms |
 | Forces overview, first open at 100 v 100 | about 0.5 s in a profiling run (200 cards built in 251 ms, laid out in 91 ms, first frame 165 ms), 133 ms in a later run; a status change then 1.5-2.9 ms. Mostly the JVM's and the fonts' first use: a second overview built in the same run took 80-120 ms (cards 40-74 ms, layout 29-38 ms, first frame 6 ms), and 49 ms after other tests had run |
 | Movement fire preview (CPU only, i7-13700H) | a plan change 16-43 ms at 12 v 12 and 0.24-0.50 s at 100 v 100; slices of 8 ms budget, at least one enemy each, up to about 31 ms per Swing event at 100 v 100; where the unit stands, a preview starts only after 250 ms without a game change |
