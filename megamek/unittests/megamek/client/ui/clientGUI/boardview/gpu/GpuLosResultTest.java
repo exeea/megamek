@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -73,8 +74,8 @@ class GpuLosResultTest {
     }
 
     /**
-     * The menu's line of sight from the own Atlas to a hex is the ruler's measurement between them; none into the
-     * unit's own hex, from an enemy or off the board.
+     * The menu's line of sight from the own Atlas to a hex is the ruler's measurement between them, its target at the
+     * height the pointer showed when one did; none into the unit's own hex, from an enemy or off the board.
      */
     @Test
     void theMenusLineOfSightMeasuresWithTheRulerFromAnOwnUnit() throws Exception {
@@ -85,13 +86,20 @@ class GpuLosResultTest {
             GpuBoardSource source = onSwing(() -> new GpuBoardSource(view, () -> fixture.panel));
             try {
                 GpuLosResult los = source.los();
-                los.lineOfSight(1, ENEMY);
-                los.lineOfSight(1, OWN);
-                los.lineOfSight(2, OWN);
-                los.lineOfSight(1, new Coords(20, 20));
+                los.lineOfSight(1, ENEMY, Float.NaN);
+                los.lineOfSight(1, OWN, Float.NaN);
+                los.lineOfSight(2, OWN, Float.NaN);
+                los.lineOfSight(1, new Coords(20, 20), Float.NaN);
                 SwingUtilities.invokeAndWait(() -> { });
                 verify(gui).measureLineOfSight(view.getBoardId(), OWN, ENEMY);
                 verify(gui, times(1)).measureLineOfSight(anyInt(), any(), any());
+                verify(gui, never()).setRulerHeight(anyInt(), any(), anyInt());
+                // A floor two levels up, where the pointer hit a building.
+                Coords floor = new Coords(5, 1);
+                los.lineOfSight(1, floor, 2 * BoardGeometry.level() + .1f);
+                SwingUtilities.invokeAndWait(() -> { });
+                verify(gui).measureLineOfSight(view.getBoardId(), OWN, floor);
+                verify(gui).setRulerHeight(view.getBoardId(), floor, 2);
             } finally {
                 SwingUtilities.invokeAndWait(source::close);
             }

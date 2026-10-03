@@ -758,7 +758,7 @@ class GpuBattleView extends ApplicationAdapter {
      * then shows the frame with the scene the playback presents.
      */
     private void updateHud(GpuBoardSource.Frame frame) {
-        GpuHud.HudView view = hudView(frame.scene() != null);
+        GpuHud.HudView view = hudView(frame.scene() != null, frame.panels().fire());
         // The HUD shows the tuning controls' own values, not the settings of the terrain on display.
         try (TerrainSettings.Scope ignored = TerrainSettings.use(null)) {
             ui.update(frame, view, dialog(), source.uiPreferences());
@@ -831,9 +831,10 @@ class GpuBattleView extends ApplicationAdapter {
      * while a board is drawn, each drawn unit's head (its label anchor) and screen rectangle in stage units, y up, and
      * its animated board position. The rectangle runs from the unit's ground up to its head, .55 of a hex wide, in 3D
      * and is the icon's square in the Tactical View; a unit whose head lies behind the camera has neither. A unit
-     * drawn in parts is placed by its centre part.
+     * drawn in parts is placed by its centre part. A fire target that is no unit is anchored on its hex's centre, on
+     * the plane of the hex annotations.
      */
-    private GpuHud.HudView hudView(boolean drawn) {
+    private GpuHud.HudView hudView(boolean drawn, GpuFireOrders.Snapshot fire) {
         Map<Integer, Rectangle> rects = new HashMap<>();
         Map<Integer, Vector2> heads = new HashMap<>();
         Map<Integer, Vector2> positions = new HashMap<>();
@@ -860,8 +861,17 @@ class GpuBattleView extends ApplicationAdapter {
                   : new Rectangle(Math.min(ground.x, head.x) - width / 2, Math.min(ground.y, head.y),
                         Math.abs(head.x - ground.x) + width, Math.abs(head.y - ground.y)));
         }
+        Map<TargetKey, Vector2> targets = new HashMap<>();
+        fire.hexes().forEach((target, hex) -> {
+            Vector2 head = drawn && scene != null && scene.tile(hex) != null ? GpuNameplates.project(boardCamera.camera,
+                  new Vector3(BoardGeometry.centerX(hex), BoardGeometry.centerY(hex),
+                        BoardTacticalGeometry.floatingZ(scene, hex))) : null;
+            if (head != null) {
+                targets.put(target, head.scl(stage));
+            }
+        });
         return new GpuHud.HudView(boardCamera.tactical(), playbackBusy(), rects, heads, positions, hovered, hoveredUnit,
-              hexPixels, hoverTop());
+              hexPixels, hoverTop(), targets);
     }
 
     /**
@@ -1670,13 +1680,15 @@ class GpuBattleView extends ApplicationAdapter {
             if (!dragged && button != Input.Buttons.MIDDLE && !ui.hit(x, y)
                   && gestureBoardGeneration == boardGeneration) {
                 Pick picked = pickSelection(x, y);
+                // The height the pointer shows, which a measurement takes: none in the Tactical View's flat art.
+                float pointedZ = boardCamera.tactical() ? Float.NaN : picked.surfaceZ();
                 if (ui instanceof GpuHud hud) {
                     // The shared phase tool handles a press; releasing Shift first must not turn it into placement.
-                    hud.boardClick(picked.coords(), picked.entityId(), button, gestureModifiers, x, y);
+                    hud.boardClick(picked.coords(), picked.entityId(), button, gestureModifiers, x, y, pointedZ);
                 } else if (button == Input.Buttons.RIGHT) {
                     source.inspect(picked.coords());
                 } else {
-                    source.measure(picked.coords(), gestureModifiers);
+                    source.measure(picked.coords(), gestureModifiers, pointedZ);
                 }
             }
             reset();

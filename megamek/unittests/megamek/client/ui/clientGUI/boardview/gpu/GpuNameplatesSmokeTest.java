@@ -760,10 +760,12 @@ class GpuNameplatesSmokeTest {
 
     /** The Atlas's orders of shots 05-07: the Timber Wolf (A, primary, focused) and the BattleMaster (B). */
     private static GpuFireOrders.Snapshot fire(GpuFireOrders.Badge hoverBest) {
-        return new GpuFireOrders.Snapshot(true, true, ATLAS, TIMBER_WOLF, -1, List.of(),
-              List.of(new GpuFireOrders.Target(TIMBER_WOLF, 'A', "Timber Wolf", true, 0, true),
-                    new GpuFireOrders.Target(BATTLEMASTER, 'B', "BattleMaster", false, 1, true)), List.of(), 0,
-              false, false, "", null, null, null, List.of(), hoverBest, Map.of(), 0, 0, null);
+        return new GpuFireOrders.Snapshot(true, true, ATLAS,
+              new GpuFireOrders.Focus(TargetKey.unit(TIMBER_WOLF), "Timber Wolf", null), -1, List.of(),
+              List.of(new GpuFireOrders.Target(TargetKey.unit(TIMBER_WOLF), 'A', "Timber Wolf", true, 0, true, null),
+                    new GpuFireOrders.Target(TargetKey.unit(BATTLEMASTER), 'B', "BattleMaster", false, 1, true,
+                          null)), List.of(), 0, false, false, "", null, null, null, List.of(), hoverBest, Map.of(), 0,
+              0, null);
     }
 
     /** The mock status in another phase, turn and actor, with the given units. */

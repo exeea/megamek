@@ -14,6 +14,7 @@ import java.io.File;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
+import javax.swing.JSpinner;
 import javax.swing.SwingUtilities;
 
 import megamek.client.ui.Messages;
@@ -124,9 +125,9 @@ class GpuMapSourceTest {
     }
 
     /**
-     * The preview's line of sight is MegaMek's ruler (the user's decision of 2026-10-03): a Ctrl click starts it, the
-     * status line says what it waits for, a plain click ends it and the ruler shows with its line on the board.
-     * Closing the preview releases the ruler with the board state it measures on.
+     * The preview's line of sight is MegaMek's ruler (the user's decision of 2026-10-03): a Ctrl click starts it at the
+     * height the pointer showed, the status line says what it waits for, a plain click ends it and the ruler shows
+     * with its line on the board. Closing the preview releases the ruler with the board state it measures on.
      */
     @Test
     void aPreviewMeasuresWithMegaMeksRuler() throws Exception {
@@ -137,17 +138,19 @@ class GpuMapSourceTest {
             var listeners = List.copyOf(game.getGameListeners());
             RulerDialog ruler;
             try (var source = new GpuMapSource(game, null, null)) {
-                source.measure(new Coords(2, 2), InputEvent.CTRL_DOWN_MASK);
+                source.measure(new Coords(2, 2), InputEvent.CTRL_DOWN_MASK, 2 * BoardGeometry.level() + .1f);
                 assertEquals(Messages.getString("GpuBoard.hud.hint.completeLos"), source.phaseStatus().text());
-                source.measure(new Coords(2, 6), 0);
+                source.measure(new Coords(2, 6), 0, Float.NaN);
                 assertEquals("", source.phaseStatus().text(), "A plain click ends the measurement");
                 var field = GpuMapSource.class.getDeclaredField("ruler");
                 field.setAccessible(true);
                 ruler = (RulerDialog) field.get(source);
                 assertTrue(ruler.isVisible(), "The ruler shows the measurement");
+                assertEquals(2, GpuDialogRoutingTest.components(ruler, JSpinner.class).getFirst().getValue(),
+                      "from the floor two levels up that the pointer showed");
                 assertNotEquals(BoardTactical.EMPTY, source.takeFrame().scene().tactical(),
                       "with its line on the board");
-                source.measure(new Coords(3, 3), 0);
+                source.measure(new Coords(3, 3), 0, Float.NaN);
                 assertEquals("", source.phaseStatus().text(), "A plain click alone measures nothing");
             }
             assertFalse(ruler.isDisplayable(), "Closing the preview disposes of its ruler");

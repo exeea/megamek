@@ -120,14 +120,14 @@ final class GpuFireControl implements Disposable {
         List<BoardScene.FiringLine> shown = new ArrayList<>();
         for (BoardScene.FiringLine line : lines) {
             if (line.attackerId() == fire.actorId()
-                  && fire.targets().stream().anyMatch(target -> target.id() == line.targetId())) {
+                  && fire.targets().stream().anyMatch(target -> target.key().equals(line.targetKey()))) {
                 continue;
             }
             GpuBattleStatus.UnitStatus attacker = GpuHudState.unit(status, line.attackerId());
             int rgb = attacker == null ? line.rgb()
                   : Color.rgb888(attacker.side() == GpuBattleStatus.Side.ENEMY ? UiTheme.CORAL : UiTheme.MINT);
             shown.add(new BoardScene.FiringLine(line.source(), line.target(), rgb, line.indirect(),
-                  line.attackerId(), line.targetId()));
+                  line.attackerId(), line.targetKey()));
         }
         return shown;
     }

@@ -398,11 +398,18 @@ final class GpuBoardOverlay implements Disposable {
         int actor = glows && eligible(listed.get(status.actorId()), shown.get(status.actorId()), false)
               ? status.actorId() : Entity.NONE;
         // The local declaration's focused target; a read-only draft (H33) has none, so the inspected unit glows.
-        int focusId = fire.editable() ? fire.focusTargetId() : physical.active() ? physical.targetId() : inspected;
+        int focusId = fire.editable() ? fire.focus().key().unitId() : physical.active() ? physical.targetId()
+              : inspected;
         int focus = glows && eligible(listed.get(focusId), shown.get(focusId), true) ? focusId : Entity.NONE;
         focused = focus;
+        // A focus that is no unit, a hex, a building or a minefield, glows on its hex as a focused enemy does.
+        Coords focusHex = glows && fire.editable() ? fire.focus().hex() : null;
         if (!tactical) {
             unitRings(sink, behind, listed, hexes, shown, actor, focus, phase.isMovement());
+            BoardScene.Tile tile = focusHex == null ? null : scene.tile(focusHex);
+            if (tile != null) {
+                glow(sink, behind, tile, CORAL);
+            }
         }
         if (move.active()) {
             if (showsEnvelope(move, envelopeShown)) {
@@ -422,8 +429,9 @@ final class GpuBoardOverlay implements Disposable {
                 wedge(sink, fire.solution().wedge());
             }
             for (GpuFireOrders.Target target : fire.targets()) {
-                if (target.id() != fire.focusTargetId()) {
-                    rings(sink, hexes.get(target.id()), .05f, .04f, .02f, alpha(CORAL, .95f));
+                if (!target.key().equals(fire.focus().key())) {
+                    rings(sink, target.hex() != null ? Set.of(target.hex()) : hexes.get(target.key().unitId()), .05f,
+                          .04f, .02f, alpha(CORAL, .95f));
                 }
             }
         }
@@ -440,7 +448,7 @@ final class GpuBoardOverlay implements Disposable {
         }
         if (tactical) {
             flatGlow(sink, hexes.get(actor), FLAT_SELECTED);
-            flatGlow(sink, hexes.get(focus), FLAT_TARGET);
+            flatGlow(sink, focusHex != null ? Set.of(focusHex) : hexes.get(focus), FLAT_TARGET);
         } else {
             hover(sink, behind, hexes, actor);
         }

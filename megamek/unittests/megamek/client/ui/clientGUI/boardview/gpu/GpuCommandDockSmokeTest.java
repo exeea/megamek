@@ -620,8 +620,8 @@ class GpuCommandDockSmokeTest {
             GpuBattleStatus.Snapshot atlasTurn = status(GamePhase.FIRING, true, ATLAS, 0);
             GpuHudTestStage.run(hud -> {
                 Dock dock = dock(hud, firing.board.source);
-                GpuFireOrdersTest.command(firing, fire -> fire.assign(cannon, firing.ahead.getId()));
-                GpuFireOrdersTest.command(firing, fire -> fire.assign(laser, firing.ahead.getId()));
+                GpuFireOrdersTest.command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
+                GpuFireOrdersTest.command(firing, fire -> fire.assign(laser, TargetKey.unit(firing.ahead.getId())));
                 Shot orders = settled(firing, atlasTurn);
                 show(hud, dock, orders);
                 assertEquals(List.of("ATLAS \u00B7 2 WEAPON ATTACKS \u00B7 1 TARGET", "1 more unit to declare"),
@@ -647,7 +647,7 @@ class GpuCommandDockSmokeTest {
                 assertTrue(button(dock, "dock-clear").isDisabled());
 
                 // H6: Clear, as the Delete key, drops the queue and the armed weapon.
-                GpuFireOrdersTest.command(firing, fire -> fire.assign(cannon, firing.ahead.getId()));
+                GpuFireOrdersTest.command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
                 show(hud, dock, settled(firing, atlasTurn));
                 dock.state().armedWeapon = laser;
                 dock.dock().clearOrders();
@@ -656,7 +656,7 @@ class GpuCommandDockSmokeTest {
                 assertEquals(-1, dock.state().armedWeapon);
 
                 // Enter fires the queued weapons through MegaMek's Done.
-                GpuFireOrdersTest.command(firing, fire -> fire.assign(cannon, firing.ahead.getId()));
+                GpuFireOrdersTest.command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
                 show(hud, dock, settled(firing, atlasTurn));
                 assertEquals("FIRE WEAPONS", button(dock, "dock-main").getText().toString());
                 dock.dock().main();
@@ -693,7 +693,7 @@ class GpuCommandDockSmokeTest {
             GpuHudTestStage.run(hud -> {
                 Dock dock = dock(hud, firing.board.source);
                 firing.board.source.setFocusUnit(ATLAS);
-                GpuFireOrdersTest.command(firing, fire -> fire.assign(cannon, firing.ahead.getId()));
+                GpuFireOrdersTest.command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
                 GpuFireOrdersTest.command(firing, fire -> fire.selectUnit(sagittaire.getId()));
                 Shot declaring = settled(firing, ownTurn);
                 show(hud, dock, declaring);
@@ -894,16 +894,17 @@ class GpuCommandDockSmokeTest {
           boolean right, int pending, int autoDeclare) {
         List<Integer> ids = List.of(TIMBER_WOLF, BATTLEMASTER, KING_CRAB);
         List<GpuFireOrders.Target> listed = IntStream.range(0, targets).mapToObj(index -> new GpuFireOrders.Target(
-              ids.get(index), (char) ('A' + index), name(ids.get(index)), index == 0, index == 0 ? 0 : 1, true))
-              .toList();
-        return new GpuFireOrders.Snapshot(true, true, ATLAS, TIMBER_WOLF, -1, List.of(), listed,
+              TargetKey.unit(ids.get(index)), (char) ('A' + index), name(ids.get(index)), index == 0,
+              index == 0 ? 0 : 1, true, null)).toList();
+        return new GpuFireOrders.Snapshot(true, true, ATLAS,
+              new GpuFireOrders.Focus(TargetKey.unit(TIMBER_WOLF), name(TIMBER_WOLF), null), -1, List.of(), listed,
               lasers(attacks, ids.subList(0, Math.max(1, targets))), twist, left, right, torso, null, null, null,
               List.of(), null, Map.of(), pending, autoDeclare, null);
     }
 
     /** E3c's read-only draft of the own Atlas on another player's turn: its attacks with their rolls, no targets. */
     private static GpuFireOrders.Snapshot draft(int attacks) {
-        return new GpuFireOrders.Snapshot(true, false, ATLAS, Entity.NONE, -1, List.of(), List.of(),
+        return new GpuFireOrders.Snapshot(true, false, ATLAS, GpuFireOrders.Focus.NONE, -1, List.of(), List.of(),
               lasers(attacks, List.of(TIMBER_WOLF)), 0, false, false, "", null, null, null, List.of(), null, Map.of(),
               5, 0, null);
     }
@@ -911,7 +912,8 @@ class GpuCommandDockSmokeTest {
     /** {@code count} medium laser attacks, at the targets in turn, each 7+ (58%). */
     private static List<GpuFireOrders.Attack> lasers(int count, List<Integer> targets) {
         return IntStream.range(0, count).mapToObj(index -> new GpuFireOrders.Attack(index,
-              targets.get(index % targets.size()), "Medium Laser", "RA", "Energy", "", -1, 7, 58.3, "")).toList();
+              TargetKey.unit(targets.get(index % targets.size())), "Medium Laser", "RA", "Energy", "", -1, 7, 58.3,
+              "")).toList();
     }
 
     /** The mock roster's name of a unit, as its card and the dock show it. */

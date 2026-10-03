@@ -382,8 +382,8 @@ class GpuLiveBoardSpaceSmokeTest {
             int cannon = GpuFireOrdersTest.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
             int left = GpuFireOrdersTest.eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
             int right = GpuFireOrdersTest.eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
-            GpuFireOrdersTest.command(firing, fire -> fire.assign(cannon, firing.ahead.getId()));
-            GpuFireOrdersTest.command(firing, fire -> fire.assign(left, CRAB));
+            GpuFireOrdersTest.command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
+            GpuFireOrdersTest.command(firing, fire -> fire.assign(left, TargetKey.unit(CRAB)));
             GpuFireOrdersTest.command(firing, fire -> fire.selectWeapon(right));
             onSwing(() -> {
                 // The Quickdraw's declared attack on the Atlas, then the board's attacks as the client refreshes them.
@@ -398,8 +398,8 @@ class GpuLiveBoardSpaceSmokeTest {
                 live.publish();
                 live.draw(20, .1f);
                 GpuFireOrders.Snapshot fire = live.frame.get().panels().fire();
-                assertEquals(List.of(firing.ahead.getId(), CRAB),
-                      fire.targets().stream().map(GpuFireOrders.Target::id).toList());
+                assertEquals(List.of(TargetKey.unit(firing.ahead.getId()), TargetKey.unit(CRAB)),
+                      fire.targets().stream().map(GpuFireOrders.Target::key).toList());
                 assertEquals(right, fire.selectedWeapon());
                 live.zoom(new Coords(6, 4), 130);
                 live.capture("i1b-firing-3d.png");
@@ -424,7 +424,7 @@ class GpuLiveBoardSpaceSmokeTest {
     private static void verifyTraces(Live live, GpuFireOrders.Snapshot fire) throws Exception {
         Set<String> captured = live.scene().firingLines().stream().map(GpuLiveBoardSpaceSmokeTest::pair)
               .collect(Collectors.toSet());
-        assertEquals(Set.of(ATLAS + ">" + fire.targets().getFirst().id(), ATLAS + ">" + CRAB,
+        assertEquals(Set.of(ATLAS + ">" + fire.targets().getFirst().key().id(), ATLAS + ">" + CRAB,
               QUICKDRAW + ">" + ATLAS), captured, "The board shows the actor's queued attacks and the Quickdraw's");
         List<BoardScene.FiringLine> drawn = live.firingLines();
         assertEquals(List.of(QUICKDRAW + ">" + ATLAS), pairs(drawn),
@@ -440,9 +440,9 @@ class GpuLiveBoardSpaceSmokeTest {
     private static void verifyReadOnlyDraftAndPlayback(Live live, GpuFireOrders.Snapshot fire) throws Exception {
         GpuBoardSource.Frame published = live.frame.get();
         GpuHudData p = published.panels();
-        GpuFireOrders.Snapshot draft = new GpuFireOrders.Snapshot(true, false, fire.actorId(), Entity.NONE, -1,
-              List.of(), List.of(), fire.attacks(), 0, false, false, "", null, null, null, List.of(), null, Map.of(),
-              0, 0, null);
+        GpuFireOrders.Snapshot draft = new GpuFireOrders.Snapshot(true, false, fire.actorId(),
+              GpuFireOrders.Focus.NONE, -1, List.of(), List.of(), fire.attacks(), 0, false, false, "", null, null, null,
+              List.of(), null, Map.of(), 0, 0, null);
         live.show(Live.copy(published, published.scene(), published.status(), new GpuHudData(p.phase(), p.move(),
               draft, p.physical(), p.record(), p.preview(), p.chat(), p.toasts(), p.los(), p.players())));
         assertEquals(0, live.strokes(), "A read-only draft has no traces");
@@ -471,7 +471,7 @@ class GpuLiveBoardSpaceSmokeTest {
     }
 
     private static String pair(BoardScene.FiringLine line) {
-        return line.attackerId() + ">" + line.targetId();
+        return line.attackerId() + ">" + line.targetKey().id();
     }
 
     /** The selected weapon's badges on the enemies without a card; the carded units have no plate. */
@@ -484,8 +484,8 @@ class GpuLiveBoardSpaceSmokeTest {
         }
         for (GpuFireOrders.Target target : fire.targets()) {
             Group root = live.hud.stage.getRoot();
-            assertFalse(GpuBoardTestUi.shown(root.findActor("pip-" + target.id())), "A card replaces the plate");
-            assertFalse(GpuBoardTestUi.shown(root.findActor("nameplate-" + target.id())));
+            assertFalse(GpuBoardTestUi.shown(root.findActor("pip-" + target.key().id())), "A card replaces the plate");
+            assertFalse(GpuBoardTestUi.shown(root.findActor("nameplate-" + target.key().id())));
         }
         verifyPlate(live, view, "pip-" + QUICKDRAW, QUICKDRAW);
         verifyPlate(live, view, "nameplate-" + ATLAS, ATLAS);
@@ -494,15 +494,15 @@ class GpuLiveBoardSpaceSmokeTest {
     /** The labels draw a leader from each placed card that leaves its target's head free, ending in a diamond. */
     private static void verifyLeaders(Live live) throws Exception {
         GpuTargetCards cards = (GpuTargetCards) field(live.hud, "targetCards");
-        Map<Integer, com.badlogic.gdx.math.Rectangle> placed = cards.placed();
+        Map<TargetKey, com.badlogic.gdx.math.Rectangle> placed = cards.placed();
         assertEquals(2, placed.size(), "Both targets' cards are placed");
         assertEquals(placed, field(field(live.hud, "boardLabels"), "cards"), "The labels have this frame's cards");
         GpuHud.HudView view = live.hudView();
         Pixmap window = live.window();
         try {
             int leaders = 0;
-            for (Map.Entry<Integer, com.badlogic.gdx.math.Rectangle> card : placed.entrySet()) {
-                Vector2 head = view.unitHeads().get(card.getKey());
+            for (Map.Entry<TargetKey, com.badlogic.gdx.math.Rectangle> card : placed.entrySet()) {
+                Vector2 head = view.head(card.getKey());
                 if (card.getValue().contains(head)) {
                     continue;
                 }

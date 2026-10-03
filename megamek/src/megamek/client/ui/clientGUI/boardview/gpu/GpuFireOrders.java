@@ -4,9 +4,11 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import javax.swing.JComponent;
@@ -63,9 +65,11 @@ import megamek.common.units.Targetable;
 /**
  * EDT service for weapon declarations (rebuild plan A.8): an immutable snapshot of the local actor's orders, read from
  * the FiringDisplay's queue and to-hit numbers, and guarded commands that change that queue through the display's own
- * methods. The queue is the one source of the orders: letters are this service's presentation of it, and every
- * reorder keeps the display's action objects. While another own unit is the actor, a unit's orders wait as its draft
- * (H33), and "Resolve phase" declares the drafts on the following own turns of the phase (H6).
+ * methods. The queue is the one source of the orders and the display's target the one source of the focus: a target
+ * is whatever they name (TargetKey), a unit, a hex, a building or a minefield; letters are this service's
+ * presentation of the queue, and every reorder keeps the display's action objects. While another own unit is the
+ * actor, a unit's orders wait as its draft (H33), and "Resolve phase" declares the drafts on the following own turns
+ * of the phase (H6).
  */
 final class GpuFireOrders implements AutoCloseable {
     /** How far the front-arc outline reaches without a weapon displayed (the prototype's 12 hexes, overlay.js:58). */
@@ -80,13 +84,13 @@ final class GpuFireOrders implements AutoCloseable {
      * "". {@code damage} is the value before " dmg": "{per hit}x{rack}" for cluster weapons, else the Unit Display's.
      * {@code mode} is "" without modes. {@code ammo} lists the bins it may switch to (its one fixed bin, or none), each
      * by its carrier and number; {@code loadedAmmo} is the loaded bin's index among them (-1 none) and {@code shots}
-     * that bin's shots (-1 none). The TN column shows {@code targetId}: the target of the weapon's queued attack, else
-     * the focus, else {@code Entity.NONE}; {@code value} and {@code odds} are its roll (TargetRoll values, odds 0-100),
-     * and {@code reason} the rules' or the display's reason, non-empty only for an impossible shot. {@code usable}: it
-     * can be assigned (valid for the phase) or is queued.
+     * that bin's shots (-1 none). The TN column shows {@code target}: the target of the weapon's queued attack, else
+     * the focus, else {@code TargetKey.NONE}; {@code value} and {@code odds} are its roll (TargetRoll values, odds
+     * 0-100), and {@code reason} the rules' or the display's reason, non-empty only for an impossible shot.
+     * {@code usable}: it can be assigned (valid for the phase) or is queued.
      */
     record WeaponRow(int eqNum, String name, String location, String kind, String damage, int heat, String mode,
-          List<GpuUnitRecord.AmmoChoice> ammo, int loadedAmmo, int shots, int targetId, int value, double odds,
+          List<GpuUnitRecord.AmmoChoice> ammo, int loadedAmmo, int shots, TargetKey target, int value, double odds,
           String reason, boolean usable, boolean locationDestroyed) {
         WeaponRow {
             ammo = List.copyOf(ammo);
@@ -94,18 +98,29 @@ final class GpuFireOrders implements AutoCloseable {
     }
 
     /**
-     * A unit with queued attacks, in letter order. Letters follow the first assignment and never change while the
-     * target keeps an attack. {@code primary} and {@code secondaryModifier} are the rules' (Compute
-     * .getSecondaryTargetMod: null = primary, else its value); {@code frontArc} = in the actor's forward arc.
+     * A target with queued attacks, in letter order: a unit, a hex, a building or a minefield. Letters follow the first
+     * assignment and never change while the target keeps an attack. {@code primary} and {@code secondaryModifier} are
+     * the rules' (Compute.getSecondaryTargetMod: null = primary, else its value); {@code frontArc} = in the actor's
+     * forward arc; {@code hex} is the hex of a target that is no unit while it lies on the shown board, else null (the
+     * scene places the units).
      */
-    record Target(int id, char letter, String name, boolean primary, int secondaryModifier, boolean frontArc) { }
+    record Target(TargetKey key, char letter, String name, boolean primary, int secondaryModifier, boolean frontArc,
+          Coords hex) { }
 
     /**
-     * One queued weapon attack, in fire (queue) order. {@code eqNum} is -1 for a handheld weapon's attack and
-     * {@code targetId} {@code Entity.NONE} for an attack on a hex or building; {@code ammo} is the bin's Unit Display
-     * entry ("" none) with its {@code shots} (-1 none); {@code detail} is the roll's description or reason.
+     * The firing display's target (H15): a unit the local player may identify, a hex, a building or a minefield, with
+     * its name and, for a target that is no unit, its hex while it lies on the shown board (else null).
      */
-    record Attack(int eqNum, int targetId, String weapon, String location, String kind, String ammo, int shots,
+    record Focus(TargetKey key, String name, Coords hex) {
+        static final Focus NONE = new Focus(TargetKey.NONE, "", null);
+    }
+
+    /**
+     * One queued weapon attack, in fire (queue) order. {@code eqNum} is -1 for a handheld weapon's attack;
+     * {@code ammo} is the bin's Unit Display entry ("" none) with its {@code shots} (-1 none); {@code detail} is the
+     * roll's description or reason.
+     */
+    record Attack(int eqNum, TargetKey target, String weapon, String location, String kind, String ammo, int shots,
           int value, double odds, String detail) { }
 
     /**
@@ -129,13 +144,13 @@ final class GpuFireOrders implements AutoCloseable {
     record WeaponArc(Coords origin, int facing, int start, int end) { }
 
     /**
-     * The selected weapon against the target its row shows ({@code Entity.NONE}: none, then no modifiers).
+     * The selected weapon against the target its row shows ({@code TargetKey.NONE}: none, then no modifiers).
      * {@code ranges} are min, short, medium, long[, extreme while the weapon display shows it]; {@code arc} names the
      * mount arc ("" for an arc without a name); {@code distance} is the rules' effective distance. {@code wedge} is
      * null while the actor is not on the shown board.
      */
-    record Solution(int eqNum, int targetId, List<Integer> ranges, String arc, int distance, List<Modifier> modifiers,
-          int value, double odds, String reason, WeaponArc wedge) {
+    record Solution(int eqNum, TargetKey target, List<Integer> ranges, String arc, int distance,
+          List<Modifier> modifiers, int value, double odds, String reason, WeaponArc wedge) {
         Solution {
             ranges = List.copyOf(ranges);
             modifiers = List.copyOf(modifiers);
@@ -179,7 +194,7 @@ final class GpuFireOrders implements AutoCloseable {
      * "Resolve phase" is on, {@code autoDeclareRemaining} is the own units it has left to declare, on every turn of
      * the phase, else 0. {@code aim} is the aimed shot choice on the focus, null while none is offered.
      */
-    record Snapshot(boolean active, boolean editable, int actorId, int focusTargetId, int selectedWeapon,
+    record Snapshot(boolean active, boolean editable, int actorId, Focus focus, int selectedWeapon,
           List<WeaponRow> weapons, List<Target> targets, List<Attack> attacks, int twist, boolean canTwistLeft,
           boolean canTwistRight, String torsoLabel, Heat heat, Solution solution, FrontArc frontArc,
           List<Badge> badges, Badge hoverBest, Map<Integer, Integer> drafted, int pendingUnits,
@@ -191,7 +206,7 @@ final class GpuFireOrders implements AutoCloseable {
          * and the resolve mode's count; equal to EMPTY without either.
          */
         static Snapshot idle(Map<Integer, Integer> drafted, int autoDeclareRemaining) {
-            return new Snapshot(false, false, Entity.NONE, Entity.NONE, -1, List.of(), List.of(), List.of(), 0, false,
+            return new Snapshot(false, false, Entity.NONE, Focus.NONE, -1, List.of(), List.of(), List.of(), 0, false,
                   false, "", null, null, null, List.of(), null, drafted, 0, autoDeclareRemaining, null);
         }
 
@@ -204,34 +219,48 @@ final class GpuFireOrders implements AutoCloseable {
         }
 
         /**
-         * The units with a target card, whose nameplates and TN badges the cards replace (H24, P3): the targets in
-         * letter order, then the focused enemy without attacks.
+         * The targets with a target card, which replaces a unit's nameplate and TN badge (H24, P3): the targets in
+         * letter order, then the focus without attacks.
          */
-        Set<Integer> carded() {
-            return GpuFireOrders.carded(targets.stream().map(Target::id).toList(), focusTargetId);
+        Set<TargetKey> carded() {
+            return GpuFireOrders.carded(targets.stream().map(Target::key).toList(), focus.key());
+        }
+
+        /** The hexes of the carded targets that are no units, while they lie on the shown board. */
+        Map<TargetKey, Coords> hexes() {
+            Map<TargetKey, Coords> hexes = new LinkedHashMap<>();
+            for (Target target : targets) {
+                if (target.hex() != null) {
+                    hexes.put(target.key(), target.hex());
+                }
+            }
+            if (focus.hex() != null) {
+                hexes.putIfAbsent(focus.key(), focus.hex());
+            }
+            return hexes;
         }
     }
 
     /** One weapon's roll for the snapshot: the target it is against and the to-hit. */
-    private record Shot(int targetId, @Nullable ToHitData toHit) { }
+    private record Shot(TargetKey target, @Nullable ToHitData toHit) { }
 
     /**
      * What the TN badges are computed from: the actor, the selected weapon and what changes its rolls locally (mode,
      * loaded bin, called shot), the focus, the queue (its targets and secondary-target modifiers), the twist and arms,
      * and the game's revision for everything the server changes.
      */
-    private record BadgeKey(int actorId, int weapon, String setting, int focusId, List<EntityAction> queue,
+    private record BadgeKey(int actorId, int weapon, String setting, TargetKey focus, List<EntityAction> queue,
           int facing, boolean flipped, long revision) { }
 
     /** A unit's saved orders (H33): its queued actions in fire order and the serials of its targets' letters. */
-    private record Draft(List<EntityAction> actions, Map<Integer, Integer> serials) { }
+    private record Draft(List<EntityAction> actions, Map<TargetKey, Integer> serials) { }
 
     private final GpuBoardSource source;
     // EDT only. The display of the last capture, and the letters of its actor's targets: each target's serial is the
     // order of its first assignment, so letters close gaps but never follow the primary or the fire order.
     private FiringDisplay display;
     private int lettersActor = Entity.NONE;
-    private final Map<Integer, Integer> serials = new HashMap<>();
+    private final Map<TargetKey, Integer> serials = new HashMap<>();
     private int serial;
     /** A command runs: a capture inside its dialog's nested loop keeps the last snapshot (the queue is half-done). */
     private boolean commanding;
@@ -368,8 +397,9 @@ final class GpuFireOrders implements AutoCloseable {
             listened = game;
         }
         List<EntityAction> queue = fd.getAttacks();
-        List<Integer> lettered = letters(actor, queue);
-        Entity focus = focus(fd);
+        List<TargetKey> lettered = letters(actor, queue);
+        Targetable focus = focus(fd);
+        TargetKey focusKey = key(focus);
         // One roll per queued attack, for its line and its weapon's row (as queued() finds it: the first). An attack on
         // a target that has left the game has no roll (MegaMek logs an error for one): it is left out, as a draft's.
         List<Attack> attacks = new ArrayList<>();
@@ -379,7 +409,7 @@ final class GpuFireOrders implements AutoCloseable {
                 ToHitData toHit = attack.toHit(game, true);
                 attacks.add(attack(game, actor, attack, toHit, actor.isUseNaturalAptitudeGunnery(game, attack)));
                 if (attack.getEntityId() == actor.getId()) {
-                    shots.putIfAbsent(attack.getWeaponId(), new Shot(unitTarget(attack), toHit));
+                    shots.putIfAbsent(attack.getWeaponId(), new Shot(TargetKey.of(attack), toHit));
                 }
             }
         }
@@ -392,27 +422,29 @@ final class GpuFireOrders implements AutoCloseable {
             int eqNum = actor.getEquipmentNum(weapon);
             boolean queued = shots.containsKey(eqNum);
             Shot shot = queued ? shots.get(eqNum)
-                  : (focus != null) ? new Shot(focus.getId(), fd.toHitFor(weapon, focus))
-                  : new Shot(Entity.NONE, null);
+                  : (focus != null) ? new Shot(focusKey, fd.toHitFor(weapon, focus))
+                  : new Shot(TargetKey.NONE, null);
             shots.put(eqNum, shot);
             rows.add(row(game, actor, weapon, eqNum, shot, queued, actor.isUseNaturalAptitudeGunnery(game, weapon)));
         }
         List<Target> targets = new ArrayList<>();
         for (int index = 0; index < lettered.size(); index++) {
-            Entity target = game.getEntity(lettered.get(index));
+            TargetKey key = lettered.get(index);
+            Targetable target = resolve(game, key);
             if (target != null) {
                 ToHitData secondary = Compute.getSecondaryTargetMod(game, actor, target);
-                targets.add(new Target(target.getId(), (char) ('A' + index), target.getShortName(),
-                      secondary == null, (secondary == null) ? 0 : secondary.getValue(), inFrontArc(actor, target)));
+                targets.add(new Target(key, (char) ('A' + index), name(target), secondary == null,
+                      (secondary == null) ? 0 : secondary.getValue(), inFrontArc(actor, target), hex(target)));
             }
         }
         WeaponMounted selected = selectedWeapon(fd, actor);
         int selectedNum = (selected == null) ? -1 : actor.getEquipmentNum(selected);
-        Set<Integer> carded = carded(lettered, (focus == null) ? Entity.NONE : focus.getId());
+        Set<TargetKey> carded = carded(lettered, focusKey);
         // The arcs are drawn on the shown board only
         boolean shown = actor.getBoardId() == source.currentView().getBoardId();
         int rotation = (actor.getSecondaryFacing() - actor.getFacing() + 6) % 6;
-        return publish(new Snapshot(true, true, actor.getId(), (focus == null) ? Entity.NONE : focus.getId(),
+        return publish(new Snapshot(true, true, actor.getId(),
+              (focus == null) ? Focus.NONE : new Focus(focusKey, name(focus), hex(focus)),
               selectedNum, rows, targets, attacks, (rotation > 3) ? (rotation - 6) : rotation,
               canTwist(actor, -1), canTwist(actor, 1),
               ((actor instanceof Tank tank) && !tank.hasNoTurret()) ? Messages.getString("GpuBoard.hud.dock.turret")
@@ -421,7 +453,7 @@ final class GpuFireOrders implements AutoCloseable {
               (selected == null) ? null : solution(game, actor, selected, selectedNum, shots.get(selectedNum),
                     shown, actor.isUseNaturalAptitudeGunnery(game, selected)),
               ((selected == null) && shown) ? frontArc(game, actor) : null,
-              badges(badgeKey(fd, actor, queue, focus), carded),
+              badges(badgeKey(fd, actor, queue, focusKey), carded),
               hoverBest(game, fd, actor, hover, queue, carded), drafted(actor.getId()),
               GpuBattleStatus.unitsToAct(game, source.currentView().getLocalPlayer()), remaining, aim(fd, actor)));
     }
@@ -431,14 +463,15 @@ final class GpuFireOrders implements AutoCloseable {
      * its own event and republishes (rule 9); until then the weapon's previous badges stay, but none on a unit with a
      * card.
      */
-    private List<Badge> badges(@Nullable BadgeKey key, Set<Integer> carded) {
+    private List<Badge> badges(@Nullable BadgeKey key, Set<TargetKey> carded) {
         if ((key != null) && !key.equals(badgeKey) && !badgeJob) {
             badgeJob = true;
             SwingUtilities.invokeLater(this::badgeJob);
         }
         boolean sameWeapon = (key != null) && (badgeKey != null) && (key.actorId() == badgeKey.actorId())
               && (key.weapon() == badgeKey.weapon());
-        return sameWeapon ? badges.stream().filter(badge -> !carded.contains(badge.targetId())).toList() : List.of();
+        return sameWeapon ? badges.stream().filter(badge -> !carded.contains(TargetKey.unit(badge.targetId())))
+              .toList() : List.of();
     }
 
     /** EDT, in its own event: the badges of the display's current state; never inside a dialog's nested loop. */
@@ -450,21 +483,20 @@ final class GpuFireOrders implements AutoCloseable {
             return;
         }
         List<EntityAction> queue = fd.getAttacks();
-        Entity focus = focus(fd);
+        TargetKey focus = key(focus(fd));
         BadgeKey key = badgeKey(fd, actor, queue, focus);
         if ((key == null) || key.equals(badgeKey)) {
             return;
         }
         Game game = source.currentView().game;
-        badges = rolls(game, fd, actor, selectedWeapon(fd, actor), queue,
-              carded(letters(actor, queue), (focus == null) ? Entity.NONE : focus.getId()));
+        badges = rolls(game, fd, actor, selectedWeapon(fd, actor), queue, carded(letters(actor, queue), focus));
         badgeKey = key;
         source.refresh();
     }
 
     /** The key of the badges for the display's state, null without a selected weapon. */
     private @Nullable BadgeKey badgeKey(FiringDisplay fd, Entity actor, List<EntityAction> queue,
-          @Nullable Entity focus) {
+          TargetKey focus) {
         WeaponMounted weapon = selectedWeapon(fd, actor);
         if (weapon == null) {
             return null;
@@ -472,19 +504,18 @@ final class GpuFireOrders implements AutoCloseable {
         AmmoMounted ammo = weapon.getLinkedAmmo();
         String setting = weapon.curMode().getName() + ':' + ((ammo == null) ? -1
               : ammo.getEntity().getEquipmentNum(ammo)) + ':' + weapon.getCalledShot().getCall();
-        return new BadgeKey(actor.getId(), actor.getEquipmentNum(weapon), setting,
-              (focus == null) ? Entity.NONE : focus.getId(), queue, actor.getSecondaryFacing(),
-              actor.getArmsFlipped(), revision);
+        return new BadgeKey(actor.getId(), actor.getEquipmentNum(weapon), setting, focus, queue,
+              actor.getSecondaryFacing(), actor.getArmsFlipped(), revision);
     }
 
     /**
-     * The units with cards, which get no badge or hover roll: the targets in letter order, then the focus
-     * ({@code Entity.NONE}: none).
+     * The targets with cards, whose units get no badge or hover roll: the targets in letter order, then the focus
+     * ({@code TargetKey.NONE}: none).
      */
-    private static Set<Integer> carded(List<Integer> lettered, int focusId) {
-        Set<Integer> carded = new LinkedHashSet<>(lettered);
-        if (focusId != Entity.NONE) {
-            carded.add(focusId);
+    private static Set<TargetKey> carded(List<TargetKey> lettered, TargetKey focus) {
+        Set<TargetKey> carded = new LinkedHashSet<>(lettered);
+        if (!focus.equals(TargetKey.NONE)) {
+            carded.add(focus);
         }
         return carded;
     }
@@ -562,10 +593,10 @@ final class GpuFireOrders implements AutoCloseable {
         });
     }
 
-    /** H15: targets an identified enemy; a sensor contact is refused with a toast (H19). */
-    void focusTarget(int targetId) {
+    /** H15: targets an identified enemy, a hex, a building or a minefield; a sensor contact is refused (H19). */
+    void focusTarget(TargetKey key) {
         command((fd, actor) -> {
-            Entity target = target(fd, actor, targetId);
+            Targetable target = target(fd, actor, key);
             if (target != null) {
                 setTarget(fd, target);
             }
@@ -577,8 +608,26 @@ final class GpuFireOrders implements AutoCloseable {
      * refusal toast (H17); a queued weapon is retargeted. Then the queue takes the canonical order, unless Fire ended
      * the turn (the auto-end setting, honoured once, by FiringDisplay.fire).
      */
-    void assign(int eqNum, int targetId) {
-        command((fd, actor) -> declare(fd, actor, eqNum, targetId));
+    void assign(int eqNum, TargetKey key) {
+        command((fd, actor) -> declare(fd, actor, eqNum, key));
+    }
+
+    /**
+     * A click on a hex in which the pointer picked no unit (H15, H16): the target MegaMek's board click chooses there
+     * (FiringDisplay.hexSelected: a unit, a building or a wooded hex, by its dialog among several; Shift twists the
+     * torso instead), then a shot of the armed weapon {@code eqNum} (-1: none) at the target it chose, as a click on an
+     * enemy assigns it.
+     */
+    void clickHex(Coords coords, int modifiers, int eqNum) {
+        command((fd, actor) -> {
+            Targetable before = fd.getTarget();
+            source.clickNow(coords, false, modifiers);
+            Targetable chosen = fd.getTarget();
+            WeaponMounted weapon = weapon(actor, eqNum);
+            if ((weapon != null) && (chosen != null) && (chosen != before) && (acting(fd) == actor)) {
+                declare(fd, actor, weapon, chosen);
+            }
+        });
     }
 
     /** H18: removes the weapon's attack. */
@@ -587,7 +636,7 @@ final class GpuFireOrders implements AutoCloseable {
             List<EntityAction> before = fd.getAttacks();
             WeaponAttackAction attack = queued(before, actor, eqNum);
             if (attack != null) {
-                Integer lead = lead(source.currentView().game, actor, before);
+                TargetKey lead = lead(source.currentView().game, actor, before);
                 fd.removeAttack(attack);
                 order(fd, actor, fd.getAttacks(), lead);
             }
@@ -600,25 +649,26 @@ final class GpuFireOrders implements AutoCloseable {
     }
 
     /** M3: removes every attack on the target; a focus on it moves to the first target left. */
-    void removeTarget(int targetId) {
+    void removeTarget(TargetKey key) {
         command((fd, actor) -> {
+            Game game = source.currentView().game;
             List<EntityAction> queue = fd.getAttacks();
-            List<EntityAction> kept = queue.stream().filter(action -> !isOrder(action, targetId)).toList();
+            List<EntityAction> kept = queue.stream().filter(action -> !isOrder(action, key)).toList();
             if (kept.size() == queue.size()) {
                 return;
             }
-            order(fd, actor, kept, lead(source.currentView().game, actor, queue));
-            List<Integer> lettered = letters(actor, fd.getAttacks());
-            Entity first = lettered.isEmpty() ? null : source.currentView().game.getEntity(lettered.getFirst());
-            if ((first != null) && (fd.getTarget() instanceof Entity focused) && (focused.getId() == targetId)) {
+            order(fd, actor, kept, lead(game, actor, queue));
+            List<TargetKey> lettered = letters(actor, fd.getAttacks());
+            Targetable first = lettered.isEmpty() ? null : resolve(game, lettered.getFirst());
+            if ((first != null) && key.equals(key(fd.getTarget()))) {
                 setTarget(fd, first);
             }
         });
     }
 
     /** H18: the weapon's attack moves to the target and keeps its place in the fire order. */
-    void retarget(int eqNum, int targetId) {
-        command((fd, actor) -> declare(fd, actor, eqNum, targetId));
+    void retarget(int eqNum, TargetKey key) {
+        command((fd, actor) -> declare(fd, actor, eqNum, key));
     }
 
     /**
@@ -660,26 +710,26 @@ final class GpuFireOrders implements AutoCloseable {
      * H13: the target's attacks fire first. When the rules then make it primary, a toast names the secondary
      * modifiers; when they keep another target primary (front arc), the order is restored and a toast says so.
      */
-    void setPrimary(int targetId) {
+    void setPrimary(TargetKey key) {
         command((fd, actor) -> {
             Game game = source.currentView().game;
-            Entity target = game.getEntity(targetId);
+            Targetable target = resolve(game, key);
             List<EntityAction> before = fd.getAttacks();
-            if ((target == null) || before.stream().noneMatch(action -> isOrder(action, targetId))) {
+            if ((target == null) || before.stream().noneMatch(action -> isOrder(action, key))) {
                 toast(fd, ToastLevel.WARNING, "GpuBoard.hud.fire.assignFirst");
                 return;
             }
-            replace(fd, canonical(game, actor, before, targetId));
-            if (primary(game, actor, targetId)) {
+            replace(fd, canonical(game, actor, before, key));
+            if (primary(game, actor, key)) {
                 RulesTarget rules = Game.rulesManager.getRulesTarget();
-                toast(fd, ToastLevel.INFO, "GpuBoard.hud.fire.primary", target.getShortName(),
+                toast(fd, ToastLevel.INFO, "GpuBoard.hud.fire.primary", name(target),
                       signed(rules.getSecondaryTargetModifier()), signed(rules.getSecondaryArcModifier()));
             } else {
                 replace(fd, before);
-                Entity kept = letters(actor, before).stream().filter(id -> primary(game, actor, id))
-                      .map(game::getEntity).findFirst().orElse(null);
-                toast(fd, ToastLevel.WARNING, "GpuBoard.hud.fire.cannotBePrimary", target.getShortName(),
-                      (kept == null) ? "" : kept.getShortName());
+                Targetable kept = letters(actor, before).stream().filter(lettered -> primary(game, actor, lettered))
+                      .map(lettered -> resolve(game, lettered)).filter(Objects::nonNull).findFirst().orElse(null);
+                toast(fd, ToastLevel.WARNING, "GpuBoard.hud.fire.cannotBePrimary", name(target),
+                      (kept == null) ? "" : name(kept));
             }
         });
     }
@@ -833,21 +883,25 @@ final class GpuFireOrders implements AutoCloseable {
         });
     }
 
-    /** Assigns the weapon to the target, or moves its queued attack there at the attack's place in the fire order. */
-    private void declare(FiringDisplay fd, Entity actor, int eqNum, int targetId) {
+    /** {@link #declare(FiringDisplay, Entity, WeaponMounted, Targetable)} for the weapon's number and target's key. */
+    private void declare(FiringDisplay fd, Entity actor, int eqNum, TargetKey key) {
         WeaponMounted weapon = weapon(actor, eqNum);
-        Entity target = (weapon == null) ? null : target(fd, actor, targetId);
-        if (target == null) {
-            return;
+        Targetable target = (weapon == null) ? null : target(fd, actor, key);
+        if (target != null) {
+            declare(fd, actor, weapon, target);
         }
+    }
+
+    /** Assigns the weapon to the target, or moves its queued attack there at the attack's place in the fire order. */
+    private void declare(FiringDisplay fd, Entity actor, WeaponMounted weapon, Targetable target) {
         List<EntityAction> before = fd.getAttacks();
-        WeaponAttackAction attack = queued(before, actor, eqNum);
-        if ((attack != null) && (unitTarget(attack) == targetId)) {
+        WeaponAttackAction attack = queued(before, actor, actor.getEquipmentNum(weapon));
+        if ((attack != null) && TargetKey.of(attack).equals(TargetKey.of(target))) {
             setTarget(fd, target);
         } else if (attack != null) {
             redeclare(fd, actor, attack, weapon, target, null);
         } else {
-            Integer lead = lead(source.currentView().game, actor, before);
+            TargetKey lead = lead(source.currentView().game, actor, before);
             // Fire may end the turn (auto-end firing, after the last weapon); the display sent the queue as it was.
             if ((shoot(fd, actor, weapon, target) != null) && (acting(fd) == actor)) {
                 order(fd, actor, fd.getAttacks(), lead);
@@ -867,8 +921,8 @@ final class GpuFireOrders implements AutoCloseable {
         Game game = source.currentView().game;
         List<EntityAction> before = fd.getAttacks();
         AmmoMounted loaded = GpuUnitRecord.ammoWeapon(weapon).getLinkedAmmo();
-        Map<Integer, Integer> serialsBefore = Map.copyOf(serials);
-        Integer lead = lead(game, actor, before);
+        Map<TargetKey, Integer> serialsBefore = Map.copyOf(serials);
+        TargetKey lead = lead(game, actor, before);
         // The canonical order with a stand-in for the new attack (never queued) at the attack's place
         WeaponAttackAction standIn = new WeaponAttackAction(attack.getEntityId(), target.getTargetType(),
               target.getId(), attack.getWeaponId());
@@ -907,8 +961,7 @@ final class GpuFireOrders implements AutoCloseable {
         show(fd, actor, weapon);
         setTarget(fd, target);
         if (!fd.isFireAllowed()) {
-            toast(fd, ToastLevel.WARNING, "GpuBoard.hud.fire.refused", weapon.getPlainDesc(),
-                  (target instanceof Entity unit) ? unit.getShortName() : target.getDisplayName(),
+            toast(fd, ToastLevel.WARNING, "GpuBoard.hud.fire.refused", weapon.getPlainDesc(), name(target),
                   fd.toHitFor(weapon, target).getDesc());
             return null;
         }
@@ -923,7 +976,7 @@ final class GpuFireOrders implements AutoCloseable {
      * null for none) keeps its attacks first while it has any and the rules keep it primary, as the prototype keeps
      * its primary; otherwise the targets the rules make primary lead (a target in the front arc beats one beside).
      */
-    private void order(FiringDisplay fd, Entity actor, List<EntityAction> queue, @Nullable Integer lead) {
+    private void order(FiringDisplay fd, Entity actor, List<EntityAction> queue, @Nullable TargetKey lead) {
         Game game = source.currentView().game;
         boolean leads = (lead != null) && queue.stream().anyMatch(action -> isOrder(action, lead));
         replace(fd, leads ? canonical(game, actor, queue, lead) : queue);
@@ -933,17 +986,17 @@ final class GpuFireOrders implements AutoCloseable {
     }
 
     /**
-     * The canonical order: the weapon attacks on units grouped by target, {@code lead}'s group first (null: the groups
-     * the rules make primary now), then the others by letter, each group in its queue order; every other action,
-     * attacks on hexes included, keeps its place.
+     * The canonical order: the weapon attacks grouped by target, {@code lead}'s group first (null: the groups the rules
+     * make primary now), then the others by letter, each group in its queue order; every other action keeps its place.
      */
-    private List<EntityAction> canonical(Game game, Entity actor, List<EntityAction> queue, @Nullable Integer lead) {
-        List<Integer> lettered = letters(actor, queue);
-        Map<Integer, Integer> rank = new HashMap<>();
+    private List<EntityAction> canonical(Game game, Entity actor, List<EntityAction> queue,
+          @Nullable TargetKey lead) {
+        List<TargetKey> lettered = letters(actor, queue);
+        Map<TargetKey, Integer> rank = new HashMap<>();
         for (int index = 0; index < lettered.size(); index++) {
-            int id = lettered.get(index);
-            boolean leading = (lead != null) ? (lead == id) : primary(game, actor, id);
-            rank.put(id, (leading ? 0 : lettered.size()) + index);
+            TargetKey key = lettered.get(index);
+            boolean leading = (lead != null) ? lead.equals(key) : primary(game, actor, key);
+            rank.put(key, (leading ? 0 : lettered.size()) + index);
         }
         List<Integer> slots = new ArrayList<>();
         List<EntityAction> orders = new ArrayList<>();
@@ -953,7 +1006,7 @@ final class GpuFireOrders implements AutoCloseable {
                 orders.add(queue.get(index));
             }
         }
-        orders.sort(Comparator.comparingInt(action -> rank.get(((WeaponAttackAction) action).getTargetId())));
+        orders.sort(Comparator.comparingInt(action -> rank.get(TargetKey.of((WeaponAttackAction) action))));
         List<EntityAction> canonical = new ArrayList<>(queue);
         for (int index = 0; index < slots.size(); index++) {
             canonical.set(slots.get(index), orders.get(index));
@@ -969,15 +1022,15 @@ final class GpuFireOrders implements AutoCloseable {
     }
 
     /** The target of the first attack in the queue whose target the rules make primary, or null. */
-    private static @Nullable Integer lead(Game game, Entity actor, List<EntityAction> queue) {
+    private static @Nullable TargetKey lead(Game game, Entity actor, List<EntityAction> queue) {
         return queue.stream().filter(action -> isOrder(action, null))
-              .map(action -> ((WeaponAttackAction) action).getTargetId())
-              .filter(id -> primary(game, actor, id)).findFirst().orElse(null);
+              .map(action -> TargetKey.of((WeaponAttackAction) action))
+              .filter(key -> primary(game, actor, key)).findFirst().orElse(null);
     }
 
-    /** Whether the rules make the unit the actor's primary target (Compute.getSecondaryTargetMod gives none). */
-    private static boolean primary(Game game, Entity actor, int targetId) {
-        Entity target = game.getEntity(targetId);
+    /** Whether the rules make the target the actor's primary target (Compute.getSecondaryTargetMod gives none). */
+    private static boolean primary(Game game, Entity actor, TargetKey key) {
+        Targetable target = resolve(game, key);
         return (target != null) && (Compute.getSecondaryTargetMod(game, actor, target) == null);
     }
 
@@ -999,14 +1052,41 @@ final class GpuFireOrders implements AutoCloseable {
         return member.getLinkedAmmo() == bin;
     }
 
-    /** The identified unit, while the actor may target it (Game.getValidTargets); a sensor contact gets a toast. */
-    private @Nullable Entity target(FiringDisplay fd, Entity actor, int targetId) {
-        Entity unit = source.currentView().game.getEntity(targetId);
+    /**
+     * The key's target: an identified unit while the actor may target it (Game.getValidTargets), a sensor contact
+     * getting a toast instead, or the hex, building or minefield the game resolves; else null.
+     */
+    private @Nullable Targetable target(FiringDisplay fd, Entity actor, TargetKey key) {
+        Game game = source.currentView().game;
+        if (key.type() != Targetable.TYPE_ENTITY) {
+            return resolve(game, key);
+        }
+        Entity unit = game.getEntity(key.id());
         if ((unit != null) && source.sensorContact(unit)) {
             toast(fd, ToastLevel.WARNING, "GpuBoard.hud.fire.contactNotTargetable");
             return null;
         }
-        return ((unit != null) && source.currentView().game.getValidTargets(actor).contains(unit)) ? unit : null;
+        return ((unit != null) && game.getValidTargets(actor).contains(unit)) ? unit : null;
+    }
+
+    /** The target the game knows by the key, or null. */
+    private static @Nullable Targetable resolve(Game game, TargetKey key) {
+        return game.getTarget(key.type(), key.id());
+    }
+
+    private static TargetKey key(@Nullable Targetable target) {
+        return (target == null) ? TargetKey.NONE : TargetKey.of(target);
+    }
+
+    /** A target's name as the orders show it: a unit's short name, else MegaMek's display name. */
+    private static String name(Targetable target) {
+        return (target instanceof Entity unit) ? unit.getShortName() : target.getDisplayName();
+    }
+
+    /** The hex of a target that is no unit while it lies on the shown board, else null (the scene places units). */
+    private @Nullable Coords hex(Targetable target) {
+        return ((target instanceof Entity) || (target.getBoardId() != source.currentView().getBoardId())) ? null
+              : target.getPosition();
     }
 
     /** Targets the target unless the display targets it already (targeting again reopens the aimed shot dialog). */
@@ -1206,7 +1286,7 @@ final class GpuFireOrders implements AutoCloseable {
                       unit.isUseNaturalAptitudeGunnery(game, attack)));
             }
         }
-        return attacks.isEmpty() ? null : new Snapshot(true, false, unitId, Entity.NONE, -1, List.of(), List.of(),
+        return attacks.isEmpty() ? null : new Snapshot(true, false, unitId, Focus.NONE, -1, List.of(), List.of(),
               attacks, 0, false, false, "", null, null, null, List.of(), null, drafted(unitId),
               GpuBattleStatus.unitsToAct(game, source.currentView().getLocalPlayer()), remaining, null);
     }
@@ -1316,32 +1396,27 @@ final class GpuFireOrders implements AutoCloseable {
      * The actor's targets in letter order. A target keeps the serial of its first assignment while it has attacks;
      * a new target gets the next serial (the prototype's targetsOf, game.js:241).
      */
-    private List<Integer> letters(Entity actor, List<EntityAction> queue) {
+    private List<TargetKey> letters(Entity actor, List<EntityAction> queue) {
         if (actor.getId() != lettersActor) {
             lettersActor = actor.getId();
             serials.clear();
         }
-        Set<Integer> present = new LinkedHashSet<>();
+        Set<TargetKey> present = new LinkedHashSet<>();
         for (EntityAction action : queue) {
             if (isOrder(action, null)) {
-                present.add(((WeaponAttackAction) action).getTargetId());
+                present.add(TargetKey.of((WeaponAttackAction) action));
             }
         }
         serials.keySet().retainAll(present);
-        for (int id : present) {
-            serials.computeIfAbsent(id, key -> ++serial);
+        for (TargetKey target : present) {
+            serials.computeIfAbsent(target, key -> ++serial);
         }
         return present.stream().sorted(Comparator.comparingInt(serials::get)).toList();
     }
 
-    /** A weapon attack on a unit ({@code targetId} null), or on that unit. */
-    private static boolean isOrder(EntityAction action, @Nullable Integer targetId) {
-        return (action instanceof WeaponAttackAction attack) && (attack.getTargetType() == Targetable.TYPE_ENTITY)
-              && ((targetId == null) || (attack.getTargetId() == targetId));
-    }
-
-    private static int unitTarget(WeaponAttackAction attack) {
-        return (attack.getTargetType() == Targetable.TYPE_ENTITY) ? attack.getTargetId() : Entity.NONE;
+    /** A weapon attack ({@code key} null), or one on that target. */
+    private static boolean isOrder(EntityAction action, @Nullable TargetKey key) {
+        return (action instanceof WeaponAttackAction attack) && ((key == null) || TargetKey.of(attack).equals(key));
     }
 
     /** The actor's queued attack with its weapon {@code eqNum}, or null. */
@@ -1355,9 +1430,10 @@ final class GpuFireOrders implements AutoCloseable {
         return null;
     }
 
-    /** The display's target while it is a unit the local player may identify, else null. */
-    private @Nullable Entity focus(FiringDisplay fd) {
-        return ((fd.getTarget() instanceof Entity target) && source.identified(target)) ? target : null;
+    /** The display's target, unless it is a unit the local player may not identify; else null. */
+    private @Nullable Targetable focus(FiringDisplay fd) {
+        Targetable target = fd.getTarget();
+        return ((target instanceof Entity unit) && !source.identified(unit)) ? null : target;
     }
 
     /** The actor's listed weapon with that number, or null. */
@@ -1408,7 +1484,7 @@ final class GpuFireOrders implements AutoCloseable {
               damage(game, actor, weapon), weapon.getCurrentHeat(), (parts.mode() == null) ? "" : parts.mode(),
               bins.stream().map(bin -> GpuUnitRecord.AmmoChoice.of(actor, bin)).toList(),
               (loaded == null) ? -1 : bins.indexOf(loaded),
-              parts.loadedShots(), shot.targetId(), value(shot.toHit()), odds(shot.toHit(), aptitude),
+              parts.loadedShots(), shot.target(), value(shot.toHit()), odds(shot.toHit(), aptitude),
               reason(shot.toHit()), queued || actor.isWeaponValidForPhase(weapon),
               (location >= 0) && actor.isLocationBad(location));
     }
@@ -1439,7 +1515,7 @@ final class GpuFireOrders implements AutoCloseable {
         Entity ammoCarrier = game.getEntity(attack.getAmmoCarrier());
         AmmoMounted bin = (attack.getAmmoId() < 0) ? null
               : (AmmoMounted) ((ammoCarrier == null) ? carrier : ammoCarrier).getEquipment(attack.getAmmoId());
-        return new Attack((carrier == actor) ? attack.getWeaponId() : -1, unitTarget(attack), weapon.getPlainDesc(),
+        return new Attack((carrier == actor) ? attack.getWeaponId() : -1, TargetKey.of(attack), weapon.getPlainDesc(),
               WeaponListModel.rowParts(game, weapon).location(), kind(weapon.getType()),
               (bin == null) ? "" : WeaponPanel.formatAmmo(actor, bin), (bin == null) ? -1 : bin.getUsableShotsLeft(),
               toHit.getValue(), odds(toHit, aptitude), toHit.getDesc());
@@ -1490,7 +1566,7 @@ final class GpuFireOrders implements AutoCloseable {
             // A weapon without a minimum range has a negative one (WeaponType.WEAPON_NA)
             ranges.add(Math.max(0, brackets[bracket]));
         }
-        Entity target = game.getEntity(shot.targetId());
+        Targetable target = resolve(game, shot.target());
         ToHitData toHit = shot.toHit();
         List<Modifier> modifiers = new ArrayList<>();
         if ((toHit != null) && toHit.needsRoll()) {
@@ -1500,7 +1576,7 @@ final class GpuFireOrders implements AutoCloseable {
         }
         int arc = actor.getWeaponArc(eqNum);
         FacingArc shape = FacingArc.valueOf(arc);
-        return new Solution(eqNum, shot.targetId(), ranges, arcName(arc),
+        return new Solution(eqNum, shot.target(), ranges, arcName(arc),
               (target == null) ? 0 : Compute.effectiveDistance(game, actor, target), modifiers, value(toHit),
               odds(toHit, aptitude), reason(toHit), shown ? new WeaponArc(actor.getPosition(),
               TurretFacing.weaponFacing(actor, eqNum), shape.getStartAngle(), shape.getEndAngle()) : null);
@@ -1543,12 +1619,12 @@ final class GpuFireOrders implements AutoCloseable {
      * (H23), best first, at most BADGES.
      */
     private List<Badge> rolls(Game game, FiringDisplay fd, Entity actor, WeaponMounted weapon,
-          List<EntityAction> queue, Set<Integer> carded) {
+          List<EntityAction> queue, Set<TargetKey> carded) {
         int range = weapon.getType().getRanges(weapon, weapon.getLinkedAmmo())[RangeType.RANGE_LONG];
         boolean aptitude = actor.isUseNaturalAptitudeGunnery(game, weapon);
         List<Badge> rolls = new ArrayList<>();
         for (Entity enemy : game.getValidTargets(actor)) {
-            if (actor.isEnemyOf(enemy) && !carded.contains(enemy.getId()) && source.identified(enemy)
+            if (actor.isEnemyOf(enemy) && !carded.contains(TargetKey.unit(enemy.getId())) && source.identified(enemy)
                   && (enemy.getBoardId() == actor.getBoardId())
                   && (actor.getPosition().distance(enemy.getPosition()) <= range)) {
                 rolls.add(badge(enemy.getId(), rollAt(game, fd, actor, weapon, queue, enemy), aptitude));
@@ -1563,11 +1639,12 @@ final class GpuFireOrders implements AutoCloseable {
      * the focus (P2), with "no shot" when none can hit; null without one.
      */
     private @Nullable Badge hoverBest(Game game, FiringDisplay fd, Entity actor, @Nullable Coords hover,
-          List<EntityAction> queue, Set<Integer> carded) {
+          List<EntityAction> queue, Set<TargetKey> carded) {
         int board = source.currentView().getBoardId();
         Entity enemy = (hover == null) ? null : game.getValidTargets(actor).stream()
               .filter(unit -> hover.equals(unit.getPosition()) && (unit.getBoardId() == board)
-                    && actor.isEnemyOf(unit) && !carded.contains(unit.getId()) && source.identified(unit))
+                    && actor.isEnemyOf(unit) && !carded.contains(TargetKey.unit(unit.getId()))
+                    && source.identified(unit))
               .findFirst().orElse(null);
         if (enemy == null) {
             return null;

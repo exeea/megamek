@@ -22,7 +22,6 @@ import megamek.client.ui.gdx.UiFlow;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.common.rolls.TargetRoll;
-import megamek.common.units.Entity;
 
 /**
  * Firing solution of the selected weapon (C.1 G10; r1 3.14, r2 5, plan A.8 H21): the weapon and its target with the
@@ -40,7 +39,7 @@ final class GpuSolutionCard implements GpuHud.Component {
     /** #solution .rng: 600 11 condensed, 10 apart, 6 above the modifiers. */
     private static final float RANGE_SIZE = 11;
 
-    /** What the card shows: the solution, its weapon's name, the letters, the focused enemy's name. */
+    /** What the card shows: the solution, its weapon's name, the letters, the focus's name. */
     private record View(Solution solution, String weapon, List<Target> targets, String focusName) { }
 
     private final UiKit ui;
@@ -107,10 +106,7 @@ final class GpuSolutionCard implements GpuHud.Component {
         Solution solution = fire.editable() ? fire.solution() : null;
         String weapon = solution == null ? "" : fire.weapons().stream().filter(row -> row.eqNum() == solution.eqNum())
               .map(GpuFireOrders.WeaponRow::name).findFirst().orElse("");
-        int targetId = solution == null ? Entity.NONE : solution.targetId();
-        String focusName = state.presentedUnits().stream().filter(unit -> unit.id() == targetId)
-              .map(GpuBattleStatus.UnitStatus::name).findFirst().orElse("");
-        View view = new View(solution, weapon, fire.targets(), focusName);
+        View view = new View(solution, weapon, fire.targets(), fire.focus().name());
         if (!view.equals(shown)) {
             shown = view;
             rebuild();
@@ -129,7 +125,7 @@ final class GpuSolutionCard implements GpuHud.Component {
         if (solution == null) {
             return;
         }
-        boolean target = solution.targetId() != Entity.NONE;
+        boolean target = !solution.target().equals(TargetKey.NONE);
         boolean shot = possible(solution.value());
         showTitle(solution, target, shot);
         List<Integer> brackets = solution.ranges();
@@ -167,7 +163,7 @@ final class GpuSolutionCard implements GpuHud.Component {
         String text = shown.weapon();
         String name = "";
         if (target) {
-            Target lettered = shown.targets().stream().filter(candidate -> candidate.id() == solution.targetId())
+            Target lettered = shown.targets().stream().filter(candidate -> candidate.key().equals(solution.target()))
                   .findFirst().orElse(null);
             if (lettered != null) {
                 name = lettered.name();

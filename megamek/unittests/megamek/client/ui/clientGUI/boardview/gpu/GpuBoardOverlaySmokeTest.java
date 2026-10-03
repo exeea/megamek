@@ -765,10 +765,13 @@ class GpuBoardOverlaySmokeTest {
 
     /** Shot 05: the Atlas's AC/20 queued at the Timber Wolf (A, primary) and the LRM at the BattleMaster (B). */
     static GpuFireOrders.Snapshot fire(GpuFireOrders.FrontArc frontArc) {
-        List<GpuFireOrders.Target> targets = List.of(new GpuFireOrders.Target(TIMBER_WOLF, 'A', "Timber Wolf", true,
-              0, true), new GpuFireOrders.Target(BATTLEMASTER, 'B', "BattleMaster", false, 1, true));
-        return new GpuFireOrders.Snapshot(true, true, ATLAS, TIMBER_WOLF, frontArc == null ? 1 : -1, List.of(), targets,
-              List.of(), 0, true, true, "", null, null, frontArc, List.of(), null, Map.of(), 4, 0, null);
+        List<GpuFireOrders.Target> targets = List.of(new GpuFireOrders.Target(TargetKey.unit(TIMBER_WOLF), 'A',
+              "Timber Wolf", true, 0, true, null), new GpuFireOrders.Target(TargetKey.unit(BATTLEMASTER), 'B',
+              "BattleMaster", false, 1, true, null));
+        return new GpuFireOrders.Snapshot(true, true, ATLAS,
+              new GpuFireOrders.Focus(TargetKey.unit(TIMBER_WOLF), "Timber Wolf", null), frontArc == null ? 1 : -1,
+              List.of(), targets, List.of(), 0, true, true, "", null, null, frontArc, List.of(), null, Map.of(), 4, 0,
+              null);
     }
 
     /**

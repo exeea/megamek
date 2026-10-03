@@ -3626,6 +3626,14 @@ public class ClientGUI extends AbstractClientGUI
         }
     }
 
+    /** The height of the board's ruler point at {@code point}, as the GPU view's pointer shows it (RulerDialog). */
+    public void setRulerHeight(int boardId, Coords point, int height) {
+        RulerDialog ruler = rulers.get(boardId);
+        if (ruler != null) {
+            ruler.setHeight(point, height);
+        }
+    }
+
     /**
      * Shows the Nova CEWS network view dialog (read-only).
      */

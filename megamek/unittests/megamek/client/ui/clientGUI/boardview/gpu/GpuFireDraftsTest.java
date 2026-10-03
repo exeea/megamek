@@ -104,10 +104,10 @@ class GpuFireDraftsTest {
             int[] atm = addAtm(firing, Mek.LOC_LEFT_ARM);
             int cannon = eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
             command(firing, fire -> fire.twist(1));
-            command(firing, fire -> fire.assign(cannon, firing.ahead.getId()));
-            command(firing, fire -> fire.assign(atm[0], crab.getId()));
+            command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
+            command(firing, fire -> fire.assign(atm[0], TargetKey.unit(crab.getId())));
             command(firing, fire -> fire.setAmmo(atm[0], bin(firing, atm[1])));
-            command(firing, fire -> fire.setPrimary(crab.getId()));
+            command(firing, fire -> fire.setPrimary(TargetKey.unit(crab.getId())));
             onSwing(() -> {
                 // An aimed shot at the centre torso, as the aimed shot handler declares it with a targeting computer
                 WeaponAttackAction attack = (WeaponAttackAction) firing.display.getAttacks().get(2);
@@ -135,9 +135,10 @@ class GpuFireDraftsTest {
                   "The display released the Atlas's orders");
             int large = equipment(sagittaire, "ER Large Laser", Mek.LOC_LEFT_TORSO);
             int reengineered = equipment(sagittaire, "Large Re-engineered Laser", Mek.LOC_LEFT_ARM);
-            command(firing, fire -> fire.assign(large, firing.ahead.getId()));
-            command(firing, fire -> fire.assign(reengineered, crab.getId()));
-            GpuFireOrders.Snapshot sagittaireOrders = command(firing, fire -> fire.setPrimary(crab.getId()));
+            command(firing, fire -> fire.assign(large, TargetKey.unit(firing.ahead.getId())));
+            command(firing, fire -> fire.assign(reengineered, TargetKey.unit(crab.getId())));
+            GpuFireOrders.Snapshot sagittaireOrders = command(firing,
+                  fire -> fire.setPrimary(TargetKey.unit(crab.getId())));
             List<EntityAction> sagittaireQueue = onSwing(firing.display::getAttacks);
 
             GpuFireOrders.Snapshot back = command(firing, fire -> fire.selectUnit(ATLAS));
@@ -173,9 +174,9 @@ class GpuFireDraftsTest {
             int cannon = eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
             int left = eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
             int right = eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
-            command(firing, fire -> fire.assign(cannon, firing.ahead.getId()));
-            command(firing, fire -> fire.assign(left, crab.getId()));
-            command(firing, fire -> fire.assign(right, quickdraw.getId()));
+            command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
+            command(firing, fire -> fire.assign(left, TargetKey.unit(crab.getId())));
+            command(firing, fire -> fire.assign(right, TargetKey.unit(quickdraw.getId())));
             assertEquals(List.of("AC/20 RT@42", "Medium Laser LA@44", "Medium Laser RA@45"), queue(firing));
             command(firing, fire -> fire.selectUnit(SAGITTAIRE));
             onSwing(() -> {
@@ -272,7 +273,8 @@ class GpuFireDraftsTest {
     void aTurnTheServerSendsAgainIsLiveAgain() throws Exception {
         try (GpuFiringFixture firing = firing()) {
             scriptTurns(firing, LOCAL, ENEMY);
-            command(firing, fire -> fire.assign(eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO), firing.ahead.getId()));
+            command(firing, fire -> fire.assign(eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO),
+                  TargetKey.unit(firing.ahead.getId())));
             onSwing(() -> {
                 firing.display.getButDone().doClick(0);
                 return null;
@@ -393,16 +395,16 @@ class GpuFireDraftsTest {
             for (int weapon : new int[] { eqNum(firing, "LRM 20", Mek.LOC_LEFT_TORSO),
                                           eqNum(firing, "SRM 6", Mek.LOC_LEFT_TORSO), right,
                                           eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO) }) {
-                command(firing, fire -> fire.assign(weapon, firing.ahead.getId()));
+                command(firing, fire -> fire.assign(weapon, TargetKey.unit(firing.ahead.getId())));
             }
-            command(firing, fire -> fire.assign(left, crab.getId()));
-            command(firing, fire -> fire.assign(atm[0], crab.getId()));
+            command(firing, fire -> fire.assign(left, TargetKey.unit(crab.getId())));
+            command(firing, fire -> fire.assign(atm[0], TargetKey.unit(crab.getId())));
             onSwing(() -> {
                 GUIPreferences.getInstance().setAutoEndFiring(true);
                 return null;
             });
-            command(firing, fire -> fire.retarget(left, firing.ahead.getId()));
-            command(firing, fire -> fire.retarget(right, crab.getId()));
+            command(firing, fire -> fire.retarget(left, TargetKey.unit(firing.ahead.getId())));
+            command(firing, fire -> fire.retarget(right, TargetKey.unit(crab.getId())));
             verify(firing.client, never()).sendAttackData(anyInt(), any());
             List<String> canonical = List.of("Medium Laser CT@42", "Medium Laser CT@42", "LRM 20 LT@42",
                   "SRM 6 LT@42", "AC/20 RT@42", "Medium Laser LA@42", "Medium Laser RA@44", "ATM 6 LA@44");
@@ -428,7 +430,8 @@ class GpuFireDraftsTest {
             Entity sagittaire = own(firing);
             scriptTurns(firing, LOCAL, ENEMY, LOCAL);
             int cannon = eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
-            GpuFireOrders.Snapshot atlas = command(firing, fire -> fire.assign(cannon, firing.ahead.getId()));
+            GpuFireOrders.Snapshot atlas = command(firing,
+                  fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
             command(firing, fire -> fire.selectUnit(SAGITTAIRE));
             firing.board.source.setFocusUnit(ATLAS);
             onSwing(() -> {
@@ -510,7 +513,7 @@ class GpuFireDraftsTest {
     /** The Atlas's draft: its AC/20 at the Archer, kept as the Sagittaire is selected. */
     private static void draftTheAtlas(GpuFiringFixture firing) throws Exception {
         int cannon = eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
-        command(firing, fire -> fire.assign(cannon, firing.ahead.getId()));
+        command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
         command(firing, fire -> fire.selectUnit(SAGITTAIRE));
     }
 

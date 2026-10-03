@@ -26,16 +26,19 @@ import java.awt.AWTEvent;
 import java.awt.GraphicsEnvironment;
 import java.awt.Toolkit;
 import java.awt.event.AWTEventListener;
+import java.awt.event.InputEvent;
 import java.io.File;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import javax.swing.JFrame;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JSpinner;
 
 import megamek.client.Client;
 import megamek.client.ui.Messages;
@@ -298,6 +301,9 @@ class GpuSwingCutTest {
             field.setAccessible(true);
             field.set(gui, new HashMap<>(Map.of(view.getBoardId(), ruler)));
             doCallRealMethod().when(gui).measureLineOfSight(anyInt(), any(), any());
+            doCallRealMethod().when(gui).setRulerHeight(anyInt(), any(), anyInt());
+            // The source measures on the board the client shows.
+            doReturn(Optional.of(view)).when(gui).getCurrentBoardState();
             GpuBoardSource source = onSwing(() -> new GpuBoardSource(view, () -> fixture.panel));
             Coords from = fixture.entity.getPosition();
             Coords to = new Coords(from.getX(), from.getY() - 3);
@@ -323,11 +329,27 @@ class GpuSwingCutTest {
                     view.checkLOS(to);
                     return null;
                 });
-                source.los().lineOfSight(fixture.entity.getId(), other);
+                source.los().lineOfSight(fixture.entity.getId(), other, Float.NaN);
                 onSwing(() -> null);
                 assertEquals(List.of(true, from, other), onSwing(() -> List.of(ruler.isVisible(),
                       view.getRulerStart(), view.getRulerEnd())), "The menu's line of sight measures with the ruler");
                 assertNull(onSwing(view::getFirstLOS), "and ends the Ctrl measurement waiting for its second point");
+
+                // Ctrl clicks at the heights the pointer shows (the user's decision of 2026-10-03): a building's floor
+                // two levels above its hex for the first point, the ground for the second.
+                Coords up = new Coords(from.getX() + 1, from.getY() - 1);
+                Coords down = new Coords(from.getX(), from.getY() - 2);
+                float level = BoardGeometry.level();
+                int upLevel = onSwing(() -> view.getBoard().getHex(up).getLevel());
+                int downLevel = onSwing(() -> view.getBoard().getHex(down).getLevel());
+                source.measure(up, InputEvent.CTRL_DOWN_MASK, (upLevel + 2) * level + .1f);
+                source.measure(down, InputEvent.CTRL_DOWN_MASK, downLevel * level + .1f);
+                onSwing(() -> null);
+                assertEquals(List.of(up, down, 2, 0), onSwing(() -> {
+                    List<JSpinner> heights = GpuDialogRoutingTest.components(ruler, JSpinner.class);
+                    return List.of(view.getRulerStart(), view.getRulerEnd(), heights.get(0).getValue(),
+                          heights.get(1).getValue());
+                }), "The ruler measures from and to the pointed heights");
             } finally {
                 Toolkit.getDefaultToolkit().removeAWTEventListener(listener);
                 dismiss();

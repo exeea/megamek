@@ -450,7 +450,7 @@ class GpuHudInteractionSmokeTest {
                     assertEquals(List.of("A" + TIMBER_WOLF), letters(play.fire()));
                     assertEquals(-1, live.hud.state.armedWeapon);
                     // 102: a second target, B, made primary on its card: no letter changes.
-                    play.command(orders -> orders.assign(lrm, BATTLEMASTER));
+                    play.command(orders -> orders.assign(lrm, TargetKey.unit(BATTLEMASTER)));
                     play.click(play.inside("target-card-" + BATTLEMASTER, "card-primary"));
                     assertEquals(List.of("A" + TIMBER_WOLF, "B" + BATTLEMASTER), letters(play.fire()));
                     assertTrue(play.target(BATTLEMASTER).primary(), "B is primary");
@@ -461,13 +461,14 @@ class GpuHudInteractionSmokeTest {
                     assertEquals("A", play.texts("weapons-pill-" + BATTLEMASTER).getFirst(), "The pill reads A");
                     // As the prototype: every weapon that reaches it on the Timber Wolf again.
                     for (int weapon : List.of(cannon, srm, leftLaser, rightLaser)) {
-                        play.command(orders -> orders.assign(weapon, TIMBER_WOLF));
+                        play.command(orders -> orders.assign(weapon, TargetKey.unit(TIMBER_WOLF)));
                     }
                     live.zoom(new Coords(13, 10), HEX);
                     live.capture("p2-declaration.png");
                     // 111: Alt+Down on a focused grip of the target card reorders the attacks.
                     List<String> before = orders(play.fire());
-                    int first = play.fire().attacks().stream().filter(attack -> attack.targetId() == TIMBER_WOLF)
+                    int first = play.fire().attacks().stream()
+                          .filter(attack -> attack.target().equals(TargetKey.unit(TIMBER_WOLF)))
                           .findFirst().orElseThrow().eqNum();
                     Actor grip = play.inside("target-card-" + TIMBER_WOLF, "card-grip-" + first);
                     play.click(grip);
@@ -827,12 +828,12 @@ class GpuHudInteractionSmokeTest {
 
     /** The weapon attacks in fire order: "{eqNum}@{target}". */
     private static List<String> orders(GpuFireOrders.Snapshot fire) {
-        return fire.attacks().stream().map(attack -> attack.eqNum() + "@" + attack.targetId()).toList();
+        return fire.attacks().stream().map(attack -> attack.eqNum() + "@" + attack.target().id()).toList();
     }
 
     /** The targets in letter order: "{letter}{target}". */
     private static List<String> letters(GpuFireOrders.Snapshot fire) {
-        return fire.targets().stream().map(target -> target.letter() + "" + target.id()).toList();
+        return fire.targets().stream().map(target -> target.letter() + "" + target.key().id()).toList();
     }
 
     /** The 3D camera's pose: focus, zoom, azimuth and tilt. */
@@ -1078,7 +1079,8 @@ class GpuHudInteractionSmokeTest {
         }
 
         GpuFireOrders.Target target(int id) {
-            return fire().targets().stream().filter(target -> target.id() == id).findFirst().orElseThrow();
+            return fire().targets().stream().filter(target -> target.key().equals(TargetKey.unit(id))).findFirst()
+                  .orElseThrow();
         }
 
         GpuFireOrders.WeaponRow weapon(int eqNum) {

@@ -76,11 +76,11 @@ class GpuMapPreviewSmokeTest {
                           "Woods/Jungle elevation: 2"), card, "The hex and what a player sees there");
                     GpuBoardTestUi.capture(new File(output, "map-preview-card.png"));
 
-                    source.get().measure(new Coords(5, 7), InputEvent.CTRL_DOWN_MASK);
+                    source.get().measure(new Coords(5, 7), InputEvent.CTRL_DOWN_MASK, Float.NaN);
                     settle(view, source.get());
                     assertTrue(texts(GpuBoardTestUi.stage().getRoot().findActor("map-hint"))
                           .contains(Messages.getString("GpuBoard.hud.hint.completeLos")), "The status line waits");
-                    source.get().measure(new Coords(5, 1), 0);
+                    source.get().measure(new Coords(5, 1), 0, Float.NaN);
                     settle(view, source.get());
                     var field = GpuMapSource.class.getDeclaredField("ruler");
                     field.setAccessible(true);

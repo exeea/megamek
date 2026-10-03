@@ -346,7 +346,7 @@ class GpuHudInputTest {
         }
         assertTrue(hud.hit(10, 10), "the scrim takes every press");
         hud.boardPress();
-        hud.boardClick(HEX, Entity.NONE, Input.Buttons.LEFT, 0, 10, 10);
+        hud.boardClick(HEX, Entity.NONE, Input.Buttons.LEFT, 0, 10, 10, Float.NaN);
         assertSame(modal, hud.stage.getKeyboardFocus());
 
         assertTrue(modalKeys.containsAll(List.of(Input.Keys.ENTER, Input.Keys.UP, Input.Keys.DOWN, Input.Keys.LEFT,
@@ -481,7 +481,10 @@ class GpuHudInputTest {
         click(HEX, FIRST, 0);
         assertEquals(Entity.NONE, hud.state.inspected, "selecting ends the inspection");
         click(HEX, Entity.NONE, CTRL_DOWN_MASK);
-        verify(source).click(HEX, false, CTRL_DOWN_MASK);
+        verify(source).measure(HEX, CTRL_DOWN_MASK, Float.NaN);
+        // At the height the pointer shows (the user's decision of 2026-10-03), the terrain hit's world height.
+        hud.boardClick(HEX, Entity.NONE, Input.Buttons.LEFT, ALT_DOWN_MASK, 100, 100, 3.5f);
+        verify(source).measure(HEX, ALT_DOWN_MASK, 3.5f);
         // With a route, Shift on an own unit pins a waypoint in its hex instead of selecting it.
         update(moving, panels(move(true, List.of(STEP)), GpuPhysicalOptions.Snapshot.EMPTY), null);
         click(HEX, SECOND, SHIFT_DOWN_MASK);
@@ -490,15 +493,15 @@ class GpuHudInputTest {
 
         update(status(3, GamePhase.FIRING, true, FIRST, 1, actor, ready, foe, blip), GpuHudData.EMPTY, null);
         click(HEX, FOE, 0);
-        verify(fire).focusTarget(FOE);
+        verify(fire).focusTarget(TargetKey.unit(FOE));
         click(HEX, BLIP, 0);
         // The fire orders refuse a sensor contact with their toast (H19).
-        verify(fire).focusTarget(BLIP);
+        verify(fire).focusTarget(TargetKey.unit(BLIP));
         click(HEX, SECOND, 0);
         click(HEX, FIRST, 0);
         verify(fire, times(1)).selectUnit(anyInt());
         verify(fire).selectUnit(SECOND);
-        verify(fire, times(2)).focusTarget(anyInt());
+        verify(fire, times(2)).focusTarget(any(TargetKey.class));
 
         GpuPhysicalOptions.Snapshot adjacent = new GpuPhysicalOptions.Snapshot(true, FIRST, Entity.NONE, List.of(FOE),
               List.of());
@@ -522,7 +525,7 @@ class GpuHudInputTest {
         assertEquals(Entity.NONE, hud.state.inspected);
         assertEquals(SECOND, hud.state.focus());
         verify(source, never()).selectUnit(anyInt());
-        hud.boardClick(HEX, SECOND, Input.Buttons.RIGHT, 0, 30, 40);
+        hud.boardClick(HEX, SECOND, Input.Buttons.RIGHT, 0, 30, 40, Float.NaN);
         verifyNoInteractions(moves);
     }
 
@@ -590,7 +593,7 @@ class GpuHudInputTest {
                   new GpuLosResult.Snapshot(pending), GpuPlayers.Snapshot.EMPTY);
             update(moving, waiting, null);
             click(HEX, Entity.NONE, 0);
-            verify(source).click(HEX, false, pending);
+            verify(source).measure(HEX, pending, Float.NaN);
             assertEquals(UiKit.text(pending == CTRL_DOWN_MASK ? "GpuBoard.hud.hint.completeLos"
                         : "GpuBoard.hud.hint.completeDistance"),
                   GpuHintLine.items(new GpuHud.Inputs(frame(moving, waiting), GpuHud.HudView.EMPTY, null,
@@ -664,11 +667,11 @@ class GpuHudInputTest {
               false)), GpuHudData.EMPTY, null);
         hud.state.armedWeapon = 4;
         click(HEX, FOE, 0);
-        verify(fire).assign(4, FOE);
+        verify(fire).assign(4, TargetKey.unit(FOE));
         assertEquals(-1, hud.state.armedWeapon);
         click(HEX, FOE, 0);
-        verify(fire, times(2)).focusTarget(FOE);
-        verify(fire, times(1)).assign(anyInt(), anyInt());
+        verify(fire, times(2)).focusTarget(TargetKey.unit(FOE));
+        verify(fire, times(1)).assign(anyInt(), any(TargetKey.class));
 
         hud.state.armedWeapon = 5;
         assertTrue(press(Input.Keys.FORWARD_DEL, KeyEvent.VK_DELETE, 0));
@@ -685,7 +688,7 @@ class GpuHudInputTest {
     }
 
     private void click(Coords coords, int unitId, int modifiers) {
-        hud.boardClick(coords, unitId, Input.Buttons.LEFT, modifiers, 100, 100);
+        hud.boardClick(coords, unitId, Input.Buttons.LEFT, modifiers, 100, 100, Float.NaN);
     }
 
     private void update(GpuBattleStatus.Snapshot status) {

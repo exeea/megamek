@@ -157,13 +157,13 @@ final class GpuNameplates implements GpuHud.Component {
         List<UnitStatus> units = state.presentedUnits();
         UnitStatus focus = units.stream().filter(unit -> unit.id() == state.focus()).findFirst().orElse(null);
         // The target cards replace the plates of the attack targets and of the focused enemy (overlay.js:105).
-        Set<Integer> carded = fire.carded();
+        Set<TargetKey> carded = fire.carded();
         int physicalTarget = physical.active() ? physical.targetId() : Entity.NONE;
         boolean many = units.size() > MANY_UNITS;
         Set<Integer> shown = new HashSet<>();
         for (UnitStatus unit : units) {
             Vector2 head = view.unitHeads().get(unit.id());
-            if (head == null || carded.contains(unit.id())) {
+            if (head == null || carded.contains(TargetKey.unit(unit.id()))) {
                 continue;
             }
             Plate plate = plates.computeIfAbsent(unit.id(), Plate::new);

@@ -91,7 +91,7 @@ class GpuFiringCaptureTest {
                     assertEquals(1, line.source().elevation());
                     assertEquals(3, line.target().elevation());
                     assertEquals(fixture.entity.getId(), line.attackerId());
-                    assertEquals(42, line.targetId());
+                    assertEquals(TargetKey.unit(42), line.targetKey());
                 }
                 fixture.view.clearAllAttacks();
                 fixture.source.refresh();
@@ -126,16 +126,17 @@ class GpuFiringCaptureTest {
                 fixture.source.refresh();
                 var lines = fixture.source.takeFrame().scene().firingLines();
                 assertEquals(4, lines.size(), "Stacked attackers and targets must retain their identities");
-                assertEquals(Set.of(42, 43), lines.stream().map(BoardScene.FiringLine::targetId).collect(Collectors.toSet()));
-                assertEquals(List.of(42), lines.stream().filter(line -> line.attackerId() == 45)
-                      .map(BoardScene.FiringLine::targetId).toList());
+                assertEquals(Set.of(TargetKey.unit(42), TargetKey.unit(43)),
+                      lines.stream().map(BoardScene.FiringLine::targetKey).collect(Collectors.toSet()));
+                assertEquals(List.of(TargetKey.unit(42)), lines.stream().filter(line -> line.attackerId() == 45)
+                      .map(BoardScene.FiringLine::targetKey).toList());
                 assertEquals(3, lines.stream().filter(line -> line.attackerId() == fixture.entity.getId()).count(),
                       "Repeated weapons from the same attacker still share a trace");
                 fixture.view.getAttackSprites().stream().filter(sprite -> sprite.getTargetedEntity().getId() == 42)
                       .forEach(sprite -> sprite.setHidden(true));
                 fixture.source.refresh();
-                assertEquals(List.of(43), fixture.source.takeFrame().scene().firingLines().stream()
-                      .map(BoardScene.FiringLine::targetId).toList());
+                assertEquals(List.of(TargetKey.unit(43)), fixture.source.takeFrame().scene().firingLines().stream()
+                      .map(BoardScene.FiringLine::targetKey).toList());
             });
         }
     }
@@ -159,7 +160,8 @@ class GpuFiringCaptureTest {
                         assertEquals(1, lines.size());
                         assertEquals(phase != GamePhase.FIRING && phase != GamePhase.FIRING_REPORT, lines.getFirst().indirect());
                         assertEquals(2.15f, lines.getFirst().target().elevation(), 0.001f);
-                        assertEquals(Entity.NONE, lines.getFirst().targetId(), "A hex target must not mark an unrelated unit");
+                        assertEquals(TargetKey.of(target), lines.getFirst().targetKey(),
+                              "A hex target is named as its attack names it, never as an unrelated unit");
                     }
                 } catch (Exception error) {
                     throw new IllegalStateException(error);

@@ -307,7 +307,8 @@ class GpuBoardLabelsSmokeTest {
                 // Shot 06: a third target (C, the King Crab) and three traces; the cards of B and C are collapsed.
                 labels = new Labels(hud, board.camera);
                 List<GpuFireOrders.Target> three = new ArrayList<>(fire(null).targets());
-                three.add(new GpuFireOrders.Target(KING_CRAB, 'C', "King Crab", false, 1, true));
+                three.add(new GpuFireOrders.Target(TargetKey.unit(KING_CRAB), 'C', "King Crab", false, 1, true,
+                      null));
                 frame = frameOf(bands, declaring, panels(GpuMovePlan.Snapshot.EMPTY,
                       orders(fire(null), three, List.of()), GpuFirePreview.Snapshot.NONE), GpuReportLog.Snapshot.EMPTY);
                 frame(board, false, atlasHex, 118, 980, 850);
@@ -738,8 +739,8 @@ class GpuBoardLabelsSmokeTest {
                       GpuFirePreview.Snapshot.NONE), GpuReportLog.Snapshot.EMPTY);
                 GpuHud.HudView view = view(false, units);
                 // The Timber Wolf's card covers its head; the BattleMaster's stands above and left of it.
-                labels.labels.cards(Map.of(TIMBER_WOLF, new Rectangle(650, 680, 200, 100), BATTLEMASTER,
-                      new Rectangle(900, 450, 200, 80)));
+                labels.labels.cards(Map.of(TargetKey.unit(TIMBER_WOLF), new Rectangle(650, 680, 200, 100),
+                      TargetKey.unit(BATTLEMASTER), new Rectangle(900, 450, 200, 80)));
                 labels.update(hud, frame, view);
                 // Badges bottom-centred 4 over the heads; an automatic success reads 2+; none on a card's unit.
                 assertEquals(Map.of(KING_CRAB, List.of("2+", "100%"), ENEMY_LOCUST, List.of(OUT_OF_ARC)),
@@ -922,7 +923,7 @@ class GpuBoardLabelsSmokeTest {
             overlay.render(camera);
             if (tactical) {
                 icons.update(true, camera, board.scene, frame.status(), unit -> unit.id() == frame.status().actorId()
-                            || fire.active() && unit.id() == fire.focusTargetId(), unit -> false, board.poses,
+                            || fire.active() && unit.id() == fire.focus().key().unitId(), unit -> false, board.poses,
                       iconAnchors, board.surfaces);
                 icons.render(camera);
                 overlay.renderGhost(camera, icons::instance);
@@ -1025,9 +1026,9 @@ class GpuBoardLabelsSmokeTest {
      * Stand-ins for G9's card placement: each target's card above its head as shots 05 and 06 show them (A to its
      * upper right, the others above and to the left), kept 8 inside the window.
      */
-    private static Map<Integer, Rectangle> cards(GpuHudTestStage hud, GpuHud.HudView view,
+    private static Map<TargetKey, Rectangle> cards(GpuHudTestStage hud, GpuHud.HudView view,
           Map<Integer, Character> letters) {
-        Map<Integer, Rectangle> cards = new HashMap<>();
+        Map<TargetKey, Rectangle> cards = new HashMap<>();
         letters.forEach((id, letter) -> {
             Vector2 head = view.unitHeads().get(id);
             if (head != null) {
@@ -1038,7 +1039,7 @@ class GpuBoardLabelsSmokeTest {
                 };
                 card.x = Math.max(8, Math.min(card.x, hud.width() - 8 - card.width));
                 card.y = Math.max(8, Math.min(card.y, hud.height() - 8 - card.height));
-                cards.put(id, card);
+                cards.put(TargetKey.unit(id), card);
             }
         });
         return cards;
@@ -1251,7 +1252,7 @@ class GpuBoardLabelsSmokeTest {
     /** The fire orders with other targets and TN badges. */
     private static GpuFireOrders.Snapshot orders(GpuFireOrders.Snapshot fire, List<GpuFireOrders.Target> targets,
           List<GpuFireOrders.Badge> badges) {
-        return new GpuFireOrders.Snapshot(fire.active(), fire.editable(), fire.actorId(), fire.focusTargetId(),
+        return new GpuFireOrders.Snapshot(fire.active(), fire.editable(), fire.actorId(), fire.focus(),
               fire.selectedWeapon(), fire.weapons(), targets, fire.attacks(), fire.twist(), fire.canTwistLeft(),
               fire.canTwistRight(), fire.torsoLabel(), fire.heat(), fire.solution(), fire.frontArc(), badges,
               fire.hoverBest(), fire.drafted(), fire.pendingUnits(), fire.autoDeclareRemaining(), fire.aim());

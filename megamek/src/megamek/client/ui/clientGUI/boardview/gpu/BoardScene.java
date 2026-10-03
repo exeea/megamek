@@ -129,8 +129,12 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         rangeBands = Map.copyOf(rangeBands);
     }
 
-    /** Absolute endpoint levels and displayed attack modes, copied from the existing visible attack sprites. */
-    record FiringLine(Waypoint source, Waypoint target, int rgb, boolean indirect, int attackerId, int targetId) { }
+    /**
+     * Absolute endpoint levels and displayed attack modes, copied from the existing visible attack sprites, with the
+     * attacker and the target the attack names.
+     */
+    record FiringLine(Waypoint source, Waypoint target, int rgb, boolean indirect, int attackerId,
+          TargetKey targetKey) { }
 
     /** The weapon handler already determines these edges, brackets and colours. No range rules live in the renderer. */
     record RangeBorder(Coords coords, int edges, int rgb, String label) { }

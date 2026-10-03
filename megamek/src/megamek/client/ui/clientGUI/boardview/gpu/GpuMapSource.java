@@ -292,7 +292,7 @@ final class GpuMapSource implements BoardSource {
     }
 
     @Override
-    public void measure(Coords coords, int modifiers) {
+    public void measure(Coords coords, int modifiers, float pointedZ) {
         onSwing(() -> {
             if (closed || editor != null || coords == null || !board.contains(coords)) {
                 return;
@@ -301,6 +301,9 @@ final class GpuMapSource implements BoardSource {
                   : measuring == null ? 0 : GpuLosResult.pending(measuring);
             if (measurement != 0 && measuring() != null) {
                 measuring.mouseAction(coords, BoardClientState.BOARD_HEX_CLICK, measurement, 1);
+                if (!Float.isNaN(pointedZ)) {
+                    ruler.setHeight(coords, GpuLosResult.pointedHeight(board.getHex(coords), pointedZ));
+                }
                 refresh();
             }
         });

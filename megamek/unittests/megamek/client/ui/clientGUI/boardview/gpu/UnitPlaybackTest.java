@@ -442,7 +442,8 @@ class UnitPlaybackTest {
 
     private static BoardScene withRanges(BoardScene scene, String label) {
         Coords coords = new Coords(0, 0);
-        var line = new BoardScene.FiringLine(unit(1, 0).location(), unit(2, 4).location(), 0x44FF88, false, 1, 2);
+        var line = new BoardScene.FiringLine(unit(1, 0).location(), unit(2, 4).location(), 0x44FF88, false, 1,
+              TargetKey.unit(2));
         return new BoardScene(scene.boardId(), scene.width(), scene.height(), scene.tiles(), scene.units(),
               scene.plannedPath(), scene.selectedId(), scene.phase(), scene.commands(), scene.light(), List.of(line),
               List.of(new BoardScene.RangeBorder(coords, 63, 0x44FF88, label)), scene.markers(), scene.tactical(),

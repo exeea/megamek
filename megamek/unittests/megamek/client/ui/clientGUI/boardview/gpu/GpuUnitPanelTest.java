@@ -860,7 +860,7 @@ class GpuUnitPanelTest {
         when(fire.editable()).thenReturn(true);
         when(fire.actorId()).thenReturn(ATLAS);
         when(fire.selectedWeapon()).thenReturn(weapon);
-        when(fire.focusTargetId()).thenReturn(Entity.NONE);
+        when(fire.focus()).thenReturn(GpuFireOrders.Focus.NONE);
         return fire;
     }
 

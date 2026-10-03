@@ -566,9 +566,10 @@ class GpuForcesPanelSmokeTest {
     /** The fire orders of an actor with {@code attacks} queued attacks. */
     private static GpuFireOrders.Snapshot fire(int actor, int attacks) {
         List<GpuFireOrders.Attack> queued = IntStream.range(0, attacks).mapToObj(index -> new GpuFireOrders.Attack(
-              index, 6, "Medium Laser", "RA", "Energy", "", 0, 7, .58, "")).toList();
-        return new GpuFireOrders.Snapshot(true, true, actor, 6, -1, List.of(), List.of(), queued, 0, false, false, "",
-              null, null, null, List.of(), null, Map.of(), 5, 0, null);
+              index, TargetKey.unit(6), "Medium Laser", "RA", "Energy", "", 0, 7, .58, "")).toList();
+        return new GpuFireOrders.Snapshot(true, true, actor, new GpuFireOrders.Focus(TargetKey.unit(6), "", null), -1,
+              List.of(), List.of(), queued, 0, false, false, "", null, null, null, List.of(), null, Map.of(), 5, 0,
+              null);
     }
 
     private static GpuReportLog.CombatEvent attack(int attacker, boolean hit) {

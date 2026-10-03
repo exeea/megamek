@@ -1050,7 +1050,7 @@ final class GpuBoardSource implements BoardSource {
                 }
                 result.add(new BoardScene.FiringLine(firingEndpoint(attacker), firingEndpoint(target),
                       attacker.getOwner().getColour().getColour().getRGB(), indirect, attacker.getId(),
-                      target instanceof Entity entity ? entity.getId() : Entity.NONE));
+                      TargetKey.of(target)));
             }
         }
         // Multiple weapons on one target share a trace, but direct and indirect fire remain distinct.
@@ -1366,10 +1366,30 @@ final class GpuBoardSource implements BoardSource {
 
     public void click(Coords coords, boolean doubleClick, int modifiers) {
         SwingUtilities.invokeLater(() -> {
-            if (acceptsInput() && isCurrentView(view) && coords != null && (view.game.getPhase().isOnMap()
-                  || isMeasurement(modifiers))) {
-                view.mouseAction(coords, doubleClick ? BoardClientState.BOARD_HEX_DOUBLE_CLICK : BoardClientState.BOARD_HEX_CLICK,
-                      modifiers, 1);
+            if (acceptsInput()) {
+                clickNow(coords, doubleClick, modifiers);
+                refresh();
+            }
+        });
+    }
+
+    /** EDT: the board click {@link #click} posts, run now, as a HUD command runs it inside its own guard. */
+    void clickNow(Coords coords, boolean doubleClick, int modifiers) {
+        if (isCurrentView(view) && coords != null && (view.game.getPhase().isOnMap() || isMeasurement(modifiers))) {
+            view.mouseAction(coords, doubleClick ? BoardClientState.BOARD_HEX_DOUBLE_CLICK
+                  : BoardClientState.BOARD_HEX_CLICK, modifiers, 1);
+        }
+    }
+
+    @Override
+    public void measure(Coords coords, int modifiers, float pointedZ) {
+        SwingUtilities.invokeLater(() -> {
+            if (acceptsInput() && isCurrentView(view) && coords != null && view.getBoard().contains(coords)) {
+                view.mouseAction(coords, BoardClientState.BOARD_HEX_CLICK, modifiers, 1);
+                if (!Float.isNaN(pointedZ) && view.getClientgui() != null) {
+                    view.getClientgui().setRulerHeight(view.getBoardId(), coords,
+                          GpuLosResult.pointedHeight(view.getBoard().getHex(coords), pointedZ));
+                }
                 refresh();
             }
         });

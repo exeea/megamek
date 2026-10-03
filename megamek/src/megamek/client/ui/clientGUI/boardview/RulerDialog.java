@@ -566,6 +566,18 @@ public class RulerDialog extends JDialog implements BoardViewListener {
         bv.drawRuler(start, end, startColor, endColor);
     }
 
+    /**
+     * Sets the height of the measurement's point at {@code point}, start or end, as the GPU view's pointer shows it:
+     * the floor it points at above the hex. A point elsewhere is left as it is.
+     */
+    public void setHeight(Coords point, int height) {
+        if (point.equals(end)) {
+            height2.setValue(height);
+        } else if (point.equals(start)) {
+            height1.setValue(height);
+        }
+    }
+
     private void clear() {
         start = null;
         end = null;

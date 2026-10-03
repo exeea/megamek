@@ -155,10 +155,10 @@ final class GpuBoardLabels implements GpuHud.Component {
     };
     private final List<Pin> pinActors = new ArrayList<>();
     private final Map<Integer, Badge> badgeActors = new HashMap<>();
-    /** The heads of the units that get a target card this frame, for the leaders. */
-    private final Map<Integer, Vector2> cardHeads = new HashMap<>();
+    /** The anchors of the targets that get a card this frame, for the leaders. */
+    private final Map<TargetKey, Vector2> cardHeads = new HashMap<>();
     private List<String> tipLines = List.of();
-    private Map<Integer, Rectangle> cards = Map.of();
+    private Map<TargetKey, Rectangle> cards = Map.of();
     private GpuHud.Inputs inputs;
     private boolean frozen;
     private float popLife = POP_LIFE;
@@ -248,10 +248,10 @@ final class GpuBoardLabels implements GpuHud.Component {
     }
 
     /**
-     * The target cards' rectangles by target id, in this component's units, as the target cards placed them this
-     * frame; a card that does not cover its target's head gets a leader to it (r1 3.13).
+     * The target cards' rectangles by target, in this component's units, as the target cards placed them this frame;
+     * a card that does not cover its target's anchor gets a leader to it (r1 3.13).
      */
-    void cards(Map<Integer, Rectangle> placed) {
+    void cards(Map<TargetKey, Rectangle> placed) {
         cards = Map.copyOf(placed);
     }
 
@@ -437,16 +437,16 @@ final class GpuBoardLabels implements GpuHud.Component {
         }
     }
 
-    // Weapon declaration: TN badges on other enemies, traces and the heads of the carded units (A.8 H23, H32).
+    // Weapon declaration: TN badges on other enemies, traces and the anchors of the carded targets (A.8 H23, H32).
 
     private void fire(BoardScene scene, GpuFireOrders.Snapshot fire, GpuHud.HudView view, Set<Integer> badged) {
         if (!fire.active()) {
             return;
         }
-        Set<Integer> carded = fire.carded();
+        Set<TargetKey> carded = fire.carded();
         for (GpuFireOrders.Badge badge : fire.badges()) {
             // Target cards replace the labels of their units.
-            if (carded.contains(badge.targetId())) {
+            if (carded.contains(TargetKey.unit(badge.targetId()))) {
                 continue;
             }
             boolean reason = badge.reason() != null && !badge.reason().isEmpty();
@@ -457,14 +457,17 @@ final class GpuBoardLabels implements GpuHud.Component {
         Vector2 middle = trace(fire.actorId(), view);
         GpuFireOrders.FrontArc arc = fire.frontArc();
         for (GpuFireOrders.Target target : fire.targets()) {
-            Vector2 to = trace(target.id(), view);
+            int unit = target.key().unitId();
+            // A hex, building or minefield: its hex's centre.
+            Vector2 to = unit != Entity.NONE ? trace(unit, view) : view.head(target.key());
             if (middle == null || to == null) {
                 continue;
             }
-            BoardScene.Unit aimed = unit(scene, target.id());
+            BoardScene.Unit aimed = unit(scene, unit);
+            Coords at = aimed != null ? aimed.location().coords() : target.hex();
             // The torso's facing: the front arc's hexside.
-            Vector2 from = arc == null || aimed == null ? middle : muzzle(scene, view.unitRects().get(fire.actorId()),
-                  arc.origin(), arc.facing(), aimed.location().coords(), middle, view);
+            Vector2 from = arc == null || at == null ? middle : muzzle(scene, view.unitRects().get(fire.actorId()),
+                  arc.origin(), arc.facing(), at, middle, view);
             if (view.tactical()) {
                 strokes.add(from, to, FLAT_TRACE_WIDTH, target.primary() ? FLAT_TRACE : FLAT_TRACE_SECONDARY,
                       FLAT_TRACE_DASH, FLAT_TRACE_DASH, false, false);
@@ -473,10 +476,10 @@ final class GpuBoardLabels implements GpuHud.Component {
                       false, true);
             }
         }
-        for (int id : carded) {
-            Vector2 head = view.unitHeads().get(id);
+        for (TargetKey key : carded) {
+            Vector2 head = view.head(key);
             if (head != null) {
-                cardHeads.put(id, head);
+                cardHeads.put(key, head);
             }
         }
     }
@@ -708,8 +711,8 @@ final class GpuBoardLabels implements GpuHud.Component {
             for (Stroke stroke : list) {
                 line(batch, stroke, x, y, parentAlpha);
             }
-            // Leaders run from the nearest point of a card to its unit's head, unless the card covers the head.
-            for (Map.Entry<Integer, Vector2> entry : cardHeads.entrySet()) {
+            // Leaders run from the nearest point of a card to its target's anchor, unless the card covers it.
+            for (Map.Entry<TargetKey, Vector2> entry : cardHeads.entrySet()) {
                 Rectangle card = cards.get(entry.getKey());
                 Vector2 head = entry.getValue();
                 if (card == null) {

@@ -47,7 +47,8 @@ import megamek.common.units.Entity;
 
 /**
  * Target cards over the board while the local unit declares its attacks (C.1 G9; r1 3.13, r2 5, plan A.8 H24-H29,
- * H31): one card per target in letter order, then one for the focused enemy without attacks. A card shows the letter,
+ * H31): one card per target in letter order, then one for the focus without attacks; a target that is no unit has its
+ * card at its hex (GpuHud.HudView.head). A card shows the letter,
  * the name and the primary state, then the target's attacks in fire order (grip, weapon, ammunition, roll, remove)
  * over a footer; with more than two targets only the focused card, or one opened by "Show attacks", lists
  * them. GpuCardPlacement keeps the cards clear of the HUD panels and the units; {@link #placed()} gives their
@@ -78,10 +79,10 @@ final class GpuTargetCards implements GpuHud.Component {
 
     /**
      * What one card shows, so that a frame that changes none of it rebuilds nothing. {@code target} is null for the
-     * focused enemy without attacks; {@code attacks} counts the target's attacks, {@code rows} lists them while the
-     * card is expanded; {@code selected}: a weapon is selected (the empty card's hint).
+     * focus without attacks; {@code attacks} counts the target's attacks, {@code rows} lists them while the card is
+     * expanded; {@code selected}: a weapon is selected (the empty card's hint).
      */
-    private record CardView(int id, Target target, String name, boolean expanded, List<Row> rows, int attacks,
+    private record CardView(TargetKey key, Target target, String name, boolean expanded, List<Row> rows, int attacks,
           boolean selected, boolean editable, float width) { }
 
     /** An attack row: the attack, its place in the fire order (1 first) and its weapon's row, null without one. */
@@ -105,12 +106,12 @@ final class GpuTargetCards implements GpuHud.Component {
     private final TextButton.TextButtonStyle removeStyle;
     private final TextButton.TextButtonStyle showStyle;
     private final Drawable focusRing;
-    /** The shown cards by target id, in letter order with the focus card last. */
-    private final Map<Integer, Card> cards = new LinkedHashMap<>();
-    private Map<Integer, Rectangle> placed = Map.of();
+    /** The shown cards by target, in letter order with the focus card last. */
+    private final Map<TargetKey, Card> cards = new LinkedHashMap<>();
+    private Map<TargetKey, Rectangle> placed = Map.of();
     private int actorId = Entity.NONE;
-    /** The card that "Show attacks" opened (S.ui.showCards); it stays expanded while its unit keeps a card. */
-    private int opened = Entity.NONE;
+    /** The card that "Show attacks" opened (S.ui.showCards); it stays expanded while its target keeps a card. */
+    private TargetKey opened = TargetKey.NONE;
 
     /** {@code menu} opens a row's queued-attack menu and the ammunition list (G12). */
     GpuTargetCards(GpuHudKit kit, GpuBoardSource source, GpuHudState state, GpuContextMenu menu) {
@@ -138,10 +139,10 @@ final class GpuTargetCards implements GpuHud.Component {
     }
 
     /**
-     * The cards' rectangles by target id as this frame placed and drew them, in stage units with y up; a card whose
+     * The cards' rectangles by target as this frame placed and drew them, in stage units with y up; a card whose
      * target is not drawn (behind the camera) is left out. GpuBoardLabels.cards draws their leaders from them.
      */
-    Map<Integer, Rectangle> placed() {
+    Map<TargetKey, Rectangle> placed() {
         return placed;
     }
 
@@ -150,30 +151,30 @@ final class GpuTargetCards implements GpuHud.Component {
         GpuFireOrders.Snapshot fire = inputs.frame().panels().fire();
         if (fire.actorId() != actorId) {
             actorId = fire.actorId();
-            opened = Entity.NONE;
+            opened = TargetKey.NONE;
         }
-        Set<Integer> carded = fire.active() ? fire.carded() : Set.of();
+        Set<TargetKey> carded = fire.active() ? fire.carded() : Set.of();
         if (!carded.contains(opened)) {
-            opened = Entity.NONE;
+            opened = TargetKey.NONE;
         }
-        Map<Integer, CardView> views = new LinkedHashMap<>();
-        for (int id : carded) {
-            views.put(id, view(fire, id, inputs.metrics()));
+        Map<TargetKey, CardView> views = new LinkedHashMap<>();
+        for (TargetKey key : carded) {
+            views.put(key, view(fire, key, inputs.metrics()));
         }
-        cards.keySet().removeIf(id -> {
-            boolean gone = !views.containsKey(id);
+        cards.keySet().removeIf(key -> {
+            boolean gone = !views.containsKey(key);
             if (gone) {
-                cards.get(id).table().remove();
+                cards.get(key).table().remove();
             }
             return gone;
         });
         int order = 0;
         for (CardView view : views.values()) {
-            Card card = cards.get(view.id());
+            Card card = cards.get(view.key());
             // A card whose row is dragged or still moves keeps it: the new orders show once the rows rest.
             if (card == null || !card.view().equals(view) && !card.busy()) {
                 card = rebuild(card, view);
-                cards.put(view.id(), card);
+                cards.put(view.key(), card);
             }
             card.table().setZIndex(order++);
         }
@@ -186,22 +187,22 @@ final class GpuTargetCards implements GpuHud.Component {
     }
 
     /** One card's view: its target (null for the focus without attacks), its rows while expanded and its width. */
-    private CardView view(GpuFireOrders.Snapshot fire, int id, GpuHud.Metrics metrics) {
-        Target target = fire.targets().stream().filter(candidate -> candidate.id() == id).findFirst().orElse(null);
-        boolean expanded = fire.targets().size() <= 2 || id == fire.focusTargetId() || id == opened;
+    private CardView view(GpuFireOrders.Snapshot fire, TargetKey key, GpuHud.Metrics metrics) {
+        Target target = fire.targets().stream().filter(candidate -> candidate.key().equals(key)).findFirst()
+              .orElse(null);
+        boolean expanded = fire.targets().size() <= 2 || key.equals(fire.focus().key()) || key.equals(opened);
         List<Row> rows = new ArrayList<>();
         List<Attack> attacks = fire.attacks();
         for (int index = 0; index < attacks.size(); index++) {
             Attack attack = attacks.get(index);
-            if (attack.targetId() == id) {
+            if (attack.target().equals(key)) {
                 WeaponRow weapon = fire.weapons().stream().filter(row -> row.eqNum() == attack.eqNum()).findFirst()
                       .orElse(null);
                 rows.add(new Row(attack, index + 1, attack.eqNum() < 0 ? null : weapon));
             }
         }
-        String name = target != null ? target.name() : state.presentedUnits().stream()
-              .filter(unit -> unit.id() == id).map(GpuBattleStatus.UnitStatus::name).findFirst().orElse("");
-        return new CardView(id, target, name, expanded, expanded ? rows : List.of(), rows.size(),
+        String name = target != null ? target.name() : fire.focus().name();
+        return new CardView(key, target, name, expanded, expanded ? rows : List.of(), rows.size(),
               fire.selectedWeapon() >= 0, fire.editable(), expanded ? metrics.card() : COMPACT_WIDTH);
     }
 
@@ -239,15 +240,17 @@ final class GpuTargetCards implements GpuHud.Component {
     private void place(GpuFireOrders.Snapshot fire, GpuHud.Inputs inputs) {
         GpuHud.HudView view = inputs.view();
         List<GpuCardPlacement.Card> shown = new ArrayList<>();
+        // The placement knows each shown card by its index here.
+        List<TargetKey> keys = new ArrayList<>();
         List<Rectangle> units = new ArrayList<>();
         Rectangle actor = view.unitRects().get(fire.actorId());
         if (actor != null) {
             units.add(actor);
         }
         for (Card card : cards.values()) {
-            int id = card.view().id();
-            Vector2 head = view.unitHeads().get(id);
-            Rectangle unit = view.unitRects().get(id);
+            TargetKey key = card.view().key();
+            Vector2 head = view.head(key);
+            Rectangle unit = view.unitRects().get(key.unitId());
             Table table = card.table();
             table.setVisible(head != null);
             if (head == null) {
@@ -266,7 +269,8 @@ final class GpuTargetCards implements GpuHud.Component {
             table.validate();
             table.setHeight(table.getPrefHeight());
             table.validate();
-            shown.add(new GpuCardPlacement.Card(id, table.getWidth(), table.getHeight(), target));
+            shown.add(new GpuCardPlacement.Card(keys.size(), table.getWidth(), table.getHeight(), target));
+            keys.add(key);
         }
         List<Rectangle> panels = new ArrayList<>();
         for (Rectangle panel : inputs.panelBounds()) {
@@ -276,12 +280,12 @@ final class GpuTargetCards implements GpuHud.Component {
         GpuHud.Metrics metrics = inputs.metrics();
         Rectangle bounds = new Rectangle(WINDOW_MARGIN, WINDOW_MARGIN, metrics.width() - 2 * WINDOW_MARGIN,
               metrics.height() - 2 * WINDOW_MARGIN);
-        Map<Integer, Rectangle> next = new LinkedHashMap<>();
-        GpuCardPlacement.place(shown, bounds, panels, units).forEach((id, rectangle) -> {
-            Table table = cards.get(id).table();
+        Map<TargetKey, Rectangle> next = new LinkedHashMap<>();
+        GpuCardPlacement.place(shown, bounds, panels, units).forEach((index, rectangle) -> {
+            Table table = cards.get(keys.get(index)).table();
             // The left and top edges on whole units, as the prototype's translate(round(x), round(y)).
             table.setPosition(Math.round(rectangle.x), Math.round(rectangle.y + rectangle.height) - rectangle.height);
-            next.put(id, new Rectangle(table.getX(), table.getY(), table.getWidth(), table.getHeight()));
+            next.put(keys.get(index), new Rectangle(table.getX(), table.getY(), table.getWidth(), table.getHeight()));
         });
         placed = next;
     }
@@ -291,14 +295,14 @@ final class GpuTargetCards implements GpuHud.Component {
     /**
      * A card (.tcard.panel), its frame neutral for every target (the user's decision of 2026-10-03; the letter carries
      * the target's colour): the header and its rule, then the attack
-     * rows and the footer, the empty card's hint, or the collapsed line. A click on it focuses its enemy and assigns
+     * rows and the footer, the empty card's hint, or the collapsed line. A click on it focuses its target and assigns
      * the armed weapon there, as a click on the unit does (H28, H16).
      */
     private Card build(CardView view) {
-        int id = view.id();
+        TargetKey key = view.key();
         Target target = view.target();
         Table table = ui.panel();
-        table.setName("target-card-" + id);
+        table.setName("target-card-" + key.id());
         table.setTouchable(Touchable.enabled);
         table.add(header(view)).growX().row();
         table.add(rule()).growX().height(1).row();
@@ -333,7 +337,7 @@ final class GpuTargetCards implements GpuHud.Component {
             public void clicked(InputEvent event, float x, float y) {
                 // The card's own controls do their own thing (the prototype's innermost data-act).
                 if (event.getTarget().firstAscendant(Button.class) == null) {
-                    GpuContextMenu.focusTarget(source, state, id);
+                    GpuContextMenu.focusTarget(source, state, key);
                 }
             }
         });
@@ -371,7 +375,7 @@ final class GpuTargetCards implements GpuHud.Component {
             UiKit.size(set.getLabel(), "hud-title", 11);
             set.add(set.getLabel()).padLeft(5);
             set.setDisabled(!view.editable());
-            onChange(set, () -> source.fire().setPrimary(view.id()));
+            onChange(set, () -> source.fire().setPrimary(view.key()));
             primary = set;
         }
         primary.setName("card-primary");
@@ -464,7 +468,7 @@ final class GpuTargetCards implements GpuHud.Component {
 
     /**
      * The collapsed line (.cmp): "{n} attack(s) assigned" and "Show attacks", which keeps the card open and focuses
-     * its enemy.
+     * its target.
      */
     private Table collapsed(CardView view) {
         Table line = new Table();
@@ -478,8 +482,8 @@ final class GpuTargetCards implements GpuHud.Component {
         show.add(show.getLabel()).height(FOOT_LINE);
         show.setName("card-show");
         onChange(show, () -> {
-            opened = opened == view.id() ? Entity.NONE : view.id();
-            source.fire().focusTarget(view.id());
+            opened = opened.equals(view.key()) ? TargetKey.NONE : view.key();
+            source.fire().focusTarget(view.key());
         });
         line.add(show).right();
         return line;

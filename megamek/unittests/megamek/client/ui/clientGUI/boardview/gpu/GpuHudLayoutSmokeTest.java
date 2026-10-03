@@ -284,8 +284,8 @@ class GpuHudLayoutSmokeTest {
     /** The local turn of the layout's phase; the weapons panel shows while the fire orders are active. */
     private static GpuBoardSource.Frame frame(Layout layout) {
         GpuFireOrders.Snapshot fire = !layout.panels().contains("weapons-panel") ? GpuFireOrders.Snapshot.EMPTY
-              : new GpuFireOrders.Snapshot(true, true, 1, Entity.NONE, -1, List.of(), List.of(), List.of(), 0, false,
-                    false, "", null, null, null, List.of(), null, Map.of(), 0, 0, null);
+              : new GpuFireOrders.Snapshot(true, true, 1, GpuFireOrders.Focus.NONE, -1, List.of(), List.of(),
+                    List.of(), 0, false, false, "", null, null, null, List.of(), null, Map.of(), 0, 0, null);
         GpuBattleStatus.UnitStatus unit = new GpuBattleStatus.UnitStatus(UNIT, GpuBattleStatus.Side.OWN, false,
               "Atlas AS7-D", "Atlas", "AS7-D", 100, "Assault", "", "Pilot", 4, 5, 1, 1, 0, 0, "30", 3, "5", 0, "", 0,
               0, 0, 0, false, false, false, false, Entity.DMG_NONE, List.of(), "", new Coords(5, 5), 0, null,

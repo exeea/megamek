@@ -55,6 +55,8 @@ final class GpuContextMenu implements GpuHud.Component {
     private Coords hex;
     /** Whether the open hex menu lists MegaMek's map menu, which a later frame brings. */
     private boolean mapListed;
+    /** The world height of the terrain the pointer hit where the open menu opened; NaN for none. */
+    private float pointedZ = Float.NaN;
     /** The frame parts the open hex menu last showed; a capture publishes new ones. */
     private String shownTooltip;
     private BoardScene.Context shownContext;
@@ -119,10 +121,19 @@ final class GpuContextMenu implements GpuHud.Component {
      * identified enemy (M3), a sensor contact (M4) or the hex (M5).
      */
     void open(Coords coords, int unitId, float x, float y) {
+        open(coords, unitId, x, y, Float.NaN);
+    }
+
+    /**
+     * As {@link #open(Coords, int, float, float)}, from the board, where the pointer hit terrain at world height
+     * {@code pointedZ} (NaN for none): its line of sight measures to that height.
+     */
+    void open(Coords coords, int unitId, float x, float y, float pointedZ) {
         if (inputs == null) {
             return;
         }
         cancel();
+        this.pointedZ = pointedZ;
         UnitStatus unit = state.presented(unitId);
         if (unit == null && (coords == null || inputs.frame().scene() == null)) {
             return;
@@ -161,27 +172,28 @@ final class GpuContextMenu implements GpuHud.Component {
      */
     private void enemyMenu(UnitStatus unit) {
         int id = unit.id();
+        TargetKey key = TargetKey.unit(id);
         GpuFireOrders.Snapshot fire = inputs.frame().panels().fire();
         UiMenuList list = new UiMenuList(ui);
         if (fire.active() && fire.editable() && !unit.destroyed()) {
             GpuFireOrders.WeaponRow armed = row(fire, state.armedWeapon);
             if (armed != null) {
                 item(list, text("GpuBoard.hud.context.assignArmed", armed.name()), null, true,
-                      () -> focusTarget(source, state, id));
+                      () -> focusTarget(source, state, key));
             }
-            GpuFireOrders.Target target = fire.targets().stream().filter(candidate -> candidate.id() == id)
+            GpuFireOrders.Target target = fire.targets().stream().filter(candidate -> candidate.key().equals(key))
                   .findFirst().orElse(null);
             if (target == null) {
-                item(list, text("GpuBoard.hud.context.setTarget"), null, true, () -> focusTarget(source, state, id));
+                item(list, text("GpuBoard.hud.context.setTarget"), null, true, () -> focusTarget(source, state, key));
             } else {
                 item(list, text("GpuBoard.hud.context.editAttacks"), null, true,
-                      () -> focusTarget(source, state, id));
+                      () -> focusTarget(source, state, key));
                 if (!target.primary()) {
                     item(list, text("GpuBoard.hud.context.makePrimary"), null, true,
-                          () -> source.fire().setPrimary(id));
+                          () -> source.fire().setPrimary(key));
                 }
                 item(list, text("GpuBoard.hud.context.removeTarget"), null, true,
-                      () -> source.fire().removeTarget(id));
+                      () -> source.fire().removeTarget(key));
             }
             list.separator();
         }
@@ -326,23 +338,23 @@ final class GpuContextMenu implements GpuHud.Component {
             return;
         }
         cancel();
-        int assigned = fire.attacks().stream().filter(attack -> attack.eqNum() == eqNum)
-              .mapToInt(GpuFireOrders.Attack::targetId).findFirst().orElse(Entity.NONE);
+        TargetKey assigned = fire.attacks().stream().filter(attack -> attack.eqNum() == eqNum)
+              .map(GpuFireOrders.Attack::target).findFirst().orElse(TargetKey.NONE);
         UiMenuList list = new UiMenuList(ui);
         if (fire.editable()) {
             for (GpuFireOrders.Target target : fire.targets().stream()
                   .sorted(Comparator.comparing(GpuFireOrders.Target::letter)).toList()) {
                 item(list, text("GpuBoard.hud.context.assignToTarget", target.letter(), target.name()),
-                      target.id() == assigned ? text("GpuBoard.hud.context.assigned") : null,
-                      shot(row, target.id()), () -> assign(eqNum, assigned, target.id()));
+                      target.key().equals(assigned) ? text("GpuBoard.hud.context.assigned") : null,
+                      shot(row, target.key()), () -> assign(eqNum, assigned, target.key()));
             }
-            int focus = fire.focusTargetId();
-            UnitStatus focused = state.presented(focus);
-            if (focused != null && fire.targets().stream().noneMatch(target -> target.id() == focus)) {
-                item(list, text("GpuBoard.hud.weapons.assignTo", name(focused)), null, shot(row, focus),
-                      () -> assign(eqNum, assigned, focus));
+            GpuFireOrders.Focus focus = fire.focus();
+            if (!focus.key().equals(TargetKey.NONE)
+                  && fire.targets().stream().noneMatch(target -> target.key().equals(focus.key()))) {
+                item(list, text("GpuBoard.hud.weapons.assignTo", focus.name()), null, shot(row, focus.key()),
+                      () -> assign(eqNum, assigned, focus.key()));
             }
-            if (assigned != Entity.NONE) {
+            if (!assigned.equals(TargetKey.NONE)) {
                 item(list, text("GpuBoard.hud.context.removeThisAttack"), null, true,
                       () -> source.fire().remove(eqNum));
             }
@@ -413,10 +425,10 @@ final class GpuContextMenu implements GpuHud.Component {
      * Assigns the weapon to the target (H15): a weapon that attacks another target is retargeted in its place (H18);
      * its own target is only focused.
      */
-    private void assign(int eqNum, int assigned, int target) {
-        if (assigned == target) {
+    private void assign(int eqNum, TargetKey assigned, TargetKey target) {
+        if (assigned.equals(target)) {
             source.fire().focusTarget(target);
-        } else if (assigned != Entity.NONE) {
+        } else if (!assigned.equals(TargetKey.NONE)) {
             source.fire().retarget(eqNum, target);
         } else {
             source.fire().assign(eqNum, target);
@@ -428,8 +440,8 @@ final class GpuContextMenu implements GpuHud.Component {
      * ({@code targetId}: its attack's, else the focus) has no reason against it. Other targets' numbers are not in the
      * orders; an assignment the rules refuse is answered by the fire service's refusal toast (H17).
      */
-    private static boolean shot(GpuFireOrders.WeaponRow row, int target) {
-        return row.usable() && (row.targetId() != target || row.reason() == null || row.reason().isBlank());
+    private static boolean shot(GpuFireOrders.WeaponRow row, TargetKey target) {
+        return row.usable() && (!row.target().equals(target) || row.reason() == null || row.reason().isBlank());
     }
 
     /**
@@ -446,8 +458,8 @@ final class GpuContextMenu implements GpuHud.Component {
         }
         cancel();
         GpuFireOrders.Attack attack = attacks.get(index);
-        boolean earlier = index > 0 && attacks.get(index - 1).targetId() == attack.targetId();
-        boolean later = index + 1 < attacks.size() && attacks.get(index + 1).targetId() == attack.targetId();
+        boolean earlier = index > 0 && attacks.get(index - 1).target().equals(attack.target());
+        boolean later = index + 1 < attacks.size() && attacks.get(index + 1).target().equals(attack.target());
         UiMenuList list = new UiMenuList(ui);
         item(list, text("GpuBoard.hud.context.fireEarlier"), text("GpuBoard.hud.context.altUp"),
               fire.editable() && earlier, () -> source.fire().move(eqNum, -1));
@@ -545,7 +557,7 @@ final class GpuContextMenu implements GpuHud.Component {
         UnitStatus acting = state.presented(acting());
         if (acting != null && acting.position() != null && to != null && !occupies(acting, to)) {
             item(list, text("GpuBoard.hud.context.lineOfSight", name(acting)), null, true,
-                  () -> source.los().lineOfSight(acting.id(), to));
+                  () -> source.los().lineOfSight(acting.id(), to, pointedZ));
         }
     }
 
@@ -559,13 +571,13 @@ final class GpuContextMenu implements GpuHud.Component {
     }
 
     /**
-     * As a left click on the enemy in the local declaration (H15, H16): focus it, and assign the armed weapon to it
+     * As a left click on the target in the local declaration (H15, H16): focus it, and assign the armed weapon to it
      * once.
      */
-    static void focusTarget(GpuBoardSource source, GpuHudState state, int id) {
-        source.fire().focusTarget(id);
+    static void focusTarget(GpuBoardSource source, GpuHudState state, TargetKey target) {
+        source.fire().focusTarget(target);
         if (state.armedWeapon >= 0) {
-            source.fire().assign(state.armedWeapon, id);
+            source.fire().assign(state.armedWeapon, target);
             state.armedWeapon = -1;
         }
     }

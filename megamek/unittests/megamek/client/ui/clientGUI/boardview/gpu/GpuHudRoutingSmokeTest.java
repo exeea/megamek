@@ -203,7 +203,7 @@ class GpuHudRoutingSmokeTest {
 
             routing.show(SCENARIOS.get(6));
             routing.click(FOE_HEX, Input.Buttons.LEFT, 0, 0);
-            verify(routing.fire).focusTarget(FOE_ID);
+            verify(routing.fire).focusTarget(TargetKey.unit(FOE_ID));
             for (Scenario classic : List.of(SCENARIOS.get(8), SCENARIOS.get(9))) {
                 clearInvocations(routing.source, routing.fire);
                 routing.show(classic);
@@ -727,7 +727,7 @@ class GpuHudRoutingSmokeTest {
                 verify(routing.source, never()).click(any(), anyBoolean(), anyInt());
                 verify(routing.source, never()).selectUnit(anyInt());
                 verify(routing.fire, never()).selectUnit(anyInt());
-                verify(routing.fire, never()).focusTarget(anyInt());
+                verify(routing.fire, never()).focusTarget(any(TargetKey.class));
 
                 routing.click(OWN_HEX, Input.Buttons.LEFT, 0, 0);
                 routing.view.render();
@@ -1052,8 +1052,8 @@ class GpuHudRoutingSmokeTest {
             routing.show(SCENARIOS.get(6));
             state.armedWeapon = 4;
             routing.click(FOE_HEX, Input.Buttons.LEFT, 0, 0);
-            verify(routing.fire).focusTarget(FOE_ID);
-            verify(routing.fire).assign(4, FOE_ID);
+            verify(routing.fire).focusTarget(TargetKey.unit(FOE_ID));
+            verify(routing.fire).assign(4, TargetKey.unit(FOE_ID));
             assertEquals(-1, state.armedWeapon, "the armed weapon is used once");
             clearInvocations(routing.fire);
             routing.show(routing.frame(GpuHudInputTest.status(3, GamePhase.FIRING, true, OWN_ID, 1,
@@ -1061,8 +1061,8 @@ class GpuHudRoutingSmokeTest {
                   GpuHudInputTest.unit(FOE_ID, ENEMY, false, false, 1, true)), GpuHudData.EMPTY));
             state.armedWeapon = 4;
             routing.click(FOE_HEX, Input.Buttons.LEFT, 0, 0);
-            verify(routing.fire).focusTarget(FOE_ID);
-            verify(routing.fire, never()).assign(anyInt(), anyInt());
+            verify(routing.fire).focusTarget(TargetKey.unit(FOE_ID));
+            verify(routing.fire, never()).assign(anyInt(), any(TargetKey.class));
             assertEquals(4, state.armedWeapon, "a sensor contact leaves the weapon armed");
 
             routing.show(SCENARIOS.get(4));

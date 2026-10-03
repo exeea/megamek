@@ -305,7 +305,7 @@ class GpuHudParitySmokeTest {
                 // 13: the King Crab's menu.
                 Vector3 crab = live.view.screenPosition(firing.board.game.getEntity(KING_CRAB).getPosition());
                 live.hud.boardClick(firing.board.game.getEntity(KING_CRAB).getPosition(), KING_CRAB,
-                      Input.Buttons.RIGHT, 0, Math.round(crab.x), Math.round(crab.y));
+                      Input.Buttons.RIGHT, 0, Math.round(crab.x), Math.round(crab.y), Float.NaN);
                 shot(live, "13", "13-context-menu.jpg", HEADER, MINIMAP, FORCES, WEAPONS, CARD_CHIP, SOLUTION,
                       FIRE_DOCK, free("context-menu-popover", 789, 193, 260, 241));
                 live.hud.boardPress();
@@ -319,16 +319,16 @@ class GpuHudParitySmokeTest {
 
                 // 06: the AC/20 moves to the King Crab (C), a third target.
                 int cannon = GpuFireOrdersTest.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
-                GpuFireOrdersTest.command(firing, fire -> fire.assign(cannon, KING_CRAB));
+                GpuFireOrdersTest.command(firing, fire -> fire.assign(cannon, TargetKey.unit(KING_CRAB)));
                 GpuFireOrdersTest.command(firing, fire -> fire.selectWeapon(cannon));
-                GpuFireOrdersTest.command(firing, fire -> fire.focusTarget(TIMBER_WOLF));
+                GpuFireOrdersTest.command(firing, fire -> fire.focusTarget(TargetKey.unit(TIMBER_WOLF)));
                 publish(live, UnaryOperator.identity());
                 live.zoom(new Coords(13, 10), MOCK_HEX);
                 shot(live, "06", "06-three-targets.jpg", HEADER, MINIMAP, FORCES, WEAPONS, CARD_CHIP, SOLUTION,
                       FIRE_DOCK, free("target-card-" + TIMBER_WOLF, 869, 76, 299, 218));
-                GpuFireOrdersTest.command(firing, fire -> fire.assign(cannon, TIMBER_WOLF));
+                GpuFireOrdersTest.command(firing, fire -> fire.assign(cannon, TargetKey.unit(TIMBER_WOLF)));
                 GpuFireOrdersTest.command(firing, fire -> fire.selectWeapon(cannon));
-                GpuFireOrdersTest.command(firing, fire -> fire.focusTarget(TIMBER_WOLF));
+                GpuFireOrdersTest.command(firing, fire -> fire.focusTarget(TargetKey.unit(TIMBER_WOLF)));
             });
 
             // 15: the declaration of 05 in a 1280 x 720 window.
@@ -465,10 +465,10 @@ class GpuHudParitySmokeTest {
               { GpuFireOrdersTest.eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM), TIMBER_WOLF },
               { GpuFireOrdersTest.eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM), TIMBER_WOLF },
               { GpuFireOrdersTest.eqNum(firing, "LRM 20", Mek.LOC_LEFT_TORSO), BATTLEMASTER } }) {
-            GpuFireOrdersTest.command(firing, fire -> fire.assign(order[0], order[1]));
+            GpuFireOrdersTest.command(firing, fire -> fire.assign(order[0], TargetKey.unit(order[1])));
         }
         GpuFireOrdersTest.command(firing, fire -> fire.selectWeapon(cannon));
-        GpuFireOrdersTest.command(firing, fire -> fire.focusTarget(TIMBER_WOLF));
+        GpuFireOrdersTest.command(firing, fire -> fire.focusTarget(TargetKey.unit(TIMBER_WOLF)));
     }
 
     /** The firing fixture's game with the roster after its movement, on the local player's firing turn (Atlas). */

@@ -396,8 +396,8 @@ class GpuWeaponsPanelSmokeTest {
     @Test
     void theReadOnlyDraftOnAnotherPlayersTurn() {
         GpuHudTestStage.run(hud -> {
-            GpuFireOrders.Snapshot draft = new GpuFireOrders.Snapshot(true, false, ATLAS, Entity.NONE, -1, List.of(),
-                  List.of(), List.of(attack(AC20, TIMBER_WOLF, "AC/20", "RT", "[RT] AC/20  (8)", 7, 58.3),
+            GpuFireOrders.Snapshot draft = new GpuFireOrders.Snapshot(true, false, ATLAS, GpuFireOrders.Focus.NONE, -1,
+                  List.of(), List.of(), List.of(attack(AC20, TIMBER_WOLF, "AC/20", "RT", "[RT] AC/20  (8)", 7, 58.3),
                   attack(LRM, BATTLEMASTER, "LRM 20", "LT", "[LT] LRM 20  (11)", 8, 41.7)), 0, false, false, "",
                   null, null, null, List.of(), null, Map.of(), 4, 0, null);
             GpuBattleStatus.Snapshot opponent = status(GamePhase.FIRING, false, Entity.NONE);
@@ -441,11 +441,11 @@ class GpuWeaponsPanelSmokeTest {
             UiButton laser = column.find("weapons-slot-" + LASER_LA);
             assertEquals("Retarget to King Crab KGC-000", tooltip(laser));
             click(hud, laser);
-            verify(fire).retarget(LASER_LA, KING_CRAB);
+            verify(fire).retarget(LASER_LA, TargetKey.unit(KING_CRAB));
             UiButton plus = column.find("weapons-slot-" + REAR_2);
             assertEquals("+", plus.getText().toString());
             click(hud, plus);
-            verify(fire).assign(REAR_2, KING_CRAB);
+            verify(fire).assign(REAR_2, TargetKey.unit(KING_CRAB));
 
             // With the Timber Wolf focused, its letter removes the attack.
             column.update(hud, firing(), shot05()).place(hud, COLUMN_X, COLUMN_TOP, 310, -1);
@@ -462,8 +462,8 @@ class GpuWeaponsPanelSmokeTest {
             Actor assignLine = ((Group) column.weapons.actor()).findActor("weapons-assign");
             assertTrue(assignLine == null || !GpuBoardTestUi.shown(assignLine), "no line for the armed weapon");
             click(hud, column.find("weapons-pill-" + BATTLEMASTER));
-            verify(fire).focusTarget(BATTLEMASTER);
-            verify(fire).assign(LRM, BATTLEMASTER);
+            verify(fire).focusTarget(TargetKey.unit(BATTLEMASTER));
+            verify(fire).assign(LRM, TargetKey.unit(BATTLEMASTER));
             assertEquals(-1, column.state.armedWeapon);
             // The selected AC/20's name deselects it.
             click(hud, column.find("weapons-name-" + AC20));
@@ -524,7 +524,7 @@ class GpuWeaponsPanelSmokeTest {
             GpuHudTestStage.run(hud -> {
                 Column column = new Column(hud, firing.board.source);
                 // Target-first (H15): the board's click focused the Archer; "+" on the AC/20's row assigns it.
-                firing.board.source.fire().focusTarget(archer);
+                firing.board.source.fire().focusTarget(TargetKey.unit(archer));
                 show(hud, column, settled(firing));
                 assertEquals(List.of("+", "Archer ARC-2R"), column.texts("weapons-pills"));
                 click(hud, column.find("weapons-slot-" + cannon));
@@ -549,7 +549,7 @@ class GpuWeaponsPanelSmokeTest {
                 assertEquals(List.of("A", "Archer ARC-2R", "B", "Crab CRB-20"), column.texts("weapons-pills"));
 
                 // H12: the Crab made primary keeps its letter; the star moves to it.
-                firing.board.source.fire().setPrimary(crab.getId());
+                firing.board.source.fire().setPrimary(TargetKey.unit(crab.getId()));
                 show(hud, column, settled(firing));
                 assertEquals(List.of("A", "Archer ARC-2R", "B", "Crab CRB-20"), column.texts("weapons-pills"));
                 assertTrue(hasIcon(column.find("weapons-pill-" + crab.getId())));
@@ -564,7 +564,7 @@ class GpuWeaponsPanelSmokeTest {
                 show(hud, column, settled(firing));
                 assertFalse(GpuFireOrdersTest.queue(firing).contains("Medium Laser LA@44"));
                 // The Hachiwara behind the woods: no shot, and the slot says why.
-                firing.board.source.fire().focusTarget(firing.left.getId());
+                firing.board.source.fire().focusTarget(TargetKey.unit(firing.left.getId()));
                 show(hud, column, settled(firing));
                 UiButton blocked = column.find("weapons-slot-" + missiles);
                 assertTrue(blocked.isDisabled());
@@ -605,8 +605,8 @@ class GpuWeaponsPanelSmokeTest {
               attack(LASER_LA, TIMBER_WOLF, "Medium Laser", "LA", "", 7, 58.3),
               attack(LASER_RA, TIMBER_WOLF, "Medium Laser", "RA", "", 7, 58.3),
               attack(LRM, BATTLEMASTER, "LRM 20", "LT", "", 8, 41.7));
-        List<GpuFireOrders.Target> targets = List.of(new GpuFireOrders.Target(TIMBER_WOLF, 'A', "Timber Wolf", true,
-              0, true), new GpuFireOrders.Target(BATTLEMASTER, 'B', "BattleMaster", false, 1, true));
+        List<GpuFireOrders.Target> targets = List.of(target(TIMBER_WOLF, 'A', "Timber Wolf", true, 0),
+              target(BATTLEMASTER, 'B', "BattleMaster", false, 1));
         return orders(weapons(TIMBER_WOLF, 7, 58.3), targets, attacks, solution(TIMBER_WOLF, 5, List.of(
               new GpuFireOrders.Modifier("Gunnery (Hayes)", 3), new GpuFireOrders.Modifier("Attacker walk", 1),
               new GpuFireOrders.Modifier("Target moved 3 hexes", 1),
@@ -620,9 +620,8 @@ class GpuWeaponsPanelSmokeTest {
               attack(LASER_LA, TIMBER_WOLF, "Medium Laser", "LA", "", 7, 58.3),
               attack(LASER_RA, TIMBER_WOLF, "Medium Laser", "RA", "", 7, 58.3),
               attack(LRM, BATTLEMASTER, "LRM 20", "LT", "", 8, 41.7));
-        List<GpuFireOrders.Target> targets = List.of(new GpuFireOrders.Target(TIMBER_WOLF, 'A', "Timber Wolf", true,
-              0, true), new GpuFireOrders.Target(BATTLEMASTER, 'B', "BattleMaster", false, 1, true),
-              new GpuFireOrders.Target(KING_CRAB, 'C', "King Crab", false, 1, true));
+        List<GpuFireOrders.Target> targets = List.of(target(TIMBER_WOLF, 'A', "Timber Wolf", true, 0),
+              target(BATTLEMASTER, 'B', "BattleMaster", false, 1), target(KING_CRAB, 'C', "King Crab", false, 1));
         List<GpuFireOrders.WeaponRow> weapons = new ArrayList<>(weapons(TIMBER_WOLF, 7, 58.3));
         weapons.set(0, weapon(AC20, "AC/20", "RT", "20", 7, List.of(bin(11, "[RT] AC/20  (8)"),
               bin(12, "[RT] AC/20 Armor-Piercing  (4)")), 8, KING_CRAB, 9, 27.8, ""));
@@ -654,7 +653,12 @@ class GpuWeaponsPanelSmokeTest {
     private static GpuFireOrders.WeaponRow weapon(int eqNum, String name, String location, String damage, int heat,
           List<GpuUnitRecord.AmmoChoice> ammo, int shots, int target, int value, double odds, String reason) {
         return new GpuFireOrders.WeaponRow(eqNum, name, location, "", damage, heat, "", ammo, ammo.isEmpty() ? -1 : 0,
-              shots, target, value, odds, reason, true, false);
+              shots, TargetKey.unit(target), value, odds, reason, true, false);
+    }
+
+    /** A unit target in the front arc. */
+    private static GpuFireOrders.Target target(int id, char letter, String name, boolean primary, int modifier) {
+        return new GpuFireOrders.Target(TargetKey.unit(id), letter, name, primary, modifier, true, null);
     }
 
     /** One of the Atlas's own bins, by its number and Unit Display entry. */
@@ -664,50 +668,59 @@ class GpuWeaponsPanelSmokeTest {
 
     private static GpuFireOrders.Attack attack(int eqNum, int target, String weapon, String location, String ammo,
           int value, double odds) {
-        return new GpuFireOrders.Attack(eqNum, target, weapon, location, "", ammo, ammo.isEmpty() ? -1 : 8, value,
-              odds, "");
+        return new GpuFireOrders.Attack(eqNum, TargetKey.unit(target), weapon, location, "", ammo,
+              ammo.isEmpty() ? -1 : 8, value, odds, "");
     }
 
     private static GpuFireOrders.Solution solution(int target, int distance, List<GpuFireOrders.Modifier> modifiers,
           int value, double odds) {
-        return new GpuFireOrders.Solution(AC20, target, List.of(0, 3, 6, 9), "Forward arc", distance, modifiers, value,
-              odds, "", null);
+        return new GpuFireOrders.Solution(AC20, TargetKey.unit(target), List.of(0, 3, 6, 9), "Forward arc", distance,
+              modifiers, value, odds, "", null);
     }
 
     private static GpuFireOrders.Snapshot orders(List<GpuFireOrders.WeaponRow> weapons,
           List<GpuFireOrders.Target> targets, List<GpuFireOrders.Attack> attacks, GpuFireOrders.Solution solution) {
-        return new GpuFireOrders.Snapshot(true, true, ATLAS, TIMBER_WOLF, AC20, weapons, targets, attacks, 0, true,
-              true, "", new GpuFireOrders.Heat(0, 24, "20", 4, "", TICKS, 31), solution, null, List.of(), null,
-              Map.of(), 5, 0, null);
+        return new GpuFireOrders.Snapshot(true, true, ATLAS,
+              new GpuFireOrders.Focus(TargetKey.unit(TIMBER_WOLF), "Timber Wolf", null), AC20, weapons, targets,
+              attacks, 0, true, true, "", new GpuFireOrders.Heat(0, 24, "20", 4, "", TICKS, 31), solution, null,
+              List.of(), null, Map.of(), 5, 0, null);
     }
 
-    /** The orders with one target named as MegaMek names it. */
+    /** The orders with one target, the focus too, named as MegaMek names it. */
     private static GpuFireOrders.Snapshot named(GpuFireOrders.Snapshot fire, int id, String name) {
-        List<GpuFireOrders.Target> targets = fire.targets().stream().map(target -> target.id() != id ? target
-              : new GpuFireOrders.Target(id, target.letter(), name, target.primary(), target.secondaryModifier(),
-                    target.frontArc())).toList();
-        return new GpuFireOrders.Snapshot(true, true, fire.actorId(), fire.focusTargetId(), fire.selectedWeapon(),
+        TargetKey key = TargetKey.unit(id);
+        List<GpuFireOrders.Target> targets = fire.targets().stream().map(target -> !target.key().equals(key) ? target
+              : new GpuFireOrders.Target(key, target.letter(), name, target.primary(), target.secondaryModifier(),
+                    target.frontArc(), null)).toList();
+        GpuFireOrders.Focus focus = fire.focus().key().equals(key) ? new GpuFireOrders.Focus(key, name, null)
+              : fire.focus();
+        return new GpuFireOrders.Snapshot(true, true, fire.actorId(), focus, fire.selectedWeapon(),
               fire.weapons(), targets, fire.attacks(), 0, true, true, "", fire.heat(), fire.solution(), null,
               List.of(), null, Map.of(), 5, 0, null);
     }
 
     /** The orders with another weapon selected (its solution left as it was). */
     private static GpuFireOrders.Snapshot selected(GpuFireOrders.Snapshot fire, int eqNum) {
-        return new GpuFireOrders.Snapshot(true, true, fire.actorId(), fire.focusTargetId(), eqNum, fire.weapons(),
+        return new GpuFireOrders.Snapshot(true, true, fire.actorId(), fire.focus(), eqNum, fire.weapons(),
               fire.targets(), fire.attacks(), 0, true, true, "", fire.heat(), fire.solution(), null, List.of(), null,
               Map.of(), 5, 0, null);
     }
 
-    /** The orders with another unit focused; the weapons that roll at the focus roll at it. */
+    /**
+     * The orders with another unit focused, under its presented name; the weapons that roll at the focus roll at it.
+     */
     private static GpuFireOrders.Snapshot focused(GpuFireOrders.Snapshot fire, int focus) {
+        TargetKey key = TargetKey.unit(focus);
         List<GpuFireOrders.WeaponRow> weapons = fire.weapons().stream().map(row -> fire.attacks().stream()
               .anyMatch(attack -> attack.eqNum() == row.eqNum()) ? row : new GpuFireOrders.WeaponRow(row.eqNum(),
               row.name(), row.location(), row.kind(), row.damage(), row.heat(), row.mode(), row.ammo(),
-              row.loadedAmmo(), row.shots(), focus, row.value(), row.odds(), row.reason(), row.usable(),
+              row.loadedAmmo(), row.shots(), key, row.value(), row.odds(), row.reason(), row.usable(),
               row.locationDestroyed())).toList();
-        return new GpuFireOrders.Snapshot(true, true, fire.actorId(), focus, fire.selectedWeapon(), weapons,
-              fire.targets(), fire.attacks(), 0, true, true, "", fire.heat(), fire.solution(), null, List.of(), null,
-              Map.of(), 5, 0, null);
+        String name = GpuHudFixtures.status().units().stream().filter(unit -> unit.id() == focus).findFirst()
+              .orElseThrow().name();
+        return new GpuFireOrders.Snapshot(true, true, fire.actorId(), new GpuFireOrders.Focus(key, name, null),
+              fire.selectedWeapon(), weapons, fire.targets(), fire.attacks(), 0, true, true, "", fire.heat(),
+              fire.solution(), null, List.of(), null, Map.of(), 5, 0, null);
     }
 
     private static GpuBoardSource.Frame frame(GpuBattleStatus.Snapshot status, GpuFireOrders.Snapshot fire) {

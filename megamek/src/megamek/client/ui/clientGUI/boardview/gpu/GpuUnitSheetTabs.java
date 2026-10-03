@@ -163,7 +163,7 @@ final class GpuUnitSheetTabs implements Disposable {
         Map<Integer, Character> declared = new HashMap<>();
         if (firing) {
             for (GpuFireOrders.Attack attack : fire.attacks()) {
-                fire.targets().stream().filter(target -> target.id() == attack.targetId()).findFirst()
+                fire.targets().stream().filter(target -> target.key().equals(attack.target())).findFirst()
                       .ifPresent(target -> declared.put(attack.eqNum(), target.letter()));
             }
         }

@@ -137,7 +137,7 @@ class GpuContextMenuSmokeTest {
             }
 
             click(hud, menu.item("Set as attack target"));
-            verify(menu.fire).focusTarget(KING_CRAB);
+            verify(menu.fire).focusTarget(TargetKey.unit(KING_CRAB));
             assertFalse(menu.popover.isVisible(), "choosing an item closes the menu");
             menu.menu.open(new Coords(12, 3), KING_CRAB, 784, hud.height() - 193);
             click(hud, menu.item("Inspect unit"));
@@ -154,8 +154,8 @@ class GpuContextMenuSmokeTest {
             verify(menu.source).locateUnit(KING_CRAB);
             menu.menu.open(new Coords(12, 3), KING_CRAB, 784, hud.height() - 193);
             click(hud, menu.item("Line of sight from Atlas"));
-            verify(menu.los).lineOfSight(ATLAS, new Coords(12, 3));
-            verify(menu.fire, never()).assign(anyInt(), anyInt());
+            verify(menu.los).lineOfSight(ATLAS, new Coords(12, 3), Float.NaN);
+            verify(menu.fire, never()).assign(anyInt(), any(TargetKey.class));
         });
     }
 
@@ -173,16 +173,16 @@ class GpuContextMenuSmokeTest {
             hud.draw();
             hud.capture("context-menu-enemy-armed").dispose();
             click(hud, menu.item("Assign armed AC/20 here"));
-            verify(menu.fire).focusTarget(BATTLEMASTER);
-            verify(menu.fire).assign(AC20, BATTLEMASTER);
+            verify(menu.fire).focusTarget(TargetKey.unit(BATTLEMASTER));
+            verify(menu.fire).assign(AC20, TargetKey.unit(BATTLEMASTER));
             assertEquals(-1, menu.state.armedWeapon, "the armed weapon is used once");
             menu.menu.open(new Coords(18, 2), BATTLEMASTER, 900, 700);
             assertNull(find(menu.popover, "Assign armed AC/20 here"));
             click(hud, menu.item("Make primary target"));
-            verify(menu.fire).setPrimary(BATTLEMASTER);
+            verify(menu.fire).setPrimary(TargetKey.unit(BATTLEMASTER));
             menu.menu.open(new Coords(18, 2), BATTLEMASTER, 900, 700);
             click(hud, menu.item("Remove target and its attacks"));
-            verify(menu.fire).removeTarget(BATTLEMASTER);
+            verify(menu.fire).removeTarget(TargetKey.unit(BATTLEMASTER));
 
             // The primary target has no "Make primary"; read-only orders (another player's turn) no attack items.
             menu.menu.open(new Coords(14, 4), TIMBER_WOLF, 900, 700);
@@ -229,7 +229,7 @@ class GpuContextMenuSmokeTest {
             hud.draw();
             hud.capture("context-menu-contact").dispose();
             click(hud, menu.item("Line of sight from Atlas"));
-            verify(menu.los).lineOfSight(ATLAS, new Coords(9, 3));
+            verify(menu.los).lineOfSight(ATLAS, new Coords(9, 3), Float.NaN);
 
             // M5: in the local planning turn a hex plans or pins; MegaMek's map menu follows once the hex's context
             // arrives, its commands in sections rather than behind a menu of menus (the user's decision of 2026-10-03).
@@ -270,6 +270,10 @@ class GpuContextMenuSmokeTest {
             // No line of sight into the acting unit's own hex.
             menu.menu.open(new Coords(14, 13), Entity.NONE, 700, 600);
             assertFalse(lines(menu.popover).contains("Line of sight from Atlas"));
+            // From the board, it measures to the height the pointer showed (the user's decision of 2026-10-03).
+            menu.menu.open(HEX, Entity.NONE, 700, 600, 2.5f);
+            click(hud, menu.item("Line of sight from Atlas"));
+            verify(menu.los).lineOfSight(ATLAS, HEX, 2.5f);
         });
     }
 
@@ -287,10 +291,10 @@ class GpuContextMenuSmokeTest {
             hud.draw();
             hud.capture("context-menu-weapon").dispose();
             click(hud, menu.item("Assign to B · BattleMaster"));
-            verify(menu.fire).retarget(AC20, BATTLEMASTER);
+            verify(menu.fire).retarget(AC20, TargetKey.unit(BATTLEMASTER));
             menu.menu.weapon(AC20, true, () -> toggled.add(true), 1400, 600);
             click(hud, menu.item("Assign to A · Timber Wolf"));
-            verify(menu.fire).focusTarget(TIMBER_WOLF);
+            verify(menu.fire).focusTarget(TargetKey.unit(TIMBER_WOLF));
             menu.menu.weapon(AC20, true, () -> toggled.add(true), 1400, 600);
             click(hud, menu.item("Hide solution and arc"));
             assertEquals(List.of(true), toggled, "the weapons panel's own toggle shows or hides the solution");
@@ -313,7 +317,7 @@ class GpuContextMenuSmokeTest {
                   "Assign to B · BattleMaster", "Assign to King Crab", "---", "Show solution and arc",
                   "Next mode [Pulse]", "Previous mode", "Called shot"), lines(menu.popover));
             click(hud, menu.item("Assign to King Crab"));
-            verify(menu.fire).assign(LASER, KING_CRAB);
+            verify(menu.fire).assign(LASER, TargetKey.unit(KING_CRAB));
             menu.menu.weapon(LASER, false, () -> { }, 1400, 600);
             click(hud, menu.item("Next mode"));
             verify(menu.fire).cycleMode(LASER, true);
@@ -560,13 +564,15 @@ class GpuContextMenuSmokeTest {
               row(SRM, "SRM 6", "LT", "2×6", 4, "", List.of(bin(14, "[LT] SRM 6  (9)")), 0, 9, TIMBER_WOLF, ""),
               row(LASER, "Medium Laser", "LA", "5", 3, "Pulse", List.of(), -1, -1, KING_CRAB, ""),
               row(REAR_LASER, "Medium Laser", "CT(R)", "5", 3, "", List.of(), -1, -1, KING_CRAB, "rear arc only"));
-        List<GpuFireOrders.Target> targets = List.of(new GpuFireOrders.Target(BATTLEMASTER, 'B', "BattleMaster", false,
-              1, false), new GpuFireOrders.Target(TIMBER_WOLF, 'A', "Timber Wolf", true, 0, true));
+        List<GpuFireOrders.Target> targets = List.of(new GpuFireOrders.Target(TargetKey.unit(BATTLEMASTER), 'B',
+              "BattleMaster", false, 1, false, null), new GpuFireOrders.Target(TargetKey.unit(TIMBER_WOLF), 'A',
+              "Timber Wolf", true, 0, true, null));
         List<GpuFireOrders.Attack> attacks = List.of(attack(AC20, TIMBER_WOLF, "AC/20"),
               attack(SRM, TIMBER_WOLF, "SRM 6"), attack(ARM_LASER, TIMBER_WOLF, "Medium Laser"),
               attack(LRM, BATTLEMASTER, "LRM 20"));
-        return new GpuFireOrders.Snapshot(true, editable, ATLAS, KING_CRAB, AC20, weapons, targets, attacks, 0, true,
-              true, "Center", null, null, null, List.of(), null, Map.of(), 4, 0, aim);
+        return new GpuFireOrders.Snapshot(true, editable, ATLAS,
+              new GpuFireOrders.Focus(TargetKey.unit(KING_CRAB), "King Crab", null), AC20, weapons, targets, attacks, 0,
+              true, true, "Center", null, null, null, List.of(), null, Map.of(), 4, 0, aim);
     }
 
     /** One of the Atlas's own bins, by its number and Unit Display entry. */
@@ -576,12 +582,12 @@ class GpuContextMenuSmokeTest {
 
     private static GpuFireOrders.WeaponRow row(int eqNum, String name, String location, String damage, int heat,
           String mode, List<GpuUnitRecord.AmmoChoice> ammo, int loaded, int shots, int target, String reason) {
-        return new GpuFireOrders.WeaponRow(eqNum, name, location, "", damage, heat, mode, ammo, loaded, shots, target,
-              7, .58, reason, true, false);
+        return new GpuFireOrders.WeaponRow(eqNum, name, location, "", damage, heat, mode, ammo, loaded, shots,
+              TargetKey.unit(target), 7, .58, reason, true, false);
     }
 
     private static GpuFireOrders.Attack attack(int eqNum, int target, String weapon) {
-        return new GpuFireOrders.Attack(eqNum, target, weapon, "RT", "", "", 0, 7, .58, "");
+        return new GpuFireOrders.Attack(eqNum, TargetKey.unit(target), weapon, "RT", "", "", 0, 7, .58, "");
     }
 
     private static GpuMovePlan.Snapshot move(GpuMovePlan.Mode mode) {

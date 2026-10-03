@@ -111,26 +111,33 @@ final class GpuHud implements GpuBoardHud {
      * The board view's facts of one frame, by unit id: the view mode and whether the playback still animates; each
      * drawn unit's screen rectangle and label anchor (head) in stage units, y up, left out while its head lies behind
      * the camera; each drawn unit's animated board position in world units; the hovered hex and unit; a hex's
-     * width on the screen, corner to corner, in stage units; and the height of the ring the view draws on a building
-     * floor under the pointer, NaN while the pointer is on the hovered hex's ground (GpuBattleView.hoverTop).
+     * width on the screen, corner to corner, in stage units; the height of the ring the view draws on a building
+     * floor under the pointer, NaN while the pointer is on the hovered hex's ground (GpuBattleView.hoverTop); and the
+     * anchor of each fire target that is no unit, its hex's centre, as a unit's head is its anchor.
      */
     record HudView(boolean tactical, boolean playbackBusy, Map<Integer, Rectangle> unitRects,
           Map<Integer, Vector2> unitHeads, Map<Integer, Vector2> unitPositions, Coords hovered, int hoveredUnit,
-          float hexPixels, float hoverTop) {
+          float hexPixels, float hoverTop, Map<TargetKey, Vector2> targetHeads) {
         static final HudView EMPTY = new HudView(false, false, Map.of(), Map.of(), Map.of(), null, Entity.NONE, 0);
 
         HudView {
             unitRects = Map.copyOf(unitRects);
             unitHeads = Map.copyOf(unitHeads);
             unitPositions = Map.copyOf(unitPositions);
+            targetHeads = Map.copyOf(targetHeads);
         }
 
-        /** The facts while no building floor is under the pointer. */
+        /** The facts while no building floor is under the pointer and every fire target is a unit. */
         HudView(boolean tactical, boolean playbackBusy, Map<Integer, Rectangle> unitRects,
               Map<Integer, Vector2> unitHeads, Map<Integer, Vector2> unitPositions, Coords hovered, int hoveredUnit,
               float hexPixels) {
             this(tactical, playbackBusy, unitRects, unitHeads, unitPositions, hovered, hoveredUnit, hexPixels,
-                  Float.NaN);
+                  Float.NaN, Map.of());
+        }
+
+        /** A fire target's anchor: a unit's head, else its hex's; null where the view draws neither. */
+        Vector2 head(TargetKey target) {
+            return (target.unitId() != Entity.NONE) ? unitHeads.get(target.unitId()) : targetHeads.get(target);
         }
     }
 
@@ -772,12 +779,13 @@ final class GpuHud implements GpuBoardHud {
 
     /**
      * A short board click (C.4) on {@code coords} and the unit {@code unitId} picked there ({@code Entity.NONE} for
-     * none), at screen pixel ({@code x}, {@code y}). A right click opens the context menu and never changes orders;
-     * Ctrl or Alt keeps MegaMek's measurement tools, and a plain left click ends a measurement waiting for its second
-     * point with that measurement's modifier (rimshaderv1's board); while a bot order picks hexes, a left click picks
-     * one, as the classic board's click does.
+     * none), at screen pixel ({@code x}, {@code y}), with the world height of the terrain the pointer hit
+     * ({@code pointedZ}; NaN on a unit, or in the Tactical View). A right click opens the context menu and never
+     * changes orders; Ctrl or Alt keeps MegaMek's measurement tools, measuring at the pointed height, and a plain left
+     * click ends a measurement waiting for its second point with that measurement's modifier (rimshaderv1's board);
+     * while a bot order picks hexes, a left click picks one, as the classic board's click does.
      */
-    void boardClick(Coords coords, int unitId, int button, int modifiers, int x, int y) {
+    void boardClick(Coords coords, int unitId, int button, int modifiers, int x, int y, float pointedZ) {
         if (inputs == null || inputs.dialog() != null || coords == null || inputs.frame().scene() == null) {
             return;
         }
@@ -785,8 +793,10 @@ final class GpuHud implements GpuBoardHud {
               : modifiers | inputs.frame().panels().los().pending();
         if (button == Input.Buttons.RIGHT) {
             Vector2 point = stage.screenToStageCoordinates(new Vector2(x, y));
-            contextMenu.open(coords, unitId, point.x, point.y);
-        } else if (button == Input.Buttons.LEFT && (GpuBoardSource.isMeasurement(clickModifiers) || picking(inputs))) {
+            contextMenu.open(coords, unitId, point.x, point.y, pointedZ);
+        } else if (button == Input.Buttons.LEFT && GpuBoardSource.isMeasurement(clickModifiers)) {
+            source.measure(coords, clickModifiers, pointedZ);
+        } else if (button == Input.Buttons.LEFT && picking(inputs)) {
             source.click(coords, false, clickModifiers);
         } else if (button == Input.Buttons.LEFT) {
             leftClick(coords, GpuHudState.unit(inputs.frame().status(), unitId), modifiers);
@@ -822,10 +832,16 @@ final class GpuHud implements GpuBoardHud {
                 select(unit.id());
             } else if (unit.sensorContact()) {
                 // Not targetable (H19): the fire orders refuse it with their toast, and the armed weapon stays armed.
-                source.fire().focusTarget(unit.id());
+                source.fire().focusTarget(TargetKey.unit(unit.id()));
             } else {
-                GpuContextMenu.focusTarget(source, state, unit.id());
+                GpuContextMenu.focusTarget(source, state, TargetKey.unit(unit.id()));
             }
+        } else if (phase.isFiring()) {
+            // A hex: MegaMek's board click chooses its target, a building or a wooded hex too, and the armed weapon
+            // fires at it once, as at an enemy.
+            source.hover(coords, modifiers);
+            source.fire().clickHex(coords, modifiers, state.armedWeapon);
+            state.armedWeapon = -1;
         } else if (phase.isPhysical() && unit != null) {
             if (own) {
                 select(unit.id());

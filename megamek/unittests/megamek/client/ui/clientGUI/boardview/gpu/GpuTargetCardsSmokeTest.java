@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
@@ -259,14 +260,14 @@ class GpuTargetCardsSmokeTest {
             click(hud, remove);
             verify(fire).remove(LASER_LA);
             click(hud, master.findActor("card-primary"));
-            verify(fire).setPrimary(BATTLEMASTER);
-            verify(fire, never()).focusTarget(anyInt());
+            verify(fire).setPrimary(TargetKey.unit(BATTLEMASTER));
+            verify(fire, never()).focusTarget(any(TargetKey.class));
 
             // A click on the card focuses its enemy and assigns the armed weapon there once (H28, H16).
             layer.state.armedWeapon = REAR;
             click(hud, master.findActor("card-name"));
-            verify(fire).focusTarget(BATTLEMASTER);
-            verify(fire).assign(REAR, BATTLEMASTER);
+            verify(fire).focusTarget(TargetKey.unit(BATTLEMASTER));
+            verify(fire).assign(REAR, TargetKey.unit(BATTLEMASTER));
             assertEquals(-1, layer.state.armedWeapon);
 
             // A row's right click opens the queued attack's menu (H37); "Fire later" moves it.
@@ -292,7 +293,7 @@ class GpuTargetCardsSmokeTest {
             verify(fire, never()).move(LASER_LA, -2);
             UiTestStage.settle(hud.stage);
             verify(fire).move(LASER_LA, -2);
-            verify(fire, never()).focusTarget(TIMBER_WOLF);
+            verify(fire, never()).focusTarget(TargetKey.unit(TIMBER_WOLF));
 
             // H25: with three targets the others collapse; "Show attacks" opens the King Crab's card and focuses it.
             clearInvocations(fire);
@@ -301,8 +302,8 @@ class GpuTargetCardsSmokeTest {
             Table crab = layer.card(KING_CRAB);
             assertNull(crab.findActor("card-row-5"), "collapsed");
             click(hud, crab.findActor("card-show"));
-            verify(fire).focusTarget(KING_CRAB);
-            verify(fire, never()).assign(anyInt(), anyInt());
+            verify(fire).focusTarget(TargetKey.unit(KING_CRAB));
+            verify(fire, never()).assign(anyInt(), any(TargetKey.class));
             layer.update(hud, firing(shot06()), view, List.of());
             hud.draw();
             assertNotNull(layer.card(KING_CRAB).findActor("card-row-5"), "opened while the Timber Wolf has the focus");
@@ -439,9 +440,9 @@ class GpuTargetCardsSmokeTest {
                 Layer layer = new Layer(hud, source, null);
                 GpuHud.HudView view = view(Map.of(firing.attacker.getId(), new Rectangle(900, 200, 60, 110), archer,
                       new Rectangle(1150, 560, 60, 110), crab.getId(), new Rectangle(650, 600, 60, 110)));
-                source.fire().assign(cannon, archer);
-                source.fire().assign(right, archer);
-                source.fire().assign(left, crab.getId());
+                source.fire().assign(cannon, TargetKey.unit(archer));
+                source.fire().assign(right, TargetKey.unit(archer));
+                source.fire().assign(left, TargetKey.unit(crab.getId()));
                 show(hud, layer, GpuWeaponsPanelSmokeTest.settled(firing), view);
                 assertEquals(List.of("AC/20 RT@42", "Medium Laser RA@42", "Medium Laser LA@44"),
                       GpuFireOrdersTest.queue(firing));
@@ -491,19 +492,20 @@ class GpuTargetCardsSmokeTest {
             GpuHud.HudView view = new GpuHud.HudView(false, false, units, heads, Map.of(), null, Entity.NONE, 118);
             layer.update(hud, firing(shot05()), view, List.of());
             hud.draw();
-            Map<Integer, Rectangle> placed = layer.cards.placed();
-            assertEquals(List.of(TIMBER_WOLF, BATTLEMASTER), List.copyOf(placed.keySet()));
-            Rectangle master = placed.get(BATTLEMASTER);
+            Map<TargetKey, Rectangle> placed = layer.cards.placed();
+            assertEquals(List.of(TargetKey.unit(TIMBER_WOLF), TargetKey.unit(BATTLEMASTER)),
+                  List.copyOf(placed.keySet()));
+            Rectangle master = placed.get(TargetKey.unit(BATTLEMASTER));
             assertEquals(500 - master.width / 2, master.x, 1, "centred over the head");
             assertEquals(500 + 26, master.y, 1, "26 above the head");
-            for (Map.Entry<Integer, Rectangle> entry : placed.entrySet()) {
-                assertEquals(GpuHudTestStage.bounds(layer.card(entry.getKey())), entry.getValue());
+            for (Map.Entry<TargetKey, Rectangle> entry : placed.entrySet()) {
+                assertEquals(GpuHudTestStage.bounds(layer.card(entry.getKey().id())), entry.getValue());
             }
 
             // A HUD panel where that card would go: the card keeps 6 units clear of it (overlay.js refreshHudRects).
             Rectangle panel = new Rectangle(300, 520, 400, 150);
             layer.update(hud, firing(shot05()), view, List.of(panel));
-            Rectangle moved = layer.cards.placed().get(BATTLEMASTER);
+            Rectangle moved = layer.cards.placed().get(TargetKey.unit(BATTLEMASTER));
             assertFalse(overlaps(moved, new Rectangle(panel.x - 6, panel.y - 6, panel.width + 12, panel.height + 12)),
                   moved + " keeps 6 clear of the panel " + panel);
 
@@ -511,7 +513,7 @@ class GpuTargetCardsSmokeTest {
             layer.update(hud, firing(shot05()), new GpuHud.HudView(false, false, units, heads, Map.of(), null,
                   Entity.NONE, 118), List.of());
             assertFalse(layer.card(BATTLEMASTER).isVisible(), "a target behind the camera has no card");
-            assertEquals(List.of(TIMBER_WOLF), List.copyOf(layer.cards.placed().keySet()));
+            assertEquals(List.of(TargetKey.unit(TIMBER_WOLF)), List.copyOf(layer.cards.placed().keySet()));
 
             layer.update(hud, firing(GpuFireOrders.Snapshot.EMPTY), view, List.of());
             assertTrue(layer.cards.placed().isEmpty(), "no card outside a declaration");
@@ -533,8 +535,8 @@ class GpuTargetCardsSmokeTest {
               attack(LASER_LA, TIMBER_WOLF, "Medium Laser", "LA", "Energy", "", -1, 7, 58.3),
               attack(LASER_RA, TIMBER_WOLF, "Medium Laser", "RA", "Energy", "", -1, 7, 58.3),
               attack(LRM, BATTLEMASTER, "LRM 20", "LT", "Missile", "[LT] LRM 20  (11)", 11, 8, 41.7));
-        return orders(List.of(new GpuFireOrders.Target(TIMBER_WOLF, 'A', "Timber Wolf", true, 0, true),
-              new GpuFireOrders.Target(BATTLEMASTER, 'B', "BattleMaster", false, 1, true)), attacks);
+        return orders(List.of(target(TIMBER_WOLF, 'A', "Timber Wolf", true, 0),
+              target(BATTLEMASTER, 'B', "BattleMaster", false, 1)), attacks);
     }
 
     /** Shot 06: the AC/20 moved to C, the King Crab, at 9+; in fire order the primary's attacks, then B's, then C's. */
@@ -545,9 +547,14 @@ class GpuTargetCardsSmokeTest {
               attack(LASER_RA, TIMBER_WOLF, "Medium Laser", "RA", "Energy", "", -1, 7, 58.3),
               attack(LRM, BATTLEMASTER, "LRM 20", "LT", "Missile", "[LT] LRM 20  (11)", 11, 8, 41.7),
               attack(AC20, KING_CRAB, "AC/20", "RT", "Ballistic", "[RT] AC/20  (8)", 8, 9, 27.8));
-        return orders(List.of(new GpuFireOrders.Target(TIMBER_WOLF, 'A', "Timber Wolf", true, 0, true),
-              new GpuFireOrders.Target(BATTLEMASTER, 'B', "BattleMaster", false, 1, true),
-              new GpuFireOrders.Target(KING_CRAB, 'C', "King Crab", false, 1, true)), attacks);
+        return orders(List.of(target(TIMBER_WOLF, 'A', "Timber Wolf", true, 0),
+              target(BATTLEMASTER, 'B', "BattleMaster", false, 1), target(KING_CRAB, 'C', "King Crab", false, 1)),
+              attacks);
+    }
+
+    /** A unit target in the front arc. */
+    private static GpuFireOrders.Target target(int id, char letter, String name, boolean primary, int modifier) {
+        return new GpuFireOrders.Target(TargetKey.unit(id), letter, name, primary, modifier, true, null);
     }
 
     /** The orders with two attacks swapped in fire order, as the fire orders' move publishes them. */
@@ -563,8 +570,9 @@ class GpuTargetCardsSmokeTest {
         List<GpuFireOrders.Badge> badges = List.of(new GpuFireOrders.Badge(KING_CRAB, 9, 27.78, ""),
               new GpuFireOrders.Badge(ENEMY_LOCUST, TargetRoll.IMPOSSIBLE, 0,
                     Messages.getString("WeaponAttackAction.OutOfArc")));
-        return new GpuFireOrders.Snapshot(true, true, ATLAS, TIMBER_WOLF, AC20, weapons(), targets, attacks, 0, true,
-              true, "", null, null, null, badges, null, Map.of(), 5, 0, null);
+        return new GpuFireOrders.Snapshot(true, true, ATLAS,
+              new GpuFireOrders.Focus(TargetKey.unit(TIMBER_WOLF), "Timber Wolf", null), AC20, weapons(), targets,
+              attacks, 0, true, true, "", null, null, null, badges, null, Map.of(), 5, 0, null);
     }
 
     /** The Atlas's weapons with ammunition (the AC/20's and the SRM's two bins, the LRM's one) and its lasers. */
@@ -579,7 +587,7 @@ class GpuTargetCardsSmokeTest {
 
     private static GpuFireOrders.WeaponRow weapon(int eqNum, String name, List<GpuUnitRecord.AmmoChoice> ammo) {
         return new GpuFireOrders.WeaponRow(eqNum, name, "", "", "", 0, "", ammo, ammo.isEmpty() ? -1 : 0, 0,
-              TIMBER_WOLF, 7, 58.3, "", true, false);
+              TargetKey.unit(TIMBER_WOLF), 7, 58.3, "", true, false);
     }
 
     private static GpuUnitRecord.AmmoChoice bin(int eqNum, String label) {
@@ -588,7 +596,8 @@ class GpuTargetCardsSmokeTest {
 
     private static GpuFireOrders.Attack attack(int eqNum, int target, String weapon, String location, String kind,
           String ammo, int shots, int value, double odds) {
-        return new GpuFireOrders.Attack(eqNum, target, weapon, location, kind, ammo, shots, value, odds, "");
+        return new GpuFireOrders.Attack(eqNum, TargetKey.unit(target), weapon, location, kind, ammo, shots, value,
+              odds, "");
     }
 
     private static GpuBoardSource.Frame firing(GpuFireOrders.Snapshot fire) {
@@ -643,7 +652,7 @@ class GpuTargetCardsSmokeTest {
             overlay.render(camera);
             if (tactical) {
                 icons.update(true, camera, board.scene, frame.status(), unit -> unit.id() == frame.status().actorId()
-                            || unit.id() == fire.focusTargetId(), unit -> false, board.poses, iconAnchors,
+                            || unit.id() == fire.focus().key().unitId(), unit -> false, board.poses, iconAnchors,
                       board.surfaces);
                 icons.render(camera);
                 overlay.renderGhost(camera, icons::instance);
@@ -667,10 +676,10 @@ class GpuTargetCardsSmokeTest {
      */
     private static void assertPlaced(GpuHudTestStage hud, Layer layer, GpuHud.HudView view, List<Rectangle> panels) {
         List<Rectangle> drawn = new ArrayList<>();
-        for (Map.Entry<Integer, Rectangle> entry : layer.cards.placed().entrySet()) {
+        for (Map.Entry<TargetKey, Rectangle> entry : layer.cards.placed().entrySet()) {
             Rectangle card = entry.getValue();
-            assertTrue(view.unitHeads().containsKey(entry.getKey()));
-            assertEquals(GpuHudTestStage.bounds(layer.card(entry.getKey())), card);
+            assertNotNull(view.head(entry.getKey()));
+            assertEquals(GpuHudTestStage.bounds(layer.card(entry.getKey().id())), card);
             assertTrue(card.x >= 8 - .5f && card.y >= 8 - .5f && card.x + card.width <= hud.width() - 8 + .5f
                   && card.y + card.height <= hud.height() - 8 + .5f, "inside the window: " + card);
             for (Rectangle panel : panels) {
