@@ -1,29 +1,8 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Solid crust and cooled banks: occluding relief, stable plates and deep red fissures.
 float magmaRepeatMetres() { return 12.0; }
-vec2 magmaRelief(vec2 uv, vec2 dx, vec2 dy, vec4 surface, vec2 parallax) {
-    if (u_normalMaps > .5) {
-        uv += parallax * .5;
-        float layer = 1.0;
-        float previous = 1.0 - magmaTexel(MAGMA_SURFACE, uv, dx, dy).r;
-        for (int step = 0; step < 12; step++) {
-            uv -= parallax / 12.0;
-            layer -= 1.0 / 12.0;
-            float gap = layer - magmaTexel(MAGMA_SURFACE, uv, dx, dy).r;
-            if (gap <= 0.0) {
-                uv += parallax / 12.0 * (-gap / max(previous - gap, .0001));
-                break;
-            }
-            previous = gap;
-        }
-    } else {
-        uv -= parallax * (surface.r - .5);
-    }
-    return uv;
-}
-
-Volcanic magmaPhaseSample(vec2 uv, vec2 dx, vec2 dy, vec3 eye, vec2 downhill, vec3 random) {
-    return magmaSample(uv, dx, dy, eye);
+Volcanic magmaPhaseSample(vec2 uv, vec2 dx, vec2 dy, vec3 eye, vec3 sun, vec2 downhill, vec3 random) {
+    return magmaSample(uv, dx, dy, eye, sun);
 }
 
 mat3 magmaDomain(inout vec3 position) {

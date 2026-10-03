@@ -10,6 +10,8 @@ import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.PixmapIO;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g3d.ModelBatch;
+import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.utils.Disposable;
 
 /**
@@ -41,6 +43,13 @@ final class GpuReviewFrame implements Disposable {
         return atmosphere.depthTexture();
     }
 
+    /** Loading must see the same shader flags as the eventual visible frame. */
+    void prepare(GpuTerrain terrain, BoardCamera camera, BoardScene scene) {
+        atmosphere.updateLight(camera.camera);
+        terrain.setAtmosphere(atmosphere.lighting());
+        atmosphere.configureClouds(terrain, scene);
+    }
+
     /** One frame of the scene from the camera, lit, shadowed and composited as on the board. */
     void render(GpuTerrain terrain, BoardCamera camera, BoardScene scene) {
         render(terrain, camera, scene, true);
@@ -48,12 +57,26 @@ final class GpuReviewFrame implements Disposable {
 
     /** Hiding the water exposes the bed and bank joins for geometry reviews. */
     void render(GpuTerrain terrain, BoardCamera camera, BoardScene scene, boolean water) {
-        atmosphere.updateLight(camera.camera);
-        terrain.setAtmosphere(atmosphere.lighting());
-        terrain.renderShadows(camera.camera, List.of());
+        render(terrain, camera, scene, water, List.of(), null);
+    }
+
+    /** Review standard unit/prop materials in the same lit scene target as the terrain. */
+    void render(GpuTerrain terrain, BoardCamera camera, BoardScene scene, List<ModelInstance> objects, ModelBatch batch) {
+        render(terrain, camera, scene, true, objects, batch);
+    }
+
+    private void render(GpuTerrain terrain, BoardCamera camera, BoardScene scene, boolean water,
+          List<ModelInstance> objects, ModelBatch batch) {
+        prepare(terrain, camera, scene);
+        terrain.renderShadows(camera.camera, objects);
         atmosphere.prepareClouds(terrain, scene, 0);
         atmosphere.begin((int) camera.camera.viewportWidth, (int) camera.camera.viewportHeight, 0);
         terrain.render(camera.camera, false);
+        if (!objects.isEmpty()) {
+            batch.begin(camera.camera);
+            batch.render(objects, terrain.environment());
+            batch.end();
+        }
         if (water) { terrain.renderTransparent(camera.camera); }
         atmosphere.end(camera.camera, terrain, scene, 0);
         atmosphere.renderWeather(camera.camera, scene);

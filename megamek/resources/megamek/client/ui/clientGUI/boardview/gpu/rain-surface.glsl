@@ -74,3 +74,11 @@ vec3 rainReflection(vec3 ground, vec3 normal, float coverage) {
     float fresnel = 0.12 + 0.55 * grazing * grazing * grazing * grazing * grazing;
     return mix(ground, sky, coverage * fresnel);
 }
+
+// Water first fills the sampled material's depressions. Broad basins still decide where water can accumulate.
+float reliefPuddle(float basin, float height, float wet) {
+    float waterline = mix(.12, .75, basin);
+    float edge = max(.025, fwidth(height) * .75);
+    float filled = 1.0 - smoothstep(waterline - edge, waterline + edge, height);
+    return basin * mix(.2, 1.0, filled) * wet;
+}

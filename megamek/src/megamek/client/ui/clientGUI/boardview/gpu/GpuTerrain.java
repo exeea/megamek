@@ -185,6 +185,10 @@ final class GpuTerrain implements Disposable {
                       case CUT -> waterCutShader;
                   } : animated ? liquidShader : GpuTreeInstances.instanced(renderable) ? instancedPropShader : config;
             String prefix = GpuCloudShadow.prefix(renderable, chosen)
+                  + "#define SCULPT_MATERIAL_COUNT " + SCULPT_LAYERS.size() + "\n"
+                  + "#define LUNAR_FAMILY " + BoardScene.Surface.LUNAR.ordinal() + ".0\n"
+                  + "#define VOLCANIC_CRUST_FAMILY " + BoardSurfaceBlend.CRUST + ".0\n"
+                  + "#define VOLCANIC_BANK_FAMILY " + BoardSurfaceBlend.BANK + ".0\n"
                   + (renderable.material.has(GpuIceShader.TYPE) ? "#define iceFlag\n" : "")
                   + (renderable.material.has(GpuBiomeVegetation.Kind.TYPE) ? "#define biomeVegetationFlag\n" : "")
                   + (renderable.material.has(GpuSurfaceBlend.TYPE) ? "#define terrainBlendFlag\n" : "")
@@ -202,6 +206,9 @@ final class GpuTerrain implements Disposable {
                         renderable.material.has(GpuBuildingCutaway.TYPE)
                               ? GpuBuildingCutaway.fragment(chosen.fragmentShader, "v_cloudPosition.z") : chosen.fragmentShader)) {
                 private final int normalMapsUniform = register("u_normalMaps");
+                private final int parallaxMappingUniform = register("u_parallaxMapping");
+                private final int sculptReliefUniform = register("u_sculptRelief[0]");
+                private final float[] sculptRelief = sculptRelief();
                 private final int iceNormalsUniform = register("u_iceNormals");
                 private final int magmaTimeUniform = register("u_magmaTime");
                 private final int magmaOceanUniform = register("u_magmaOcean");
@@ -249,13 +256,11 @@ final class GpuTerrain implements Disposable {
                 private final int biomeHexesUniform = register("u_biomeHexes");
                 private final int biomeBoardUniform = register("u_biomeBoard");
                 private final int iceBoardUniform = register("u_iceBoard");
-                private final int biomeSoilUniform = register("u_biomeSoil");
-                private final int biomeSoilNormalUniform = register("u_biomeSoilNormal");
+                private final int biomeSoilUniform = register("u_biomeSoilLayer");
                 private final int biomeSoilTileUniform = register("u_biomeSoilTile");
                 private final Vector3 detailPosition = new Vector3();
                 private int rainNoiseUnit = -1, waterDetailUnit = -1, biomeUnit = -1;
                 private final int[] waterOceanUnits = { -1, -1, -1 };
-                private int biomeSoilUnit = -1, biomeSoilNormalUnit = -1;
                 private int magmaOceanUnit = -1;
                 private int waterShapeUnit = -1;
                 private int waterExposureUnit = -1;
@@ -272,6 +277,8 @@ final class GpuTerrain implements Disposable {
                     // must not reuse a reed shader, which never binds a_coverRow and would draw rows as clumps.
                     return waterMode == (otherWater == null ? null : otherWater.mode)
                           && flowingMagma == (otherMagma != null && otherMagma.flowing())
+                          // A shadow map changes the compiled samplers without changing the environment's mask.
+                          && shadowMap == (other.environment != null && other.environment.shadowMap != null)
                           && instances == instanceMask(other) && super.canRender(other);
                 }
 
@@ -283,6 +290,7 @@ final class GpuTerrain implements Disposable {
                     if (globalsPass == shadingPass) { return; }
                     globalsPass = shadingPass;
                     set(normalMapsUniform, normalMaps ? 1f : 0f);
+                    set(parallaxMappingUniform, parallaxMapping ? 1f : 0f);
                     set(iceNormalsUniform, normalMaps ? 1f : 0f);
                     set(magmaTimeUniform, magmaClock);
                     set(magmaOceanScaleUniform, lavaOcean.texture() == null ? 0f : GpuOcean.lavaScale());
@@ -320,7 +328,13 @@ final class GpuTerrain implements Disposable {
                         set(biomeBoardUniform, (float) biomes.width(), (float) biomes.height());
                         set(iceBoardUniform, (float) biomes.iceWidth(), (float) biomes.iceHeight());
                     }
-                    if (has(biomeSoilUniform)) { set(biomeSoilTileUniform, assets.sculptTile("earth") * .45f); }
+                    if (has(biomeSoilUniform)) {
+                        set(biomeSoilUniform, 2f * SCULPT_LAYERS.indexOf("dirt"));
+                        set(biomeSoilTileUniform, assets.sculptTile("dirt"));
+                    }
+                    if (has(sculptReliefUniform)) {
+                        program.setUniform1fv(loc(sculptReliefUniform), sculptRelief, 0, sculptRelief.length);
+                    }
                     // BaseShader skips uniforms absent from a program. All lit surfaces share the same rain clock.
                     set(rainScaleUniform, 1f / BoardGeometry.width());
                     set(rainTimeUniform, clock);
@@ -350,11 +364,6 @@ final class GpuTerrain implements Disposable {
                     rainNoiseUnit = bindShared(rainNoiseUniform, rainNoise, rainNoiseUnit);
                     waterDetailUnit = bindShared(waterDetailUniform, waterDetail, waterDetailUnit);
                     if (has(biomeHexesUniform)) { biomeUnit = bindShared(biomeHexesUniform, biomes.texture(), biomeUnit); }
-                    if (has(biomeSoilUniform)) {
-                        var soil = assets.sculpt("earth");
-                        biomeSoilUnit = bindShared(biomeSoilUniform, soil.color(), biomeSoilUnit);
-                        biomeSoilNormalUnit = bindShared(biomeSoilNormalUniform, soil.normal(), biomeSoilNormalUnit);
-                    }
                     for (int cascade = 0; cascade < waterOceanUniforms.length; cascade++) {
                         Texture waves = ocean.waves(cascade);
                         waterOceanUnits[cascade] = bindShared(waterOceanUniforms[cascade],
@@ -396,6 +405,7 @@ final class GpuTerrain implements Disposable {
                 }
             };
             GpuCloudShadow.register(result);
+            GpuLavaLighting.register(result);
             GpuBuildingCutaway.register(result);
             GpuLiquidShader.register(result);
             GpuMagmaShader.register(result);
@@ -557,6 +567,7 @@ final class GpuTerrain implements Disposable {
     /** Every tree of the board, drawn instanced; each pass gathers the trees of the chunks it draws. */
     private final GpuTreeInstances trees;
     private final Environment environment = new Environment();
+    private final GpuLavaLighting lavaLighting = new GpuLavaLighting();
     private final List<Chunk> chunks = new ArrayList<>();
     // At most four in-flight chunks and eight replaced chunks. A small worker pool leaves CPU capacity for
     // rendering/input instead of borrowing every common-pool worker. All GL ownership stays on the render thread.
@@ -656,6 +667,7 @@ final class GpuTerrain implements Disposable {
     private int chunkRows;
     private float buildingOpacity = DEFAULT_BUILDING_OPACITY;
     private boolean normalMaps = true;
+    private boolean parallaxMapping = true;
     private boolean grass = true;
     /** Neutral material view: sculpted terrain drops its textures so only geometry, light and occlusion remain. */
     private boolean clay;
@@ -667,6 +679,11 @@ final class GpuTerrain implements Disposable {
     private boolean hasCutaways;
     private boolean flatTrees;
     private boolean terrainMaterialsReady;
+    private GpuGlsl.Preparation terrainMaterialPreparation;
+    private final List<Renderable> terrainMaterialSamples = new ArrayList<>();
+    private final TerrainLoadProgress terrainMaterialProgress = new TerrainLoadProgress();
+    private long terrainMaterialEnvironment = -1;
+    private boolean terrainMaterialShadows;
 
     /** Tiny shared, mipmapped field: mask and sky variation; allocated once, never updated per frame. */
     private static Texture rainNoise() {
@@ -704,10 +721,23 @@ final class GpuTerrain implements Disposable {
         return GpuIceShader.fragment(GpuCloudShadow.fragment(rainFragment(source), true));
     }
 
+    /** One tracing kernel for ordinary textures and array layers; both overloads use identical filtering/refinement. */
+    static String parallaxFunctions() {
+        String trace = GpuShaderSource.read("parallax-trace.glsl") + GpuShaderSource.read("parallax-shadow.glsl");
+        return GpuShaderSource.read("surface-parallax.glsl")
+              + trace.replace("POM_SAMPLER", "sampler2D").replace("POM_UV", "at")
+              + trace.replace("POM_SAMPLER", "sampler2DArray").replace("POM_UV", "vec3(at, layer)");
+    }
+
     /** Every custom surface shares the light model, rain field, lighting, geometry shadows and water optics. */
     private static String rainFragment(String source) {
         String functions = GpuShaderSource.read("light-model.glsl");
+        if (source.contains("// sculpt-material-functions") || source.contains("// magma-solid-functions")
+              || source.contains("// magma-flow-functions") || source.contains("struct RoadMaps")) {
+            functions += parallaxFunctions();
+        }
         functions += GpuShaderSource.read("rain-surface.glsl");
+        functions += GpuShaderSource.read("lava-lighting.glsl");
         functions += GpuShaderSource.read("surface-lighting.glsl");
         functions += GpuShaderSource.read("terrain-meadow.glsl");
         functions += GpuShaderSource.read("terrain-patterns.glsl");
@@ -719,6 +749,7 @@ final class GpuTerrain implements Disposable {
         if (source.contains("// sculpt-material-functions")) {
             functions += GpuShaderSource.read("terrain-concrete.glsl");
             functions += "\n#ifdef volcanicFlag\n" + GpuMagmaShader.functions(false) + "\n#endif\n";
+            functions += GpuShaderSource.read("terrain-repeat.glsl");
             functions += GpuShaderSource.read("terrain-materials.glsl");
             functions += GpuShaderSource.read("terrain-biome.glsl");
         }
@@ -776,6 +807,7 @@ final class GpuTerrain implements Disposable {
         this.frameBounds = frameBounds;
         this.liquidShaderAnimation = liquidShaderAnimation;
         this.proceduralWater = proceduralWater;
+        environment.set(lavaLighting);
         assets = new GpuAssets();
         trees = new GpuTreeInstances((name, level) -> foliage(assets.lodModel(name, level)));
     }
@@ -936,14 +968,16 @@ final class GpuTerrain implements Disposable {
      * {@code textures/sculpt}.
      */
     private static final String[][] SCULPT_MATERIALS = {
-          { "grass", "scree", "granite-contact", "soil-contact" },
-          { "dirt", "gravel", "granite-contact", "soil-contact" },
+          { "grass", "scree", "granite", "soil-contact" },
+          { "dirt", "gravel", "granite", "soil-contact" },
           { "sand", "pavement", "sandstone", "sandstone" },
-          { "rock", "scree", "granite-contact", "granite-contact" },
-          { "concrete", "scree", "granite-contact", "cast" },
-          { "snow", "scree", "granite-contact", "snow" },
+          { "rock", "scree", "granite", "granite" },
+          { "concrete", "scree", "granite", "cast" },
+          { "snow", "scree", "granite", "snow" },
+          { "lunar", "lunar-scree", "lunar-cliff", "lunar-cliff" },
     };
-    private static final List<String> SCULPT_LAYERS = Arrays.stream(SCULPT_MATERIALS).flatMap(Arrays::stream).distinct().toList();
+    private static final List<String> SCULPT_LAYERS = java.util.stream.Stream.concat(
+          Arrays.stream(SCULPT_MATERIALS).flatMap(Arrays::stream), java.util.stream.Stream.of("earth")).distinct().toList();
 
     /**
      * Every family's maps in one array (GpuAssets.sculptArray, bound as u_terrainLayers), so all of them take a
@@ -1362,31 +1396,45 @@ final class GpuTerrain implements Disposable {
         }
     }
 
-    boolean busy() { return requested != null || rebuild != null || detailJob != null; }
+    private boolean materialsReady() {
+        return terrainMaterialsReady && terrainMaterialEnvironment == environment.getMask()
+              && terrainMaterialShadows == (environment.shadowMap != null);
+    }
 
-    boolean ready(BoardScene scene) { return coverScene != null && sameBoard(coverScene, scene); }
+    boolean busy() { return requested != null || rebuild != null || detailJob != null || coverScene != null && !materialsReady(); }
+
+    boolean ready(BoardScene scene) { return materialsReady() && coverScene != null && sameBoard(coverScene, scene); }
 
     int buildProgress() {
-        if (requested == null) { return -1; }
+        if (requested == null) { return materialsReady() ? -1 : 100; }
         if (rebuild == null || rebuild.request != requested || rebuild.plan == null) { return 0; }
         return 100 * rebuild.replacements.size() / Math.max(1, rebuild.remaining.size() + rebuild.replacements.size());
     }
 
     /** Read on the GL thread; each worker contributes one coherent, non-authoritative progress snapshot. */
     List<TerrainLoadProgress.Status> buildDetails() {
+        if (requested == null && coverScene == null) { return List.of(); }
+        List<TerrainLoadProgress.Status> result = new ArrayList<>();
+        if (terrainMaterialPreparation != null && !materialsReady()) {
+            result.add(new TerrainLoadProgress.Status(0, 0, terrainMaterialProgress.snapshot()));
+        }
         if (requested == null || rebuild == null || rebuild.request.generation() != requested.generation()) {
-            return List.of();
+            return result;
         }
         List<DetailJob> jobs = new ArrayList<>(rebuild.pending);
         if (detailJob != null && detailJob.rebuilding()) { jobs.add(detailJob); }
-        if (jobs.isEmpty()) { return List.of(new TerrainLoadProgress.Status(0, 0, rebuild.progress.snapshot())); }
+        if (jobs.isEmpty()) {
+            result.add(new TerrainLoadProgress.Status(0, 0, rebuild.progress.snapshot()));
+            return result;
+        }
         BoardScene scene = rebuild.request.scene();
         int columns = (scene.width() + CHUNK_SIZE - 1) / CHUNK_SIZE;
         int rows = (scene.height() + CHUNK_SIZE - 1) / CHUNK_SIZE;
-        return jobs.stream().filter(job -> job.generation() == requested.generation())
+        result.addAll(jobs.stream().filter(job -> job.generation() == requested.generation())
               .map(job -> new TerrainLoadProgress.Status(TerrainLoadProgress.displayIndex(job.index(), columns, rows) + 1,
                     columns * rows, job.progress().snapshot()))
-              .sorted(Comparator.comparingInt(TerrainLoadProgress.Status::section)).toList();
+              .sorted(Comparator.comparingInt(TerrainLoadProgress.Status::section)).toList());
+        return result;
     }
 
     /** Presentation only: derive cell colors from the current request's existing chunk ownership. */
@@ -1647,10 +1695,16 @@ final class GpuTerrain implements Disposable {
 
     /** A bounded edit pipeline shares two CPU workers; GL collection/upload remains under the frame budget. */
     boolean refine(Camera camera) {
+        // Launch links while CPU terrain jobs are being prepared, and poll without blocking the loading screen.
+        if (!materialsReady()) {
+            if (terrainMaterialPreparation == null && requested != null) { updateLight(requested.scene().light()); }
+            prepareTerrainMaterials();
+        }
         // While opening/replacing a board, use more of the loading frame for uploads instead of stretching each
         // chunk's handoffs over several frames. Interactive edits retain their smaller budget.
         long deadline = System.nanoTime() + (coverScene == null ? 8_000_000 : 2_000_000);
         drainRetired(deadline);
+        if (requested == null && rebuild == null && detailJob == null) { return false; }
         do {
             if (advanceBuild(camera, deadline)) { return true; }
             if (detailJob != null && !detailJob.ready()
@@ -1959,25 +2013,45 @@ final class GpuTerrain implements Disposable {
         trees.retainParts(sharedSources);
         assets.retainBuildings(liveBuildings);
         updateLight(scene.light());
-        if (!terrainMaterialsReady) { prepareTerrainMaterials(); }
     }
 
-    /** Pay the fixed natural-terrain palette and shader costs while opening, before the first painting stroke. */
-    private void prepareTerrainMaterials() {
-        for (BoardScene.Surface family : BoardScene.Surface.values()) { sculptMaterial(family); }
-        Material blend = blendMaterial(new GpuSurfaceBlend.Palette(BoardScene.Surface.GRASS,
-              BoardScene.Surface.SAND, BoardScene.Surface.ROCK));
-        for (Material material : List.of(sculptMaterial(BoardScene.Surface.GRASS), blend)) {
-            Mesh mesh = new Mesh(true, 1, 0, material.has(GpuSurfaceBlend.TYPE) ? GpuSurfaceBlend.VERTICES : MeshBatch.STANDARD);
-            try {
-                Renderable sample = new Renderable();
-                sample.material = material;
-                sample.environment = environment;
-                sample.meshPart.set("terrain-material-warmup", mesh, 0, 0, GL20.GL_TRIANGLES);
-                batch.getShaderProvider().getShader(sample);
-            } finally { mesh.dispose(); }
+    /** Retain one layout per sculpt variant, including ice/volcanic flags discovered in actual chunk materials. */
+    private void prepareTerrainMaterial(Material material, VertexAttributes attributes) {
+        for (Renderable sample : terrainMaterialSamples) {
+            if (sample.material.getMask() == material.getMask()
+                  && sample.meshPart.mesh.getVertexAttributes().equals(attributes)) { return; }
         }
+        Renderable sample = new Renderable();
+        sample.material = new Material(material);
+        sample.environment = environment;
+        sample.meshPart.set("terrain-material-warmup", new Mesh(true, 0, 0, attributes), 0, 0, GL20.GL_TRIANGLES);
+        terrainMaterialSamples.add(sample);
+        terrainMaterialsReady = false;
+    }
+
+    /** Driver links continue across loading frames. Retained samples are checked again when lighting flags change. */
+    private void prepareTerrainMaterials() {
+        if (terrainMaterialSamples.isEmpty()) {
+            // Start the common program while CPU workers build the board. Chunk materials queue any mixed,
+            // ice or volcanic variants they actually use; a uniform board never needs a hypothetical blend.
+            prepareTerrainMaterial(sculptMaterial(BoardScene.Surface.GRASS), MeshBatch.STANDARD);
+        }
+        if (terrainMaterialPreparation == null || terrainMaterialEnvironment != environment.getMask()
+              || terrainMaterialShadows != (environment.shadowMap != null)
+              || terrainMaterialProgress.snapshot().total() != terrainMaterialSamples.size()) {
+            terrainMaterialProgress.begin("materials", terrainMaterialSamples.size());
+        }
+        if (terrainMaterialPreparation == null) { terrainMaterialPreparation = new GpuGlsl.Preparation(); }
+        terrainMaterialEnvironment = environment.getMask();
+        terrainMaterialShadows = environment.shadowMap != null;
         terrainMaterialsReady = true;
+        int completed = 0;
+        for (Renderable sample : terrainMaterialSamples) {
+            if (terrainMaterialPreparation.run(() -> sample.shader = batch.getShaderProvider().getShader(sample))) {
+                completed++;
+            } else { terrainMaterialsReady = false; }
+        }
+        while (terrainMaterialProgress.snapshot().completed() < completed) { terrainMaterialProgress.advance(); }
     }
 
     private void drainRetired(long deadline) {
@@ -2665,6 +2739,13 @@ final class GpuTerrain implements Disposable {
             chunk.terrainRenderables = GpuTerrainDepth.snapshot(chunk.opaque);
             chunk.scatterRenderables = GpuTerrainDepth.snapshot(chunk.scatter);
             chunk.waterRenderables = GpuTerrainDepth.snapshot(chunk.water);
+            for (Array<Renderable> layer : List.of(chunk.terrainRenderables, chunk.scatterRenderables, chunk.waterRenderables)) {
+                for (Renderable part : layer) {
+                    if (part.material.has(Sculpt.TYPE)) {
+                        prepareTerrainMaterial(part.material, part.meshPart.mesh.getVertexAttributes());
+                    }
+                }
+            }
             chunk.depthTerrain = new GpuTerrainDepth(chunk.opaque);
             if (chunk.waterField != null) { chunk.waterField.finish(); }
             if (chunk.waterField != null) {
@@ -3075,6 +3156,12 @@ final class GpuTerrain implements Disposable {
         return tiles;
     }
 
+    private float[] sculptRelief() {
+        float[] relief = new float[SCULPT_LAYERS.size()];
+        for (int i = 0; i < relief.length; i++) { relief[i] = assets.sculptRelief(SCULPT_LAYERS.get(i)); }
+        return relief;
+    }
+
     /** The colour/height layers of the family's ground, debris, wall and mantle maps in the sculpt array. */
     private static float[] sculptLayers(BoardScene.Surface family) {
         float[] layers = new float[4];
@@ -3394,7 +3481,7 @@ final class GpuTerrain implements Disposable {
             case SAND -> 0.05f;
             case DIRT -> 0.15f;
             case GRASS -> 0.25f;
-            case ROCK -> 0.7f;
+            case ROCK, LUNAR -> 0.7f;
             case CONCRETE -> 1;
         };
     }
@@ -3901,6 +3988,7 @@ final class GpuTerrain implements Disposable {
         shadingPass++;
         if (!drawTactical) {
             updateDetail(camera);
+            lavaLighting.update(coverScene, camera);
             // Upload before the render context tracks bound texture units for this pass.
             biomes.update(coverScene);
         }
@@ -4053,6 +4141,9 @@ final class GpuTerrain implements Disposable {
         normalMaps = enabled;
     }
 
+    /** A uniform-only change, shared by both cameras and independent of normal-map lighting. */
+    void setParallaxMapping(boolean enabled) { parallaxMapping = enabled; }
+
     /** Live grass visibility; disabled cover skips root preparation and drawing without rebuilding the terrain. */
     void setGrass(boolean enabled) {
         grass = enabled;
@@ -4136,10 +4227,17 @@ final class GpuTerrain implements Disposable {
     /** Camera depth retains the cutaway so atmosphere effects do not hide units behind faded surfaces. */
     void renderDepth(Camera camera, List<ModelInstance> units, ModelBatch pass) {
         updateDetail(camera);
-        renderDepth(camera, units, pass, false);
+        renderDepth(camera, units, pass, false, true);
     }
 
-    private void renderDepth(Camera camera, List<ModelInstance> units, ModelBatch pass, boolean shadows) {
+    /** Wireframe fill and lines share the camera's cutaway and detail selection, without scatter terrain. */
+    void renderWireframe(Camera camera, ModelBatch pass) {
+        updateDetail(camera);
+        renderDepth(camera, List.of(), pass, false, false);
+    }
+
+    private void renderDepth(Camera camera, List<ModelInstance> units, ModelBatch pass, boolean shadows,
+          boolean includeScatter) {
         pass.begin(camera);
         trees.begin(shadows ? GpuTreeInstances.Pass.SHADOW : GpuTreeInstances.Pass.DEPTH);
         // A shadow map whose texel spans half a metre or more cannot resolve leaves: its trees cast the shadow of
@@ -4151,7 +4249,7 @@ final class GpuTerrain implements Disposable {
             if (!flatTrees) { trees.add(chunk.stand, Math.max(chunk.treeLod, coarsest), visible); }
             if (visible) {
                 pass.render(chunk.depthTerrain);
-                if (chunk.scatterVisible) {
+                if (includeScatter && chunk.scatterVisible) {
                     chunk.scatter.forEach(pass::render);
                 }
                 pass.render(shadows ? chunk.shadowProps : chunk.solidProps);
@@ -4243,7 +4341,7 @@ final class GpuTerrain implements Disposable {
                 renderUnitShadows(lightCamera, units);
             } else {
                 shadow.begin();
-                renderDepth(lightCamera, boardWide ? List.of() : units, depthBatch, true);
+                renderDepth(lightCamera, boardWide ? List.of() : units, depthBatch, true, true);
                 shadow.end();
                 if (boardWide) {
                     if (boardShadow == null) {
@@ -4264,7 +4362,7 @@ final class GpuTerrain implements Disposable {
                 }
                 if (!staticShadowValid) {
                     shadow.begin();
-                    renderDepth(lightCamera, List.of(), depthBatch, true);
+                    renderDepth(lightCamera, List.of(), depthBatch, true, true);
                     shadow.end();
                     shadow.getFrameBuffer().transfer(staticShadow, buffers);
                     staticShadowValid = true;
@@ -4428,6 +4526,9 @@ final class GpuTerrain implements Disposable {
 
     @Override
     public void dispose() {
+        if (terrainMaterialPreparation != null) { terrainMaterialPreparation.dispose(); }
+        terrainMaterialSamples.forEach(sample -> sample.meshPart.mesh.dispose());
+        terrainMaterialSamples.clear();
         meshGeneration++;
         detailWorker.shutdownNow();
         try {

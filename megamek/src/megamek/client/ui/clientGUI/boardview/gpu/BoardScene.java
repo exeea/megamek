@@ -138,7 +138,8 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         SAND("terrain/sand"),
         ROCK("terrain/rock"),
         CONCRETE("terrain/concrete"),
-        SNOW("terrain/snow");
+        SNOW("terrain/snow"),
+        LUNAR("terrain/rock");
 
         final String wall;
 
@@ -318,7 +319,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
                     labels.add(label);
                 }
             }
-            return new Tile(coords, level, -1, false, roadExits, Surface.ROCK, ground, null, null, null,
+            return new Tile(coords, level, -1, false, roadExits, Surface.LUNAR, ground, null, null, null,
                   tactical, kept, labels, BoardLiquid.NONE, null, true, road, fireSmoke, Biome.NONE,
                   impassable, false, cliffTopExits, true);
         }

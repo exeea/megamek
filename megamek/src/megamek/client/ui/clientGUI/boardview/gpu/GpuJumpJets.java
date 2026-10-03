@@ -31,15 +31,14 @@ final class GpuJumpJets implements Disposable {
     private static final class Puff {
         final Vector3 origin, velocity;
         final Vector3 center = new Vector3();
-        final float birth, width, strength;
+        final float birth, width;
         float radius, alpha, depth;
 
-        Puff(Vector3 origin, Vector3 velocity, float birth, float width, float strength) {
+        Puff(Vector3 origin, Vector3 velocity, float birth, float width) {
             this.origin = origin;
             this.velocity = velocity;
             this.birth = birth;
             this.width = width;
-            this.strength = strength;
         }
     }
 
@@ -75,19 +74,22 @@ final class GpuJumpJets implements Disposable {
                 tick = (int) Math.ceil(time / EMISSION_STEP);
             }
             smoke.removeIf(puff -> time - puff.birth >= SMOKE_LIFE);
+            // Carry downward nozzle motion into the plume so descent does not overtake fresh exhaust.
+            float carriedSpeed = time > previousTime
+                  ? Math.max(0, (position.dot(direction) - previous.dot(direction)) / (time - previousTime)) : 0;
             while (tick * EMISSION_STEP <= time + .00001f) {
                 float birth = tick * EMISSION_STEP;
                 float strength = power.smoke(birth);
                 int random = seed + tick++ * 7919;
                 if (noise(random) < strength && time - birth < SMOKE_LIFE) {
                     float fraction = time == previousTime ? 1 : MathUtils.clamp((birth - previousTime) / (time - previousTime), 0, 1);
-                    var origin = new Vector3(previous).lerp(position, fraction).mulAdd(direction, width * 3);
+                    var origin = new Vector3(previous).lerp(position, fraction);
                     var velocity = new Vector3(noise(random + 1) - .5f, noise(random + 2) - .5f, .25f)
-                          .scl(width * 3).mulAdd(direction, width * 5);
+                          .scl(width * 3).mulAdd(direction, width * 20 + carriedSpeed);
                     if (smoke.size() == PUFFS_PER_EMITTER) {
                         smoke.removeFirst();
                     }
-                    smoke.addLast(new Puff(origin, velocity, birth, width * (.85f + .3f * noise(random + 3)), strength));
+                    smoke.addLast(new Puff(origin, velocity, birth, width * (.85f + .3f * noise(random + 3))));
                 }
             }
             previous.set(position);
@@ -216,8 +218,9 @@ final class GpuJumpJets implements Disposable {
             for (Puff puff : jet.smoke) {
                 float age = jet.time - puff.birth, remaining = 1 - age / SMOKE_LIFE;
                 puff.center.set(puff.origin).mulAdd(puff.velocity, age);
-                puff.radius = puff.width * (2.3f + age * 8);
-                puff.alpha = .5f * puff.strength * jet.power.smoke() * remaining * remaining;
+                puff.radius = puff.width * (.5f + age * 8);
+                // Jump power already controls emission density; emitted smoke fades only with its own age.
+                puff.alpha = .5f * remaining * remaining;
                 puff.depth = puff.center.dot(camera.direction);
                 sortedSmoke.add(puff);
             }

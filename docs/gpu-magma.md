@@ -13,6 +13,7 @@
 | `liquid-flow.glsl` | Shared water/lava advection phases, weights and material coordinates. |
 | `magma-solid.glsl / magma-flow.glsl / magma-lighting.glsl` | Own crust relief, molten advection and heat/lighting; terrain boundaries reuse these evaluations. |
 | `GpuAtmosphere / GpuHeatGlow` | Preserve molten HDR energy, select visible hot highlights and composite a reduced-resolution camera halo. |
+| `GpuLavaLighting / lava-lighting.glsl` | Derive bounded local diffuse emitters from installed volcanic tiles for terrain, units and props. |
 
 MAGMA level 1 is solid basalt crust with incandescent fissures. Level 2 is opaque
 flowing lava, including falling sheets and exposed board-edge cuts. The captured
@@ -38,8 +39,9 @@ view directions and flow directions include the warp's Jacobian; mip derivatives
 taken after the warp. Smooth triplanar weights cover tops, slopes, curved fall lips
 and vertical cuts without switching projection abruptly.
 
-A flat flowing surface uses ten material-map reads at close range: five in each
-of the two advection phases. Material LOD reduces this to six after fine normals
+A flat flowing surface uses ten base material-map reads at close range: five in each
+of the two advection phases, plus the adaptive height trace when its offset is visible.
+Material LOD reduces this to six after fine normals
 and relief disappear, then four when the surface map is no longer sampled; colour
 and heat remain. These counts exclude bank/current fields, the wave field, lighting
 and shadows; surfaces using multiple projection axes cost more. Solid crust retains
@@ -104,18 +106,36 @@ composite. With tactical FoV active, each source texel is attenuated by the shar
 visibility opacity before downsampling, preventing hidden heat from bleeding into
 a visible neighbour. The final composite retains its normal FoV treatment.
 
-The halo models camera glare; it does not dynamically illuminate nearby terrain
-or units. Its warm-radiance selector is an approximation rather than a material
+The halo models camera glare. Its warm-radiance selector is an approximation rather than a material
 mask: sufficiently bright warm fire may also glow on a molten board, while ordinary
 white reflections are excluded. Non-emissive opaque surfaces preserve the existing
 clamped lighting path, apart from buffer quantization. Blending translucent objects
 over HDR highlights can differ from the former per-draw LDR clipping.
 
-Relief uses normals and bounded parallax, not geometric displacement, so silhouettes
-and picking remain the existing board geometry. Crust traces up to twelve depth
-layers with a refined intersection to preserve its occluding slab edges; lava keeps
-its thin-skin offset. The crust bake concentrates relief in the thick plates and
-gives fine rock grain only shallow relief. Fissure-wall glow stays close to the gaps.
+Local illumination is a separate diffuse contribution in the existing lit shaders.
+`GpuLavaLighting` derives up to 32 disk-like emitters from the installed terrain
+snapshot each frame, culling by camera and the captured client LOS. Molten tiles
+emit strongly; cooling crust retains 3.5% source power. The camera-centred budget
+fades its outer sources by distance when full. The same environment attribute reaches
+terrain, units, buildings and props without extra textures, render passes or game state.
+Changing terrain or board scale refreshes positions; removing lava clears the count.
+This is a short-range, bounded lighting approximation, with no obstacle shadow rays
+or global illumination. Light can leak through nearby geometry, and a very large
+lava field exceeds the local emitter budget. The camera halo and local lighting
+both respect captured visibility, through their own existing render paths.
+
+Relief uses normals and bounded parallax, so silhouettes and picking remain the
+existing board geometry. Crust and lava share the terrain's adaptive POM trace:
+subpixel offsets skip tracing; visible relief uses 4–24 depth steps and local
+intersection refinement. Lava's shallow skin usually takes the subpixel path.
+Visible relief also traces 4–10 sunlight samples for cavity self-shadowing; this
+only shades reflected light. The crust bake uses a 0.95-metre normalized height
+range and concentrates relief in thick plates, smoothing photographic grain into
+broader shapes. Its sampled heights occupy only part of that range. Molten skin
+retains a 0.06-metre range. Fissure-wall glow stays close to the gaps.
+The ray follows the actual surface normal before projection and domain warping,
+keeping relief aligned on sloping banks and falls. See
+[terrain materials](gpu-terrain-materials.md#parallax-relief) for filtering and limits.
 
 ## Assets
 

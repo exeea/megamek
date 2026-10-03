@@ -296,6 +296,12 @@ final class GpuAssets implements Disposable {
         return entry == null ? 4 : entry.getFloat("tile");
     }
 
+    /** Physical range used to bake the normals. Older/custom sets without height metadata keep normal mapping. */
+    float sculptRelief(String name) {
+        JsonValue entry = sculptEntry(name);
+        return entry == null ? 0 : Math.max(0, entry.getFloat("relief_metres", 0));
+    }
+
     private JsonValue sculptEntry(String name) {
         if (!sculptEntries.containsKey(name)) {
             FileHandle manifest = new FileHandle(new File(root, "textures/sculpt/manifest.json"));

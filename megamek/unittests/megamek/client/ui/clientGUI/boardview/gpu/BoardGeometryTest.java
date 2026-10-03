@@ -32,7 +32,8 @@ class BoardGeometryTest {
                 var cache = new BoardSurface.Cache();
                 var ray = new Ray(BoardGeometry.center(tile.coords(), 0).add(0, 0, 100), new Vector3(0, 0, -1));
                 var hit = BoardGeometry.hit(board, ray, board.tiles(), BoardGeometry.floor(board), cache);
-                boolean sparks = water < 0 && (material == BoardScene.Surface.ROCK || material == BoardScene.Surface.CONCRETE);
+                boolean sparks = water < 0 && (material == BoardScene.Surface.ROCK || material == BoardScene.Surface.LUNAR
+                      || material == BoardScene.Surface.CONCRETE);
                 assertEquals(sparks, hit.hardSurface(), "The exposed material matters, including water over rock");
                 var at = ray.origin.cpy().mulAdd(ray.direction, (float) Math.sqrt(hit.distance()));
                 var attack = new UnitAttack(UnitPlaybackTest.attack(UnitPlaybackTest.unit(1, 1), UnitPlaybackTest.unit(2, 0),

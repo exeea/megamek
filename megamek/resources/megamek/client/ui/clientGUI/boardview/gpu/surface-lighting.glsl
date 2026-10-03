@@ -1,5 +1,7 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Every custom lit surface shares per-fragment lighting and geometry-shadow sampling, after light-model.glsl.
+// Final material visibility attenuates direct illumination only; cavities never extinguish emitted heat.
+float reliefVisibility = 1.0;
 #ifdef lightingFlag
 uniform vec3 u_ambientCubemap[6];
 #if numDirectionalLights > 0
@@ -109,8 +111,25 @@ float sculptShadow(vec3 normal, vec3 light) {
 #endif
 }
 
+float surfaceSpecular(vec3 normal, vec3 view, vec3 light, float film, float roughness) {
+    float incidence = max(0.0, dot(normal, light));
+    vec3 halfVector = normalize(light + view);
+    float nv = max(.001, dot(normal, view)), nh = max(0.0, dot(normal, halfVector));
+    float r = mix(clamp(roughness, .15, .98), .12, film);
+    // Filter unresolved normal variance into roughness rather than sparkling as the camera moves.
+    vec3 dx = dFdx(normal), dy = dFdy(normal);
+    r = min(.98, sqrt(r * r + min(.18, .35 * (dot(dx, dx) + dot(dy, dy)))));
+    float a2 = r * r * r * r;
+    float denominator = nh * nh * (a2 - 1.0) + 1.0;
+    float distribution = a2 / max(3.14159265 * denominator * denominator, .0001);
+    float k = (r + 1.0) * (r + 1.0) / 8.0;
+    float visibility = nv / (nv * (1.0 - k) + k) * incidence / (incidence * (1.0 - k) + k);
+    float fresnel = .04 + .96 * pow(1.0 - max(0.0, dot(view, halfVector)), 5.0);
+    return distribution * visibility * fresnel / (4.0 * nv);
+}
+
 void surfaceLighting(vec3 normal, float film, float roughness, out vec3 ambient, out vec3 direct, out vec3 sheen) {
-    ambient = skyLight(normal, GROUND_ALBEDO);
+    ambient = skyLight(normal, GROUND_ALBEDO) + lavaIrradiance(v_cloudPosition, normal);
     direct = vec3(0.0);
     sheen = vec3(0.0);
 #if numDirectionalLights > 0
@@ -119,18 +138,10 @@ void surfaceLighting(vec3 normal, float film, float roughness, out vec3 ambient,
         vec3 light = -u_dirLights[i].direction;
         float incidence = max(0.0, dot(normal, light));
         direct += u_dirLights[i].color * incidence;
-        if (roughness >= 0.0 && incidence > 0.0) {
+        if (roughness >= 0.0) {
             // Dielectric GGX for materials with authored roughness. Wet pores develop a smoother water film.
-            vec3 halfVector = normalize(light + view);
-            float nv = max(.001, dot(normal, view)), nh = max(0.0, dot(normal, halfVector));
-            float r = mix(clamp(roughness, .15, .98), .12, film);
-            float a2 = r * r * r * r;
-            float denominator = nh * nh * (a2 - 1.0) + 1.0;
-            float distribution = a2 / max(3.14159265 * denominator * denominator, .0001);
-            float k = (r + 1.0) * (r + 1.0) / 8.0;
-            float visibility = nv / (nv * (1.0 - k) + k) * incidence / (incidence * (1.0 - k) + k);
-            float fresnel = .04 + .96 * pow(1.0 - max(0.0, dot(view, halfVector)), 5.0);
-            sheen += u_dirLights[i].color * distribution * visibility * fresnel / (4.0 * nv);
+            // Evaluate derivatives on both sides of the light terminator; zero incidence already returns zero.
+            sheen += u_dirLights[i].color * surfaceSpecular(normal, view, light, film, roughness);
         } else if (film > 0.0 && incidence > 0.0) {
             vec3 halfVector = normalize(light + view);
             float exponent = mix(12.0, 96.0, film);
@@ -145,6 +156,8 @@ void surfaceLighting(vec3 normal, float film, float roughness, out vec3 ambient,
     direct *= visibility;
     sheen *= visibility;
 #endif
+    direct *= reliefVisibility;
+    sheen *= reliefVisibility;
 }
 
 // Existing surfaces keep their established water-film response until they supply a roughness map.
@@ -152,3 +165,11 @@ void surfaceLighting(vec3 normal, float film, out vec3 ambient, out vec3 direct,
     surfaceLighting(normal, film, -1.0, ambient, direct, sheen);
 }
 #endif
+
+vec3 surfaceSunDirection() {
+#if defined(lightingFlag) && numDirectionalLights > 0
+    return -u_dirLights[0].direction;
+#else
+    return vec3(0.0, 0.0, 1.0);
+#endif
+}

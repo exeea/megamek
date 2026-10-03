@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -42,6 +43,7 @@ class GpuTerrainReliefSmokeTest {
             public void create() {
                 GpuTerrain terrain = new GpuTerrain();
                 try {
+                    assertGl("terrain construction");
                     File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
                     assertTrue(output.isDirectory() || output.mkdirs());
                     StringBuilder timing = new StringBuilder(Gdx.gl.glGetString(GL20.GL_RENDERER))
@@ -53,14 +55,17 @@ class GpuTerrainReliefSmokeTest {
                           new Color(.39f, .57f, .72f, 1), new Color(.69f, .75f, .78f, 1), Color.WHITE, 1, 1, true);
                     terrain.setAtmosphere(daylight);
                     terrain.setWind(new BoardAtmosphere.Effects(0, 0, 0, 0, 0, .65f, 115));
+                    assertGl("atmosphere and wind");
                     for (BoardScene.Surface family : BoardScene.Surface.values()) {
                         BoardScene scene = scene(family);
                         terrain.update(scene);
+                        assertGl(family + " terrain update");
                         camera.setIsometric(true);
                         camera.tilt(5);
                         camera.camera.zoom = .26f;
                         camera.center(BoardGeometry.center(new Coords(4, 5), 1));
                         terrain.renderShadows(camera.camera, List.of());
+                        assertGl(family + " isometric shadows");
                         // Finish progressive grass preparation so changes cannot be mistaken for animation.
                         for (int warmup = 0; warmup < 12; warmup++) { frame(terrain, camera); }
                         settleCover(terrain, camera);
@@ -95,21 +100,18 @@ class GpuTerrainReliefSmokeTest {
                         camera.setIsometric(false);
                         camera.center(BoardGeometry.center(new Coords(4, 4), 3));
                         terrain.renderShadows(camera.camera, List.of());
+                        assertGl(family + " overhead shadows");
                         settleCover(terrain, camera);
                         GpuBoardTestUi.capture(new File(output, "terrain-" + family + "-top.png"));
                         if (family == BoardScene.Surface.SAND) {
-                            var shadows = terrain.environment().shadowMap;
-                            terrain.environment().shadowMap = null;
-                            try {
-                                frame(terrain, camera);
-                                GpuBoardTestUi.capture(new File(output, "terrain-SAND-top-no-shadows.png"));
-                            } finally { terrain.environment().shadowMap = shadows; }
+                            checkShadowToggle(terrain, camera, scene, output);
                         }
                         if (family == BoardScene.Surface.GRASS) {
                             terrain.setAtmosphere(new BoardAtmosphere.Lighting(new Vector3(-.8f, .45f, -.35f).nor(),
                                   new Color(1, .77f, .53f, 1), new Color(.24f, .27f, .33f, 1), Color.BLACK,
                                   daylight.sky(), daylight.horizon(), Color.WHITE, 1, 1, true));
                             terrain.renderShadows(camera.camera, List.of());
+                            assertGl("warm grass shadows");
                             frame(terrain, camera);
                             GpuBoardTestUi.capture(new File(output, "terrain-GRASS-warm-top.png"));
                             terrain.setAtmosphere(daylight);
@@ -135,17 +137,50 @@ class GpuTerrainReliefSmokeTest {
     }
 
     private static void frame(GpuTerrain terrain, BoardCamera camera) {
+        assertGl("before frame");
         ScreenUtils.clear(.2f, .26f, .31f, 1, true);
+        assertGl("frame clear");
         terrain.render(camera.camera, false);
+        assertGl("opaque terrain");
         terrain.renderTransparent(camera.camera);
+        assertGl("transparent terrain");
+    }
+
+    private static void assertGl(String stage) {
+        assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), stage);
+    }
+
+    private static void checkShadowToggle(GpuTerrain terrain, BoardCamera camera, BoardScene scene, File output) {
+        byte[] shadowed = ScreenUtils.getFrameBufferPixels(true);
+        var environment = terrain.environment();
+        var shadows = environment.shadowMap;
+        long attributes = environment.getMask();
+        assertTrue(terrain.ready(scene));
+        environment.shadowMap = null;
+        try {
+            assertEquals(attributes, environment.getMask(), "Shadow presence is outside the attribute mask");
+            assertTrue(terrain.busy(), "An unshadowed material variant must prepare before the next visible frame");
+            settleCover(terrain, camera);
+            assertTrue(terrain.ready(scene));
+            assertFalse(Arrays.equals(shadowed, ScreenUtils.getFrameBufferPixels(true)),
+                  "The new variant must actually remove the shadows");
+            GpuBoardTestUi.capture(new File(output, "terrain-SAND-top-no-shadows.png"));
+        } finally { environment.shadowMap = shadows; }
+        assertTrue(terrain.busy(), "Restoring shadows must recheck the compiled material variants");
+        settleCover(terrain, camera);
+        assertTrue(terrain.ready(scene));
+        assertArrayEquals(shadowed, ScreenUtils.getFrameBufferPixels(true),
+              "Restoring the shadow map must restore the identical shaded frame");
     }
 
     private static void settleCover(GpuTerrain terrain, BoardCamera camera) {
         // Grass is planted with the terrain: once the terrain is installed, one frame shows it completely.
         long deadline = System.nanoTime() + 60_000_000_000L;
         while (terrain.refine(camera.camera) || terrain.busy()) {
+            assertGl("terrain refinement");
             assertTrue(System.nanoTime() < deadline, "Terrain must settle before image comparisons");
         }
+        assertGl("terrain settled");
         frame(terrain, camera);
     }
 
@@ -241,6 +276,7 @@ class GpuTerrainReliefSmokeTest {
             prepareCover(cover, edited, camera, plants(coverScene(pixels, pixels, 2)));
             assertTrue(cover.uploads() > uploads, "New support at the same camera and scene must replace grass roots");
         } finally { cover.dispose(); }
+        assertGl("independent cover disposal");
     }
 
     /** Roots planted on each hex's full-detail support, as a terrain worker installs them. */
@@ -254,6 +290,7 @@ class GpuTerrainReliefSmokeTest {
     private static List<ModelInstance> prepareCover(GpuGroundCover cover, BoardScene scene, BoardCamera camera,
           Function<Coords, BoardPlants> plants) {
         List<ModelInstance> instances = cover.visible(scene, camera.camera, scene.tiles(), plants);
+        assertGl("independent cover preparation");
         assertTrue(instances.size() <= 1, "One blade template per terrain chunk, never a batch per hex");
         return instances;
     }

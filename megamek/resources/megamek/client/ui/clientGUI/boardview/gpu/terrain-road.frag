@@ -20,9 +20,7 @@ uniform sampler2D u_roadMask;
 flat in vec4 v_roadMaskRegion;
 in vec2 v_roadMaskUV;
 #endif
-#ifdef bridgeDeckFlag
 uniform float u_worldMetre;
-#endif
 #ifdef roadMapsFlag
 uniform sampler2D u_roadSurface;
 uniform float u_roadTransition;
@@ -41,7 +39,7 @@ flat in vec4 v_roadCoat;
 // ground-surface-functions
 // Those shared functions are inserted just before main, after the helpers below.
 vec3 groundNormal(vec2 uv, float strength);
-#ifdef roadCoatFlag
+#if defined(normalTextureFlag) || defined(roadCoatFlag)
 vec3 mappedNormal(vec4 texel, float strength);
 #endif
 
@@ -72,32 +70,34 @@ RoadMaps roadMaps() {
 #endif
 }
 
-vec4 roadAlbedo(RoadMaps m, vec2 uv) {
+vec4 roadAlbedo(RoadMaps m, vec2 uv, mat2 gradient) {
 #ifdef roadCoatFlag
-    return m.mapped ? texture(u_roadMaps, vec3(uv, float(m.maps * 3)))
-          : texture(u_sculptMaps, vec3(uv, float((m.maps - 3) * 2)));
+    return m.mapped ? textureGrad(u_roadMaps, vec3(uv, float(m.maps * 3)), gradient[0], gradient[1])
+          : textureGrad(u_sculptMaps, vec3(uv, float((m.maps - 3) * 2)), gradient[0], gradient[1]);
 #else
-    return texture(u_diffuseTexture, uv);
+    return textureGrad(u_diffuseTexture, uv, gradient[0], gradient[1]);
 #endif
 }
 
 // Only a surface with maps has one; see RoadMaps.mapped.
-vec4 roadSurface(RoadMaps m, vec2 uv) {
+vec4 roadSurface(RoadMaps m, vec2 uv, mat2 gradient) {
 #ifdef roadCoatFlag
-    return texture(u_roadMaps, vec3(uv, float(m.maps * 3 + 2)));
+    return textureGrad(u_roadMaps, vec3(uv, float(m.maps * 3 + 2)), gradient[0], gradient[1]);
 #elif defined(roadMapsFlag)
-    return texture(u_roadSurface, uv);
+    return textureGrad(u_roadSurface, uv, gradient[0], gradient[1]);
 #else
     return vec4(.5);
 #endif
 }
 
-vec3 roadNormal(RoadMaps m, vec2 uv, float strength) {
+vec3 roadNormal(RoadMaps m, vec2 uv, mat2 gradient, float strength) {
 #ifdef roadCoatFlag
-    return mappedNormal(m.mapped ? texture(u_roadMaps, vec3(uv, float(m.maps * 3 + 1)))
-          : texture(u_sculptMaps, vec3(uv, float((m.maps - 3) * 2 + 1))), strength);
+    return mappedNormal(m.mapped ? textureGrad(u_roadMaps, vec3(uv, float(m.maps * 3 + 1)), gradient[0], gradient[1])
+          : textureGrad(u_sculptMaps, vec3(uv, float((m.maps - 3) * 2 + 1)), gradient[0], gradient[1]), strength);
+#elif defined(normalTextureFlag)
+    return mappedNormal(textureGrad(u_normalTexture, uv, gradient[0], gradient[1]), strength);
 #else
-    return groundNormal(uv, strength);
+    return normalize(v_normal);
 #endif
 }
 
@@ -110,6 +110,13 @@ vec4 roadProfile() {
 }
 
 void main() {
+    vec2 uv = v_diffuseUV;
+#ifdef bridgeDeckFlag
+    // A rotated bridge shares the adjacent road's scale, orientation and texture phase.
+    uv = vec2(v_cloudPosition.x, -v_cloudPosition.y) / u_worldMetre;
+#endif
+    mat2 gradient = mat2(dFdx(uv), dFdy(uv));
+    vec3 worldDx = dFdx(v_cloudPosition / u_worldMetre), worldDy = dFdy(v_cloudPosition / u_worldMetre);
     RoadMaps m = roadMaps();
     vec4 roadColor = v_color;
 #ifdef roadMaskFlag
@@ -118,15 +125,35 @@ void main() {
     roadColor = texture(u_roadMask, v_roadMaskRegion.xy + maskUV * v_roadMaskRegion.zw);
     if (roadColor.a < .002) { discard; }
 #endif
-    vec2 uv = v_diffuseUV;
-#ifdef bridgeDeckFlag
-    // A rotated bridge shares the adjacent road's scale, orientation and texture phase.
-    uv = vec2(v_cloudPosition.x, -v_cloudPosition.y) / u_worldMetre;
-#endif
     vec3 tint = roadColor.rgb;
     if (m.mapped && (m.transition > .5 || m.transition < -1.5)) { tint = vec3(1.0); }
-    vec3 albedo = roadAlbedo(m, uv).rgb * tint;
-    vec4 properties = m.mapped ? roadSurface(m, uv) : vec4(.5);
+    vec2 sampleUv = uv;
+    vec4 properties = m.mapped ? roadSurface(m, uv, gradient) : vec4(.5);
+#if defined(normalTextureFlag) || defined(roadCoatFlag)
+    if (m.mapped && u_parallaxMapping > .5) {
+        vec3 face = normalize(v_normal);
+        vec3 travel = parallaxDirection(-viewDirection(), face) * (properties.a * .1);
+        vec2 ray = parallaxProject(travel, worldDx, worldDy, gradient[0], gradient[1]);
+        // Coverage/markings stay on their authored geometry. Only aligned material maps follow the hit.
+#ifdef roadCoatFlag
+        sampleUv = parallaxUv(u_roadMaps, float(m.maps * 3 + 2), vec4(1.0, 0.0, 0.0, 0.0),
+              uv, gradient[0], gradient[1], ray);
+#elif defined(roadMapsFlag)
+        sampleUv = parallaxUv(u_roadSurface, 0.0, vec4(1.0, 0.0, 0.0, 0.0), uv, gradient[0], gradient[1], ray);
+#endif
+        properties = roadSurface(m, sampleUv, gradient);
+        vec2 sunRay = parallaxProject(parallaxDirection(surfaceSunDirection(), face) * (properties.a * .1),
+              worldDx, worldDy, gradient[0], gradient[1]);
+#ifdef roadCoatFlag
+        reliefVisibility = parallaxShadow(u_roadMaps, float(m.maps * 3 + 2), vec4(1.0, 0.0, 0.0, 0.0),
+              sampleUv, gradient[0], gradient[1], sunRay, 1.0);
+#elif defined(roadMapsFlag)
+        reliefVisibility = parallaxShadow(u_roadSurface, 0.0, vec4(1.0, 0.0, 0.0, 0.0),
+              sampleUv, gradient[0], gradient[1], sunRay, 1.0);
+#endif
+    }
+#endif
+    vec3 albedo = roadAlbedo(m, sampleUv, gradient).rgb * tint;
     float roadCoverage = 1.0;
     bool wheelWear = m.mapped && m.transition < -1.5 && m.transition > -2.5;
     // Reuse the shared, stable noise field. These masks describe use and loose material, not road width.
@@ -158,7 +185,7 @@ void main() {
         float across = abs((roadColor.g - .5) * 2.0 * profile.x);
         float rut = 1.0 - smoothstep(profile.z * .5, profile.z, abs(across - profile.y));
         float grain = properties.r;
-        float broad = roadSurface(m, uv * .21).r;
+        float broad = roadSurface(m, uv * .21, gradient * .21).r;
         // A full-width construction edge, chipped only at a small scale.
         float seam = along + (broad - .5) * .8 + (grain - .5) * .6;
         float body = smoothstep(-.7, .5, seam);
@@ -178,7 +205,7 @@ void main() {
     }
     float normalStrength = 1.0;
     if (wheelWear) { normalStrength = mix(1.2, .35, compaction); }
-    vec3 normal = roadNormal(m, uv, normalStrength);
+    vec3 normal = roadNormal(m, sampleUv, gradient, normalStrength);
     // Only exposed, upward-facing ground receives liquid water. No accumulation or terrain-rule changes.
     float wet = u_wetness * step(0.0, m.response) * smoothstep(0.2, 0.8, v_normal.z);
     float response = max(0.0, m.response);
@@ -195,23 +222,24 @@ void main() {
     float puddle = groundPuddle(wet, response);
     if (wet * u_rainDetail > 0.0 && m.mapped) {
         // Microscopic depressions wet first, without moving the road or its supporting terrain.
-        puddle *= mix(1.0, 1.0 - smoothstep(.18, .78, properties.r), .35);
+        puddle = reliefPuddle(puddle, properties.r, wet);
         if (m.soil) {
             float basinWater = smoothstep(mix(.86, .51, wet), mix(.92, .59, wet), soilBasins);
             puddle = max(puddle, basinWater * wet * smoothstep(.98, .999, v_normal.z) * u_rainDetail);
         }
     }
+    reliefVisibility = mix(reliefVisibility, 1.0, puddle);
     groundFilm(albedo, normal, puddle);
     albedo = m.mapped ? groundLighting(albedo, normal, wet, response, puddle, properties.g, mix(1.0, properties.b, .7))
           : groundLighting(albedo, normal, wet, response, puddle, -1.0, 1.0);
 #ifdef roadFlag
     // The road's outer strip carries coverage. World-anchored grain breaks up its dusty verge.
-    float grain = m.mapped ? properties.r : roadAlbedo(m, uv * 2.3).r;
+    float grain = m.mapped ? properties.r : roadAlbedo(m, uv * 2.3, gradient * 2.3).r;
     float alpha = clamp(roadColor.a + (grain - .5) * min(roadColor.a, 1.0 - roadColor.a) * .7, 0.0, 1.0);
     if (m.mapped && m.transition < -2.5) {
         // Grounded bridge landings: individual asphalt chips/aggregate expose soil and grass. The broad
         // envelope is in the mask; material grain supplies the small fractured edge at every orientation.
-        float chips = roadSurface(m, uv * .63 + .19).r;
+        float chips = roadSurface(m, uv * .63 + .19, gradient * .63).r;
         float fragments = clamp((.56 * grain + .28 * chips + .16 * loosePatches - .2) / .6, 0.0, 1.0);
         float filterWidth = max(.025, fwidth(fragments));
         float broken = smoothstep(fragments - filterWidth, fragments + filterWidth, roadColor.a);

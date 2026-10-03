@@ -45,7 +45,7 @@ final class GpuGroundCover implements Disposable {
     private static final int STRIDE = 4;
     private static final float START_PIXELS = 120, FULL_PIXELS = 500;
     /** The tallest standing blade, as a fraction of the hex width; shared with cosmetic shrub sizing. */
-    static final float MAX_HEIGHT_FRACTION = .07f;
+    static final float MAX_HEIGHT_FRACTION = .03f;
     /** Metres frozen land's jagged border reaches past its hex edge at most: the shard offset, lean and splinters. */
     private static final float ICE_BORDER_REACH = 5.2f;
 

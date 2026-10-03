@@ -24,13 +24,21 @@ final class BoardEditorTerrain {
         for (int type : hex.getTerrainTypes()) {
             boolean invisible = switch (type) {
                 case Terrains.BLACK_ICE, Terrains.BLDG_BASE_COLLAPSED, Terrains.METAL_CONTENT -> true;
-                case Terrains.BLDG_BASEMENT_TYPE, Terrains.FLUFF, Terrains.GROUND_FLUFF, Terrains.ROAD_FLUFF,
+                case Terrains.GROUND_FLUFF -> blank.contains(type) && !cosmeticTransition(hex);
+                case Terrains.BLDG_BASEMENT_TYPE, Terrains.FLUFF, Terrains.ROAD_FLUFF,
                       Terrains.WATER_FLUFF, Terrains.BLDG_FLUFF -> blank.contains(type);
                 default -> false;
             };
             if (invisible) { result.add(type); }
         }
         return result.stream().sorted().toList();
+    }
+
+    /** Legacy theme blends use fluff levels 1-5 and store their 20-100% strength in the exits field. */
+    private static boolean cosmeticTransition(Hex hex) {
+        var ground = hex.getTerrain(Terrains.GROUND_FLUFF);
+        return ground != null && ground.getLevel() >= 1 && ground.getLevel() <= 5
+              && ground.hasExitsSpecified() && ground.getExits() >= 1 && ground.getExits() <= 5;
     }
 
     static BoardTactical capture(Hex hex, Coords coords, Set<Integer> blank) {

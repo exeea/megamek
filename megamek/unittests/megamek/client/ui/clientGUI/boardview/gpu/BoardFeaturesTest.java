@@ -72,6 +72,21 @@ class BoardFeaturesTest {
     }
 
     @Test
+    void lunarThemeKeepsItsOwnGeologyWithoutReplacingExplicitSurfaceTerrain() {
+        Hex hex = new Hex(0);
+        hex.setTheme("lunar");
+        assertEquals(BoardScene.Surface.LUNAR, BoardFeatures.surface(hex));
+        hex.setTheme("rock");
+        assertEquals(BoardScene.Surface.ROCK, BoardFeatures.surface(hex));
+        hex.setTheme("lunar");
+        hex.addTerrain(new Terrain(Terrains.MAGMA, 1));
+        assertEquals(BoardScene.Surface.ROCK, BoardFeatures.surface(hex));
+        hex.removeTerrain(Terrains.MAGMA);
+        hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1));
+        assertEquals(BoardScene.Surface.CONCRETE, BoardFeatures.surface(hex));
+    }
+
+    @Test
     void waterDecorationDoesNotChangeTheBedMaterialOrInventWater() {
         Hex hex = new Hex(-2);
         hex.setTheme("volcano");

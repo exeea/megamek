@@ -2,7 +2,7 @@
 // Injected into the lit vertex shader. Only roots/ranks are stored; blade shape and wind live on the GPU.
 // Older running clients can reload this shader before their Java-side shared size constant is rebuilt.
 #ifndef GRASS_MAX_HEIGHT
-#define GRASS_MAX_HEIGHT .07
+#define GRASS_MAX_HEIGHT .03
 #endif
 layout(location = 14) in vec4 a_coverRoot;
 uniform float u_coverPixels;
@@ -32,8 +32,12 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
     vec2 direction = vec2(cos(angle), sin(angle));
     vec3 side = vec3(-direction.y, direction.x, 0.0);
     float meadow = meadowCover(root.xy / u_worldMetre);
-    float height = u_coverHexWidth * mix(.025, GRASS_MAX_HEIGHT, variation) * mix(.55, 1.0, meadow);
-    float width = u_coverHexWidth * mix(.0015, .0028, grassRandom(seed + 37u)) * mix(.75, 1.0, meadow);
+    // Short groundcover carries the meadow. Standing blades form irregular tufts, with only a few taller tips;
+    // reject by stable root hash so moving the camera cannot reshuffle the patches or the density prefix.
+    if (grassRandom(seed + 101u) > mix(.18, .85, meadow)) return false;
+    float height = u_coverHexWidth * mix(.005, GRASS_MAX_HEIGHT, variation * variation * variation)
+          * mix(.6, 1.0, meadow);
+    float width = u_coverHexWidth * mix(.001, .0018, grassRandom(seed + 37u)) * mix(.75, 1.0, meadow);
     // Fractional growth of the last blade keeps density transitions continuous, without shading invisible blades.
     float growth = clamp(density - a_coverRoot.w, 0.0, 1.0);
     float t = samplePoint.y;
@@ -52,7 +56,8 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
     position = root + curve + side * samplePoint.x * width * (1.0 - t) * growth;
     normal = normalize(cross(side, tangent));
     float tone = grassRandom(seed + 71u);
-    color = vec4(mix(vec3(.24, .30, .10), vec3(.44, .48, .21), tone), 1.0);
+    vec3 pigment = mix(vec3(.19, .27, .09), vec3(.40, .44, .19), tone);
+    color = vec4(mix(vec3(.45, .39, .20), pigment, .4 + .6 * meadow), 1.0);
     v_coverData = vec2(height, t);
     v_coverRoot = root.xy / u_worldMetre;
     return true;

@@ -440,6 +440,8 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String GPU_BOARD_MAXIMIZED = "GpuBoardMaximized";
     /** Width of the GPU board's report panel, as last dragged. */
     public static final String GPU_REPORT_PANEL_WIDTH = "GpuReportPanelWidth";
+    /** Whether terrain materials use parallax occlusion mapping in the GPU board. */
+    public static final String GPU_BOARD_PARALLAX_MAPPING = "GpuBoardParallaxMapping";
     public static final String PLANETARY_CONDITIONS_POS_X = "PlanetaryConditionsPosX";
     public static final String PLANETARY_CONDITIONS_POS_Y = "PlanetaryConditionsPosY";
     public static final String RND_ARMY_SIZE_HEIGHT = "RndArmySizeHeight";
@@ -998,6 +1000,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(GPU_BOARD_SIZE_HEIGHT, 800);
         store.setDefault(GPU_BOARD_MAXIMIZED, true);
         store.setDefault(GPU_REPORT_PANEL_WIDTH, 362);
+        store.setDefault(GPU_BOARD_PARALLAX_MAPPING, true);
         store.setDefault(PLANETARY_CONDITIONS_POS_X, -1);
         store.setDefault(PLANETARY_CONDITIONS_POS_Y, -1);
 
@@ -1912,6 +1915,10 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public int getGpuReportPanelWidth() {
         return store.getInt(GPU_REPORT_PANEL_WIDTH);
+    }
+
+    public boolean getGpuBoardParallaxMapping() {
+        return store.getBoolean(GPU_BOARD_PARALLAX_MAPPING);
     }
 
     public int getPlanetaryConditionsPosX() {
@@ -2965,6 +2972,10 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setGpuReportPanelWidth(int width) {
         store.setValue(GPU_REPORT_PANEL_WIDTH, width);
+    }
+
+    public void setGpuBoardParallaxMapping(boolean enabled) {
+        store.setValue(GPU_BOARD_PARALLAX_MAPPING, enabled);
     }
 
     public void setPlanetaryConditionsPosX(int x) {

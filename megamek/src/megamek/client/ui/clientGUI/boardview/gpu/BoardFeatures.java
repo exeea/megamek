@@ -97,7 +97,8 @@ final class BoardFeatures {
         if (desert(hex)) {
             return BoardScene.Surface.SAND;
         }
-        if (theme.contains("lunar") || theme.contains("rock") || theme.contains("volcan")) {
+        if (theme.contains("lunar")) { return BoardScene.Surface.LUNAR; }
+        if (theme.contains("rock") || theme.contains("volcan")) {
             return BoardScene.Surface.ROCK;
         }
         // Fields and reed marshes replace the flat cover in the biome shader. Their banks retain the theme's

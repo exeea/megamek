@@ -100,8 +100,8 @@ class BoardLunarTest {
             for (var family : BoardScene.Surface.values()) {
                 var lunar = tile(0, -1, new BoardLiquid(kind, "", 2), family, features).lunar();
                 var scene = new BoardScene(0, 1, 1, List.of(lunar), List.of(), List.of(), -1, "", List.of());
-                assertEquals(BoardScene.Surface.ROCK, lunar.surface());
-                assertTrue(lunar.detailedGround(), "The ROCK material must replace captured ground artwork");
+                assertEquals(BoardScene.Surface.LUNAR, lunar.surface());
+                assertTrue(lunar.detailedGround(), "The LUNAR material must replace captured ground artwork");
                 assertEquals(BoardLiquid.NONE, lunar.liquid());
                 assertFalse(lunar.water());
                 assertFalse(lunar.frozen());

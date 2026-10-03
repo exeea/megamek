@@ -509,6 +509,12 @@ class GpuBattleView extends ApplicationAdapter {
         boardGeneration = frame.boardGeneration();
         ui.setPlaybackPaused(playback.paused());
         var atmosphereSettings = ui.atmosphere();
+        atmosphere.configure(atmosphereSettings);
+        atmosphere.setOptions(ui.atmosphereOptions());
+        // Material readiness includes live lighting/cloud flags, before any visible terrain is submitted.
+        atmosphere.updateLight(boardCamera.camera);
+        terrain.setAtmosphere(atmosphere.lighting());
+        atmosphere.configureClouds(terrain, scene);
         terrain.setGravity(atmosphereSettings.gravity());
         terrain.update(scene, boardCamera.camera);
         boolean detailChanged = terrain.refine(boardCamera.camera);
@@ -549,10 +555,9 @@ class GpuBattleView extends ApplicationAdapter {
         tactical.update(scene, detailChanged, hovered);
         fieldOfView.update(scene.fieldOfView());
         fieldOfView.configure(ui.fovStyle(), ui.fovDarkness(), ui.sensorStyle(), ui.sensorDarkness());
-        atmosphere.configure(atmosphereSettings);
         attackEffects.setWind(atmosphereSettings.effects());
-        atmosphere.setOptions(ui.atmosphereOptions());
         terrain.setNormalMaps(ui.normalMaps());
+        terrain.setParallaxMapping(ui.parallaxMapping());
         terrain.setGrass(ui.grass());
         if (unitTextures.update(scene.units().stream().filter(unit -> !unit.sensorContact()
               && (unitModels == null || unitModels.get(unit.model(), unit.id()) == null)).map(BoardScene.Unit::image).distinct()

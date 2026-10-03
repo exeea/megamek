@@ -297,8 +297,8 @@ final class GpuAtmosphere implements Disposable {
         this.options = options;
     }
 
-    /** Prepare clouds and surface weather before scene capture; cameras share their field and wind timeline. */
-    void prepareClouds(GpuTerrain terrain, BoardScene board, float delta) {
+    /** Publish material flags before warmup, without advancing wind or rendering with an unfinished camera. */
+    void configureClouds(GpuTerrain terrain, BoardScene board) {
         if (heatTiles != board.tiles()) {
             heatTiles = board.tiles();
             molten = heatTiles.stream().anyMatch(tile -> tile.liquid().molten());
@@ -308,10 +308,17 @@ final class GpuAtmosphere implements Disposable {
         cloudsActive = settings.clouds() > 0 && lighting.hasDirectLight();
         if (cloudsActive) {
             if (clouds == null) { clouds = new GpuClouds(quad); }
-            clouds.update(settings, lighting, board, delta, options.cloudShadowStrength(settings.clouds()));
             terrain.environment().set(clouds.shadow());
         } else {
             terrain.environment().remove(GpuCloudShadow.TYPE);
+        }
+    }
+
+    /** Prepare clouds after the final camera/light update; cameras share their field and wind timeline. */
+    void prepareClouds(GpuTerrain terrain, BoardScene board, float delta) {
+        configureClouds(terrain, board);
+        if (cloudsActive) {
+            clouds.update(settings, lighting, board, delta, options.cloudShadowStrength(settings.clouds()));
         }
     }
 

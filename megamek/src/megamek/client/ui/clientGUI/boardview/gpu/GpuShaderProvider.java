@@ -47,6 +47,7 @@ final class GpuShaderProvider implements ShaderProvider, GpuShaderManager.Target
         renderable.shader = null;
         try {
             try { shader = active.value().getShader(renderable); }
+            catch (GpuGlsl.Pending unfinished) { throw unfinished; }
             catch (RuntimeException failure) {
                 if (!session.hasDrafts()) { throw failure; }
                 session.reportFallback(failure);

@@ -10,7 +10,8 @@ final class BoardSurfaceBlend {
     // Render-only covers derived from BoardLiquid; the board's terrain families and rules remain unchanged.
     static final int CRUST = BoardScene.Surface.values().length, BANK = CRUST + 1, FAMILIES = BANK + 1;
 
-    record Cover(float grass, float dirt, float sand, float rock, float concrete, float snow, float crust, float bank) {
+    record Cover(float grass, float dirt, float sand, float rock, float concrete, float snow, float lunar,
+          float crust, float bank) {
         float weight(BoardScene.Surface family) { return weight(family.ordinal()); }
 
         float weight(int family) {
@@ -21,8 +22,9 @@ final class BoardSurfaceBlend {
                 case 3 -> rock;
                 case 4 -> concrete;
                 case 5 -> snow;
-                case 6 -> crust;
-                case 7 -> bank;
+                case 6 -> lunar;
+                case 7 -> crust;
+                case 8 -> bank;
                 default -> throw new IllegalArgumentException("Surface cover " + family);
             };
         }
@@ -37,9 +39,9 @@ final class BoardSurfaceBlend {
     }
 
     private static final Cover[] SOLID = {
-          new Cover(1, 0, 0, 0, 0, 0, 0, 0), new Cover(0, 1, 0, 0, 0, 0, 0, 0), new Cover(0, 0, 1, 0, 0, 0, 0, 0),
-          new Cover(0, 0, 0, 1, 0, 0, 0, 0), new Cover(0, 0, 0, 0, 1, 0, 0, 0), new Cover(0, 0, 0, 0, 0, 1, 0, 0),
-          new Cover(0, 0, 0, 0, 0, 0, 1, 0), new Cover(0, 0, 0, 0, 0, 0, 0, 1)
+          new Cover(1, 0, 0, 0, 0, 0, 0, 0, 0), new Cover(0, 1, 0, 0, 0, 0, 0, 0, 0), new Cover(0, 0, 1, 0, 0, 0, 0, 0, 0),
+          new Cover(0, 0, 0, 1, 0, 0, 0, 0, 0), new Cover(0, 0, 0, 0, 1, 0, 0, 0, 0), new Cover(0, 0, 0, 0, 0, 1, 0, 0, 0),
+          new Cover(0, 0, 0, 0, 0, 0, 1, 0, 0), new Cover(0, 0, 0, 0, 0, 0, 0, 1, 0), new Cover(0, 0, 0, 0, 0, 0, 0, 0, 1)
     };
 
     private BoardSurfaceBlend() { }
@@ -198,7 +200,8 @@ final class BoardSurfaceBlend {
             weights[bedFamily] += bed * total;
         }
         return new Cover(weights[0] / total, weights[1] / total, weights[2] / total,
-              weights[3] / total, weights[4] / total, weights[5] / total, weights[6] / total, weights[7] / total);
+              weights[3] / total, weights[4] / total, weights[5] / total, weights[6] / total, weights[7] / total,
+              weights[8] / total);
     }
 
     /** Signed distance to the hex's supporting edges, using the board's actual short/long dimensions. */

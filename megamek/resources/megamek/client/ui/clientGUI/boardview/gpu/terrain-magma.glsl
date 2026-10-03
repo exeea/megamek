@@ -16,9 +16,9 @@ struct Volcanic {
     vec4 surface;
     vec2 heat;
     vec3 emission;
+    float visibility;
 };
 
-vec2 magmaRelief(vec2 uv, vec2 dx, vec2 dy, vec4 surface, vec2 parallax);
 vec3 magmaEmission(vec2 heat, float strength);
 float magmaRepeatMetres();
 
@@ -37,28 +37,34 @@ float magmaBankHeat(vec2 position) {
     return mix(.10, 1.0, 1.0 - smoothstep(0.0, MAGMA_MARGIN, -shore));
 }
 
-Volcanic magmaSample(vec2 uv, vec2 dx, vec2 dy, vec3 eye) {
+Volcanic magmaSample(vec2 uv, vec2 dx, vec2 dy, vec3 eye, vec3 sun) {
     vec4 distantSurface = vec4(.5, .85, TERRAIN_DISTANT_CAVITY, 0.0);
     vec4 surface = distantSurface;
     vec3 normal = vec3(0.0, 0.0, 1.0);
     if (terrainSurfaceDetail > 0.0) surface = magmaTexel(MAGMA_SURFACE, uv, dx, dy);
-    if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
+    if (u_parallaxMapping > .5 && terrainNormalDetail > 0.0) {
         // Relief and normals share the authored height, but vanish before distant shading skips their maps.
-        vec2 parallax = eye.xy / max(abs(eye.z), .35) * surface.a * .1 * (12.0 / magmaRepeatMetres())
+        vec2 parallax = eye.xy * surface.a * .1 * (12.0 / magmaRepeatMetres())
               * terrainNormalDetail;
-        uv = magmaRelief(uv, dx, dy, surface, parallax);
+        uv = parallaxUv(u_magmaMaps, MAGMA_SURFACE, vec4(1.0, 0.0, 0.0, 0.0), uv, dx, dy, parallax);
         surface = magmaTexel(MAGMA_SURFACE, uv, dx, dy);
+    }
+    if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
         normal = mix(normal, (magmaTexel(MAGMA_NORMAL, uv, dx, dy).rgb * 255.0 - 128.0) / 127.0,
               terrainNormalDetail);
     }
     surface = mix(distantSurface, surface, terrainSurfaceDetail);
     vec4 heat = magmaTexel(MAGMA_HEAT, uv, dx, dy);
-    return Volcanic(magmaTexel(MAGMA_COLOR, uv, dx, dy).rgb, normal, surface, heat.ra, vec3(0.0));
+    vec2 lightRay = sun.xy * surface.a * .1 * (12.0 / magmaRepeatMetres());
+    float visibility = parallaxShadow(u_magmaMaps, MAGMA_SURFACE, vec4(1.0, 0.0, 0.0, 0.0),
+          uv, dx, dy, lightRay, terrainNormalDetail);
+    return Volcanic(magmaTexel(MAGMA_COLOR, uv, dx, dy).rgb, normal, surface, heat.ra, vec3(0.0), visibility);
 }
 
 Volcanic magmaMix(Volcanic a, Volcanic b, float weight) {
     return Volcanic(mix(a.albedo, b.albedo, weight), mix(a.normal, b.normal, weight),
-          mix(a.surface, b.surface, weight), mix(a.heat, b.heat, weight), mix(a.emission, b.emission, weight));
+          mix(a.surface, b.surface, weight), mix(a.heat, b.heat, weight), mix(a.emission, b.emission, weight),
+          mix(a.visibility, b.visibility, weight));
 }
 
 // MAGMA_CONDITION
@@ -69,7 +75,7 @@ vec3 magmaHash(vec2 cell) {
     return fract((p.xxy + p.yzz) * p.zyx);
 }
 
-Volcanic magmaPatch(vec2 uv, vec2 dx, vec2 dy, vec2 cell, vec3 eye, vec2 downhill) {
+Volcanic magmaPatch(vec2 uv, vec2 dx, vec2 dy, vec2 cell, vec3 eye, vec3 sun, vec2 downhill) {
     vec3 random = magmaHash(cell + vec2(17.0, 83.0));
     float angle = random.x * 6.2831853;
     mat2 rotation = mat2(cos(angle), sin(angle), -sin(angle), cos(angle));
@@ -78,7 +84,8 @@ Volcanic magmaPatch(vec2 uv, vec2 dx, vec2 dy, vec2 cell, vec3 eye, vec2 downhil
     dx = rotation * dx * scale;
     dy = rotation * dy * scale;
     eye.xy = rotation * eye.xy * scale;
-    Volcanic material = magmaPhaseSample(uv, dx, dy, eye, rotation * downhill * scale, random);
+    sun.xy = rotation * sun.xy * scale;
+    Volcanic material = magmaPhaseSample(uv, dx, dy, eye, sun, rotation * downhill * scale, random);
     // Rotate the height gradient back with the texture. Rotating colour alone mislights the fissures.
     material.normal.xy = transpose(rotation) * material.normal.xy * (scale * 12.0 / magmaRepeatMetres())
           / max(material.normal.z, .15);
@@ -86,16 +93,17 @@ Volcanic magmaPatch(vec2 uv, vec2 dx, vec2 dy, vec2 cell, vec3 eye, vec2 downhil
     return material;
 }
 
-Volcanic magmaProjection(vec2 uv, vec2 dx, vec2 dy, vec3 eye, vec2 downhill) {
+Volcanic magmaProjection(vec2 uv, vec2 dx, vec2 dy, vec3 eye, vec3 sun, vec2 downhill) {
     // One coherent textured surface, with the existing normal, relief, heat and two-phase flow.
-    return magmaPatch(uv, dx, dy, vec2(0.0), eye, downhill);
+    return magmaPatch(uv, dx, dy, vec2(0.0), eye, sun, downhill);
 }
 Volcanic magmaSurface(vec3 world, vec3 face, vec3 eye, vec3 uphill, float bank, vec4 waves) {
     vec3 position = world / magmaRepeatMetres();
     // Every projection shares one continuous domain. Transform directions and height gradients
     // with its Jacobian too, so texture bending cannot detach the relief or current from the colour.
     mat3 domain = magmaDomain(position);
-    vec3 textureEye = domain * eye, textureUphill = domain * uphill;
+    vec3 textureEye = domain * parallaxDirection(eye, face), textureUphill = domain * uphill;
+    vec3 textureSun = domain * parallaxDirection(surfaceSunDirection(), face);
     // Smooth triplanar projection covers every slope orientation, including curved lava lips and vertical cuts.
     // Derivatives are taken before the projection branches, retaining stable mip levels through their blends.
     vec3 dx = dFdx(position), dy = dFdy(position);
@@ -105,6 +113,7 @@ Volcanic magmaSurface(vec3 world, vec3 face, vec3 eye, vec3 uphill, float bank, 
     vec4 surface = vec4(0.0);
     vec2 heat = vec2(0.0);
     vec3 emission = vec3(0.0);
+    float visibility = 0.0;
     for (int axis = 0; axis < 3; axis++) {
         if (weights[axis] < .001) continue;
         vec3 tangent = axis == 0 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
@@ -112,13 +121,15 @@ Volcanic magmaSurface(vec3 world, vec3 face, vec3 eye, vec3 uphill, float bank, 
         vec2 uv = vec2(dot(position, tangent), dot(position, bitangent));
         vec2 du = vec2(dot(dx, tangent), dot(dx, bitangent));
         vec2 dv = vec2(dot(dy, tangent), dot(dy, bitangent));
-        vec3 localEye = vec3(dot(textureEye, tangent), dot(textureEye, bitangent), dot(eye, face));
+        vec3 localEye = vec3(dot(textureEye, tangent), dot(textureEye, bitangent), 1.0);
+        vec3 localSun = vec3(dot(textureSun, tangent), dot(textureSun, bitangent), 1.0);
         vec2 downhill = vec2(dot(textureUphill, tangent), dot(textureUphill, bitangent));
-        Volcanic material = magmaProjection(uv, du, dv, localEye, downhill);
+        Volcanic material = magmaProjection(uv, du, dv, localEye, localSun, downhill);
         pigment += material.albedo * weights[axis];
         surface += material.surface * weights[axis];
         heat += material.heat * weights[axis];
         emission += material.emission * weights[axis];
+        visibility += material.visibility * weights[axis];
         gradient += (tangent * material.normal.x + bitangent * material.normal.y) * weights[axis];
     }
     // Chain rule: bring the warped texture's height gradient back into world coordinates.
@@ -127,7 +138,7 @@ Volcanic magmaSurface(vec3 world, vec3 face, vec3 eye, vec3 uphill, float bank, 
     vec3 swell = vec3(-waves.xy, 0.0) * .30 * bank;
     gradient += swell - face * dot(swell, face);
     vec3 normal = normalize(face + gradient * u_normalMaps);
-    return Volcanic(pigment, normal, surface, heat, emission);
+    return Volcanic(pigment, normal, surface, heat, emission, visibility);
 }
 
 vec3 magmaEmission(vec2 heat, float strength) {

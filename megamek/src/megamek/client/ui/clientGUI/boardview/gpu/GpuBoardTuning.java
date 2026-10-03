@@ -106,6 +106,7 @@ final class GpuBoardTuning {
     private final CheckBox firstPerson;
     private final List<Control> cameraFieldOfView;
     private final CheckBox normalMaps;
+    private final CheckBox parallaxMapping;
     private final SelectBox<UnitDisplayMode> unitDisplayMode;
     private final CheckBox vsync;
     /** The graphics card rows; null on computers without two cards to choose from. */
@@ -205,6 +206,9 @@ final class GpuBoardTuning {
             }
         });
         normalMaps = checkbox(skin, "Normal maps", "tuning-normal-maps");
+        parallaxMapping = checkbox(skin, "Parallax occlusion mapping (POM)", "tuning-parallax-mapping");
+        parallaxMapping.addListener(new TextTooltip("Add apparent depth to terrain, rubble, paving and magma. "
+              + "Turn off to reduce GPU work while keeping normal-map lighting. Applies immediately.", skin, "menu"));
         unitDisplayMode = choice(skin, "Unit display", "tuning-unit-display", UnitDisplayMode.values(), () -> { });
         unitDisplayMode.addListener(new TextTooltip("All Meeples: every unit uses an extruded artwork token. "
               + "Mek Meeples: only Meks use tokens; other units use 3D models. "
@@ -543,7 +547,7 @@ final class GpuBoardTuning {
               this::applyRelief, 0, true);
         section(skin, "Material geology");
         geologyFamily = choice(skin, "Material", "tuning-geology-family",
-              new String[] { "Grass", "Dirt", "Sand", "Rock", "Concrete", "Snow", "Bedrock under slabs" }, this::syncGeology);
+              new String[] { "Grass", "Dirt", "Sand", "Rock", "Concrete", "Snow", "Lunar", "Bedrock under slabs" }, this::syncGeology);
         geology = controls(skin, List.of(
               new Knob("Joint width (m)", .25f, 20, .05f, "%.2f",
                     "Width of the large rock blocks in a cliff. Higher values make broader blocks."),
@@ -647,6 +651,14 @@ final class GpuBoardTuning {
         });
         panel.add(editShaders).left().height(24).padTop(4).row();
         restoreDefaults();
+        parallaxMapping.setChecked(GUIPreferences.getInstance().getGpuBoardParallaxMapping());
+        parallaxMapping.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                boolean enabled = parallaxMapping.isChecked();
+                SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setGpuBoardParallaxMapping(enabled));
+            }
+        });
     }
 
     boolean takeAssetReloadRequest() {
@@ -952,6 +964,7 @@ final class GpuBoardTuning {
         setValues(cameraFieldOfView, new float[] { BoardCamera.DEFAULT_FIELD_OF_VIEW });
         applyCamera();
         normalMaps.setChecked(true);
+        parallaxMapping.setChecked(true);
         unitDisplayMode.setSelected(UnitDisplayMode.DEFAULT);
         grass.setChecked(true);
         boolean fixedSunKept = fixedSun.isChecked();
@@ -1046,6 +1059,8 @@ final class GpuBoardTuning {
     boolean normalMaps() {
         return normalMaps.isChecked();
     }
+
+    boolean parallaxMapping() { return parallaxMapping.isChecked(); }
 
     UnitDisplayMode unitDisplayMode() {
         return unitDisplayMode.getSelected();

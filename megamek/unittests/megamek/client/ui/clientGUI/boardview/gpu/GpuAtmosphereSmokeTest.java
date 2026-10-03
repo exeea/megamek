@@ -317,6 +317,16 @@ class GpuAtmosphereSmokeTest {
         atmosphere.setOptions(new GpuAtmosphere.Options(0.5f, true));
         Vector3 screenDirection = null;
         for (int turn = 0; turn < 3; turn++) {
+            // Readiness sees the cloud variant before this frame's final camera motion, as in BattleView.
+            atmosphere.configure(cloudy);
+            atmosphere.updateLight(camera.camera);
+            atmosphere.configureClouds(terrain, scene);
+            var preparedCloud = terrain.environment().get(GpuCloudShadow.class, GpuCloudShadow.TYPE);
+            assertNotNull(preparedCloud, "Cloud material flags must be present during warmup");
+            float[] preparedProjection = preparedCloud.projection.val.clone();
+            atmosphere.configureClouds(terrain, scene);
+            assertArrayEquals(preparedProjection, preparedCloud.projection.val,
+                  "Readiness must not advance or redraw the cloud field");
             camera.orbit(60, 5);
             camera.fit(scene);
             draw(atmosphere, terrain, batch, List.of(tower), camera, scene, cloudy, null, 0);
@@ -328,6 +338,7 @@ class GpuAtmosphereSmokeTest {
             assertTrue(screenDirection.epsilonEquals(screen, 0.00001f));
             assertSame(originalShadow, terrain.environment().shadowMap, "Fixed lighting reuses the native shadow map");
             var cloud = terrain.environment().get(GpuCloudShadow.class, GpuCloudShadow.TYPE);
+            assertSame(preparedCloud, cloud, "Final camera motion reuses the prepared cloud attribute");
             Vector3 point = BoardGeometry.center(new Coords(2, 2), 0);
             Vector3 alongLight = point.cpy().mulAdd(lighting.direction(), 100);
             Vector3 cloudA = point.cpy().mul(cloud.projection), cloudB = alongLight.cpy().mul(cloud.projection);
@@ -980,11 +991,18 @@ class GpuAtmosphereSmokeTest {
             var initial = fixture.source.takeFrame().scenarioAtmosphere();
             new Lwjgl3Application(new GpuBattleView(fixture.source) {
                 private float initialMoonFill;
+                private int moonlessLoadingFrames;
 
                 @Override
                 public void render() {
                     try {
                         super.render();
+                        // Shader preparation can pause the presented-frame counter after a live weather change.
+                        // Do not replay the preceding frame's clicks while the loading screen is visible.
+                        if (GpuBoardTestUi.loading(this)) {
+                            if (frames() == 12) { moonlessLoadingFrames++; }
+                            return;
+                        }
                         if (frames() == 3) {
                             assertEquals(initial.hour(), value("Time of day"), MINUTE_TOLERANCE);
                             assertEquals(1, value("Snow"));
@@ -1115,6 +1133,8 @@ class GpuAtmosphereSmokeTest {
                             assertFalse(renderedAtmosphere(this).lighting().hasDirectLight(),
                                   "Manual time and the fixed-light option must preserve an explicit moonless night");
                             assertEquals(0, fixture.clicks.get());
+                            System.out.printf("Scenario control script paused through %d moonless loading frames%n",
+                                  moonlessLoadingFrames);
                             Gdx.app.exit();
                         }
                     } catch (Throwable error) {

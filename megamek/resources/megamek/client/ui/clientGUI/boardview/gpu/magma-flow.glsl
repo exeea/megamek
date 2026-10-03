@@ -9,11 +9,7 @@ float magmaRepeatMetres() { return 24.0; }
 // BoardFlow already slows lava to a quarter of water's speed. This keeps its ordinary reach near 2.4 m/s at 1g.
 const float MAGMA_CURRENT_SPEED = 3.2;
 
-vec2 magmaRelief(vec2 uv, vec2 dx, vec2 dy, vec4 surface, vec2 parallax) {
-    return uv - parallax * (surface.r - .5);
-}
-
-Volcanic magmaPhaseSample(vec2 uv, vec2 dx, vec2 dy, vec3 eye, vec2 velocity, vec3 random) {
+Volcanic magmaPhaseSample(vec2 uv, vec2 dx, vec2 dy, vec3 eye, vec3 sun, vec2 velocity, vec3 random) {
     // Both phases carry the complete material downstream, including heat. Refreshing the source window at hidden
     // resets avoids repeating the same short loop while keeping local displacement bounded around bends.
     // Water staggers resets with its broad noise map. Lava uses a broad analytic seed without another map read.
@@ -25,8 +21,8 @@ Volcanic magmaPhaseSample(vec2 uv, vec2 dx, vec2 dy, vec3 eye, vec2 velocity, ve
     vec2 jump = vec2(.75487766, .56984029);
     vec2 first = liquidFlowUv(uv, velocity, flow, 0, jump, moving);
     vec2 second = liquidFlowUv(uv, velocity, flow, 1, jump, moving);
-    Volcanic a = magmaSample(first, dx, dy, eye);
-    Volcanic b = magmaSample(second, dx, dy, eye);
+    Volcanic a = magmaSample(first, dx, dy, eye, sun);
+    Volcanic b = magmaSample(second, dx, dy, eye, sun);
     // Blend emitted light rather than applying a nonlinear heat ramp to an averaged temperature: that would
     // pulse at each crossfade. Each phase's cooling skin remains opaque and dark.
     a.emission = magmaEmission(a.heat, smoothstep(.28, .56, a.heat.x));

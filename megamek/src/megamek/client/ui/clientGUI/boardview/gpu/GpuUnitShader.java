@@ -28,6 +28,7 @@ final class GpuUnitShader extends DefaultShader {
         super(renderable, config, GpuGlsl.compile("GPU unit material", GpuCloudShadow.prefix(renderable, config),
               config.vertexShader, config.fragmentShader));
         GpuCloudShadow.register(this);
+        GpuLavaLighting.register(this);
     }
 
     static DefaultShaderProvider provider() {
@@ -74,7 +75,7 @@ final class GpuUnitShader extends DefaultShader {
      */
     static String linearFragment(String source) {
         source = GpuGlsl.libGdx(source, false);
-        source = replaceOnce(source, MAIN, lightModel() + "\n" + MAIN, "fragment");
+        source = replaceOnce(source, MAIN, lightModel() + GpuShaderSource.read("lava-lighting.glsl") + "\n" + MAIN, "fragment");
         String lit = "#if (!defined(lightingFlag))";
         source = replaceOnce(source, lit, GpuShaderSource.read("linear-material.glsl") + "\n" + lit, "fragment");
         String fog = "#endif // end fogFlag";

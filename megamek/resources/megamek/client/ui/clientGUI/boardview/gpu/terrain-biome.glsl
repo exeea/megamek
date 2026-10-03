@@ -1,9 +1,8 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Surface-only treatment: reeds/crops stand on this same terrain; these small wet depressions do not change rules.
-// Borrow the asset cache's earth maps on every terrain family, including array-backed boundary draws.
-uniform sampler2D u_biomeSoil, u_biomeSoilNormal;
-uniform float u_biomeSoilTile;
-void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, float rim, float materialHeight,
+// Earth shares the terrain array and the exact same relief/normal projection as the native ground.
+uniform float u_biomeSoilLayer, u_biomeSoilTile;
+void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, float rim, inout float materialHeight,
       inout vec3 color, inout vec3 normal, inout float cavity,
       inout float grass, inout vec3 bounce, out float pool, out float damp) {
     pool = 0.0; damp = 0.0;
@@ -50,8 +49,10 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
         float canopy = mix(.60, smoothstep(.22, .70, ridge) * mix(.78, 1.0, grain), visible);
         // The broad field margin is weathered cultivated earth; rows/canopy stay on their supported ground.
         float planted = cover.x / max(fringe.x, .0001);
-        vec2 soilUV = vec2(world.x, -world.y);
-        vec4 soil = planar(u_biomeSoil, soilUV, u_biomeSoilTile, broad);
+        MaterialProjection projection = materialProjection(world, face);
+        MaterialCoordinates soilUV;
+        vec4 soil = sampleMaterial(u_biomeSoilLayer, u_biomeSoilTile, fringe.x, projection,
+              world, face, broad, fine, 0.0, false, u_sculptFamily, soilUV);
         vec3 earth = mix(vec3(.20, .14, .075), vec3(.33, .255, .14), soil.a) * mix(.78, 1.20, grain);
         // Under nearby plants the rows are in their shade. Where plants dissolve at distance, the ground takes the crop
         // artwork's own range, from its leaves to its golden heads, so a field keeps its colour.
@@ -60,9 +61,12 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
         float amount = materialWeights(vec4(1.0 - fringe.x, fringe.x, 0.0, 0.0),
               vec4(materialHeight, soil.a, 0.0, 0.0)).y;
         color = mix(color, mix(earth, crop, canopy * planted * .95), amount);
+        materialHeight = mix(materialHeight, soil.a, amount);
+        reliefVisibility = mix(reliefVisibility,
+              materialShadow(u_biomeSoilLayer, u_biomeSoilTile, amount, projection, face, soilUV), amount);
         if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
-            vec3 soilNormal = upNormal(planarNormal(u_biomeSoilNormal, soilUV, u_biomeSoilTile, broad).rgb, face);
-            soilNormal = normalize(mix(face, soilNormal, terrainNormalDetail));
+            vec3 soilNormal = materialNormal(u_biomeSoilLayer + 1.0, u_biomeSoilTile, amount,
+                  projection, face, broad, soilUV).rgb;
             normal = normalize(mix(normal, soilNormal, amount));
         }
         normal = normalize(normal + vec3(direction * sin(row * 6.2831853) * .30 * visible * cover.x, 0.0));
@@ -91,8 +95,13 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
         }
         // Reuse actual soil relief rather than replacing it with smooth coloured noise.
         MaterialProjection projection = materialProjection(world, face);
-        vec4 soil = draped(u_biomeSoil, projection.top, projection.x, projection.y,
-              projection.side, u_biomeSoilTile, broad, projection.lying);
+        projection.ray *= 1.0 - water;
+        MaterialCoordinates soilUV;
+        vec4 soil = sampleMaterial(u_biomeSoilLayer, u_biomeSoilTile, wetland, projection,
+              world, face, broad, fine, 0.0, false, u_sculptFamily, soilUV);
+        water *= mix(.2, 1.0, 1.0 - smoothstep(.28, .65, soil.a));
+        reliefVisibility = mix(reliefVisibility,
+              materialShadow(u_biomeSoilLayer, u_biomeSoilTile, wetland, projection, face, soilUV), wetland * (1.0 - water));
         // Use the same texture-height competition as grass/soil contacts, preserving the native slope's detail.
         float deposits = materialWeights(vec4(1.0 - wetland, wetland, 0.0, 0.0),
               vec4(materialHeight, soil.a, 0.0, 0.0)).y;
@@ -115,6 +124,7 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
         vec3 marsh = mix(mix(mud, moss, hummock), shallow, water);
         color *= 1.0 - saturation * (1.0 - wetland) * .25;
         color = mix(color, marsh, wetland);
+        materialHeight = mix(materialHeight, soil.a, wetland);
         pool = water * (1.0 - algae) * wetland * emerged;
         damp = max(saturation * .60, wetland * mix(.85, .28, hummock));
         // Low hummocks alter the shading normal without moving the shared picking/support surface.
@@ -123,11 +133,8 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
         float area = dot(dx, cross(dy, face));
         vec3 gradient = (cross(dy, face) * dFdx(bump) + cross(face, dx) * dFdy(bump)) / max(abs(area), .00001) * sign(area);
         if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {
-            vec3 soilNormal = projection.lying >= 1.0
-                  ? upNormal(planarNormal(u_biomeSoilNormal, projection.top, u_biomeSoilTile, broad).rgb, face)
-                  : drapedNormal(u_biomeSoilNormal, projection.top, projection.x, projection.y,
-                        face, projection.side, u_biomeSoilTile, broad, projection.lying);
-            soilNormal = normalize(mix(face, soilNormal, terrainNormalDetail));
+            vec3 soilNormal = materialNormal(u_biomeSoilLayer + 1.0, u_biomeSoilTile, wetland,
+                  projection, face, broad, soilUV).rgb;
             normal = normalize(mix(normal, soilNormal, wetland));
         }
         normal = normalize(normal - gradient * wetland * (1.0 - bare));

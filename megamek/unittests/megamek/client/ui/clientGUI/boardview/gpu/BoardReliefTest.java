@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -229,5 +230,102 @@ class BoardReliefTest {
             assertNotNull(BoardGeometry.pick(scene, new com.badlogic.gdx.math.collision.Ray(
                   new Vector3(BoardGeometry.center(CENTER, 3)).add(0, 0, 100), new Vector3(0, 0, -1))));
         } finally { BoardGeometry.tune(previous); }
+    }
+
+    @Test
+    void exposedGrassCliffsShareRockShapeWhileLowBanksKeepTheirSoilProfile() {
+        for (int level : new int[] { 1, 2, 3, 5 }) {
+            BoardScene grass = scene(level, true, BoardScene.Surface.GRASS);
+            BoardScene rock = scene(level, true, BoardScene.Surface.ROCK);
+            BoardScene lunar = scene(level, true, BoardScene.Surface.LUNAR);
+            for (TerrainLod lod : TerrainLod.values()) {
+                var grassSurface = new BoardSurface(grass, grass.tile(CENTER), lod);
+                var rockSurface = new BoardSurface(rock, rock.tile(CENTER), lod);
+                var lunarSurface = new BoardSurface(lunar, lunar.tile(CENTER), lod);
+                var grassWall = grassSurface.walls(grass, BoardGeometry.floor(grass));
+                var rockWall = rockSurface.walls(rock, BoardGeometry.floor(rock));
+                var lunarWall = lunarSurface.walls(lunar, BoardGeometry.floor(lunar));
+                if (level <= 2) {
+                    assertEquals(lunarWall.size(), rockWall.size(), "Low banks retain their wall budget: " + lod);
+                } else {
+                    assertTrue(rockWall.size() <= 2 * lunarWall.size(),
+                          "Resolved cliff joints stay within twice the ordinary wall budget: " + lod);
+                }
+                if (level <= 2) {
+                    assertNotEquals(rockWall, grassWall, "Low grass banks keep their soil profile");
+                } else {
+                    assertEquals(rockWall, grassWall, "Exposed grass rock uses the same faces at " + lod);
+                    assertNotEquals(rockWall, lunarWall, "Lunar keeps its separate rounded geology");
+                }
+            }
+        }
+    }
+
+    @Test
+    void exposedRockFacesReachDownAboveALowDebrisApron() {
+        BoardSculptTest.withTransitions(true, () -> {
+            float m = BoardRelief.metres(1);
+            for (var family : List.of(BoardScene.Surface.ROCK, BoardScene.Surface.GRASS)) {
+                for (int level : new int[] { 3, 6 }) {
+                    BoardScene scene = scene(level, true, family);
+                    var surface = new BoardSurface(scene, scene.tile(CENTER));
+                    float total = 0, upright = 0;
+                    for (var face : surface.walls(scene, BoardGeometry.floor(scene))) {
+                        float height = (face.a().z + face.b().z + face.c().z) / 3;
+                        if (height < 2 * m || height > 5 * m) { continue; }
+                        Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
+                        float area = normal.len();
+                        total += area;
+                        if (Math.abs(normal.z) < .3f * area) { upright += area; }
+                    }
+                    assertTrue(total > 0 && upright > .5f * total,
+                          family + " level " + level + " must expose low rock faces, not bury them in a tall bank");
+                }
+            }
+        });
+    }
+
+    @Test
+    void lunarMaterialHasLooseRocksWithoutGrowingCosmeticPlants() {
+        BoardScene scene = scene(0, true, BoardScene.Surface.LUNAR);
+        int rocks = 0;
+        for (var tile : scene.tiles()) {
+            var surface = new BoardSurface(scene, tile);
+            for (var face : surface.faces) {
+                for (Vector3 point : List.of(face.a(), face.b(), face.c())) {
+                    var shade = surface.relief.shade(point);
+                    if (shade == null) { continue; }
+                    assertNotEquals(BoardRelief.Kind.PLANT, shade.kind(), "Lunar regolith never grows dry shrubs");
+                    if (shade.kind() == BoardRelief.Kind.ROCK) { rocks++; }
+                }
+            }
+        }
+        assertTrue(rocks > 0, "Material selection alone must retain ordinary loose stones");
+    }
+
+    @Test
+    void rockGeologyTuningCannotChangeThePreservedLunarSurface() {
+        var previous = BoardRelief.geology();
+        try {
+            BoardScene lunar = scene(4, true, BoardScene.Surface.LUNAR);
+            List<List<BoardSurface.Face>> before = new ArrayList<>();
+            for (TerrainLod lod : TerrainLod.values()) {
+                var surface = new BoardSurface(lunar, lunar.tile(CENTER), lod);
+                var faces = new ArrayList<>(surface.faces);
+                faces.addAll(surface.walls(lunar, BoardGeometry.floor(lunar)));
+                before.add(faces);
+            }
+            var changed = new ArrayList<>(previous);
+            int rock = BoardScene.Surface.ROCK.ordinal();
+            changed.set(rock, previous.get(BoardScene.Surface.SAND.ordinal()));
+            changed.set(previous.size() - 1, changed.get(rock));
+            BoardRelief.tuneGeology(changed);
+            for (TerrainLod lod : TerrainLod.values()) {
+                var surface = new BoardSurface(lunar, lunar.tile(CENTER), lod);
+                var faces = new ArrayList<>(surface.faces);
+                faces.addAll(surface.walls(lunar, BoardGeometry.floor(lunar)));
+                assertEquals(before.get(lod.ordinal()), faces, "Lunar must not borrow live ROCK or bedrock settings");
+            }
+        } finally { BoardRelief.tuneGeology(previous); }
     }
 }
