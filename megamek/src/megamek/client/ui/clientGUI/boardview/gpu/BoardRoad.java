@@ -99,6 +99,9 @@ final class BoardRoad {
 
         /** Opposite exits already describe a straight course through this hex. */
         boolean straight() { return simple() && (exits & (exits >> 3)) != 0; }
+
+        /** Adjacent exits need the whole hex for their tight return turn. */
+        boolean hairpin() { return simple() && (exits & ((exits << 1) | (exits >> 5))) != 0; }
     }
 
     private BoardRoad(Coords coords, List<List<Point>> paths, List<Point> borders, List<End> ends, List<Join> joins,
@@ -156,7 +159,8 @@ final class BoardRoad {
      * hold a straight corridor; next to one, the crossing turns so that the hex's whole course into that corridor is
      * one circular arc, rather than a late sharp turn at its mouth. Both hexes derive the same crossing; the result is
      * its direction, pointing out of this hex, or null for a square crossing. Opposite-exit roads keep their straight
-     * axis; their turning neighbours approach that same axis without pulling the straight road sideways.
+     * axis; their turning neighbours approach that same axis without pulling the straight road sideways. Adjacent
+     * exits likewise keep square shared tangents, leaving the full hex to round their return turn.
      */
     static IntFunction<Vector2> bends(Coords coords, Function<Coords, Node> nodes) {
         return direction -> {
@@ -164,9 +168,10 @@ final class BoardRoad {
             Coords after = coords.translated(direction);
             int mine = other(nodes.apply(coords), direction), theirs = other(nodes.apply(after), (direction + 3) % 6);
             Vector2 normal = border(coords, direction);
-            // A neighbouring turn must not pull an otherwise straight road into an S-bend. Both sides use this
-            // same tangent; keeping it non-null lets the turning hex use its full width for a broad approach.
-            if (nodes.apply(coords).straight() || nodes.apply(after).straight()) { return normal.nor(); }
+            // A neighbouring turn must not pull a straight road sideways or squeeze a hairpin against its border.
+            // Both sides use this tangent; non-null lets a level turning hex use its full width for a broad curve.
+            Node here = nodes.apply(coords), next = nodes.apply(after);
+            if (here.straight() || next.straight() || here.hairpin() || next.hairpin()) { return normal.nor(); }
             Vector2 offset = new Vector2(BoardGeometry.centerX(after) - BoardGeometry.centerX(coords),
                   BoardGeometry.centerY(after) - BoardGeometry.centerY(coords)).scl(1 / BoardGeometry.hexScale());
             Vector2 before = border(coords, mine), beyond = border(after, theirs);
@@ -283,12 +288,19 @@ final class BoardRoad {
                   && dx * in.x + dy * in.y > 0 && dx * out.x + dy * out.y < 0) {
                 line(path, from, to);
             } else {
+                Point finish = to;
                 if (Math.abs(cross) > 1e-4f) {
-                    // Converging tangents meet where a quadratic would put its control point; the cubic keeps that shape.
                     float s = (dx * out.y - dy * out.x) / cross, u = (dx * in.y - dy * in.x) / cross;
                     if (s > 0 && u > 0) {
-                        reachIn = 2 * s / 3;
-                        reachOut = 2 * u / 3;
+                        // A circular fillet leaves room inside a tight turn. A quadratic pulled towards the
+                        // tangent intersection can bend more sharply than the road's own half-width.
+                        float arm = Math.min(s, u);
+                        Point start = new Point(from.x + in.x * (s - arm), from.y + in.y * (s - arm), from.width);
+                        if (s > u) { line(path, from, start); }
+                        from = start;
+                        to = new Point(to.x + out.x * (u - arm), to.y + out.y * (u - arm), to.width);
+                        float halfCos = (float) Math.sqrt((1 - Math.clamp(in.dot(out), -1f, 1f)) / 2);
+                        reachIn = reachOut = 4 * arm * halfCos / (3 * (1 + halfCos));
                     }
                 }
                 for (int i = 1; i <= 16; i++) {
@@ -299,6 +311,7 @@ final class BoardRoad {
                           s * s * s * from.y + 3 * s * s * t * by + 3 * s * t * t * cy + t * t * t * to.y,
                           from.width + t * (to.width - from.width)));
                 }
+                if (to.x != finish.x || to.y != finish.y) { line(path, to, finish); }
             }
             path.addAll(tail.reversed().subList(1, tail.size()));
             paths.add(path);
