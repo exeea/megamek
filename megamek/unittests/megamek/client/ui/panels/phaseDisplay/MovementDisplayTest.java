@@ -40,9 +40,11 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.HashSet;
 import java.util.List;
 
@@ -50,7 +52,7 @@ import megamek.client.Client;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.MegaMekGUI;
-import megamek.client.ui.clientGUI.boardview.BoardView;
+import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.util.MegaMekController;
 import megamek.common.Hex;
 import megamek.common.board.Board;
@@ -58,6 +60,7 @@ import megamek.common.board.Coords;
 import megamek.common.enums.MoveStepType;
 import megamek.common.game.Game;
 import megamek.common.moves.MovePath;
+import megamek.common.units.AeroSpaceFighter;
 import megamek.common.units.BipedMek;
 import megamek.common.units.Targetable;
 import org.junit.jupiter.api.AfterEach;
@@ -91,16 +94,16 @@ class MovementDisplayTest {
         mockClientGUI = mock(ClientGUI.class);
         mockClient = mock(Client.class);
         game = new Game(board);
-        BoardView boardView = mock(BoardView.class);
+        BoardClientState boardState = mock(BoardClientState.class);
         CommonMenuBar menuBar = mock(CommonMenuBar.class);
         mockClientGUI.controller = mockController;
 
         when(mockClientGUI.getClient()).thenReturn(mockClient);
         when(mockClient.getGame()).thenReturn(game);
-        when(mockClientGUI.boardViews()).thenReturn(List.of());
+        when(mockClientGUI.boardStates()).thenReturn(List.of());
         when(mockClientGUI.getMenuBar()).thenReturn(menuBar);
-        when(mockClientGUI.getBoardView((Targetable) any())).thenReturn(boardView);
-        when(mockClientGUI.getBoardView(anyInt())).thenReturn(boardView);
+        when(mockClientGUI.getBoardState((Targetable) any())).thenReturn(boardState);
+        when(mockClientGUI.getBoardState(anyInt())).thenReturn(boardState);
 
         movementDisplay = new MovementDisplay(mockClientGUI);
     }
@@ -218,6 +221,41 @@ class MovementDisplayTest {
     }
 
     @Test
+    @DisplayName("clear keeps aerospace deployment at altitude 4, and a following UP raises it to 5")
+    void clearWithAerospaceDeploymentPathCanRiseFromAltitudeFour() throws Exception {
+        Game spiedGame = spy(game);
+        when(spiedGame.getEntitiesVector(any(Coords.class))).thenReturn(List.of());
+        setGameField(movementDisplay, spiedGame);
+
+        AeroSpaceFighter fighter = new AeroSpaceFighter();
+        fighter.setGame(game);
+        fighter.setPosition(new Coords(0, 0));
+        fighter.setBoardId(game.getBoard().getBoardId());
+        fighter.setAltitude(4);
+        game.addEntity(fighter);
+        movementDisplay.currentEntity = fighter.getId();
+
+        MovePath deployedPath = new MovePath(game, fighter);
+        deployedPath.addStep(MoveStepType.DEPLOY);
+        setField(movementDisplay, "cmd", deployedPath);
+        setField(movementDisplay, "gear", MovementDisplay.GEAR_LAND);
+
+        Method clearMethod = MovementDisplay.class.getDeclaredMethod("clear", boolean.class);
+        clearMethod.setAccessible(true);
+        clearMethod.invoke(movementDisplay, true);
+
+        MovePath refreshed = (MovePath) readField(movementDisplay, "cmd");
+        assertNotNull(refreshed, "clear should rebuild the aerospace deployment path.");
+        assertEquals(4, refreshed.getFinalAltitude(),
+                     "clear(true) must preserve a deployed aerospace unit at altitude 4.");
+
+        refreshed.addStep(MoveStepType.UP);
+
+        assertEquals(5, refreshed.getFinalAltitude(),
+                     "A deployed aerospace unit cleared with clear(true) should rise from altitude 4 to 5 with UP.");
+    }
+
+    @Test
     @DisplayName("deployment position keeps the current facing when all facings remain valid")
     void determineDeploymentPositionPreservesCurrentFacingWhenFacingsAreValid() {
         Board board = new Board(7, 7);
@@ -269,6 +307,13 @@ class MovementDisplayTest {
                                  String fieldName,
                                  Object value) throws Exception {
         Field field = MovementDisplay.class.getDeclaredField(fieldName);
+        field.setAccessible(true);
+        field.set(target, value);
+    }
+
+    private static void setGameField(MovementDisplay target,
+                                    Game value) throws Exception {
+        Field field = ActionPhaseDisplay.class.getDeclaredField("game");
         field.setAccessible(true);
         field.set(target, value);
     }
