@@ -1024,8 +1024,10 @@ public class RulerDialog extends JDialog implements BoardViewListener {
         Entity targetEntity = getSelectedEntity(!attackerIsFirst);
         boolean spinnerMatch1 = isSpinnerAtEntityHeight(true);
         boolean spinnerMatch2 = isSpinnerAtEntityHeight(false);
+        // A sensor return is measured as its bare hex, so its real height, cover and states stay hidden
         boolean useEntityPath = (attackerEntity != null) && (targetEntity != null)
-              && spinnerMatch1 && spinnerMatch2;
+              && spinnerMatch1 && spinnerMatch2
+              && !isSensorReturn(attackerEntity) && !isSensorReturn(targetEntity);
 
         String toHit1;
         String toHit2;

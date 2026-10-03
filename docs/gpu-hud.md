@@ -60,7 +60,7 @@ last frame.
 
 | `Frame` component | Content |
 | --- | --- |
-| `scene` | `BoardScene`: tiles, units, markers, tactical geometry, firing lines, range bands and labels, field of view |
+| `scene` | `BoardScene`: tiles, units, markers, tactical geometry, firing lines, range borders and labels, field of view |
 | `timeline` | movement, combat and scene-update events for the playback |
 | `context`, `globalCommands` | MegaMek's map menu at a hex; the menu bar, the game commands and a Maps group |
 | `status` | `GpuBattleStatus.Snapshot`: units with side, state and status words, initiative, turns, phase, round |
@@ -87,19 +87,28 @@ actor, calls MegaMek's own code and republishes the frame.
 | `GpuBoardActions` | `panels.phase()` (`PhaseInfo`: phase status, Done/Skip/Clear ids, turn details, conditions lines); the phase, context and global commands | each `BoardScene.Command` clicks its captured button or menu item if its turn is still current |
 | `GpuBattleStatus` | `status` | none |
 | `GpuMovePlan` | `panels.move()` | `planTo`, `pinDestination`, `turn`, `setMode`, `undo`, `clearRoute`, `holdAll`, `stopHolding` |
-| `GpuFireOrders` | `panels.fire()` | `selectUnit`, `selectWeapon`, `focusTarget`, `assign`, `remove`, `removeLast`, `removeTarget`, `retarget`, `move`, `setPrimary`, `setAmmo`, `cycleMode`, `calledShot`, `aim`, `twist`, `clearAll`, `resolvePhase`, `stopResolve` |
+| `GpuFireOrders` | `panels.fire()` | `selectUnit`, `selectWeapon`, `focusTarget`, `assign`, `clickHex`, `remove`, `removeLast`, `removeTarget`, `retarget`, `move`, `setPrimary`, `setAmmo`, `cycleMode`, `calledShot`, `aim`, `twist`, `clearAll`, `resolvePhase`, `stopResolve` |
 | `GpuPhysicalOptions` | `panels.physical()` | `target`, `declare` |
 | `GpuUnitRecord` | `panels.record()`: the card unit's record | `setMode`, `setSystem`, `moveWeapon`, `setDumping`, `setAmmo` |
 | `GpuFirePreview` | `panels.preview()`: the movement fire preview | none (time-sliced jobs, 12.4) |
 | `GpuChat` | `panels.chat()` | `send` |
 | `GpuToasts` | `panels.toasts()` | none; `ClientGUI.addToast` feeds it through `GpuBoardWindow.toast` |
-| `GpuLosResult` | `panels.los()`: the measurement waiting for its second point | `lineOfSight` (ruler measures from the unit) |
+| `GpuLosResult` | `panels.los()`: the measurement waiting for its second point | `lineOfSight` (ruler measures from the unit to the height the pointer showed) |
 | `GpuPlayers` | `panels.players()` | `setPanelOpen` |
 | `GpuReportLog` | `reports` | none |
 
 `GpuBoardSource` has its own commands too: `selectUnit` (MegaMek's SELECT_UNIT event: the phase display decides),
 `locateUnit` (`ClientGUI.centerOnUnit`), `click` and `hover` (MegaMek's board tool through
-`BoardClientState.mouseAction`), `key` (1.5), `setCardUnit`, `setFocusUnit` and `answer` (1.6).
+`BoardClientState.mouseAction`), `measure` (the ruler's point at the pointed height), `key` (1.5), `setCardUnit`,
+`setFocusUnit` and `answer` (1.6).
+
+- **Fire targets.** The fire orders know a target as MegaMek's attacks do, by its target type and id (`TargetKey`,
+  which `Game.getTarget` resolves): a unit, a hex, a building or a minefield alike. The focus is the firing display's
+  target whatever it is (a unit only while the player may identify it), and every weapon attack in the queue gives its
+  target a letter, so a target MegaMek's board click or map menu chooses (woods to clear, a building) is focused,
+  assigned, lettered, carded and traced as an enemy is, and its attacks count for Fire weapons. A target that is no
+  unit has its hex in the snapshot while it lies on the shown board; the view anchors its card and trace on that hex
+  (`HudView.targetHeads`), and the overlay rings it.
 
 - **Captured commands.** The phase commands are the phase display's own buttons: those of
   `StatusBarPhaseDisplay.getActionButtons()` on all its pages (without the More paging button), the visible buttons of
@@ -109,7 +118,9 @@ actor, calls MegaMek's own code and republishes the frame.
   the current menu first, so a choice that became hidden or unavailable cannot run.
 - The movement planner plots for ground units in the walk, jump and back-up gears. Aerospace units, the other gears
   (such as charge and death from above) and a hex the display picks itself (an escape pod's landing, a bridge) keep
-  MegaMek's own board tool.
+  MegaMek's own board tool. So does a unit that walks on (walk-on deployment) until MegaMek's click on its entry hex
+  places it; the planner then continues from the entry and keeps the placement (the DEPLOY step) at the start of the
+  path, as it keeps a jump's start.
 - The fire orders read and change `FiringDisplay`'s queue through its own methods; the queue is the one source of
   the orders. While another own unit acts, a unit's orders wait as its draft, and "Resolve phase" declares the
   drafts on the following own turns.
@@ -258,8 +269,9 @@ the held nameplate key, the log's open state and the playback history. It is pre
    markers and terrain along the pointer's ray. In the Tactical View a unit icon wins over the ground, and a hex
    holding a unit picks that unit. The release calls `GpuHud.boardClick` with the modifiers held at the press:
    - right: the context menu at the pointer; opening it never changes orders;
-   - left with Ctrl or Alt: MegaMek's measurement, which its Swing ruler shows over the native window; while one
-     waits for its second point, a plain left click ends it;
+   - left with Ctrl or Alt: MegaMek's measurement, which its Swing ruler shows over the native window, each point
+     at the height the pointer shows there (the building floor it points at, else the ground; the Tactical View keeps
+     the ruler's own height); while one waits for its second point, a plain left click ends it;
    - left: by phase, below.
 4. The wheel zooms at the pointer over the board, and scrolls a panel under the pointer.
 5. Hovering picks the hex and the unit. The pointer is a hand over units and a move cursor over the minimap (desktop
@@ -269,7 +281,7 @@ the held nameplate key, the log's open state and the playback history. It is pre
 | --- | --- | --- |
 | Outside the local turn | own unit: becomes the focus; other: inspected | nothing |
 | Local movement turn, planner | select an own unit that can act, else inspect; with Shift (and on an own unit only once a route exists) plan to its hex | plan the route to it; Shift pins a waypoint |
-| Local FIRING turn | own: select; identified enemy: focus it as the target (an armed weapon is assigned); sensor contact: refused with a toast | MegaMek's board tool |
+| Local FIRING turn | own: select; identified enemy: focus it as the target (an armed weapon is assigned); sensor contact: refused with a toast | MegaMek's board click chooses the target there (`clickHex`: a building, woods to clear, its dialog among several; Shift twists), focused as an enemy is; an armed weapon is assigned to it |
 | Local PHYSICAL turn | own: select; enemy: inspect, and make it the target when adjacent | MegaMek's board tool |
 | Any other local turn: deployment, TARGETING and OFFBOARD, movement outside the planner | MegaMek's board tool (`hover` then `click`) | MegaMek's board tool |
 
@@ -355,10 +367,9 @@ view changes (open panels, the camera) stay on the GL thread. Names in quotes ar
 | `GpuTuningPanel` | dialogs layer | developer tuning (section 10); the frame rate beside its title | the tuning model |
 
 Two board-space components are world meshes that `GpuBattleView` draws:
-- `GpuBoardOverlay`: reach envelopes, the route and its ghost, unit rings and glows, range bands and their borders,
-  the front arc or the displayed weapon's arc, the physical-attack neighbours and the Tactical View's elevation-drop
-  edges. Short, medium and long range use the hud-v3 colours, minimum and extreme the client's field-of-fire
-  colours. It rebuilds its meshes only when what it draws changed. Over the route it draws the route's pulse (below).
+- `GpuBoardOverlay`: reach envelopes, the route and its ghost, unit rings and glows, the front arc or the displayed
+  weapon's arc, the physical-attack neighbours and the Tactical View's elevation-drop edges. It rebuilds its meshes
+  only when what it draws changed. Over the route it draws the route's pulse (below).
   Where the terrain or a model hides the acting unit's ring or the hovered unit's rings, it draws them again at
   half opacity behind what hides them (rimshaderv1's occluded outlines). The envelope's border lies on the drawn
   ground, on a step's face where one lies back over a lower hex. `GpuBattleView` rings the hovered hex; over a
@@ -366,6 +377,13 @@ Two board-space components are world meshes that `GpuBattleView` draws:
 - `GpuFireControl`: the firing lines and the flat range labels ([attack controls](gpu-attack-controls.md)). During
   the local weapon declaration the actor's lines are the HUD's traces instead; every other line is drawn in its
   attacker's side colour. Lines hide while an attack plays (`GpuBattleView.HIDE_TARGET_ARROWS_DURING_ATTACKS`).
+
+**Region markings** stand upright through one class, rimshaderv1's `BoardRangeBorder` (the user's decision of
+2026-10-04): the displayed weapon's range brackets (MegaMek's field of fire, `FieldOfFireSprite`, a level tall in each
+bracket's colour), the visual range (`SensorRangeSprite`) and the deployment zones (`BoardDeploymentGeometry`) give
+their border paths to it in the tactical capture, and `GpuTactical` stands the walls upright with their animated
+outline in 3D and lays them flat in the Tactical View. A new region marking hands its border to a `BoardRangeBorder`
+the same way.
 
 **The route's pulse** (`GpuRoutePulse`, user item 55). In the local movement turn a plotted route pulses: a glowing
 head leaves the unit, runs the route and settles into the destination; the ghost then surges and a ring ripples out of
@@ -668,7 +686,8 @@ While the native window is active (`GpuBoardWindow.isActiveFor`), the HUD replac
   hidden while the native window is active; they show again on the classic board as their preferences say.
   Line of sight stays with the Swing `RulerDialog` with its elevation diagram:
   it shows over the native window for a measurement, as on the classic board, and the allowlist raises it. The
-  context menu's "Line of sight from {unit}" measures with it (`RulerDialog.measure`).
+  context menu's "Line of sight from {unit}" measures with it (`RulerDialog.measure`), to the height the pointer
+  showed where the menu opened (`RulerDialog.setHeight`).
 - The frame carries no Swing overlay layers, so each toast shows once, in the native stack.
 - **Allowlist.** `GpuBoardWindow.allowedOverBattle(Dialog)` decides which Swing dialogs may still show over the
   presented window: the classes in `GpuBoardWindow.SWING_DIALOGS` (the Menu's settings and tools, the Game Master
@@ -693,9 +712,10 @@ the editor also Menu with its menu bar, Tools and 2D Editor). At the bottom, the
 as the battle's hex tooltip names them; no automated terrains or terrain codes) stands over a hint line with the
 editor's title or what the preview's measurement waits for, and the keys of the editor, Free Flight or the preview's
 line of sight. A left drag paints in the editor. In the preview a right click inspects the hex, and a Ctrl or Alt
-click measures with MegaMek's Swing ruler, which the preview makes on its own board state at the first measurement
-(`BoardSource.measure`); a plain click ends a measurement that waits for its second point, and the board draws the
-ruler's line. The camera centres the board beside the editor's Swing tools (`BoardSource.toolsInset`).
+click measures with MegaMek's Swing ruler at the height the pointer shows, which the preview makes on its own board
+state at the first measurement (`BoardSource.measure`); a plain click ends a measurement that waits for its second
+point, and the board draws the ruler's line. The camera centres the board beside the editor's Swing tools
+(`BoardSource.toolsInset`).
 
 ## 10. The developer Tuning utility
 

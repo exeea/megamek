@@ -5,10 +5,12 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Deque;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 import javax.swing.JComponent;
@@ -45,6 +47,9 @@ final class GpuMovePlan implements AutoCloseable {
     static final int UNDO_LIMIT = 60;
     /** No turn held yet in this hold. */
     private static final int NO_TURN = Integer.MIN_VALUE;
+    /** The step types a path may start with before its route (see {@link #base}). */
+    private static final Set<MoveStepType> START_STEPS = EnumSet.of(MoveStepType.START_JUMP,
+          MoveStepType.JUMP_MEK_MECHANICAL_BOOSTER, MoveStepType.DEPLOY);
 
     /** The gear the planner uses; AUTO lets the route choose walking, running or jumping. */
     enum Mode { AUTO, WALK, RUN, JUMP, BACK, OTHER }
@@ -591,13 +596,16 @@ final class GpuMovePlan implements AutoCloseable {
     }
 
     /**
-     * The planner plots for ground units in the walk, jump and back-up gears; other movement stays classic (G20), and
-     * so does a hex the display picks (an escape pod landing or a bridge build), which its own board click selects.
+     * The planner plots for ground units on the board in the walk, jump and back-up gears; other movement stays
+     * classic (G20), and so does a hex the display picks (an escape pod landing or a bridge build), which its own
+     * board click selects. A unit that walks on (walk-on deployment) is not on the board yet: MegaMek's click on its
+     * entry hex places it first, and the plan then continues from there.
      */
     private static boolean planner(MovementDisplay md, Entity entity) {
         int gear = md.getGear();
-        return !entity.isAero() && !md.isSelectingHex() && ((gear == MovementDisplay.GEAR_LAND)
-              || (gear == MovementDisplay.GEAR_JUMP) || (gear == MovementDisplay.GEAR_BACKUP));
+        return !entity.isAero() && entity.isDeployed() && !md.isSelectingHex()
+              && ((gear == MovementDisplay.GEAR_LAND) || (gear == MovementDisplay.GEAR_JUMP)
+              || (gear == MovementDisplay.GEAR_BACKUP));
     }
 
     private Mode mode(MovementDisplay md) {
@@ -644,11 +652,13 @@ final class GpuMovePlan implements AutoCloseable {
         return true;
     }
 
-    /** The steps a mode puts before any route: the jump start and the mechanical jump booster step. */
+    /**
+     * The steps before any route: a jump's start and its mechanical booster step, and a walk-on unit's placement on
+     * its entry hex (MegaMek's DEPLOY step, after the jump's start).
+     */
     private static int base(MovePath path) {
         int base = 0;
-        while ((base < path.length()) && ((path.getStep(base).getType() == MoveStepType.START_JUMP)
-              || (path.getStep(base).getType() == MoveStepType.JUMP_MEK_MECHANICAL_BOOSTER))) {
+        while ((base < path.length()) && START_STEPS.contains(path.getStep(base).getType())) {
             base++;
         }
         return base;

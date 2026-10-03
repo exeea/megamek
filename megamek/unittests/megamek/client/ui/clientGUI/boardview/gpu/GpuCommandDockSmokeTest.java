@@ -1103,7 +1103,7 @@ class GpuCommandDockSmokeTest {
         GpuBoardSource.UiPreferences preferences = GpuHudInputTest.preferences();
         return new Shot(shot.status(), withPhase(panels, info), shot.commands(), shot.reports(), shot.playback(),
               new GpuBoardSource.UiPreferences(preferences.scale(), "", "", true, true, false, false, true,
-                    preferences.binds(), 0, 0, 0));
+                    preferences.binds(), 0));
     }
 
     /** The shot whose phase info names these Done and skip commands, as GpuBoardActions.phaseInfo derives them. */

@@ -5001,11 +5001,6 @@ public class ClientGUI extends AbstractClientGUI
         firingArcSpriteHandler.clearValues();
     }
 
-    /** @return the shown field of fire's hexes per range bracket ({@link FiringArcSpriteHandler#fieldOfFire()}) */
-    public List<Set<Coords>> fieldOfFire() {
-        return firingArcSpriteHandler.fieldOfFire();
-    }
-
     /**
      * Updates the Nova Networks menu enablement based on whether the local player has any Nova CEWS units in their
      * force.

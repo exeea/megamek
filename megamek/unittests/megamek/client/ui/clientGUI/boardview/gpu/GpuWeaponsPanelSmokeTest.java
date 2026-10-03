@@ -39,11 +39,13 @@ import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiMenuList;
 import megamek.client.ui.gdx.UiPopover;
 import megamek.common.Configuration;
+import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.equipment.WeaponMounted;
 import megamek.common.rolls.TargetRoll;
 import megamek.common.units.Entity;
 import megamek.common.units.Mek;
+import megamek.common.units.Targetable;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
@@ -579,6 +581,31 @@ class GpuWeaponsPanelSmokeTest {
                 show(hud, column, settled(firing));
                 assertEquals(17, onSwing(() -> firing.attacker.getEquipmentNum(gun.getLinkedAmmo())));
                 hud.capture("weapons-firing-display").dispose();
+            });
+        }
+    }
+
+    /**
+     * The user's report of 2026-10-03: a terrain target kept "Hold fire". Over a real FiringDisplay, a click on the
+     * board's light woods focuses them as it focuses a unit: the dashed "+" pill and the assign line name the hex, "+"
+     * on the AC/20's row assigns the cannon there, and its attack takes the letter A.
+     */
+    @Test
+    void aClickedWoodedHexIsAssignedAsAUnitIs() throws Exception {
+        try (GpuFiringFixture firing = GpuFireOrdersTest.firing()) {
+            Coords woods = new Coords(7, 2);
+            int cannon = GpuFireOrdersTest.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
+            GpuHudTestStage.run(hud -> {
+                Column column = new Column(hud, firing.board.source);
+                firing.board.source.fire().clickHex(woods, 0, -1);
+                show(hud, column, settled(firing));
+                Targetable hex = onSwing(firing.display::getTarget);
+                assertEquals(List.of("+", hex.getDisplayName()), column.texts("weapons-pills"));
+                assertEquals("Assign weapon \u2192 " + hex.getDisplayName(), column.line("weapons-assign"));
+                click(hud, column.find("weapons-slot-" + cannon));
+                show(hud, column, settled(firing));
+                assertEquals(List.of("AC/20 RT@" + hex.getId()), GpuFireOrdersTest.queue(firing));
+                assertEquals(List.of("A", hex.getDisplayName()), column.texts("weapons-pills"));
             });
         }
     }

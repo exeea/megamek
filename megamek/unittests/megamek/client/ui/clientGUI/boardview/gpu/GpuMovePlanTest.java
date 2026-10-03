@@ -45,6 +45,7 @@ import megamek.client.ui.clientGUI.boardview.sprite.MovementEnvelopeSprite;
 import megamek.client.ui.panels.phaseDisplay.commands.MoveCommand;
 import megamek.common.Configuration;
 import megamek.common.Player;
+import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.enums.MoveStepType;
@@ -54,6 +55,8 @@ import megamek.common.game.GameTurn;
 import megamek.common.loaders.MekFileParser;
 import megamek.common.moves.MovePath;
 import megamek.common.moves.MoveStep;
+import megamek.common.rules.RulesManager;
+import megamek.common.rules.totalwarfare.TWRulesManager;
 import megamek.common.units.ConvInfantry;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementType;
@@ -427,9 +430,55 @@ class GpuMovePlanTest {
     }
 
     /**
+     * The user's crash report of 2026-10-03: with walk-on deployment a unit enters the board in its first movement
+     * turn. Until MegaMek's click on its entry hex places it, the unit is no planner and the plan's commands are
+     * dropped, so no path is searched from a unit without a position (MovePath.findPathTo threw). Once placed, it is
+     * planned from the entry hex, and the placement stays at the start of the path as a jump's start does.
+     */
+    @Test
+    void aWalkOnUnitEntersByTheBoardClickAndIsPlannedFromItsEntryHex() throws Exception {
+        RulesManager rules = Game.rulesManager;
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            Game.rulesManager = new TWRulesManager();
+            Game.rulesManager.getRulesGame().setWalkOnDeployment(true);
+            // The south edge of the 16 x 17 board, where the unit walks on.
+            Coords entry = new Coords(11, 16);
+            Coords inland = new Coords(11, 14);
+            Entity walker = new MekFileParser(new File("testresources/megamek/common/units/Sagittaire SGT-14D.mtf"))
+                  .getEntity();
+            onSwing(() -> {
+                walker.setId(8);
+                walker.setOwner(moving.board.player);
+                walker.setStartingPos(Board.START_S);
+                walker.setDeployRound(0);
+                moving.board.game.addEntity(walker, false);
+                moving.display.selectEntity(walker.getId());
+                return null;
+            });
+            GpuMovePlan plan = plan(moving);
+            assertFalse(shown(moving).planner(), "Not on the board yet: MegaMek's board click places it");
+            plan.planTo(inland, 0, false);
+            assertEquals(List.of(), shown(moving).route(), "Nothing is searched from no position");
+
+            classicClick(moving, entry);
+            assertEquals(List.of(true, entry), onSwing(() -> List.of(walker.isDeployed(), walker.getPosition())));
+            assertTrue(shown(moving).planner());
+            plan.planTo(inland, 0, false);
+            Snapshot planned = shown(moving);
+            assertEquals(inland, planned.route().getLast().coords());
+            assertEquals(MoveStepType.DEPLOY, onSwing(() -> moving.display.getPlannedMovement().getStep(0).getType()),
+                  "The route continues the placement");
+            plan.clearRoute();
+            assertEquals(List.of(MoveStepType.DEPLOY), onSwing(() -> moving.display.getPlannedMovement()
+                  .getStepVector().stream().map(MoveStep::getType).toList()), "Clearing the route keeps the entry");
+        } finally {
+            Game.rulesManager = rules;
+        }
+    }
+
+    /**
      * E2d: while the display picks the hexes of a bridge build, its own selection takes the board click; once MegaMek's
      * cancel ends the pick, the unit is planned again and a click plots as before.
-     */
     @Test
     void aBridgeBuildPickTakesTheBoardClickAndPlanningResumesAfterIt() throws Exception {
         try (GpuMovementFixture moving = GpuMovementFixture.create()) {

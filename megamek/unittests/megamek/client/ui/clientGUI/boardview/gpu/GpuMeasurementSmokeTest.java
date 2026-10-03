@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -22,6 +23,7 @@ import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 /** Exercises real board picking and modifier routing in both cameras. */
 @Tag("on-demand")
@@ -81,8 +83,12 @@ class GpuMeasurementSmokeTest {
                 }
 
                 private void verifyModifiers(int modifiers) {
-                    // The HUD hands a Ctrl or Alt click to MegaMek's measurement tools.
-                    verify(source).click(start, false, modifiers);
+                    // The HUD hands a Ctrl or Alt click to MegaMek's measurement tools, at the height the pointer
+                    // shows: the measured hex's ground (the user's decision of 2026-10-03).
+                    ArgumentCaptor<Float> pointed = ArgumentCaptor.forClass(Float.class);
+                    verify(source).measure(eq(start), eq(modifiers), pointed.capture());
+                    assertEquals(0, GpuLosResult.pointedHeight(fixture.game.getBoard().getHex(start),
+                          pointed.getValue()));
                 }
 
                 private void gesture(int modifiers) {

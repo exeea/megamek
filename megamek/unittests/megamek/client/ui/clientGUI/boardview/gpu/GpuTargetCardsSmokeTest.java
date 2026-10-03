@@ -1,7 +1,6 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuBoardOverlaySmokeTest.banded;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuBoardOverlaySmokeTest.frame;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuBoardOverlaySmokeTest.preferences;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuBoardOverlaySmokeTest.unit;
@@ -53,6 +52,7 @@ import megamek.common.enums.GamePhase;
 import megamek.common.rolls.TargetRoll;
 import megamek.common.units.Entity;
 import megamek.common.units.Mek;
+import megamek.common.units.Targetable;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
@@ -156,7 +156,7 @@ class GpuTargetCardsSmokeTest {
 
     @Test
     void cardsOverTheBoardBesideShots05To07And15() throws Exception {
-        BoardScene scene = banded(GpuBoardSpaceHarness.scene());
+        BoardScene scene = GpuBoardSpaceHarness.scene();
         GpuHudTestStage.run(hud -> {
             GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
             GpuBoardOverlay overlay = new GpuBoardOverlay();
@@ -321,7 +321,7 @@ class GpuTargetCardsSmokeTest {
      */
     @Test
     void aDraggedRowFloatsOverItsCardWhileTheOthersMakeRoom() throws Exception {
-        BoardScene scene = banded(GpuBoardSpaceHarness.scene());
+        BoardScene scene = GpuBoardSpaceHarness.scene();
         GpuHudTestStage.run(hud -> {
             GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
             GpuBoardOverlay overlay = new GpuBoardOverlay();
@@ -472,6 +472,43 @@ class GpuTargetCardsSmokeTest {
                 layer.dispose();
             });
         }
+    }
+
+    /**
+     * The user's report of 2026-10-03: a terrain target kept "Hold fire". A wooded hex with an attack has its card as
+     * a unit has, against the area below the anchor the view gives its hex; a click on the card focuses the hex by
+     * its key.
+     */
+    @Test
+    void aHexTargetsCardStandsAtItsHex() {
+        GpuHudTestStage.run(hud -> {
+            GpuBoardSource source = mock(GpuBoardSource.class);
+            GpuFireOrders orders = mock(GpuFireOrders.class);
+            when(source.fire()).thenReturn(orders);
+            Layer layer = new Layer(hud, source, null);
+            TargetKey woods = new TargetKey(Targetable.TYPE_HEX_CLEAR, 20007);
+            GpuFireOrders.Snapshot fire = orders(List.of(target(TIMBER_WOLF, 'A', "Timber Wolf", true, 0),
+                        new GpuFireOrders.Target(woods, 'B', "Hex: 0803 (Clear)", false, 1, true, new Coords(7, 2))),
+                  List.of(attack(AC20, TIMBER_WOLF, "AC/20", "RT", "Ballistic", "[RT] AC/20  (8)", 8, 7, 58.3),
+                        new GpuFireOrders.Attack(LRM, woods, "LRM 20", "LT", "Missile", "[LT] LRM 20  (11)", 11, 2,
+                              100, "")));
+            Map<Integer, Rectangle> units = Map.of(ATLAS, new Rectangle(900, 200, 60, 110), TIMBER_WOLF,
+                  new Rectangle(1100, 520, 60, 110));
+            Map<Integer, Vector2> heads = new HashMap<>();
+            units.forEach((id, rect) -> heads.put(id, new Vector2(rect.x + rect.width / 2, rect.y + rect.height)));
+            GpuHud.HudView view = new GpuHud.HudView(false, false, units, heads, Map.of(), null, Entity.NONE, 118,
+                  Float.NaN, Map.of(woods, new Vector2(500, 500)));
+            layer.update(hud, firing(fire), view, List.of());
+            hud.draw();
+            Rectangle card = layer.cards.placed().get(woods);
+            assertNotNull(card, "The hex's card is placed");
+            assertEquals(500 - card.width / 2, card.x, 1, "centred over the hex's anchor");
+            assertEquals(500 + 26, card.y, 1, "26 above it, as above a head");
+            assertEquals(List.of("B", "HEX: 0803 (CLEAR)"), rows(layer.card(woods.id())).subList(0, 2));
+            click(hud, layer.card(woods.id()).findActor("card-name"));
+            verify(orders).focusTarget(woods);
+            layer.dispose();
+        });
     }
 
     /**

@@ -672,6 +672,13 @@ class GpuHudInputTest {
         click(HEX, FOE, 0);
         verify(fire, times(2)).focusTarget(TargetKey.unit(FOE));
         verify(fire, times(1)).assign(anyInt(), any(TargetKey.class));
+        // A hex: MegaMek's click chooses the target there, a wooded hex or a building too, and the armed weapon fires
+        // at it (the user's report of 2026-10-03: terrain kept "Hold fire").
+        hud.state.armedWeapon = 6;
+        click(HEX, Entity.NONE, 0);
+        verify(fire).clickHex(HEX, 0, 6);
+        assertEquals(-1, hud.state.armedWeapon);
+        verify(source, never()).click(any(), anyBoolean(), anyInt());
 
         hud.state.armedWeapon = 5;
         assertTrue(press(Input.Keys.FORWARD_DEL, KeyEvent.VK_DELETE, 0));
@@ -714,7 +721,7 @@ class GpuHudInputTest {
     static GpuBoardSource.UiPreferences preferences(float scale) {
         List<GpuBoardSource.Bind> binds = Stream.of(KeyCommandBind.values())
               .map(bind -> new GpuBoardSource.Bind(bind, bind.keyDefault, bind.modifiersDefault, "")).toList();
-        return new GpuBoardSource.UiPreferences(scale, "", "", true, true, false, false, false, binds, 0, 0, 0);
+        return new GpuBoardSource.UiPreferences(scale, "", "", true, true, false, false, false, binds, 0);
     }
 
     static GpuBattleStatus.Snapshot status(int round, GamePhase phase, boolean myTurn, int actor, int turnIndex,

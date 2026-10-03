@@ -39,17 +39,18 @@ import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
 import megamek.client.ui.gdx.UiTheme;
-import megamek.common.RangeType;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.units.Entity;
 
 /**
  * The hud-v3 board overlay (rebuild plan C.1 G7; overlay.js in 3D, flat.js in the Tactical View) as world meshes:
- * reach envelopes, the route and its ghost, unit rings and glows, range bands, the front arc or the displayed weapon's
- * arc, the physical-attack neighbours and the Tactical View's elevation-drop edges; over them the plotted route's
- * {@link GpuRoutePulse}. It draws the frame's snapshots and decides no rule; it rebuilds only when what it draws
- * changed. Owns its meshes, its pulse and its batch on the GL thread.
+ * reach envelopes, the route and its ghost, unit rings and glows, the front arc or the displayed weapon's arc, the
+ * physical-attack neighbours and the Tactical View's elevation-drop edges; over them the plotted route's
+ * {@link GpuRoutePulse}. The displayed weapon's range brackets are MegaMek's field of fire, upright walls of the
+ * tactical capture (GpuTactical), as the visual range and the deployment zones. It draws the frame's snapshots and
+ * decides no rule; it rebuilds only when what it draws changed. Owns its meshes, its pulse and its batch on the GL
+ * thread.
  */
 final class GpuBoardOverlay implements Disposable {
     /** One prototype pixel in hex radii at the Tactical View zoom GpuUnitIcons follows: an icon of 38 = 1.25 radii. */
@@ -61,9 +62,6 @@ final class GpuBoardOverlay implements Disposable {
     private static final Color VIOLET = new Color(.72f, .62f, 1, 1);
     private static final Color BLIP = new Color(1, .66f, .34f, 1);
     private static final Color WRECK = new Color(.3f, .3f, .3f, 1);
-    /** Short, medium and long range, in both views. */
-    private static final Color[] BANDS = {
-          new Color(.49f, .94f, .82f, 1), new Color(.93f, .78f, .46f, 1), new Color(.62f, .72f, .95f, 1) };
     // flat.js:16-75, the Tactical View palette; its mint is the HUD's mint token.
     private static final Color FLAT_RUN = new Color(.9f, .76f, .45f, 1);
     private static final Color FLAT_SELECTED = Color.valueOf("a3ffe0");
@@ -110,8 +108,6 @@ final class GpuBoardOverlay implements Disposable {
     private GpuFireOrders.Snapshot fire;
     private GpuPhysicalOptions.Snapshot physical;
     private boolean envelopeShown = true;
-    private int minRangeRgb;
-    private int extremeRangeRgb;
     /** MegaMek's sprint envelope colour; the prototype has no sprint band. */
     private int sprintRgb;
     private Coords hovered;
@@ -141,9 +137,9 @@ final class GpuBoardOverlay implements Disposable {
     }
 
     /**
-     * Shows the frame's overlay. The meshes are rebuilt only when what they draw changed: the scene's units, terrain
-     * or range bands and borders, the status, the presented units, the movement, fire or physical snapshot, the
-     * envelope preference, the range and sprint colours or the view state. {@code view} gives the Tactical View flag
+     * Shows the frame's overlay. The meshes are rebuilt only when what they draw changed: the scene's units or
+     * terrain, the status, the presented units, the movement, fire or physical snapshot, the envelope preference, the
+     * sprint colour or the view state. {@code view} gives the Tactical View flag
      * and the hovered hex and unit; {@code state} the inspected unit and the presented units (C.6). Called once a
      * frame, it also moves the route's pulse on by the frame's time.
      */
@@ -161,8 +157,7 @@ final class GpuBoardOverlay implements Disposable {
               || showsEnvelope(panels.move(), preferences.moveEnvelope()) ? null : view.hovered();
         if (sameScene && frame.status() == status && state.presentedUnits() == units
               && panels.move() == move && panels.fire() == fire && panels.physical() == physical
-              && preferences.moveEnvelope() == envelopeShown && preferences.minRangeRgb() == minRangeRgb
-              && preferences.extremeRangeRgb() == extremeRangeRgb && preferences.moveSprintRgb() == sprintRgb
+              && preferences.moveEnvelope() == envelopeShown && preferences.moveSprintRgb() == sprintRgb
               && Objects.equals(ring, hovered) && view.hoveredUnit() == hoveredUnit && state.inspected == inspected
               && view.tactical() == tactical && revision == BoardGeometry.revision()) {
             return;
@@ -173,8 +168,6 @@ final class GpuBoardOverlay implements Disposable {
         fire = panels.fire();
         physical = panels.physical();
         envelopeShown = preferences.moveEnvelope();
-        minRangeRgb = preferences.minRangeRgb();
-        extremeRangeRgb = preferences.extremeRangeRgb();
         sprintRgb = preferences.moveSprintRgb();
         hovered = ring;
         hoveredUnit = view.hoveredUnit();
@@ -229,14 +222,10 @@ final class GpuBoardOverlay implements Disposable {
         return focused;
     }
 
-    /**
-     * Whether two captures show the same overlay: the same units, terrain (by identity, as the terrain caches compare
-     * it) and range bands and borders.
-     */
+    /** Whether two captures show the same overlay: the same units and terrain (by identity, as its caches compare). */
     private static boolean sameDrawing(BoardScene shown, BoardScene next) {
         return shown == next || shown != null && next != null && shown.boardId() == next.boardId()
-              && shown.tiles() == next.tiles() && shown.units().equals(next.units())
-              && shown.rangeBands().equals(next.rangeBands()) && shown.rangeBorders().equals(next.rangeBorders());
+              && shown.tiles() == next.tiles() && shown.units().equals(next.units());
     }
 
     /** Whether two terrain captures have the same hexes at the same levels; the source repaints tiles as views pan. */
@@ -420,7 +409,6 @@ final class GpuBoardOverlay implements Disposable {
                 route(sink, moving);
             }
         }
-        rangeBands(sink);
         if (fire.active() && !tactical) {
             if (fire.frontArc() != null) {
                 outline(sink, fire.frontArc().hexes(), .03f, false, alpha(Color.WHITE, .3f));
@@ -757,59 +745,6 @@ final class GpuBoardOverlay implements Disposable {
 
     private static Vector3 point(Vector3 center, Vector3 ahead, float along, Vector3 across, float aside) {
         return new Vector3(center).mulAdd(ahead, along).mulAdd(across, aside);
-    }
-
-    /**
-     * The displayed weapon's range bands: each hex filled in its bracket's colour, and in 3D the handler's bracket
-     * borders (overlay.js:51-53); in the Tactical View every band hex is outlined (flat.js:50-51). Short, medium and
-     * long use the prototype's colours, minimum and extreme the client's field-of-fire colours; a border whose hex
-     * has no bracket keeps the handler's colour.
-     */
-    private void rangeBands(Sink sink) {
-        for (Map.Entry<Coords, Integer> entry : scene.rangeBands().entrySet()) {
-            BoardScene.Tile tile = scene.tile(entry.getKey());
-            if (tile == null) {
-                continue;
-            }
-            Color color = rangeColor(entry.getValue(), 0);
-            if (tactical) {
-                fill(sink, tile, .05f, 0, alpha(color, .28f));
-                ring(sink, tile, 1.2f * PIXEL, .05f - .6f * PIXEL, 0, alpha(color, .7f));
-            } else {
-                int bracket = entry.getValue();
-                float strength = bracket == RangeType.RANGE_MEDIUM ? .11f
-                      : bracket >= RangeType.RANGE_LONG ? .08f : .16f;
-                fill(sink, tile, .045f, .03f, alpha(color, strength));
-            }
-        }
-        if (tactical) {
-            return;
-        }
-        for (BoardScene.RangeBorder border : scene.rangeBorders()) {
-            BoardScene.Tile tile = scene.tile(border.coords());
-            if (tile == null) {
-                continue;
-            }
-            Color color = alpha(rangeColor(scene.rangeBands().get(border.coords()), border.rgb()), .75f);
-            for (int direction = 0; direction < 6; direction++) {
-                if ((border.edges() & 1 << direction) != 0) {
-                    side(sink, tile, direction, .03f, false, color);
-                }
-            }
-        }
-    }
-
-    private Color rangeColor(Integer bracket, int handlerRgb) {
-        if (bracket == null) {
-            return rgb(handlerRgb);
-        }
-        return switch (bracket) {
-            case RangeType.RANGE_SHORT -> BANDS[0];
-            case RangeType.RANGE_MEDIUM -> BANDS[1];
-            case RangeType.RANGE_LONG -> BANDS[2];
-            case RangeType.RANGE_MINIMUM -> rgb(minRangeRgb);
-            default -> rgb(extremeRangeRgb);
-        };
     }
 
     /**

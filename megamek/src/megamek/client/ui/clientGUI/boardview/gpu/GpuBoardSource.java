@@ -883,8 +883,7 @@ final class GpuBoardSource implements BoardSource {
               view.getBoardMarkers(), tacticalGeometry(move.planner()),
               view.getWeaponRangeTextSprites().stream().map(sprite -> new BoardScene.RangeLabel(sprite.getPosition(),
                     FieldOfFireSprite.getFieldOfFireColor(sprite.getRangeBracket()).getRGB(),
-                    FieldOfFireSprite.getRangeText(sprite.getRangeBracket()))).toList(), fieldOfView,
-              fire.rangeBands(panel));
+                    FieldOfFireSprite.getRangeText(sprite.getRangeBracket()))).toList(), fieldOfView);
         // The report log before the chat, whose round lines read it with the status (plan O6).
         GpuReportLog.Snapshot log = captureReports();
         chat.roundLines(status, log);

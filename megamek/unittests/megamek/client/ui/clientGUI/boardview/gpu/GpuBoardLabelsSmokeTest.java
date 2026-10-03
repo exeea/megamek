@@ -2,7 +2,6 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuBoardOverlaySmokeTest.atlasMove;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuBoardOverlaySmokeTest.banded;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuBoardOverlaySmokeTest.fire;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuBoardOverlaySmokeTest.frame;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuBoardOverlaySmokeTest.ground;
@@ -269,13 +268,12 @@ class GpuBoardLabelsSmokeTest {
 
                 // Shots 05 and 13 (the same board under G12's menu): the Atlas's orders on the Timber Wolf (A) and
                 // the BattleMaster (B), TN badges for the selected weapon on the other enemies, traces and leaders.
-                BoardScene bands = banded(scene);
                 GpuBattleStatus.Snapshot declaring = turn(GamePhase.FIRING, true, ATLAS, moving.units());
                 GpuFireOrders.Snapshot orders = orders(fire(null), fire(null).targets(), List.of(
                       new GpuFireOrders.Badge(KING_CRAB, 9, 27.78, ""),
                       new GpuFireOrders.Badge(ENEMY_LOCUST, TargetRoll.IMPOSSIBLE, 0, OUT_OF_ARC),
                       new GpuFireOrders.Badge(BATTLEMASTER, 8, 41.67, "")));
-                frame = frameOf(bands, declaring, panels(GpuMovePlan.Snapshot.EMPTY, orders,
+                frame = frameOf(scene, declaring, panels(GpuMovePlan.Snapshot.EMPTY, orders,
                       GpuFirePreview.Snapshot.NONE), GpuReportLog.Snapshot.EMPTY);
                 for (boolean tactical : new boolean[] { false, true }) {
                     labels = new Labels(hud, board.camera);
@@ -309,7 +307,7 @@ class GpuBoardLabelsSmokeTest {
                 List<GpuFireOrders.Target> three = new ArrayList<>(fire(null).targets());
                 three.add(new GpuFireOrders.Target(TargetKey.unit(KING_CRAB), 'C', "King Crab", false, 1, true,
                       null));
-                frame = frameOf(bands, declaring, panels(GpuMovePlan.Snapshot.EMPTY,
+                frame = frameOf(scene, declaring, panels(GpuMovePlan.Snapshot.EMPTY,
                       orders(fire(null), three, List.of()), GpuFirePreview.Snapshot.NONE), GpuReportLog.Snapshot.EMPTY);
                 frame(board, false, atlasHex, 118, 980, 850);
                 view = draw(hud, board, overlay, icons, labels, frame);

@@ -24,10 +24,8 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
 import megamek.client.ui.tileset.MekTileset;
 import megamek.common.Configuration;
-import megamek.common.RangeType;
 import megamek.common.board.Coords;
 import megamek.common.compute.Compute;
 import megamek.common.compute.ComputeArc;
@@ -42,9 +40,9 @@ import org.junit.jupiter.api.Test;
  * G7: the hud-v3 board overlay over the board-space harness, in 3D and in the Tactical View (its two alpha sets),
  * beside the prototype's shots 02, 03, 05, 07, 09 and 15, and its behaviour: the envelope preference, the hover
  * preview, non-planner movement, one arc per jump, the ghost of a plotted route only, drop edges only in the Tactical
- * View, rebuilding only when the drawing changes, and freeing every mesh. The envelopes and bands of the fixtures are
- * drawing inputs chosen to resemble the pictures (straight-line distance from the unit, MegaMek's forward arc); they
- * are not movement or range rules.
+ * View, rebuilding only when the drawing changes, and freeing every mesh. The envelopes of the fixtures are drawing
+ * inputs chosen to resemble the pictures (straight-line distance from the unit, MegaMek's forward arc); they are not
+ * movement rules.
  */
 @Tag("on-demand")
 class GpuBoardOverlaySmokeTest {
@@ -89,7 +87,6 @@ class GpuBoardOverlaySmokeTest {
                 GpuHudData physical = GpuHudInputTest.panels(GpuMovePlan.Snapshot.EMPTY, GpuFireOrders.Snapshot.EMPTY,
                       new GpuPhysicalOptions.Snapshot(true, ATLAS, TIMBER_WOLF, List.of(TIMBER_WOLF), List.of()),
                       GpuUnitRecord.Snapshot.EMPTY);
-                BoardScene banded = banded(scene);
                 GpuBattleStatus.Snapshot moving = GpuHudFixtures.status();
                 GpuBattleStatus.Snapshot pantherTurn = status(GamePhase.MOVEMENT, PANTHER);
                 GpuBattleStatus.Snapshot declaring = status(GamePhase.FIRING, ATLAS);
@@ -105,11 +102,11 @@ class GpuBoardOverlaySmokeTest {
                             pantherHex, 118, 1147, 660, new int[] { 860, 380, 660, 520 }, sprites),
                       new Shot("waypoint-tactical", null, true, scene, pantherTurn, waypoint, pantherHex, 60.8f, 960,
                             600, new int[] { 0, 0, 0, 0 }, null),
-                      new Shot("firing-3d", "05-weapon-declaration.jpg", false, banded, declaring, firing, atlasHex,
+                      new Shot("firing-3d", "05-weapon-declaration.jpg", false, scene, declaring, firing, atlasHex,
                             118, 925, 790, new int[] { 330, 100, 1260, 800 }, sprites),
                       new Shot("firing-front-arc-3d", null, false, scene, declaring, frontArc, atlasHex, 118, 925,
                             790, new int[] { 0, 0, 0, 0 }, sprites),
-                      new Shot("firing-tactical", "07-tactical-view.jpg", true, banded, declaring, firing, atlasHex,
+                      new Shot("firing-tactical", "07-tactical-view.jpg", true, scene, declaring, firing, atlasHex,
                             60.8f, 868, 672, new int[] { 380, 120, 1000, 800 }, null),
                       new Shot("physical-3d", "09-physical-attacks.jpg", false, adjacent, meleeStatus, physical,
                             atlasHex, 118, 960, 505, new int[] { 700, 280, 520, 420 }, melee.instances::get),
@@ -125,7 +122,7 @@ class GpuBoardOverlaySmokeTest {
                 if (Gdx.graphics.getBackBufferWidth() == 1280) {
                     board.camera.resize(1280, 720);
                     render(hud, board, overlay, icons, new Shot("firing-3d-1280x720", "15-compact-1280x720.jpg",
-                          false, banded, declaring, firing, atlasHex, 80, 615, 520, new int[] { 250, 90, 780, 520 },
+                          false, scene, declaring, firing, atlasHex, 80, 615, 520, new int[] { 250, 90, 780, 520 },
                           sprites), 1280, 720);
                 }
             } finally {
@@ -327,11 +324,10 @@ class GpuBoardOverlaySmokeTest {
             GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
             try {
                 board.view(false);
-                BoardScene banded = banded(scene);
                 GpuBattleStatus.Snapshot moving = GpuHudFixtures.status();
                 GpuHudData panels = panels(atlasMove(scene), fire(null));
                 GpuHudState state = state(moving);
-                GpuBoardSource.Frame frame = frame(banded, moving, panels);
+                GpuBoardSource.Frame frame = frame(scene, moving, panels);
                 Set<Integer> before = liveBuffers();
                 GpuBoardOverlay overlay = new GpuBoardOverlay();
                 overlay.update(frame, view(false, null, Entity.NONE), preferences(true), state);
@@ -339,7 +335,7 @@ class GpuBoardOverlaySmokeTest {
                 assertEquals(1, overlay.builds(), "The same snapshots and view state build once");
                 // The source captures a new scene at every refresh: one that shows the same keeps the meshes, as
                 // does a hovered hex while the envelope hides its ring.
-                overlay.update(frame(recaptured(banded), moving, panels), view(false, null, Entity.NONE),
+                overlay.update(frame(recaptured(scene), moving, panels), view(false, null, Entity.NONE),
                       preferences(true), state);
                 assertEquals(1, overlay.builds(), "A recaptured equal scene keeps the meshes");
                 overlay.update(frame, view(false, new Coords(3, 8), Entity.NONE), preferences(true), state);
@@ -349,7 +345,7 @@ class GpuBoardOverlaySmokeTest {
                 first.removeAll(before);
                 assertTrue(!first.isEmpty(), "The overlay's meshes are GL buffers");
                 // Every hover change that shows (here while declaring attacks) rebuilds and frees the old meshes.
-                GpuBoardSource.Frame firing = frame(banded, moving, panels(GpuMovePlan.Snapshot.EMPTY, fire(null)));
+                GpuBoardSource.Frame firing = frame(scene, moving, panels(GpuMovePlan.Snapshot.EMPTY, fire(null)));
                 for (int column = 0; column < 20; column++) {
                     overlay.update(firing, view(false, new Coords(column, 8), Entity.NONE), preferences(true), state);
                     overlay.render(board.camera.camera);
@@ -368,7 +364,7 @@ class GpuBoardOverlaySmokeTest {
                 Set<Integer> left = liveBuffers();
                 left.removeAll(before);
                 assertEquals(Set.of(), left, "Disposing the overlay frees every buffer it made");
-                measure(scene, banded);
+                measure(scene);
             } finally {
                 board.dispose();
             }
@@ -381,7 +377,7 @@ class GpuBoardOverlaySmokeTest {
      * the terrain samples start cold) and a recapture that shows the same (no rebuild). Not a performance claim when
      * JaCoCo instruments the run.
      */
-    private static void measure(BoardScene scene, BoardScene banded) {
+    private static void measure(BoardScene scene) {
         List<BoardScene.Unit> crowd = new ArrayList<>();
         List<GpuBattleStatus.UnitStatus> listed = new ArrayList<>();
         GpuBattleStatus.Snapshot fixture = GpuHudFixtures.status();
@@ -398,9 +394,9 @@ class GpuBoardOverlaySmokeTest {
         }
         GpuBattleStatus.Snapshot crowded = new GpuBattleStatus.Snapshot(3, GamePhase.MOVEMENT, true,
               GpuHudFixtures.LOCAL_PLAYER, ATLAS, fixture.turns(), 0, listed, List.of(), false);
-        BoardScene large = banded.withUnits(crowd);
+        BoardScene large = scene.withUnits(crowd);
         for (boolean tactical : new boolean[] { false, true }) {
-            for (BoardScene shown : List.of(banded, large)) {
+            for (BoardScene shown : List.of(scene, large)) {
                 GpuBattleStatus.Snapshot status = shown == large ? crowded : fixture;
                 GpuMovePlan.Snapshot plan = atlasMove(shown);
                 List<GpuHudData> plans = List.of(panels(plan, fire(null)),
@@ -472,7 +468,7 @@ class GpuBoardOverlaySmokeTest {
         return new BoardScene(scene.boardId(), scene.width(), scene.height(), new ArrayList<>(scene.tiles()),
               scene.units(), scene.plannedPath(), scene.selectedId(), scene.phase(), scene.commands(), scene.light(),
               scene.firingLines(), scene.rangeBorders(), scene.markers(), scene.tactical(), scene.rangeLabels(),
-              scene.fieldOfView(), scene.rangeBands());
+              scene.fieldOfView());
     }
 
     /**
@@ -793,39 +789,6 @@ class GpuBoardOverlaySmokeTest {
         return new GpuFireOrders.FrontArc(from, facing, hexes);
     }
 
-    /**
-     * The AC/20's bands of shot 05 (S 3, M 6, L 9 in the forward arc) and their borders as the firing-arc handler
-     * marks them: each side whose neighbour is not in the same bracket, in the client's field-of-fire colours.
-     */
-    static BoardScene banded(BoardScene scene) {
-        GpuFireOrders.FrontArc arc = frontArc(scene);
-        Map<Coords, Integer> bands = new HashMap<>();
-        for (Coords coords : arc.hexes()) {
-            int distance = arc.origin().distance(coords);
-            if (distance <= 9) {
-                bands.put(coords, distance <= 3 ? RangeType.RANGE_SHORT
-                      : distance <= 6 ? RangeType.RANGE_MEDIUM : RangeType.RANGE_LONG);
-            }
-        }
-        List<BoardScene.RangeBorder> borders = new ArrayList<>();
-        bands.forEach((coords, bracket) -> {
-            int edges = 0;
-            for (int direction = 0; direction < 6; direction++) {
-                if (!bracket.equals(bands.get(coords.translated(direction)))) {
-                    edges |= 1 << direction;
-                }
-            }
-            if (edges != 0) {
-                int rgb = FieldOfFireSprite.getFieldOfFireColor(bracket).getRGB();
-                borders.add(new BoardScene.RangeBorder(coords, edges, rgb, FieldOfFireSprite.getRangeText(bracket)));
-            }
-        });
-        return new BoardScene(scene.boardId(), scene.width(), scene.height(), scene.tiles(), scene.units(),
-              scene.plannedPath(), scene.selectedId(), scene.phase(), scene.commands(), scene.light(),
-              scene.firingLines(), borders, scene.markers(), scene.tactical(), scene.rangeLabels(),
-              scene.fieldOfView(), bands);
-    }
-
     static GpuHudData panels(GpuMovePlan.Snapshot move, GpuFireOrders.Snapshot fire) {
         return GpuHudInputTest.panels(move, fire, GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY);
     }
@@ -853,8 +816,6 @@ class GpuBoardOverlaySmokeTest {
 
     static GpuBoardSource.UiPreferences preferences(boolean envelope) {
         return new GpuBoardSource.UiPreferences(1, "", "", true, true, envelope, false, false, List.of(),
-              FieldOfFireSprite.getFieldOfFireColor(RangeType.RANGE_MINIMUM).getRGB(),
-              FieldOfFireSprite.getFieldOfFireColor(RangeType.RANGE_EXTREME).getRGB(),
               GUIPreferences.getInstance().getMoveSprintColor().getRGB());
     }
 

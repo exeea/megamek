@@ -28,22 +28,11 @@ import megamek.common.board.Coords;
 import megamek.common.units.EntityMovementType;
 import megamek.common.units.Terrains;
 
-/**
- * A presentation snapshot. Only the Swing thread reads the game; the GPU thread owns rendering. {@code rangeBands}
- * holds the displayed weapon's range bracket per hex, as the firing-arc handler classifies it.
- */
+/** A presentation snapshot. Only the Swing thread reads the game; the GPU thread owns rendering. */
 record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Unit> units,
       List<Waypoint> plannedPath, int selectedId, String phase, List<Command> commands, Light light,
       List<FiringLine> firingLines, List<RangeBorder> rangeBorders, List<BoardMarker> markers, BoardTactical tactical,
-      List<RangeLabel> rangeLabels, BoardFieldOfView fieldOfView, Map<Coords, Integer> rangeBands) {
-
-    BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Unit> units,
-          List<Waypoint> plannedPath, int selectedId, String phase, List<Command> commands, Light light,
-          List<FiringLine> firingLines, List<RangeBorder> rangeBorders, List<BoardMarker> markers,
-          BoardTactical tactical, List<RangeLabel> rangeLabels, BoardFieldOfView fieldOfView) {
-        this(boardId, width, height, tiles, units, plannedPath, selectedId, phase, commands, light, firingLines,
-              rangeBorders, markers, tactical, rangeLabels, fieldOfView, Map.of());
-    }
+      List<RangeLabel> rangeLabels, BoardFieldOfView fieldOfView) {
 
     BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Unit> units,
           List<Waypoint> plannedPath, int selectedId, String phase, List<Command> commands, Light light,
@@ -126,7 +115,6 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         rangeBorders = List.copyOf(rangeBorders);
         rangeLabels = List.copyOf(rangeLabels);
         markers = List.copyOf(markers);
-        rangeBands = Map.copyOf(rangeBands);
     }
 
     /**
@@ -542,12 +530,12 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
     BoardScene withTiles(List<Tile> shown) {
         if (shown == tiles) { return this; }
         return new BoardScene(boardId, width, height, shown, units, plannedPath, selectedId, phase, commands, light,
-              firingLines, rangeBorders, markers, tactical, rangeLabels, fieldOfView, rangeBands);
+              firingLines, rangeBorders, markers, tactical, rangeLabels, fieldOfView);
     }
 
     BoardScene withUnits(List<Unit> shown) {
         return new BoardScene(boardId, width, height, tiles, shown, plannedPath, selectedId, phase, commands, light,
-              firingLines, rangeBorders, markers, tactical, rangeLabels, fieldOfView, rangeBands);
+              firingLines, rangeBorders, markers, tactical, rangeLabels, fieldOfView);
     }
 
     /** Board artwork, terrain and authorized contacts advance with the queue; interactive tools stay live. */
@@ -565,8 +553,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               hideMovement ? List.of() : world.plannedPath, selectedId, phase, commands, light,
               hideMovement ? List.of() : world.firingLines, hideMovement ? List.of() : world.rangeBorders, shownMarkers,
               tactical.duringPlayback(settled == null ? BoardTactical.EMPTY : settled.tactical, hideMovement),
-              hideMovement ? List.of() : world.rangeLabels, hideMovement ? BoardFieldOfView.EMPTY : world.fieldOfView,
-              hideMovement ? Map.of() : world.rangeBands);
+              hideMovement ? List.of() : world.rangeLabels, hideMovement ? BoardFieldOfView.EMPTY : world.fieldOfView);
     }
 
     /** Excludes HUD commands and other live controls, which do not need a playback checkpoint. */
@@ -575,8 +562,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               && tiles.equals(other.tiles) && units.equals(other.units) && markers.equals(other.markers)
               && tactical.equals(other.tactical) && plannedPath.equals(other.plannedPath)
               && firingLines.equals(other.firingLines) && rangeBorders.equals(other.rangeBorders)
-              && rangeLabels.equals(other.rangeLabels) && fieldOfView.equals(other.fieldOfView)
-              && rangeBands.equals(other.rangeBands);
+              && rangeLabels.equals(other.rangeLabels) && fieldOfView.equals(other.fieldOfView);
     }
 
     /**

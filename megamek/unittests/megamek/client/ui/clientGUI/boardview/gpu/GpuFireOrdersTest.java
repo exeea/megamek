@@ -5,10 +5,8 @@ import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.awa
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.dismiss;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.present;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuFieldOfFireCharacterizationTest.show;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringFixture.weapon;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.any;
@@ -27,8 +25,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
-import java.util.TreeMap;
 import java.util.Vector;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -39,7 +35,6 @@ import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
-import megamek.client.ui.clientGUI.boardview.spriteHandler.FiringArcSpriteHandler;
 import megamek.client.ui.dialogs.phaseDisplay.AimedShotDialog;
 import megamek.common.Configuration;
 import megamek.common.actions.EntityAction;
@@ -59,6 +54,7 @@ import megamek.common.rolls.TargetRoll;
 import megamek.common.units.Entity;
 import megamek.common.units.Mek;
 import megamek.common.units.Tank;
+import megamek.common.units.Targetable;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -241,6 +237,43 @@ class GpuFireOrdersTest {
             List<EntityAction> reordered = onSwing(firing.display::getAttacks);
             assertSame(queued.get(1), reordered.get(0), "The display keeps its own action objects");
             assertSame(queued.get(0), reordered.get(1));
+        }
+    }
+
+    /**
+     * The user's report of 2026-10-03: a terrain target kept "Hold fire". The display's target is the one focus, a
+     * wooded hex as much as a unit: MegaMek's board click chooses it, the armed weapon fires at it, the rows roll at
+     * it and a "+" assigns another weapon there. Its attacks count, which the dock's Fire weapons follows, and take a
+     * letter, the primary's here, with a unit's beside it.
+     */
+    @Test
+    void aWoodedHexIsTargetedAndAssignedAsAUnitIs() throws Exception {
+        try (GpuFiringFixture firing = firing()) {
+            // The board's light woods north-east of the Atlas, beside the Archer.
+            Coords woods = new Coords(7, 2);
+            int laser = eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
+            int cannon = eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
+            int left = eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
+            // Nothing armed: the click only targets the woods, to clear them.
+            GpuFireOrders.Snapshot focused = command(firing, fire -> fire.clickHex(woods, 0, -1));
+            Targetable chosen = onSwing(firing.display::getTarget);
+            TargetKey hex = TargetKey.of(chosen);
+            assertEquals(List.of(Targetable.TYPE_HEX_CLEAR, woods), List.of(chosen.getTargetType(),
+                  chosen.getPosition()));
+            assertEquals(new GpuFireOrders.Focus(hex, chosen.getDisplayName(), woods), focused.focus());
+            assertEquals(List.of(), focused.attacks());
+            assertEquals(hex, weaponRow(focused, laser).target(), "The rows roll at the hex");
+
+            command(firing, fire -> fire.clickHex(woods, 0, laser));
+            GpuFireOrders.Snapshot assigned = command(firing, fire -> fire.assign(cannon, hex));
+            assertEquals(List.of("Medium Laser RA@" + hex.id(), "AC/20 RT@" + hex.id()), queue(firing));
+            assertEquals(List.of(hex, hex), assigned.attacks().stream().map(GpuFireOrders.Attack::target).toList());
+            assertEquals(List.of("A " + hex.id() + " primary front"), targets(assigned));
+            assertEquals(woods, assigned.targets().getFirst().hex(), "The board marks the hex");
+
+            GpuFireOrders.Snapshot both = command(firing,
+                  fire -> fire.assign(left, TargetKey.unit(firing.ahead.getId())));
+            assertEquals(List.of("A " + hex.id() + " primary front", "B 42 secondary +1 front"), targets(both));
         }
     }
 
@@ -545,34 +578,6 @@ class GpuFireOrdersTest {
     }
 
     @Test
-    void rangeBandsAreTheFieldOfFireHexes() throws Exception {
-        GUIPreferences preferences = GUIPreferences.getInstance();
-        boolean shown = preferences.getShowFieldOfFire();
-        try (GpuFiringFixture firing = firing()) {
-            WeaponMounted laser = weapon(firing.attacker, "Medium Laser", Mek.LOC_RIGHT_ARM);
-            Map<Integer, Integer> counts = onSwing(() -> {
-                preferences.setShowFieldOfFire(true);
-                FiringArcSpriteHandler handler = new FiringArcSpriteHandler(firing.gui);
-                show(handler, firing.gui, firing.board, firing.attacker, laser);
-                when(firing.gui.fieldOfFire()).thenAnswer(invocation -> handler.fieldOfFire());
-                return brackets(firing.board.source.fire().rangeBands(firing.display));
-            });
-            Map<Integer, Integer> off = onSwing(() -> {
-                preferences.setShowFieldOfFire(false);
-                return brackets(firing.board.source.fire().rangeBands(firing.display));
-            });
-            // GpuFieldOfFireTest's sets of this laser: no minimum range, 21 short, 46 medium and 40 long hexes
-            assertEquals(Map.of(1, 21, 2, 46, 3, 40), counts);
-            assertEquals(Map.of(), off, "No bands while the field of fire setting is off, as no borders");
-        } finally {
-            onSwing(() -> {
-                preferences.setShowFieldOfFire(shown);
-                return null;
-            });
-        }
-    }
-
-    @Test
     void closingTheSourceRemovesTheListenerTheOrdersAddedWhileFiring() throws Exception {
         try (GpuFiringFixture firing = firing()) {
             List<Integer> counts = onSwing(() -> {
@@ -761,12 +766,6 @@ class GpuFireOrdersTest {
 
     private static String value(int value) {
         return (value == TargetRoll.IMPOSSIBLE) ? "IMPOSSIBLE" : Integer.toString(value);
-    }
-
-    private static Map<Integer, Integer> brackets(Map<Coords, Integer> bands) {
-        Map<Integer, Integer> counts = new TreeMap<>();
-        bands.values().forEach(bracket -> counts.merge(bracket, 1, Integer::sum));
-        return counts;
     }
 
     static void assertSameActions(List<EntityAction> expected, List<EntityAction> actual) {

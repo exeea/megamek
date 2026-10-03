@@ -117,8 +117,7 @@ class GpuHelpMenuPlayersSmokeTest {
             GpuBoardSource.UiPreferences changed = new GpuBoardSource.UiPreferences(preferences.scale(),
                   preferences.reportKeywords(), preferences.reportFilterKeywords(), preferences.minimapEnabled(),
                   preferences.contactsEnabled(), preferences.moveEnvelope(), preferences.conditionsVisible(),
-                  preferences.turnDetails(), binds,
-                  preferences.minRangeRgb(), preferences.extremeRangeRgb(), preferences.moveSprintRgb());
+                  preferences.turnDetails(), binds, preferences.moveSprintRgb());
             help.update(inputs(hud, frame(List.of(), GpuPlayers.Snapshot.EMPTY), changed, false));
             lines = lines(root);
             assertPair(lines, "F12", "KeyBinds.cmdNames.toggleKeybinds");

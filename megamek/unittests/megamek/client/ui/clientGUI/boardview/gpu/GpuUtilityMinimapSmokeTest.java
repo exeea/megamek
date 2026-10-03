@@ -258,7 +258,7 @@ class GpuUtilityMinimapSmokeTest {
     private static GpuBoardSource.UiPreferences contacts(GpuBoardSource.UiPreferences p, boolean enabled) {
         return new GpuBoardSource.UiPreferences(p.scale(), p.reportKeywords(), p.reportFilterKeywords(),
               p.minimapEnabled(), enabled, p.moveEnvelope(), p.conditionsVisible(), p.turnDetails(), p.binds(),
-              p.minRangeRgb(), p.extremeRangeRgb(), p.moveSprintRgb());
+              p.moveSprintRgb());
     }
 
     /** The utilities run the camera's Tactical View, the View menu's minimap item and the HUD's panel toggles. */
@@ -469,7 +469,7 @@ class GpuUtilityMinimapSmokeTest {
         return new BoardScene(scene.boardId(), scene.width(), scene.height(), tiles, scene.units(),
               scene.plannedPath(), scene.selectedId(), scene.phase(), scene.commands(), scene.light(),
               scene.firingLines(), scene.rangeBorders(), scene.markers(), scene.tactical(), scene.rangeLabels(),
-              scene.fieldOfView(), scene.rangeBands());
+              scene.fieldOfView());
     }
 
     /**
@@ -713,7 +713,7 @@ class GpuUtilityMinimapSmokeTest {
         List<GpuBoardSource.Bind> binds = Stream.of(KeyCommandBind.values())
               .map(bind -> new GpuBoardSource.Bind(bind, bind.keyDefault, bind.modifiersDefault,
                     KeyCommandBind.getDesc(bind.keyDefault, bind.modifiersDefault))).toList();
-        return new GpuBoardSource.UiPreferences(1, "", "", true, true, false, false, false, binds, 0, 0, 0);
+        return new GpuBoardSource.UiPreferences(1, "", "", true, true, false, false, false, binds, 0);
     }
 
     private static String text(String key) {

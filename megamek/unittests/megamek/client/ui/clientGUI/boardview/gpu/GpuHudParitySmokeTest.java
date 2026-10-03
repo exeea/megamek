@@ -663,8 +663,7 @@ class GpuHudParitySmokeTest {
         GpuBoardSource.UiPreferences p = live.source.uiPreferences;
         live.source.uiPreferences = new GpuBoardSource.UiPreferences(p.scale(), p.reportKeywords(),
               p.reportFilterKeywords(), p.minimapEnabled(), p.contactsEnabled(), p.moveEnvelope(),
-              p.conditionsVisible(), p.turnDetails(), live.real.uiPreferences.binds(), p.minRangeRgb(),
-              p.extremeRangeRgb(), p.moveSprintRgb());
+              p.conditionsVisible(), p.turnDetails(), live.real.uiPreferences.binds(), p.moveSprintRgb());
         doAnswer(invocation -> {
             live.real.setCardUnit(invocation.getArgument(0));
             return null;

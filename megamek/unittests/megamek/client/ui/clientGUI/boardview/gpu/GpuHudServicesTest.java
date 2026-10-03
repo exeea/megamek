@@ -20,7 +20,6 @@ import java.awt.event.KeyEvent;
 import java.io.File;
 import java.lang.reflect.Field;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
 import javax.swing.JPanel;
@@ -85,7 +84,6 @@ class GpuHudServicesTest {
             assertSame(GpuLosResult.Snapshot.NONE, panels.los());
             assertEquals(List.of("GPU review"), panels.players().players().stream().map(GpuPlayers.PlayerRow::name)
                   .toList(), "The players panel lists the fixture's one player");
-            assertEquals(Map.of(), first.scene().rangeBands());
 
             GpuBoardSource.UiPreferences preferences = fixture.source.uiPreferences;
             SwingUtilities.invokeAndWait(fixture.source::refresh);

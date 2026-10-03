@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyFloat;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -187,7 +188,8 @@ class GpuHudRoutingSmokeTest {
             routing.click(FOE_HEX, Input.Buttons.LEFT, 0, 0);
             assertEquals(FOE_ID, routing.hud.state.inspected, "An enemy is inspected, never planned to");
             routing.click(EMPTY_HEX, Input.Buttons.LEFT, InputEvent.CTRL_DOWN_MASK, InputEvent.CTRL_DOWN_MASK);
-            verify(routing.source).click(EMPTY_HEX, false, InputEvent.CTRL_DOWN_MASK);
+            // MegaMek's ruler, at the height the pointer shows (the user's decision of 2026-10-03).
+            verify(routing.source).measure(eq(EMPTY_HEX), eq(InputEvent.CTRL_DOWN_MASK), anyFloat());
             verify(routing.moves, times(2)).planTo(any(), anyInt(), anyBoolean());
             clearInvocations(routing.moves);
             routing.click(EMPTY_HEX, Input.Buttons.RIGHT, 0, 0);
@@ -924,7 +926,7 @@ class GpuHudRoutingSmokeTest {
     private static GpuBoardSource.UiPreferences contacts(GpuBoardSource.UiPreferences p, boolean enabled) {
         return new GpuBoardSource.UiPreferences(p.scale(), p.reportKeywords(), p.reportFilterKeywords(),
               p.minimapEnabled(), enabled, p.moveEnvelope(), p.conditionsVisible(), p.turnDetails(), p.binds(),
-              p.minRangeRgb(), p.extremeRangeRgb(), p.moveSprintRgb());
+              p.moveSprintRgb());
     }
 
     /**

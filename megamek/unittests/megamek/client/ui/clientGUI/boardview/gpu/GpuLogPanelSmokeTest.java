@@ -268,7 +268,7 @@ class GpuLogPanelSmokeTest {
             panel = new Panel(hud);
             play(panel.state.history, round);
             panel.preferences = new GpuBoardSource.UiPreferences(1, "Piloting\nlaser", "Hit Damage", true, true,
-                  false, false, false, GpuHudInputTest.preferences().binds(), 0, 0, 0);
+                  false, false, false, GpuHudInputTest.preferences().binds(), 0);
             panel.show(hud, status, round.log());
             assertTrue(panel.log.key(Set.of(KeyCommandBind.REPORT_KEY_SELECT_NEXT)));
             assertTrue(panel.log.key(Set.of(KeyCommandBind.REPORT_KEY_NEXT)));
@@ -298,7 +298,7 @@ class GpuLogPanelSmokeTest {
             play(panel.state.history, new Round(log, round.events()));
             GpuBattleStatus.Snapshot status = status(GamePhase.END_REPORT, 4);
             panel.preferences = new GpuBoardSource.UiPreferences(1, "laser", "Piloting\nheat", true, true, false,
-                  false, false, GpuHudInputTest.preferences().binds(), 0, 0, 0);
+                  false, false, GpuHudInputTest.preferences().binds(), 0);
             panel.show(hud, status, log);
             List<String> list = panel.list();
             int artillery = list.indexOf(UiTheme.upper(Messages.getString("GpuBoard.hud.log.artilleryInFlight")));

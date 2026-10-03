@@ -16,13 +16,11 @@ import javax.swing.SwingUtilities;
 
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.clientGUI.tooltip.UnitToolTip;
 import megamek.client.ui.dialogs.unitDisplay.HeatEffects;
 import megamek.client.ui.dialogs.unitDisplay.WeaponListModel;
 import megamek.client.ui.dialogs.unitDisplay.WeaponPanel;
-import megamek.client.ui.panels.phaseDisplay.AbstractPhaseDisplay;
 import megamek.client.ui.panels.phaseDisplay.AimedShotHandler;
 import megamek.client.ui.panels.phaseDisplay.FiringDisplay;
 import megamek.client.ui.panels.phaseDisplay.FiringDisplay.FiringCommand;
@@ -518,28 +516,6 @@ final class GpuFireOrders implements AutoCloseable {
             carded.add(focus);
         }
         return carded;
-    }
-
-    /**
-     * EDT: the range bracket (RangeType order) of each hex of the field of fire the phase display's client shows for
-     * its displayed weapon, while the field of fire setting is on, on the board this source shows; the firing-arc
-     * handler is the one source, so the bands match the range borders the board draws from the same handler.
-     */
-    Map<Coords, Integer> rangeBands(JComponent panel) {
-        GpuBoardSource.requireSwingThread();
-        if (!(panel instanceof AbstractPhaseDisplay phase) || !(phase.getClientGUI() instanceof ClientGUI gui)
-              || !GUIPreferences.getInstance().getShowFieldOfFire() || (gui.getDisplayedUnit() == null)
-              || (gui.getDisplayedUnit().getBoardId() != source.currentView().getBoardId())) {
-            return Map.of();
-        }
-        Map<Coords, Integer> bands = new HashMap<>();
-        List<Set<Coords>> brackets = gui.fieldOfFire();
-        for (int bracket = 0; bracket < brackets.size(); bracket++) {
-            for (Coords hex : brackets.get(bracket)) {
-                bands.put(hex, bracket);
-            }
-        }
-        return bands;
     }
 
     // GL-safe commands (B.5). Each is posted through the source's input guard and runs only while the actor of the

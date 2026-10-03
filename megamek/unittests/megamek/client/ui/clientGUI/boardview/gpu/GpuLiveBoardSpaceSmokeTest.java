@@ -320,7 +320,7 @@ class GpuLiveBoardSpaceSmokeTest {
         GpuBoardSource.UiPreferences p = preferences;
         return new GpuBoardSource.UiPreferences(p.scale() * factor, p.reportKeywords(), p.reportFilterKeywords(),
               p.minimapEnabled(), p.contactsEnabled(), p.moveEnvelope(), p.conditionsVisible(), p.turnDetails(),
-              p.binds(), p.minRangeRgb(), p.extremeRangeRgb(), p.moveSprintRgb());
+              p.binds(), p.moveSprintRgb());
     }
 
     /** A 3D head is the top of the unit's model above its middle, in stage units, y up (C.4 HudView). */
@@ -641,7 +641,7 @@ class GpuLiveBoardSpaceSmokeTest {
                 GpuBattleStatus.Snapshot status = base.status();
                 live.frame.set(Live.copy(base, new BoardScene(s.boardId(), s.width(), s.height(), s.tiles(), s.units(),
                       s.plannedPath(), ARCHER, s.phase(), s.commands(), s.light(), s.firingLines(), s.rangeBorders(),
-                      s.markers(), s.tactical(), s.rangeLabels(), s.fieldOfView(), s.rangeBands()),
+                      s.markers(), s.tactical(), s.rangeLabels(), s.fieldOfView()),
                       new GpuBattleStatus.Snapshot(status.round(), GamePhase.MOVEMENT_REPORT, false,
                             status.localPlayerId(), Entity.NONE, status.turns(), status.turnIndex(), status.units(),
                             status.initiative(), status.turnOrderHidden()), base.panels()));
@@ -864,8 +864,7 @@ class GpuLiveBoardSpaceSmokeTest {
             // One HUD unit per window pixel, as in the prototype's 1920 x 1080 captures; envelopes and the minimap on.
             source.uiPreferences = new GpuBoardSource.UiPreferences(.1f
                   / DisplayScale.read(.1f, new GpuDisplayScale().contentScale()), "", "", true, true, true, false,
-                  false, GpuHudInputTest.preferences().binds(), preferences.minRangeRgb(),
-                  preferences.extremeRangeRgb(), preferences.moveSprintRgb());
+                  false, GpuHudInputTest.preferences().binds(), preferences.moveSprintRgb());
             // The view reads the preferences through the accessor; tests change them through the field.
             when(source.uiPreferences()).thenAnswer(invocation -> source.uiPreferences);
             when(source.takeFrame()).thenAnswer(invocation -> frame.get());
@@ -935,7 +934,7 @@ class GpuLiveBoardSpaceSmokeTest {
             GpuHudData panels = shown.panels();
             return copy(shown, new BoardScene(s.boardId(), s.width(), s.height(), s.tiles(), s.units(), s.plannedPath(),
                   s.selectedId(), s.phase(), s.commands(), s.light(), s.firingLines(), s.rangeBorders(), s.markers(),
-                  BoardTactical.EMPTY, s.rangeLabels(), s.fieldOfView(), s.rangeBands()), shown.status(),
+                  BoardTactical.EMPTY, s.rangeLabels(), s.fieldOfView()), shown.status(),
                   new GpuHudData(panels.phase(), move, panels.fire(), panels.physical(), panels.record(),
                         panels.preview(), panels.chat(), panels.toasts(), panels.los(), panels.players()));
         }
