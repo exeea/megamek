@@ -421,6 +421,7 @@ tasks.register('stageDataMekfiles', Sync) {
     from("${mmDataDir}/data/mekfiles") {
         include "*.txt"
         include "*.xml"
+        include "*.csv"
     }
     from("${mmGeneratedDir}/mekfiles") {
         if (suiteDataFromPin) { include "unit_files.zip" }
