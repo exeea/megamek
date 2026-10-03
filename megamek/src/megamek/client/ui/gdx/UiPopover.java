@@ -56,6 +56,10 @@ public final class UiPopover extends Table {
     };
     /** The submenu last opened beside one of its items; open or closed. */
     private UiPopover submenu;
+    /** The item whose submenu shows, pressed meanwhile, as a desktop menu keeps it lit. */
+    private UiButton opener;
+    /** The popover this one last opened beside as a submenu. */
+    private UiPopover owner;
     /** Where it opened in its parent: its left edge, and its top, or its bottom when it opened above an anchor. */
     private float left;
     private float edge;
@@ -156,6 +160,8 @@ public final class UiPopover extends Table {
             submenu.cancel();
         }
         submenu = menu;
+        menu.owner = this;
+        opener = item instanceof UiButton button ? button.pressed(true) : null;
         Vector2 top = item.localToActorCoordinates(menu.getParent(), new Vector2(0, item.getHeight()));
         float width = menu.getPrefWidth();
         float x = getX() + getWidth() - OVERLAP;
@@ -221,6 +227,10 @@ public final class UiPopover extends Table {
         }
         if (!isVisible()) {
             return false;
+        }
+        if (owner != null && owner.submenu == this && owner.opener != null) {
+            owner.opener.pressed(false);
+            owner.opener = null;
         }
         setVisible(false);
         Stage stage = getStage();

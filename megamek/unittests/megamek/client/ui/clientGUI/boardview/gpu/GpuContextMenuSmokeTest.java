@@ -403,10 +403,12 @@ class GpuContextMenuSmokeTest {
                         command("Deepest", "", true, ran))),
                   group("Unload", command("Unload cargo", "", true, ran))), List.of());
             menu.menu.more(more, button);
-            UiPopover first = menu.root.findActor("context-submenu-1");
             click(hud, menu.item("Load"));
+            // Each depth's popover is made the first time a menu opens that deep.
+            UiPopover first = menu.root.findActor("context-submenu-1");
             assertTrue(menu.popover.isVisible() && first.isVisible(), "the menu stays open beside its submenu");
             assertEquals(List.of("Load cargo", "Deeper ›"), lines(first));
+            assertEquals(List.of("Load"), highlighted(menu.popover), "the item whose submenu shows stays lit");
             Rectangle parent = UiTestStage.bounds(menu.popover);
             Rectangle child = UiTestStage.bounds(first);
             Rectangle item = UiTestStage.bounds(menu.item("Load"));
@@ -421,8 +423,10 @@ class GpuContextMenuSmokeTest {
             click(hud, menu.item("Unload"));
             assertFalse(second.isVisible(), "another group of the menu closes the chain below it");
             assertEquals(List.of("Unload cargo"), lines(first), "and opens its own submenu");
+            assertEquals(List.of("Unload"), highlighted(menu.popover), "whose item alone stays lit");
             assertTrue(menu.menu.back(), "Esc closes the deepest submenu");
             assertTrue(menu.popover.isVisible() && !first.isVisible());
+            assertEquals(List.of(), highlighted(menu.popover), "a closed submenu leaves its item unlit");
             assertSame(UiMenuList.class, hud.stage.getKeyboardFocus().getClass(), "the menu takes the keys back");
 
             click(hud, menu.item("Load"));
