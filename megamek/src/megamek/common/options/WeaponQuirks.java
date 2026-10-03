@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2000-2003 Ben Mazur (bmazur@sev.org)
- * Copyright (C) 2009-2025 The MegaMek Team. All Rights Reserved.
+ * Copyright (C) 2009-2026 The MegaMek Team. All Rights Reserved.
  *
  * This file is part of MegaMek.
  *
@@ -255,9 +255,25 @@ public class WeaponQuirks extends AbstractOptions {
     }
 
     private static class WeaponQuirksInfo extends AbstractOptionsInfo {
-        private static final AbstractOptionsInfo instance = new WeaponQuirksInfo();
+        private static volatile WeaponQuirksInfo instance;
+        private static final Object lock = new Object();
 
-        public static AbstractOptionsInfo getInstance() {
+        /**
+         * Returns the weapon quirk name table, filling it on first use. A {@link WeaponQuirks} read back from a save
+         * game or a network packet skips its constructor, so it cannot be relied on to fill the table; without this,
+         * looking up a quirk's display name before any fresh {@link WeaponQuirks} was created finds nothing.
+         *
+         * @return the filled weapon quirk name table
+         */
+        public static WeaponQuirksInfo getInstance() {
+            if (instance == null) {
+                synchronized (lock) {
+                    if (instance == null) {
+                        instance = new WeaponQuirksInfo();
+                        new WeaponQuirks();
+                    }
+                }
+            }
             return instance;
         }
 
