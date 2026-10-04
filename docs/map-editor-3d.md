@@ -57,8 +57,13 @@ including editor deployment/INVALID overlays and crane highlights, across terrai
 Camera-facing tactical labels use the same height. Shape painters opt in through
 `BoardTacticalGraphics.onHexPlane`; individual hex-border painters can request the same placement.
 Unit bands retain their animated unit support, range walls retain their upright/overhead presentations,
-and terrain tints still follow the ground. Ruler lines, drift arrows, C3 links and flyover routes span
-hexes and retain terrain-following placement. Ordinary hex text retains its roof-aware placement;
+and terrain tints still follow the ground. Ruler rays connect the Swing ruler's absolute endpoint heights
+in a straight line, with elevated crosshairs. The same engine result supplies both the Swing diagram and
+the native ray: solid green until entry into the first blocking hex, then dashed red through to the target.
+The ray draws through terrain so its blocked portion stays visible. Distinct luminance, a dark outline
+and the dash pattern supplement the green/red colors. Height changes, flips and closing the ruler update
+the same immutable measurement snapshot, including in previews and during movement playback.
+Drift arrows, C3 links and flyover routes retain terrain-following placement. Ordinary hex text retains its roof-aware placement;
 HEIGHT labels draw through their own hex's content but remain occluded by other hexes. Top view reveals
 all enabled ground text and borders.
 Weapon-range letters retain their camera-dependent clearance.

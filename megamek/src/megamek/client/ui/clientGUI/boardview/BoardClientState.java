@@ -203,8 +203,8 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     final CursorSprite secondLOSSprite = new CursorSprite(this, Color.red);
     Entity en_Deployer;
     boolean useLOSTool = true, showAllDeployment, showLobbyPlayerDeployment, chatterBoxActive, shouldIgnoreKeys;
-    Coords lastCursor, firstLOS, movementTarget, rulerStart, rulerEnd;
-    Color rulerStartColor, rulerEndColor;
+    Coords lastCursor, firstLOS, movementTarget;
+    private BoardTactical.Ruler ruler;
     List<Coords> highlightedEntityHexes = new ArrayList<>(), demolitionChargeHighlightHexes = new ArrayList<>();
     private final Set<Integer> selectedEntities = new HashSet<>(), ecmEntities = new HashSet<>();
     Map<Coords, Color> ecmHexes = Map.of(), eccmHexes = Map.of(), ecmCenters = Map.of(), eccmCenters = Map.of();
@@ -1227,20 +1227,27 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
     }
 
     public void drawRuler(Coords startCoords, Coords endCoords, Color startColor, Color endColor) {
-        rulerStart = startCoords;
-        rulerEnd = endCoords;
-        rulerStartColor = startColor;
-        rulerEndColor = endColor;
+        drawRuler(startCoords == null ? null : new BoardTactical.Ruler(startCoords, endCoords,
+              getBoard().getHex(startCoords).getLevel() + 1,
+              endCoords == null ? 0 : getBoard().getHex(endCoords).getLevel() + 1,
+              null, startColor.getRGB(), endColor.getRGB()));
+    }
 
+    public void drawRuler(BoardTactical.Ruler measurement) {
+        ruler = measurement;
         repaint();
     }
 
+    public BoardTactical.Ruler getRuler() {
+        return ruler;
+    }
+
     public Coords getRulerStart() {
-        return rulerStart;
+        return ruler == null ? null : ruler.start();
     }
 
     public Coords getRulerEnd() {
-        return rulerEnd;
+        return ruler == null ? null : ruler.end();
     }
 
     public void drawMovementData(Entity entity, MovePath movePath) {
@@ -2409,17 +2416,17 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         drawSprites(graphics2D, fpiSprites);
 
         // draw the ruler line
-        if (rulerStart != null && (!gpuCapture || graphics2D instanceof BoardTacticalGraphics)) {
-            Point start = getCentreHexLocation(rulerStart);
-            if (rulerEnd != null) {
-                Point end = getCentreHexLocation(rulerEnd);
+        if (ruler != null && !gpuCapture) {
+            Point start = getCentreHexLocation(ruler.start());
+            if (ruler.end() != null) {
+                Point end = getCentreHexLocation(ruler.end());
                 graphics2D.setColor(Color.yellow);
                 graphics2D.drawLine(start.x, start.y, end.x, end.y);
 
-                drawRulerCrosshair(graphics2D, rulerEnd, rulerEndColor);
+                drawRulerCrosshair(graphics2D, ruler.end(), new Color(ruler.endArgb(), true));
             }
 
-            drawRulerCrosshair(graphics2D, rulerStart, rulerStartColor);
+            drawRulerCrosshair(graphics2D, ruler.start(), new Color(ruler.startArgb(), true));
         }
 
     }
@@ -2610,7 +2617,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
             }
             drawSprites(graphics, behindTerrainHexSprites);
             drawTacticalLayers(graphics, false);
-            BoardTactical captured = graphics.snapshot();
+            BoardTactical captured = graphics.snapshot().withRuler(ruler);
             // Compare on Swing after evaluating every painter, keeping unchanged snapshots cheap on the GL thread.
             if (!captured.equals(capturedTacticalGeometry)) {
                 capturedTacticalGeometry = captured;

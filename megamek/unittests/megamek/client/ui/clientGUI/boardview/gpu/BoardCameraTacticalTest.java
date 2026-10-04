@@ -14,7 +14,10 @@ import megamek.common.board.Coords;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-/** The Tactical View's camera: a fixed north-up top view that hands the replaced 3D pose back unchanged. */
+/**
+ * The Tactical View's camera: it enters at the north-up top view, orbits as the 3D view does and hands the replaced 3D
+ * pose back unchanged.
+ */
 class BoardCameraTacticalTest {
     private static final float TOLERANCE = 0.0001f;
 
@@ -42,7 +45,7 @@ class BoardCameraTacticalTest {
     }
 
     @Test
-    void entersAFixedNorthUpTopViewAndRestoresTheReplacedPoseExactly() {
+    void entersTheNorthUpTopViewOrbitsAndRestoresTheReplacedPoseExactly() {
         BoardCamera view = orbiting();
         Vector3 focus = view.focus.cpy();
         float zoom = view.camera.zoom;
@@ -55,15 +58,6 @@ class BoardCameraTacticalTest {
         assertEquals(focus, view.focus, "Entering keeps the centre of the view");
         assertEquals(zoom, view.camera.zoom, "Entering keeps the scale");
 
-        view.orbit(35, 20);
-        view.tilt(15);
-        view.rotateStep(1);
-        view.advance(BoardCamera.ROTATION_SECONDS);
-        view.setIsometric(true);
-        assertTopView(view);
-        assertTrue(view.tactical(), "Only setTactical leaves the Tactical View");
-        assertFalse(view.isRotating(), "A turn must not queue up for after the Tactical View");
-
         view.pan(40, -25);
         assertTopView(view);
         assertEquals(focus.x - 40 * zoom, view.focus.x, TOLERANCE, "A positive x pan moves west, like SCROLL_WEST");
@@ -72,14 +66,26 @@ class BoardCameraTacticalTest {
         view.zoom(2);
         assertEquals(2 * zoom, view.camera.zoom, TOLERANCE);
 
+        view.orbit(35, 20);
+        view.tilt(15);
+        assertEquals(35, view.azimuth(), TOLERANCE, "The Tactical View orbits");
+        assertEquals(35, view.tilt(), TOLERANCE, "and tilts");
+        view.rotateStep(1);
+        view.advance(BoardCamera.ROTATION_SECONDS);
+        assertEquals(35 + BoardCamera.ROTATION_STEP, view.azimuth(), TOLERANCE, "and turns");
+        assertTrue(view.tactical(), "Only setTactical leaves the Tactical View");
+        view.rotateStep(1);
+        view.advance(.1f);
+
         view.setTactical(false, null);
         assertFalse(view.tactical());
+        assertFalse(view.isRotating(), "A turn in the Tactical View ends with it");
         assertEquals(focus, view.focus);
         assertEquals(zoom, view.camera.zoom);
         assertEquals(azimuth, view.azimuth());
         assertEquals(tilt, view.tilt());
         view.orbit(10, 5);
-        assertEquals(azimuth + 10, view.azimuth(), TOLERANCE, "The 3D view orbits again");
+        assertEquals(azimuth + 10, view.azimuth(), TOLERANCE, "The 3D view orbits on from its own pose");
     }
 
     @Test
@@ -165,14 +171,16 @@ class BoardCameraTacticalTest {
     }
 
     @Test
-    void automaticFramingAndResetKeepTheTopView() {
+    void automaticFramingKeepsTheAngleAndResetReturnsToTheTopView() {
         BoardCamera view = orbiting();
         view.setTactical(true, null);
+        view.orbit(30, 25);
         var unit = new BoardScene.Unit(1, -1, "Unit 1", new BoardScene.Waypoint(new Coords(18, 14), 3, 0),
               null, false, null, 2, true);
         view.frameSelection(unit, 700);
         view.advance(BoardCamera.CAMERA_FRAMING_SECONDS);
-        assertTopView(view);
+        assertEquals(30, view.azimuth(), TOLERANCE, "Framing keeps the orbited angle");
+        assertEquals(25, view.tilt(), TOLERANCE);
         BoardCameraFramingTest.assertVisible(view, 700, unit);
 
         view.reset(UnitPlaybackTest.scene(unit));

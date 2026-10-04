@@ -2,7 +2,11 @@
 package megamek.client.ui.clientGUI.boardview;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -11,11 +15,13 @@ import java.io.File;
 import java.lang.reflect.Field;
 import java.util.List;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 
 import megamek.client.event.BoardViewEvent;
 import megamek.common.Player;
+import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.game.Game;
 import megamek.common.loaders.MekFileParser;
@@ -27,6 +33,63 @@ import org.junit.jupiter.api.Test;
 /** Characterizes the ruler's two LOS rows for scripted measurements across one light-woods hex. */
 class RulerDialogLosTest {
     private static final String ATLAS = "testresources/megamek/common/units/Atlas AS7-D.mtf";
+
+    @Test
+    void collapsedDiagramAndNativeRayShareHeightsBlockerFlipAndClear() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "RulerDialog needs a display");
+        Game game = new Game();
+        game.setBoard(Board.createEmptyBoard(1, 7));
+        Coords start = new Coords(0, 0), end = new Coords(0, 6);
+        game.getBoard().getHex(new Coords(0, 2)).setLevel(2);
+        game.getBoard().getHex(new Coords(0, 4)).setLevel(2);
+        BoardClientState view = mock(BoardClientState.class);
+        AtomicReference<BoardTactical.Ruler> published = new AtomicReference<>();
+        doAnswer(call -> { published.set(call.getArgument(0)); return null; }).when(view).drawRuler(any());
+        FutureTask<Void> task = new FutureTask<>(() -> {
+            RulerDialog dialog = new RulerDialog(null, view, game);
+            try {
+                Field expanded = RulerDialog.class.getDeclaredField("diagramExpanded");
+                expanded.setAccessible(true);
+                expanded.setBoolean(dialog, false);
+                dialog.measure(start, end);
+                dialog.setHeight(start, 2);
+                dialog.setHeight(end, 2);
+                assertEquals(new Coords(0, 2), published.get().blockedAt());
+                assertEquals(2, published.get().startHeight());
+                assertShared(dialog, published.get());
+                assertTrue(row(dialog, "tf_los1").contains("blocked"));
+                dialog.butFlip_actionPerformed();
+                assertEquals(end, published.get().start());
+                assertEquals(new Coords(0, 4), published.get().blockedAt());
+                assertShared(dialog, published.get());
+                dialog.setHeight(start, 5);
+                dialog.setHeight(end, 5);
+                assertNull(published.get().blockedAt());
+                assertShared(dialog, published.get());
+                dialog.butClose_actionPerformed();
+                assertNull(published.get());
+            } finally {
+                dialog.dispose();
+            }
+            return null;
+        });
+        SwingUtilities.invokeAndWait(task);
+        task.get();
+    }
+
+    private static void assertShared(RulerDialog dialog, BoardTactical.Ruler ruler) throws Exception {
+        Field panel = RulerDialog.class.getDeclaredField("diagramPanel");
+        panel.setAccessible(true);
+        Field data = LOSElevationDiagramPanel.class.getDeclaredField("diagramData");
+        data.setAccessible(true);
+        LOSDiagramData diagram = (LOSDiagramData) data.get(panel.get(dialog));
+        assertEquals(ruler.start(), diagram.attackPos());
+        assertEquals(ruler.end(), diagram.targetPos());
+        assertEquals(ruler.startHeight(), diagram.attackerAbsHeight());
+        assertEquals(ruler.endHeight(), diagram.targetAbsHeight());
+        assertEquals(ruler.blockedAt(), diagram.blockingHex());
+        assertEquals(ruler.blockedAt() != null, diagram.losBlocked());
+    }
 
     /** A strip of four hexes: the local Atlas, light woods, a prone enemy Atlas, a clear hex. */
     private static Game game() throws Exception {

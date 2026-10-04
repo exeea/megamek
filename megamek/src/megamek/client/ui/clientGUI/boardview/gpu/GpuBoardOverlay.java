@@ -48,10 +48,10 @@ import megamek.common.units.Entity;
  * ghost, the front arc or the displayed weapon's arc, the physical-attack neighbours and the Tactical View's
  * elevation-drop edges as world meshes, with the plotted route's {@link GpuRoutePulse} over them; and the marks of the
  * units and the target hexes (side rings, glows, the other targets' rings, the hovered unit's ring), drawn every frame
- * where the units stand, level as rimshaderv1's selection bands, so that the pointer lays no mark on the terrain
+ * where the units stand, level as selection bands, so that the pointer lays no mark on the terrain
  * again. MegaMek's own movement envelope belongs to the tactical capture (GpuTactical), the displayed weapon's range
- * walls to GpuFireControl, and the view draws the hovered hex's ring, as in rimshaderv1 (the user's decisions of
- * 2026-10-04). It draws the frame's snapshots and decides no rule; the marks and meshes are made again only when what
+ * walls to GpuFireControl, and the view draws the hovered hex's ring. 
+ * It draws the frame's snapshots and decides no rule; the marks and meshes are made again only when what
  * they show changed. Owns its meshes, its pulse, its batch and its shape renderer on the GL thread.
  */
 final class GpuBoardOverlay implements Disposable {
@@ -84,7 +84,7 @@ final class GpuBoardOverlay implements Disposable {
     private static final float GHOST_OPACITY = .75f;
     /** The Tactical View's ghost is the unit's icon at half strength (rebuild plan A.7 G4). */
     private static final float GHOST_ICON_OPACITY = .5f;
-    /** The marks the board hides show at this opacity (rimshaderv1's occluded selection outlines). */
+    /** The marks the board hides show at this opacity (occluded selection outlines). */
     private static final float HIDDEN_OPACITY = .5f;
     // overlay.js:20-31 and 56-57: the bands of a contact, a wreck, another target and the hovered unit.
     private static final List<Band> CONTACT = List.of(new Band(.05f, .95f, alpha(BLIP, .22f)),
@@ -94,7 +94,7 @@ final class GpuBoardOverlay implements Disposable {
     private static final List<Band> HOVERED = List.of(new Band(.05f, .06f, alpha(Color.WHITE, .85f)));
 
     private final ModelBatch batch = new ModelBatch((camera, renderables) -> { });
-    /** Draws the marks every frame, as rimshaderv1's GpuBattleView draws its selection bands. */
+    /** Draws the marks every frame, GpuBattleView draws its selection bands. */
     private final ShapeRenderer shapes = new ShapeRenderer();
     private final BoardSurface.Cache surfaces = new BoardSurface.Cache();
     /** Light for the 3D ghost: enough ambient to keep it bright, one light from above to show its shape. */
@@ -144,7 +144,7 @@ final class GpuBoardOverlay implements Disposable {
     private final GpuRoutePulse pulse = new GpuRoutePulse();
 
     /**
-     * A band of a mark, level as rimshaderv1's selection bands: its outer edge {@code inset} hex radii inside the hex
+     * A band of a mark, level as selection bands: its outer edge {@code inset} hex radii inside the hex
      * edge, {@code width} radii wide; one that reaches the centre fills the hex.
      */
     private record Band(float inset, float width, Color color) { }
@@ -262,7 +262,7 @@ final class GpuBoardOverlay implements Disposable {
     }
 
     /**
-     * Draws the marks where the units stand this frame and on their hexes, level as rimshaderv1's selection bands, half
+     * Draws the marks where the units stand this frame and on their hexes, level as selection bands, half
      * a unit above the unit's base ({@code poses} gives each scene unit's as the view placed it; a unit without one
      * shows none) or on a hex's floating plane: in 3D first the hidden bands faintly where the terrain or a model hides
      * them, then every band depth-tested; in the Tactical View flat over the board, under the icons.
@@ -326,7 +326,7 @@ final class GpuBoardOverlay implements Disposable {
         Vector3 point(int corner, float inset);
     }
 
-    /** A band as two triangles a side, rimshaderv1's hexBand; one that reaches the centre as one. */
+    /** A band as two triangles a side; one that reaches the centre as one. */
     private void band(Outline outline, Band band, float opacity) {
         Color color = band.color();
         float bits = Color.toFloatBits(color.r, color.g, color.b, color.a * opacity);

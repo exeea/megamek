@@ -150,6 +150,9 @@ class GpuMapSourceTest {
                       "from the floor two levels up that the pointer showed");
                 assertNotEquals(BoardTactical.EMPTY, source.takeFrame().scene().tactical(),
                       "with its line on the board");
+                ruler.setHeight(new Coords(2, 6), 4);
+                assertEquals(4, source.takeFrame().scene().tactical().ruler().endHeight(),
+                      "Changing only a height must invalidate the preview's captured measurement");
                 source.measure(new Coords(3, 3), 0, Float.NaN);
                 assertEquals("", source.phaseStatus().text(), "A plain click alone measures nothing");
             }

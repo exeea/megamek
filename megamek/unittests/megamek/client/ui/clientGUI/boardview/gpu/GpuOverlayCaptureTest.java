@@ -74,12 +74,9 @@ class GpuOverlayCaptureTest {
 
                 fixture.view.drawRuler(hexes.getFirst(), hexes.getLast(), Color.RED, Color.CYAN);
                 var ruler = fixture.view.captureTacticalGeometry();
-                assertPlanes(ruler.fills().stream().filter(fill -> fill.argb() == Color.RED.getRGB()).toList(),
-                      List.of(hexes.getFirst()), BoardTactical.Playback.LIVE);
-                assertPlanes(ruler.fills().stream().filter(fill -> fill.argb() == Color.CYAN.getRGB()).toList(),
-                      List.of(hexes.getLast()), BoardTactical.Playback.LIVE);
-                var line = fill(ruler, Color.YELLOW);
-                assertNull(line.planeAnchor(), "The connecting line spans hexes and must retain terrain-following placement");
+                assertEquals(hexes.getFirst(), ruler.ruler().start());
+                assertEquals(hexes.getLast(), ruler.ruler().end());
+                assertTrue(ruler.fills().isEmpty(), "The elevated ray and its crosshairs must bypass ground draping");
                 fixture.view.drawRuler(null, null, Color.RED, Color.CYAN);
 
                 fixture.game.getBoard().addSpecialHexDisplay(RETAINED, new SpecialHexDisplay(

@@ -54,8 +54,8 @@ class GpuMeasurementTest {
                 fixture.view.drawRuler(start, null, Color.CYAN, Color.ORANGE);
                 fixture.source.refresh();
                 var first = fixture.source.takeFrame().scene().tactical();
-                assertTrue(first.fills().stream().anyMatch(fill -> fill.argb() == Color.CYAN.getRGB()));
-                assertTrue(first.fills().stream().noneMatch(fill -> fill.argb() == Color.ORANGE.getRGB()));
+                assertEquals(start, first.ruler().start());
+                assertNull(first.ruler().end());
 
                 fixture.view.drawRuler(start, end, Color.CYAN, Color.ORANGE);
                 fixture.view.checkLOS(start);
@@ -63,8 +63,10 @@ class GpuMeasurementTest {
                 fixture.source.refresh();
                 BoardScene measured = fixture.source.takeFrame().scene();
                 var colors = measured.tactical().fills().stream().map(fill -> fill.argb()).toList();
-                assertTrue(colors.containsAll(List.of(Color.CYAN.getRGB(), Color.ORANGE.getRGB(),
-                      Color.YELLOW.getRGB(), Color.RED.getRGB())));
+                assertTrue(colors.contains(Color.RED.getRGB()));
+                assertEquals(start, measured.tactical().ruler().start());
+                assertEquals(end, measured.tactical().ruler().end());
+                assertFalse(colors.contains(Color.YELLOW.getRGB()), "The ruler must not become a draped fill");
                 assertEquals(before.tiles().stream().map(BoardScene.Tile::tactical).toList(),
                       measured.tiles().stream().map(BoardScene.Tile::tactical).toList());
 

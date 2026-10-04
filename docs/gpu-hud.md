@@ -370,19 +370,19 @@ Two board-space components are world meshes that `GpuBattleView` draws:
 - `GpuBoardOverlay`: the route and its ghost, the front arc or the displayed weapon's arc, the physical-attack
   neighbours and the Tactical View's elevation-drop edges as meshes, rebuilt only when what they draw changed, with
   the route's pulse over the route (below). The unit marks (side rings, glows, the other targets' rings and the
-  hovered unit's ring) are drawn every frame where the units stand, level as rimshaderv1's selection bands, so the
-  pointer rebuilds no mesh. Where the terrain or a model hides the acting unit's, the focused target's or the hovered
-  unit's ring, it is drawn again at half opacity behind what hides it (rimshaderv1's occluded outlines).
-  `GpuBattleView` rings the hovered hex as rimshaderv1 does; over a building floor the ring lies at that floor with a
+  hovered unit's ring) are drawn every frame where the units stand, so the pointer rebuilds no mesh. 
+  Where the terrain or a model hides the acting unit's, the focused target's or the hovered
+  unit's ring, it is drawn again at half opacity behind what hides it (occluded outlines).
+  `GpuBattleView` rings the hovered hex; over a building floor the ring lies at that floor with a
   faint ring at the ground and faint corner posts between them. The movement envelope is MegaMek's own (below).
-- `GpuFireControl`: rimshaderv1's range walls of the displayed weapon, the firing lines and the flat range labels
+- `GpuFireControl`: range walls of the displayed weapon, the firing lines and the flat range labels
   ([attack controls](gpu-attack-controls.md)). During the local weapon declaration the actor's lines are the HUD's
   traces instead; every other line is drawn in its attacker's side colour. Lines hide while an attack plays
   (`GpuBattleView.HIDE_TARGET_ARROWS_DURING_ATTACKS`).
 
-**Region markings** are rimshaderv1's (the user's decisions of 2026-10-04). The displayed weapon's range brackets
-are `GpuFireControl`'s continuous walls along the brackets' contours (`BoardFiringGeometry`) with the camera-facing
-S/M/L letters. The visual range (`SensorRangeSprite`) and the deployment zones (`BoardDeploymentGeometry`) stand
+**Region markings** The displayed weapon's range brackets are `GpuFireControl`'s continuous walls along the brackets'
+contours (`BoardFiringGeometry`) with the camera-facing S/M/L letters. 
+The visual range (`SensorRangeSprite`) and the deployment zones (`BoardDeploymentGeometry`) stand
 upright through `BoardRangeBorder` in the tactical capture, which `GpuTactical` lays flat in the Tactical View.
 MegaMek's movement envelope, the sensor ranges and the zones lie flat on their hex's plane; `GpuTactical` depth-tests
 those markings two levels nearer (`PLANE_SEE_THROUGH_LEVELS`), so that the slopes and rocks inside their hex never
@@ -480,7 +480,7 @@ handler runs.
 ## 5. The Tactical View
 
 The Tactical View is the board seen straight down on its tileset columns. The scene, picking and animation timeline
-stay the 3D view's own; only the shaded terrain becomes rimshaderv1's tileset columns and unit models become icons.
+stay the 3D view's own; only the shaded terrain becomes tileset columns and unit models become icons.
 
 - **Switch it** with `TOGGLE_ISO` (T), the "Tactical view" utility, the Menu's "Tactical view" item, or the chip's
   "Back to 3D". Entering it ends Free Flight; switching Free Flight on leaves it. The chip ("Tactical view" with "Back to 3D") shows centred at the top when the top row has room, and
@@ -501,8 +501,8 @@ stay the 3D view's own; only the shaded terrain becomes rimshaderv1's tileset co
   - a destroyed or doomed unit fades to 45 % with the red cross. The shown pose decides, so the cross comes with the
     shot's impact on the animation timeline. An own or allied unit that has moved gets a dark veil.
   - Labels hang 0.62 of the icon's side above its centre. A click on an icon picks its unit, ahead of the ground.
-- **Terrain.** `GpuTerrain.setTacticalView` follows the camera's mode every frame: rimshaderv1's `GpuTilesetTerrain`
-  draws each hex as a column at its level topped by its Saxarba tileset art, with the 3D view's structures, animated
+- **Terrain.** `GpuTerrain.setTacticalView` follows the camera's mode every frame: `GpuTilesetTerrain` draws each 
+  hex as a column at its level topped by its Saxarba tileset art, with the 3D view's structures, animated
   liquids, the hex grid, picking and overlay draping on the columns ([GPU board](gpu-board.md#tactical-view)). Trees
   and other feature meshes leave the board and picking, so a click returns the hex under the pointer, also where a 3D
   canopy would overhang the next hex. The wireframe view and the Tactical View exclude each other: turning one on

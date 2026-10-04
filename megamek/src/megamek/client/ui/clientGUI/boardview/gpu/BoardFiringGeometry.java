@@ -117,7 +117,7 @@ final class BoardFiringGeometry {
     }
 
     /** Segment/hex clipping, including both neighbours when a shot travels exactly along an edge. */
-    private static float[] crossing(Vector3 start, Vector3 end, Coords coords) {
+    static float[] crossing(Vector3 start, Vector3 end, Coords coords) {
         float enter = 0, exit = 1;
         for (int corner = 0; corner < 6; corner++) {
             Vector3 a = BoardGeometry.corner(coords, 0, corner);

@@ -47,6 +47,7 @@ import megamek.common.board.Coords;
  * @param attackPos          the attacker's hex coordinates
  * @param targetPos          the target's hex coordinates
  * @param losBlocked         whether LOS is completely blocked along this path
+ * @param blockingHex        first hex that blocks LOS on the engine-selected path, or null for clear LOS
  * @param attackerUnitType   the attacker's unit type for silhouette rendering
  * @param targetUnitType     the target's unit type for silhouette rendering
  * @param attackerIsHullDown whether the attacker is hull-down (reduces LOS profile by 1 TW level)
@@ -81,6 +82,7 @@ record LOSDiagramData(
       Coords attackPos,
       Coords targetPos,
       boolean losBlocked,
+      @Nullable Coords blockingHex,
       DiagramUnitType attackerUnitType,
       DiagramUnitType targetUnitType,
       boolean attackerIsHullDown,
@@ -136,7 +138,7 @@ record LOSDiagramData(
      * @param eruptingGeyser   true if an erupting geyser is present (its plume blocks LOS as ultra-heavy woods)
      * @param splitHex         true if this hex was part of a split LOS path (line along hex edge)
      * @param splitAlternate   the alternate hex coordinates if this is a split hex, null otherwise
-     * @param blocksLOS        true if this specific hex blocks the LOS line
+     * @param blocksLOS        true at the engine's first blocking hex (including its split alternate)
      * @param losLineElevation the interpolated LOS line elevation at this hex position
      */
     public record HexRow(

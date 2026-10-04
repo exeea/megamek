@@ -10,7 +10,7 @@ import java.util.stream.Stream;
 import megamek.common.board.Coords;
 
 /** Immutable drawing commands in unscaled board pixels; game state remains on the Swing thread. */
-public record BoardTactical(List<Fill> fills, List<Label> labels, List<Wall> walls, List<Fill> flatWalls) {
+public record BoardTactical(List<Fill> fills, List<Label> labels, List<Wall> walls, List<Fill> flatWalls, Ruler ruler) {
     /** Range contour labels are a presentation choice shared by capture and rendering. */
     public static final boolean SCROLLING_RANGE_LABELS = false;
     public static final BoardTactical EMPTY = new BoardTactical(List.of(), List.of());
@@ -21,6 +21,18 @@ public record BoardTactical(List<Fill> fills, List<Label> labels, List<Wall> wal
     public BoardTactical(List<Fill> fills, List<Label> labels) {
         this(fills, labels, List.of(), List.of());
     }
+
+    public BoardTactical(List<Fill> fills, List<Label> labels, List<Wall> walls, List<Fill> flatWalls) {
+        this(fills, labels, walls, flatWalls, null);
+    }
+
+    public BoardTactical withRuler(Ruler ruler) {
+        return new BoardTactical(fills, labels, walls, flatWalls, ruler);
+    }
+
+    /** EDT-owned measurement snapshot. Heights are absolute display levels; null blockedAt means clear LOS. */
+    public record Ruler(Coords start, Coords end, int startHeight, int endHeight, Coords blockedAt,
+          int startArgb, int endArgb) { }
 
     public BoardTactical {
         fills = List.copyOf(fills);
@@ -39,7 +51,7 @@ public record BoardTactical(List<Fill> fills, List<Label> labels, List<Wall> wal
               Stream.concat(settled.walls.stream().filter(wall -> retained(wall.playback(), hideMovement)),
                     walls.stream().filter(wall -> wall.playback() == Playback.LIVE)).toList(),
               Stream.concat(settled.flatWalls.stream().filter(fill -> retained(fill.playback(), hideMovement)),
-                    flatWalls.stream().filter(fill -> fill.playback() == Playback.LIVE)).toList());
+                    flatWalls.stream().filter(fill -> fill.playback() == Playback.LIVE)).toList(), ruler);
     }
 
     private static boolean retained(Playback playback, boolean hideMovement) {

@@ -664,7 +664,7 @@ class GpuBattleView extends ApplicationAdapter {
         updateEquipmentDetail();
         // Icons and the tileset columns are the Tactical View; the 3D view keeps its meshes at every angle and zoom.
         if (unitIcons.update(boardCamera.tactical(), boardCamera.camera, scene, frame.status(),
-              this::marked, this::hovers, unitFootprints, unitAnchors)) { unitPicking.clear(); }
+              unitFootprints, unitAnchors)) { unitPicking.clear(); }
         terrain.setTacticalView(boardCamera.tactical());
         markers.update(unitIcons.active() ? unitIcons.instances() : unitInstances.values(), boardCamera.camera);
         updateJumpJets();
@@ -783,9 +783,9 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     /**
-     * The hover rings the view draws itself every frame, inset by {@link #HOVER_HEX_INSET}, as rimshaderv1 draws them:
+     * The hover rings the view draws itself every frame, inset by {@link #HOVER_HEX_INSET}:
      * the hovered hex's outline, or with Ctrl in the editor the brush's hexes, at the height a unit would stand there;
-     * and a building floor under the pointer as rimshaderv1's column: its outline half a hex above the floor's level,
+     * and a building floor under the pointer column: its outline half a hex above the floor's level,
      * joined by its corners to a faint outline on the hex.
      */
     private void renderHoverRings() {
@@ -1487,7 +1487,7 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     /**
-     * The height of the hovered hex's outline on a building floor under the pointer (rimshaderv1's hover column): half
+     * The height of the hovered hex's outline on a building floor under the pointer (hover column): half
      * a hex above the floor's level when that is more than a hex above the hex's own ground, else NaN.
      */
     private float hoverTop() {

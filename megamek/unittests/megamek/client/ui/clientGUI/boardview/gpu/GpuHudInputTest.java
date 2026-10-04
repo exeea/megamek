@@ -579,7 +579,7 @@ class GpuHudInputTest {
     }
 
     /**
-     * rimshaderv1's board: a measurement waiting for its second point (Ctrl for a line of sight, Alt for a distance)
+     * A measurement waiting for its second point (Ctrl for a line of sight, Alt for a distance)
      * takes a plain left click with its modifier, ahead of the phase's own gestures, and the hint line names it; with
      * none waiting, a plain click plans again.
      */

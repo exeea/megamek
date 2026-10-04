@@ -172,7 +172,7 @@ final class BoardCamera {
 
     void setFirstPerson(boolean value) {
         if (firstPerson == value) { return; }
-        // Free flight starts from the 3D pose: the Tactical View's fixed top view cannot look around.
+        // Free flight starts from the 3D pose, so it leaves the Tactical View.
         if (value && tactical()) { setTactical(false, null); }
         stopFraming();
         stopRotation();
@@ -309,9 +309,8 @@ final class BoardCamera {
         update();
     }
 
-    /** Sets the isometric or the straight-down angle of the 3D view; the Tactical View ignores it. */
+    /** Sets the isometric or the straight-down, north-up angle. */
     void setIsometric(boolean value) {
-        if (tactical()) { return; }
         setFirstPerson(false);
         stopFraming();
         stopRotation();
@@ -325,10 +324,10 @@ final class BoardCamera {
     }
 
     /**
-     * Enters or leaves the Tactical View, a fixed north-up view straight down. Entering keeps the focus and zoom (or
-     * the fit to the window); leaving restores the replaced 3D pose, including that fit, exactly. A turn or framing
-     * move in progress counts as finished, so the 3D view returns where it was heading. Pan and zoom work as usual in
-     * between; orbit, tilt and turns are ignored.
+     * Enters or leaves the Tactical View. Entering turns the camera straight down, north up, and keeps the focus and
+     * zoom (or the fit to the window); leaving restores the replaced 3D pose, including that fit, exactly. A turn or
+     * framing move in progress counts as finished, so the 3D view returns where it was heading. In between, the
+     * camera pans, zooms, orbits, tilts and turns as in the 3D view.
      */
     void setTactical(boolean enabled, BoardScene scene) {
         if (enabled == tactical()) { return; }
@@ -394,7 +393,6 @@ final class BoardCamera {
     }
 
     void orbit(float rotation, float inclination) {
-        if (tactical()) { return; }
         if (firstPerson) {
             look(rotation, -inclination);
             return;
@@ -406,7 +404,6 @@ final class BoardCamera {
 
     /** Changes only the viewing angle, so holding a tilt key does not interrupt a keyboard turn in progress. */
     void tilt(float inclination) {
-        if (tactical()) { return; }
         if (firstPerson) {
             look(0, -inclination);
             return;
@@ -424,7 +421,6 @@ final class BoardCamera {
      * @param direction {@code -1} to turn left, {@code 1} to turn right
      */
     void rotateStep(int direction) {
-        if (tactical()) { return; }
         if (firstPerson) {
             look(direction * ROTATION_STEP, 0);
             return;
@@ -794,10 +790,10 @@ final class BoardCamera {
         return wrapped < 0 ? wrapped + 360 : wrapped;
     }
 
-    /** Fits the board; the 3D view also returns to the isometric angle, while the Tactical View keeps its top view. */
+    /** Fits the board; the 3D view also returns to the isometric angle, the Tactical View to its north-up top view. */
     void reset(BoardScene scene) {
         overviewFocus = null;
-        setIsometric(true);
+        setIsometric(!tactical());
         fit(scene);
     }
 

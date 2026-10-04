@@ -38,9 +38,8 @@ import megamek.client.ui.clientGUI.boardview.sprite.TextMarkerSprite;
 import megamek.client.ui.gdx.UiTheme;
 
 /**
- * Unlit, depth-tested tactical volumes shared by both cameras: the displayed weapon's range walls, as rimshaderv1 draws
- * them (the user's decision of 2026-10-04), and the firing lines; and the flat range labels. Owns its meshes and batch
- * on the GL thread.
+ * Unlit, depth-tested tactical volumes shared by both cameras: the displayed weapon's range walls, and the firing lines;
+ * and the flat range labels. Owns its meshes and batch on the GL thread.
  */
 final class GpuFireControl implements Disposable {
     /** Positive size multiplier for firing-line thickness and the arrowhead; 1 keeps the current size. */

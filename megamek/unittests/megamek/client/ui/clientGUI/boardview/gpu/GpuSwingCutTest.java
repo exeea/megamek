@@ -115,9 +115,9 @@ class GpuSwingCutTest {
     }
 
     /**
-     * G4: while the plan draws the route, the native frame shows MegaMek's movement envelope as rimshaderv1 draws it
-     * (the user's decision of 2026-10-04) and the zones, whose sprites extend the envelope's: everything the board
-     * state captures but the route's steps, of which this plan has none yet. The weapon's bracket, a field of fire too,
+     * G4: while the plan draws the route, the native frame shows MegaMek's movement envelope and the zones, 
+     * whose sprites extend the envelope's: everything the board state captures but the route's steps, 
+     * of which this plan has none yet. The weapon's bracket, a field of fire too,
      * is the fire control's wall.
      */
     @Test

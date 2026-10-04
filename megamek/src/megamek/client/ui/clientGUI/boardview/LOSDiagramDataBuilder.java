@@ -78,10 +78,9 @@ final class LOSDiagramDataBuilder {
           LosRuleMode losRuleMode,
           boolean attackerHasMastMount, boolean targetHasMastMount,
           boolean attackerSpottingClear, boolean targetSpottingClear) {
-        LosEffects losEffects = LosEffects.calculateLos(game, attackInfo);
-        boolean losBlocked = !losEffects.canSee();
+        LosEffects losEffects = LosEffects.calculateLos(game, attackInfo, true);
 
-        return buildWithLosResult(game, attackInfo, losBlocked, losEffects.isBlockedByDeadZone(),
+        return buildWithLosResult(game, attackInfo, losEffects,
               attackerIsHullDown, targetIsHullDown,
               attackerUnitType, targetUnitType,
               attackerAtAltitude, targetAtAltitude,
@@ -92,15 +91,12 @@ final class LOSDiagramDataBuilder {
     }
 
     /**
-     * Builds diagram data with a pre-computed LOS blocked result. Use this when the LOS calculation was already
-     * performed via the entity-based path (fire phase code), so the diagram doesn't re-compute with the manual
-     * AttackInfo (which may produce different results). {@code losRuleMode} controls the per-hex comparison level
-     * the diagram uses to flag blockers; pick it from the active game options via
-     * {@link LosRuleMode#fromGameOptions(Game)}. {@code deadZone} comes from the engine's
-     * {@link LosEffects#isBlockedByDeadZone()} flag and drives the dead-zone hatch overlay.
+     * Builds the shared diagram/ray data from the result already used for the ruler's text. The engine supplies
+     * the blocking hex, including accumulated obscuration and the chosen side of divided LOS. The diagram never
+     * substitutes its own terrain test for that result. The active rule mode controls only its reference levels.
      */
     public static LOSDiagramData buildWithLosResult(Game game, LosEffects.AttackInfo attackInfo,
-          boolean losBlocked, boolean deadZone,
+          LosEffects losEffects,
           boolean attackerIsHullDown, boolean targetIsHullDown,
           DiagramUnitType attackerUnitType, DiagramUnitType targetUnitType,
           boolean attackerAtAltitude, boolean targetAtAltitude,
@@ -155,15 +151,6 @@ final class LOSDiagramDataBuilder {
             double losLineElevation = calculateLosLineElevation(
                   attackInfo, coords, attackPos, targetPos, losRuleMode);
 
-            // Solid terrain (ground + building) blocks LOS when its top reaches the line. The >=
-            // matches BMM ("equal to or higher than") for Standard/Dead Zone and the engine's >=
-            // against (1 + interp(absHeight)) for Diagrammed. Attacker and target hexes never count
-            // as intervening terrain.
-            int solidTerrainHeight = groundElevation + buildingHeight;
-            boolean blocksLos = solidTerrainHeight >= losLineElevation
-                  && !coords.equals(attackPos)
-                  && !coords.equals(targetPos);
-
             // Check if this hex has a split alternate
             boolean isSplitHex = false;
             Coords splitAlternate = null;
@@ -194,7 +181,8 @@ final class LOSDiagramDataBuilder {
                   eruptingGeyser,
                   isSplitHex,
                   splitAlternate,
-                  blocksLos,
+                  coords.equals(losEffects.getBlockingHex())
+                        || splitAlternate != null && splitAlternate.equals(losEffects.getBlockingHex()),
                   losLineElevation
             ));
         }
@@ -202,7 +190,7 @@ final class LOSDiagramDataBuilder {
         // The dead-zone "victim" is whichever endpoint sits at the lower absHeight - that's the unit
         // inside the shadow cast by the tallest intervening hill. Tied: pick the target arbitrarily.
         Coords deadZoneVictimPos = null;
-        if (deadZone) {
+        if (losEffects.isBlockedByDeadZone()) {
             deadZoneVictimPos = attackInfo.attackAbsHeight < attackInfo.targetAbsHeight
                   ? attackPos
                   : targetPos;
@@ -217,7 +205,8 @@ final class LOSDiagramDataBuilder {
               attackInfo.targetAbsHeight + 1,
               attackPos,
               targetPos,
-              losBlocked,
+              !losEffects.canSee(),
+              losEffects.getBlockingHex(),
               attackerUnitType,
               targetUnitType,
               attackerIsHullDown,
@@ -227,7 +216,7 @@ final class LOSDiagramDataBuilder {
               attackerName,
               targetName,
               losRuleMode,
-              deadZone,
+              losEffects.isBlockedByDeadZone(),
               deadZoneVictimPos,
               attackerHasMastMount,
               targetHasMastMount,

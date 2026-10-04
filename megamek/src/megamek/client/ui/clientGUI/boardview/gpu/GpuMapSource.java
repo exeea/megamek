@@ -57,7 +57,7 @@ final class GpuMapSource implements BoardSource {
     private BoardClientState measuring;
     private RulerDialog ruler;
     /** The measurement the scene's ruler line shows, and that line. */
-    private List<Coords> measured = List.of();
+    private List<?> measured = List.of();
     private BoardTactical rulerLine = BoardTactical.EMPTY;
     private final BoardEditorPanel editor;
     /** Only Swing owns the active brush stroke; render input carries the board generation it picked. */
@@ -331,8 +331,7 @@ final class GpuMapSource implements BoardSource {
 
     /** The ruler's line, crosshairs and line of sight hexes as the scene draws them, captured when they change. */
     private BoardTactical rulerLine() {
-        List<Coords> now = Arrays.asList(measuring.getRulerStart(), measuring.getRulerEnd(),
-              measuring.getFirstLOS());
+        List<?> now = Arrays.asList(measuring.getRuler(), measuring.getFirstLOS());
         if (!now.equals(measured)) {
             measured = now;
             rulerLine = measuring.captureTacticalGeometry();

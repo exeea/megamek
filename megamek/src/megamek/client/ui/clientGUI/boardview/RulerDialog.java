@@ -563,7 +563,7 @@ public class RulerDialog extends JDialog implements BoardViewListener {
         bv.setFirstLOS(null);
         addPoint(from);
         addPoint(to);
-        bv.drawRuler(start, end, startColor, endColor);
+        drawRuler();
     }
 
     /**
@@ -575,6 +575,16 @@ public class RulerDialog extends JDialog implements BoardViewListener {
             height2.setValue(height);
         } else if (point.equals(start)) {
             height1.setValue(height);
+        }
+    }
+
+    /** Complete measurements are published by setText, even with the diagram collapsed. */
+    private void drawRuler() {
+        if (start == null) {
+            bv.drawRuler(null);
+        } else if (end == null) {
+            int height = (int) height1.getValue() + (atAltitude1 ? 0 : game.getBoard().getHex(start).getLevel());
+            bv.drawRuler(new BoardTactical.Ruler(start, null, height, 0, null, startColor.getRGB(), endColor.getRGB()));
         }
     }
 
@@ -1029,11 +1039,11 @@ public class RulerDialog extends JDialog implements BoardViewListener {
               && spinnerMatch1 && spinnerMatch2
               && !isSensorReturn(attackerEntity) && !isSensorReturn(targetEntity);
 
-        String toHit1;
+        LOSModifierCalculator.Measurement measurement;
         String toHit2;
         if (useEntityPath) {
             // Entity-based path: identical to fire phase LOS calculation
-            toHit1 = LOSModifierCalculator.computeEntityBasedModifiers(game, attackerEntity, targetEntity);
+            measurement = LOSModifierCalculator.measureEntities(game, attackerEntity, targetEntity, true);
             toHit2 = LOSModifierCalculator.computeEntityBasedModifiers(game, targetEntity, attackerEntity);
         } else {
             // Manual path: scenario testing with spinner overrides or no entities
@@ -1049,9 +1059,9 @@ public class RulerDialog extends JDialog implements BoardViewListener {
             boolean targetIsAlt = flip ? atAltitude2 : atAltitude1;
 
             Player localPlayer = bv.getLocalPlayer();
-            toHit1 = LOSModifierCalculator.computeFullModifiers(game, attackerPos, targetPos,
+            measurement = LOSModifierCalculator.measure(game, attackerPos, targetPos,
                   attackerHeight, targetHeight, attackerIsMek, targetIsMek,
-                  attackerIsAlt, targetIsAlt, localPlayer);
+                  attackerIsAlt, targetIsAlt, localPlayer, true);
             toHit2 = LOSModifierCalculator.computeFullModifiers(game, targetPos, attackerPos,
                   targetHeight, attackerHeight, targetIsMek, attackerIsMek,
                   targetIsAlt, attackerIsAlt, localPlayer);
@@ -1060,21 +1070,12 @@ public class RulerDialog extends JDialog implements BoardViewListener {
         tf_start.setText(start.toString());
         tf_end.setText(end.toString());
         rangeLabel.setText("<- " + distance + " ->");
-        tf_los1.setText(toHit1);
+        tf_los1.setText(measurement.description());
         tf_los2.setText(toHit2);
-
-        // When using entity-based path, compute the authoritative LOS result for the diagram
-        Boolean entityLosBlocked = null;
-        boolean entityDeadZone = false;
-        if (useEntityPath) {
-            LosEffects entityLos = LosEffects.calculateLOS(game, attackerEntity, targetEntity);
-            entityLosBlocked = !entityLos.canSee();
-            entityDeadZone = entityLos.isBlockedByDeadZone();
-        }
 
         updateHeightInfo();
         updateUnitLabels();
-        updateDiagram(entityLosBlocked, entityDeadZone);
+        updateDiagram(measurement.effects(), useEntityPath);
         if (compareExpanded) {
             updateCompareTable();
         }
@@ -1160,14 +1161,11 @@ public class RulerDialog extends JDialog implements BoardViewListener {
     /**
      * Updates the elevation diagram panel with current LOS data.
      *
-     * @param entityLosBlocked if non-null, overrides the diagram's own LOS calculation with the entity-based result
-     *                         (from the fire phase code path). Null means use the diagram's manual AttackInfo-based
-     *                         calculation.
-     * @param entityDeadZone   true when the entity-based LOS result was blocked by a dead-zone shadow. Ignored when
-     *                         {@code entityLosBlocked} is null.
+     * @param losEffects the same engine result already used for the attacker POV text, including its blocking hex
+     * @param entityPath whether visible entities at their unmodified heights supplied the measurement
      */
-    private void updateDiagram(Boolean entityLosBlocked, boolean entityDeadZone) {
-        if (!diagramExpanded || start == null || end == null) {
+    private void updateDiagram(LosEffects losEffects, boolean entityPath) {
+        if (start == null || end == null) {
             return;
         }
 
@@ -1204,13 +1202,12 @@ public class RulerDialog extends JDialog implements BoardViewListener {
         // Pass the active LOS rule through to the diagram so it can pick the matching line shape and overlays.
         LosRuleMode losRuleMode = LosRuleMode.fromGameOptions(game);
 
-        // VTOL Mast Mount marker: only on the entity-based path (entityLosBlocked != null), where the diagram
+        // VTOL Mast Mount marker: only on the entity-based path, where the diagram
         // uses the units' real heights, so the "+1 spotting eye" stays consistent with the drawn LOS. The
         // manual/spinner-override path has no real entity heights to reason about. Never surface it for a
         // sensor return - that would leak hidden equipment under double-blind, matching the POV-label gating.
         // The spotting LOS (spotting=true applies the +1 sensor elevation per TacOps) colors the marker;
         // the main direct-fire LOS line is unaffected (a Mast Mount never helps direct fire over cover).
-        boolean entityPath = (entityLosBlocked != null);
         Entity attackerEntity = getSelectedEntity(flip);
         Entity targetEntity = getSelectedEntity(!flip);
         boolean attackerHasMastMount = entityPath && (attackerEntity != null)
@@ -1222,26 +1219,17 @@ public class RulerDialog extends JDialog implements BoardViewListener {
         boolean targetSpottingClear = targetHasMastMount && (attackerEntity != null)
               && LosEffects.calculateLOS(game, targetEntity, attackerEntity, true).canSee();
 
-        LOSDiagramData diagramData;
-        if (entityLosBlocked != null) {
-            // Use pre-computed entity-based LOS result (matches fire phase)
-            diagramData = LOSDiagramDataBuilder.buildWithLosResult(game, attackInfo,
-                  entityLosBlocked, entityDeadZone, attackerHullDown, targetHullDown,
+        LOSDiagramData diagramData = LOSDiagramDataBuilder.buildWithLosResult(game, attackInfo,
+                  losEffects, attackerHullDown, targetHullDown,
                   attackerType, targetType, attackerIsAlt, targetIsAlt,
                   attackerName, targetName, losRuleMode,
                   attackerHasMastMount, targetHasMastMount,
                   attackerSpottingClear, targetSpottingClear);
-        } else {
-            // Use manual AttackInfo-based LOS (scenario testing)
-            diagramData = LOSDiagramDataBuilder.build(game, attackInfo,
-                  attackerHullDown, targetHullDown, attackerType, targetType,
-                  attackerIsAlt, targetIsAlt,
-                  attackerName, targetName, losRuleMode,
-                  attackerHasMastMount, targetHasMastMount,
-                  attackerSpottingClear, targetSpottingClear);
-        }
 
         diagramPanel.setData(diagramData);
+        bv.drawRuler(new BoardTactical.Ruler(diagramData.attackPos(), diagramData.targetPos(),
+              diagramData.attackerAbsHeight(), diagramData.targetAbsHeight(), diagramData.blockingHex(),
+              startColor.getRGB(), endColor.getRGB()));
     }
 
     private void toggleDiagram() {
@@ -1461,7 +1449,7 @@ public class RulerDialog extends JDialog implements BoardViewListener {
             }
         }
 
-        bv.drawRuler(start, end, startColor, endColor);
+        drawRuler();
     }
 
     @Override
@@ -1482,13 +1470,13 @@ public class RulerDialog extends JDialog implements BoardViewListener {
     @Override
     public void firstLOSHex(BoardViewEvent b) {
         addPoint(b.getCoords());
-        bv.drawRuler(start, end, startColor, endColor);
+        drawRuler();
     }
 
     @Override
     public void secondLOSHex(BoardViewEvent b) {
         addPoint(b.getCoords());
-        bv.drawRuler(start, end, startColor, endColor);
+        drawRuler();
     }
 
     void butFlip_actionPerformed() {
@@ -1501,7 +1489,7 @@ public class RulerDialog extends JDialog implements BoardViewListener {
         setText();
         setVisible(true);
 
-        bv.drawRuler(start, end, startColor, endColor);
+        drawRuler();
     }
 
     /**
@@ -1567,7 +1555,7 @@ public class RulerDialog extends JDialog implements BoardViewListener {
         setVisible(false);
 
         bv.setFirstLOS(null);
-        bv.drawRuler(start, end, startColor, endColor);
+        drawRuler();
     }
 
     void heightSpinnerChanged() {
@@ -1577,6 +1565,8 @@ public class RulerDialog extends JDialog implements BoardViewListener {
         }
         if (start != null && end != null) {
             setText();
+        } else {
+            drawRuler();
         }
     }
 

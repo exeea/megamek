@@ -35,6 +35,7 @@ import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.DepthTestAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.IntAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
+import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Array;
@@ -74,6 +75,10 @@ final class GpuTactical implements Disposable {
     private static final Group PLANES = new Group(4, null);
     private record Span(float[] vertices, int start, int count) { }
     private final ModelBatch batch = new ModelBatch();
+    private ShapeRenderer rulerShapes;
+    /** Luminance differs as well as hue; the blocked section also has a dash pattern. */
+    static final int RULER_CLEAR = 0x64D8A2FF;
+    static final int RULER_BLOCKED = 0xD84959FF;
     private final GpuHexMasks hexMasks = new GpuHexMasks();
     private final GpuHexMasks deploymentTint = new GpuHexMasks();
     private final SpriteBatch textBatch = new SpriteBatch();
@@ -531,6 +536,7 @@ final class GpuTactical implements Disposable {
     }
 
     void renderLabels(Camera camera) {
+        renderRuler(camera);
         if (labels.isEmpty()) {
             return;
         }
@@ -563,6 +569,71 @@ final class GpuTactical implements Disposable {
                   image.pixels().width() * scale / 2, image.pixels().height() * scale / 2);
         }
         textBatch.end();
+    }
+
+    /** A screen-width stroke of one straight world-space ray, visible through the hex that blocks it. */
+    private void renderRuler(Camera camera) {
+        BoardTactical.Ruler ruler = previous == null ? null : previous.tactical().ruler();
+        if (ruler == null || previous.tile(ruler.start()) == null) { return; }
+        Vector3 start = BoardGeometry.center(ruler.start(), ruler.startHeight());
+        Vector3 end = ruler.end() == null ? null : BoardGeometry.center(ruler.end(), ruler.endHeight());
+        // Avoid projecting a point behind the near plane while the camera is inside the board.
+        if (camera.frustum.planes[0].distance(start) < 0
+              || end != null && camera.frustum.planes[0].distance(end) < 0) { return; }
+        Vector3 split = end == null ? null : new Vector3(start).lerp(end, rulerBlockedFrom(ruler));
+        camera.project(start, 0, 0, camera.viewportWidth, camera.viewportHeight);
+        if (end != null) {
+            camera.project(end, 0, 0, camera.viewportWidth, camera.viewportHeight);
+            camera.project(split, 0, 0, camera.viewportWidth, camera.viewportHeight);
+        }
+        if (rulerShapes == null) { rulerShapes = new ShapeRenderer(); }
+        Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
+        rulerShapes.setProjectionMatrix(new Matrix4().setToOrtho2D(0, 0, camera.viewportWidth, camera.viewportHeight));
+        rulerShapes.begin(ShapeRenderer.ShapeType.Filled);
+        if (end != null) {
+            rulerStroke(start, split, RULER_CLEAR, false);
+            rulerStroke(split, end, RULER_BLOCKED, true);
+            rulerCrosshair(end, ruler.endArgb());
+        }
+        rulerCrosshair(start, ruler.startArgb());
+        rulerShapes.end();
+    }
+
+    /** Enter the engine's first blocking hex; the remainder stays blocked even after the ray leaves it. */
+    static float rulerBlockedFrom(BoardTactical.Ruler ruler) {
+        if (ruler.blockedAt() == null || ruler.end() == null) { return 1; }
+        float[] interval = BoardFiringGeometry.crossing(BoardGeometry.center(ruler.start(), ruler.startHeight()),
+              BoardGeometry.center(ruler.end(), ruler.endHeight()), ruler.blockedAt());
+        return interval == null ? 0 : interval[0];
+    }
+
+    private void rulerStroke(Vector3 start, Vector3 end, int rgba, boolean dashed) {
+        float length = (float) Math.hypot(end.x - start.x, end.y - start.y);
+        if (length < .01f) { return; }
+        float step = dashed ? 16 : length;
+        for (float distance = 0; distance < length; distance += step) {
+            float a = distance / length, b = Math.min(length, distance + (dashed ? 10 : length)) / length;
+            float ax = start.x + (end.x - start.x) * a, ay = start.y + (end.y - start.y) * a;
+            float bx = start.x + (end.x - start.x) * b, by = start.y + (end.y - start.y) * b;
+            rulerShapes.setColor(Color.BLACK);
+            rulerShapes.rectLine(ax, ay, bx, by, 5);
+            rulerShapes.setColor(new Color(rgba));
+            rulerShapes.rectLine(ax, ay, bx, by, 3);
+        }
+    }
+
+    private void rulerCrosshair(Vector3 point, int argb) {
+        for (int pass = 0; pass < 2; pass++) {
+            rulerShapes.setColor(pass == 0 ? Color.BLACK : new Color((argb << 8) | (argb >>> 24)));
+            float width = pass == 0 ? 4 : 2;
+            for (int i = 0; i < 32; i++) {
+                double a = i * Math.PI / 16, b = (i + 1) * Math.PI / 16;
+                rulerShapes.rectLine(point.x + (float) Math.cos(a) * 8, point.y + (float) Math.sin(a) * 8,
+                      point.x + (float) Math.cos(b) * 8, point.y + (float) Math.sin(b) * 8, width);
+            }
+            rulerShapes.rectLine(point.x - 12, point.y, point.x + 12, point.y, width);
+            rulerShapes.rectLine(point.x, point.y - 12, point.x, point.y + 12, width);
+        }
     }
 
     private static TextImage paintText(List<BoardTactical.Text> texts) {
@@ -610,6 +681,7 @@ final class GpuTactical implements Disposable {
 
     @Override
     public void dispose() {
+        if (rulerShapes != null) { rulerShapes.dispose(); rulerShapes = null; }
         hexMasks.dispose();
         deploymentTint.dispose();
         pages.values().forEach(group -> group.forEach(Page::dispose));

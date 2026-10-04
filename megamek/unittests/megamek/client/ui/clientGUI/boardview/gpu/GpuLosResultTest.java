@@ -108,7 +108,7 @@ class GpuLosResultTest {
 
     /**
      * A measurement waiting for its second point is published with its modifier, Ctrl for MegaMek's line of sight and
-     * Alt for its ruler, so that a plain left click can end it (rimshaderv1's board, GpuHud.boardClick).
+     * Alt for its ruler, so that a plain left click can end it (GpuHud.boardClick).
      */
     @Test
     void aMeasurementWaitingForItsSecondPointIsPublishedWithItsModifier() throws Exception {

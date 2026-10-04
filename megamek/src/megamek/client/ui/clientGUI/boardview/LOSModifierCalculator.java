@@ -77,11 +77,18 @@ final class LOSModifierCalculator {
      * @return a formatted string of the to-hit modifier total and breakdown
      */
     static String computeEntityBasedModifiers(Game game, Entity attacker, Entity target) {
-        LosEffects losEffects = LosEffects.calculateLOS(game, attacker, target);
+        return measureEntities(game, attacker, target, false).description();
+    }
+
+    /** One engine result supplies the ruler text, Swing diagram and native ray. */
+    record Measurement(LosEffects effects, String description) { }
+
+    static Measurement measureEntities(Game game, Entity attacker, Entity target, boolean trace) {
+        LosEffects losEffects = LosEffects.calculateLOS(game, attacker, target, false, trace);
         ToHitData thd = losEffects.losModifiers(game);
 
         if (thd.getValue() == TargetRoll.IMPOSSIBLE) {
-            return thd.getDesc();
+            return new Measurement(losEffects, thd.getDesc());
         }
 
         // Attacker hex terrain modifiers
@@ -113,7 +120,7 @@ final class LOSModifierCalculator {
             result = thd.getValue() + " = ";
         }
         result += thd.getDesc();
-        return result;
+        return new Measurement(losEffects, result);
     }
 
     /**
@@ -158,6 +165,13 @@ final class LOSModifierCalculator {
     static String computeFullModifiers(Game game, Coords attackerPos, Coords targetPos,
           int attackerHeight, int targetHeight, boolean attackerIsMek, boolean targetIsMek,
           boolean attackerIsAltitude, boolean targetIsAltitude, @Nullable Player localPlayer) {
+        return measure(game, attackerPos, targetPos, attackerHeight, targetHeight, attackerIsMek, targetIsMek,
+              attackerIsAltitude, targetIsAltitude, localPlayer, false).description();
+    }
+
+    static Measurement measure(Game game, Coords attackerPos, Coords targetPos,
+          int attackerHeight, int targetHeight, boolean attackerIsMek, boolean targetIsMek,
+          boolean attackerIsAltitude, boolean targetIsAltitude, @Nullable Player localPlayer, boolean trace) {
         // LosEffects needs the physical (non-hull-down) heights to correctly detect partial
         // cover, matching the real game where Mek.height() doesn't change for hull-down.
         // The hull-down modifier (+2) is applied separately via addTargetEntityStateModifiers.
@@ -173,12 +187,12 @@ final class LOSModifierCalculator {
         LosEffects.AttackInfo attackInfo = buildAttackInfo(game, attackerPos, targetPos,
               losAttackerHeight, losTargetHeight, attackerIsMek, targetIsMek,
               attackerIsAltitude, targetIsAltitude);
-        LosEffects losEffects = LosEffects.calculateLos(game, attackInfo);
+        LosEffects losEffects = LosEffects.calculateLos(game, attackInfo, trace);
         ToHitData thd = losEffects.losModifiers(game);
 
         // If LOS is blocked, no point adding terrain modifiers
         if (thd.getValue() == TargetRoll.IMPOSSIBLE) {
-            return thd.getDesc();
+            return new Measurement(losEffects, thd.getDesc());
         }
 
         // Attacker hex terrain modifiers (matching Compute.getAttackerTerrainModifier)
@@ -208,7 +222,7 @@ final class LOSModifierCalculator {
             result = thd.getValue() + " = ";
         }
         result += thd.getDesc();
-        return result;
+        return new Measurement(losEffects, result);
     }
 
     /**

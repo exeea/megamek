@@ -695,8 +695,8 @@ class GpuHudParitySmokeTest {
     /**
      * EDT: gives the fixture's board state the fixture's client, as the battle window's board state has it. The
      * fixtures build the board state before their client; without one the source knows no turn of the local player
-     * (the fire preview would not follow the plan, the physical options stay off). BoardClientState is rimshaderv1's
-     * text, so the test sets its field. The client shows that board, so the source's captured commands run (a command
+     * (the fire preview would not follow the plan, the physical options stay off). 
+     * The client shows that board, so the source's captured commands run (a command
      * of a board the client does not show is stale).
      */
     static void attach(GpuBoardFixture board, ClientGUI gui) throws ReflectiveOperationException {

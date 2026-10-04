@@ -16,7 +16,7 @@ import megamek.common.units.Entity;
 final class GpuLosResult {
     /**
      * The modifier of a measurement waiting for its second point: Ctrl for a line of sight, Alt for a distance, 0 for
-     * none. A plain left click on the board ends that measurement, as on rimshaderv1's board.
+     * none. A plain left click on the board ends that measurement.
      */
     record Snapshot(int pending) {
         static final Snapshot NONE = new Snapshot(0);
@@ -40,7 +40,7 @@ final class GpuLosResult {
     }
 
     /**
-     * The modifier of a measurement waiting for its second point (rimshaderv1's pendingMeasurementModifiers): Ctrl
+     * The modifier of a measurement waiting for its second point: Ctrl
      * while a line of sight has its first point, Alt while the ruler has its start alone, else 0.
      */
     static int pending(BoardClientState view) {

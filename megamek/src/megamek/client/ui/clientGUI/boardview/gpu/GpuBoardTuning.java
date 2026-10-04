@@ -190,7 +190,7 @@ final class GpuBoardTuning {
         wireframe.addListener(new ChangeListener() {
             @Override
             public void changed(ChangeEvent event, Actor actor) {
-                // The wireframe and the Tactical View exclude each other (rimshaderv1): it leaves the view.
+                // The wireframe and the Tactical View exclude each other: it leaves the view.
                 if (wireframe.isChecked()) { camera.setTactical(false, null); }
             }
         });

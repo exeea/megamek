@@ -146,6 +146,7 @@ final class GpuHintLine implements GpuHud.Component {
                     : pending != 0 ? "GpuBoard.hud.hint.completeDistance" : leftClick(status, planning))));
         if (inputs.view().tactical()) {
             items.addAll(List.of(text("GpuBoard.hud.mouse.rightDrag"), text("GpuBoard.hud.hint.panMap"),
+                  text("GpuBoard.hud.mouse.orbitShort"), text("GpuBoard.hud.hint.orbit"),
                   text("GpuBoard.hud.mouse.wheel"), text("GpuBoard.hud.hint.zoom"),
                   key(preferences, KeyCommandBind.TOGGLE_ISO), text("GpuBoard.hud.util.backTo3d")));
         } else {

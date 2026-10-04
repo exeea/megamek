@@ -8,9 +8,11 @@ import java.util.List;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
+import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
+import com.badlogic.gdx.utils.Align;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
@@ -42,7 +44,7 @@ final class GpuUtilityBar implements GpuHud.Component {
     private final BoardCamera camera;
     private final GpuBoardTuning tuning;
     private final Table root = new Table();
-    private final Label north;
+    private final Container<Label> north;
     private final Table chip = new Table();
     private final UiButton tactical;
     private final UiButton wireframe;
@@ -80,7 +82,7 @@ final class GpuUtilityBar implements GpuHud.Component {
         // The style at W <= 1350, which the developer Tuning utility at the row's end (G17) also takes.
         narrow = ui.skin.get("hud-utility-narrow", TextButton.TextButtonStyle.class);
         onChange(tactical, () -> setTactical(!camera.tactical()));
-        // The thermal wireframe view of rimshaderv1's old Camera menu, a switch of the tuning model the board reads.
+        // The thermal wireframe view, a switch of the tuning model the board reads.
         onChange(wireframe, () -> tuning.setWireframe(!tuning.wireframe()));
         onChange(map, () -> runMinimap(inputs));
         // The contacts panel's preference, remembered as the minimap's is; the client's settings change on Swing.
@@ -97,8 +99,10 @@ final class GpuUtilityBar implements GpuHud.Component {
         chip.add(ui.icon("map", 16, UiTheme.MINT));
         chip.add(ui.label(UiTheme.upper(Messages.getString("GpuBoard.hud.util.tactical")), "hud-caption", 12,
               UiTheme.MINT)).padLeft(CHIP_GAP);
-        north = ui.label(Messages.getString("GpuBoard.hud.minimap.north"), "hud-medium", 12, NORTH);
+        north = new Container<>(ui.label(Messages.getString("GpuBoard.hud.minimap.north"), "hud-medium", 12, NORTH));
         north.setName("tactical-north");
+        // Turned with the camera, so it points north while the view orbits.
+        north.setTransform(true);
         // Part of the board drawing in the prototype: presses pass through it to the board.
         north.setTouchable(Touchable.disabled);
     }
@@ -144,6 +148,9 @@ final class GpuUtilityBar implements GpuHud.Component {
         menu.pressed(state.dialog == GpuHudState.Dialog.MENU);
         chip.setVisible(tacticalView);
         north.setVisible(tacticalView);
+        // Scene2D turns counterclockwise; the camera's azimuth turns the board's north that far clockwise on screen.
+        north.setOrigin(Align.center);
+        north.setRotation(-camera.azimuth());
         if (narrowShown != inputs.metrics().narrow()) {
             narrowShown = inputs.metrics().narrow();
             utilities.forEach(utility -> utility.setStyle(narrowShown ? narrow : wide));

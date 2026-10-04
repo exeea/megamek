@@ -782,7 +782,7 @@ final class GpuHud implements GpuBoardHud {
      * none), at screen pixel ({@code x}, {@code y}), with the world height of the terrain the pointer hit
      * ({@code pointedZ}; NaN on a unit, or in the Tactical View). A right click opens the context menu and never
      * changes orders; Ctrl or Alt keeps MegaMek's measurement tools, measuring at the pointed height, and a plain left
-     * click ends a measurement waiting for its second point with that measurement's modifier (rimshaderv1's board);
+     * click ends a measurement waiting for its second point with that measurement's modifier;
      * while a bot order picks hexes, a left click picks one, as the classic board's click does.
      */
     void boardClick(Coords coords, int unitId, int button, int modifiers, int x, int y, float pointedZ) {

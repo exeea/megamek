@@ -95,7 +95,7 @@ class GpuBuildingHoverSmokeTest {
     }
 
     /**
-     * rimshaderv1's occluded selection outlines: the acting unit behind the building keeps its ring, faintly where the
+     * Occluded selection outlines: the acting unit behind the building keeps its ring, faintly where the
      * building hides it. The frame with the overlay's hidden rings differs from the same frame without them in a mint
      * ring only.
      */
@@ -249,7 +249,7 @@ class GpuBuildingHoverSmokeTest {
             assertTrue(wallY >= 0, "The render check must use a wall hit well between floors, not an already-aligned roof");
             when(pointer.getY()).thenReturn(wallY);
             original.getInputProcessor().mouseMoved(x, wallY);
-            // The floor's column, which the view draws over the battle HUD's overlay (rimshaderv1's hover column).
+            // The floor's column, which the view draws over the battle HUD's overlay
             var draw = GpuBattleView.class.getDeclaredMethod("renderHoverRings");
             draw.setAccessible(true);
             HdpiUtils.glViewport(0, 0, (int) camera.viewportWidth, (int) camera.viewportHeight);
