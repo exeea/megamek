@@ -189,6 +189,9 @@ final class GpuTerrain implements Disposable {
                   } : animated ? liquidShader : GpuTreeInstances.instanced(renderable) ? instancedPropShader : config;
             String prefix = GpuCloudShadow.prefix(renderable, chosen)
                   + "#define LUNAR_FAMILY " + BoardScene.Surface.LUNAR.ordinal() + ".0\n"
+                  + "#define FUNGUS_FAMILY " + BoardScene.Surface.FUNGUS.ordinal() + ".0\n"
+                  + "#define DESERT_FAMILY " + BoardScene.Surface.DESERT.ordinal() + ".0\n"
+                  + "#define MARS_FAMILY " + BoardScene.Surface.MARS.ordinal() + ".0\n"
                   + "#define VOLCANIC_CRUST_FAMILY " + BoardSurfaceBlend.CRUST + ".0\n"
                   + "#define VOLCANIC_BANK_FAMILY " + BoardSurfaceBlend.BANK + ".0\n"
                   + (renderable.material.has(GpuIceShader.TYPE) ? "#define iceFlag\n" : "")
@@ -947,7 +950,8 @@ final class GpuTerrain implements Disposable {
     private static Model foliage(Model model) {
         for (Material material : model.materials) {
             if (!material.has(Foliage.TYPE)) {
-                boolean solid = material.id.startsWith("bark") || material.id.equals("cactus") || material.id.equals("fruit");
+                boolean solid = material.id.startsWith("bark") || material.id.equals("cactus") || material.id.equals("fruit")
+                      || material.id.equals("fungus") || material.id.equals("mycelium");
                 material.set(new Foliage(material.id.equals("snow") ? 2 : solid ? 0 : 1));
             }
             // The impostor cards are cutouts: their texels outside the plant discard in every pass, shadows included.
@@ -981,11 +985,14 @@ final class GpuTerrain implements Disposable {
     private static final String[][] SCULPT_MATERIALS = {
           { "grass", "scree", "granite-contact", "soil-contact" },
           { "dirt", "gravel", "granite-contact", "soil-contact" },
-          { "sand", "pavement", "sandstone", "sandstone" },
+          { "loose-sand", "pavement", "sandstone", "sandstone" },
           { "rock", "scree", "granite-contact", "granite-contact" },
           { "concrete", "scree", "granite-contact", "cast" },
           { "snow", "scree", "granite-contact", "snow" },
           { "lunar", "lunar-scree", "lunar-cliff", "lunar-cliff" },
+          { "fungus-ground", "fungus-mat", "fungus-cliff", "fungus-ground" },
+          { "desert-hardpan", "pavement", "sandstone", "sandstone" },
+          { "mars-hardpan", "mars-hardpan", "mars-bedrock", "mars-hardpan" },
     };
     private static final List<String> SCULPT_LAYERS = Arrays.stream(SCULPT_MATERIALS).flatMap(Arrays::stream).distinct().toList();
 
@@ -2459,6 +2466,17 @@ final class GpuTerrain implements Disposable {
                 }
             }
         }
+        if (tile.surface() == BoardScene.Surface.FUNGUS) {
+            List<BoardSurface.Face> cliffs = new ArrayList<>(surface.faces);
+            cliffs.addAll(surface.walls(scene, floor, surfaces));
+            for (var placement : BoardFungus.cliffs(scene, tile, cliffs)) {
+                ModelInstance instance = new ModelInstance(foliage(assets.lodModel(placement.asset(), 0)));
+                instance.transform.set(placement.transform());
+                BoundingBox bounds = instance.calculateBoundingBox(new BoundingBox()).mul(instance.transform);
+                chunk.props.add(new Prop(tile.coords(), instance, bounds, placement.asset(), false));
+                chunk.bounds.ext(bounds);
+            }
+        }
         for (var tunnel : BoardTunnel.entrances(scene, tile)) {
             Model model = assets.model(tunnel.asset());
             if (model == null) { continue; }
@@ -2482,7 +2500,10 @@ final class GpuTerrain implements Disposable {
         for (BoardScene.Feature feature : tile.features()) {
             // Rough boulders are already part of the shared terrain mesh, shading and picking geometry.
             if (feature.kind() == BoardScene.FeatureKind.BOULDER || feature.kind() == BoardScene.FeatureKind.ROUGH) { continue; }
-            if (feature.kind() == BoardScene.FeatureKind.SCATTER) {
+            boolean fungus = BoardFungus.asset(feature.asset());
+            boolean fungusScatter = fungus && feature.kind() == BoardScene.FeatureKind.SCATTER;
+            if (fungusScatter && (!BoardScatter.allowed(tile) || tile.liquid().present() || surface.ramps != 0)) { continue; }
+            if (feature.kind() == BoardScene.FeatureKind.SCATTER && !fungus) {
                 // Road approaches can extend into a hex that has no road terrain of its own.
                 if (!tile.liquid().present() && surface.ramps == 0
                       && !(tile.detailedGround() && feature.asset().equals("scatter-grass"))) {
@@ -2518,7 +2539,7 @@ final class GpuTerrain implements Disposable {
                   ? assets.lodModel(feature.asset(), 0)
                   : assets.model(bridge ? BoardBridge.asset(feature.bridgeExits()) : feature.asset());
             ModelInstance instance = building != null ? building.instance(0)
-                  : new ModelInstance(feature.kind() == BoardScene.FeatureKind.TREE ? foliage(model) : model);
+                  : new ModelInstance(feature.kind() == BoardScene.FeatureKind.TREE || fungus ? foliage(model) : model);
             if (bridge) {
                 Material deck = instance.getMaterial("bridge-deck");
                 deck.set(roadMaterial(GpuRoads.texture(prepared.bridges().get(tile.coords()).kind()).substring("roads/".length()), false));
@@ -2533,7 +2554,7 @@ final class GpuTerrain implements Disposable {
             }
             float px = BoardGeometry.centerX(tile.coords()) + feature.x() * BoardGeometry.hexScale();
             float py = BoardGeometry.centerY(tile.coords()) + feature.y() * BoardGeometry.hexScale();
-            if (feature.kind() == BoardScene.FeatureKind.TREE) {
+            if (feature.kind() == BoardScene.FeatureKind.TREE || fungusScatter) {
                 // A tree stands on its hex's own ground, never over a receding rim or a transition's slope.
                 float[] spot = surface.relief.settle(px, py, BoardRelief.metres(.8f));
                 px = spot[0];
@@ -2561,12 +2582,12 @@ final class GpuTerrain implements Disposable {
                 // Trees and structures retain inspectable proportions; their actual Z extent fits the rules' height.
                 // Fuel tanks and industrial structures also use the building catalog, without building cutaways.
                 boolean fitHeight = feature.kind() == BoardScene.FeatureKind.TREE
-                      || feature.kind() == BoardScene.FeatureKind.BUILDING || feature.asset().startsWith("buildings/");
+                      || fungus || feature.kind() == BoardScene.FeatureKind.BUILDING || feature.asset().startsWith("buildings/");
                 float sourceHeight = fitHeight ? bounds.getDepth() : 1;
                 float verticalScale = building == null ? feature.height() * BoardGeometry.level() / sourceHeight
                       : BoardGeometry.level() / GpuBuilding.LEVEL_HEIGHT;
                 // Understory meshes are authored as shrubs: preserve their proportions when fitting one level.
-                float horizontalScale = feature.asset().startsWith("foliage-") ? verticalScale
+                float horizontalScale = fungus || feature.asset().startsWith("foliage-") ? verticalScale
                       : feature.scale() * BoardGeometry.hexScale();
                 instance.transform.setToTranslation(px, py,
                       base + feature.elevation() * BoardGeometry.level())
@@ -2574,8 +2595,11 @@ final class GpuTerrain implements Disposable {
                       .scale(horizontalScale, horizontalScale, verticalScale);
             }
             bounds.mul(instance.transform);
+            if (fungusScatter && (surface.relief.obstructed(new Vector3(px, py, base),
+                  Math.max(bounds.getWidth(), bounds.getHeight()) * .5f, bounds.getDepth())
+                  || !surface.relief.visibleScatter(new Vector3(px, py, base), bounds.getDepth()))) { continue; }
             chunk.props.add(new Prop(tile.coords(), instance, bounds,
-                  feature.kind() == BoardScene.FeatureKind.TREE ? feature.asset() : null,
+                  feature.kind() == BoardScene.FeatureKind.TREE || fungus ? feature.asset() : null,
                   feature.kind() == BoardScene.FeatureKind.LIMB, building,
                   feature.kind() == BoardScene.FeatureKind.BUILDING || feature.asset().startsWith("buildings/")));
             if (feature.kind() == BoardScene.FeatureKind.BUILDING) {
@@ -3483,9 +3507,11 @@ final class GpuTerrain implements Disposable {
         return switch (surface) {
             case SNOW -> -1;
             case SAND -> 0.05f;
+            case DESERT, MARS -> 0.12f;
             case DIRT -> 0.15f;
             case GRASS -> 0.25f;
             case ROCK, LUNAR -> 0.7f;
+            case FUNGUS -> 0.35f;
             case CONCRETE -> 1;
         };
     }

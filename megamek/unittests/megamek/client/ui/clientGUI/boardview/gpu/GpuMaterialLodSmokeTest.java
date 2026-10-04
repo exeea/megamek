@@ -54,7 +54,7 @@ class GpuMaterialLodSmokeTest {
             camera.far = 10000;
             terrain.setAtmosphere(BoardAtmosphere.lighting(new BoardAtmosphere.Settings(13, 0, 0,
                   BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0)));
-            for (String material : List.of("sand", "concrete", "crust", "lava")) {
+            for (String material : List.of("sand", "desert", "mars", "concrete", "crust", "lava")) {
                 assertTrue(manager.apply(Map.of()).success());
                 terrain.update(scene(material));
                 double closeDifference = 0;
@@ -133,7 +133,12 @@ class GpuMaterialLodSmokeTest {
         for (int x = 0; x < 7; x++) {
             for (int y = 0; y < 7; y++) {
                 tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0,
-                      material.equals("concrete") ? BoardScene.Surface.CONCRETE : BoardScene.Surface.SAND,
+                      switch (material) {
+                          case "concrete" -> BoardScene.Surface.CONCRETE;
+                          case "desert" -> BoardScene.Surface.DESERT;
+                          case "mars" -> BoardScene.Surface.MARS;
+                          default -> BoardScene.Surface.SAND;
+                      },
                       pixels, null, null, null, null, List.of(), List.of(), liquid, null, true));
             }
         }

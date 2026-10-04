@@ -30,21 +30,20 @@ vec3 levelGrade(vec3 c, float level) {
 }
 
 // Broad variations in the ground's tone, so a large field reads neither as one flat colour nor as tiles: patches, the
-// desert's iron-red thin sand, pale washes and flats and its dunes, a meadow's dry and lush turf. rim and foot weigh the
+// desert's compact ochre earth, loose sand's drifts, a meadow's dry and lush turf. rim and foot weigh the
 // nearness of a drop and of a rise. The ground and the cover drifted onto slopes and ledges share it, so they match.
 vec3 groundToneFor(float f, vec3 albedo, vec3 world, float broad, float fine, float region, float rim, float foot) {
     albedo *= mix(.94, 1.06, broad) * mix(.95, 1.05, region) * mix(.96, 1.04, fine);
     if (abs(f - 2.0) < .5) {
-        // Desert ground: iron-red where the sand lies thin over its bedrock, paler washes where fines settle.
-        albedo = mix(albedo, albedo * vec3(1.04, .86, .76), smoothstep(.5, .75, broad * .7 + region * .3) * .7);
-        albedo = mix(albedo, albedo * vec3(1.06, 1.08, 1.1), smoothstep(.62, .85, fine * .5 + region * .5) * .5);
-        // Broad flats of fine, pale sand between the orange drifts: lighter and less saturated.
-        float luma = dot(albedo, vec3(.299, .587, .114));
-        albedo = mix(albedo, mix(vec3(luma), albedo, .55) * 1.12, smoothstep(.4, .7, region * .6 + broad * .4) * .6);
-        // Dunes: long, gentle swells of light and shade that run across the flats regardless of the hexes, bent and
-        // broken up by the broad fields.
+        // Shared loose sand over any theme. No drift pattern is added to clear desert or Martian hardpan.
         float dune = sin(dot(world.xy, vec2(.8, .6)) / 19.0 + broad * 5.0 + region * 3.0);
-        albedo *= 1.0 + .07 * dune * smoothstep(.2, .6, region + .3 * fine);
+        albedo *= 1.0 + .04 * dune * smoothstep(.2, .6, region + .3 * fine);
+    }
+    if (abs(f - DESERT_FAMILY) < .5) {
+        albedo = mix(albedo, albedo * vec3(1.03, .91, .85), smoothstep(.4, .75, broad * .6 + region * .4) * .45);
+    }
+    if (abs(f - MARS_FAMILY) < .5) {
+        albedo = mix(albedo, albedo * vec3(.92, .82, .77), smoothstep(.55, .8, region * .6 + fine * .4) * .3);
     }
     if (abs(f) < .5) {
         // Thin, dry turf on convex rims and in sunny patches; lush, dark grass where water gathers below cliffs.

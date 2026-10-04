@@ -52,8 +52,8 @@ class BoardGroundCaptureTest {
                         if (hex.terrainLevel(Terrains.GROUND_FLUFF) == 1 && !tile.liquid().present()) {
                             float amount = hex.getTerrain(Terrains.GROUND_FLUFF).getExits() / 6f;
                             var p = BoardGeometry.center(tile.coords(), tile.elevation());
-                            assertEquals(amount, tile.groundCover().sand(), .00001f);
-                            assertEquals(amount, BoardSurfaceBlend.sample(scene, tile, p.x, p.y, p.z).sand(), .00001f,
+                            assertEquals(amount, tile.groundCover().desert(), .00001f);
+                            assertEquals(amount, BoardSurfaceBlend.sample(scene, tile, p.x, p.y, p.z).desert(), .00001f,
                                   "The authored desert percentage reaches native material vertices at " + tile.coords());
                             assertTrue(BoardSurfaceBlend.boundary(scene, tile));
                         }
@@ -93,10 +93,13 @@ class BoardGroundCaptureTest {
                               "Cosmetic blends must not fill the editor with hidden-terrain badges");
                         var tile = BoardScene.captureTile(hex, pixels, null, new BoardScene.PixelPool());
                         if (family == 1) {
-                            float[] sand = { 1 / 6f, 1 / 3f, .5f, 2 / 3f, 5 / 6f };
-                            assertEquals(sand[strength - 1], tile.groundCover().sand(), .00001f);
-                            assertEquals(1 - sand[strength - 1], tile.groundCover().grass(), .00001f);
+                            float amount = strength / 6f;
+                            assertEquals(amount, tile.groundCover().desert(), .00001f);
+                            assertEquals(1 - amount, tile.groundCover().grass(), .00001f);
+                        } else if (family == 4) {
+                            assertEquals(strength / 6f, tile.groundCover().mars(), .00001f);
                         }
+                        assertEquals(0, tile.groundCover().sand(), "Theme gradients never introduce loose SAND");
                         assertNull(tile.decals(), "A hidden transition must not survive in the decal pass");
                         assertFalse(classic.blankTerrainTypes(hex).contains(Terrains.GROUND_FLUFF),
                               "The ordinary board keeps its authored transition artwork");
@@ -146,8 +149,8 @@ class BoardGroundCaptureTest {
             var p = BoardGeometry.center(center, 0).lerp(BoardGeometry.center(next, 0), .5f);
             var mixed = BoardSurfaceBlend.sample(after, after.tile(center), p.x, p.y, p.z);
             assertEquals(mixed, BoardSurfaceBlend.sample(after, after.tile(next), p.x, p.y, p.z));
-            assertTrue(mixed.sand() > 0 && mixed.sand() < .5f);
-            assertEquals(1, mixed.grass() + mixed.sand(), .00001f);
+            assertTrue(mixed.desert() > 0 && mixed.desert() < .5f);
+            assertEquals(1, mixed.grass() + mixed.desert(), .00001f);
             assertEquals(after.tile(center).groundCover(), after.tile(center).withTactical(before.tile(center).ground()).groundCover());
             return null;
         });

@@ -95,17 +95,18 @@ final class BoardFeatures {
         if (hex.containsTerrain(Terrains.PAVEMENT)) {
             return BoardScene.Surface.CONCRETE;
         }
-        if (desert(hex)) {
-            return BoardScene.Surface.SAND;
-        }
+        // The theme supplies geology. BoardSurfaceBlend captures the independent gameplay SAND cover.
+        if (theme.contains("mars")) { return BoardScene.Surface.MARS; }
+        if (desert(hex)) { return BoardScene.Surface.DESERT; }
         if (theme.contains("lunar")) { return BoardScene.Surface.LUNAR; }
+        if (theme.contains("fungus")) { return BoardScene.Surface.FUNGUS; }
         if (theme.contains("rock") || theme.contains("volcan")) {
             return BoardScene.Surface.ROCK;
         }
         // Fields and reed marshes replace the flat cover in the biome shader. Their banks retain the theme's
         // grass/soil mantle; classifying the whole column as dirt leaves a bare cutout around every plantation.
         if (hex.containsTerrain(Terrains.MUD) || hex.terrainLevel(Terrains.SWAMP) > 1
-              || theme.contains("dirt") || theme.contains("mars")) {
+              || theme.contains("dirt")) {
             return BoardScene.Surface.DIRT;
         }
         return BoardScene.Surface.GRASS;
@@ -171,14 +172,16 @@ final class BoardFeatures {
               : BoardRoad.clearance(coords, hex, board);
         if (jungle || hex.containsTerrain(Terrains.WOODS)) {
             boolean orchard = orchard(hex);
+            boolean fungus = surface(hex) == BoardScene.Surface.FUNGUS;
             int density = hex.terrainLevel(jungle ? Terrains.JUNGLE : Terrains.WOODS);
-            int count = density >= 3 ? 16 : density == 2 ? 9 : orchard ? 6 : 3;
+            int count = fungus ? (density >= 3 ? 6 : density == 2 ? 4 : 2)
+                  : density >= 3 ? 16 : density == 2 ? 9 : orchard ? 6 : 3;
             // Foliage reaches its rules height. Level-one cover uses proportioned shrubs; taller woods keep
             // broad tree crowns so the canopy reads as an obstacle. Light woods have the broadest tree crowns.
             float height = Math.max(1, hex.terrainLevel(Terrains.FOLIAGE_ELEV));
             float crown = orchard ? (density >= 3 ? .62f : .82f)
                   : density >= 3 ? 1.35f : density == 2 ? 1.45f : 1.7f;
-            List<String> species = orchard ? orchardSpecies(hex)
+            List<String> species = fungus ? BoardFungus.COVER : orchard ? orchardSpecies(hex)
                   : height == 1 ? List.of(shrub(hex, jungle)) : species(hex, jungle);
             for (int index = 0; index < count; index++) {
                 double angle = index * (density >= 2 ? 2.399963 : 2 * Math.PI / count) + variant;
@@ -186,6 +189,17 @@ final class BoardFeatures {
                 float radius = density >= 2 ? 28 * (float) Math.sqrt(index / (count - 1f))
                       : 20 + index * 2;
                 String tree = species.get(Math.floorMod(coords.getX() * 31 + coords.getY() * 17 + index, species.size()));
+                float foliageHeight = height * (1f + (index % 3) * .05f);
+                if (fungus) {
+                    // One mature cup establishes the cover height; smaller cups and low rounded bodies form a colony.
+                    // The model count and silhouette are visual choices, independent of the game's woods density.
+                    if (index == 0) {
+                        tree = BoardFungus.CUPS.get(Math.floorMod(coords.getX() * 31 + coords.getY() * 17, BoardFungus.CUPS.size()));
+                    }
+                    foliageHeight = height * (tree.startsWith("fungus/spore-") ? .46f + (index % 3) * .08f
+                          : index == 0 ? 1 : .7f + (index % 3) * .1f);
+                    radius *= .8f;
+                }
                 float x = (float) Math.cos(angle) * radius, y = (float) Math.sin(angle) * radius;
                 if (orchard) {
                     // Light orchard rows align across the 63x72 staggered hex lattice.
@@ -195,7 +209,7 @@ final class BoardFeatures {
                     x = (index % columns - (columns - 1) * .5f) * spacing;
                     y = (index / columns - (rows - 1) * .5f) * (density == 1 ? 36 : spacing);
                 }
-                // Preserve the authoritative woods density, relocating trunks to the verge instead of deleting trees.
+                // Keep the chosen visual density, relocating trunks to the verge instead of deleting them.
                 for (int attempt = 0; road != null && road.distance(x, y) < BoardRoad.SHOULDER + 2 && attempt < 24; attempt++) {
                     angle += 2.399963;
                     x = (float) Math.cos(angle) * 29;
@@ -203,7 +217,7 @@ final class BoardFeatures {
                 }
                 result.add(new BoardScene.Feature(tree, x,
                       y, index * 137.5f, crown * (0.9f + (index % 3) * 0.1f),
-                      height * (1f + (index % 3) * 0.05f), 0, BoardScene.FeatureKind.TREE));
+                      foliageHeight, 0, BoardScene.FeatureKind.TREE));
             }
         }
         rough(hex, coords, result, board);
@@ -349,7 +363,7 @@ final class BoardFeatures {
 
     private static boolean desert(Hex hex) {
         String theme = hex.getTheme() == null ? "" : hex.getTheme().toLowerCase(Locale.ROOT);
-        return hex.containsTerrain(Terrains.SAND) || theme.contains("desert") || theme.contains("sand");
+        return theme.contains("desert") || theme.contains("sand");
     }
 
     private static List<String> orchardSpecies(Hex hex) {

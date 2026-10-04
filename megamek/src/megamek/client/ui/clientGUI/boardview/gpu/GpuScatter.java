@@ -100,7 +100,7 @@ final class GpuScatter {
         float shade = .88f + .24f * feature.rotation() / 360;
         color.mul(shade, shade, shade, 1);
         int material = feature.asset().equals("scatter-rock") || feature.asset().equals("scatter-slab")
-              ? switch (tile.surface()) { case DIRT -> 1; case SAND -> 2; default -> 0; } : 3;
+              ? switch (tile.surface()) { case DIRT -> 1; case SAND, DESERT, MARS -> 2; default -> 0; } : 3;
         BoardShape shape;
         switch (feature.asset()) {
             case "scatter-grass", "scatter-dry-grass" -> {
@@ -148,7 +148,8 @@ final class GpuScatter {
         }
         // The atlas supplies the stone's colour; retain only a light biome tint in the vertices.
         return switch (surface) {
-            case SAND, DIRT -> new Color(.95f, .95f, .95f, 1);
+            case SAND, DESERT, DIRT -> new Color(.95f, .95f, .95f, 1);
+            case MARS -> new Color(.78f, .43f, .29f, 1);
             case SNOW -> new Color(.95f, .98f, 1, 1);
             case ROCK, LUNAR -> new Color(.95f, .94f, .91f, 1);
             default -> new Color(.90f, .95f, .83f, 1);

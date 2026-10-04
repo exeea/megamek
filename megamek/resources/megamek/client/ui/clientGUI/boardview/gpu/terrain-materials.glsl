@@ -51,6 +51,21 @@ vec4 materialTexel(float layer, vec2 uv, mat2 gradient) {
     return textureGrad(u_terrainLayers, vec3(uv, layer), gradient[0], gradient[1]);
 }
 
+// Overlapping translated samples break the fungal source's recognisable repeats. Use identical offsets for
+// colour/height and normal/AO; translations keep tangent normals aligned and leave vertical cliff grain upright.
+vec2 fungusOffset(vec2 cell) {
+    return fract(sin(vec2(dot(cell, vec2(127.1, 311.7)), dot(cell, vec2(269.5, 183.3)))) * 43758.5453) * 8.0;
+}
+
+vec4 fungusTexel(float layer, vec2 uv, mat2 gradient) {
+    vec2 cell = floor(uv), blend = smoothstep(.15, .85, fract(uv));
+    vec4 a = materialTexel(layer, uv + fungusOffset(cell), gradient);
+    vec4 b = materialTexel(layer, uv + fungusOffset(cell + vec2(1.0, 0.0)), gradient);
+    vec4 c = materialTexel(layer, uv + fungusOffset(cell + vec2(0.0, 1.0)), gradient);
+    vec4 d = materialTexel(layer, uv + fungusOffset(cell + vec2(1.0, 1.0)), gradient);
+    return mix(mix(a, b, blend.x), mix(c, d, blend.x), blend.y);
+}
+
 // Earth banks need the same repeat breakup as flat dirt. Keep both vertical projections upright, so erosion
 // runs downhill; translating and rescaling also lets color/height and normal/AO share this exact sampling.
 vec4 earthSideTexel(float layer, vec2 uv, mat2 gradient, float breakup) {
@@ -65,9 +80,11 @@ vec4 earthSideTexel(float layer, vec2 uv, mat2 gradient, float breakup) {
 vec4 sampleMaterial(float colorMap, float tile, float amount, MaterialProjection p,
       vec3 world, float variation, float fine, float region, bool groundMap, float familyId, bool earth) {
     if (amount < .0001) return vec4(0.0);
+    bool fungus = abs(familyId - FUNGUS_FAMILY) < .5;
     vec4 pigment = vec4(0.0);
     if (p.lying > 0.0) {
-        pigment = mix(materialTexel(colorMap, p.top / tile, p.topGradient / tile),
+        pigment = fungus ? fungusTexel(colorMap, p.top / tile, p.topGradient / tile)
+              : mix(materialTexel(colorMap, p.top / tile, p.topGradient / tile),
               materialTexel(colorMap, TURN * p.top / (tile * 2.37) + .31,
                     TURN * p.topGradient / (tile * 2.37)), variation);
         if (farDetail > 0.0) {
@@ -76,8 +93,10 @@ vec4 sampleMaterial(float colorMap, float tile, float amount, MaterialProjection
     }
     if (p.lying < 1.0) {
         float breakup = earth ? variation : 0.0;
-        vec4 steep = mix(earthSideTexel(colorMap, p.y / tile + .37, p.yGradient / tile, breakup),
-              earthSideTexel(colorMap, p.x / tile, p.xGradient / tile, breakup), p.side);
+        vec4 steep = fungus ? mix(fungusTexel(colorMap, p.y / tile + .37, p.yGradient / tile),
+              fungusTexel(colorMap, p.x / tile, p.xGradient / tile), p.side)
+              : mix(earthSideTexel(colorMap, p.y / tile + .37, p.yGradient / tile, breakup),
+                    earthSideTexel(colorMap, p.x / tile, p.xGradient / tile, breakup), p.side);
         pigment = mix(steep, pigment, p.lying);
     }
     vec3 color = pigment.rgb;
@@ -87,24 +106,28 @@ vec4 sampleMaterial(float colorMap, float tile, float amount, MaterialProjection
 
 // Height blending often discards a present layer entirely. Its normal/cavity cannot affect the result then.
 // Defer those texture reads until the colour/height samples have determined the final weights.
-vec4 materialNormal(float normalMap, float tile, float weight, MaterialProjection p, vec3 face, float variation, bool earth) {
+vec4 materialNormal(float normalMap, float tile, float weight, MaterialProjection p, vec3 face, float variation,
+      bool earth, bool fungus) {
     if (weight <= 0.0 || u_normalMaps <= .5) return vec4(face, 1.0);
     if (terrainNormalDetail <= 0.0) return vec4(face, TERRAIN_DISTANT_CAVITY);
     vec3 normal = face;
     float cavity = 1.0;
     if (p.lying > 0.0) {
-        vec4 near = materialTexel(normalMap, p.top / tile, p.topGradient / tile);
-        vec4 far = materialTexel(normalMap, TURN * p.top / (tile * 2.37) + .31,
-              TURN * p.topGradient / (tile * 2.37));
+        vec4 near = fungus ? fungusTexel(normalMap, p.top / tile, p.topGradient / tile)
+              : materialTexel(normalMap, p.top / tile, p.topGradient / tile);
+        vec4 far = fungus ? near : materialTexel(normalMap, TURN * p.top / (tile * 2.37) + .31,
+                    TURN * p.topGradient / (tile * 2.37));
         vec3 a = near.rgb * 2.0 - 1.0, b = far.rgb * 2.0 - 1.0;
-        b.xy = b.xy * TURN;
+        if (!fungus) b.xy = b.xy * TURN;
         normal = upNormal(mix(mix(a, b, variation), vec3(0.0, 0.0, 1.0), farDetail), face);
         cavity = mix(near.a, far.a, variation);
     }
     if (p.lying < 1.0) {
         float breakup = earth ? variation : 0.0;
-        vec4 nx = earthSideTexel(normalMap, p.x / tile, p.xGradient / tile, breakup);
-        vec4 ny = earthSideTexel(normalMap, p.y / tile + .37, p.yGradient / tile, breakup);
+        vec4 nx = fungus ? fungusTexel(normalMap, p.x / tile, p.xGradient / tile)
+              : earthSideTexel(normalMap, p.x / tile, p.xGradient / tile, breakup);
+        vec4 ny = fungus ? fungusTexel(normalMap, p.y / tile + .37, p.yGradient / tile)
+              : earthSideTexel(normalMap, p.y / tile + .37, p.yGradient / tile, breakup);
         vec3 x = nx.rgb * 2.0 - 1.0, y = ny.rgb * 2.0 - 1.0;
         vec3 wall = normalize(mix(vec3(-y.x * sign(face.y) + face.x, y.z * face.y, face.z - y.y),
               vec3(x.z * face.x, x.x * sign(face.x) + face.y, face.z - x.y), p.side));
@@ -163,6 +186,13 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
         cover = max(cover, max(lip, shoulder) * twoLevels * (1.0 - exposure));
         soil = (1.0 - cover) * ((1.0 - exposure) * .9 + rim * .5 * smoothstep(.25, .7, variation));
         deposit *= mix(.25, 1.0, rock);
+    } else if (abs(familyId - FUNGUS_FAMILY) < .5) {
+        // Crust grows across the rock shoulder and in damp pockets, leaving the open plain quiet.
+        cover *= 1.0 - .75 * scour;
+        float raised = smoothstep(.5, 2.5, v_cloudPosition.z / u_levelHeight);
+        float growth = max(rim * .85, max(foot * .6, raised * .9));
+        deposit = growth * smoothstep(.25, .65, pockets * .65 + broad * .35)
+              * smoothstep(.1, .6, up);
     } else if (abs(familyId - 5.0) < .5) {
         cover = smoothstep(.36, .92, coverUp + (variation - .5) * .5 + deposit * .18);
         cover *= 1.0 - .85 * scour;
@@ -170,6 +200,13 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
     } else if (abs(familyId - 2.0) < .5) {
         cover = smoothstep(.38, .94, coverUp + (variation - .5) * .45 + deposit * .15);
         cover *= 1.0 - .92 * scour;
+        deposit *= .55;
+    } else if (abs(familyId - DESERT_FAMILY) < .5 || abs(familyId - MARS_FAMILY) < .5) {
+        // Firm crust wears back to exposed rock on banks and a broken mineral shoulder at the crest.
+        cover = smoothstep(.38, .96, coverUp + (variation - .5) * .22);
+        float shoulder = (1.0 - smoothstep(.1, 1.3 + 1.6 * broad, belowRim))
+              * smoothstep(.28, .65, pockets) * smoothstep(.55, .94, up);
+        cover *= 1.0 - max(.90 * scour, .85 * shoulder);
         deposit *= .55;
     } else if (abs(familyId - 1.0) < .5) {
         cover = smoothstep(.28, .9, coverUp + (variation - .5) * .16);
@@ -201,11 +238,17 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
     vec4 d = sampleMaterial(layers.z, tiles.z, roles.w * candidates.w, projection,
           world, broad, fine, region, false, familyId, false);
     d.rgb *= toLinear(bedTintFor(familyId, hardness));
+    if (abs(familyId - DESERT_FAMILY) < .5) {
+        // Pale abraded sandstone at the actual rim reads from above; deeper faces retain their warm brown.
+        float abrasion = (1.0 - smoothstep(.15, 2.2, belowRim)) * smoothstep(.45, .95, up);
+        d.rgb *= toLinear(mix(vec3(.98, .91, .85), vec3(1.14, 1.15, 1.13), abrasion));
+    }
     vec4 weights = materialWeights(roles, vec4(a.a, b.a, c.a, d.a));
-    vec4 na = materialNormal(layers.x + 1.0, tiles.x, weights.x, projection, face, broad, dirt);
-    vec4 nb = materialNormal(layers.w + 1.0, tiles.w, weights.y, projection, face, fine, earthMantle);
-    vec4 nc = materialNormal(layers.y + 1.0, tiles.y, weights.z, projection, face, fine, false);
-    vec4 nd = materialNormal(layers.z + 1.0, tiles.z, weights.w, projection, face, broad, false);
+    bool fungus = abs(familyId - FUNGUS_FAMILY) < .5;
+    vec4 na = materialNormal(layers.x + 1.0, tiles.x, weights.x, projection, face, broad, dirt, fungus);
+    vec4 nb = materialNormal(layers.w + 1.0, tiles.w, weights.y, projection, face, fine, earthMantle, fungus);
+    vec4 nc = materialNormal(layers.y + 1.0, tiles.y, weights.z, projection, face, fine, false, fungus);
+    vec4 nd = materialNormal(layers.z + 1.0, tiles.z, weights.w, projection, face, broad, false, fungus);
     TerrainMaterial result;
     result.color = toDisplay(a.rgb * weights.x + b.rgb * weights.y + c.rgb * weights.z + d.rgb * weights.w);
     result.normal = normalize(na.rgb * weights.x + nb.rgb * weights.y + nc.rgb * weights.z + nd.rgb * weights.w);
@@ -233,7 +276,7 @@ float coverPatch(vec3 world, float familyId) {
 
 void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float hardness, float sediment,
       float broad, float fine, float region,
-      inout vec3 color, inout vec3 normal, inout float cavity, out float height, inout float grass,
+      inout vec3 color, inout vec3 normal, inout float cavity, out float height, inout float grass, inout float sand,
       inout vec3 bounce, inout float response, inout float rainCover,
       out vec3 emission, out float roughness, out float volcanic) {
     TerrainMaterial a;
@@ -278,6 +321,7 @@ void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float
     roughness = dot(vec4(a.roughness, b.roughness, c.roughness, d.roughness), weights);
     volcanic = dot(vec4(a.volcanic, b.volcanic, c.volcanic, d.volcanic), weights);
     grass = dot(vec4(1.0) - step(vec4(.5), abs(u_coverFamilies)), weights) * (1.0 - sediment);
+    sand = dot(vec4(1.0) - step(vec4(.5), abs(u_coverFamilies - 2.0)), weights);
     bounce = groundBounceFor(u_coverFamilies.x) * weights.x + groundBounceFor(u_coverFamilies.y) * weights.y
           + groundBounceFor(u_coverFamilies.z) * weights.z + groundBounceFor(u_coverFamilies.w) * weights.w;
     response = dot(max(u_coverResponses, vec4(0.0)), weights);

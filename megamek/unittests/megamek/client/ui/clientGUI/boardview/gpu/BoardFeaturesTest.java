@@ -165,7 +165,7 @@ class BoardFeaturesTest {
     }
 
     @Test
-    void desertAndSandyWoodsGrowDesertSpeciesAtEveryDensity() {
+    void theThemeSelectsDesertSpeciesWhileSandKeepsItsOwnBiomesTrees() {
         Coords coords = new Coords(3, 2);
         for (int density = 1; density <= 3; density++) {
             Hex hex = new Hex(0);
@@ -181,8 +181,9 @@ class BoardFeaturesTest {
             assertEquals(themed, BoardFeatures.capture(hex, coords, Map.of()), "Ground paving must not change the biome's trees");
             hex.removeTerrain(Terrains.PAVEMENT);
             hex.setTheme("");
+            var temperate = BoardFeatures.capture(hex, coords, Map.of());
             hex.addTerrain(new Terrain(Terrains.SAND, 1));
-            assertEquals(themed, BoardFeatures.capture(hex, coords, Map.of()), "Sandy woods use the same palm selection");
+            assertEquals(temperate, BoardFeatures.capture(hex, coords, Map.of()), "Loose sand does not create a desert biome");
             hex.addTerrain(new Terrain(Terrains.SNOW, 1));
             assertTrue(BoardFeatures.capture(hex, coords, Map.of()).stream().allMatch(feature -> feature.asset().endsWith("-snow")),
                   "Snow retains the existing winter variants");
@@ -267,7 +268,8 @@ class BoardFeaturesTest {
     void surfaceMaterialsAndCropsFollowTheHex() {
         Hex hex = new Hex(0);
         hex.addTerrain(new Terrain(Terrains.SAND, 1));
-        assertEquals(BoardScene.Surface.SAND, BoardFeatures.surface(hex));
+        assertEquals(BoardScene.Surface.GRASS, BoardFeatures.surface(hex));
+        assertEquals(1, BoardSurfaceBlend.capture(hex).sand());
         hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1));
         assertEquals(BoardScene.Surface.CONCRETE, BoardFeatures.surface(hex));
         for (int scatter : new int[] { Terrains.ROUGH, Terrains.RUBBLE }) {
@@ -278,7 +280,8 @@ class BoardFeaturesTest {
             hex.setTheme("rock");
             assertEquals(BoardScene.Surface.ROCK, BoardFeatures.surface(hex));
             hex.addTerrain(new Terrain(Terrains.SAND, 1));
-            assertEquals(BoardScene.Surface.SAND, BoardFeatures.surface(hex));
+            assertEquals(BoardScene.Surface.ROCK, BoardFeatures.surface(hex));
+            assertEquals(1, BoardSurfaceBlend.capture(hex).sand());
         }
         hex.removeAllTerrains();
         hex.setTheme("");

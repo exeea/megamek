@@ -132,7 +132,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               ? null : tiles.get(coords.getX() * height + coords.getY());
     }
 
-    /** A material family determines the exposed geology. */
+    /** Render materials. A tile's surface supplies its geology; groundCover can put shared SAND over any theme. */
     enum Surface {
         GRASS("terrain/rock"),
         DIRT("terrain/dirt"),
@@ -140,7 +140,10 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         ROCK("terrain/rock"),
         CONCRETE("terrain/concrete"),
         SNOW("terrain/snow"),
-        LUNAR("terrain/lunar");
+        LUNAR("terrain/lunar"),
+        FUNGUS("sculpt/fungus-cliff"),
+        DESERT("terrain/sand"),
+        MARS("sculpt/mars-bedrock");
 
         final String wall;
 

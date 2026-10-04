@@ -220,8 +220,10 @@ class GpuCliffMaterialsSmokeTest {
         int color = switch (family) {
             case GRASS -> 0xff7c9262;
             case DIRT -> 0xff9a8065;
-            case SAND -> 0xffcdb18a;
+            case SAND, DESERT -> 0xffcdb18a;
+            case MARS -> 0xff97684f;
             case ROCK, LUNAR -> 0xff9a9992;
+            case FUNGUS -> 0xff827589;
             case CONCRETE -> 0xff999996;
             case SNOW -> 0xffdedee0;
         };

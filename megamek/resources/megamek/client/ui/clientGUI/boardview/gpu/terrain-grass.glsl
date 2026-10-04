@@ -32,11 +32,8 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
     vec2 direction = vec2(cos(angle), sin(angle));
     vec3 side = vec3(-direction.y, direction.x, 0.0);
     float meadow = meadowCover(root.xy / u_worldMetre);
-    // Most meadow blades are short; occasional taller stems follow the same moist patches as the ground.
-    float stature = variation * variation;
-    stature *= stature * variation;
-    float height = u_coverHexWidth * GRASS_MAX_HEIGHT * mix(.08, 1.0, stature) * mix(.35, 1.0, meadow);
-    float width = u_coverHexWidth * mix(.0006, .0015, grassRandom(seed + 37u)) * mix(.75, 1.0, meadow);
+    float height = u_coverHexWidth * mix(.025, GRASS_MAX_HEIGHT, variation) * mix(.55, 1.0, meadow);
+    float width = u_coverHexWidth * mix(.0015, .0028, grassRandom(seed + 37u)) * mix(.75, 1.0, meadow);
     // Fractional growth of the last blade keeps density transitions continuous, without shading invisible blades.
     float growth = clamp(density - a_coverRoot.w, 0.0, 1.0);
     float t = samplePoint.y;

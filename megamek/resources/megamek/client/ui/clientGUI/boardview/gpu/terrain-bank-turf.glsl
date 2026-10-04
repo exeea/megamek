@@ -3,9 +3,11 @@
 out vec2 v_coverData;
 out vec2 v_coverRoot;
 in vec4 a_turfWeights;
-in vec3 a_turfOthers;
+in vec4 a_turfOthers;
+in vec2 a_turfArid;
 out vec4 v_turfWeights;
-out vec3 v_turfOthers;
+out vec4 v_turfOthers;
+out vec2 v_turfArid;
 vec3 turfPosition() {
     float tip = smoothstep(.4, .95, fract(a_texCoord0.y * 2.0));
     vec3 position = a_position;

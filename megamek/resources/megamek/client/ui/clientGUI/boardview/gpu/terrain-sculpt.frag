@@ -62,7 +62,9 @@ vec4 debrisWeights() {
     if (family(0.0)) return vec4(.55, 1.0, .45, 0.0);  // grass: rocky edges and scree, turf elsewhere
     if (family(1.0)) return vec4(.6, .9, .6, .45);     // dirt: gravel
     if (family(2.0)) return vec4(.85, .9, .5, .3);     // sand: desert pavement
+    if (family(DESERT_FAMILY) || family(MARS_FAMILY)) return vec4(.85, .9, .5, .3);
     if (family(3.0) || family(LUNAR_FAMILY)) return vec4(.5, .9, .6, .55); // rock/lunar: scree
+    if (family(FUNGUS_FAMILY)) return vec4(.8, .4, .6, .2); // cyan crust in sheltered rock pockets
     if (family(4.0)) return vec4(0.0);                  // concrete: clean slab
     return vec4(.75, .9, .7, .12);                     // snow: wind-scoured rock
 }
@@ -72,7 +74,10 @@ vec3 groundBounceFor(float f) {
     if (abs(f) < .5) return vec3(.15, .145, .06);
     if (abs(f - 1.0) < .5) return vec3(.22, .15, .10);
     if (abs(f - 2.0) < .5) return vec3(.42, .28, .16);
+    if (abs(f - DESERT_FAMILY) < .5) return vec3(.35, .23, .13);
+    if (abs(f - MARS_FAMILY) < .5) return vec3(.34, .14, .07);
     if (abs(f - 3.0) < .5 || abs(f - LUNAR_FAMILY) < .5) return vec3(.22, .21, .19);
+    if (abs(f - FUNGUS_FAMILY) < .5) return vec3(.23, .20, .28);
     if (abs(f - 4.0) < .5) return vec3(.30, .29, .27);
     if (f > VOLCANIC_CRUST_FAMILY - .5) return vec3(.04, .025, .018);
     return vec3(.75, .78, .82);
@@ -82,7 +87,9 @@ vec3 groundBounce() { return groundBounceFor(u_sculptFamily); }
 
 // Bed colour around the wall map's own tint: hard beds pale, soft beds deeper.
 vec3 bedTintFor(float f, float hardness) {
-    if (abs(f - 2.0) < .5) return mix(vec3(.90, .86, .83), vec3(1.06, 1.03, 1.0), hardness);
+    if (abs(f - 2.0) < .5 || abs(f - DESERT_FAMILY) < .5 || abs(f - MARS_FAMILY) < .5) {
+        return mix(vec3(.90, .86, .83), vec3(1.06, 1.03, 1.0), hardness);
+    }
     if (abs(f - 1.0) < .5) return mix(vec3(.86, .80, .74), vec3(1.08, 1.04, 1.0), hardness);
     // The bedrock under a concrete slab: darker than the pale concrete it carries.
     if (abs(f - 4.0) < .5) return mix(vec3(.62, .61, .59), vec3(.80, .78, .75), hardness);
@@ -152,6 +159,7 @@ void main() {
     float roughness = .9, volcanic = 0.0;
     float caustic = 0.0;
     float grass = family(0.0) ? 1.0 : 0.0;
+    float sand = family(2.0) ? 1.0 : 0.0;
     vec3 bounce = groundBounce();
     float response = u_groundResponse;
     float rainCover = step(0.0, response);
@@ -355,13 +363,13 @@ void main() {
             float rock = ground ? rockiness(steps) : v_color.g;
             // A bank blend must use sediment below the waterline, never repaint the bed with neighbouring turf.
             blendCovers(materialWorld, face, foot, rim, rock, ground ? .5 : v_color.a, sediment,
-                  broad, fine, region, albedo, normal, cavity, materialHeight, grass, bounce, response, rainCover,
+                  broad, fine, region, albedo, normal, cavity, materialHeight, grass, sand, bounce, response, rainCover,
                   emission, roughness, volcanic);
         }
 #endif
         if (natural) {
             biomeSurface(world, face, shore, above, cliff || bedrock ? v_diffuseUV.x : 0.0,
-                  cliff || bedrock ? v_diffuseUV.y : v_diffuseUV.x, materialHeight,
+                  cliff || bedrock ? v_diffuseUV.y : v_diffuseUV.x, materialHeight, sand,
                   albedo, normal, cavity, grass, bounce, biomePool, biomeDamp);
         }
         if (ground && grass > 0.0 && !shore && u_wind.z > 0.0) {

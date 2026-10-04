@@ -34,6 +34,15 @@ and a talus foot. Its corner fillets and transition bands must preserve a usable
 and shared edge samples. Decorative displacement remains bounded; picking bounds must
 include the permitted horizontal overhang and vertical headroom.
 
+Tall natural transitions use elongated joints along a shared oblique strike.
+The same joints connect vertical ribs, breaks in the caprock and deposits at the
+foot. Smaller slopes keep their soil mantle and quieter jointing. Fallen-block
+groups sample recesses in the actual shaped face; they reuse
+the existing candidate count, assets and clearance checks. The sampling grid stays
+fixed across dressing LODs. No additional terrain subdivisions are introduced.
+The transition band and rock relief share the talus-height field; fallen blocks
+use it too, so the deposit does not repeat a uniform horizontal band.
+
 Grass/dirt and snow use soil/cover mantles on small steps, exposing rock on taller
 faces. Sand and rock retain steeper geological profiles. Concrete stays constructed:
 up to two levels it is a cast wall; taller differences expose bedrock beneath the top
@@ -42,7 +51,8 @@ slab. `BoardConcrete` also owns the fitted corners used by adjacent material con
 Dry grassy two-level transitions have two earthen faces separated by a shallow shoulder
 at the intermediate level. `BoardRelief.band` shapes it within the existing transition
 width and preserves the rim, foot and game elevations. Canonical corner evaluation,
-surface support and grass planting see the same shoulder. Single-level slopes, water
+surface support and grass planting see the same shoulder. Its strength varies in
+world space, while the height profile stays monotone. Single-level slopes, water
 contacts and explicitly marked cliff faces retain their own profiles. The grass material
 uses the existing rim/foot heights and world-space variation to add an irregular turf
 lip and patches on the shoulder, including overhead views with grass blades hidden.
@@ -69,6 +79,10 @@ Material detail belongs in the fragment shader: world-space wear exposes soil an
 rock on low-poly slopes without relying on small changes in mesh normals.
 Ground vertices shared with a sculpted cliff foot use zero foot distance, so debris
 coverage continues across that contact despite the displaced outline.
+Plateau vertices at the sculpted rim likewise use zero rim distance. Measuring those
+vertices against the approximate lattice segment instead could move the cover contact
+several metres away. Sand and snow now expose irregular rock shoulders across that
+shared crest through the existing material roles; open flats retain their cover.
 Corner relief fades over the tangent space left by both transition bands and rounded
 corners. Using the original edge length let adjacent columns reverse into a hanging
 strip in Mines 1; the corrected fade keeps the shared endpoints and triangle count.
@@ -131,8 +145,10 @@ their own anisotropic filtering: libGDX's `setAnisotropicFilter` only addresses
 Sculpt albedo textures store height in alpha; their tangent-normal partners store
 ambient occlusion in alpha. Repeat scales come from the asset metadata.
 LUNAR has independent `lunar`, `lunar-scree` and `lunar-cliff` map pairs and a
-`terrain/lunar.png` fallback. These start as byte-identical copies of the original
-ROCK maps, with matching geology parameters; editing lunar assets leaves ROCK alone.
+`terrain/lunar.png` fallback. These began as copies of the original ROCK maps and
+geology. Terrestrial rock now has broader masses and a new granite contact source;
+lunar retains its original separate assets/profile. Editing either family must
+leave the other alone.
 World-space projections keep coordinates continuous across hexes. Two differently
 oriented ground samples reduce repetition; walls use compatible vertical projections.
 Bare dirt and the soil mantle beneath grass/dirt also mix two translated, differently
@@ -152,6 +168,23 @@ measured scan. Dirt repeats at 5 m, soil at 4 m; no additional runtime maps are 
 The bank source represents cohesive eroded subsoil instead of a carpet of loose gravel;
 its estimated relief spans 9.5 cm, with aligned normal and cavity channels.
 Updating dirt alone does not update exposed grass banks, which use `soil-contact`.
+
+The same baker supplies the sandstone and `granite-contact` pairs from
+`sandstone.png` and `granite-bedrock.png` in that source directory, with exact prompts
+beside them. Sandstone repeats at 12 m with estimated relief of 16 cm; granite at 8 m
+with 8 cm. Their broader rock planes and discontinuous fractures replace the former
+brick-like sandstone and densely mottled granite. Run
+`python tools/prepare_terrain_contact.py --only sandstone granite-bedrock`, then the
+same command with `--check`. The older `granite.png` source remains available for
+comparison; `granite-bedrock` now bakes the existing `granite-contact` runtime slot.
+See the [realism plan](gpu-terrain-realism.md) for references and visual acceptance.
+
+The authored `sand-ground`, `meadow-ground` and `granite-scree` sources also bake
+through that tool, into the existing `sand`, `grass` and `scree` slots. Their
+repeats remain 6, 4 and 4 metres; estimated relief is 2.5, 2.5 and 10 cm. They
+replace the former procedural surface patterns without extra maps, layers or
+mesh detail. Lunar retains its own `lunar-scree` map. Run the baker without
+`--only` to restore all authored materials after a procedural rebuild.
 
 `terrain-materials.glsl` owns that common evaluation.
 `terrain-projection.glsl` owns projection helpers, and `terrain-concrete.glsl` handles

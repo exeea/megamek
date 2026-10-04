@@ -104,9 +104,9 @@ final class BoardScatter {
         BoardScene.Surface surface = BoardFeatures.surface(hex);
         float density = switch (surface) {
             case GRASS -> .16f;
-            case ROCK, LUNAR -> .18f;
+            case ROCK, LUNAR, FUNGUS -> .18f;
             case DIRT -> .12f;
-            case SAND -> .10f;
+            case SAND, DESERT, MARS -> .10f;
             case SNOW -> .06f;
             case CONCRETE -> 0;
         };
@@ -117,7 +117,8 @@ final class BoardScatter {
         }
         int count = 3 + random.nextInt(4);
         String theme = hex.getTheme() == null ? "" : hex.getTheme().toLowerCase(Locale.ROOT);
-        boolean plants = !theme.contains("lunar") && !theme.contains("mars") && !theme.contains("volcan");
+        boolean plants = !hex.containsTerrain(Terrains.SAND)
+              && !theme.contains("lunar") && !theme.contains("mars") && !theme.contains("volcan");
         for (int index = 0; index < count; index++) {
             int choice = random.nextInt(10);
             String asset = choice % 2 == 0 ? "scatter-rock" : "scatter-slab";
@@ -129,8 +130,11 @@ final class BoardScatter {
                 }
             } else if (plants && surface == BoardScene.Surface.DIRT && choice < 4) {
                 asset = "scatter-dry-grass";
-            } else if (plants && surface == BoardScene.Surface.SAND && choice == 0) {
+            } else if (plants && (surface == BoardScene.Surface.SAND || surface == BoardScene.Surface.DESERT) && choice == 0) {
                 asset = "scatter-plant";
+            }
+            if (surface == BoardScene.Surface.FUNGUS) {
+                asset = BoardFungus.SCATTER.get(random.nextInt(BoardFungus.SCATTER.size()));
             }
             double angle = random.nextDouble() * Math.PI * 2;
             float radius = 16 + 12 * (float) Math.sqrt(random.nextFloat());

@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doReturn;
@@ -26,6 +27,7 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListenerAdapter;
@@ -185,10 +187,14 @@ class GpuBoardSmokeTest {
                             capture("deployment-ranges.png");
                         } else if (frames() == 210) {
                             Vector3 direction = new Vector3(boardCamera.camera.direction);
-                            Vector3 focus = new Vector3(boardCamera.focus);
+                            Ray ray = new Ray(boardCamera.focus.cpy().mulAdd(direction, -1000), direction);
+                            var hit = boardCamera.terrainHit.apply(ray);
+                            assertNotNull(hit, "The view center must see the installed terrain");
+                            Vector3 focus = ray.getEndPoint(new Vector3(), (float) Math.sqrt(hit.distance()));
                             cameraDrag(true, 120, 40);
                             assertFalse(direction.epsilonEquals(boardCamera.camera.direction, 0.001f));
-                            assertTrue(focus.epsilonEquals(boardCamera.focus, 0.001f));
+                            assertTrue(focus.epsilonEquals(boardCamera.focus, .01f),
+                                  "Mouse orbit must hold the visible terrain at the center");
                             assertEquals(2, boardClicks.get(), "Orbit gestures must not issue game commands");
                         } else if (frames() == 216) {
                             capture("orbit.png");
