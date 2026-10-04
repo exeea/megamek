@@ -645,6 +645,7 @@ final class GpuTerrain implements Disposable {
     private final GpuBiomeSurface biomes = new GpuBiomeSurface();
     private final GpuPropBatch propBatch = new GpuPropBatch();
     private final GpuFungus fungus = new GpuFungus();
+    private final GpuGeysers geysers = new GpuGeysers();
     private BoardScene coverScene;
     /** GL-thread cache derived from the immutable source tiles; published with the existing terrain rebuild. */
     private List<BoardScene.Tile> lunarSource, lunarTiles;
@@ -1093,6 +1094,7 @@ final class GpuTerrain implements Disposable {
         final List<Prop> cutaways = new ArrayList<>();
         final GpuTreeInstances.Stand stand = new GpuTreeInstances.Stand();
         final List<GpuFungus.Emitter> spores = new ArrayList<>();
+        final List<GpuGeysers.Emitter> geysers = new ArrayList<>();
         final List<GpuLavaLighting.Source> fungalLights = new ArrayList<>();
         float treeDiameter;
         int treeLod;
@@ -2566,6 +2568,17 @@ final class GpuTerrain implements Disposable {
                 if (building == null && material.id.equals("wall")) {
                     material.get(TextureAttribute.class, TextureAttribute.Diffuse).scaleV = feature.height();
                 }
+                if (material.id.startsWith("geyser-")) {
+                    // Mineral deposits and rocks use the same lighting/wetness as the terrain.
+                    material.set(new Ground(.15f));
+                    if (material.id.equals("geyser-rock")) {
+                        material.set(TextureAttribute.createNormal(assets.material(feature.asset().endsWith("magma")
+                              ? "sculpt/volcano-basalt-normal" : "sculpt/rock-normal")));
+                    } else if (material.id.equals("geyser-lava")) {
+                        Material lava = GpuMagmaShader.material(assets, GpuMagmaShader.LAVA, null);
+                        if (lava != null) { for (Attribute attribute : lava) { material.set(attribute.copy()); } }
+                    }
+                }
             }
             BoundingBox bounds = instance.calculateBoundingBox(new BoundingBox());
             boolean coral = feature.asset().startsWith("mars/");
@@ -2638,6 +2651,15 @@ final class GpuTerrain implements Disposable {
                       .scale(horizontalScale, horizontalScale, verticalScale);
             }
             bounds.mul(instance.transform);
+            GpuGeysers.Emitter geyser = GpuGeysers.emitter(feature.asset(), instance.transform);
+            if (geyser != null) {
+                chunk.geysers.add(geyser);
+                // Include the animated plume in the owning chunk's culling envelope.
+                float reach = 20 * geyser.scale();
+                bounds.ext(geyser.origin().x - reach, geyser.origin().y - reach, geyser.origin().z);
+                bounds.ext(geyser.origin().x + reach, geyser.origin().y + reach,
+                      geyser.origin().z + (geyser.active() ? 40 : 15) * geyser.scale());
+            }
             if (fungusScatter && (surface.relief.obstructed(new Vector3(px, py, base),
                   Math.max(bounds.getWidth(), bounds.getHeight()) * .5f, bounds.getDepth())
                   || !surface.relief.visibleScatter(new Vector3(px, py, base), bounds.getDepth()))) { continue; }
@@ -2983,7 +3005,9 @@ final class GpuTerrain implements Disposable {
         bed = surface.renderBed(bed);
         Map<GpuSurfaceBlend.Palette, List<GpuSurfaceBlend.Triangle>> groups = new LinkedHashMap<>();
         float spacing = GpuSurfaceBlend.spacing(lod);
-        if (BoardSurfaceBlend.cliffBoundary(scene, tile)) {
+        // Open-water banks belong to their adjacent land. Process them with the shared water field below,
+        // before a water hex's authored mixture can consume these faces and repaint the shore with its nominal theme.
+        if (openWater(tile) == null && BoardSurfaceBlend.cliffBoundary(scene, tile)) {
             if (tile.liquid().volcanic() && tile.detailedGround()) {
                 formed.addAll(ground);
                 ground.clear();
@@ -3009,44 +3033,37 @@ final class GpuTerrain implements Disposable {
             }
         }
         if (openWater(tile) != null) {
-            List<BoardSurface> waters = null;
-            for (int edge = 0; edge < 6; edge++) {
-                var land = scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(edge)));
-                if (!BoardSurfaceBlend.boundary(scene, land)) { continue; }
-                List<BoardSurface.Face> blended = new ArrayList<>();
-                int bankEdge = edge;
-                formed.removeIf(face -> {
-                    var a = surface.relief.shade(face.a());
-                    var b = surface.relief.shade(face.b());
-                    var c = surface.relief.shade(face.c());
-                    boolean cover = face.landEdge() == bankEdge && a != null && b != null && c != null
-                          && (a.kind() == BoardRelief.Kind.GROUND || a.kind() == BoardRelief.Kind.SUBMERGED_CLIFF)
-                          && b.kind() == a.kind() && c.kind() == a.kind();
-                    if (cover) { blended.add(face); }
-                    return cover;
-                });
-                List<BoardSurface.Face> bars = new ArrayList<>();
-                bed.removeIf(face -> {
-                    if (face.landEdge() != bankEdge) { return false; }
-                    bars.add(face);
-                    return true;
-                });
-                if (blended.isEmpty() && bars.isEmpty()) { continue; }
-                if (waters == null) { waters = coveringWaters(scene, surface, surfaces); }
-                for (var face : blended) {
-                    coveredPolygons(surface, face, waters, polygon -> GpuSurfaceBlend.appendPolygon(groups,
-                          land.surface(), polygon, p -> BoardSurfaceBlend.sample(scene, land, p.x, p.y, p.z), spacing));
-                }
-                for (var face : bars) {
-                    coveredPolygons(face, waters, p -> {
-                        var shade = surface.relief.shade(p);
-                        return shade != null ? sculptVertex(p, shade, Float.NaN, surface)
-                              : vertex(p, bedNormals.get(p), 99, 99,
-                                    new Color(1, (tile.elevation() + 64) / 255f, 0, .3f));
-                    }, polygon -> GpuSurfaceBlend.appendPolygon(groups, land.surface(), polygon,
-                          p -> BoardSurfaceBlend.sample(scene, land, p.x, p.y, p.z), spacing));
-                }
+            // Every natural bank and bed triangle queries one shared field. Processing only the sectors facing
+            // mixed land leaves radial wedges with the water hex's material, including at water-to-water edges.
+            List<BoardSurface.Face> blended = new ArrayList<>();
+            formed.removeIf(face -> {
+                var land = face.landEdge() < 0 ? null
+                      : scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(face.landEdge())));
+                if (land != null && !land.liquid().present() && !BoardSurfaceBlend.natural(land)) { return false; }
+                var a = surface.relief.shade(face.a());
+                var b = surface.relief.shade(face.b());
+                var c = surface.relief.shade(face.c());
+                boolean cover = a != null && b != null && c != null
+                      && (a.kind() == BoardRelief.Kind.GROUND || a.kind() == BoardRelief.Kind.SUBMERGED_CLIFF)
+                      && b.kind() == a.kind() && c.kind() == a.kind();
+                if (cover) { blended.add(face); }
+                return cover;
+            });
+            var waters = coveringWaters(scene, surface, surfaces);
+            for (var face : blended) {
+                coveredPolygons(surface, face, waters, polygon -> GpuSurfaceBlend.appendPolygon(groups,
+                      surface.family(face), polygon, p -> BoardSurfaceBlend.sample(scene, tile, p.x, p.y, p.z), spacing));
             }
+            for (var face : bed) {
+                coveredPolygons(face, waters, p -> {
+                    var shade = surface.relief.shade(p);
+                    return shade != null ? sculptVertex(p, shade, Float.NaN, surface)
+                          : vertex(p, bedNormals.get(p), 99, 99,
+                                new Color(1, (tile.elevation() + 64) / 255f, 0, .3f));
+                }, polygon -> GpuSurfaceBlend.appendPolygon(groups, surface.family(face), polygon,
+                      p -> BoardSurfaceBlend.sample(scene, tile, p.x, p.y, p.z), spacing));
+            }
+            bed.clear();
         }
         return new SculptPlan(walls, ground, formed, bed, bedNormals, groups);
     }
@@ -4246,7 +4263,7 @@ final class GpuTerrain implements Disposable {
             waterPages.render(batch, environment, false);
             batch.end();
             waterPages.dispose();
-            renderFungus(camera);
+            renderSceneryEffects(camera);
             return;
         }
         waterPages.prepare();
@@ -4263,16 +4280,23 @@ final class GpuTerrain implements Disposable {
         batch.begin(camera);
         waterPages.render(batch, environment, false);
         batch.end();
-        renderFungus(camera);
+        renderSceneryEffects(camera);
     }
 
-    private void renderFungus(Camera camera) {
+    private void renderSceneryEffects(Camera camera) {
         fungus.begin();
+        geysers.begin();
         if (!clay) {
-            for (Chunk chunk : chunks) { fungus.add(chunk.spores, camera); }
+            for (Chunk chunk : chunks) {
+                fungus.add(chunk.spores, camera);
+                geysers.add(chunk.geysers, camera);
+            }
         }
         fungus.render(camera, clock, wind);
+        geysers.render(camera, clock, gravity, wind, atmosphere == null ? Color.WHITE : atmosphere.groundLight());
     }
+
+    int geyserParticles() { return geysers.particles(); }
 
     int fungusParticles() { return fungus.particles(); }
 
@@ -4720,6 +4744,7 @@ final class GpuTerrain implements Disposable {
         biomes.dispose();
         propBatch.dispose();
         fungus.dispose();
+        geysers.dispose();
         terrainPages.dispose();
         waterPages.dispose();
         trees.dispose();

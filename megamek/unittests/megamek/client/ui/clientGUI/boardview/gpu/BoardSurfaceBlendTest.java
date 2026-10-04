@@ -273,6 +273,39 @@ class BoardSurfaceBlendTest {
     }
 
     @Test
+    void adjacentWaterBedsStayContinuousAcrossAllSixEdges() {
+        for (int depth : new int[] { 0, 1 }) for (int direction = 0; direction < 6; direction++) {
+            int waterDepth = depth;
+            var next = CENTER.translated(direction);
+            var scene = scene(c -> tile(c,
+                  c.equals(CENTER) ? BoardScene.Surface.DESERT : c.equals(next) ? BoardScene.Surface.MARS
+                        : c.distance(CENTER) <= c.distance(next) ? BoardScene.Surface.GRASS : BoardScene.Surface.TROPICAL,
+                  0, c.equals(CENTER) || c.equals(next) ? waterDepth : -1, 0));
+            var first = scene.tile(CENTER);
+            var second = scene.tile(next);
+            var a = BoardGeometry.center(CENTER, 0);
+            var b = BoardGeometry.center(next, 0);
+            for (float along : new float[] { -.35f, 0, .35f }) {
+                var midpoint = new Vector3(a).lerp(b, .5f);
+                var across = new Vector3(b).sub(a).nor();
+                midpoint.add(-across.y * along * BoardGeometry.width() / 2,
+                      across.x * along * BoardGeometry.width() / 2, 0);
+                midpoint.z = BoardGeometry.groundZ(first);
+                float epsilon = BoardRelief.metres(.001f);
+                var left = new Vector3(midpoint).mulAdd(across, -epsilon);
+                var right = new Vector3(midpoint).mulAdd(across, epsilon);
+                var before = BoardSurfaceBlend.sample(scene, first, left.x, left.y, left.z);
+                var after = BoardSurfaceBlend.sample(scene, second, right.x, right.y, right.z);
+                assertEquals(before, BoardSurfaceBlend.sample(scene, second, left.x, left.y, left.z));
+                for (int family = 0; family < BoardSurfaceBlend.FAMILIES; family++) {
+                    assertEquals(before.weight(family), after.weight(family), .003f,
+                          "Water boundary at depth " + depth + ", direction " + direction + ", position " + along);
+                }
+            }
+        }
+    }
+
+    @Test
     void shallowBarsShareTheirCentralCoverAndKeepBankPalettesBounded() {
         var scene = BoardTerrainDetailTest.shores(0, false);
         var water = scene.tile(BoardTerrainDetailTest.WATER);

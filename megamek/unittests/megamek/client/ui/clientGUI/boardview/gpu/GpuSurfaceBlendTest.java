@@ -17,19 +17,43 @@ import megamek.common.Hex;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class GpuSurfaceBlendTest {
     @ParameterizedTest
-    @ValueSource(ints = { 0, 1 })
-    void authoredWaterMixturesKeepTheAdjacentLandsCoverOnTheirBanks(int depth) {
+    @ValueSource(ints = { 0, 1, 2, 4 })
+    void submergedBanksRetainTheAdjacentLandsGeology(int level) {
+        var center = BoardSurfaceBlendTest.CENTER;
+        var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+              c.equals(center) ? BoardScene.Surface.GRASS : BoardScene.Surface.LUNAR,
+              c.equals(center) ? 0 : level, c.equals(center) ? 1 : -1, 0));
+        var water = scene.tile(center);
+        var surface = new BoardSurface(scene, water);
+        var plan = GpuTerrain.prepareSculpt(scene, water, surface, -BoardGeometry.level(), TerrainLod.FULL,
+              new java.util.HashMap<>());
+        int checked = 0;
+        for (var triangles : plan.blended().values()) for (var triangle : triangles) {
+            for (var point : List.of(triangle.a(), triangle.b(), triangle.c())) {
+                assertEquals(1, point.cover().lunar(), .00001f,
+                      "The land's geology must continue across its banks and bed below the waterline");
+                checked++;
+            }
+        }
+        assertTrue(checked > 0, "Exercise the prepared submerged bank vertices");
+    }
+
+    @ParameterizedTest
+    @CsvSource({ "0, false", "0, true", "1, false", "1, true" })
+    void authoredWaterMixturesKeepTheAdjacentLandsCoverOnTheirBanks(int depth, boolean adjacentWater) {
         var center = BoardSurfaceBlendTest.CENTER;
         var tropical = center.translated(2);
         var scene = BoardSurfaceBlendTest.scene(c -> {
-            var hex = new Hex(0, c.equals(center) ? "water:" + depth + ";ground_fluff:3:2"
+            boolean wet = c.equals(center) || adjacentWater && c.equals(center.translated(5));
+            var hex = new Hex(0, wet ? "water:" + depth + ";ground_fluff:3:2"
                   : c.equals(tropical) ? "ground_fluff:1:3" : "",
-                  c.equals(center) ? "desert" : c.equals(tropical) ? "tropical" : "grass", c);
+                  wet ? "desert" : c.equals(tropical) ? "tropical" : "grass", c);
             var artwork = new BoardArtwork.HexImage(c, null, null, null, null, null, List.of(), Map.of(), null);
             return BoardScene.captureTile(hex, artwork, null, new BoardScene.PixelPool());
         });
@@ -38,6 +62,7 @@ class GpuSurfaceBlendTest {
         var surface = new BoardSurface(scene, water);
         var plan = GpuTerrain.prepareSculpt(scene, water, surface, -BoardGeometry.level(), TerrainLod.FULL,
               new java.util.HashMap<>());
+        assertTrue(plan.bed().isEmpty(), "Every natural bed sector must use the shared field, including water-to-water edges");
         int checked = 0;
         for (var triangles : plan.blended().values()) for (var triangle : triangles) {
             for (var point : List.of(triangle.a(), triangle.b(), triangle.c())) {
@@ -288,7 +313,7 @@ class GpuSurfaceBlendTest {
     }
 
     @Test
-    void aNarrowMaterialBorderDoesNotSpreadAcrossTheFlatFan() {
+    void materialBordersKeepTheirSampledWidthAndPureTileCentres() {
         var center = BoardSurfaceBlendTest.CENTER;
         for (int direction = 0; direction < 6; direction++) {
             var neighbor = center.translated(direction);
@@ -308,11 +333,11 @@ class GpuSurfaceBlendTest {
                 float actual = BoardSurfaceBlend.sample(scene, tile, p.x, p.y, p.z).sand();
                 float interpolated = interpolatedCover(triangles, p, BoardScene.Surface.SAND);
                 maxError = Math.max(maxError, Math.abs(actual - interpolated));
-                if (step <= 50) {
-                    assertEquals(0, interpolated, .025f, "The pure interior must not become a half-hex material fade");
+                if (step <= 25) {
+                    assertEquals(0, interpolated, .025f, "The wider contact must still leave the tile's centre pure");
                 }
             }
-            assertTrue(maxError < .125f, "The narrow boundary must retain its sampled shape: " + maxError);
+            assertTrue(maxError < .125f, "The material boundary must retain its sampled shape: " + maxError);
         }
     }
 

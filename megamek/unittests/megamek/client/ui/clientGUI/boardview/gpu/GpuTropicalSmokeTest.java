@@ -44,6 +44,12 @@ class GpuTropicalSmokeTest {
             study.setHex(new Coords(x, y), new Hex(y < 2 ? 2 : 0, cover, theme));
         }
         var contacts = BoardAridSurfaceTest.capture(study);
+        var themes = List.of("grass", "tropical", "desert", "snow", "fungus", "volcano");
+        var gradients = Board.createEmptyBoard(themes.size() * 2, 5);
+        for (int x = 0; x < themes.size() * 2; x++) for (int y = 0; y < 5; y++) {
+            gradients.setHex(new Coords(x, y), new Hex(0, "", themes.get(x / 2)));
+        }
+        var themeContacts = BoardAridSurfaceTest.capture(gradients);
         var tropical = Board.createEmptyBoard(7, 5);
         for (int x = 0; x < 7; x++) for (int y = 0; y < 5; y++) {
             tropical.setHex(new Coords(x, y), new Hex(x < 2 ? 1 : 0,
@@ -117,6 +123,13 @@ class GpuTropicalSmokeTest {
                         camera.center(BoardGeometry.center(new Coords(4, 3), 0));
                         renderReady(terrain, frame, camera, contacts);
                         GpuReviewFrame.save(new File(output, oblique ? "contacts-oblique.png" : "contacts-top.png"));
+                    }
+                    for (boolean oblique : new boolean[] { false, true }) {
+                        camera.setIsometric(oblique);
+                        camera.camera.zoom = .7f;
+                        camera.center(BoardGeometry.center(new Coords(5, 2), 0));
+                        renderReady(terrain, frame, camera, themeContacts);
+                        GpuReviewFrame.save(new File(output, oblique ? "theme-gradients-oblique.png" : "theme-gradients-top.png"));
                     }
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) { failure.set(error); }

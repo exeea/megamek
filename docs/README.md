@@ -27,6 +27,8 @@ The feature guides explain the implementation boundaries and asset contracts.
 | Guide | What it explains |
 | --- | --- |
 | [Terrain overview](gpu-terrain.md) | How captured hexes become surfaces, features and render passes. |
+| [Tile scenery and decals](gpu-scenery.md) | Tileset coverage, decorative models, source variants, native roads, pools and asset validation. |
+| [Terrain realism plan](gpu-terrain-realism.md) | Gaea/World Creator reference analysis, current gaps, staged improvements and verification budgets. |
 | [Materials and geometry](gpu-terrain-materials.md) | Shared corners, cliffs, slopes, concrete, texture channels and world projection. |
 | [Terrain contacts](gpu-terrain-contacts.md) | Cross-material boundaries, cliff-foot deposits and shading-only refinement. |
 | [Roads](gpu-roads.md) | Footprints, masks, graded approaches, bridge inheritance and chunk invalidation. |
@@ -37,6 +39,9 @@ The feature guides explain the implementation boundaries and asset contracts.
 | [Fields and wetlands](gpu-fields-marsh.md) | Ground patterns, planted rows, reeds, support and liquid mixing. |
 | [Grass](gpu-grass-rendering.md) | Root preparation, instancing, projected density, cache reuse and shared wind. |
 | [Orchards](gpu-orchards.md) / [Understory](gpu-understory-foliage.md) / [Rough](gpu-rough.md) | Feature selection, placement, authored variants and clearance. |
+| [Mars corals](gpu-mars-corals.md) | Martian woods and jungle, Blender source assets, mesh detail levels and verification. |
+| [Tropical terrain](gpu-tropical.md) | Tropical forest floor, palms, jungle understory, authored transitions and Racice verification. |
+| [Fungal terrain](gpu-fungus.md) | Fungal surface roles, cliff attachment, bioluminescence and mushroom-hex mist. |
 | [Modular buildings](gpu-modular-buildings.md) / [Asset proportions](board-asset-proportions.md) | Module contracts, interior footprints, legacy dimensions and bridge assets. |
 | [Fire and smoke](gpu-terrain-fire-smoke.md) | Terrain hazard capture, volumetric drawing, lighting and detail. |
 | [Atmosphere](gpu-atmosphere.md) / [Clouds](gpu-clouds.md) | Scenario mapping, light, fog/composition, cloud shadows and wetness. |

@@ -62,6 +62,7 @@ final class BoardObstacles {
         for (var feature : tile.features()) {
             // Bridges already have height-aware passage/approach clearance. Fields are ground cover, not solids.
             if (feature.kind() != BoardScene.FeatureKind.BUILDING && feature.kind() != BoardScene.FeatureKind.PROP
+                  && feature.kind() != BoardScene.FeatureKind.SCENERY
                   || feature.asset().equals("bridge") || feature.asset().equals("field")) { continue; }
             boolean custom = feature.asset().startsWith("buildings/")
                   && BoardArtwork.customBuildingFile(feature.asset()).isFile();
@@ -112,7 +113,8 @@ final class BoardObstacles {
             }
             boolean fitHeight = custom || feature.kind() == BoardScene.FeatureKind.BUILDING
                   || feature.asset().startsWith("buildings/");
-            float verticalScale = custom ? BoardGeometry.level() / GpuBuilding.LEVEL_HEIGHT
+            float verticalScale = feature.kind() == BoardScene.FeatureKind.SCENERY ? scale
+                  : custom ? BoardGeometry.level() / GpuBuilding.LEVEL_HEIGHT
                   : feature.height() * BoardGeometry.level() / (fitHeight ? bounds.getDepth() : 1);
             float low = ground + feature.elevation() * BoardGeometry.level() + bounds.min.z * verticalScale;
             float height = custom ? feature.height() * BoardGeometry.level() : bounds.getDepth() * verticalScale;

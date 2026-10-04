@@ -15,18 +15,19 @@ vec3 levelGrade(vec3 c, float level, float fungus) {
     level = max(level, mix(-1.5, -6.0, fungus));
     // Levels count almost fully near the ground and ease off further away, so no height grades to white or black.
     float up = 6.0 * (1.0 - exp(-max(level, 0.0) / 6.0)), down = 6.0 * (1.0 - exp(-max(-level, 0.0) / 6.0));
-    float saturation = -1.0 * up + 1.0 * down;
-    float lightness = mix(4.0, 5.5, fungus) * up - mix(6.0, 7.0, fungus) * down;
+    float saturation = mix(-up + down, 22.0 - 12.0 * up + 2.0 * down, fungus);
+    float lightness = mix(4.0, 7.5, fungus) * up - mix(6.0, 7.0, fungus) * down;
     float contrast = .5 * up;
     // Warmer below: less blue, a little less green.
-    // Fungal plateaus cool gently toward blue/cyan; their sublevels deepen toward plum. Keep the same
-    // continuous grade on their tops, slopes and cliffs, with distinct negative levels as well as positive ones.
+    // Begin fungus darker and richer, leaving room for the cyan crust to lighten and lose saturation uphill.
+    // Grade the completed material mix, so the crust, underlying skin and slopes all follow the same height.
+    c *= mix(1.0, .82, fungus);
     c *= mix(vec3(1.0, 1.0 - .01 * down, 1.0 - .04 * down),
-          vec3(1.0 - .015 * up, 1.0 - .025 * down, 1.0 + .01 * up - .006 * down), fungus);
+          vec3(1.0, 1.0 - .025 * down, 1.0 - .006 * down), fungus);
     float luma = dot(c, vec3(.299, .587, .114));
     c = mix(vec3(luma), c, 1.0 + saturation / 100.0);
     // Dark ground lifts less, so a meadow's upper levels keep their green and their texture instead of bleaching.
-    vec3 highlight = mix(vec3(1.0, .97, .9), vec3(.86, .94, 1.0), fungus);
+    vec3 highlight = mix(vec3(1.0, .97, .9), vec3(.94, .96, 1.0), fungus);
     c = lightness >= 0.0 ? mix(c, highlight, lightness / 100.0 * min(1.0, luma / .55))
           : c * (1.0 + lightness / 100.0);
     c = (c - .5) * (1.0 + contrast / 100.0) + .5;

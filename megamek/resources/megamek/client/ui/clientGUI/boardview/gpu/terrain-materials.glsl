@@ -341,11 +341,14 @@ void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float
           coverPatch(world, u_coverFamilies.z), coverPatch(world, u_coverFamilies.w));
     float patchStrength = mix(1.5, 2.4, 1.0 - smoothstep(.35, .85, face.z));
     vec4 weights = materialWeights(raw, vec4(a.height, b.height, c.height, d.height) * .45 + patches * patchStrength);
-    // Tropical litter retains its texture in patches: a colour fade into bright desert loses the dark moss.
-    // Other authored gradients continue to interpolate whole materials, including color.
+    // Soften neighbouring covers without losing their interlocking texture. Authored tropical mixtures keep
+    // their dark litter patches in the interior; fade that exception with its actual contribution, never the
+    // triangle's palette membership, so a zero-weight tropical slot cannot introduce a material seam.
     vec4 proportions = raw / max(dot(raw, vec4(1.0)), .00001);
-    bool tropical = any(lessThan(abs(u_coverFamilies - TROPICAL_FAMILY), vec4(.5)));
-    weights = mix(weights, proportions, tropical ? 0.0 : clamp(v_coverInterpolation, 0.0, 1.0));
+    float authored = clamp(v_coverInterpolation, 0.0, 1.0);
+    float tropical = dot(proportions, vec4(lessThan(abs(u_coverFamilies - TROPICAL_FAMILY), vec4(.5))));
+    float gradient = mix(.55, 1.0, authored) * (1.0 - authored * smoothstep(0.0, .15, tropical));
+    weights = mix(weights, proportions, gradient);
     // Loose deposits leave a few windows onto this tile's actual substrate. Transfer coverage, not just colour,
     // so exposed turf/rock keeps its own normals, height, cavity and wet response. The CPU uses this same field
     // for grass roots; neither the board's SAND flag nor the terrain/support mesh changes.

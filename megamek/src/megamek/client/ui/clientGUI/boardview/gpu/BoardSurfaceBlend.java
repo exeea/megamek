@@ -11,7 +11,7 @@ import megamek.common.units.Terrains;
 
 /** Surface cover at a world position. Rendering and grass placement query the same immutable board snapshot. */
 public final class BoardSurfaceBlend {
-    static final float WIDTH_METRES = 4.5f;
+    static final float WIDTH_METRES = 7f;
     static final float FOOT_METRES = .9f;
     // Render-only covers derived from BoardLiquid; the board's terrain families and rules remain unchanged.
     static final int CRUST = BoardScene.Surface.values().length, BANK = CRUST + 1, FAMILIES = BANK + 1;
@@ -185,8 +185,9 @@ public final class BoardSurfaceBlend {
     private static boolean contact(BoardScene.Tile a, BoardScene.Tile b) {
         if (!blendable(b)) { return false; }
         if (a.liquid().present() && !a.liquid().volcanic()) {
-            return natural(b) && (a.elevation() == b.elevation()
-                  || BoardGeometry.tuning().stepsBetweenTops() && Math.abs(a.elevation() - b.elevation()) == 1);
+            // The bank includes the submerged continuation of higher land, including tall cliffs.
+            return natural(b) && (b.elevation() >= a.elevation()
+                  || BoardGeometry.tuning().stepsBetweenTops() && a.elevation() - b.elevation() == 1);
         }
         // Only the rock beneath a tall concrete slab joins natural ground. A higher natural cliff must not
         // spread its cover onto a lower paved surface or force that flat slab to subdivide for a material fade.
@@ -222,14 +223,37 @@ public final class BoardSurfaceBlend {
 
     /** The footprint, rather than the emitting mesh, owns the query; shared positions therefore agree. */
     static Cover sample(BoardScene scene, BoardScene.Tile owner, float x, float y, float z) {
-        if (!blendable(owner)) { return cover(owner, z); }
+        if (!blendable(owner) && !water(owner)) { return cover(owner, z); }
         var at = BoardGeometry.tile(scene, x, y);
         if (at == null || !blendable(at) && (!at.liquid().present() || at.frozen())) { return cover(owner, z); }
         if ((!at.liquid().present() || at.liquid().volcanic() || owner.surface() == BoardScene.Surface.CONCRETE)
               && !contact(owner, at)) {
             return cover(owner, z);
         }
+        if (water(at)) { return sampleWater(scene, at, x, y, z); }
         return sampleAt(scene, at, cover(owner, z), x, y, z, false);
+    }
+
+    private static boolean water(BoardScene.Tile tile) {
+        return tile != null && tile.liquid().present() && !tile.liquid().volcanic() && !tile.frozen();
+    }
+
+    /** Water hexes share their bank/bed fields across their boundaries, independently of triangle ownership. */
+    private static Cover sampleWater(BoardScene scene, BoardScene.Tile at, float x, float y, float z) {
+        float[] weights = new float[FAMILIES];
+        float total = 0, interpolation = 0;
+        float width = BoardRelief.metres(WIDTH_METRES);
+        for (int direction = -1; direction < 6; direction++) {
+            var tile = direction < 0 ? at : scene.tile(at.coords().translated(direction));
+            if (!water(tile) || tile.elevation() != at.elevation()) { continue; }
+            float amount = 1 - BoardRelief.smooth((distance(scene, tile.coords(), x, y) + width) / (2 * width));
+            if (amount <= .0001f) { continue; }
+            var cover = sampleAt(scene, tile, cover(tile, z), x, y, z, false);
+            for (int family = 0; family < FAMILIES; family++) { weights[family] += amount * cover.weight(family); }
+            interpolation += amount * cover.interpolation();
+            total += amount;
+        }
+        return total > .0001f ? cover(weights, total, interpolation / total) : cover(at, z);
     }
 
     private static Cover sampleAt(BoardScene scene, BoardScene.Tile at, Cover fallback,
@@ -295,7 +319,10 @@ public final class BoardSurfaceBlend {
             // A column's material reaches the foot and nearby talus. The receiving ground creeps a bounded
             // distance up that column, then disappears; it cannot paint the whole cliff or the upper plateau.
             if (water) {
-                float dz = Math.abs(Math.max(z, BoardGeometry.groundZ(at)) - BoardGeometry.groundZ(tile)) / BoardGeometry.level();
+                // Land continues down into the basin; only cover from below this height is attenuated.
+                // The water surface is the reference, not its recessed bed or an absolute height difference.
+                float dz = Math.max(0, Math.max(z, at.elevation() * BoardGeometry.level()) - BoardGeometry.groundZ(tile))
+                      / BoardGeometry.level();
                 weight *= 1 - BoardRelief.smooth((dz - .35f) / .65f);
             } else {
                 float above = Math.max(0, (z - BoardGeometry.groundZ(tile)) / BoardRelief.metres(1));

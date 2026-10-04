@@ -217,13 +217,44 @@ class BoardObstaclesTest {
               new Vector3(right, top, 0), new Vector3(left, top, 0), new Vector3(left, bottom, 0)));
     }
 
+    @Test
+    void everyGeyserClearsGrassFromItsBasinAndKeepsSurroundingMeadow() {
+        for (String state : List.of("water_off", "water_on", "magma")) {
+            var feature = new BoardScene.Feature("scenery/saxarba/misc/geyser_" + state,
+                  7, -3, 27, .8f, 0, 0, BoardScene.FeatureKind.SCENERY);
+            BoardScene scene = scene(CENTER, feature, 0, BoardScene.Surface.GRASS);
+            var tile = scene.tile(CENTER);
+            var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, BoardGeometry.floor(scene));
+            var roots = GpuGroundCover.plant(scene, tile, surface);
+            assertTrue(roots.size / 4 > 1500, "The surrounding meadow must remain planted: " + state);
+            float scale = BoardGeometry.hexScale();
+            float x = BoardGeometry.centerX(CENTER) + 7 * scale, y = BoardGeometry.centerY(CENTER) - 3 * scale;
+            float basin = 18 * .8f * scale;
+            int outside = 0;
+            for (int i = 0; i < roots.size; i += 4) {
+                float dx = roots.get(i) - x, dy = roots.get(i + 1) - y;
+                assertTrue(dx * dx + dy * dy > basin * basin, "No grass may emerge through the basin: " + state);
+                if (dx * dx + dy * dy > 30 * 30 * scale * scale) { outside++; }
+            }
+            assertTrue(outside > 500, "Grass outside the geyser footprint remains available");
+            var obstacles = new BoardObstacles(scene, tile);
+            assertTrue(obstacles.obstructs(new Vector3(x, y, 0), 0, 1));
+            assertFalse(obstacles.obstructs(new Vector3(x, y, -10 * scale), 0, scale),
+                  "The scenery footprint must not clear a separate lower ledge");
+        }
+    }
+
     private static BoardScene scene(Coords structure, BoardScene.Feature feature, int elevation) {
+        return scene(structure, feature, elevation, BoardScene.Surface.SAND);
+    }
+
+    private static BoardScene scene(Coords structure, BoardScene.Feature feature, int elevation, BoardScene.Surface surface) {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 5; x++) {
             for (int y = 0; y < 5; y++) {
                 Coords coords = new Coords(x, y);
                 tiles.add(new BoardScene.Tile(coords, coords.equals(structure) ? elevation : 0, -1, false, 0,
-                      BoardScene.Surface.SAND, null, null, null, null, null,
+                      surface, null, null, null, null, null,
                       coords.equals(structure) ? List.of(feature) : List.of(), List.of(), BoardLiquid.NONE, null, true));
             }
         }

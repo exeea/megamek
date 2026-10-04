@@ -98,6 +98,8 @@ final class GpuGroundCover implements Disposable {
             }
         }
         float iceReach = BoardRelief.metres(ICE_BORDER_REACH);
+        var obstacles = new BoardObstacles(scene, tile);
+        var root = new Vector3();
         for (int rank = 0; rank < ROOTS_PER_HEX; rank++) {
             // The same random sequence at every detail level: every candidate draws its place and its growth chance
             // before any ground-dependent rejection.
@@ -110,6 +112,10 @@ final class GpuGroundCover implements Disposable {
             var face = support.face(x, y);
             if (face == null) { continue; }
             float z = face.height(x, y);
+            // Test the actual authored triangles: geyser basins/rims and other
+            // scenery leave the surrounding grass and empty gaps untouched.
+            if (!obstacles.isEmpty() && obstacles.obstructs(root.set(x, y, z), 2 * BoardGeometry.hexScale(),
+                  MAX_HEIGHT_FRACTION * BoardGeometry.width())) { continue; }
             if (road != null && road.distance((x - centerX) / BoardGeometry.hexScale(),
                   (y - centerY) / BoardGeometry.hexScale()) < BoardRoad.SHOULDER + 1) { continue; }
             boolean iced = false;
