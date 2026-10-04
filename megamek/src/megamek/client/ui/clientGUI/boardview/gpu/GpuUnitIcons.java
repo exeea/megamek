@@ -37,7 +37,7 @@ final class GpuUnitIcons implements Disposable {
 
     /** Returns true when cached picking meshes must be released along with an obsolete atlas layout. */
     boolean update(boolean enabled, float threshold, Camera camera, BoardScene scene,
-          Map<BoardScene.Unit, UnitFootprint.Pose> poses, Map<BoardScene.Unit, Vector3> anchors, BoardSurface.Cache surfaces) {
+          Map<BoardScene.Unit, UnitFootprint.Pose> poses, Map<BoardScene.Unit, Vector3> anchors) {
         active = useIcons(enabled, camera, BoardGeometry.width() / BoardCamera.worldUnitsPerPixel(camera), threshold, active);
         if (!active) { return false; }
         var images = scene.units().stream().map(BoardScene.Unit::image).distinct()
@@ -62,9 +62,10 @@ final class GpuUnitIcons implements Disposable {
                 instances.put(key, instance);
             }
             var position = pose.position();
-            float ground = UnitLandingSupports.surface(scene, position.x, position.y, surfaces);
-            var tile = scene.tile(unit.location().coords());
-            if (!Float.isFinite(ground)) { ground = tile == null ? 0 : BoardGeometry.surfaceZ(tile); }
+            // The Tactical View's terrain: the tileset column under the icon, else the unit's own hex.
+            var tile = BoardGeometry.tile(scene, position.x, position.y);
+            if (tile == null) { tile = scene.tile(unit.location().coords()); }
+            float ground = tile == null ? 0 : BoardGeometry.surfaceZ(tile);
             float scale = SIZE_IN_HEXES * Math.min(BoardGeometry.width() / unit.image().width(),
                   BoardGeometry.height() / unit.image().height());
             instance.transform.setToTranslation(position.x, position.y, ground + .25f * BoardGeometry.hexScale())

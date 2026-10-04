@@ -24,7 +24,7 @@ import org.junit.jupiter.api.Test;
  * Review renders of shipped boards, such as the Savannah map pack that the user compares with its printed maps: each
  * board named by {@code megamek.gpu.boards} (paths under data/boards, comma separated) straight down and from an
  * oblique angle, at the hour {@code megamek.gpu.boards.hour}, with hex transitions as by default, drawn as on the board
- * ({@link GpuReviewFrame}).
+ * ({@link GpuReviewFrame}), or in the Tactical View's tileset columns with {@code megamek.gpu.boards.tactical}.
  */
 @Tag("on-demand")
 class GpuBoardFileSmokeTest {
@@ -66,6 +66,8 @@ class GpuBoardFileSmokeTest {
             @Override
             public void create() {
                 GpuTerrain terrain = new GpuTerrain();
+                boolean tactical = Boolean.getBoolean("megamek.gpu.boards.tactical");
+                terrain.setTacticalView(tactical);
                 GpuReviewFrame frame = new GpuReviewFrame(new BoardAtmosphere.Settings(hour, 0, 0,
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                 try {
@@ -93,7 +95,7 @@ class GpuBoardFileSmokeTest {
                             }
                             frame.render(terrain, camera, scene);
                             GpuReviewFrame.save(new File(output, names.get(i) + (oblique ? "-oblique" : "-top")
-                                  + String.format(Locale.ROOT, "-h%s.png", hour)));
+                                  + (tactical ? "-tactical" : "") + String.format(Locale.ROOT, "-h%s.png", hour)));
                         }
                     }
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());

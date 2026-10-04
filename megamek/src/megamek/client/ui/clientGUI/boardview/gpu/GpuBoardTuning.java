@@ -256,9 +256,17 @@ final class GpuBoardTuning {
                   + "ultralight Meks use Light Meks.", skin, "menu"));
         }
         section(skin, "Overview icons");
-        overviewIcons = checkbox(skin, "Tactical View (Top-View only)", "tuning-overview-icons");
-        overviewIcons.addListener(new TextTooltip("Replace units and trees with flat board artwork when zoomed out "
-              + "within 15 degrees of overhead. Also available in the Camera menu.", skin, "menu"));
+        overviewIcons = checkbox(skin, "Tactical View", "tuning-overview-icons");
+        overviewIcons.addListener(new TextTooltip("Draw the board as its tileset art on plain hex columns, starting from "
+              + "the top view. Units become icons when zoomed out within 15 degrees of overhead. Also available in the "
+              + "Camera menu.", skin, "menu"));
+        overviewIcons.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                // Entering the Tactical View moves the camera as the toolbar's Top view does.
+                if (!syncing && overviewIcons.isChecked()) { camera.setIsometric(false); }
+            }
+        });
         overview = controls(skin, List.of(new Knob("Icon switch hex px", 0, 256, 2, "%.0f")),
               this::applyOverview, 0);
         overview.getFirst().slider().addListener(new TextTooltip("Switch to icons when a hex is this many window pixels wide. "
@@ -543,7 +551,7 @@ final class GpuBoardTuning {
               this::applyRelief, 0, true);
         section(skin, "Material geology");
         geologyFamily = choice(skin, "Material", "tuning-geology-family",
-              new String[] { "Grass", "Dirt", "Sand", "Rock", "Concrete", "Snow", "Bedrock under slabs" }, this::syncGeology);
+              new String[] { "Grass", "Dirt", "Sand", "Rock", "Concrete", "Snow", "Lunar", "Bedrock under slabs" }, this::syncGeology);
         geology = controls(skin, List.of(
               new Knob("Joint width (m)", .25f, 20, .05f, "%.2f",
                     "Width of the large rock blocks in a cliff. Higher values make broader blocks."),

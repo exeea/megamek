@@ -216,7 +216,7 @@ class GpuMagmaSmokeTest {
         throw new AssertionError("No live lava advection program");
     }
 
-    private static BoardScene scene(boolean cooled) {
+    static BoardScene scene(boolean cooled) {
         var pixels = new BoardScene.Pixels(new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB));
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 9; x++) {

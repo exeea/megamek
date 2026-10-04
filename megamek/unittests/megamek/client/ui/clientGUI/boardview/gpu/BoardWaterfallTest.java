@@ -35,7 +35,7 @@ class BoardWaterfallTest {
         var tiles = scene.tiles().stream().map(t -> !t.liquid().molten() ? t
               : new BoardScene.Tile(t.coords(), t.elevation(), 1, t.frozen(), t.roadExits(), t.surface(),
                     t.ground(), t.normals(), t.decals(), t.decalsWithoutLimbs(), t.tactical(), t.features(), t.text(),
-                    BoardLiquid.WATER, t.foliage(), t.detailedGround(), t.road(), t.fireSmoke(), t.biome(), t.impassable())).toList();
+                    BoardLiquid.WATER, t.tileset(), t.detailedGround(), t.road(), t.fireSmoke(), t.biome(), t.impassable())).toList();
         return new BoardScene(scene.boardId(), scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
     }
 

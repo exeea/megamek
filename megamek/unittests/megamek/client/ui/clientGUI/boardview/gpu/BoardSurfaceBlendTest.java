@@ -121,15 +121,36 @@ class BoardSurfaceBlendTest {
     }
 
     @Test
+    void lunarAndRockKeepDistinctCoverageWithoutBecomingVolcanic() {
+        var scene = scene(c -> tile(c, c.equals(CENTER) ? BoardScene.Surface.LUNAR : BoardScene.Surface.ROCK, 0, -1, 0));
+        var lunar = scene.tile(CENTER);
+        var rock = scene.tile(CENTER.translated(2));
+        assertTrue(BoardSurfaceBlend.boundary(scene, lunar));
+        assertTrue(BoardSurfaceBlend.boundary(scene, rock));
+        assertFalse(new GpuSurfaceBlend.Palette(BoardScene.Surface.LUNAR, BoardScene.Surface.ROCK,
+              BoardScene.Surface.SAND).volcanic());
+        var center = BoardGeometry.center(CENTER, 0);
+        assertEquals(1, BoardSurfaceBlend.sample(scene, lunar, center.x, center.y, center.z).lunar());
+        var edge = center.lerp(BoardGeometry.center(rock.coords(), 0), .5f);
+        var cover = BoardSurfaceBlend.sample(scene, lunar, edge.x, edge.y, edge.z);
+        assertEquals(cover, BoardSurfaceBlend.sample(scene, rock, edge.x, edge.y, edge.z));
+        assertTrue(cover.lunar() > .05f && cover.rock() > .05f, cover.toString());
+        assertEquals(0, cover.crust());
+        assertEquals(0, cover.bank());
+    }
+
+    @Test
     void volcanicBoundariesShareCoverageOnLevelGround() {
         for (int family : new int[] { BoardSurfaceBlend.CRUST, BoardSurfaceBlend.BANK }) {
-            var scene = scene(c -> tile(c, c.equals(CENTER) ? family : BoardScene.Surface.ROCK.ordinal(), 0));
-            var next = CENTER.translated(2);
-            var p = BoardGeometry.center(CENTER, 0).lerp(BoardGeometry.center(next, 0), .5f);
-            var cover = BoardSurfaceBlend.sample(scene, scene.tile(CENTER), p.x, p.y, p.z);
-            assertEquals(cover, BoardSurfaceBlend.sample(scene, scene.tile(next), p.x, p.y, p.z));
-            assertTrue(cover.rock() > .05f && cover.weight(family) > .05f, cover.toString());
-            assertTrue(BoardSurfaceBlend.boundary(scene, scene.tile(CENTER)));
+            for (var host : new BoardScene.Surface[] { BoardScene.Surface.ROCK, BoardScene.Surface.LUNAR }) {
+                var scene = scene(c -> tile(c, c.equals(CENTER) ? family : host.ordinal(), 0));
+                var next = CENTER.translated(2);
+                var p = BoardGeometry.center(CENTER, 0).lerp(BoardGeometry.center(next, 0), .5f);
+                var cover = BoardSurfaceBlend.sample(scene, scene.tile(CENTER), p.x, p.y, p.z);
+                assertEquals(cover, BoardSurfaceBlend.sample(scene, scene.tile(next), p.x, p.y, p.z));
+                assertTrue(cover.weight(host) > .05f && cover.weight(family) > .05f, cover.toString());
+                assertTrue(BoardSurfaceBlend.boundary(scene, scene.tile(CENTER)));
+            }
         }
     }
 

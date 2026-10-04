@@ -509,6 +509,12 @@ class GpuBattleView extends ApplicationAdapter {
         boardGeneration = frame.boardGeneration();
         ui.setPlaybackPaused(playback.paused());
         var atmosphereSettings = ui.atmosphere();
+        atmosphere.configure(atmosphereSettings);
+        atmosphere.setOptions(ui.atmosphereOptions());
+        // Material readiness includes live lighting/cloud flags, before any visible terrain is submitted.
+        atmosphere.updateLight(boardCamera.camera);
+        terrain.setAtmosphere(atmosphere.lighting());
+        atmosphere.configureClouds(terrain, scene);
         terrain.setGravity(atmosphereSettings.gravity());
         terrain.update(scene, boardCamera.camera);
         boolean detailChanged = terrain.refine(boardCamera.camera);
@@ -549,9 +555,7 @@ class GpuBattleView extends ApplicationAdapter {
         tactical.update(scene, detailChanged, hovered);
         fieldOfView.update(scene.fieldOfView());
         fieldOfView.configure(ui.fovStyle(), ui.fovDarkness(), ui.sensorStyle(), ui.sensorDarkness());
-        atmosphere.configure(atmosphereSettings);
         attackEffects.setWind(atmosphereSettings.effects());
-        atmosphere.setOptions(ui.atmosphereOptions());
         terrain.setNormalMaps(ui.normalMaps());
         terrain.setGrass(ui.grass());
         if (unitTextures.update(scene.units().stream().filter(unit -> !unit.sensorContact()
@@ -634,8 +638,8 @@ class GpuBattleView extends ApplicationAdapter {
         }
         updateEquipmentDetail();
         if (unitIcons.update(ui.overviewIcons(), ui.overviewHexPixels(), boardCamera.camera,
-              scene, unitFootprints, unitAnchors, groundSurfaces)) { unitPicking.clear(); }
-        terrain.setFlatTrees(unitIcons.active());
+              scene, unitFootprints, unitAnchors)) { unitPicking.clear(); }
+        terrain.setTacticalView(ui.overviewIcons());
         markers.update(unitIcons.active() ? unitIcons.instances() : unitInstances.values(), boardCamera.camera);
         updateJumpJets();
         attackEffects.update(playback.attacks(), unitModels, unitInstances);
@@ -676,7 +680,10 @@ class GpuBattleView extends ApplicationAdapter {
         Color smokeLight = atmosphere.particleLight();
         terrainEffects.update(scene, groundSurfaces, atmosphereSettings.effects(), animationSeconds());
         effectDepth.begin();
-        terrainEffects.render(boardCamera.camera, effectDepth, smokeLight, atmosphere.lighting().direction());
+        // The Tactical View's tileset art already shows fire and smoke.
+        if (!terrain.tacticalView()) {
+            terrainEffects.render(boardCamera.camera, effectDepth, smokeLight, atmosphere.lighting().direction());
+        }
         jumpJets.setSmokeLight(smokeLight);
         attackEffects.setSmokeLight(smokeLight);
         attackEffects.setLightDirection(atmosphere.lighting().direction());
@@ -693,12 +700,12 @@ class GpuBattleView extends ApplicationAdapter {
         atmosphere.renderWeather(boardCamera.camera, scene);
         renderStage("unit outlines");
         unitVisibility.render(boardCamera.camera, outlined, atmosphere.depthTexture(), ui.bottomPixels(), seeThrough,
-              layoutScale, unitBounds, terrainEffects.opacityTexture());
+              layoutScale, unitBounds, terrain.tacticalView() ? null : terrainEffects.opacityTexture());
         renderStage("tactical overlays");
         terrain.render(boardCamera.camera, true);
         fireControl.render(boardCamera.camera, Gdx.graphics.getDeltaTime());
         tactical.render(boardCamera.camera, Gdx.graphics.getDeltaTime(), unitIcons.active() ? unitIcons.instances() : List.of());
-        hexGrid.render(boardCamera, scene);
+        hexGrid.render(boardCamera, scene, terrain.tacticalView());
         renderHexText();
         fireControl.renderLabels(boardCamera.camera);
         renderSelectionOutlines();

@@ -69,7 +69,7 @@ class GpuWaterShaderSmokeTest {
                                     BoardScene shown = terrain.presentation(scene);
                                     if (gravity == 0) {
                                         for (var tile : shown.tiles()) {
-                                            assertEquals(BoardScene.Surface.ROCK, tile.surface());
+                                            assertEquals(BoardScene.Surface.LUNAR, tile.surface());
                                             assertEquals(BoardLiquid.NONE, tile.liquid());
                                             assertEquals(scene.tile(tile.coords()).elevation()
                                                   - Math.max(0, scene.tile(tile.coords()).waterDepth()), tile.elevation());

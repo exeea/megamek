@@ -16,6 +16,8 @@ import megamek.common.board.Coords;
 final class BoardRim {
     static final float BLEND_OPACITY = 0.7f;
     static final float GROUND_UV_SCALE = 0.96f; // MUST NOT TOUCH!!! With 1.0f we have some black pixels in the textures around the borders!
+    /** The board's own incline split: a drop of up to two levels is an incline, anything deeper a high incline. */
+    private static final int INCLINE_LEVELS = 2;
 
     record Images(BoardScene.Pixels color, BoardScene.Pixels normal) { }
     private record Triangle(float ax, float ay, float bx, float by, float cx, float cy) {
@@ -73,16 +75,57 @@ final class BoardRim {
               ignored -> compose(key, incline, highIncline));
     }
 
-    /**
-     * The board's own incline split, per edge: a drop of up to two levels is an incline, anything deeper is a
-     * high incline. A board-edge drop has no adjacent hex and is judged by its own depth instead.
-     */
+    /** The incline split per edge. A board-edge drop has no adjacent hex and is judged by its own depth instead. */
     private static boolean highDrop(BoardScene scene, BoardScene.Tile tile, BoardSurface.Side side) {
-        BoardScene.Tile neighbor = scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(side.edge())));
+        int direction = BoardGeometry.edgeDirection(side.edge());
+        BoardScene.Tile neighbor = scene.tile(tile.coords().translated(direction));
         if (neighbor != null) {
-            return tile.elevation() - neighbor.elevation() > 2;
+            return high(tile, direction, tile.elevation() - neighbor.elevation());
         }
-        return Math.round(Math.max(side.a().z - side.lowA(), side.b().z - side.lowB()) / BoardGeometry.level()) > 2;
+        return high(tile, direction,
+              Math.round(Math.max(side.a().z - side.lowA(), side.b().z - side.lowB()) / BoardGeometry.level()));
+    }
+
+    /**
+     * Deeper than an incline, or a drop the map marks as a cliff side (its manual cliff-top exit): the high rim, and in
+     * the Tactical View a rock side.
+     */
+    static boolean high(BoardScene.Tile tile, int direction, int drop) {
+        return drop > INCLINE_LEVELS || (tile.cliffTopExits() & (1 << direction)) != 0;
+    }
+
+    /**
+     * The Tactical View's plain hex: its whole art, with the rim along every edge above a lower neighbour. Liquid
+     * keeps its art, as in {@link #material}.
+     */
+    BoardScene.Pixels column(BoardScene scene, BoardScene.Tile tile, BoardScene.Pixels art,
+          BoardScene.Pixels incline, BoardScene.Pixels highIncline) {
+        List<Patch> patches = new ArrayList<>();
+        int ramps = BoardSurface.ramps(scene, tile);
+        for (int edge = 0; edge < 6; edge++) {
+            int direction = BoardGeometry.edgeDirection(edge);
+            BoardScene.Tile neighbor = scene.tile(tile.coords().translated(direction));
+            int drop = neighbor == null ? 0 : tile.elevation() - neighbor.elevation();
+            if (drop <= 0) { continue; }
+            boolean high = high(tile, direction, drop);
+            if ((ramps & 1 << direction) == 0) {
+                patches.add(new Patch(edge, Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, high));
+                continue;
+            }
+            // A road ramps through the middle of this edge: its mouth stays clear, as the libGDX board's did.
+            float middle = BoardGeometry.corner(tile.coords(), 0, edge).dst(BoardGeometry.corner(tile.coords(), 0, edge + 1))
+                  / BoardGeometry.hexScale() / 2;
+            patches.add(new Patch(edge, Float.NEGATIVE_INFINITY, quantize(middle - BoardSurface.ROAD_MOUTH), high));
+            patches.add(new Patch(edge, quantize(middle + BoardSurface.ROAD_MOUTH), Float.POSITIVE_INFINITY, high));
+        }
+        if (patches.isEmpty() || tile.liquid().present()) { return art; }
+        int width = Math.max(art.width(), (int) BoardGeometry.TILE_WIDTH);
+        int height = Math.max(art.height(), (int) BoardGeometry.TILE_HEIGHT);
+        BitSet coverage = new BitSet(width * height);
+        coverage.set(0, width * height);
+        Key key = new Key(new Images(art, null), coverage, List.copyOf(patches));
+        used.add(key);
+        return cache.computeIfAbsent(key, ignored -> compose(key, incline, highIncline)).color();
     }
 
     /** End of one terrain snapshot update; keep only combinations used by that snapshot. */

@@ -39,6 +39,19 @@ faces. Sand and rock retain steeper geological profiles. Concrete stays construc
 up to two levels it is a cast wall; taller differences expose bedrock beneath the top
 slab. `BoardConcrete` also owns the fitted corners used by adjacent material contacts.
 
+Dry grassy two-level transitions have two earthen faces separated by a shallow shoulder
+at the intermediate level. `BoardRelief.band` shapes it within the existing transition
+width and preserves the rim, foot and game elevations. Canonical corner evaluation,
+surface support and grass planting see the same shoulder. Single-level slopes, water
+contacts and explicitly marked cliff faces retain their own profiles. The grass material
+uses the existing rim/foot heights and world-space variation to add an irregular turf
+lip and patches on the shoulder, including overhead views with grass blades hidden.
+At grass detail scales, fitted cutout crowns add the hanging fringe; see
+[grass rendering](gpu-grass-rendering.md). Their pigment follows the terrain's material
+weights and shared elevation grade, rather than the generated atlas's original color.
+The ImageGen reference and prompt are saved as `grass-bank-concept.png` and
+`grass-bank-concept-prompt.json` in `mm-data/tools/terrain-contact-sources`.
+
 Poured tops use six triangles and a rectangular cast wall panel uses two. A road cut,
 water contact or junction can require additional boundary vertices; bedrock beneath a
 tall slab remains a separate shaped surface. Higher natural terrain must not spread
@@ -117,9 +130,28 @@ their own anisotropic filtering: libGDX's `setAnisotropicFilter` only addresses
 
 Sculpt albedo textures store height in alpha; their tangent-normal partners store
 ambient occlusion in alpha. Repeat scales come from the asset metadata.
+LUNAR has independent `lunar`, `lunar-scree` and `lunar-cliff` map pairs and a
+`terrain/lunar.png` fallback. These start as byte-identical copies of the original
+ROCK maps, with matching geology parameters; editing lunar assets leaves ROCK alone.
 World-space projections keep coordinates continuous across hexes. Two differently
 oriented ground samples reduce repetition; walls use compatible vertical projections.
+Bare dirt and the soil mantle beneath grass/dirt also mix two translated, differently
+scaled samples on vertical projections. Both stay upright to preserve downhill erosion;
+color/height and normal/AO use the same coordinates and weights. Other wall materials
+retain their existing sampling.
 Slope and height-aware blending determine how cover gives way to mantle, rock and scree.
+
+The dirt and `soil-contact` pairs are baked from ImageGen sources in
+`mm-data/tools/terrain-contact-sources`; `dirt-prompts.json` records the original
+prompts and `bank-soil-prompt.json` records the replacement eroded bank material.
+Run `python tools/prepare_terrain_contact.py --only dirt soil` in mm-data after any
+procedural material rebuild; `--check` verifies pixels and source metadata. The shared
+baker makes opposite edges periodic, flattens broad baked lighting, and derives aligned
+normal/AO and height channels. This relief is an artistic luminance estimate, not a
+measured scan. Dirt repeats at 5 m, soil at 4 m; no additional runtime maps are needed.
+The bank source represents cohesive eroded subsoil instead of a carpet of loose gravel;
+its estimated relief spans 9.5 cm, with aligned normal and cavity channels.
+Updating dirt alone does not update exposed grass banks, which use `soil-contact`.
 
 `terrain-materials.glsl` owns that common evaluation.
 `terrain-projection.glsl` owns projection helpers, and `terrain-concrete.glsl` handles

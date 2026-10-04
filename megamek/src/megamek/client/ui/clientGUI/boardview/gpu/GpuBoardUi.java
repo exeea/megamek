@@ -488,6 +488,8 @@ final class GpuBoardUi implements Disposable {
 
     boolean overviewIcons() { return tuning.overviewIcons(); }
 
+    float overviewHexPixels() { return tuning.overviewHexPixels(); }
+
     boolean wireframe() { return wireframe; }
 
     Skin skin() { return skin; }
@@ -498,7 +500,6 @@ final class GpuBoardUi implements Disposable {
 
     void assetReloadFinished(boolean success) { tuning.assetReloadFinished(success); }
 
-    float overviewHexPixels() { return tuning.overviewHexPixels(); }
 
     float buildingOpacity() {
         return tuning.buildingOpacity();

@@ -186,6 +186,7 @@ class BoardTerrainDetailTest {
             case CONCRETE -> hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1));
             case DIRT -> hex.setTheme("dirt");
             case ROCK -> hex.setTheme("rock");
+            case LUNAR -> hex.setTheme("lunar");
             default -> { }
         }
         return hex;

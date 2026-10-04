@@ -221,7 +221,7 @@ class GpuCliffMaterialsSmokeTest {
             case GRASS -> 0xff7c9262;
             case DIRT -> 0xff9a8065;
             case SAND -> 0xffcdb18a;
-            case ROCK -> 0xff9a9992;
+            case ROCK, LUNAR -> 0xff9a9992;
             case CONCRETE -> 0xff999996;
             case SNOW -> 0xffdedee0;
         };

@@ -58,6 +58,17 @@ file changes rather than silently overwriting them. A live draft and a durable
 source edit are distinct: use the displayed resolved path to know which file a
 save will change.
 
+## Terrain startup
+
+Terrain startup prepares the material variants found in actual chunks while CPU
+geometry is being built. The loading display reports **Preparing terrain materials**
+until their links are ready. `GpuGlsl.Preparation` polls the driver's parallel shader
+compiler when available; otherwise a worker compiles in a private hidden shared
+context. The render thread adopts each completed program into libGDX without a
+second compilation and retains resource ownership. Lighting and shadow changes
+recheck the required variants. Closing a renderer during a native compiler call may
+wait for that call before releasing the shared context.
+
 ## Uniforms, inputs and previews
 
 `GpuShaderUniforms`, `GpuShaderInputs` and `GpuShaderValue` record typed inputs

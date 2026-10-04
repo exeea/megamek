@@ -100,8 +100,8 @@ class BoardLunarTest {
             for (var family : BoardScene.Surface.values()) {
                 var lunar = tile(0, -1, new BoardLiquid(kind, "", 2), family, features).lunar();
                 var scene = new BoardScene(0, 1, 1, List.of(lunar), List.of(), List.of(), -1, "", List.of());
-                assertEquals(BoardScene.Surface.ROCK, lunar.surface());
-                assertTrue(lunar.detailedGround(), "The ROCK material must replace captured ground artwork");
+                assertEquals(BoardScene.Surface.LUNAR, lunar.surface());
+                assertTrue(lunar.detailedGround(), "The LUNAR material must replace captured ground artwork");
                 assertEquals(BoardLiquid.NONE, lunar.liquid());
                 assertFalse(lunar.water());
                 assertFalse(lunar.frozen());
@@ -112,7 +112,7 @@ class BoardLunarTest {
                 assertFalse(BoardScatter.allowed(lunar), "Neither captured scatter nor field cover dresses bare rock");
                 assertEquals(List.of(building, new BoardScene.Feature(BoardRocks.OUTCROP, 0, 0, 0, 3, 1.5f, 0,
                       BoardScene.FeatureKind.BOULDER)), lunar.features(), "A loose boulder becomes bedrock");
-                assertNull(lunar.foliage());
+                assertNull(lunar.tileset());
                 assertNull(lunar.decals());
                 assertNull(lunar.decalsWithoutLimbs());
                 assertEquals(BoardRoad.Kind.PAVED, lunar.road());

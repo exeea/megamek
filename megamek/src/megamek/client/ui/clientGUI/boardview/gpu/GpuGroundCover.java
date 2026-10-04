@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -10,9 +11,11 @@ import java.util.Random;
 import java.util.function.Function;
 
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.Material;
@@ -26,6 +29,7 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.FloatArray;
 import com.badlogic.gdx.utils.IntArray;
+import megamek.common.Configuration;
 import megamek.common.board.Coords;
 
 /**
@@ -237,6 +241,7 @@ final class GpuGroundCover implements Disposable {
     /** One terrain chunk's grass: the three- and seven-triangle blade templates, one in use at a time. */
     private static final class Chunk implements Disposable {
         final Batch[] batches = { new Batch(2), new Batch(4) };
+        final GpuBankTurf turf = new GpuBankTurf();
         // The chunk's planted hexes and, for each, the roots its projected size needs this frame (none out of view).
         final List<FloatArray> roots = new ArrayList<>();
         final IntArray targets = new IntArray();
@@ -250,18 +255,19 @@ final class GpuGroundCover implements Disposable {
                   chunk.getY() * TerrainLod.CHUNK_SIZE + TerrainLod.CHUNK_SIZE / 2), 0);
         }
 
-        void begin(long next) { frame = next; roots.clear(); targets.clear(); nearPixels = 0; }
+        void begin(long next) { frame = next; roots.clear(); targets.clear(); turf.begin(); nearPixels = 0; }
 
         @Override
-        public void dispose() { for (Batch batch : batches) { batch.dispose(); } }
+        public void dispose() { for (Batch batch : batches) { batch.dispose(); } turf.dispose(); }
     }
 
     private final Map<Coords, Chunk> chunks = new HashMap<>();
     private long frame, uploads;
     private int revision = -1, boardId = -1;
+    private Texture turfTexture;
     /** Render-owned submission snapshot; installed roots still invalidate a stationary view. */
     private record View(float[] projectionView, float viewportPixels, List<BoardScene.Tile> candidates,
-          Map<Coords, FloatArray> sources, List<ModelInstance> instances) { }
+          Map<Coords, BoardPlants> sources, List<ModelInstance> instances) { }
     private View view;
     /** How long blades take to grow on a hex whose roots arrived while it was already on screen without any. */
     private static final long GROWTH_NANOS = 500_000_000L;
@@ -312,12 +318,12 @@ final class GpuGroundCover implements Disposable {
               && Arrays.equals(view.projectionView(), camera.combined.val) && view.candidates().equals(candidates)) {
             boolean current = true;
             for (var entry : view.sources().entrySet()) {
-                if (grass(plants.apply(entry.getKey())) != entry.getValue()) { current = false; break; }
+                if (plants.apply(entry.getKey()) != entry.getValue()) { current = false; break; }
             }
             if (current) { return view.instances(); }
         }
         frame++;
-        Map<Coords, FloatArray> sources = new HashMap<>();
+        Map<Coords, BoardPlants> sources = new HashMap<>();
         Vector3 nearest = new Vector3();
         for (BoardScene.Tile tile : candidates) {
             if (!grows(scene, tile)) { continue; }
@@ -329,15 +335,17 @@ final class GpuGroundCover implements Disposable {
             boolean inView = camera.frustum.sphereInFrustum(center, radius);
             // Every candidate stays in its chunk's buffer, in view or not, so panning uploads nothing. Hexes without
             // installed roots are remembered too: their chunk's installation must refresh a stationary view.
-            FloatArray roots = grass(plants.apply(tile.coords()));
+            BoardPlants planted = plants.apply(tile.coords());
+            FloatArray roots = grass(planted);
             if (inView) {
                 if (roots != null && view != null && view.sources().containsKey(tile.coords())
-                      && view.sources().get(tile.coords()) == null) {
+                      && grass(view.sources().get(tile.coords())) == null) {
                     arrivals.put(tile.coords(), now);
                 }
-                sources.put(tile.coords(), roots);
+                sources.put(tile.coords(), planted);
             }
             if (roots == null) { continue; }
+            chunk.turf.add(planted.turf());
             // Enough roots for the hex's nearest edge; the shader evaluates density again at each actual root.
             nearest.set(center).mulAdd(camera.direction, -radius);
             float pixels = inView ? BoardGeometry.width() * BoardCamera.pixelsPerUnit(camera, nearest) : 0;
@@ -356,6 +364,16 @@ final class GpuGroundCover implements Disposable {
                 continue;
             }
             int detail = chunk.nearPixels >= 280 ? 1 : 0;
+            if (chunk.nearPixels > START_PIXELS) {
+                if (turfTexture == null && !chunk.turf.isEmpty()) {
+                    turfTexture = new Texture(new FileHandle(new File(Configuration.dataDir(),
+                          "models/board/textures/foliage/bank-turf.png")), true);
+                    turfTexture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
+                    turfTexture.setWrap(Texture.TextureWrap.ClampToEdge, Texture.TextureWrap.ClampToEdge);
+                }
+                ModelInstance turf = chunk.turf.upload(turfTexture);
+                if (turf != null) { result.add(turf); }
+            }
             for (int i = 0; i < chunk.batches.length; i++) {
                 Batch batch = chunk.batches[i];
                 // The idle template keeps its buffer for a return to its scale.
@@ -383,6 +401,7 @@ final class GpuGroundCover implements Disposable {
     public void dispose() {
         for (Chunk chunk : chunks.values()) { chunk.dispose(); }
         chunks.clear();
+        if (turfTexture != null) { turfTexture.dispose(); turfTexture = null; }
         view = null;
     }
 }

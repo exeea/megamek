@@ -36,11 +36,11 @@ import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Actual artwork, flat placement, input, shadow invalidation and reversible camera switching. */
+/** Actual tileset artwork on plain columns, flat placement, input and reversible camera switching. */
 @Tag("on-demand")
 class GpuOverviewIconsSmokeTest {
     @Test
-    void cameraToggleReplacesUnitsAndFoliageWithoutResettingPoses() throws Exception {
+    void cameraToggleReplacesUnitsAndTerrainWithoutResettingPoses() throws Exception {
         Hex[] hexes = new Hex[12 * 12];
         for (int y = 0; y < 12; y++) {
             for (int x = 0; x < 12; x++) {
@@ -86,13 +86,9 @@ class GpuOverviewIconsSmokeTest {
         var models = (Map<String, ModelInstance>) field(view, "unitInstances");
         var original = models.get("1:-1");
         assertNotNull(original);
-        for (var tile : scene.tiles()) {
-            if (tile.features().stream().anyMatch(feature -> feature.kind() == BoardScene.FeatureKind.TREE)) {
-                assertNotNull(tile.foliage(), "Forested hexes retain their matching flat tileset art");
-            }
-        }
-        verifyFoliageSilhouette(scene);
-        view.boardCamera.setIsometric(false);
+        for (var tile : scene.tiles()) { assertNotNull(tile.tileset(), "Every hex carries its whole tileset art"); }
+        verifyTilesetArt(scene);
+        view.boardCamera.setIsometric(true);
         view.boardCamera.zoom(2 / view.boardCamera.camera.zoom);
         renderReady(view);
         assertFalse(icons.active(), "The option is opt-in");
@@ -102,9 +98,13 @@ class GpuOverviewIconsSmokeTest {
         assertTrue(GpuBoardTestUi.stage().getRoot().<CheckBox>findActor("tuning-overview-icons").isChecked());
         GpuBoardTestUi.click("camera");
         renderReady(view);
+        assertTrue(view.boardCamera.isTopDown(), "Entering the Tactical View switches to the top view");
         assertTrue(icons.active());
-        assertTrue((boolean) field(terrain, "flatTrees"));
-        assertTrue(((List<?>) field(terrain, "shadowModels")).isEmpty(), "Hidden models must not cast shadows");
+        assertTrue((boolean) field(terrain, "tacticalView"));
+        for (var face : terrain.tacticalSurface(unit.location().coords()).top()) {
+            assertEquals(BoardGeometry.surfaceZ(scene.tile(unit.location().coords())), face.a().z, .0001f,
+                  "Overlays drape on the flat column the view draws");
+        }
         assertSame(original, models.get("1:-1"), "Camera switches preserve the animated 3D instance");
         var icon = icons.instance(unit);
         assertNotNull(icon);
@@ -131,19 +131,19 @@ class GpuOverviewIconsSmokeTest {
         var position = poses.get(unit).position().cpy().add(12, -9, 200);
         moved.put(unit, new UnitFootprint.Pose(unit, position, 240));
         var anchors = new HashMap<BoardScene.Unit, Vector3>();
-        icons.update(true, 56, view.boardCamera.camera, scene, moved, anchors, new BoardSurface.Cache());
+        icons.update(true, 56, view.boardCamera.camera, scene, moved, anchors);
         assertEquals(position.x, icon.transform.getTranslation(new Vector3()).x, .0001f);
         assertEquals(position.y, icon.transform.getTranslation(new Vector3()).y, .0001f);
         assertTrue(icon.transform.getTranslation(new Vector3()).z < BoardGeometry.LEVEL,
               "Even airborne animation poses project onto the hex surface");
 
-        view.boardCamera.orbit(0, 2);
+        view.boardCamera.orbit(0, 30);
         renderReady(view);
-        assertFalse(icons.active());
-        assertFalse((boolean) field(terrain, "flatTrees"));
+        assertFalse(icons.active(), "Beyond the top view the units show their models");
+        assertTrue((boolean) field(terrain, "tacticalView"), "The terrain keeps the Tactical View at any tilt");
+        assertFalse(((List<?>) field(terrain, "shadowModels")).isEmpty(), "The models shadow the columns");
         assertSame(original, models.get("1:-1"));
-        assertFalse(((List<?>) field(terrain, "shadowModels")).isEmpty());
-        capture("overview-models-oblique.png");
+        capture("tactical-models-oblique.png");
 
         view.boardCamera.setIsometric(false);
         view.boardCamera.zoom(.6f / view.boardCamera.camera.zoom);
@@ -160,6 +160,7 @@ class GpuOverviewIconsSmokeTest {
         view.boardCamera.zoom(.6f / view.boardCamera.camera.zoom);
         renderReady(view);
         assertFalse(icons.active(), "A finite zoom cutoff keeps full models at close range");
+        assertTrue((boolean) field(terrain, "tacticalView"), "The terrain keeps the Tactical View at any zoom");
         view.boardCamera.zoom(2 / view.boardCamera.camera.zoom);
         renderReady(view);
         assertTrue(icons.active());
@@ -172,6 +173,8 @@ class GpuOverviewIconsSmokeTest {
         GpuBoardTestUi.click("tuning-defaults");
         renderReady(view);
         assertFalse(icons.active());
+        assertFalse((boolean) field(terrain, "tacticalView"));
+        assertFalse(((List<?>) field(terrain, "shadowModels")).isEmpty(), "The 3D view's units cast shadows again");
         assertEquals(GpuUnitIcons.DEFAULT_HEX_PIXELS, ui.overviewHexPixels());
         SwingUtilities.invokeAndWait(() -> {
             assertEquals(new Coords(5, 5), fixture.entity.getPosition());
@@ -186,14 +189,17 @@ class GpuOverviewIconsSmokeTest {
         GpuBoardTestUi.capture(new File(directory, name));
     }
 
-    /** Compare real tileset canopy pixels outside the hex with the actual tactical draw. */
-    private static void verifyFoliageSilhouette(BoardScene scene) {
+    /**
+     * The Tactical View draws the hex's own tileset art on its column's top, lit and shadowed like the 3D terrain:
+     * clear noon light gives level ground its albedo (BoardAtmosphere), and the column does not shadow its own top.
+     */
+    private static void verifyTilesetArt(BoardScene scene) {
         var coords = new Coords(0, 0);
-        var tile = scene.tiles().stream().filter(item -> item.foliage() != null && !item.liquid().present()).findFirst().orElseThrow();
-        var art = tile.foliage();
-        var flat = new BoardScene.Tile(coords, 0, -1, false, 0, tile.surface(), tile.ground(),
+        var source = scene.tile(coords);
+        var art = source.tileset();
+        var column = new BoardScene.Tile(coords, 0, -1, false, 0, source.surface(), source.ground(),
               null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, art);
-        var isolated = new BoardScene(0, 1, 1, List.of(flat), List.of(), List.of(), -1, "", List.of());
+        var isolated = new BoardScene(0, 1, 1, List.of(column), List.of(), List.of(), -1, "", List.of());
         var terrain = new GpuTerrain();
         var target = new FrameBuffer(Pixmap.Format.RGBA8888, art.width(), art.height(), true);
         var camera = new OrthographicCamera(BoardGeometry.WIDTH, BoardGeometry.HEIGHT);
@@ -204,29 +210,32 @@ class GpuOverviewIconsSmokeTest {
         Pixmap rendered = null;
         try {
             terrain.update(isolated);
-            terrain.setFlatTrees(true);
+            terrain.setTacticalView(true);
+            terrain.setAtmosphere(BoardAtmosphere.lighting(new BoardAtmosphere.Settings(12, 0, 0,
+                  BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0)));
+            terrain.renderShadows(List.of());
             target.begin();
             Gdx.gl.glClearColor(0, 0, 0, 0);
             Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
-            terrain.render(camera, true);
+            terrain.render(camera, false);
             rendered = Pixmap.createFromFrameBuffer(0, 0, art.width(), art.height());
             target.end();
-            int overhang = 0;
-            int missing = 0;
-            for (int y = 0; y < art.height(); y++) {
-                for (int x = 0; x < art.width(); x++) {
-                    float worldX = (x + .5f) / art.width() * BoardGeometry.WIDTH;
-                    float worldY = -(y + .5f) / art.height() * BoardGeometry.HEIGHT;
-                    if ((art.rgba(y * art.width() + x) & 255) >= 240 && !BoardGeometry.contains(coords, worldX, worldY)) {
-                        overhang++;
-                        if ((rendered.getPixel(x, art.height() - y - 1) & 255) < 200) { missing++; }
+            PixmapIO.writePNG(Gdx.files.absolute(new File(System.getProperty("megamek.gpu.screenshots"),
+                  "tactical-tileset-column.png").getAbsolutePath()), rendered, -1, true);
+            // The middle of the hex, averaged: the art's texels and the drawn pixels differ only by filtering.
+            long[] expected = new long[3], drawn = new long[3];
+            for (int y = art.height() / 2 - 12; y < art.height() / 2 + 12; y++) {
+                for (int x = art.width() / 2 - 12; x < art.width() / 2 + 12; x++) {
+                    int texel = art.rgba(y * art.width() + x), pixel = rendered.getPixel(x, art.height() - y - 1);
+                    for (int channel = 0; channel < 3; channel++) {
+                        expected[channel] += texel >>> 24 - 8 * channel & 255;
+                        drawn[channel] += pixel >>> 24 - 8 * channel & 255;
                     }
                 }
             }
-            PixmapIO.writePNG(Gdx.files.absolute(new File(System.getProperty("megamek.gpu.screenshots"),
-                  "overview-foliage-full.png").getAbsolutePath()), rendered, -1, true);
-            assertTrue(overhang > 0, "The real artwork must exercise canopies extending outside the hex");
-            assertEquals(0, missing, "Canopy pixels outside the hex must survive the tactical render");
+            for (int channel = 0; channel < 3; channel++) {
+                assertEquals(expected[channel] / 576f, drawn[channel] / 576f, 6, "Channel " + channel + " of the art");
+            }
         } finally {
             if (rendered != null) { rendered.dispose(); }
             target.dispose();

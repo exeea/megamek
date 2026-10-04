@@ -22,7 +22,8 @@ final class GpuSurfaceBlend extends Attribute {
     static final long TYPE = register("boardSurfaceBlend");
     static final VertexAttributes VERTICES = new VertexAttributes(VertexAttribute.Position(), VertexAttribute.Normal(),
           VertexAttribute.ColorPacked(), VertexAttribute.TexCoords(0),
-          new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_coverWeights"));
+          new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_coverWeights"),
+          new VertexAttribute(VertexAttributes.Usage.Generic, 1, "a_coverInterpolation", 1));
     final TextureDescriptor<TextureArray> texture;
     final float[] families, responses;
     final float[][] tiles, layers;
@@ -92,7 +93,7 @@ final class GpuSurfaceBlend extends Attribute {
                   v.color.toFloatBits(), v.uv.x, v.uv.y, point.cover().weight(palette.base()),
                   palette.first() == palette.base() ? 0 : point.cover().weight(palette.first()),
                   palette.second() == palette.base() ? 0 : point.cover().weight(palette.second()),
-                  palette.third() == palette.base() ? 0 : point.cover().weight(palette.third()));
+                  palette.third() == palette.base() ? 0 : point.cover().weight(palette.third()), point.cover().interpolation());
         }
     }
 
@@ -155,14 +156,31 @@ final class GpuSurfaceBlend extends Attribute {
         int mask = a.cover().mask() | b.cover().mask() | c.cover().mask();
         float ab = a.vertex().position.dst2(b.vertex().position), bc = b.vertex().position.dst2(c.vertex().position);
         float ca = c.vertex().position.dst2(a.vertex().position);
+        boolean crowded = Integer.bitCount(mask) > 4;
+        boolean mixedPoint = Integer.bitCount(a.cover().mask()) > 4 || Integer.bitCount(b.cover().mask()) > 4
+              || Integer.bitCount(c.cover().mask()) > 4;
         // A long top fan must not stretch a four-metre boundary into a half-hex fade. Linear cover needs no
         // extra geometry; probe its edges and interior before subdividing a mixed triangle.
-        if (Integer.bitCount(mask) > 4 || Integer.bitCount(mask) > 1 && Math.max(ab, Math.max(bc, ca)) > spacing * spacing) {
+        float longest = Math.max(ab, Math.max(bc, ca));
+        if (depth < 12 && (crowded || Integer.bitCount(mask) > 1 && longest > spacing * spacing)
+              && !(crowded && mixedPoint && longest <= spacing * spacing)) {
             boolean split;
             if (bc > ab && bc >= ca) { split = appendSplit(groups, family, cover, b, c, a, spacing, depth, mask); }
             else if (ca > ab) { split = appendSplit(groups, family, cover, c, a, b, spacing, depth, mask); }
             else { split = appendSplit(groups, family, cover, a, b, c, spacing, depth, mask); }
             if (split) { return; }
+        }
+        // Authored mixtures can put more than four families at one point; subdivision cannot separate those.
+        // Keep the strongest four on this already small carrier instead of growing an unbounded mesh.
+        while (Integer.bitCount(mask) > 4) {
+            int weakest = -1;
+            float least = Float.POSITIVE_INFINITY;
+            for (int candidate = 0; candidate < BoardSurfaceBlend.FAMILIES; candidate++) {
+                if ((mask & (1 << candidate)) == 0) { continue; }
+                float weight = a.cover().weight(candidate) + b.cover().weight(candidate) + c.cover().weight(candidate);
+                if (weight < least) { weakest = candidate; least = weight; }
+            }
+            mask &= ~(1 << weakest);
         }
         // A slope can extend beyond its source footprint. Its absent family must not consume a palette slot.
         int base = (mask & (1 << family)) != 0 ? family : Integer.numberOfTrailingZeros(mask);
@@ -189,7 +207,6 @@ final class GpuSurfaceBlend extends Attribute {
               && accurate(between(cover, mid, c, 1 / 3f), a, b, c, 1 / 3f, 1 / 3f, 1 / 3f)) {
             return false;
         }
-        if (depth >= 12) { throw new IllegalStateException("Unbounded terrain cover palette at " + a.vertex().position); }
         append(groups, family, cover, a, mid, c, spacing, depth + 1);
         append(groups, family, cover, mid, b, c, spacing, depth + 1);
         return true;
@@ -203,6 +220,8 @@ final class GpuSurfaceBlend extends Attribute {
     }
 
     private static boolean accurate(Point sample, Point a, Point b, Point c, float wa, float wb, float wc) {
+        float interpolation = a.cover().interpolation() * wa + b.cover().interpolation() * wb + c.cover().interpolation() * wc;
+        if (Math.abs(sample.cover().interpolation() - interpolation) > .04f) { return false; }
         for (int family = 0; family < BoardSurfaceBlend.FAMILIES; family++) {
             float expected = a.cover().weight(family) * wa + b.cover().weight(family) * wb + c.cover().weight(family) * wc;
             if (Math.abs(sample.cover().weight(family) - expected) > .04f) { return false; }

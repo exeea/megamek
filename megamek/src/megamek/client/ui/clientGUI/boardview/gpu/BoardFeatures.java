@@ -78,6 +78,7 @@ final class BoardFeatures {
                 case Terrains.ROAD_FLUFF -> hex.terrainLevel(Terrains.ROAD_FLUFF) == 1
                       && BoardRoad.capture(hex) != BoardRoad.Kind.NONE;
                 case Terrains.FLUFF -> orchard(hex) || BoardRough.variant(hex) != 0;
+                case Terrains.GROUND_FLUFF -> BoardSurfaceBlend.hasTransition(hex);
                 default -> false;
             };
             if (!base) { return false; }
@@ -97,7 +98,8 @@ final class BoardFeatures {
         if (desert(hex)) {
             return BoardScene.Surface.SAND;
         }
-        if (theme.contains("lunar") || theme.contains("rock") || theme.contains("volcan")) {
+        if (theme.contains("lunar")) { return BoardScene.Surface.LUNAR; }
+        if (theme.contains("rock") || theme.contains("volcan")) {
             return BoardScene.Surface.ROCK;
         }
         // Fields and reed marshes replace the flat cover in the biome shader. Their banks retain the theme's
@@ -336,7 +338,7 @@ final class BoardFeatures {
         if (!snow && jungle) { return PALMS; }
         if (!snow && desert(hex)) { return DESERT; }
         List<String> trees = theme.contains("mars") || theme.contains("lunar") ? BARREN : switch (surface) {
-            case ROCK -> ROCKY;
+            case ROCK, LUNAR -> ROCKY;
             case DIRT -> WETLAND;
             case CONCRETE -> PARK;
             case SNOW -> HIGHLAND;
@@ -372,7 +374,7 @@ final class BoardFeatures {
             family = "wetland";
         } else {
             family = switch (surface) {
-                case ROCK -> "rocky";
+                case ROCK, LUNAR -> "rocky";
                 case DIRT -> "wetland";
                 case CONCRETE -> "temperate";
                 default -> hex.getLevel() >= 2 || hex.containsTerrain(Terrains.TUNDRA) ? "highland" : "temperate";

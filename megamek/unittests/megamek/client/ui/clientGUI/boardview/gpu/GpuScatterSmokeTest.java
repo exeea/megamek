@@ -40,11 +40,11 @@ class GpuScatterSmokeTest {
     void batchesSparseDetailsAndCullsAllPassesWithoutChangingPicking() throws Exception {
         assumeTrue(BoardScatter.DENSITY_MULTIPLIER > 0, "Scatter is disabled");
         Hex[] hexes = new Hex[16 * 16];
-        String[] themes = { "grass", "dirt", "desert", "lunar" };
+        String[] themes = { "grass", "dirt", "desert", "rock", "lunar" };
         for (int y = 0; y < 16; y++) {
             for (int x = 0; x < 16; x++) {
                 Hex hex = new Hex(0);
-                hex.setTheme(themes[x / 4]);
+                hex.setTheme(themes[x * themes.length / 16]);
                 hexes[y * 16 + x] = hex;
             }
         }
@@ -56,7 +56,7 @@ class GpuScatterSmokeTest {
             var tiles = captured.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(), tile.elevation(),
                   tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(), tile.ground(), tile.normals(),
                   tile.decals(), tile.decalsWithoutLimbs(), tile.tactical(), tile.features(), tile.text(), tile.liquid(),
-                  tile.foliage(), false)).toList();
+                  tile.tileset(), false)).toList();
             BoardScene scene = new BoardScene(0, 16, 16, tiles, List.of(), List.of(), -1, "", List.of(),
                   new BoardScene.Light(-24, -30));
             BoardScene bare = new BoardScene(0, 16, 16, scene.tiles().stream().map(tile -> new BoardScene.Tile(
@@ -163,7 +163,7 @@ class GpuScatterSmokeTest {
                         camera.fit(scene);
                         preview(terrain, camera, "scatter-overview");
                         for (BoardScene.Surface surface : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.DIRT,
-                              BoardScene.Surface.SAND, BoardScene.Surface.ROCK)) {
+                              BoardScene.Surface.SAND, BoardScene.Surface.ROCK, BoardScene.Surface.LUNAR)) {
                             var tile = scene.tiles().stream().filter(value -> value.surface() == surface
                                   && !value.features().isEmpty()).findFirst().orElseThrow();
                             camera.camera.zoom = .15f;

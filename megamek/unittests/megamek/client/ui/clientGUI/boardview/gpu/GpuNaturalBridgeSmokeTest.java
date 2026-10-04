@@ -58,7 +58,7 @@ class GpuNaturalBridgeSmokeTest {
                             GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                             frame.render(terrain, camera, scene);
                             GpuReviewFrame.save(new File(output, "lava-tubes-" + at.getBoardNum() + "-" + (int) tilt + ".png"));
-                            grid.render(camera, scene);
+                            grid.render(camera, scene, false);
                             labels.update(scene, skin.skin.getFont("default-font"), terrain::roofBounds);
                             labels.render(batch, camera, frame.depthTexture(), 0);
                             GpuReviewFrame.save(new File(output,

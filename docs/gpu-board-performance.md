@@ -17,6 +17,18 @@ or chunk. Reuse unchanged tile meshes where their inputs still match, and replac
 the affected installed resources together. A new scene object alone is not a
 reason to rebuild everything.
 
+An edited hex rebuilds the hexes within its reach (`GpuTerrain.editReach`): two
+rings for dry relief, features, ice, biome or ground cover; three for a level,
+ground or road edit within six hexes of liquid, and for a pool that only grows
+deeper or shallower while staying at least a level deep, since beyond a level the
+shore field and river channels read no depth; `BoardSurface.SHORE_RINGS` (six)
+where liquid appears or disappears or a neighbour's shore class changes. Changed
+river currents and bridge spans add their own hexes. The on-demand
+`GpuTerrainEditReachSmokeTest` applies and reverts edits incrementally on shipped
+boards (`megamek.gpu.reach.boards`, `.samples`) and fails when a hex differs from
+a full build or changed without being rebuilt. It leaves road masks' atlas slots
+out of that comparison, since each build packs a section's masks afresh.
+
 Camera refinement and local edits use the same bounded preparation pipeline.
 Collection/upload is spread over frames, but the frame budget is soft: an individual
 tile collection or buffer upload can overrun it. Retired chunks are disposed by

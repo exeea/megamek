@@ -134,6 +134,8 @@ final class BoardRelief {
           new Geology(6.0f, 6.0f, 0, 0, 0, 3.0f, 0, 0, 0, 0, 0, .05f, 1, 0, 1, 0, 0),
           // SNOW: rock under a snow mantle that buries the low steps.
           new Geology(4.0f, 3.8f, 1.0f, .60f, .40f, 3.2f, 1.05f, 1.0f, .85f, 1, 1, .5f, .5f, .3f, 0, 1, 0),
+          // LUNAR: starts with the same jointed bedrock as ROCK; independently tunable.
+          new Geology(3.6f, 4.2f, 1.25f, .75f, .45f, 2.9f, 1.25f, 1.1f, .75f, 1, 1, .42f, 1, .12f, 0, 2.5f, .4f),
     };
 
     /** The rock that carries a concrete slab: jointed bedrock whose top is the slab's underside, so without caprock. */
@@ -173,7 +175,7 @@ final class BoardRelief {
           TRANSITION, 1, DEFAULT_CLIFFS_INTO_WATER);
     private static Tuning tuning = DEFAULTS;
     private static final List<Geology> DEFAULT_GEOLOGY = List.of(GEOLOGY[0], GEOLOGY[1], GEOLOGY[2], GEOLOGY[3],
-          GEOLOGY[4], GEOLOGY[5], BEDROCK);
+          GEOLOGY[4], GEOLOGY[5], GEOLOGY[6], BEDROCK);
     private static List<Geology> geology = DEFAULT_GEOLOGY;
 
     static Tuning tuning() {
@@ -187,7 +189,7 @@ final class BoardRelief {
         BoardGeometry.terrainChanged();
     }
 
-    /** The six surface families followed by the bedrock beneath concrete. Records and returned lists are immutable. */
+    /** Surface families followed by the bedrock beneath concrete. Records and returned lists are immutable. */
     static List<Geology> geology() {
         TerrainSettings settings = TerrainSettings.current();
         return settings == null ? geology : settings.geology();
@@ -223,6 +225,7 @@ final class BoardRelief {
         BoardGeometry.Tuning geometry = BoardGeometry.tuning();
         return geometry.padding() > 0 ? metres(geometry.padding() / 2) : geometry.transitions() ? metres(tuning().transition()) : 0;
     }
+    private static final int GRASS = BoardScene.Surface.GRASS.ordinal();
     private static final int CONCRETE = BoardScene.Surface.CONCRETE.ordinal();
     private static final int SAND = BoardScene.Surface.SAND.ordinal();
 
@@ -1412,7 +1415,7 @@ final class BoardRelief {
         // The roads' banks meet along a gate, so it has no relief of its own and keeps its lattice line under the
         // carriageway. Each corner still moves as the steps through it do, at the height both roads give it, and
         // that move runs out before the shoulder, independent of the grades in between.
-        float clear = .5f - 9 * BoardGeometry.hexScale() / edge.length;
+        float clear = .5f - BoardSurface.ROAD_MOUTH * BoardGeometry.hexScale() / edge.length;
         Vector3 a = reliefPoint(edge, 0, gateLevel(edge.a)), b = reliefPoint(edge, 1, gateLevel(edge.b));
         float fa = Math.max(0, 1 - t / clear), fb = Math.max(0, 1 - (1 - t) / clear);
         return new Vector3(lerp(edge.a.x, edge.b.x, t) + (a.x - edge.a.x) * fa + (b.x - edge.b.x) * fb,
@@ -1623,6 +1626,13 @@ final class BoardRelief {
         float bottom = (lower.level() - (wall ? 0 : lower.depth())) * BoardGeometry.level();
         float top = upper.level() * BoardGeometry.level();
         float t = transition(Math.clamp(z, bottom, top), bottom, top, drop(upper, lower));
+        if (!wall && !upper.liquid() && !lower.liquid() && upper.family() == GRASS
+              && upper.level() - lower.level() == 2) {
+            // Two earth faces share a shallow grassy shoulder. Keep the canonical rim/foot and a monotone
+            // profile: corners, support, picking and grass roots all follow this same finished surface.
+            float height = Math.clamp((z - bottom) / (top - bottom), 0, 1);
+            t = 1 - 2 * (height + .88f * (float) Math.sin(4 * Math.PI * height) / (4 * (float) Math.PI));
+        }
         return wall && lower.liquid() ? room / 2 * (t - 1) : upper.liquid() ? room / 2 * (t + 1) : room * t;
     }
 

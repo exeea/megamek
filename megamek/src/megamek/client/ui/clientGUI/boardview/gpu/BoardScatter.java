@@ -104,7 +104,7 @@ final class BoardScatter {
         BoardScene.Surface surface = BoardFeatures.surface(hex);
         float density = switch (surface) {
             case GRASS -> .16f;
-            case ROCK -> .18f;
+            case ROCK, LUNAR -> .18f;
             case DIRT -> .12f;
             case SAND -> .10f;
             case SNOW -> .06f;

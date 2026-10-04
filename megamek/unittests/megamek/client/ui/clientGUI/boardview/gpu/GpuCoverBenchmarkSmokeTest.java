@@ -552,6 +552,8 @@ class GpuCoverBenchmarkSmokeTest {
         final List<BoardScene.Tile> hexes = new ArrayList<>();
         final GpuGroundCover grass;
         final GpuBiomeVegetation plants;
+        /** Each chunk's trees while the woods are hidden. */
+        final List<Map<?, ?>> trees = new ArrayList<>();
 
         Cover(GpuTerrain terrain, Kind kind, BoardScene scene) throws Exception {
             this.terrain = terrain;
@@ -607,13 +609,27 @@ class GpuCoverBenchmarkSmokeTest {
 
         void hide() throws Exception {
             if (kind == Kind.GRASS) { terrain.setGrass(false); }
-            else if (kind == Kind.WOODS) { terrain.setFlatTrees(true); }
+            else if (kind == Kind.WOODS) {
+                for (Object chunk : (List<?>) field(terrain, "chunks")) {
+                    Map<?, ?> stand = (Map<?, ?>) field(field(chunk, "stand"), "trees");
+                    trees.add(new java.util.LinkedHashMap<>(stand));
+                    stand.clear();
+                }
+            }
             else { ((Map<?, ?>) field(plants, "kinds")).clear(); set(plants, "view", null); }
         }
 
         void show() throws Exception {
             if (kind == Kind.GRASS) { terrain.setGrass(true); }
-            else if (kind == Kind.WOODS) { terrain.setFlatTrees(false); }
+            else if (kind == Kind.WOODS) {
+                List<?> chunks = (List<?>) field(terrain, "chunks");
+                for (int index = 0; index < chunks.size(); index++) {
+                    @SuppressWarnings("unchecked")
+                    Map<Object, Object> stand = (Map<Object, Object>) field(field(chunks.get(index), "stand"), "trees");
+                    stand.putAll(trees.get(index));
+                }
+                trees.clear();
+            }
             else { set(plants, "tiles", null); }
         }
 

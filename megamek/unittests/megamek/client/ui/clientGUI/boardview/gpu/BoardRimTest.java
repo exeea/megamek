@@ -141,6 +141,36 @@ class BoardRimTest {
     }
 
     @Test
+    void tacticalColumnsShadeEachDropEdgeWithTheBoardsInclineSplit() {
+        BoardScene.Pixels incline = pixels(0xff606060), high = pixels(0xffc0c0c0);
+        int centre = 36 * 84 + 42;
+        for (int edge = 0; edge < 6; edge++) {
+            BoardScene gentle = scene(edge, false, 0, ground, null);
+            BoardScene.Pixels art = new BoardRim().column(gentle, gentle.tile(CENTER), ground, incline, high);
+            assertEquals(Math.round(0x50 * shade(0x60, 1)), art.rgba(probe(edge, 0.5f, 9)) >>> 24, 1,
+                  "A two-level drop wears the incline mask at edge " + edge);
+            assertEquals(ground.rgba(centre), art.rgba(centre));
+            BoardScene road = scene(edge, true, 0, ground, null);
+            BoardScene.Pixels ramp = new BoardRim().column(road, road.tile(CENTER), ground, incline, high);
+            assertEquals(ground.rgba(probe(edge, 0.5f, 3)), ramp.rgba(probe(edge, 0.5f, 3)),
+                  "A road ramping through the edge keeps its mouth clear at edge " + edge);
+            assertNotEquals(ground.rgba(probe(edge, 0.12f, 3)), ramp.rgba(probe(edge, 0.12f, 3)),
+                  "Beside the mouth the drop keeps its rim at edge " + edge);
+            BoardScene steep = scene(edge, false, -1, ground, null);
+            assertEquals(Math.round(0x50 * shade(0xc0, 1)),
+                  new BoardRim().column(steep, steep.tile(CENTER), ground, incline, high).rgba(probe(edge, 0.5f, 9)) >>> 24,
+                  1, "A three-level drop wears the high mask at edge " + edge);
+            BoardScene cliff = cliffTop(gentle, BoardGeometry.edgeDirection(edge));
+            assertEquals(Math.round(0x50 * shade(0xc0, 1)),
+                  new BoardRim().column(cliff, cliff.tile(CENTER), ground, incline, high).rgba(probe(edge, 0.5f, 9)) >>> 24,
+                  1, "A two-level drop the map marks as a cliff side wears the high mask at edge " + edge);
+        }
+        BoardScene level = scene(0, false, 2, ground, null);
+        assertSame(ground, new BoardRim().column(level, level.tile(CENTER), ground, incline, high),
+              "A column without a lower neighbour keeps its art");
+    }
+
+    @Test
     void reusesMaterialsForUnchangedInputsAndReleasesUnusedCombinations() {
         GpuAssets assets = assets(pixels(0xfff0f0f0));
         BoardRim rims = new BoardRim();
@@ -194,6 +224,17 @@ class BoardRimTest {
             }
         }
         return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
+    }
+
+    /** The centre hex with its manual cliff-top exit toward {@code direction}. */
+    private static BoardScene cliffTop(BoardScene scene, int direction) {
+        BoardScene.Tile t = scene.tile(CENTER);
+        List<BoardScene.Tile> tiles = new ArrayList<>(scene.tiles());
+        tiles.set(CENTER.getX() * scene.height() + CENTER.getY(), new BoardScene.Tile(t.coords(), t.elevation(),
+              t.waterDepth(), t.frozen(), t.roadExits(), t.surface(), t.ground(), t.normals(), t.decals(),
+              t.decalsWithoutLimbs(), t.tactical(), t.features(), t.text(), t.liquid(), t.tileset(), t.detailedGround(),
+              t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), 1 << direction));
+        return scene.withTiles(tiles);
     }
 
     private static int probe(int edge, float along, float inward) {

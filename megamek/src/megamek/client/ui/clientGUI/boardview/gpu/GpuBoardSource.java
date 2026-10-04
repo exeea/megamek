@@ -776,8 +776,8 @@ final class GpuBoardSource implements BoardSource {
                 BoardScene.Tile next = new BoardScene.Tile(old.coords(), old.elevation(), old.waterDepth(), old.frozen(),
                       old.roadExits(), old.surface(), old.ground(), old.normals(), old.decals(), old.decalsWithoutLimbs(),
                       terrainImages.capture(hex.tactical(), old.tactical()), old.features(), hex.text(), old.liquid(),
-                      old.foliage(), old.detailedGround(), old.road(), old.fireSmoke(), old.biome(), old.impassable(),
-                      old.blackIce(), old.cliffTopExits());
+                      old.tileset(), old.detailedGround(), old.road(), old.fireSmoke(), old.biome(), old.impassable(),
+                      old.blackIce(), old.cliffTopExits(), old.bare(), old.groundCover(), old.bridge());
                 if (!next.equals(old)) {
                     painted.set(index, next);
                 }

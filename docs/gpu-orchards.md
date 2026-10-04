@@ -20,8 +20,8 @@ Light orchards contain six trees in two planted rows that align across adjacent
 hexes, heavy orchards nine, and ultra-heavy orchards sixteen. Coordinates
 deterministically select and rotate the variants. Road clearance uses the same
 trunk relocation as other woods.
-Orchard fluff allows native ground materials; the existing flat-foliage artwork
-remains available for the board's flat-tree presentation.
+Orchard fluff allows native ground materials; the Tactical View still shows the
+orchard's tileset artwork.
 
 The six forms are round, spreading, upright, vase, leaning, and young. Each has
 its own mesh and atlas, with a snow-covered counterpart that
