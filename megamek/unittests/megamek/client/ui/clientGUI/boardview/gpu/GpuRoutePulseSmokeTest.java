@@ -167,9 +167,10 @@ class GpuRoutePulseSmokeTest {
                 float head = pulse.head();
                 assertTrue(head > 0, "Under way after .3 s");
                 long builds = overlay.builds();
-                // A rebuild for something else (here the envelope preference) keeps the pulse where it was.
-                show(overlay, scene, false, plan, state, false);
-                assertEquals(builds + 1, overlay.builds(), "The preference rebuilds the meshes");
+                // A rebuild for something else (here a unit under the pointer, which hides a hover route) keeps the
+                // pulse where it was.
+                show(overlay, scene, false, plan, state, scene.units().getLast().id());
+                assertEquals(builds + 1, overlay.builds(), "Hovering a unit rebuilds the meshes");
                 assertEquals(head, pulse.head(), "and the same plan's pulse runs on from where it was");
                 pulse.advance(FRAME);
                 assertTrue(pulse.head() > head);
@@ -418,15 +419,15 @@ class GpuRoutePulseSmokeTest {
     /** Hands the overlay the fixture's movement turn with this plan, as GpuBattleView does once a frame. */
     private static void show(GpuBoardOverlay overlay, BoardScene scene, boolean tactical, GpuMovePlan.Snapshot plan,
           GpuHudState state) {
-        show(overlay, scene, tactical, plan, state, true);
+        show(overlay, scene, tactical, plan, state, Entity.NONE);
     }
 
     private static void show(GpuBoardOverlay overlay, BoardScene scene, boolean tactical, GpuMovePlan.Snapshot plan,
-          GpuHudState state, boolean envelope) {
+          GpuHudState state, int hoveredUnit) {
         overlay.update(GpuBoardOverlaySmokeTest.frame(scene, STATUS,
                     GpuBoardOverlaySmokeTest.panels(plan, GpuFireOrders.Snapshot.EMPTY)),
-              GpuBoardOverlaySmokeTest.view(tactical, null, Entity.NONE),
-              GpuBoardOverlaySmokeTest.preferences(envelope), state);
+              GpuBoardOverlaySmokeTest.view(tactical, null, hoveredUnit), GpuBoardOverlaySmokeTest.preferences(),
+              state);
     }
 
     /** Shows the plan anew, so that its pulse leaves the unit, and lets {@code seconds} pass in frames. */

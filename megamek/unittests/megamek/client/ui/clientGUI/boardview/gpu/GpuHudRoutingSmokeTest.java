@@ -925,7 +925,7 @@ class GpuHudRoutingSmokeTest {
     /** The preferences with the contacts panel shown or hidden. */
     private static GpuBoardSource.UiPreferences contacts(GpuBoardSource.UiPreferences p, boolean enabled) {
         return new GpuBoardSource.UiPreferences(p.scale(), p.reportKeywords(), p.reportFilterKeywords(),
-              p.minimapEnabled(), enabled, p.moveEnvelope(), p.conditionsVisible(), p.turnDetails(), p.binds(),
+              p.minimapEnabled(), enabled, p.conditionsVisible(), p.turnDetails(), p.binds(),
               p.moveSprintRgb());
     }
 

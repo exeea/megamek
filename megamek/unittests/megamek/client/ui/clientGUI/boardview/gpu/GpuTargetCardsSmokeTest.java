@@ -497,7 +497,7 @@ class GpuTargetCardsSmokeTest {
             Map<Integer, Vector2> heads = new HashMap<>();
             units.forEach((id, rect) -> heads.put(id, new Vector2(rect.x + rect.width / 2, rect.y + rect.height)));
             GpuHud.HudView view = new GpuHud.HudView(false, false, units, heads, Map.of(), null, Entity.NONE, 118,
-                  Float.NaN, Map.of(woods, new Vector2(500, 500)));
+                  Map.of(woods, new Vector2(500, 500)));
             layer.update(hud, firing(fire), view, List.of());
             hud.draw();
             Rectangle card = layer.cards.placed().get(woods);
@@ -679,13 +679,14 @@ class GpuTargetCardsSmokeTest {
         boolean tactical = board.tactical();
         layer.state.update(frame.status(), GpuUnitRecord.Snapshot.EMPTY, false);
         overlay.update(frame, new GpuHud.HudView(tactical, false, Map.of(), Map.of(), Map.of(), null, Entity.NONE, 0),
-              preferences(true), layer.state);
+              preferences(), layer.state);
         Map<BoardScene.Unit, Vector3> iconAnchors = new HashMap<>();
         GpuFireOrders.Snapshot fire = frame.panels().fire();
         board.draw(camera -> {
             if (!tactical) {
                 overlay.renderGhost(camera, board.instances::get);
             }
+            overlay.renderMarks(camera, board.poses::get);
             overlay.render(camera);
             if (tactical) {
                 icons.update(true, camera, board.scene, frame.status(), unit -> unit.id() == frame.status().actorId()

@@ -721,7 +721,7 @@ class GpuHudInputTest {
     static GpuBoardSource.UiPreferences preferences(float scale) {
         List<GpuBoardSource.Bind> binds = Stream.of(KeyCommandBind.values())
               .map(bind -> new GpuBoardSource.Bind(bind, bind.keyDefault, bind.modifiersDefault, "")).toList();
-        return new GpuBoardSource.UiPreferences(scale, "", "", true, true, false, false, false, binds, 0);
+        return new GpuBoardSource.UiPreferences(scale, "", "", true, true, false, false, binds, 0);
     }
 
     static GpuBattleStatus.Snapshot status(int round, GamePhase phase, boolean myTurn, int actor, int turnIndex,

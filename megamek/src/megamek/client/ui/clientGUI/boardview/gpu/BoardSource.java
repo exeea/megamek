@@ -20,11 +20,11 @@ interface BoardSource extends AutoCloseable {
 
     /**
      * Immutable preference snapshot published to the render thread: the existing preferences the native views read,
-     * whether the battle HUD shows its contacts panel, every key binding and the movement envelope's sprint colour.
+     * whether the battle HUD shows its contacts panel, every key binding and MegaMek's sprint colour.
      */
     public record UiPreferences(float scale, String reportKeywords, String reportFilterKeywords,
-          boolean minimapEnabled, boolean contactsEnabled, boolean moveEnvelope, boolean conditionsVisible,
-          boolean turnDetails, List<Bind> binds, int moveSprintRgb) {
+          boolean minimapEnabled, boolean contactsEnabled, boolean conditionsVisible, boolean turnDetails,
+          List<Bind> binds, int moveSprintRgb) {
         public UiPreferences {
             binds = List.copyOf(binds);
         }
@@ -34,7 +34,7 @@ interface BoardSource extends AutoCloseable {
             GUIPreferences gui = GUIPreferences.getInstance();
             return new UiPreferences(gui.getGUIScale(), preferences.getReportKeywords(),
                   preferences.getReportFilterKeywords(), gui.getMinimapEnabled(), gui.getGpuContactsEnabled(),
-                  gui.getMoveEnvelope(), gui.getShowPlanetaryConditionsOverlay(), gui.getTurnDetailsOverlay(),
+                  gui.getShowPlanetaryConditionsOverlay(), gui.getTurnDetailsOverlay(),
                   Stream.of(KeyCommandBind.values()).map(bind -> new Bind(bind, bind.key, bind.modifiers,
                         KeyCommandBind.getDesc(bind))).toList(),
                   gui.getMoveSprintColor().getRGB());

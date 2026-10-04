@@ -46,9 +46,7 @@ import java.awt.image.ImageObserver;
 
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardGlyphContext;
-import megamek.client.ui.clientGUI.boardview.BoardRangeBorder;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
-import megamek.client.ui.clientGUI.boardview.BoardTacticalGraphics;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.RangeType;
 import megamek.common.board.Coords;
@@ -87,11 +85,6 @@ public class FieldOfFireSprite extends MovementEnvelopeSprite {
 
 
     private static final GUIPreferences GUIP = GUIPreferences.getInstance();
-
-    /** The GPU board's upright weapon range bracket (BoardRangeBorder), a level tall, as the native contours were. */
-    private static final float GPU_WEAPON_RANGE_HEIGHT = 1;
-    /** 0 is fully transparent; 1 is fully opaque. */
-    private static final float GPU_WEAPON_RANGE_OPACITY = 0.3f;
 
     // thin line
     private static final float lineThickness = 1.4f;
@@ -335,14 +328,6 @@ public class FieldOfFireSprite extends MovementEnvelopeSprite {
     }
 
     protected void drawBorderXC(Graphics2D graph, Shape fillShape, Shape lineShape) {
-        if ((graph instanceof BoardTacticalGraphics tactical) && isWeaponRange()) {
-            // The GPU board stands a weapon's bracket upright, as the visual range and the deployment zones
-            var border = new BoardRangeBorder(GPU_WEAPON_RANGE_HEIGHT, getFieldOfFireColor(rangeBracket).getRGB(),
-                  GPU_WEAPON_RANGE_OPACITY,
-                  new BoardTactical.Outline(lineColor.getRGB(), (BasicStroke) graph.getStroke()));
-            tactical.wall(lineShape, fillShape, getPosition(), border);
-            return;
-        }
         // 1) thick transparent border
         graph.setColor(fillColor);
         graph.fill(fillShape);

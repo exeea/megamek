@@ -656,7 +656,7 @@ class GpuContextMenuSmokeTest {
         List<GpuBoardSource.Bind> binds = Stream.of(KeyCommandBind.values()).map(bind -> new GpuBoardSource.Bind(bind,
               bind.keyDefault, bind.modifiersDefault, KeyCommandBind.getDesc(bind.keyDefault, bind.modifiersDefault)))
               .toList();
-        return new GpuBoardSource.UiPreferences(1, "", "", true, true, false, false, false, binds, 0);
+        return new GpuBoardSource.UiPreferences(1, "", "", true, true, false, false, binds, 0);
     }
 
     // ---------------------------------------------------------------- reading and pressing the menu

@@ -12,7 +12,6 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import javax.swing.SwingUtilities;
 
-import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.SensorRangeSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.TextMarkerSprite;
@@ -192,14 +191,6 @@ class GpuFiringCaptureTest {
                 assertEquals(before.tile(sensorHex).tactical(), scene.tile(sensorHex).tactical());
                 assertEquals(before.tile(objectiveHex).tactical(), scene.tile(objectiveHex).tactical());
                 assertFalse(scene.tactical().fills().isEmpty(), "Sensor and objective borders must survive as native geometry");
-                // The weapon's bracket stands upright in the shared range border's walls, a level tall in its
-                // colour, as the visual range and the deployment zones (the user's decision of 2026-10-04).
-                int shortRgb = FieldOfFireSprite.getFieldOfFireColor(RangeType.RANGE_SHORT).getRGB() & 0xFFFFFF;
-                List<BoardTactical.Wall> walls = scene.tactical().walls().stream()
-                      .filter(wall -> wall.coords().equals(weaponHex)).toList();
-                assertFalse(walls.isEmpty(), "The weapon's bracket is upright walls");
-                assertTrue(walls.stream().allMatch(wall -> (wall.height() == 1)
-                      && ((wall.argb() & 0xFFFFFF) == shortRgb)), "in the short bracket's colour, a level tall");
                 fixture.view.addSprites(List.of(label));
                 fixture.source.refresh();
                 BoardScene withLabel = fixture.source.takeFrame().scene();
@@ -220,8 +211,6 @@ class GpuFiringCaptureTest {
                 label.setHidden(true);
                 fixture.source.refresh();
                 assertTrue(fixture.source.takeFrame().scene().rangeBorders().isEmpty());
-                assertTrue(fixture.source.takeFrame().scene().tactical().walls().stream()
-                      .noneMatch(wall -> wall.coords().equals(weaponHex)), "A hidden bracket has no walls");
                 assertTrue(fixture.source.takeFrame().scene().rangeLabels().isEmpty());
                 assertEquals(megamek.client.ui.clientGUI.boardview.BoardTactical.SCROLLING_RANGE_LABELS ? 0 : 1, withLabel.rangeLabels().size(),
                       "Hiding the Swing sprite must not mutate an already published snapshot");

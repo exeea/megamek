@@ -341,7 +341,7 @@ class GpuPhaseHeaderSmokeTest {
     }
 
     private static GpuBoardSource.UiPreferences preferences(boolean conditions) {
-        return new GpuBoardSource.UiPreferences(1, "", "", true, true, false, conditions, false, List.of(), 0);
+        return new GpuBoardSource.UiPreferences(1, "", "", true, true, conditions, false, List.of(), 0);
     }
 
     /** The panels of a frame whose phase display reports the given planetary condition lines. */

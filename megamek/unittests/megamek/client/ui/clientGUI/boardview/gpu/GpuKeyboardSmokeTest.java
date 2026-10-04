@@ -176,7 +176,7 @@ class GpuKeyboardSmokeTest {
         GpuBoardSource.UiPreferences defaults = GpuHudInputTest.preferences();
         List<GpuBoardSource.Bind> binds = defaults.binds().stream().map(bind -> keys.containsKey(bind.command())
               ? new GpuBoardSource.Bind(bind.command(), keys.get(bind.command()), 0, bind.text()) : bind).toList();
-        return new GpuBoardSource.UiPreferences(defaults.scale(), "", "", true, true, false, false, false, binds, 0);
+        return new GpuBoardSource.UiPreferences(defaults.scale(), "", "", true, true, false, false, binds, 0);
     }
 
     /** The modifier keys the mocked input reports as held, as GLFW does while they are down. */

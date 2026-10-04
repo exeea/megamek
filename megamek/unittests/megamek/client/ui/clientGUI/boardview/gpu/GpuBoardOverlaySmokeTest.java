@@ -21,7 +21,6 @@ import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.tileset.MekTileset;
@@ -38,11 +37,11 @@ import org.junit.jupiter.api.Test;
 
 /**
  * G7: the hud-v3 board overlay over the board-space harness, in 3D and in the Tactical View (its two alpha sets),
- * beside the prototype's shots 02, 03, 05, 07, 09 and 15, and its behaviour: the envelope preference, the hover
- * preview, non-planner movement, one arc per jump, the ghost of a plotted route only, drop edges only in the Tactical
- * View, rebuilding only when the drawing changes, and freeing every mesh. The envelopes of the fixtures are drawing
- * inputs chosen to resemble the pictures (straight-line distance from the unit, MegaMek's forward arc); they are not
- * movement rules.
+ * beside the prototype's shots 02, 03, 05, 07, 09 and 15, and its behaviour: the hover preview, non-planner movement,
+ * one arc per jump, the ghost of a plotted route only, drop edges only in the Tactical View, rebuilding only when the
+ * drawing changes, never for the pointer, and freeing every mesh. MegaMek's own envelope is the tactical capture's,
+ * so the shots show none. The envelopes of the fixtures are drawing inputs chosen to resemble the pictures
+ * (straight-line distance from the unit, MegaMek's forward arc); they are not movement rules.
  */
 @Tag("on-demand")
 class GpuBoardOverlaySmokeTest {
@@ -137,7 +136,7 @@ class GpuBoardOverlaySmokeTest {
     }
 
     @Test
-    void envelopeRouteHoverAndDropEdgesFollowTheSnapshotsAndTheView() throws Exception {
+    void routeHoverAndDropEdgesFollowTheSnapshotsAndTheView() throws Exception {
         BoardScene scene = GpuBoardSpaceHarness.scene();
         GpuHudTestStage.run(hud -> {
             GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
@@ -148,95 +147,40 @@ class GpuBoardOverlaySmokeTest {
                 Coords atlas = unit(scene, ATLAS).location().coords();
                 frame(board, false, atlas, 118, 960, 600);
                 GpuMovePlan.Snapshot plan = atlasMove(scene);
-                Coords walkHex = atlas.translated(4, 2);
                 Coords routeHex = plan.route().getFirst().coords();
-                GpuHudData planPanels = panels(plan, GpuFireOrders.Snapshot.EMPTY);
-                Pixmap bare = draw(hud, board, overlay, scene, moving, GpuHudData.EMPTY, false, null, "bare");
-                Pixmap planned = draw(hud, board, overlay, scene, moving, planPanels, true, null, "planned");
-                Pixmap hidden = draw(hud, board, overlay, scene, moving, planPanels, false, null, "envelope-off");
+                Pixmap planned = draw(hud, board, overlay, scene, moving, panels(plan, GpuFireOrders.Snapshot.EMPTY),
+                      null, "planned");
                 GpuHudData hoverPanels = panels(withRoute(plan, List.of(), plan.route(), true),
                       GpuFireOrders.Snapshot.EMPTY);
-                Pixmap hovering = draw(hud, board, overlay, scene, moving, hoverPanels, true, null, "hover");
-                Pixmap overUnit = draw(hud, board, overlay, scene, moving, hoverPanels, true, null, ATLAS,
-                      "hover-unit");
+                Pixmap hovering = draw(hud, board, overlay, scene, moving, hoverPanels, null, "hover");
+                Pixmap overUnit = draw(hud, board, overlay, scene, moving, hoverPanels, null, ATLAS, "hover-unit");
                 Pixmap noRoute = draw(hud, board, overlay, scene, moving, panels(withRoute(plan, List.of(),
-                      List.of(), true), GpuFireOrders.Snapshot.EMPTY), true, null, "envelope-only");
+                      List.of(), true), GpuFireOrders.Snapshot.EMPTY), null, "no-route");
                 Pixmap classic = draw(hud, board, overlay, scene, moving, panels(withRoute(plan, plan.route(),
-                      List.of(), false), GpuFireOrders.Snapshot.EMPTY), true, null, "non-planner");
-                Coords hoverHex = atlas.translated(5, 2);
-                Pixmap hexRing = draw(hud, board, overlay, scene, moving, GpuHudData.EMPTY, true, hoverHex,
-                      "hover-hex");
-                Pixmap hexInEnvelope = draw(hud, board, overlay, scene, moving, planPanels, true, hoverHex,
-                      "hover-hex-envelope");
-                Vector2 walk = board.screen(ground(scene, walkHex));
+                      List.of(), false), GpuFireOrders.Snapshot.EMPTY), null, "non-planner");
                 Vector2 dot = board.screen(ground(scene, routeHex));
-                // The hovered hex's ring lies just inside the hex edge; probe it at the middle of the north side.
-                Vector2 rim = board.screen(ground(scene, hoverHex).add(0, .9325f * BoardGeometry.HEIGHT / 2, 0));
-                // G1: the envelope follows the client's move-envelope preference; the route does not.
-                assertTrue(difference(bare, planned, walk) > 2, "The walk envelope tints " + walkHex);
-                assertTrue(difference(bare, hidden, walk) < .5f, "No envelope with the preference off");
-                assertTrue(difference(bare, hidden, dot) > 20, "The route stays with the preference off");
                 // G3: the hover preview shows at half strength without a plotted route, never over a unit.
                 float full = difference(noRoute, planned, dot);
                 float half = difference(noRoute, hovering, dot);
                 assertTrue(half > 5 && half < full, "The hover route is fainter: " + half + " vs " + full);
                 assertTrue(difference(noRoute, overUnit, dot) < .5f, "No hover route while a unit is hovered");
-                // G20: a non-planner unit keeps its envelope but gets no route line from the overlay.
+                // G20: a non-planner unit gets no route line from the overlay.
                 assertTrue(difference(noRoute, classic, dot) < .5f, "No route for a non-planner unit");
-                assertTrue(difference(bare, classic, walk) > 2, "The envelope stays for a non-planner unit");
-                // overlay.js:56: the hovered hex is ringed unless an envelope shows the reach.
-                assertTrue(difference(bare, hexRing, rim) > 3, "A ring on the hovered hex " + hoverHex);
-                assertTrue(difference(planned, hexInEnvelope, rim) < .5f, "No hover ring over an envelope");
 
                 // L7: elevation-drop edges appear in the Tactical View only.
                 Vector3 edge = dropEdge(scene, Set.of(atlas));
                 frame(board, true, atlas, 60.8f, 960, 540);
-                Pixmap flatBare = draw(hud, board, overlay, null, moving, GpuHudData.EMPTY, true, null,
-                      "tactical-bare");
-                Pixmap flat = draw(hud, board, overlay, scene, moving, GpuHudData.EMPTY, true, null,
-                      "tactical-drops");
+                Pixmap flatBare = draw(hud, board, overlay, null, moving, GpuHudData.EMPTY, null, "tactical-bare");
+                Pixmap flat = draw(hud, board, overlay, scene, moving, GpuHudData.EMPTY, null, "tactical-drops");
                 assertTrue(difference(flatBare, flat, board.screen(edge)) > 5, "A drop edge at " + edge);
                 frame(board, false, atlas, 118, 960, 600);
-                Pixmap solidBare = draw(hud, board, overlay, null, moving, GpuHudData.EMPTY, true, null, "3d-bare");
-                Pixmap solid = draw(hud, board, overlay, scene, moving, GpuHudData.EMPTY, true, null, "3d-drops");
+                Pixmap solidBare = draw(hud, board, overlay, null, moving, GpuHudData.EMPTY, null, "3d-bare");
+                Pixmap solid = draw(hud, board, overlay, scene, moving, GpuHudData.EMPTY, null, "3d-drops");
                 assertTrue(difference(solidBare, solid, board.screen(edge)) < .5f, "No drop edge in 3D");
-                for (Pixmap image : List.of(bare, planned, hidden, hovering, overUnit, noRoute, classic, hexRing,
-                      hexInEnvelope, flatBare, flat, solidBare, solid)) {
+                for (Pixmap image : List.of(planned, hovering, overUnit, noRoute, classic, flatBare, flat, solidBare,
+                      solid)) {
                     image.dispose();
                 }
-            } finally {
-                overlay.dispose();
-                board.dispose();
-            }
-        });
-    }
-
-    /**
-     * A step's face lies back over the hex below it beside their edge, where that hex's own top gives way. The
-     * envelope's border along the step lies on that face, not under it at the lower hex's level, where the terrain hid
-     * it (the user's report of 2026-10-03). Probed at the middle of the border's side, seen from the step's foot.
-     */
-    @Test
-    void theEnvelopeBorderLiesOnTheFaceOfAStep() throws Exception {
-        BoardScene scene = GpuBoardSpaceHarness.scene();
-        GpuHudTestStage.run(hud -> {
-            GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
-            GpuBoardOverlay overlay = new GpuBoardOverlay();
-            try {
-                board.units = false;
-                Vector3 face = stepFace(scene);
-                Coords foot = BoardGeometry.tile(scene, face.x, face.y).coords();
-                frame(board, false, foot, 118, 960, 600);
-                GpuBattleStatus.Snapshot moving = GpuHudFixtures.status();
-                GpuHudData envelope = panels(move(ATLAS, List.of(), List.of(), List.of(),
-                      Map.of(foot, GpuMovePlan.Band.WALK), true), GpuFireOrders.Snapshot.EMPTY);
-                Pixmap bare = draw(hud, board, overlay, scene, moving, GpuHudData.EMPTY, true, null, "step-bare");
-                Pixmap bordered = draw(hud, board, overlay, scene, moving, envelope, true, null, "step-border");
-                Vector2 probe = board.screen(face.cpy().add(0, 0, .035f * RADIUS));
-                float shown = difference(bare, bordered, probe);
-                bare.dispose();
-                bordered.dispose();
-                assertTrue(shown > 20, "The border shows on the step's face over " + foot + ": " + shown);
             } finally {
                 overlay.dispose();
                 board.dispose();
@@ -265,9 +209,9 @@ class GpuBoardOverlaySmokeTest {
                 GpuMovePlan.Snapshot jump = move(ATLAS, List.of(step(scene, first, 5, GpuMovePlan.Band.JUMP),
                       step(scene, second, 5, GpuMovePlan.Band.JUMP), step(scene, landing, 5, GpuMovePlan.Band.JUMP)),
                       List.of(), List.of(), Map.of(), true);
-                Pixmap still = draw(hud, board, overlay, scene, moving, GpuHudData.EMPTY, true, null, "jump-none");
+                Pixmap still = draw(hud, board, overlay, scene, moving, GpuHudData.EMPTY, null, "jump-none");
                 Pixmap jumped = draw(hud, board, overlay, scene, moving, panels(jump, GpuFireOrders.Snapshot.EMPTY),
-                      true, null, "jump");
+                      null, "jump");
                 images.addAll(List.of(still, jumped));
                 Vector3 start = lifted(scene, atlas, .07f);
                 Vector3 end = lifted(scene, landing, .07f);
@@ -330,27 +274,37 @@ class GpuBoardOverlaySmokeTest {
                 GpuBoardSource.Frame frame = frame(scene, moving, panels);
                 Set<Integer> before = liveBuffers();
                 GpuBoardOverlay overlay = new GpuBoardOverlay();
-                overlay.update(frame, view(false, null, Entity.NONE), preferences(true), state);
-                overlay.update(frame, view(false, null, Entity.NONE), preferences(true), state);
+                overlay.update(frame, view(false, null, Entity.NONE), preferences(), state);
+                overlay.update(frame, view(false, null, Entity.NONE), preferences(), state);
                 assertEquals(1, overlay.builds(), "The same snapshots and view state build once");
-                // The source captures a new scene at every refresh: one that shows the same keeps the meshes, as
-                // does a hovered hex while the envelope hides its ring.
+                // The source captures a new scene at every refresh: one that shows the same keeps the meshes. The
+                // pointer keeps them too: the view rings the hovered hex, and the marks, drawn every frame, ring the
+                // hovered unit; only whether a unit is hovered at all counts, as it hides the hover route.
                 overlay.update(frame(recaptured(scene), moving, panels), view(false, null, Entity.NONE),
-                      preferences(true), state);
+                      preferences(), state);
                 assertEquals(1, overlay.builds(), "A recaptured equal scene keeps the meshes");
-                overlay.update(frame, view(false, new Coords(3, 8), Entity.NONE), preferences(true), state);
-                assertEquals(1, overlay.builds(), "A hover ring the envelope hides keeps the meshes");
+                for (int column = 0; column < 20; column++) {
+                    overlay.update(frame, view(false, new Coords(column, 8), Entity.NONE), preferences(), state);
+                }
+                assertEquals(1, overlay.builds(), "Hovering hexes keeps the meshes");
+                overlay.update(frame, view(false, null, PANTHER), preferences(), state);
+                overlay.update(frame, view(false, null, TIMBER_WOLF), preferences(), state);
+                assertEquals(2, overlay.builds(), "Moving from one hovered unit to another keeps the meshes");
+                overlay.update(frame, view(false, null, Entity.NONE), preferences(), state);
+                overlay.renderMarks(board.camera.camera, board.poses::get);
                 overlay.render(board.camera.camera);
                 Set<Integer> first = liveBuffers();
                 first.removeAll(before);
                 assertTrue(!first.isEmpty(), "The overlay's meshes are GL buffers");
-                // Every hover change that shows (here while declaring attacks) rebuilds and frees the old meshes.
+                // Every change of what the meshes draw rebuilds them and frees the old ones.
                 GpuBoardSource.Frame firing = frame(scene, moving, panels(GpuMovePlan.Snapshot.EMPTY, fire(null)));
-                for (int column = 0; column < 20; column++) {
-                    overlay.update(firing, view(false, new Coords(column, 8), Entity.NONE), preferences(true), state);
+                for (int change = 0; change < 20; change++) {
+                    overlay.update(change % 2 == 0 ? firing : frame, view(false, null, Entity.NONE), preferences(),
+                          state);
+                    overlay.renderMarks(board.camera.camera, board.poses::get);
                     overlay.render(board.camera.camera);
                 }
-                assertEquals(21, overlay.builds());
+                assertEquals(23, overlay.builds());
                 Set<Integer> later = liveBuffers();
                 later.removeAll(before);
                 System.out.println("Overlay buffers after the first build " + first.size() + ", after 20 more "
@@ -358,13 +312,14 @@ class GpuBoardOverlaySmokeTest {
                 assertEquals(first.size(), later.size(), "Rebuilding frees the old meshes");
                 // The Tactical View adds the board's drop edges; disposing frees them too.
                 board.view(true);
-                overlay.update(frame, view(true, null, Entity.NONE), preferences(true), state);
+                overlay.update(frame, view(true, null, Entity.NONE), preferences(), state);
+                overlay.renderMarks(board.camera.camera, board.poses::get);
                 overlay.render(board.camera.camera);
                 overlay.dispose();
                 Set<Integer> left = liveBuffers();
                 left.removeAll(before);
                 assertEquals(Set.of(), left, "Disposing the overlay frees every buffer it made");
-                measure(scene);
+                measure(board, scene);
             } finally {
                 board.dispose();
             }
@@ -374,10 +329,11 @@ class GpuBoardOverlaySmokeTest {
     /**
      * Update times at the fixture's 10 units and at 100 v 100, in milliseconds: the first build (with the drop edges
      * in the Tactical View), a rebuild for a changed plan, a rebuild after a pan (the source repaints the tiles, so
-     * the terrain samples start cold) and a recapture that shows the same (no rebuild). Not a performance claim when
-     * JaCoCo instruments the run.
+     * the terrain samples start cold) and a recapture that shows the same (no rebuild); and the marks of one frame,
+     * drawn where the units stand, with the GPU's work (glFinish). Not a performance claim when JaCoCo instruments the
+     * run.
      */
-    private static void measure(BoardScene scene) {
+    private static void measure(GpuBoardSpaceHarness board, BoardScene scene) {
         List<BoardScene.Unit> crowd = new ArrayList<>();
         List<GpuBattleStatus.UnitStatus> listed = new ArrayList<>();
         GpuBattleStatus.Snapshot fixture = GpuHudFixtures.status();
@@ -405,33 +361,47 @@ class GpuBoardOverlaySmokeTest {
                 GpuHudState state = state(status);
                 GpuHud.HudView view = view(tactical, null, Entity.NONE);
                 long firstBuild = time(() -> overlay.update(frame(shown, status, plans.getFirst()), view,
-                      preferences(true), state));
+                      preferences(), state));
                 List<Long> rebuilds = new ArrayList<>();
                 List<Long> recaptures = new ArrayList<>();
                 List<Long> pans = new ArrayList<>();
                 // The plan alternates, so each update rebuilds; the last one leaves the second plan shown.
                 for (int i = 1; i <= 25; i++) {
                     GpuHudData next = plans.get(i % 2);
-                    rebuilds.add(time(() -> overlay.update(frame(shown, status, next), view, preferences(true),
+                    rebuilds.add(time(() -> overlay.update(frame(shown, status, next), view, preferences(),
                           state)));
                 }
                 GpuHudData settled = plans.get(1);
                 for (int i = 0; i < 25; i++) {
                     BoardScene again = recaptured(shown);
-                    recaptures.add(time(() -> overlay.update(frame(again, status, settled), view, preferences(true),
+                    recaptures.add(time(() -> overlay.update(frame(again, status, settled), view, preferences(),
                           state)));
                 }
                 for (int i = 0; i < 25; i++) {
                     BoardScene painted = repainted(shown);
-                    pans.add(time(() -> overlay.update(frame(painted, status, settled), view, preferences(true),
+                    pans.add(time(() -> overlay.update(frame(painted, status, settled), view, preferences(),
                           state)));
+                }
+                Map<BoardScene.Unit, UnitFootprint.Pose> poses = new HashMap<>();
+                for (BoardScene.Unit unit : shown.units()) {
+                    poses.put(unit, new UnitFootprint.Pose(unit,
+                          BoardGeometry.center(unit.location().coords(), unit.location().elevation()),
+                          unit.location().facing() * 60));
+                }
+                List<Long> marks = new ArrayList<>();
+                for (int i = 0; i < 25; i++) {
+                    marks.add(time(() -> {
+                        overlay.renderMarks(board.camera.camera, poses::get);
+                        Gdx.gl.glFinish();
+                    }));
                 }
                 long builds = overlay.builds();
                 overlay.dispose();
                 System.out.printf("Overlay, %d units, %s: first build %.2f ms; rebuild median %.2f, max %.2f; after"
-                            + " a pan median %.2f, max %.2f; equal recapture median %.3f ms; %d builds%n",
+                            + " a pan median %.2f, max %.2f; equal recapture median %.3f ms; %d builds; marks of a"
+                            + " frame median %.3f, max %.3f ms%n",
                       shown.units().size(), tactical ? "tactical" : "3D", firstBuild / 1e6, median(rebuilds),
-                      max(rebuilds), median(pans), max(pans), median(recaptures), builds);
+                      max(rebuilds), median(pans), max(pans), median(recaptures), builds, median(marks), max(marks));
             }
         }
     }
@@ -479,12 +449,13 @@ class GpuBoardOverlaySmokeTest {
           GpuUnitIcons icons, Shot shot, int width, int height) {
         frame(board, shot.tactical(), shot.focus(), shot.hexPixels(), shot.x(), shot.y());
         overlay.update(frame(shot.scene(), shot.status(), shot.panels()), view(shot.tactical(), null, Entity.NONE),
-              preferences(true), state(shot.status()));
+              preferences(), state(shot.status()));
         Map<BoardScene.Unit, Vector3> anchors = new HashMap<>();
         board.draw(camera -> {
             if (!shot.tactical()) {
                 overlay.renderGhost(camera, shot.shown());
             }
+            overlay.renderMarks(camera, board.poses::get);
             overlay.render(camera);
             if (shot.tactical()) {
                 icons.update(true, camera, board.scene, shot.status(),
@@ -510,18 +481,23 @@ class GpuBoardOverlaySmokeTest {
     }
 
     private static Pixmap draw(GpuHudTestStage hud, GpuBoardSpaceHarness board, GpuBoardOverlay overlay,
-          BoardScene scene, GpuBattleStatus.Snapshot status, GpuHudData panels, boolean envelope, Coords hovered,
-          String name) {
-        return draw(hud, board, overlay, scene, status, panels, envelope, hovered, Entity.NONE, name);
+          BoardScene scene, GpuBattleStatus.Snapshot status, GpuHudData panels, Coords hovered, String name) {
+        return draw(hud, board, overlay, scene, status, panels, hovered, Entity.NONE, name);
     }
 
-    /** Draws the board and the overlay of these snapshots (none for a null scene) and captures the back buffer. */
+    /**
+     * Draws the board and the overlay of these snapshots (none for a null scene), its marks first where the harness
+     * stands the units, and captures the back buffer.
+     */
     private static Pixmap draw(GpuHudTestStage hud, GpuBoardSpaceHarness board, GpuBoardOverlay overlay,
-          BoardScene scene, GpuBattleStatus.Snapshot status, GpuHudData panels, boolean envelope, Coords hovered,
-          int hoveredUnit, String name) {
-        overlay.update(frame(scene, status, panels), view(board.tactical(), hovered, hoveredUnit),
-              preferences(envelope), state(status));
-        board.draw(overlay::render);
+          BoardScene scene, GpuBattleStatus.Snapshot status, GpuHudData panels, Coords hovered, int hoveredUnit,
+          String name) {
+        overlay.update(frame(scene, status, panels), view(board.tactical(), hovered, hoveredUnit), preferences(),
+              state(status));
+        board.draw(camera -> {
+            overlay.renderMarks(camera, board.poses::get);
+            overlay.render(camera);
+        });
         return hud.captureBackBuffer("g7-probe-" + name);
     }
 
@@ -532,11 +508,12 @@ class GpuBoardOverlaySmokeTest {
     private static Pixmap drawGhost(GpuHudTestStage hud, GpuBoardSpaceHarness board, GpuBoardOverlay overlay,
           GpuUnitIcons icons, GpuBattleStatus.Snapshot status, GpuHudData panels, boolean ghost, String name) {
         overlay.update(frame(board.scene, status, panels), view(board.tactical(), null, Entity.NONE),
-              preferences(true), state(status));
+              preferences(), state(status));
         board.draw(camera -> {
             if (ghost && !board.tactical()) {
                 overlay.renderGhost(camera, board.instances::get);
             }
+            overlay.renderMarks(camera, board.poses::get);
             overlay.render(camera);
             if (board.tactical()) {
                 icons.update(true, camera, board.scene, status, unit -> unit.id() == status.actorId(), unit -> false,
@@ -576,37 +553,6 @@ class GpuBoardOverlaySmokeTest {
     /** A hex's centre {@code radii} hex radii above its level, where the overlay lifts its marks. */
     private static Vector3 lifted(BoardScene scene, Coords coords, float radii) {
         return ground(scene, coords).add(0, 0, radii * RADIUS);
-    }
-
-    /**
-     * The middle of the north side of a hex whose north neighbour lies higher, just inside the edge as the overlay
-     * draws a border, where the step's face lies back over the hex well above its own level (BoardGeometry
-     * stepsBetweenTops); its height is the drawn ground a vertical ray meets there. Hexes with features, which could
-     * hide the side, and water are passed over.
-     */
-    private static Vector3 stepFace(BoardScene scene) {
-        for (BoardScene.Tile tile : scene.tiles()) {
-            Coords coords = tile.coords();
-            BoardScene.Tile upper = scene.tile(coords.translated(0));
-            if (coords.getX() < 2 || coords.getX() > scene.width() - 3 || coords.getY() < 3
-                  || coords.getY() > scene.height() - 3 || upper == null || upper.elevation() <= tile.elevation()
-                  || tile.liquid().present() || !tile.features().isEmpty() || !upper.features().isEmpty()) {
-                continue;
-            }
-            Vector3 centre = BoardGeometry.center(coords, 0);
-            Vector3 side = BoardGeometry.inset(BoardGeometry.corner(coords, 0, 1), centre, .03f).cpy()
-                  .lerp(BoardGeometry.inset(BoardGeometry.corner(coords, 0, 2), centre, .03f), .5f);
-            float high = 100 * BoardGeometry.level();
-            BoardGeometry.Hit hit = BoardGeometry.hit(scene, new Ray(new Vector3(side.x, side.y, high),
-                  new Vector3(0, 0, -1)));
-            if (hit != null) {
-                side.z = high - (float) Math.sqrt(hit.distance());
-                if (side.z > BoardGeometry.groundZ(tile) + .2f * BoardGeometry.level()) {
-                    return side;
-                }
-            }
-        }
-        throw new AssertionError("The fixture board has no step whose face lies over the hex below it");
     }
 
     /** The middle of a hex side whose neighbour lies lower, away from the given hexes and the fixture's units. */
@@ -814,8 +760,8 @@ class GpuBoardOverlaySmokeTest {
         return new GpuHud.HudView(tactical, false, Map.of(), Map.of(), Map.of(), hovered, hoveredUnit, 0);
     }
 
-    static GpuBoardSource.UiPreferences preferences(boolean envelope) {
-        return new GpuBoardSource.UiPreferences(1, "", "", true, true, envelope, false, false, List.of(),
+    static GpuBoardSource.UiPreferences preferences() {
+        return new GpuBoardSource.UiPreferences(1, "", "", true, true, false, false, List.of(),
               GUIPreferences.getInstance().getMoveSprintColor().getRGB());
     }
 

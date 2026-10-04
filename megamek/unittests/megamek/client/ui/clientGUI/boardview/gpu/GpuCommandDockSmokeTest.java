@@ -1102,7 +1102,7 @@ class GpuCommandDockSmokeTest {
               List.of("Walk 1 hex (1 MP)", "Walk 1 hex (2 MP)"), List.of());
         GpuBoardSource.UiPreferences preferences = GpuHudInputTest.preferences();
         return new Shot(shot.status(), withPhase(panels, info), shot.commands(), shot.reports(), shot.playback(),
-              new GpuBoardSource.UiPreferences(preferences.scale(), "", "", true, true, false, false, true,
+              new GpuBoardSource.UiPreferences(preferences.scale(), "", "", true, true, false, true,
                     preferences.binds(), 0));
     }
 

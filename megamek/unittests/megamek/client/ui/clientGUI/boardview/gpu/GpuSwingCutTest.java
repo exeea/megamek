@@ -23,18 +23,17 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.awt.AWTEvent;
+import java.awt.Color;
 import java.awt.GraphicsEnvironment;
 import java.awt.Toolkit;
 import java.awt.event.AWTEventListener;
 import java.awt.event.InputEvent;
 import java.io.File;
 import java.lang.reflect.Field;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import javax.swing.JFrame;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
@@ -43,12 +42,11 @@ import javax.swing.JSpinner;
 import megamek.client.Client;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.RulerDialog;
+import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.FiringSolutionSprite;
-import megamek.client.ui.clientGUI.boardview.sprite.MovementEnvelopeSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
 import megamek.client.ui.clientGUI.boardview.sprite.StepSprite;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
@@ -56,6 +54,7 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.Asked;
 import megamek.client.ui.panels.phaseDisplay.DeployMinefieldDisplay;
 import megamek.common.Configuration;
+import megamek.common.RangeType;
 import megamek.common.ToHitData;
 import megamek.common.board.Coords;
 import megamek.common.equipment.Cargo;
@@ -116,39 +115,32 @@ class GpuSwingCutTest {
     }
 
     /**
-     * G4: while the plan draws a unit's route and envelope, the native frame leaves out MegaMek's movement envelope,
-     * and every one of its fills only then; the sprites stay shown. Without a plan (MegaMek's own board tool) the
-     * frame shows MegaMek's envelope, as it shows a hex pick's highlight (GpuMovePlanTest).
+     * G4: while the plan draws the route, the native frame shows MegaMek's movement envelope as rimshaderv1 draws it
+     * (the user's decision of 2026-10-04) and the zones, whose sprites extend the envelope's: everything the board
+     * state captures but the route's steps, of which this plan has none yet. The weapon's bracket, a field of fire too,
+     * is the fire control's wall.
      */
     @Test
-    void theNativeFrameLeavesOutMegaMeksEnvelopeOnlyWhileThePlanDrawsOne() throws Exception {
+    void theNativeFrameShowsMegaMeksEnvelopeAndFieldOfFireWhileThePlanDrawsTheRoute() throws Exception {
         try (GpuMovementFixture moving = GpuMovementFixture.create()) {
-            List<MovementEnvelopeSprite> envelope = onSwing(moving::envelopeSprites);
-            assertFalse(envelope.isEmpty(), "MegaMek's board state shows the selected unit's envelope");
-            Set<Integer> colours = onSwing(() -> {
-                GUIPreferences preferences = GUIPreferences.getInstance();
-                return Set.of(preferences.getMoveDefaultColor().getRGB() & 0xFFFFFF,
-                      preferences.getMoveRunColor().getRGB() & 0xFFFFFF,
-                      preferences.getMoveJumpColor().getRGB() & 0xFFFFFF,
-                      preferences.getMoveSprintColor().getRGB() & 0xFFFFFF);
-            });
-
+            assertFalse(onSwing(moving::envelopeSprites).isEmpty(),
+                  "MegaMek's board state shows the selected unit's envelope");
             moving.board.panel = moving.display;
+            onSwing(() -> {
+                moving.board.view.addSprites(List.of(
+                      new FieldOfFireSprite(moving.board.view, RangeType.RANGE_SHORT, new Coords(4, 4), 63),
+                      new FieldOfFireSprite(moving.board.view, new Color(0x12, 0x34, 0x56), new Coords(6, 4), 63)));
+                return null;
+            });
             Planned planning = planned(moving);
             assertTrue(planning.planner(), "The Sagittaire walks in a planner gear");
-            List<BoardTactical.Fill> left = new ArrayList<>(planning.state());
-            planning.fills().forEach(left::remove);
-            assertEquals(planning.state().size() - planning.fills().size(), left.size(), "The frame adds no fill");
-            assertFalse(left.isEmpty(), "The envelope's fills are left out");
-            assertTrue(left.stream().allMatch(fill -> colours.contains(fill.argb() & 0xFFFFFF)),
-                  "Only the envelope's fills are left out");
-            assertTrue(onSwing(() -> envelope.stream().noneMatch(Sprite::isHidden)),
-                  "The capture leaves the envelope shown for the classic board");
-
-            moving.board.panel = new JPanel();
-            Planned classic = planned(moving);
-            assertFalse(classic.planner());
-            assertEquals(classic.state(), classic.fills(), "Without a plan the frame shows MegaMek's envelope");
+            assertEquals(planning.state(), planning.frame(), "The frame shows every marking of the board state");
+            List<BoardScene.RangeBorder> brackets = onSwing(() -> {
+                moving.board.source.refresh();
+                return moving.board.source.takeFrame().scene().rangeBorders();
+            });
+            assertTrue(brackets.stream().anyMatch(border -> border.coords().equals(new Coords(4, 4))),
+                  "The weapon's bracket reaches the fire control's walls");
         }
     }
 
@@ -169,14 +161,10 @@ class GpuSwingCutTest {
             List<BoardTactical> captures = onSwing(() -> {
                 moving.board.source.refresh();
                 BoardTactical frame = moving.board.source.takeFrame().scene().tactical();
-                // The board state's own capture without the envelope, which the frame leaves out as well.
-                List<MovementEnvelopeSprite> envelope = moving.envelopeSprites();
-                envelope.forEach(sprite -> sprite.setHidden(true));
                 BoardTactical withSteps = moving.board.view.captureTacticalGeometry();
                 steps.forEach(step -> step.setHidden(true));
                 BoardTactical withoutSteps = moving.board.view.captureTacticalGeometry();
                 steps.forEach(step -> step.setHidden(false));
-                envelope.forEach(sprite -> sprite.setHidden(false));
                 return List.of(frame, withSteps, withoutSteps);
             });
             assertNotEquals(captures.get(2), captures.get(1), "MegaMek's own capture draws the steps");
@@ -187,20 +175,20 @@ class GpuSwingCutTest {
             moving.board.panel = new JPanel();
             Planned classic = planned(moving);
             assertFalse(classic.planner());
-            assertEquals(classic.state(), classic.fills(), "Without a plan the frame shows MegaMek's steps");
+            assertEquals(classic.state(), classic.frame(), "Without a plan the frame shows MegaMek's steps");
         }
     }
 
-    /** A capture: the plan's planner flag, the frame's tactical fills and the board state's own ones. */
-    private record Planned(boolean planner, List<BoardTactical.Fill> fills, List<BoardTactical.Fill> state) { }
+    /** A capture: the plan's planner flag, the frame's tactical geometry and the board state's own. */
+    private record Planned(boolean planner, BoardTactical frame, BoardTactical state) { }
 
     /** EDT, in one event: captures the frame, then the board state's own tactical capture of the same sprites. */
     private static Planned planned(GpuMovementFixture moving) throws Exception {
         return onSwing(() -> {
             moving.board.source.refresh();
             GpuBoardSource.Frame frame = moving.board.source.takeFrame();
-            return new Planned(frame.panels().move().planner(), frame.scene().tactical().fills(),
-                  moving.board.view.captureTacticalGeometry().fills());
+            return new Planned(frame.panels().move().planner(), frame.scene().tactical(),
+                  moving.board.view.captureTacticalGeometry());
         });
     }
 

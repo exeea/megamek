@@ -117,7 +117,7 @@ final class GpuHud implements GpuBoardHud {
      */
     record HudView(boolean tactical, boolean playbackBusy, Map<Integer, Rectangle> unitRects,
           Map<Integer, Vector2> unitHeads, Map<Integer, Vector2> unitPositions, Coords hovered, int hoveredUnit,
-          float hexPixels, float hoverTop, Map<TargetKey, Vector2> targetHeads) {
+          float hexPixels, Map<TargetKey, Vector2> targetHeads) {
         static final HudView EMPTY = new HudView(false, false, Map.of(), Map.of(), Map.of(), null, Entity.NONE, 0);
 
         HudView {
@@ -127,12 +127,12 @@ final class GpuHud implements GpuBoardHud {
             targetHeads = Map.copyOf(targetHeads);
         }
 
-        /** The facts while no building floor is under the pointer and every fire target is a unit. */
+        /** The facts while every fire target is a unit. */
         HudView(boolean tactical, boolean playbackBusy, Map<Integer, Rectangle> unitRects,
               Map<Integer, Vector2> unitHeads, Map<Integer, Vector2> unitPositions, Coords hovered, int hoveredUnit,
               float hexPixels) {
             this(tactical, playbackBusy, unitRects, unitHeads, unitPositions, hovered, hoveredUnit, hexPixels,
-                  Float.NaN, Map.of());
+                  Map.of());
         }
 
         /** A fire target's anchor: a unit's head, else its hex's; null where the view draws neither. */

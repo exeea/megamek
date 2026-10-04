@@ -727,12 +727,14 @@ class GpuBattleView extends ApplicationAdapter {
               unitBounds, terrainEffects.opacityTexture());
         renderStage("tactical overlays");
         terrain.render(boardCamera.camera, true);
-        // The board overlay over the terrain's marks; in 3D after the route's ghost, whose depth hides the marks under
-        // it. In the Tactical View the overlay lies under the icons and the ghost icon over them.
+        // The board overlay over the terrain's marks, its unit marks where the units stand this frame first; in 3D
+        // after the route's ghost, whose depth hides the marks under it. In the Tactical View the overlay lies under
+        // the icons and the ghost icon over them.
         if (!unitIcons.active()) { overlay.renderGhost(boardCamera.camera, shownUnit); }
+        overlay.renderMarks(boardCamera.camera, unitFootprints::get);
         overlay.render(boardCamera.camera);
         renderHoverRings();
-        fireControl.render(boardCamera.camera);
+        fireControl.render(boardCamera.camera, Gdx.graphics.getDeltaTime());
         tactical.render(boardCamera.camera, Gdx.graphics.getDeltaTime(), unitIcons.active());
         hexGrid.render(boardCamera, scene);
         renderHexText();
@@ -774,15 +776,14 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     /**
-     * The hover rings the view draws itself, inset by {@link #HOVER_HEX_INSET}: the board editor and the map preview
-     * have no battle overlay, so there the hovered hex's outline, or with Ctrl in the editor the brush's hexes, at the
-     * height a unit would stand there; and in every view a building floor under the pointer as rimshaderv1's column:
-     * its outline half a hex above the floor's level, joined by its corners to a faint outline on the hex.
+     * The hover rings the view draws itself every frame, inset by {@link #HOVER_HEX_INSET}, as rimshaderv1 draws them:
+     * the hovered hex's outline, or with Ctrl in the editor the brush's hexes, at the height a unit would stand there;
+     * and a building floor under the pointer as rimshaderv1's column: its outline half a hex above the floor's level,
+     * joined by its corners to a faint outline on the hex.
      */
     private void renderHoverRings() {
         float top = hoverTop();
-        if (hovered == null || scene.tile(hovered) == null || ui.hit(Gdx.input.getX(), Gdx.input.getY())
-              || ui instanceof GpuHud && Float.isNaN(top)) {
+        if (hovered == null || scene.tile(hovered) == null || ui.hit(Gdx.input.getX(), Gdx.input.getY())) {
             return;
         }
         Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
@@ -871,7 +872,7 @@ class GpuBattleView extends ApplicationAdapter {
             }
         });
         return new GpuHud.HudView(boardCamera.tactical(), playbackBusy(), rects, heads, positions, hovered, hoveredUnit,
-              hexPixels, hoverTop(), targets);
+              hexPixels, targets);
     }
 
     /**

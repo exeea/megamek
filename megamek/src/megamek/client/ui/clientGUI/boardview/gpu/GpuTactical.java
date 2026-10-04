@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.IntPredicate;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
@@ -58,8 +59,19 @@ final class GpuTactical implements Disposable {
     private record FillGeometry(Map<Coords, BoardTacticalGeometry.Surface> surfaces, float[] vertices, float planeZ) { }
     private record WallGeometry(Map<Coords, BoardTacticalGeometry.Surface> surfaces, int[] levels,
           float[] body, float[] uprightOutline, float[] flatOutline) { }
-    /** Presentations 0 and 3 are always drawn; 1 and 2 are the upright and flat wall alternatives. */
+    /**
+     * Presentations 0, 3 and 4 are always drawn; 1 and 2 are the upright and flat wall alternatives. 3 holds the map
+     * restrictions and 4 the other fills on their owner's hex plane, both depth-tested nearer (see
+     * {@link #PLANE_SEE_THROUGH_LEVELS}).
+     */
     private record Group(int presentation, BasicStroke stroke) { }
+    /**
+     * How much nearer the markings on the hex planes are depth-tested, in levels: a step's slope lying over a hex's
+     * edge rises up to two levels, so the terrain inside their hex never covers them (the user's report of
+     * 2026-10-04), while a hill in front of the hex still does. Only their depth moves; they stay flat where they are.
+     */
+    static final float PLANE_SEE_THROUGH_LEVELS = 2;
+    private static final Group PLANES = new Group(4, null);
     private record Span(float[] vertices, int start, int count) { }
     private final ModelBatch batch = new ModelBatch();
     private final GpuHexMasks hexMasks = new GpuHexMasks();
@@ -243,7 +255,8 @@ final class GpuTactical implements Disposable {
                       reuse(vertices, geometry == null ? null : geometry.vertices()), planeZ);
             }
             retained.put(key, geometry);
-            add(groups, group, geometry.vertices());
+            add(groups, group.presentation() == 0 && command.planeAnchor() != null ? PLANES : group,
+                  geometry.vertices());
         }
     }
 
@@ -490,9 +503,24 @@ final class GpuTactical implements Disposable {
         batch.begin(camera);
         deploymentTint.submit(batch, camera);
         hexMasks.submit(batch, camera);
+        renderPages(camera, presentation -> presentation == 0 || presentation == (tacticalView ? 2 : 1));
+        batch.end();
+        // The hex planes' markings: the camera's depth row is moved nearer for their pass alone, then restored.
+        float[] combined = camera.combined.val;
+        float depth = combined[Matrix4.M23];
+        combined[Matrix4.M23] += camera.projection.val[Matrix4.M22] * PLANE_SEE_THROUGH_LEVELS * BoardGeometry.level();
+        try {
+            batch.begin(camera);
+            renderPages(camera, presentation -> presentation == 3 || presentation == PLANES.presentation());
+            batch.end();
+        } finally {
+            combined[Matrix4.M23] = depth;
+        }
+    }
+
+    private void renderPages(Camera camera, IntPredicate presentations) {
         for (var entry : pages.entrySet()) {
-            int presentation = entry.getKey().presentation();
-            if (presentation == 0 || presentation == 3 || presentation == (tacticalView ? 2 : 1)) {
+            if (presentations.test(entry.getKey().presentation())) {
                 for (Page page : entry.getValue()) {
                     var bounds = page.renderable.meshPart;
                     if (camera.frustum.boundsInFrustum(bounds.center.x, bounds.center.y, bounds.center.z,
@@ -500,7 +528,6 @@ final class GpuTactical implements Disposable {
                 }
             }
         }
-        batch.end();
     }
 
     void renderLabels(Camera camera) {

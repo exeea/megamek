@@ -257,7 +257,7 @@ class GpuUtilityMinimapSmokeTest {
     /** The preferences with the contacts panel shown or hidden. */
     private static GpuBoardSource.UiPreferences contacts(GpuBoardSource.UiPreferences p, boolean enabled) {
         return new GpuBoardSource.UiPreferences(p.scale(), p.reportKeywords(), p.reportFilterKeywords(),
-              p.minimapEnabled(), enabled, p.moveEnvelope(), p.conditionsVisible(), p.turnDetails(), p.binds(),
+              p.minimapEnabled(), enabled, p.conditionsVisible(), p.turnDetails(), p.binds(),
               p.moveSprintRgb());
     }
 
@@ -713,7 +713,7 @@ class GpuUtilityMinimapSmokeTest {
         List<GpuBoardSource.Bind> binds = Stream.of(KeyCommandBind.values())
               .map(bind -> new GpuBoardSource.Bind(bind, bind.keyDefault, bind.modifiersDefault,
                     KeyCommandBind.getDesc(bind.keyDefault, bind.modifiersDefault))).toList();
-        return new GpuBoardSource.UiPreferences(1, "", "", true, true, false, false, false, binds, 0);
+        return new GpuBoardSource.UiPreferences(1, "", "", true, true, false, false, binds, 0);
     }
 
     private static String text(String key) {

@@ -69,9 +69,9 @@ last frame.
 | others | tooltip, centring request, board generation, actor name, the scenario's atmosphere |
 
 Two channels sit outside the frame and are read without the source's monitor:
-- `uiPreferences` (`UiPreferences`): the GUI scale, report keywords, the minimap, movement envelope, planetary
-  conditions and turn details preferences, every key binding (`Bind`: command, key, modifiers, text), and the range
-  and sprint colours. It is captured again at every capture and on preference events.
+- `uiPreferences` (`UiPreferences`): the GUI scale, report keywords, the minimap, planetary conditions and turn
+  details preferences, every key binding (`Bind`: command, key, modifiers, text), and the sprint colour. It is
+  captured again at every capture and on preference events.
 - `dialog()`: the newest pending native dialog (1.6).
 
 Units the local player cannot see are not captured, and a sensor contact is captured without its identity.
@@ -367,23 +367,26 @@ view changes (open panels, the camera) stay on the GL thread. Names in quotes ar
 | `GpuTuningPanel` | dialogs layer | developer tuning (section 10); the frame rate beside its title | the tuning model |
 
 Two board-space components are world meshes that `GpuBattleView` draws:
-- `GpuBoardOverlay`: reach envelopes, the route and its ghost, unit rings and glows, the front arc or the displayed
-  weapon's arc, the physical-attack neighbours and the Tactical View's elevation-drop edges. It rebuilds its meshes
-  only when what it draws changed. Over the route it draws the route's pulse (below).
-  Where the terrain or a model hides the acting unit's ring or the hovered unit's rings, it draws them again at
-  half opacity behind what hides them (rimshaderv1's occluded outlines). The envelope's border lies on the drawn
-  ground, on a step's face where one lies back over a lower hex. `GpuBattleView` rings the hovered hex; over a
-  building floor the ring lies at that floor with a faint ring at the ground and faint corner posts between them.
-- `GpuFireControl`: the firing lines and the flat range labels ([attack controls](gpu-attack-controls.md)). During
-  the local weapon declaration the actor's lines are the HUD's traces instead; every other line is drawn in its
-  attacker's side colour. Lines hide while an attack plays (`GpuBattleView.HIDE_TARGET_ARROWS_DURING_ATTACKS`).
+- `GpuBoardOverlay`: the route and its ghost, the front arc or the displayed weapon's arc, the physical-attack
+  neighbours and the Tactical View's elevation-drop edges as meshes, rebuilt only when what they draw changed, with
+  the route's pulse over the route (below). The unit marks (side rings, glows, the other targets' rings and the
+  hovered unit's ring) are drawn every frame where the units stand, level as rimshaderv1's selection bands, so the
+  pointer rebuilds no mesh. Where the terrain or a model hides the acting unit's, the focused target's or the hovered
+  unit's ring, it is drawn again at half opacity behind what hides it (rimshaderv1's occluded outlines).
+  `GpuBattleView` rings the hovered hex as rimshaderv1 does; over a building floor the ring lies at that floor with a
+  faint ring at the ground and faint corner posts between them. The movement envelope is MegaMek's own (below).
+- `GpuFireControl`: rimshaderv1's range walls of the displayed weapon, the firing lines and the flat range labels
+  ([attack controls](gpu-attack-controls.md)). During the local weapon declaration the actor's lines are the HUD's
+  traces instead; every other line is drawn in its attacker's side colour. Lines hide while an attack plays
+  (`GpuBattleView.HIDE_TARGET_ARROWS_DURING_ATTACKS`).
 
-**Region markings** stand upright through one class, rimshaderv1's `BoardRangeBorder` (the user's decision of
-2026-10-04): the displayed weapon's range brackets (MegaMek's field of fire, `FieldOfFireSprite`, a level tall in each
-bracket's colour), the visual range (`SensorRangeSprite`) and the deployment zones (`BoardDeploymentGeometry`) give
-their border paths to it in the tactical capture, and `GpuTactical` stands the walls upright with their animated
-outline in 3D and lays them flat in the Tactical View. A new region marking hands its border to a `BoardRangeBorder`
-the same way.
+**Region markings** are rimshaderv1's (the user's decisions of 2026-10-04). The displayed weapon's range brackets
+are `GpuFireControl`'s continuous walls along the brackets' contours (`BoardFiringGeometry`) with the camera-facing
+S/M/L letters. The visual range (`SensorRangeSprite`) and the deployment zones (`BoardDeploymentGeometry`) stand
+upright through `BoardRangeBorder` in the tactical capture, which `GpuTactical` lays flat in the Tactical View.
+MegaMek's movement envelope, the sensor ranges and the zones lie flat on their hex's plane; `GpuTactical` depth-tests
+those markings two levels nearer (`PLANE_SEE_THROUGH_LEVELS`), so that the slopes and rocks inside their hex never
+cover them while a hill in front of the hex still does.
 
 **The route's pulse** (`GpuRoutePulse`, user item 55). In the local movement turn a plotted route pulses: a glowing
 head leaves the unit, runs the route and settles into the destination; the ghost then surges and a ring ripples out of

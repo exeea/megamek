@@ -2031,6 +2031,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
               || sprite instanceof GroundObjectSprite || sprite instanceof FlareSprite
               || sprite instanceof HexFlagSprite || sprite instanceof SawClearingSprite
               || sprite instanceof BridgeRepairedSprite
+              || sprite instanceof FieldOfFireSprite field && field.isWeaponRange()
               || sprite instanceof TextMarkerSprite text && text.isWeaponRange();
     }
 

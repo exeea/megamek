@@ -4,7 +4,6 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuMixedUnitBenchmarkSmokeTest.field;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -175,12 +174,13 @@ class GpuBuildingHoverSmokeTest {
 
     private static void checkHiddenRing(GpuBattleView view, Supplier<Pixmap> shot) throws Exception {
         var overlay = (GpuBoardOverlay) field(view, "overlay");
-        var hidden = GpuBoardOverlay.class.getDeclaredField("hidden");
+        var hidden = GpuBoardOverlay.class.getDeclaredField("hiddenUnitMarks");
         hidden.setAccessible(true);
         Object rings = hidden.get(overlay);
-        assertNotNull(rings, "The acting unit's ring is drawn once more where the board hides it");
+        assertFalse(((Map<?, ?>) rings).isEmpty(),
+              "The acting unit's ring is drawn once more where the board hides it");
         Pixmap with = shot.get();
-        hidden.set(overlay, null);
+        hidden.set(overlay, Map.of());
         Pixmap without;
         try {
             without = shot.get();

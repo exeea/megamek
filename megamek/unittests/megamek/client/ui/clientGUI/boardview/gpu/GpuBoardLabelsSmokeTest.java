@@ -911,13 +911,14 @@ class GpuBoardLabelsSmokeTest {
         boolean tactical = board.tactical();
         labels.state.update(frame.status(), GpuUnitRecord.Snapshot.EMPTY, false);
         overlay.update(frame, new GpuHud.HudView(tactical, false, Map.of(), Map.of(), Map.of(), null, Entity.NONE, 0),
-              preferences(true), labels.state);
+              preferences(), labels.state);
         Map<BoardScene.Unit, Vector3> iconAnchors = new HashMap<>();
         GpuFireOrders.Snapshot fire = frame.panels().fire();
         board.draw(camera -> {
             if (!tactical) {
                 overlay.renderGhost(camera, board.instances::get);
             }
+            overlay.renderMarks(camera, board.poses::get);
             overlay.render(camera);
             if (tactical) {
                 icons.update(true, camera, board.scene, frame.status(), unit -> unit.id() == frame.status().actorId()

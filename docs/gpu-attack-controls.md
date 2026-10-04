@@ -17,10 +17,12 @@ command dock ([gpu-hud.md](gpu-hud.md)). Physical attacks use the dock's physica
 OFFBOARD keep MegaMek's own board tool. The HUD's commands change `FiringDisplay`'s own queue through the
 display's methods on the Swing event thread, which owns all game access and attack calculations.
 
-The displayed weapon's range brackets are the field-of-fire handler's borders as upright walls of the shared
-`BoardRangeBorder`, a level tall in each bracket's colour, as the visual range and the deployment zones stand
-([gpu-hud.md](gpu-hud.md), region markings); the Tactical View lays them flat. Sensor ranges and objective zones
-retain their ground presentation. During the local weapon declaration the acting unit's lines
+Weapon arcs and range boundaries use translucent, narrow 3D walls with a bright
+top edge. They rise two levels above the adjoining hex ridges and extend down
+the cliff sides; shared corners meet even where the elevation changes. The
+existing field-of-fire handler supplies the exact boundaries and configured
+range colours. Sensor ranges, deployment markers and objective zones retain
+their ground presentation. During the local weapon declaration the acting unit's lines
 are the HUD's traces; the lines below are every other attack's.
 
 Queued attack arrows connect the attacker and target at their occupied heights.

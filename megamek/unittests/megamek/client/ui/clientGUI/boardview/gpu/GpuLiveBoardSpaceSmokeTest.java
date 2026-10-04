@@ -63,7 +63,7 @@ import org.junit.jupiter.api.Test;
  * The board-space components in the live battle view (rebuild plan I1b): a real GpuBattleView draws the frames a real
  * source captures from real phase displays, published as the local player's turn (the fixtures' board state has no
  * client to tell), in a 1920 x 1080 window with one HUD unit per window pixel. Movement: after planTo, the overlay's
- * envelope, route and ghost, the destination tip and the waypoint number, the nameplates and pips at the units' heads
+ * route and ghost, the destination tip and the waypoint number, the nameplates and pips at the units' heads
  * in both views, the fire preview's badge and guides, the Tactical View's north mark, and no overlay rebuild across
  * unchanged recaptures. Firing: the selected weapon's badges, one trace for each attacker and target (none for a
  * read-only draft, no line while an attack plays), the leaders to the placed target cards, the weapon's arc and the
@@ -75,8 +75,6 @@ class GpuLiveBoardSpaceSmokeTest {
     /** The movement fixture's Sagittaire (walk 3, run 5) pins a waypoint north of it and runs on to the road. */
     private static final Coords WAYPOINT = new Coords(11, 10);
     private static final Coords DESTINATION = new Coords(11, 7);
-    /** A hex of the envelope off the route, clear of every unit. */
-    private static final Coords ENVELOPE = new Coords(13, 10);
     private static final int ATLAS = 1;
     private static final int SAGITTAIRE = 2;
     /** The identified enemy of the movement scene, in the open three hexes east, for the fire preview. */
@@ -137,7 +135,7 @@ class GpuLiveBoardSpaceSmokeTest {
     private static void verifyMovement3d(Live live, GpuMovePlan.Snapshot move) throws Exception {
         live.zoom(DESTINATION, 120);
         live.capture("i1b-movement-3d.png");
-        // For the review: without MegaMek's own route and envelope sprites, as after I3's capture filter.
+        // For the review: the overlay without MegaMek's own sprites.
         GpuBoardSource.Frame published = live.frame.get();
         live.show(live.overlayOnly(move));
         live.capture("i1b-movement-3d-overlay-only.png");
@@ -197,7 +195,6 @@ class GpuLiveBoardSpaceSmokeTest {
                 assertTrue(live.difference(planned, idle, dot) > 60, dot + ": the route's dot");
             }
             assertTrue(live.difference(planned, idle, DESTINATION) > 30, "The ghost stands at the destination");
-            assertTrue(live.difference(planned, idle, ENVELOPE) > 2, "The envelope's fill");
         } finally {
             planned.dispose();
             idle.dispose();
@@ -245,7 +242,6 @@ class GpuLiveBoardSpaceSmokeTest {
         live.show(live.overlayOnly(GpuMovePlan.Snapshot.EMPTY));
         Pixmap idle = live.board();
         try {
-            assertTrue(live.difference(planned, idle, ENVELOPE) > 10, "The flat envelope's fill");
             assertTrue(live.difference(planned, idle, DESTINATION) > 20, "The ghost icon at the destination");
         } finally {
             planned.dispose();
@@ -319,7 +315,7 @@ class GpuLiveBoardSpaceSmokeTest {
     private static GpuBoardSource.UiPreferences scaled(GpuBoardSource.UiPreferences preferences, float factor) {
         GpuBoardSource.UiPreferences p = preferences;
         return new GpuBoardSource.UiPreferences(p.scale() * factor, p.reportKeywords(), p.reportFilterKeywords(),
-              p.minimapEnabled(), p.contactsEnabled(), p.moveEnvelope(), p.conditionsVisible(), p.turnDetails(),
+              p.minimapEnabled(), p.contactsEnabled(), p.conditionsVisible(), p.turnDetails(),
               p.binds(), p.moveSprintRgb());
     }
 
@@ -662,7 +658,8 @@ class GpuLiveBoardSpaceSmokeTest {
 
     /**
      * The board-space HUD's cost at 100 v 100 (rebuild plan I1b F3): the movement scene with 197 more units, its
-     * frames steady (no overlay rebuild) and while the pointer sweeps over units (a rebuild each frame). Prints the
+     * frames steady (no overlay rebuild) and while the pointer sweeps over units (no rebuild either: the marks
+     * follow the pointer every frame). Prints the
      * CPU time of the view's board-space HUD stage, which builds the HudView and updates the HUD and the overlay.
      */
     @Test
@@ -693,7 +690,7 @@ class GpuLiveBoardSpaceSmokeTest {
                     }
                 }
                 long rebuilt = live.overlay.builds() - builds;
-                assertTrue(rebuilt >= 30, "Hovering one unit after another rebuilds the overlay; " + rebuilt);
+                assertTrue(rebuilt <= 1, "Hovering one unit after another keeps the meshes; " + rebuilt);
                 System.out.printf("Board-space HUD stage at 200 units: steady median %.2f ms (max %.2f); pointer sweep"
                             + " median %.2f ms (max %.2f) with %d rebuilds in %d frames%n", median(steady), max(steady),
                       median(sweep), max(sweep), rebuilt, sweep.size());
@@ -863,7 +860,7 @@ class GpuLiveBoardSpaceSmokeTest {
             GpuBoardSource.UiPreferences preferences = real.uiPreferences;
             // One HUD unit per window pixel, as in the prototype's 1920 x 1080 captures; envelopes and the minimap on.
             source.uiPreferences = new GpuBoardSource.UiPreferences(.1f
-                  / DisplayScale.read(.1f, new GpuDisplayScale().contentScale()), "", "", true, true, true, false,
+                  / DisplayScale.read(.1f, new GpuDisplayScale().contentScale()), "", "", true, true, false,
                   false, GpuHudInputTest.preferences().binds(), preferences.moveSprintRgb());
             // The view reads the preferences through the accessor; tests change them through the field.
             when(source.uiPreferences()).thenAnswer(invocation -> source.uiPreferences);

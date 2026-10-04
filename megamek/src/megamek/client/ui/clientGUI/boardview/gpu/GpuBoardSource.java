@@ -38,7 +38,6 @@ import megamek.client.ui.clientGUI.boardview.BoardFocus;
 import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.sprite.FieldOfFireSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.FiringSolutionSprite;
-import megamek.client.ui.clientGUI.boardview.sprite.MovementEnvelopeSprite;
 import megamek.client.ui.clientGUI.boardview.sprite.Sprite;
 import megamek.client.ui.clientGUI.boardview.sprite.StepSprite;
 import megamek.client.ui.dialogs.RoundsInAirDialog;
@@ -908,15 +907,14 @@ final class GpuBoardSource implements BoardSource {
 
     /**
      * EDT: the board state's tactical capture without MegaMek's sprites the HUD draws itself (G4, a consumer filter):
-     * the firing solutions always (the board labels' to-hit badges), and the movement envelope and the path's step
-     * arrows and costs while the plan draws the route and its envelope. A display's own hex pick (an escape pod's
-     * landing, a bridge) is no plan, so its envelope sprites, MegaMek's pick highlight, stay. The sprites are hidden
-     * only for this capture, on the thread that paints the classic board.
+     * the firing solutions always (the board labels' to-hit badges), and the path's step arrows and costs while the
+     * plan draws the route. MegaMek's movement envelope stays, drawn as rimshaderv1 draws it (the user's decision of
+     * 2026-10-04). The sprites are hidden only for this capture, on the thread that paints the classic board.
      */
     private BoardTactical tacticalGeometry(boolean planner) {
         List<Sprite> skipped = Stream.concat(view.getAllSprites().stream(), view.getPathSprites().stream())
               .filter(sprite -> !sprite.isHidden() && (sprite instanceof FiringSolutionSprite
-                    || planner && (sprite instanceof MovementEnvelopeSprite || sprite instanceof StepSprite)))
+                    || planner && sprite instanceof StepSprite))
               .toList();
         skipped.forEach(sprite -> sprite.setHidden(true));
         try {
