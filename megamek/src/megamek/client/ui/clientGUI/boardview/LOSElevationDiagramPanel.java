@@ -629,7 +629,7 @@ class LOSElevationDiagramPanel extends JPanel {
                 g2d.setStroke(STROKE_DEFAULT);
             }
 
-            // Highlight the hex bar in red when this hex's solid terrain blocks LOS so the offender pops
+            // Highlight the engine's first blocking hex in red so the offender pops
             // visually. Outline runs from the hex's effective top (ground + buildings) down to ground level.
             if (hex.blocksLOS()) {
                 int blockerTopElevation = hex.groundElevation() + hex.buildingHeight();
@@ -2340,7 +2340,7 @@ class LOSElevationDiagramPanel extends JPanel {
      * line is informational — it shows the path the units' eyes would trace toward each other. Whether terrain
      * actually blocks LOS is conveyed by the red outline on the offending hex bar (drawn in {@link #drawTerrain})
      * and by the colour of this line itself ({@link #COLOR_LOS_BLOCKED} vs {@link #COLOR_LOS_CLEAR}). Mode-aware
-     * blocking detection lives in {@link LOSDiagramDataBuilder}; the line stays the same shape in every mode so
+     * blocking detection comes from {@link megamek.common.LosEffects}; the line stays the same shape in every mode so
      * players read "blocked by this red hex" instead of trying to interpret a bent line.
      */
     private void drawLosLine(Graphics2D g2d, DiagramMetrics metrics, List<HexRow> hexPath) {

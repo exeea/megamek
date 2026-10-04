@@ -49,6 +49,7 @@ class GpuRulerSmokeTest {
             try {
                 for (boolean tactical : new boolean[] { false, true }) {
                     board.view(tactical);
+                    board.camera.setIsometric(!tactical);
                     for (boolean obstructed : new boolean[] { true, false }) {
                         ruler.update(obstructed ? blocked.get() : clear.get());
                         board.draw(ruler::renderLabels);

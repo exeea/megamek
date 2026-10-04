@@ -54,11 +54,11 @@ import megamek.common.board.Coords;
  * @param targetIsHullDown   whether the target is hull-down (reduces LOS profile by 1 TW level)
  * @param attackerName       display name of the attacker entity, or empty if none
  * @param targetName         display name of the target entity, or empty if none
- * @param losRuleMode        the active LOS rule set; drives the per-hex comparison level used to flag
- *                           blockers (BMM adjacency rule for {@link LosRuleMode#STANDARD} and
+ * @param losRuleMode        the active LOS rule set; drives the displayed per-hex reference level
+ *                           (BMM adjacency rule for {@link LosRuleMode#STANDARD} and
  *                           {@link LosRuleMode#DEAD_ZONE}, linear interp matching the engine's
  *                           {@code losElevation} for {@link LosRuleMode#DIAGRAMMED}). The line itself is
- *                           drawn straight from eye level to eye level in every mode
+ *                           drawn straight from eye level to eye level in every mode. The engine supplies blockers
  * @param deadZone           true if the engine flagged this LOS as blocked by a TacOps dead-zone shadow
  *                           (see {@link megamek.common.LosEffects#isBlockedByDeadZone()}). The panel
  *                           hatches the lower endpoint's hex column as a marker
