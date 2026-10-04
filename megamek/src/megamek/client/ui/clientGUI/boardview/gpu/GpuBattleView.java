@@ -263,6 +263,7 @@ class GpuBattleView extends ApplicationAdapter {
         boardCamera.flightCollision = (eye, movement) -> {
             if (terrain != null) { terrain.moveCamera(eye, movement, boardCamera.collisionRadius()); }
         };
+        boardCamera.terrainHit = ray -> scene == null || terrain == null ? null : terrain.selectionHit(scene, ray);
         markers = new GpuMarkers();
         if (source.isGameplay()) { markers.prepareModels(); }
         unitTextures = new GpuTextures<>();
@@ -548,7 +549,7 @@ class GpuBattleView extends ApplicationAdapter {
         scene = terrain.presentation(scene);
         boolean changedTiles = previousTiles != scene.tiles();
         if (changedTiles || cameraTerrainRevision != BoardGeometry.revision()) {
-            boardCamera.constrainFlight();
+            boardCamera.terrainChanged();
             cameraTerrainRevision = BoardGeometry.revision();
         }
         fireControl.update(scene, HIDE_TARGET_ARROWS_DURING_ATTACKS && !playback.attacks().isEmpty());
