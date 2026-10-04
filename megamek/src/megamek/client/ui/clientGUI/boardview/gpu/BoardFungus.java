@@ -44,7 +44,7 @@ final class BoardFungus {
             Random random = new Random(tile.coords().getX() * 73_856_093L ^ tile.coords().getY() * 19_349_663L
                   ^ edge * 83_492_791L ^ 0xf091L);
             // Use the exposed height, not the hex's absolute elevation. Small steps are almost always bare.
-            float occupancy = drop == 1 ? .03f : drop == 2 ? .12f : .4f;
+            float occupancy = drop == 1 ? .06f : drop == 2 ? .25f : .8f;
             if (random.nextFloat() >= occupancy) { continue; }
             List<BoardSurface.Face> wall = new ArrayList<>();
             List<Float> areas = new ArrayList<>();
@@ -59,7 +59,7 @@ final class BoardFungus {
                 areas.add(area);
             }
             if (wall.isEmpty()) { continue; }
-            int count = drop >= 3 && random.nextFloat() < .35f ? 2 : 1;
+            int count = drop >= 3 ? 2 : 1;
             List<Vector3> placed = new ArrayList<>();
             for (int attempt = 0; attempt < count * 12 && placed.size() < count; attempt++) {
                 float target = random.nextFloat() * area;
