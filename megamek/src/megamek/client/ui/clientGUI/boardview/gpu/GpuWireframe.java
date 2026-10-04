@@ -4,9 +4,9 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.graphics.glutils.GLVersion;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.shaders.DepthShader;
+import com.badlogic.gdx.graphics.glutils.GLVersion;
 import com.badlogic.gdx.utils.Disposable;
 import org.lwjgl.opengl.GL11;
 

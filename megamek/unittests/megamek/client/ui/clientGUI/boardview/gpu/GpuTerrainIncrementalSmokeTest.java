@@ -56,7 +56,7 @@ class GpuTerrainIncrementalSmokeTest {
                         tiles.set(at.getX() * scene.height() + at.getY(), new BoardScene.Tile(at, tile.elevation(),
                               tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(), tile.ground(), tile.normals(),
                               tile.decals(), tile.decalsWithoutLimbs(), tile.tactical(), tile.features(), tile.text(),
-                              tile.liquid(), tile.foliage(), tile.detailedGround(), tile.road(), tile.fireSmoke(), tile.biome(),
+                              tile.liquid(), tile.tileset(), tile.detailedGround(), tile.road(), tile.fireSmoke(), tile.biome(),
                               tile.impassable(), tile.blackIce(), exits));
                         scene = new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
                         incremental.update(scene);

@@ -147,7 +147,7 @@ class BoardTunnelTest {
         return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(),
               t.ground(), t.normals(), t.decals(), t.decalsWithoutLimbs(), t.tactical(),
               List.of(new BoardScene.Feature("bridge", 0, 0, 0, 1, 1, 2, BoardScene.FeatureKind.PROP, exits)),
-              t.text(), t.liquid(), t.foliage(), t.detailedGround(), t.road());
+              t.text(), t.liquid(), t.tileset(), t.detailedGround(), t.road());
     }
 
     @Test

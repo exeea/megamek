@@ -10,7 +10,10 @@ import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.utils.Disposable;
 
-/** Top view repeats the shared terrain grid over the completed scene, including roofs and units. */
+/**
+ * Top view repeats the shared terrain grid over the completed scene, including roofs and units. The Tactical View's
+ * columns draw no grid of their own: there it lies on their tops at every angle, behind whatever stands nearer.
+ */
 final class GpuHexGrid implements Disposable {
     private final GpuInstancedMesh hex;
     private ShaderProgram shader;
@@ -27,8 +30,10 @@ final class GpuHexGrid implements Disposable {
         hex.setIndices(new short[] { 0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 5 });
     }
 
-    void render(BoardCamera camera, BoardScene scene) {
-        if (!camera.isTopDown() || BoardGeometry.tuning().gridShade() >= 1 || scene.tiles().isEmpty()) { return; }
+    void render(BoardCamera camera, BoardScene scene, boolean tacticalView) {
+        if (!tacticalView && !camera.isTopDown() || BoardGeometry.tuning().gridShade() >= 1 || scene.tiles().isEmpty()) {
+            return;
+        }
         if (tiles != scene.tiles()) {
             // One render-owned snapshot per board edit; the camera and scale only change uniforms.
             if (scene.tiles().size() > capacity) {
@@ -46,7 +51,15 @@ final class GpuHexGrid implements Disposable {
             hex.setInstanceData(data);
             tiles = scene.tiles();
         }
-        Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
+        if (tacticalView) {
+            // Coplanar with the column tops: pulled toward the camera, it wins over them and loses to anything nearer.
+            Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
+            Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
+            Gdx.gl.glEnable(GL20.GL_POLYGON_OFFSET_FILL);
+            Gdx.gl.glPolygonOffset(-1, -1);
+        } else {
+            Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
+        }
         Gdx.gl.glDepthMask(false);
         Gdx.gl.glEnable(GL20.GL_BLEND);
         Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
@@ -57,6 +70,9 @@ final class GpuHexGrid implements Disposable {
             shader.setUniformf("u_gridShade", BoardGeometry.tuning().gridShade());
             hex.render(shader, GL20.GL_TRIANGLES);
         } finally {
+            Gdx.gl.glDisable(GL20.GL_POLYGON_OFFSET_FILL);
+            Gdx.gl.glPolygonOffset(0, 0);
+            Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
             Gdx.gl.glDepthMask(true);
             Gdx.gl.glDisable(GL20.GL_BLEND);
         }

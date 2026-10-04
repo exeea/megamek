@@ -562,12 +562,12 @@ class GpuHexTextSmokeTest {
             for (boolean perspective : List.of(false, true)) {
                 camera.setPerspective(perspective);
                 ScreenUtils.clear(1, 1, 1, 1, true);
-                grid.render(camera, scene);
+                grid.render(camera, scene, false);
                 Pixmap expected = pixels();
                 Gdx.gl.glClearDepthf(0);
                 ScreenUtils.clear(1, 1, 1, 1, true);
                 Gdx.gl.glClearDepthf(1);
-                grid.render(camera, scene);
+                grid.render(camera, scene, false);
                 Pixmap covered = pixels();
                 try {
                     assertTrue(expected.getPixels().equals(covered.getPixels()), "The entire grid must ignore scene depth");
@@ -587,7 +587,7 @@ class GpuHexTextSmokeTest {
                 } else { camera.setIsometric(true); }
                 ScreenUtils.clear(1, 1, 1, 1, true);
                 Pixmap before = pixels();
-                grid.render(camera, scene);
+                grid.render(camera, scene, false);
                 Pixmap after = pixels();
                 try { assertTrue(before.getPixels().equals(after.getPixels()), "No overlay grid in angled view or when disabled"); }
                 finally { before.dispose(); after.dispose(); }

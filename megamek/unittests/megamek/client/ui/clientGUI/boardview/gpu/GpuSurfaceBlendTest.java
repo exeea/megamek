@@ -7,10 +7,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.math.Vector3;
+import megamek.client.ui.clientGUI.boardview.BoardArtwork;
+import megamek.common.Hex;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -123,6 +126,32 @@ class GpuSurfaceBlendTest {
         for (var t : triangles) {
             assertEquals(t.a().vertex().color.b, t.b().vertex().color.b);
             assertEquals(t.a().vertex().color.b, t.c().vertex().color.b);
+        }
+    }
+
+    @Test
+    void authoredTransitionsAtCrowdedCliffsKeepABoundedMesh() {
+        var themes = List.of("grass", "snow", "dirt", "rock", "lunar");
+        var scene = BoardSurfaceBlendTest.scene(c -> {
+            var hex = new Hex(c.getY() < 4 ? 4 : 0, "ground_fluff:1:3",
+                  themes.get(Math.floorMod(c.getX() + 2 * c.getY(), themes.size())), c);
+            var artwork = new BoardArtwork.HexImage(c, null, null, null, null, null, List.of(), Map.of(), null);
+            return BoardScene.captureTile(hex, artwork, null, new BoardScene.PixelPool());
+        });
+        for (int x = 2; x <= 6; x++) {
+            var tile = scene.tile(new Coords(x, 3));
+            var surface = new BoardSurface(scene, tile);
+            var faces = surface.walls(scene, -BoardGeometry.level()).stream()
+                  .filter(f -> surface.relief.shade(f.a()) != null
+                        && surface.relief.shade(f.a()).kind() == BoardRelief.Kind.CLIFF).toList();
+            var groups = GpuSurfaceBlend.prepare(scene, tile, faces, p -> {
+                var shade = surface.relief.shade(p);
+                return new MeshPartBuilder.VertexInfo().setPos(p).setNor(shade.normal())
+                      .setUV(shade.rim(), shade.foot()).setCol(1, shade.level(), .5f, shade.tint());
+            });
+            assertTrue(!groups.isEmpty());
+            assertTrue(groups.values().stream().mapToInt(List::size).sum() < faces.size() * 8,
+                  "Authored mixtures must not cause runaway palette subdivision");
         }
     }
 

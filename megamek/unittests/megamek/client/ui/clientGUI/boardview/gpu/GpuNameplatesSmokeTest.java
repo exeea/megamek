@@ -625,7 +625,7 @@ class GpuNameplatesSmokeTest {
         board.draw(camera -> {
             if (tactical) {
                 icons.update(true, camera, board.scene, status, unit -> unit.id() == status.actorId(),
-                      unit -> unit.id() == hovered, board.poses, iconAnchors, board.surfaces);
+                      unit -> unit.id() == hovered, board.poses, iconAnchors);
                 icons.render(camera);
             }
         });

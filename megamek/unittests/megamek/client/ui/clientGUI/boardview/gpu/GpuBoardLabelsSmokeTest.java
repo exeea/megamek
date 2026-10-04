@@ -923,7 +923,7 @@ class GpuBoardLabelsSmokeTest {
             if (tactical) {
                 icons.update(true, camera, board.scene, frame.status(), unit -> unit.id() == frame.status().actorId()
                             || fire.active() && unit.id() == fire.focus().key().unitId(), unit -> false, board.poses,
-                      iconAnchors, board.surfaces);
+                      iconAnchors);
                 icons.render(camera);
                 overlay.renderGhost(camera, icons::instance);
             }

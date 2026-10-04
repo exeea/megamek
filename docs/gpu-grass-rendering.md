@@ -13,12 +13,14 @@ density and mesh rules.
 | Owner | Responsibility |
 | --- | --- |
 | `BoardVegetation`, `BoardBiome` | Terrain eligibility, deterministic placement inputs and shared growth fields. |
-| `BoardPlants` | What each terrain detail level plants; grass only on full detail. |
+| `BoardPlants` | What each terrain detail level plants; grass and bank turf on medium and full detail. |
 | `GpuGroundCover` | Root planting for terrain workers, projected density, blade templates and per-chunk submission. |
+| `GpuBankTurf` | Six curved turf-edge cutouts, fitted to finished bank contours and retained with the grass chunk. |
 | `terrain-grass.glsl` | Blade shape, root-fixed bending and per-root detail selection. |
 | `terrain-meadow.glsl` | Growth variation shared by ground color and grass shape. |
 | `terrain-vegetation-wind.glsl` | World-space gust used by grass, crops and marsh plants. |
 | `terrain-vegetation.frag` | Plant surface lighting, root darkening and wetness. |
+| `terrain-ground-color.glsl`, `terrain-bank-color.glsl` | Terrain pigment and elevation grading shared with the turf; the atlas contributes neutral blade detail. |
 | `GpuTerrain` | Wind phase integration, finished support surfaces and pass ordering. |
 
 The **Grass blades** control under Tuning → Terrain skips grass preparation and
@@ -32,6 +34,32 @@ existing surface and road rules. Terrain workers plant them for every hex of a
 full-detail chunk (`GpuGroundCover.plant`), and the installed tile keeps them.
 Each instance stores position plus a stable sample rank. Density selects an
 ordered prefix by rank: existing roots do not move when density changes.
+
+Two-level grassy banks include a shallow intermediate shoulder in their canonical
+terrain profile. It admits roots through the existing slope filter, using the same
+finished triangles as support and picking. Its ground material remains visible when
+blade density fades at a distance, so both earth faces still read from above.
+
+At visible grass scales, `GpuBankTurf` adds dense crowns and hanging fringes to both
+contours. Its six ImageGen silhouettes occupy a 3-by-2 transparent atlas at
+`mm-data/data/models/board/textures/foliage/bank-turf.png`; the generation prompt is
+`mm-data/tools/terrain-contact-sources/bank-turf-prompt.json`. Stable placement varies
+the silhouette, mirroring, width, length and gaps, without repeating the immediately
+previous variant. Curved crowns are visible overhead as well as from the side.
+
+The terrain worker finds each contour on the installed triangles and fits the crown
+to that carrier. Unsupported crowns and abrupt cliff-junction height changes reject
+the entire clump, preventing stretched curtains. These are cosmetic foliage surfaces;
+support and picking still use the underlying canonical terrain. Each grass chunk owns
+one extra opaque cutout mesh, rebuilt only when its source geometry changes, with one
+shared mipmapped atlas. The free ends use the existing vegetation wind. Turf receives
+scene shadows but has no separate per-strand shadow pass.
+
+The atlas's original olive color is not a fixed tint. Each clump carries the local
+`BoardSurfaceBlend` proportions, samples the corresponding ground materials, and uses
+the same world color fields and elevation grade as terrain. Atlas luminance supplies
+bounded detail, avoiding pale halos on raised tiles or green strips across authored
+grass-to-sand gradients. The Grass blades control also hides these crowns.
 
 Two shared blade templates contain three or seven triangles. The vertex shader
 derives curvature, orientation, color variation and wind from the root; the

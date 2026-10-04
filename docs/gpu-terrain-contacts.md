@@ -19,7 +19,7 @@ A color blend cannot fix contradictory rim/foot heights or mismatched support tr
 
 ## Where cover may spread
 
-Grass, dirt, sand, rock, snow, magma crust and cooled lava banks share a deterministic
+Grass, dirt, sand, rock, lunar, snow, magma crust and cooled lava banks share a deterministic
 world-space field. The footprint containing a sample owns the neighbor query, even
 when another hex's mesh emitted that sample. This is what makes both sides of a seam
 evaluate the same cover.
@@ -28,6 +28,9 @@ The horizontal field starts with `WIDTH_METRES` (4.5 m) and varies in world spac
 Height limits keep the receiving soil/snow near the actual cliff foot: its influence
 reaches only 0.9 m up the face. A tall cliff can contribute its own material to the
 ground below. At stacked junctions the GPU palette can retain four families.
+If authored mixtures contribute more than four at one point, small shading triangles
+retain the four strongest contributions; weaker covers at those crowded junctions
+are omitted to keep geometry and shader costs bounded.
 
 Concrete walls remain complete cast slabs for differences of up to two levels.
 From three levels, their rock foundation can enter the natural contact field while
@@ -38,6 +41,23 @@ loose aggregate.
 Authored special ground, buildings and frozen surfaces retain protected handling.
 Roads use their own overlays and joins. Changing a family's eligibility belongs in
 the CPU query as well as its shader representation.
+
+## Authored transitions
+
+Legacy `ground_fluff` transitions remain defined in the tileset. GPU artwork capture
+intercepts the five recognized transition kinds (desert, grass, tropical grass, Mars
+and Moon) and omits their painted overlay from the GPU decal pass. `BoardScene.Tile`
+instead captures their target material proportions: strengths 1–5 use 1/6, 2/6, 3/6,
+4/6 and 5/6, leaving some base material at both ends. The board and classic artwork
+are unchanged. Unknown ground artwork keeps its existing fallback handling.
+
+These weights feed the same world-space contact field as neighboring terrain, so
+the native shader blends color, normal, height, roughness and occlusion together;
+grass placement reads the same coverage. Authored gradients interpolate the complete
+materials, including their colors; ordinary terrain boundaries keep their existing
+height-based texture breakup. Lighting and each material's own texture still affect
+the displayed pixel color.
+An edited strength invalidates neighboring material meshes and grass coverage.
 
 ## Contacts inside one family
 
@@ -50,6 +70,7 @@ when both neighboring hexes have the same family.
 | Dirt | Bare dirt, mineral soil, exposed rock and gravel |
 | Sand | Sand, sandstone and broken sandstone |
 | Rock | Weathered top, exposed granite and scree |
+| Lunar | Independent maps initially identical to rock, granite and scree |
 | Snow | Snow cover, exposed rock and scree |
 | Concrete | Pavement/cast slab, supporting granite and deposits |
 | Volcanic | Crust/cooled banks and rock, with heat blended by the same coverage |

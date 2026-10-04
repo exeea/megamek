@@ -460,7 +460,7 @@ class GpuBoardOverlaySmokeTest {
             if (shot.tactical()) {
                 icons.update(true, camera, board.scene, shot.status(),
                       unit -> unit.id() == shot.status().actorId() || unit.id() == TIMBER_WOLF
-                            && shot.panels().fire().active(), unit -> false, board.poses, anchors, board.surfaces);
+                            && shot.panels().fire().active(), unit -> false, board.poses, anchors);
                 icons.render(camera);
                 overlay.renderGhost(camera, icons::instance);
             }
@@ -517,7 +517,7 @@ class GpuBoardOverlaySmokeTest {
             overlay.render(camera);
             if (board.tactical()) {
                 icons.update(true, camera, board.scene, status, unit -> unit.id() == status.actorId(), unit -> false,
-                      board.poses, new HashMap<>(), board.surfaces);
+                      board.poses, new HashMap<>());
                 icons.render(camera);
                 if (ghost) {
                     overlay.renderGhost(camera, icons::instance);

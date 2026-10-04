@@ -1,16 +1,26 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.util.Map;
+import java.util.Set;
+
+import megamek.common.Hex;
 import megamek.common.board.Coords;
+import megamek.common.units.Terrains;
 
 /** Surface cover at a world position. Rendering and grass placement query the same immutable board snapshot. */
-final class BoardSurfaceBlend {
+public final class BoardSurfaceBlend {
     static final float WIDTH_METRES = 4.5f;
     static final float FOOT_METRES = .9f;
     // Render-only covers derived from BoardLiquid; the board's terrain families and rules remain unchanged.
     static final int CRUST = BoardScene.Surface.values().length, BANK = CRUST + 1, FAMILIES = BANK + 1;
 
-    record Cover(float grass, float dirt, float sand, float rock, float concrete, float snow, float crust, float bank) {
+    record Cover(float grass, float dirt, float sand, float rock, float concrete, float snow, float lunar,
+          float crust, float bank, float interpolation) {
+        Cover(float grass, float dirt, float sand, float rock, float concrete, float snow, float lunar,
+              float crust, float bank) {
+            this(grass, dirt, sand, rock, concrete, snow, lunar, crust, bank, 0);
+        }
         float weight(BoardScene.Surface family) { return weight(family.ordinal()); }
 
         float weight(int family) {
@@ -21,8 +31,9 @@ final class BoardSurfaceBlend {
                 case 3 -> rock;
                 case 4 -> concrete;
                 case 5 -> snow;
-                case 6 -> crust;
-                case 7 -> bank;
+                case 6 -> lunar;
+                case 7 -> crust;
+                case 8 -> bank;
                 default -> throw new IllegalArgumentException("Surface cover " + family);
             };
         }
@@ -37,15 +48,53 @@ final class BoardSurfaceBlend {
     }
 
     private static final Cover[] SOLID = {
-          new Cover(1, 0, 0, 0, 0, 0, 0, 0), new Cover(0, 1, 0, 0, 0, 0, 0, 0), new Cover(0, 0, 1, 0, 0, 0, 0, 0),
-          new Cover(0, 0, 0, 1, 0, 0, 0, 0), new Cover(0, 0, 0, 0, 1, 0, 0, 0), new Cover(0, 0, 0, 0, 0, 1, 0, 0),
-          new Cover(0, 0, 0, 0, 0, 0, 1, 0), new Cover(0, 0, 0, 0, 0, 0, 0, 1)
+          new Cover(1, 0, 0, 0, 0, 0, 0, 0, 0), new Cover(0, 1, 0, 0, 0, 0, 0, 0, 0), new Cover(0, 0, 1, 0, 0, 0, 0, 0, 0),
+          new Cover(0, 0, 0, 1, 0, 0, 0, 0, 0), new Cover(0, 0, 0, 0, 1, 0, 0, 0, 0), new Cover(0, 0, 0, 0, 0, 1, 0, 0, 0),
+          new Cover(0, 0, 0, 0, 0, 0, 1, 0, 0), new Cover(0, 0, 0, 0, 0, 0, 0, 1, 0), new Cover(0, 0, 0, 0, 0, 0, 0, 0, 1)
     };
 
     private BoardSurfaceBlend() { }
 
     static Cover solid(BoardScene.Surface family) { return SOLID[family.ordinal()]; }
     static Cover solid(int family) { return SOLID[family]; }
+
+    /** The classic tileset's ground_fluff transitions: desert, grass, tropical grass, Mars and Moon. */
+    static boolean hasTransition(Hex hex) { return transitionFamily(hex) >= 0; }
+
+    /** Omit legacy paint only when native ground can actually display the captured material mixture. */
+    public static boolean replacesTransition(Hex hex, Map<Integer, String> models, Set<Integer> blankTerrains) {
+        return hasTransition(hex) && BoardFeatures.detailedGround(hex, models, blankTerrains);
+    }
+
+    static int transitionFamily(Hex hex) {
+        var terrain = hex.getTerrain(Terrains.GROUND_FLUFF);
+        if (terrain == null || !terrain.hasExitsSpecified() || terrain.getExits() < 1 || terrain.getExits() > 5) {
+            return -1;
+        }
+        return switch (terrain.getLevel()) {
+            case 1 -> BoardScene.Surface.SAND.ordinal();
+            case 2, 3 -> BoardScene.Surface.GRASS.ordinal();
+            case 4 -> BoardScene.Surface.DIRT.ordinal();
+            case 5 -> BoardScene.Surface.LUNAR.ordinal();
+            default -> -1;
+        };
+    }
+
+    /** Capture authored material proportions once; the renderer never reads or changes the source hex. */
+    static Cover capture(Hex hex) {
+        int base = BoardFeatures.surface(hex).ordinal(), target = transitionFamily(hex);
+        if (target < 0 || target == base) { return solid(base); }
+        // Five evenly spaced interior points leave some of both materials at every authored strength.
+        float amount = hex.getTerrain(Terrains.GROUND_FLUFF).getExits() / 6f;
+        float[] weights = new float[FAMILIES];
+        weights[base] = 1 - amount;
+        weights[target] += amount;
+        return cover(weights, 1, 1);
+    }
+
+    private static Cover cover(BoardScene.Tile tile) {
+        return tile.liquid().volcanic() ? solid(family(tile)) : tile.groundCover();
+    }
 
     static int family(BoardScene.Tile tile) {
         return tile.liquid().volcanic() ? tile.liquid().molten() ? BANK : CRUST : tile.surface().ordinal();
@@ -66,9 +115,11 @@ final class BoardSurfaceBlend {
     /** Uniform interiors retain the ordinary family material and incur no extra maps or vertex attributes. */
     static boolean boundary(BoardScene scene, BoardScene.Tile tile) {
         if (!blendable(tile)) { return false; }
+        Cover own = cover(tile);
+        if (!own.equals(solid(family(tile)))) { return true; }
         for (int direction = 0; direction < 6; direction++) {
             var next = scene.tile(tile.coords().translated(direction));
-            if (contact(tile, next) && family(next) != family(tile)) { return true; }
+            if (contact(tile, next) && !cover(next).equals(own)) { return true; }
         }
         return false;
     }
@@ -94,7 +145,7 @@ final class BoardSurfaceBlend {
     static Cover sampleCliff(BoardScene scene, BoardScene.Tile owner, float x, float y, float z) {
         if (!blendable(owner)) { return solid(family(owner)); }
         var at = BoardGeometry.tile(scene, x, y);
-        if (at == null) { return solid(family(owner)); }
+        if (at == null) { return cover(owner); }
         if (!at.liquid().present() || at.liquid().volcanic()) { return sample(scene, owner, x, y, z); }
         BoardScene.Tile column = null;
         float nearest = Float.POSITIVE_INFINITY;
@@ -104,7 +155,7 @@ final class BoardSurfaceBlend {
             float distance = distance(scene, candidate.coords(), x, y);
             if (distance < nearest) { column = candidate; nearest = distance; }
         }
-        return column == null ? solid(family(owner)) : sampleAt(scene, column, family(column), x, y, z, true);
+        return column == null ? cover(owner) : sampleAt(scene, column, cover(column), x, y, z, true);
     }
 
     private static boolean reaches(BoardScene.Tile tile, float z) {
@@ -115,18 +166,19 @@ final class BoardSurfaceBlend {
     static Cover sample(BoardScene scene, BoardScene.Tile owner, float x, float y, float z) {
         if (!blendable(owner)) { return solid(family(owner)); }
         var at = BoardGeometry.tile(scene, x, y);
-        if (at == null || !blendable(at) && (!at.liquid().present() || at.frozen())) { return solid(family(owner)); }
+        if (at == null || !blendable(at) && (!at.liquid().present() || at.frozen())) { return cover(owner); }
         if ((!at.liquid().present() || at.liquid().volcanic() || owner.surface() == BoardScene.Surface.CONCRETE)
               && !contact(owner, at)) {
-            return solid(family(owner));
+            return cover(owner);
         }
-        return sampleAt(scene, at, family(owner), x, y, z, false);
+        return sampleAt(scene, at, cover(owner), x, y, z, false);
     }
 
-    private static Cover sampleAt(BoardScene scene, BoardScene.Tile at, int fallback,
+    private static Cover sampleAt(BoardScene scene, BoardScene.Tile at, Cover fallback,
           float x, float y, float z, boolean cliff) {
         float[] weights = new float[FAMILIES];
         float total = 0;
+        float interpolation = 0;
         float width = BoardRelief.metres(WIDTH_METRES);
         float mx = x / BoardRelief.metres(1), my = y / BoardRelief.metres(1);
         float offset = 0;
@@ -137,15 +189,16 @@ final class BoardSurfaceBlend {
             // Extend the neighbouring cover fields to the curved bank. Absolute hex distance would end the blend
             // before the waterline at a recessed corner, leaving the two banks with a hard radial seam.
             float nearest = Float.POSITIVE_INFINITY;
-            int[] banks = new int[FAMILIES];
+            float[] banks = new float[FAMILIES];
             for (int direction = 0; direction < 6; direction++) {
                 var land = scene.tile(at.coords().translated(direction));
                 if (contact(at, land)) {
                     nearest = Math.min(nearest, distance(scene, land.coords(), x, y));
-                    banks[land.surface().ordinal()]++;
+                    Cover cover = cover(land);
+                    for (int family = 0; family < FAMILIES; family++) { banks[family] += cover.weight(family); }
                 }
             }
-            if (!Float.isFinite(nearest)) { return solid(fallback); }
+            if (!Float.isFinite(nearest)) { return fallback; }
             offset = Math.max(0, nearest);
             for (int family = 1; family < banks.length; family++) {
                 if (banks[family] > banks[bedFamily]) { bedFamily = family; }
@@ -189,16 +242,23 @@ final class BoardSurfaceBlend {
                 weight *= 1 - BoardRelief.smooth(above / FOOT_METRES);
             }
             if (weight < .0001f) { continue; }
-            weights[family] += weight;
+            Cover cover = cover(tile);
+            for (int material = 0; material < FAMILIES; material++) { weights[material] += weight * cover.weight(material); }
+            interpolation += weight * cover.interpolation();
             total += weight;
         }
-        if (total <= .0001f) { return solid(fallback); }
+        if (total <= .0001f) { return fallback; }
         if (bed > 0) {
             for (int family = 0; family < weights.length; family++) { weights[family] *= 1 - bed; }
             weights[bedFamily] += bed * total;
         }
+        return cover(weights, total, interpolation / total * (1 - bed));
+    }
+
+    private static Cover cover(float[] weights, float total, float interpolation) {
         return new Cover(weights[0] / total, weights[1] / total, weights[2] / total,
-              weights[3] / total, weights[4] / total, weights[5] / total, weights[6] / total, weights[7] / total);
+              weights[3] / total, weights[4] / total, weights[5] / total, weights[6] / total, weights[7] / total,
+              weights[8] / total, interpolation);
     }
 
     /** Signed distance to the hex's supporting edges, using the board's actual short/long dimensions. */

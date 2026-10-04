@@ -161,12 +161,21 @@ class GpuWireframeSmokeTest {
         view.boardCamera.setIsometric(false);
         toggle("utility-tactical");
         render(view, "wireframe-tactical.png");
+        assertFalse(tuning.wireframe(), "Entering the Tactical View leaves the wireframe view");
         assertTrue(((GpuUnitIcons) field(view, "unitIcons")).active(), "The top view shows flat icons");
-        assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Wireframe with the Tactical View's flat icons");
-        toggle("utility-tactical");
+        assertTrue(((GpuTerrain) field(view, "terrain")).tacticalView(), "and the tileset columns");
+        assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Tactical View after wireframe");
+
+        toggle("utility-wireframe");
+        assertTrue(tuning.wireframe());
+        assertFalse(view.boardCamera.tactical(), "Turning the wireframe on leaves the Tactical View");
+        render(view, "wireframe-after-tactical.png");
+        assertFalse(((GpuUnitIcons) field(view, "unitIcons")).active());
+        assertFalse(((GpuTerrain) field(view, "terrain")).tacticalView());
 
         toggle("utility-wireframe");
         assertFalse(tuning.wireframe());
+        assertFalse(view.boardCamera.tactical(), "Leaving the wireframe view does not re-enter the Tactical View");
         Mix restored = render(view, "wireframe-restored.png");
         assertTrue(restored.other > .6, "Leaving the wireframe restores shading: " + restored);
         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Restored frames");

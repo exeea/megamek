@@ -270,8 +270,8 @@ the held nameplate key, the log's open state and the playback history. It is pre
    holding a unit picks that unit. The release calls `GpuHud.boardClick` with the modifiers held at the press:
    - right: the context menu at the pointer; opening it never changes orders;
    - left with Ctrl or Alt: MegaMek's measurement, which its Swing ruler shows over the native window, each point
-     at the height the pointer shows there (the building floor it points at, else the ground; the Tactical View keeps
-     the ruler's own height); while one waits for its second point, a plain left click ends it;
+     at the height the pointer shows there (the building floor it points at, else the ground); while one waits for
+     its second point, a plain left click ends it;
    - left: by phase, below.
 4. The wheel zooms at the pointer over the board, and scrolls a panel under the pointer.
 5. Hovering picks the hex and the unit. The pointer is a hand over units and a move cursor over the minimap (desktop
@@ -479,8 +479,8 @@ handler runs.
 
 ## 5. The Tactical View
 
-The Tactical View is the board seen straight down with flat tileset art. The scene, picking and animation timeline
-stay the 3D view's own; only unit models become icons and feature meshes become flat art.
+The Tactical View is the board seen straight down on its tileset columns. The scene, picking and animation timeline
+stay the 3D view's own; only the shaded terrain becomes rimshaderv1's tileset columns and unit models become icons.
 
 - **Switch it** with `TOGGLE_ISO` (T), the "Tactical view" utility, the Menu's "Tactical view" item, or the chip's
   "Back to 3D". Entering it ends Free Flight; switching Free Flight on leaves it. The chip ("Tactical view" with "Back to 3D") shows centred at the top when the top row has room, and
@@ -501,11 +501,12 @@ stay the 3D view's own; only unit models become icons and feature meshes become 
   - a destroyed or doomed unit fades to 45 % with the red cross. The shown pose decides, so the cross comes with the
     shot's impact on the animation timeline. An own or allied unit that has moved gets a dark veil.
   - Labels hang 0.62 of the icon's side above its centre. A click on an icon picks its unit, ahead of the ground.
-- **Flat terrain art.** `BoardArtwork.captureDecals` draws, on the EDT, the tileset's art for each hex with woods,
-  jungle, a building, fuel tank, industrial structure, bridge or limbs, straight from above. It lies at its hex's
-  level and takes the scene's light, fog and field-of-view dimming. Every feature mesh leaves picking, so a click
-  returns the hex under the pointer, also where a 3D canopy would overhang the next hex. Height labels keep the roof
-  position of the hidden building.
+- **Terrain.** `GpuTerrain.setTacticalView` follows the camera's mode every frame: rimshaderv1's `GpuTilesetTerrain`
+  draws each hex as a column at its level topped by its Saxarba tileset art, with the 3D view's structures, animated
+  liquids, the hex grid, picking and overlay draping on the columns ([GPU board](gpu-board.md#tactical-view)). Trees
+  and other feature meshes leave the board and picking, so a click returns the hex under the pointer, also where a 3D
+  canopy would overhang the next hex. The wireframe view and the Tactical View exclude each other: turning one on
+  turns the other off. The minimap shows the same tileset art.
 - **Board overlay.** It uses the `flat.js` colours, draws the route's ghost as the unit's icon at half strength, and
   adds elevation-drop edges. The route's pulse is a flat glow on the dashed line, a ripple of the destination ring and
   a brighter ghost icon (section 3).
@@ -514,13 +515,12 @@ stay the 3D view's own; only unit models become icons and feature meshes become 
   renders a 12 x 10 board with woods, jungle, buildings, a fuel tank, an industrial hex and a bridged river at
   1920 x 1080 and enters and leaves through the real T bind. It checks the restored pose, the icons' rotation and
   states, the frame pixels (exactly #82E2CE and #EC9189 on an Intel Iris Xe), the icon's share of the hex on screen
-  (0.600 of hexes 20, 60, 300 and 800 pixels wide), picking at icons and through an overhanging canopy, and the
-  field-of-view dimming of unseen art (mean luminance 0.352 to 0.276 on an Intel Iris Xe).
-- **Limits.** From above, multi-level buildings and bridge decks lose their height, as on the classic 2D board.
-  Water keeps the animated surfaces and rounded banks instead of the tileset's structured-water art. Unlike the
-  hud-v3 mock, whose squares stay upright, the whole icon turns with the unit. Frame widths scale with the icon, so on
-  hexes 20 pixels wide the thin frame shows as broken dots, and a bold frame's corners reach 1 % of a hex past the
-  hex. A hex that gains sprite art rebuilds every terrain chunk; that cost was not measured on large boards.
+  (0.600 of hexes 20, 60, 300 and 800 pixels wide), picking at icons, on the columns' art and where a 3D canopy
+  would overhang the next hex, and the field-of-view dimming of unseen tileset art. It was adapted to the tileset
+  columns in the 2026-10-04 merge and not run there.
+- **Limits.** Unlike the hud-v3 mock, whose squares stay upright, the whole icon turns with the unit. Frame widths
+  scale with the icon, so on hexes 20 pixels wide the thin frame shows as broken dots, and a bold frame's corners
+  reach 1 % of a hex past the hex.
 
 ## 6. Zoom-out unit scaling
 

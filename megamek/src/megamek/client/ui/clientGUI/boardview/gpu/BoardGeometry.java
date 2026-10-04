@@ -404,7 +404,8 @@ final class BoardGeometry {
     private static boolean hardSurface(BoardScene.Tile tile, BoardSurface.Face face) {
         if (face.finish() == BoardSurface.Finish.ICE || face.finish() == BoardSurface.Finish.DRESSING) { return false; }
         return face.finish() == BoardSurface.Finish.OUTCROP
-              || tile.surface() == BoardScene.Surface.ROCK || tile.surface() == BoardScene.Surface.CONCRETE
+              || tile.surface() == BoardScene.Surface.ROCK || tile.surface() == BoardScene.Surface.LUNAR
+              || tile.surface() == BoardScene.Surface.CONCRETE
               || tile.surface() == BoardScene.Surface.GRASS && face.finish() == BoardSurface.Finish.WALL;
     }
 }

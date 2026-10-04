@@ -151,7 +151,7 @@ class BoardSurfaceCacheTest {
 
     private static BoardScene.Tile shape(BoardScene.Tile t, int elevation, int roadExits, BoardScene.Surface surface) {
         return new BoardScene.Tile(t.coords(), elevation, t.waterDepth(), t.frozen(), roadExits, surface, t.ground(),
-              t.normals(), t.decals(), t.decalsWithoutLimbs(), t.tactical(), t.features(), t.text(), t.liquid(), t.foliage(),
+              t.normals(), t.decals(), t.decalsWithoutLimbs(), t.tactical(), t.features(), t.text(), t.liquid(), t.tileset(),
               t.detailedGround());
     }
 

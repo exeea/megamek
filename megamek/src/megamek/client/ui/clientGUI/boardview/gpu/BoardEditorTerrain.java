@@ -24,7 +24,8 @@ final class BoardEditorTerrain {
         for (int type : hex.getTerrainTypes()) {
             boolean invisible = switch (type) {
                 case Terrains.BLACK_ICE, Terrains.BLDG_BASE_COLLAPSED, Terrains.METAL_CONTENT -> true;
-                case Terrains.BLDG_BASEMENT_TYPE, Terrains.FLUFF, Terrains.GROUND_FLUFF, Terrains.ROAD_FLUFF,
+                case Terrains.GROUND_FLUFF -> blank.contains(type) && BoardSurfaceBlend.transitionFamily(hex) < 0;
+                case Terrains.BLDG_BASEMENT_TYPE, Terrains.FLUFF, Terrains.ROAD_FLUFF,
                       Terrains.WATER_FLUFF, Terrains.BLDG_FLUFF -> blank.contains(type);
                 default -> false;
             };

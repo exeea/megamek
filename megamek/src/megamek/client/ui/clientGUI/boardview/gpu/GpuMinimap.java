@@ -67,10 +67,10 @@ final class GpuMinimap implements GpuHud.Component {
     private static final float CONTACT_MINIMUM = 9;
 
     /**
-     * The art of one hex seen from above: its ground or open liquid, then its decals, then its flat foliage (each may
-     * be null), and the tint the board's liquid material gives the hex (white for none).
+     * The art of one hex seen from above, as the Tactical View draws it: its open liquid or its tileset art, then its
+     * bridge (either may be null), and the tint the board's liquid material gives the hex (white for none).
      */
-    private record Art(BoardScene.Pixels ground, BoardScene.Pixels decals, BoardScene.Pixels foliage, Color tint) { }
+    private record Art(BoardScene.Pixels base, BoardScene.Pixels bridge, Color tint) { }
 
     /**
      * What the board image shows: each hex's art in the order of the scene's tiles, the board's size in hexes and the
@@ -140,27 +140,27 @@ final class GpuMinimap implements GpuHud.Component {
     }
 
     /**
-     * A hex's art from above. Open water, hazardous liquid or magma covers the ground with its animated tileset art
-     * (BoardLiquid), whose first frame stands for it, a hazardous liquid's in the board's tint; frozen water shows its
-     * ground art's ice, as the board does.
+     * A hex's art from above. Open water, hazardous liquid or magma covers the tileset art with its animated art
+     * (BoardLiquid), whose first frame stands for it, a hazardous liquid's in the board's tint; frozen water shows the
+     * ice of its tileset art.
      */
     private Art art(BoardScene.Tile tile) {
-        BoardScene.Pixels ground = tile.ground();
+        BoardScene.Pixels base = GpuTilesetTerrain.art(tile);
         Color tint = Color.WHITE;
         if (tile.liquid().present() && !tile.frozen()) {
             Optional<BoardScene.Pixels> liquid = liquids.computeIfAbsent(
                   tile.liquid().textures(tile.waterDepth(), tile.elevation()).base(), GpuMinimap::firstFrame);
             if (liquid.isPresent()) {
-                ground = liquid.get();
+                base = liquid.get();
                 tint = tile.liquid().kind() == BoardLiquid.Kind.HAZARDOUS ? BoardLiquid.HAZARDOUS_TINT : Color.WHITE;
             }
         }
-        return new Art(ground, tile.decals(), tile.foliage(), tint);
+        return new Art(base, tile.bridge(), tint);
     }
 
     /**
      * The first frame of a liquid animation of the board tileset, decoded as GpuAssets decodes it for the board, or
-     * empty when it cannot be read: the hex then shows its ground art, and the failure is logged once.
+     * empty when it cannot be read: the hex then shows its tileset art, and the failure is logged once.
      */
     private static Optional<BoardScene.Pixels> firstFrame(String path) {
         File file = GpuAssets.tilesetFile(path);
@@ -173,13 +173,12 @@ final class GpuMinimap implements GpuHud.Component {
     }
 
     /**
-     * The mean colour of a hex's art as the board shows it from above: the ground, then its decals and flat foliage
-     * over it, weighted by coverage, in the art's tint. Every layer is sampled on the first layer's grid.
+     * The mean colour of a hex's art as the board shows it from above: the base, then the bridge over it, weighted by
+     * coverage, in the art's tint. Both layers are sampled on the first one's grid.
      */
     private static int average(Art art) {
-        BoardScene.Pixels[] layers = { art.ground(), art.decals(), art.foliage() };
-        BoardScene.Pixels grid = art.ground() != null ? art.ground() : art.decals() != null ? art.decals()
-              : art.foliage();
+        BoardScene.Pixels[] layers = { art.base(), art.bridge() };
+        BoardScene.Pixels grid = art.base() != null ? art.base() : art.bridge();
         if (grid == null) {
             return 0;
         }

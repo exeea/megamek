@@ -210,7 +210,7 @@ class BoardIceTest {
     }
 
     @Test
-    void blankFlagsAreIdentifiedFromTheSelectedArtworkWithoutHidingVisibleGradients() throws Exception {
+    void blankFlagsAreIdentifiedFromTheSelectedArtworkWithoutHidingUnmodeledGround() throws Exception {
         onEdt(() -> {
             var board = Board.createEmptyBoard(1, 1);
             var coords = new Coords(0, 0);
@@ -219,7 +219,7 @@ class BoardIceTest {
                 var blank = artwork.capture(board, coords, true);
                 assertTrue(blank.blankTerrains().contains(Terrains.GROUND_FLUFF));
                 assertTrue(BoardFeatures.detailedGround(board.getHex(coords), blank.structureModels(), blank.blankTerrains()));
-                board.setHex(coords, new Hex(0, "ground_fluff:4:4", ""));
+                board.setHex(coords, new Hex(0, "ground_fluff:2000", ""));
                 artwork.invalidate(coords);
                 var visible = artwork.capture(board, coords, true);
                 assertFalse(visible.blankTerrains().contains(Terrains.GROUND_FLUFF));

@@ -374,10 +374,10 @@ class GpuUtilityMinimapSmokeTest {
 
     /**
      * Each hex shows its art's colour, found through the minimap's own mapping: a press gives the ground point under
-     * the pointer. A hex of bare ground shows the mean of its ground image; a hex with woods differs from it; a water
+     * the pointer. A hex without trees shows the mean of its tileset art; a hex with woods differs from it; a water
      * hex shows the first frame of its water animation as the board decodes it, and a hazardous liquid's hex the same
-     * in the tint of the board's liquid material; a hex whose liquid art cannot be read shows its ground. The captures
-     * have no route or units, and the sampled hexes lie three hexes inside the board, clear of the frustum.
+     * in the tint of the board's liquid material; a hex whose liquid art cannot be read shows its tileset art. The
+     * captures have no route or units, and the sampled hexes lie three hexes inside the board, clear of the frustum.
      */
     private static void checkTileColours(GpuHudTestStage hud, GpuBoardSpaceHarness board, Parts parts,
           BoardScene scene, GpuBattleStatus.Snapshot status) {
@@ -400,26 +400,27 @@ class GpuUtilityMinimapSmokeTest {
             List<BoardScene.Tile> inner = scene.tiles().stream().filter(tile -> tile.coords().getX() >= 3
                   && tile.coords().getY() >= 3 && tile.coords().getX() < scene.width() - 3
                   && tile.coords().getY() < scene.height() - 3).toList();
-            BoardScene.Tile bare = inner.stream().filter(tile -> tile.decals() == null && tile.foliage() == null
-                  && !tile.water() && tile.ground() != null).findFirst().orElseThrow();
-            BoardScene.Tile wooded = inner.stream().filter(tile -> tile.foliage() != null).findFirst().orElseThrow();
-            int bareColour = sample(image, first, origin, scale, bare.coords());
-            int expected = mean(bare.ground());
-            System.out.printf("Bare hex %s: minimap #%08X, ground art mean #%08X%n", bare.coords(), bareColour,
+            BoardScene.Tile open = inner.stream().filter(tile -> !wooded(tile) && !tile.water()
+                  && tile.bridge() == null && tile.tileset() != null).findFirst().orElseThrow();
+            BoardScene.Tile wooded = inner.stream().filter(GpuUtilityMinimapSmokeTest::wooded).findFirst()
+                  .orElseThrow();
+            int openColour = sample(image, first, origin, scale, open.coords());
+            int expected = mean(open.tileset());
+            System.out.printf("Open hex %s: minimap #%08X, tileset art mean #%08X%n", open.coords(), openColour,
                   expected);
             for (int shift : new int[] { 24, 16, 8 }) {
-                assertEquals(expected >>> shift & 255, bareColour >>> shift & 255, 6,
-                      "The bare hex shows its ground art's mean colour");
+                assertEquals(expected >>> shift & 255, openColour >>> shift & 255, 6,
+                      "A hex without trees shows its tileset art's mean colour");
             }
             int woodedColour = sample(image, first, origin, scale, wooded.coords());
             System.out.printf("Wooded hex %s: minimap #%08X%n", wooded.coords(), woodedColour);
-            assertNotEquals(bareColour, woodedColour, "A wooded hex shows its foliage art");
+            assertNotEquals(openColour, woodedColour, "A wooded hex shows its trees");
 
             // Three more bare hexes made depth-1 liquid: water shows the first frame of its water animation, not its
             // ground; a hazardous liquid shows the same frame in the board's tint; a liquid that names art that does
             // not exist keeps the ground.
-            List<BoardScene.Tile> dry = inner.stream().filter(tile -> tile.decals() == null && tile.foliage() == null
-                  && !tile.water() && tile.coords().distance(bare.coords()) >= 3).toList();
+            List<BoardScene.Tile> dry = inner.stream().filter(tile -> !tile.water()
+                  && tile.coords().distance(open.coords()) >= 3).toList();
             BoardScene.Tile wet = dry.getFirst();
             BoardScene.Tile unreadable = dry.stream().filter(tile -> tile.coords().distance(wet.coords()) >= 3)
                   .findFirst().orElseThrow();
@@ -441,16 +442,16 @@ class GpuUtilityMinimapSmokeTest {
                 System.out.printf("Hazardous liquid hex %s: minimap #%08X, tinted water frame mean #%08X%n",
                       hazardous.coords(), hazardousColour, tinted);
                 int unreadableColour = sample(liquids, first, origin, scale, unreadable.coords());
-                int ground = mean(unreadable.ground());
-                System.out.printf("Unreadable liquid hex %s: minimap #%08X, ground art mean #%08X%n",
-                      unreadable.coords(), unreadableColour, ground);
+                int art = mean(unreadable.tileset());
+                System.out.printf("Unreadable liquid hex %s: minimap #%08X, tileset art mean #%08X%n",
+                      unreadable.coords(), unreadableColour, art);
                 for (int shift : new int[] { 24, 16, 8 }) {
                     assertEquals(waterArt >>> shift & 255, waterColour >>> shift & 255, 6,
                           "The water hex shows its water art's mean colour");
                     assertEquals(tinted >>> shift & 255, hazardousColour >>> shift & 255, 6,
                           "The hazardous liquid's hex shows its water art in the board's tint");
-                    assertEquals(ground >>> shift & 255, unreadableColour >>> shift & 255, 6,
-                          "A hex whose liquid art cannot be read shows its ground art");
+                    assertEquals(art >>> shift & 255, unreadableColour >>> shift & 255, 6,
+                          "A hex whose liquid art cannot be read shows its tileset art");
                 }
             } finally {
                 liquids.dispose();
@@ -460,12 +461,16 @@ class GpuUtilityMinimapSmokeTest {
         }
     }
 
+    private static boolean wooded(BoardScene.Tile tile) {
+        return tile.features().stream().anyMatch(feature -> feature.kind() == BoardScene.FeatureKind.TREE);
+    }
+
     /** The scene with one hex turned into open liquid of depth 1, as the source captures a water hex. */
     private static BoardScene withLiquid(BoardScene scene, Coords coords, BoardLiquid liquid) {
         List<BoardScene.Tile> tiles = scene.tiles().stream().map(tile -> !tile.coords().equals(coords) ? tile
               : new BoardScene.Tile(tile.coords(), tile.elevation(), 1, false, tile.roadExits(), tile.surface(),
                     tile.ground(), tile.normals(), tile.decals(), tile.decalsWithoutLimbs(), tile.tactical(),
-                    tile.features(), tile.text(), liquid, tile.foliage())).toList();
+                    tile.features(), tile.text(), liquid, tile.tileset())).toList();
         return new BoardScene(scene.boardId(), scene.width(), scene.height(), tiles, scene.units(),
               scene.plannedPath(), scene.selectedId(), scene.phase(), scene.commands(), scene.light(),
               scene.firingLines(), scene.rangeBorders(), scene.markers(), scene.tactical(), scene.rangeLabels(),

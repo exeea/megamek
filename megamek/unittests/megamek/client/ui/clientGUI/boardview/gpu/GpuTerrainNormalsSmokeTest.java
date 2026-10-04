@@ -66,7 +66,7 @@ class GpuTerrainNormalsSmokeTest {
             List<BoardScene.Tile> atlasTiles = captured.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(),
                   tile.elevation(), tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(), tile.ground(),
                   tile.normals(), tile.decals(), tile.decalsWithoutLimbs(), tile.tactical(), tile.features(), tile.text(),
-                  tile.liquid(), tile.foliage(), false)).toList();
+                  tile.liquid(), tile.tileset(), false)).toList();
             BoardScene scene = new BoardScene(0, 15, 9, atlasTiles, List.of(), List.of(), -1, "", List.of(),
                   new BoardScene.Light(30, -20));
             for (BoardScene.Tile tile : scene.tiles()) {
@@ -192,7 +192,7 @@ class GpuTerrainNormalsSmokeTest {
         // Only the normals change: every other layer (foliage, limb-free decals, biome...) must match the compared scene.
         List<BoardScene.Tile> tiles = scene.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(), tile.elevation(),
               tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(), tile.ground(), flat, tile.decals(),
-              tile.decalsWithoutLimbs(), tile.tactical(), tile.features(), tile.text(), tile.liquid(), tile.foliage(),
+              tile.decalsWithoutLimbs(), tile.tactical(), tile.features(), tile.text(), tile.liquid(), tile.tileset(),
               tile.detailedGround(), tile.road(), tile.fireSmoke(), tile.biome(), tile.impassable(), tile.blackIce())).toList();
         return new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of(), scene.light());
     }

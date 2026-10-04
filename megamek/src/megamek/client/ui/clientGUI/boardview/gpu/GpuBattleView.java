@@ -533,6 +533,12 @@ class GpuBattleView extends ApplicationAdapter {
         }
         boardGeneration = frame.boardGeneration();
         var atmosphereSettings = tuning.atmosphere();
+        atmosphere.configure(atmosphereSettings);
+        atmosphere.setOptions(tuning.atmosphereOptions());
+        // Material readiness includes live lighting/cloud flags, before any visible terrain is submitted.
+        atmosphere.updateLight(boardCamera.camera);
+        terrain.setAtmosphere(atmosphere.lighting());
+        atmosphere.configureClouds(terrain, scene);
         terrain.setGravity(atmosphereSettings.gravity());
         terrain.update(scene, boardCamera.camera);
         boolean detailChanged = terrain.refine(boardCamera.camera);
@@ -574,9 +580,7 @@ class GpuBattleView extends ApplicationAdapter {
         tactical.update(scene, detailChanged, hovered, !frame.panels().move().route().isEmpty());
         fieldOfView.update(scene.fieldOfView());
         fieldOfView.configure(tuning.fovStyle(), tuning.fovDarkness(), tuning.sensorStyle(), tuning.sensorDarkness());
-        atmosphere.configure(atmosphereSettings);
         attackEffects.setWind(atmosphereSettings.effects());
-        atmosphere.setOptions(tuning.atmosphereOptions());
         terrain.setNormalMaps(tuning.normalMaps());
         terrain.setGrass(tuning.grass());
         if (unitTextures.update(scene.units().stream().filter(unit -> !unit.sensorContact()
@@ -658,10 +662,10 @@ class GpuBattleView extends ApplicationAdapter {
             });
         }
         updateEquipmentDetail();
-        // Icons and flat terrain art are the Tactical View; the 3D view keeps its meshes at every angle and zoom.
+        // Icons and the tileset columns are the Tactical View; the 3D view keeps its meshes at every angle and zoom.
         if (unitIcons.update(boardCamera.tactical(), boardCamera.camera, scene, frame.status(),
-              this::marked, this::hovers, unitFootprints, unitAnchors, groundSurfaces)) { unitPicking.clear(); }
-        terrain.setFlatFeatures(unitIcons.active());
+              this::marked, this::hovers, unitFootprints, unitAnchors)) { unitPicking.clear(); }
+        terrain.setTacticalView(boardCamera.tactical());
         markers.update(unitIcons.active() ? unitIcons.instances() : unitInstances.values(), boardCamera.camera);
         updateJumpJets();
         attackEffects.update(playback.attacks(), unitModels, unitInstances);
@@ -707,7 +711,10 @@ class GpuBattleView extends ApplicationAdapter {
         Color smokeLight = atmosphere.particleLight();
         terrainEffects.update(scene, groundSurfaces, atmosphereSettings.effects(), animationSeconds());
         effectDepth.begin();
-        terrainEffects.render(boardCamera.camera, effectDepth, smokeLight, atmosphere.lighting().direction());
+        // The Tactical View's tileset art already shows fire and smoke.
+        if (!terrain.tacticalView()) {
+            terrainEffects.render(boardCamera.camera, effectDepth, smokeLight, atmosphere.lighting().direction());
+        }
         jumpJets.setSmokeLight(smokeLight);
         attackEffects.setSmokeLight(smokeLight);
         attackEffects.setLightDirection(atmosphere.lighting().direction());
@@ -724,7 +731,7 @@ class GpuBattleView extends ApplicationAdapter {
         atmosphere.renderWeather(boardCamera.camera, scene);
         renderStage("unit outlines");
         unitVisibility.render(boardCamera.camera, outlined, atmosphere.depthTexture(), 0, seeThrough, layoutScale,
-              unitBounds, terrainEffects.opacityTexture());
+              unitBounds, terrain.tacticalView() ? null : terrainEffects.opacityTexture());
         renderStage("tactical overlays");
         terrain.render(boardCamera.camera, true);
         // The board overlay over the terrain's marks, its unit marks where the units stand this frame first; in 3D
@@ -736,7 +743,7 @@ class GpuBattleView extends ApplicationAdapter {
         renderHoverRings();
         fireControl.render(boardCamera.camera, Gdx.graphics.getDeltaTime());
         tactical.render(boardCamera.camera, Gdx.graphics.getDeltaTime(), unitIcons.active());
-        hexGrid.render(boardCamera, scene);
+        hexGrid.render(boardCamera, scene, terrain.tacticalView());
         renderHexText();
         unitIcons.render(boardCamera.camera);
         if (unitIcons.active()) { overlay.renderGhost(boardCamera.camera, shownUnit); }
@@ -1481,12 +1488,10 @@ class GpuBattleView extends ApplicationAdapter {
 
     /**
      * The height of the hovered hex's outline on a building floor under the pointer (rimshaderv1's hover column): half
-     * a hex above the floor's level when that is more than a hex above the hex's own ground, else NaN. None in the
-     * Tactical View, whose buildings are flat art.
+     * a hex above the floor's level when that is more than a hex above the hex's own ground, else NaN.
      */
     private float hoverTop() {
-        if (hovered == null || scene == null || scene.tile(hovered) == null || Float.isNaN(hoverZ)
-              || boardCamera.tactical()) {
+        if (hovered == null || scene == null || scene.tile(hovered) == null || Float.isNaN(hoverZ)) {
             return Float.NaN;
         }
         float base = BoardTacticalGeometry.floatingZ(scene, hovered);
@@ -1681,8 +1686,8 @@ class GpuBattleView extends ApplicationAdapter {
             if (!dragged && button != Input.Buttons.MIDDLE && !ui.hit(x, y)
                   && gestureBoardGeneration == boardGeneration) {
                 Pick picked = pickSelection(x, y);
-                // The height the pointer shows, which a measurement takes: none in the Tactical View's flat art.
-                float pointedZ = boardCamera.tactical() ? Float.NaN : picked.surfaceZ();
+                // The height the pointer shows, which a measurement takes.
+                float pointedZ = picked.surfaceZ();
                 if (ui instanceof GpuHud hud) {
                     // The shared phase tool handles a press; releasing Shift first must not turn it into placement.
                     hud.boardClick(picked.coords(), picked.entityId(), button, gestureModifiers, x, y, pointedZ);

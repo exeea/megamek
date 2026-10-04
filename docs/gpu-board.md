@@ -99,7 +99,9 @@ per-instance materials while retaining shared mesh/texture ownership.
 
 The HUD's Wireframe utility (beside Tactical view; also on the tuning panel's Camera page)
 draws terrain, buildings and trees as green lines,
-and units with a separate thermal shader. The unit pass borrows the same posed models,
+and units with a separate thermal shader. Decorative scatter is omitted from both
+wireframe lines and its depth fill. The two views exclude each other: turning the wireframe on leaves the Tactical
+View, and entering the Tactical View turns the wireframe off. The unit pass borrows the same posed models,
 visible parts, sprite alpha cutouts and scene depth as the shaded view. Sensor contacts
 and tactical overview icons retain their existing presentation.
 
@@ -118,6 +120,38 @@ and ground support, so their vertical gradient is an approximation across the fo
 `GpuThermalUnits` creates its batch and programs on first use. Normal rendering does not
 run the thermal shader or queue thermal draws. Turning Wireframe off retains the shader
 cache until renderer disposal; no additional unit meshes or full-screen buffers are made.
+
+## Tactical View
+
+The HUD's Tactical view utility and the Toggle Tactical View key (T) switch the camera to the Tactical View, a
+north-up top view, and back ([HUD](gpu-hud.md#5-the-tactical-view)). While it is on, at every zoom,
+`GpuTilesetTerrain` replaces the shaded terrain, as the libGDX branch drew the board: each
+hex is a plain column at its level, topped by its Saxarba tileset art (`BoardScene.Tile.tileset`, which `BoardArtwork`
+composes from the 3D board's own tileset, never the 2D board) and walled in its material down to lower neighbours or
+the board's floor. The tileset's own incline and cliff edges are left out of that art: `BoardRim` lays its incline
+mask along each edge above a lower neighbour, or its high-incline mask where the drop exceeds two levels or the map
+marks a cliff side there. A road leaving a hex toward one of another level ramps through their shared edge to the
+height `BoardSurface.roadEdgeElevation` gives both, between banks, and the walls and rims leave that mouth open; a
+bridge's art (`BoardScene.Tile.bridge`) lies on its deck, where its approaches' ramps arrive. Open liquid shows its
+animated frames (`BoardLiquid.textures`) over its art, as the libGDX board drew it: water translucent, whole over the
+middle and fading out toward each bank so the art's shore shows, moving with its river's current (`BoardFlow`);
+hazardous liquid tinted green; magma opaque and glowing. Over each drop into the open liquid it joins, a fall curves
+over the edge, hangs just clear of the wall and spreads into the pool below, its frames running down it. These liquids
+cast no shadow, and `GpuTerrain` animates them with its own. Buildings, fuel tanks and industrial structures stay
+the 3D board's own models (a custom kit's modular building where one exists), and their art is left out of the hex's
+tileset image: they fade around units inside, show their struts and floors, take picks with the hovered level's
+cutaway, and cast shadows, as in the 3D view. Toggling the view recaches each section's props, so their caches hold
+only the structures while it is on. The hex grid lies on the columns at every angle, behind whatever stands nearer.
+The columns have no relief, blends, 3D water surfaces, trees, scatter or other feature models. While the view is on, `GpuTerrain` draws, picks and drapes overlays on these same columns, and lights them
+with its own batch and environment: the hour's sun or moon, ambient, cloud shadows and lava glow, as on the 3D board
+(tops face up, walls and banks outward). The geometry shadow map holds the columns, bridge decks and 3D units in
+place of the 3D terrain, through the same fit and caches, so higher columns shade lower ones and units shade the
+columns. The 3D terrain stays built, so the switch needs no rebuild, only a shadow redraw; the columns and their art
+atlases are built on first use. An edit rebuilds only the terrain sections (`GpuTerrain.CHUNK_SIZE` hexes square)
+holding a changed hex and, when what its neighbours read of it changed (levels, roads, liquid, bridge), those
+neighbours, plus the sections of hexes whose current the edit turned, and redraws the shadow. The atmosphere (grading, fog, sand, weather, heat glow, glare, lightning) applies
+as in the 3D view; only fire and smoke particles are left out, since the tileset art shows them. Units are flat icons
+(`GpuUnitIcons`) throughout the view.
 
 ## Threads and update ownership
 

@@ -12,7 +12,7 @@ import com.badlogic.gdx.utils.FloatArray;
  * and a medium chunk's roots keep their places and ranks on the full ground. Every part is null when the hex grows
  * none of it.
  */
-record BoardPlants(GpuBiomeVegetation.Crops crops, FloatArray reeds, FloatArray grass) {
+record BoardPlants(GpuBiomeVegetation.Crops crops, FloatArray reeds, FloatArray grass, FloatArray turf) {
     static BoardPlants plant(BoardScene scene, BoardScene.Tile tile, BoardTacticalGeometry.Surface support, TerrainLod lod) {
         if (lod == TerrainLod.DISTANT) { return null; }
         var kind = BoardBiome.plantKind(scene, tile);
@@ -23,6 +23,7 @@ record BoardPlants(GpuBiomeVegetation.Crops crops, FloatArray reeds, FloatArray 
               lod == TerrainLod.FULL ? 1 : lod == TerrainLod.MEDIUM ? .35f : .08f) : null;
         FloatArray grass = lod != TerrainLod.COARSE && GpuGroundCover.grows(scene, tile)
               ? GpuGroundCover.plant(scene, tile, support) : null;
-        return crops == null && reeds == null && grass == null ? null : new BoardPlants(crops, reeds, grass);
+        FloatArray turf = grass == null ? null : GpuBankTurf.plant(scene, tile, support);
+        return crops == null && reeds == null && grass == null && turf == null ? null : new BoardPlants(crops, reeds, grass, turf);
     }
 }

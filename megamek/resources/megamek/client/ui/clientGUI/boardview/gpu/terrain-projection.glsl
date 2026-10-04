@@ -1,7 +1,5 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Shared world-space texture projection and normal reconstruction.
-// The second repeat of every map is 2.37 times larger and turned by 34 degrees.
-const mat2 TURN = mat2(.8253, .5646, -.5646, .8253);
 
 
 // ---- Material sampling -------------------------------------------------------------------------------------------

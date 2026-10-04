@@ -150,7 +150,7 @@ final class GpuScatter {
         return switch (surface) {
             case SAND, DIRT -> new Color(.95f, .95f, .95f, 1);
             case SNOW -> new Color(.95f, .98f, 1, 1);
-            case ROCK -> new Color(.95f, .94f, .91f, 1);
+            case ROCK, LUNAR -> new Color(.95f, .94f, .91f, 1);
             default -> new Color(.90f, .95f, .83f, 1);
         };
     }

@@ -150,7 +150,7 @@ class GpuHudKitSmokeTest {
                         board.draw(camera -> {
                             icons.update(true, camera, board.scene, board.status,
                                   unit -> unit.id() == GpuHudFixtures.ATLAS, unit -> false, board.poses,
-                                  iconAnchors, board.surfaces);
+                                  iconAnchors);
                             icons.render(camera);
                         });
                         Pixmap drawn = hud.captureBackBuffer("board-space-icons-" + view);

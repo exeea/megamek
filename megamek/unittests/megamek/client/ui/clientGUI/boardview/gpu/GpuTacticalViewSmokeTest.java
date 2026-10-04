@@ -16,7 +16,6 @@ import java.awt.Component;
 import java.awt.Rectangle;
 import java.io.File;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,22 +28,14 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Pixmap;
-import com.badlogic.gdx.graphics.PixmapIO;
-import com.badlogic.gdx.graphics.Texture;
-import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.model.NodePart;
-import com.badlogic.gdx.graphics.g3d.utils.DepthShaderProvider;
-import com.badlogic.gdx.graphics.glutils.FrameBuffer;
-import com.badlogic.gdx.graphics.profiling.GLProfiler;
 import com.badlogic.gdx.math.Quaternion;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.scenes.scene2d.ui.Slider;
-import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardFieldOfView;
 import megamek.client.ui.gdx.DisplayScale;
@@ -65,8 +56,8 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * The Tactical View on the real Saxarba capture: the T key swaps every mesh for tileset sprites and framed unit icons,
- * and T again restores the 3D view, which keeps its meshes at every angle and zoom.
+ * The Tactical View on the real Saxarba capture: the T key swaps the shaded terrain for the tileset columns and the
+ * unit meshes for framed icons, and T again restores the 3D view, which keeps its meshes at every angle and zoom.
  */
 @Tag("on-demand")
 class GpuTacticalViewSmokeTest {
@@ -83,7 +74,7 @@ class GpuTacticalViewSmokeTest {
     private static final int ENEMY_FACING = 2;
 
     @Test
-    void replacesEveryMeshWithTilesetArtFromAboveAndRestoresTheThreeDimensionalView() throws Exception {
+    void swapsInTilesetColumnsAndUnitIconsAndRestoresTheThreeDimensionalView() throws Exception {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         GUIPreferences preferences = GUIPreferences.getInstance();
         float originalScale = preferences.getGUIScale();
@@ -196,10 +187,6 @@ class GpuTacticalViewSmokeTest {
         var model = models.get("1:-1");
         assertNotNull(model, "The own Atlas is a 3D model");
         assertEquals(2, scene.units().size());
-        for (Coords coords : List.of(BUILDING, BRIDGE, FUEL_TANK, new Coords(10, 5), new Coords(1, 2))) {
-            assertNotNull(scene.tile(coords).foliage(), "Tileset art from above for the mesh at " + coords);
-        }
-        verifySpriteSilhouette(scene);
         assertFalse(icons.active());
         var roof = terrain.roofBounds(BUILDING);
         assertNotNull(roof, "The 3D board raises the building mesh");
@@ -225,7 +212,7 @@ class GpuTacticalViewSmokeTest {
         assertTrue(view.boardCamera.camera.direction.epsilonEquals(0, 0, -1, .0001f));
         assertTrue(view.boardCamera.camera.up.epsilonEquals(0, 1, 0, .0001f), "North stays up");
         assertTrue(icons.active(), "The Tactical View always shows unit icons");
-        assertTrue((boolean) field(terrain, "flatFeatures"));
+        assertTrue(terrain.tacticalView(), "The tileset columns replace the shaded terrain");
         assertTrue(((List<?>) field(terrain, "shadowModels")).isEmpty(), "Hidden unit models cast no shadows");
         assertSame(model, models.get("1:-1"), "The hidden 3D model keeps its animated instance");
         assertEquals(roof.getCenter(new Vector3()), terrain.roofBounds(BUILDING).getCenter(new Vector3()),
@@ -247,7 +234,7 @@ class GpuTacticalViewSmokeTest {
         assertEquals(azimuth, view.boardCamera.azimuth());
         assertEquals(tilt, view.boardCamera.tilt());
         assertFalse(icons.active());
-        assertFalse((boolean) field(terrain, "flatFeatures"));
+        assertFalse(terrain.tacticalView());
         assertFalse(((List<?>) field(terrain, "shadowModels")).isEmpty(), "Unit models cast shadows again");
         capture("tactical-view-restored.png");
 
@@ -261,10 +248,9 @@ class GpuTacticalViewSmokeTest {
         render(view);
         assertFalse(view.boardCamera.tactical());
         assertFalse(icons.active(), "No zoom or angle turns the 3D models into icons");
-        assertFalse((boolean) field(terrain, "flatFeatures"), "No zoom or angle turns feature meshes into sprites");
+        assertFalse(terrain.tacticalView(), "No zoom or angle turns the terrain into tileset columns");
         assertFalse(((List<?>) field(terrain, "shadowModels")).isEmpty());
         assertSame(model, models.get("1:-1"));
-        verifyPasses(scene);
         assertEquals(isometricPreference, GUIPreferences.getInstance().getIsometricEnabled(),
               "T stays in the GPU view: the classic board's isometric setting is untouched");
         SwingUtilities.invokeAndWait(() -> {
@@ -334,8 +320,7 @@ class GpuTacticalViewSmokeTest {
         shown.put(contact, new UnitFootprint.Pose(contact, poses.get(enemy).position(), 0));
         shown.put(unlisted, new UnitFootprint.Pose(unlisted, poses.get(own).position(), 0));
         icons.update(true, view.boardCamera.camera, scene.withUnits(List.of(contact, unlisted)),
-              (GpuBattleStatus.Snapshot) field(icons, "status"), unit -> false, unit -> false, shown, new HashMap<>(),
-              new BoardSurface.Cache());
+              (GpuBattleStatus.Snapshot) field(icons, "status"), unit -> false, unit -> false, shown, new HashMap<>());
         ModelInstance blip = icons.instance(contact);
         assertTrue(part(blip, "dashed").enabled && !part(blip, "frame").enabled && !part(blip, "tick").enabled,
               "A sensor contact has a dashed frame and no facing tick");
@@ -529,82 +514,32 @@ class GpuTacticalViewSmokeTest {
         GpuBoardTestUi.capture(new File(directory, name));
     }
 
-    /** Real tileset canopy pixels outside the hex must survive the lit flat-sprite draw. */
-    private static void verifySpriteSilhouette(BoardScene scene) {
-        var coords = new Coords(0, 0);
-        var tile = scene.tiles().stream().filter(item -> item.foliage() != null && !item.liquid().present()
-                    && item.features().stream().anyMatch(feature -> feature.kind() == BoardScene.FeatureKind.TREE))
-              .findFirst().orElseThrow();
-        var art = tile.foliage();
-        var flat = new BoardScene.Tile(coords, 0, -1, false, 0, tile.surface(), tile.ground(),
-              null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, art);
-        var isolated = new BoardScene(0, 1, 1, List.of(flat), List.of(), List.of(), -1, "", List.of());
-        var terrain = new GpuTerrain();
-        var target = new FrameBuffer(Pixmap.Format.RGBA8888, art.width(), art.height(), true);
-        var camera = new OrthographicCamera(BoardGeometry.WIDTH, BoardGeometry.HEIGHT);
-        camera.position.set(BoardGeometry.center(coords, 0)).add(0, 0, 50);
-        camera.direction.set(0, 0, -1);
-        camera.up.set(0, 1, 0);
-        camera.update();
-        Pixmap rendered = null;
-        try {
-            terrain.update(isolated);
-            terrain.setFlatFeatures(true);
-            target.begin();
-            Gdx.gl.glClearColor(0, 0, 0, 0);
-            Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
-            terrain.renderTransparent(camera);
-            rendered = Pixmap.createFromFrameBuffer(0, 0, art.width(), art.height());
-            target.end();
-            int overhang = 0;
-            int missing = 0;
-            for (int y = 0; y < art.height(); y++) {
-                for (int x = 0; x < art.width(); x++) {
-                    float worldX = (x + .5f) / art.width() * BoardGeometry.WIDTH;
-                    float worldY = -(y + .5f) / art.height() * BoardGeometry.HEIGHT;
-                    if (opaque(art, x, y) && !BoardGeometry.contains(coords, worldX, worldY)) {
-                        overhang++;
-                        if ((rendered.getPixel(x, art.height() - y - 1) & 255) < 200) { missing++; }
-                    }
-                }
-            }
-            PixmapIO.writePNG(Gdx.files.absolute(new File(System.getProperty("megamek.gpu.screenshots",
-                  "build/gpu-board-review"), "tactical-view-sprite-full.png").getAbsolutePath()), rendered, -1, true);
-            assertTrue(overhang > 0, "The real artwork must exercise canopies extending outside the hex");
-            assertEquals(0, missing, "Canopy pixels outside the hex must survive the flat render");
-        } finally {
-            if (rendered != null) { rendered.dispose(); }
-            target.dispose();
-            terrain.dispose();
-        }
-    }
-
-    /** Sprites are lit before the atmosphere composite, so the shared field of view darkens only unseen art. */
+    /** The columns are lit before the atmosphere composite, so the shared field of view darkens only unseen art. */
     private static void verifyFieldOfView(GpuBattleView view, BoardScene scene) {
         Slider darkness = GpuBoardTestUi.tuning(view, "FoV darkness");
-        float[] darkened = spriteLuminance(view, scene);
+        float[] darkened = artLuminance(view, scene);
         darkness.setValue(0);
         render(view);
-        float[] plain = spriteLuminance(view, scene);
+        float[] plain = artLuminance(view, scene);
         darkness.setValue(GpuFieldOfView.FOV_DARKNESS * 100);
         render(view);
-        System.out.printf("Sprite luminance with/without FoV darkness: seen %.3f/%.3f, unseen %.3f/%.3f on %s%n",
+        System.out.printf("Tileset art luminance with/without FoV darkness: seen %.3f/%.3f, unseen %.3f/%.3f on %s%n",
               darkened[0], plain[0], darkened[1], plain[1], Gdx.gl.glGetString(GL20.GL_RENDERER));
-        assertTrue(plain[0] > 0 && plain[1] > 0, "Both seen and unseen sprites must be sampled");
-        assertEquals(plain[0], darkened[0], .02f, "Seen sprites keep their lit colors");
-        assertTrue(darkened[1] < plain[1] * .9f, "Unseen sprites darken like the ground");
-        assertTrue(darkened[1] < darkened[0], "An unseen sprite is darker than a seen one");
+        assertTrue(plain[0] > 0 && plain[1] > 0, "Both seen and unseen hexes must be sampled");
+        assertEquals(plain[0], darkened[0], .02f, "Seen hexes keep their lit colors");
+        assertTrue(darkened[1] < plain[1] * .9f, "Unseen hexes darken");
+        assertTrue(darkened[1] < darkened[0], "An unseen hex is darker than a seen one");
     }
 
-    /** Mean luminance of opaque sprite pixels inside their own hexes: {seen, unseen}, away from units and labels. */
-    private static float[] spriteLuminance(GpuBattleView view, BoardScene scene) {
+    /** Mean luminance of opaque tileset art pixels inside their hexes: {seen, unseen}, away from units and labels. */
+    private static float[] artLuminance(GpuBattleView view, BoardScene scene) {
         Pixmap frame = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(),
               Gdx.graphics.getBackBufferHeight());
         try {
             float[] sum = new float[2];
             int[] count = new int[2];
             for (BoardScene.Tile tile : scene.tiles()) {
-                var art = tile.foliage();
+                var art = tile.tileset();
                 var visibility = GpuFieldOfViewTest.at(scene.fieldOfView(), tile.coords()).visibility();
                 boolean seen = visibility == BoardFieldOfView.Visibility.VISIBLE;
                 if (art == null || (!seen && visibility != BoardFieldOfView.Visibility.BLOCKED) || scene.units()
@@ -632,7 +567,7 @@ class GpuTacticalViewSmokeTest {
         }
     }
 
-    /** Board offset from the hex centre of a sprite's art pixel; the flat quad spans one hex's tile rectangle. */
+    /** Board offset from the hex centre of a pixel of its tileset art, which spans the hex's tile rectangle. */
     private static Vector3 offset(BoardScene.Pixels art, int x, int y) {
         return new Vector3(((x + .5f) / art.width() - .5f) * BoardGeometry.WIDTH,
               (.5f - (y + .5f) / art.height()) * BoardGeometry.HEIGHT, 0);
@@ -663,8 +598,8 @@ class GpuTacticalViewSmokeTest {
     private static void verifyPicking(GpuBattleView view, GpuTerrain terrain, BoardScene scene, GpuUnitIcons icons)
           throws Exception {
         for (Coords coords : List.of(BUILDING, BRIDGE, FUEL_TANK)) {
-            var art = scene.tile(coords).foliage();
-            // The opaque sprite pixel farthest from the centre that still lies well inside its own hex.
+            var art = scene.tile(coords).tileset();
+            // The opaque art pixel farthest from the centre that still lies well inside its own hex.
             Vector3 edge = null;
             for (int y = 0; y < art.height(); y++) {
                 for (int x = 0; x < art.width(); x++) {
@@ -676,7 +611,7 @@ class GpuTacticalViewSmokeTest {
                 }
             }
             assertNotNull(edge, "Opaque tileset art at " + coords);
-            assertEquals(coords, pick(view, screen(view, coords, edge)), "A sprite pixel picks its own hex");
+            assertEquals(coords, pick(view, screen(view, coords, edge)), "An art pixel picks its own hex");
             assertEquals(coords, pick(view, view.screenPosition(coords)));
         }
         for (Coords coords : List.of(OWN, ENEMY)) {
@@ -693,7 +628,7 @@ class GpuTacticalViewSmokeTest {
         var status = (GpuBattleStatus.Snapshot) field(icons, "status");
         // The own unit is hovered; verifyStates covers the client's selection.
         icons.update(true, view.boardCamera.camera, scene, status, unit -> false,
-              unit -> unit != enemy, moved, new HashMap<>(), new BoardSurface.Cache());
+              unit -> unit != enemy, moved, new HashMap<>());
         ModelInstance icon = icons.instance(enemy);
         Vector3 center = icon.transform.getTranslation(new Vector3());
         assertEquals(position.x, center.x, .0001f);
@@ -734,9 +669,12 @@ class GpuTacticalViewSmokeTest {
 
     /**
      * A point over a hex's own ground, away from units, where a 3D feature mesh of another hex takes the vertical
-     * pick. Leaves the terrain flat.
+     * pick. Leaves the Tactical View on.
      */
     private static Overhang overhang(GpuTerrain terrain, BoardScene scene) {
+        List<Coords> under = new ArrayList<>();
+        List<Vector3> offsets = new ArrayList<>();
+        List<Ray> rays = new ArrayList<>();
         for (BoardScene.Tile tile : scene.tiles()) {
             if (scene.units().stream().anyMatch(unit -> unit.location().coords().distance(tile.coords()) <= 1)) {
                 continue;
@@ -744,16 +682,22 @@ class GpuTacticalViewSmokeTest {
             for (int step = 0; step < 400; step++) {
                 Vector3 offset = new Vector3((step % 20 / 19f - .5f) * BoardGeometry.WIDTH,
                       (step / 20 / 19f - .5f) * BoardGeometry.HEIGHT, 0);
-                Ray ray = new Ray(BoardGeometry.center(tile.coords(), 0).add(offset).add(0, 0, 1000),
-                      new Vector3(0, 0, -1));
-                terrain.setFlatFeatures(false);
-                var mesh = terrain.hit(scene, ray);
-                terrain.setFlatFeatures(true);
-                var ground = terrain.hit(scene, ray);
-                if (mesh != null && ground != null && tile.coords().equals(ground.coords())
-                      && !tile.coords().equals(mesh.coords())) {
-                    return new Overhang(tile.coords(), offset, mesh.coords());
-                }
+                under.add(tile.coords());
+                offsets.add(offset);
+                rays.add(new Ray(BoardGeometry.center(tile.coords(), 0).add(offset).add(0, 0, 1000),
+                      new Vector3(0, 0, -1)));
+            }
+        }
+        // Switching the view recaches every section's props, so each view answers all the rays in turn.
+        terrain.setTacticalView(false);
+        var meshes = rays.stream().map(ray -> terrain.hit(scene, ray)).toList();
+        terrain.setTacticalView(true);
+        for (int index = 0; index < rays.size(); index++) {
+            var mesh = meshes.get(index);
+            var ground = terrain.hit(scene, rays.get(index));
+            Coords coords = under.get(index);
+            if (mesh != null && ground != null && coords.equals(ground.coords()) && !coords.equals(mesh.coords())) {
+                return new Overhang(coords, offsets.get(index), mesh.coords());
             }
         }
         return null;
@@ -764,131 +708,5 @@ class GpuTacticalViewSmokeTest {
         var pick = input.getClass().getDeclaredMethod("pick", int.class, int.class);
         pick.setAccessible(true);
         return (Coords) pick.invoke(input, Math.round(point.x), Math.round(point.y));
-    }
-
-    /**
-     * Flat mode draws the same terrain in the colour, camera-depth and shadow passes, without the 3D board's feature
-     * meshes, and adds one lit quad per sprite hex after the water.
-     */
-    private static void verifyPasses(BoardScene captured) throws Exception {
-        var light = new BoardScene.Light(-24, -30);
-        var lit = new BoardScene(0, WIDTH, HEIGHT, captured.tiles(), List.of(), List.of(), -1, "", List.of(), light);
-        List<BoardScene.Tile> bareTiles = new ArrayList<>();
-        for (var tile : captured.tiles()) {
-            bareTiles.add(featureless(tile, tile.foliage()));
-        }
-        var bareScene = new BoardScene(0, WIDTH, HEIGHT, bareTiles, List.of(), List.of(), -1, "", List.of(), light);
-        GpuTerrain full = new GpuTerrain();
-        GpuTerrain flat = new GpuTerrain();
-        GpuTerrain bare = new GpuTerrain();
-        ModelBatch depth = new ModelBatch(new DepthShaderProvider());
-        GLProfiler profiler = new GLProfiler(Gdx.graphics);
-        try {
-            full.update(lit);
-            flat.update(lit);
-            flat.setFlatFeatures(true);
-            bare.update(bareScene);
-            BoardCamera camera = new BoardCamera();
-            camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-            camera.setIsometric(false);
-            camera.fit(lit);
-            profiler.enable();
-            int[] shadows = new int[3];
-            int[] colour = new int[3];
-            int[] depths = new int[3];
-            int[] transparent = new int[3];
-            List<GpuTerrain> terrains = List.of(full, flat, bare);
-            for (int index = 0; index < 3; index++) {
-                GpuTerrain terrain = terrains.get(index);
-                shadows[index] = vertices(profiler, () -> terrain.renderShadows(camera.camera, List.of()));
-                colour[index] = vertices(profiler, () -> terrain.render(camera.camera, false));
-                depths[index] = vertices(profiler, () -> terrain.renderDepth(camera.camera, List.of(), depth));
-                transparent[index] = vertices(profiler, () -> terrain.renderTransparent(camera.camera));
-            }
-            long sprites = captured.tiles().stream().filter(tile -> tile.foliage() != null).count();
-            System.out.printf("TACTICAL-PASSES (3D, flat, featureless) shadow=%s depth=%s colour=%s transparent=%s%n",
-                  Arrays.toString(shadows), Arrays.toString(depths), Arrays.toString(colour),
-                  Arrays.toString(transparent));
-            // Features shape the terrain under them (foundations, roads, woods floors), so the featureless board is
-            // no vertex baseline: flat mode draws the same terrain in every pass; the 3D board adds feature meshes.
-            assertEquals(colour[1], shadows[1], "Flat mode casts shadows only from what it draws");
-            assertEquals(colour[1], depths[1], "Flat mode writes camera depth only for what it draws");
-            assertTrue(shadows[0] > shadows[1] && depths[0] > depths[1] && colour[0] > colour[1],
-                  "The 3D board draws its feature meshes");
-            assertEquals(6 * sprites, transparent[1] - transparent[2], "One lit quad per sprite hex");
-            assertEquals(transparent[2], transparent[0], "The 3D board draws no sprite");
-            profiler.disable();
-            int[] bridge = coveredBridgePixels(flat, camera, captured.tile(BRIDGE));
-            // Filtering may blend a few edge texels with their transparent neighbors; the banks would hide far more.
-            assertTrue(bridge[1] > 100 && bridge[0] * 100 < bridge[1],
-                  "The river banks cover " + bridge[0] + " of " + bridge[1] + " bridge pixels");
-
-            // A destroyed bridge leaves the sprite atlas layout alone, so it does not rebuild the whole board.
-            Texture page = spritePage(flat, BUILDING);
-            var destroyed = new BoardScene(0, WIDTH, HEIGHT, captured.tiles().stream()
-                  .map(tile -> tile.coords().equals(BRIDGE) ? featureless(tile, null) : tile).toList(),
-                  List.of(), List.of(), -1, "", List.of(), light);
-            flat.update(destroyed);
-            assertSame(page, spritePage(flat, BUILDING), "The sprite atlas keeps its pages");
-            profiler.enable();
-            assertEquals(transparent[1] - 6, vertices(profiler, () -> flat.renderTransparent(camera.camera)),
-                  "The bridge art leaves with the bridge");
-        } finally {
-            profiler.disable();
-            depth.dispose();
-            full.dispose();
-            flat.dispose();
-            bare.dispose();
-        }
-    }
-
-    private static BoardScene.Tile featureless(BoardScene.Tile tile, BoardScene.Pixels sprite) {
-        // Only the features and the sprite change: roads, biome and the ground's detail shape the terrain itself.
-        return new BoardScene.Tile(tile.coords(), tile.elevation(), tile.waterDepth(), tile.frozen(), tile.roadExits(),
-              tile.surface(), tile.ground(), tile.normals(), tile.decals(), tile.decalsWithoutLimbs(), tile.tactical(),
-              List.of(), tile.text(), tile.liquid(), sprite, tile.detailedGround(), tile.road(), tile.fireSmoke(),
-              tile.biome(), tile.impassable(), tile.blackIce(), tile.cliffTopExits(), tile.bare());
-    }
-
-    /** The atlas page that holds a hex's sprite art; a full terrain rebuild replaces every page. */
-    @SuppressWarnings("unchecked")
-    private static Texture spritePage(GpuTerrain terrain, Coords coords) throws Exception {
-        return ((GpuTextures<Coords>) field(terrain, "foliage")).region(coords).getTexture();
-    }
-
-    /** {covered, tested}: bright opaque bridge art pixels left black when water and sprites draw over the depth. */
-    private static int[] coveredBridgePixels(GpuTerrain flat, BoardCamera camera, BoardScene.Tile bridge) {
-        ScreenUtils.clear(0, 0, 0, 0, true);
-        flat.render(camera.camera, false);
-        ScreenUtils.clear(0, 0, 0, 0, false);
-        flat.renderTransparent(camera.camera);
-        Pixmap frame = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(),
-              Gdx.graphics.getBackBufferHeight());
-        try {
-            var art = bridge.foliage();
-            int covered = 0;
-            int tested = 0;
-            for (int y = 0; y < art.height(); y++) {
-                for (int x = 0; x < art.width(); x++) {
-                    int rgba = art.rgba(y * art.width() + x);
-                    if (!opaque(art, x, y) || ((rgba >>> 24) & 255) + ((rgba >>> 16) & 255) < 80) { continue; }
-                    tested++;
-                    Vector3 world = BoardGeometry.center(bridge.coords(), 0).add(offset(art, x, y));
-                    Vector3 point = camera.camera.project(world, 0, 0, Gdx.graphics.getWidth(),
-                          Gdx.graphics.getHeight());
-                    int shown = pixel(frame, point.x, point.y);
-                    if (((shown >>> 24) & 255) + ((shown >>> 16) & 255) + ((shown >>> 8) & 255) < 12) { covered++; }
-                }
-            }
-            return new int[] { covered, tested };
-        } finally {
-            frame.dispose();
-        }
-    }
-
-    private static int vertices(GLProfiler profiler, Runnable draw) {
-        profiler.reset();
-        draw.run();
-        return (int) profiler.getVertexCount().total;
     }
 }

@@ -114,8 +114,7 @@ final class GpuUnitIcons implements Disposable {
      */
     boolean update(boolean tacticalView, Camera camera, BoardScene scene,
           GpuBattleStatus.Snapshot status, Predicate<BoardScene.Unit> marked, Predicate<BoardScene.Unit> hovered,
-          Map<BoardScene.Unit, UnitFootprint.Pose> poses, Map<BoardScene.Unit, Vector3> anchors,
-          BoardSurface.Cache surfaces) {
+          Map<BoardScene.Unit, UnitFootprint.Pose> poses, Map<BoardScene.Unit, Vector3> anchors) {
         active = tacticalView;
         if (!active) { return false; }
         if (status != this.status) {
@@ -145,9 +144,10 @@ final class GpuUnitIcons implements Disposable {
                 instances.put(key, instance);
             }
             var position = pose.position();
-            float ground = UnitLandingSupports.surface(scene, position.x, position.y, surfaces);
-            var tile = scene.tile(unit.location().coords());
-            if (!Float.isFinite(ground)) { ground = tile == null ? 0 : BoardGeometry.surfaceZ(tile); }
+            // The Tactical View's terrain: the tileset column under the icon, else the unit's own hex.
+            var tile = BoardGeometry.tile(scene, position.x, position.y);
+            if (tile == null) { tile = scene.tile(unit.location().coords()); }
+            float ground = tile == null ? 0 : BoardGeometry.surfaceZ(tile);
             place(instance.transform, position, ground, pose.facing());
             var listing = unit.sensorContact() ? null : listed.get(unit.id());
             boolean friendly = listing != null && listing.side() != GpuBattleStatus.Side.ENEMY;

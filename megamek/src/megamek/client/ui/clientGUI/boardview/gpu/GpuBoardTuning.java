@@ -187,6 +187,13 @@ final class GpuBoardTuning {
         // Read by the board view each frame; the HUD's wireframe utility switches the same box.
         wireframe = checkbox(skin, Messages.getString("GpuBoard.wireframe"), "camera-wireframe");
         wireframe.addListener(new TextTooltip(Messages.getString("GpuBoard.wireframeHelp"), skin, "menu"));
+        wireframe.addListener(new ChangeListener() {
+            @Override
+            public void changed(ChangeEvent event, Actor actor) {
+                // The wireframe and the Tactical View exclude each other (rimshaderv1): it leaves the view.
+                if (wireframe.isChecked()) { camera.setTactical(false, null); }
+            }
+        });
         general = rows = new Table();
         rows.top().defaults().pad(0, 3, 0, 3);
         section(skin, "Geometry");
@@ -572,7 +579,7 @@ final class GpuBoardTuning {
               this::applyRelief, 0, true);
         section(skin, "Material geology");
         geologyFamily = choice(skin, "Material", "tuning-geology-family",
-              new String[] { "Grass", "Dirt", "Sand", "Rock", "Concrete", "Snow", "Bedrock under slabs" }, this::syncGeology);
+              new String[] { "Grass", "Dirt", "Sand", "Rock", "Concrete", "Snow", "Lunar", "Bedrock under slabs" }, this::syncGeology);
         geology = controls(skin, List.of(
               new Knob("Joint width (m)", .25f, 20, .05f, "%.2f",
                     "Width of the large rock blocks in a cliff. Higher values make broader blocks."),
@@ -1140,6 +1147,8 @@ final class GpuBoardTuning {
         syncing = true;
         firstPerson.setChecked(camera.firstPerson());
         syncing = false;
+        // Entering the Tactical View, by its utility, key or menu, turns the wireframe off.
+        if (camera.tactical() && wireframe.isChecked()) { wireframe.setChecked(false); }
         cameraFieldOfView.getFirst().slider().setDisabled(!camera.firstPerson());
     }
 

@@ -21,7 +21,7 @@ uniform vec4 u_sculptTiles; // metres per repeat: ground, debris, wall, mantle
 uniform float u_metre;      // world units per metre
 uniform float u_normalMaps;
 uniform float u_groundResponse;
-uniform float u_sculptFamily; // BoardScene.Surface: GRASS 0, DIRT 1, SAND 2, ROCK 3, CONCRETE 4, SNOW 5
+uniform float u_sculptFamily; // BoardScene.Surface: GRASS 0, DIRT 1, SAND 2, ROCK 3, CONCRETE 4, SNOW 5, LUNAR 6
 uniform float u_levelHeight;
 uniform float u_clay;
 uniform vec3 u_wind;        // direction in xy, strength in z
@@ -30,34 +30,14 @@ uniform float u_waterLine;  // world units the water surface lies below its hex'
 uniform float u_gravity;    // scenario acceleration; without it there is no water (GpuTerrain.waterVisible)
 #ifdef terrainBlendFlag
 in vec4 v_coverWeights;
+in float v_coverInterpolation;
 uniform vec4 u_coverFamilies;
 uniform vec4 u_coverResponses;
 uniform vec4 u_coverTiles0, u_coverTiles1, u_coverTiles2, u_coverTiles3;
 uniform vec4 u_coverLayers0, u_coverLayers1, u_coverLayers2, u_coverLayers3;
 #endif
 
-// Per-level identity, so every level reads from straight above; saturation, lightness and contrast in percent per
-// level. Higher ground turns lighter and paler toward cream, as drier, sun-bleached ground; lower ground darker and a
-// little warmer. Neither turns any family's hue toward red or pink.
-vec3 levelGrade(vec3 c, float level) {
-    // Ground, cliffs and rocks share one lower limit, including deep valleys and the board's plinth.
-    // Keep it local to colour grading: water optics still need the actual surface level.
-    level = max(level, -1.5);
-    // Levels count almost fully near the ground and ease off further away, so no height grades to white or black.
-    float up = 6.0 * (1.0 - exp(-max(level, 0.0) / 6.0)), down = 6.0 * (1.0 - exp(-max(-level, 0.0) / 6.0));
-    float saturation = -3.0 * up + 4.0 * down;
-    float lightness = 14.0 * up - 18.0 * down;
-    float contrast = 2.0 * up;
-    // Warmer below: less blue, a little less green.
-    c *= vec3(1.0, 1.0 - .01 * down, 1.0 - .04 * down);
-    float luma = dot(c, vec3(.299, .587, .114));
-    c = mix(vec3(luma), c, 1.0 + saturation / 100.0);
-    // Dark ground lifts less, so a meadow's upper levels keep their green and their texture instead of bleaching.
-    c = lightness >= 0.0 ? mix(c, vec3(1.0, .97, .9), lightness / 100.0 * min(1.0, luma / .55))
-          : c * (1.0 + lightness / 100.0);
-    c = (c - .5) * (1.0 + contrast / 100.0) + .5;
-    return clamp(c, 0.0, 1.0);
-}
+// terrain-ground-color-functions
 
 // terrain-projection-functions
 
@@ -82,7 +62,7 @@ vec4 debrisWeights() {
     if (family(0.0)) return vec4(.55, 1.0, .45, 0.0);  // grass: rocky edges and scree, turf elsewhere
     if (family(1.0)) return vec4(.6, .9, .6, .45);     // dirt: gravel
     if (family(2.0)) return vec4(.85, .9, .5, .3);     // sand: desert pavement
-    if (family(3.0)) return vec4(.5, .9, .6, .55);     // rock: scree
+    if (family(3.0) || family(LUNAR_FAMILY)) return vec4(.5, .9, .6, .55); // rock/lunar: scree
     if (family(4.0)) return vec4(0.0);                  // concrete: clean slab
     return vec4(.75, .9, .7, .12);                     // snow: wind-scoured rock
 }
@@ -92,9 +72,9 @@ vec3 groundBounceFor(float f) {
     if (abs(f) < .5) return vec3(.15, .145, .06);
     if (abs(f - 1.0) < .5) return vec3(.22, .15, .10);
     if (abs(f - 2.0) < .5) return vec3(.42, .28, .16);
-    if (abs(f - 3.0) < .5) return vec3(.22, .21, .19);
+    if (abs(f - 3.0) < .5 || abs(f - LUNAR_FAMILY) < .5) return vec3(.22, .21, .19);
     if (abs(f - 4.0) < .5) return vec3(.30, .29, .27);
-    if (f > 5.5) return vec3(.04, .025, .018);
+    if (f > VOLCANIC_CRUST_FAMILY - .5) return vec3(.04, .025, .018);
     return vec3(.75, .78, .82);
 }
 
@@ -111,31 +91,6 @@ vec3 bedTintFor(float f, float hardness) {
 
 vec3 bedTint(float hardness) { return bedTintFor(u_sculptFamily, hardness); }
 
-// Broad variations in the ground's tone, so a large field reads neither as one flat colour nor as tiles: patches, the
-// desert's iron-red thin sand, pale washes and flats and its dunes, a meadow's dry and lush turf. rim and foot weigh the
-// nearness of a drop and of a rise. The ground and the cover drifted onto slopes and ledges share it, so they match.
-vec3 groundToneFor(float f, vec3 albedo, vec3 world, float broad, float fine, float region, float rim, float foot) {
-    albedo *= mix(.94, 1.06, broad) * mix(.95, 1.05, region) * mix(.96, 1.04, fine);
-    if (abs(f - 2.0) < .5) {
-        // Desert ground: iron-red where the sand lies thin over its bedrock, paler washes where fines settle.
-        albedo = mix(albedo, albedo * vec3(1.04, .86, .76), smoothstep(.5, .75, broad * .7 + region * .3) * .7);
-        albedo = mix(albedo, albedo * vec3(1.06, 1.08, 1.1), smoothstep(.62, .85, fine * .5 + region * .5) * .5);
-        // Broad flats of fine, pale sand between the orange drifts: lighter and less saturated.
-        float luma = dot(albedo, vec3(.299, .587, .114));
-        albedo = mix(albedo, mix(vec3(luma), albedo, .55) * 1.12, smoothstep(.4, .7, region * .6 + broad * .4) * .6);
-        // Dunes: long, gentle swells of light and shade that run across the flats regardless of the hexes, bent and
-        // broken up by the broad fields.
-        float dune = sin(dot(world.xy, vec2(.8, .6)) / 19.0 + broad * 5.0 + region * 3.0);
-        albedo *= 1.0 + .07 * dune * smoothstep(.2, .6, region + .3 * fine);
-    }
-    if (abs(f) < .5) {
-        // Thin, dry turf on convex rims and in sunny patches; lush, dark grass where water gathers below cliffs.
-        float dry = max(smoothstep(.55, .85, broad * .7 + fine * .3) * .5, rim * .6);
-        albedo = mix(albedo, albedo * vec3(1.25, 1.12, .7), dry);
-        albedo = mix(albedo, albedo * vec3(.78, .95, .82), max(foot * .6, (1.0 - smoothstep(.2, .45, broad)) * .4));
-    }
-    return albedo;
-}
 
 vec3 groundTone(vec3 albedo, vec3 world, float broad, float fine, float region, float rim, float foot) {
     return groundToneFor(u_sculptFamily, albedo, world, broad, fine, region, rim, foot);
@@ -187,9 +142,8 @@ void main() {
         p += vec2(swell.x, -swell.y) * (under * .3 * u_waterEffects * u_rainDetail);
     }
     // Smooth value fields from the shared 64-texel noise: broad has ~11 m cells, fine ~2.5 m, and region ~40 m.
-    float broad = texture(u_rainNoise, world.xy / 700.0).g * .6 + texture(u_rainNoise, world.xy / 430.0 + .19).b * .4;
-    float fine = texture(u_rainNoise, world.xy / 160.0 + .41).b;
-    float region = texture(u_rainNoise, world.xy / 2600.0 + .73).r;
+    vec3 fields = groundFields(u_rainNoise, world);
+    float broad = fields.x, fine = fields.y, region = fields.z;
     vec3 albedo = vec3(.52);
     vec3 normal = face;
     float cavity = 1.0;
@@ -310,7 +264,7 @@ void main() {
                 float below = family(4.0) ? d - u_levelHeight / u_metre : d;
                 float streak = smoothstep(.55, .85, texture(u_rainNoise, vec2((world.x + world.y) / 7.0, world.z / 90.0)).r)
                       * (1.0 - smoothstep(2.0, 14.0, below)) * smoothstep(.5, 1.5, below);
-                if (family(2.0) || family(3.0) || family(4.0)) albedo = mix(albedo, albedo * vec3(.52, .45, .42), streak * .6);
+                if (family(2.0) || family(3.0) || family(LUNAR_FAMILY) || family(4.0)) albedo = mix(albedo, albedo * vec3(.52, .45, .42), streak * .6);
 
                 // Talus: fallen rock on the apron at the foot, where the face lies back. A mantle's banks slump into
                 // soil and turf instead; concrete walls stand clean, and only the bedrock under a slab has talus.

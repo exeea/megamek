@@ -690,8 +690,7 @@ class GpuTargetCardsSmokeTest {
             overlay.render(camera);
             if (tactical) {
                 icons.update(true, camera, board.scene, frame.status(), unit -> unit.id() == frame.status().actorId()
-                            || unit.id() == fire.focus().key().unitId(), unit -> false, board.poses, iconAnchors,
-                      board.surfaces);
+                            || unit.id() == fire.focus().key().unitId(), unit -> false, board.poses, iconAnchors);
                 icons.render(camera);
                 overlay.renderGhost(camera, icons::instance);
             }

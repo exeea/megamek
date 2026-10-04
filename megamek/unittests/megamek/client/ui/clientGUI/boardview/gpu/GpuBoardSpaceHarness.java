@@ -41,7 +41,6 @@ final class GpuBoardSpaceHarness implements Disposable {
     final BoardCamera camera = new BoardCamera();
     /** Still poses: each unit at its hex center and level, turned to its facing. */
     final Map<BoardScene.Unit, UnitFootprint.Pose> poses = new HashMap<>();
-    final BoardSurface.Cache surfaces = new BoardSurface.Cache();
     /** Each unit's anchor in the last 3D draw with units, as GpuBattleView places nameplates and badges. */
     final Map<BoardScene.Unit, Vector3> anchors = new HashMap<>();
     /** Whether the 3D view draws the roster, as GpuBattleView does outside the Tactical View. */
@@ -92,12 +91,12 @@ final class GpuBoardSpaceHarness implements Disposable {
                     pixels -> GpuUnitModel.sprite(pixels, unitTextures.region(pixels)));
     }
 
-    /** Fits the board in the 3D view's isometric start pose, or in the Tactical View with flat tileset art. */
+    /** Fits the board in the 3D view's isometric start pose, or in the Tactical View on its tileset columns. */
     void view(boolean tactical) {
         camera.setTactical(tactical, scene);
         camera.setIsometric(true);
         camera.fit(scene);
-        terrain.setFlatFeatures(tactical);
+        terrain.setTacticalView(tactical);
     }
 
     boolean tactical() {

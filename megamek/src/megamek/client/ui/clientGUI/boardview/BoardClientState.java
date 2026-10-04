@@ -2801,7 +2801,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
                 copy.setData(marking.getData()); marking = copy;
             }
             result.add(new BoardArtwork.HexImage(hex.coords(), hex.terrain(), hex.normals(), hex.decals(),
-                  hex.decalsWithoutLimbs(), marking, hex.text(), hex.structureModels(), hex.foliage()));
+                  hex.decalsWithoutLimbs(), marking, hex.text(), hex.structureModels(), hex.tileset(), hex.bridge()));
         });
         result.sort(Comparator.comparingInt((BoardArtwork.HexImage hex) -> hex.coords().getX())
               .thenComparingInt(hex -> hex.coords().getY()));
@@ -2842,7 +2842,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
                             Point point = getHexLocation(coords);
                             BufferedImage marking = includeTactical ? markingImage(tacticalChunk, point.x - pixels.x, point.y - pixels.y) : null;
                             consumer.accept(new BoardArtwork.HexImage(coords, art.terrain(), art.normals(), art.decals(),
-                                  art.decalsWithoutLimbs(), marking, art.text(), art.structureModels(), art.foliage()));
+                                  art.decalsWithoutLimbs(), marking, art.text(), art.structureModels(), art.tileset(), art.bridge()));
                         }
                     }
                 }

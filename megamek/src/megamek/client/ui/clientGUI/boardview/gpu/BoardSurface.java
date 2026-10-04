@@ -4,8 +4,8 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Area;
 import java.awt.geom.Path2D;
-import java.awt.geom.Rectangle2D;
 import java.awt.geom.PathIterator;
+import java.awt.geom.Rectangle2D;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -80,7 +80,8 @@ final class BoardSurface {
     /** Only inputs that alter topology; the ramp mask also captures second-ring road/bridge approaches. */
     record Geometry(int elevation, int waterDepth, boolean frozen, int roadExits, BoardScene.Surface surface,
           BoardLiquid liquid, boolean detailedGround, List<BoardScene.Feature> features, int ramps,
-          List<BoardConcrete.Shift> coast, BoardRoad.Kind road, BoardScene.Biome biome, int cliffTopExits, boolean bare) { }
+          List<BoardConcrete.Shift> coast, BoardRoad.Kind road, BoardScene.Biome biome, int cliffTopExits, boolean bare,
+          BoardSurfaceBlend.Cover groundCover) { }
 
     /** What of a hex further out can reach a hex's shape: through the water's shore, its level, liquid and ground. */
     record Shape(int elevation, int waterDepth, BoardLiquid liquid, boolean detailedGround, BoardScene.Surface surface,
@@ -95,6 +96,8 @@ final class BoardSurface {
      * land round a corner allows its move by the moves of all its own corners.
      */
     static final int SHORE_RINGS = 6;
+    /** Half a road's width where it ramps through a hex edge to the next hex, in hex-scale units. */
+    static final float ROAD_MOUTH = 9;
 
     /**
      * Own shape followed by the six neighboring shapes, a missing board neighbor as a null entry; then the shapes of the
@@ -114,17 +117,23 @@ final class BoardSurface {
                 if (distance < 2 || distance > SHORE_RINGS) { continue; }
                 BoardScene.Tile other = scene.tile(new Coords(Math.clamp(x, 0, scene.width() - 1),
                       Math.clamp(y, 0, scene.height() - 1)));
-                far.add(new Shape(other.elevation(), other.waterDepth(), other.liquid(), other.detailedGround(),
-                      other.surface(), other.roadExits(), other.road(), other.cliffTopExits()));
+                far.add(shape(other, other.waterDepth()));
             }
         }
         return new Key(Collections.unmodifiableList(near), List.copyOf(far));
     }
 
+    /** The hex's shape as a hex further out reads it, with the given water depth. */
+    static Shape shape(BoardScene.Tile tile, int waterDepth) {
+        return new Shape(tile.elevation(), waterDepth, tile.liquid(), tile.detailedGround(), tile.surface(),
+              tile.roadExits(), tile.road(), tile.cliffTopExits());
+    }
+
     private static Geometry geometry(BoardScene scene, BoardScene.Tile tile) {
         return tile == null ? null : new Geometry(tile.elevation(), tile.waterDepth(), tile.frozen(), tile.roadExits(),
               tile.surface(), tile.liquid(), tile.detailedGround(), tile.features(), ramps(scene, tile),
-              BoardConcrete.of(scene).corners(tile.coords()), tile.road(), tile.biome(), tile.cliffTopExits(), tile.bare());
+              BoardConcrete.of(scene).corners(tile.coords()), tile.road(), tile.biome(), tile.cliffTopExits(), tile.bare(),
+              tile.groundCover());
     }
 
     static int ramps(BoardScene scene, BoardScene.Tile tile) {
@@ -2225,7 +2234,7 @@ final class BoardSurface {
                 }
                 continue;
             }
-            float half = 9 * BoardGeometry.hexScale()
+            float half = ROAD_MOUTH * BoardGeometry.hexScale()
                   / (float) Math.hypot(corners[edge].x - corners[next].x, corners[edge].y - corners[next].y);
             float rise = roadEdgeElevation(tile, neighbor, direction) * BoardGeometry.level() - center.z;
             // Both sides derive the bank samples from this approach, independent of any other exits in their hex.

@@ -43,6 +43,13 @@ final class GpuReviewFrame implements Disposable {
         return atmosphere.depthTexture();
     }
 
+    /** Loading must see the same shader flags as the eventual visible frame. */
+    void prepare(GpuTerrain terrain, BoardCamera camera, BoardScene scene) {
+        atmosphere.updateLight(camera.camera);
+        terrain.setAtmosphere(atmosphere.lighting());
+        atmosphere.configureClouds(terrain, scene);
+    }
+
     /** One frame of the scene from the camera, lit, shadowed and composited as on the board. */
     void render(GpuTerrain terrain, BoardCamera camera, BoardScene scene) {
         render(terrain, camera, scene, true);
@@ -60,8 +67,7 @@ final class GpuReviewFrame implements Disposable {
 
     private void render(GpuTerrain terrain, BoardCamera camera, BoardScene scene, boolean water,
           List<ModelInstance> objects, ModelBatch batch) {
-        atmosphere.updateLight(camera.camera);
-        terrain.setAtmosphere(atmosphere.lighting());
+        prepare(terrain, camera, scene);
         terrain.renderShadows(camera.camera, objects);
         atmosphere.prepareClouds(terrain, scene, 0);
         atmosphere.begin((int) camera.camera.viewportWidth, (int) camera.camera.viewportHeight, 0);

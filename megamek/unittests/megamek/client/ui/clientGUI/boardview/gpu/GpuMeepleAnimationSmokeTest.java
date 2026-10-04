@@ -21,6 +21,7 @@ import javax.swing.SwingUtilities;
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
+import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
@@ -28,7 +29,6 @@ import com.badlogic.gdx.math.collision.Ray;
 import megamek.client.ui.tileset.MekTileset;
 import megamek.common.Configuration;
 import megamek.common.ResolvedAttack;
-import megamek.common.board.Coords;
 import megamek.common.loaders.MekFileParser;
 import megamek.common.units.EntityMovementMode;
 import megamek.common.units.EntityMovementType;
@@ -259,9 +259,39 @@ class GpuMeepleAnimationSmokeTest {
             assertEquals(frame == 48 ? 0 : 2, jets.emitterCount());
             smoke |= jets.smokeCount() > 0;
             if (frame % 12 == 0) { renderer.frame(List.of(instance), motion.position(), null, jets, "meeple-jump", frame); }
+            if (frame == 36) { verifyVisibleSmoke(instance, motion.position(), renderer, jets); }
         }
         assertTrue(smoke);
         assertEquals(0, jets.smokeCount(), "Landing clears the same effect timeline");
+    }
+
+    private static void verifyVisibleSmoke(ModelInstance instance, Vector3 position,
+          GpuPlaybackReview.ReviewRenderer renderer, GpuJumpJets jets) {
+        renderer.frame(List.of(instance), position, null, "meeple-jump-no-exhaust", 36);
+        renderer.buffer.begin();
+        var before = Pixmap.createFromFrameBuffer(0, 0, 640, 480);
+        renderer.buffer.end();
+        renderer.frame(List.of(instance), position, null, jets, "meeple-jump", 36);
+        renderer.buffer.begin();
+        var after = Pixmap.createFromFrameBuffer(0, 0, 640, 480);
+        renderer.buffer.end();
+        try {
+            int smokePixels = 0, bodySmokePixels = 0;
+            for (int y = 0; y < after.getHeight(); y++) {
+                for (int x = 0; x < after.getWidth(); x++) {
+                    int old = before.getPixel(x, y), color = after.getPixel(x, y);
+                    int red = color >>> 24, blue = (color >>> 8) & 255;
+                    // Grey smoke must visibly change the image; the bright blue flame cannot satisfy this.
+                    if (red > (old >>> 24) + 12 && blue - red < 30) {
+                        smokePixels++;
+                        // This fixture's brown walls must not look like smoke emitters during descent.
+                        if ((old >>> 24) > ((old >>> 8) & 255) + 10) { bodySmokePixels++; }
+                    }
+                }
+            }
+            assertTrue(smokePixels > 100, "The late-jump smoke trail must remain visible: " + smokePixels);
+            assertTrue(bodySmokePixels < 10, "Smoke must emerge below the token, not through its walls: " + bodySmokePixels);
+        } finally { before.dispose(); after.dispose(); }
     }
 
     private static void verifyAttachments(GpuUnitModel model, GpuUnitInstance host, BoardScene.Unit unit,

@@ -51,9 +51,19 @@ vec4 materialTexel(float layer, vec2 uv, mat2 gradient) {
     return textureGrad(u_terrainLayers, vec3(uv, layer), gradient[0], gradient[1]);
 }
 
+// Earth banks need the same repeat breakup as flat dirt. Keep both vertical projections upright, so erosion
+// runs downhill; translating and rescaling also lets color/height and normal/AO share this exact sampling.
+vec4 earthSideTexel(float layer, vec2 uv, mat2 gradient, float breakup) {
+    vec4 texel = materialTexel(layer, uv, gradient);
+    if (breakup > 0.0) {
+        texel = mix(texel, materialTexel(layer, uv / 2.37 + vec2(.31, .57), gradient / 2.37), breakup);
+    }
+    return texel;
+}
+
 // Every role shares projection and metre scale through a bend. No UV origin at an individual hex's rim or foot.
 vec4 sampleMaterial(float colorMap, float tile, float amount, MaterialProjection p,
-      vec3 world, float variation, float fine, float region, bool groundMap, float familyId) {
+      vec3 world, float variation, float fine, float region, bool groundMap, float familyId, bool earth) {
     if (amount < .0001) return vec4(0.0);
     vec4 pigment = vec4(0.0);
     if (p.lying > 0.0) {
@@ -65,8 +75,9 @@ vec4 sampleMaterial(float colorMap, float tile, float amount, MaterialProjection
         }
     }
     if (p.lying < 1.0) {
-        vec4 steep = mix(materialTexel(colorMap, p.y / tile + .37, p.yGradient / tile),
-              materialTexel(colorMap, p.x / tile, p.xGradient / tile), p.side);
+        float breakup = earth ? variation : 0.0;
+        vec4 steep = mix(earthSideTexel(colorMap, p.y / tile + .37, p.yGradient / tile, breakup),
+              earthSideTexel(colorMap, p.x / tile, p.xGradient / tile, breakup), p.side);
         pigment = mix(steep, pigment, p.lying);
     }
     vec3 color = pigment.rgb;
@@ -76,7 +87,7 @@ vec4 sampleMaterial(float colorMap, float tile, float amount, MaterialProjection
 
 // Height blending often discards a present layer entirely. Its normal/cavity cannot affect the result then.
 // Defer those texture reads until the colour/height samples have determined the final weights.
-vec4 materialNormal(float normalMap, float tile, float weight, MaterialProjection p, vec3 face, float variation) {
+vec4 materialNormal(float normalMap, float tile, float weight, MaterialProjection p, vec3 face, float variation, bool earth) {
     if (weight <= 0.0 || u_normalMaps <= .5) return vec4(face, 1.0);
     if (terrainNormalDetail <= 0.0) return vec4(face, TERRAIN_DISTANT_CAVITY);
     vec3 normal = face;
@@ -91,8 +102,9 @@ vec4 materialNormal(float normalMap, float tile, float weight, MaterialProjectio
         cavity = mix(near.a, far.a, variation);
     }
     if (p.lying < 1.0) {
-        vec4 nx = materialTexel(normalMap, p.x / tile, p.xGradient / tile);
-        vec4 ny = materialTexel(normalMap, p.y / tile + .37, p.yGradient / tile);
+        float breakup = earth ? variation : 0.0;
+        vec4 nx = earthSideTexel(normalMap, p.x / tile, p.xGradient / tile, breakup);
+        vec4 ny = earthSideTexel(normalMap, p.y / tile + .37, p.yGradient / tile, breakup);
         vec3 x = nx.rgb * 2.0 - 1.0, y = ny.rgb * 2.0 - 1.0;
         vec3 wall = normalize(mix(vec3(-y.x * sign(face.y) + face.x, y.z * face.y, face.z - y.y),
               vec3(x.z * face.x, x.x * sign(face.x) + face.y, face.z - x.y), p.side));
@@ -106,10 +118,10 @@ vec4 materialNormal(float normalMap, float tile, float weight, MaterialProjectio
 TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float belowRim, float rock,
       float hardness, float broad, float fine, float region, float familyId, vec4 tiles, vec4 layers, float sediment) {
 #ifdef volcanicFlag
-    if (familyId > 5.5) {
+    if (familyId > VOLCANIC_CRUST_FAMILY - .5) {
         Volcanic material = magmaSurface(world, face, -viewDirection(), vec3(0.0), 1.0, vec4(0.0));
         return TerrainMaterial(material.albedo, material.normal, material.surface.b, material.surface.r,
-              magmaEmission(material.heat, familyId > 6.5 ? magmaBankHeat(v_cloudPosition.xy) : 1.0),
+              magmaEmission(material.heat, familyId > VOLCANIC_BANK_FAMILY - .5 ? magmaBankHeat(v_cloudPosition.xy) : 1.0),
               material.surface.g, 1.0);
     }
 #endif
@@ -133,6 +145,18 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
     float cover = smoothstep(.4, .96, coverUp + (variation - .5) * .55);
     float soil = 0.0;
     if (abs(familyId) < .5) {
+        // The two-level earth bank keeps a ragged turf lip and broken turf on its real intermediate shoulder.
+        // Color remains legible from above when individual blades are too small to draw.
+        float levelMetres = u_levelHeight / u_metre;
+        float twoLevels = 1.0 - smoothstep(.05, .3, abs((aboveFoot + belowRim) / levelMetres - 2.0));
+        float fray = texture(u_rainNoise, (world.xy + world.z * vec2(.29, .41)) / 28.0 + .217).r;
+        float lipDepth = levelMetres * (mix(.2, .65, fine * .45 + pockets * .55) + .14 * (fray - .5));
+        float lip = 1.0 - smoothstep(.05, lipDepth, belowRim);
+        float middle = abs(aboveFoot / levelMetres - 1.0 - (pockets - .5) * .18);
+        float width = mix(.1, .24, fine) * mix(.55, 1.45, fray);
+        float shoulder = 1.0 - smoothstep(width * .25, width, middle);
+        shoulder *= smoothstep(.35, .73, up) * smoothstep(.22, .55, pockets * .7 + fine * .3);
+        cover = max(cover, max(lip, shoulder) * twoLevels * (1.0 - exposure));
         soil = (1.0 - cover) * ((1.0 - exposure) * .9 + rim * .5 * smoothstep(.25, .7, variation));
         deposit *= mix(.25, 1.0, rock);
     } else if (abs(familyId - 5.0) < .5) {
@@ -160,20 +184,22 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
     float highestMinimum = max(max(roles.x, roles.y), max(roles.z, roles.w));
     float width = materialBlendWidth();
     vec4 candidates = step(vec4(highestMinimum - width), roles + .38 * (4.0 * roles * (1.0 - roles)));
+    bool dirt = abs(familyId - 1.0) < .5;
+    bool earthMantle = dirt || abs(familyId) < .5;
     vec4 a = sampleMaterial(layers.x, tiles.x, roles.x * candidates.x, projection,
-          world, broad, fine, region, true, familyId);
+          world, broad, fine, region, true, familyId, dirt);
     vec4 b = sampleMaterial(layers.w, tiles.w, roles.y * candidates.y, projection,
-          world, fine, fine, region, false, familyId);
+          world, fine, fine, region, false, familyId, earthMantle);
     vec4 c = sampleMaterial(layers.y, tiles.y, roles.z * candidates.z, projection,
-          world, fine, fine, region, false, familyId);
+          world, fine, fine, region, false, familyId, false);
     vec4 d = sampleMaterial(layers.z, tiles.z, roles.w * candidates.w, projection,
-          world, broad, fine, region, false, familyId);
+          world, broad, fine, region, false, familyId, false);
     d.rgb *= toLinear(bedTintFor(familyId, hardness));
     vec4 weights = materialWeights(roles, vec4(a.a, b.a, c.a, d.a));
-    vec4 na = materialNormal(layers.x + 1.0, tiles.x, weights.x, projection, face, broad);
-    vec4 nb = materialNormal(layers.w + 1.0, tiles.w, weights.y, projection, face, fine);
-    vec4 nc = materialNormal(layers.y + 1.0, tiles.y, weights.z, projection, face, fine);
-    vec4 nd = materialNormal(layers.z + 1.0, tiles.z, weights.w, projection, face, broad);
+    vec4 na = materialNormal(layers.x + 1.0, tiles.x, weights.x, projection, face, broad, dirt);
+    vec4 nb = materialNormal(layers.w + 1.0, tiles.w, weights.y, projection, face, fine, earthMantle);
+    vec4 nc = materialNormal(layers.y + 1.0, tiles.y, weights.z, projection, face, fine, false);
+    vec4 nd = materialNormal(layers.z + 1.0, tiles.z, weights.w, projection, face, broad, false);
     TerrainMaterial result;
     result.color = toDisplay(a.rgb * weights.x + b.rgb * weights.y + c.rgb * weights.z + d.rgb * weights.w);
     result.normal = normalize(na.rgb * weights.x + nb.rgb * weights.y + nc.rgb * weights.z + nd.rgb * weights.w);
@@ -224,7 +250,7 @@ void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float
 #ifdef volcanicFlag
     // Within the lava's margin a cooled bank in the palette takes the contact, and magmaBankHeat keeps its
     // fissures glowing: a buffer of hot crust between the melt and the ground beside it.
-    vec4 bank = vec4(greaterThan(u_coverFamilies, vec4(6.5)));
+    vec4 bank = vec4(greaterThan(u_coverFamilies, vec4(VOLCANIC_BANK_FAMILY - .5)));
     if (u_magmaFieldMap.x > 0.0 && dot(bank, vec4(1.0)) > 0.0) {
         raw = mix(raw, bank, 1.0 - smoothstep(0.0, MAGMA_MARGIN, -magmaShore(magmaField(v_cloudPosition.xy))));
     }
@@ -234,6 +260,9 @@ void blendCovers(vec3 world, vec3 face, float foot, float rim, float rock, float
           coverPatch(world, u_coverFamilies.z), coverPatch(world, u_coverFamilies.w));
     float patchStrength = mix(1.5, 2.4, 1.0 - smoothstep(.35, .85, face.z));
     vec4 weights = materialWeights(raw, vec4(a.height, b.height, c.height, d.height) * .45 + patches * patchStrength);
+    // Authored gradients interpolate whole materials, including color; retain sharp height contacts elsewhere.
+    vec4 proportions = raw / max(dot(raw, vec4(1.0)), .00001);
+    weights = mix(weights, proportions, clamp(v_coverInterpolation, 0.0, 1.0));
     color = toDisplay(toLinear(a.color) * weights.x + toLinear(b.color) * weights.y
           + toLinear(c.color) * weights.z + toLinear(d.color) * weights.w);
     normal = normalize(a.normal * weights.x + b.normal * weights.y + c.normal * weights.z + d.normal * weights.w);
