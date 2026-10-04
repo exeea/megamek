@@ -81,11 +81,11 @@ final class BoardSurface {
     record Geometry(int elevation, int waterDepth, boolean frozen, int roadExits, BoardScene.Surface surface,
           BoardLiquid liquid, boolean detailedGround, List<BoardScene.Feature> features, int ramps,
           List<BoardConcrete.Shift> coast, BoardRoad.Kind road, BoardScene.Biome biome, int cliffTopExits, boolean bare,
-          BoardSurfaceBlend.Cover groundCover) { }
+          BoardSurfaceBlend.Cover groundCover, boolean ultraSublevel) { }
 
     /** What of a hex further out can reach a hex's shape: through the water's shore, its level, liquid and ground. */
     record Shape(int elevation, int waterDepth, BoardLiquid liquid, boolean detailedGround, BoardScene.Surface surface,
-          int roadExits, BoardRoad.Kind road, int cliffTopExits) { }
+          int roadExits, BoardRoad.Kind road, int cliffTopExits, boolean ultraSublevel) { }
 
     /** A hex's own geometry and its six neighbours', and the shapes of the hexes out to {@link #SHORE_RINGS}. */
     record Key(List<Geometry> near, List<Shape> far) { }
@@ -126,14 +126,14 @@ final class BoardSurface {
     /** The hex's shape as a hex further out reads it, with the given water depth. */
     static Shape shape(BoardScene.Tile tile, int waterDepth) {
         return new Shape(tile.elevation(), waterDepth, tile.liquid(), tile.detailedGround(), tile.surface(),
-              tile.roadExits(), tile.road(), tile.cliffTopExits());
+              tile.roadExits(), tile.road(), tile.cliffTopExits(), tile.ultraSublevel());
     }
 
     private static Geometry geometry(BoardScene scene, BoardScene.Tile tile) {
         return tile == null ? null : new Geometry(tile.elevation(), tile.waterDepth(), tile.frozen(), tile.roadExits(),
               tile.surface(), tile.liquid(), tile.detailedGround(), tile.features(), ramps(scene, tile),
               BoardConcrete.of(scene).corners(tile.coords()), tile.road(), tile.biome(), tile.cliffTopExits(), tile.bare(),
-              tile.groundCover());
+              tile.groundCover(), tile.ultraSublevel());
     }
 
     static int ramps(BoardScene scene, BoardScene.Tile tile) {
@@ -475,14 +475,17 @@ final class BoardSurface {
         this.lod = lod;
         this.scene = scene;
         this.tile = tile;
-        center = BoardGeometry.center(tile.coords(), tile.elevation());
+        center = BoardGeometry.center(tile.coords(), tile.groundLevel());
         for (int edge = 0; edge < 6; edge++) {
-            corners[edge] = BoardGeometry.corner(tile.coords(), tile.elevation(), edge);
+            corners[edge] = BoardGeometry.corner(tile.coords(), tile.groundLevel(), edge);
         }
         ramps = ramps(scene, tile);
         // The relief first: a water hex lays out its waterline round the steps the relief puts beside it.
         relief = new BoardRelief(scene, tile, ramps, lod);
-        if (tile.liquid().present()) {
+        if (tile.ultraSublevel()) {
+            // A closed, flat cap below the mouth; neighbouring columns supply the pit's cliffs.
+            fan(corners, center.z, Finish.TOP);
+        } else if (tile.liquid().present()) {
             river(scene);
         } else if (ramps != 0 || BoardRoad.rendered(tile)) {
             road(scene);
@@ -496,7 +499,7 @@ final class BoardSurface {
             // Only faces reaching the hex outline can meet a neighbour's: a bed's inner rings never do.
             if (i < interiorFrom || i >= interiorTo) { edgeTopography.add(faces.get(i)); }
         }
-        if (detailed) {
+        if (detailed && !tile.ultraSublevel()) {
             if (ramps != 0 && relief.graded() && tile.surface() != BoardScene.Surface.CONCRETE) {
                 roadRelief();
                 simplifyRoad();
@@ -695,7 +698,7 @@ final class BoardSurface {
 
     /** A bridge approach reaches the deck at the edge; ordinary roads share their height change across both hexes. */
     static float roadEdgeElevation(BoardScene.Tile tile, BoardScene.Tile neighbor, int direction) {
-        if (neighbor == null || tile.liquid().present()) {
+        if (neighbor == null || tile.ultraSublevel() || neighbor.ultraSublevel() || tile.liquid().present()) {
             return tile.elevation();
         }
         var bridge = connectingBridge(tile, neighbor, direction);
@@ -708,7 +711,8 @@ final class BoardSurface {
 
     /** Presentation only: a road end can meet unpaved ground across at most two levels. */
     static boolean hasRoadApproach(BoardScene.Tile tile, BoardScene.Tile neighbor, int direction) {
-        if (neighbor == null || tile.liquid().present() || neighbor.liquid().present()) {
+        if (neighbor == null || tile.ultraSublevel() || neighbor.ultraSublevel()
+              || tile.liquid().present() || neighbor.liquid().present()) {
             return false;
         }
         boolean exit = (tile.roadExits() & (1 << direction)) != 0;

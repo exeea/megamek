@@ -20,9 +20,10 @@ final class GpuScatter {
     private static final int CELL = 256;
     private static final int BORDER = 32;
     private static final int WIDTH = 2 * CELL;
-    private static final int HEIGHT = 3 * CELL;
-    // The white fifth swatch preserves the bushes' authored bark and leaf colours in the same draw batch.
-    private static final String[] MATERIALS = { "sculpt/granite", "sculpt/earth", "sculpt/sandstone", "foliage/fronds-palm" };
+    // The white fifth swatch preserves the bushes' authored bark and leaf colours; the sixth shares Mars cliff stone.
+    private static final String[] MATERIALS = { "sculpt/granite", "sculpt/earth", "sculpt/sandstone",
+          "foliage/fronds-palm", null, "sculpt/mars-bedrock", "sculpt/volcano-basalt" };
+    private static final int HEIGHT = (MATERIALS.length + 1) / 2 * CELL;
 
     private GpuScatter() { }
 
@@ -34,6 +35,7 @@ final class GpuScatter {
             atlas.fill();
             var pixels = atlas.getPixels().duplicate().order(ByteOrder.BIG_ENDIAN);
             for (int index = 0; index < MATERIALS.length; index++) {
+                if (MATERIALS[index] == null) { continue; }
                 Pixmap tile = new Pixmap(CELL - 2 * BORDER, CELL - 2 * BORDER, Pixmap.Format.RGBA8888);
                 try {
                     FileHandle file = new FileHandle(new File(root, "textures/" + MATERIALS[index] + ".png"));
@@ -46,7 +48,7 @@ final class GpuScatter {
                                   0, 0, tile.getWidth(), tile.getHeight());
                         } finally { source.dispose(); }
                     } else {
-                        tile.setColor(index >= 3 ? Color.WHITE : Color.GRAY);
+                        tile.setColor(index == 3 ? Color.WHITE : Color.GRAY);
                         tile.fill();
                     }
                     for (int y = 0; y < CELL; y++) {
@@ -100,7 +102,13 @@ final class GpuScatter {
         float shade = .88f + .24f * feature.rotation() / 360;
         color.mul(shade, shade, shade, 1);
         int material = feature.asset().equals("scatter-rock") || feature.asset().equals("scatter-slab")
-              ? switch (tile.surface()) { case DIRT -> 1; case SAND, DESERT, MARS -> 2; default -> 0; } : 3;
+              ? switch (tile.surface()) {
+                  case DIRT -> 1;
+                  case SAND, DESERT -> 2;
+                  case MARS -> 5;
+                  case VOLCANO -> 6;
+                  default -> 0;
+              } : 3;
         BoardShape shape;
         switch (feature.asset()) {
             case "scatter-grass", "scatter-dry-grass" -> {
@@ -148,10 +156,10 @@ final class GpuScatter {
         }
         // The atlas supplies the stone's colour; retain only a light biome tint in the vertices.
         return switch (surface) {
-            case SAND, DESERT, DIRT -> new Color(.95f, .95f, .95f, 1);
-            case MARS -> new Color(.78f, .43f, .29f, 1);
+            case SAND, DESERT, DIRT, MARS -> new Color(.95f, .95f, .95f, 1);
             case SNOW -> new Color(.95f, .98f, 1, 1);
             case ROCK, LUNAR -> new Color(.95f, .94f, .91f, 1);
+            case VOLCANO -> new Color(.92f, .96f, 1, 1);
             default -> new Color(.90f, .95f, .83f, 1);
         };
     }

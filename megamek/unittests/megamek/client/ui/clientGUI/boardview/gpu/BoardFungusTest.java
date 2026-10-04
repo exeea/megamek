@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -141,16 +142,29 @@ class BoardFungusTest {
             assertEquals(placements.get(index).asset(), repeated.get(index).asset());
             assertArrayEquals(placements.get(index).transform().val, repeated.get(index).transform().val);
         }
+        Map<String, BoardShape> shapes = new HashMap<>();
+        int contacts = 0;
         for (var placement : placements) {
             Vector3 anchor = placement.transform().getTranslation(new Vector3());
             Vector3 outward = new Vector3(0, -1, 0).rot(placement.transform()).nor();
             assertTrue(outward.dot(anchor.cpy().sub(BoardGeometry.center(center, 4))) > 0);
-            Vector3 hit = new Vector3();
-            Ray ray = new Ray(anchor.cpy().mulAdd(outward, 1), outward.cpy().scl(-1));
-            assertTrue(walls.stream().anyMatch(face -> face.finish() == BoardSurface.Finish.WALL
-                  && Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit)
-                  && hit.dst(anchor) < .01f), "The mounting origin lies on the drawn wall");
+            // Reproduce the floating-tier failure using the actual GLB, not a point at its origin. Every
+            // rear vertex must see rock when looking out of its mounting side, including the lower shelves.
+            var shape = shapes.computeIfAbsent(placement.asset(), BoardShape::loadModel);
+            var roots = shape.polygons().stream().flatMap(p -> Stream.of(p.points())).distinct()
+                  .filter(p -> p.y >= 0).toList();
+            assertFalse(roots.isEmpty());
+            for (Vector3 root : roots) {
+                Vector3 mounted = root.cpy().mul(placement.transform()), hit = new Vector3();
+                Ray ray = new Ray(mounted, outward);
+                assertTrue(walls.stream().anyMatch(face -> face.finish() == BoardSurface.Finish.WALL
+                      && Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit)
+                      && hit.dst(mounted) < 8 * BoardGeometry.hexScale()),
+                      () -> placement.asset() + " has an unsupported root at " + mounted);
+                contacts++;
+            }
         }
+        assertTrue(contacts > 100, "Check the broad attachment area, not just a few origins");
         var flat = BoardSurfaceBlendTest.scene(at -> BoardSurfaceBlendTest.tile(at, BoardScene.Surface.FUNGUS, 0, -1, 0));
         assertTrue(BoardFungus.cliffs(flat, flat.tile(center), walls).isEmpty());
         var grass = BoardSurfaceBlendTest.scene(at -> BoardSurfaceBlendTest.tile(at,

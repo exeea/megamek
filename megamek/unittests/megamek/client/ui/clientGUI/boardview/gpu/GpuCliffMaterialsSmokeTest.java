@@ -219,9 +219,11 @@ class GpuCliffMaterialsSmokeTest {
         BufferedImage image = new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB);
         int color = switch (family) {
             case GRASS -> 0xff7c9262;
+            case TROPICAL -> 0xff555b36;
             case DIRT -> 0xff9a8065;
             case SAND, DESERT -> 0xffcdb18a;
             case MARS -> 0xff97684f;
+            case VOLCANO -> 0xff777d86;
             case ROCK, LUNAR -> 0xff9a9992;
             case FUNGUS -> 0xff827589;
             case CONCRETE -> 0xff999996;

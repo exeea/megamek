@@ -27,12 +27,14 @@ Volcanic magmaPhaseSample(vec2 uv, vec2 dx, vec2 dy, vec3 eye, vec2 downhill, ve
 }
 
 mat3 magmaDomain(inout vec3 position) {
-    // Cooled crust retains its gentle deformation and authored plate scale.
-    vec3 phase = position.yzx * vec3(.63, .57, .69) + position.zxy * .17 + vec3(.1, 1.3, 2.7);
-    vec3 slope = .22 * cos(phase);
-    position += .22 * sin(phase);
-    return mat3(vec3(1.0, .17 * slope.y, .69 * slope.z),
-          vec3(.63 * slope.x, 1.0, .17 * slope.z), vec3(.17 * slope.x, .57 * slope.y, 1.0));
+    // Bend the 12 m plate field within a few repeats, rather than translating a recognisable grid almost rigidly.
+    // The bounded off-diagonal derivatives sum to less than one per row: the domain cannot fold over itself.
+    // Keep its exact Jacobian so colour, parallax and normal relief still describe the same surface.
+    vec3 phase = position.yzx * vec3(1.73, 1.57, 1.91) + position.zxy * .47 + vec3(.1, 1.3, 2.7);
+    vec3 slope = .32 * cos(phase);
+    position += .32 * sin(phase);
+    return mat3(vec3(1.0, .47 * slope.y, 1.91 * slope.z),
+          vec3(1.73 * slope.x, 1.0, .47 * slope.z), vec3(.47 * slope.x, 1.57 * slope.y, 1.0));
 }
 
 vec3 magmaHeatColor(float heat) {

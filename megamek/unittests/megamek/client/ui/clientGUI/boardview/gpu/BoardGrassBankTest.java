@@ -76,7 +76,7 @@ class BoardGrassBankTest {
 
     @Test
     void turfKeepsAuthoredTerrainColorsInsteadOfAnAtlasTint() {
-        for (int family : new int[] { 1, 4, 5 }) {
+        for (int family : new int[] { 1, 3, 4, 5 }) {
             var cover = BoardSurfaceBlend.capture(new Hex(0, "ground_fluff:" + family + ":1", "grass"));
             var scene = BoardSurfaceBlendTest.scene(c -> {
                 var tile = BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, c.getX() < 4 ? 2 : 0, -1, 0);

@@ -10,6 +10,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.VertexAttributes;
+import com.badlogic.gdx.graphics.g3d.utils.MeshBuilder;
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
@@ -119,8 +122,8 @@ class BoardScatterTest {
             double baseline = switch (theme) {
                 case "grass" -> .16;
                 case "lunar", "volcanic" -> .18;
-                case "dirt", "mars" -> .12;
-                case "desert" -> .10;
+                case "dirt" -> .12;
+                case "desert", "mars" -> .10;
                 default -> .06;
             };
             double expected = Math.clamp(baseline * BoardScatter.DENSITY_MULTIPLIER, 0, 1);
@@ -193,6 +196,39 @@ class BoardScatterTest {
         }
         assertTrue(BoardScatter.DENSITY_MULTIPLIER <= 0 || shapes.containsAll(List.of("scatter-grass", "scatter-plant")),
               "Depth-zero water remains eligible for the ordinary grass/bush population");
+    }
+
+    @Test
+    void marsStonesUseTheirOwnBedrockSwatchWithoutAnExtraRedTint() {
+        for (var family : List.of(BoardScene.Surface.MARS, BoardScene.Surface.DESERT, BoardScene.Surface.SAND)) {
+            var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, family,
+                  null, null, null, List.of(), List.of());
+            var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
+            var surface = new BoardSurface(scene, tile);
+            for (String asset : List.of("scatter-rock", "scatter-slab")) {
+                var mesh = new MeshBuilder();
+                mesh.begin(VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal
+                      | VertexAttributes.Usage.ColorUnpacked | VertexAttributes.Usage.TextureCoordinates, GL20.GL_TRIANGLES);
+                GpuScatter.build(mesh, tile, surface, new BoardScene.Feature(asset, 0, 0, 137, 1, .15f, 0,
+                      BoardScene.FeatureKind.SCATTER));
+                assertEquals(24, mesh.getNumIndices(), "The material fix keeps the tiny eight-triangle stones");
+                int stride = mesh.getAttributes().vertexSize / Float.BYTES;
+                int uv = mesh.getAttributes().findByUsage(VertexAttributes.Usage.TextureCoordinates).offset / Float.BYTES;
+                int color = mesh.getAttributes().findByUsage(VertexAttributes.Usage.ColorUnpacked).offset / Float.BYTES;
+                float[] vertices = new float[mesh.getNumVertices() * stride];
+                mesh.getVertices(vertices, 0);
+                for (int i = 0; i < vertices.length; i += stride) {
+                    assertEquals(vertices[i + color], vertices[i + color + 1], .00001f, "Do not recolor the source stone");
+                    assertEquals(vertices[i + color], vertices[i + color + 2], .00001f);
+                    float u = vertices[i + uv], v = vertices[i + uv + 1];
+                    if (family == BoardScene.Surface.MARS) {
+                        assertTrue(u > .5f && u < 1 && v > 2f / 3 && v < 1, "Mars bedrock occupies the sixth swatch");
+                    } else {
+                        assertTrue(u > 0 && u < .5f && v > 1f / 3 && v < 2f / 3, "Sandstone keeps its existing swatch");
+                    }
+                }
+            }
+        }
     }
 
     private static List<BoardScene.Feature> scatter(Hex hex, Coords coords) {

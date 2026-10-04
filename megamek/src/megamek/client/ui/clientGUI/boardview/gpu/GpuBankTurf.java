@@ -31,7 +31,7 @@ final class GpuBankTurf implements Disposable {
         public Turf copy() { return new Turf(); }
     }
 
-    static final int STRIDE = 19;
+    static final int STRIDE = 9 + BoardScene.Surface.values().length;
     private static final float[] ROWS = { 0, .23f, .42f, .68f, 1 };
     private final List<FloatArray> current = new ArrayList<>(), previous = new ArrayList<>();
     private ModelInstance instance;
@@ -183,7 +183,7 @@ final class GpuBankTurf implements Disposable {
               // Keep the free end inside its atlas cell: fract(v * 2) must not wrap the tip's wind weight to zero.
               (variant / 3 + .001f + ROWS[row] * .998f) / 2);
         into.addAll(cover.grass(), cover.dirt(), cover.sand(), cover.rock(), cover.concrete(), cover.snow(), cover.lunar(), cover.fungus());
-        into.addAll(cover.desert(), cover.mars());
+        into.addAll(cover.desert(), cover.mars(), cover.volcano(), cover.tropical());
     }
 
     static String vertex(String source) {
@@ -213,7 +213,7 @@ final class GpuBankTurf implements Disposable {
               VertexAttribute.ColorPacked(), VertexAttribute.TexCoords(0),
               new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_turfWeights"),
               new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_turfOthers", 1),
-              new VertexAttribute(VertexAttributes.Usage.Generic, 2, "a_turfArid", 2));
+              new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_turfArid", 2));
         mesh.setVertices(vertices.items, 0, vertices.size);
         var builder = new ModelBuilder();
         builder.begin();

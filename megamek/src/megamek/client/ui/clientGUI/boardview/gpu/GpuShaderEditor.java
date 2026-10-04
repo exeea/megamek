@@ -215,7 +215,7 @@ final class GpuShaderEditor {
 
     private static String group(String name) {
         if (name.startsWith("water") || name.startsWith("ocean") || name.startsWith("liquid")) { return "Water"; }
-        if (name.startsWith("terrain") || name.startsWith("road")) { return "Terrain"; }
+        if (name.startsWith("terrain") || name.startsWith("road") || name.startsWith("fungus")) { return "Terrain"; }
         if (name.startsWith("unit")) { return "Units"; }
         if (name.startsWith("hex")) { return "Board overlays"; }
         if (name.startsWith("atmosphere") || name.startsWith("cloud") || name.startsWith("weather")

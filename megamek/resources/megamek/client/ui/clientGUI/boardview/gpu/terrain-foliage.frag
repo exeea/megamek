@@ -22,7 +22,7 @@ in float v_opacity;
 in float v_alphaTest;
 #endif
 #endif
-uniform float u_foliage; // the part: 0 solid (bark, cactus stems), 1 canopy (leaves, needles, fronds), 2 snow
+uniform float u_foliage; // 0 solid, 1 canopy, 2 snow, 3 fungal fruiting body, 4 cyan mycelium
 uniform float u_clay;
 
 void main() {
@@ -31,6 +31,7 @@ void main() {
 #ifdef diffuseTextureFlag
     diffuse = texture(u_diffuseTexture, v_diffuseUV);
 #endif
+    vec3 tissue = diffuse.rgb;
     // How much of the surface is leaves, which scatter light around, rather than bark, cactus or snow.
     float leaves = abs(u_foliage - 1.0) < .5 ? 1.0 : 0.0;
 #ifdef impostorFlag
@@ -47,9 +48,10 @@ void main() {
 #endif
     vec3 albedo = diffuse.rgb;
     // The source models tint their snow; fresh snow stays neutral, as on the ground below.
-    if (u_foliage > 1.5) albedo = vec3(dot(albedo, vec3(.2126, .7152, .0722))) * vec3(.97, .98, 1.02);
+    bool snow = abs(u_foliage - 2.0) < .5;
+    if (snow) albedo = vec3(dot(albedo, vec3(.2126, .7152, .0722))) * vec3(.97, .98, 1.02);
     if (u_clay > .5) albedo = vec3(.52);
-    albedo *= 1.0 - u_wetness * (u_foliage > 1.5 ? 0.0 : .12);
+    albedo *= 1.0 - u_wetness * (snow ? 0.0 : .12);
     albedo = toLinear(albedo);
 #ifdef lightingFlag
     // Inside and under a canopy the sky is hidden by the leaves above.
@@ -68,6 +70,25 @@ void main() {
     albedo *= ambient + direct;
     albedo += sheen;
 #endif
+    if (u_foliage > 2.5 && u_clay < .5) {
+        // The authored atlas already separates skin, lips, gills/pores and spore bodies. Emission follows those
+        // surfaces at every model LOD, including scatter; bark-like stems keep their natural opaque shading.
+        vec3 emission = vec3(0.0);
+#ifdef diffuseTextureFlag
+        vec2 panel = step(vec2(.5), v_diffuseUV);
+        float lip = panel.x * (1.0 - panel.y);
+        float gills = (1.0 - panel.x) * panel.y;
+        float spore = panel.x * panel.y;
+        float grain = smoothstep(.16, .62, tissue.r);
+        float lamella = pow(smoothstep(.16, .49, tissue.r), 3.0);
+        emission = vec3(1.0, .31, .085) * lip * (.06 + .48 * grain * grain)
+              + mix(vec3(.8, .07, .20), vec3(1.0, .35, .16), lamella) * gills * (.015 + .38 * lamella)
+              + vec3(.48, .06, .15) * spore * grain * .035;
+#endif
+        if (u_foliage > 3.5) emission = toLinear(diffuse.rgb) * 1.3;
+        float breath = .94 + .06 * sin(u_rainTime * .65 + dot(v_cloudPosition.xy, vec2(.073, .051)));
+        albedo += emission * breath;
+    }
     fragColor.rgb = toDisplay(albedo);
 #ifdef blendedFlag
     fragColor.a = diffuse.a * v_opacity;

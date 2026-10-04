@@ -556,7 +556,7 @@ final class GpuBoardTuning {
         section(skin, "Material geology");
         geologyFamily = choice(skin, "Material", "tuning-geology-family",
               new String[] { "Grass", "Dirt", "Sand", "Rock", "Concrete", "Snow", "Lunar", "Fungus",
-                    "Desert", "Mars", "Bedrock under slabs" }, this::syncGeology);
+                    "Desert", "Mars", "Volcano", "Bedrock under slabs" }, this::syncGeology);
         geology = controls(skin, List.of(
               new Knob("Joint width (m)", .25f, 20, .05f, "%.2f",
                     "Width of the large rock blocks in a cliff. Higher values make broader blocks."),

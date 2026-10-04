@@ -9,25 +9,31 @@ vec3 groundFields(sampler2D noiseMap, vec3 world) {
 }
 // A restrained per-level cue for the overhead view; light and material cover still establish the landform.
 // The same rock or soil must not bleach toward cream simply because it stands on a taller hex.
-vec3 levelGrade(vec3 c, float level) {
+vec3 levelGrade(vec3 c, float level, float fungus) {
     // Ground, cliffs and rocks share one lower limit, including deep valleys and the board's plinth.
     // Keep it local to colour grading: water optics still need the actual surface level.
-    level = max(level, -1.5);
+    level = max(level, mix(-1.5, -6.0, fungus));
     // Levels count almost fully near the ground and ease off further away, so no height grades to white or black.
     float up = 6.0 * (1.0 - exp(-max(level, 0.0) / 6.0)), down = 6.0 * (1.0 - exp(-max(-level, 0.0) / 6.0));
     float saturation = -1.0 * up + 1.0 * down;
-    float lightness = 4.0 * up - 6.0 * down;
+    float lightness = mix(4.0, 5.5, fungus) * up - mix(6.0, 7.0, fungus) * down;
     float contrast = .5 * up;
     // Warmer below: less blue, a little less green.
-    c *= vec3(1.0, 1.0 - .01 * down, 1.0 - .04 * down);
+    // Fungal plateaus cool gently toward blue/cyan; their sublevels deepen toward plum. Keep the same
+    // continuous grade on their tops, slopes and cliffs, with distinct negative levels as well as positive ones.
+    c *= mix(vec3(1.0, 1.0 - .01 * down, 1.0 - .04 * down),
+          vec3(1.0 - .015 * up, 1.0 - .025 * down, 1.0 + .01 * up - .006 * down), fungus);
     float luma = dot(c, vec3(.299, .587, .114));
     c = mix(vec3(luma), c, 1.0 + saturation / 100.0);
     // Dark ground lifts less, so a meadow's upper levels keep their green and their texture instead of bleaching.
-    c = lightness >= 0.0 ? mix(c, vec3(1.0, .97, .9), lightness / 100.0 * min(1.0, luma / .55))
+    vec3 highlight = mix(vec3(1.0, .97, .9), vec3(.86, .94, 1.0), fungus);
+    c = lightness >= 0.0 ? mix(c, highlight, lightness / 100.0 * min(1.0, luma / .55))
           : c * (1.0 + lightness / 100.0);
     c = (c - .5) * (1.0 + contrast / 100.0) + .5;
     return clamp(c, 0.0, 1.0);
 }
+
+vec3 levelGrade(vec3 c, float level) { return levelGrade(c, level, 0.0); }
 
 // Broad variations in the ground's tone, so a large field reads neither as one flat colour nor as tiles: patches, the
 // desert's compact ochre earth, loose sand's drifts, a meadow's dry and lush turf. rim and foot weigh the

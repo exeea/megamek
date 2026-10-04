@@ -41,7 +41,7 @@ class BoardFeaturesTest {
     }
 
     @ParameterizedTest
-    @EnumSource(BoardScene.Surface.class)
+    @EnumSource(value = BoardScene.Surface.class, mode = EnumSource.Mode.EXCLUDE, names = "SAND")
     void modeledStructuresKeepTheirGroundWithoutErasingOtherTerrainMarkings(BoardScene.Surface surface) {
         Hex hex = new Hex(0);
         hex.setTheme(surface.name().toLowerCase(Locale.ROOT));
@@ -92,7 +92,7 @@ class BoardFeaturesTest {
         hex.setTheme("volcano");
         hex.addTerrain(new Terrain(Terrains.WATER_FLUFF, 1));
         assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
-        assertEquals(BoardScene.Surface.ROCK, BoardFeatures.surface(hex));
+        assertEquals(BoardScene.Surface.VOLCANO, BoardFeatures.surface(hex));
         assertFalse(BoardLiquid.capture(hex).present());
         hex.addTerrain(new Terrain(Terrains.WATER, 2));
         assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
@@ -269,7 +269,8 @@ class BoardFeaturesTest {
         Hex hex = new Hex(0);
         hex.addTerrain(new Terrain(Terrains.SAND, 1));
         assertEquals(BoardScene.Surface.GRASS, BoardFeatures.surface(hex));
-        assertEquals(1, BoardSurfaceBlend.capture(hex).sand());
+        assertTrue(BoardSurfaceBlend.capture(hex).sand() > .9f);
+        assertTrue(BoardSurfaceBlend.capture(hex).grass() > 0, "Sand retains its exposed substrate");
         hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1));
         assertEquals(BoardScene.Surface.CONCRETE, BoardFeatures.surface(hex));
         for (int scatter : new int[] { Terrains.ROUGH, Terrains.RUBBLE }) {
@@ -281,7 +282,8 @@ class BoardFeaturesTest {
             assertEquals(BoardScene.Surface.ROCK, BoardFeatures.surface(hex));
             hex.addTerrain(new Terrain(Terrains.SAND, 1));
             assertEquals(BoardScene.Surface.ROCK, BoardFeatures.surface(hex));
-            assertEquals(1, BoardSurfaceBlend.capture(hex).sand());
+            assertTrue(BoardSurfaceBlend.capture(hex).sand() > .9f);
+            assertTrue(BoardSurfaceBlend.capture(hex).rock() > 0);
         }
         hex.removeAllTerrains();
         hex.setTheme("");

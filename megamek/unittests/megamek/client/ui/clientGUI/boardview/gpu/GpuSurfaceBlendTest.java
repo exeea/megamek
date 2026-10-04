@@ -18,8 +18,42 @@ import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class GpuSurfaceBlendTest {
+    @ParameterizedTest
+    @ValueSource(ints = { 0, 1 })
+    void authoredWaterMixturesKeepTheAdjacentLandsCoverOnTheirBanks(int depth) {
+        var center = BoardSurfaceBlendTest.CENTER;
+        var tropical = center.translated(2);
+        var scene = BoardSurfaceBlendTest.scene(c -> {
+            var hex = new Hex(0, c.equals(center) ? "water:" + depth + ";ground_fluff:3:2"
+                  : c.equals(tropical) ? "ground_fluff:1:3" : "",
+                  c.equals(center) ? "desert" : c.equals(tropical) ? "tropical" : "grass", c);
+            var artwork = new BoardArtwork.HexImage(c, null, null, null, null, null, List.of(), Map.of(), null);
+            return BoardScene.captureTile(hex, artwork, null, new BoardScene.PixelPool());
+        });
+        var water = scene.tile(center);
+        var land = scene.tile(center.translated(0));
+        var surface = new BoardSurface(scene, water);
+        var plan = GpuTerrain.prepareSculpt(scene, water, surface, -BoardGeometry.level(), TerrainLod.FULL,
+              new java.util.HashMap<>());
+        int checked = 0;
+        for (var triangles : plan.blended().values()) for (var triangle : triangles) {
+            for (var point : List.of(triangle.a(), triangle.b(), triangle.c())) {
+                if (point.vertex().color.b >= .125f) { continue; }
+                var p = point.vertex().position;
+                var expected = BoardSurfaceBlend.sample(scene, land, p.x, p.y, p.z);
+                for (var family : BoardScene.Surface.values()) {
+                    assertEquals(expected.weight(family), point.cover().weight(family), .00001f,
+                          "The same bank position must keep its land material on the water-owned mesh: " + p);
+                }
+                checked++;
+            }
+        }
+        assertTrue(checked > 0, "Exercise the prepared bank's material vertices");
+    }
+
     @ParameterizedTest
     @EnumSource(TerrainLod.class)
     void homogeneousFlatTopsKeepSixTrianglesThroughMaterialPreparation(TerrainLod lod) {

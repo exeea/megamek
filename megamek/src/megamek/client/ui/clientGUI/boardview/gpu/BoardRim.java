@@ -80,7 +80,7 @@ final class BoardRim {
         int direction = BoardGeometry.edgeDirection(side.edge());
         BoardScene.Tile neighbor = scene.tile(tile.coords().translated(direction));
         if (neighbor != null) {
-            return high(tile, direction, tile.elevation() - neighbor.elevation());
+            return high(tile, direction, tile.groundLevel() - neighbor.groundLevel());
         }
         return high(tile, direction,
               Math.round(Math.max(side.a().z - side.lowA(), side.b().z - side.lowB()) / BoardGeometry.level()));

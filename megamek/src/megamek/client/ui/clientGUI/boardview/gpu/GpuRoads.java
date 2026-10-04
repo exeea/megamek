@@ -396,17 +396,12 @@ final class GpuRoads {
 
     /** Shape/coverage data only: repeating albedo, normals and roughness keep their original full resolution. */
     static MaskData mask(BoardRoad road, Patch patch) {
-        return mask(road, patch, true);
-    }
-
-    static MaskData mask(BoardRoad road, Patch patch, boolean clipToHex) {
+        // The supporting terrain already clips the paint. Its fitted edge can extend beyond the original hex box.
         var bounds = patch.shape().getBounds2D();
-        double halfWidth = clipToHex ? BoardGeometry.TILE_WIDTH / 2f : Double.POSITIVE_INFINITY;
-        double halfHeight = clipToHex ? BoardGeometry.TILE_HEIGHT / 2f : Double.POSITIVE_INFINITY;
-        int x = (int) Math.floor(Math.max(-halfWidth, bounds.getMinX())) - 1;
-        int y = (int) Math.floor(Math.max(-halfHeight, bounds.getMinY())) - 1;
-        int w = Math.max(1, (int) Math.ceil(Math.min(halfWidth, bounds.getMaxX())) - x + 1);
-        int h = Math.max(1, (int) Math.ceil(Math.min(halfHeight, bounds.getMaxY())) - y + 1);
+        int x = (int) Math.floor(bounds.getMinX()) - 1;
+        int y = (int) Math.floor(bounds.getMinY()) - 1;
+        int w = Math.max(1, (int) Math.ceil(bounds.getMaxX()) - x + 1);
+        int h = Math.max(1, (int) Math.ceil(bounds.getMaxY()) - y + 1);
         int density = 4;
         var image = new BufferedImage(w * density, h * density, BufferedImage.TYPE_INT_ARGB);
         var graphics = image.createGraphics();

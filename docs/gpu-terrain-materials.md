@@ -44,7 +44,7 @@ The transition band and rock relief share the talus-height field; fallen blocks
 use it too, so the deposit does not repeat a uniform horizontal band.
 
 Grass/dirt and snow use soil/cover mantles on small steps, exposing rock on taller
-faces. Sand and rock retain steeper geological profiles. Concrete stays constructed:
+faces. Desert, Mars and rock retain steeper geological profiles. Concrete stays constructed:
 up to two levels it is a cast wall; taller differences expose bedrock beneath the top
 slab. `BoardConcrete` also owns the fitted corners used by adjacent material contacts.
 
@@ -231,11 +231,58 @@ map (height, roughness, AO, relief range) fades out by 1.25 metres per pixel, us
 roughness of 0.85 and no parallax. Lava colour, heat, currents and emission remain
 active at every distance. Near detail and physical shared boundaries are unchanged.
 
-`GpuMaterialLodSmokeTest` renders sand, concrete, crust and lava with altered detail
+`GpuMaterialLodSmokeTest` renders sand, desert, Mars, concrete, crust and lava with altered detail
 maps. Close pixels must respond, while distant pixels must be identical despite
 changes to the normal/AO and volcanic surface maps. These native checks establish
 the rendering behaviour, not an FPS improvement; frame-time gains need measurement
 in the complete board view.
+
+## Themes and the SAND gameplay treatment
+
+Desert and Mars supply ground and geology. Desert uses compact ochre hardpan,
+pale abraded sandstone shoulders and browner exposed faces. Mars has independent
+rust-red hardpan and darker iron-rich bedrock maps; it does not darken the dirt theme.
+Neither theme implies `Terrains.SAND`.
+
+`BoardSurfaceBlend.capture` derives one shared SAND cover from that gameplay flag.
+Its pale loose-sand material is the same in desert, Mars and grassland. The tile
+keeps its theme's geology, vegetation selection and coexisting rough/swamp data.
+Exposed cliffs below the surface deposit regain the theme's rock. Snow, pavement
+and magma retain their established material precedence. Buildings block neighbouring
+cover without discarding their own authored SAND; water keeps its bed treatment.
+Authored `ground_fluff` gradients mix themes (including Desert and Mars), not SAND.
+
+The shared loose-sand source has broad branching waves and finer cross-ripples.
+Its 512-square color/height and normal/AO pair repeats over 12 metres. The baker's
+22-centimetre relief is an artistic estimate for normals, not mesh displacement.
+The shader keeps a dominant wind direction, reducing the rotated second sample
+that otherwise cancels the wave pattern. Existing material LOD filters detail at
+distance. Uniform flat SAND tops still use six triangles; no extra sampler or
+draw pass is introduced. Only existing mixed-material boundaries need refinement.
+
+`BoardAridSurfaceTest` covers actual artwork capture of SAND with desert, Mars,
+grass/marsh, rough and buildings, plus the flat mesh budget at all four LODs.
+`GpuAridSurfaceSmokeTest` provides matching overhead, oblique and close native
+views of these themes. Sources, exact ImageGen prompts and reproducible map bakes
+live in `mm-data/tools/terrain-contact-sources` and `prepare_terrain_contact.py`.
+
+## Ultra-sublevel pits
+
+Presence of `ULTRA_SUBLEVEL`, including `ultra_sublevel:0`, selects a pit in every
+theme. Scene capture folds edges toward it into the existing `cliffTopExits` mask;
+the normal cliff builder supplies the walls, including one- and two-level drops.
+Neither the board's elevations nor its gameplay cliff exits are modified.
+
+The opaque black hex cap lies one visual level below the authored sublevel, so
+even equal-level neighbours have an exposed rim. `Tile.groundLevel()` is the one
+derived height used by the surface and its receiving cliffs. The cap replaces
+ground artwork, relief and vegetation, seals the sky, and remains pickable. Both
+terrain presentations use the same black material; neighbouring pits join without
+an internal wall. Pit edits invalidate the cap and surrounding cliff geometry.
+
+`BoardUltraSublevelTest` checks zero-valued flags, theme independence, cap closure
+and picking at all LODs, equivalence to authored `cliff_top` walls, cache invalidation,
+adjacent pits, and the three pits on Fungal Crevasse.
 
 ## Authoring and related features
 

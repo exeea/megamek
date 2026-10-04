@@ -80,25 +80,44 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
     /** The board supplies neighbouring roads, whose course through this hex its scenery keeps clear of. */
     static Tile captureTile(megamek.common.Hex hex, BoardArtwork.HexImage pixels, Tile previous, PixelPool terrainImages,
           java.util.function.Function<Coords, megamek.common.Hex> board) {
+        var liquid = BoardLiquid.capture(hex);
+        // The garden-lake source consumes WATER:0 and supplies a bounded basin, not a full-hex water surface.
+        boolean decorativeWater = hex.terrainLevel(Terrains.WATER) == 0 && !hex.containsTerrain(Terrains.ICE)
+              && liquid.kind() == BoardLiquid.Kind.WATER && pixels.scenery().modelTerrains().contains(Terrains.WATER);
         return new BoardScene.Tile(pixels.coords(), hex.getLevel(),
-              hex.containsTerrain(Terrains.WATER) ? Math.max(0, hex.terrainLevel(Terrains.WATER)) : -1,
+              hex.containsTerrain(Terrains.WATER) && !decorativeWater ? Math.max(0, hex.terrainLevel(Terrains.WATER)) : -1,
               hex.containsTerrain(Terrains.ICE),
-              hex.containsTerrain(Terrains.ROAD) ? hex.getTerrain(Terrains.ROAD).getExits() & 63 : 0,
+              hex.containsTerrain(Terrains.ROAD) ? hex.getTerrain(Terrains.ROAD).getExits() & 63
+                    : pixels.scenery().cosmeticRoadExits(),
               BoardFeatures.surface(hex),
               terrainImages.capture(pixels.terrain(), previous == null ? null : previous.ground()),
               terrainImages.capture(pixels.normals(), previous == null ? null : previous.normals()),
               terrainImages.captureOverlay(pixels.decals(), previous == null ? null : previous.decals()),
               terrainImages.capture(pixels.decalsWithoutLimbs(), previous == null ? null : previous.decalsWithoutLimbs()),
               terrainImages.capture(pixels.tactical(), previous == null ? null : previous.tactical()),
-              BoardFeatures.capture(hex, pixels.coords(), pixels.structureModels(), pixels.blankTerrains(), board),
-              pixels.text(), BoardLiquid.capture(hex),
+              BoardFeatures.capture(hex, pixels.coords(), pixels.structureModels(), pixels.blankTerrains(), board, pixels.scenery()),
+              pixels.text(), decorativeWater ? BoardLiquid.NONE : liquid,
               terrainImages.capture(pixels.tileset(), previous == null ? null : previous.tileset()),
-              BoardFeatures.detailedGround(hex, pixels.structureModels(), pixels.blankTerrains()), BoardRoad.capture(hex),
+              BoardFeatures.detailedGround(hex, pixels.structureModels(), pixels.blankTerrains(), pixels.scenery()),
+              !hex.containsTerrain(Terrains.ROAD) && pixels.scenery().cosmeticRoadExits() != 0
+                    ? BoardRoad.Kind.PAVED : BoardRoad.capture(hex),
               BoardFireSmoke.capture(hex), BoardFeatures.biome(hex), hex.containsTerrain(Terrains.IMPASSABLE),
               hex.containsTerrain(Terrains.BLACK_ICE) && hex.getTerrain(Terrains.BLACK_ICE).isBlackIceDetected(),
-              hex.containsTerrain(Terrains.CLIFF_TOP) && hex.getTerrain(Terrains.CLIFF_TOP).hasExitsSpecified()
-                    ? hex.getTerrain(Terrains.CLIFF_TOP).getExits() & 63 : 0, false, BoardSurfaceBlend.capture(hex),
-              terrainImages.captureOverlay(pixels.bridge(), previous == null ? null : previous.bridge()));
+              cliffTopExits(hex, pixels.coords(), board), false, BoardSurfaceBlend.capture(hex),
+              terrainImages.captureOverlay(pixels.bridge(), previous == null ? null : previous.bridge()),
+              hex.containsTerrain(Terrains.ULTRA_SUBLEVEL));
+    }
+
+    /** Pit rims use the existing authored-cliff path. The source hex and its gameplay exits remain untouched. */
+    private static int cliffTopExits(megamek.common.Hex hex, Coords coords,
+          java.util.function.Function<Coords, megamek.common.Hex> board) {
+        int exits = hex.containsTerrain(Terrains.CLIFF_TOP) && hex.getTerrain(Terrains.CLIFF_TOP).hasExitsSpecified()
+              ? hex.getTerrain(Terrains.CLIFF_TOP).getExits() & 63 : 0;
+        for (int direction = 0; direction < 6; direction++) {
+            var neighbor = board.apply(coords.translated(direction));
+            if (neighbor != null && neighbor.containsTerrain(Terrains.ULTRA_SUBLEVEL)) { exits |= 1 << direction; }
+        }
+        return exits;
     }
 
     /** World-space shadow travel per elevation level; null means directional shadows are disabled. */
@@ -143,7 +162,9 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         LUNAR("terrain/lunar"),
         FUNGUS("sculpt/fungus-cliff"),
         DESERT("terrain/sand"),
-        MARS("sculpt/mars-bedrock");
+        MARS("sculpt/mars-bedrock"),
+        VOLCANO("sculpt/volcano-basalt"),
+        TROPICAL("terrain/rock");
 
         final String wall;
 
@@ -152,7 +173,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         }
     }
 
-    enum FeatureKind { PROP, BUILDING, TREE, LIMB, SCATTER, BOULDER, ROUGH }
+    enum FeatureKind { PROP, BUILDING, TREE, LIMB, SCATTER, BOULDER, ROUGH, SCENERY }
 
     /** Captured visual ground treatment; movement and cover modifiers remain in the game terrain. */
     enum Biome { NONE, FIELD, MARSH, QUICKSAND, MUD }
@@ -180,7 +201,17 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
           Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
           Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
           boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable,
-          boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover, Pixels bridge) {
+          boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover, Pixels bridge,
+          boolean ultraSublevel) {
+        Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
+              Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
+              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
+              boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable,
+              boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover, Pixels bridge) {
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
+                  tactical, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce,
+                  cliffTopExits, bare, groundCover, bridge, false);
+        }
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
               Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
@@ -290,7 +321,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             if (marking == tactical) { return this; }
             return new Tile(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals,
                   decalsWithoutLimbs, marking, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome,
-                  impassable, blackIce, cliffTopExits, bare, groundCover, bridge);
+                  impassable, blackIce, cliffTopExits, bare, groundCover, bridge, ultraSublevel);
         }
 
         /** Zero-gravity presentation only: expose the liquid bed as bare rock, without editing the source hex. */
@@ -346,7 +377,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             }
             return new Tile(coords, level, -1, false, roadExits, Surface.LUNAR, ground, null, null, null,
                   tactical, kept, labels, BoardLiquid.NONE, null, true, road, fireSmoke, Biome.NONE,
-                  impassable, false, cliffTopExits, true, BoardSurfaceBlend.solid(Surface.LUNAR), bridge());
+                  impassable, false, cliffTopExits, true, BoardSurfaceBlend.solid(Surface.LUNAR), bridge(), ultraSublevel);
         }
 
         Tile {
@@ -358,11 +389,14 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             return waterDepth >= 0;
         }
 
+        /** Visual cap below an ultra-sublevel's mouth, including pits beside ground at the same authored level. */
+        int groundLevel() { return elevation - (ultraSublevel ? 1 : 0); }
+
         /** Inputs shared by terrain meshes, support surfaces and draped tactical geometry. */
         boolean sameGeometry(Tile other) {
             return this == other || coords.equals(other.coords) && elevation == other.elevation
                   && waterDepth == other.waterDepth && frozen == other.frozen && roadExits == other.roadExits
-                  && cliffTopExits == other.cliffTopExits && bare == other.bare
+                  && cliffTopExits == other.cliffTopExits && bare == other.bare && ultraSublevel == other.ultraSublevel
                   && surface == other.surface && detailedGround == other.detailedGround && road == other.road && biome == other.biome
                   && liquid.equals(other.liquid) && features.equals(other.features) && groundCover.equals(other.groundCover);
         }

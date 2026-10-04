@@ -21,6 +21,25 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardRoadSlopeTest {
+    @ParameterizedTest
+    @EnumSource(TerrainLod.class)
+    void motorwayRetainingPanelsStayNearTheirRoadBelowZero(TerrainLod lod) {
+        var scene = BoardCliffSeamTest.scene(new File(
+              "data/boards/unofficial/SimonLandmine/64x68/64x68 Motorway-M1-2.board"));
+        var tile = scene.tile(new Coords(27, 25));
+        assertEquals(-3, tile.elevation(), "Exercise the reported road bend below elevation zero");
+        var surface = new BoardSurface(scene, tile, lod);
+        assertTrue(!surface.retainingPanels.isEmpty(), "The road bend must still have retaining panels");
+        // Walls retain at most one level of the cut, rounded up to a half-metre step with a quarter-metre cap.
+        float ceiling = BoardGeometry.groundZ(tile) + BoardGeometry.level() + BoardRelief.metres(.75f);
+        for (var face : surface.retainingPanels) {
+            for (var point : List.of(face.a(), face.b(), face.c())) {
+                assertTrue(point.z <= ceiling + .001f, tile.coords().getBoardNum() + " " + lod
+                      + " retaining panel rises above its local cut: " + point.z + " > " + ceiling);
+            }
+        }
+    }
+
     @Test
     void mesaCityRoadCutsKeepClosedBoundaries() {
         var scene = BoardCliffSeamTest.scene(new File(

@@ -36,11 +36,11 @@ vec4 planar(float map, vec2 p, float tile, float mixer) {
     return farDetail > 0.0 ? mix(near, mapAverage(map, p / tile), farDetail) : near;
 }
 
-// The matching tangent-space normal (x along +U, y along +V) from the two repeats' texels; the turned one is turned
-// back.
+// The matching tangent-space normal (x along +U, y along +V) from the two repeats' texels. An enlarged sample has
+// the same relief over a longer distance: rotate its gradient back and divide its slope by the enlargement.
 vec4 planarNormal(vec4 near, vec4 far, float mixer) {
     vec3 a = near.rgb * 2.0 - 1.0, b = far.rgb * 2.0 - 1.0;
-    b.xy = b.xy * TURN;
+    b = normalize(vec3(b.xy * TURN / 2.37, b.z));
     vec4 result = vec4(mix(a, b, mixer), mix(near.a, far.a, mixer));
     return mix(result, vec4(0.0, 0.0, 1.0, result.a), farDetail);
 }

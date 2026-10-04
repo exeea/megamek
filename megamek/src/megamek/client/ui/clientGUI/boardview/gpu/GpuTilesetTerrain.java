@@ -176,12 +176,13 @@ final class GpuTilesetTerrain implements Disposable {
 
     private static boolean sameColumn(BoardScene.Tile a, BoardScene.Tile b) {
         return a == b || sameEdges(a, b) && a.surface() == b.surface() && a.cliffTopExits() == b.cliffTopExits()
+              && a.ultraSublevel() == b.ultraSublevel()
               && a.waterDepth() == b.waterDepth() && Objects.equals(art(a), art(b)) && Objects.equals(a.bridge(), b.bridge());
     }
 
     /** What a neighbouring column reads of a hex: its levels, its roads and liquid, and its bridge's deck. */
     private static boolean sameEdges(BoardScene.Tile a, BoardScene.Tile b) {
-        return a.elevation() == b.elevation() && BoardGeometry.surfaceZ(a) == BoardGeometry.surfaceZ(b)
+        return a.elevation() == b.elevation() && surfaceZ(a) == surfaceZ(b)
               && a.roadExits() == b.roadExits() && a.liquid().equals(b.liquid()) && a.frozen() == b.frozen()
               && Objects.equals(BoardBridge.feature(a), BoardBridge.feature(b));
     }
@@ -202,6 +203,11 @@ final class GpuTilesetTerrain implements Disposable {
         return tile.tileset() != null ? tile.tileset() : tile.ground();
     }
 
+    /** Tactical columns retain the authored pit artwork at its game level, without the sculpted view's recess. */
+    private static float surfaceZ(BoardScene.Tile tile) {
+        return tile.ultraSublevel() ? tile.elevation() * BoardGeometry.level() : BoardGeometry.surfaceZ(tile);
+    }
+
     /**
      * A plain column at the hex's surface. Where a road leaves it toward a hex of another level, as {@link BoardSurface}
      * decides, it keeps a hub at its own level and ramps a strip of the road to the edge, to the height both hexes meet
@@ -209,7 +215,7 @@ final class GpuTilesetTerrain implements Disposable {
      * it joins.
      */
     static BoardTacticalGeometry.Surface column(BoardScene scene, BoardScene.Tile tile, float floor) {
-        float top = BoardGeometry.surfaceZ(tile);
+        float top = surfaceZ(tile);
         Vector3 center = BoardGeometry.center(tile.coords(), 0);
         center.z = top;
         int ramps = BoardSurface.ramps(scene, tile);
@@ -242,7 +248,7 @@ final class GpuTilesetTerrain implements Disposable {
             } else if (ramps != 0) {
                 quad(tops, hub[edge], a, b, hub[next], BoardSurface.Finish.TOP);
             }
-            float across = neighbor == null ? floor : BoardGeometry.surfaceZ(neighbor);
+            float across = neighbor == null ? floor : surfaceZ(neighbor);
             float roadAcross = neighbor != null && (BoardSurface.ramps(scene, neighbor) & 1 << reverse) != 0
                   ? BoardSurface.roadEdgeElevation(neighbor, tile, reverse) * BoardGeometry.level() : across;
             if (road != top || roadAcross != across) {
