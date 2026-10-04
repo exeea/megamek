@@ -75,6 +75,10 @@ those boundary vertices; extra top bands are reserved for deeply notched outline
 Mixed-material tops subdivide only where sampled blend weights differ from linear
 interpolation by more than 4%, down to the existing detail-dependent spacing limit.
 Homogeneous tops remain six triangles in the submitted mesh.
+Natural material contacts share a world-space cover field with grass placement.
+Their nominal half-width is seven metres, with bounded irregular edges. The shader
+combines that broad gradient with texture-height contacts, softening transitions
+between themes while keeping pure tile centres and visible material detail.
 Material detail belongs in the fragment shader: world-space wear exposes soil and
 rock on low-poly slopes without relying on small changes in mesh normals.
 Ground vertices shared with a sculpted cliff foot use zero foot distance, so debris
@@ -104,6 +108,15 @@ owns the bank/bed and water surface; `BoardRelief.bank` connects the shoreline t
 shared terrain boundary. Water-to-water drops keep the seam needed by the falling
 surface. A land-to-bed difference includes the water depth when deciding whether the
 bank behaves like a small slope or a taller cliff.
+
+Open-water banks and beds use one sampled material field across every natural
+sector. A water hex's authored ground mixture must not consume its bank faces in
+the ordinary land-material pass. Adjacent water hexes at the same surface level
+blend their bank/bed fields at their shared edges, avoiding triangular underwater
+wedges. Bank coverage references the water column's surface elevation, so increasing
+the water depth cannot discard the neighboring land cover. Higher banks and cliffs
+continue their land material below the waterline. Protected road, concrete
+and frozen banks retain their existing boundaries; geometry and picking are unchanged.
 
 Road approaches change the finished surface, not just its texture. The rest of a
 roadside cliff keeps the native relief. `BoardRampMesh` can simplify interior samples,
@@ -153,8 +166,12 @@ World-space projections keep coordinates continuous across hexes. Two differentl
 oriented ground samples reduce repetition; walls use compatible vertical projections.
 Bare dirt and the soil mantle beneath grass/dirt also mix two translated, differently
 scaled samples on vertical projections. Both stay upright to preserve downhill erosion;
-color/height and normal/AO use the same coordinates and weights. Other wall materials
-retain their existing sampling.
+color/height and normal/AO use the same coordinates and weights. Sand and other natural
+wall maps instead blend translated source windows selected by a continuous world field,
+preserving wind/bedding direction and feature size without a regular per-hex motif.
+The fungal materials retain their four overlapping translated windows. Enlarging a
+sample by 2.37 also divides its normal gradient by 2.37, rather than exaggerating
+the same relief over a longer distance.
 Slope and height-aware blending determine how cover gives way to mantle, rock and scree.
 
 The dirt and `soil-contact` pairs are baked from ImageGen sources in
@@ -195,6 +212,45 @@ and roughness together. Cross-family contacts are described in
 For a change in silhouette or support, edit CPU geometry. For grain, wet response,
 material breakup or per-level color grade, edit the relevant material helper and its
 maps. Editing a normal map will not correct a geometric seam.
+
+### Physical texture scale
+
+`BoardRelief.metres` defines 30 metres across a hex. Sculpt UVs are world positions
+divided by the repeat in the asset manifest; slopes blend ground and vertical
+projections at the same physical scale. No UV origin or fixed repetition count is
+assigned per hex. A material can span several source windows within a hex without
+restarting at its edges. Window blending breaks up recognisable repetitions.
+
+| Material | Base source span in metres |
+| --- | --- |
+| Grass / dirt / desert hardpan / Mars hardpan | 4 / 5 / 6 / 6 |
+| Loose SAND / rock / snow / lunar / concrete tops | 12 / 8 / 8 / 8 / 6 |
+| Soil banks / scree / gravel | 4 / 4 / 3 |
+| Granite / sandstone / Martian / lunar cliff maps | 8 / 12 / 10 / 4 |
+| Cast concrete wall map | 8; panel joints have their own constructed dimensions |
+| Fungal ground / mat / cliff / fibrous slope | 22 / 8 / 12 / 10 |
+| Volcanic ash ground / basalt cliff | 6 / 12 |
+| Wetland earth | 9; the shared earth map sampled at 45% of its 20 m source span |
+| Road and bridge deck maps | 6 for the ordinary repeat of one legacy detail unit |
+| Ice / solid volcanic crust / flowing lava | 24 / 12 / 24 |
+
+Fungal material roles and their mushroom effects are described in [fungal terrain](gpu-fungus.md).
+
+The legacy `detailMetres` helper uses a different unit: one is six physical metres.
+Road and bridge deck projections agree in that convention; new geological materials
+use physical metres. The ground sampler's second source window spans 2.37 times its
+base repeat. Ice blends complete samples at its original and turned coordinates for
+colour, surface properties and normals; its normal gradients follow the rotation,
+scale and wind stretch. Solid crust bends its domain within a few repeats to reduce
+the visible plate grid while retaining one material sample and its matching Jacobian.
+
+`GpuSurfaceScaleSmokeTest` captures 14 materials at identical overhead, oblique and
+close scales, including one-level slopes and three-level cliffs. These are visual
+review images, not an automated assertion of realism. `GpuSurfaceProjectionSmokeTest`
+compares GPU normals with independently differentiated physical height and checks
+the CPU/GPU sand exposure field. The scale audit also renders road ramps, retaining
+walls, wet/dry road materials and material LOD. Native sampler-budget and ice checks
+pass on the tested machine; no frame-time or cross-platform performance claim follows.
 
 ## Lighting, grading and inspection
 
@@ -247,6 +303,12 @@ Neither theme implies `Terrains.SAND`.
 `BoardSurfaceBlend.capture` derives one shared SAND cover from that gameplay flag.
 Its pale loose-sand material is the same in desert, Mars and grassland. The tile
 keeps its theme's geology, vegetation selection and coexisting rough/swamp data.
+Its palette retains a small share of the substrate. A continuous metre-based field
+opens sparse patches through the sand, exposing the substrate's complete material:
+turf, stone, earth or the theme's hardpan, including normals, cavity and wet response.
+Grass roots use that same field and grow only where enough turf is exposed. Existing
+rock scatter and authored Rough features remain in place. Sand stays the dominant
+gameplay cue; these openings neither change the board flags nor subdivide the mesh.
 Exposed cliffs below the surface deposit regain the theme's rock. Snow, pavement
 and magma retain their established material precedence. Buildings block neighbouring
 cover without discarding their own authored SAND; water keeps its bed treatment.
@@ -255,34 +317,74 @@ Authored `ground_fluff` gradients mix themes (including Desert and Mars), not SA
 The shared loose-sand source has broad branching waves and finer cross-ripples.
 Its 512-square color/height and normal/AO pair repeats over 12 metres. The baker's
 22-centimetre relief is an artistic estimate for normals, not mesh displacement.
-The shader keeps a dominant wind direction, reducing the rotated second sample
-that otherwise cancels the wave pattern. Existing material LOD filters detail at
+The shader translates source windows instead of rotating or resizing them, retaining
+the dominant wind direction and wave size. Existing material LOD filters detail at
 distance. Uniform flat SAND tops still use six triangles; no extra sampler or
 draw pass is introduced. Only existing mixed-material boundaries need refinement.
 
 `BoardAridSurfaceTest` covers actual artwork capture of SAND with desert, Mars,
-grass/marsh, rough and buildings, plus the flat mesh budget at all four LODs.
+grass/marsh, rough and buildings, the shared grass-root field, plus the flat mesh
+budget at all four LODs in grass, dirt, rock, lunar, desert and Mars themes.
 `GpuAridSurfaceSmokeTest` provides matching overhead, oblique and close native
 views of these themes. Sources, exact ImageGen prompts and reproducible map bakes
 live in `mm-data/tools/terrain-contact-sources` and `prepare_terrain_contact.py`.
+
+## Volcano theme
+
+`volcano` selects cool ash-grey ground and blue-grey basalt, independently of the
+rust-coloured Mars theme. Explicit magma still selects its own solid crust or
+flowing lava; ordinary volcanic rock does not become emissive. Shared SAND keeps
+its terrain identity and wave detail, with a grey mineral tint over lunar or
+volcanic substrates. The tint follows the existing cover weights at contacts.
+
+`volcano-ground` and `volcano-basalt` use the existing sculpt array, world-space
+projection, material LOD and native slope/cliff builders. Their aligned 512-square
+color/height and normal/AO maps repeat over 6 and 12 metres. Estimated relief is
+4.5 and 14 cm respectively; this is shading relief, not extra mesh subdivision.
+Scatter reuses the basalt map in its shared atlas. No per-hex texture or draw pass
+is added.
+
+ImageGen source images and exact prompts are maintained in
+`mm-data/tools/terrain-contact-sources/volcano-*.png` and `volcano-prompts.json`.
+`prepare_terrain_contact.py --only volcano-ground volcano-basalt` reproduces the
+runtime maps. Height and normal maps are artistic estimates derived from the
+generated images, not measured photogrammetry.
+
+The theme audit's recommendation to separate Volcano from generic rock was valid;
+its claim that Mars still used generic dirt was stale. Theme variations belong in
+the shared material/cover system, while SAND, ICE, pavement and magma retain their
+gameplay precedence. The audit's remaining lunar-water and enclosed-road artwork
+suggestions require their own material/model work and are not provided by this
+Volcano change.
+
+`BoardAridSurfaceTest` covers volcanic/lunar SAND capture and the six-triangle flat
+mesh at every LOD. Native board captures cover Thunder Rift and Crystalline Canyon;
+`GpuMaterialLodSmokeTest` also exercises the volcanic maps' distance filtering.
 
 ## Ultra-sublevel pits
 
 Presence of `ULTRA_SUBLEVEL`, including `ultra_sublevel:0`, selects a pit in every
 theme. Scene capture folds edges toward it into the existing `cliffTopExits` mask;
 the normal cliff builder supplies the walls, including one- and two-level drops.
+Pit boundaries disable the normal slope/talus transition and pin the cliff foot
+to the opening, so there is no textured shelf inside the hex. The shared cliff
+shader fades these walls into black with depth; their rock texture and rim still
+come from the surrounding theme. Pit corners keep one shared vertical boundary;
+all incident walls fade from the same cap height, including mixed-height rims.
 Neither the board's elevations nor its gameplay cliff exits are modified.
 
 The opaque black hex cap lies one visual level below the authored sublevel, so
 even equal-level neighbours have an exposed rim. `Tile.groundLevel()` is the one
 derived height used by the surface and its receiving cliffs. The cap replaces
-ground artwork, relief and vegetation, seals the sky, and remains pickable. Both
-terrain presentations use the same black material; neighbouring pits join without
-an internal wall. Pit edits invalidate the cap and surrounding cliff geometry.
+ground artwork, relief and vegetation in the sculpted view, seals the sky, and
+remains pickable. Tactical View keeps its existing tileset pit artwork at the
+authored game elevation. Neighbouring pits at the same level join without an internal wall. Pit
+edits invalidate the cap and surrounding cliff geometry.
 
 `BoardUltraSublevelTest` checks zero-valued flags, theme independence, cap closure
-and picking at all LODs, equivalence to authored `cliff_top` walls, cache invalidation,
-adjacent pits, and the three pits on Fungal Crevasse.
+and picking at all LODs, forced cliff classification and an unobstructed opening,
+closed mixed-height seams and their shading, cache invalidation, live game/map-preview
+edits, adjacent pits, and the three pits on Fungal Crevasse.
 
 ## Authoring and related features
 

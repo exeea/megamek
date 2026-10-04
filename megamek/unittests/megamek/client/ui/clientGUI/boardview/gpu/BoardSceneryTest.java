@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import com.badlogic.gdx.files.FileHandle;
+import com.badlogic.gdx.math.Vector3;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Configuration;
 import megamek.common.Hex;
@@ -19,6 +20,25 @@ import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 
 class BoardSceneryTest {
+    @Test
+    void rubbleUsesTheDestroyedStructureTypeAndClearedPathsStayCosmetic() {
+        var families = List.of("light", "medium", "heavy", "hardened", "wall", "heavy");
+        for (int type = 1; type <= 6; type++) {
+            var rubble = new Hex(0, "rubble:" + type, "");
+            var captured = capture(rubble);
+            assertEquals(List.of("scenery/saxarba/misc/rubble_" + families.get(type - 1)), captured.scenery().models());
+            assertEquals(type, rubble.terrainLevel(Terrains.RUBBLE));
+            assertEquals(0, alpha(captured.decals()), "The modeled pile replaces its painted duplicate");
+            if (type > 5) { continue; }
+            var cleared = new Hex(0, "ground_fluff:2000;fluff:" + (2000 + type), "");
+            var path = capture(cleared);
+            assertEquals(List.of("scenery/saxarba/rubble_" + families.get(type - 1) + "_path"), path.scenery().models());
+            assertFalse(cleared.containsTerrain(Terrains.RUBBLE), "Cosmetic debris must not restore the obstacle");
+            assertTrue(cleared.isClearHex());
+        }
+        assertEquals(List.of("scenery/saxarba/misc/fortified"), capture(new Hex(0, "fortified:1", "")).scenery().models());
+    }
+
     @Test
     void everyShippedSceneryAssetDecodesThroughTheRuntimeIncludingItsSharedTextures() throws Exception {
         Path root = Configuration.dataDir().toPath().resolve("models/board");
@@ -62,6 +82,40 @@ class BoardSceneryTest {
                 assertEquals(List.of("scenery/fluff/" + (family.equals("6") ? "skylight" : "ledge")
                       + (variant + 1)), image.scenery().models());
             }
+        }
+    }
+
+    @Test
+    void everyExportedLedgeFacesOutwardAndHasAVisibleUpperSurface() {
+        Path root = Configuration.dataDir().toPath().resolve("models/board");
+        for (int variant = 1; variant <= 6; variant++) {
+            var file = root.resolve("scenery/fluff/ledge" + variant + ".glb");
+            var data = RigidGlb.loadLods(new FileHandle(file.toFile()), root).getFirst();
+            double volume = 0;
+            double upperArea = 0;
+            double footprintArea = 0;
+            for (var mesh : data.meshes) {
+                for (var part : mesh.parts) {
+                    for (int i = 0; i < part.indices.length; i += 3) {
+                        var points = new Vector3[3];
+                        for (int p = 0; p < 3; p++) {
+                            int offset = Short.toUnsignedInt(part.indices[i + p]) * RigidGlb.STRIDE;
+                            points[p] = new Vector3(mesh.vertices[offset], mesh.vertices[offset + 1], mesh.vertices[offset + 2]);
+                        }
+                        var normal = points[1].cpy().sub(points[0]).crs(points[2].cpy().sub(points[0]));
+                        volume += points[0].dot(normal) / 6.0;
+                        if (points[0].z + points[1].z + points[2].z > .001f) {
+                            upperArea += Math.max(0, normal.z) / 2.0;
+                        } else {
+                            footprintArea += Math.abs(normal.z) / 2.0;
+                        }
+                    }
+                }
+            }
+            // Inward winding previously hid the parapet and left only its narrow trim visible.
+            assertTrue(volume > 0, "The closed ledge must enclose positive volume: " + file);
+            assertTrue(footprintArea > 0 && upperArea >= footprintArea * .99,
+                  "The upper faces must cover the body footprint when backface culling is enabled: " + file);
         }
     }
 

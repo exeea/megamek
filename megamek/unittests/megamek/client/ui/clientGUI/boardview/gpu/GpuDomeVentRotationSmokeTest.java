@@ -40,21 +40,28 @@ class GpuDomeVentRotationSmokeTest {
                 var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                 var original = BoardGeometry.tuning();
+                var atmosphere = new GpuAtmosphere();
+                atmosphere.configure(new BoardAtmosphere.Settings(13, 0, 0,
+                      BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                 try {
                     BoardGeometry.tune(BoardGeometry.DEFAULTS);
                     terrain.update(scene);
                     var camera = new BoardCamera();
                     camera.resize(960, 960);
                     camera.setIsometric(true);
-                    camera.camera.zoom = .7f;
-                    camera.center(BoardGeometry.center(new Coords(8, 8), 3));
+                    camera.camera.zoom = .35f;
+                    camera.center(BoardGeometry.center(new Coords(13, 9), 3));
                     int total = 0;
                     Vector3 origin = new Vector3(), end = new Vector3();
                     for (int angle = 0; angle < 360; angle += 2) {
                         if (angle > 0) { camera.orbit(2, 0); }
+                        terrain.refine(camera.camera);
                         terrain.animate(1f / 30, List.of());
                         frame.prepare(terrain, camera, scene);
                         terrain.renderShadows(camera.camera, List.of());
+                        atmosphere.updateLight(camera.camera);
+                        atmosphere.prepareClouds(terrain, scene, 1f / 30);
+                        atmosphere.begin(960, 960, 1f / 30);
                         ScreenUtils.clear(1, 0, 1, 1, true);
                         terrain.render(camera.camera, false);
                         terrain.renderTransparent(camera.camera);
@@ -74,7 +81,6 @@ class GpuDomeVentRotationSmokeTest {
                                 if (tile != null && tile.coords().getX() > 1 && tile.coords().getX() < scene.width() - 2
                                       && tile.coords().getY() > 1 && tile.coords().getY() < scene.height() - 2) {
                                     holes++;
-                                    if (angle == 0) { DomeMeshDiagnostic.dump(terrain, camera, x, y); }
                                 }
                             }
                             if (holes > 0) {
@@ -83,6 +89,7 @@ class GpuDomeVentRotationSmokeTest {
                             }
                             total += holes;
                         } finally { pixels.dispose(); }
+                        atmosphere.end(camera.camera, terrain, scene, 0);
                     }
                     frame.render(terrain, camera, scene);
                     GpuReviewFrame.save(new File(output, "volcano-dome-vent.png"));
@@ -91,6 +98,7 @@ class GpuDomeVentRotationSmokeTest {
                 } catch (Throwable error) { failure.set(error); }
                 finally {
                     BoardGeometry.tune(original);
+                    atmosphere.dispose();
                     frame.dispose();
                     terrain.dispose();
                     Gdx.app.exit();

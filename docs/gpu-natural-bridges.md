@@ -9,13 +9,22 @@
 | `BoardBridge` | Traverse connected spans; choose manufactured road material or a natural span from their approaches. |
 | `BoardNaturalBridge` | Construct the natural arch, top, underside and bank contact facets. |
 | `BoardBridgeFooting` | Extend manufactured slab/rails onto actual supporting banks. |
+| `BoardBridgeSlope` | Grade authored manufactured slabs and rails between connected deck elevations. |
 | `BoardRelief` | Reserve entrances and move obstructing decorative rocks onto supported bank positions. |
 | `GpuRoads / GpuTerrain` | Apply deck/apron materials and own the installed bridge geometry used for drawing and picking. |
 
 A connected bridge span without an attached road is a natural rock formation. `BoardBridge` follows
-reciprocal bridge exits at a common deck elevation and uses the existing road-to-bridge height checks for
-approaches. A road beneath the deck remains a ground road. If an approach exists anywhere along the span,
+reciprocal bridge exits at the same absolute deck elevation or one level apart and uses the existing
+road-to-bridge height checks for approaches. A road beneath the deck remains a ground road. If an approach exists anywhere along the span,
 the manufactured bridge inherits its best surface: marked asphalt, unmarked asphalt, gravel, then dirt.
+
+Decks one level apart meet halfway between their elevations at the shared edge, in either direction.
+The centre retains its authored elevation. Manufactured spans keep a level central hub, with broad
+diagonal approaches across the whole carriageway and both rails. The existing GLB triangles are split
+at the grade changes and displaced together, preserving the slab thickness, rail height and footprint.
+Road materials and markings use those same installed top facets; picking and bounds use the complete
+sloped shape. Natural spans grade their rock shell to matching top and underside contacts at every LOD.
+Missing reciprocal exits and differences greater than one level remain disconnected.
 
 Natural spans choose the most frequent material family among their distinct connected dry banks: grass,
 dirt, sand, rock or snow. Ties follow the existing family order. With no eligible bank, the bridge hex
@@ -54,7 +63,8 @@ hex. If the rim has receded, the extension grows until the full slab width has g
 inset from the rim. The extension keeps the authored slab thickness and rail width. Its short grade
 reaches the bank's ground height; asphalt, gravel, dirt, dashes and wheel wear use the same road helpers
 as the original deck. Lower-grade road approaches keep their existing fade. Bridge-to-bridge joints
-retain their original position. No foundation is grown down through a lower crossing.
+retain their original position in the hex plane, with stepped decks sharing the joint's height.
+No foundation is grown down through a lower crossing.
 
 A manufactured terminal without an attached road keeps full-height rails over the void, then slopes them
 down over 1.5 metres of supported bank. Lane markings stop before that taper. Beyond the solid slab, a
@@ -76,7 +86,8 @@ promontory whose rims close in on the deck, the rock is left out: nothing stands
 The immutable bridge facets belong to the installed terrain chunk. Rendering and picking share those
 facets and their bounds; an extended section is picked in the hex its visible contact occupies. Chunk
 reuse carries this geometry with the material batches. Manufactured assets retain their original mesh and
-are supplemented only at their bank ends.
+are supplemented at their bank ends; level sections keep the original model, while sloped sections
+reuse its authored geometry in the terrain batches.
 
 ## Limits
 

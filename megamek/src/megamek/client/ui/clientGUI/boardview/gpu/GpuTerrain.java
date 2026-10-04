@@ -414,7 +414,7 @@ final class GpuTerrain implements Disposable {
             GpuLavaLighting.register(result);
             GpuBuildingCutaway.register(result);
             GpuLiquidShader.register(result);
-            GpuMagmaShader.register(result);
+            GpuMagmaShader.register(result, rainNoise);
             // Upload before drawing: creating ice maps from a uniform setter disturbs the active texture bindings.
             if (renderable.material.has(GpuIceShader.TYPE)) { assets.ice(); }
             GpuIceShader.register(result, assets);
@@ -2234,13 +2234,15 @@ final class GpuTerrain implements Disposable {
                     continue;
                 }
                 var footing = BoardBridgeFooting.build(scene, tile, lod, surfaces);
-                if (!footing.shape().facets().isEmpty()) { bridgeShapes.put(tile.coords(), footing.shape()); }
+                var slope = deck.sloped() ? BoardBridgeSlope.build(tile, deck, footing.shape()) : null;
+                if (slope != null) { bridgeShapes.put(tile.coords(), slope); }
+                else if (!footing.shape().facets().isEmpty()) { bridgeShapes.put(tile.coords(), footing.shape()); }
                 BoardRoad road = footing.road(deck, tile.coords());
                 for (var patch : GpuRoads.deckPatches(tile, deck, road, footing)) {
                     check.run();
                     if (patch.shape().isEmpty()) { continue; }
                     patches.add(new RoadPatch(patch, roadMaskData.share(GpuRoads.mask(road, patch)),
-                          GpuRoads.deck(tile, feature, patch, footing, surfaces), true));
+                          GpuRoads.deck(tile, feature, patch, footing, surfaces, slope), true));
                 }
             }
             if (!patches.isEmpty()) { roads.put(tile.coords(), patches); }
@@ -2563,15 +2565,19 @@ final class GpuTerrain implements Disposable {
                 deck.set(GpuIceShader.road(deck, scene, tile));
                 deck.set(new BridgeDeck());
                 if (bridgeShape != null) { bridgeFooting(solid, bridgeShape, deck, instance.getMaterial("bridge-structure")); }
+                if (prepared.bridges().get(tile.coords()).sloped()) { continue; }
             }
             for (Material material : instance.materials) {
                 if (building == null && material.id.equals("wall")) {
                     material.get(TextureAttribute.class, TextureAttribute.Diffuse).scaleV = feature.height();
                 }
-                if (material.id.startsWith("geyser-")) {
-                    // Mineral deposits and rocks use the same lighting/wetness as the terrain.
+                if (material.id.startsWith("geyser-") || material.id.startsWith("rubble-")
+                      || material.id.startsWith("fortified-")) {
+                    // Terrain scenery shares the ground's lighting and weather response.
                     material.set(new Ground(.15f));
-                    if (material.id.equals("geyser-rock")) {
+                    if (material.id.equals("rubble-concrete")) {
+                        material.set(TextureAttribute.createNormal(assets.material("sculpt/concrete-normal")));
+                    } else if (material.id.equals("geyser-rock")) {
                         material.set(TextureAttribute.createNormal(assets.material(feature.asset().endsWith("magma")
                               ? "sculpt/volcano-basalt-normal" : "sculpt/rock-normal")));
                     } else if (material.id.equals("geyser-lava")) {

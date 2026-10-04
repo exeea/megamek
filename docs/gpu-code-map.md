@@ -43,6 +43,7 @@ Use the feature guides for algorithms, asset contracts and coupled changes.
 | `GpuRoads` | Turns footprints into material masks/atlases carried by existing terrain or bridge triangles. |
 | `BoardBridge` | Follows span connectivity and approach roads to select deck shape and surface material. |
 | `BoardBridgeFooting` | Extends manufactured slab/rails until their bank ends have actual terrain support. |
+| `BoardBridgeSlope` | Fits authored slabs and rails to connected decks one level apart; shares facets with paint and picking. |
 | `BoardNaturalBridge` | Builds hollow rock spans, bank contacts and underpass geometry. |
 | `BoardTunnel` | Detects cosmetic portals at eligible cliff-facing road/deck exits and supplies their placement. |
 | `BoardRocks`, `BoardShape` | Load reusable rock/scatter CPU mesh data; shape loading is separate from placement policy. |

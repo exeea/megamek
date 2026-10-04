@@ -18,9 +18,11 @@ final class BoardBridge {
 
     private BoardBridge() { }
 
-    record Deck(BoardRoad.Kind kind, int exits, List<BoardRoad.Kind> neighbors, BoardScene.Surface surface) {
+    record Deck(BoardRoad.Kind kind, int exits, List<BoardRoad.Kind> neighbors, BoardScene.Surface surface,
+          List<Float> rises) {
         BoardRoad road(Coords coords) { return BoardRoad.layout(coords, exits, kind, neighbors::get); }
         boolean natural() { return kind == BoardRoad.Kind.NONE; }
+        boolean sloped() { return rises.stream().anyMatch(rise -> rise != 0); }
     }
 
     private record Material(BoardRoad.Kind kind, BoardScene.Surface surface) { }
@@ -69,12 +71,14 @@ final class BoardBridge {
         var material = material(scene, tile);
         var kind = material.kind();
         var neighbors = new ArrayList<BoardRoad.Kind>();
+        var rises = new ArrayList<Float>();
         for (int d = 0; d < 6; d++) {
             var next = scene.tile(tile.coords().translated(d));
             neighbors.add(connected(tile, next, d) ? kind
                   : road(tile, next, d) ? next.road() : BoardRoad.Kind.NONE);
+            rises.add(edgeElevation(tile, next, d) - tile.elevation() - bridge.elevation());
         }
-        return new Deck(kind, bridge.bridgeExits(), List.copyOf(neighbors), material.surface());
+        return new Deck(kind, bridge.bridgeExits(), List.copyOf(neighbors), material.surface(), List.copyOf(rises));
     }
 
     /** The whole connected span inherits its best approach: asphalt, then gravel, then dirt. */
@@ -175,7 +179,8 @@ final class BoardBridge {
             // Both styles reserve the usable passage. A distant road edit must not change the bank's ground mesh.
             float width = Math.max(BoardRelief.metres(NATURAL_HALF_WIDTH * 1.04f),
                   (BoardRoad.Kind.PAVED.halfWidth + BoardRoad.SHOULDER) * BoardGeometry.hexScale());
-            float level = span ? (tile.elevation() + own.elevation()) * BoardGeometry.level() : center.z;
+            float level = span ? Math.min(tile.elevation() + own.elevation(),
+                  edgeElevation(tile, scene.tile(tile.coords().translated(d)), d)) * BoardGeometry.level() : center.z;
             result.add(new Approach(center.x, center.y, direction.x, direction.y, length, width, level));
         }
         return List.copyOf(result);
@@ -186,6 +191,12 @@ final class BoardBridge {
         var other = feature(next);
         return bridge != null && other != null && (bridge.bridgeExits() & (1 << direction)) != 0
               && (other.bridgeExits() & (1 << ((direction + 3) % 6))) != 0
-              && tile.elevation() + bridge.elevation() == next.elevation() + other.elevation();
+              && Math.abs(tile.elevation() + bridge.elevation() - next.elevation() - other.elevation()) <= 1;
+    }
+
+    /** Each connected deck owns half the grade; banks and unconnected exits keep the authored deck height. */
+    static float edgeElevation(BoardScene.Tile tile, BoardScene.Tile next, int direction) {
+        float level = tile.elevation() + feature(tile).elevation();
+        return connected(tile, next, direction) ? (level + next.elevation() + feature(next).elevation()) / 2 : level;
     }
 }

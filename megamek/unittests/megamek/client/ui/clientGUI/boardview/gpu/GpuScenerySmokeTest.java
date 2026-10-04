@@ -85,11 +85,31 @@ class GpuScenerySmokeTest {
         for (int state = 1; state <= 3; state++) {
             geothermal.setHex(new Coords(state * 2, 3), new Hex(0, "geyser:" + state, ""));
         }
+        var demolition = Board.createEmptyBoard(13, 10);
+        for (int x = 0; x < 13; x++) for (int y = 0; y < 10; y++) {
+            demolition.setHex(new Coords(x, y), new Hex(0, "pavement:1", ""));
+        }
+        for (int type = 1; type <= 5; type++) {
+            demolition.setHex(new Coords(type * 2, 3), new Hex(0, "pavement:1;rubble:" + type, ""));
+            demolition.setHex(new Coords(type * 2, 6), new Hex(0, "pavement:1;ground_fluff:2000;fluff:" + (2000 + type), ""));
+        }
+        demolition.setHex(new Coords(6, 8), new Hex(0, "fortified:1", ""));
         var fccw = new Board();
         fccw.load(new File("data/boards/unofficial/Aokarasu/45x45 FCCW 4-1.board"));
         assertEquals(45, fccw.getWidth());
+        var fccwNoBasement = new Board();
+        fccwNoBasement.load(new File("data/boards/buildingsnobasement/45x45 FCCW 4-1 (No Basement).board"));
+        assertEquals(45, fccwNoBasement.getWidth());
+        var ledges = Board.createEmptyBoard(8, 7);
+        for (int x = 0; x < 8; x++) for (int y = 0; y < 7; y++) {
+            ledges.setHex(new Coords(x, y), new Hex(0, "pavement:1", ""));
+        }
+        for (int variant = 0; variant < 6; variant++) {
+            ledges.setHex(new Coords(variant + 1, 2), new Hex(0, "pavement:1;fluff:8:" + variant, ""));
+            ledges.setHex(new Coords(variant + 1, 4), new Hex(0, "pavement:1;fluff:6:" + (12 + variant), ""));
+        }
         var scenes = new ArrayList<BoardScene>();
-        for (Board board : List.of(catalog, fccw, details, corrections, port, geothermal)) {
+        for (Board board : List.of(catalog, fccw, details, corrections, port, geothermal, demolition, fccwNoBasement, ledges)) {
             var captured = new AtomicReference<BoardScene>();
             SwingUtilities.invokeAndWait(() -> {
                 try (var artwork = new BoardArtwork()) {
@@ -113,6 +133,12 @@ class GpuScenerySmokeTest {
               "The native review must exercise both shuffled horse variants");
         assertEquals(48, scenes.get(4).tiles().stream().flatMap(t -> t.features().stream())
               .map(BoardScene.Feature::asset).filter(a -> a.contains("GantryCrane-01-")).distinct().count());
+        assertEquals(11, scenes.get(7).tiles().stream().flatMap(t -> t.features().stream())
+              .filter(f -> f.asset().equals("scenery/fluff/ledge1")).count());
+        assertTrue(scenes.get(7).tile(new Coords(13, 44)).features().stream()
+              .anyMatch(f -> f.asset().equals("scenery/fluff/ledge1")), "Review the reported ledge beside the helipad");
+        assertEquals(12, scenes.get(8).tiles().stream().flatMap(t -> t.features().stream())
+              .map(BoardScene.Feature::asset).filter(a -> a.startsWith("scenery/fluff/")).distinct().count());
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "scenery");
         Files.createDirectories(output.toPath());
         var failure = new AtomicReference<Throwable>();
@@ -133,21 +159,28 @@ class GpuScenerySmokeTest {
                         frame.prepare(terrain, camera, scene);
                         terrain.update(scene);
                         terrain.animate(.5f, List.of());
-                        Coords focus = i == 4 ? new Coords(9, 12) : i != 1 ? new Coords(4, 3) : scene.tiles().stream()
+                        Coords focus = i == 7 ? new Coords(13, 43) : i == 4 ? new Coords(9, 12) : i != 1 ? new Coords(4, 3) : scene.tiles().stream()
                               .filter(t -> t.features().stream().anyMatch(f -> f.asset().equals("scenery/fluff/construction1")))
                               .findFirst().orElseThrow().coords();
                         var ray = new Ray(BoardGeometry.center(focus, 0).add(0, 0, 1000), new Vector3(0, 0, -1));
                         BoardGeometry.Hit picked = null;
                         for (boolean oblique : new boolean[] { false, true }) {
                             camera.setIsometric(oblique);
-                            camera.camera.zoom = i == 4 ? 1.55f : i != 1 ? .48f : .35f;
+                            camera.camera.zoom = i == 7 ? .32f : i == 4 ? 1.55f : i != 1 ? .48f : .35f;
                             camera.center(BoardGeometry.center(focus, scene.tile(focus).elevation()));
                             frame.render(terrain, camera, scene);
                             var hit = terrain.hit(scene, ray);
                             assertTrue(hit != null);
                             if (picked == null) { picked = hit; } else { assertEquals(picked, hit); }
-                            GpuReviewFrame.save(new File(output, List.of("catalog", "fccw-4-1", "variants", "corrections", "cranes", "geysers").get(i)
+                            GpuReviewFrame.save(new File(output, List.of("catalog", "fccw-4-1", "variants", "corrections", "cranes", "geysers", "demolition", "fccw-no-basement-ledges", "ledge-rotations").get(i)
                                   + (oblique ? "-oblique.png" : "-top.png")));
+                        }
+                        if (i == 7 || i == 8) {
+                            camera.orbit(180, 0);
+                            frame.render(terrain, camera, scene);
+                            assertEquals(picked, terrain.hit(scene, ray));
+                            GpuReviewFrame.save(new File(output, (i == 7 ? "fccw-no-basement-ledges" : "ledge-rotations")
+                                  + "-reverse.png"));
                         }
                         if (i == 2) {
                             camera.camera.zoom = .13f;
@@ -185,7 +218,7 @@ class GpuScenerySmokeTest {
                         if (i == 5) {
                             assertTrue(terrain.geyserParticles() > 50);
                             for (int state = 1; state <= 3; state++) {
-                                camera.camera.zoom = .12f;
+                                camera.camera.zoom = .08f;
                                 camera.center(BoardGeometry.center(new Coords(state * 2, 3), 0).add(0, 0, state == 2 ? 12 : 0));
                                 frame.render(terrain, camera, scene);
                                 GpuReviewFrame.save(new File(output, "geyser-" + state + "-in-game.png"));
@@ -195,6 +228,21 @@ class GpuScenerySmokeTest {
                                     GpuReviewFrame.save(new File(output, "geyser-2-animated-in-game.png"));
                                 }
                             }
+                        }
+                        if (i == 6) {
+                            for (int type = 1; type <= 5; type++) {
+                                for (int row : new int[] { 3, 6 }) {
+                                    camera.camera.zoom = .09f;
+                                    camera.center(BoardGeometry.center(new Coords(type * 2, row), 0));
+                                    frame.render(terrain, camera, scene);
+                                    GpuReviewFrame.save(new File(output, "rubble-" + type
+                                          + (row == 6 ? "-cleared" : "") + "-in-game.png"));
+                                }
+                            }
+                            camera.camera.zoom = .09f;
+                            camera.center(BoardGeometry.center(new Coords(6, 8), 0));
+                            frame.render(terrain, camera, scene);
+                            GpuReviewFrame.save(new File(output, "fortified-in-game.png"));
                         }
                     }
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());

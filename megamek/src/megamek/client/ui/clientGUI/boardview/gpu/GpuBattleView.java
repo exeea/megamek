@@ -419,6 +419,7 @@ class GpuBattleView extends ApplicationAdapter {
                         BoardScatter.reload();
                         BoardObstacles.reload();
                         BoardBridgeFooting.reload();
+                        BoardBridgeSlope.reload();
                         createSceneRenderers();
                         cameraTerrainRevision = -1;
                     } catch (RuntimeException failure) {

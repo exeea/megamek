@@ -317,6 +317,15 @@ final class BoardTacticalGeometry {
         }
 
         void clip(BoardSurface.Face face, float lift, Consumer<Triangle> destination) {
+            clip(face, lift, false, destination);
+        }
+
+        /** Add a piecewise planar height field while retaining the source's thickness, including vertical faces. */
+        void displace(BoardSurface.Face face, Consumer<Triangle> destination) {
+            clip(face, 0, true, destination);
+        }
+
+        private void clip(BoardSurface.Face face, float lift, boolean displace, Consumer<Triangle> destination) {
             if (maximumX < Math.min(face.a().x, Math.min(face.b().x, face.c().x))
                   || minimumX > Math.max(face.a().x, Math.max(face.b().x, face.c().x))
                   || maximumY < Math.min(face.a().y, Math.min(face.b().y, face.c().y))
@@ -357,12 +366,22 @@ final class BoardTacticalGeometry {
                 Vector3 point = polygon[i];
                 float b = cross(face.a(), point, face.c()) / area;
                 float c = cross(face.a(), face.b(), point) / area;
-                point.z = face.a().z + b * (face.b().z - face.a().z) + c * (face.c().z - face.a().z) + lift;
+                point.z = (displace ? point.z : 0)
+                      + face.a().z + b * (face.b().z - face.a().z) + c * (face.c().z - face.a().z) + lift;
             }
             Vector3 start = new Vector3(polygon[0]), previous = new Vector3(polygon[1]);
             for (int i = 2; i < count; i++) {
                 Vector3 point = new Vector3(polygon[i]);
-                add(destination, start, previous, point, triangle.argb());
+                if (displace) {
+                    var a = new Vector3(previous).sub(start);
+                    var b = new Vector3(point).sub(start);
+                    float lengths = a.len2() * b.len2();
+                    // Clipping on a profile boundary can leave nearly collinear float slivers. They have no
+                    // visible area, but their unstable plane can produce a spurious distant picking hit.
+                    if (a.crs(b).len2() > 1e-10f * lengths) {
+                        destination.accept(new Triangle(start, previous, point, triangle.argb()));
+                    }
+                } else { add(destination, start, previous, point, triangle.argb()); }
                 previous = point;
             }
         }
