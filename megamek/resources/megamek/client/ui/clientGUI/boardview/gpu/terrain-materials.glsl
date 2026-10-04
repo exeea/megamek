@@ -136,6 +136,10 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
     // Break a bank-to-cliff contact into soil pockets and exposed rock. Both sides use the same world field;
     // pure banks/cliffs stay pure, and distance filtering already controls the final height blend.
     float exposure = clamp(rock + (variation - .5) * 1.2 * (4.0 * rock * (1.0 - rock)), 0.0, 1.0);
+    // Exposed rock shoulders lose loose cover, while sheltered patches retain it. Plateau and face use the
+    // same rim distance and world field, so the weathered contact continues over the crest.
+    float scour = (1.0 - smoothstep(.1, 3.0 + 4.0 * broad, belowRim))
+          * exposure * smoothstep(.30, .65, broad * .6 + pockets * .4);
     // A sparse bank mesh carries its broad slope, not every eroded patch. Expose its mantle with the existing
     // world-space detail field, so sand and turf do not hide all the material detail when the mesh is simplified.
     // Level ground keeps its cover; hard cliffs already get their exposed rock from the existing material mix.
@@ -161,9 +165,11 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
         deposit *= mix(.25, 1.0, rock);
     } else if (abs(familyId - 5.0) < .5) {
         cover = smoothstep(.36, .92, coverUp + (variation - .5) * .5 + deposit * .18);
+        cover *= 1.0 - .85 * scour;
         deposit *= .35;
     } else if (abs(familyId - 2.0) < .5) {
         cover = smoothstep(.38, .94, coverUp + (variation - .5) * .45 + deposit * .15);
+        cover *= 1.0 - .92 * scour;
         deposit *= .55;
     } else if (abs(familyId - 1.0) < .5) {
         cover = smoothstep(.28, .9, coverUp + (variation - .5) * .16);

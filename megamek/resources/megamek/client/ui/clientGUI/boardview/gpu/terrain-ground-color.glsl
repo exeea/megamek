@@ -7,18 +7,17 @@ vec3 groundFields(sampler2D noiseMap, vec3 world) {
     return vec3(texture(noiseMap, world.xy / 700.0).g * .6 + texture(noiseMap, world.xy / 430.0 + .19).b * .4,
           texture(noiseMap, world.xy / 160.0 + .41).b, texture(noiseMap, world.xy / 2600.0 + .73).r);
 }
-// Per-level identity, so every level reads from straight above; saturation, lightness and contrast in percent per
-// level. Higher ground turns lighter and paler toward cream, as drier, sun-bleached ground; lower ground darker and a
-// little warmer. Neither turns any family's hue toward red or pink.
+// A restrained per-level cue for the overhead view; light and material cover still establish the landform.
+// The same rock or soil must not bleach toward cream simply because it stands on a taller hex.
 vec3 levelGrade(vec3 c, float level) {
     // Ground, cliffs and rocks share one lower limit, including deep valleys and the board's plinth.
     // Keep it local to colour grading: water optics still need the actual surface level.
     level = max(level, -1.5);
     // Levels count almost fully near the ground and ease off further away, so no height grades to white or black.
     float up = 6.0 * (1.0 - exp(-max(level, 0.0) / 6.0)), down = 6.0 * (1.0 - exp(-max(-level, 0.0) / 6.0));
-    float saturation = -3.0 * up + 4.0 * down;
-    float lightness = 14.0 * up - 18.0 * down;
-    float contrast = 2.0 * up;
+    float saturation = -1.0 * up + 1.0 * down;
+    float lightness = 4.0 * up - 6.0 * down;
+    float contrast = .5 * up;
     // Warmer below: less blue, a little less green.
     c *= vec3(1.0, 1.0 - .01 * down, 1.0 - .04 * down);
     float luma = dot(c, vec3(.299, .587, .114));

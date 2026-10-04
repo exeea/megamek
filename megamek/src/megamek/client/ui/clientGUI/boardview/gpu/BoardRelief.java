@@ -123,18 +123,18 @@ final class BoardRelief {
     /** Indexed by {@link BoardScene.Surface#ordinal()}. */
     private static final Geology[] GEOLOGY = {
           // GRASS: earth banks on low steps, blocky granite from three levels.
-          new Geology(4.2f, 3.6f, 1.15f, .70f, .40f, 3.4f, 1.10f, 1.0f, .85f, 1, 1, .5f, .3f, .42f, 0, .8f, .6f),
+          new Geology(7.5f, 6.2f, 1.4f, .70f, .40f, 3.4f, 1.6f, 1.0f, .85f, .85f, 1, .5f, .3f, .42f, 0, .8f, .6f),
           // DIRT: soft, gullied earth.
           new Geology(2.6f, 9.0f, .45f, .75f, .25f, 1.8f, .80f, .8f, .45f, .6f, 1.1f, .5f, .55f, .38f, 0, 1.2f, 1.4f),
           // SAND: sandstone mesas of jointed columns: tall masses split by deep vertical joints, faint bedding.
-          new Geology(5.0f, 14f, 1.8f, 2.2f, .3f, 3.6f, .8f, 1.2f, .95f, 1, 1, .45f, 1, .06f, 0, 1, 3),
+          new Geology(7.5f, 18f, 1.8f, 1.6f, .3f, 3.6f, 1.2f, 1.2f, .95f, .8f, 1, .45f, 1, .06f, 0, 1, 3),
           // ROCK: jointed bedrock.
-          new Geology(3.6f, 4.2f, 1.25f, .75f, .45f, 2.9f, 1.25f, 1.1f, .75f, 1, 1, .42f, 1, .12f, 0, 2.5f, .4f),
+          new Geology(7.0f, 6.0f, 1.25f, .75f, .45f, 2.9f, 1.45f, 1.1f, .75f, .7f, 1, .42f, 1, .12f, 0, 2.5f, .4f),
           // CONCRETE: flat cast slabs with crisp arrises; from three levels one slab caps the bedrock below.
           new Geology(6.0f, 6.0f, 0, 0, 0, 3.0f, 0, 0, 0, 0, 0, .05f, 1, 0, 1, 0, 0),
           // SNOW: rock under a snow mantle that buries the low steps.
-          new Geology(4.0f, 3.8f, 1.0f, .60f, .40f, 3.2f, 1.05f, 1.0f, .85f, 1, 1, .5f, .5f, .3f, 0, 1, 0),
-          // LUNAR: starts with the same jointed bedrock as ROCK; independently tunable.
+          new Geology(7.0f, 6.0f, 1.2f, .60f, .40f, 3.2f, 1.55f, 1.0f, .85f, .85f, 1, .5f, .5f, .3f, 0, 1, 0),
+          // LUNAR: finely jointed bedrock; independently tunable.
           new Geology(3.6f, 4.2f, 1.25f, .75f, .45f, 2.9f, 1.25f, 1.1f, .75f, 1, 1, .42f, 1, .12f, 0, 2.5f, .4f),
     };
 
@@ -2534,11 +2534,18 @@ final class BoardRelief {
             float fallen = !rim && edge.upper.family() == SAND ? 1.8f : 1;
             int count = Math.round((rim ? lerp(.7f, 4.5f, big) : lerp(1.6f, 5.5f, big)) * firm * apron * fallen
                   * (.5f + random.nextFloat()));
+            float outlet = !rim && !submergedFoot && big > .5f && geology.cast() == 0
+                  && edge.upper.family() != BoardScene.Surface.LUNAR.ordinal() ? talusOutlet(edge) : Float.NaN;
             float t = random.nextFloat();
             for (int i = 0; i < count; i++) {
                 // Rocks come in small groups: most follow the previous one closely.
                 t = random.nextFloat() < .55f ? t + (random.nextFloat() - .3f) * .16f : random.nextFloat();
                 t = .1f + .8f * (t - (float) Math.floor(t));
+                // Most fallen pieces gather below an actual cleft. Keep some scattered farther along the apron,
+                // with the same finite candidate count and clearance rules as before.
+                if (Float.isFinite(outlet) && i % 3 != 0) {
+                    t = Math.clamp(outlet + (t - .5f) * .35f, .1f, .9f);
+                }
                 // Mostly small pieces, now and then a large block.
                 float r = random.nextFloat();
                 float size = m * (rim ? lerp(.8f, 2.7f, big)
@@ -2595,6 +2602,27 @@ final class BoardRelief {
                 place(destination, rock, base, turn, length, width, height / rock.height(), Kind.ROCK, e, false);
             }
         }
+    }
+
+    /** Deepest recess relative to its adjacent cliff columns; reuse the shaped face, including road cuts. */
+    private float talusOutlet(Edge edge) {
+        float z = lerp(edge.bottom(), edge.top(), .45f);
+        // Use the full cliff grid at every dressing LOD, so changing detail never moves a deposit.
+        int columns = 2 * TerrainLod.FULL.steps;
+        Vector3 before = edgePoint(edge, 1f / columns, z), at = edgePoint(edge, 2f / columns, z);
+        float deepest = metres(.15f), outlet = Float.NaN;
+        for (int column = 2; column <= columns - 2; column++) {
+            Vector3 after = edgePoint(edge, (column + 1f) / columns, z);
+            float recess = ((before.x + after.x) * .5f - at.x) * edge.nx
+                  + ((before.y + after.y) * .5f - at.y) * edge.ny;
+            if (recess > deepest) {
+                deepest = recess;
+                outlet = column / (float) columns;
+            }
+            before = at;
+            at = after;
+        }
+        return outlet;
     }
 
     /**
@@ -2999,6 +3027,11 @@ final class BoardRelief {
             Vector3 p = points[i];
             float[] seam = seamDistances(p.x, p.y);
             Edge previous = i == 0 ? edge((e + 5) % 6) : null;
+            if (drop || previous != null && previous.upper == self && previous.profiled) {
+                // The top and cliff meet at this sculpted rim, which can be metres from the
+                // approximate segment used for interior distances. Both must start their cover here.
+                seam[0] = 0;
+            }
             Edge foot = edge.lower == self && edge.profiled ? edge
                   : previous != null && previous.lower == self && previous.profiled ? previous : null;
             if (foot != null) {

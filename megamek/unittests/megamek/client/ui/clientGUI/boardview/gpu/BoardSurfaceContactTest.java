@@ -16,6 +16,33 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 /** Every ordered surface pair, including within-family roles, constructed edges and volcanic banks. */
 class BoardSurfaceContactTest {
+    @ParameterizedTest
+    @ValueSource(ints = { 0, 2, 5 })
+    void exposedPlateausMeetTheirCliffAtTheActualSculptedRim(int family) {
+        var at = BoardSurfaceBlendTest.CENTER;
+        for (int rise : new int[] { 1, 2, 3, 5 }) {
+            var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, family,
+                  c.equals(at) ? rise : 0));
+            for (var lod : TerrainLod.values()) {
+                var surface = new BoardSurface(scene, scene.tile(at), lod);
+                var rim = surface.walls(scene, BoardGeometry.floor(scene)).stream()
+                      .flatMap(w -> List.of(w.a(), w.b(), w.c()).stream())
+                      .filter(p -> Math.abs(p.z - rise * BoardGeometry.level()) < .001f).toList();
+                int compared = 0;
+                for (var face : surface.groundFaces()) {
+                    if (face.finish() != BoardSurface.Finish.TOP) { continue; }
+                    for (var p : List.of(face.a(), face.b(), face.c())) {
+                        if (rim.stream().noneMatch(r -> r.epsilonEquals(p, .001f))) { continue; }
+                        assertEquals(0, surface.relief.shade(p).rim(), .001f,
+                              "Ground cover must meet the emitted cliff rim: " + family + "/" + rise + "/" + lod);
+                        compared++;
+                    }
+                }
+                assertTrue(compared > 0, "Compare shared top/cliff vertices at every detail level");
+            }
+        }
+    }
+
     @Test
     void minesCliffDebrisContinuesOntoTheReceivingGround() {
         var scene = BoardCliffSeamTest.scene(new File("data/boards/Deserts/16x17 Mines 1.board"));
