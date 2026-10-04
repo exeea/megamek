@@ -128,6 +128,7 @@ final class GpuBoardTuning {
     private final List<Control> geology;
     private final List<Control> familySizes;
     private final CheckBox overviewIcons;
+    private boolean wireframe;
     private final List<Control> overview;
     private final List<Control> visibility;
     private final ButtonGroup<TextButton> fovModes;
@@ -264,7 +265,10 @@ final class GpuBoardTuning {
             @Override
             public void changed(ChangeEvent event, Actor actor) {
                 // Entering the Tactical View moves the camera as the toolbar's Top view does.
-                if (!syncing && overviewIcons.isChecked()) { camera.setIsometric(false); }
+                if (overviewIcons.isChecked()) {
+                    wireframe = false;
+                    if (!syncing) { camera.setIsometric(false); }
+                }
             }
         });
         overview = controls(skin, List.of(new Knob("Icon switch hex px", 0, 256, 2, "%.0f")),
@@ -1070,6 +1074,13 @@ final class GpuBoardTuning {
     boolean overviewIcons() { return overviewIcons.isChecked(); }
 
     void setOverviewIcons(boolean enabled) { overviewIcons.setChecked(enabled); }
+
+    boolean wireframe() { return wireframe; }
+
+    void setWireframe(boolean enabled) {
+        wireframe = enabled;
+        if (enabled) { setOverviewIcons(false); }
+    }
 
     float overviewHexPixels() { return value(overview, 0); }
 

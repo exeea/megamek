@@ -144,13 +144,31 @@ class GpuWireframeSmokeTest {
 
         view.boardCamera.setIsometric(false);
         toggle("camera-overview-icons");
+        assertTrue(ui.overviewIcons());
+        assertFalse(ui.wireframe(), "Selecting Tactical View disables wireframe");
         render(view, "wireframe-tactical.png");
         assertTrue(((GpuUnitIcons) field(view, "unitIcons")).active(), "The top view shows flat icons");
-        assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Wireframe with the Tactical View's flat icons");
-        toggle("camera-overview-icons");
+        assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Tactical View after wireframe");
+
+        toggle("camera-wireframe");
+        assertTrue(ui.wireframe());
+        assertFalse(ui.overviewIcons(), "Selecting wireframe disables Tactical View");
+        CheckBox tactical = GpuBoardTestUi.stage().getRoot().findActor("tuning-overview-icons");
+        assertFalse(tactical.isChecked(), "The tuning panel follows the Camera menu");
+        render(view, "wireframe-after-tactical.png");
+        assertFalse(((GpuUnitIcons) field(view, "unitIcons")).active());
+        assertFalse(((GpuTerrain) field(view, "terrain")).tacticalView());
+
+        tactical.setChecked(true);
+        assertTrue(ui.overviewIcons());
+        assertFalse(ui.wireframe(), "Selecting Tactical View in the tuning panel also disables wireframe");
+        toggle("camera-wireframe");
+        assertTrue(ui.wireframe());
+        assertFalse(tactical.isChecked());
 
         toggle("camera-wireframe");
         assertFalse(ui.wireframe());
+        assertFalse(ui.overviewIcons(), "Leaving wireframe does not re-enable Tactical View");
         Mix restored = render(view, "wireframe-restored.png");
         assertTrue(restored.other > .6, "Leaving the wireframe restores shading: " + restored);
         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Restored frames");
@@ -163,6 +181,9 @@ class GpuWireframeSmokeTest {
         boolean before = check.isChecked();
         GpuBoardTestUi.click(row);
         assertEquals(!before, GpuBoardTestUi.stage().getRoot().<CheckBox>findActor(row + "-check").isChecked());
+        assertFalse(GpuBoardTestUi.stage().getRoot().<CheckBox>findActor("camera-wireframe-check").isChecked()
+              && GpuBoardTestUi.stage().getRoot().<CheckBox>findActor("camera-overview-icons-check").isChecked(),
+              "The Camera menu must not show both modes selected");
         GpuBoardTestUi.click("camera");
     }
 

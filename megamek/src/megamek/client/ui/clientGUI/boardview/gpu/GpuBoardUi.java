@@ -104,7 +104,6 @@ final class GpuBoardUi implements Disposable {
     private float anchorTop;
     private String menuTriggerName;
     private boolean reportOpenedForPhase;
-    private boolean wireframe;
 
     GpuBoardUi(BoardSource source, BoardCamera camera, Runnable changeSpeed) {
         this(source, camera, changeSpeed, () -> { });
@@ -490,7 +489,7 @@ final class GpuBoardUi implements Disposable {
 
     float overviewHexPixels() { return tuning.overviewHexPixels(); }
 
-    boolean wireframe() { return wireframe; }
+    boolean wireframe() { return tuning.wireframe(); }
 
     Skin skin() { return skin; }
 
@@ -966,7 +965,7 @@ final class GpuBoardUi implements Disposable {
               new BoardScene.Command(Messages.getString("GpuBoard.resetCamera"), true, () -> camera.reset(frame.scene())),
               cameraToggle("camera-fixed-sun", "GpuBoard.fixedSun", () -> tuning.setFixedSun(!tuning.fixedSun())),
               cameraToggle("camera-overview-icons", "GpuBoard.overviewIcons", () -> tuning.setOverviewIcons(!tuning.overviewIcons())),
-              cameraToggle("camera-wireframe", "GpuBoard.wireframe", () -> wireframe = !wireframe),
+              cameraToggle("camera-wireframe", "GpuBoard.wireframe", () -> tuning.setWireframe(!tuning.wireframe())),
               cameraToggle("camera-animate-selection", "GpuBoard.animateSelection",
                     () -> camera.animateOnSelectionChange = !camera.animateOnSelectionChange),
               cameraToggle("camera-animate-combat", "GpuBoard.animateCombat",
@@ -988,7 +987,7 @@ final class GpuBoardUi implements Disposable {
             case "camera-free-flight" -> camera.firstPerson();
             case "camera-fixed-sun" -> tuning.fixedSun();
             case "camera-overview-icons" -> tuning.overviewIcons();
-            case "camera-wireframe" -> wireframe;
+            case "camera-wireframe" -> tuning.wireframe();
             case "camera-animate-selection" -> camera.animateOnSelectionChange;
             case "camera-animate-combat" -> camera.animateCombatPlayback;
             case "camera-animate-movement" -> camera.animateOnMove;
