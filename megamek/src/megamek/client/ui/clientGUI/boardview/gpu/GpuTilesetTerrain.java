@@ -22,6 +22,7 @@ import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
+import com.badlogic.gdx.graphics.g3d.attributes.DepthTestAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.IntAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
@@ -104,7 +105,15 @@ final class GpuTilesetTerrain implements Disposable {
         for (Chunk chunk : chunks.values()) {
             if (!batch.getCamera().frustum.boundsInFrustum(chunk.bounds())) { continue; }
             batch.render(chunk.instance(), environment);
-            if (environment != null && chunk.liquid() != null) { batch.render(chunk.liquid(), environment); }
+        }
+    }
+
+    /** Water follows units and placed artwork, so the lakebed remains visible through its translucent surface. */
+    void renderLiquids(ModelBatch batch, Environment environment) {
+        for (Chunk chunk : chunks.values()) {
+            if (chunk.liquid() != null && batch.getCamera().frustum.boundsInFrustum(chunk.bounds())) {
+                batch.render(chunk.liquid(), environment);
+            }
         }
     }
 
@@ -182,7 +191,7 @@ final class GpuTilesetTerrain implements Disposable {
 
     /** What a neighbouring column reads of a hex: its levels, its roads and liquid, and its bridge's deck. */
     private static boolean sameEdges(BoardScene.Tile a, BoardScene.Tile b) {
-        return a.elevation() == b.elevation() && surfaceZ(a) == surfaceZ(b)
+        return a.elevation() == b.elevation() && surfaceZ(a) == surfaceZ(b) && solidZ(a) == solidZ(b)
               && a.roadExits() == b.roadExits() && a.liquid().equals(b.liquid()) && a.frozen() == b.frozen()
               && Objects.equals(BoardBridge.feature(a), BoardBridge.feature(b));
     }
@@ -208,6 +217,10 @@ final class GpuTilesetTerrain implements Disposable {
         return tile.ultraSublevel() ? tile.elevation() * BoardGeometry.level() : BoardGeometry.surfaceZ(tile);
     }
 
+    private static float solidZ(BoardScene.Tile tile) {
+        return tile.liquid().present() && !tile.frozen() ? BoardGeometry.groundZ(tile) : surfaceZ(tile);
+    }
+
     /**
      * A plain column at the hex's surface. Where a road leaves it toward a hex of another level, as {@link BoardSurface}
      * decides, it keeps a hub at its own level and ramps a strip of the road to the edge, to the height both hexes meet
@@ -215,7 +228,7 @@ final class GpuTilesetTerrain implements Disposable {
      * it joins.
      */
     static BoardTacticalGeometry.Surface column(BoardScene scene, BoardScene.Tile tile, float floor) {
-        float top = surfaceZ(tile);
+        float top = surfaceZ(tile), solidTop = solidZ(tile);
         Vector3 center = BoardGeometry.center(tile.coords(), 0);
         center.z = top;
         int ramps = BoardSurface.ramps(scene, tile);
@@ -249,20 +262,30 @@ final class GpuTilesetTerrain implements Disposable {
                 quad(tops, hub[edge], a, b, hub[next], BoardSurface.Finish.TOP);
             }
             float across = neighbor == null ? floor : surfaceZ(neighbor);
+            float solidAcross = neighbor == null ? floor : solidZ(neighbor);
+            float roadTop = road == top ? solidTop : road;
             float roadAcross = neighbor != null && (BoardSurface.ramps(scene, neighbor) & 1 << reverse) != 0
-                  ? BoardSurface.roadEdgeElevation(neighbor, tile, reverse) * BoardGeometry.level() : across;
-            if (road != top || roadAcross != across) {
-                wall(walls, tile, direction, a, left, top, across);
-                wall(walls, tile, direction, left, right, road, roadAcross);
-                wall(walls, tile, direction, right, b, top, across);
+                  ? BoardSurface.roadEdgeElevation(neighbor, tile, reverse) * BoardGeometry.level() : solidAcross;
+            if (roadTop != solidTop || roadAcross != solidAcross) {
+                wall(walls, tile, direction, a, left, solidTop, solidAcross);
+                wall(walls, tile, direction, left, right, roadTop, roadAcross);
+                wall(walls, tile, direction, right, b, solidTop, solidAcross);
             } else {
-                wall(walls, tile, direction, a, b, top, across);
+                wall(walls, tile, direction, a, b, solidTop, solidAcross);
             }
             if (open(tile, neighbor) && neighbor != null && !tile.frozen() && neighbor.elevation() < tile.elevation()) {
                 falls.add(new BoardSurface.Side(new Vector3(a), new Vector3(b), across, across, edge));
             }
         }
-        return new BoardTacticalGeometry.Surface(List.copyOf(tops), List.of(), List.copyOf(tops), List.of(),
+        boolean openWater = tile.liquid().present() && !tile.frozen();
+        List<BoardSurface.Face> solid = tops;
+        if (openWater) {
+            solid = tops.stream().map(face -> new BoardSurface.Face(
+                  new Vector3(face.a().x, face.a().y, solidTop), new Vector3(face.b().x, face.b().y, solidTop),
+                  new Vector3(face.c().x, face.c().y, solidTop), BoardSurface.Finish.BED)).toList();
+        }
+        return new BoardTacticalGeometry.Surface(List.copyOf(tops), List.of(), List.copyOf(solid),
+              openWater ? List.copyOf(tops) : List.of(),
               List.copyOf(walls), List.copyOf(falls));
     }
 
@@ -340,7 +363,7 @@ final class GpuTilesetTerrain implements Disposable {
                 BoardScene.Tile tile = scene.tile(coords);
                 BoardTacticalGeometry.Surface surface = surface(scene, coords, floor);
                 Texture page = tops.containsKey(coords) ? art.region(coords).getTexture() : null;
-                for (BoardSurface.Face face : surface.top()) {
+                for (BoardSurface.Face face : surface.faces()) {
                     topFaces.computeIfAbsent(page, key -> new ArrayList<>()).add(new Top(coords, face));
                 }
                 for (BoardSurface.Face face : surface.walls()) {
@@ -414,6 +437,7 @@ final class GpuTilesetTerrain implements Disposable {
         if (!key.liquid().molten()) {
             material.set(new BlendingAttribute(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA,
                   key.falling() ? .8f : GpuWaterShader.SURFACE_OPACITY));
+            material.set(new DepthTestAttribute(GL20.GL_LEQUAL, false));
         }
         GpuTerrain.liquidColour(material, key.liquid(), frame);
         return material;
@@ -495,9 +519,13 @@ final class GpuTilesetTerrain implements Disposable {
     }
 
     /** The bridge's art laid flat over its hex, at its deck's height. */
-    private static List<BoardSurface.Face> deck(BoardScene.Tile tile) {
+    static float deckZ(BoardScene.Tile tile) {
         BoardScene.Feature bridge = BoardBridge.feature(tile);
-        float z = (tile.elevation() + bridge.elevation()) * BoardGeometry.level() + DECK_LIFT * BoardGeometry.hexScale();
+        return (tile.elevation() + bridge.elevation()) * BoardGeometry.level() + DECK_LIFT * BoardGeometry.hexScale();
+    }
+
+    private static List<BoardSurface.Face> deck(BoardScene.Tile tile) {
+        float z = deckZ(tile);
         Vector3 center = BoardGeometry.center(tile.coords(), 0);
         center.z = z;
         List<BoardSurface.Face> faces = new ArrayList<>(6);

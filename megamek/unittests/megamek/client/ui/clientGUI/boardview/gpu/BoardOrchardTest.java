@@ -133,7 +133,10 @@ class BoardOrchardTest {
                 assertEquals(30, high, 1f, "LOD preserves the tree height: " + name);
                 boolean hasSnow = false;
                 for (var material : data.materials) {
-                    hasSnow |= material.id.equals("snow");
+                    hasSnow |= material.id.equals("snow") || material.id.equals("canopy-snow-cutout");
+                    if (material.id.endsWith("-cutout")) {
+                        assertEquals(.5f, ((RigidGlb.Data) data).alphaTests.get(material.id), .0001f);
+                    }
                     assertEquals(1, material.textures.size);
                     var image = ((RigidGlb.Data) data).images.get(material.textures.first().fileName);
                     assertTrue(new File(image.file()).isFile(), "The sampler cache key must resolve to a shipped texture");

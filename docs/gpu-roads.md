@@ -128,8 +128,9 @@ for the separate maps, which now load only for the kinds that decks and tunnel f
 ## Physical ramps and joins
 
 `BoardSurface` rounds the change from a flat center into a graded approach, then meets
-the neighbor at a shared height and tangent. Bridge approaches must arrive level at
-the deck. Tile centers retain their game elevation and grades stay within the connected
+the neighbor at a shared height and tangent. Road-to-bridge approaches use the same
+planar inset as stepped bridges: each hex carries half the rise, meeting halfway in
+height at the shared edge. Tile centers retain their game elevation and grades stay within the connected
 hexes; they do not spread into an arbitrary chain of tiles.
 
 Across a dry difference of up to two levels, an exit can form an approach onto unpaved
@@ -141,6 +142,21 @@ Natural cut/fill uses the shared cliff profile and lateral shoulders. Concrete k
 engineered slabs and retaining walls. `BoardRampMesh` can remove redundant interior
 samples, but must retain shared boundaries, the center and the curved carriageway.
 Contact queries choose a containing triangle before using an edge-tolerance fallback.
+Raised bridge approaches are one closed concrete block spanning both insets, built by
+`BoardBridgeFooting`. The underlying road bank and shoreline retain their own geometry.
+The block owns the ramp's carriageway and straight retaining sides, and the bridge
+retains its authored rails above it. Those rails continue to the road inset, with the
+existing `bridge-terminal` GLB wedges on the flat road beyond the base. The level centre
+of the bridge remains open below. The block's faces serve both road paint and picking;
+`BoardBridgeSlope` omits the authored slab inside that block to avoid overlapping faces.
+Descending approaches still cut the road bank, with concrete on the cut faces and
+ground cover excluded from those faces.
+
+At shifted shorelines, walls compare road and bank heights at corresponding edge
+parameters in each surface's original profile. The wall then joins the ramp's emitted
+rim to the bank's sampled boundary. Sampling the road at the shifted shore instead
+leaves the wall short beneath graded road approaches. Graded wall endpoints stay
+exact even beside water, so the joins do not leave pinholes.
 
 At concrete cuts, the wall endpoints use the roof triangle selected inside each edge
 interval. Sampling the highest roof at a discontinuous shoulder can otherwise bridge

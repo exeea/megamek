@@ -194,9 +194,10 @@ final class BoardBridge {
               && Math.abs(tile.elevation() + bridge.elevation() - next.elevation() - other.elevation()) <= 1;
     }
 
-    /** Each connected deck owns half the grade; banks and unconnected exits keep the authored deck height. */
+    /** Connected decks and road approaches each own half the grade; bare banks keep the authored deck height. */
     static float edgeElevation(BoardScene.Tile tile, BoardScene.Tile next, int direction) {
         float level = tile.elevation() + feature(tile).elevation();
-        return connected(tile, next, direction) ? (level + next.elevation() + feature(next).elevation()) / 2 : level;
+        if (connected(tile, next, direction)) { return (level + next.elevation() + feature(next).elevation()) / 2; }
+        return road(tile, next, direction) ? (level + next.elevation()) / 2 : level;
     }
 }

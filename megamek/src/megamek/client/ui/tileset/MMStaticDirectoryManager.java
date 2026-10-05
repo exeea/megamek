@@ -249,10 +249,10 @@ public class MMStaticDirectoryManager {
     /**
      * Reloads the MekTileset and returns the updated MekTileset object. This will update the MekTileset object with
      * changes to the mek tileset (like added image files and changes to the tileset text file) while MM is running.
+     * Asset reload uses a fresh tileset so deleted mappings and cached unit images are discarded as well.
      *
      * @see #getMekTileset()
      */
-    @Deprecated(since = "0.51.0", forRemoval = true)
     public static MekTileset refreshMekTileset() {
         parseMekTileset = true;
         return getMekTileset();

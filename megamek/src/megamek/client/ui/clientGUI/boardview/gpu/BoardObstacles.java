@@ -116,7 +116,9 @@ final class BoardObstacles {
             float verticalScale = feature.kind() == BoardScene.FeatureKind.SCENERY ? scale
                   : custom ? BoardGeometry.level() / GpuBuilding.LEVEL_HEIGHT
                   : feature.height() * BoardGeometry.level() / (fitHeight ? bounds.getDepth() : 1);
-            float low = ground + feature.elevation() * BoardGeometry.level() + bounds.min.z * verticalScale;
+            // Scenery grounds its lowest authored vertex, including models with an offset origin.
+            float low = ground + feature.elevation() * BoardGeometry.level()
+                  + (feature.kind() == BoardScene.FeatureKind.SCENERY ? 0 : bounds.min.z * verticalScale);
             float height = custom ? feature.height() * BoardGeometry.level() : bounds.getDepth() * verticalScale;
             footprints.add(new Footprint(List.copyOf(points), low, low + height + upperGround - ground, bounds));
         }

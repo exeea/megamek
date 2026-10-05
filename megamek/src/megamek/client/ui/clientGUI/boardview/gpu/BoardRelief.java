@@ -2455,11 +2455,24 @@ final class BoardRelief {
 
     // ---- Rim formations and fallen rock ----------------------------------------------------------------------
 
+    /** Authored Rough on an exposed ridge reads as attached bedrock, sharing the strike of nearby outcrops. */
+    private boolean roughRidge() {
+        if (!sculpted || !self.detailed() || self.liquid() || self.family() == CONCRETE) { return false; }
+        int exposed = 0;
+        for (int e = 0; e < 6; e++) {
+            Site other = neighbor(self, e);
+            // A board boundary alone must not turn the whole border into a geological landmark.
+            if (other != null && !other.ultraSublevel() && self.level() - other.level() >= 3) { exposed++; }
+        }
+        return exposed >= 2;
+    }
+
     /** Rough boulders use the rock kit and the hex's geology, rooted in its finished ground or riverbed. */
     void boulders(List<BoardSurface.Face> destination) {
         List<BoardScene.Feature> boulders = tile.features().stream()
               .filter(feature -> feature.kind() == BoardScene.FeatureKind.BOULDER).toList();
         if (boulders.isEmpty()) { return; }
+        boolean ridge = roughRidge();
         BoardScene.Surface family = BoardScene.Surface.values()[self.family()];
         List<BoardSurface.Face> ground = new ArrayList<>(destination.stream()
               .filter(face -> face.finish() != BoardSurface.Finish.OUTCROP
@@ -2474,7 +2487,7 @@ final class BoardRelief {
             BoardScene.Feature feature = boulders.get(i);
             // Without gravity rough is bedrock (BoardScene.Tile.lunar): formations of the ground's own rock that
             // share the regional strike and keep their proportions.
-            boolean outcrop = feature.asset().equals(BoardRocks.OUTCROP);
+            boolean outcrop = feature.asset().equals(BoardRocks.OUTCROP) || ridge;
             float size = BoardFeatures.ROUGH_BOULDER_WIDTH * feature.scale() * BoardGeometry.hexScale();
             float height = feature.height() * BoardGeometry.level();
             // Keep the captured road/bridge clearance; pulling a rock inward to fit a rim could invade that route.
@@ -3271,24 +3284,37 @@ final class BoardRelief {
         Vector3 start = BoardGeometry.corner(tile.coords(), tile.elevation(), side.edge());
         Vector3 end = BoardGeometry.corner(tile.coords(), tile.elevation(), side.edge() + 1);
         float ta = along(side.edge(), side.a()), tb = along(side.edge(), side.b());
-        int count = sculpted ? topSamples(side.edge()) : 1;
+        boolean graded = roadRims != null && roadRims[side.edge()] != null;
+        int count = sculpted || graded ? topSamples(side.edge()) : 1;
         List<Float> cuts = new ArrayList<>(List.of(ta));
         for (int i = 1; i < count; i++) {
             float t = i / (float) count;
             if (t > ta + .0001f && t < tb - .0001f) { cuts.add(t); }
         }
         cuts.add(tb);
-        Vector3 previous = rimPoint(side, ta, side.a()), previousLow = new Vector3(previous.x, previous.y, side.lowA());
+        Vector3 previous = rimPoint(side, ta, side.a());
+        Vector3 previousLow = graded ? roadFootPoint(side.edge(), ta, side.lowA())
+              : new Vector3(previous.x, previous.y, side.lowA());
         for (int i = 1; i < cuts.size(); i++) {
             float t = cuts.get(i), u = (t - ta) / (tb - ta);
             Vector3 top = rimPoint(side, t, i == cuts.size() - 1 ? side.b() : new Vector3(start).lerp(end, t));
             top.z = side.a().z + (side.b().z - side.a().z) * u;
-            Vector3 low = new Vector3(top.x, top.y, side.lowA() + (side.lowB() - side.lowA()) * u);
+            float bottom = side.lowA() + (side.lowB() - side.lowA()) * u;
+            Vector3 low = graded ? roadFootPoint(side.edge(), t, bottom) : new Vector3(top.x, top.y, bottom);
             addQuad(result, previous, previousLow, low, top, BoardSurface.Finish.WALL, side.edge());
             previous = top;
             previousLow = low;
         }
         shadeWall(side, result, from);
+    }
+
+    /** Match the neighbouring ground's emitted rim segments when a ramp adds columns between its samples. */
+    private Vector3 roadFootPoint(int edge, float t, float z) {
+        int count = topSamples(edge);
+        float scaled = Math.clamp(t, 0, 1) * count;
+        int first = Math.min((int) scaled, count - 1);
+        return roadPoint(edge, first / (float) count, z)
+              .lerp(roadPoint(edge, (first + 1f) / count, z), scaled - first);
     }
 
     /** Retaining faces keep wall projection data even when a road cuts their rim or raises their foot. */
@@ -3431,6 +3457,7 @@ final class BoardRelief {
 
     /** The top of a straight face: this hex's own canonical boundary point where one exists, else the side's point. */
     private Vector3 rimPoint(BoardSurface.Side side, float t, Vector3 fallback) {
+        if (roadRims != null && roadRims[side.edge()] != null) { return roadRimPoint(side.edge(), t, fallback.z); }
         if (!sculpted) { return new Vector3(fallback); }
         int count = topSamples(side.edge());
         float scaled = t * count;

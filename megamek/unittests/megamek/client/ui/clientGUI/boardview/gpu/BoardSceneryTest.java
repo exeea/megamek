@@ -21,6 +21,27 @@ import org.junit.jupiter.api.Test;
 
 class BoardSceneryTest {
     @Test
+    void tacticalSceneryKeepsOriginalArtworkSeparateFromTheGroundOnRoofsAndUnderwater() {
+        for (String support : List.of("pavement:1", "water:2",
+              "pavement:1;building:2;bldg_elev:3;bldg_cf:90")) {
+            var bare = capture(new Hex(0, support, ""));
+            for (String decoration : List.of("fluff:6:0", "fluff:14:0", "geyser:1")) {
+                var hex = new Hex(0, support + ";" + decoration, "");
+                var image = capture(hex);
+                assertTrue(alpha(image.tilesetDecals()) + alpha(image.tilesetScenery()) > 0,
+                      "Tactical View must retain " + decoration);
+                assertEquals(BoardScene.Pixels.capture(bare.tileset(), null), BoardScene.Pixels.capture(image.tileset(), null),
+                      "The ground must not retain a duplicate of " + decoration);
+                var tile = tile(hex, image);
+                assertEquals(tile.tilesetDecals(), tile.withTactical(null).tilesetDecals(),
+                      "Tactical marker refreshes must retain painted artwork");
+                assertEquals(tile.tilesetScenery(), tile.withTactical(null).tilesetScenery(),
+                      "Tactical marker refreshes must retain object artwork");
+            }
+        }
+    }
+
+    @Test
     void rubbleUsesTheDestroyedStructureTypeAndClearedPathsStayCosmetic() {
         var families = List.of("light", "medium", "heavy", "hardened", "wall", "heavy");
         for (int type = 1; type <= 6; type++) {
@@ -209,7 +230,7 @@ class BoardSceneryTest {
     }
 
     @Test
-    void roofFurnitureUsesTheCapturedBuildingHeight() {
+    void roofFurnitureRetainsNominalBuildingHeightForClearance() {
         var hex = new Hex(0, "building:2;bldg_elev:3;bldg_cf:50;fluff:6:6", "");
         var image = capture(hex);
         var feature = tile(hex, image).features().stream()

@@ -105,7 +105,9 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               hex.containsTerrain(Terrains.BLACK_ICE) && hex.getTerrain(Terrains.BLACK_ICE).isBlackIceDetected(),
               cliffTopExits(hex, pixels.coords(), board), false, BoardSurfaceBlend.capture(hex),
               terrainImages.captureOverlay(pixels.bridge(), previous == null ? null : previous.bridge()),
-              hex.containsTerrain(Terrains.ULTRA_SUBLEVEL));
+              hex.containsTerrain(Terrains.ULTRA_SUBLEVEL),
+              terrainImages.captureOverlay(pixels.tilesetDecals(), previous == null ? null : previous.tilesetDecals()),
+              terrainImages.captureOverlay(pixels.tilesetScenery(), previous == null ? null : previous.tilesetScenery()));
     }
 
     /** Pit rims use the existing authored-cliff path. The source hex and its gameplay exits remain untouched. */
@@ -202,7 +204,17 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
           Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
           boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable,
           boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover, Pixels bridge,
-          boolean ultraSublevel) {
+          boolean ultraSublevel, Pixels tilesetDecals, Pixels tilesetScenery) {
+        Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
+              Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
+              Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
+              boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable,
+              boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover, Pixels bridge,
+              boolean ultraSublevel) {
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals, decalsWithoutLimbs,
+                  tactical, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce,
+                  cliffTopExits, bare, groundCover, bridge, ultraSublevel, null, null);
+        }
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface, Pixels ground,
               Pixels normals, Pixels decals, Pixels decalsWithoutLimbs,
               Pixels tactical, List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
@@ -321,7 +333,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             if (marking == tactical) { return this; }
             return new Tile(coords, elevation, waterDepth, frozen, roadExits, surface, ground, normals, decals,
                   decalsWithoutLimbs, marking, features, text, liquid, tileset, detailedGround, road, fireSmoke, biome,
-                  impassable, blackIce, cliffTopExits, bare, groundCover, bridge, ultraSublevel);
+                  impassable, blackIce, cliffTopExits, bare, groundCover, bridge, ultraSublevel, tilesetDecals, tilesetScenery);
         }
 
         /** Zero-gravity presentation only: expose the liquid bed as bare rock, without editing the source hex. */
@@ -879,6 +891,8 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
                 used.add(tile.tactical());
                 used.add(tile.tileset());
                 used.add(tile.bridge());
+                used.add(tile.tilesetDecals());
+                used.add(tile.tilesetScenery());
             }
             images.keySet().retainAll(used);
         }

@@ -45,7 +45,14 @@ public final class BoardArtwork implements AutoCloseable {
     public record HexImage(Coords coords, BufferedImage terrain, BufferedImage normals, BufferedImage decals,
           BufferedImage decalsWithoutLimbs, BufferedImage tactical, List<BoardHexText> text,
           Map<Integer, String> structureModels, BufferedImage tileset, BufferedImage bridge, Set<Integer> blankTerrains,
-          Scenery scenery) {
+          Scenery scenery, BufferedImage tilesetDecals, BufferedImage tilesetScenery) {
+        public HexImage(Coords coords, BufferedImage terrain, BufferedImage normals, BufferedImage decals,
+              BufferedImage decalsWithoutLimbs, BufferedImage tactical, List<BoardHexText> text,
+              Map<Integer, String> structureModels, BufferedImage tileset, BufferedImage bridge, Set<Integer> blankTerrains,
+              Scenery scenery) {
+            this(coords, terrain, normals, decals, decalsWithoutLimbs, tactical, text, structureModels, tileset, bridge,
+                  blankTerrains, scenery, null, null);
+        }
         public HexImage(Coords coords, BufferedImage terrain, BufferedImage normals, BufferedImage decals,
               BufferedImage decalsWithoutLimbs, BufferedImage tactical, List<BoardHexText> text,
               Map<Integer, String> structureModels, BufferedImage tileset, BufferedImage bridge, Set<Integer> blankTerrains) {
@@ -76,7 +83,7 @@ public final class BoardArtwork implements AutoCloseable {
     }
     private record GroundArtwork(BufferedImage color, BufferedImage normal) { }
     private record DecalArtwork(BufferedImage full, BufferedImage withoutLimbs, BufferedImage tileset,
-          BufferedImage bridge, Scenery scenery) { }
+          BufferedImage bridge, Scenery scenery, BufferedImage tilesetDecals, BufferedImage tilesetScenery) { }
     private final Map<Coords, GroundArtwork> groundArtwork = new HashMap<>();
     private final Map<Coords, DecalArtwork> featureArtwork = new HashMap<>();
     private final Map<String, Image> groundNormals = new HashMap<>();
@@ -170,7 +177,8 @@ public final class BoardArtwork implements AutoCloseable {
               decals == null ? null : decals.full(), decals == null ? null : decals.withoutLimbs(), null,
               BoardHexText.capture(coords, hex, board, 1, LABEL_FONT, LABEL_FONT),
               models, decals == null ? null : decals.tileset(), decals == null ? null : decals.bridge(), blank,
-              decals == null ? Scenery.EMPTY : decals.scenery());
+              decals == null ? Scenery.EMPTY : decals.scenery(), decals == null ? null : decals.tilesetDecals(),
+              decals == null ? null : decals.tilesetScenery());
     }
 
     public void invalidate(Coords coords) {
@@ -381,7 +389,6 @@ public final class BoardArtwork implements AutoCloseable {
     private DecalArtwork captureDecals(Board board, Coords coords, Map<Integer, String> structures, Set<Integer> blank) {
         return featureArtwork.computeIfAbsent(coords, key -> {
             Hex flat = board.getHex(key).duplicate();
-            BufferedImage tileset = drawTileset(board.getHex(key), structures);
             BufferedImage bridge = drawBridge(board.getHex(key));
             for (int terrain : GROUND_TERRAINS) {
                 flat.removeTerrain(terrain);
@@ -391,16 +398,20 @@ public final class BoardArtwork implements AutoCloseable {
             }
             for (int terrain : SCENERY_TERRAINS) { flat.removeTerrain(terrain); }
             BufferedImage full = drawDecals(flat);
-            Scenery scenery = drawScenery(board.getHex(key), structures, blank, full);
+            BufferedImage tilesetDecals = new BufferedImage(HEX_W, HEX_H, BufferedImage.TYPE_INT_ARGB);
+            BufferedImage tilesetScenery = new BufferedImage(HEX_W, HEX_H, BufferedImage.TYPE_INT_ARGB);
+            Set<String> placedSources = new HashSet<>();
+            Scenery scenery = drawScenery(board.getHex(key), structures, blank, full, tilesetDecals, tilesetScenery, placedSources);
+            BufferedImage tileset = drawTileset(board.getHex(key), structures, placedSources);
             BufferedImage withoutLimbs = null;
             if (flat.containsAnyTerrainOf(Terrains.ARMS, Terrains.LEGS)) {
                 flat.removeTerrain(Terrains.ARMS);
                 flat.removeTerrain(Terrains.LEGS);
                 withoutLimbs = drawDecals(flat);
-                drawScenery(board.getHex(key), structures, blank, withoutLimbs);
+                drawScenery(board.getHex(key), structures, blank, withoutLimbs, null, null, null);
             }
             // The GPU chooses the filtered image only after successfully loading the replacement mesh.
-            return new DecalArtwork(full, withoutLimbs, tileset, bridge, scenery);
+            return new DecalArtwork(full, withoutLimbs, tileset, bridge, scenery, tilesetDecals, tilesetScenery);
         });
     }
 
@@ -410,7 +421,7 @@ public final class BoardArtwork implements AutoCloseable {
      * artwork stays an alpha decal on the existing surface. Original images remain available to Tactical View.
      */
     private Scenery drawScenery(Hex hex, Map<Integer, String> structures, Set<Integer> blank,
-          BufferedImage decals) {
+          BufferedImage decals, BufferedImage tilesetDecals, BufferedImage tilesetScenery, Set<String> placedSources) {
         List<String> models = new ArrayList<>();
         List<Image> paint = new ArrayList<>();
         Set<Integer> covered = new HashSet<>(), modeled = new HashSet<>();
@@ -419,8 +430,12 @@ public final class BoardArtwork implements AutoCloseable {
         layers.addAll(gpuTileset.getOrthographic(hex));
         layers.add(gpuTileset.getBase(hex));
         Graphics2D graphics = decals.createGraphics();
+        Graphics2D original = tilesetDecals == null ? null : tilesetDecals.createGraphics();
+        Graphics2D objects = tilesetScenery == null ? null : tilesetScenery.createGraphics();
         try {
             UIUtil.setHighQualityRendering(graphics);
+            if (original != null) { UIUtil.setHighQualityRendering(original); }
+            if (objects != null) { UIUtil.setHighQualityRendering(objects); }
             for (Image layer : layers) {
                 Set<Integer> types = new HashSet<>();
                 for (int type : hex.getTerrainTypes()) {
@@ -442,6 +457,10 @@ public final class BoardArtwork implements AutoCloseable {
                 String asset = extension < 0 ? "" : "scenery/" + source.substring(0, extension);
                 boolean model = !asset.isEmpty() && sceneryModels.computeIfAbsent(asset,
                       name -> new File(Configuration.dataDir(), "models/board/" + name + ".glb").isFile());
+                if (original != null) {
+                    (model ? objects : original).drawImage(layer, 0, 0, null);
+                    placedSources.add(source);
+                }
                 if (model) {
                     models.add(asset);
                     modeled.addAll(types);
@@ -470,6 +489,8 @@ public final class BoardArtwork implements AutoCloseable {
             return scenery;
         } finally {
             graphics.dispose();
+            if (original != null) { original.dispose(); }
+            if (objects != null) { objects.dispose(); }
         }
     }
 
@@ -489,9 +510,10 @@ public final class BoardArtwork implements AutoCloseable {
     /**
      * The hex's Saxarba art, as the Tactical View shows it: its base, its supers and its orthographic images, without
      * the incline and cliff edges, which the view's BoardRim shades from the levels instead, without the bridge, which
-     * it lays on the deck, and without the structures that stand there as 3D models.
+     * it lays on the deck, and without structures or scenery. Scenery retains its original selected artwork in a
+     * separate overlay, so both views can put it on roofs and lakebeds instead of baking it into the column top.
      */
-    private BufferedImage drawTileset(Hex source, Map<Integer, String> structures) {
+    private BufferedImage drawTileset(Hex source, Map<Integer, String> structures, Set<String> placedSources) {
         Hex hex = source.duplicate();
         for (int terrain : DROP_TERRAINS) { hex.removeTerrain(terrain); }
         for (int terrain : BRIDGE_TERRAINS) { hex.removeTerrain(terrain); }
@@ -504,9 +526,12 @@ public final class BoardArtwork implements AutoCloseable {
             UIUtil.setHighQualityRendering(graphics);
             Image base = gpuTileset.getBase(hex);
             drawBaseTerrain(hex, graphics, base, base, mask(), 1);
-            drawSupers(hex, graphics);
-            for (Image orthographic : gpuTileset.getOrthographic(hex)) {
-                if (orthographic != null) { graphics.drawImage(orthographic, 0, 0, null); }
+            List<Image> layers = new ArrayList<>(gpuTileset.getSupers(hex));
+            layers.addAll(gpuTileset.getOrthographic(hex));
+            for (Image layer : layers) {
+                if (layer != null && !placedSources.contains(gpuTileset.imageSource(layer).replace('\\', '/'))) {
+                    graphics.drawImage(layer, 0, 0, null);
+                }
             }
         } finally {
             graphics.dispose();

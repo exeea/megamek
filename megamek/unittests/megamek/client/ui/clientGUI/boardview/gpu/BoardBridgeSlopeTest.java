@@ -140,9 +140,101 @@ class BoardBridgeSlopeTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = { 0, 1, 2, 3, 4, 5 })
+    void roadApproachesShareTheSlopeAndSupportAcrossBothInsets(int direction) {
+        for (int x : new int[] { 3, 4 }) {
+            var at = new Coords(x, 4);
+            var roadAt = at.translated(direction);
+            int exits = (1 << direction) | (1 << ((direction + 3) % 6));
+            for (int roadLevel : new int[] { 0, 2 }) {
+                var scene = BoardSurfaceBlendTest.scene(c -> c.equals(at) ? bridge(c, -1, 2, exits)
+                      : BoardRoadTest.tile(c, c.equals(roadAt) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
+                            c.equals(roadAt) ? exits : 0, c.equals(roadAt) ? roadLevel : -1, BoardScene.Surface.GRASS));
+                var tile = scene.tile(at);
+                var center = BoardGeometry.center(at, 1);
+                var roadCenter = BoardGeometry.center(roadAt, roadLevel);
+                int edge = Math.floorMod(1 - direction, 6);
+                var across = BoardGeometry.corner(at, 0, edge + 1).sub(BoardGeometry.corner(at, 0, edge)).nor();
+                float lift = GpuRoads.SURFACE_LIFT * BoardGeometry.hexScale();
+                for (var lod : TerrainLod.values()) {
+                    var surfaces = new HashMap<Coords, BoardSurface>();
+                    var footing = BoardBridgeFooting.build(scene, tile, lod, surfaces);
+                    var shape = BoardBridgeSlope.build(tile, BoardBridge.deck(scene, tile), footing);
+                    assertEquals(roadLevel == 0, (footing.solidExits() & (1 << direction)) != 0,
+                          "A raised bridge owns a solid approach over the unchanged bank");
+                    var road = surfaces.get(roadAt);
+                    assertEquals(center.z + lift, height(shape, center, false), .01f);
+                    assertEquals(roadCenter.z, road.height(roadCenter.x, roadCenter.y), .01f);
+                    // A straight line from one inset to the other must describe both actual meshes.
+                    for (float t : new float[] { .3f, .4f, .499f, .501f, .6f, .7f }) {
+                        for (float lateral : new float[] { -6, 0, 6 }) {
+                            var p = new Vector3(center).lerp(roadCenter, t)
+                                  .mulAdd(across, lateral * BoardGeometry.hexScale());
+                            float expected = center.z + (roadCenter.z - center.z) * (2 * t - .5f);
+                            if (t < .5f || roadLevel == 0) {
+                                assertEquals(expected + lift, height(shape, p, false), .015f, "Solid approach: " + lod);
+                            } else {
+                                assertEquals(expected, road.height(p.x, p.y), .015f, "Road inset: " + lod + " x=" + x
+                                      + " roadLevel=" + roadLevel + " t=" + t + " lateral=" + lateral);
+                            }
+                        }
+                    }
+                    if (roadLevel == 0) {
+                        assertTrue(road.faces.stream().allMatch(f -> Math.max(f.a().z, Math.max(f.b().z, f.c().z)) <= lift),
+                              "The raised block must not pull the bank or shoreline up into its sides");
+                        var along = new Vector3(roadCenter).sub(center);
+                        along.z = 0;
+                        float length = along.len();
+                        along.nor();
+                        var outward = new Vector3(-along.y, along.x, 0);
+                        assertEquals(length * .25f + BoardBridgeFooting.terminalLength() * BoardGeometry.hexScale(),
+                              footing.lengths().get(direction) * BoardGeometry.hexScale(), .001f,
+                              "The entrance wedge starts at the road inset and finishes on its flat hub");
+                        for (float t : new float[] { .3f, .49f, .51f, .7f }) {
+                            var p = new Vector3(center).lerp(roadCenter, t);
+                            float grade = center.z + (roadCenter.z - center.z) * (2 * t - .5f) + lift;
+                            for (int side : new int[] { -1, 1 }) {
+                                var rail = new Vector3(p).mulAdd(across, side * 8.25f * BoardGeometry.hexScale());
+                                assertEquals(grade + 2.5f * BoardGeometry.hexScale(), height(shape, rail, false), .015f,
+                                      "Both rails continue along the ramp without a terminal interrupting the grade");
+                                var origin = new Vector3(p).mulAdd(outward, side * 30 * BoardGeometry.hexScale());
+                                origin.z = (grade - BoardGeometry.level()) / 2;
+                                assertTrue(Float.isFinite(footing.shape().hit(new Ray(origin, new Vector3(outward).scl(-side)))),
+                                      "The single support closes both sides across the road/bridge boundary");
+                            }
+                        }
+                        var base = new Vector3(center).lerp(roadCenter, .75f);
+                        for (int side : new int[] { -1, 1 }) {
+                            var cap = new Vector3(base).mulAdd(along,
+                                        BoardBridgeFooting.terminalLength() * BoardGeometry.hexScale() - BoardRelief.metres(1.38f))
+                                  .mulAdd(outward, side * (9 * BoardGeometry.hexScale() + BoardRelief.metres(.15f)));
+                            assertTrue(height(shape, cap, false) > roadCenter.z + lift + 2.5f * BoardGeometry.hexScale(),
+                                  "The authored entrance block is beyond the ramp, on the flat road");
+                        }
+                    } else {
+                        assertTrue(road.faces.stream().anyMatch(road::bridgeSupport), "The road's cut receives concrete");
+                    }
+                    assertFalse(road.faces.stream().filter(f -> f.a().z == roadCenter.z && f.b().z == roadCenter.z
+                          && f.c().z == roadCenter.z).anyMatch(road::bridgeSupport), "The flat road hub keeps its ground");
+                    // The bridge half has a real support down to the ground, while its central crossing stays open.
+                    for (int side : new int[] { -1, 1 }) {
+                        var p = new Vector3(center).lerp(roadCenter, .375f);
+                        p.z = 0;
+                        var origin = new Vector3(p).mulAdd(across, side * 30 * BoardGeometry.hexScale());
+                        assertTrue(Float.isFinite(footing.shape().hit(new Ray(origin, new Vector3(across).scl(-side)))),
+                              "Concrete fills the entire sloping bridge end: " + lod);
+                    }
+                    var under = new Vector3(center.x, center.y, 0).mulAdd(across, -30 * BoardGeometry.hexScale());
+                    assertFalse(Float.isFinite(footing.shape().hit(new Ray(under, across))), "The level span remains open below");
+                }
+            }
+        }
+    }
+
     static BoardBridge.Shape manufactured(BoardScene scene, BoardScene.Tile tile) {
         var footing = BoardBridgeFooting.build(scene, tile, TerrainLod.FULL, new HashMap<>());
-        return BoardBridgeSlope.build(tile, BoardBridge.deck(scene, tile), footing.shape());
+        return BoardBridgeSlope.build(tile, BoardBridge.deck(scene, tile), footing);
     }
 
     static float height(BoardBridge.Shape shape, Vector3 point, boolean underside) {

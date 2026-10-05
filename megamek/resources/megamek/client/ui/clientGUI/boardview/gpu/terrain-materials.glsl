@@ -76,24 +76,16 @@ vec4 translatedTexel(float layer, vec2 uv, mat2 gradient, float variation) {
     return mix(a, b, smoothstep(.2, .8, fract(choice)));
 }
 
-// Earth banks need the same repeat breakup as flat dirt. Keep both vertical projections upright, so erosion
-// runs downhill; translating and rescaling also lets color/height and normal/AO share this exact sampling.
-vec4 earthSideTexel(float layer, vec2 uv, mat2 gradient, float breakup, bool normalMap) {
-    vec4 texel = materialTexel(layer, uv, gradient);
-    if (breakup > 0.0) {
-        vec4 enlarged = materialTexel(layer, uv / 2.37 + vec2(.31, .57), gradient / 2.37);
-        if (normalMap) {
-            vec3 normal = enlarged.rgb * 2.0 - 1.0;
-            enlarged.rgb = normalize(vec3(normal.xy / 2.37, normal.z)) * .5 + .5;
-        }
-        texel = mix(texel, enlarged, breakup);
-    }
-    return texel;
+// The ground's variation field is constant down a vertical face. Advance the source selection with projected
+// height as well, otherwise a tall cliff repeats the same two patches at every map period. Blends use a different
+// interval from the source repeat; both maps keep their scale and upright grain, with the same two texture reads.
+vec4 cliffTexel(float layer, vec2 uv, mat2 gradient, float variation) {
+    return translatedTexel(layer, uv, gradient, variation + uv.y * .173);
 }
 
 // Every role shares projection and metre scale through a bend. No UV origin at an individual hex's rim or foot.
 vec4 sampleMaterial(float colorMap, float tile, float amount, MaterialProjection p,
-      vec3 world, float variation, float fine, float region, bool groundMap, float familyId, bool earth) {
+      vec3 world, float variation, float fine, float region, bool groundMap, float familyId) {
     if (amount < .0001) return vec4(0.0);
     bool fungus = abs(familyId - FUNGUS_FAMILY) < .5;
     vec4 pigment = vec4(0.0);
@@ -111,10 +103,8 @@ vec4 sampleMaterial(float colorMap, float tile, float amount, MaterialProjection
     if (p.lying < 1.0) {
         vec4 steep = fungus ? mix(fungusTexel(colorMap, p.y / tile + .37, p.yGradient / tile),
               fungusTexel(colorMap, p.x / tile, p.xGradient / tile), p.side)
-              : earth ? mix(earthSideTexel(colorMap, p.y / tile + .37, p.yGradient / tile, variation, false),
-                    earthSideTexel(colorMap, p.x / tile, p.xGradient / tile, variation, false), p.side)
-              : mix(translatedTexel(colorMap, p.y / tile + .37, p.yGradient / tile, variation),
-                    translatedTexel(colorMap, p.x / tile, p.xGradient / tile, variation), p.side);
+              : mix(cliffTexel(colorMap, p.y / tile + .37, p.yGradient / tile, variation),
+                    cliffTexel(colorMap, p.x / tile, p.xGradient / tile, variation), p.side);
         pigment = mix(steep, pigment, p.lying);
     }
     vec3 color = pigment.rgb;
@@ -129,7 +119,7 @@ vec4 sampleMaterial(float colorMap, float tile, float amount, MaterialProjection
 // Height blending often discards a present layer entirely. Its normal/cavity cannot affect the result then.
 // Defer those texture reads until the colour/height samples have determined the final weights.
 vec4 materialNormal(float normalMap, float tile, float weight, MaterialProjection p, vec3 face, float variation,
-      bool earth, bool fungus, bool sand) {
+      bool fungus, bool sand) {
     if (weight <= 0.0 || u_normalMaps <= .5) return vec4(face, 1.0);
     if (terrainNormalDetail <= 0.0) return vec4(face, TERRAIN_DISTANT_CAVITY);
     vec3 normal = face;
@@ -147,11 +137,9 @@ vec4 materialNormal(float normalMap, float tile, float weight, MaterialProjectio
     }
     if (p.lying < 1.0) {
         vec4 nx = fungus ? fungusTexel(normalMap, p.x / tile, p.xGradient / tile)
-              : earth ? earthSideTexel(normalMap, p.x / tile, p.xGradient / tile, variation, true)
-              : translatedTexel(normalMap, p.x / tile, p.xGradient / tile, variation);
+              : cliffTexel(normalMap, p.x / tile, p.xGradient / tile, variation);
         vec4 ny = fungus ? fungusTexel(normalMap, p.y / tile + .37, p.yGradient / tile)
-              : earth ? earthSideTexel(normalMap, p.y / tile + .37, p.yGradient / tile, variation, true)
-              : translatedTexel(normalMap, p.y / tile + .37, p.yGradient / tile, variation);
+              : cliffTexel(normalMap, p.y / tile + .37, p.yGradient / tile, variation);
         vec3 x = nx.rgb * 2.0 - 1.0, y = ny.rgb * 2.0 - 1.0;
         vec3 wall = normalize(mix(vec3(-y.x * sign(face.y) + face.x, y.z * face.y, face.z - y.y),
               vec3(x.z * face.x, x.x * sign(face.x) + face.y, face.z - x.y), p.side));
@@ -257,16 +245,14 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
     float highestMinimum = max(max(roles.x, roles.y), max(roles.z, roles.w));
     float width = materialBlendWidth();
     vec4 candidates = step(vec4(highestMinimum - width), roles + .38 * (4.0 * roles * (1.0 - roles)));
-    bool dirt = abs(familyId - 1.0) < .5;
-    bool earthMantle = dirt || abs(familyId) < .5 || abs(familyId - TROPICAL_FAMILY) < .5;
     vec4 a = sampleMaterial(layers.x, tiles.x, roles.x * candidates.x, projection,
-          world, broad, fine, region, true, familyId, dirt);
+          world, broad, fine, region, true, familyId);
     vec4 b = sampleMaterial(layers.w, tiles.w, roles.y * candidates.y, projection,
-          world, fine, fine, region, false, familyId, earthMantle);
+          world, fine, fine, region, false, familyId);
     vec4 c = sampleMaterial(layers.y, tiles.y, roles.z * candidates.z, projection,
-          world, fine, fine, region, false, familyId, false);
+          world, fine, fine, region, false, familyId);
     vec4 d = sampleMaterial(layers.z, tiles.z, roles.w * candidates.w, projection,
-          world, broad, fine, region, false, familyId, false);
+          world, broad, fine, region, false, familyId);
     d.rgb *= toLinear(bedTintFor(familyId, hardness));
     if (abs(familyId - DESERT_FAMILY) < .5) {
         // Pale abraded sandstone at the actual rim reads from above; deeper faces retain their warm brown.
@@ -275,11 +261,11 @@ TerrainMaterial naturalMaterialFor(vec3 world, vec3 face, float aboveFoot, float
     }
     vec4 weights = materialWeights(roles, vec4(a.a, b.a, c.a, d.a));
     bool fungus = abs(familyId - FUNGUS_FAMILY) < .5;
-    vec4 na = materialNormal(layers.x + 1.0, tiles.x, weights.x, projection, face, broad, dirt, fungus,
+    vec4 na = materialNormal(layers.x + 1.0, tiles.x, weights.x, projection, face, broad, fungus,
           abs(familyId - 2.0) < .5);
-    vec4 nb = materialNormal(layers.w + 1.0, tiles.w, weights.y, projection, face, fine, earthMantle, fungus, false);
-    vec4 nc = materialNormal(layers.y + 1.0, tiles.y, weights.z, projection, face, fine, false, fungus, false);
-    vec4 nd = materialNormal(layers.z + 1.0, tiles.z, weights.w, projection, face, broad, false, fungus, false);
+    vec4 nb = materialNormal(layers.w + 1.0, tiles.w, weights.y, projection, face, fine, fungus, false);
+    vec4 nc = materialNormal(layers.y + 1.0, tiles.y, weights.z, projection, face, fine, fungus, false);
+    vec4 nd = materialNormal(layers.z + 1.0, tiles.z, weights.w, projection, face, broad, fungus, false);
     TerrainMaterial result;
     result.color = toDisplay(a.rgb * weights.x + b.rgb * weights.y + c.rgb * weights.z + d.rgb * weights.w);
     result.normal = normalize(na.rgb * weights.x + nb.rgb * weights.y + nc.rgb * weights.z + nd.rgb * weights.w);

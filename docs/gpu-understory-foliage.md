@@ -38,7 +38,7 @@ The meshes and their textures are in the sibling `mm-data` repository:
 | Highland | Elevated grass or tundra | 460 | 236 | 92 |
 | Rocky | Rock and volcanic themes | 460 | 236 | 92 |
 | Wetland | Swamp, mud, water or dirt | 460 | 236 | 92 |
-| Desert | Sand or desert theme | 478 | 238 | 94 |
+| Desert | Desert theme | 478 | 238 | 94 |
 | Jungle | Jungle terrain or tropical theme | 472 | 228 | 96 |
 | Barren | Lunar theme | 456 | 232 | 96 |
 | Snow | Snow terrain or theme | 460 | 236 | 92 |

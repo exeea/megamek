@@ -19,13 +19,14 @@ import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Identical 30 m hexes, one-level slopes and a three-level cliff expose material scale/repetition differences. */
+/** Identical 30 m hexes and slopes expose material scale; surfaceScale.cliffTop extends the wall for tall-cliff review. */
 @Tag("on-demand")
 class GpuSurfaceScaleSmokeTest {
     @Test
     void capturesEverySurfaceAtTheSamePhysicalScale() throws Exception {
         var names = List.of("grass", "dirt", "sand", "rock", "concrete", "snow", "lunar", "fungus",
-              "desert", "mars", "mud", "swamp", "ice", "crust");
+              "desert", "mars", "volcano", "tropical", "mud", "swamp", "ice", "crust");
+        int cliffTop = Integer.getInteger("megamek.gpu.surfaceScale.cliffTop", 5);
         var scenes = new ArrayList<BoardScene>();
         for (String name : names) {
             var board = Board.createEmptyBoard(7, 8);
@@ -40,7 +41,7 @@ class GpuSurfaceScaleSmokeTest {
             };
             String theme = contents.isEmpty() ? name : "grass";
             for (int x = 0; x < 7; x++) for (int y = 0; y < 8; y++) {
-                int level = y < 2 ? 5 : y < 4 ? 2 : y < 6 ? 1 : 0;
+                int level = y < 2 ? cliffTop : y < 4 ? 2 : y < 6 ? 1 : 0;
                 board.setHex(new Coords(x, y), new Hex(level, contents, theme));
             }
             scenes.add(BoardAridSurfaceTest.capture(board));
@@ -69,12 +70,12 @@ class GpuSurfaceScaleSmokeTest {
                         for (boolean oblique : new boolean[] { false, true }) {
                             camera.setIsometric(oblique);
                             camera.camera.zoom = .44f;
-                            camera.center(BoardGeometry.center(new Coords(3, 4), 2));
+                            camera.center(BoardGeometry.center(new Coords(3, 4), oblique ? (cliffTop + 2) / 2 : 2));
                             frame.render(terrain, camera, scene);
                             GpuReviewFrame.save(new File(output, names.get(i) + (oblique ? "-oblique.png" : "-top.png")));
                         }
                         camera.camera.zoom = .18f;
-                        camera.center(BoardGeometry.center(new Coords(3, 3), 2));
+                        camera.center(BoardGeometry.center(new Coords(3, 3), (cliffTop + 2) / 2));
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(output, names.get(i) + "-detail.png"));
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), names.get(i));

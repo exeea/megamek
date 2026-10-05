@@ -73,6 +73,25 @@ class GpuTilesetTerrainSmokeTest {
         marked.replaceAll(tile -> tile.withTactical(pixels(0x80ff0000)));
         scene = scene.withTiles(marked);
         assertEquals(Set.of(), rebuilt(terrain, chunks, scene, floor, assets));
+
+        // Deepening water keeps the liquid level fixed, but changes the neighbours' underwater walls across a section edge.
+        List<BoardScene.Tile> water = new ArrayList<>();
+        for (var tile : scene.tiles()) { water.add(pool(tile.coords(), 2, art)); }
+        scene = scene.withTiles(water);
+        float bedFloor = -6 * BoardGeometry.level();
+        terrain.update(scene, bedFloor, assets);
+        water = new ArrayList<>(water);
+        water.set(edge.getX() * HEIGHT + edge.getY(), pool(edge, 4, art));
+        scene = scene.withTiles(water);
+        assertEquals(Set.of(0, rows), rebuilt(terrain, chunks, scene, bedFloor, assets));
+        for (var face : terrain.surface(scene, edge, bedFloor).faces()) {
+            assertEquals(-4 * BoardGeometry.level(), face.a().z, .001f, "The artwork follows the edited bed depth");
+        }
+    }
+
+    private static BoardScene.Tile pool(Coords coords, int depth, BoardScene.Pixels art) {
+        return new BoardScene.Tile(coords, 0, depth, false, 0, BoardScene.Surface.GRASS, art, null, null, null, null,
+              List.of(), List.of(), BoardLiquid.WATER, art);
     }
 
     /** The indices of the sections whose meshes an update to {@code scene} replaced. */

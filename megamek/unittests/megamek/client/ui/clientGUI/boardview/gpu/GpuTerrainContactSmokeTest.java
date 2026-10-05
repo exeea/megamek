@@ -103,8 +103,10 @@ class GpuTerrainContactSmokeTest {
                         try {
                             sentinel.setColor(0xff00ffff);
                             sentinel.fill();
-                            for (String name : List.of("grass", "sand")) {
-                                Gdx.gl30.glTexSubImage3D(GL30.GL_TEXTURE_2D_ARRAY, 0, 0, 0, 2 * names.indexOf(name),
+                            for (String name : List.of("grass", "loose-sand")) {
+                                int layer = names.indexOf(name);
+                                assertTrue(layer >= 0, "Sentinel must replace a real material: " + name);
+                                Gdx.gl30.glTexSubImage3D(GL30.GL_TEXTURE_2D_ARRAY, 0, 0, 0, 2 * layer,
                                       array.getWidth(), array.getHeight(), 1, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, sentinel.getPixels());
                             }
                             Gdx.gl.glGenerateMipmap(GL30.GL_TEXTURE_2D_ARRAY);

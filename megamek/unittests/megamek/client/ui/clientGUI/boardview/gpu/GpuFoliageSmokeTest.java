@@ -46,12 +46,28 @@ class GpuFoliageSmokeTest {
                             if (tile.features().isEmpty()) { continue; }
                             String name = tile.features().getFirst().asset();
                             var model = assets.model(name);
-                            assertEquals(snow, model.getMaterial("snow") != null, name);
+                            assertEquals(snow, model.getMaterial("snow") != null
+                                  || model.getMaterial("canopy-snow-cutout") != null, name);
                             for (var material : model.materials) {
                                 var map = material.get(TextureAttribute.class, TextureAttribute.Diffuse);
                                 assertNotNull(map, name + ": " + material.id);
                                 // The impostor cards carry their own rendered atlas, not a shared detail map.
                                 if (material.id.equals("impostor")) { continue; }
+                                if (material.id.endsWith("-cutout")) {
+                                    assertEquals(512, map.textureDescription.texture.getWidth());
+                                    assertEquals(512, map.textureDescription.texture.getHeight());
+                                    assertEquals(Texture.TextureWrap.ClampToEdge, map.textureDescription.texture.getVWrap());
+                                    continue;
+                                }
+                                if (material.id.equals("cactus")) {
+                                    assertEquals(512, map.textureDescription.texture.getWidth());
+                                    var normal = material.get(TextureAttribute.class, TextureAttribute.Normal);
+                                    assertNotNull(normal, "Cactus ribs use the authored normal map");
+                                    assertSame(assets.material("foliage/cactus-skin-normal"),
+                                          normal.textureDescription.texture);
+                                    assertSame(assets.material("foliage/cactus-skin"), map.textureDescription.texture);
+                                    continue;
+                                }
                                 assertEquals(64, map.textureDescription.texture.getWidth());
                                 assertEquals(64, map.textureDescription.texture.getHeight());
                                 assertEquals(Texture.TextureWrap.Repeat, map.textureDescription.texture.getVWrap());

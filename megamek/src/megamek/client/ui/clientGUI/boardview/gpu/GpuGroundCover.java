@@ -76,7 +76,8 @@ final class GpuGroundCover implements Disposable {
         List<BoardSurface.Face> ground = new ArrayList<>(surface.top().stream()
               .filter(face -> face.finish() == BoardSurface.Finish.TOP).toList());
         if (BoardGeometry.tuning().stepsBetweenTops()) { ground.addAll(surface.slopes()); }
-        ground.removeIf(face -> new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor().z <= .7f);
+        ground.removeIf(face -> BoardSurface.bridgeSupport(scene, tile, face)
+              || new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor().z <= .7f);
         var roots = new FloatArray();
         if (ground.isEmpty()) { return roots; }
         var support = new GpuBiomeVegetation.Support(ground);

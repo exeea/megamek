@@ -197,9 +197,15 @@ class GpuTerrainShowcaseSmokeTest {
                 };
                 int depth = cell == 'w' ? 1 : cell == 'W' ? 2 : -1;
                 Coords coords = new Coords(x, y);
-                tiles.add(new BoardScene.Tile(coords, level, depth, false, 0, family, pixels,
-                      null, null, null, null, woods(WOODS[y].charAt(x), level, family, coords), List.of(),
-                      water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
+                var features = new ArrayList<>(woods(WOODS[y].charAt(x), level, family, coords));
+                if (Boolean.getBoolean("megamek.gpu.showcase.rough") && x == 12 && (y == 4 || y == 6)) {
+                    Hex rough = new Hex(level);
+                    rough.addTerrain(new Terrain(Terrains.ROUGH, 1));
+                    features.addAll(BoardFeatures.capture(rough, coords, Map.of()));
+                }
+                var tile = new BoardScene.Tile(coords, level, depth, false, 0, family, pixels,
+                      null, null, null, null, features, List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true);
+                tiles.add(family == BoardScene.Surface.LUNAR ? tile.lunar() : tile);
             }
         }
         assertTrue(tiles.size() == width * height);
@@ -219,6 +225,10 @@ class GpuTerrainShowcaseSmokeTest {
             case CONCRETE -> hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1));
             case ROCK -> hex.setTheme("rock");
             case DIRT -> hex.setTheme("dirt");
+            case DESERT -> hex.setTheme("desert");
+            case MARS -> hex.setTheme("mars");
+            case VOLCANO -> hex.setTheme("volcano");
+            case LUNAR -> { return List.of(); }
             default -> { }
         }
         return BoardFeatures.capture(hex, coords, Map.of());

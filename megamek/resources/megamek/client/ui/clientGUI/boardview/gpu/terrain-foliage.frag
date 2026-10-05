@@ -16,6 +16,10 @@ uniform sampler2D u_diffuseTexture;
 #ifdef diffuseColorFlag
 uniform vec4 u_diffuseColor;
 #endif
+#ifdef normalTextureFlag
+uniform sampler2D u_normalTexture;
+uniform float u_normalMaps;
+#endif
 #ifdef blendedFlag
 in float v_opacity;
 #ifdef alphaTestFlag
@@ -27,6 +31,25 @@ uniform float u_clay;
 
 void main() {
     vec3 face = normalize(v_normal);
+#ifdef normalTextureFlag
+    // Derive the frame from the authored UVs, so mapped ribs follow bent stems and rotated instances.
+    // Mip filtering removes subpixel normal detail without adding a mesh level or draw pass.
+    vec3 dx = dFdx(v_cloudPosition), dy = dFdy(v_cloudPosition);
+    vec2 du = dFdx(v_diffuseUV), dv = dFdy(v_diffuseUV);
+    float determinant = du.x * dv.y - du.y * dv.x;
+    if (u_normalMaps > .5 && abs(determinant) > 1e-10) {
+        vec3 tangent = (dx * dv.y - dy * du.y) / determinant;
+        vec3 bitangent = (dy * du.x - dx * dv.x) / determinant;
+        tangent -= face * dot(face, tangent);
+        if (dot(tangent, tangent) > 1e-10) {
+            tangent = normalize(tangent);
+            vec3 perpendicular = cross(face, tangent);
+            bitangent = dot(perpendicular, bitangent) < 0.0 ? -perpendicular : perpendicular;
+            vec3 detail = (texture(u_normalTexture, v_diffuseUV).rgb * 255.0 - 128.0) / 127.0;
+            face = normalize(tangent * detail.x + bitangent * detail.y + face * detail.z);
+        }
+    }
+#endif
     vec4 diffuse = vec4(1.0);
 #ifdef diffuseTextureFlag
     diffuse = texture(u_diffuseTexture, v_diffuseUV);
@@ -65,8 +88,12 @@ void main() {
     direct *= sunlit;
 #endif
 #endif
-    // Cloud shadows attenuate direct light here (inserted by GpuCloudShadow).
     vec3 sheen = vec3(0.0);
+#ifdef normalTextureFlag
+    // Opaque cactus skin has a broad waxy highlight, using the terrain's existing dielectric light model.
+    surfaceLighting(face, u_wetness * .15, .65, ambient, direct, sheen);
+#endif
+    // Cloud shadows attenuate direct light here (inserted by GpuCloudShadow).
     albedo *= ambient + direct;
     albedo += sheen;
 #endif

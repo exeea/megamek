@@ -51,6 +51,7 @@ final class GpuBankTurf implements Disposable {
         var vertices = new FloatArray();
         List<BoardSurface.Face> faces = new ArrayList<>(surface.top());
         faces.addAll(surface.walls());
+        faces.removeIf(face -> BoardSurface.bridgeSupport(scene, tile, face));
         var support = new GpuBiomeVegetation.Support(faces);
         var center = BoardGeometry.center(tile.coords(), tile.elevation());
         var obstacles = new BoardObstacles(scene, tile);

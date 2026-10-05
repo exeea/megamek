@@ -4,10 +4,13 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.util.Map;
 import java.util.function.Function;
 
+import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.TextureData;
 import com.badlogic.gdx.graphics.g3d.Model;
+import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
+import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 
 /** Models borrow textures from their library's cache; each cache alone owns their disposal. */
@@ -33,6 +36,11 @@ final class ModelTextures {
             for (var texture : material.textures) { provider.load(texture.fileName); }
         }
         Model model = new Model(data, provider);
+        if (data instanceof RigidGlb.Data glb) {
+            glb.alphaTests.forEach((id, cutoff) -> model.getMaterial(id).set(
+                  new BlendingAttribute(false, GL20.GL_ONE, GL20.GL_ZERO, 1),
+                  new FloatAttribute(FloatAttribute.AlphaTest, cutoff)));
+        }
         var owned = model.getManagedDisposables().iterator();
         while (owned.hasNext()) {
             if (owned.next() instanceof Texture) { owned.remove(); }

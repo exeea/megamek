@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
@@ -40,6 +41,50 @@ class BoardRocksTest {
             }
         }
         return new BoardScene(0, LAYOUT[0].length(), LAYOUT.length, tiles, List.of(), List.of(), -1, "", List.of());
+    }
+
+    @Test
+    void authoredRoughOnNaturalRidgesUsesBoundedBedrockAtEveryLod() {
+        Coords centre = new Coords(1, 1);
+        for (TerrainLod detail : TerrainLod.values()) {
+            for (BoardScene.Surface family : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.DESERT,
+                  BoardScene.Surface.ROCK, BoardScene.Surface.MARS, BoardScene.Surface.VOLCANO)) {
+                var rough = roughRidge(family, 4, false, "rough-boulder");
+                var bedrock = roughRidge(family, 4, false, BoardRocks.OUTCROP);
+                var actual = new BoardSurface(rough, rough.tile(centre), detail);
+                var expected = new BoardSurface(bedrock, bedrock.tile(centre), detail);
+                assertEquals(expected.faces, actual.faces, "Rough reuses the closed outcrop kit: " + family + detail);
+                Vector3 anchor = BoardGeometry.center(centre, 4);
+                float height = actual.height(anchor.x, anchor.y) - anchor.z;
+                assertTrue(height > 0 && height <= BoardGeometry.level() * .5f,
+                      "Bedrock stays rooted and inside the captured rough height");
+                assertEquals(rough.tile(centre).features().size(), 1, "No additional obstacles or scene state");
+            }
+        }
+        for (var family : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.CONCRETE)) {
+            for (boolean wet : List.of(false, true)) {
+                int level = family == BoardScene.Surface.GRASS && !wet ? 0 : 4;
+                var ordinary = roughRidge(family, level, wet, "rough-boulder");
+                var bedrock = roughRidge(family, level, wet, BoardRocks.OUTCROP);
+                assertNotEquals(new BoardSurface(ordinary, ordinary.tile(centre)).faces,
+                      new BoardSurface(bedrock, bedrock.tile(centre)).faces,
+                      "Flat, submerged and concrete rough retain loose boulders");
+            }
+        }
+    }
+
+    private static BoardScene roughRidge(BoardScene.Surface family, int height, boolean wet, String asset) {
+        var tiles = new ArrayList<BoardScene.Tile>();
+        var rough = new BoardScene.Feature(asset, 0, 0, 20, 1, .5f, 0, BoardScene.FeatureKind.BOULDER);
+        for (int x = 0; x < 3; x++) {
+            for (int y = 0; y < 3; y++) {
+                boolean centre = x == 1 && y == 1;
+                tiles.add(new BoardScene.Tile(new Coords(x, y), centre ? height : 0, wet ? 1 : -1, false, 0,
+                      family, null, null, null, null, null, centre ? List.of(rough) : List.of(), List.of(),
+                      wet ? BoardLiquid.WATER : BoardLiquid.NONE, null, true));
+            }
+        }
+        return new BoardScene(0, 3, 3, tiles, List.of(), List.of(), -1, "", List.of());
     }
 
     private record Key(long x, long y, long z) {

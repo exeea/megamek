@@ -21,6 +21,54 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardRoadSlopeTest {
+    @Test
+    void bridgeRampFillDoesNotGrowGrass() {
+        var at = BoardRoadTest.CENTER;
+        var scene = BoardSurfaceBlendTest.scene(c -> c.equals(at.translated(0))
+              ? BoardBridgeSlopeTest.bridge(c, 0, 1, 9)
+              : BoardRoadTest.tile(c, c.equals(at) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
+                    c.equals(at) ? 9 : 0, 0, BoardScene.Surface.GRASS));
+        var tile = scene.tile(at);
+        for (var lod : List.of(TerrainLod.FULL, TerrainLod.MEDIUM)) {
+            var surface = new BoardSurface(scene, tile, lod);
+            var support = BoardTacticalGeometry.Surface.of(surface, scene, BoardGeometry.floor(scene));
+            var roots = GpuGroundCover.plant(scene, tile, support);
+            assertTrue(roots.size > 0, "Grass remains on the untouched ground beside the approach");
+            for (int i = 0; i < roots.size; i += 4) {
+                assertTrue(roots.get(i + 2) < .001f, "Grass must not grow from the raised concrete fill: " + lod);
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = { 0, 1, 2, 3, 4, 5 })
+    void raisedBridgeApproachesKeepTheirTerrainClosed(int direction) {
+        var at = BoardRoadTest.CENTER;
+        var bridge = at.translated(direction);
+        int exits = (1 << direction) | (1 << ((direction + 3) % 6));
+        for (int depth : new int[] { -1, 0, 1 }) {
+            var scene = BoardSurfaceBlendTest.scene(c -> {
+                if (c.equals(bridge)) {
+                    var span = BoardBridgeSlopeTest.bridge(c, 0, 1, exits);
+                    return new BoardScene.Tile(c, 0, depth, false, 0, BoardScene.Surface.GRASS,
+                          span.ground(), null, null, null, null, span.features(), List.of(),
+                          depth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE);
+                }
+                return BoardRoadTest.tile(c, c.equals(at) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
+                      c.equals(at) ? exits : 0, 0, BoardScene.Surface.GRASS);
+            });
+            for (var lod : TerrainLod.values()) { assertClosed(scene, at, lod); }
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(TerrainLod.class)
+    void koziceBridgeApproachesKeepTheirTerrainClosed(TerrainLod lod) {
+        var scene = BoardCliffSeamTest.scene(new File(
+              "data/boards/unofficial/Strategoslevel3/32x17 (CDS) Kozice Valley Grain Mills.board"));
+        for (var at : List.of(new Coords(19, 7), new Coords(19, 9))) { assertClosed(scene, at, lod); }
+    }
+
     @ParameterizedTest
     @EnumSource(TerrainLod.class)
     void motorwayRetainingPanelsStayNearTheirRoadBelowZero(TerrainLod lod) {
@@ -278,9 +326,13 @@ class BoardRoadSlopeTest {
 
     /** Check the emitted mesh, including T junctions, rather than just comparing the boundary helper to itself. */
     private static void assertClosed(BoardScene scene, Coords at) {
+        assertClosed(scene, at, TerrainLod.FULL);
+    }
+
+    private static void assertClosed(BoardScene scene, Coords at, TerrainLod lod) {
         Map<Coords, BoardSurface> surfaces = new HashMap<>();
         for (var tile : scene.tiles()) {
-            if (at.distance(tile.coords()) <= 2) { surfaces.put(tile.coords(), new BoardSurface(scene, tile)); }
+            if (at.distance(tile.coords()) <= 2) { surfaces.put(tile.coords(), new BoardSurface(scene, tile, lod)); }
         }
         Map<String, List<Segment>> edges = new HashMap<>();
         for (var surface : surfaces.values()) {
@@ -317,7 +369,7 @@ class BoardRoadSlopeTest {
                 if (!covered && gaps.size() < 12) { gaps.add(p + " on " + edge); }
             }
         }
-        assertTrue(gaps.isEmpty(), "Open terrain boundaries near " + at + ": " + gaps);
+        assertTrue(gaps.isEmpty(), lod + " open terrain boundaries near " + at + ": " + gaps);
     }
 
     private static String key(Vector3 p) {

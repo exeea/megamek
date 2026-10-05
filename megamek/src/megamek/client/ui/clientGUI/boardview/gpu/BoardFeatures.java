@@ -40,7 +40,9 @@ final class BoardFeatures {
     private static final List<String> ORCHARD = List.of("orchard-round", "orchard-spreading", "orchard-upright",
           "orchard-vase", "orchard-leaning", "orchard-young");
     static final List<String> MARS_CORALS = List.of("mars/finger-spires", "mars/fan-scalloped", "mars/tube-grove",
-          "mars/finger-crown", "mars/fan-folded", "mars/tube-crown");
+          "mars/antler-crown", "mars/plate-terraces", "mars/brain-lobes",
+          "mars/finger-crown", "mars/fan-folded", "mars/tube-crown",
+          "mars/organ-pipes", "mars/spiral-whorls", "mars/lattice-spires");
     private BoardFeatures() { }
 
     /** The tileset's orchard marker changes woods appearance, never creates cover by itself. */
@@ -155,7 +157,7 @@ final class BoardFeatures {
         if (hex.containsTerrain(Terrains.ULTRA_SUBLEVEL)) { return List.of(); }
         List<BoardScene.Feature> result = new ArrayList<>();
         for (String asset : scenery.models()) {
-            // Artwork layered on a building belongs to its roof. Cosmetic meshes never become game structures.
+            // Nominal roof elevation bounds CPU decoration clearance. Rendering settles onto the actual solid mesh.
             int roof = structureModels.containsKey(Terrains.BUILDING) ? Math.max(1, hex.terrainLevel(Terrains.BLDG_ELEV)) : 0;
             result.add(new BoardScene.Feature(asset, 0, 0, 0, 1, 1, roof, BoardScene.FeatureKind.SCENERY));
         }

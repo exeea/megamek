@@ -160,18 +160,21 @@ ambient occlusion in alpha. Repeat scales come from the asset metadata.
 LUNAR has independent `lunar`, `lunar-scree` and `lunar-cliff` map pairs and a
 `terrain/lunar.png` fallback. These began as copies of the original ROCK maps and
 geology. Terrestrial rock now has broader masses and a new granite contact source;
-lunar retains its original separate assets/profile. Editing either family must
+lunar now has authored neutral regolith, angular scree and fractured bedrock in
+its existing slots, with its separate profile. Editing either family must
 leave the other alone.
+Their existing 512-square map pairs span 8, 4 and 12 metres respectively; the
+contact baker estimates 2.5, 8 and 12 centimetres of shading relief. Sources and
+exact ImageGen prompts are retained in `mm-data/tools/terrain-contact-sources`.
 World-space projections keep coordinates continuous across hexes. Two differently
 oriented ground samples reduce repetition; walls use compatible vertical projections.
-Bare dirt and the soil mantle beneath grass/dirt also mix two translated, differently
-scaled samples on vertical projections. Both stay upright to preserve downhill erosion;
-color/height and normal/AO use the same coordinates and weights. Sand and other natural
-wall maps instead blend translated source windows selected by a continuous world field,
+Bare dirt, the soil mantle beneath grass/dirt and natural stone now share one
+vertical sampler. They blend translated source windows selected by a continuous world field,
 preserving wind/bedding direction and feature size without a regular per-hex motif.
-The fungal materials retain their four overlapping translated windows. Enlarging a
-sample by 2.37 also divides its normal gradient by 2.37, rather than exaggerating
-the same relief over a longer distance.
+The former earth-only two-scale bypass was removed. The fungal materials retain
+their four overlapping translated windows, varying in both horizontal and vertical
+directions. Enlarging a ground sample by 2.37 also divides its normal gradient by
+2.37, rather than exaggerating the same relief over a longer distance.
 Slope and height-aware blending determine how cover gives way to mantle, rock and scree.
 
 The dirt and `soil-contact` pairs are baked from ImageGen sources in
@@ -221,12 +224,20 @@ projections at the same physical scale. No UV origin or fixed repetition count i
 assigned per hex. A material can span several source windows within a hex without
 restarting at its edges. Window blending breaks up recognisable repetitions.
 
+Natural cliff sampling also advances its translated source selection with projected
+height. The horizontal ground field alone stays constant down a vertical face and
+repeats identical patches on tall walls such as Thunder Rift's basalt. Color/height
+and normal/AO use the same height-dependent offsets, keeping the source's metre scale
+and upright grain. This reuses the existing two reads per projection, material LOD,
+texture array and geometry; flat ground, constructed concrete and flowing lava retain
+their own sampling.
+
 | Material | Base source span in metres |
 | --- | --- |
 | Grass / dirt / desert hardpan / Mars hardpan | 4 / 5 / 6 / 6 |
 | Loose SAND / rock / snow / lunar / concrete tops | 12 / 8 / 8 / 8 / 6 |
 | Soil banks / scree / gravel | 4 / 4 / 3 |
-| Granite / sandstone / Martian / lunar cliff maps | 8 / 12 / 10 / 4 |
+| Granite / sandstone / Martian / lunar cliff maps | 8 / 12 / 10 / 12 |
 | Cast concrete wall map | 8; panel joints have their own constructed dimensions |
 | Fungal ground / mat / cliff / fibrous slope | 22 / 8 / 12 / 10 |
 | Volcanic ash ground / basalt cliff | 6 / 12 |
@@ -243,6 +254,9 @@ base repeat. Ice blends complete samples at its original and turned coordinates 
 colour, surface properties and normals; its normal gradients follow the rotation,
 scale and wind stretch. Solid crust bends its domain within a few repeats to reduce
 the visible plate grid while retaining one material sample and its matching Jacobian.
+The solid magma source uses varied broken crust, quiet cold faces and sparse narrow
+fissures instead of a few repeated large slabs. Its four aligned maps are baked by
+`mm-data/tools/build_magma_materials.py`.
 
 `GpuSurfaceScaleSmokeTest` captures 14 materials at identical overhead, oblique and
 close scales, including one-level slopes and three-level cliffs. These are visual
