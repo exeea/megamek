@@ -190,7 +190,7 @@ class GpuOffBoardTargetsTest {
     /** EDT: selects the weapon in the Unit Display, as the player does there or with the weapon keys. */
     private static void select(GpuTargetingFixture targeting, WeaponMounted weapon) throws Exception {
         onSwing(() -> {
-            targeting.unitDisplay.wPan.selectWeapon(weapon);
+            targeting.unitDisplay.selectWeapon(weapon);
             return null;
         });
     }

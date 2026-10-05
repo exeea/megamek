@@ -18,7 +18,7 @@ import javax.swing.SwingUtilities;
 import megamek.client.Client;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
+import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
 import megamek.client.ui.panels.phaseDisplay.ActionPhaseDisplay;
 import megamek.client.ui.panels.phaseDisplay.DeployMinefieldDisplay;
 import megamek.client.ui.panels.phaseDisplay.DeploymentDisplay;
@@ -49,7 +49,7 @@ class ClientGUIUnitSelectionTest {
     private final Player player = new Player(0, "Local player");
     private final Entity unit = new BipedMek();
     private final ClientGUI gui = mock(ClientGUI.class);
-    private final UnitDisplayPanel display = mock(UnitDisplayPanel.class);
+    private final UnitDisplayState display = mock(UnitDisplayState.class);
     private final BoardClientState view = mock(BoardClientState.class);
 
     ClientGUIUnitSelectionTest() {
@@ -62,7 +62,7 @@ class ClientGUIUnitSelectionTest {
         when(gui.getClient()).thenReturn(client);
         when(client.getGame()).thenReturn(game);
         when(client.getLocalPlayer()).thenReturn(player);
-        when(gui.getUnitDisplay()).thenReturn(display);
+        when(gui.getUnitDisplayState()).thenReturn(display);
         doCallRealMethod().when(gui).unitSelected(any());
         doCallRealMethod().when(gui).inspectUnit(anyInt());
     }

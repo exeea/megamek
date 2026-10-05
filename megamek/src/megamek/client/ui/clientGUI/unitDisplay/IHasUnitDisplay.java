@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005-2025 The MegaMek Team. All Rights Reserved.
+ * Copyright (C) 2025 The MegaMek Team. All Rights Reserved.
  *
  * This file is part of MegaMek.
  *
@@ -30,26 +30,8 @@
  * <https://www.xbox.com/en-US/developers/rules> and it is not endorsed by or
  * affiliated with Microsoft.
  */
-package megamek.client.ui.dialogs.unitDisplay;
+package megamek.client.ui.clientGUI.unitDisplay;
 
-import megamek.client.ui.Messages;
-
-public class HeatEffects {
-
-    public static String getHeatEffects(int heat, boolean mtHeat, boolean hasTSM) {
-        String whichOne = "HeatEffects";
-        int maxHeat = 30;
-        if (hasTSM) {
-            whichOne += ".tsm";
-        }
-        if (mtHeat) {
-            if (heat >= 30) {
-                whichOne += ".mt";
-            }
-            maxHeat = 50;
-        }
-        whichOne += "." + Math.min(maxHeat, heat);
-        return Messages.getString(whichOne);
-    }
-
+public interface IHasUnitDisplay {
+    UnitDisplayState getUnitDisplayState();
 }

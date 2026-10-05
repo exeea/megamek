@@ -84,7 +84,6 @@ public class PreEndDeclarationsDisplay extends AttackPhaseDisplay {
     /** How long after the under-attack prompt opens it is raised again, once it is surely on screen. */
     private static final int PROMPT_RAISE_DELAY_MILLISECONDS = 500;
 
-
     /** General pre-end declarations phase diagnostics; tagged [PreEnd]. */
     private static final MMLogger LOGGER = MMLogger.create(PreEndDeclarationsDisplay.class);
 
@@ -807,7 +806,6 @@ public class PreEndDeclarationsDisplay extends AttackPhaseDisplay {
         updateButtons();
     }
 
-
     /**
      * The local player's units that can do something in this phase, in display order. The pre-End declarations are
      * player-wide rather than one turn per unit, so the player must be free to move between their own units.
@@ -1190,7 +1188,7 @@ public class PreEndDeclarationsDisplay extends AttackPhaseDisplay {
         selectedDeployBridgeIndex = 0;
         selectingScanTarget = false;
         clientgui.setSelectedEntityNum(entityId);
-        clientgui.getUnitDisplay().displayEntity(selected);
+        clientgui.getUnitDisplayState().displayEntity(selected);
         clientgui.getBoardState().highlight(selected.getPosition());
         clientgui.getBoardState().centerOn(selected);
 

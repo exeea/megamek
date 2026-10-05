@@ -13,10 +13,10 @@ import java.util.regex.Pattern;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
-import megamek.client.ui.clientGUI.boardview.UnitStatusWords;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.UnitStatusWords;
 import megamek.client.ui.clientGUI.tooltip.UnitToolTip;
-import megamek.client.ui.dialogs.unitDisplay.HeatEffects;
+import megamek.client.ui.clientGUI.unitDisplay.HeatEffects;
 import megamek.common.ECMInfo;
 import megamek.common.Player;
 import megamek.common.Report;

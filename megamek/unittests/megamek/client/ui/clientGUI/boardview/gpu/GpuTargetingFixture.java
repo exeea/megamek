@@ -26,8 +26,7 @@ import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.MegaMekGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.overlay.OffBoardTargetOverlay;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayDialog;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
+import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
 import megamek.client.ui.panels.phaseDisplay.TargetingPhaseDisplay;
 import megamek.client.ui.util.MegaMekController;
 import megamek.common.OffBoardDirection;
@@ -47,8 +46,7 @@ import org.mockito.MockedStatic;
 /**
  * A real TargetingPhaseDisplay on the local player's TARGETING turn over the board fixture's game, set up as ClientGUI
  * sets a phase display up and started by the turn's event. The fixture's Atlas at (5, 5), facing north, carries a Long
- * Tom in its left arm with a ton of its ammunition, is selected, and has the Long Tom selected in the real Unit
- * Display. The client's board state carries the off-board target overlay, as
+ * Tom in its left arm with a ton of its ammunition, is selected, and has the Long Tom selected in the shared unit selection state, without constructing a Swing inspector. The client's board state carries the off-board target overlay, as
  * ClientGUI adds one to every board state, and {@link #source} captures that state with the display as its phase
  * panel. {@link #battery} puts enemy units off a board edge. The client records what the display sends; prompts go
  * through the routing client (GpuDialogRoutingTest), whose frame leads back to it. Fire does not end the turn by itself
@@ -63,7 +61,7 @@ final class GpuTargetingFixture implements AutoCloseable {
     final Player enemy = new Player(2, "Enemy");
     final Entity attacker;
     final BoardClientState view;
-    final UnitDisplayPanel unitDisplay;
+    final UnitDisplayState unitDisplay;
     final WeaponMounted longTom;
     final TargetingPhaseDisplay display;
     final OffBoardTargetOverlay overlay;
@@ -86,7 +84,6 @@ final class GpuTargetingFixture implements AutoCloseable {
         when(client.getFirstEntityNum()).thenReturn(attacker.getId());
         when(gui.getClient()).thenReturn(client);
         when(gui.getMenuBar()).thenReturn(menu);
-        when(gui.getUnitDisplayDialog()).thenReturn(mock(UnitDisplayDialog.class));
         // Dialogs that know only their parent frame find their client through it (ClientGUI.forFrame).
         frame.getRootPane().putClientProperty(ClientGUI.class, gui);
         when(gui.getFrame()).thenReturn(frame);
@@ -102,11 +99,11 @@ final class GpuTargetingFixture implements AutoCloseable {
             return state;
         });
         unitDisplay = onSwing(() -> {
-            UnitDisplayPanel panel = new UnitDisplayPanel(gui, null);
-            when(gui.getUnitDisplay()).thenReturn(panel);
+            UnitDisplayState panel = new UnitDisplayState(gui);
+            when(gui.getUnitDisplayState()).thenReturn(panel);
             when(gui.getDisplayedUnit()).thenAnswer(invocation -> panel.getCurrentEntity());
             when(gui.getDisplayedWeapon()).thenAnswer(invocation ->
-                  Optional.ofNullable(panel.wPan.getSelectedWeapon()));
+                  Optional.ofNullable(panel.getSelectedWeapon()));
             return panel;
         });
         longTom = onSwing(() -> {
@@ -138,7 +135,7 @@ final class GpuTargetingFixture implements AutoCloseable {
             // The turn's event starts the display's turn; the selection does not depend on the auto-select preference.
             board.game.setTurnIndex(0, board.player.getId());
             created.unitSelected(new BoardViewEvent(view, BoardViewEvent.SELECT_UNIT, attacker.getId()));
-            unitDisplay.wPan.selectWeapon(longTom);
+            unitDisplay.selectWeapon(longTom);
             view.addOverlay(new OffBoardTargetOverlay(gui));
             return created;
         });
@@ -190,7 +187,6 @@ final class GpuTargetingFixture implements AutoCloseable {
                 source.close();
                 view.removeBoardViewListener(display);
                 display.removeAllListeners();
-                GUIPreferences.getInstance().removePreferenceChangeListener(unitDisplay.wPan);
                 GUIPreferences.getInstance().setAutoEndFiring(autoEndFiring);
                 view.close();
                 frame.dispose();

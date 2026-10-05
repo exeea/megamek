@@ -40,7 +40,7 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuHudState.SheetTab;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuPaperdoll.Cell;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuPaperdoll.View;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuRecordSheet.Density;
-import megamek.client.ui.dialogs.unitDisplay.WeaponListModel;
+import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayData;
 import megamek.client.ui.entityreadout.EntityReadout;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
@@ -1381,7 +1381,7 @@ final class GpuUnitSheetTabs implements Disposable {
      * charge and called shot.
      */
     private List<String> words(GpuUnitRecord.RecordWeapon weapon, boolean lettered) {
-        WeaponListModel.RowParts row = weapon.row();
+        UnitDisplayData.RowParts row = weapon.row();
         List<String> words = new ArrayList<>();
         if (row.mode() != null && !row.mode().isBlank()) {
             words.add(row.pendingMode() == null ? text("GpuBoard.hud.unit.mode", row.mode())

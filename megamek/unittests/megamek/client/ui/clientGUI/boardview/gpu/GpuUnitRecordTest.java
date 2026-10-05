@@ -36,14 +36,12 @@ import megamek.client.Client;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
-import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.MegaMekGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.clientGUI.tooltip.TipUtil;
-import megamek.client.ui.dialogs.unitDisplay.SystemPanel;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayDialog;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
+import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
+import megamek.client.ui.clientGUI.unitDisplay.UnitEquipmentActions;
 import megamek.client.ui.panels.phaseDisplay.FiringDisplay;
 import megamek.client.ui.util.MegaMekController;
 import megamek.common.Configuration;
@@ -168,7 +166,7 @@ class GpuUnitRecordTest {
             SwingUtilities.invokeAndWait(session.source::refresh);
             assertSame(record, session.record(), "An unchanged unit keeps its record instance");
 
-            // Equipment modes: the Systems tab's mode list (SystemPanel.changeMode), which acts only on a changed
+            // Equipment modes: the Systems tab's mode list (UnitEquipmentActions.changeMode), which acts only on a changed
             // selection, so the second click on the entry now selected sends nothing
             session.source.record().setMode(id, ecmNum, 1);
             session.source.record().setMode(id, ecmNum, 1);
@@ -229,7 +227,7 @@ class GpuUnitRecordTest {
             verify(session.client).sendUpdateEntity(atlas);
             assertTrue(atlas.getCrew().getSwapConsoleRoles());
 
-            // Ammunition dumping after movement, once confirmed (SystemPanel.toggleDump)
+            // Ammunition dumping after movement, once confirmed (UnitEquipmentActions.toggleDump)
             Mounted<?> ammo = atlas.getCritical(Mek.LOC_RIGHT_TORSO, 10).getMount();
             int ammoNum = atlas.getEquipmentNum(ammo);
             assertEquals(new GpuUnitRecord.AmmoBin(ammoNum, "AC/20 Ammo", "RT", 5, 5, false, false, false, false,
@@ -259,7 +257,7 @@ class GpuUnitRecordTest {
             Mounted<?> oneShot = launcher.getLinked();
             int oneShotNum = atlas.getEquipmentNum(oneShot);
             assertEquals(Entity.LOC_NONE, oneShot.getLocation());
-            assertTrue(onSwing(() -> SystemPanel.canDump(session.client, atlas, oneShot)));
+            assertTrue(onSwing(() -> UnitEquipmentActions.canDump(session.client, atlas, oneShot)));
             assertTrue(session.record().ammo().stream().noneMatch(bin -> bin.eqNum() == oneShotNum));
             session.source.record().setDumping(id, oneShotNum, true);
             session.flush();
@@ -682,14 +680,12 @@ class GpuUnitRecordTest {
         try (GpuBoardFixture fixture = GpuBoardFixture.create(); Session session = new Session(fixture)) {
             Entity enemy = session.addEnemy(fixture);
             SwingUtilities.invokeAndWait(() -> fixture.game.setPhase(GamePhase.FIRING));
-            UnitDisplayDialog dialog = mock(UnitDisplayDialog.class);
             MegaMekController controller = mock(MegaMekController.class);
             AtomicReference<MockedStatic<MegaMekGUI>> keys = new AtomicReference<>();
-            UnitDisplayPanel display = onSwing(() -> new UnitDisplayPanel(session.gui, null));
+            UnitDisplayState display = new UnitDisplayState(session.gui);
             FiringDisplay firing = onSwing(() -> {
                 // Stubbed on the EDT, where the source's refresh timer reads the same mocks.
-                when(session.gui.getUnitDisplay()).thenReturn(display);
-                when(session.gui.getUnitDisplayDialog()).thenReturn(dialog);
+                when(session.gui.getUnitDisplayState()).thenReturn(display);
                 when(session.gui.getDisplayedUnit()).thenReturn(fixture.entity);
                 when(session.client.isMyTurn()).thenReturn(true);
                 when(session.client.getMyTurn()).thenReturn(new GameTurn(fixture.player.getId()));
@@ -702,18 +698,17 @@ class GpuUnitRecordTest {
                 return phase;
             });
             try {
-                int weapon = onSwing(() -> display.wPan.getSelectedWeaponNum());
-                assertEquals(fixture.entity.getId(), display.wPan.getSelectedEntityId());
+                int weapon = onSwing(() -> display.getSelectedWeaponNum());
+                assertEquals(fixture.entity.getId(), display.getSelectedEntityId());
                 session.source.setCardUnit(enemy.getId());
                 session.source.record().setSheetOpen(true);
                 assertEquals(enemy.getId(), session.record().unitId());
-                assertEquals(fixture.entity.getId(), onSwing(display.wPan::getSelectedEntityId),
+                assertEquals(fixture.entity.getId(), onSwing(display::getSelectedEntityId),
                       "The record sheet never shows its unit in the firing display's weapon panel");
-                assertEquals(weapon, (int) onSwing(display.wPan::getSelectedWeaponNum));
+                assertEquals(weapon, (int) onSwing(display::getSelectedWeaponNum));
             } finally {
                 onSwing(() -> {
                     firing.removeAllListeners();
-                    GUIPreferences.getInstance().removePreferenceChangeListener(display.wPan);
                     keys.get().close();
                     return null;
                 });

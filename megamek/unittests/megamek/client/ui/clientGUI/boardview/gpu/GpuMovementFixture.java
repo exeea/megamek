@@ -23,7 +23,7 @@ import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.MegaMekGUI;
 import megamek.client.ui.clientGUI.boardview.sprite.MovementEnvelopeSprite;
 import megamek.client.ui.clientGUI.boardview.spriteHandler.MovementEnvelopeSpriteHandler;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
+import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
 import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
 import megamek.client.ui.panels.phaseDisplay.commands.MoveCommand;
 import megamek.client.ui.util.MegaMekController;
@@ -61,7 +61,7 @@ final class GpuMovementFixture implements AutoCloseable {
         when(gui.getClient()).thenReturn(client);
         when(menu.getComponents()).thenReturn(new Component[0]);
         when(gui.getMenuBar()).thenReturn(menu);
-        when(gui.getUnitDisplay()).thenReturn(mock(UnitDisplayPanel.class));
+        when(gui.getUnitDisplayState()).thenReturn(mock(UnitDisplayState.class));
         when(gui.boardStates()).thenReturn(List.of(board.view));
         when(gui.getBoardState()).thenReturn(board.view);
         when(gui.getBoardState(any(Entity.class))).thenReturn(board.view);

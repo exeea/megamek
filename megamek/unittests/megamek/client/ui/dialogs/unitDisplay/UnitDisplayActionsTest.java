@@ -32,8 +32,8 @@ import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JList;
-import javax.swing.JToggleButton;
 import javax.swing.JTextArea;
+import javax.swing.JToggleButton;
 import javax.swing.ListModel;
 import javax.swing.SwingUtilities;
 import javax.swing.event.MouseInputAdapter;
@@ -42,8 +42,8 @@ import megamek.client.Client;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
-import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
+import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
 import megamek.client.ui.dialogs.SliderDialog;
 import megamek.common.Configuration;
 import megamek.common.Player;
@@ -119,6 +119,9 @@ class UnitDisplayActionsTest {
         when(gui.getClient()).thenReturn(client);
         when(gui.doYesNoDialog(anyString(), anyString())).thenReturn(true);
         when(display.getClientGUI()).thenReturn(gui);
+        UnitDisplayState state = new UnitDisplayState(gui);
+        when(display.getDisplayState()).thenReturn(state);
+        when(gui.getUnitDisplayState()).thenReturn(state);
         onSwing(() -> {
             display.wPan = weaponPanel();
             return null;
@@ -129,7 +132,31 @@ class UnitDisplayActionsTest {
     void tearDown() throws Exception {
         Game.rulesManager = rules;
         onSwing(() -> {
-            weaponPanels.forEach(GUIPreferences.getInstance()::removePreferenceChangeListener);
+            weaponPanels.forEach(WeaponPanel::disposeDisplay);
+            return null;
+        });
+    }
+
+    @Test
+    void openingTheClassicInspectorRendersExistingSelectionWithoutResettingIt() throws Exception {
+        onSwing(() -> {
+            UnitDisplayState state = gui.getUnitDisplayState();
+            state.displayEntity(atlas);
+            WeaponMounted weapon = atlas.getWeaponList().get(2);
+            state.selectWeapon(weapon);
+            UnitDisplayPanel classic = new UnitDisplayPanel(gui);
+            try {
+                classic.refreshFromState();
+                assertSame(atlas, classic.getCurrentEntity());
+                assertSame(weapon, classic.wPan.getSelectedWeapon());
+                assertEquals(2, classic.wPan.weaponList.getSelectedIndex());
+                classic.wPan.weaponList.setSelectedIndex(1);
+                assertSame(atlas.getWeaponList().get(1), state.getSelectedWeapon());
+            } finally {
+                classic.disposeDisplay();
+            }
+            state.selectWeapon(weapon);
+            assertEquals(1, classic.wPan.weaponList.getSelectedIndex(), "Disposed views stop observing selection");
             return null;
         });
     }
@@ -503,7 +530,7 @@ class UnitDisplayActionsTest {
     }
 
     private WeaponPanel weaponPanel() {
-        WeaponPanel panel = new WeaponPanel(display, client);
+        WeaponPanel panel = new WeaponPanel(display);
         weaponPanels.add(panel);
         return panel;
     }

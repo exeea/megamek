@@ -7,8 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -20,10 +22,12 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Graphics;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.InputProcessor;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.math.Vector3;
 import megamek.client.ui.util.KeyCommandBind;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -59,6 +63,10 @@ class GpuKeyboardSmokeTest {
                         InputProcessor processor = realInput.getInputProcessor();
                         Input keyboard = mock(Input.class);
                         when(keyboard.getInputProcessor()).thenReturn(processor);
+                        Graphics realGraphics = Gdx.graphics;
+                        Graphics timed = spy(realGraphics);
+                        doReturn(.05f).when(timed).getDeltaTime();
+                        Gdx.graphics = timed;
                         Gdx.input = keyboard;
                         try {
                             // Alt goes down reporting Alt itself: the nameplate key, which never reaches Swing.
@@ -77,16 +85,16 @@ class GpuKeyboardSmokeTest {
                             verify(source).key(KeyEvent.VK_SHIFT, true, InputEvent.SHIFT_DOWN_MASK);
                             verify(source).key(KeyEvent.VK_SHIFT, false, InputEvent.SHIFT_DOWN_MASK);
 
-                            // Shift released before W: the release keeps the modifiers of the press
-                            // (MegaMek's MOVE_STEP_FORWARD), and an auto-repeated press does not reach Swing twice.
+                            // Ctrl released before W: the unbound chord's release keeps its press's modifiers,
+                            // and an auto-repeated press does not reach Swing twice.
                             clearInvocations(source);
-                            press(keyboard, InputEvent.SHIFT_DOWN_MASK);
+                            press(keyboard, InputEvent.CTRL_DOWN_MASK);
                             processor.keyDown(Input.Keys.W);
                             processor.keyDown(Input.Keys.W);
                             press(keyboard, 0);
                             processor.keyUp(Input.Keys.W);
-                            verify(source, times(1)).key(KeyEvent.VK_W, true, InputEvent.SHIFT_DOWN_MASK);
-                            verify(source, times(1)).key(KeyEvent.VK_W, false, InputEvent.SHIFT_DOWN_MASK);
+                            verify(source, times(1)).key(KeyEvent.VK_W, true, InputEvent.CTRL_DOWN_MASK);
+                            verify(source, times(1)).key(KeyEvent.VK_W, false, InputEvent.CTRL_DOWN_MASK);
 
                             // Rebound on the Swing thread: Help on F9 and north scrolling on I. The view follows the
                             // captured binds, while the bind fields keep MegaMek's defaults.
@@ -107,34 +115,33 @@ class GpuKeyboardSmokeTest {
                             processor.keyDown(Input.Keys.I);
                             assertTrue(cameraKeys().containsValue(KeyCommandBind.SCROLL_NORTH), "I scrolls north");
                             processor.keyUp(Input.Keys.I);
+                            assertCameraBoost(keyboard, processor, Input.Keys.I);
                             processor.keyDown(Input.Keys.W);
                             assertTrue(cameraKeys().isEmpty(), "W no longer scrolls");
                             processor.keyUp(Input.Keys.W);
                             verify(source).key(KeyEvent.VK_W, true, 0);
                             verify(source, never()).key(KeyEvent.VK_I, true, 0);
+                            verify(source, never()).key(KeyEvent.VK_I, true, InputEvent.SHIFT_DOWN_MASK);
                             verify(source, never()).key(KeyEvent.VK_F9, true, 0);
 
-                            // Free Flight: Shift held before W accelerates flight and never reaches the client;
-                            // opposing flight keys cancel. The default binds again, so W scrolls north.
+                            // Both Shift keys boost WASD and Q/E in 3D, Tactical View and Free Flight.
                             source.uiPreferences = GpuHudInputTest.preferences();
                             super.render();
-                            boardCamera.setFirstPerson(true);
-                            boardCamera.look(0, 90 - boardCamera.tilt());
                             clearInvocations(source);
+                            for (int mode = 0; mode < 3; mode++) {
+                                setTacticalView(mode == 1);
+                                if (mode == 2) {
+                                    boardCamera.setFirstPerson(true);
+                                    boardCamera.look(0, 90 - boardCamera.tilt());
+                                    boardCamera.camera.position.z += 5000;
+                                    boardCamera.update();
+                                }
+                                for (int key : new int[] { Input.Keys.W, Input.Keys.A, Input.Keys.S, Input.Keys.D,
+                                      Input.Keys.Q, Input.Keys.E }) {
+                                    assertCameraBoost(keyboard, processor, key);
+                                }
+                            }
                             var start = boardCamera.camera.position.cpy();
-                            processor.keyDown(Input.Keys.W);
-                            super.render();
-                            processor.keyUp(Input.Keys.W);
-                            float normalDistance = start.dst(boardCamera.camera.position);
-                            start.set(boardCamera.camera.position);
-                            press(keyboard, InputEvent.SHIFT_DOWN_MASK);
-                            processor.keyDown(Input.Keys.W);
-                            super.render();
-                            press(keyboard, 0);
-                            processor.keyUp(Input.Keys.W);
-                            assertEquals(normalDistance * 4, start.dst(boardCamera.camera.position), .01f,
-                                  "Shift held before W must accelerate flight and never plot unit movement");
-                            start.set(boardCamera.camera.position);
                             processor.keyDown(Input.Keys.W);
                             processor.keyDown(Input.Keys.S);
                             super.render();
@@ -146,12 +153,42 @@ class GpuKeyboardSmokeTest {
                             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                         } finally {
                             Gdx.input = realInput;
+                            Gdx.graphics = realGraphics;
                         }
                         Gdx.app.exit();
                     } catch (Throwable error) {
                         failure.set(error);
                         Gdx.app.exit();
                     }
+                }
+
+                private void assertCameraBoost(Input keyboard, InputProcessor processor, int key) {
+                    processor.keyDown(key);
+                    float normal = advanceCamera(key);
+                    processor.keyUp(key);
+                    assertTrue(normal > .01f, "The unmodified camera key must move");
+                    for (int shift : new int[] { Input.Keys.SHIFT_LEFT, Input.Keys.SHIFT_RIGHT }) {
+                        when(keyboard.isKeyPressed(shift)).thenReturn(true);
+                        processor.keyDown(key);
+                        assertEquals(normal * 4, advanceCamera(key), .03f, "Shift held before the camera key boosts it");
+                        when(keyboard.isKeyPressed(shift)).thenReturn(false);
+                        assertEquals(normal, advanceCamera(key), .03f, "Releasing Shift restores normal speed");
+                        when(keyboard.isKeyPressed(shift)).thenReturn(true);
+                        assertEquals(normal * 4, advanceCamera(key), .03f, "Shift pressed during movement boosts it");
+                        processor.keyUp(key);
+                        assertEquals(0, advanceCamera(key), .001f, "Releasing the camera key stops movement");
+                        when(keyboard.isKeyPressed(shift)).thenReturn(false);
+                    }
+                }
+
+                private float advanceCamera(int key) {
+                    Vector3 position = boardCamera.camera.position.cpy();
+                    float azimuth = boardCamera.azimuth();
+                    super.render();
+                    if (!boardCamera.firstPerson() && (key == Input.Keys.Q || key == Input.Keys.E)) {
+                        return Math.abs(((boardCamera.azimuth() - azimuth) % 360 + 540) % 360 - 180);
+                    }
+                    return position.dst(boardCamera.camera.position);
                 }
 
                 @SuppressWarnings("unchecked")

@@ -36,7 +36,7 @@ import megamek.client.ui.clientGUI.MegaMekGUI;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.Asked;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
+import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
 import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
 import megamek.client.ui.util.MegaMekController;
 import megamek.common.Configuration;
@@ -85,7 +85,7 @@ class GpuMoveNagBridgeTest {
         ClientGUI gui = GpuDialogRoutingTest.routingClient();
         CommonMenuBar menu = mock(CommonMenuBar.class);
         MegaMekController controller = mock(MegaMekController.class);
-        UnitDisplayPanel unitDisplay = mock(UnitDisplayPanel.class);
+        UnitDisplayState unitDisplay = mock(UnitDisplayState.class);
         AtomicReference<MockedStatic<MegaMekGUI>> keys = new AtomicReference<>();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             when(client.getGame()).thenReturn(fixture.game);
@@ -95,7 +95,7 @@ class GpuMoveNagBridgeTest {
             when(gui.getClient()).thenReturn(client);
             when(menu.getComponents()).thenReturn(new Component[0]);
             when(gui.getMenuBar()).thenReturn(menu);
-            when(gui.getUnitDisplay()).thenReturn(unitDisplay);
+            when(gui.getUnitDisplayState()).thenReturn(unitDisplay);
             when(gui.boardStates()).thenReturn(List.of(fixture.view));
             when(gui.getBoardState()).thenReturn(fixture.view);
             when(gui.getBoardState(any(Entity.class))).thenReturn(fixture.view);

@@ -45,9 +45,9 @@ import megamek.common.units.Entity;
 
 /**
  * The hud-v3 board overlay (rebuild plan C.1 G7; overlay.js in 3D, flat.js in the Tactical View): the route and its
- * ghost, the front arc or the displayed weapon's arc, the physical-attack neighbours and the Tactical View's
- * elevation-drop edges as world meshes, with the plotted route's {@link GpuRoutePulse} over them; and the marks of the
- * units and the target hexes (side rings, glows, the other targets' rings, the hovered unit's ring), drawn every frame
+ * ghost, the front arc or the displayed weapon's arc and the physical-attack neighbours as world meshes, with the
+ * plotted route's {@link GpuRoutePulse} over them; and the marks of the units and the target hexes (side rings,
+ * glows, the other targets' rings, the hovered unit's ring), drawn every frame
  * where the units stand, level as selection bands, so that the pointer lays no mark on the terrain
  * again. MegaMek's own movement envelope belongs to the tactical capture (GpuTactical), the displayed weapon's range
  * walls to GpuFireControl, and the view draws the hovered hex's ring. 
@@ -70,7 +70,6 @@ final class GpuBoardOverlay implements Disposable {
     private static final Color FLAT_TARGET = Color.valueOf("ff7a70");
     private static final Color FLAT_ARROW = Color.valueOf("e9fff7");
     private static final Color FLAT_PIN = Color.valueOf("f2f5f1");
-    private static final Color DROP = new Color(20 / 255f, 30 / 255f, 24 / 255f, .7f);
     /** overlay.js:66: the displayed weapon's mount arc, a wedge from .8 to 2.2 hex radii in 28 steps. */
     private static final float WEDGE_INNER = .8f;
     private static final float WEDGE_OUTER = 2.2f;
@@ -100,9 +99,6 @@ final class GpuBoardOverlay implements Disposable {
     /** Light for the 3D ghost: enough ambient to keep it bright, one light from above to show its shape. */
     private final Environment ghostLight = new Environment();
     private ModelInstance overlay;
-    private ModelInstance dropEdges;
-    private List<BoardScene.Tile> dropTiles;
-    private int dropRevision = -1;
     private long builds;
     /** The marks' bands by unit and by hex, in drawing order. */
     private Map<Integer, List<Band>> unitMarks = Map.of();
@@ -207,19 +203,9 @@ final class GpuBoardOverlay implements Disposable {
         }
         radius = BoardGeometry.WIDTH / 2;
         overlay = build();
-        if (tactical && !(sameLevels(dropTiles, scene.tiles()) && dropRevision == revision)) {
-            if (dropEdges != null) {
-                dropEdges.model.dispose();
-            }
-            dropRevision = revision;
-            dropEdges = dropEdges();
-        }
-        if (tactical) {
-            dropTiles = scene.tiles();
-        }
     }
 
-    /** How often the overlay was rebuilt; the drop edges are built again only when the board's levels change. */
+    /** How often the overlay was rebuilt. */
     long builds() {
         return builds;
     }
@@ -241,24 +227,6 @@ final class GpuBoardOverlay implements Disposable {
     private static boolean sameDrawing(BoardScene shown, BoardScene next) {
         return shown == next || shown != null && next != null && shown.boardId() == next.boardId()
               && shown.tiles() == next.tiles() && shown.units().equals(next.units());
-    }
-
-    /** Whether two terrain captures have the same hexes at the same levels; the source repaints tiles as views pan. */
-    private static boolean sameLevels(List<BoardScene.Tile> shown, List<BoardScene.Tile> next) {
-        if (shown == next) {
-            return true;
-        }
-        if (shown == null || next == null || shown.size() != next.size()) {
-            return false;
-        }
-        for (int index = 0; index < shown.size(); index++) {
-            BoardScene.Tile before = shown.get(index);
-            BoardScene.Tile after = next.get(index);
-            if (!before.coords().equals(after.coords()) || before.elevation() != after.elevation()) {
-                return false;
-            }
-        }
-        return true;
     }
 
     /**
@@ -364,16 +332,11 @@ final class GpuBoardOverlay implements Disposable {
      * the route's pulse last, over the route.
      */
     void render(Camera camera) {
-        if (scene == null || overlay == null && !(tactical && dropEdges != null)) {
+        if (scene == null || overlay == null) {
             return;
         }
         batch.begin(camera);
-        if (tactical && dropEdges != null) {
-            batch.render(dropEdges);
-        }
-        if (overlay != null) {
-            batch.render(overlay);
-        }
+        batch.render(overlay);
         Renderable pulsing = pulse.renderable(camera);
         if (pulsing != null) {
             batch.render(pulsing);
@@ -829,21 +792,6 @@ final class GpuBoardOverlay implements Disposable {
               MathUtils.cos(angle) * distance * radius, 0);
     }
 
-    /** flat.js:27: a dark line on each hex side whose neighbour lies lower, thicker for a bigger drop. */
-    private ModelInstance dropEdges() {
-        Sink sink = new Sink(material(true));
-        for (BoardScene.Tile tile : scene.tiles()) {
-            for (int direction = 0; direction < 6; direction++) {
-                BoardScene.Tile neighbour = scene.tile(tile.coords().translated(direction));
-                if (neighbour != null && neighbour.elevation() < tile.elevation()) {
-                    float width = Math.min(4, 1.2f + (tile.elevation() - neighbour.elevation()) * .9f) * PIXEL;
-                    edge(sink, tile, direction, 1, width / 2, 0, false, DROP);
-                }
-            }
-        }
-        return sink.end();
-    }
-
     private Color moveColor(GpuMovePlan.Band band) {
         return switch (band) {
             case WALK -> tactical ? UiTheme.MINT : MINT;
@@ -984,11 +932,6 @@ final class GpuBoardOverlay implements Disposable {
             overlay.model.dispose();
             overlay = null;
         }
-        if (dropEdges != null) {
-            dropEdges.model.dispose();
-            dropEdges = null;
-        }
-        dropTiles = null;
         // The ghost owns no GL object: its meshes and textures are the shown model's.
         ghost = null;
         ghostSource = null;

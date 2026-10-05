@@ -225,8 +225,8 @@ public abstract class AttackPhaseDisplay extends ActionPhaseDisplay {
             LOGGER.info("[DirTorsoMount] flip ignored - no current entity");
             return;
         }
-        WeaponMounted weapon = clientgui.getUnitDisplay().wPan.getSelectedWeapon();
-        int weaponNumber = clientgui.getUnitDisplay().wPan.getSelectedWeaponNum();
+        WeaponMounted weapon = clientgui.getUnitDisplayState().getSelectedWeapon();
+        int weaponNumber = clientgui.getUnitDisplayState().getSelectedWeaponNum();
         if ((weapon == null) || (weaponNumber == -1)) {
             LOGGER.info("[DirTorsoMount] {}: flip ignored - no weapon selected (weaponNumber={})",
                   currentEntity().getShortName(), weaponNumber);
@@ -290,8 +290,8 @@ public abstract class AttackPhaseDisplay extends ActionPhaseDisplay {
         // is avoided here: it selects the first weapon and short-circuits the unit-display rebuild when the entity
         // object is unchanged, which is what dropped the selection and left the arc indicator stale.
         clientgui.onAllBoardStates(boardView -> boardView.redrawEntity(currentEntity()));
-        clientgui.getUnitDisplay().wPan.displayMek(currentEntity());
-        clientgui.getUnitDisplay().wPan.selectWeapon(weapon);
+        clientgui.getUnitDisplayState().displayMek(currentEntity());
+        clientgui.getUnitDisplayState().selectWeapon(weapon);
         updateDonePanel();
         clientgui.updateFiringArc(currentEntity());
     }
@@ -329,7 +329,7 @@ public abstract class AttackPhaseDisplay extends ActionPhaseDisplay {
      * like a torso twist). Logs the decision for any directional-mount unit to aid playtesting.
      */
     protected void updateFlipMount() {
-        WeaponMounted weapon = clientgui.getUnitDisplay().wPan.getSelectedWeapon();
+        WeaponMounted weapon = clientgui.getUnitDisplayState().getSelectedWeapon();
         if ((currentEntity() == null) || (weapon == null)) {
             setFlipMountEnabled(false);
             return;
@@ -374,7 +374,7 @@ public abstract class AttackPhaseDisplay extends ActionPhaseDisplay {
             }
             return;
         }
-        WeaponMounted weapon = clientgui.getUnitDisplay().wPan.getSelectedWeapon();
+        WeaponMounted weapon = clientgui.getUnitDisplayState().getSelectedWeapon();
         if (weapon == null) {
             return;
         }
@@ -418,10 +418,10 @@ public abstract class AttackPhaseDisplay extends ActionPhaseDisplay {
         // The arc is drawn for whatever weapon the unit display currently shows, so it only picks up the new
         // facing when the weapon panel is rebuilt. Reselecting the same weapon keeps the player's choice, which a
         // full refresh would drop back to the first weapon. Same sequence the flip-mount button uses.
-        WeaponMounted selectedWeapon = clientgui.getUnitDisplay().wPan.getSelectedWeapon();
-        clientgui.getUnitDisplay().wPan.displayMek(entity);
+        WeaponMounted selectedWeapon = clientgui.getUnitDisplayState().getSelectedWeapon();
+        clientgui.getUnitDisplayState().displayMek(entity);
         if (selectedWeapon != null) {
-            clientgui.getUnitDisplay().wPan.selectWeapon(selectedWeapon);
+            clientgui.getUnitDisplayState().selectWeapon(selectedWeapon);
         }
         clientgui.updateFiringArc(entity);
     }
@@ -484,7 +484,7 @@ public abstract class AttackPhaseDisplay extends ActionPhaseDisplay {
         }
         setRotateTurretLabel(false);
         setRotateRearTurretEnabled(false);
-        WeaponMounted weapon = clientgui.getUnitDisplay().wPan.getSelectedWeapon();
+        WeaponMounted weapon = clientgui.getUnitDisplayState().getSelectedWeapon();
         if (weapon == null) {
             setRotateTurretEnabled(false);
             return;

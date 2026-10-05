@@ -318,8 +318,8 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
         setNextEnabled(true);
         setRemoveEnabled(true);
 
-        clientgui.getUnitDisplay().displayEntity(entity);
-        clientgui.getUnitDisplay().showPanel(MekPanelTabStrip.SUMMARY);
+        clientgui.getUnitDisplayState().displayEntity(entity);
+        clientgui.showUnitDisplayPanel(MekPanelTabStrip.SUMMARY);
         clientgui.updateFiringArc(entity);
         clientgui.showSensorRanges(entity);
         computeWarningHexes(entity);
@@ -1145,7 +1145,7 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
                 // Please note, the Server may never get this load order.
                 currentEntity().load(other, false, other.getTargetBay());
                 other.setTransportId(cen);
-                clientgui.getUnitDisplay().displayEntity(currentEntity());
+                clientgui.getUnitDisplayState().displayEntity(currentEntity());
                 setUnloadEnabled(true);
             } else {
                 clientgui.addToast(ToastLevel.ERROR,
@@ -1170,7 +1170,7 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
                     if (loader.unload(loaded)) {
                         loaded.setTransportId(Entity.NONE);
                         loaded.newRound(game.getRoundCount());
-                        clientgui.getUnitDisplay().displayEntity(currentEntity());
+                        clientgui.getUnitDisplayState().displayEntity(currentEntity());
                         // Unit loaded in the lobby? Server needs updating
                         if (loader.getLoadedKeepers().contains(loaded.getId())) {
                             Vector<Integer> lobbyLoaded = loader.getLoadedKeepers();
@@ -1214,7 +1214,7 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
                 updateHullDownButtonText(entity);
                 // Sync the toggle so the server applies the chosen state when the unit deploys.
                 clientgui.getClient().sendUpdateEntity(entity);
-                clientgui.getUnitDisplay().displayEntity(entity);
+                clientgui.getUnitDisplayState().displayEntity(entity);
             }
         } else if (actionCmd.equals(DeployCommand.DEPLOY_CLEAR_DEPLOY.getCmd())) {
             Entity entity = currentEntity();
@@ -1300,7 +1300,6 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
         }
     }
 
-
     @Override
     public void clear() {
         clientgui.maybeShowUnitDisplay();
@@ -1376,7 +1375,7 @@ public class DeploymentDisplay extends StatusBarPhaseDisplay {
             }
         } else {
             clientgui.maybeShowUnitDisplay();
-            clientgui.getUnitDisplay().displayEntity(e);
+            clientgui.getUnitDisplayState().displayEntity(e);
             if (game.hasBoardLocation(e.getPosition(), e.getBoardId())) {
                 clientgui.getBoardState(e).centerOn(e);
             }

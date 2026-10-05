@@ -61,15 +61,20 @@ class GpuBattleView extends ApplicationAdapter {
     static final float HOVER_LEVELS = UnitAnimator.HOVER_LEVELS;
     /** Hover and editor-brush outline inset as a fraction of the hex radius: 0 is the border, .1 keeps 90%. */
     static final float HOVER_HEX_INSET = .1f;
+    /** Hidden hover and editor-brush outlines remain visible through terrain and objects at half opacity. */
+    static final float HOVER_OCCLUDED_ALPHA = .5f;
     /** Hide all declared firing arrows while combat is playing, regardless of selection. */
     static final boolean HIDE_TARGET_ARROWS_DURING_ATTACKS = true;
     /** hud-v3's unitRect (view3d.js): in 3D a unit's screen rectangle is .55 of a hex wide. */
     private static final float UNIT_RECT_WIDTH = .55f;
     /** Floating units are tied to their hex with this faint solid stem; solid, so it needs no blending state. */
     private static final Color TETHER_COLOR = Color.valueOf("A9B8B8");
+    private static final float PAN_PIXELS_PER_SECOND = 750;
+    private static final float FLIGHT_HEXES_PER_SECOND = 1.5f;
+    private static final float CAMERA_SPEED_BOOST = 4;
     private static final float TILT_DEGREES_PER_SECOND = 60;
     /** A held CAMERA_ROTATE bind turns the 3D camera at this rate (rebuild plan A.17 Q9). */
-    private static final float ROTATE_DEGREES_PER_SECOND = 70;
+    private static final float ROTATE_DEGREES_PER_SECOND = 90;
     /** The zoom factor of one ZOOM_IN or ZOOM_OUT bind; the Menu's View zoom items use it as well. */
     static final float ZOOM_STEP = 1.2f;
     /** A pointer that moved this far, times the layout scale, drags: the camera moves and no click follows (C.4). */
@@ -610,15 +615,17 @@ class GpuBattleView extends ApplicationAdapter {
         // The first visible frame's delta may still include the hidden window's loading time.
         boardCamera.advance(entranceStarting ? 0 : Gdx.graphics.getDeltaTime());
         entranceStarting = false;
+        float cameraSpeed = (modifiers() & InputEvent.SHIFT_DOWN_MASK) != 0 ? CAMERA_SPEED_BOOST : 1;
         if (ui.isTextEditing()) {
             // The camera keys work with every panel open and pause only while a text field takes the keys (Q9).
             cameraKeys.clear();
         } else if (boardCamera.firstPerson()) {
-            advanceFirstPerson(Gdx.graphics.getDeltaTime());
+            advanceFirstPerson(Gdx.graphics.getDeltaTime(), cameraSpeed);
         } else {
-            float distance = 500 * Gdx.graphics.getDeltaTime();
-            float inclination = TILT_DEGREES_PER_SECOND * Gdx.graphics.getDeltaTime();
-            float rotation = ROTATE_DEGREES_PER_SECOND * Gdx.graphics.getDeltaTime();
+            float elapsed = Gdx.graphics.getDeltaTime() * cameraSpeed;
+            float distance = PAN_PIXELS_PER_SECOND * elapsed;
+            float inclination = TILT_DEGREES_PER_SECOND * elapsed;
+            float rotation = ROTATE_DEGREES_PER_SECOND * elapsed;
             for (KeyCommandBind command : cameraKeys.values()) {
                 switch (command) {
                     case SCROLL_NORTH -> boardCamera.pan(0, distance);
@@ -789,7 +796,7 @@ class GpuBattleView extends ApplicationAdapter {
      * The hover rings the view draws itself every frame, inset by {@link #HOVER_HEX_INSET}:
      * the hovered hex's outline, or with Ctrl in the editor the brush's hexes, at the height a unit would stand there;
      * and a building floor under the pointer column: its outline half a hex above the floor's level,
-     * joined by its corners to a faint outline on the hex.
+     * joined by its corners to a faint outline on the hex. Hidden sections draw at half opacity.
      */
     private void renderHoverRings() {
         float top = hoverTop();
@@ -797,12 +804,26 @@ class GpuBattleView extends ApplicationAdapter {
             return;
         }
         Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
-        Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
+        // Both passes compare against scene depth without letting the outline occlude itself or later overlays.
+        Gdx.gl.glDepthMask(false);
         Gdx.gl.glEnable(GL20.GL_BLEND);
         Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
         lines.setProjectionMatrix(boardCamera.camera.combined);
+        try {
+            Gdx.gl.glDepthFunc(GL20.GL_GREATER);
+            drawHoverRings(top, HOVER_OCCLUDED_ALPHA);
+            Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
+            drawHoverRings(top, 1);
+        } finally {
+            Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
+            Gdx.gl.glDepthMask(true);
+            Gdx.gl.glDisable(GL20.GL_BLEND);
+        }
+    }
+
+    private void drawHoverRings(float top, float alpha) {
         lines.begin(ShapeRenderer.ShapeType.Line);
-        lines.setColor(Color.WHITE);
+        lines.setColor(1, 1, 1, alpha);
         if (source.isEditor() && editorModifiers() == InputEvent.CTRL_DOWN_MASK) {
             for (Coords coords : source.editorBrush(hovered, boardGeneration)) {
                 if (scene.tile(coords) != null) {
@@ -813,7 +834,7 @@ class GpuBattleView extends ApplicationAdapter {
             float base = BoardTacticalGeometry.floatingZ(scene, hovered);
             ring(hovered, Float.isNaN(top) ? base : top);
             if (!Float.isNaN(top)) {
-                lines.setColor(1, 1, 1, .25f);
+                lines.setColor(1, 1, 1, alpha * .25f);
                 ring(hovered, base);
                 Vector3 center = BoardGeometry.center(hovered, 0);
                 for (int edge = 0; edge < 6; edge++) {
@@ -824,7 +845,6 @@ class GpuBattleView extends ApplicationAdapter {
             }
         }
         lines.end();
-        Gdx.gl.glDisable(GL20.GL_BLEND);
     }
 
     /** A hex's outline, inset by {@link #HOVER_HEX_INSET}, at height {@code z}. */
@@ -1515,7 +1535,7 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     /** Held camera binds share the existing focus and release routing; free flight uses wall-clock movement. */
-    private void advanceFirstPerson(float seconds) {
+    private void advanceFirstPerson(float seconds, float speed) {
         float forward = 0, sideways = 0, vertical = 0, pitch = 0;
         for (KeyCommandBind command : cameraKeys.values()) {
             switch (command) {
@@ -1530,10 +1550,9 @@ class GpuBattleView extends ApplicationAdapter {
                 default -> { }
             }
         }
-        float elapsed = MathUtils.clamp(seconds, 0, .1f);
+        float elapsed = MathUtils.clamp(seconds, 0, .1f) * speed;
         if (pitch != 0) { boardCamera.look(0, pitch * TILT_DEGREES_PER_SECOND * elapsed); }
-        float speed = (modifiers() & InputEvent.SHIFT_DOWN_MASK) != 0 ? 4 : 1;
-        boardCamera.fly(forward, sideways, vertical, BoardGeometry.height() * 3 * speed * elapsed);
+        boardCamera.fly(forward, sideways, vertical, BoardGeometry.height() * FLIGHT_HEXES_PER_SECOND * elapsed);
     }
 
     Vector3 screenPosition(Coords coords) {
@@ -1774,23 +1793,20 @@ class GpuBattleView extends ApplicationAdapter {
             }
             int awt = awtKey(key);
             int modifiers = modifiers();
+            // Resolve Shift as camera acceleration before HUD hotkeys can turn or twist a unit with Shift+A/D.
+            List<GpuBoardSource.Bind> captured = source.uiPreferences().binds();
+            int bindModifiers = modifiers;
+            if (modifiers == InputEvent.SHIFT_DOWN_MASK
+                  && GpuHud.binds(captured, awt, 0).stream().anyMatch(GpuBattleView::heldCameraCommand)) {
+                bindModifiers = 0;
+            }
             // The HUD first (C.4): a pending dialog, the Esc chain, a focused field or list, the hotkeys.
-            if (ui.keyDown(key, awt, modifiers)) {
+            if (ui.keyDown(key, awt, bindModifiers)) {
                 return true;
             }
             if (reloadingAssets || assetReloadFailed) { return true; }
             // The binds the client captured on the Swing thread; the bind fields are Swing's (rebuild plan D).
-            List<GpuBoardSource.Bind> captured = source.uiPreferences().binds();
-            Set<KeyCommandBind> binds = GpuHud.binds(captured, awt, modifiers);
-            if (boardCamera.firstPerson() && modifiers == InputEvent.SHIFT_DOWN_MASK) {
-                // Shift accelerates flight, including when held before pressing a movement key.
-                for (KeyCommandBind command : GpuHud.binds(captured, awt, 0)) {
-                    if (heldCameraCommand(command)) {
-                        cameraKeys.put(key, command);
-                        return true;
-                    }
-                }
-            }
+            Set<KeyCommandBind> binds = GpuHud.binds(captured, awt, bindModifiers);
             for (KeyCommandBind command : binds) {
                 if (cameraCommand(key, command)) {
                     return true;

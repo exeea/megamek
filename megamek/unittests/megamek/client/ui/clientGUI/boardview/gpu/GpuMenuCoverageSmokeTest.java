@@ -36,7 +36,7 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.MegaMekGUI;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
+import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.panels.phaseDisplay.DeploymentDisplay;
 import megamek.client.ui.panels.phaseDisplay.ReportDisplay;
@@ -358,7 +358,7 @@ class GpuMenuCoverageSmokeTest {
             when(client.getMyTurn()).thenReturn(new GameTurn(board.player.getId()));
             when(gui.getClient()).thenReturn(client);
             when(gui.getMenuBar()).thenReturn(menu);
-            when(gui.getUnitDisplay()).thenReturn(mock(UnitDisplayPanel.class));
+            when(gui.getUnitDisplayState()).thenReturn(mock(UnitDisplayState.class));
             when(gui.boardStates()).thenReturn(List.of(board.view));
             when(gui.getBoardState()).thenReturn(board.view);
             when(gui.getBoardState(anyInt())).thenReturn(board.view);

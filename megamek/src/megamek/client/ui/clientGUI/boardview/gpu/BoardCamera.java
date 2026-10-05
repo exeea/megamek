@@ -65,6 +65,8 @@ final class BoardCamera {
     private boolean overviewFit;
     private boolean fitToWindow;
     private float displayScale = 1;
+    /** Render-owned board dimensions, installed by fit() when the view receives a new board. */
+    private int boardColumns, boardRows;
     private float entranceElapsed = ENTRANCE_SECONDS;
     private float entranceZoom;
     /** Screen composition only: focus remains the world-space orbit pivot in the unobstructed board area. */
@@ -370,6 +372,7 @@ final class BoardCamera {
 
     /** A new board makes the saved 3D position meaningless: leaving the Tactical View then fits the new board. */
     void boardChanged() {
+        boardColumns = boardRows = 0;
         if (tactical()) { tacticalReturnFit = true; }
     }
 
@@ -873,6 +876,7 @@ final class BoardCamera {
             zoom(factor);
             Vector3 after = pointOnPlane(x, y, focus.z);
             if (before != null && after != null) { focus.add(before.sub(after)); }
+            constrainPan();
             update();
             return;
         }
@@ -881,10 +885,13 @@ final class BoardCamera {
         float difference = before - camera.zoom;
         moveOnBoard((x - camera.viewportWidth / 2 + viewOffsetPixels) * difference,
               (y - camera.viewportHeight / 2) * difference);
+        constrainPan();
         update();
     }
 
     void fit(BoardScene scene) {
+        boardColumns = scene.width();
+        boardRows = scene.height();
         setFirstPerson(false);
         stopFraming();
         fitToWindow = true;
@@ -958,7 +965,23 @@ final class BoardCamera {
         } else {
             moveOnBoard(-dx * camera.zoom, dy * camera.zoom);
         }
+        constrainPan();
         update();
+    }
+
+    /**
+     * Keep the usable screen's orbit pivot over the board. Inset the jagged hex perimeter just enough to keep
+     * every point in the allowed rectangle on the map, including its corners at close zoom. All edge hexes remain
+     * reachable. Clamping each world axis separately lets a drag slide along an edge and reverse immediately.
+     */
+    private void constrainPan() {
+        if (boardColumns <= 0 || boardRows <= 0) { return; }
+        float width = BoardGeometry.width(), height = BoardGeometry.height();
+        // Stay just inside the silhouette, avoiding round-off on an exact outer edge when projecting a distant eye.
+        float inset = Math.min(width, height) * .001f;
+        focus.x = MathUtils.clamp(focus.x, width * .25f + inset, boardColumns * width * .75f - inset);
+        focus.y = MathUtils.clamp(focus.y, -boardRows * height + inset,
+              (boardColumns == 1 ? 0 : -height * .5f) - inset);
     }
 
     /** Screen coordinates use the bottom-left origin, without relying on a global graphics viewport. */

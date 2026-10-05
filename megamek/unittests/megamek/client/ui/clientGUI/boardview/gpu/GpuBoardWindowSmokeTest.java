@@ -71,6 +71,7 @@ import megamek.client.ui.dialogs.miniReport.MiniReportDisplayDialog;
 import megamek.client.ui.dialogs.miniReport.MiniReportDisplayPanel;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayDialog;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
+import megamek.client.ui.dialogs.unitDisplay.WeaponPanel;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.panels.StartingScenarioPanel;
 import megamek.client.ui.panels.WaitingForServerPanel;
@@ -121,9 +122,12 @@ class GpuBoardWindowSmokeTest {
     }
 
     @Test
-    void nativeGameplayRendersWithoutConstructingAClassicBoard() throws Exception {
+    void nativeGameplayRendersWithoutConstructingAClassicBoardOrInspector() throws Exception {
         var classic = onSwing(() -> mockConstruction(BoardView.class));
         var panels = onSwing(() -> mockConstruction(BoardViewPanel.class));
+        var inspector = onSwing(() -> mockConstruction(UnitDisplayPanel.class));
+        var inspectorDialog = onSwing(() -> mockConstruction(UnitDisplayDialog.class));
+        var weapons = onSwing(() -> mockConstruction(WeaponPanel.class));
         var session = onSwing(GpuGameplayStateTest.Session::create);
         JFrame owner = onSwing(JFrame::new);
         CommonMenuBar menus = onSwing(CommonMenuBar::getMenuBarForGame);
@@ -158,6 +162,9 @@ class GpuBoardWindowSmokeTest {
             onSwing(() -> {
                 assertTrue(classic.constructed().isEmpty());
                 assertTrue(panels.constructed().isEmpty());
+                assertTrue(inspector.constructed().isEmpty());
+                assertTrue(inspectorDialog.constructed().isEmpty());
+                assertTrue(weapons.constructed().isEmpty());
                 assertFalse(session.state().isClosed());
                 return null;
             });
@@ -169,6 +176,9 @@ class GpuBoardWindowSmokeTest {
                 owner.dispose();
                 menus.die();
                 panels.close();
+                weapons.close();
+                inspectorDialog.close();
+                inspector.close();
                 classic.close();
                 return null;
             });
@@ -884,88 +894,6 @@ class GpuBoardWindowSmokeTest {
         }
     }
 
-    /**
-     * W1 (unit panel design 14 U4): once the native HUD draws, its switch on, no phase shows the Unit Display's window,
-     * however the client's preferences, phase rules or keys ask for it; the panel stays in its hidden dialog with its
-     * unit, the firing display's weapon list. Back on the classic board the window shows again.
-     */
-    @Test
-    void theUnitDisplaysWindowStaysHiddenOverTheNativeHudInEveryPhase() throws Exception {
-        GUIPreferences preferences = GUIPreferences.getInstance();
-        int location = preferences.getUnitDisplayLocation();
-        boolean unitEnabled = preferences.getUnitDisplayEnabled();
-        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            ClientWindow ui = onSwing(() -> createClientWindow(fixture));
-            ClientGUI gui = ui.view().getClientgui();
-            UnitDisplayDialog unit = onSwing(() -> {
-                preferences.setUnitDisplayLocation(0);
-                preferences.setUnitDisplayEnabled(true);
-                UnitDisplayPanel panel = new UnitDisplayPanel(gui);
-                UnitDisplayDialog dialog = new UnitDisplayDialog(ui.frame(), gui);
-                when(gui.getUnitDisplay()).thenReturn(panel);
-                when(gui.getUnitDisplayDialog()).thenReturn(dialog);
-                panel.displayEntity(fixture.entity);
-                doCallRealMethod().when(gui).setUnitDisplayVisible(anyBoolean());
-                doAnswer(invocation -> {
-                    // This fixture has no classic split panes; the classic board's request is only observed
-                    if (GpuBoardWindow.isActiveFor(gui)) {
-                        invocation.callRealMethod();
-                    } else {
-                        dialog.setVisible(invocation.getArgument(0));
-                    }
-                    return null;
-                }).when(gui).setUnitDisplayLocation(anyBoolean());
-                doCallRealMethod().when(gui).maybeShowUnitDisplay();
-                doCallRealMethod().when(gui).actionPerformed(any());
-                doCallRealMethod().when(gui).preferenceChange(any());
-                ui.menus().addActionListener(gui);
-                preferences.addPreferenceChangeListener(gui);
-                return dialog;
-            });
-            try {
-                openNative(ui);
-                await(() -> onSwing(() -> GpuBoardWindow.drawsDialogsFor(gui)));
-                for (GamePhase phase : List.of(GamePhase.DEPLOYMENT, GamePhase.MOVEMENT, GamePhase.FIRING,
-                      GamePhase.PHYSICAL, GamePhase.FIRING_REPORT, GamePhase.END_REPORT)) {
-                    onSwing(() -> {
-                        fixture.game.setPhase(phase);
-                        ui.menus().setPhase(phase);
-                        gui.maybeShowUnitDisplay();
-                        gui.refreshAuxiliaryWindows();
-                        preferences.setUnitDisplayEnabled(true);
-                        return null;
-                    });
-                    pressShortcut(KeyCommandBind.UNIT_DISPLAY);
-                    pressShortcut(KeyCommandBind.UNIT_DISPLAY);
-                    onSwing(() -> {
-                        assertFalse(Arrays.stream(Window.getWindows())
-                              .anyMatch(window -> window instanceof UnitDisplayDialog && window.isShowing()), phase
-                              + ": no Unit Display window");
-                        assertTrue(SwingUtilities.isDescendingFrom(gui.getUnitDisplay(), unit));
-                        assertSame(fixture.entity, gui.getUnitDisplay().getCurrentEntity());
-                        return null;
-                    });
-                }
-                onSwing(() -> {
-                    GpuBoardWindow.showClassic(gui);
-                    return null;
-                });
-                await(() -> onSwing(unit::isShowing));
-            } finally {
-                onSwing(() -> {
-                    preferences.removePreferenceChangeListener(gui);
-                    GpuBoardWindow.closeFor(ui.view().getClientState());
-                    unit.dispose();
-                    ui.frame().dispose();
-                    ui.view().dispose();
-                    ui.menus().die();
-                    preferences.setUnitDisplayLocation(location);
-                    preferences.setUnitDisplayEnabled(unitEnabled);
-                    return null;
-                });
-            }
-        }
-    }
 
     @Test
     void nativeStartupShowsPhaseMessagesBeforeTheFirstMapArrives() throws Exception {

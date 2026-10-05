@@ -338,7 +338,7 @@ public class ForceDisplayPanel extends JPanel implements GameListener, IPreferen
                 TreePath path = forceTree.getPathForRow(row);
                 if (path != null && path.getLastPathComponent() instanceof Entity entity) {
                     if (clientgui != null) {
-                        clientgui.getUnitDisplay().displayEntity(entity);
+                        clientgui.getUnitDisplayState().displayEntity(entity);
                     } else {
                         JFrame frame = null;
                         Window windowAncestor = SwingUtilities.getWindowAncestor(ForceDisplayPanel.this);

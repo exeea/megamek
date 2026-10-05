@@ -199,13 +199,7 @@ public final class UiTheme implements Disposable {
         TextButton.TextButtonStyle hud = quietButton("hud-button", 8, 12, 36);
         skin.add("hud", hud);
         skin.add("hud-mini", quietButton("hud-mini", 3, 9, 26));
-        TextButton.TextButtonStyle segment = quietButton("hud-medium", 6, 4, 0);
-        // A pressed segment stays filled under the pointer: proto3.css's .seg button.on outranks its hover rule.
-        segment.checkedOver = segment.checked;
-        segment.checkedDown = segment.checked;
-        segment.checkedOverFontColor = FILL_INK;
-        segment.checkedDownFontColor = FILL_INK;
-        skin.add("hud-seg", segment);
+        skin.add("hud-seg", quietButton("hud-medium", 6, 4, 0));
         // The sections of a pill: bare, the hovered one lighter, the pressed one filled.
         TextButton.TextButtonStyle section = new TextButton.TextButtonStyle();
         section.font = skin.getFont("hud-medium");
@@ -378,8 +372,8 @@ public final class UiTheme implements Disposable {
     }
 
     /**
-     * A standalone utility (.b.brk): corner ticks at rest, a full outline under the pointer, filled when pressed. As on
-     * hud buttons, the hover rule outranks the pressed one, so a hovered pressed utility is outlined.
+     * A standalone utility (.b.brk): corner ticks at rest, a full outline under the pointer, filled when checked.
+     * Checked utilities keep their fill when hovered or held.
      */
     private TextButton.TextButtonStyle utility(TextButton.TextButtonStyle hud, String font, float top,
           float horizontal, float bottom, float minWidth, float minHeight) {
@@ -397,8 +391,8 @@ public final class UiTheme implements Disposable {
         style.over = size.apply(new HudFrame(white, rgba(25, 33, 33, .95f), null, null, 0, outline));
         style.down = style.over;
         style.checked = size.apply(new HudFrame(white, FILL, null, null, 0, outline));
-        style.checkedOver = style.over;
-        style.checkedDown = style.over;
+        style.checkedOver = style.checked;
+        style.checkedDown = style.checked;
         style.disabled = style.up;
         return style;
     }
@@ -422,11 +416,9 @@ public final class UiTheme implements Disposable {
         icon.down = icon.over;
         icon.checked = resized("button-checked", 0, 0, 30);
         icon.checked.setMinWidth(30);
-        // A pressed icon button stays filled under the pointer (.b.ib[aria-pressed] follows the .b hover rule).
+        // Use the icon-sized checked face while hovered or held, with the shared checked text colors.
         icon.checkedOver = icon.checked;
         icon.checkedDown = icon.checked;
-        icon.checkedOverFontColor = FILL_INK;
-        icon.checkedDownFontColor = FILL_INK;
         icon.disabled = none;
         skin.add("hud-icon", icon);
 
@@ -617,8 +609,8 @@ public final class UiTheme implements Disposable {
     }
 
     /**
-     * The prototype's quiet button: ink2 label, white on hover, filled when checked, dim when disabled. proto3.css's
-     * hover rule outranks its pressed rule, so a hovered or held checked button shows the hover look.
+     * A quiet button: ink2 label, white on hover, filled when checked, dim when disabled. Checked buttons keep their
+     * fill and contrasting text when hovered or held.
      */
     private TextButton.TextButtonStyle quietButton(String font, float vertical, float horizontal, float minHeight) {
         TextButton.TextButtonStyle style = new TextButton.TextButtonStyle();
@@ -627,14 +619,14 @@ public final class UiTheme implements Disposable {
         style.over = resized("button-over", vertical, horizontal, minHeight);
         style.down = style.over;
         style.checked = resized("button-checked", vertical, horizontal, minHeight);
-        style.checkedOver = style.over;
-        style.checkedDown = style.over;
+        style.checkedOver = style.checked;
+        style.checkedDown = style.checked;
         style.disabled = resized("button-disabled", vertical, horizontal, minHeight);
         style.fontColor = ACCENT;
         style.overFontColor = Color.WHITE;
         style.checkedFontColor = FILL_INK;
-        style.checkedOverFontColor = Color.WHITE;
-        style.checkedDownFontColor = Color.WHITE;
+        style.checkedOverFontColor = FILL_INK;
+        style.checkedDownFontColor = FILL_INK;
         style.disabledFontColor = DISABLED;
         return style;
     }

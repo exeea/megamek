@@ -4,9 +4,14 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringFixture.weapon;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -15,7 +20,9 @@ import java.util.Map;
 import java.util.TreeMap;
 
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.dialogs.unitDisplay.WeaponPanel;
+import megamek.client.ui.clientGUI.unitDisplay.WeaponDisplayData;
+import megamek.client.ui.panels.phaseDisplay.FiringDisplay;
+import megamek.client.ui.panels.phaseDisplay.PointblankShotDisplay;
 import megamek.common.Configuration;
 import megamek.common.actions.DirectionalMountFacingAction;
 import megamek.common.actions.EntityAction;
@@ -24,7 +31,9 @@ import megamek.common.actions.SearchlightAttackAction;
 import megamek.common.actions.TorsoTwistAction;
 import megamek.common.actions.WeaponAttackAction;
 import megamek.common.board.Coords;
+import megamek.common.enums.GamePhase;
 import megamek.common.equipment.BombLoadout;
+import megamek.common.equipment.EquipmentType;
 import megamek.common.equipment.WeaponMounted;
 import megamek.common.equipment.enums.BombType.BombTypeEnum;
 import megamek.common.game.Game;
@@ -36,6 +45,8 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * Characterizes the Swing FiringDisplay's attack queue: what twisting, flipping a Directional Torso Mount, the automatic
@@ -85,6 +96,64 @@ class GpuFiringCharacterizationTest {
     @AfterAll
     static void restoreDataDir() {
         Configuration.setDataDir(originalDataDir);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    void aForcedGrenadeTargetRestoresThePreviousTargetWithoutAnInspector(boolean pointblank) throws Exception {
+        try (GpuFiringFixture firing = GpuFiringFixture.create()) {
+            onSwing(() -> {
+                FiringDisplay active = firing.display;
+                if (pointblank) {
+                    firing.display.setIgnoringEvents(true);
+                    firing.board.game.setPhase(GamePhase.MOVEMENT);
+                    when(firing.gui.isProcessingPointblankShot()).thenReturn(true);
+                    active = new PointblankShotDisplay(firing.gui);
+                    active.selectEntity(firing.attacker.getId());
+                }
+                try {
+                    WeaponMounted laser = weapon(firing.attacker, "Medium Laser", Mek.LOC_RIGHT_ARM);
+                    WeaponMounted grenade = (WeaponMounted) firing.attacker.addEquipment(
+                          EquipmentType.get("ISVehicularGrenadeLauncher"), Mek.LOC_LEFT_ARM);
+                    grenade.setFacing(0);
+                    firing.unitDisplay.selectWeapon(laser);
+                    active.target(firing.ahead);
+                    firing.unitDisplay.selectWeapon(grenade);
+                    assertNotSame(firing.ahead, active.getTarget());
+                    firing.unitDisplay.selectWeapon(laser);
+                    assertSame(firing.ahead, active.getTarget());
+                    // Inspecting an undeployed unit must not force the active attacker's target.
+                    Entity inspected = GpuFiringFixture.unit("Atlas AS7-D.mtf", 99, null);
+                    WeaponMounted otherGrenade = (WeaponMounted) inspected.addEquipment(
+                          EquipmentType.get("ISVehicularGrenadeLauncher"), Mek.LOC_LEFT_ARM);
+                    otherGrenade.setFacing(0);
+                    firing.unitDisplay.displayEntity(inspected);
+                    firing.unitDisplay.selectWeapon(otherGrenade);
+                    assertSame(firing.ahead, active.getTarget());
+                    assertNull(firing.gui.getUnitDisplay());
+                    assertNull(firing.gui.getUnitDisplayDialog());
+                } finally {
+                    if (pointblank) { active.removeAllListeners(); }
+                }
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void inspectingAnotherUnitClearsThePreviousFiringSolutionWithoutAnInspector() throws Exception {
+        try (GpuFiringFixture firing = GpuFiringFixture.create()) {
+            onSwing(() -> {
+                firing.unitDisplay.selectWeapon(weapon(firing.attacker, "Medium Laser", Mek.LOC_RIGHT_ARM));
+                firing.display.target(firing.ahead);
+                assertNotEquals("---", firing.unitDisplay.getToHit());
+                firing.unitDisplay.displayEntity(firing.left);
+                assertNull(firing.unitDisplay.getSelectedWeapon());
+                assertEquals("---", firing.unitDisplay.getRange());
+                assertEquals("---", firing.unitDisplay.getToHit());
+                return null;
+            });
+        }
     }
 
     @Test
@@ -144,14 +213,14 @@ class GpuFiringCharacterizationTest {
             WeaponMounted centerLaser = weapon(atlas, "Medium Laser", Mek.LOC_CENTER_TORSO);
             List<String> observed = onSwing(() -> {
                 List<String> lines = new ArrayList<>();
-                firing.unitDisplay.wPan.selectWeapon(laser);
+                firing.unitDisplay.selectWeapon(laser);
                 firing.display.target(firing.ahead);
                 lines.add(solution(firing));
                 firing.display.fire();
-                firing.unitDisplay.wPan.selectWeapon(laser);
+                firing.unitDisplay.selectWeapon(laser);
                 lines.add(solution(firing));
                 firing.display.torsoTwist(0);
-                firing.unitDisplay.wPan.selectWeapon(centerLaser);
+                firing.unitDisplay.selectWeapon(centerLaser);
                 firing.display.target(firing.ahead);
                 lines.add(solution(firing));
                 return lines;
@@ -176,7 +245,7 @@ class GpuFiringCharacterizationTest {
         atlas.setSearchlightState(true);
         GUIPreferences.getInstance().setAutoDeclareSearchlight(true);
         firing.display.torsoTwist(1);
-        firing.unitDisplay.wPan.selectWeapon(lrm);
+        firing.unitDisplay.selectWeapon(lrm);
         firing.display.flipDirectionalMount();
         firing.fire(weapon(atlas, "AC/20", Mek.LOC_RIGHT_TORSO), firing.ahead);
         firing.fire(weapon(atlas, "Medium Laser", Mek.LOC_RIGHT_ARM), firing.ahead);
@@ -204,7 +273,7 @@ class GpuFiringCharacterizationTest {
         lines.add("used " + used(atlas));
         lines.add("facing " + atlas.getSecondaryFacing() + " mount "
               + weapon(atlas, "LRM 20", Mek.LOC_LEFT_TORSO).getDirectionalMountFacing());
-        WeaponPanel.HeatBuildup heat = WeaponPanel.heatBuildup(game, atlas);
+        WeaponDisplayData.HeatBuildup heat = WeaponDisplayData.heatBuildup(game, atlas);
         lines.add("heat " + heat.value() + " " + heat.text());
         return lines;
     }
@@ -252,6 +321,6 @@ class GpuFiringCharacterizationTest {
     /** EDT: whether Fire is enabled, and the weapon display's range and to-hit as plain text. */
     static String solution(GpuFiringFixture firing) {
         return firing.display.isFireAllowed() + " " + GpuBoardWindow.plainText(
-              firing.unitDisplay.wPan.getFiringSolution()).replaceAll("\\s+", " ").strip();
+              firing.unitDisplay.getFiringSolution()).replaceAll("\\s+", " ").strip();
     }
 }

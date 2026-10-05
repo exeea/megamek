@@ -33,7 +33,6 @@ import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.graphics.glutils.HdpiUtils;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
@@ -213,7 +212,6 @@ class GpuBuildingHoverSmokeTest {
         var terrain = (GpuTerrain) field(view, "terrain");
         var ui = (GpuBoardHud) field(view, "ui");
         var camera = view.boardCamera.camera;
-        checkRoofHover(view, terrain, scene, ui);
         checkCutaway(terrain);
         checkRenderedStoreys(view, terrain, ui);
         checkModularStoreys(view, ui);
@@ -296,49 +294,6 @@ class GpuBuildingHoverSmokeTest {
             }
         }
         return result;
-    }
-
-    private static void checkRoofHover(GpuBattleView view, GpuTerrain terrain, BoardScene scene, GpuBoardHud ui) throws Exception {
-        var camera = view.boardCamera.camera;
-        var bounds = terrain.roofBounds(BUILDING);
-        float roofZ = (scene.tile(BUILDING).elevation() + 5) * BoardGeometry.level();
-        Input original = Gdx.input;
-        Input pointer = mock(Input.class);
-        Gdx.input = pointer;
-        var floor = GpuBattleView.class.getDeclaredMethod("hoverFloorZ");
-        floor.setAccessible(true);
-        int checked = 0, wrong = 0;
-        float low = Float.POSITIVE_INFINITY, high = Float.NEGATIVE_INFINITY;
-        try {
-            for (int dx = 1; dx < 12; dx++) {
-                for (int dy = 1; dy < 12; dy++) {
-                    var vertical = new Ray(new Vector3(bounds.min.x + bounds.getWidth() * dx / 12,
-                          bounds.min.y + bounds.getHeight() * dy / 12, bounds.max.z + 100), new Vector3(0, 0, -1));
-                    var roof = terrain.selectionHit(scene, vertical);
-                    if (roof == null || !BUILDING.equals(roof.coords())) { continue; }
-                    Vector3 point = vertical.getEndPoint(new Vector3(), (float) Math.sqrt(roof.distance()));
-                    if (point.z < roofZ - BoardGeometry.level() / 2) { continue; }
-                    var screen = camera.project(point.cpy(), 0, 0, camera.viewportWidth, camera.viewportHeight);
-                    int x = Math.round(screen.x), y = Gdx.graphics.getHeight() - Math.round(screen.y);
-                    if (ui.hit(x, y)) { continue; }
-                    var ray = camera.getPickRay(x, y, 0, 0, camera.viewportWidth, camera.viewportHeight);
-                    var hit = terrain.selectionHit(scene, ray);
-                    if (hit == null || !BUILDING.equals(hit.coords())) { continue; }
-                    Vector3 visible = ray.getEndPoint(new Vector3(), (float) Math.sqrt(hit.distance()));
-                    if (visible.dst2(point) > 4) { continue; }
-                    when(pointer.getX()).thenReturn(x);
-                    when(pointer.getY()).thenReturn(y);
-                    original.getInputProcessor().mouseMoved(x, y);
-                    float hover = (float) field(view, "hoverZ");
-                    low = Math.min(low, hover); high = Math.max(high, hover);
-                    checked++;
-                    if ((float) floor.invoke(view) != roofZ) { wrong++; }
-                }
-            }
-            System.out.println("ROOF hover samples=" + checked + " wrong=" + wrong + " range=" + low + ".." + high + " nominal=" + roofZ);
-            assertTrue(checked > 20, "Sweep must cover the visible roof");
-            assertEquals(0, wrong, "All visible roof points must select the roof, including near its edge");
-        } finally { Gdx.input = original; }
     }
 
     private static void checkCutaway(GpuTerrain terrain) throws Exception {

@@ -51,6 +51,7 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.Asked;
+import megamek.client.ui.clientGUI.unitDisplay.UnitEquipmentActions;
 import megamek.client.ui.dialogs.ChoiceDialog;
 import megamek.client.ui.dialogs.SliderDialog;
 import megamek.client.ui.dialogs.minimap.MinimapPanel;
@@ -60,7 +61,6 @@ import megamek.client.ui.dialogs.phaseDisplay.EntityChoiceDialog;
 import megamek.client.ui.dialogs.phaseDisplay.ManeuverChoiceDialog;
 import megamek.client.ui.dialogs.phaseDisplay.TeleMissileSettingDialog;
 import megamek.client.ui.dialogs.phaseDisplay.VibrabombSettingDialog;
-import megamek.client.ui.dialogs.unitDisplay.SystemPanel;
 import megamek.common.Configuration;
 import megamek.common.ManeuverType;
 import megamek.common.board.Board;
@@ -233,7 +233,7 @@ class GpuChoiceRoutingTest {
             try {
                 // Switching the second suite back on would put two suites into use: the player keeps one of them
                 Asked<Boolean> kept = ask(fixture.source,
-                      () -> SystemPanel.changeMode(gui, atlas, suites.get(1), 0), pick(0, 1));
+                      () -> UnitEquipmentActions.changeMode(gui, atlas, suites.get(1), 0), pick(0, 1));
                 DialogRequest request = kept.request();
                 assertEquals(DialogKind.CHOICE, request.kind());
                 assertEquals(Messages.getString("EcmSuiteChoiceDialog.title"), request.title());
@@ -251,9 +251,9 @@ class GpuChoiceRoutingTest {
                 verify(client).sendModeChange(atlas.getId(), secondNum, 0);
 
                 // Back on the first suite: keeping the second, or cancelling, abandons the switch
-                assertFalse(ask(fixture.source, () -> SystemPanel.changeMode(gui, atlas, suites.get(0), 0),
+                assertFalse(ask(fixture.source, () -> UnitEquipmentActions.changeMode(gui, atlas, suites.get(0), 0),
                       pick(0, 1)).result());
-                assertFalse(ask(fixture.source, () -> SystemPanel.changeMode(gui, atlas, suites.get(0), 0),
+                assertFalse(ask(fixture.source, () -> UnitEquipmentActions.changeMode(gui, atlas, suites.get(0), 0),
                       pick(1)).result());
                 verify(client, never()).sendModeChange(atlas.getId(), firstNum, 0);
                 assertEquals(dialogs, ecmDialogs(), "No Swing dialog was built for the question");

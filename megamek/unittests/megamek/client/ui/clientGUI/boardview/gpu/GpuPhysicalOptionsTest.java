@@ -41,12 +41,12 @@ import megamek.client.ui.clientGUI.MegaMekGUI;
 import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
-import megamek.client.ui.panels.phaseDisplay.PhysicalDisplay;
+import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
 import megamek.client.ui.panels.phaseDisplay.PhysicalDisplay.PhysicalCommand;
+import megamek.client.ui.panels.phaseDisplay.PhysicalDisplay;
 import megamek.client.ui.util.MegaMekController;
-import megamek.common.CriticalSlot;
 import megamek.common.Configuration;
+import megamek.common.CriticalSlot;
 import megamek.common.Player;
 import megamek.common.actions.EntityAction;
 import megamek.common.actions.KickAttackAction;
@@ -417,12 +417,12 @@ class GpuPhysicalOptionsTest {
             }).when(client).sendAttackData(anyInt(), any());
             CommonMenuBar menu = mock(CommonMenuBar.class);
             when(menu.getComponents()).thenReturn(new Component[0]);
-            UnitDisplayPanel unitDisplay = mock(UnitDisplayPanel.class);
+            UnitDisplayState unitDisplay = mock(UnitDisplayState.class);
             // The display enables its buttons only while the unit display shows its unit.
             when(unitDisplay.getCurrentEntity()).thenAnswer(invocation -> attacker);
             when(gui.getClient()).thenReturn(client);
             when(gui.getMenuBar()).thenReturn(menu);
-            when(gui.getUnitDisplay()).thenReturn(unitDisplay);
+            when(gui.getUnitDisplayState()).thenReturn(unitDisplay);
             gui.controller = mock(MegaMekController.class);
 
             view = new BoardView(game, null, gui, 0);

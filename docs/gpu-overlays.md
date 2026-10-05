@@ -32,11 +32,14 @@ Flat hex annotations use `BoardTacticalGeometry.floatingZ`, at the owning
 hex's nominal ground/water level plus a small clearance. Road ramps and sculpted
 relief do not raise this plane. Raised point symbols use the separate
 `GpuMarkers.locationSupport` helper to clear the hex ceiling and overlapping units.
+Matching range bands are connected by vertical strips wherever they cross a shared
+hex edge at different elevations. The strips retain the captured color and opacity;
+separate bands, board edges and equal-height planes do not acquire extra walls.
 Flat annotations still test scene depth, so rising terrain can hide parts of them.
-Hover and editor-brush outlines, unit selection bands and target bands draw hidden
-sections in an additional depth pass at `GpuBattleView.SELECTION_OCCLUDED_ALPHA` (50%
-opacity), keeping unobstructed sections fully bright. Both passes use the same
-geometry and preserve the scene depth.
+Hover and editor-brush outlines draw hidden sections in an additional depth pass at
+`GpuBattleView.HOVER_OCCLUDED_ALPHA` (50% opacity), keeping unobstructed sections fully
+bright. Both passes use the same geometry and preserve the scene depth. Unit
+selection and target bands retain their own hidden-section pass in `GpuBoardOverlay`.
 `GpuBattleView.HOVER_HEX_INSET` controls the native hover and editor-brush outline's
 inset as a fraction of the hex radius; `.1` preserves the original 10% inset.
 When the pointer hits a raised surface, its hover outline snaps the ray-hit height to the supporting floor level (the bottom of the storey hit by the ray). A second
@@ -54,6 +57,19 @@ an alternate source of game state or visibility.
 
 Field-of-view classification is shared with the classic painter. The GPU uses
 one texel per hex and applies the chosen grayscale, dimmed or fog-of-war style.
+The atmosphere composite reconstructs the visible surface from the existing scene
+depth and applies the mask there. Shading follows terrain slopes, cliffs and props;
+foreground surfaces naturally hide anything behind them. The contour follows the
+surface too and fades on vertical faces. At exact cliff boundaries, ownership is
+sampled just inside the solid to avoid switching hexes as the camera moves.
+There is no separate LOS mesh, connector geometry or render target.
+
+Visibility changes upload the per-hex mask without rebuilding terrain or repainting
+its textures. Unchanged visibility reuses the mask; style and opacity preferences
+update uniforms only. Camera changes reuse the same mask and composite
+the current scene depth. Terrain rebuilds remain tied to terrain/geometry changes,
+with camera detail refinement managed independently by `GpuTerrain`.
+Range-band connectors keep their own geometry and colors.
 Change classification in the client capture; change appearance in
 `GpuFieldOfView` and the atmosphere's FOV helper.
 

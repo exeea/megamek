@@ -7,6 +7,7 @@ import java.awt.geom.PathIterator;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
@@ -26,6 +27,17 @@ final class BoardTacticalGeometry {
     static final float HEX_PLANE_CLEARANCE = .65f;
 
     record Triangle(Vector3 a, Vector3 b, Vector3 c, int argb) { }
+    private record PlaneFill(Coords coords, int argb, BoardTactical.Playback playback) { }
+
+    /** A shared hex edge descending from one annotation plane to the neighboring plane. */
+    record PlaneStep(Vector3 a, Vector3 b, float bottom, Coords neighbor) {
+        void connect(float start, float end, int argb, Consumer<Triangle> destination) {
+            Vector3 topA = new Vector3(a).lerp(b, start), topB = new Vector3(a).lerp(b, end);
+            Vector3 bottomA = new Vector3(topA.x, topA.y, bottom), bottomB = new Vector3(topB.x, topB.y, bottom);
+            destination.accept(new Triangle(topA, bottomA, bottomB, argb));
+            destination.accept(new Triangle(topA, bottomB, topB, argb));
+        }
+    }
     /** Only the finished triangles are retained; none of the terrain builder's scene or shoreline caches. */
     record Surface(List<BoardSurface.Face> top, List<BoardSurface.Face> slopes,
           List<BoardSurface.Face> faces, List<BoardSurface.Face> water, List<BoardSurface.Face> walls,
@@ -193,6 +205,92 @@ final class BoardTacticalGeometry {
      */
     static float floatingZ(BoardScene scene, Coords coords) {
         return BoardGeometry.surfaceZ(scene.tile(coords)) + HEX_PLANE_CLEARANCE;
+    }
+
+    /** Only the higher owner emits a connector; board edges and equal-height neighbors have none. */
+    static PlaneStep planeStep(BoardScene scene, Coords coords, int edge) {
+        Coords neighbor = coords.translated(BoardGeometry.edgeDirection(edge));
+        if (scene.tile(neighbor) == null) { return null; }
+        float top = floatingZ(scene, coords), bottom = floatingZ(scene, neighbor);
+        if (top <= bottom) { return null; }
+        Vector3 a = BoardGeometry.corner(coords, 0, edge), b = BoardGeometry.corner(coords, 0, edge + 1);
+        a.z = top; b.z = top;
+        return new PlaneStep(a, b, bottom, neighbor);
+    }
+
+    /** Join matching captured bands only where they both reach their common hex edge. */
+    static void connectPlanes(BoardScene scene, List<BoardTactical.Fill> fills, Consumer<Triangle> destination) {
+        Map<PlaneFill, Area> areas = new LinkedHashMap<>();
+        for (BoardTactical.Fill fill : fills) {
+            // Deployment owns its perimeter curtains and omits these per-hex fills from the plane pass.
+            if (BoardDeploymentGeometry.isZone(fill)) { continue; }
+            Coords coords = anchorCoords(scene, fill.planeAnchor());
+            if (coords != null) {
+                areas.computeIfAbsent(new PlaneFill(coords, fill.argb(), fill.playback()), ignored -> new Area())
+                      .add(new Area(fill.shape()));
+            }
+        }
+        for (var entry : areas.entrySet()) {
+            PlaneFill owner = entry.getKey();
+            for (int edge = 0; edge < 6; edge++) {
+                PlaneStep step = planeStep(scene, owner.coords(), edge);
+                if (step == null) { continue; }
+                Area neighbor = areas.get(new PlaneFill(step.neighbor(), owner.argb(), owner.playback()));
+                if (neighbor == null) { continue; }
+                List<float[]> first = planeIntervals(entry.getValue(), owner.coords(), step);
+                List<float[]> second = planeIntervals(neighbor, step.neighbor(), step);
+                for (float[] a : first) {
+                    for (float[] b : second) {
+                        float start = Math.max(a[0], b[0]), end = Math.min(a[1], b[1]);
+                        if (end - start > .00001f) { step.connect(start, end, owner.argb(), destination); }
+                    }
+                }
+            }
+        }
+    }
+
+    /** Intersect an edge with the captured fill, just inside its owner to include polygons ending on the edge. */
+    private static List<float[]> planeIntervals(Area area, Coords owner, PlaneStep step) {
+        double scale = BoardGeometry.hexScale();
+        double ax = step.a().x / scale, ay = -step.a().y / scale;
+        double bx = step.b().x / scale, by = -step.b().y / scale;
+        double nx = BoardGeometry.centerX(owner) / scale - (ax + bx) / 2;
+        double ny = -BoardGeometry.centerY(owner) / scale - (ay + by) / 2;
+        double inset = .001 / Math.hypot(nx, ny);
+        ax += nx * inset; ay += ny * inset;
+        bx += nx * inset; by += ny * inset;
+        double dx = bx - ax, dy = by - ay;
+        TreeSet<Double> cuts = new TreeSet<>(List.of(0.0, 1.0));
+        PathIterator path = area.getPathIterator(null, .25);
+        double[] point = new double[6];
+        double x = 0, y = 0, startX = 0, startY = 0;
+        while (!path.isDone()) {
+            int type = path.currentSegment(point);
+            if (type == PathIterator.SEG_MOVETO) {
+                startX = x = point[0]; startY = y = point[1];
+            } else {
+                double nextX = type == PathIterator.SEG_CLOSE ? startX : point[0];
+                double nextY = type == PathIterator.SEG_CLOSE ? startY : point[1];
+                double sx = nextX - x, sy = nextY - y, denominator = dx * sy - dy * sx;
+                if (Math.abs(denominator) > .0000001) {
+                    double t = ((x - ax) * sy - (y - ay) * sx) / denominator;
+                    double u = ((x - ax) * dy - (y - ay) * dx) / denominator;
+                    if (t > 0 && t < 1 && u >= 0 && u <= 1) { cuts.add(t); }
+                }
+                x = nextX; y = nextY;
+            }
+            path.next();
+        }
+        List<float[]> result = new ArrayList<>();
+        double previous = 0;
+        for (double next : cuts) {
+            double middle = (previous + next) / 2;
+            if (next > previous && area.contains(ax + dx * middle, ay + dy * middle)) {
+                result.add(new float[] { (float) previous, (float) next });
+            }
+            previous = next;
+        }
+        return result;
     }
 
     static float layerLift(int layer) {

@@ -54,7 +54,7 @@ import megamek.client.Client;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.IClientGUI;
-import megamek.client.ui.dialogs.unitDisplay.IHasUnitDisplay;
+import megamek.client.ui.clientGUI.unitDisplay.IHasUnitDisplay;
 import megamek.client.ui.util.BASE64ToolKit;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.UIUtil;
@@ -609,7 +609,7 @@ public class MiniReportDisplayPanel extends JPanel implements ActionListener, Hy
                 var optionalEntity = currentClientGUI.getClient().getGame().getInGameObject(id);
                 if (optionalEntity.isPresent() && optionalEntity.get() instanceof Entity entity) {
                     if (currentClientGUI instanceof IHasUnitDisplay) {
-                        ((IHasUnitDisplay) currentClientGUI).getUnitDisplay().displayEntity(entity);
+                        ((IHasUnitDisplay) currentClientGUI).getUnitDisplayState().displayEntity(entity);
                         GUIP.setUnitDisplayEnabled(true);
                         if (entity.isDeployed() && !entity.isOffBoard() && entity.getPosition() != null) {
                             if (currentClientGUI instanceof megamek.client.ui.clientGUI.AbstractClientGUI gui) {

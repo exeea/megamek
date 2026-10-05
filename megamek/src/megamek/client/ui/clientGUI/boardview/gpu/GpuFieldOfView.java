@@ -48,10 +48,16 @@ final class GpuFieldOfView implements Disposable {
     }
 
     void update(BoardFieldOfView next) {
-        if (previous.equals(next)) {
+        if (previous == next) {
             return;
         }
+        boolean sameMask = previous.width() == next.width() && previous.height() == next.height()
+              && previous.hexes().equals(next.hexes());
         previous = next;
+        // Preference changes update uniforms, without allocating pixels or uploading an identical mask.
+        if (sameMask) {
+            return;
+        }
         active = next.active();
         if (!active) {
             return;

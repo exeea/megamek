@@ -476,8 +476,8 @@ public class TurretFacingDialog extends JDialog implements ActionListener {
                 // The whole mount (every directional weapon in this location) shares one facing; rotate them together.
                 DirectionalTorsoMountRules.setMountFacing(mek, turret.getLocation(), offset);
                 clientgui.getClient().sendMountFacingChange(mek.getId(), mek.getEquipmentNum(turret), offset);
-                if (clientgui.getUnitDisplay() != null) {
-                    clientgui.getUnitDisplay().wPan.selectWeapon(mek.getEquipmentNum(turret));
+                if (clientgui.getUnitDisplayState() != null) {
+                    clientgui.getUnitDisplayState().selectWeapon(mek.getEquipmentNum(turret));
                 }
                 dispose();
                 return;
@@ -494,8 +494,8 @@ public class TurretFacingDialog extends JDialog implements ActionListener {
 
                 Mounted<?> firstMountedWeapon = null; // Take note of the first weapon mounted on this turret.
                 Mounted<?> currentSelectedWeapon = null; // Take note of current selected weapon.
-                if (clientgui.getUnitDisplay() != null) {
-                    currentSelectedWeapon = clientgui.getUnitDisplay().wPan.getSelectedWeapon();
+                if (clientgui.getUnitDisplayState() != null) {
+                    currentSelectedWeapon = clientgui.getUnitDisplayState().getSelectedWeapon();
                 }
 
                 for (Mounted<?> weapon : mek.getWeaponList()) {
@@ -517,8 +517,8 @@ public class TurretFacingDialog extends JDialog implements ActionListener {
                 }
 
                 // Select the mounted weapon in the unit display to refresh the firing arch.
-                if (clientgui.getUnitDisplay() != null) {
-                    clientgui.getUnitDisplay().wPan.selectWeapon(mek.getEquipmentNum(firstMountedWeapon));
+                if (clientgui.getUnitDisplayState() != null) {
+                    clientgui.getUnitDisplayState().selectWeapon(mek.getEquipmentNum(firstMountedWeapon));
                 }
             } else if (tank != null) {
                 tank.setDualTurretOffset(((6 - tank.getFacing()) + facing) % 6);
@@ -533,8 +533,8 @@ public class TurretFacingDialog extends JDialog implements ActionListener {
                 }
 
                 // Select the turret in the unit display.
-                if (clientgui.getUnitDisplay() != null) {
-                    clientgui.getUnitDisplay().wPan.selectWeapon(tank.getEquipmentNum(turret));
+                if (clientgui.getUnitDisplayState() != null) {
+                    clientgui.getUnitDisplayState().selectWeapon(tank.getEquipmentNum(turret));
                 }
             }
 

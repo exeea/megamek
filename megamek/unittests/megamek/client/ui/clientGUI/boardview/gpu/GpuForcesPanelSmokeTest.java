@@ -38,7 +38,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import megamek.client.ui.clientGUI.boardview.UnitStatusWords;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.UnitStatus;
-import megamek.client.ui.dialogs.unitDisplay.HeatEffects;
+import megamek.client.ui.clientGUI.unitDisplay.HeatEffects;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.common.ResolvedAttack;

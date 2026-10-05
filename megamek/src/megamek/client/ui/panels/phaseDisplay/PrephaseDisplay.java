@@ -44,8 +44,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import javax.swing.event.ListSelectionEvent;
-import javax.swing.event.ListSelectionListener;
 
 import megamek.client.Client;
 import megamek.client.event.BoardViewEvent;
@@ -75,7 +73,7 @@ import megamek.logging.MMLogger;
 /**
  * PrephaseDisplay for revealing hidden units. This occurs before Move and Firing
  */
-public class PrephaseDisplay extends StatusBarPhaseDisplay implements ListSelectionListener {
+public class PrephaseDisplay extends StatusBarPhaseDisplay {
     private static final MMLogger logger = MMLogger.create(PrephaseDisplay.class);
 
     @Serial
@@ -218,7 +216,6 @@ public class PrephaseDisplay extends StatusBarPhaseDisplay implements ListSelect
      */
     public void initializeListeners() {
         game().addGameListener(this);
-        clientgui.getUnitDisplay().wPan.weaponList.addListSelectionListener(this);
     }
 
     @Override
@@ -423,11 +420,11 @@ public class PrephaseDisplay extends StatusBarPhaseDisplay implements ListSelect
             return;
         }
         clientgui.boardStates().forEach(bv -> bv.redrawEntity(currentEntity()));
-        clientgui.getUnitDisplay().displayEntity(currentEntity());
+        clientgui.getUnitDisplayState().displayEntity(currentEntity());
         if (GUIP.getFireDisplayTabDuringFiringPhases()) {
-            clientgui.getUnitDisplay().showPanel(MekPanelTabStrip.WEAPONS);
+            clientgui.showUnitDisplayPanel(MekPanelTabStrip.WEAPONS);
         }
-        clientgui.getUnitDisplay().wPan.selectFirstWeapon();
+        clientgui.getUnitDisplayState().selectFirstWeapon();
     }
 
     /**
@@ -855,7 +852,7 @@ public class PrephaseDisplay extends StatusBarPhaseDisplay implements ListSelect
             }
         } else {
             clientgui.maybeShowUnitDisplay();
-            clientgui.getUnitDisplay().displayEntity(selectedUnit);
+            clientgui.getUnitDisplayState().displayEntity(selectedUnit);
             if (selectedUnit.isDeployed()) {
                 clientgui.centerOnUnit(selectedUnit);
             }
@@ -866,11 +863,7 @@ public class PrephaseDisplay extends StatusBarPhaseDisplay implements ListSelect
     public void removeAllListeners() {
         game().removeGameListener(this);
         clientgui.boardStates().forEach(bv -> bv.removeBoardViewListener(this));
-        clientgui.getUnitDisplay().wPan.weaponList.removeListSelectionListener(this);
     }
-
-    @Override
-    public void valueChanged(ListSelectionEvent event) {}
 
     private Game game() {
         return clientgui.getClient().getGame();

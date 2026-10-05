@@ -20,8 +20,6 @@ import java.util.List;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import javax.swing.JComboBox;
-import javax.swing.JList;
 import javax.swing.SwingUtilities;
 
 import megamek.client.Client;
@@ -29,8 +27,7 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
-import megamek.client.ui.dialogs.unitDisplay.WeaponPanel;
+import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
 import megamek.client.ui.panels.phaseDisplay.FiringDisplay;
 import megamek.client.ui.widget.MegaMekButton;
 import megamek.common.Player;
@@ -43,7 +40,7 @@ import megamek.common.units.Targetable;
 import org.junit.jupiter.api.Test;
 
 class GpuBoardActionsTest {
-    private record Controls(GpuBoardActions actions, FiringDisplay phase, WeaponPanel weapons, Entity target) { }
+    private record Controls(GpuBoardActions actions, FiringDisplay phase, UnitDisplayState weapons, Entity target) { }
 
     @Test
     void presentationTextDecodesHtmlEntitiesWithoutRemovingLiteralComparisons() {
@@ -158,13 +155,8 @@ class GpuBoardActionsTest {
             when(phase.getActionButtons()).thenReturn(List.of());
             when(phase.getCompletionButtons()).thenReturn(List.of());
             when(phase.shouldReceiveKeyCommands()).thenReturn(true);
-            UnitDisplayPanel display = mock(UnitDisplayPanel.class);
-            when(gui.getUnitDisplay()).thenReturn(display);
-            WeaponPanel weapons = mock(WeaponPanel.class);
-            display.wPan = weapons;
-            weapons.weaponList = new JList<>(new String[] { "Laser A", "Laser B" });
-            weapons.m_chBayWeapon = new JComboBox<>();
-            when(weapons.getAmmoSelector()).thenReturn(new JComboBox<>(new String[] { "Standard", "Special" }));
+            UnitDisplayState weapons = mock(UnitDisplayState.class);
+            when(gui.getUnitDisplayState()).thenReturn(weapons);
             when(weapons.getSelectedEntityId()).thenReturn(fixture.entity.getId());
             when(weapons.getSelectedWeaponNum()).thenReturn(-1);
             when(weapons.getTargetSummary()).thenReturn("<html>7+ to hit</html>");

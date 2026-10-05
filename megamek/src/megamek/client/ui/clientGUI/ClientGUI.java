@@ -69,8 +69,6 @@ import megamek.client.bot.princess.BehaviorSettings;
 import megamek.client.commands.*;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListener;
-import megamek.client.event.MekDisplayEvent;
-import megamek.client.event.MekDisplayListener;
 import megamek.client.ratgenerator.GenerationContext;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.audio.AudioService;
@@ -81,12 +79,12 @@ import megamek.client.ui.clientGUI.boardview.BoardView;
 import megamek.client.ui.clientGUI.boardview.CollapseWarning;
 import megamek.client.ui.clientGUI.boardview.IBoardView;
 import megamek.client.ui.clientGUI.boardview.RulerDialog;
-import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogField;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.clientGUI.boardview.overlay.BoardToastOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.ChatterBoxOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.KeyBindingsOverlay;
@@ -97,6 +95,8 @@ import megamek.client.ui.clientGUI.boardview.overlay.TurnDetailsOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.UnitOverviewOverlay;
 import megamek.client.ui.clientGUI.boardview.spriteHandler.*;
 import megamek.client.ui.clientGUI.boardview.toolTip.TWBoardViewTooltip;
+import megamek.client.ui.clientGUI.unitDisplay.IHasUnitDisplay;
+import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
 import megamek.client.ui.dialogs.*;
 import megamek.client.ui.dialogs.BotCommands.BotCommandsDialog;
 import megamek.client.ui.dialogs.BotCommands.BotCommandsPanel;
@@ -115,7 +115,6 @@ import megamek.client.ui.dialogs.minimap.MinimapDialog;
 import megamek.client.ui.dialogs.minimap.MinimapPanel;
 import megamek.client.ui.dialogs.phaseDisplay.NovaNetworkViewDialog;
 import megamek.client.ui.dialogs.randomArmy.RandomArmyDialog;
-import megamek.client.ui.dialogs.unitDisplay.IHasUnitDisplay;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayDialog;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
 import megamek.client.ui.dialogs.unitSelectorDialogs.MegaMekUnitSelectorDialog;
@@ -188,7 +187,7 @@ import megamek.common.weapons.handlers.WeaponOrderHandler;
 import megamek.logging.MMLogger;
 
 public class ClientGUI extends AbstractClientGUI
-      implements BoardViewListener, ActionListener, IPreferenceChangeListener, MekDisplayListener, ILocalBots,
+      implements BoardViewListener, ActionListener, IPreferenceChangeListener, ILocalBots,
                  IDisconnectSilently, IHasUnitDisplay, IHasBoardView, IHasMenuBar, IHasCurrentPanel {
     private final static MMLogger logger = MMLogger.create(ClientGUI.class);
 
@@ -382,7 +381,8 @@ public class ClientGUI extends AbstractClientGUI
     private JPanel panA1;
     private JPanel panA2;
 
-    private final UnitDisplayPanel unitDisplayPanel;
+    private UnitDisplayPanel unitDisplayPanel;
+    private final UnitDisplayState unitDisplayState;
     private UnitDisplayDialog unitDisplayDialog;
 
     private BotCommandsDialog botCommandsDialog;
@@ -402,7 +402,6 @@ public class ClientGUI extends AbstractClientGUI
     private javax.swing.Timer toastDripTimer;
     /** Normalized report entries already shown as toasts this phase; see {@link ReportToastFormatter#formatReport}. */
     private final Set<String> toastedReportEntries = new HashSet<>();
-
 
     // some dialogs...
     private GameOptionsDialog gameOptionsDialog;
@@ -528,7 +527,7 @@ public class ClientGUI extends AbstractClientGUI
 
         audioService.loadSoundFiles();
 
-        unitDisplayPanel = new UnitDisplayPanel(this, controller);
+        unitDisplayState = new UnitDisplayState(this);
         try {
             tilesetManager = new TilesetManager(client.getGame());
         } catch (IOException e) {
@@ -740,9 +739,28 @@ public class ClientGUI extends AbstractClientGUI
         toastDripTimer.start();
     }
 
-    @Override
+    /** The optional classic inspector. Gameplay code must use {@link #getUnitDisplayState()}. */
+    @Nullable
     public UnitDisplayPanel getUnitDisplay() {
         return unitDisplayPanel;
+    }
+
+    @Override
+    public UnitDisplayState getUnitDisplayState() {
+        return unitDisplayState;
+    }
+
+    /** Presentation only: a phase may suggest a classic tab without constructing the inspector. */
+    public void showUnitDisplayPanel(String panel) {
+        if (unitDisplayPanel != null) { unitDisplayPanel.showPanel(panel); }
+    }
+
+    private void initializeClassicUnitDisplay() {
+        if (unitDisplayPanel == null) {
+            setUnitDisplayDialog(new UnitDisplayDialog(getFrame(), this));
+            unitDisplayPanel = new UnitDisplayPanel(this, controller);
+            unitDisplayPanel.refreshFromState();
+        }
     }
 
     public UnitDisplayDialog getUnitDisplayDialog() {
@@ -1056,10 +1074,6 @@ public class ClientGUI extends AbstractClientGUI
         aw.setLocation(0, 0);
         aw.setSize(300, 300);
 
-        unitDisplayPanel.addMekDisplayListener(this);
-        setUnitDisplayDialog(new UnitDisplayDialog(getFrame(), this));
-        getUnitDisplayDialog().setVisible(false);
-
         setForceDisplayPanel(new ForceDisplayPanel(this));
         setForceDisplayDialog(new ForceDisplayDialog(getFrame(), this));
         getForceDisplayDialog().add(getForceDisplayPanel(), BorderLayout.CENTER);
@@ -1259,7 +1273,6 @@ public class ClientGUI extends AbstractClientGUI
         getNetworkInformationDialog().pack();
         getNetworkInformationDialog().setVisible(true);
     }
-
 
     public void customizePlayer() {
         PlayerSettingsDialog psd = new PlayerSettingsDialog(this, client, getBoardState());
@@ -1617,7 +1630,7 @@ public class ClientGUI extends AbstractClientGUI
             case VIEW_MOVE_ENV:
                 GUIP.setMoveEnvelope(!GUIP.getMoveEnvelope());
                 if (curPanel instanceof MovementDisplay movementDisplay) {
-                    Entity entity = getUnitDisplay().getCurrentEntity();
+                    Entity entity = getUnitDisplayState().getCurrentEntity();
                     movementDisplay.computeMovementEnvelope(entity);
                 }
                 break;
@@ -1630,7 +1643,7 @@ public class ClientGUI extends AbstractClientGUI
                 getCurrentBoardState().ifPresent(BoardClientState::changeTheme);
                 break;
             case FIRE_SAVE_WEAPON_ORDER:
-                Entity ent = getUnitDisplay().getCurrentEntity();
+                Entity ent = getUnitDisplayState().getCurrentEntity();
                 if (ent != null) {
                     WeaponOrderHandler.setWeaponOrder(ent.getChassis(),
                           ent.getModel(),
@@ -1745,6 +1758,8 @@ public class ClientGUI extends AbstractClientGUI
             SwingUtilities.invokeLater(this::die);
             return;
         }
+
+        if (unitDisplayPanel != null) { unitDisplayPanel.disposeDisplay(); }
 
         // Tell all the displays to remove themselves as listeners.
         GpuBoardWindow.closeFor(this);
@@ -2473,17 +2488,15 @@ public class ClientGUI extends AbstractClientGUI
     public void setUnitDisplayVisible(boolean visible) {
         // If no unit displayed, select a unit so display can be safely shown
         // This can happen when using mouse button 4
-        if (visible && (getUnitDisplay().getCurrentEntity() == null) && (getClient() != null) && (getClient().getGame()
+        if (visible && (getUnitDisplayState().getCurrentEntity() == null) && (getClient() != null) && (getClient().getGame()
               != null)) {
             List<Entity> es = getClient().getGame().getEntitiesVector();
             if (!es.isEmpty()) {
-                getUnitDisplay().displayEntity(es.getFirst());
+                getUnitDisplayState().displayEntity(es.getFirst());
             }
         }
 
-        if (getUnitDisplayDialog() != null) {
-            setUnitDisplayLocation(visible);
-        }
+        setUnitDisplayLocation(visible);
     }
 
     /**
@@ -2559,13 +2572,17 @@ public class ClientGUI extends AbstractClientGUI
     }
 
     private void revalidatePanels() {
-        getUnitDisplay().setMinimumSize(new Dimension(0, (int) (panTop.getHeight() * 0.7)));
-        getUnitDisplay().setPreferredSize(new Dimension(0, (int) (panTop.getHeight() * 0.7)));
+        if (unitDisplayPanel != null) {
+            unitDisplayPanel.setMinimumSize(new Dimension(0, (int) (panTop.getHeight() * 0.7)));
+            unitDisplayPanel.setPreferredSize(new Dimension(0, (int) (panTop.getHeight() * 0.7)));
+        }
         getMiniReportDisplay().setMinimumSize(new Dimension(0, (int) (panTop.getHeight() * 0.3)));
         getMiniReportDisplay().setPreferredSize(new Dimension(0, (int) (panTop.getHeight() * 0.3)));
 
-        getUnitDisplayDialog().revalidate();
-        getUnitDisplayDialog().repaint();
+        if (unitDisplayDialog != null) {
+            unitDisplayDialog.revalidate();
+            unitDisplayDialog.repaint();
+        }
         panA1.revalidate();
         panA1.repaint();
         panA2.revalidate();
@@ -2583,18 +2600,12 @@ public class ClientGUI extends AbstractClientGUI
     }
 
     public void setUnitDisplayLocation(boolean visible) {
-        // Over the native board the panel stays in its dialog; its saved 2D docking choice remains unchanged. Once the
-        // native HUD draws (the switch that also routes the dialogs), its unit card and sheet replace the Unit Display:
-        // the dialog stays hidden, while the panel lives on in it as plumbing, the firing display's weapon list.
-        if (GpuBoardWindow.isActiveFor(this)) {
-            getUnitDisplayDialog().add(getUnitDisplay(), BorderLayout.CENTER);
-            getUnitDisplay().setTitleVisible(false);
-            getUnitDisplay().setVisible(visible);
-            getUnitDisplayDialog().setVisible(visible && !GpuBoardWindow.drawsDialogsFor(this));
-            getUnitDisplayDialog().revalidate();
-            getUnitDisplayDialog().repaint();
+        if (GpuBoardWindow.isActiveFor(this) || !boardViewsContainer.isClassicViewEnabled()) {
+            if (getUnitDisplayDialog() != null) { getUnitDisplayDialog().setVisible(false); }
             return;
         }
+        if (unitDisplayPanel == null && !visible) { return; }
+        initializeClassicUnitDisplay();
         saveSplitPaneLocations();
         setDockAxis();
 
@@ -3079,7 +3090,6 @@ public class ClientGUI extends AbstractClientGUI
         doAlertDialog(title, message, JOptionPane.ERROR_MESSAGE);
     }
 
-
     /**
      * Brings up a dialog that displays a message using a default icon determined by the <code>messageType</code>
      * parameter.
@@ -3537,7 +3547,6 @@ public class ClientGUI extends AbstractClientGUI
 
             logger.info("Running command: {}", String.join(" ", pb.command()));
 
-
             var p = pb.start();
 
             // This thread's only purpose is to wait for the MML process to finish and change the button's text back to
@@ -3560,7 +3569,6 @@ public class ClientGUI extends AbstractClientGUI
 
         }
     }
-
 
     protected void saveVictoryList() {
         String filename = client.getLocalPlayer().getName();
@@ -3968,12 +3976,11 @@ public class ClientGUI extends AbstractClientGUI
 
         @Override
         public void gameEntityChange(GameEntityChangeEvent e) {
-            if ((unitDisplayPanel != null)
-                  && (unitDisplayPanel.getCurrentEntity() != null)
+            if ((unitDisplayState.getCurrentEntity() != null)
                   && (e.getEntity() != null)
-                  && (unitDisplayPanel.getCurrentEntity().getId() == e.getEntity().getId())) {
+                  && (unitDisplayState.getCurrentEntity().getId() == e.getEntity().getId())) {
                 // underlying object may have changed, so reset
-                unitDisplayPanel.displayEntity(e.getEntity());
+                unitDisplayState.displayEntity(e.getEntity());
             }
         }
 
@@ -4678,7 +4685,7 @@ public class ClientGUI extends AbstractClientGUI
         Player viewer = getClient().getLocalPlayer();
         if (entity != null && EntityVisibilityUtils.detectedOrHasVisual(viewer, game, entity)
               && !EntityVisibilityUtils.onlyDetectedBySensors(viewer, entity)) {
-            getUnitDisplay().displayEntity(entity);
+            getUnitDisplayState().displayEntity(entity);
             setSelectedEntityNum(entity.getId());
             maybeShowUnitDisplay();
         }
@@ -4789,11 +4796,11 @@ public class ClientGUI extends AbstractClientGUI
             }
             case GUIPreferences.DEFAULT_WEAPON_SORT_ORDER -> {
                 setWeaponOrderPrefs(true);
-                getUnitDisplay().displayEntity(getUnitDisplay().getCurrentEntity());
+                getUnitDisplayState().displayEntity(getUnitDisplayState().getCurrentEntity());
             }
             case GUIPreferences.SENSOR_PREFERENCE_ORDER -> {
                 setSensorPrefs();
-                getUnitDisplay().displayEntity(getUnitDisplay().getCurrentEntity());
+                getUnitDisplayState().displayEntity(getUnitDisplayState().getCurrentEntity());
             }
             case GUIPreferences.SOUND_BING_FILENAME_CHAT,
                  GUIPreferences.SOUND_BING_FILENAME_MY_TURN,
@@ -4919,7 +4926,7 @@ public class ClientGUI extends AbstractClientGUI
      */
     @Nullable
     public Entity getDisplayedUnit() {
-        return unitDisplayPanel.getCurrentEntity();
+        return unitDisplayState.getCurrentEntity();
     }
 
     /**
@@ -4932,12 +4939,12 @@ public class ClientGUI extends AbstractClientGUI
      * @return The weapon that is currently selected in the Unit Display, if any
      */
     public Optional<WeaponMounted> getDisplayedWeapon() {
-        WeaponMounted weapon = unitDisplayPanel.wPan.getSelectedWeapon();
+        WeaponMounted weapon = unitDisplayState.getSelectedWeapon();
         if ((getDisplayedUnit() == null) || (weapon == null) || (client.getGame().getEntity(getDisplayedUnit().getId())
               == null)) {
             return Optional.empty();
         }
-        Mounted<?> weaponOnUnit = getDisplayedUnit().getEquipment(unitDisplayPanel.wPan.getSelectedWeaponNum());
+        Mounted<?> weaponOnUnit = getDisplayedUnit().getEquipment(unitDisplayState.getSelectedWeaponNum());
         if (weaponOnUnit == weapon) {
             return Optional.of(weapon);
         } else if (weapon.getEntity() instanceof HandheldWeapon hhw && hhw.getAttackingEntity()
@@ -4945,20 +4952,14 @@ public class ClientGUI extends AbstractClientGUI
             return Optional.of(weapon);
         } else {
             logger.error("Unsafe selected weapon. Returning null instead. Equipment ID {} on unit {}",
-                  unitDisplayPanel.wPan.getSelectedWeaponNum(),
+                  unitDisplayState.getSelectedWeaponNum(),
                   getDisplayedUnit());
             return Optional.empty();
         }
     }
 
     public Optional<AmmoMounted> getDisplayedAmmo() {
-        return unitDisplayPanel.wPan.getSelectedAmmo();
-    }
-
-    @Override
-    public void weaponSelected(MekDisplayEvent b) {
-        setSelectedEntityNum(b.getEntityId());
-        updateFiringArc(b.getEntity());
+        return unitDisplayState.getSelectedAmmo();
     }
 
     /**
@@ -5036,7 +5037,7 @@ public class ClientGUI extends AbstractClientGUI
 
     private void toggleFleeZone() {
         showFleeZone = !showFleeZone;
-        Entity entity = unitDisplayPanel.getCurrentEntity();
+        Entity entity = unitDisplayState.getCurrentEntity();
         if (showFleeZone && entity != null) {
             Game game = client.getGame();
             Board board = game.getBoard(entity);

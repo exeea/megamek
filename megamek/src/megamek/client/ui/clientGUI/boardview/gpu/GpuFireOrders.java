@@ -18,12 +18,13 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.clientGUI.tooltip.UnitToolTip;
-import megamek.client.ui.dialogs.unitDisplay.HeatEffects;
-import megamek.client.ui.dialogs.unitDisplay.WeaponListModel;
-import megamek.client.ui.dialogs.unitDisplay.WeaponPanel;
+import megamek.client.ui.clientGUI.unitDisplay.HeatEffects;
+import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayData;
+import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
+import megamek.client.ui.clientGUI.unitDisplay.WeaponDisplayData;
 import megamek.client.ui.panels.phaseDisplay.AimedShotHandler;
-import megamek.client.ui.panels.phaseDisplay.FiringDisplay;
 import megamek.client.ui.panels.phaseDisplay.FiringDisplay.FiringCommand;
+import megamek.client.ui.panels.phaseDisplay.FiringDisplay;
 import megamek.client.ui.widget.MegaMekButton;
 import megamek.common.RangeType;
 import megamek.common.TargetRollModifier;
@@ -38,6 +39,9 @@ import megamek.common.compute.ComputeArc;
 import megamek.common.compute.TurretFacing;
 import megamek.common.enums.FacingArc;
 import megamek.common.enums.GamePhase;
+import megamek.common.equipment.AmmoMounted;
+import megamek.common.equipment.WeaponMounted;
+import megamek.common.equipment.WeaponType;
 import megamek.common.event.GameListener;
 import megamek.common.event.GameListenerAdapter;
 import megamek.common.event.GameNewActionEvent;
@@ -47,9 +51,6 @@ import megamek.common.event.board.GameBoardChangeEvent;
 import megamek.common.event.entity.GameEntityChangeEvent;
 import megamek.common.event.entity.GameEntityNewEvent;
 import megamek.common.event.entity.GameEntityRemoveEvent;
-import megamek.common.equipment.AmmoMounted;
-import megamek.common.equipment.WeaponMounted;
-import megamek.common.equipment.WeaponType;
 import megamek.common.game.Game;
 import megamek.common.game.GameTurn;
 import megamek.common.options.OptionsConstants;
@@ -412,7 +413,7 @@ final class GpuFireOrders implements AutoCloseable {
             }
         }
         List<WeaponRow> rows = new ArrayList<>();
-        for (WeaponMounted weapon : WeaponPanel.listedWeapons(actor)) {
+        for (WeaponMounted weapon : WeaponDisplayData.listedWeapons(actor)) {
             if (weapon.getEntity() != actor) {
                 // A handheld weapon has no number on the actor; it keeps the classic controls.
                 continue;
@@ -728,7 +729,7 @@ final class GpuFireOrders implements AutoCloseable {
                   : redeclare(fd, actor, attack, weapon, attack.getTarget(source.currentView().game), bin);
             if (changed && (acting(fd) == actor)) {
                 toast(fd, ToastLevel.INFO, "GpuBoard.hud.fire.ammoChanged", weapon.getPlainDesc(),
-                      WeaponPanel.formatAmmo(actor, bin));
+                      WeaponDisplayData.formatAmmo(actor, bin));
             }
         });
     }
@@ -1011,7 +1012,7 @@ final class GpuFireOrders implements AutoCloseable {
     }
 
     /**
-     * Loads the bin by its number as a pick in the Unit Display's ammunition list does ({@code WeaponPanel.loadAmmo};
+     * Loads the bin by its number as a pick in the Unit Display's ammunition list does ({@code WeaponDisplayData.loadAmmo};
      * the list itself cannot pick the second of two bins with one label), then shows it in that list and lets the
      * display roll again with it, as the pick does; false when the list does not offer the bin or the weapon did not
      * load it.
@@ -1022,8 +1023,8 @@ final class GpuFireOrders implements AutoCloseable {
             return false;
         }
         WeaponMounted member = GpuUnitRecord.ammoWeapon(weapon);
-        WeaponPanel.loadAmmo(((ClientGUI) fd.getClientGUI()).getClient(), actor, weapon, member, bin);
-        weaponPanel(fd).updateForEntity(actor);
+        WeaponDisplayData.loadAmmo(((ClientGUI) fd.getClientGUI()).getClient(), actor, weapon, member, bin);
+        weaponState(fd).updateForEntity(actor);
         fd.updateTarget();
         return member.getLinkedAmmo() == bin;
     }
@@ -1075,13 +1076,12 @@ final class GpuFireOrders implements AutoCloseable {
     /** The Unit Display shows the actor with the weapon selected (null: none). */
     private static void show(FiringDisplay fd, Entity actor, @Nullable WeaponMounted weapon) {
         ClientGUI gui = (ClientGUI) fd.getClientGUI();
-        if (gui.getUnitDisplay().getCurrentEntity() != actor) {
-            gui.getUnitDisplay().displayEntity(actor);
+        if (gui.getUnitDisplayState().getCurrentEntity() != actor) {
+            gui.getUnitDisplayState().displayEntity(actor);
         }
-        WeaponPanel weapons = weaponPanel(fd);
+        UnitDisplayState weapons = weaponState(fd);
         if (weapon == null) {
-            // WeaponPanel.selectWeapon(null) selects index -1, which a Swing list ignores
-            weapons.weaponList.clearSelection();
+            weapons.selectWeapon((WeaponMounted) null);
         } else if (weapons.getSelectedWeapon() != weapon) {
             weapons.selectWeapon(weapon);
         }
@@ -1415,23 +1415,23 @@ final class GpuFireOrders implements AutoCloseable {
     /** The actor's listed weapon with that number, or null. */
     private static @Nullable WeaponMounted weapon(Entity actor, int eqNum) {
         return ((eqNum >= 0) && (actor.getEquipment(eqNum) instanceof WeaponMounted weapon)
-              && WeaponPanel.listedWeapons(actor).contains(weapon)) ? weapon : null;
+              && WeaponDisplayData.listedWeapons(actor).contains(weapon)) ? weapon : null;
     }
 
-    private static WeaponPanel weaponPanel(FiringDisplay fd) {
-        return ((ClientGUI) fd.getClientGUI()).getUnitDisplay().wPan;
+    private static UnitDisplayState weaponState(FiringDisplay fd) {
+        return ((ClientGUI) fd.getClientGUI()).getUnitDisplayState();
     }
 
     /** The actor's weapon the Unit Display selects, or null (another unit shown, or none selected). */
     private static @Nullable WeaponMounted selectedWeapon(FiringDisplay fd, Entity actor) {
-        WeaponPanel weapons = weaponPanel(fd);
+        UnitDisplayState weapons = weaponState(fd);
         WeaponMounted weapon = (weapons.getSelectedEntityId() == actor.getId()) ? weapons.getSelectedWeapon() : null;
         return ((weapon != null) && (weapon.getEntity() == actor)) ? weapon : null;
     }
 
     /** The bins the Unit Display's ammunition list offers for the weapon, in its order. */
     private static List<AmmoMounted> bins(Entity actor, WeaponMounted weapon) {
-        return WeaponPanel.ammoChoices(actor, weapon, GpuUnitRecord.ammoWeapon(weapon)).ammo();
+        return WeaponDisplayData.ammoChoices(actor, weapon, GpuUnitRecord.ammoWeapon(weapon)).ammo();
     }
 
     private static boolean canTwist(Entity actor, int direction) {
@@ -1448,7 +1448,7 @@ final class GpuFireOrders implements AutoCloseable {
 
     private static WeaponRow row(Game game, Entity actor, WeaponMounted weapon, int eqNum, Shot shot, boolean queued,
           boolean aptitude) {
-        WeaponListModel.RowParts parts = WeaponListModel.rowParts(game, weapon);
+        UnitDisplayData.RowParts parts = UnitDisplayData.rowParts(game, weapon);
         AmmoMounted loaded = GpuUnitRecord.ammoWeapon(weapon).getLinkedAmmo();
         List<AmmoMounted> bins = bins(actor, weapon);
         if (bins.isEmpty() && (loaded != null)) {
@@ -1476,7 +1476,7 @@ final class GpuFireOrders implements AutoCloseable {
             return null;
         }
         Set<Integer> weapons = new LinkedHashSet<>();
-        for (WeaponMounted weapon : WeaponPanel.listedWeapons(actor)) {
+        for (WeaponMounted weapon : WeaponDisplayData.listedWeapons(actor)) {
             if ((weapon.getEntity() == actor) && aims.allowAimedShotWith(weapon)) {
                 weapons.add(actor.getEquipmentNum(weapon));
             }
@@ -1492,8 +1492,8 @@ final class GpuFireOrders implements AutoCloseable {
         AmmoMounted bin = (attack.getAmmoId() < 0) ? null
               : (AmmoMounted) ((ammoCarrier == null) ? carrier : ammoCarrier).getEquipment(attack.getAmmoId());
         return new Attack((carrier == actor) ? attack.getWeaponId() : -1, TargetKey.of(attack), weapon.getPlainDesc(),
-              WeaponListModel.rowParts(game, weapon).location(), kind(weapon.getType()),
-              (bin == null) ? "" : WeaponPanel.formatAmmo(actor, bin), (bin == null) ? -1 : bin.getUsableShotsLeft(),
+              UnitDisplayData.rowParts(game, weapon).location(), kind(weapon.getType()),
+              (bin == null) ? "" : WeaponDisplayData.formatAmmo(actor, bin), (bin == null) ? -1 : bin.getUsableShotsLeft(),
               toHit.getValue(), odds(toHit, aptitude), toHit.getDesc());
     }
 
@@ -1508,7 +1508,7 @@ final class GpuFireOrders implements AutoCloseable {
      * the ammunition's damage per shot, as Compute.getExpectedDamage counts it), else the Unit Display's damage text.
      */
     private static String damage(Game game, Entity actor, WeaponMounted weapon) {
-        String text = WeaponPanel.damageText(game, actor, weapon);
+        String text = WeaponDisplayData.damageText(game, actor, weapon);
         AmmoMounted ammo = weapon.getLinkedAmmo();
         boolean aerospace = text.equals(Messages.getString("MekDisplay.StandardD"))
               || text.equals(Messages.getString("MekDisplay.CapitalD"));
@@ -1521,7 +1521,7 @@ final class GpuFireOrders implements AutoCloseable {
             return null;
         }
         UnitToolTip.HeatDisplayHelper capacity = UnitToolTip.getHeatCapacityForDisplay(actor);
-        int after = WeaponPanel.heatBuildup(game, actor).value();
+        int after = WeaponDisplayData.heatBuildup(game, actor).value();
         int end = Math.max(0, after - capacity.heatCapWater);
         List<Integer> ticks = GpuUnitRecord.heatTicks(game, actor);
         // Below the first tick the heat table has the effects of heat 0, which are none.
@@ -1537,7 +1537,7 @@ final class GpuFireOrders implements AutoCloseable {
           boolean aptitude) {
         int[] brackets = weapon.getType().getRanges(weapon, weapon.getLinkedAmmo());
         List<Integer> ranges = new ArrayList<>();
-        int last = WeaponPanel.showsExtremeRange(game, actor) ? RangeType.RANGE_EXTREME : RangeType.RANGE_LONG;
+        int last = WeaponDisplayData.showsExtremeRange(game, actor) ? RangeType.RANGE_EXTREME : RangeType.RANGE_LONG;
         for (int bracket = RangeType.RANGE_MINIMUM; bracket <= last; bracket++) {
             // A weapon without a minimum range has a negative one (WeaponType.WEAPON_NA)
             ranges.add(Math.max(0, brackets[bracket]));
@@ -1626,7 +1626,7 @@ final class GpuFireOrders implements AutoCloseable {
             return null;
         }
         Badge best = null;
-        for (WeaponMounted weapon : WeaponPanel.listedWeapons(actor)) {
+        for (WeaponMounted weapon : WeaponDisplayData.listedWeapons(actor)) {
             if (weapon.getEntity() == actor) {
                 Badge roll = badge(enemy.getId(), rollAt(game, fd, actor, weapon, queue, enemy),
                       actor.isUseNaturalAptitudeGunnery(game, weapon));

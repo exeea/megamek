@@ -16,12 +16,10 @@ import megamek.client.ui.clientGUI.tooltip.HexTooltip;
 import megamek.client.ui.clientGUI.tooltip.PilotToolTip;
 import megamek.client.ui.clientGUI.tooltip.TipUtil;
 import megamek.client.ui.clientGUI.tooltip.UnitToolTip;
-import megamek.client.ui.dialogs.unitDisplay.ExtraPanel;
-import megamek.client.ui.dialogs.unitDisplay.HeatEffects;
-import megamek.client.ui.dialogs.unitDisplay.PilotPanel;
-import megamek.client.ui.dialogs.unitDisplay.SystemPanel;
-import megamek.client.ui.dialogs.unitDisplay.WeaponListModel;
-import megamek.client.ui.dialogs.unitDisplay.WeaponPanel;
+import megamek.client.ui.clientGUI.unitDisplay.HeatEffects;
+import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayData;
+import megamek.client.ui.clientGUI.unitDisplay.UnitEquipmentActions;
+import megamek.client.ui.clientGUI.unitDisplay.WeaponDisplayData;
 import megamek.client.ui.entityreadout.EntityReadout;
 import megamek.client.ui.util.ViewFormatting;
 import megamek.common.CriticalSlot;
@@ -161,10 +159,10 @@ final class GpuUnitRecord {
      * the sheet is open, the weapon display's statistics with its loaded ammunition (for no target, so a Centurion
      * Weapon System's longer range against a susceptible target is left out; null while the sheet is closed), a bay's
      * weapons, its quirks ("" without) and, for an own weapon that can switch ammunition, the bins it may load
-     * ({@code WeaponPanel.ammoChoices}) and the loaded one's index among them (-1: none).
+     * ({@code WeaponDisplayData.ammoChoices}) and the loaded one's index among them (-1: none).
      */
-    record RecordWeapon(int eqNum, String name, WeaponListModel.RowParts row, List<Integer> ranges, boolean destroyed,
-          boolean jammed, boolean crippled, boolean fired, @Nullable WeaponPanel.WeaponStats stats,
+    record RecordWeapon(int eqNum, String name, UnitDisplayData.RowParts row, List<Integer> ranges, boolean destroyed,
+          boolean jammed, boolean crippled, boolean fired, @Nullable WeaponDisplayData.WeaponStats stats,
           List<String> bayMembers, String quirks, List<AmmoChoice> ammoChoices, int loadedAmmo) {
         RecordWeapon {
             ranges = List.copyOf(ranges);
@@ -187,7 +185,7 @@ final class GpuUnitRecord {
         /** A bin of the unit's ammunition list, named by its entry; the number is the bin's on its own carrier. */
         static AmmoChoice of(Entity entity, AmmoMounted bin) {
             return new AmmoChoice(bin.getEntity().getId(), bin.getEntity().getEquipmentNum(bin),
-                  WeaponPanel.formatAmmo(entity, bin));
+                  WeaponDisplayData.formatAmmo(entity, bin));
         }
 
         /** Whether this is the bin: its carrier and its number there (two carriers of a train number bins alike). */
@@ -237,7 +235,7 @@ final class GpuUnitRecord {
     /**
      * An ammunition bin the Systems tab lists, or a weapon the owner may jettison: its shots and full load, whether it
      * dumps, is hot-loaded, is a jettisonable weapon or carried ammunition (for no weapon of the unit), and for the
-     * owner whether it may be dumped now and else the reason's message key ({@code SystemPanel.dumpBlocker}; "" for
+     * owner whether it may be dumped now and else the reason's message key ({@code UnitEquipmentActions.dumpBlocker}; "" for
      * another player's unit, which cannot be dumped).
      */
     record AmmoBin(int eqNum, String name, String location, int shots, int fullShots, boolean dumping,
@@ -257,7 +255,7 @@ final class GpuUnitRecord {
      */
     record Snapshot(int unitId, boolean own, boolean removed, String paperdoll, String damageLevel,
           List<Location> locations, List<Vital> vitals, List<HitTrack> hitTracks, List<Shield> shields,
-          List<Integer> heatTicks, List<String> heatTickEffects, int heatScale, WeaponPanel.HeatBuildup heatBuildup,
+          List<Integer> heatTicks, List<String> heatTickEffects, int heatScale, WeaponDisplayData.HeatBuildup heatBuildup,
           List<RecordWeapon> weapons, List<Equipment> equipment, List<SystemControl> systems, List<CrewSeat> crew,
           List<TipUtil.OptionGroup> abilities, List<AmmoBin> ammo, List<String> conditions, List<String> carried,
           String unused, String lastTarget, List<InfoRow> info, List<EntityReadout.Row> readoutRows, String readout) {
@@ -292,7 +290,7 @@ final class GpuUnitRecord {
               List<TipUtil.OptionGroup> abilities, List<AmmoBin> ammo, List<String> conditions, List<String> carried,
               String unused, String lastTarget, String readout) {
             this(unitId, own, false, "", "", locations, List.of(), List.of(), List.of(), heatTicks, List.of(),
-                  heatScale, new WeaponPanel.HeatBuildup(0, 0, ""), weapons, equipment, systems, crew, abilities, ammo,
+                  heatScale, new WeaponDisplayData.HeatBuildup(0, 0, ""), weapons, equipment, systems, crew, abilities, ammo,
                   conditions, carried, unused, lastTarget, List.of(), List.of(), readout);
         }
 
@@ -376,11 +374,11 @@ final class GpuUnitRecord {
         return new Snapshot(entity.getId(), own, removed, GpuPaperdolls.family(entity),
               UnitToolTip.getDamageLevelDesc(entity, false), locations(entity), vitals(entity), hitTracks(entity),
               shields(entity), ticks, heatTickEffects(game, entity, ticks), heatScale(ticks),
-              WeaponPanel.heatBuildup(game, entity), weapons(game, entity, actions, sheet),
+              WeaponDisplayData.heatBuildup(game, entity), weapons(game, entity, actions, sheet),
               actions ? equipment(game, entity) : List.of(), actions ? systems(entity) : List.of(),
               crew(game, entity, actions, portraits),
               PilotToolTip.crewAbilities(entity), ammo(actions ? gui.getClient() : null, entity),
-              ExtraPanel.affectedBy(game, entity), carried(game, entity), entity.getUnusedString().strip(),
+              UnitDisplayData.affectedBy(game, entity), carried(game, entity), entity.getUnusedString().strip(),
               lastTarget(entity), info(game, entity, gui, sheet), List.of(), "");
     }
 
@@ -681,7 +679,7 @@ final class GpuUnitRecord {
      * owner's weapons ({@code actions}), the ammunition they may load.
      */
     private static List<RecordWeapon> weapons(Game game, Entity entity, boolean actions, boolean sheet) {
-        return WeaponPanel.listedWeapons(entity).stream().map(weapon -> {
+        return WeaponDisplayData.listedWeapons(entity).stream().map(weapon -> {
             Entity carrier = weapon.getEntity();
             int loc = weapon.getLocation();
             // A weapon without a minimum range has a negative one (WeaponType.WEAPON_NA); the record shows 0.
@@ -691,15 +689,15 @@ final class GpuUnitRecord {
             int loaded = -1;
             if (actions && sheet) {
                 WeaponMounted member = ammoWeapon(weapon);
-                List<AmmoMounted> bins = WeaponPanel.ammoChoices(entity, weapon, member).ammo();
+                List<AmmoMounted> bins = WeaponDisplayData.ammoChoices(entity, weapon, member).ammo();
                 choices = bins.stream().map(bin -> AmmoChoice.of(entity, bin)).toList();
                 loaded = (member.getLinkedAmmo() == null) ? -1 : bins.indexOf(member.getLinkedAmmo());
             }
             return new RecordWeapon(entity.getEquipmentNum(weapon), weapon.getPlainDesc(),
-                  WeaponListModel.rowParts(game, weapon), ranges,
+                  UnitDisplayData.rowParts(game, weapon), ranges,
                   weapon.isInoperable() || ((loc >= 0) && carrier.isLocationBad(loc)),
                   weapon.isJammed(), weapon.isCrippled(), weapon.isUsedThisRound(),
-                  sheet ? WeaponPanel.stats(game, entity, weapon, weapon.getLinkedAmmo(), false) : null,
+                  sheet ? WeaponDisplayData.stats(game, entity, weapon, weapon.getLinkedAmmo(), false) : null,
                   sheet ? weapon.getBayWeapons().stream().map(Mounted::getDesc).toList() : List.of(),
                   sheet ? weapon.getQuirkList(", ") : "", choices, loaded);
         }).toList();
@@ -721,7 +719,7 @@ final class GpuUnitRecord {
             if (!switchable(entity, mounted)) {
                 continue;
             }
-            SystemPanel.ModeChoices choices = SystemPanel.modeChoices(game, entity, mounted);
+            UnitEquipmentActions.ModeChoices choices = UnitEquipmentActions.modeChoices(game, entity, mounted);
             if (!choices.labels().isEmpty()) {
                 equipment.add(new Equipment(entity.getEquipmentNum(mounted), mounted.getName(),
                       location(entity, mounted), choices.labels(), choices.selectedIndex(),
@@ -736,7 +734,7 @@ final class GpuUnitRecord {
 
     /** Whether the Systems tab can offer the equipment's mode list: it has modes and the tab lists it. */
     private static boolean switchable(Entity entity, Mounted<?> mounted) {
-        return (mounted.getType() != null) && mounted.hasModes() && SystemPanel.isListed(entity, mounted);
+        return (mounted.getType() != null) && mounted.hasModes() && UnitEquipmentActions.isListed(entity, mounted);
     }
 
     /** The index of a mode in the equipment's mode list, -1 for none (no queued switch). */
@@ -754,13 +752,13 @@ final class GpuUnitRecord {
         List<SystemControl> systems = new ArrayList<>();
         if (!entity.getSensors().isEmpty()) {
             systems.add(new SystemControl(SENSORS, Messages.getString("MekDisplay.CurrentSensors"),
-                  ExtraPanel.sensorLabels(entity), ExtraPanel.nextSensorIndex(entity), activeSensorIndex(entity),
+                  UnitDisplayData.sensorLabels(entity), UnitDisplayData.nextSensorIndex(entity), activeSensorIndex(entity),
                   true));
         }
         if (entity instanceof Mek mek) {
             List<String> sinks = new ArrayList<>();
             for (int count = 0; count <= mek.getNumberOfSinks(); count++) {
-                sinks.add(ExtraPanel.activeSinksText(mek, count));
+                sinks.add(UnitDisplayData.activeSinksText(mek, count));
             }
             systems.add(new SystemControl(HEAT_SINKS, Messages.getString("MekDisplay.activeSinksLabel"), sinks,
                   mek.getActiveSinksNextRound(), mek.getActiveSinks(), true));
@@ -768,8 +766,8 @@ final class GpuUnitRecord {
         if (entity.isHidden()) {
             // Choice 0 is "stop activating": the unit stays hidden unless another is chosen
             systems.add(new SystemControl(HIDDEN, Messages.getString("MekDisplay.ActivateHidden.Label"),
-                  ExtraPanel.HIDDEN_ACTIVATION_PHASES.stream().map(ExtraPanel::hiddenActivationLabel).toList(),
-                  ExtraPanel.HIDDEN_ACTIVATION_PHASES.indexOf(entity.getHiddenActivationPhase()), 0, true));
+                  UnitDisplayData.HIDDEN_ACTIVATION_PHASES.stream().map(UnitDisplayData::hiddenActivationLabel).toList(),
+                  UnitDisplayData.HIDDEN_ACTIVATION_PHASES.indexOf(entity.getHiddenActivationPhase()), 0, true));
         }
         int order = entity.getWeaponSortOrder().ordinal();
         systems.add(new SystemControl(WEAPON_ORDER, Messages.getString("MekDisplay.WeaponSortOrder.label"),
@@ -779,13 +777,13 @@ final class GpuUnitRecord {
             systems.add(new SystemControl(CONSOLE_ROLES, Messages.getString("PilotMapSet.swapRoles.text"),
                   List.of(Messages.getString("PilotMapSet.keepRoles.text"),
                         Messages.getString("PilotMapSet.swapRoles.text")),
-                  entity.getCrew().getSwapConsoleRoles() ? 1 : 0, 0, PilotPanel.canSwapConsoleRoles(entity)));
+                  entity.getCrew().getSwapConsoleRoles() ? 1 : 0, 0, UnitDisplayData.canSwapConsoleRoles(entity)));
         }
         return systems;
     }
 
     /**
-     * The index of the sensor in use, by the Extras tab's rule for the chosen one ({@code ExtraPanel.nextSensorIndex}:
+     * The index of the sensor in use, by the Extras tab's rule for the chosen one ({@code UnitDisplayData.nextSensorIndex}:
      * the last sensor of its type); -1 before the game has set one.
      */
     private static int activeSensorIndex(Entity entity) {
@@ -806,7 +804,7 @@ final class GpuUnitRecord {
     private static List<CrewSeat> crew(Game game, Entity entity, boolean actions,
           Map<Portrait, BoardScene.Pixels> portraits) {
         Crew crew = entity.getCrew();
-        boolean swappable = actions && PilotPanel.canSwapConsoleRoles(entity);
+        boolean swappable = actions && UnitDisplayData.canSwapConsoleRoles(entity);
         boolean rpgGunnery = game.getOptions().booleanOption(OptionsConstants.RPG_RPG_GUNNERY);
         List<CrewSeat> seats = new ArrayList<>();
         for (int position = 0; position < crew.getSlotCount(); position++) {
@@ -857,12 +855,12 @@ final class GpuUnitRecord {
     private static List<AmmoBin> ammo(Client client, Entity entity) {
         List<AmmoBin> bins = new ArrayList<>();
         for (Mounted<?> mounted : entity.getEquipment()) {
-            // Only ammunition and weapons can be dumped (SystemPanel.dumpBlocker)
+            // Only ammunition and weapons can be dumped (UnitEquipmentActions.dumpBlocker)
             if (!((mounted.getType() instanceof AmmoType) || (mounted.getType() instanceof WeaponType))
-                  || !SystemPanel.isListed(entity, mounted)) {
+                  || !UnitEquipmentActions.isListed(entity, mounted)) {
                 continue;
             }
-            String blocker = (client == null) ? "" : SystemPanel.dumpBlocker(client, entity, mounted);
+            String blocker = (client == null) ? "" : UnitEquipmentActions.dumpBlocker(client, entity, mounted);
             boolean canDump = (client != null) && blocker.isEmpty();
             boolean isAmmo = mounted.getType() instanceof AmmoType;
             if (canDump || isAmmo) {
@@ -878,8 +876,8 @@ final class GpuUnitRecord {
 
     /** The Extras tab's "Carrying" lines, then its searchlight state when the unit has a searchlight. */
     private static List<String> carried(Game game, Entity entity) {
-        List<String> carried = new ArrayList<>(ExtraPanel.carried(game, entity));
-        String searchlight = ExtraPanel.searchlightText(entity);
+        List<String> carried = new ArrayList<>(UnitDisplayData.carried(game, entity));
+        String searchlight = UnitDisplayData.searchlightText(entity);
         if (!searchlight.isEmpty()) {
             carried.add(searchlight);
         }
@@ -1004,7 +1002,7 @@ final class GpuUnitRecord {
 
     /**
      * Loads one of the bins a weapon of the unit may load ({@link RecordWeapon#ammoChoices}), as picking it in the Unit
-     * Display's ammunition list does ({@code WeaponPanel.loadAmmo}); a bin the list no longer offers, or the one
+     * Display's ammunition list does ({@code WeaponDisplayData.loadAmmo}); a bin the list no longer offers, or the one
      * loaded, sends nothing. A queued attack keeps the bin it was declared with: the local firing actor's weapons
      * change their bin through the fire orders, which declare the attack again.
      */
@@ -1016,10 +1014,10 @@ final class GpuUnitRecord {
         Entity entity = ownUnit(unitId);
         Mounted<?> mounted = entity == null ? null : entity.getEquipment(eqNum);
         if ((mounted != null) && switchable(entity, mounted)) {
-            SystemPanel.ModeChoices choices = SystemPanel.modeChoices(source.currentView().game, entity, mounted);
+            UnitEquipmentActions.ModeChoices choices = UnitEquipmentActions.modeChoices(source.currentView().game, entity, mounted);
             if (choices.enabled() && (mode >= 0) && (mode < choices.labels().size())
                   && (mode != choices.selectedIndex())) {
-                SystemPanel.changeMode(gui(), entity, mounted, mode);
+                UnitEquipmentActions.changeMode(gui(), entity, mounted, mode);
             }
         }
     }
@@ -1034,15 +1032,15 @@ final class GpuUnitRecord {
         }
         ClientGUI gui = gui();
         switch (id) {
-            case SENSORS -> ExtraPanel.setNextSensor(gui, entity, choice);
-            case HEAT_SINKS -> ExtraPanel.setActiveSinks(gui, (Mek) entity, choice);
+            case SENSORS -> UnitDisplayData.setNextSensor(gui, entity, choice);
+            case HEAT_SINKS -> UnitDisplayData.setActiveSinks(gui, (Mek) entity, choice);
             case HIDDEN -> gui.getClient().sendActivateHidden(entity.getId(),
-                  ExtraPanel.HIDDEN_ACTIVATION_PHASES.get(choice));
+                  UnitDisplayData.HIDDEN_ACTIVATION_PHASES.get(choice));
             case WEAPON_ORDER -> {
                 entity.setWeaponSortOrder(WeaponSortOrder.values()[choice]);
-                WeaponPanel.sendWeaponOrder(gui.getClient(), entity);
+                WeaponDisplayData.sendWeaponOrder(gui.getClient(), entity);
             }
-            case CONSOLE_ROLES -> PilotPanel.swapConsoleRoles(gui.getClient(), entity, choice == 1);
+            case CONSOLE_ROLES -> UnitDisplayData.swapConsoleRoles(gui.getClient(), entity, choice == 1);
             default -> { }
         }
     }
@@ -1052,7 +1050,7 @@ final class GpuUnitRecord {
         if ((entity == null) || (eqNum < 0)) {
             return;
         }
-        List<WeaponMounted> order = new ArrayList<>(WeaponPanel.listedWeapons(entity));
+        List<WeaponMounted> order = new ArrayList<>(WeaponDisplayData.listedWeapons(entity));
         int from = -1;
         for (int index = 0; index < order.size(); index++) {
             if (entity.getEquipmentNum(order.get(index)) == eqNum) {
@@ -1062,30 +1060,30 @@ final class GpuUnitRecord {
         int to = from < 0 ? from : Math.clamp((long) from + delta, 0, order.size() - 1);
         if (to != from) {
             order.add(to, order.remove(from));
-            WeaponPanel.setCustomWeaponOrder(entity, order);
+            WeaponDisplayData.setCustomWeaponOrder(entity, order);
         }
     }
 
     private void dumping(int unitId, int ammoEqNum, boolean dump) {
         Entity entity = ownUnit(unitId);
         Mounted<?> mounted = entity == null ? null : entity.getEquipment(ammoEqNum);
-        if ((mounted != null) && (mounted.isPendingDump() != dump) && SystemPanel.isListed(entity, mounted)
-              && SystemPanel.canDump(gui().getClient(), entity, mounted)) {
-            SystemPanel.toggleDump(gui(), entity, mounted);
+        if ((mounted != null) && (mounted.isPendingDump() != dump) && UnitEquipmentActions.isListed(entity, mounted)
+              && UnitEquipmentActions.canDump(gui().getClient(), entity, mounted)) {
+            UnitEquipmentActions.toggleDump(gui(), entity, mounted);
         }
     }
 
     private void ammo(int unitId, int weaponEqNum, AmmoChoice choice) {
         Entity entity = ownUnit(unitId);
         if ((entity == null) || !(entity.getEquipment(weaponEqNum) instanceof WeaponMounted weapon)
-              || !WeaponPanel.listedWeapons(entity).contains(weapon)) {
+              || !WeaponDisplayData.listedWeapons(entity).contains(weapon)) {
             return;
         }
         WeaponMounted member = ammoWeapon(weapon);
-        AmmoMounted bin = WeaponPanel.ammoChoices(entity, weapon, member).ammo().stream().filter(choice::is)
+        AmmoMounted bin = WeaponDisplayData.ammoChoices(entity, weapon, member).ammo().stream().filter(choice::is)
               .findFirst().orElse(null);
         if ((bin != null) && (bin != member.getLinkedAmmo())) {
-            WeaponPanel.loadAmmo(gui().getClient(), entity, weapon, member, bin);
+            WeaponDisplayData.loadAmmo(gui().getClient(), entity, weapon, member, bin);
         }
     }
 

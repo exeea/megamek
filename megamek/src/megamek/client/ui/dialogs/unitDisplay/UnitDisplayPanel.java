@@ -43,8 +43,6 @@ import java.awt.Image;
 import java.awt.Insets;
 import java.awt.event.KeyEvent;
 import java.io.Serial;
-import java.util.ArrayList;
-import java.util.List;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -52,13 +50,12 @@ import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.KeyStroke;
 
-import megamek.client.event.MekDisplayEvent;
-import megamek.client.event.MekDisplayListener;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.UnitDisplayOrderPreferences;
 import megamek.client.ui.clientGUI.tooltip.UnitToolTip;
+import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.MegaMekController;
 import megamek.client.ui.widget.BackGroundDrawer;
@@ -72,13 +69,13 @@ import megamek.common.Configuration;
 import megamek.common.annotations.Nullable;
 import megamek.common.units.Entity;
 import megamek.common.util.fileUtils.MegaMekFile;
-import megamek.logging.MMLogger;
 
 /**
- * Displays the info for a mek. This is also a sort of interface for special movement and firing actions.
+ * Optional Swing view of the client's inspected-unit state.
  */
 public class UnitDisplayPanel extends JPanel implements LocationSelectListener {
-    private static final MMLogger logger = MMLogger.create(UnitDisplayPanel.class);
+    private final UnitDisplayState displayState;
+    private final Runnable stateListener = this::refreshFromState;
 
     // buttons & gizmos for top level
     @Serial
@@ -106,7 +103,6 @@ public class UnitDisplayPanel extends JPanel implements LocationSelectListener {
     private final ClientGUI clientgui;
     private Entity currentlyDisplaying;
     private final JLabel labTitle;
-    private final List<MekDisplayListener> eventListeners = new ArrayList<>();
 
     JScrollPane mPanScroll;
     JScrollPane pPanScroll;
@@ -168,6 +164,7 @@ public class UnitDisplayPanel extends JPanel implements LocationSelectListener {
           @Nullable MegaMekController controller) {
         super(new GridBagLayout());
         this.clientgui = clientGui;
+        displayState = clientGui == null ? new UnitDisplayState(null) : clientGui.getUnitDisplayState();
 
         labTitle = new JLabel("Title");
 
@@ -186,7 +183,7 @@ public class UnitDisplayPanel extends JPanel implements LocationSelectListener {
         aPan = new ArmorPanel(clientgui != null ? clientgui.getClient().getGame() : null, this);
         // fill the panel with the diagram instead of leaving it small in a large empty area
         aPan.setFitToWindow(true);
-        wPan = new WeaponPanel(this, clientgui != null ? clientgui.getClient() : null);
+        wPan = new WeaponPanel(this);
         sPan = new SystemPanel(this);
         ePan = new ExtraPanel(this);
         JScrollPane scrollPane = new JScrollPane(displayP);
@@ -326,6 +323,7 @@ public class UnitDisplayPanel extends JPanel implements LocationSelectListener {
         } else {
             setDisplayNonTabbed();
         }
+        displayState.addChangeListener(stateListener);
     }
 
     /**
@@ -489,31 +487,37 @@ public class UnitDisplayPanel extends JPanel implements LocationSelectListener {
      * Displays the specified entity in the panel.
      */
     public void displayEntity(Entity en) {
-        if ((en == null) || (currentlyDisplaying == en)) {
-            // Issue #5650 - this method should not be executed if the currently displayed
-            // entity hasn't changed.
-            return;
+        displayState.displayEntity(en);
+    }
+
+    public UnitDisplayState getDisplayState() { return displayState; }
+
+    /** Renders the client selection; this cached entity belongs only to this optional Swing view. */
+    public void refreshFromState() {
+        Entity selected = displayState.getCurrentEntity();
+        if (selected != null && selected != currentlyDisplaying) {
+            currentlyDisplaying = selected;
+            updateDisplay();
         }
-        currentlyDisplaying = en;
-        updateDisplay();
-        if (clientgui != null) {
-            clientgui.clearFieldOfFire();
-            clientgui.hideFleeZone();
-        }
+    }
+
+    public void disposeDisplay() {
+        displayState.removeChangeListener(stateListener);
+        wPan.disposeDisplay();
     }
 
     protected void updateDisplay() {
         if (clientgui != null) {
             String enName = currentlyDisplaying.getShortName();
             enName += " [" + UnitToolTip.getDamageLevelDesc(currentlyDisplaying, false) + "]";
-            clientgui.getUnitDisplayDialog().setTitle(enName);
+            if (clientgui.getUnitDisplayDialog() != null) { clientgui.getUnitDisplayDialog().setTitle(enName); }
             labTitle.setText(enName);
         }
 
         mPan.displayMek(currentlyDisplaying);
         pPan.displayMek(currentlyDisplaying);
         aPan.displayMek(currentlyDisplaying);
-        wPan.displayMek(currentlyDisplaying);
+        wPan.refreshFromState();
         sPan.displayMek(currentlyDisplaying);
         ePan.displayMek(currentlyDisplaying);
 
@@ -533,7 +537,7 @@ public class UnitDisplayPanel extends JPanel implements LocationSelectListener {
      * Returns the entity we're currently displaying
      */
     public Entity getCurrentEntity() {
-        return currentlyDisplaying;
+        return displayState.getCurrentEntity();
     }
 
     /**
@@ -586,30 +590,6 @@ public class UnitDisplayPanel extends JPanel implements LocationSelectListener {
         sPan.selectLocation(loc);
         displayP.revalidate();
         displayP.repaint();
-    }
-
-    /**
-     * Adds the specified mek display listener to receive events from this view.
-     *
-     * @param listener the listener.
-     */
-    public void addMekDisplayListener(MekDisplayListener listener) {
-        eventListeners.add(listener);
-    }
-
-    /**
-     * Notifies attached listeners of the event.
-     *
-     * @param event the mek display event.
-     */
-    void processMekDisplayEvent(MekDisplayEvent event) {
-        for (MekDisplayListener lis : eventListeners) {
-            if (event.getType() == MekDisplayEvent.WEAPON_SELECTED) {
-                lis.weaponSelected(event);
-            } else {
-                logger.error("Received unknown event {} in processMekDisplayEvent", event.getType());
-            }
-        }
     }
 
     /**

@@ -164,7 +164,7 @@ class GpuHudRoutingSmokeTest {
             for (Scenario scenario : SCENARIOS) {
                 routing.show(scenario);
                 for (Key key : keys) {
-                    Handler expected = expected(scenario, key.binds(), routing.hud.state.logOpen());
+                    Handler expected = expected(scenario, key, routing.hud.state.logOpen());
                     assertEquals(expected, routing.press(key), scenario + ", " + key.binds());
                 }
             }
@@ -282,6 +282,12 @@ class GpuHudRoutingSmokeTest {
             Vector3 focus = camera.focus.cpy();
             routing.hold(Input.Keys.W, () -> routing.advance(3, .1f));
             assertTrue(focus.epsilonEquals(camera.focus, .001f), "W types instead of panning");
+            routing.with(InputEvent.SHIFT_DOWN_MASK, 0, 0, () -> {
+                routing.processor.keyDown(Input.Keys.W);
+                routing.advance(1, .1f);
+                routing.processor.keyUp(Input.Keys.W);
+            });
+            assertTrue(focus.epsilonEquals(camera.focus, .001f), "Shift+W also stays with the text field");
             verify(routing.source, never()).key(anyInt(), anyBoolean(), anyInt());
             routing.key(Input.Keys.ESCAPE, 0);
             assertFalse(routing.hud.isTextEditing(), "Esc ends the typing");
@@ -295,7 +301,7 @@ class GpuHudRoutingSmokeTest {
             assertFalse(focus.epsilonEquals(camera.focus, .001f), "W pans with Help open");
             float azimuth = camera.azimuth();
             routing.hold(Input.Keys.E, () -> routing.advance(3, .1f));
-            assertEquals(21, turned(azimuth, camera.azimuth()), .01f, "E turns 70 degrees a second while held");
+            assertEquals(27, turned(azimuth, camera.azimuth()), .01f, "E turns 90 degrees a second while held");
             routing.key(Input.Keys.ESCAPE, 0);
             assertEquals(GpuHudState.Dialog.NONE, routing.hud.state.dialog, "One Esc closes Help from its list");
             assertNull(routing.hud.stage.getKeyboardFocus());
@@ -401,7 +407,7 @@ class GpuHudRoutingSmokeTest {
 
             float azimuth = camera.azimuth();
             routing.hold(Input.Keys.Q, () -> routing.advance(3, .1f));
-            assertEquals(-21, turned(azimuth, camera.azimuth()), .01f, "Q turns 70 degrees a second while held");
+            assertEquals(-27, turned(azimuth, camera.azimuth()), .01f, "Q turns 90 degrees a second while held");
             azimuth = camera.azimuth();
             routing.advance(2, .1f);
             assertEquals(azimuth, camera.azimuth(), "The turn stops with the key");
@@ -409,7 +415,7 @@ class GpuHudRoutingSmokeTest {
             routing.view.render();
             azimuth = camera.azimuth();
             routing.hold(Input.Keys.Q, () -> routing.advance(3, .1f));
-            assertEquals(azimuth, camera.azimuth(), "No turn in the Tactical View");
+            assertEquals(-27, turned(azimuth, camera.azimuth()), .01f, "The Tactical View shares the turn controls");
             routing.view.setTacticalView(false);
         });
     }
@@ -718,7 +724,9 @@ class GpuHudRoutingSmokeTest {
                 routing.view.render();
                 assertEquals(FOE_ID, state.inspected, scenario + ": an enemy is inspected");
                 assertFalse(shown(routing.find("command-dock")), scenario + ": and the selection stays cleared");
-                for (KeyCommandBind bind : List.of(KeyCommandBind.TURN_LEFT, KeyCommandBind.DONE,
+                assertEquals(Handler.CAMERA, routing.press(key(keys, KeyCommandBind.TURN_LEFT)),
+                      scenario + ": Shift+A pans even with no unit selected");
+                for (KeyCommandBind bind : List.of(KeyCommandBind.DONE,
                       KeyCommandBind.UNDO_LAST_STEP, KeyCommandBind.FIRE, KeyCommandBind.NEXT_TARGET,
                       KeyCommandBind.PHYS_PUNCH, KeyCommandBind.CENTER_ON_SELECTED)) {
                     assertEquals(Handler.HUD, routing.press(key(keys, bind)), scenario + ": " + bind);
@@ -1122,7 +1130,13 @@ class GpuHudRoutingSmokeTest {
     }
 
     /** C.4's handler of a key press: the HUD's hotkeys first, then the camera binds, then MegaMek's Swing keys. */
-    private static Handler expected(Scenario scenario, Set<KeyCommandBind> binds, boolean logOpen) {
+    private static Handler expected(Scenario scenario, Key key, boolean logOpen) {
+        // Shift+WASD now accelerates the camera instead of stepping, turning or twisting the unit.
+        if (key.modifiers() == InputEvent.SHIFT_DOWN_MASK
+              && Set.of(KeyEvent.VK_W, KeyEvent.VK_A, KeyEvent.VK_S, KeyEvent.VK_D).contains(key.awt())) {
+            return Handler.CAMERA;
+        }
+        Set<KeyCommandBind> binds = key.binds();
         if (binds.stream().anyMatch(bind -> hudBind(scenario, bind, logOpen))) {
             return Handler.HUD;
         }

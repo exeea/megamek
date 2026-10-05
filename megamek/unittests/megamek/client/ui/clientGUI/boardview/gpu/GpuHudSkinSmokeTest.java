@@ -501,7 +501,7 @@ class GpuHudSkinSmokeTest {
         utilities.add(utility(skin, "map", "Map", false, true));
         utilities.add(utility(skin, "report", "Log", true, false));
         utilities.add(utility(skin, "help", "Help", false, false));
-        // Hovering a pressed utility or button shows the hover look, as in proto3.css.
+        // Hovering a checked utility or button keeps its fill and contrasting text.
         utilities.add(utility(skin, "settings", "Settings", true, true));
         utilities.add(utility(skin, "menu", "Menu", false, false)).padRight(28);
         utilities.add(sub(skin, button(skin, "hud", UiTheme.upper("Walk"), false, false), "3 MP",

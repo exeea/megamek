@@ -10,6 +10,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
@@ -18,6 +19,62 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardConcreteShoreTest {
     private static final Coords CENTER = new Coords(3, 3);
+
+    @ParameterizedTest
+    @ValueSource(floats = { .5f, 1, 2 })
+    void footprintDistancesFollowFittedGeometryAndLeaveUnmovedHexesAlone(float scale) {
+        BoardConcrete.Mode mode = BoardConcrete.mode();
+        BoardGeometry.Tuning geometry = BoardGeometry.tuning();
+        try {
+            BoardConcrete.tune(BoardConcrete.Mode.EVERYWHERE);
+            BoardGeometry.tune(new BoardGeometry.Tuning(scale, geometry.unitScale(), geometry.unitHeightScale(),
+                  geometry.levelHeight(), geometry.gridShade()));
+            for (int direction = 0; direction < 3; direction++) {
+                BoardScene scene = pavedPatch(direction);
+                BoardConcrete shape = BoardConcrete.of(scene);
+                int moved = 0, unmoved = 0;
+                for (var tile : scene.tiles()) {
+                    Coords at = tile.coords();
+                    boolean fitted = shape.corners(at).stream().anyMatch(shift -> shift.x() != 0 || shift.y() != 0);
+                    Vector3 center = BoardGeometry.center(at, 0);
+                    if (!fitted) {
+                        assertTrue(Float.isNaN(shape.distance(at, center.x, center.y)));
+                        unmoved++;
+                        continue;
+                    }
+                    moved++;
+                    float[] polygon = new float[12];
+                    for (int k = 0; k < 6; k++) {
+                        Vector3 corner = shape.corner(at, k);
+                        polygon[k * 2] = corner.x;
+                        polygon[k * 2 + 1] = corner.y;
+                    }
+                    for (int dx = -2; dx <= 2; dx++) {
+                        for (int dy = -2; dy <= 2; dy++) {
+                            float x = center.x + dx * BoardGeometry.width() / 3;
+                            float y = center.y + dy * BoardGeometry.height() / 3;
+                            float expected = Float.POSITIVE_INFINITY;
+                            for (int k = 0; k < 6; k++) {
+                                int next = (k + 1) % 6;
+                                expected = Math.min(expected, Intersector.distanceSegmentPoint(polygon[k * 2], polygon[k * 2 + 1],
+                                      polygon[next * 2], polygon[next * 2 + 1], x, y));
+                            }
+                            if (Intersector.isPointInPolygon(polygon, 0, polygon.length, x, y)) { expected = -expected; }
+                            assertEquals(expected, shape.distance(at, x, y), .001f,
+                                  "Blending must use the exact fitted outline, including adjoining natural hexes: " + at);
+                        }
+                    }
+                }
+                assertTrue(moved > 0 && unmoved > 0);
+            }
+            BoardConcrete.tune(BoardConcrete.Mode.OFF);
+            BoardScene scene = pavedPatch(0);
+            assertTrue(Float.isNaN(BoardConcrete.of(scene).distance(new Coords(8, 8), 0, 0)));
+        } finally {
+            BoardConcrete.tune(mode);
+            BoardGeometry.tune(geometry);
+        }
+    }
 
     @Test
     void noneKeepsSharpHexEdgesAgainstWater() {

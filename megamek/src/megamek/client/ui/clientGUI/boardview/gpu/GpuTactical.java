@@ -94,6 +94,7 @@ final class GpuTactical implements Disposable {
     private Coords impassableHover;
     private boolean movementPlanning;
     private Map<FillKey, FillGeometry> fills = Map.of();
+    private float[] planeConnections = new float[0];
     private Map<BoardTactical.Wall, WallGeometry> walls = Map.of();
     private Map<Group, List<Page>> pages = Map.of();
     private Map<BasicStroke, Material> outlines = Map.of();
@@ -209,6 +210,10 @@ final class GpuTactical implements Disposable {
         boolean masked = hexMasks.update(scene, surfaces, true);
         addFills(scene, masked ? List.of() : scene.tactical().fills(), new Group(0, null), groups, nextFills,
               surfaces, clipper, reset, terrainChanged);
+        FloatArray connections = new FloatArray();
+        BoardTacticalGeometry.connectPlanes(scene, scene.tactical().fills(), packed(connections, null));
+        planeConnections = reuse(connections, planeConnections);
+        add(groups, PLANES, planeConnections);
         // Keep map restrictions in their own retained pages, outside the sprite-mask fast path.
         addFills(scene, impassable, new Group(3, null), groups, nextFills, surfaces, clipper, reset, terrainChanged);
         groups.put(new Group(1, null), new ArrayList<>());
@@ -690,6 +695,7 @@ final class GpuTactical implements Disposable {
               ink.get(TextureAttribute.class, TextureAttribute.Diffuse).textureDescription.texture.dispose());
         outlines = Map.of();
         fills = Map.of();
+        planeConnections = new float[0];
         walls = Map.of();
         impassable = List.of();
         batch.dispose();

@@ -272,7 +272,6 @@ public class PhysicalDisplay extends AttackPhaseDisplay {
         buttons.get(PhysicalCommand.PHYSICAL_PUSH).doClick();
     }
 
-
     /**
      * Cache the list of visible targets. This is used for the 'next target' button.
      * <p>
@@ -490,9 +489,9 @@ public class PhysicalDisplay extends AttackPhaseDisplay {
         clientgui.onAllBoardStates(BoardClientState::clearMarkedHexes);
         clientgui.getBoardState(currentEntity()).highlight(currentEntity().getPosition());
 
-        clientgui.getUnitDisplay().displayEntity(entity);
+        clientgui.getUnitDisplayState().displayEntity(entity);
         if (GUIP.getMoveDisplayTabDuringMovePhases()) {
-            clientgui.getUnitDisplay().showPanel(MekPanelTabStrip.SUMMARY);
+            clientgui.showUnitDisplayPanel(MekPanelTabStrip.SUMMARY);
         }
 
         clientgui.centerOnUnit(entity);
@@ -710,7 +709,7 @@ public class PhysicalDisplay extends AttackPhaseDisplay {
         }
 
         if (currentEntity() != null) {
-            clientgui.getUnitDisplay().wPan.displayMek(currentEntity());
+            clientgui.getUnitDisplayState().displayMek(currentEntity());
         }
         updateTarget();
 
@@ -1975,7 +1974,7 @@ public class PhysicalDisplay extends AttackPhaseDisplay {
     void updateTarget() {
         // dis/enable physical attach buttons
         if ((currentEntity != Entity.NONE) &&
-              currentEntity().equals(clientgui.getUnitDisplay().getCurrentEntity()) &&
+              currentEntity().equals(clientgui.getUnitDisplayState().getCurrentEntity()) &&
               (target != null)) {
             if (!brushOffOnly(target)) {
                 // punch?
@@ -2146,7 +2145,7 @@ public class PhysicalDisplay extends AttackPhaseDisplay {
      * @param direction the secondary facing to twist to
      */
     private void applyTorsoTwist(int direction) {
-        WeaponMounted selectedWeapon = clientgui.getUnitDisplay().wPan.getSelectedWeapon();
+        WeaponMounted selectedWeapon = clientgui.getUnitDisplayState().getSelectedWeapon();
         List<DirectionalMountFacingAction> mountFacings = pendingDirectionalMountFacings(NO_EXCLUDED_LOCATION);
         clearAttacks();
         addAttack(new TorsoTwistAction(currentEntity, direction));
@@ -2156,7 +2155,7 @@ public class PhysicalDisplay extends AttackPhaseDisplay {
         }
         refreshAll();
         if (selectedWeapon != null) {
-            clientgui.getUnitDisplay().wPan.selectWeapon(selectedWeapon);
+            clientgui.getUnitDisplayState().selectWeapon(selectedWeapon);
         }
     }
 
@@ -2168,7 +2167,7 @@ public class PhysicalDisplay extends AttackPhaseDisplay {
             return;
         }
         clientgui.boardStates().forEach(bv -> bv.redrawEntity(currentEntity()));
-        clientgui.getUnitDisplay().displayEntity(currentEntity());
+        clientgui.getUnitDisplayState().displayEntity(currentEntity());
         updateTarget();
         clientgui.updateFiringArc(currentEntity());
     }
@@ -2459,7 +2458,7 @@ public class PhysicalDisplay extends AttackPhaseDisplay {
                 }
             } else {
                 clientgui.maybeShowUnitDisplay();
-                clientgui.getUnitDisplay().displayEntity(e);
+                clientgui.getUnitDisplayState().displayEntity(e);
                 clientgui.centerOnUnit(e);
             }
         }

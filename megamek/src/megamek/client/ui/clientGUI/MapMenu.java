@@ -310,7 +310,7 @@ public class MapMenu extends JPopupMenu {
             try {
                 selectedEntity = game.getEntity(Integer.parseInt(evt.getActionCommand()));
                 GUIPreferences.getInstance().setUnitDisplayEnabled(true);
-                gui.getUnitDisplay().displayEntity(selectedEntity);
+                gui.getUnitDisplayState().displayEntity(selectedEntity);
             } catch (Exception ex) {
                 logger.error(ex, "");
             }
@@ -1181,7 +1181,7 @@ public class MapMenu extends JPopupMenu {
                     // Only fire weapons that have a chance to hit
                     int toHitVal = waa.toHit(game).getValue();
                     if (toHitVal <= 12) {
-                        gui.getUnitDisplay().wPan.selectWeapon(weaponNum);
+                        gui.getUnitDisplayState().selectWeapon(weaponNum);
                         panel.fire();
                     }
                 }
@@ -1235,7 +1235,7 @@ public class MapMenu extends JPopupMenu {
               && boardLocation.equals(firingDisplay.getTarget().getBoardLocation());
         boolean isFireAllowed = targetInHex && firingDisplay.isFireAllowed();
         item.setEnabled(isFireAllowed);
-        item.setToolTipText(targetInHex ? gui.getUnitDisplay().wPan.getTargetSummary()
+        item.setToolTipText(targetInHex ? gui.getUnitDisplayState().getTargetSummary()
               : Messages.getString("GpuBoard.selectTargetFirst"));
         if (!isFireAllowed) {
             logger.debug("[MapMenu] Fire item disabled for {}: the Fire button is not currently enabled; "
@@ -1908,7 +1908,7 @@ public class MapMenu extends JPopupMenu {
     private JMenu createModeMenu() {
         JMenu menu = new JMenu("Modes");
 
-        int weaponNum = gui.getUnitDisplay().wPan.getSelectedWeaponNum();
+        int weaponNum = gui.getUnitDisplayState().getSelectedWeaponNum();
         Mounted<?> mounted = myEntity.getEquipment(weaponNum);
 
         if ((mounted != null) && mounted.hasModes()) {
@@ -1939,7 +1939,7 @@ public class MapMenu extends JPopupMenu {
         item.addActionListener(evt -> {
             try {
                 int modePosition = Integer.parseInt(evt.getActionCommand());
-                int weaponNum = gui.getUnitDisplay().wPan.getSelectedWeaponNum();
+                int weaponNum = gui.getUnitDisplayState().getSelectedWeaponNum();
                 Mounted<?> equip = myEntity.getEquipment(weaponNum);
                 equip.setMode(modePosition);
                 client.sendModeChange(myEntity.getId(), weaponNum, modePosition);

@@ -42,6 +42,7 @@ import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.RulerDialog;
+import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
 import megamek.client.ui.dialogs.BotCommands.BotCommandsDialog;
 import megamek.client.ui.dialogs.BotCommands.BotCommandsPanel;
 import megamek.client.ui.dialogs.PlayerListDialog;
@@ -307,6 +308,7 @@ class GpuSwingCutSmokeTest {
         set(ClientGUI.class, gui, "botCommandsPanel", new BotCommandsPanel(gui.getClient(), null, null, gui));
         set(ClientGUI.class, gui, "commandBarPanel", bar);
         set(ClientGUI.class, gui, "panTop", top);
+        when(gui.getUnitDisplayState()).thenReturn(new UnitDisplayState(gui));
         UnitDisplayPanel unitPanel = new UnitDisplayPanel(gui);
         UnitDisplayDialog unit = new UnitDisplayDialog(frame, gui);
         when(gui.getUnitDisplay()).thenReturn(unitPanel);

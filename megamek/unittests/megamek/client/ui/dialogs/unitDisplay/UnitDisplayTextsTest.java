@@ -19,8 +19,11 @@ import javax.swing.SwingUtilities;
 
 import megamek.client.Client;
 import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.tooltip.PilotToolTip;
+import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayData;
+import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
+import megamek.client.ui.clientGUI.unitDisplay.UnitEquipmentActions;
+import megamek.client.ui.clientGUI.unitDisplay.WeaponDisplayData;
 import megamek.common.Configuration;
 import megamek.common.Player;
 import megamek.common.board.Board;
@@ -97,12 +100,15 @@ class UnitDisplayTextsTest {
         when(client.getLocalPlayer()).thenReturn(local);
         when(gui.getClient()).thenReturn(client);
         when(display.getClientGUI()).thenReturn(gui);
+        UnitDisplayState state = new UnitDisplayState(gui);
+        when(display.getDisplayState()).thenReturn(state);
+        when(gui.getUnitDisplayState()).thenReturn(state);
     }
 
     @AfterEach
     void tearDown() throws Exception {
         onSwing(() -> {
-            weaponPanels.forEach(GUIPreferences.getInstance()::removePreferenceChangeListener);
+            weaponPanels.forEach(WeaponPanel::disposeDisplay);
             return null;
         });
     }
@@ -152,14 +158,14 @@ class UnitDisplayTextsTest {
               "rows of " + List.of(atm.getName(), rocket.getName(), bombast.getName()));
 
         // The parts the GPU unit record reads: shots, hot-loading, the current and queued mode, rapid fire
-        WeaponListModel.RowParts launcher = WeaponListModel.rowParts(game, weapons.get(2));
+        UnitDisplayData.RowParts launcher = UnitDisplayData.rowParts(game, weapons.get(2));
         assertEquals(List.of(6, 12, true, "Indirect"), List.of(launcher.loadedShots(), launcher.totalShots(),
               launcher.hotLoaded(), launcher.mode()));
-        WeaponListModel.RowParts computer = WeaponListModel.rowParts(game, (WeaponMounted) master);
+        UnitDisplayData.RowParts computer = UnitDisplayData.rowParts(game, (WeaponMounted) master);
         assertEquals(List.of("On", "Off"), List.of(computer.mode(), computer.pendingMode()));
-        assertEquals(-1, WeaponListModel.rowParts(game, (WeaponMounted) rocket).totalShots(),
+        assertEquals(-1, UnitDisplayData.rowParts(game, (WeaponMounted) rocket).totalShots(),
               "The list shows no shots for a one-shot launcher");
-        assertEquals(true, WeaponListModel.rowParts(game, (WeaponMounted) gun).rapidFire());
+        assertEquals(true, UnitDisplayData.rowParts(game, (WeaponMounted) gun).rapidFire());
     }
 
     @Test
@@ -177,12 +183,12 @@ class UnitDisplayTextsTest {
         Entity omega = unit(new File(Configuration.dataDir(), "mekfiles/unit_files.zip"),
               "meks/3145/NTNU RS/NTNU/Omega SHP-5R.mtf");
         List<String> texts = new ArrayList<>();
-        texts.add(SystemPanel.slotText(atlas, Mek.LOC_CENTER_TORSO, 10));
-        texts.add(SystemPanel.slotText(atlas, Mek.LOC_RIGHT_ARM, atlas.slotNumber(turret)));
-        texts.add(SystemPanel.slotText(atlas, Mek.LOC_LEFT_TORSO, atlas.slotNumber(directional)));
-        texts.add(SystemPanel.slotText(atlas, Mek.LOC_LEFT_TORSO, atlas.slotNumber(atlas.getWeaponList().get(2))));
-        texts.add(SystemPanel.slotText(omega, Mek.LOC_LEFT_ARM, dualSlot(omega)));
-        texts.add(SystemPanel.slotText(omega, Mek.LOC_CENTER_TORSO, 0));
+        texts.add(UnitEquipmentActions.slotText(atlas, Mek.LOC_CENTER_TORSO, 10));
+        texts.add(UnitEquipmentActions.slotText(atlas, Mek.LOC_RIGHT_ARM, atlas.slotNumber(turret)));
+        texts.add(UnitEquipmentActions.slotText(atlas, Mek.LOC_LEFT_TORSO, atlas.slotNumber(directional)));
+        texts.add(UnitEquipmentActions.slotText(atlas, Mek.LOC_LEFT_TORSO, atlas.slotNumber(atlas.getWeaponList().get(2))));
+        texts.add(UnitEquipmentActions.slotText(omega, Mek.LOC_LEFT_ARM, dualSlot(omega)));
+        texts.add(UnitEquipmentActions.slotText(omega, Mek.LOC_CENTER_TORSO, 0));
         assertEquals(List.of("Medium Laser (R)", "Medium Laser (T)", "Small Laser (DTM) (RR) (Locked)",
               "LRM 20 is Hot-Loaded",
               "LB 10-X AC Ammo (10) LB 10-X AC Ammo (10)", "Engine"), texts);
@@ -248,9 +254,9 @@ class UnitDisplayTextsTest {
 
         List<String> feeds = new ArrayList<>();
         for (WeaponMounted weapon : atlas.getWeaponList()) {
-            WeaponPanel.AmmoChoices offered = WeaponPanel.ammoChoices(atlas, weapon, weapon);
+            WeaponDisplayData.AmmoChoices offered = WeaponDisplayData.ammoChoices(atlas, weapon, weapon);
             feeds.add(offered.feed() + " " + offered.ammo().stream()
-                  .map(ammo -> WeaponPanel.formatAmmo(atlas, ammo)).toList());
+                  .map(ammo -> WeaponDisplayData.formatAmmo(atlas, ammo)).toList());
         }
         assertEquals(List.of("NONE []", "NONE []", "BINS [[LT] LRM 20  (6), [LT] LRM 20  (6)]",
               "BINS [[LT] SRM 6  (15)]", "BINS [[RT] AC/20  (5), [RT] AC/20  (5)]", "NONE []", "NONE []",
@@ -282,7 +288,7 @@ class UnitDisplayTextsTest {
         // 5 carried + 2 moved + 3 and 6 fired; 30 over 20 sinks; the Union's two fired bays heat their arcs
         assertEquals(List.of("16 (20)", "30* (20) 10 over", "34 (170)"), labels);
         assertEquals(labels, onSwing(() -> List.of(atlas, hot, union).stream()
-              .map(entity -> WeaponPanel.heatBuildup(game, entity).text()).toList()));
+              .map(entity -> WeaponDisplayData.heatBuildup(game, entity).text()).toList()));
     }
 
     @Test
@@ -370,7 +376,7 @@ class UnitDisplayTextsTest {
      * damage per trooper of other weapons, the attack values of a ground attack) keeps its "---".
      */
     private List<String> statTexts(Entity entity, WeaponMounted weapon) {
-        WeaponPanel.WeaponStats stats = WeaponPanel.stats(game, entity, weapon, weapon.getLinkedAmmo(), false);
+        WeaponDisplayData.WeaponStats stats = WeaponDisplayData.stats(game, entity, weapon, weapon.getLinkedAmmo(), false);
         List<String> attackValues = stats.attackValues().isEmpty() ? List.of("---", "---", "---", "---")
               : stats.attackValues();
         List<String> texts = new ArrayList<>(List.of(stats.heat(), stats.arcHeat(), stats.damage(),
@@ -406,7 +412,7 @@ class UnitDisplayTextsTest {
     }
 
     private WeaponPanel weaponPanel() {
-        WeaponPanel panel = new WeaponPanel(display, client);
+        WeaponPanel panel = new WeaponPanel(display);
         weaponPanels.add(panel);
         return panel;
     }

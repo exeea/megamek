@@ -24,24 +24,30 @@ import megamek.client.ui.clientGUI.audio.SoundManager;
 import megamek.client.ui.dialogs.UnitLoadingDialog;
 import megamek.client.ui.dialogs.randomArmy.RandomArmyDialog;
 import megamek.client.ui.dialogs.unitSelectorDialogs.MegaMekUnitSelectorDialog;
+import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
+import megamek.client.ui.dialogs.unitDisplay.UnitDisplayDialog;
 import megamek.client.ui.util.MegaMekController;
 import megamek.common.Player;
 import megamek.common.enums.GamePhase;
 import megamek.common.game.Game;
 import megamek.common.loaders.MapSettings;
 import megamek.common.loaders.MekSummaryCache;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class ClientGUIUnitLoadingTest {
-    @Test
-    void enteringLobbyDoesNotWaitForUnitsOrConstructUnitTools() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    void enteringLobbyDoesNotWaitForUnitsOrConstructUnitTools(boolean nativeBoard) throws Exception {
         assumeFalse(GraphicsEnvironment.isHeadless());
         AtomicReference<ClientGUI> opened = new AtomicReference<>();
         FutureTask<Void> startup = new FutureTask<>(() -> {
             GUIPreferences preferences = GUIPreferences.getInstance();
             boolean use3D = preferences.getUse3DBoard();
-            preferences.setUse3DBoard(false);
+            preferences.setUse3DBoard(nativeBoard);
             try (var sound = mockConstruction(SoundManager.class);
+                  var inspector = nativeBoard ? mockConstruction(UnitDisplayPanel.class) : null;
+                  var inspectorDialog = nativeBoard ? mockConstruction(UnitDisplayDialog.class) : null;
                   var cacheAccess = mockStatic(MekSummaryCache.class);
                   var application = mockStatic(MegaMekGUI.class)) {
                 MekSummaryCache cache = mock(MekSummaryCache.class);
@@ -64,13 +70,20 @@ class ClientGUIUnitLoadingTest {
                 try {
                     gui.initialize();
                     gui.switchPanel(GamePhase.LOUNGE);
-                    assertTrue(gui.getFrame().isShowing());
-                    UnitLoadingDialog progress = Arrays.stream(gui.getFrame().getOwnedWindows())
-                          .filter(UnitLoadingDialog.class::isInstance)
-                          .map(UnitLoadingDialog.class::cast)
-                          .findFirst().orElseThrow();
-                    assertTrue(progress.isShowing());
-                    assertFalse(progress.isModal(), "Entering the lobby must not block its controls");
+                    if (nativeBoard) {
+                        gui.setUnitDisplayVisible(true);
+                        assertTrue(inspector.constructed().isEmpty());
+                        assertTrue(inspectorDialog.constructed().isEmpty());
+                        assertFalse(gui.getFrame().isShowing());
+                    } else {
+                        assertTrue(gui.getFrame().isShowing());
+                        UnitLoadingDialog progress = Arrays.stream(gui.getFrame().getOwnedWindows())
+                              .filter(UnitLoadingDialog.class::isInstance)
+                              .map(UnitLoadingDialog.class::cast)
+                              .findFirst().orElseThrow();
+                        assertTrue(progress.isShowing());
+                        assertFalse(progress.isModal(), "Entering the lobby must not block its controls");
+                    }
                     assertTrue(Arrays.stream(gui.getFrame().getOwnedWindows())
                           .noneMatch(window -> (window instanceof MegaMekUnitSelectorDialog)
                                 || (window instanceof RandomArmyDialog)));

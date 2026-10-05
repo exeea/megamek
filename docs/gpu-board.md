@@ -28,6 +28,14 @@ movement and view selection; `BoardProjectionCamera` handles projection and
 `BoardCameraCollision` handles camera contact with the scene. Changing cameras retains
 the same unit instances, picking geometry and playback timeline.
 
+Manual panning and pointer-centered zoom keep the orbit pivot within the board in both
+the 3D and Tactical views. The pivot is the center of the usable board area between HUD
+panels. The limit leaves every edge hex reachable and insets the jagged perimeter so a
+rotated corner cannot leave the map off-screen at close zoom. Dragging against an edge
+still slides along it and responds immediately when reversed. Board replacement resets
+the bounds, and geometry scaling changes their world size. Automatic framing and Free
+Flight retain their own camera behavior.
+
 ## From game state to a frame
 
 [BoardSource](../megamek/src/megamek/client/ui/clientGUI/boardview/gpu/BoardSource.java)
@@ -143,6 +151,9 @@ the 3D board's own models (a custom kit's modular building where one exists), an
 tileset image: they fade around units inside, show their struts and floors, take picks with the hovered level's
 cutaway, and cast shadows, as in the 3D view. Toggling the view recaches each section's props, so their caches hold
 only the structures while it is on. The hex grid lies on the columns at every angle, behind whatever stands nearer.
+Cliff outlines are strokes in the upper hex's artwork, so they follow the same top and depth at every camera angle.
+They use `BoardRim`'s cliff classification (a drop above two levels, or a manual `CLIFF_TOP` exit), leave road mouths
+open, and update with the terrain's artwork cache. Ordinary slopes keep their rim shading without a bold outline.
 The columns have no relief, blends, 3D water surfaces, trees, scatter or other feature models. While the view is on, `GpuTerrain` draws, picks and drapes overlays on these same columns, and lights them
 with its own batch and environment: the hour's sun or moon, ambient, cloud shadows and lava glow, as on the 3D board
 (tops face up, walls and banks outward). The geometry shadow map holds the columns, bridge decks and 3D units in

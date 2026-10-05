@@ -38,7 +38,7 @@ import org.junit.jupiter.api.Test;
 /**
  * G7: the hud-v3 board overlay over the board-space harness, in 3D and in the Tactical View (its two alpha sets),
  * beside the prototype's shots 02, 03, 05, 07, 09 and 15, and its behaviour: the hover preview, non-planner movement,
- * one arc per jump, the ghost of a plotted route only, drop edges only in the Tactical View, rebuilding only when the
+ * one arc per jump, the ghost of a plotted route only, terrain edges left to the terrain, rebuilding only when the
  * drawing changes, never for the pointer, and freeing every mesh. MegaMek's own envelope is the tactical capture's,
  * so the shots show none. The envelopes of the fixtures are drawing inputs chosen to resemble the pictures
  * (straight-line distance from the unit, MegaMek's forward arc); they are not movement rules.
@@ -136,7 +136,7 @@ class GpuBoardOverlaySmokeTest {
     }
 
     @Test
-    void routeHoverAndDropEdgesFollowTheSnapshotsAndTheView() throws Exception {
+    void routeHoverAndTerrainEdgesFollowTheirOwners() throws Exception {
         BoardScene scene = GpuBoardSpaceHarness.scene();
         GpuHudTestStage.run(hud -> {
             GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
@@ -167,12 +167,12 @@ class GpuBoardOverlaySmokeTest {
                 // G20: a non-planner unit gets no route line from the overlay.
                 assertTrue(difference(noRoute, classic, dot) < .5f, "No route for a non-planner unit");
 
-                // L7: elevation-drop edges appear in the Tactical View only.
+                // Terrain owns cliff strokes in its top artwork; this overlay must add no floating drop edges.
                 Vector3 edge = dropEdge(scene, Set.of(atlas));
                 frame(board, true, atlas, 60.8f, 960, 540);
                 Pixmap flatBare = draw(hud, board, overlay, null, moving, GpuHudData.EMPTY, null, "tactical-bare");
                 Pixmap flat = draw(hud, board, overlay, scene, moving, GpuHudData.EMPTY, null, "tactical-drops");
-                assertTrue(difference(flatBare, flat, board.screen(edge)) > 5, "A drop edge at " + edge);
+                assertTrue(difference(flatBare, flat, board.screen(edge)) < .5f, "No separate drop overlay at " + edge);
                 frame(board, false, atlas, 118, 960, 600);
                 Pixmap solidBare = draw(hud, board, overlay, null, moving, GpuHudData.EMPTY, null, "3d-bare");
                 Pixmap solid = draw(hud, board, overlay, scene, moving, GpuHudData.EMPTY, null, "3d-drops");
@@ -310,7 +310,7 @@ class GpuBoardOverlaySmokeTest {
                 System.out.println("Overlay buffers after the first build " + first.size() + ", after 20 more "
                       + later.size());
                 assertEquals(first.size(), later.size(), "Rebuilding frees the old meshes");
-                // The Tactical View adds the board's drop edges; disposing frees them too.
+                // Switching to Tactical View also releases all of its overlay buffers on disposal.
                 board.view(true);
                 overlay.update(frame, view(true, null, Entity.NONE), preferences(), state);
                 overlay.renderMarks(board.camera.camera, board.poses::get);
@@ -327,8 +327,8 @@ class GpuBoardOverlaySmokeTest {
     }
 
     /**
-     * Update times at the fixture's 10 units and at 100 v 100, in milliseconds: the first build (with the drop edges
-     * in the Tactical View), a rebuild for a changed plan, a rebuild after a pan (the source repaints the tiles, so
+     * Update times at the fixture's 10 units and at 100 v 100, in milliseconds: the first build,
+     * a rebuild for a changed plan, a rebuild after a pan (the source repaints the tiles, so
      * the terrain samples start cold) and a recapture that shows the same (no rebuild); and the marks of one frame,
      * drawn where the units stand, with the GPU's work (glFinish). Not a performance claim when JaCoCo instruments the
      * run.

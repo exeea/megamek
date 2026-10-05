@@ -105,6 +105,14 @@ class GpuFieldOfViewEffectsSmokeTest {
                 assertTrue(chroma(both.blocked()) < chroma(both.visible()) / 3,
                       "Fog of war must desaturate out-of-sensor terrain");
 
+                BoardFieldOfView faint = new BoardFieldOfView(mask.width(), mask.height(), mask.hexes(),
+                      64, mask.highlightAlpha(), mask.darken(), mask.grayscale(), mask.spotting());
+                Samples faded = draw(scene, terrain, atmosphere, field, camera, faint);
+                assertEquals(both.visible(), faded.visible());
+                assertTrue(brightness(faded.sensor()) > brightness(both.sensor()), "Preference opacity updates the FoV uniform");
+                assertTrue(brightness(faded.blocked()) > brightness(both.blocked()), "Preference opacity updates the sensor uniform");
+                assertEquals(1, field.uploads(), "Preference opacity changes must reuse the mask");
+
                 field.configure(GpuFieldOfView.Style.GRAYSCALE, GpuFieldOfView.FOV_DARKNESS,
                       GpuFieldOfView.SENSOR_STYLE, GpuFieldOfView.SENSOR_DARKNESS);
                 Samples grayFov = draw(scene, terrain, atmosphere, field, camera, mask);

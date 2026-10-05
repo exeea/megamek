@@ -39,7 +39,7 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.UnitStatus;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuFirePreview.Contact;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuFirePreview.Line;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuFirePreview.Side;
-import megamek.client.ui.dialogs.unitDisplay.HeatEffects;
+import megamek.client.ui.clientGUI.unitDisplay.HeatEffects;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.common.Player;
 import megamek.common.board.Coords;

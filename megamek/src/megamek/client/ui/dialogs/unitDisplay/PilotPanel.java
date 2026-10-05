@@ -32,12 +32,14 @@
  */
 package megamek.client.ui.dialogs.unitDisplay;
 
+import static megamek.client.ui.clientGUI.unitDisplay.UnitDisplayData.canSwapConsoleRoles;
+import static megamek.client.ui.clientGUI.unitDisplay.UnitDisplayData.swapConsoleRoles;
+
 import java.awt.*;
 import java.io.Serial;
 import java.util.Enumeration;
 import javax.swing.*;
 
-import megamek.client.Client;
 import megamek.client.ui.Messages;
 import megamek.client.ui.widget.BackGroundDrawer;
 import megamek.client.ui.widget.mapset.PilotMapSet;
@@ -138,21 +140,6 @@ public class PilotPanel extends PicMap {
 
         onResize();
         update();
-    }
-
-    /** Whether the unit's crew sits at a command console with both seats active, so the two can swap roles. */
-    public static boolean canSwapConsoleRoles(Entity entity) {
-        return entity.getCrew().getCrewType().equals(CrewType.COMMAND_CONSOLE)
-              && entity.getCrew().isActive(0) && entity.getCrew().isActive(1);
-    }
-
-    /**
-     * Schedules (or cancels) the command console crew's role swap at the end of the turn and sends the unit; the swap
-     * button's action. The Unit Display and the GPU record sheet both use it.
-     */
-    public static void swapConsoleRoles(Client client, Entity entity, boolean swap) {
-        entity.getCrew().setSwapConsoleRoles(swap);
-        client.sendUpdateEntity(entity);
     }
 
     private void selectCrewSlot() {

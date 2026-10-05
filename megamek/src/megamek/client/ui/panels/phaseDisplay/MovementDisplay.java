@@ -221,7 +221,6 @@ public class MovementDisplay extends ActionPhaseDisplay {
         return null;
     }
 
-
     /**
      * One legal bridge a platoon could raise: the bridge occupies {@code middle} (adjacent to the engineer), with its
      * near bank {@code start} fixed at the engineer's hex and reaching the far bank {@code end}; {@code exits} is the
@@ -897,9 +896,9 @@ public class MovementDisplay extends ActionPhaseDisplay {
      * @param entity Currently Selected Entity
      */
     private void updateUnitDisplay(final Entity entity) {
-        clientgui.getUnitDisplay().displayEntity(entity);
+        clientgui.getUnitDisplayState().displayEntity(entity);
         if (GUIP.getMoveDisplayTabDuringMovePhases()) {
-            clientgui.getUnitDisplay().showPanel(MekPanelTabStrip.SUMMARY);
+            clientgui.showUnitDisplayPanel(MekPanelTabStrip.SUMMARY);
         }
     }
 
@@ -2030,7 +2029,6 @@ public class MovementDisplay extends ActionPhaseDisplay {
         } else if (currentlySelectedEntity.getMovementMode() == EntityMovementMode.QUAD_SWIM) {
             currentlySelectedEntity.setMovementMode(EntityMovementMode.QUAD);
         }
-
 
         // create new current and considered paths
         cmd = new MovePath(game, currentlySelectedEntity);
@@ -7021,7 +7019,6 @@ public class MovementDisplay extends ActionPhaseDisplay {
         return maxMP;
     }
 
-
     /**
      * Computes all the possible moves for an {@link Entity}. The {@link Entity} can either be a suggested
      * {@link Entity} or the currently selected one.
@@ -8076,7 +8073,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
             performAeroLand(VERTICAL);
 
         } else if (actionCmd.equals(MoveCommand.MOVE_ENVELOPE.getCmd())) {
-            computeMovementEnvelope(clientgui.getUnitDisplay().getCurrentEntity());
+            computeMovementEnvelope(clientgui.getUnitDisplayState().getCurrentEntity());
         } else if (actionCmd.equals(MoveCommand.MOVE_TRAITOR.getCmd())) {
             var players = game.getPlayersList();
             Integer[] playerIds = new Integer[players.size() - 1];
@@ -8235,7 +8232,6 @@ public class MovementDisplay extends ActionPhaseDisplay {
         // if we need to choose a pickup location, then do so
         if (locationMap.size() > 1) {
 
-
             // Dialog for choosing which object to pick up
             String title = "Choose Pickup Location";
             String body = "Choose the location with which to pick up cargo:";
@@ -8384,7 +8380,7 @@ public class MovementDisplay extends ActionPhaseDisplay {
             }
         } else {
             clientgui.maybeShowUnitDisplay();
-            clientgui.getUnitDisplay().displayEntity(entity);
+            clientgui.getUnitDisplayState().displayEntity(entity);
             if (entity.isDeployed()) {
                 clientgui.centerOnUnit(entity);
             }

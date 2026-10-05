@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import javax.swing.JMenuItem;
 import javax.swing.JToolTip;
@@ -14,17 +15,20 @@ import javax.swing.text.Document;
 import javax.swing.text.View;
 
 import megamek.client.ui.Messages;
-import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
 import org.junit.jupiter.api.Test;
 
 class WeaponPanelTest {
     @Test
     void targetTooltipRendersTheEntireFiringSolution() throws Exception {
         SwingUtilities.invokeAndWait(() -> {
-            WeaponPanel panel = new WeaponPanel(mock(UnitDisplayPanel.class), null);
+            UnitDisplayState state = new UnitDisplayState(null);
+            UnitDisplayPanel display = mock(UnitDisplayPanel.class);
+            when(display.getDisplayState()).thenReturn(state);
+            WeaponPanel panel = new WeaponPanel(display);
             try {
                 panel.setTarget(null, "<b>Extra information &amp; modifiers</b>");
-                panel.wRangeR.setText("8");
+                state.setRange("8");
                 panel.setToHit("7+ to hit<br>Movement +2");
 
                 String rendered = tooltipText(panel.getTargetSummary());
@@ -35,13 +39,13 @@ class WeaponPanelTest {
                 assertTrue(rendered.contains("Extra information & modifiers"), rendered);
 
                 panel.clearToHit();
-                panel.wRangeR.setText(null);
-                panel.wTargetExtraInfo.setText(null);
+                state.setRange(null);
+                state.setTarget(null, null);
                 rendered = tooltipText(panel.getTargetSummary());
                 assertTrue(rendered.contains("---"), rendered);
                 assertFalse(rendered.contains("null"), rendered);
             } finally {
-                GUIPreferences.getInstance().removePreferenceChangeListener(panel);
+                panel.disposeDisplay();
             }
         });
     }

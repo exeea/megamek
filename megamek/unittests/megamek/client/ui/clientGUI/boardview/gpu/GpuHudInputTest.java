@@ -50,7 +50,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.scenes.scene2d.utils.UIUtils;
 import com.badlogic.gdx.utils.GdxNativesLoader;
-import megamek.client.ui.dialogs.unitDisplay.WeaponPanel;
+import megamek.client.ui.clientGUI.unitDisplay.WeaponDisplayData;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.Player;
@@ -772,7 +772,7 @@ class GpuHudInputTest {
 
     private static GpuUnitRecord.Snapshot record(int unitId) {
         return new GpuUnitRecord.Snapshot(unitId, true, false, "", "", List.of(), List.of(), List.of(), List.of(),
-              List.of(), List.of(), 0, new WeaponPanel.HeatBuildup(0, 0, ""), List.of(), List.of(), List.of(),
+              List.of(), List.of(), 0, new WeaponDisplayData.HeatBuildup(0, 0, ""), List.of(), List.of(), List.of(),
               List.of(), List.of(), List.of(), List.of(), List.of(), "", "", List.of(), List.of(), "");
     }
 

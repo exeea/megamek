@@ -13,6 +13,7 @@ import java.util.Set;
 import java.util.TreeMap;
 
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.utils.LongMap;
 import megamek.common.board.Coords;
 
 /** Fitted concrete rectangles and their joins, shared with adjoining terrain. No game state or GL objects. */
@@ -46,7 +47,10 @@ final class BoardConcrete {
     }
     // Retain the displayed and pending outlines. A cache miss must not hold a monitor during board construction.
     private static volatile Cached cached, previous;
-    private final Map<Long, Shift> shifts;
+    // Packed lattice coordinates collide heavily in Long.hashCode(); use the primitive map's mixed lookup.
+    // Both maps are filled only during construction and then published with this immutable derived outline.
+    private final LongMap<Shift> shifts = new LongMap<>(0);
+    private final LongMap<float[]> footprints = new LongMap<>(0);
 
     static BoardConcrete of(BoardScene scene) {
         Cached first = cached, second = previous;
@@ -61,7 +65,7 @@ final class BoardConcrete {
         return shape;
     }
 
-    Shift shift(long corner) { return shifts.getOrDefault(corner, ZERO); }
+    Shift shift(long corner) { return shifts.get(corner, ZERO); }
 
     /** The same fitted corner for terrain, water, artwork and picking in both GPU views. */
     Vector3 corner(Coords coords, int corner) {
@@ -72,15 +76,13 @@ final class BoardConcrete {
 
     /** Signed distance to the fitted footprint; NaN means this hex still uses its original outline. */
     float distance(Coords coords, float x, float y) {
-        if (shifts.isEmpty()) { return Float.NaN; }
-        Vector3 corner = new Vector3();
+        float[] outline = footprints.get(tileKey(coords));
+        if (outline == null) { return Float.NaN; }
         float nearest = Float.POSITIVE_INFINITY, ax = 0, ay = 0;
-        boolean inside = false, moved = false;
+        boolean inside = false;
         for (int k = 0; k <= 6; k++) {
-            BoardGeometry.corner(corner, coords, 0, k);
-            Shift delta = shift(key(corner));
-            moved |= delta.x() != 0 || delta.y() != 0;
-            float bx = corner.x + delta.x(), by = corner.y + delta.y();
+            int index = (k % 6) * 2;
+            float bx = outline[index], by = outline[index + 1];
             if (k > 0) {
                 float dx = bx - ax, dy = by - ay;
                 float t = Math.clamp(((x - ax) * dx + (y - ay) * dy) / Math.max(dx * dx + dy * dy, .00001f), 0, 1);
@@ -90,7 +92,7 @@ final class BoardConcrete {
             ax = bx;
             ay = by;
         }
-        return moved ? inside ? -nearest : nearest : Float.NaN;
+        return inside ? -nearest : nearest;
     }
 
     List<Shift> corners(Coords coords) {
@@ -113,6 +115,10 @@ final class BoardConcrete {
               ^ (Math.round(p.y / (BoardGeometry.height() / 2)) & 0xffffffffL);
     }
 
+    private static long tileKey(Coords coords) {
+        return ((long) coords.getX() << 32) ^ (coords.getY() & 0xffffffffL);
+    }
+
     /** Construction-only vertices. Each is the same lattice corner seen by its three adjoining hexes. */
     private static final class Corner {
         final Vector3 original;
@@ -129,7 +135,7 @@ final class BoardConcrete {
     }
 
     private BoardConcrete(BoardScene scene) {
-        if (mode() == Mode.OFF) { shifts = Map.of(); return; }
+        if (mode() == Mode.OFF) { return; }
         Map<Long, Corner> corners = new TreeMap<>();
         for (BoardScene.Tile land : scene.tiles()) {
             if (land.liquid().present() || land.surface() != BoardScene.Surface.CONCRETE) { continue; }
@@ -178,12 +184,25 @@ final class BoardConcrete {
         simplify(corners.values(), scene, null);
         Set<Corner> continued = continueSides(corners.values(), scene);
         if (!continued.isEmpty()) { simplify(corners.values(), scene, continued); }
-        Map<Long, Shift> result = new TreeMap<>();
+        Set<Coords> fitted = new HashSet<>();
         corners.forEach((key, corner) -> {
             float dx = corner.point.x - corner.original.x, dy = corner.point.y - corner.original.y;
-            if (Math.hypot(dx, dy) > .001f) { result.put(key, new Shift(dx, dy)); }
+            if (Math.hypot(dx, dy) > .001f) {
+                shifts.put(key, new Shift(dx, dy));
+                corner.tiles.forEach(tile -> fitted.add(tile.coords()));
+            }
         });
-        shifts = Map.copyOf(result);
+        // Surface blending asks for this polygon repeatedly per vertex. Derive it once from the same corner shifts
+        // used by geometry/picking, and retain only moved hexes; ordinary ground returns NaN in one lookup.
+        for (Coords coords : fitted) {
+            float[] outline = new float[12];
+            for (int k = 0; k < 6; k++) {
+                Vector3 point = corner(coords, k);
+                outline[k * 2] = point.x;
+                outline[k * 2 + 1] = point.y;
+            }
+            footprints.put(tileKey(coords), outline);
+        }
     }
 
     private static void simplify(Collection<Corner> corners, BoardScene scene, Set<Corner> changed) {

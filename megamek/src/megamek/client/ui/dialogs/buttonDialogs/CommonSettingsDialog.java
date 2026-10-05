@@ -3524,7 +3524,7 @@ public class CommonSettingsDialog extends AbstractButtonDialog
             }
         }
         if (unitDisplayNonTabbedChanged && (clientgui != null) && !GUIP.getUnitDisplayStartTabbed()) {
-            clientgui.getUnitDisplay().setDisplayNonTabbed();
+            if (clientgui.getUnitDisplay() != null) { clientgui.getUnitDisplay().setDisplayNonTabbed(); }
         }
 
         GUIP.setUnitDisplayAutoDisplayReportPhase(unitDisplayAutoDisplayReportCombo.getSelectedIndex());

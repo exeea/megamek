@@ -368,7 +368,7 @@ view changes (open panels, the camera) stay on the GL thread. Names in quotes ar
 
 Two board-space components are world meshes that `GpuBattleView` draws:
 - `GpuBoardOverlay`: the route and its ghost, the front arc or the displayed weapon's arc, the physical-attack
-  neighbours and the Tactical View's elevation-drop edges as meshes, rebuilt only when what they draw changed, with
+  neighbours as meshes, rebuilt only when what they draw changed, with
   the route's pulse over the route (below). The unit marks (side rings, glows, the other targets' rings and the
   hovered unit's ring) are drawn every frame where the units stand, so the pointer rebuilds no mesh. 
   Where the terrain or a model hides the acting unit's, the focused target's or the hovered
@@ -457,8 +457,8 @@ client captured (`UiPreferences.binds()`). The defaults:
 | `DONE` | Ctrl+Enter | the dock's main button; while a bot order picks hexes, the order with the picked hexes (the hint line shows the pick and both keys; in narrow windows the pick's chip has Done and Cancel buttons) |
 | `SHOW_NAMEPLATES` | Alt, held | every nameplate |
 | `MOVE_MODE_WALK`, `_RUN`, `_JUMP` | 1, 2, 3 | movement mode (local planner turn) |
-| `TURN_LEFT`, `TURN_RIGHT` | Shift+A, Shift+D | turn (local planner turn) |
-| `TWIST_LEFT`, `TWIST_RIGHT` | Shift+A, Shift+D | torso twist (local FIRING turn) |
+| `TURN_LEFT`, `TURN_RIGHT` | Shift+A, Shift+D | turn (local planner turn, when rebound away from boosted camera keys) |
+| `TWIST_LEFT`, `TWIST_RIGHT` | Shift+A, Shift+D | torso twist (local FIRING turn, when rebound away from boosted camera keys) |
 | `UNDO_LAST_STEP` | Backspace | undo a step (planner) or the last attack (FIRING) |
 | `CLEAR_ORDERS` | Delete | clear the route (planner) or the orders (FIRING) |
 | `PLAYBACK_TOGGLE`, `_PREV`, `_NEXT` | Space, Left, Right | report phases: pause and step the playback |
@@ -466,9 +466,15 @@ client captured (`UiPreferences.binds()`). The defaults:
 | `REPORT_KEY_NEXT`, `_PREV`, `REPORT_KEY_SELECT_NEXT`, `_PREVIOUS`, `REPORT_KEY_FILTER`, `REPORT_FILTER_KEY_SELECT_NEXT` | N, Shift+N, Ctrl+N, Ctrl+Shift+N, Shift+F, Ctrl+Shift+F | while the log is open: find and filter by report keyword |
 
 Camera binds (`GpuBattleView`): `SCROLL_NORTH/WEST/SOUTH/EAST` (W, A, S, D, held), `CAMERA_ROTATE_LEFT/RIGHT` (Q,
-E, held: 70 degrees per second, 3D view only), `CAMERA_TILT_UP/DOWN` (Page Up, Page Down, held: 60 degrees per
+E, held: 90 degrees per second), `CAMERA_TILT_UP/DOWN` (Page Up, Page Down, held: 60 degrees per
 second), `TOGGLE_ISO` (T: Tactical View), `ZOOM_IN/OUT` (numpad + and -, a step of 1.2, also the Menu's zoom items),
 `CAMERA_RESET` (Home), `CAMERA_FIT_BOARD` (End) and `ZOOM_OVERVIEW_TOGGLE` (Z).
+
+Hold either Shift key for 4× keyboard camera speed, including when Shift is pressed or released during movement.
+Normal panning is 750 screen pixels per second before zoom scaling. Free Flight moves 1.5 hex heights per second;
+WASD moves along the view and Q/E descends/ascends. Shift plus an unmodified camera bind takes priority over the
+unit's step, turn and twist shortcuts in every camera mode, including rebound camera keys. Text fields and pending
+dialogs still take their input first; mouse gestures keep their existing speeds.
 
 Forwarded to MegaMek on purpose, among others: `NEXT_UNIT`/`PREV_UNIT` (Tab, Shift+Tab), the weapon and target
 cycling binds, `FIRE`, `PHYS_PUNCH`, `PHYS_KICK` and `PHYS_PUSH` (they declare at once, because the native window
@@ -507,8 +513,8 @@ stay the 3D view's own; only the shaded terrain becomes tileset columns and unit
   and other feature meshes leave the board and picking, so a click returns the hex under the pointer, also where a 3D
   canopy would overhang the next hex. The wireframe view and the Tactical View exclude each other: turning one on
   turns the other off. The minimap shows the same tileset art.
-- **Board overlay.** It uses the `flat.js` colours, draws the route's ghost as the unit's icon at half strength, and
-  adds elevation-drop edges. The route's pulse is a flat glow on the dashed line, a ripple of the destination ring and
+- **Board overlay.** It uses the `flat.js` colours and draws the route's ghost as the unit's icon at half strength.
+  Cliff strokes belong to the terrain's top artwork. The route's pulse is a flat glow on the dashed line, a ripple of the destination ring and
   a brighter ghost icon (section 3).
 - **Tests.** `BoardCameraTacticalTest` covers the camera. `GpuUnitIconsTest` checks the icon's side (0.6 of its hex's
   width, within 1 %) and its corners inside the hex at every facing in 15-degree steps. `GpuTacticalViewSmokeTest`
@@ -666,7 +672,13 @@ the size), merged into the same font. Icons are Material Symbols Rounded glyphs 
 
 ## 9. Swing in GPU mode
 
-While the native window is active (`GpuBoardWindow.isActiveFor`), the HUD replaces the battle view's Swing surfaces:
+While the native window is active (`GpuBoardWindow.isActiveFor`), the HUD replaces the battle view's Swing surfaces.
+
+Native startup, including scenarios, constructs neither the Swing Unit Display panel nor its dialog. Weapon and
+ammunition selection and the firing solution live in `UnitDisplayState`, owned by `ClientGUI` on the client thread.
+Phase controllers and GPU commands use that state directly. Shared weapon calculations, equipment actions and unit
+text live beside it in `clientGUI.unitDisplay`; they have no dependency on the legacy inspector panels. The classic
+inspector is created only when requested in classic mode and renders the same state.
 
 | Swing surface | Native replacement |
 | --- | --- |
@@ -785,7 +797,7 @@ checkout. `test` excludes `@Tag("on-demand")`, runs `checkstyleMain` first and s
 | Modal bridge and Swing cut | `GpuModalBridgeTest`, `GpuDialogRoutingTest`, `GpuListPromptBridgeTest`, `GpuChatToastModalSmokeTest`, `GpuSwingCutTest`, `GpuSwingCutSmokeTest` (a scripted round with real Swing windows under the native window), `GpuVictoryHexFormTest`, `GpuStoryDialogTest`, `GpuHexPickTest` (the bot orders' hex pick), `GpuTurretFacingRoutingTest`, `GpuSwingDialogGateTest` (every prompt opener with the window presented and on the classic client; the allowlist) |
 | Live view | `GpuLiveBoardSpaceSmokeTest` (board labels, overlay, traces, minimap, 100 v 100), `GpuLivePlaybackSmokeTest` (presented units, review, speeds, stride), `GpuHudParitySmokeTest` (the live view of a real battle beside each of the 16 hud-v3 shots: every anchored panel within 2 units of the mock's frame; `parity-NN-sbs.png`) |
 | Layout and coverage | `GpuHudLayoutSmokeTest` (900 x 600, 1280 x 720, 1920 x 1080), `GpuMenuCoverageSmokeTest` (every menu item and every phase command of real phase displays reachable) |
-| Board overlay | `GpuBoardOverlaySmokeTest` (beside the mock's shots; envelopes, route, hover preview, ghost, drop edges, rebuilds), `GpuRoutePulseSmokeTest` (the route's pulse frame by frame: the head from the unit to the destination, the surge, the rhythm across rebuilds, a jump's arc, a turn in place, none without a plotted route or switched off, the Tactical View, and the real view's own frames moving it on without a rebuild; `pulse-*.png` and its measured cost in `pulse-cost.txt`) |
+| Board overlay | `GpuBoardOverlaySmokeTest` (beside the mock's shots; envelopes, route, hover preview, ghost, rebuilds), `GpuTacticalCliffSmokeTest` (cliff strokes on the terrain through a camera orbit), `GpuRoutePulseSmokeTest` (the route's pulse frame by frame: the head from the unit to the destination, the surge, the rhythm across rebuilds, a jump's arc, a turn in place, none without a plotted route or switched off, the Tactical View, and the real view's own frames moving it on without a rebuild; `pulse-*.png` and its measured cost in `pulse-cost.txt`) |
 | Services | `GpuHudServicesTest`, `GpuMovePlanTest`, `GpuFireOrdersTest`, `GpuFireDraftsTest`, `GpuOffBoardTargetsTest` (the classic off-board arrows pinned; the dock's command sends the same attack; the native choice and its Esc), `GpuPhysicalOptionsTest`, `GpuUnitRecordTest`, `GpuFirePreviewTest`, `GpuLosResultTest`, `GpuHudMessagesTest`, `GpuChatRoundLinesTest`, `GpuBattleStatusTest`, `GpuReportLogTest`, `GpuPlaybackHistoryTest`, `GpuBotCommandsTest` |
 | Components | one smoke test per component, e.g. `GpuPhaseHeaderSmokeTest`, `GpuForcesPanelSmokeTest`, `GpuCommandDockSmokeTest`, `GpuWeaponsPanelSmokeTest`, `GpuTargetCardsSmokeTest`, `GpuLogPanelSmokeTest`, `GpuUnitCardSmokeTest`, `GpuTuningPanelSmokeTest`; `GpuCardPlacementTest`, `GpuContextMenuTest` |
 | Toolkit and skin | `UiGallerySmokeTest`, `UiListSmokeTest`, `DisplayScaleTest`, `GpuHudKitSmokeTest`, `GpuHudSkinSmokeTest`, `GpuPaperdollTest`, `GpuPaperdollsTest`, `GpuPaperdollSmokeTest` |

@@ -821,8 +821,7 @@ public final class GpuBoardWindow {
     /**
      * Any thread, no monitor: whether this client's native window is presented, so its HUD draws the client's dialogs,
      * which {@link #route} requires. A chokepoint whose request is costly to build checks it first, so its Swing
-     * dialog stays as before. While it holds, the HUD's unit card and sheet replace the Unit Display's window
-     * ({@code ClientGUI.setUnitDisplayLocation}).
+     * dialog stays as before. Auxiliary windows use {@link #isActiveFor} instead, so they stay hidden during startup.
      */
     public static boolean drawsDialogsFor(ClientGUI gui) {
         GpuBoardWindow window = active;

@@ -23,7 +23,7 @@ import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
-import megamek.client.ui.dialogs.unitDisplay.WeaponPanel;
+import megamek.client.ui.clientGUI.unitDisplay.WeaponDisplayData;
 import megamek.common.Configuration;
 import megamek.common.actions.WeaponAttackAction;
 import megamek.common.equipment.AmmoMounted;
@@ -97,7 +97,7 @@ class GpuUnitActionsTest {
                 List<AmmoMounted> bins = atlas.getAmmo().stream()
                       .filter(bin -> bin.getType().getAmmoType() == lrm.getType().getAmmoType()).toList();
                 assertEquals(List.of("[LT] LRM 20  (6)", "[LT] LRM 20  (6)"), bins.stream()
-                      .map(bin -> WeaponPanel.formatAmmo(atlas, bin)).toList(), "One label for both bins");
+                      .map(bin -> WeaponDisplayData.formatAmmo(atlas, bin)).toList(), "One label for both bins");
                 onSwing(() -> {
                     firing.fire(lrm, firing.ahead);
                     return source.fire().capture(firing.display, null);
@@ -131,7 +131,7 @@ class GpuUnitActionsTest {
             views.setAccessible(true);
             views.set(firing.gui, Map.of(0, firing.board.view));
             List<Integer> before = onSwing(() -> {
-                firing.unitDisplay.wPan.selectWeapon(GpuFiringFixture.weapon(firing.attacker, "AC/20",
+                firing.unitDisplay.selectWeapon(GpuFiringFixture.weapon(firing.attacker, "AC/20",
                       Mek.LOC_RIGHT_TORSO));
                 return selection(firing);
             });
@@ -149,8 +149,8 @@ class GpuUnitActionsTest {
 
     /** EDT: the firing display's actor, the unit its Unit Display shows and the weapon selected there. */
     private static List<Integer> selection(GpuFiringFixture firing) {
-        return List.of(firing.display.currentEntity().getId(), firing.unitDisplay.wPan.getSelectedEntityId(),
-              firing.unitDisplay.wPan.getSelectedWeaponNum());
+        return List.of(firing.display.currentEntity().getId(), firing.unitDisplay.getSelectedEntityId(),
+              firing.unitDisplay.getSelectedWeaponNum());
     }
 
     /** A board source over the fixture's view whose client is the fixture's, as the native window's source. */

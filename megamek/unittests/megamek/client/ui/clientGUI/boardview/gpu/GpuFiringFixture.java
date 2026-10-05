@@ -23,8 +23,7 @@ import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.MegaMekGUI;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayDialog;
-import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
+import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
 import megamek.client.ui.panels.phaseDisplay.FiringDisplay;
 import megamek.client.ui.util.KeyBindReceiver;
 import megamek.client.ui.util.KeyCommandBind;
@@ -44,8 +43,8 @@ import org.mockito.MockedStatic;
 /**
  * A real FiringDisplay over the board fixture on the local player's firing turn, with the fixture's Atlas AS7-D at
  * (5, 5) facing north selected and two identified enemies: an Archer ARC-2R at {@link #AHEAD} (north-east) and a
- * Hachiwara HCA-6P at {@link #LEFT} (north-west). The Unit Display is real, so its weapon panel is the display's weapon
- * list; the client records what the display sends. Prompts go through the routing client (GpuDialogRoutingTest); a
+ * Hachiwara HCA-6P at {@link #LEFT} (north-west). The shared unit selection state is real; no Swing inspector is
+ * constructed, and the client records what the display sends. Prompts go through the routing client (GpuDialogRoutingTest); a
  * yes/no question answers yes and is recorded by the mock. Fire does not end the turn by itself and no searchlight is
  * declared automatically unless a test switches that on (both preferences are restored on close). Build and close it
  * on the test thread; the display runs on the EDT.
@@ -62,7 +61,7 @@ final class GpuFiringFixture implements AutoCloseable {
     final Entity attacker;
     final Entity ahead;
     final Entity left;
-    final UnitDisplayPanel unitDisplay;
+    final UnitDisplayState unitDisplay;
     final FiringDisplay display;
     private final MockedStatic<MegaMekGUI> keys;
     private final boolean autoEndFiring = GUIPreferences.getInstance().getAutoEndFiring();
@@ -81,7 +80,6 @@ final class GpuFiringFixture implements AutoCloseable {
         when(client.getMyTurn()).thenReturn(new GameTurn(board.player.getId()));
         when(gui.getClient()).thenReturn(client);
         when(gui.getMenuBar()).thenReturn(menu);
-        when(gui.getUnitDisplayDialog()).thenReturn(mock(UnitDisplayDialog.class));
         when(gui.boardStates()).thenReturn(List.of(board.view));
         when(gui.getBoardState()).thenReturn(board.view);
         when(gui.getBoardState(any(Targetable.class))).thenReturn(board.view);
@@ -91,12 +89,12 @@ final class GpuFiringFixture implements AutoCloseable {
         // The key dispatcher mock is thread-local: the display registers and uses its keys on the EDT only.
         keys = onSwing(() -> mockStatic(MegaMekGUI.class, CALLS_REAL_METHODS));
         try {
-            unitDisplay = onSwing(() -> new UnitDisplayPanel(gui, null));
+            unitDisplay = new UnitDisplayState(gui);
             display = onSwing(() -> {
                 GUIPreferences.getInstance().setAutoEndFiring(false);
                 GUIPreferences.getInstance().setAutoDeclareSearchlight(false);
                 keys.when(MegaMekGUI::getKeyDispatcher).thenReturn(controller);
-                when(gui.getUnitDisplay()).thenReturn(unitDisplay);
+                when(gui.getUnitDisplayState()).thenReturn(unitDisplay);
                 when(gui.getDisplayedUnit()).thenAnswer(invocation -> unitDisplay.getCurrentEntity());
                 enemy.setTeam(2);
                 board.game.addPlayer(enemy.getId(), enemy);
@@ -154,7 +152,7 @@ final class GpuFiringFixture implements AutoCloseable {
 
     /** EDT: selects the weapon in the Unit Display and fires it at the target, as the Fire button does. */
     void fire(WeaponMounted weapon, Targetable target) {
-        unitDisplay.wPan.selectWeapon(weapon);
+        unitDisplay.selectWeapon(weapon);
         display.target(target);
         display.fire();
     }
@@ -187,7 +185,6 @@ final class GpuFiringFixture implements AutoCloseable {
             onSwing(() -> {
                 board.view.removeBoardViewListener(display);
                 display.removeAllListeners();
-                GUIPreferences.getInstance().removePreferenceChangeListener(unitDisplay.wPan);
                 keys.close();
                 restorePreferences();
                 return null;

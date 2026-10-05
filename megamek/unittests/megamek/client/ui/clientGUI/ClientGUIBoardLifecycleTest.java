@@ -24,6 +24,8 @@ import megamek.client.ui.clientGUI.boardview.overlay.BoardToastOverlay;
 import megamek.client.ui.clientGUI.boardview.sprite.EntitySprite;
 import megamek.client.ui.clientGUI.boardview.sprite.isometric.IsometricSprite;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
+import megamek.client.ui.dialogs.unitDisplay.UnitDisplayDialog;
+import megamek.client.ui.dialogs.unitDisplay.WeaponPanel;
 import megamek.client.ui.panels.phaseDisplay.lobby.ChatLounge;
 import megamek.client.ui.util.MegaMekController;
 import megamek.common.Player;
@@ -35,20 +37,30 @@ import megamek.common.game.Game;
 import megamek.common.loaders.MapSettings;
 import megamek.common.loaders.MekSummaryCache;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 class ClientGUIBoardLifecycleTest {
-    @Test
-    void nativeMapArrivalReplacementAndBoardSelectionNeedNoClassicRenderer() throws Exception {
+    @ParameterizedTest
+    @EnumSource(value = GamePhase.class, names = { "UNKNOWN", "LOUNGE", "STARTING_SCENARIO", "EXCHANGE" })
+    void nativeMapArrivalReplacementAndBoardSelectionNeedNoClassicRenderer(GamePhase phase) throws Exception {
         onClient(() -> {
             try (var views = mockConstruction(BoardView.class);
                   var panels = mockConstruction(BoardViewPanel.class);
                   var units = mockConstruction(EntitySprite.class);
                   var isometric = mockConstruction(IsometricSprite.class);
                   var display = mockConstruction(UnitDisplayPanel.class);
+                  var dialog = mockConstruction(UnitDisplayDialog.class);
+                  var weapons = mockConstruction(WeaponPanel.class);
                   var sound = mockConstruction(SoundManager.class);
-                  var session = Session.create()) {
+                  var session = Session.create(phase)) {
                 Game game = session.game();
                 ClientGUI gui = session.gui();
+                // Startup preferences and phase rules may request the inspector before the native window exists.
+                gui.setUnitDisplayVisible(true);
+                gui.setUnitDisplayLocation(true);
+                assertNull(gui.getUnitDisplay());
+                assertNull(gui.getUnitDisplayDialog());
                 game.receiveBoard(0, Board.createEmptyBoard(8, 8));
                 BoardClientState first = gui.getBoardState();
                 assertNotNull(first);
@@ -85,6 +97,9 @@ class ClientGUIBoardLifecycleTest {
                 assertTrue(panels.constructed().isEmpty());
                 assertTrue(units.constructed().isEmpty());
                 assertTrue(isometric.constructed().isEmpty());
+                assertTrue(display.constructed().isEmpty(), "Native startup must not construct the Swing inspector");
+                assertTrue(dialog.constructed().isEmpty());
+                assertTrue(weapons.constructed().isEmpty());
                 gui.die();
                 assertTrue(gui.boardStates().isEmpty());
                 assertTrue(session.closeListeners().isEmpty());
@@ -181,11 +196,15 @@ class ClientGUIBoardLifecycleTest {
 
     private record Session(Game game, ClientGUI gui, boolean use3D, Set<CloseClientListener> closeListeners) implements AutoCloseable {
         static Session create() throws Exception {
+            return create(GamePhase.LOUNGE);
+        }
+
+        static Session create(GamePhase phase) throws Exception {
             GUIPreferences preferences = GUIPreferences.getInstance();
             boolean previous = preferences.getUse3DBoard();
             preferences.setUse3DBoard(true);
             Game game = new Game();
-            game.setPhase(GamePhase.LOUNGE);
+            game.setPhase(phase);
             Player player = new Player(0, "Native lifecycle");
             game.addPlayer(0, player);
             Client client = mock(Client.class);
