@@ -138,8 +138,8 @@ class BoardCliffSeamTest {
                 for (float radius : new float[] { 0, .5f, .99f }) {
                     Vector3 point = new Vector3(center).lerp(corner, radius);
                     // Natural shoreline cutbacks outside the actual building already exist without fitting.
-                    if (Math.abs(BoardSurface.sampleHeight(originalGround, point.x, point.y, Float.NaN) - center.z) >= .001f
-                          || !Float.isFinite(BoardSurface.sampleHeight(originalGround, point.x, point.y, Float.NaN))) { continue; }
+                    float previousHeight = BoardSurface.sampleHeight(originalGround, point.x, point.y, Float.NaN);
+                    if (!Float.isFinite(previousHeight) || Math.abs(previousHeight - center.z) >= .001f) { continue; }
                     boolean supported = false;
                     for (Coords at : tile.coords().allAtDistanceOrLess(1)) {
                         var neighbor = scene.tile(at);
