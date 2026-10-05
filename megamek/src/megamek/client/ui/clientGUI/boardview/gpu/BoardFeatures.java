@@ -194,8 +194,11 @@ final class BoardFeatures {
                 default -> Terrains.INDUSTRIAL;
             };
             result.add(new BoardScene.Feature(structure.getValue(), 0, 0, 0, 1,
-                  Math.max(1, hex.terrainLevel(heightTerrain)), 0, structure.getKey() == Terrains.BUILDING
-                        ? BoardScene.FeatureKind.BUILDING : BoardScene.FeatureKind.PROP));
+                  Math.max(1, hex.terrainLevel(heightTerrain)), 0, switch (structure.getKey()) {
+                      case Terrains.BUILDING -> BoardScene.FeatureKind.BUILDING;
+                      case Terrains.INDUSTRIAL -> BoardScene.FeatureKind.INDUSTRIAL;
+                      default -> BoardScene.FeatureKind.PROP;
+                  }));
         }
         if (hex.containsTerrain(Terrains.FIELDS) && !detailedGround(hex, structureModels, blankTerrains)) {
             add(result, "field", 1, 0, 0);

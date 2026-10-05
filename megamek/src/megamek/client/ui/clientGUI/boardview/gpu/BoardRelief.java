@@ -255,9 +255,14 @@ final class BoardRelief {
      * beds its ledges follow), one rock's own variation, or for ground the height of the nearest step. Plants carry
      * their authored red/green/blue in rim/foot/tint, so woody stems retain their colour. A tree pit's
      * earth has its variation below one half and its kerb stone one. A submerged cliff uses ground data and water
-     * optics, with rim measuring height above its bed so rock can blend into sediment at the foot.
+     * optics, with rim measuring height above its bed so rock can blend into sediment at the foot. A finite
+     * {@code projection} gives a wall's fixed texture azimuth, independently of its triangles' lighting normals.
      */
-    record Shade(Vector3 normal, Kind kind, float occlusion, float level, float rim, float foot, float tint) { }
+    record Shade(Vector3 normal, Kind kind, float occlusion, float level, float rim, float foot, float tint, float projection) {
+        Shade(Vector3 normal, Kind kind, float occlusion, float level, float rim, float foot, float tint) {
+            this(normal, kind, occlusion, level, rim, foot, tint, Float.NaN);
+        }
+    }
 
     /**
      * One hex as the sculpt sees it. A water hex's family is the ground of the land around it (see
@@ -734,7 +739,8 @@ final class BoardRelief {
         if (sa == null || sb == null) { return; }
         shades.put(p, new Shade(new Vector3(sa.normal()).lerp(sb.normal(), t).nor(), sa.kind(),
               lerp(sa.occlusion(), sb.occlusion(), t), lerp(sa.level(), sb.level(), t),
-              lerp(sa.rim(), sb.rim(), t), lerp(sa.foot(), sb.foot(), t), lerp(sa.tint(), sb.tint(), t)));
+              lerp(sa.rim(), sb.rim(), t), lerp(sa.foot(), sb.foot(), t), lerp(sa.tint(), sb.tint(), t),
+              lerp(sa.projection(), sb.projection(), t)));
     }
 
     // ---- Board context ---------------------------------------------------------------------------------------
@@ -792,7 +798,7 @@ final class BoardRelief {
         /** Transition band offsets per height; see {@link #bandOffset(Corner, float)}. */
         final Map<Integer, float[]> bands = new HashMap<>();
         /**
-         * Whether hex transitions or padding are on and all three hexes are natural ground, so the steps through this
+         * Whether hex transitions or padding are on and the adjoining hexes are natural ground, so the steps through this
          * corner take transition room and its relief leaves the apron to the band.
          */
         final boolean banded;
@@ -862,15 +868,20 @@ final class BoardRelief {
             // Joined curtains keep their shared crest. Free ends can round into dry rock between contact levels.
             anyPinned |= waterStep && !waterfall && !Float.isFinite(gradedContact);
             pinned = anyPinned;
+            boolean natural = BoardGeometry.tuning().stepsBetweenTops();
+            for (Site site : around) {
+                if (site != null) { natural &= site.sculpted() && site.detailed() && !site.fixedRoad() && !site.ultraSublevel(); }
+            }
+            // At a dry board edge the slope and the cut face share the same corner profile.
+            banded = natural && (!pinned || around[1] != null && around[2] == null
+                  && !around[0].liquid() && !around[1].liquid());
             if (pinned) {
-                low = mid = high = 0;
+                low = banded ? Math.min(around[0].level(), around[1].level()) : 0;
+                high = banded ? Math.max(around[0].level(), around[1].level()) : 0;
+                mid = low;
                 fillet = 0;
-                banded = false;
                 return;
             }
-            boolean natural = BoardGeometry.tuning().stepsBetweenTops();
-            for (Site site : around) { natural &= site.detailed() && !site.fixedRoad(); }
-            banded = natural;
             int a = around[0].level(), b = around[1].level(), c = around[2].level();
             low = Math.min(a, Math.min(b, c));
             high = Math.max(a, Math.max(b, c));
@@ -1060,7 +1071,9 @@ final class BoardRelief {
             out[1] = 0;
             return;
         }
-        float[] cached = corner.bands.computeIfAbsent(Float.floatToIntBits(z), key -> computeBandOffset(corner, z));
+        // The cut below the slope continues from its foot, instead of returning to the old hex corner.
+        float height = corner.pinned ? Math.clamp(z, corner.low * BoardGeometry.level(), corner.high * BoardGeometry.level()) : z;
+        float[] cached = corner.bands.computeIfAbsent(Float.floatToIntBits(height), key -> computeBandOffset(corner, height));
         float weight = wetFoot(corner, z) * corner.wallWeight(z);
         out[0] = cached[0] * weight;
         out[1] = cached[1] * weight;
@@ -1071,6 +1084,7 @@ final class BoardRelief {
         float level = BoardGeometry.level(), reach = .35f * level, a11 = 0, a12 = 0, a22 = 0, b1 = 0, b2 = 0, widest = 0;
         for (int i = 0; i < 3; i++) {
             Site p = corner.around[i], q = corner.around[(i + 1) % 3];
+            if (p == null || q == null) { continue; }
             if (p.level() == q.level() && p.detailed() && q.detailed() && !p.liquid() && !q.liquid()) { continue; }
             Site upper = p.level() >= q.level() ? p : q, lower = upper == p ? q : p;
             float bottom = lower.level() * level, top = upper.level() * level;
@@ -1420,6 +1434,7 @@ final class BoardRelief {
     /** No natural relief, road gate, water contact or intermediate level needs samples on this corner. */
     private boolean simpleConcreteCorner(Corner corner) {
         if (!BoardRelief.geology().get(CONCRETE).equals(GEOLOGY[CONCRETE])) { return false; }
+        if (corner.pinned && corner.low != corner.high) { return false; }
         if (corner.low < corner.mid && corner.mid < corner.high) { return false; }
         for (Site site : corner.around) {
             if (site == null) { continue; }
@@ -1430,7 +1445,7 @@ final class BoardRelief {
 
     /** Poured tops stay level; adjacent natural ground eases down to their straight edge. */
     private boolean planarConcrete(Site site) {
-        if (site.liquid() || site.road() || !site.sculpted() || site.family() != CONCRETE) { return false; }
+        if (site == null || site.liquid() || site.road() || !site.sculpted() || site.family() != CONCRETE) { return false; }
         return !site.detailed() || BoardRelief.geology().get(CONCRETE).relief() == 0;
     }
 
@@ -1464,6 +1479,12 @@ final class BoardRelief {
 
     /** The relief before any road cuts it back; see {@link #cutForRoads}. */
     private Vector3 naturalPoint(Edge edge, float t, float z) {
+        // A cast face joins its canonical corners with a straight line at every height. Blending
+        // through the natural edge profile here bends the wall away from its straight slab rim.
+        if (t > 0 && t < 1 && edge.upper != null && (edge.lower == null || edge.upper.family() == CONCRETE
+              && BoardRelief.geology().get(CONCRETE).equals(GEOLOGY[CONCRETE]))) {
+            return naturalPoint(edge, 0, z).lerp(naturalPoint(edge, 1, z), t);
+        }
         float lx = edge.b.x - edge.a.x, ly = edge.b.y - edge.a.y;
         float px = edge.a.x + lx * t, py = edge.a.y + ly * t;
         float along = t * edge.length;
@@ -3265,25 +3286,32 @@ final class BoardRelief {
             } else if (edge != null && edge.upper == self && edge.profiled
                   && (!self.liquid() || spans(entry.getValue(), e, edge.bottom()))) {
                 canonicalWall(e, edge, List.of(), result);
+            } else if (edge != null && edge.upper == self && edge.lower == null
+                  && (edge.a.low != edge.a.high || edge.b.low != edge.b.high)) {
+                canonicalWall(e, edge, entry.getValue(), result);
             } else {
                 for (BoardSurface.Side side : entry.getValue()) { straightWall(side, result); }
             }
         }
-        if (self.family() == CONCRETE) {
-            result.replaceAll(face -> {
-                Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
-                return new BoardSurface.Face(wallVertex(face.a(), normal), wallVertex(face.b(), normal),
-                      wallVertex(face.c(), normal), face.finish(), face.landEdge());
-            });
-        }
+        result.replaceAll(face -> {
+            int e = face.landEdge();
+            boolean concrete = self.family() == CONCRETE;
+            if (!concrete && neighbor(self, e) != null) { return face; }
+            Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
+            Vector3 a = coast.corner(self.coords(), e), b = coast.corner(self.coords(), e + 1);
+            float projection = (float) Math.atan2(a.x - b.x, b.y - a.y);
+            return new BoardSurface.Face(wallVertex(face.a(), normal, projection), wallVertex(face.b(), normal, projection),
+                  wallVertex(face.c(), normal, projection), face.finish(), e);
+        });
         return result;
     }
 
-    /** Every poured face has its actual normal, even at a twisted junction, without changing the shared top. */
-    private Vector3 wallVertex(Vector3 source, Vector3 normal) {
+    /** Poured faces and the board's cut keep their own normals and a fixed texture frame, separate from the ground. */
+    private Vector3 wallVertex(Vector3 source, Vector3 normal, float projection) {
         Vector3 vertex = new Vector3(source);
         Shade shade = shades.get(source);
-        shades.put(vertex, new Shade(normal, shade.kind(), shade.occlusion(), shade.level(), shade.rim(), shade.foot(), shade.tint()));
+        shades.put(vertex, new Shade(normal, shade.kind(), shade.occlusion(), shade.level(),
+              shade.rim(), shade.foot(), shade.tint(), projection));
         return vertex;
     }
 
@@ -3683,14 +3711,14 @@ final class BoardRelief {
                 shades.put(p, shade);
             }
         }
-        // Cast slopes and cliffs use one planar panel wherever their complete shared boundary permits it.
+        // Cast slopes and cliffs use flat facets wherever their complete shared boundary permits it.
         int wallTop = last;
-        if (contour.isEmpty() && self.family() == CONCRETE && planarPanel(e, grid, result)) {
+        if ((contour.isEmpty() || edge.lower == null) && self.family() == CONCRETE && castPanels(e, grid, result)) {
             return;
         }
         // Poured tops and feet use endpoints. Stitch the adjoining relief row to that straight boundary
         // without adding collinear T junctions.
-        if (contour.isEmpty() && planarConcrete(edge.upper) && wallTop > 0) {
+        if ((contour.isEmpty() || edge.lower == null) && planarConcrete(edge.upper) && wallTop > 0) {
             collapsedWallBand(grid[wallTop], grid[wallTop - 1], true, e, result);
             wallTop--;
         }
@@ -3738,11 +3766,36 @@ final class BoardRelief {
         else { addTriangle(result, bottom[0], bottom[last], top[last], BoardSurface.Finish.WALL, e); }
     }
 
-    /** A planar wall is triangulated from its perimeter; shared samples survive without an interior grid. */
-    private boolean planarPanel(int e, Vector3[][] grid, List<BoardSurface.Face> result) {
+    /** A cut face changes direction at a slope's foot; each straight span gets its own cast panel. */
+    private boolean castPanels(int e, Vector3[][] grid, List<BoardSurface.Face> result) {
+        if (castPanel(e, grid, true, true, result)) { return true; }
+        TreeSet<Integer> cuts = new TreeSet<>(List.of(0, grid.length - 1));
+        for (Corner corner : new Corner[] { corner(self, e), corner(self, e + 1) }) {
+            for (int level : new int[] { corner.low, corner.mid, corner.high }) {
+                for (int r = 1; r < grid.length - 1; r++) {
+                    if (Math.abs(grid[r][0].z - level * BoardGeometry.level()) < EPSILON) { cuts.add(r); }
+                }
+            }
+        }
+        if (cuts.size() == 2) { return false; }
+        List<BoardSurface.Face> panels = new ArrayList<>();
+        int first = 0;
+        for (int last : cuts) {
+            if (last == 0) { continue; }
+            if (!castPanel(e, Arrays.copyOfRange(grid, first, last + 1), first == 0, last == grid.length - 1, panels)) {
+                return false;
+            }
+            first = last;
+        }
+        result.addAll(panels);
+        return true;
+    }
+
+    /** Triangulate a straight-sided panel from its perimeter, retaining its shared boundary samples. */
+    private boolean castPanel(int e, Vector3[][] grid, boolean foot, boolean rim, List<BoardSurface.Face> result) {
         int last = grid.length - 1, columns = grid[0].length - 1;
         Vector3 a = grid[last][0], b = grid[0][0], c = grid[0][columns], d = grid[last][columns];
-        float tolerance = .0001f * BoardGeometry.hexScale();
+        float tolerance = .001f * BoardGeometry.hexScale();
         // Testing the complete sampled panel also protects tuned geology and corners joining other landforms.
         for (int r = 0; r <= last; r++) {
             float v = (grid[r][0].z - b.z) / (a.z - b.z);
@@ -3752,19 +3805,19 @@ final class BoardRelief {
                 if (!grid[r][i].epsilonEquals(expected, tolerance)) { return false; }
             }
         }
-        // The ruled panel must also be planar, not a twisted quad.
+        // A twisted junction uses two flat facets across the diagonal, instead of a fan of narrow strips.
         Vector3 normal = new Vector3(b).sub(a).crs(new Vector3(c).sub(a)).nor();
-        if (normal.len2() < .5f || Math.abs(new Vector3(d).sub(a).dot(normal)) > tolerance) { return false; }
+        if (normal.len2() < .5f) { return false; }
         List<Vector3> perimeter = new ArrayList<>();
         int leftStride = simpleConcreteCorner(corner(self, e)) ? last : 1;
         int rightStride = simpleConcreteCorner(corner(self, e + 1)) ? last : 1;
         for (int r = last; r > 0; r -= leftStride) { perimeter.add(grid[r][0]); }
         int bottomStart = perimeter.size();
-        for (int i = 0; i < columns; i += planarConcrete(edge(e).lower) ? columns : 1) { perimeter.add(grid[0][i]); }
+        for (int i = 0; i < columns; i += foot && planarConcrete(edge(e).lower) ? columns : 1) { perimeter.add(grid[0][i]); }
         int rightStart = perimeter.size();
         for (int r = 0; r < last; r += rightStride) { perimeter.add(grid[r][columns]); }
         int topStart = perimeter.size();
-        for (int i = columns; i > 0; i -= topSamples(e) == 1 ? columns : 1) { perimeter.add(grid[last][i]); }
+        for (int i = columns; i > 0; i -= rim && topSamples(e) == 1 ? columns : 1) { perimeter.add(grid[last][i]); }
         if (perimeter.size() == 4) {
             addQuad(result, perimeter.get(0), perimeter.get(1), perimeter.get(2), perimeter.get(3), BoardSurface.Finish.CAP, e);
         } else {

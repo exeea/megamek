@@ -20,6 +20,11 @@ uniform vec4 u_diffuseColor;
 uniform sampler2D u_normalTexture;
 uniform float u_normalMaps;
 #endif
+#ifdef ambientTextureFlag
+// Leaf surface texture: red cavity occlusion, green roughness, blue thin-tissue transmission.
+// Stored in glTF occlusionTexture (whose standard red channel remains valid).
+uniform sampler2D u_ambientTexture;
+#endif
 #ifdef blendedFlag
 in float v_opacity;
 #ifdef alphaTestFlag
@@ -31,6 +36,7 @@ uniform float u_clay;
 
 void main() {
     vec3 face = normalize(v_normal);
+    vec3 crownNormal = face;
 #ifdef normalTextureFlag
     // Derive the frame from the authored UVs, so mapped ribs follow bent stems and rotated instances.
     // Mip filtering removes subpixel normal detail without adding a mesh level or draw pass.
@@ -77,19 +83,33 @@ void main() {
     albedo *= 1.0 - u_wetness * (snow ? 0.0 : .12);
     albedo = toLinear(albedo);
 #ifdef lightingFlag
+    vec3 surface = vec3(1.0, .58, .35);
+#ifdef ambientTextureFlag
+    surface = texture(u_ambientTexture, v_diffuseUV).rgb;
+#endif
     // Inside and under a canopy the sky is hidden by the leaves above.
     vec3 ambient = skyLight(face, GROUND_ALBEDO) * mix(.85, mix(.7, 1.0, face.z * .5 + .5), leaves);
+    ambient *= surface.r;
     vec3 direct = vec3(0.0);
+    vec3 sheen = vec3(0.0);
 #if numDirectionalLights > 0
     vec3 light = -u_dirLights[0].direction;
     float incidence = mix(max(0.0, dot(face, light)), max(0.0, dot(face, light) * .6 + .4), leaves);
-    direct = u_dirLights[0].color * sculptShadow(face, light) * incidence;
+    // Use the crown's smooth normal for stable shadow offsets; the detail normal is only leaf relief.
+    float visibility = sculptShadow(crownNormal, light);
 #ifdef impostorFlag
-    direct *= sunlit;
+    visibility *= sunlit;
 #endif
+    vec3 view = -viewDirection();
+    float backlight = pow(max(0.0, dot(-light, view)), 4.0);
+    float transmitted = leaves * surface.b * backlight * .65;
+    direct = u_dirLights[0].color * visibility * (incidence + transmitted);
+    if (leaves > 0.0) {
+        sheen = u_dirLights[0].color * visibility * leaves
+              * dielectricSheen(face, light, view, u_wetness * .15, surface.g);
+    }
 #endif
-    vec3 sheen = vec3(0.0);
-#ifdef normalTextureFlag
+#if defined(normalTextureFlag) && !defined(ambientTextureFlag)
     // Opaque cactus skin has a broad waxy highlight, using the terrain's existing dielectric light model.
     surfaceLighting(face, u_wetness * .15, .65, ambient, direct, sheen);
 #endif

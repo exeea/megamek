@@ -624,7 +624,7 @@ final class BoardConcrete {
 
     private static boolean fixedFootprint(BoardScene.Tile tile) {
         return !tile.detailedGround() || tile.features().stream().anyMatch(feature -> feature.kind() == BoardScene.FeatureKind.BUILDING
-              || feature.kind() == BoardScene.FeatureKind.PROP);
+              || feature.kind() == BoardScene.FeatureKind.INDUSTRIAL || feature.kind() == BoardScene.FeatureKind.PROP);
     }
 
     private static boolean fixedBoundary(BoardScene scene, Corner corner, BoardScene.Tile tile) {

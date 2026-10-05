@@ -50,6 +50,27 @@ class BoardCliffSeamTest {
         BoardSculptTest.withTransitions(transitions, BoardCliffSeamTest::checkBoundaries);
     }
 
+    @Test
+    void commCenterBoardCutNormalsStaySeparateFromTheRoadAbove() throws Exception {
+        BoardScene scene = capturedScene("GrassLands/16x17 Grasslands River CommCenter.board");
+        for (Coords at : List.of(new Coords(0, 2), new Coords(0, 3))) {
+            for (TerrainLod lod : TerrainLod.values()) {
+                var surface = new BoardSurface(scene, scene.tile(at), lod);
+                int checked = 0;
+                for (var face : surface.walls(scene, BoardGeometry.floor(scene))) {
+                    if (scene.tile(at.translated(BoardGeometry.edgeDirection(face.landEdge()))) != null) { continue; }
+                    Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
+                    for (Vector3 point : List.of(face.a(), face.b(), face.c())) {
+                        assertTrue(surface.relief.shade(point).normal().epsilonEquals(normal, .0001f),
+                              "The map cut must not inherit upward road normals at " + at + ", " + lod + ": " + point);
+                    }
+                    checked++;
+                }
+                assertTrue(checked > 0, "Exercise the exposed board cut beside the road");
+            }
+        }
+    }
+
     @ParameterizedTest(name = "quay {0}")
     @ValueSource(strings = { "Templates/SeaPort.board", "Map Set 7/16x17 Seaport.board" })
     void seaportQuayPanelsStayClosedAndFaceTheWater(String path) throws Exception {
@@ -163,6 +184,47 @@ class BoardCliffSeamTest {
         });
         SwingUtilities.invokeAndWait(capture);
         return capture.get();
+    }
+
+    @Test
+    void commCenterBoardCutsMeetEverySlope() throws Exception {
+        BoardScene scene = capturedScene("GrassLands/16x17 Grasslands River CommCenter.board");
+        float floor = BoardGeometry.floor(scene);
+        for (TerrainLod lod : TerrainLod.values()) {
+            Map<Segment, Integer> joined = new HashMap<>();
+            Map<String, List<BoardSurface.Face>> cuts = new HashMap<>();
+            for (var tile : scene.tiles()) {
+                Coords at = tile.coords();
+                if (at.getX() > 1 && at.getX() < scene.width() - 2 && at.getY() > 1 && at.getY() < scene.height() - 2) { continue; }
+                var surface = new BoardSurface(scene, tile, lod);
+                countEdges(joined, surface.faces);
+                var walls = surface.walls(scene, floor);
+                countEdges(joined, walls);
+                if (!tile.liquid().present()) {
+                    for (int edge = 0; edge < 6; edge++) {
+                        if (scene.tile(at.translated(BoardGeometry.edgeDirection(edge))) != null) { continue; }
+                        int cut = edge;
+                        var panels = walls.stream().filter(face -> face.landEdge() == cut).toList();
+                        Vector3 outward = BoardGeometry.corner(at, 0, edge).add(BoardGeometry.corner(at, 0, edge + 1))
+                              .scl(.5f).sub(BoardGeometry.center(at, 0)).nor();
+                        for (var face : panels) {
+                            Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
+                            assertTrue(normal.dot(outward) > 0,
+                                  "The board cut must not fold inward at " + at + ", edge " + edge + ", " + lod);
+                        }
+                        cuts.put(at + " edge " + edge, panels);
+                    }
+                }
+            }
+            long bottom = Math.round(floor * 1000);
+            assertFalse(cuts.isEmpty());
+            for (var cut : cuts.entrySet()) {
+                Map<Segment, Integer> boundary = new HashMap<>();
+                countEdges(boundary, cut.getValue());
+                boundary.keySet().removeIf(edge -> edge.a.z == bottom && edge.b.z == bottom);
+                assertJoined(boundary, joined, "CommCenter map-edge slope at " + cut.getKey() + ", " + lod);
+            }
+        }
     }
 
     @Test

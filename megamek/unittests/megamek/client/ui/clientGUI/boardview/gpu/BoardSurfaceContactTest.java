@@ -117,7 +117,7 @@ class BoardSurfaceContactTest {
                     var cover = BoardSurfaceBlend.sampleCliff(scene, high, foot.x, foot.y, foot.z);
                     var receiver = BoardSurfaceBlend.sample(scene, low, foot.x, foot.y, foot.z);
                     boolean slab = lower == BoardScene.Surface.CONCRETE.ordinal()
-                          || rise < 3 && upper == BoardScene.Surface.CONCRETE.ordinal();
+                          || upper == BoardScene.Surface.CONCRETE.ordinal();
                     if (slab) {
                         assertEquals(BoardSurfaceBlend.solid(upper), cover, "The slab keeps its constructed edge");
                         assertEquals(BoardSurfaceBlend.solid(lower), receiver);

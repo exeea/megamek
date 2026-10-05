@@ -175,7 +175,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         }
     }
 
-    enum FeatureKind { PROP, BUILDING, TREE, LIMB, SCATTER, BOULDER, ROUGH, SCENERY }
+    enum FeatureKind { PROP, BUILDING, INDUSTRIAL, TREE, LIMB, SCATTER, BOULDER, ROUGH, SCENERY }
 
     /** Captured visual ground treatment; movement and cover modifiers remain in the game terrain. */
     enum Biome { NONE, FIELD, MARSH, QUICKSAND, MUD }

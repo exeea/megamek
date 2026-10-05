@@ -81,6 +81,13 @@ Panning changes which existing ranges are selected, not the page's geometry.
 Only replacement source ranges invalidate a page. One bounded page is built per
 frame; original ranges draw while pending pages are prepared.
 
+Building hover and unit cutaways retain the chunk's complete opaque source in
+the static page. While a chunk is opened, its original ranges are hidden and its
+existing cutaway cache is drawn separately. Moving the pointer between storeys
+must not recopy the entire surrounding page. Colour, depth and shadow passes
+still use their existing cutaway rules; `GpuBuildingHoverSmokeTest` checks both
+the visible storey and the unchanged page-build count.
+
 Page grouping is used for orthographic rendering. Perspective keeps the original
 ranges and their projected-detail uniforms. Large meshes and ineligible material
 states also remain separate. Do not merge transparent, cutout, instanced or

@@ -11,6 +11,7 @@ import java.util.Map;
 
 import megamek.common.Hex;
 import megamek.common.board.Coords;
+import megamek.common.units.BipedMek;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
@@ -19,6 +20,36 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardFeaturesTest {
+    @ParameterizedTest
+    @ValueSource(ints = { 1, 3, 7, 10 })
+    void industrialHeightProvidesCoverWithoutOccupiableStoreys(int height) {
+        Hex hex = new Hex(2);
+        hex.addTerrain(new Terrain(Terrains.INDUSTRIAL, height));
+        Coords coords = new Coords(2, 3);
+        for (String suffix : new String[] { "a", "b", "c", "d" }) {
+            String asset = "buildings/saxarba/misc/heavy_industrial_" + suffix;
+            var features = BoardFeatures.capture(hex, coords, Map.of(Terrains.INDUSTRIAL, asset));
+            assertEquals(1, features.size());
+            assertEquals(BoardScene.FeatureKind.INDUSTRIAL, features.getFirst().kind());
+            assertEquals(height, features.getFirst().height());
+            assertEquals(asset, features.getFirst().asset());
+        }
+        BipedMek unit = new BipedMek();
+        assertTrue(unit.isElevationValid(0, hex));
+        for (int elevation = 1; elevation <= height; elevation++) {
+            assertFalse(unit.isElevationValid(elevation, hex), "Industrial height is cover, not a building floor");
+        }
+        hex.addTerrain(new Terrain(Terrains.BUILDING, 2));
+        hex.addTerrain(new Terrain(Terrains.BLDG_ELEV, 3));
+        assertTrue(unit.isElevationValid(1, hex), "A coexisting real building retains its authoritative floors");
+        var mixed = BoardFeatures.capture(hex, coords, Map.of(Terrains.BUILDING, "building",
+              Terrains.INDUSTRIAL, "industry"));
+        assertTrue(mixed.stream().anyMatch(feature -> feature.kind() == BoardScene.FeatureKind.BUILDING
+              && feature.height() == 3));
+        assertTrue(mixed.stream().anyMatch(feature -> feature.kind() == BoardScene.FeatureKind.INDUSTRIAL
+              && feature.height() == height));
+    }
+
     @ParameterizedTest
     @ValueSource(strings = { "", "desert", "snow", "volcano", "dirt", "lunar" })
     void modeledBridgesKeepTheUnderlyingTerrainMaterial(String theme) {

@@ -194,18 +194,29 @@ final class RigidGlb {
                 }
                 float[] color = material.getBaseColorFactor();
                 target.diffuse = new Color(display(color[0]), display(color[1]), display(color[2]), color[3]);
-                for (boolean normal : new boolean[] { false, true }) {
-                    var sourceTexture = normal ? material.getNormalTexture() : material.getBaseColorTexture();
+                for (int usage : new int[] { ModelTexture.USAGE_DIFFUSE, ModelTexture.USAGE_NORMAL, ModelTexture.USAGE_AMBIENT }) {
+                    var sourceTexture = switch (usage) {
+                        case ModelTexture.USAGE_NORMAL -> material.getNormalTexture();
+                        case ModelTexture.USAGE_AMBIENT -> material.getOcclusionTexture();
+                        default -> material.getBaseColorTexture();
+                    };
                     if (sourceTexture == null) { continue; }
-                    Integer coordinate = normal ? material.getNormalTexcoord() : material.getBaseColorTexcoord();
+                    Integer coordinate = switch (usage) {
+                        case ModelTexture.USAGE_NORMAL -> material.getNormalTexcoord();
+                        case ModelTexture.USAGE_AMBIENT -> material.getOcclusionTexcoord();
+                        default -> material.getBaseColorTexcoord();
+                    };
                     require(coordinate == null || coordinate == 0,
                           "Only TEXCOORD_0 is supported");
-                    require(!normal || material.getNormalScale() == 1, "Bake normal strength into the map");
+                    require(usage != ModelTexture.USAGE_NORMAL || material.getNormalScale() == 1,
+                          "Bake normal strength into the map");
+                    require(usage != ModelTexture.USAGE_AMBIENT || material.getOcclusionStrength() == 1,
+                          "Bake occlusion strength into the map");
                     var image = asset.images().get(sourceTexture);
                     result.images.put(image.key(), image);
                     var texture = new ModelTexture();
                     texture.id = target.id;
-                    texture.usage = normal ? ModelTexture.USAGE_NORMAL : ModelTexture.USAGE_DIFFUSE;
+                    texture.usage = usage;
                     texture.fileName = image.key();
                     if (target.textures == null) { target.textures = new com.badlogic.gdx.utils.Array<>(); }
                     target.textures.add(texture);

@@ -76,6 +76,11 @@ class GpuModularBuildingSmokeTest {
         try {
             var five = kit.assemble(5, 7);
             assertSame(five, kit.assemble(5, 7), "Repeated loads/edits reuse compact recipes");
+            var cover = kit.assemble(5, 7, false);
+            assertNull(cover.interior(), "Industrial use of the same kit must not borrow a building's interior");
+            assertEquals(five.modules(), cover.modules());
+            assertSame(five.model(0), cover.model(0), "Different terrain semantics still share native geometry");
+            assertSame(cover, kit.assemble(5, 7, false));
             var another = kit.assemble(5, 19);
             assertSame(five.interior(), another.interior(), "Variants share the same volume's interior");
             for (int count : new int[] { 1, 5, 10 }) {

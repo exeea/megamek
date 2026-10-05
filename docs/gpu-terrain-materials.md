@@ -48,7 +48,20 @@ faces. Desert, Mars and rock retain steeper geological profiles. Concrete uses t
 slope/cliff selection: unmarked one- and two-level steps slope, while authored cliff
 exits and taller drops form cliffs. Its slopes are planar with sharp edges, and its
 vertical cliffs stay concrete for their full height. `BoardConcrete` owns the fitted
-corners shared by the top, neighbouring ground and shoreline.
+corners shared by the top, neighbouring ground and shoreline. Transition bands use
+those fitted edge normals, keeping a straight rim and a constant slope width. Each
+cast wall triangle retains its own face normal, including non-planar junctions.
+Cast wall rows join the canonical corners directly, so the face cannot bow away
+from its straight slab rim at a cliff-to-slope junction. At dry board edges the
+slope and the outer cut use the same corner profile; below the slope's foot the
+cut continues vertically from that position down to the board base. Straight-sided
+panels split at adjoining terrain heights and use flat facets across their diagonals,
+preserving shared boundary samples without narrow triangle fans at the slope ends.
+Concrete and outer cut walls retain one texture orientation across their facets.
+Their actual normals still light the geometry, but no longer rotate or switch the
+texture projection at a triangle boundary.
+The outer cut also keeps its face normals separate from the road or ground above;
+sharing the upward rim normals produces diagonal shading bands on the cut wall.
 
 Dry grassy two-level transitions have two earthen faces separated by a shallow shoulder
 at the intermediate level. `BoardRelief.band` shapes it within the existing transition
@@ -70,8 +83,10 @@ its own material down to the foot, without a rock foundation or fallen rubble.
 Natural terrain must not spread its material across concrete or subdivide it for that blend.
 Concrete shores continue vertically to the water bed using the same fitted boundary
 as the land; no independent shoreline shortcut or sloping beach crosses that wall.
-Building foundations keep their corners, while nearby paving can still straighten
-its water-facing edge into a quay.
+Fitting defaults to Everywhere. A material boundary on one ground plane can move
+beside buildings without changing their support height. Structures on the concrete,
+water contacts, height changes and road ramps keep the foundation constraints they
+need; merely being near a building does not pin the surrounding paving.
 The water hex owns the submerged panel; the land column stops at its rim so those
 faces cannot overlap and flicker.
 Both GPU views omit the old `quay_fluff` sprites (`fluff:100`, used by

@@ -10,10 +10,11 @@ in vec2 v_diffuseUV;   // ground: rim / foot distance (drowned cliff: height abo
                             // / below top. All in metres. Plants: authored red / green.
 in vec3 v_normal;
 in vec4 v_color;       // r: occlusion. g: game level (+64)/255, or for cliffs how much rock the face is (0
-                            // bank, 1 cliff). b: kind (0 ground, .3 plant, .5 cliff, .6 abyss wall, .75 tree pit, 1 rock). a: bed
+                            // bank, 1 cliff). b: kind (0 ground, .3 plant, .45 panel, .5 cliff, .6 abyss wall, .75 tree pit, 1 rock). a: bed
                             // hardness (cliff), authored blue (plant), variation (rock, a pit's earth below .5; its kerb is 1),
                             // nearest step height (.3 + .1 per level, dry ground), or below .25 on a water hex's banks
-                            // and bed its water's palette and that height packed (GpuTerrain.shoreTint)
+                            // and bed its water's palette and that height packed (GpuTerrain.shoreTint).
+                            // Panels use alpha for a fixed texture azimuth, independent of the lighting normal.
 // Every family's maps, interleaved: colour/height at a map's layer and normal/AO at the next (GpuAssets.sculptArray).
 uniform sampler2DArray u_terrainLayers;
 uniform vec4 u_sculptLayers; // this family's colour/height layers: ground, debris, wall, mantle; normal/AO one up
@@ -125,6 +126,11 @@ void main() {
     float level = floor(v_color.g * 255.0 + .5) - 64.0;
     float kind = v_color.b;
     bool ground = kind < .125, plant = kind >= .125 && kind < .375, cliff = kind >= .375 && kind < .625;
+    bool panel = cliff && kind < .475;
+    float projectionAngle = (v_color.a - .5) * 6.2831853;
+    vec3 projection = panel ? vec3(cos(projectionAngle), sin(projectionAngle), 0.0) : face;
+    terrainWallProjection = panel ? projection : vec3(0.0);
+    float hardness = panel ? .5 : v_color.a;
     bool abyss = cliff && kind > .55;
     bool pit = kind >= .625 && kind < .875;
     bool shore = ground && v_color.a < .25;
@@ -194,7 +200,7 @@ void main() {
             float foot = shore || cliff || bedrock ? v_diffuseUV.x : v_diffuseUV.y;
             float rim = shore || cliff || bedrock ? v_diffuseUV.y : v_diffuseUV.x;
             float rock = ground ? rockiness(steps) : bedrock ? 1.0 : v_color.g;
-            TerrainMaterial material = naturalMaterial(materialWorld, face, foot, rim, rock, ground ? .5 : v_color.a,
+            TerrainMaterial material = naturalMaterial(materialWorld, face, foot, rim, rock, ground ? .5 : hardness,
                   broad, fine, region, sediment);
             albedo = material.color;
             normal = material.normal;
@@ -256,14 +262,14 @@ void main() {
                 if (u_normalMaps > .5 && terrainNormalDetail > 0.0) normal = upNormal(planarNormal(u_sculptLayers.y + 1.0, p, u_sculptTiles.y * .6, fine).rgb, face);
             }
         } else if (cliff && family(4.0)) {
-            concreteSlab(world, face, v_diffuseUV.x, v_diffuseUV.y, albedo, normal, occlusion, cavity);
+            concreteSlab(world, face, projection, v_diffuseUV.x, v_diffuseUV.y, albedo, normal, occlusion, cavity);
         } else {
             // Walls and rocks: the two vertical projections, V running down the face, never mirrored from outside.
             // Where a rounded corner turns between them, the projection whose relief stands higher shows through.
             vec3 axes = pow(abs(face), vec3(4.0));
             vec2 uvx, uvy;
             float side;
-            vec4 wall = wallSample(world, face, uvx, uvy, side);
+            vec4 wall = wallSample(world, projection, uvx, uvy, side);
             // A boulder's crown needs a horizontal stone projection: the two wall projections collapse on a
             // flat top, otherwise leaving a single colour or stretched stripes under the moss/snow treatment.
             float crown = cliff ? 0.0 : smoothstep(.45, .85, face.z);
@@ -281,7 +287,7 @@ void main() {
             float h = v_diffuseUV.x, d = v_diffuseUV.y;
             if (cliff) {
                 float drop = h + d;
-                albedo *= bedTint(v_color.a);
+                albedo *= bedTint(hardness);
                 // Caprock: the hard top bed of a cliff weathers paler; varnish streaks run down from under it.
                 float cap = 1.0 - smoothstep(.8, 2.2, d);
                 albedo = mix(albedo, albedo * vec3(1.08, 1.06, 1.03), cap * .6);
@@ -296,7 +302,7 @@ void main() {
                 apron = max(apron, 1.0 - smoothstep(.2, .6, h));
                 if (apron > 0.0) {
                     float lying = smoothstep(.45, .8, face.z);
-                    vec2 dx = vec2(world.y * sign(face.x), -world.z), dy = vec2(-world.x * sign(face.y), -world.z) + 3.1;
+                    vec2 dx = vec2(world.y * sign(projection.x), -world.z), dy = vec2(-world.x * sign(projection.y), -world.z) + 3.1;
                     vec4 rubble = draped(u_sculptLayers.y, p, dx, dy, side, u_sculptTiles.y, fine, lying);
                     // A desert talus is the cliff's own sandstone, broken: redder and darker than the drifted sand.
                     if (family(2.0)) rubble.rgb = mix(rubble.rgb, wall.rgb * .92, .5);
@@ -342,7 +348,7 @@ void main() {
             occlusion = 1.0 - .3 * exp(-v_diffuseUV.y / 3.5);
         }
         if (shore && !natural && family(4.0) && face.z < .6) {
-            concreteSlab(world, face, v_diffuseUV.x, v_diffuseUV.y, albedo, normal, occlusion, cavity);
+            concreteSlab(world, face, projection, v_diffuseUV.x, v_diffuseUV.y, albedo, normal, occlusion, cavity);
         } else if (shore && !natural && !family(4.0)) {
             // A drowned wall stays sheer: exposed rock above, then a broken transition into the bed's sediment
             // near its foot. Its height above that bed is supplied by the same vertices that form the wall.
@@ -373,7 +379,7 @@ void main() {
             float rim = shore || cliff ? v_diffuseUV.y : v_diffuseUV.x;
             float rock = ground ? rockiness(steps) : v_color.g;
             // A bank blend must use sediment below the waterline, never repaint the bed with neighbouring turf.
-            blendCovers(materialWorld, face, foot, rim, rock, ground ? .5 : v_color.a, sediment,
+            blendCovers(materialWorld, face, foot, rim, rock, ground ? .5 : hardness, sediment,
                   broad, fine, region, albedo, normal, cavity, materialHeight, grass, sand, bounce, response, rainCover,
                   emission, roughness, volcanic);
         }

@@ -32,17 +32,17 @@ vec2 slab(float u, float z, float h, float d, float projection, out float shade)
     return vec2(u, -z) / u_sculptTiles.w + window;
 }
 
-void concreteSlab(vec3 world, vec3 face, float h, float d,
+void concreteSlab(vec3 world, vec3 face, vec3 projection, float h, float d,
       inout vec3 albedo, inout vec3 normal, inout float occlusion, inout float cavity) {
-    vec3 axes = pow(abs(face), vec3(4.0));
+    vec3 axes = pow(abs(projection), vec3(4.0));
     // Evaluate contact shading per fragment so it stays at the foot and rim of a large planar panel.
     float shelterDistance = (d - 2.2) / 1.6;
     float shelter = max(0.0, 1.0 - shelterDistance * shelterDistance);
     occlusion = (1.0 - .4 * exp(-h / 1.6)) * (1.0 - .25 * shelter * shelter);
     float along = clamp((axes.x / max(axes.x + axes.y, 1e-4) - .5) * 6.0 + .5, 0.0, 1.0);
     float shadeX, shadeY;
-    vec2 sx = slab(world.y * sign(face.x), world.z, h, d, 1.0, shadeX);
-    vec2 sy = slab(-world.x * sign(face.y), world.z, h, d, 0.0, shadeY);
+    vec2 sx = slab(world.y * sign(projection.x), world.z, h, d, 1.0, shadeX);
+    vec2 sy = slab(-world.x * sign(projection.y), world.z, h, d, 0.0, shadeY);
     albedo = mix(mapTexel(u_sculptLayers.w, sy).rgb * shadeY,
           mapTexel(u_sculptLayers.w, sx).rgb * shadeX, along);
     if (u_normalMaps > .5 && terrainNormalDetail > 0.0) {

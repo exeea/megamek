@@ -32,17 +32,21 @@ struct MaterialProjection {
     float side, lying;
 };
 
+// Cut walls keep one texture frame across their facets; zero leaves natural landforms unchanged.
+vec3 terrainWallProjection = vec3(0.0);
+
 MaterialProjection materialProjection(vec3 world, vec3 face) {
+    vec3 basis = dot(terrainWallProjection, terrainWallProjection) > .5 ? terrainWallProjection : face;
     MaterialProjection p;
     p.top = vec2(world.x, -world.y);
-    p.x = vec2(world.y * sign(face.x), -world.z);
-    p.y = vec2(-world.x * sign(face.y), -world.z);
+    p.x = vec2(world.y * sign(basis.x), -world.z);
+    p.y = vec2(-world.x * sign(basis.y), -world.z);
     p.topGradient = mat2(dFdx(p.top), dFdy(p.top));
     p.xGradient = mat2(dFdx(p.x), dFdy(p.x));
     p.yGradient = mat2(dFdx(p.y), dFdy(p.y));
-    vec2 axes = pow(abs(face.xy), vec2(4.0));
+    vec2 axes = pow(abs(basis.xy), vec2(4.0));
     p.side = axes.x / max(axes.x + axes.y, .00001);
-    p.lying = smoothstep(.25, .87, face.z);
+    p.lying = smoothstep(.25, .87, basis.z);
     return p;
 }
 

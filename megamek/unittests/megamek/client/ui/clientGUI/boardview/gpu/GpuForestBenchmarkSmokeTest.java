@@ -35,7 +35,8 @@ import org.junit.jupiter.api.Test;
 @Tag("on-demand")
 class GpuForestBenchmarkSmokeTest {
     private static final int SIZE = 40;
-    private static final int FRAMES = 12;
+    private static final int WARMUP = 24;
+    private static final int FRAMES = 40;
 
     @Test
     void measuresWoodsOnALargeBoard() throws Exception {
@@ -45,14 +46,19 @@ class GpuForestBenchmarkSmokeTest {
         StringBuilder report = new StringBuilder();
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1440, 1080);
+        config.useVsync(false);
+        config.setForegroundFPS(0);
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
             public void create() {
                 GpuTerrain terrain = new GpuTerrain();
                 GLProfiler profiler = new GLProfiler(Gdx.graphics);
-                try {
+                GL20 rawGl20 = Gdx.gl20;
+                try (var timings = new GpuStageTimings()) {
                     report.append(Gdx.gl.glGetString(GL20.GL_RENDERER)).append(" / ")
                           .append(Gdx.gl.glGetString(GL20.GL_VERSION)).append('\n');
+                    report.append("1440x1080; 24 warmup + 40 samples; profiler excluded from timings.\n")
+                          .append("Terrain-only steady frames with glFinish; not full-game FPS.\n");
                     BoardAtmosphere.Settings settings = new BoardAtmosphere.Settings(13, 0, 0,
                           BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0);
                     terrain.setAtmosphere(BoardAtmosphere.lighting(settings));
@@ -74,24 +80,31 @@ class GpuForestBenchmarkSmokeTest {
                         camera.center(BoardGeometry.center(new Coords(SIZE / 2, SIZE / 2), 0));
                         long lod = System.nanoTime();
                         terrain.renderShadows(camera.camera, List.of());
-                        frame(terrain, camera);
+                        frame(terrain, camera, null);
                         double switchMillis = (System.nanoTime() - lod) / 1e6;
+                        for (int i = 0; i < WARMUP; i++) {
+                            timings.beginFrame(false);
+                            frame(terrain, camera, timings);
+                            Gdx.gl.glFinish();
+                        }
                         double[] times = new double[FRAMES];
                         for (int i = 0; i < FRAMES; i++) {
+                            timings.beginFrame();
                             long t = System.nanoTime();
-                            frame(terrain, camera);
+                            frame(terrain, camera, timings);
                             Gdx.gl.glFinish();
                             times[i] = (System.nanoTime() - t) / 1e6;
                         }
                         Arrays.sort(times);
                         profiler.reset();
                         profiler.enable();
-                        frame(terrain, camera);
-                        profiler.disable();
+                        frame(terrain, camera, null);
+                        GpuStageTimings.stopCounting(profiler, rawGl20);
                         report.append(String.format(Locale.ROOT,
                               "  zoom %.2f: first frame %.0f ms, median frame %.1f ms, draws=%d vertices=%.0f,"
                                     + " tree geometry %.1f MB%n", zoom, switchMillis, times[FRAMES / 2],
                               profiler.getDrawCalls(), profiler.getVertexCount().total, terrain.treeGeometryBytes() / 1e6));
+                        timings.appendReport(report, "  zoom " + zoom);
                         GpuBoardTestUi.capture(new File(output, String.format(Locale.ROOT, "forest-%.2f.png", zoom)));
                     }
                     Files.writeString(new File(output, "forest-benchmark.txt").toPath(), report);
@@ -99,6 +112,7 @@ class GpuForestBenchmarkSmokeTest {
                 } catch (Throwable error) {
                     failure.set(error);
                 } finally {
+                    GpuStageTimings.stopCounting(profiler, rawGl20);
                     terrain.dispose();
                     Gdx.app.exit();
                 }
@@ -108,10 +122,13 @@ class GpuForestBenchmarkSmokeTest {
         System.out.print(report);
     }
 
-    private static void frame(GpuTerrain terrain, BoardCamera camera) {
+    private static void frame(GpuTerrain terrain, BoardCamera camera, GpuStageTimings timings) {
+        if (timings != null) { timings.stage("opaque"); }
         ScreenUtils.clear(.42f, .56f, .69f, 1, true);
         terrain.render(camera.camera, false);
+        if (timings != null) { timings.stage("transparent"); }
         terrain.renderTransparent(camera.camera);
+        if (timings != null) { timings.stage(null); }
     }
 
     /** Level ground of mixed families; woods of every density on about 40% of the hexes, seeded. */

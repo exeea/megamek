@@ -27,10 +27,10 @@ import com.badlogic.gdx.utils.Disposable;
 /** One shared GLB kit and compact assembly recipes. Only the kit and generated interiors own GPU resources. */
 final class GpuBuilding implements Disposable {
     static final float LEVEL_HEIGHT = BoardGeometry.MODEL_LEVEL_HEIGHT;
-    private static final Pattern PART = Pattern.compile(".*-(roof|floor)(0|[1-9][0-9]*)");
+    private static final Pattern PART = Pattern.compile(".*-(base|floor|roof)(0|[1-9][0-9]*)");
     private final List<Model> models = new ArrayList<>();
     private final List<Map<String, String>> names;
-    private final Map<String, Assembly> assemblies = new HashMap<>();
+    private final Map<Recipe, Assembly> assemblies = new HashMap<>();
     private final List<String> roles;
     private final Map<String, Area> footprints = new HashMap<>();
     private final Map<String, List<Vector3>> triangles = new HashMap<>();
@@ -38,6 +38,7 @@ final class GpuBuilding implements Disposable {
     private final Map<Interior, Model> interiors = new HashMap<>();
 
     private record Interior(List<Vector3> footprint, int levels) { }
+    private record Recipe(String modules, boolean withInterior) { }
 
     // One module index per character; offsets are implicit (index * LEVEL_HEIGHT). No expanded Model is cached.
     record Assembly(String modules, Model interior, GpuBuilding kit) {
@@ -66,7 +67,7 @@ final class GpuBuilding implements Disposable {
                     Node node = models.get(lod).getNode(entry.getValue());
                     BoundingBox bounds = node.calculateBoundingBox(new BoundingBox());
                     require(bounds.isValid(), "Empty building module: " + entry.getValue());
-                    if (entry.getKey().startsWith("floor")) {
+                    if (!entry.getKey().startsWith("roof")) {
                         require(Math.abs(bounds.getDepth() - LEVEL_HEIGHT) < .001f,
                               entry.getValue() + " must be exactly one level (18 units) high");
                     }
@@ -76,24 +77,12 @@ final class GpuBuilding implements Disposable {
                 }
                 models.get(lod).calculateTransforms();
             }
-            // Roofs preserve courtyards and disconnected wings; wall sections exclude overhangs and ledges.
+            // Every kit shares its picking geometry; only enterable buildings need wall/roof footprints.
             for (var entry : names.getFirst().entrySet()) {
                 var node = models.getFirst().getNode(entry.getValue());
                 List<Vector3> geometry = GpuTerrain.triangles(node);
                 triangles.put(entry.getKey(), geometry);
                 bounds.put(entry.getKey(), node.calculateBoundingBox(new BoundingBox()));
-                if (entry.getKey().startsWith("roof")) {
-                    // The lowest underside may be only the overhanging border around a recessed roof panel.
-                    Area footprint = GpuBuildingInterior.area(geometry);
-                    require(!footprint.isEmpty(), entry.getValue() + " requires a roof footprint");
-                    footprints.put(entry.getKey(), footprint);
-                } else {
-                    // LODs share the wall envelope. The simplest authored walls omit window recesses and facade seams.
-                    Node wall = models.getLast().getNode(names.getLast().get(entry.getKey()));
-                    Area footprint = GpuBuildingInterior.walls(GpuTerrain.triangles(wall), LEVEL_HEIGHT * .5f);
-                    require(!footprint.isEmpty(), entry.getValue() + " requires a closed mid-storey wall outline");
-                    footprints.put(entry.getKey(), footprint);
-                }
             }
         } catch (RuntimeException | Error error) {
             dispose();
@@ -114,15 +103,14 @@ final class GpuBuilding implements Disposable {
         Map<String, String> result = new LinkedHashMap<>();
         for (var node : data.nodes) {
             var match = PART.matcher(node.id);
-            require(match.matches(), "Expected -roofN or -floorN: " + node.id);
+            require(match.matches(), "Expected -baseN, -floorN or -roofN: " + node.id);
             require(node.parts != null && node.parts.length > 0 && (node.children == null || node.children.length == 0),
                   "Building modules must be mesh nodes: " + node.id);
             String role = match.group(1) + match.group(2);
             require(result.put(role, node.id) == null, "Duplicate building module: " + role);
         }
-        require(result.containsKey("floor0"), "Building requires -floor0");
-        require(result.keySet().stream().anyMatch(id -> id.startsWith("floor") && !id.equals("floor0")),
-              "Building requires an upper-floor variant");
+        require(result.keySet().stream().anyMatch(id -> id.startsWith("base")), "Building requires a base variant");
+        require(result.keySet().stream().anyMatch(id -> id.startsWith("floor")), "Building requires a floor variant");
         require(result.keySet().stream().anyMatch(id -> id.startsWith("roof")), "Building requires a roof variant");
         return Map.copyOf(result);
     }
@@ -142,30 +130,50 @@ final class GpuBuilding implements Disposable {
     static List<String> select(Map<String, String> parts, int levels, long seed) {
         require(levels >= 1, "A building needs at least one level");
         List<String> roofs = parts.keySet().stream().filter(id -> id.startsWith("roof")).sorted().toList();
-        List<String> floors = parts.keySet().stream().filter(id -> id.startsWith("floor") && !id.equals("floor0")).sorted().toList();
+        List<String> bases = parts.keySet().stream().filter(id -> id.startsWith("base")).sorted().toList();
+        List<String> floors = parts.keySet().stream().filter(id -> id.startsWith("floor")).sorted().toList();
         SplittableRandom random = new SplittableRandom(seed);
-        // Choose the roof first so changing the building height preserves both its roof and existing lower floors.
+        // Choose roof and base before floors so height edits preserve them and the existing lower floors.
         String roof = roofs.get(random.nextInt(roofs.size()));
         List<String> result = new ArrayList<>();
-        result.add("floor0");
+        result.add(bases.get(random.nextInt(bases.size())));
         for (int level = 1; level < levels; level++) { result.add(floors.get(random.nextInt(floors.size()))); }
         result.add(roof);
         return List.copyOf(result);
     }
 
     Assembly assemble(int levels, long seed) {
+        return assemble(levels, seed, true);
+    }
+
+    /** Industrial terrain and fuel tanks borrow the same modules without allocating occupiable interiors. */
+    Assembly assemble(int levels, long seed, boolean withInterior) {
         List<String> selected = select(names.getFirst(), levels, seed);
         char[] modules = new char[selected.size()];
         for (int i = 0; i < modules.length; i++) { modules[i] = (char) roles.indexOf(selected.get(i)); }
-        return assemblies.computeIfAbsent(new String(modules), key -> {
-            Area volume = new Area(footprints.get(selected.getLast()));
+        return assemblies.computeIfAbsent(new Recipe(new String(modules), withInterior), key -> {
+            if (!withInterior) { return new Assembly(key.modules(), null, this); }
+            Area volume = new Area(footprint(selected.getLast()));
             for (String floor : selected.subList(0, selected.size() - 1).stream().distinct().toList()) {
-                volume.intersect(footprints.get(floor));
+                volume.intersect(footprint(floor));
             }
             var footprint = GpuBuildingInterior.triangles(volume);
             Model interior = interiors.computeIfAbsent(new Interior(footprint, levels),
                   ignored -> GpuBuildingInterior.build(footprint, levels * LEVEL_HEIGHT, levels));
-            return new Assembly(key, interior, this);
+            return new Assembly(key.modules(), interior, this);
+        });
+    }
+
+    private Area footprint(String role) {
+        return footprints.computeIfAbsent(role, key -> {
+            boolean roof = key.startsWith("roof");
+            // The full roof projection preserves notches; the simplest wall LOD excludes facade seams and ledges.
+            Area area = roof ? GpuBuildingInterior.area(triangles.get(key))
+                  : GpuBuildingInterior.walls(GpuTerrain.triangles(models.getLast().getNode(names.getLast().get(key))),
+                        LEVEL_HEIGHT * .5f);
+            require(!area.isEmpty(), names.getFirst().get(key) + (roof ? " requires a roof footprint"
+                  : " requires a closed mid-storey wall outline"));
+            return area;
         });
     }
 

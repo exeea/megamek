@@ -8,9 +8,7 @@ import java.io.File;
 import java.util.HashSet;
 import java.util.List;
 
-import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
-import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.board.Coords;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -110,8 +108,9 @@ class BoardRoadConcreteTest {
             float scale = BoardGeometry.hexScale();
             if (BoardRoadTest.maskAlpha(mask, (x - BoardGeometry.centerX(at)) / scale,
                   (y - BoardGeometry.centerY(at)) / scale) < .99f) { return false; }
-            var ray = new Ray(new Vector3(x, y, 100), new Vector3(0, 0, -1));
-            return triangles.stream().anyMatch(t -> Intersector.intersectRayTriangle(ray, t.a(), t.b(), t.c(), null));
+            // Use terrain's border tolerance: a float ray can reject both triangles of an exact shared edge.
+            return triangles.stream().anyMatch(t -> Float.isFinite(new BoardSurface.Face(t.a(), t.b(), t.c(), BoardSurface.Finish.TOP)
+                  .height(x, y)));
         }
     }
 }

@@ -13,6 +13,7 @@ import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import com.badlogic.gdx.files.FileHandle;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -289,6 +290,31 @@ class RigidGlbTest {
         ((ObjectNode) material.get("normalTexture")).put("scale", .2);
         var unsupported = file(textured, false);
         assertThrows(IllegalArgumentException.class, () -> RigidGlb.load(unsupported));
+    }
+
+    @Test
+    void retainsPackedOcclusionTextureAlongsideColorAndNormal() throws Exception {
+        var textured = document();
+        var images = textured.putArray("images");
+        var textures = textured.putArray("textures");
+        for (String name : List.of("leaf.png", "leaf-normal.png", "leaf-surface.png")) {
+            images.addObject().put("uri", name);
+            textures.addObject().put("source", images.size() - 1);
+            Files.write(directory.resolve(name), encodedImage("png"));
+        }
+        var material = (ObjectNode) textured.get("materials").get(0);
+        ((ObjectNode) material.get("pbrMetallicRoughness")).putObject("baseColorTexture").put("index", 0);
+        material.putObject("normalTexture").put("index", 1);
+        var occlusion = material.putObject("occlusionTexture").put("index", 2);
+        var data = RigidGlb.load(file(textured, false));
+        assertEquals(3, data.materials.first().textures.size);
+        var surface = data.materials.first().textures.get(2);
+        assertEquals(com.badlogic.gdx.graphics.g3d.model.data.ModelTexture.USAGE_AMBIENT, surface.usage);
+        assertEquals(directory.resolve("leaf-surface.png").toString(), surface.fileName);
+        occlusion.put("texCoord", 1);
+        assertThrows(IllegalArgumentException.class, () -> RigidGlb.load(file(textured, false)));
+        occlusion.put("texCoord", 0).put("strength", .3);
+        assertThrows(IllegalArgumentException.class, () -> RigidGlb.load(file(textured, false)));
     }
 
     static byte[] encodedImage(String format) throws Exception {

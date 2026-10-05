@@ -215,11 +215,13 @@ class GpuBuildingHoverSmokeTest {
         } finally { terrain.dispose(); }
     }
 
-    private static void checkRenderedStoreys(GpuBattleView view, GpuTerrain terrain, GpuBoardUi ui) {
+    private static void checkRenderedStoreys(GpuBattleView view, GpuTerrain terrain, GpuBoardUi ui) throws Exception {
         var camera = view.boardCamera.camera;
         HdpiUtils.glViewport(0, ui.bottomPixels(), (int) camera.viewportWidth, (int) camera.viewportHeight);
         ScreenUtils.clear(0, 0, 0, 1, true);
         terrain.render(camera, false);
+        var pages = (GpuPropBatch) field(terrain, "propBatch");
+        long pageBuilds = pages.rebuilds();
         int width = Gdx.graphics.getBackBufferWidth(), height = Gdx.graphics.getBackBufferHeight();
         var buildingBounds = terrain.roofBounds(BUILDING);
         Pixmap baseline = Pixmap.createFromFrameBuffer(0, 0, width, height);
@@ -230,11 +232,14 @@ class GpuBuildingHoverSmokeTest {
                 terrain.animate(0, List.of(), level == 1 ? 1 : .5f, BUILDING, level * BoardGeometry.level());
                 ScreenUtils.clear(0, 0, 0, 1, true);
                 terrain.render(camera, false);
+                assertEquals(pageBuilds, pages.rebuilds(),
+                      "Opening/closing a building storey must not rebuild static prop pages");
                 Pixmap hiddenWalls = Pixmap.createFromFrameBuffer(0, 0, width, height);
                 terrain.renderTransparent(camera);
                 Pixmap opened = Pixmap.createFromFrameBuffer(0, 0, width, height);
                 try {
                     int changedInside = 0, visibleWalls = 0, unchangedOutside = 0, changedOutside = 0;
+                    String outsideSample = "";
                     for (int x = 0; x < width; x += 4) {
                         for (int y = ui.bottomPixels(); y < ui.bottomPixels() + camera.viewportHeight; y += 4) {
                             Vector3 point = new Vector3((x + .5f) / camera.viewportWidth * 2 - 1,
@@ -254,7 +259,10 @@ class GpuBuildingHoverSmokeTest {
                                       + Math.abs((hidden >>> 8 & 255) - (b >>> 8 & 255));
                                 if (wallContribution > 10) { visibleWalls++; }
                             } else {
-                                if (difference > 10) { changedOutside++; }
+                                if (difference > 10) {
+                                    changedOutside++;
+                                    outsideSample = " at pixel " + x + "," + y + " world=" + point + " delta=" + difference;
+                                }
                                 else { unchangedOutside++; }
                             }
                         }
@@ -264,7 +272,7 @@ class GpuBuildingHoverSmokeTest {
                               "build/gpu-board-review/hover-floor-" + (camera.projection.val[Matrix4.M33] == 0) + ".png"), opened, -1, true);
                     }
                     assertTrue(unchangedOutside > 100, "Other storeys and roof must remain visible");
-                    assertEquals(0, changedOutside, "Hover must not alter walls outside the highlighted storey: " + level);
+                    assertEquals(0, changedOutside, "Hover must not alter walls outside the highlighted storey: " + level + outsideSample);
                     if (level < 5 && level != 1) {
                         assertTrue(changedInside > 10, "The highlighted storey's walls must become translucent: " + level);
                         assertTrue(visibleWalls > 10, "Hovered walls must remain visible rather than disappearing: " + level);

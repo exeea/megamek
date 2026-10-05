@@ -25,6 +25,7 @@ import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
+import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.environment.DirectionalLight;
 import com.badlogic.gdx.graphics.g3d.shaders.DepthShader;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
@@ -84,6 +85,8 @@ class GpuTreeLodSmokeTest {
                                 assertEquals(.5f, material.get(FloatAttribute.class, FloatAttribute.AlphaTest).value);
                                 assertTrue(!material.get(BlendingAttribute.class, BlendingAttribute.Type).blended,
                                       "Cutout crowns write opaque depth: " + name);
+                                assertTrue(material.has(TextureAttribute.Normal) && material.has(TextureAttribute.Ambient),
+                                      "Cutout crowns carry relief and packed leaf surface maps: " + name);
                             }
                         }
                         assertTrue(triangles[0] <= 480 && triangles[1] <= 240 && triangles[2] <= 96 && triangles[3] <= 12, name);
@@ -317,6 +320,7 @@ class GpuTreeLodSmokeTest {
                 var bounds = assets.model(name).calculateBoundingBox(new BoundingBox());
                 var detail = new BufferedImage(1152, 416, BufferedImage.TYPE_INT_RGB);
                 var paint = detail.createGraphics();
+                int normalChanges = 0;
                 try {
                     for (int angle = 0; angle < 3; angle++) {
                         var camera = new BoardCamera();
@@ -327,19 +331,21 @@ class GpuTreeLodSmokeTest {
                         camera.camera.zoom = zoomForSize(bounds.getDimensions(new Vector3()).scl(1, 1, 36 / 30f).len(), 380);
                         camera.update();
                         var frame = foliageFrame(preview, instances, stand, 0, batch, environment, camera);
-                        if (name.startsWith("cactus")) {
-                            preview.setNormalMaps(false);
-                            var plain = foliageFrame(preview, instances, stand, 0, batch, environment, camera);
-                            preview.setNormalMaps(true);
-                            assertEquals(coverage(frame), coverage(plain), 5, "Normal maps retain the stem silhouette");
-                            assertTrue(differences(frame, plain) > 100, "Normal detail must affect real cactus lighting: " + name);
-                        }
+                        preview.setNormalMaps(false);
+                        var plain = foliageFrame(preview, instances, stand, 0, batch, environment, camera);
+                        preview.setNormalMaps(true);
+                        assertEquals(coverage(frame), coverage(plain), 5, "Normal maps retain the plant silhouette");
+                        normalChanges += differences(frame, plain);
                         paint.drawImage(frame.getSubimage(frame.getWidth() / 2 - 192, frame.getHeight() / 2 - 192, 384, 384),
                               angle * 384, 32, null);
                         paint.setColor(java.awt.Color.WHITE);
                         paint.drawString(name + " / " + angle * 120 + " degrees", angle * 384 + 12, 20);
                     }
                 } finally { paint.dispose(); }
+                // Fine needles can resolve only a little relief at one angle. Check the three views together;
+                // the maps must change real lighting while keeping exactly the same alpha coverage in each view.
+                assertTrue(normalChanges > 100, "Normal detail must affect real plant lighting: " + name
+                      + " changed=" + normalChanges);
                 ImageIO.write(detail, "png", new File(System.getProperty("megamek.gpu.screenshots"), "plant-material-" + name + ".png"));
             }
         } finally {

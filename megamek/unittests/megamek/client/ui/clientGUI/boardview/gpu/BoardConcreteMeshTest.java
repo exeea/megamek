@@ -50,9 +50,11 @@ class BoardConcreteMeshTest {
         Coords first = new Coords(1, 14), last = new Coords(2, 15);
         Vector3 a = shape.corner(first, 3), direction = shape.corner(last, 5).sub(a).nor();
         float rimDistance = Float.NaN;
-        for (Coords at : List.of(first, last)) {
+        for (Coords at : List.of(new Coords(0, 14), first, last)) {
             BoardSurface surface = new BoardSurface(scene, scene.tile(at));
-            for (int k = 3; k <= 5; k++) {
+            // At 0115 edge 3 is the board cut; the fitted slope begins at corner 4.
+            int start = at.getX() == 0 ? 4 : 3;
+            for (int k = start; k <= 5; k++) {
                 Vector3 rim = surface.relief.seam(k, k, 0).sub(a);
                 float distance = direction.x * rim.y - direction.y * rim.x;
                 if (Float.isNaN(rimDistance)) { rimDistance = distance; }
@@ -60,7 +62,7 @@ class BoardConcreteMeshTest {
                       "The rim above 0216 follows the fitted straight boundary: " + at + " corner " + k);
             }
             for (var face : surface.walls(scene, BoardGeometry.floor(scene))) {
-                if (face.landEdge() != 3 && face.landEdge() != 4) { continue; }
+                if (face.landEdge() < start || face.landEdge() > 4) { continue; }
                 for (var vertex : List.of(face.a(), face.b(), face.c())) {
                     Vector3 offset = new Vector3(vertex).sub(a);
                     float distance = direction.x * offset.y - direction.y * offset.x;
@@ -74,6 +76,68 @@ class BoardConcreteMeshTest {
 
     private static BoardScene commCenter() throws Exception {
         return BoardCliffSeamTest.capturedScene("GrassLands/16x17 Grasslands River CommCenter.board");
+    }
+
+    @Test
+    void commCenterCliffToSlopeJunctionsDoNotFoldUnderTheirRims() throws Exception {
+        BoardScene scene = commCenter();
+        for (Coords at : List.of(new Coords(6, 2), new Coords(8, 13))) {
+            for (TerrainLod lod : TerrainLod.values()) {
+                var surface = new BoardSurface(scene, scene.tile(at), lod);
+                var walls = surface.walls(scene, BoardGeometry.floor(scene));
+                assertTrue(walls.size() >= 2);
+                for (var face : walls) {
+                    Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
+                    assertTrue(normal.z >= -.001f,
+                          "The poured join must not fold back underneath the slab at " + at + ", " + lod + ": " + face);
+                }
+            }
+        }
+    }
+
+    @Test
+    void commCenterSlopeEndsInFlatCutFaces() throws Exception {
+        BoardScene scene = commCenter();
+        for (TerrainLod lod : TerrainLod.values()) {
+            var surface = new BoardSurface(scene, scene.tile(new Coords(0, 14)), lod);
+            List<Vector3> normals = new ArrayList<>();
+            for (var face : surface.walls(scene, BoardGeometry.floor(scene))) {
+                if (face.landEdge() != 3 || Math.min(face.a().z, Math.min(face.b().z, face.c().z)) < -.001f) { continue; }
+                Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
+                if (normals.stream().noneMatch(other -> other.epsilonEquals(normal, .001f))) { normals.add(normal); }
+            }
+            assertTrue(!normals.isEmpty() && normals.size() <= 2,
+                  "The slope ends in a flat cut or two sharp facets, without a fan of bent strips: " + lod + " " + normals);
+        }
+    }
+
+    @Test
+    void wallTextureFrameStaysFixedAcrossConcreteAndEarthCutFacets() throws Exception {
+        BoardScene scene = commCenter();
+        var encode = GpuTerrain.class.getDeclaredMethod("sculptVertex", Vector3.class, BoardRelief.Shade.class,
+              float.class, BoardSurface.class);
+        encode.setAccessible(true);
+        for (Coords at : List.of(new Coords(0, 10), new Coords(0, 2))) {
+            var surface = new BoardSurface(scene, scene.tile(at));
+            Map<Integer, Float> projections = new java.util.HashMap<>();
+            for (var face : surface.walls(scene, BoardGeometry.floor(scene))) {
+                if (scene.tile(at.translated(BoardGeometry.edgeDirection(face.landEdge()))) != null) { continue; }
+                for (Vector3 p : List.of(face.a(), face.b(), face.c())) {
+                    var shade = surface.relief.shade(p);
+                    assertTrue(Float.isFinite(shade.projection()), "The cut has an explicit texture frame");
+                    Float previous = projections.putIfAbsent(face.landEdge(), shade.projection());
+                    if (previous != null) { assertEquals(previous, shade.projection(), .0001f); }
+                    var vertex = (com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder.VertexInfo)
+                          encode.invoke(null, p, shade, Float.NaN, surface);
+                    int packed = Float.floatToRawIntBits(vertex.color.toFloatBits());
+                    float kind = (packed >>> 16 & 255) / 255f;
+                    assertTrue(kind >= .375f && kind < .475f, "The shader uses the fixed wall projection");
+                    float angle = ((packed >>> 24 & 255) / 254f - .5f) * 2 * (float) Math.PI;
+                    assertEquals(shade.projection(), angle, .05f, "The packed frame survives the GPU vertex format");
+                }
+            }
+            assertTrue(!projections.isEmpty());
+        }
     }
 
     @ParameterizedTest
@@ -181,6 +245,19 @@ class BoardConcreteMeshTest {
         Set<Vector3> vertices = new HashSet<>();
         for (var face : faces) { vertices.addAll(List.of(face.a(), face.b(), face.c())); }
         return vertices;
+    }
+
+    @Test
+    void concreteSlopesStayClosedAtTheBoardCut() {
+        BoardScene scene = scene(at -> at.getX() >= 8 ? 1 : 0, false);
+        float floor = BoardGeometry.floor(scene);
+        List<BoardSurface.Face> complete = new ArrayList<>();
+        for (var tile : scene.tiles()) {
+            var surface = new BoardSurface(scene, tile);
+            complete.addAll(surface.faces);
+            complete.addAll(surface.walls(scene, floor));
+        }
+        BoardCliffSeamTest.assertClosed(complete, floor, "Concrete slope at the board cut");
     }
 
     private static BoardScene scene(ToIntFunction<Coords> elevation, boolean natural) {
