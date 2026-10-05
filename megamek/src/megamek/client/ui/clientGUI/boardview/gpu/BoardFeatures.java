@@ -20,23 +20,30 @@ import megamek.common.units.Terrains;
 final class BoardFeatures {
     /** Width in tile pixels of a Rough boulder at feature scale one; placement and meshing share this size. */
     static final float ROUGH_BOULDER_WIDTH = 12;
+    /** Cosmetic species stands and irregular spacing; false restores the evenly mixed tree scatter. */
+    static final boolean NATURAL_TREE_DISTRIBUTION = true;
     /** Half-diagonal in tile pixels of the 6.4-pixel square dragon-tooth footprint; clears roads and hex edges. */
     private static final float DRAGON_TOOTH_RADIUS = 4.6f;
     /** Ultra rough's tooth spacing in tile pixels, the closest that still reads as separate teeth. */
     private static final float CLOSE_TEETH_SPACING = 11;
     /** Tree species by where they grow; repeated names are the common ones. */
     private static final List<String> TEMPERATE = List.of("tree", "pine", "tree-broad", "birch", "tree-slender",
-          "pine-tall", "pine-broad");
+          "pine-tall", "pine-broad", "tree-forked", "tree-layered", "birch-tall", "birch-spreading", "birch-young",
+          "pine-slender", "pine-layered");
     private static final List<String> HIGHLAND = List.of("pine", "pine-tall", "pine-broad", "tree-slender", "pine-tall",
-          "birch");
-    private static final List<String> ROCKY = List.of("pine", "tree-dead", "pine-tall", "pine-broad");
-    private static final List<String> WETLAND = List.of("willow", "tree-slender", "tree-dead", "willow", "tree");
+          "birch", "pine-slender", "pine-layered", "pine-slender", "pine-layered", "birch-tall", "birch-young");
+    private static final List<String> ROCKY = List.of("pine", "tree-dead", "pine-tall", "pine-broad", "pine-slender",
+          "pine-layered");
+    private static final List<String> WETLAND = List.of("willow", "tree-slender", "tree-dead", "willow", "tree",
+          "willow-broad", "willow-broad", "birch-spreading", "tree-forked");
     private static final List<String> BARREN = List.of("tree-dead");
-    private static final List<String> PARK = List.of("tree-broad", "tree", "birch");
+    private static final List<String> PARK = List.of("tree-broad", "tree", "birch", "tree-forked", "tree-layered",
+          "birch-spreading");
     private static final List<String> DESERT = List.of("cactus", "palm", "tree-dead", "cactus-flowers", "palm-bent",
           "cactus");
     private static final List<String> PALMS = List.of("palm", "palm-bent");
-    private static final List<String> TROPICAL = List.of("palm", "palm-bent", "tree-broad", "palm", "tree-slender");
+    private static final List<String> TROPICAL = List.of("palm", "palm-bent", "tree-broad", "palm", "tree-slender",
+          "tree-forked", "tree-layered");
     private static final List<String> ORCHARD = List.of("orchard-round", "orchard-spreading", "orchard-upright",
           "orchard-vase", "orchard-leaning", "orchard-young");
     static final List<String> MARS_CORALS = List.of("mars/finger-spires", "mars/fan-scalloped", "mars/tube-grove",
@@ -154,6 +161,12 @@ final class BoardFeatures {
 
     static List<BoardScene.Feature> capture(Hex hex, Coords coords, Map<Integer, String> structureModels,
           Set<Integer> blankTerrains, Function<Coords, Hex> board, BoardArtwork.Scenery scenery) {
+        return capture(hex, coords, structureModels, blankTerrains, board, scenery, NATURAL_TREE_DISTRIBUTION);
+    }
+
+    static List<BoardScene.Feature> capture(Hex hex, Coords coords, Map<Integer, String> structureModels,
+          Set<Integer> blankTerrains, Function<Coords, Hex> board, BoardArtwork.Scenery scenery,
+          boolean naturalTreeDistribution) {
         if (hex.containsTerrain(Terrains.ULTRA_SUBLEVEL)) { return List.of(); }
         List<BoardScene.Feature> result = new ArrayList<>();
         for (String asset : scenery.models()) {
@@ -213,12 +226,19 @@ final class BoardFeatures {
             // Cosmetic understory shares the canopy's placement, road clearance, grounding and tree LODs.
             boolean understory = surface(hex) == BoardScene.Surface.TROPICAL && height > 1 && !orchard;
             if (understory) { count *= 2; }
+            boolean natural = naturalTreeDistribution && !orchard && !fungus && !mars && height > 1;
+            Random treeRandom = natural ? new Random(coords.getX() * 73_856_093L ^ coords.getY() * 19_349_663L) : null;
             for (int index = 0; index < count; index++) {
                 boolean low = understory && index % 2 == 1;
                 double angle = index * (density >= 2 ? 2.399963 : 2 * Math.PI / count) + variant;
                 // Space light foliage around the centre; dense foliage fills an equal-area spiral.
                 float radius = density >= 2 ? 28 * (float) Math.sqrt(index / (count - 1f))
                       : 20 + index * 2;
+                // Keep the density and bounded footprint, but break identical per-hex spirals.
+                if (natural) {
+                    angle += treeRandom.nextFloat() * .7f - .35f;
+                    radius *= .86f + treeRandom.nextFloat() * .14f;
+                }
                 int speciesIndex = understory ? index / 2 : index;
                 String tree = low ? "foliage-jungle" : species.get(Math.floorMod(
                       coords.getX() * 31 + coords.getY() * 17 + speciesIndex, species.size()));
@@ -253,8 +273,12 @@ final class BoardFeatures {
                     x = (float) Math.cos(angle) * 29;
                     y = (float) Math.sin(angle) * 29;
                 }
+                if (natural && !low) {
+                    tree = BoardTreeDistribution.species(species, coords, x, y, treeRandom.nextLong());
+                }
                 result.add(new BoardScene.Feature(tree, x,
-                      y, index * 137.5f + (mars ? Math.floorMod(coords.getX() * 97 + coords.getY() * 53, 360) : 0),
+                      y, natural ? treeRandom.nextFloat() * 360
+                            : index * 137.5f + (mars ? Math.floorMod(coords.getX() * 97 + coords.getY() * 53, 360) : 0),
                       (low ? .9f : crown) * (0.9f + (index % 3) * 0.1f),
                       foliageHeight, 0, BoardScene.FeatureKind.TREE));
             }

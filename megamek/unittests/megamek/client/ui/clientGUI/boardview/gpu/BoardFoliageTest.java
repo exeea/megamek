@@ -39,7 +39,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardFoliageTest {
     @ParameterizedTest
-    @ValueSource(strings = { "pine", "pine-tall", "pine-broad", "pine-snow", "pine-tall-snow", "pine-broad-snow" })
+    @ValueSource(strings = { "pine", "pine-tall", "pine-broad", "pine-snow", "pine-tall-snow", "pine-broad-snow",
+          "pine-slender", "pine-layered", "pine-slender-snow", "pine-layered-snow" })
     void upperPineBranchesStayAttachedToTheirBentTrunk(String name) {
         File root = new File(Configuration.dataDir(), "models/board");
         var near = RigidGlb.loadLods(new FileHandle(new File(root, name + ".glb")), root.toPath()).getFirst();
@@ -360,7 +361,7 @@ class BoardFoliageTest {
         return total;
     }
 
-    private static void partMaterials(Iterable<ModelNode> nodes, Map<String, String> result) {
+    static void partMaterials(Iterable<ModelNode> nodes, Map<String, String> result) {
         for (ModelNode node : nodes) {
             for (var part : node.parts) { result.put(part.meshPartId, part.materialId); }
             partMaterials(Arrays.asList(node.children), result);

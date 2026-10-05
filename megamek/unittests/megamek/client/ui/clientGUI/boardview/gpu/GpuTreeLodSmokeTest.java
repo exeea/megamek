@@ -41,10 +41,9 @@ import org.junit.jupiter.api.Test;
 /** Actual submitted triangle counts, shared render passes, and pixel comparisons to the original catalog. */
 @Tag("on-demand")
 class GpuTreeLodSmokeTest {
-    private static final List<String> TREES = List.of("tree", "tree-broad", "tree-slender", "birch", "willow", "pine",
-          "pine-tall", "palm", "palm-bent", "tree-snow", "tree-broad-snow", "tree-slender-snow", "birch-snow",
-          "willow-snow", "pine-snow", "pine-tall-snow", "pine-broad", "pine-broad-snow", "tree-dead",
-          "tree-dead-snow", "cactus", "cactus-flowers");
+    private static final List<String> TREES = java.util.stream.Stream.concat(
+          BoardTreeDistributionTest.BASIC_TREES.stream().flatMap(name -> java.util.stream.Stream.of(name, name + "-snow")),
+          java.util.stream.Stream.of("tree-dead", "tree-dead-snow", "palm", "palm-bent", "cactus", "cactus-flowers")).toList();
     /** A projected diameter within each level's band, past the hysteresis of the thresholds on both sides. */
     static final float[] PIXELS = { 200, 60, 32, 12 };
 
@@ -87,7 +86,7 @@ class GpuTreeLodSmokeTest {
                                       "Cutout crowns write opaque depth: " + name);
                             }
                         }
-                        assertTrue(triangles[1] <= 240 && triangles[2] <= 96 && triangles[3] <= 12, name);
+                        assertTrue(triangles[0] <= 480 && triangles[1] <= 240 && triangles[2] <= 96 && triangles[3] <= 12, name);
                         BoundingBox bounds = assets.model(name).calculateBoundingBox(new BoundingBox());
                         assertEquals(30, bounds.getDepth(), .001f, "Plant GLBs must not contain flattened geometry: " + name);
                         float diameter = bounds.getDimensions(new Vector3()).scl(1, 1, 36 / bounds.getDepth()).len();
@@ -310,7 +309,9 @@ class GpuTreeLodSmokeTest {
             }
             // Inspect the corrected attachment and the newly converted desert plants in the production shader.
             // The default ModelBatch above only verifies silhouettes; it does not shade the cactus normal map.
-            for (String name : List.of("pine-tall", "pine-broad", "pine-tall-snow", "palm", "palm-bent", "cactus", "cactus-flowers")) {
+            for (String name : List.of("pine-tall", "pine-broad", "pine-tall-snow", "palm", "palm-bent", "cactus", "cactus-flowers",
+                  "tree-forked", "tree-layered", "birch-tall", "birch-spreading", "birch-young", "willow-broad",
+                  "pine-slender", "pine-layered")) {
                 var stand = new GpuTreeInstances.Stand();
                 stand.add(name, new Matrix4().setToScaling(1, 1, 36 / 30f));
                 var bounds = assets.model(name).calculateBoundingBox(new BoundingBox());
