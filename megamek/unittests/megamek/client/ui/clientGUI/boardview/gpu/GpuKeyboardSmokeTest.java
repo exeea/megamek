@@ -150,6 +150,21 @@ class GpuKeyboardSmokeTest {
                             assertEquals(start, boardCamera.camera.position, "Opposing flight keys cancel");
                             verify(source, never()).key(anyInt(), anyBoolean(), anyInt());
                             boardCamera.setFirstPerson(false);
+                            for (boolean tactical : new boolean[] { false, true }) {
+                                setTacticalView(tactical);
+                                boardCamera.setIsometric(false);
+                                boardCamera.pan(100000, 0);
+                                Vector3 edge = boardCamera.focus.cpy();
+                                processor.keyDown(Input.Keys.A);
+                                super.render();
+                                super.render();
+                                processor.keyUp(Input.Keys.A);
+                                assertTrue(edge.epsilonEquals(boardCamera.focus, .01f), "Held panning stops at the map edge");
+                                processor.keyDown(Input.Keys.D);
+                                super.render();
+                                processor.keyUp(Input.Keys.D);
+                                assertTrue(boardCamera.focus.x > edge.x, "Reversing away from the map edge moves immediately");
+                            }
                             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                         } finally {
                             Gdx.input = realInput;
@@ -182,6 +197,11 @@ class GpuKeyboardSmokeTest {
                 }
 
                 private float advanceCamera(int key) {
+                    if (!boardCamera.firstPerson()) {
+                        // Measure input speed with room to move; repeated boosted steps now stop at map boundaries.
+                        boardCamera.zoom(1 / boardCamera.camera.zoom);
+                        boardCamera.center(BoardGeometry.center(fixture.game.getBoard().getCenter(), 0));
+                    }
                     Vector3 position = boardCamera.camera.position.cpy();
                     float azimuth = boardCamera.azimuth();
                     super.render();
