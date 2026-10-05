@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuCamouflageReview.field;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
@@ -16,6 +17,8 @@ import java.util.stream.Collectors;
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
+import com.badlogic.gdx.graphics.VertexAttributes.Usage;
+import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -86,6 +89,33 @@ class GpuTilesetTerrainSmokeTest {
         assertEquals(Set.of(0, rows), rebuilt(terrain, chunks, scene, bedFloor, assets));
         for (var face : terrain.surface(scene, edge, bedFloor).faces()) {
             assertEquals(-4 * BoardGeometry.level(), face.a().z, .001f, "The artwork follows the edited bed depth");
+        }
+
+        // Both natural banks and quays meet liquid with full coverage, without a shore fade at the boundary.
+        Coords center = new Coords(1, 1);
+        for (var bank : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.CONCRETE)) {
+            List<BoardScene.Tile> shore = new ArrayList<>();
+            for (int x = 0; x < 3; x++) for (int y = 0; y < 3; y++) {
+                Coords at = new Coords(x, y);
+                shore.add(at.equals(center) ? pool(at, 2, art)
+                      : new BoardScene.Tile(at, 1, -1, false, 0, bank, art, null, null, null, null,
+                            List.of(), List.of(), BoardLiquid.NONE, art));
+            }
+            scene = new BoardScene(0, 3, 3, shore, List.of(), List.of(), -1, "", List.of());
+            terrain.update(scene, bedFloor, assets);
+            var liquid = (ModelInstance) field(chunks.values().iterator().next(), "liquid");
+            int vertices = 0;
+            for (var mesh : liquid.model.meshes) {
+                int stride = mesh.getVertexSize() / Float.BYTES;
+                int alpha = mesh.getVertexAttribute(Usage.ColorUnpacked).offset / Float.BYTES + 3;
+                float[] data = new float[mesh.getNumVertices() * stride];
+                mesh.getVertices(data);
+                for (int i = 0; i < mesh.getNumVertices(); i++) {
+                    assertEquals(1, data[i * stride + alpha], .0001f, "Water must not fade beside " + bank);
+                    vertices++;
+                }
+            }
+            assertTrue(vertices > 0, "Inspect the actual uploaded liquid mesh");
         }
     }
 

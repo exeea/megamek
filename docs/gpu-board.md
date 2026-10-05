@@ -127,9 +127,10 @@ mask along each edge above a lower neighbour, or its high-incline mask where the
 marks a cliff side there. A road leaving a hex toward one of another level ramps through their shared edge to the
 height `BoardSurface.roadEdgeElevation` gives both, between banks, and the walls and rims leave that mouth open; a
 bridge's art (`BoardScene.Tile.bridge`) lies on its deck, where its approaches' ramps arrive. Open liquid shows its
-animated frames (`BoardLiquid.textures`) over its art, as the libGDX board drew it: water translucent, whole over the
-middle and fading out toward each bank so the art's shore shows, moving with its river's current (`BoardFlow`);
-hazardous liquid tinted green; magma opaque and glowing. Over each drop into the open liquid it joins, a fall curves
+animated frames (`BoardLiquid.textures`) over its art, reaching every bank without fading and moving with its
+river's current (`BoardFlow`). Water stays translucent; hazardous liquid is tinted green; magma is opaque and glowing.
+Water artwork uses the full-water variant at its authored depth, without a painted shore on the lakebed; the column
+walls supply the banks. Game water exits remain unchanged. Over each drop into the open liquid it joins, a fall curves
 over the edge, hangs just clear of the wall and spreads into the pool below, its frames running down it. These liquids
 cast no shadow, and `GpuTerrain` animates them with its own. Buildings, fuel tanks and industrial structures stay
 the 3D board's own models (a custom kit's modular building where one exists), and their art is left out of the hex's

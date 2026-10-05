@@ -32,11 +32,10 @@ If authored mixtures contribute more than four at one point, small shading trian
 retain the four strongest contributions; weaker covers at those crowded junctions
 are omitted to keep geometry and shader costs bounded.
 
-Concrete walls remain complete cast slabs for differences of up to two levels.
-From three levels, their rock foundation can enter the natural contact field while
-the slab panels retain their constructed material. Fitted boundaries use the same
-corner shifts as `BoardConcrete`; concrete contribution to neighboring ground is
-loose aggregate.
+Concrete slopes, cliffs and underwater retaining walls keep their constructed
+material for their full height. They do not blend into neighbouring natural ground.
+Fitted boundaries use the same corner shifts as `BoardConcrete`, including the
+shoreline and its submerged wall.
 
 Authored special ground, buildings and frozen surfaces retain protected handling.
 Roads use their own overlays and joins. Changing a family's eligibility belongs in
@@ -72,7 +71,7 @@ when both neighboring hexes have the same family.
 | Rock | Weathered top, exposed granite and scree |
 | Lunar | Independent maps initially identical to rock, granite and scree |
 | Snow | Snow cover, exposed rock and scree |
-| Concrete | Pavement/cast slab, supporting granite and deposits |
+| Concrete | Pavement and cast concrete faces |
 | Volcanic | Crust/cooled banks and rock, with heat blended by the same coverage |
 
 Role weights vary with slope, rim/foot distance, deposition and material height.

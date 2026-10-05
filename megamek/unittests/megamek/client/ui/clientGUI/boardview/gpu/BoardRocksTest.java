@@ -263,10 +263,6 @@ class BoardRocksTest {
                 for (BoardSurface.Face face : surface.faces) {
                     if (face.finish() != BoardSurface.Finish.OUTCROP) { continue; }
                     rocks++;
-                    if (family == BoardScene.Surface.CONCRETE) {
-                        assertTrue(belowSlab(scene, tile), "Paved rims and open slabs stay clear; only the bedrock under"
-                              + " a slab sheds rubble: " + tile.coords());
-                    }
                     for (Vector3 p : List.of(face.a(), face.b(), face.c())) {
                         assertTrue(Math.hypot(p.x - center.x, p.y - center.y) > BoardGeometry.WIDTH * .2f,
                               "The standing area stays clear");
@@ -287,18 +283,9 @@ class BoardRocksTest {
             if (family != BoardScene.Surface.CONCRETE) {
                 assertTrue(rocks > 100, family + " has rim and fallen rock");
             } else {
-                assertTrue(rocks > 0, "The bedrock under a concrete slab sheds rubble");
+                assertEquals(0, rocks, "Concrete rims and feet stay clear of fallen rock at every height");
             }
         }
-    }
-
-    /** Whether a hex lies at the foot of a cliff of three levels or more. */
-    private static boolean belowSlab(BoardScene scene, BoardScene.Tile tile) {
-        for (int direction = 0; direction < 6; direction++) {
-            BoardScene.Tile neighbor = scene.tile(tile.coords().translated(direction));
-            if (neighbor != null && neighbor.elevation() - tile.elevation() >= 3) { return true; }
-        }
-        return false;
     }
 
     private static Vector3 centroid(BoardSurface.Face face) {

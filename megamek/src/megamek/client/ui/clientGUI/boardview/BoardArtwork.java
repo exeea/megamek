@@ -33,6 +33,7 @@ import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
+import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import megamek.common.util.ImageUtil;
 
@@ -444,7 +445,7 @@ public final class BoardArtwork implements AutoCloseable {
                 boolean decoration = false;
                 for (int type : SCENERY_TERRAINS) { decoration |= types.contains(type); }
                 decoration |= types.contains(Terrains.ROAD) && hex.terrainLevel(Terrains.ROAD) == 2;
-                decoration |= types.contains(Terrains.PAVEMENT) && hex.terrainLevel(Terrains.PAVEMENT) > 1;
+                // Pavement variants belong to the ground; repainting them as scenery hides the native concrete.
                 if (!decoration) { continue; }
                 covered.addAll(types);
                 if (types.stream().anyMatch(structures::containsKey)
@@ -453,11 +454,18 @@ public final class BoardArtwork implements AutoCloseable {
                       || types.contains(Terrains.FLUFF) && (BoardRough.variant(hex) != 0
                             || hex.terrainLevel(Terrains.FLUFF) == 12 && types.contains(Terrains.WOODS))) { continue; }
                 String source = gpuTileset.imageSource(layer).replace('\\', '/');
+                // Both GPU views use the fitted quay wall. Its old perspective sprite must not also be
+                // projected onto the seabed or baked into the Tactical View's ground artwork.
+                if (source.startsWith("Structured_Pavement/Fluff/quay_fluff")) {
+                    if (placedSources != null) { placedSources.add(source); }
+                    continue;
+                }
                 int extension = source.lastIndexOf('.');
                 String asset = extension < 0 ? "" : "scenery/" + source.substring(0, extension);
                 boolean model = !asset.isEmpty() && sceneryModels.computeIfAbsent(asset,
                       name -> new File(Configuration.dataDir(), "models/board/" + name + ".glb").isFile());
-                if (original != null) {
+                // Keep ground paint in the tileset's authored order, below structured pavement edges.
+                if (original != null && (model || !types.contains(Terrains.GROUND_FLUFF))) {
                     (model ? objects : original).drawImage(layer, 0, 0, null);
                     placedSources.add(source);
                 }
@@ -512,6 +520,8 @@ public final class BoardArtwork implements AutoCloseable {
      * the incline and cliff edges, which the view's BoardRim shades from the levels instead, without the bridge, which
      * it lays on the deck, and without structures or scenery. Scenery retains its original selected artwork in a
      * separate overlay, so both views can put it on roofs and lakebeds instead of baking it into the column top.
+     * Pavement uses its full variant: the shared concrete geometry supplies its outline in both GPU views.
+     * Water also fills its footprint: a painted shore on the lakebed would duplicate the column's bank wall.
      */
     private BufferedImage drawTileset(Hex source, Map<Integer, String> structures, Set<String> placedSources) {
         Hex hex = source.duplicate();
@@ -519,6 +529,13 @@ public final class BoardArtwork implements AutoCloseable {
         for (int terrain : BRIDGE_TERRAINS) { hex.removeTerrain(terrain); }
         for (int structure : structures.keySet()) {
             for (int terrain : STRUCTURE_TERRAINS.get(structure)) { hex.removeTerrain(terrain); }
+        }
+        if (hex.containsTerrain(Terrains.PAVEMENT)) {
+            hex.addTerrain(new Terrain(Terrains.PAVEMENT, hex.terrainLevel(Terrains.PAVEMENT), true, 63));
+            if (BoardSurfaceBlend.hasTransition(hex)) { hex.removeTerrain(Terrains.GROUND_FLUFF); }
+        }
+        if (hex.containsTerrain(Terrains.WATER)) {
+            hex.addTerrain(new Terrain(Terrains.WATER, hex.terrainLevel(Terrains.WATER), true, 63));
         }
         BufferedImage image = new BufferedImage(HEX_W, HEX_H, BufferedImage.TYPE_INT_ARGB);
         Graphics2D graphics = image.createGraphics();

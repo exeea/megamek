@@ -556,7 +556,7 @@ final class GpuBoardTuning {
         section(skin, "Material geology");
         geologyFamily = choice(skin, "Material", "tuning-geology-family",
               new String[] { "Grass", "Dirt", "Sand", "Rock", "Concrete", "Snow", "Lunar", "Fungus",
-                    "Desert", "Mars", "Volcano", "Bedrock under slabs" }, this::syncGeology);
+                    "Desert", "Mars", "Volcano", "Tropical" }, this::syncGeology);
         geology = controls(skin, List.of(
               new Knob("Joint width (m)", .25f, 20, .05f, "%.2f",
                     "Width of the large rock blocks in a cliff. Higher values make broader blocks."),
@@ -586,8 +586,8 @@ final class GpuBoardTuning {
                     "How much rock texture shows through low soil banks. Zero makes those banks smoother."),
               new Knob("Bank lean", 0, 1, .01f, "%.2f",
                     "How far a soil bank leans back as it rises. Higher values make a gentler slope."),
-              new Knob("Cast slab share", 0, 1, .05f, "%.2f",
-                    "How much a tall cliff looks like a concrete slab over rock. Zero removes the slab effect."),
+              new Knob("Cast surface share", 0, 1, .05f, "%.2f",
+                    "How much fine weathering and fallen rock is suppressed. One keeps cast faces clean."),
               new Knob("Loose stones / hex", 0, 6, .1f, "%.1f",
                     "Average number of loose stones per open hex of this material. Stones need room and full or medium detail."),
               new Knob("Low shrubs / hex", 0, 6, .1f, "%.1f",
@@ -1285,11 +1285,6 @@ final class GpuBoardTuning {
         setValues(geology, new float[] { g.cellWidth(), g.cellHeight(), g.cells(), g.fractures(), g.strata(),
               g.bedding(), g.buttress(), g.recess(), g.relief(), g.cap(), g.talus(), g.round(), g.bank(), g.lean(), g.cast(),
               g.stones(), g.shrubs() });
-        boolean bedrock = geologyFamily.getSelectedIndex() == BoardScene.Surface.values().length;
-        geology.get(8).slider().setDisabled(bedrock);
-        geology.get(11).slider().setDisabled(bedrock);
-        geology.get(15).slider().setDisabled(bedrock);
-        geology.get(16).slider().setDisabled(bedrock);
         updateReadings(geology);
     }
 

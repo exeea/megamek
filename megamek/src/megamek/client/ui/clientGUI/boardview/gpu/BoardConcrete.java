@@ -60,6 +60,13 @@ final class BoardConcrete {
 
     Shift shift(long corner) { return shifts.getOrDefault(corner, ZERO); }
 
+    /** The same fitted corner for terrain, water, artwork and picking in both GPU views. */
+    Vector3 corner(Coords coords, int corner) {
+        Vector3 point = BoardGeometry.corner(coords, 0, corner);
+        Shift delta = shift(key(point));
+        return point.add(delta.x(), delta.y(), 0);
+    }
+
     /** Signed distance to the fitted footprint; NaN means this hex still uses its original outline. */
     float distance(Coords coords, float x, float y) {
         if (shifts.isEmpty()) { return Float.NaN; }
@@ -110,7 +117,7 @@ final class BoardConcrete {
         final Set<BoardScene.Tile> tiles = new HashSet<>();
         Corner previous, next;
         Line rail;
-        boolean pinned, dock;
+        boolean pinned, dock, border;
 
         Corner(Vector3 point) {
             original = point;
@@ -126,7 +133,8 @@ final class BoardConcrete {
             for (int e = 0; e < 6; e++) {
                 BoardScene.Tile water = scene.tile(land.coords().translated(BoardGeometry.edgeDirection(e)));
                 if (!outside(water) || water.liquid().present() && water.elevation() > land.elevation()) { continue; }
-                Corner a = coastCorner(corners, land.coords(), e), b = coastCorner(corners, land.coords(), (e + 1) % 6);
+                Corner a = coastCorner(corners, scene, land.coords(), e);
+                Corner b = coastCorner(corners, scene, land.coords(), (e + 1) % 6);
                 a.next = b;
                 b.previous = a;
                 a.rail = dockRail(scene, land, a.point, b.point);
@@ -138,7 +146,8 @@ final class BoardConcrete {
         }
         for (Corner corner : corners.values()) {
             Integer dryLevel = null, waterLevel = null;
-            corner.pinned = corner.tiles.size() != 3 || corner.previous == null || corner.next == null;
+            corner.border &= corner.tiles.size() == 2 && (corner.previous == null) != (corner.next == null);
+            corner.pinned = !corner.border && (corner.tiles.size() != 3 || corner.previous == null || corner.next == null);
             for (BoardScene.Tile tile : corner.tiles) {
                 if (outside(tile)) {
                     if (tile.liquid().present()) {
@@ -156,12 +165,12 @@ final class BoardConcrete {
                     for (int d = 0; d < 6; d++) {
                         BoardScene.Tile neighbor = scene.tile(tile.coords().translated(d));
                         corner.pinned |= neighbor != null && !neighbor.liquid().present()
-                              && (outside(neighbor) ? protectedOutside(scene, neighbor) : protectedLand(scene, neighbor));
+                              && (outside(neighbor) ? protectedOutside(scene, neighbor) : fixedFootprint(neighbor));
                     }
                 }
             }
             if (!corner.pinned) {
-                Line before = corner.previous.rail, after = corner.rail;
+                Line before = corner.previous == null ? null : corner.previous.rail, after = corner.rail;
                 corner.dock = before != null || after != null;
                 if (before != null && after != null && !before.same(after)) {
                     Vector3 joint = before.intersection(after);
@@ -185,9 +194,12 @@ final class BoardConcrete {
         shifts = Map.copyOf(result);
     }
 
-    private static Corner coastCorner(Map<Long, Corner> corners, Coords coords, int k) {
+    private static Corner coastCorner(Map<Long, Corner> corners, BoardScene scene, Coords coords, int k) {
         Vector3 point = BoardGeometry.corner(coords, 0, k);
-        return corners.computeIfAbsent(key(point), ignored -> new Corner(point));
+        Corner corner = corners.computeIfAbsent(key(point), ignored -> new Corner(point));
+        corner.border |= scene.tile(coords.translated(BoardGeometry.edgeDirection(k))) == null
+              || scene.tile(coords.translated(BoardGeometry.edgeDirection((k + 5) % 6))) == null;
+        return corner;
     }
 
     private static int nearest(List<Corner> chain, Vector3 point, int first, int last) {
@@ -425,6 +437,15 @@ final class BoardConcrete {
         Vector3[] points = new Vector3[last - first + 1];
         points[0] = new Vector3(chain.get(first).point);
         points[points.length - 1] = new Vector3(chain.get(last).point);
+        // A run ends where the map ends; an unprotected border corner must not introduce a final hex bevel.
+        if (!runs.isEmpty()) {
+            if (chain.get(first).border && !chain.get(first).pinned) {
+                points[0] = runs.getFirst().line.project(chain.get(first).point);
+            }
+            if (chain.get(last).border && !chain.get(last).pinned) {
+                points[points.length - 1] = runs.getLast().line.project(chain.get(last).point);
+            }
+        }
         for (int i = 0; i < runs.size(); i++) {
             Run run = runs.get(i);
             for (int j = run.first + 1; j < run.last; j++) {
@@ -519,8 +540,11 @@ final class BoardConcrete {
     }
 
     private static boolean protectedLand(BoardScene scene, BoardScene.Tile tile) {
-        return !tile.detailedGround() || tile.roadExits() != 0 || BoardSurface.ramps(scene, tile) != 0
-              || tile.features().stream().anyMatch(feature -> feature.kind() == BoardScene.FeatureKind.BUILDING
+        return fixedFootprint(tile) || tile.roadExits() != 0 || BoardSurface.ramps(scene, tile) != 0;
+    }
+
+    private static boolean fixedFootprint(BoardScene.Tile tile) {
+        return !tile.detailedGround() || tile.features().stream().anyMatch(feature -> feature.kind() == BoardScene.FeatureKind.BUILDING
               || feature.kind() == BoardScene.FeatureKind.PROP);
     }
 
@@ -538,54 +562,8 @@ final class BoardConcrete {
 
     static boolean concreteBank(BoardScene scene, BoardScene.Tile water, int edge) {
         BoardScene.Tile land = scene.tile(water.coords().translated(BoardGeometry.edgeDirection(edge)));
-        return land != null && land.surface() == BoardScene.Surface.CONCRETE
-              && !land.liquid().present() && land.elevation() >= water.elevation();
-    }
-
-    /**
-     * Join paved banks across water-side notches, keeping the canonical mouth endpoints. A shortcut that would
-     * cross the water centre is rejected using the actual lattice geometry, irrespective of direction.
-     */
-    static void straighten(BoardScene scene, BoardScene.Tile water, Vector3[] shore) {
-        if (mode() == Mode.OFF || water.liquid().molten()) { return; }
-        int paved = 0;
-        for (int e = 0; e < 6; e++) {
-            if (concreteBank(scene, water, e)) { paved |= 1 << e; }
-        }
-        if (paved == 63) {
-            for (int e = 0; e < 6; e++) { chord(water, shore, e, 1); }
-            return;
-        }
-        for (int e = 0; e < 6; e++) {
-            if ((paved & 1 << e) == 0 || (paved & 1 << (e + 5) % 6) != 0) { continue; }
-            int count = 1;
-            while ((paved & 1 << (e + count) % 6) != 0) { count++; }
-            boolean fitted = false;
-            for (int k = 0; k < count; k++) {
-                BoardScene.Tile land = scene.tile(water.coords().translated(BoardGeometry.edgeDirection(e + k)));
-                fitted |= dockLinks(scene, land) >= 0 || of(scene).corners(land.coords()).stream()
-                      .anyMatch(shift -> shift.x != 0 || shift.y != 0);
-            }
-            if (fitted) { continue; }
-            if (!chord(water, shore, e, count)) {
-                // Keep an inlet open, with individual straight sections along its banks.
-                for (int k = 0; k < count; k++) { chord(water, shore, (e + k) % 6, 1); }
-            }
-        }
-    }
-
-    private static boolean chord(BoardScene.Tile water, Vector3[] shore, int first, int count) {
-        int perEdge = shore.length / 6;
-        Vector3 a = shore[first * perEdge], b = shore[(first + count) % 6 * perEdge];
-        float dx = b.x - a.x, dy = b.y - a.y;
-        float cx = BoardGeometry.centerX(water.coords()), cy = BoardGeometry.centerY(water.coords());
-        float clearance = (dx * (cy - a.y) - dy * (cx - a.x)) / (float) Math.hypot(dx, dy);
-        if (!(clearance >= (water.waterDepth() > 0 ? 12 : 4) * BoardGeometry.hexScale())) { return false; }
-        int samples = count * perEdge;
-        for (int i = 1; i < samples; i++) {
-            shore[(first * perEdge + i) % shore.length] = new Vector3(a).lerp(b, i / (float) samples);
-        }
-        return true;
+        return land != null && land.surface() == BoardScene.Surface.CONCRETE && !land.liquid().present()
+              && land.elevation() >= water.elevation();
     }
 
     private static float dockHalf(BoardScene.Tile land, float[] axis) {

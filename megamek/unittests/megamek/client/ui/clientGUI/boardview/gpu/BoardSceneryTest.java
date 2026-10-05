@@ -142,7 +142,7 @@ class BoardSceneryTest {
 
     @Test
     void surfaceSymbolsRemainDecalsWithoutSwitchingOffTheTerrainMaterial() {
-        for (String terrain : List.of("fluff:14:0", "fluff:50:1", "fluff:70:1", "fluff:91:1", "fluff:10:9", "fluff:100:1")) {
+        for (String terrain : List.of("fluff:14:0", "fluff:50:1", "fluff:70:1", "fluff:91:1", "fluff:10:9")) {
             var hex = new Hex(0, "pavement:1;" + terrain, "");
             var image = capture(hex);
             assertTrue(image.scenery().models().isEmpty(), terrain);

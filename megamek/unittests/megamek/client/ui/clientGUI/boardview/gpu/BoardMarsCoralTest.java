@@ -48,6 +48,14 @@ class BoardMarsCoralTest {
                 }
             }
         }
+        // Coherent stands intentionally repeat nearby forms. Check catalog reach across a wider woodland,
+        // rather than requiring all twelve forms in the nine positions above.
+        var woodland = new Hex(0, "woods:2;foliage_elev:2", theme);
+        for (int x = 0; x < 24; x++) {
+            for (int y = 0; y < 24; y++) {
+                cover(woodland, new Coords(x, y)).forEach(tree -> used.add(tree.asset()));
+            }
+        }
         assertEquals(Set.copyOf(BoardFeatures.MARS_CORALS), used);
     }
 

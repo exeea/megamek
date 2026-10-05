@@ -44,9 +44,11 @@ The transition band and rock relief share the talus-height field; fallen blocks
 use it too, so the deposit does not repeat a uniform horizontal band.
 
 Grass/dirt and snow use soil/cover mantles on small steps, exposing rock on taller
-faces. Desert, Mars and rock retain steeper geological profiles. Concrete stays constructed:
-up to two levels it is a cast wall; taller differences expose bedrock beneath the top
-slab. `BoardConcrete` also owns the fitted corners used by adjacent material contacts.
+faces. Desert, Mars and rock retain steeper geological profiles. Concrete uses the same
+slope/cliff selection: unmarked one- and two-level steps slope, while authored cliff
+exits and taller drops form cliffs. Its slopes are planar with sharp edges, and its
+vertical cliffs stay concrete for their full height. `BoardConcrete` owns the fitted
+corners shared by the top, neighbouring ground and shoreline.
 
 Dry grassy two-level transitions have two earthen faces separated by a shallow shoulder
 at the intermediate level. `BoardRelief.band` shapes it within the existing transition
@@ -63,9 +65,16 @@ The ImageGen reference and prompt are saved as `grass-bank-concept.png` and
 `grass-bank-concept-prompt.json` in `mm-data/tools/terrain-contact-sources`.
 
 Poured tops use six triangles and a rectangular cast wall panel uses two. A road cut,
-water contact or junction can require additional boundary vertices; bedrock beneath a
-tall slab remains a separate shaped surface. Higher natural terrain must not spread
-its material across lower concrete or subdivide the slab for that blend.
+water contact or junction can require additional boundary vertices. Concrete keeps
+its own material down to the foot, without a rock foundation or fallen rubble.
+Natural terrain must not spread its material across concrete or subdivide it for that blend.
+Concrete shores continue vertically to the water bed using the same fitted boundary
+as the land; no independent shoreline shortcut or sloping beach crosses that wall.
+The water hex owns the submerged panel; the land column stops at its rim so those
+faces cannot overlap and flicker.
+Both GPU views omit the old `quay_fluff` sprites (`fluff:100`, used by
+`Templates/SeaPort.board`). Projecting those painted walls onto the seabed leaves pale
+wedges outside the actual quay. Tactical columns and water use the same fitted corners.
 
 Natural tops stay exactly at their board level. An ordinary flat hex, including map
 edges, uses six triangles at every detail level. Slopes use six columns, cliffs twelve,
@@ -93,8 +102,9 @@ strip in Mines 1; the corrected fade keeps the shared endpoints and triangle cou
 
 Natural hex transitions reserve room on each side of a step for the slope or cliff
 and its foot. Roads, buildings and special artwork have additional boundary constraints.
-An explicit `cliff_top` exit on the higher hex selects the cliff profile and rock
-material even for a one- or two-level drop. Only the marked directions change;
+An explicit `cliff_top` exit on the higher hex selects the cliff profile even for a
+one- or two-level drop. Natural cliffs expose rock; constructed cliffs remain concrete.
+Only the marked directions change;
 the real rim and foot elevations stay fixed. The captured exit mask participates
 in terrain, support and picking cache invalidation, including neighbouring shores.
 Hex padding uses the same step-room machinery; it does not enlarge the lattice.

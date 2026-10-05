@@ -32,7 +32,7 @@ class BoardTropicalTest {
         var scene = BoardAridSurfaceTest.capture(board);
         assertEquals(32, scene.width());
         assertEquals(17, scene.height());
-        int tropical = 0;
+        int tropical = 0, palms = 0, broadleaf = 0;
         for (var tile : scene.tiles()) {
             var hex = board.getHex(tile.coords());
             if (!"tropical".equals(hex.getTheme())) { continue; }
@@ -46,7 +46,8 @@ class BoardTropicalTest {
             assertEquals(3, tile.features().stream().filter(f -> f.kind() == BoardScene.FeatureKind.TREE
                   && !f.asset().equals("foliage-jungle")).count());
             assertEquals(3, tile.features().stream().filter(f -> f.asset().equals("foliage-jungle")).count());
-            assertTrue(tile.features().stream().anyMatch(f -> f.asset().startsWith("palm")));
+            palms += (int) tile.features().stream().filter(f -> f.asset().startsWith("palm")).count();
+            broadleaf += (int) tile.features().stream().filter(f -> f.asset().startsWith("tree")).count();
             assertFalse(tile.features().stream().anyMatch(f -> f.asset().startsWith("pine")));
             assertEquals(1, hex.terrainLevel(Terrains.WOODS));
             assertEquals(2, hex.terrainLevel(Terrains.FOLIAGE_ELEV));
@@ -54,6 +55,7 @@ class BoardTropicalTest {
             assertFalse(hex.containsTerrain(Terrains.JUNGLE), "The theme must not invent jungle rules");
         }
         assertEquals(24, tropical);
+        assertTrue(palms > 0 && broadleaf > 0, "Natural stands retain the tropical mixture across the woodland");
     }
 
     @ParameterizedTest

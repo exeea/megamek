@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
@@ -74,7 +75,7 @@ class BoardTreeDistributionTest {
     }
 
     @Test
-    void groupingKeepsCoverHeightsFootprintsAndSpecialVegetation() {
+    void groupingKeepsCoverHeightsFootprintsAndClearGround() {
         var coords = new Coords(7, 4);
         for (int density = 1; density <= 3; density++) {
             var hex = new Hex(0, "woods:" + density + ";foliage_elev:2", "", coords);
@@ -83,14 +84,40 @@ class BoardTreeDistributionTest {
             assertTrue(trees.stream().allMatch(t -> t.height() >= 2 && t.height() <= 2.2f
                   && Math.hypot(t.x(), t.y()) <= 29), "Keep authoritative cover and the existing trunk footprint");
         }
-        for (String cover : List.of("", "woods:1;foliage_elev:1", "woods:1;foliage_elev:2;fluff:12")) {
-            var hex = new Hex(0, cover, "", coords);
-            assertEquals(capture(hex, coords, false), capture(hex, coords, true), "Clear ground, shrubs and orchard rows");
+        var clear = new Hex(0, "", "", coords);
+        assertTrue(capture(clear, coords, true).isEmpty());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = { "", "desert", "tropical", "snow", "lunar", "mars", "fungus" })
+    void distributionAppliesToEveryBiomeIncludingOrchardsAndLowCover(String theme) {
+        var coords = new Coords(7, 4);
+        for (int height : new int[] { 1, 2 }) {
+            for (String marker : List.of("", ";fluff:12")) {
+                var hex = new Hex(0, "woods:1;foliage_elev:" + height + marker + ";road:1:9", theme, coords);
+                var natural = capture(hex, coords, true);
+                var original = capture(hex, coords, false);
+                assertEquals(original.size(), natural.size(), "The flag changes distribution, not cover density");
+                assertNotEquals(original, natural, "No vegetation is exempt from the distribution flag");
+                assertEquals(natural, capture(hex, coords, true));
+                var road = BoardRoad.clearance(coords, hex, c -> null);
+                assertTrue(natural.stream().allMatch(f -> road.distance(f.x(), f.y()) >= BoardRoad.SHOULDER + 2));
+            }
         }
-        for (String theme : List.of("mars", "fungus")) {
-            var hex = new Hex(0, "woods:2;foliage_elev:2", theme, coords);
-            assertEquals(capture(hex, coords, false), capture(hex, coords, true), "Keep alien colony layouts");
+    }
+
+    @Test
+    void singleFamilyPalettesAlsoFormStands() {
+        List<String> forms = List.of("orchard-round", "orchard-spreading", "orchard-upright", "orchard-vase");
+        var coords = new Coords(5, 3);
+        var random = new Random(730);
+        var counts = new java.util.HashMap<String, Integer>();
+        for (int i = 0; i < 1000; i++) {
+            counts.merge(BoardTreeDistribution.species(forms, coords, 0, 0, random.nextLong()), 1, Integer::sum);
         }
+        assertEquals(4, counts.size(), "Keep occasional other forms");
+        assertTrue(counts.values().stream().mapToInt(Integer::intValue).max().orElseThrow() > 700,
+              "A single-family palette must still favor a local form");
     }
 
     @ParameterizedTest

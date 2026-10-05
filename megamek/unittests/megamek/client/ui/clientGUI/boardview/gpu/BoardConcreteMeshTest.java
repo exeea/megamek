@@ -2,22 +2,32 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.ToIntFunction;
 
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.Ray;
+import megamek.client.ui.clientGUI.boardview.BoardArtwork;
+import megamek.common.Hex;
 import megamek.common.board.Coords;
+import megamek.common.units.Terrain;
+import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardConcreteMeshTest {
-    @Test
-    void plainSlabsAndTwoLevelPanelsUseOnlyTheirCornersAtEveryDetail() {
-        BoardScene scene = scene(at -> at.getX() >= 8 ? 2 : 0, false);
+    @ParameterizedTest
+    @ValueSource(ints = { 1, 2, 3, 6 })
+    void markedCliffsStayPlanarForTheirFullHeightAtEveryDetail(int levels) {
+        BoardScene scene = scene(at -> at.getX() >= 8 ? levels : 0, false, 63);
         for (TerrainLod lod : TerrainLod.values()) {
             for (Coords at : List.of(new Coords(2, 2), new Coords(7, 4), new Coords(8, 4))) {
                 BoardSurface surface = new BoardSurface(scene, scene.tile(at), lod);
@@ -55,8 +65,8 @@ class BoardConcreteMeshTest {
                         assertEquals((center.z - p.z) / BoardRelief.metres(1), surface.relief.shade(p).foot(), .001f);
                     }
                 }
-                float edgeLength = BoardGeometry.corner(at, 2, 0).dst(BoardGeometry.corner(at, 2, 1));
-                assertEquals(2 * edgeLength * 2 * BoardGeometry.level(), wallArea, .01f, "Panels have no holes or overlaps");
+                float edgeLength = BoardGeometry.corner(at, levels, 0).dst(BoardGeometry.corner(at, levels, 1));
+                assertEquals(2 * edgeLength * levels * BoardGeometry.level(), wallArea, .01f, "Panels have no holes or overlaps");
             }
         }
     }
@@ -89,38 +99,30 @@ class BoardConcreteMeshTest {
         assertTrue(compared >= 4, "Exercise both shared edges, including their endpoints");
     }
 
-    @Test
-    void tallSlabsRetainBedrockAndEveryVertexOfTheirSharedUnderside() {
-        for (int levels : new int[] { 3, 6 }) {
+    @ParameterizedTest
+    @ValueSource(ints = { 1, 2 })
+    void unmarkedConcreteStepsHaveSharpPlanarSlopesAndMatchingPicking(int levels) {
+        BoardSculptTest.withTransitions(true, () -> {
             BoardScene scene = scene(at -> at.getX() >= 8 ? levels : 0, false);
             Coords at = new Coords(8, 4);
             for (TerrainLod lod : TerrainLod.values()) {
                 BoardSurface surface = new BoardSurface(scene, scene.tile(at), lod);
-                assertEquals(6, surface.faces.size(), "Tall bedrock must not subdivide the slab");
-                float underside = (levels - 1) * BoardGeometry.level();
                 var walls = surface.walls(scene, BoardGeometry.floor(scene));
-                List<BoardSurface.Face> slab = walls.stream()
-                      .filter(f -> Math.min(f.a().z, Math.min(f.b().z, f.c().z)) >= underside - .001f).toList();
-                List<BoardSurface.Face> rock = walls.stream().filter(f -> !slab.contains(f)).toList();
-                assertTrue(!slab.isEmpty() && !rock.isEmpty(), "The slab still rests on real bedrock");
-                assertEquals(4, slab.size(), "Two exposed rectangular slab panels: " + lod);
-                Set<Vector3> upper = vertices(slab), lower = vertices(rock);
-                for (Vector3 p : upper) {
-                    if (Math.abs(p.z - underside) < .001f) {
-                        assertTrue(lower.stream().anyMatch(q -> q.epsilonEquals(p, .001f)), "Slab and bedrock share the underside");
+                assertEquals(4, walls.size(), "Two planar slopes need two triangles each: " + lod);
+                for (var face : walls) {
+                    Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
+                    assertTrue(normal.z > .1f && normal.z < .95f, "The side slopes between the two levels");
+                    for (Vector3 p : List.of(face.a(), face.b(), face.c())) {
+                        assertTrue(surface.relief.shade(p).normal().epsilonEquals(normal, .0001f), "Slopes have sharp arrises");
                     }
+                    Vector3 middle = new Vector3(face.a()).add(face.b()).add(face.c()).scl(1f / 3);
+                    Ray ray = new Ray(new Vector3(middle.x, middle.y, 500), new Vector3(0, 0, -1));
+                    BoardGeometry.Hit hit = BoardGeometry.hit(scene, ray);
+                    assertNotNull(hit);
+                    assertEquals(middle.z, 500 - Math.sqrt(hit.distance()), .002, "Picking follows the drawn slope");
                 }
-                assertTrue(lower.stream().anyMatch(p -> {
-                    if (p.z <= 0 || p.z >= underside) { return false; }
-                    for (int e = 0; e < 6; e++) {
-                        Vector3 a = BoardGeometry.corner(at, 0, e), b = BoardGeometry.corner(at, 0, e + 1);
-                        if (Math.abs(new Vector3(b).sub(a).crs(new Vector3(p.x, p.y, 0).sub(a)).z)
-                              / a.dst(b) < .1f * BoardRelief.metres(1)) { return false; }
-                    }
-                    return true;
-                }), "Bedrock retains its displaced profile");
             }
-        }
+        });
     }
 
     private static Set<Vector3> vertices(List<BoardSurface.Face> faces) {
@@ -130,13 +132,19 @@ class BoardConcreteMeshTest {
     }
 
     private static BoardScene scene(ToIntFunction<Coords> elevation, boolean natural) {
+        return scene(elevation, natural, 0);
+    }
+
+    private static BoardScene scene(ToIntFunction<Coords> elevation, boolean natural, int cliffs) {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 11; x++) {
             for (int y = 0; y < 9; y++) {
                 Coords at = new Coords(x, y);
-                var family = natural && x >= 8 ? BoardScene.Surface.GRASS : BoardScene.Surface.CONCRETE;
-                tiles.add(new BoardScene.Tile(at, elevation.applyAsInt(at), -1, false, 0, family,
-                      null, null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
+                Hex hex = new Hex(elevation.applyAsInt(at));
+                if (!natural || x < 8) { hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1)); }
+                hex.addTerrain(new Terrain(Terrains.CLIFF_TOP, 1, true, cliffs));
+                var art = new BoardArtwork.HexImage(at, null, null, null, null, null, List.of(), Map.of(), null);
+                tiles.add(BoardScene.captureTile(hex, art, null, new BoardScene.PixelPool()));
             }
         }
         return new BoardScene(0, 11, 9, tiles, List.of(), List.of(), -1, "", List.of());

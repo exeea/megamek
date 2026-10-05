@@ -58,17 +58,19 @@ class GpuTerrainMaterialsSmokeTest {
                           "A two-level grassland step is an earth bank, a three-level one rock: bank "
                                 + ratio(bank) + ", cliff " + ratio(cliff));
 
-                    // Concrete: a two-level step is cast concrete down to its foot; from three levels a pale slab
-                    // one level thick caps darker bedrock.
-                    BoardScene pavedStep = step(BoardScene.Surface.CONCRETE, 2, true);
-                    BoardScene pavedCliff = step(BoardScene.Surface.CONCRETE, 3, true);
-                    float[] wall = sample(terrain, camera, pavedStep, facePoint(.25f), output, "concrete-wall");
-                    float[] slab = sample(terrain, camera, pavedCliff, facePoint(2.5f), output, "concrete-slab");
-                    float[] bedrock = sample(terrain, camera, pavedCliff, facePoint(1.1f), null, null);
-                    float rock = luminance(bedrock) * 1.2f;
-                    assertTrue(luminance(wall) > rock && luminance(slab) > rock,
-                          "Cast concrete is paler than the bedrock under a slab: wall " + ratio(wall) + ", slab "
-                                + ratio(slab) + ", bedrock " + ratio(bedrock));
+                    // The same point on a cast face keeps its material when the wall grows taller.
+                    BoardSculptTest.withTransitions(false, () -> {
+                        float[] low = sample(terrain, camera, step(BoardScene.Surface.CONCRETE, 2, true),
+                              facePoint(1.1f), output, "concrete-wall");
+                        for (int height : new int[] { 3, 6 }) {
+                            float[] tall = sample(terrain, camera, step(BoardScene.Surface.CONCRETE, height, true),
+                                  facePoint(1.1f), output, "concrete-wall-" + height);
+                            assertEquals(luminance(low), luminance(tall), .08f,
+                                  "The foot stays cast concrete: low " + ratio(low) + ", tall " + ratio(tall));
+                        }
+                    });
+                    sample(terrain, camera, step(BoardScene.Surface.CONCRETE, 2, true),
+                          facePoint(1), output, "concrete-slope");
 
                     // Rain darkens every exposed family except snow.
                     for (BoardScene.Surface family : BoardScene.Surface.values()) {

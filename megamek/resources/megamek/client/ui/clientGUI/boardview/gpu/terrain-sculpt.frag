@@ -108,8 +108,6 @@ vec3 bedTintFor(float f, float hardness) {
         return mix(vec3(.90, .86, .83), vec3(1.06, 1.03, 1.0), hardness);
     }
     if (abs(f - 1.0) < .5) return mix(vec3(.86, .80, .74), vec3(1.08, 1.04, 1.0), hardness);
-    // The bedrock under a concrete slab: darker than the pale concrete it carries.
-    if (abs(f - 4.0) < .5) return mix(vec3(.62, .61, .59), vec3(.80, .78, .75), hardness);
     return mix(vec3(.90, .91, .93), vec3(1.06, 1.04, 1.01), hardness);
 }
 
@@ -257,6 +255,8 @@ void main() {
                 albedo = mix(vec3(.27, .19, .13), vec3(.42, .30, .19), mulch) * mix(.8, 1.2, grit.a);
                 if (u_normalMaps > .5 && terrainNormalDetail > 0.0) normal = upNormal(planarNormal(u_sculptLayers.y + 1.0, p, u_sculptTiles.y * .6, fine).rgb, face);
             }
+        } else if (cliff && family(4.0)) {
+            concreteSlab(world, face, v_diffuseUV.x, v_diffuseUV.y, albedo, normal, occlusion, cavity);
         } else {
             // Walls and rocks: the two vertical projections, V running down the face, never mirrored from outside.
             // Where a rounded corner turns between them, the projection whose relief stands higher shows through.
@@ -281,27 +281,23 @@ void main() {
             float h = v_diffuseUV.x, d = v_diffuseUV.y;
             if (cliff) {
                 float drop = h + d;
-                float rock = v_color.g;
                 albedo *= bedTint(v_color.a);
                 // Caprock: the hard top bed of a cliff weathers paler; varnish streaks run down from under it.
                 float cap = 1.0 - smoothstep(.8, 2.2, d);
                 albedo = mix(albedo, albedo * vec3(1.08, 1.06, 1.03), cap * .6);
-                // Under a concrete slab the streaks run down from its underside.
-                float below = family(4.0) ? d - u_levelHeight / u_metre : d;
                 float streak = smoothstep(.55, .85, texture(u_rainNoise, vec2((world.x + world.y) / 7.0, world.z / 90.0)).r)
-                      * (1.0 - smoothstep(2.0, 14.0, below)) * smoothstep(.5, 1.5, below);
-                if (family(2.0) || family(3.0) || family(LUNAR_FAMILY) || family(4.0)) albedo = mix(albedo, albedo * vec3(.52, .45, .42), streak * .6);
+                      * (1.0 - smoothstep(2.0, 14.0, d)) * smoothstep(.5, 1.5, d);
+                if (family(2.0) || family(3.0) || family(LUNAR_FAMILY)) albedo = mix(albedo, albedo * vec3(.52, .45, .42), streak * .6);
 
                 // Talus: fallen rock on the apron at the foot, where the face lies back. A mantle's banks slump into
-                // soil and turf instead; concrete walls stand clean, and only the bedrock under a slab has talus.
+                // soil and turf instead.
                 float talus = min(.3 * drop, 6.0) * mix(.6, 1.0, fine);
                 float apron = (1.0 - smoothstep(talus * .55, talus, h)) * smoothstep(.2, .5, face.z);
-                apron = family(4.0) ? apron * rock : max(apron, 1.0 - smoothstep(.2, .6, h));
+                apron = max(apron, 1.0 - smoothstep(.2, .6, h));
                 if (apron > 0.0) {
                     float lying = smoothstep(.45, .8, face.z);
                     vec2 dx = vec2(world.y * sign(face.x), -world.z), dy = vec2(-world.x * sign(face.y), -world.z) + 3.1;
                     vec4 rubble = draped(u_sculptLayers.y, p, dx, dy, side, u_sculptTiles.y, fine, lying);
-                    if (family(4.0)) rubble.rgb *= bedTint(.5);
                     // A desert talus is the cliff's own sandstone, broken: redder and darker than the drifted sand.
                     if (family(2.0)) rubble.rgb = mix(rubble.rgb, wall.rgb * .92, .5);
                     float w = heightBlend(wall.a, rubble.a, apron);
@@ -310,9 +306,6 @@ void main() {
                         vec3 rubbleNormal = drapedNormal(u_sculptLayers.y + 1.0, p, dx, dy, face, side, u_sculptTiles.y, fine, lying);
                         normal = normalize(mix(normal, rubbleNormal, w));
                     }
-                }
-                if (family(4.0)) {
-                    concreteSlab(world, face, h, d, rock, albedo, normal, occlusion, cavity);
                 }
             }
             // Broad ledges collect the ground cover (sand, snow, moss on alpine rock); on the rock kit only snow and
@@ -333,10 +326,8 @@ void main() {
                 }
             }
             if (!cliff) {
-                // Each block its own shade; on alpine meadows a thin moss stain keeps the stone texture visible. Rubble below a
-                // concrete slab is the bedrock's.
+                // Each block its own shade; on alpine meadows a thin moss stain keeps the stone texture visible.
                 if (!wetRock) albedo *= mix(.78, 1.0, v_color.a);
-                if (family(4.0)) albedo *= bedTint(.5);
                 if (family(0.0)) {
                     float moss = smoothstep(.7, .94, face.z) * smoothstep(.6, .8, fine);
                     albedo *= mix(vec3(1.0), vec3(.9, .97, .82), moss * .22);
@@ -350,7 +341,9 @@ void main() {
         if (ground && !shore && family(4.0)) {
             occlusion = 1.0 - .3 * exp(-v_diffuseUV.y / 3.5);
         }
-        if (shore && !natural) {
+        if (shore && !natural && family(4.0) && face.z < .6) {
+            concreteSlab(world, face, v_diffuseUV.x, v_diffuseUV.y, albedo, normal, occlusion, cavity);
+        } else if (shore && !natural && !family(4.0)) {
             // A drowned wall stays sheer: exposed rock above, then a broken transition into the bed's sediment
             // near its foot. Its height above that bed is supplied by the same vertices that form the wall.
             float rock = rockiness(steps) * (1.0 - smoothstep(.2, .8, face.z));

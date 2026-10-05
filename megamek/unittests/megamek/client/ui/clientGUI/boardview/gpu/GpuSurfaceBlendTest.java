@@ -123,16 +123,14 @@ class GpuSurfaceBlendTest {
                   .flatMap(t -> List.of(t.a(), t.b(), t.c()).stream()).allMatch(p -> p.cover().concrete() == 1),
                   "The poured surface must retain its concrete cover");
             if (level == 0) { continue; }
-            float underside = BoardGeometry.groundZ(tile) - BoardGeometry.level();
-            var panels = surface.walls(scene, -BoardGeometry.level()).stream()
-                  .filter(f -> f.a().z >= underside && f.b().z >= underside && f.c().z >= underside).toList();
+            var panels = surface.walls(scene, -BoardGeometry.level());
             var walls = GpuSurfaceBlend.prepare(scene, tile, panels, p -> {
                 var shade = surface.relief.shade(p);
                 return new MeshPartBuilder.VertexInfo().setPos(p).setNor(shade.normal())
                       .setCol(1, shade.level(), .5f, shade.tint()).setUV(shade.rim(), shade.foot());
             }, GpuSurfaceBlend.spacing(lod));
-            assertEquals(12, walls.values().stream().mapToInt(List::size).sum(),
-                  "Six flat slab panels need two triangles each after material sampling");
+            assertEquals(panels.size(), walls.values().stream().mapToInt(List::size).sum(),
+                  "Material sampling preserves the complete concrete panels without subdivision");
         }
     }
 

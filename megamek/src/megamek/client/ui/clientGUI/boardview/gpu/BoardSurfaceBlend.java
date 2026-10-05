@@ -68,7 +68,7 @@ public final class BoardSurfaceBlend {
     static Cover solid(int family) { return SOLID[family]; }
 
     /** The classic tileset's ground_fluff transitions: desert, grass, tropical grass, Mars and Moon. */
-    static boolean hasTransition(Hex hex) { return transitionFamily(hex) >= 0; }
+    public static boolean hasTransition(Hex hex) { return transitionFamily(hex) >= 0; }
 
     /** Omit legacy paint only when native ground can actually display the captured material mixture. */
     public static boolean replacesTransition(Hex hex, Map<Integer, String> models, Set<Integer> blankTerrains) {
@@ -98,6 +98,8 @@ public final class BoardSurfaceBlend {
     /** Capture authored material proportions once; the renderer never reads or changes the source hex. */
     static Cover capture(Hex hex) {
         int base = BoardFeatures.surface(hex).ordinal(), target = transitionFamily(hex);
+        // Natural transitions describe the substrate; pavement covers it with concrete.
+        if (base == BoardScene.Surface.CONCRETE.ordinal()) { return solid(base); }
         // Sand is one gameplay surface treatment, independent of the theme beneath it. Snow/paving/magma
         // retain their existing precedence. Authored theme gradients must not dilute the SAND gameplay cue.
         if (hex.containsTerrain(Terrains.SAND) && base != BoardScene.Surface.SNOW.ordinal()
@@ -189,13 +191,8 @@ public final class BoardSurfaceBlend {
             return natural(b) && (b.elevation() >= a.elevation()
                   || BoardGeometry.tuning().stepsBetweenTops() && a.elevation() - b.elevation() == 1);
         }
-        // Only the rock beneath a tall concrete slab joins natural ground. A higher natural cliff must not
-        // spread its cover onto a lower paved surface or force that flat slab to subdivide for a material fade.
-        if (a == b || a.surface() != BoardScene.Surface.CONCRETE && b.surface() != BoardScene.Surface.CONCRETE) {
-            return true;
-        }
-        return a.surface() == BoardScene.Surface.CONCRETE && a.elevation() - b.elevation() >= 3
-              || b.surface() == BoardScene.Surface.CONCRETE && b.elevation() - a.elevation() >= 3;
+        // Constructed faces keep their material all the way to the adjoining ground.
+        return a == b || a.surface() != BoardScene.Surface.CONCRETE && b.surface() != BoardScene.Surface.CONCRETE;
     }
 
     static boolean cliffBoundary(BoardScene scene, BoardScene.Tile tile) { return boundary(scene, tile); }

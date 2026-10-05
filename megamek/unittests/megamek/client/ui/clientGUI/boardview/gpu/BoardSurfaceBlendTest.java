@@ -40,6 +40,7 @@ class BoardSurfaceBlendTest {
     @Test
     void everyFamilyMeetsTheReceivingNaturalGroundAtItsCliffFootInEveryDirection() {
         for (int family = 0; family < BoardSurfaceBlend.FAMILIES; family++) {
+            if (family == BoardScene.Surface.CONCRETE.ordinal()) { continue; }
             int upper = family, lower = (family + 3) % BoardScene.Surface.values().length;
             if (lower == BoardScene.Surface.CONCRETE.ordinal()) { lower = BoardScene.Surface.ROCK.ordinal(); }
             int receiving = lower;
@@ -77,25 +78,23 @@ class BoardSurfaceBlendTest {
     }
 
     @Test
-    void concreteKeepsItsLowSlabsAndBlendsOnlyBelowTallFoundations() {
+    void concreteKeepsItsMaterialAtEveryHeight() {
         for (int level = 0; level <= 4; level++) {
             int rise = level;
             var scene = scene(c -> tile(c, c.getY() < 4 ? BoardScene.Surface.CONCRETE.ordinal()
                   : BoardScene.Surface.DIRT.ordinal(), c.getY() < 4 ? rise : 0));
             var high = scene.tile(new Coords(4, 3));
             var low = scene.tile(new Coords(4, 4));
-            assertEquals(level >= 3, BoardSurfaceBlend.boundary(scene, high));
-            assertEquals(level >= 3, BoardSurfaceBlend.boundary(scene, low));
-            if (level < 3) {
-                var p = BoardGeometry.center(high.coords(), 0).lerp(BoardGeometry.center(low.coords(), 0), .5f);
-                assertEquals(BoardSurfaceBlend.solid(high.surface()), BoardSurfaceBlend.sampleCliff(scene, high, p.x, p.y, p.z));
-                assertEquals(BoardSurfaceBlend.solid(low.surface()), BoardSurfaceBlend.sample(scene, low, p.x, p.y, p.z));
-            }
+            assertFalse(BoardSurfaceBlend.boundary(scene, high));
+            assertFalse(BoardSurfaceBlend.boundary(scene, low));
+            var p = BoardGeometry.center(high.coords(), 0).lerp(BoardGeometry.center(low.coords(), 0), .5f);
+            assertEquals(BoardSurfaceBlend.solid(high.surface()), BoardSurfaceBlend.sampleCliff(scene, high, p.x, p.y, p.z));
+            assertEquals(BoardSurfaceBlend.solid(low.surface()), BoardSurfaceBlend.sample(scene, low, p.x, p.y, p.z));
         }
     }
 
     @Test
-    void tallConcreteContactFollowsTheFittedFootAtEveryDetail() {
+    void tallConcreteKeepsACleanMaterialEdgeAtItsFittedFootAtEveryDetail() {
         var scene = scene(c -> tile(c, c.getY() < 4 ? BoardScene.Surface.CONCRETE.ordinal()
               : BoardScene.Surface.DIRT.ordinal(), c.getY() < 4 ? 4 : 0));
         int checked = 0;
@@ -109,9 +108,9 @@ class BoardSurfaceBlendTest {
                     for (float t : new float[] { .1f, .35f, .6f, .9f }) {
                         var p = surface.relief.seam(edge, edge, t);
                         var cover = BoardSurfaceBlend.sample(scene, low, p.x, p.y, p.z);
-                        assertEquals(cover, BoardSurfaceBlend.sampleCliff(scene, high, p.x, p.y, p.z));
-                        assertTrue(cover.concrete() > .05f && cover.dirt() > .05f,
-                              "Both materials reach the fitted foot: " + p + " " + cover);
+                        assertEquals(BoardSurfaceBlend.solid(BoardScene.Surface.DIRT), cover);
+                        assertEquals(BoardSurfaceBlend.solid(BoardScene.Surface.CONCRETE),
+                              BoardSurfaceBlend.sampleCliff(scene, high, p.x, p.y, p.z), "Concrete reaches the foot");
                         checked++;
                     }
                 }

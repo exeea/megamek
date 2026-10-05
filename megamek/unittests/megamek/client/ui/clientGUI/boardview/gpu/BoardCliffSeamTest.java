@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.math.Vector3;
@@ -45,6 +46,61 @@ class BoardCliffSeamTest {
     @ValueSource(booleans = { false, true })
     void adjoiningCliffsShareTheirBoundaries(boolean transitions) {
         BoardSculptTest.withTransitions(transitions, BoardCliffSeamTest::checkBoundaries);
+    }
+
+    @Test
+    void seaportQuayPanelsStayClosedAndFaceTheWater() throws Exception {
+        var board = new Board();
+        board.load(new File("data/boards/Templates/SeaPort.board"));
+        BoardScene scene;
+        try (var fixture = GpuBoardFixture.create(board)) {
+            SwingUtilities.invokeAndWait(fixture.source::refresh);
+            scene = fixture.source.takeFrame().scene();
+        }
+        for (TerrainLod lod : TerrainLod.values()) {
+            Map<Segment, Integer> joined = new HashMap<>();
+            Map<Coords, List<BoardSurface.Face>> quays = new HashMap<>();
+            for (var tile : scene.tiles()) {
+                var surface = new BoardSurface(scene, tile, lod);
+                countEdges(joined, surface.faces);
+                var walls = surface.walls(scene, BoardGeometry.floor(scene));
+                countEdges(joined, walls);
+                if (!tile.liquid().present() && tile.surface() == BoardScene.Surface.CONCRETE) {
+                    for (var face : walls) {
+                        if (face.landEdge() < 0) { continue; }
+                        var water = scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(face.landEdge())));
+                        if (water == null || !water.liquid().present()) { continue; }
+                        for (var vertex : List.of(face.a(), face.b(), face.c())) {
+                            assertTrue(vertex.z >= water.elevation() * BoardGeometry.level() - .001f,
+                                  "Only the basin owns the submerged quay: " + tile.coords() + " beside " + water.coords()
+                                        + ", " + lod + ": " + vertex);
+                        }
+                    }
+                }
+                if (!tile.liquid().present()) { continue; }
+                List<BoardSurface.Face> panels = surface.faces.stream().filter(face -> face.finish() == BoardSurface.Finish.WALL
+                      && face.landEdge() >= 0 && BoardConcrete.concreteBank(scene, tile, face.landEdge())).toList();
+                if (!panels.isEmpty()) { quays.put(tile.coords(), panels); }
+                Vector3 center = BoardGeometry.center(tile.coords(), 0);
+                for (var face : panels) {
+                    for (var vertex : List.of(face.a(), face.b(), face.c())) {
+                        assertEquals(BoardRelief.Kind.SUBMERGED_CLIFF, surface.relief.shade(vertex).kind(),
+                              "The complete panel keeps underwater shading at " + tile.coords() + ", " + lod);
+                    }
+                    Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
+                    Vector3 towardWater = new Vector3(center).sub(face.a());
+                    towardWater.z = 0;
+                    assertTrue(normal.dot(towardWater) > 0,
+                          "Quay panel faces the water at " + tile.coords() + ", " + lod + ": " + face);
+                }
+            }
+            assertFalse(quays.isEmpty());
+            for (var quay : quays.entrySet()) {
+                Map<Segment, Integer> boundary = new HashMap<>();
+                countEdges(boundary, quay.getValue());
+                assertJoined(boundary, joined, "SeaPort quay " + quay.getKey() + ", " + lod);
+            }
+        }
     }
 
     @Test

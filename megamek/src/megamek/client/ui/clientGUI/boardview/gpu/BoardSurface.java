@@ -1939,7 +1939,6 @@ final class BoardSurface {
                 result[edge * SHORE_SEGMENTS + segment] = point;
             }
         }
-        BoardConcrete.straighten(scene, tile, result);
         return result;
     }
 
@@ -2909,7 +2908,9 @@ final class BoardSurface {
             }
             BoardSurface adjacent = neighbor == null ? null : neighbors.get(neighbor.coords());
             if (adjacent == null && neighbor != null) { adjacent = new BoardSurface(scene, neighbor, false, lod); }
-            boolean basin = crests[edge] != null && adjacent != null && adjacent.relief.waterfallFoot((edge + 3) % 6);
+            // The basin owns the submerged cliff. The upper column stops at its rim instead of drawing
+            // another wall over the same concrete quay or drowned cliff down to the seabed.
+            boolean basin = adjacent != null && adjacent.relief.wetCliff((edge + 3) % 6);
             // Compare both profiles at the same edge parameter, in each profile's own coordinate space.
             // Sampling a road at the shifted shore instead samples inside its ramp and leaves its wall short.
             Vector3 roofA = topographyCorner(edge), roofB = topographyCorner(edge + 1);

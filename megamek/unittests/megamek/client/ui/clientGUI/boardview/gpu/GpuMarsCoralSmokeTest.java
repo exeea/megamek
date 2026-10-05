@@ -57,7 +57,8 @@ class GpuMarsCoralSmokeTest {
         Set<String> plants = scene.tiles().stream().flatMap(t -> t.features().stream())
               .filter(f -> f.kind() == BoardScene.FeatureKind.TREE).map(BoardScene.Feature::asset)
               .collect(Collectors.toSet());
-        assertEquals(Set.copyOf(BoardFeatures.MARS_CORALS), plants);
+        assertTrue(plants.size() >= 6 && BoardFeatures.MARS_CORALS.containsAll(plants),
+              "Local stands mix eligible coral forms; they need not contain the entire catalog");
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "mars-corals");
         Files.createDirectories(output.toPath());
         var failure = new AtomicReference<Throwable>();

@@ -21,22 +21,25 @@ final class BoardTreeDistribution {
         if (fraction(individual) < .22f) {
             return trees.get(Math.floorMod(individual, trees.size()));
         }
-        String family = family(dominant);
         int count = 0;
         for (String tree : trees) {
-            if (family(tree).equals(family)) { count++; }
+            if (sameFamily(tree, dominant)) { count++; }
         }
+        // A single family (for example orchard forms) still groups its dominant form instead of bypassing stands.
+        if (count == trees.size()) { return dominant; }
         int choice = Math.floorMod(individual, count);
         for (String tree : trees) {
-            if (family(tree).equals(family) && choice-- == 0) { return tree; }
+            if (sameFamily(tree, dominant) && choice-- == 0) { return tree; }
         }
         return dominant;
     }
 
-    private static String family(String tree) {
-        if (tree.startsWith("tree-dead")) { return "dead"; }
-        int end = tree.indexOf('-');
-        return end < 0 ? tree : tree.substring(0, end);
+    private static boolean sameFamily(String a, String b) {
+        if (a.startsWith("tree-dead") != b.startsWith("tree-dead")) { return false; }
+        int endA = a.indexOf('-'), endB = b.indexOf('-');
+        if (endA < 0) { endA = a.length(); }
+        if (endB < 0) { endB = b.length(); }
+        return endA == endB && a.regionMatches(0, b, 0, endA);
     }
 
     /** Nearest jittered seed, shared across hex boundaries. No board-sized cache or neighbor capture. */

@@ -93,9 +93,11 @@ class GpuFoliageSmokeTest {
                         for (boolean natural : new boolean[] { false, true }) {
                             BoardScene forest = forest(natural);
                             terrain.update(forest);
-                            camera.fit(forest);
                             for (boolean overhead : new boolean[] { false, true }) {
+                                camera = new BoardCamera();
+                                camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                                 camera.setIsometric(!overhead);
+                                camera.fit(forest);
                                 GpuTerrainLodSmokeTest.settle(terrain, null, forest, camera);
                                 frame.render(terrain, camera, forest);
                                 GpuReviewFrame.save(new File(System.getProperty("megamek.gpu.screenshots"),
@@ -134,7 +136,8 @@ class GpuFoliageSmokeTest {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int index = 0; index < 25; index++) {
             List<BoardScene.Feature> tree = index < names.size()
-                  ? List.of(new BoardScene.Feature(names.get(index) + (snow ? "-snow" : ""), 0, 0, 20, 1.1f, 2, 0))
+                  ? List.of(new BoardScene.Feature(names.get(index) + (snow ? "-snow" : ""), 0, 0, 20, 1.1f, 2, 0,
+                        BoardScene.FeatureKind.TREE))
                   : List.of();
             tiles.add(new BoardScene.Tile(new Coords(index / 5, index % 5), 0, -1, false, 0,
                   snow ? BoardScene.Surface.SNOW : BoardScene.Surface.GRASS, pixels, null, null, tree, List.of()));
