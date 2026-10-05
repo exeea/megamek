@@ -16,6 +16,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -32,6 +33,7 @@ import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
+import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import megamek.common.util.ImageUtil;
 
@@ -43,7 +45,21 @@ public final class BoardArtwork implements AutoCloseable {
      */
     public record HexImage(Coords coords, BufferedImage terrain, BufferedImage normals, BufferedImage decals,
           BufferedImage decalsWithoutLimbs, BufferedImage tactical, List<BoardHexText> text,
-          Map<Integer, String> structureModels, BufferedImage tileset, BufferedImage bridge, Set<Integer> blankTerrains) {
+          Map<Integer, String> structureModels, BufferedImage tileset, BufferedImage bridge, Set<Integer> blankTerrains,
+          Scenery scenery, BufferedImage tilesetDecals, BufferedImage tilesetScenery) {
+        public HexImage(Coords coords, BufferedImage terrain, BufferedImage normals, BufferedImage decals,
+              BufferedImage decalsWithoutLimbs, BufferedImage tactical, List<BoardHexText> text,
+              Map<Integer, String> structureModels, BufferedImage tileset, BufferedImage bridge, Set<Integer> blankTerrains,
+              Scenery scenery) {
+            this(coords, terrain, normals, decals, decalsWithoutLimbs, tactical, text, structureModels, tileset, bridge,
+                  blankTerrains, scenery, null, null);
+        }
+        public HexImage(Coords coords, BufferedImage terrain, BufferedImage normals, BufferedImage decals,
+              BufferedImage decalsWithoutLimbs, BufferedImage tactical, List<BoardHexText> text,
+              Map<Integer, String> structureModels, BufferedImage tileset, BufferedImage bridge, Set<Integer> blankTerrains) {
+            this(coords, terrain, normals, decals, decalsWithoutLimbs, tactical, text, structureModels, tileset, bridge,
+                  blankTerrains, Scenery.EMPTY);
+        }
         public HexImage(Coords coords, BufferedImage terrain, BufferedImage normals, BufferedImage decals,
               BufferedImage decalsWithoutLimbs, BufferedImage tactical, List<BoardHexText> text,
               Map<Integer, String> structureModels, BufferedImage tileset) {
@@ -57,12 +73,22 @@ public final class BoardArtwork implements AutoCloseable {
         }
         public HexImage { blankTerrains = Set.copyOf(blankTerrains); }
     }
+    /** Selected cosmetic layers, captured on Swing; no terrain matching or game objects reach the GL thread. */
+    public record Scenery(List<String> models, Set<Integer> terrains, Set<Integer> modelTerrains, int cosmeticRoadExits) {
+        public static final Scenery EMPTY = new Scenery(List.of(), Set.of(), Set.of(), 0);
+        public Scenery {
+            models = List.copyOf(models);
+            terrains = Set.copyOf(terrains);
+            modelTerrains = Set.copyOf(modelTerrains);
+        }
+    }
     private record GroundArtwork(BufferedImage color, BufferedImage normal) { }
     private record DecalArtwork(BufferedImage full, BufferedImage withoutLimbs, BufferedImage tileset,
-          BufferedImage bridge) { }
+          BufferedImage bridge, Scenery scenery, BufferedImage tilesetDecals, BufferedImage tilesetScenery) { }
     private final Map<Coords, GroundArtwork> groundArtwork = new HashMap<>();
     private final Map<Coords, DecalArtwork> featureArtwork = new HashMap<>();
     private final Map<String, Image> groundNormals = new HashMap<>();
+    private final Map<String, Boolean> sceneryModels = new HashMap<>();
     private HexTileset gpuTileset;
     private Image hexMask;
     private static final Font LABEL_FONT = new Font(MMConstants.FONT_SANS_SERIF, Font.PLAIN, 10);
@@ -134,6 +160,7 @@ public final class BoardArtwork implements AutoCloseable {
         gpuTileset = replacement;
         clear();
         groundNormals.clear();
+        sceneryModels.clear();
         hexMask = null;
     }
 
@@ -145,12 +172,14 @@ public final class BoardArtwork implements AutoCloseable {
         Map<Integer, String> models = includeArtwork ? structureModels(hex) : Map.of();
         Set<Integer> blank = includeArtwork ? gpuTileset.blankTerrainTypes(hex) : Set.of();
         DecalArtwork decals = includeArtwork
-              ? captureDecals(board, coords, BoardSurfaceBlend.replacesTransition(hex, models, blank), models) : null;
+              ? captureDecals(board, coords, models, blank) : null;
         gpuTileset.clearHex(hex);
         return new HexImage(coords, ground == null ? null : ground.color(), ground == null ? null : ground.normal(),
               decals == null ? null : decals.full(), decals == null ? null : decals.withoutLimbs(), null,
               BoardHexText.capture(coords, hex, board, 1, LABEL_FONT, LABEL_FONT),
-              models, decals == null ? null : decals.tileset(), decals == null ? null : decals.bridge(), blank);
+              models, decals == null ? null : decals.tileset(), decals == null ? null : decals.bridge(), blank,
+              decals == null ? Scenery.EMPTY : decals.scenery(), decals == null ? null : decals.tilesetDecals(),
+              decals == null ? null : decals.tilesetScenery());
     }
 
     public void invalidate(Coords coords) {
@@ -358,31 +387,119 @@ public final class BoardArtwork implements AutoCloseable {
         });
     }
 
-    private DecalArtwork captureDecals(Board board, Coords coords, boolean nativeTransition,
-          Map<Integer, String> structures) {
+    private DecalArtwork captureDecals(Board board, Coords coords, Map<Integer, String> structures, Set<Integer> blank) {
         return featureArtwork.computeIfAbsent(coords, key -> {
             Hex flat = board.getHex(key).duplicate();
-            // Native material weights replace these overlays in the GPU view; keep the tileset and board intact.
-            if (nativeTransition) { flat.removeTerrain(Terrains.GROUND_FLUFF); }
-            BufferedImage tileset = drawTileset(board.getHex(key), structures);
             BufferedImage bridge = drawBridge(board.getHex(key));
-            if (BoardRough.variant(flat) != 0) { flat.removeTerrain(Terrains.FLUFF); }
             for (int terrain : GROUND_TERRAINS) {
                 flat.removeTerrain(terrain);
             }
             for (int terrain : MODEL_TERRAINS) {
                 flat.removeTerrain(terrain);
             }
+            for (int terrain : SCENERY_TERRAINS) { flat.removeTerrain(terrain); }
             BufferedImage full = drawDecals(flat);
+            BufferedImage tilesetDecals = new BufferedImage(HEX_W, HEX_H, BufferedImage.TYPE_INT_ARGB);
+            BufferedImage tilesetScenery = new BufferedImage(HEX_W, HEX_H, BufferedImage.TYPE_INT_ARGB);
+            Set<String> placedSources = new HashSet<>();
+            Scenery scenery = drawScenery(board.getHex(key), structures, blank, full, tilesetDecals, tilesetScenery, placedSources);
+            BufferedImage tileset = drawTileset(board.getHex(key), structures, placedSources);
             BufferedImage withoutLimbs = null;
             if (flat.containsAnyTerrainOf(Terrains.ARMS, Terrains.LEGS)) {
                 flat.removeTerrain(Terrains.ARMS);
                 flat.removeTerrain(Terrains.LEGS);
                 withoutLimbs = drawDecals(flat);
+                drawScenery(board.getHex(key), structures, blank, withoutLimbs, null, null, null);
             }
             // The GPU chooses the filtered image only after successfully loading the replacement mesh.
-            return new DecalArtwork(full, withoutLimbs, tileset, bridge);
+            return new DecalArtwork(full, withoutLimbs, tileset, bridge, scenery, tilesetDecals, tilesetScenery);
         });
+    }
+
+    /**
+     * Resolve from the original selected layers. Matching a hex after removing roads/woods/buildings loses composite
+     * rules (parked cars, port containers, gardens, etc.). A sibling scenery GLB replaces only that layer; flat
+     * artwork stays an alpha decal on the existing surface. Original images remain available to Tactical View.
+     */
+    private Scenery drawScenery(Hex hex, Map<Integer, String> structures, Set<Integer> blank,
+          BufferedImage decals, BufferedImage tilesetDecals, BufferedImage tilesetScenery, Set<String> placedSources) {
+        List<String> models = new ArrayList<>();
+        List<Image> paint = new ArrayList<>();
+        Set<Integer> covered = new HashSet<>(), modeled = new HashSet<>();
+        int cosmeticRoadExits = 0;
+        List<Image> layers = new ArrayList<>(gpuTileset.getSupers(hex));
+        layers.addAll(gpuTileset.getOrthographic(hex));
+        layers.add(gpuTileset.getBase(hex));
+        Graphics2D graphics = decals.createGraphics();
+        Graphics2D original = tilesetDecals == null ? null : tilesetDecals.createGraphics();
+        Graphics2D objects = tilesetScenery == null ? null : tilesetScenery.createGraphics();
+        try {
+            UIUtil.setHighQualityRendering(graphics);
+            if (original != null) { UIUtil.setHighQualityRendering(original); }
+            if (objects != null) { UIUtil.setHighQualityRendering(objects); }
+            for (Image layer : layers) {
+                Set<Integer> types = new HashSet<>();
+                for (int type : hex.getTerrainTypes()) {
+                    if (gpuTileset.imageHasTerrain(layer, type)) { types.add(type); }
+                }
+                boolean decoration = false;
+                for (int type : SCENERY_TERRAINS) { decoration |= types.contains(type); }
+                decoration |= types.contains(Terrains.ROAD) && hex.terrainLevel(Terrains.ROAD) == 2;
+                // Pavement variants belong to the ground; repainting them as scenery hides the native concrete.
+                if (!decoration) { continue; }
+                covered.addAll(types);
+                if (types.stream().anyMatch(structures::containsKey)
+                      || types.contains(Terrains.ROAD_FLUFF) && hex.terrainLevel(Terrains.ROAD_FLUFF) == 1
+                            && types.contains(Terrains.ROAD)
+                      || types.contains(Terrains.FLUFF) && (BoardRough.variant(hex) != 0
+                            || hex.terrainLevel(Terrains.FLUFF) == 12 && types.contains(Terrains.WOODS))) { continue; }
+                String source = gpuTileset.imageSource(layer).replace('\\', '/');
+                // Both GPU views use the fitted quay wall. Its old perspective sprite must not also be
+                // projected onto the seabed or baked into the Tactical View's ground artwork.
+                if (source.startsWith("Structured_Pavement/Fluff/quay_fluff")) {
+                    if (placedSources != null) { placedSources.add(source); }
+                    continue;
+                }
+                int extension = source.lastIndexOf('.');
+                String asset = extension < 0 ? "" : "scenery/" + source.substring(0, extension);
+                boolean model = !asset.isEmpty() && sceneryModels.computeIfAbsent(asset,
+                      name -> new File(Configuration.dataDir(), "models/board/" + name + ".glb").isFile());
+                // Keep ground paint in the tileset's authored order, below structured pavement edges.
+                if (original != null && (model || !types.contains(Terrains.GROUND_FLUFF))) {
+                    (model ? objects : original).drawImage(layer, 0, 0, null);
+                    placedSources.add(source);
+                }
+                if (model) {
+                    models.add(asset);
+                    modeled.addAll(types);
+                    // The selected parking sprite specifies a visual route even without gameplay ROAD terrain.
+                    // These are ordinary hex-direction bits consumed by the existing road engine.
+                    cosmeticRoadExits |= switch (source) {
+                        case "fluff/cars_1.gif", "fluff/cars_4.gif" -> 18;
+                        case "fluff/cars_2.gif", "fluff/cars_5.gif", "fluff/cars_7.gif" -> 36;
+                        case "fluff/cars_3.gif", "fluff/cars_6.gif", "fluff/cars_8.gif" -> 9;
+                        default -> 0; // The 2b/3b variants intentionally omit the road.
+                    };
+                } else if (types.contains(Terrains.ROAD) && hex.terrainLevel(Terrains.ROAD) >= 1
+                      && hex.terrainLevel(Terrains.ROAD) <= Terrains.ROAD_LVL_GRAVEL) {
+                    // Road-fluff surface variants use the same material, joins and relief as every other road.
+                } else {
+                    paint.add(layer);
+                }
+            }
+            Scenery scenery = new Scenery(models, covered, modeled, cosmeticRoadExits);
+            boolean nativeTransition = BoardSurfaceBlend.replacesTransition(hex, structures, blank, scenery);
+            for (Image layer : paint) {
+                if (!nativeTransition || !gpuTileset.imageHasTerrain(layer, Terrains.GROUND_FLUFF)) {
+                    graphics.drawImage(layer, 0, 0, null);
+                }
+            }
+            return scenery;
+        } finally {
+            graphics.dispose();
+            if (original != null) { original.dispose(); }
+            if (objects != null) { objects.dispose(); }
+        }
     }
 
     private BufferedImage drawDecals(Hex flat) {
@@ -401,14 +518,24 @@ public final class BoardArtwork implements AutoCloseable {
     /**
      * The hex's Saxarba art, as the Tactical View shows it: its base, its supers and its orthographic images, without
      * the incline and cliff edges, which the view's BoardRim shades from the levels instead, without the bridge, which
-     * it lays on the deck, and without the structures that stand there as 3D models.
+     * it lays on the deck, and without structures or scenery. Scenery retains its original selected artwork in a
+     * separate overlay, so both views can put it on roofs and lakebeds instead of baking it into the column top.
+     * Pavement uses its full variant: the shared concrete geometry supplies its outline in both GPU views.
+     * Water also fills its footprint: a painted shore on the lakebed would duplicate the column's bank wall.
      */
-    private BufferedImage drawTileset(Hex source, Map<Integer, String> structures) {
+    private BufferedImage drawTileset(Hex source, Map<Integer, String> structures, Set<String> placedSources) {
         Hex hex = source.duplicate();
         for (int terrain : DROP_TERRAINS) { hex.removeTerrain(terrain); }
         for (int terrain : BRIDGE_TERRAINS) { hex.removeTerrain(terrain); }
         for (int structure : structures.keySet()) {
             for (int terrain : STRUCTURE_TERRAINS.get(structure)) { hex.removeTerrain(terrain); }
+        }
+        if (hex.containsTerrain(Terrains.PAVEMENT)) {
+            hex.addTerrain(new Terrain(Terrains.PAVEMENT, hex.terrainLevel(Terrains.PAVEMENT), true, 63));
+            if (BoardSurfaceBlend.hasTransition(hex)) { hex.removeTerrain(Terrains.GROUND_FLUFF); }
+        }
+        if (hex.containsTerrain(Terrains.WATER)) {
+            hex.addTerrain(new Terrain(Terrains.WATER, hex.terrainLevel(Terrains.WATER), true, 63));
         }
         BufferedImage image = new BufferedImage(HEX_W, HEX_H, BufferedImage.TYPE_INT_ARGB);
         Graphics2D graphics = image.createGraphics();
@@ -416,9 +543,12 @@ public final class BoardArtwork implements AutoCloseable {
             UIUtil.setHighQualityRendering(graphics);
             Image base = gpuTileset.getBase(hex);
             drawBaseTerrain(hex, graphics, base, base, mask(), 1);
-            drawSupers(hex, graphics);
-            for (Image orthographic : gpuTileset.getOrthographic(hex)) {
-                if (orthographic != null) { graphics.drawImage(orthographic, 0, 0, null); }
+            List<Image> layers = new ArrayList<>(gpuTileset.getSupers(hex));
+            layers.addAll(gpuTileset.getOrthographic(hex));
+            for (Image layer : layers) {
+                if (layer != null && !placedSources.contains(gpuTileset.imageSource(layer).replace('\\', '/'))) {
+                    graphics.drawImage(layer, 0, 0, null);
+                }
             }
         } finally {
             graphics.dispose();
@@ -481,6 +611,10 @@ public final class BoardArtwork implements AutoCloseable {
           Terrains.SNOW, Terrains.TUNDRA, Terrains.MUD, Terrains.SWAMP, Terrains.ICE, Terrains.MAGMA, Terrains.FIELDS,
           Terrains.RUBBLE };
 
+    private static final int[] SCENERY_TERRAINS = { Terrains.FLUFF, Terrains.GROUND_FLUFF, Terrains.ROAD_FLUFF,
+          Terrains.WATER_FLUFF, Terrains.FORTIFIED, Terrains.GEYSER, Terrains.SOLARIS_ELEVATOR,
+          Terrains.INDUSTRIAL_ELEVATOR, Terrains.RUBBLE };
+
     /** These have geometry or tactical markings in 3D; their painted symbols would duplicate that presentation. */
     private static final int[] MODEL_TERRAINS = { Terrains.WATER, Terrains.WATER_FLUFF, Terrains.RAPIDS, Terrains.HAZARDOUS_LIQUID,
           Terrains.BUILDING, Terrains.BLDG_CF, Terrains.BLDG_ELEV, Terrains.BLDG_FLUFF, Terrains.BLDG_ARMOR,
@@ -494,6 +628,7 @@ public final class BoardArtwork implements AutoCloseable {
     public void close() {
         clear();
         groundNormals.clear();
+        sceneryModels.clear();
         if (gpuTileset != null) { gpuTileset.close(); gpuTileset = null; }
         hexMask = null;
     }

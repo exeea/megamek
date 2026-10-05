@@ -185,7 +185,7 @@ final class BoardGeometry {
 
     /** Liquid beds include a two-world-unit visual recess even without positive game water depth. */
     static float groundZ(BoardScene.Tile tile) {
-        return tile.elevation() * level() - (tile.liquid().present() ? Math.max(2 * hexScale(), tile.waterDepth() * level()) : 0);
+        return tile.groundLevel() * level() - (tile.liquid().present() ? Math.max(2 * hexScale(), tile.waterDepth() * level()) : 0);
     }
 
     static float waterZ(BoardScene.Tile tile) {

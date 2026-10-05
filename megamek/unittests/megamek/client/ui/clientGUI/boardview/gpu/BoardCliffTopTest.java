@@ -106,16 +106,18 @@ class BoardCliffTopTest {
     @ValueSource(booleans = { false, true })
     void mixedCliffsAndSlopesStayClosedAtEveryDetail(boolean transitions) {
         BoardSculptTest.withTransitions(transitions, () -> {
-            BoardScene scene = island(CENTER, 1, 56);
-            float floor = BoardGeometry.floor(scene);
-            for (TerrainLod lod : TerrainLod.values()) {
-                List<BoardSurface.Face> faces = new ArrayList<>();
-                for (var tile : scene.tiles()) {
-                    var surface = new BoardSurface(scene, tile, lod);
-                    faces.addAll(surface.faces);
-                    faces.addAll(surface.walls(scene, floor));
+            for (boolean concrete : new boolean[] { false, true }) {
+                BoardScene scene = island(CENTER, 1, 56, concrete);
+                float floor = BoardGeometry.floor(scene);
+                for (TerrainLod lod : TerrainLod.values()) {
+                    List<BoardSurface.Face> faces = new ArrayList<>();
+                    for (var tile : scene.tiles()) {
+                        var surface = new BoardSurface(scene, tile, lod);
+                        faces.addAll(surface.faces);
+                        faces.addAll(surface.walls(scene, floor));
+                    }
+                    BoardCliffSeamTest.assertClosed(faces, floor, "Authored cliffs " + lod + " concrete=" + concrete);
                 }
-                BoardCliffSeamTest.assertClosed(faces, floor, "Authored cliffs " + lod);
             }
         });
     }
@@ -155,11 +157,16 @@ class BoardCliffTopTest {
     }
 
     private static BoardScene island(Coords upper, int levels, int exits) {
+        return island(upper, levels, exits, false);
+    }
+
+    private static BoardScene island(Coords upper, int levels, int exits, boolean concrete) {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 7; x++) {
             for (int y = 0; y < 7; y++) {
                 Coords at = new Coords(x, y);
                 Hex hex = new Hex(at.equals(upper) ? levels : 0);
+                if (concrete) { hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1)); }
                 if (at.equals(upper)) { hex.addTerrain(new Terrain(Terrains.CLIFF_TOP, 1, true, exits)); }
                 tiles.add(capture(hex, at));
             }

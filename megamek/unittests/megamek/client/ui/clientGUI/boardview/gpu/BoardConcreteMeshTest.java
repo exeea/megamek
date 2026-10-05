@@ -2,22 +2,148 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.ToIntFunction;
 
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.Ray;
+import megamek.client.ui.clientGUI.boardview.BoardArtwork;
+import megamek.common.Hex;
 import megamek.common.board.Coords;
+import megamek.common.units.Terrain;
+import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardConcreteMeshTest {
     @Test
-    void plainSlabsAndTwoLevelPanelsUseOnlyTheirCornersAtEveryDetail() {
-        BoardScene scene = scene(at -> at.getX() >= 8 ? 2 : 0, false);
+    void commCenterBorderSlopeUsesItsActualFaceNormals() throws Exception {
+        BoardScene scene = commCenter();
+        for (TerrainLod lod : TerrainLod.values()) {
+            BoardSurface surface = new BoardSurface(scene, scene.tile(new Coords(0, 10)), lod);
+            var panels = surface.walls(scene, BoardGeometry.floor(scene)).stream()
+                  .filter(face -> face.landEdge() == 4).toList();
+            assertTrue(panels.size() >= 2, "The two-level concrete drop beside 0112 is present");
+            for (var face : panels) {
+                Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
+                for (var vertex : List.of(face.a(), face.b(), face.c())) {
+                    assertTrue(surface.relief.shade(vertex).normal().epsilonEquals(normal, .0001f),
+                          "A concrete face must not inherit its horizontal rim's texture projection: " + lod + " " + face);
+                }
+            }
+        }
+    }
+
+    @Test
+    void commCenterFittedSlopeKeepsAStraightRimAndConstantWidth() throws Exception {
+        BoardScene scene = commCenter();
+        assertEquals(BoardConcrete.Mode.EVERYWHERE, BoardConcrete.mode(), "Exercise the default fitted concrete outline");
+        BoardConcrete shape = BoardConcrete.of(scene);
+        Coords first = new Coords(1, 14), last = new Coords(2, 15);
+        Vector3 a = shape.corner(first, 3), direction = shape.corner(last, 5).sub(a).nor();
+        float rimDistance = Float.NaN;
+        for (Coords at : List.of(new Coords(0, 14), first, last)) {
+            BoardSurface surface = new BoardSurface(scene, scene.tile(at));
+            // At 0115 edge 3 is the board cut; the fitted slope begins at corner 4.
+            int start = at.getX() == 0 ? 4 : 3;
+            for (int k = start; k <= 5; k++) {
+                Vector3 rim = surface.relief.seam(k, k, 0).sub(a);
+                float distance = direction.x * rim.y - direction.y * rim.x;
+                if (Float.isNaN(rimDistance)) { rimDistance = distance; }
+                assertEquals(rimDistance, distance, .003f,
+                      "The rim above 0216 follows the fitted straight boundary: " + at + " corner " + k);
+            }
+            for (var face : surface.walls(scene, BoardGeometry.floor(scene))) {
+                if (face.landEdge() < start || face.landEdge() > 4) { continue; }
+                for (var vertex : List.of(face.a(), face.b(), face.c())) {
+                    Vector3 offset = new Vector3(vertex).sub(a);
+                    float distance = direction.x * offset.y - direction.y * offset.x;
+                    float expected = rimDistance * (2 * vertex.z / BoardGeometry.level() - 1);
+                    assertEquals(expected, distance, .003f,
+                          "The entire concrete slope remains planar across former hex edges at " + at);
+                }
+            }
+        }
+    }
+
+    private static BoardScene commCenter() throws Exception {
+        return BoardCliffSeamTest.capturedScene("GrassLands/16x17 Grasslands River CommCenter.board");
+    }
+
+    @Test
+    void commCenterCliffToSlopeJunctionsDoNotFoldUnderTheirRims() throws Exception {
+        BoardScene scene = commCenter();
+        for (Coords at : List.of(new Coords(6, 2), new Coords(8, 13))) {
+            for (TerrainLod lod : TerrainLod.values()) {
+                var surface = new BoardSurface(scene, scene.tile(at), lod);
+                var walls = surface.walls(scene, BoardGeometry.floor(scene));
+                assertTrue(walls.size() >= 2);
+                for (var face : walls) {
+                    Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
+                    assertTrue(normal.z >= -.001f,
+                          "The poured join must not fold back underneath the slab at " + at + ", " + lod + ": " + face);
+                }
+            }
+        }
+    }
+
+    @Test
+    void commCenterSlopeEndsInFlatCutFaces() throws Exception {
+        BoardScene scene = commCenter();
+        for (TerrainLod lod : TerrainLod.values()) {
+            var surface = new BoardSurface(scene, scene.tile(new Coords(0, 14)), lod);
+            List<Vector3> normals = new ArrayList<>();
+            for (var face : surface.walls(scene, BoardGeometry.floor(scene))) {
+                if (face.landEdge() != 3 || Math.min(face.a().z, Math.min(face.b().z, face.c().z)) < -.001f) { continue; }
+                Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
+                if (normals.stream().noneMatch(other -> other.epsilonEquals(normal, .001f))) { normals.add(normal); }
+            }
+            assertTrue(!normals.isEmpty() && normals.size() <= 2,
+                  "The slope ends in a flat cut or two sharp facets, without a fan of bent strips: " + lod + " " + normals);
+        }
+    }
+
+    @Test
+    void wallTextureFrameStaysFixedAcrossConcreteAndEarthCutFacets() throws Exception {
+        BoardScene scene = commCenter();
+        var encode = GpuTerrain.class.getDeclaredMethod("sculptVertex", Vector3.class, BoardRelief.Shade.class,
+              float.class, BoardSurface.class);
+        encode.setAccessible(true);
+        for (Coords at : List.of(new Coords(0, 10), new Coords(0, 2))) {
+            var surface = new BoardSurface(scene, scene.tile(at));
+            Map<Integer, Float> projections = new java.util.HashMap<>();
+            for (var face : surface.walls(scene, BoardGeometry.floor(scene))) {
+                if (scene.tile(at.translated(BoardGeometry.edgeDirection(face.landEdge()))) != null) { continue; }
+                for (Vector3 p : List.of(face.a(), face.b(), face.c())) {
+                    var shade = surface.relief.shade(p);
+                    assertTrue(Float.isFinite(shade.projection()), "The cut has an explicit texture frame");
+                    Float previous = projections.putIfAbsent(face.landEdge(), shade.projection());
+                    if (previous != null) { assertEquals(previous, shade.projection(), .0001f); }
+                    var vertex = (com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder.VertexInfo)
+                          encode.invoke(null, p, shade, Float.NaN, surface);
+                    int packed = Float.floatToRawIntBits(vertex.color.toFloatBits());
+                    float kind = (packed >>> 16 & 255) / 255f;
+                    assertTrue(kind >= .375f && kind < .475f, "The shader uses the fixed wall projection");
+                    float angle = ((packed >>> 24 & 255) / 254f - .5f) * 2 * (float) Math.PI;
+                    assertEquals(shade.projection(), angle, .05f, "The packed frame survives the GPU vertex format");
+                }
+            }
+            assertTrue(!projections.isEmpty());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = { 1, 2, 3, 6 })
+    void markedCliffsStayPlanarForTheirFullHeightAtEveryDetail(int levels) {
+        BoardScene scene = scene(at -> at.getX() >= 8 ? levels : 0, false, 63);
         for (TerrainLod lod : TerrainLod.values()) {
             for (Coords at : List.of(new Coords(2, 2), new Coords(7, 4), new Coords(8, 4))) {
                 BoardSurface surface = new BoardSurface(scene, scene.tile(at), lod);
@@ -55,8 +181,8 @@ class BoardConcreteMeshTest {
                         assertEquals((center.z - p.z) / BoardRelief.metres(1), surface.relief.shade(p).foot(), .001f);
                     }
                 }
-                float edgeLength = BoardGeometry.corner(at, 2, 0).dst(BoardGeometry.corner(at, 2, 1));
-                assertEquals(2 * edgeLength * 2 * BoardGeometry.level(), wallArea, .01f, "Panels have no holes or overlaps");
+                float edgeLength = BoardGeometry.corner(at, levels, 0).dst(BoardGeometry.corner(at, levels, 1));
+                assertEquals(2 * edgeLength * levels * BoardGeometry.level(), wallArea, .01f, "Panels have no holes or overlaps");
             }
         }
     }
@@ -89,38 +215,30 @@ class BoardConcreteMeshTest {
         assertTrue(compared >= 4, "Exercise both shared edges, including their endpoints");
     }
 
-    @Test
-    void tallSlabsRetainBedrockAndEveryVertexOfTheirSharedUnderside() {
-        for (int levels : new int[] { 3, 6 }) {
+    @ParameterizedTest
+    @ValueSource(ints = { 1, 2 })
+    void unmarkedConcreteStepsHaveSharpPlanarSlopesAndMatchingPicking(int levels) {
+        BoardSculptTest.withTransitions(true, () -> {
             BoardScene scene = scene(at -> at.getX() >= 8 ? levels : 0, false);
             Coords at = new Coords(8, 4);
             for (TerrainLod lod : TerrainLod.values()) {
                 BoardSurface surface = new BoardSurface(scene, scene.tile(at), lod);
-                assertEquals(6, surface.faces.size(), "Tall bedrock must not subdivide the slab");
-                float underside = (levels - 1) * BoardGeometry.level();
                 var walls = surface.walls(scene, BoardGeometry.floor(scene));
-                List<BoardSurface.Face> slab = walls.stream()
-                      .filter(f -> Math.min(f.a().z, Math.min(f.b().z, f.c().z)) >= underside - .001f).toList();
-                List<BoardSurface.Face> rock = walls.stream().filter(f -> !slab.contains(f)).toList();
-                assertTrue(!slab.isEmpty() && !rock.isEmpty(), "The slab still rests on real bedrock");
-                assertEquals(4, slab.size(), "Two exposed rectangular slab panels: " + lod);
-                Set<Vector3> upper = vertices(slab), lower = vertices(rock);
-                for (Vector3 p : upper) {
-                    if (Math.abs(p.z - underside) < .001f) {
-                        assertTrue(lower.stream().anyMatch(q -> q.epsilonEquals(p, .001f)), "Slab and bedrock share the underside");
+                assertEquals(4, walls.size(), "Two planar slopes need two triangles each: " + lod);
+                for (var face : walls) {
+                    Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
+                    assertTrue(normal.z > .1f && normal.z < .95f, "The side slopes between the two levels");
+                    for (Vector3 p : List.of(face.a(), face.b(), face.c())) {
+                        assertTrue(surface.relief.shade(p).normal().epsilonEquals(normal, .0001f), "Slopes have sharp arrises");
                     }
+                    Vector3 middle = new Vector3(face.a()).add(face.b()).add(face.c()).scl(1f / 3);
+                    Ray ray = new Ray(new Vector3(middle.x, middle.y, 500), new Vector3(0, 0, -1));
+                    BoardGeometry.Hit hit = BoardGeometry.hit(scene, ray);
+                    assertNotNull(hit);
+                    assertEquals(middle.z, 500 - Math.sqrt(hit.distance()), .002, "Picking follows the drawn slope");
                 }
-                assertTrue(lower.stream().anyMatch(p -> {
-                    if (p.z <= 0 || p.z >= underside) { return false; }
-                    for (int e = 0; e < 6; e++) {
-                        Vector3 a = BoardGeometry.corner(at, 0, e), b = BoardGeometry.corner(at, 0, e + 1);
-                        if (Math.abs(new Vector3(b).sub(a).crs(new Vector3(p.x, p.y, 0).sub(a)).z)
-                              / a.dst(b) < .1f * BoardRelief.metres(1)) { return false; }
-                    }
-                    return true;
-                }), "Bedrock retains its displaced profile");
             }
-        }
+        });
     }
 
     private static Set<Vector3> vertices(List<BoardSurface.Face> faces) {
@@ -129,14 +247,33 @@ class BoardConcreteMeshTest {
         return vertices;
     }
 
+    @Test
+    void concreteSlopesStayClosedAtTheBoardCut() {
+        BoardScene scene = scene(at -> at.getX() >= 8 ? 1 : 0, false);
+        float floor = BoardGeometry.floor(scene);
+        List<BoardSurface.Face> complete = new ArrayList<>();
+        for (var tile : scene.tiles()) {
+            var surface = new BoardSurface(scene, tile);
+            complete.addAll(surface.faces);
+            complete.addAll(surface.walls(scene, floor));
+        }
+        BoardCliffSeamTest.assertClosed(complete, floor, "Concrete slope at the board cut");
+    }
+
     private static BoardScene scene(ToIntFunction<Coords> elevation, boolean natural) {
+        return scene(elevation, natural, 0);
+    }
+
+    private static BoardScene scene(ToIntFunction<Coords> elevation, boolean natural, int cliffs) {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 11; x++) {
             for (int y = 0; y < 9; y++) {
                 Coords at = new Coords(x, y);
-                var family = natural && x >= 8 ? BoardScene.Surface.GRASS : BoardScene.Surface.CONCRETE;
-                tiles.add(new BoardScene.Tile(at, elevation.applyAsInt(at), -1, false, 0, family,
-                      null, null, null, null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
+                Hex hex = new Hex(elevation.applyAsInt(at));
+                if (!natural || x < 8) { hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1)); }
+                hex.addTerrain(new Terrain(Terrains.CLIFF_TOP, 1, true, cliffs));
+                var art = new BoardArtwork.HexImage(at, null, null, null, null, null, List.of(), Map.of(), null);
+                tiles.add(BoardScene.captureTile(hex, art, null, new BoardScene.PixelPool()));
             }
         }
         return new BoardScene(0, 11, 9, tiles, List.of(), List.of(), -1, "", List.of());

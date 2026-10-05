@@ -4,22 +4,23 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.util.Map;
 import java.util.Set;
 
+import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrains;
 
 /** Surface cover at a world position. Rendering and grass placement query the same immutable board snapshot. */
 public final class BoardSurfaceBlend {
-    static final float WIDTH_METRES = 4.5f;
+    static final float WIDTH_METRES = 7f;
     static final float FOOT_METRES = .9f;
     // Render-only covers derived from BoardLiquid; the board's terrain families and rules remain unchanged.
     static final int CRUST = BoardScene.Surface.values().length, BANK = CRUST + 1, FAMILIES = BANK + 1;
 
     record Cover(float grass, float dirt, float sand, float rock, float concrete, float snow, float lunar,
-          float crust, float bank, float interpolation) {
+          float fungus, float desert, float mars, float volcano, float tropical, float crust, float bank, float interpolation) {
         Cover(float grass, float dirt, float sand, float rock, float concrete, float snow, float lunar,
-              float crust, float bank) {
-            this(grass, dirt, sand, rock, concrete, snow, lunar, crust, bank, 0);
+              float fungus, float desert, float mars, float volcano, float tropical, float crust, float bank) {
+            this(grass, dirt, sand, rock, concrete, snow, lunar, fungus, desert, mars, volcano, tropical, crust, bank, 0);
         }
         float weight(BoardScene.Surface family) { return weight(family.ordinal()); }
 
@@ -32,8 +33,13 @@ public final class BoardSurfaceBlend {
                 case 4 -> concrete;
                 case 5 -> snow;
                 case 6 -> lunar;
-                case 7 -> crust;
-                case 8 -> bank;
+                case 7 -> fungus;
+                case 8 -> desert;
+                case 9 -> mars;
+                case 10 -> volcano;
+                case 11 -> tropical;
+                case 12 -> crust;
+                case 13 -> bank;
                 default -> throw new IllegalArgumentException("Surface cover " + family);
             };
         }
@@ -47,11 +53,14 @@ public final class BoardSurfaceBlend {
         }
     }
 
-    private static final Cover[] SOLID = {
-          new Cover(1, 0, 0, 0, 0, 0, 0, 0, 0), new Cover(0, 1, 0, 0, 0, 0, 0, 0, 0), new Cover(0, 0, 1, 0, 0, 0, 0, 0, 0),
-          new Cover(0, 0, 0, 1, 0, 0, 0, 0, 0), new Cover(0, 0, 0, 0, 1, 0, 0, 0, 0), new Cover(0, 0, 0, 0, 0, 1, 0, 0, 0),
-          new Cover(0, 0, 0, 0, 0, 0, 1, 0, 0), new Cover(0, 0, 0, 0, 0, 0, 0, 1, 0), new Cover(0, 0, 0, 0, 0, 0, 0, 0, 1)
-    };
+    private static final Cover[] SOLID = new Cover[FAMILIES];
+    static {
+        for (int family = 0; family < FAMILIES; family++) {
+            float[] weights = new float[FAMILIES];
+            weights[family] = 1;
+            SOLID[family] = cover(weights, 1, 0);
+        }
+    }
 
     private BoardSurfaceBlend() { }
 
@@ -59,11 +68,16 @@ public final class BoardSurfaceBlend {
     static Cover solid(int family) { return SOLID[family]; }
 
     /** The classic tileset's ground_fluff transitions: desert, grass, tropical grass, Mars and Moon. */
-    static boolean hasTransition(Hex hex) { return transitionFamily(hex) >= 0; }
+    public static boolean hasTransition(Hex hex) { return transitionFamily(hex) >= 0; }
 
     /** Omit legacy paint only when native ground can actually display the captured material mixture. */
     public static boolean replacesTransition(Hex hex, Map<Integer, String> models, Set<Integer> blankTerrains) {
         return hasTransition(hex) && BoardFeatures.detailedGround(hex, models, blankTerrains);
+    }
+
+    public static boolean replacesTransition(Hex hex, Map<Integer, String> models, Set<Integer> blankTerrains,
+          BoardArtwork.Scenery scenery) {
+        return hasTransition(hex) && BoardFeatures.detailedGround(hex, models, blankTerrains, scenery);
     }
 
     static int transitionFamily(Hex hex) {
@@ -72,9 +86,10 @@ public final class BoardSurfaceBlend {
             return -1;
         }
         return switch (terrain.getLevel()) {
-            case 1 -> BoardScene.Surface.SAND.ordinal();
-            case 2, 3 -> BoardScene.Surface.GRASS.ordinal();
-            case 4 -> BoardScene.Surface.DIRT.ordinal();
+            case 1 -> BoardScene.Surface.DESERT.ordinal();
+            case 2 -> BoardScene.Surface.GRASS.ordinal();
+            case 3 -> BoardScene.Surface.TROPICAL.ordinal();
+            case 4 -> BoardScene.Surface.MARS.ordinal();
             case 5 -> BoardScene.Surface.LUNAR.ordinal();
             default -> -1;
         };
@@ -83,6 +98,19 @@ public final class BoardSurfaceBlend {
     /** Capture authored material proportions once; the renderer never reads or changes the source hex. */
     static Cover capture(Hex hex) {
         int base = BoardFeatures.surface(hex).ordinal(), target = transitionFamily(hex);
+        // Natural transitions describe the substrate; pavement covers it with concrete.
+        if (base == BoardScene.Surface.CONCRETE.ordinal()) { return solid(base); }
+        // Sand is one gameplay surface treatment, independent of the theme beneath it. Snow/paving/magma
+        // retain their existing precedence. Authored theme gradients must not dilute the SAND gameplay cue.
+        if (hex.containsTerrain(Terrains.SAND) && base != BoardScene.Surface.SNOW.ordinal()
+              && base != BoardScene.Surface.CONCRETE.ordinal() && !hex.containsTerrain(Terrains.MAGMA)) {
+            // Retain the supporting material in the palette. Small wind-scoured windows are resolved in the
+            // shader, so a uniform sand flat still needs only six triangles rather than a mesh for every patch.
+            float[] weights = new float[FAMILIES];
+            weights[base] = .06f;
+            weights[BoardScene.Surface.SAND.ordinal()] += .94f;
+            return cover(weights, 1, 0);
+        }
         if (target < 0 || target == base) { return solid(base); }
         // Five evenly spaced interior points leave some of both materials at every authored strength.
         float amount = hex.getTerrain(Terrains.GROUND_FLUFF).getExits() / 6f;
@@ -96,27 +124,59 @@ public final class BoardSurfaceBlend {
         return tile.liquid().volcanic() ? solid(family(tile)) : tile.groundCover();
     }
 
+    /** Same metre-based field as sandExposure in terrain-hexes.glsl. Sand stays dominant between sparse openings. */
+    static float sandExposure(float xMetres, float yMetres) {
+        float field = .75f * BoardRelief.noise(xMetres / 6, yMetres / 6)
+              + .25f * BoardRelief.noise(xMetres / 1.7f + 19, yMetres / 1.7f - 7);
+        return BoardRelief.smooth((field - .60f) / .14f);
+    }
+
+    /** Vegetation uses the same exposed substrate windows as the material, including sand reaching a neighbour. */
+    static float grass(BoardScene.Tile tile, Cover cover, float x, float y) {
+        if (tile.surface() != BoardScene.Surface.GRASS || cover.sand() <= 0) { return cover.grass(); }
+        float metre = BoardRelief.metres(1);
+        return cover.grass() + cover.sand() * sandExposure(x / metre, y / metre);
+    }
+
+    /** Loose surface deposits do not turn the supporting cliff into sandstone or erase the theme's geology. */
+    private static Cover cover(BoardScene.Tile tile, float z) {
+        Cover top = cover(tile);
+        if (top.sand() == 0 || tile.surface() == BoardScene.Surface.SAND || tile.liquid().present()) { return top; }
+        float exposed = BoardRelief.smooth((BoardGeometry.groundZ(tile) - z) / BoardRelief.metres(1.2f));
+        if (exposed <= 0) { return top; }
+        float[] weights = new float[FAMILIES];
+        for (int family = 0; family < FAMILIES; family++) { weights[family] = top.weight(family); }
+        float mineral = top.sand() * exposed;
+        weights[BoardScene.Surface.SAND.ordinal()] -= mineral;
+        weights[tile.surface().ordinal()] += mineral;
+        return cover(weights, 1, top.interpolation());
+    }
+
     static int family(BoardScene.Tile tile) {
         return tile.liquid().volcanic() ? tile.liquid().molten() ? BANK : CRUST : tile.surface().ordinal();
     }
 
     static boolean natural(BoardScene.Tile tile) {
-        return tile != null && tile.detailedGround() && !tile.liquid().present() && !tile.liquid().volcanic() && !tile.frozen()
+        return tile != null && !tile.ultraSublevel() && tile.detailedGround()
+              && !tile.liquid().present() && !tile.liquid().volcanic() && !tile.frozen()
               && (tile.roadExits() == 0 || BoardRoad.rendered(tile)) && tile.surface() != BoardScene.Surface.CONCRETE
               && tile.features().stream().noneMatch(feature -> feature.kind() == BoardScene.FeatureKind.BUILDING);
     }
 
     private static boolean blendable(BoardScene.Tile tile) {
-        return tile != null && tile.detailedGround() && (!tile.liquid().present() || tile.liquid().volcanic())
+        return tile != null && !tile.ultraSublevel() && tile.detailedGround()
+              && (!tile.liquid().present() || tile.liquid().volcanic())
               && !tile.frozen() && (tile.roadExits() == 0 || BoardRoad.rendered(tile))
               && tile.features().stream().noneMatch(feature -> feature.kind() == BoardScene.FeatureKind.BUILDING);
     }
 
     /** Uniform interiors retain the ordinary family material and incur no extra maps or vertex attributes. */
     static boolean boundary(BoardScene scene, BoardScene.Tile tile) {
-        if (!blendable(tile)) { return false; }
+        if (tile == null || tile.ultraSublevel() || !tile.detailedGround()) { return false; }
         Cover own = cover(tile);
+        // A building or ice sheet blocks neighbouring cover, but cannot erase its own authored ground treatment.
         if (!own.equals(solid(family(tile)))) { return true; }
+        if (!blendable(tile)) { return false; }
         for (int direction = 0; direction < 6; direction++) {
             var next = scene.tile(tile.coords().translated(direction));
             if (contact(tile, next) && !cover(next).equals(own)) { return true; }
@@ -127,25 +187,21 @@ public final class BoardSurfaceBlend {
     private static boolean contact(BoardScene.Tile a, BoardScene.Tile b) {
         if (!blendable(b)) { return false; }
         if (a.liquid().present() && !a.liquid().volcanic()) {
-            return natural(b) && (a.elevation() == b.elevation()
-                  || BoardGeometry.tuning().stepsBetweenTops() && Math.abs(a.elevation() - b.elevation()) == 1);
+            // The bank includes the submerged continuation of higher land, including tall cliffs.
+            return natural(b) && (b.elevation() >= a.elevation()
+                  || BoardGeometry.tuning().stepsBetweenTops() && a.elevation() - b.elevation() == 1);
         }
-        // Only the rock beneath a tall concrete slab joins natural ground. A higher natural cliff must not
-        // spread its cover onto a lower paved surface or force that flat slab to subdivide for a material fade.
-        if (a == b || a.surface() != BoardScene.Surface.CONCRETE && b.surface() != BoardScene.Surface.CONCRETE) {
-            return true;
-        }
-        return a.surface() == BoardScene.Surface.CONCRETE && a.elevation() - b.elevation() >= 3
-              || b.surface() == BoardScene.Surface.CONCRETE && b.elevation() - a.elevation() >= 3;
+        // Constructed faces keep their material all the way to the adjoining ground.
+        return a == b || a.surface() != BoardScene.Surface.CONCRETE && b.surface() != BoardScene.Surface.CONCRETE;
     }
 
     static boolean cliffBoundary(BoardScene scene, BoardScene.Tile tile) { return boundary(scene, tile); }
 
     /** Cliff and ground agree at the foot. The lower cover reaches only a short way up the exposed column. */
     static Cover sampleCliff(BoardScene scene, BoardScene.Tile owner, float x, float y, float z) {
-        if (!blendable(owner)) { return solid(family(owner)); }
+        if (!blendable(owner)) { return cover(owner, z); }
         var at = BoardGeometry.tile(scene, x, y);
-        if (at == null) { return cover(owner); }
+        if (at == null) { return cover(owner, z); }
         if (!at.liquid().present() || at.liquid().volcanic()) { return sample(scene, owner, x, y, z); }
         BoardScene.Tile column = null;
         float nearest = Float.POSITIVE_INFINITY;
@@ -155,7 +211,7 @@ public final class BoardSurfaceBlend {
             float distance = distance(scene, candidate.coords(), x, y);
             if (distance < nearest) { column = candidate; nearest = distance; }
         }
-        return column == null ? cover(owner) : sampleAt(scene, column, cover(column), x, y, z, true);
+        return column == null ? cover(owner, z) : sampleAt(scene, column, cover(column, z), x, y, z, true);
     }
 
     private static boolean reaches(BoardScene.Tile tile, float z) {
@@ -164,14 +220,37 @@ public final class BoardSurfaceBlend {
 
     /** The footprint, rather than the emitting mesh, owns the query; shared positions therefore agree. */
     static Cover sample(BoardScene scene, BoardScene.Tile owner, float x, float y, float z) {
-        if (!blendable(owner)) { return solid(family(owner)); }
+        if (!blendable(owner) && !water(owner)) { return cover(owner, z); }
         var at = BoardGeometry.tile(scene, x, y);
-        if (at == null || !blendable(at) && (!at.liquid().present() || at.frozen())) { return cover(owner); }
+        if (at == null || !blendable(at) && (!at.liquid().present() || at.frozen())) { return cover(owner, z); }
         if ((!at.liquid().present() || at.liquid().volcanic() || owner.surface() == BoardScene.Surface.CONCRETE)
               && !contact(owner, at)) {
-            return cover(owner);
+            return cover(owner, z);
         }
-        return sampleAt(scene, at, cover(owner), x, y, z, false);
+        if (water(at)) { return sampleWater(scene, at, x, y, z); }
+        return sampleAt(scene, at, cover(owner, z), x, y, z, false);
+    }
+
+    private static boolean water(BoardScene.Tile tile) {
+        return tile != null && tile.liquid().present() && !tile.liquid().volcanic() && !tile.frozen();
+    }
+
+    /** Water hexes share their bank/bed fields across their boundaries, independently of triangle ownership. */
+    private static Cover sampleWater(BoardScene scene, BoardScene.Tile at, float x, float y, float z) {
+        float[] weights = new float[FAMILIES];
+        float total = 0, interpolation = 0;
+        float width = BoardRelief.metres(WIDTH_METRES);
+        for (int direction = -1; direction < 6; direction++) {
+            var tile = direction < 0 ? at : scene.tile(at.coords().translated(direction));
+            if (!water(tile) || tile.elevation() != at.elevation()) { continue; }
+            float amount = 1 - BoardRelief.smooth((distance(scene, tile.coords(), x, y) + width) / (2 * width));
+            if (amount <= .0001f) { continue; }
+            var cover = sampleAt(scene, tile, cover(tile, z), x, y, z, false);
+            for (int family = 0; family < FAMILIES; family++) { weights[family] += amount * cover.weight(family); }
+            interpolation += amount * cover.interpolation();
+            total += amount;
+        }
+        return total > .0001f ? cover(weights, total, interpolation / total) : cover(at, z);
     }
 
     private static Cover sampleAt(BoardScene scene, BoardScene.Tile at, Cover fallback,
@@ -226,6 +305,8 @@ public final class BoardSurfaceBlend {
             float strength = .9f + .7f * BoardRelief.smooth(below / 3);
             if (distance >= contactWidth * (1 + strength * .5f)) { continue; }
             int family = family(tile);
+            // Volcanic contacts keep their established noise when a new ordinary family is appended.
+            if (tile.liquid().volcanic()) { family = tile.liquid().molten() ? 12 : 11; }
             // Family-anchored patches continue through neighbouring hexes of that family.
             float px = mx + below * .65f, py = my + below * .4f;
             float patch = .7f * BoardRelief.noise(px / 5.3f + family * 19.7f, py / 5.3f - family * 11.3f)
@@ -235,14 +316,17 @@ public final class BoardSurfaceBlend {
             // A column's material reaches the foot and nearby talus. The receiving ground creeps a bounded
             // distance up that column, then disappears; it cannot paint the whole cliff or the upper plateau.
             if (water) {
-                float dz = Math.abs(Math.max(z, BoardGeometry.groundZ(at)) - BoardGeometry.groundZ(tile)) / BoardGeometry.level();
+                // Land continues down into the basin; only cover from below this height is attenuated.
+                // The water surface is the reference, not its recessed bed or an absolute height difference.
+                float dz = Math.max(0, Math.max(z, at.elevation() * BoardGeometry.level()) - BoardGeometry.groundZ(tile))
+                      / BoardGeometry.level();
                 weight *= 1 - BoardRelief.smooth((dz - .35f) / .65f);
             } else {
                 float above = Math.max(0, (z - BoardGeometry.groundZ(tile)) / BoardRelief.metres(1));
                 weight *= 1 - BoardRelief.smooth(above / FOOT_METRES);
             }
             if (weight < .0001f) { continue; }
-            Cover cover = cover(tile);
+            Cover cover = water ? cover(tile) : cover(tile, z);
             for (int material = 0; material < FAMILIES; material++) { weights[material] += weight * cover.weight(material); }
             interpolation += weight * cover.interpolation();
             total += weight;
@@ -258,7 +342,8 @@ public final class BoardSurfaceBlend {
     private static Cover cover(float[] weights, float total, float interpolation) {
         return new Cover(weights[0] / total, weights[1] / total, weights[2] / total,
               weights[3] / total, weights[4] / total, weights[5] / total, weights[6] / total, weights[7] / total,
-              weights[8] / total, interpolation);
+              weights[8] / total, weights[9] / total, weights[10] / total, weights[11] / total, weights[12] / total,
+              weights[13] / total, interpolation);
     }
 
     /** Signed distance to the hex's supporting edges, using the board's actual short/long dimensions. */

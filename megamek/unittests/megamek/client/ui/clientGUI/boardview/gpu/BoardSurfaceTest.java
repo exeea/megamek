@@ -178,7 +178,7 @@ class BoardSurfaceTest {
 
     @ParameterizedTest
     @ValueSource(ints = { 0, 1, 2, 3, 4, 5 })
-    void roadsRampUpAndDownToAlignedBridgeDecksOverLandAndWater(int direction) {
+    void roadsKeepGroundBelowRaisedBridgeRampsAndCutDownToLowerDecks(int direction) {
         for (int roadElevation : new int[] { 0, 1, 2 }) {
             for (boolean water : List.of(false, true)) {
                 BoardScene scene = bridgeScene(direction, (direction + 3) % 6, 1, water, roadElevation, 0, water);
@@ -187,27 +187,25 @@ class BoardSurfaceTest {
                 BoardSurface belowBridge = new BoardSurface(scene, scene.tile(neighbor));
                 Vector3 center = BoardGeometry.center(FIRST, roadElevation);
                 Vector3 gate = new Vector3(center).lerp(BoardGeometry.center(neighbor, 1), 0.5f);
-                assertEquals(BoardGeometry.LEVEL, road.height(gate.x, gate.y), 0.01f,
-                      "The road must reach the deck's full height at the shared edge");
+                assertEquals(roadElevation == 0 ? center.z : gate.z, road.height(gate.x, gate.y), 0.01f,
+                      "Raised approaches are separate solids; only a descending approach cuts the bank");
                 assertEquals(center.z, road.height(center.x, center.y), 0.01f);
                 Vector3 hub = new Vector3(center).lerp(gate, .5f);
                 hub.z = center.z;
-                Vector3 deck = new Vector3(gate.x, gate.y, BoardGeometry.LEVEL);
-                assertTrue(road.roadNormal(hub).epsilonEquals(Vector3.Z, .0001f));
-                assertTrue(road.roadNormal(deck).epsilonEquals(Vector3.Z, .0001f),
-                      "The approach must become level before joining the bridge deck");
-                Vector3 leaving = new Vector3(hub).lerp(deck, .01f), arriving = new Vector3(deck).lerp(hub, .01f);
-                assertTrue(Math.abs(road.height(leaving.x, leaving.y) - hub.z) < .002f * BoardGeometry.LEVEL,
-                      "Round the actual departure, not just the lighting normal");
-                assertTrue(Math.abs(road.height(arriving.x, arriving.y) - deck.z) < .002f * BoardGeometry.LEVEL,
-                      "Round the actual arrival at the bridge deck");
+                assertEquals(hub.z, road.height(hub.x, hub.y), .01f,
+                      "Only the inset half of each connected hex is graded");
+                Vector3 halfway = new Vector3(hub).lerp(gate, .5f);
+                if (roadElevation > 0) {
+                    assertTrue(road.roadNormal(halfway).epsilonEquals(road.roadNormal(gate), .0001f),
+                          "The road retains the bridge's planar grade through the shared edge");
+                }
                 assertEquals(0, belowBridge.height(gate.x, gate.y), 0.01f,
                       "The bridge approach must not deform the ground beneath the deck");
                 Vector3 bridgeCenter = BoardGeometry.center(neighbor, 0);
                 assertEquals(BoardGeometry.groundZ(scene.tile(neighbor)),
                       belowBridge.height(bridgeCenter.x, bridgeCenter.y), 0.01f);
                 Vector3 approach = new Vector3(gate).lerp(center, 0.25f);
-                float height = (roadElevation + 1) * BoardGeometry.LEVEL / 2;
+                float height = roadElevation == 0 ? 0 : (3 * roadElevation + 1) * BoardGeometry.LEVEL / 4;
                 assertEquals(height, road.height(approach.x, approach.y), 0.01f,
                       "The existing road corridor must slope between the unchanged hub and the deck");
                 BoardGeometry.Hit hit = BoardGeometry.hit(scene,
@@ -215,14 +213,6 @@ class BoardSurfaceTest {
                 assertNotNull(hit);
                 assertEquals(FIRST, hit.coords());
                 assertEquals(200 - height, Math.sqrt(hit.distance()), 0.01);
-                if (roadElevation == 0) {
-                    Vector3 inward = new Vector3(center.x - gate.x, center.y - gate.y, 0).nor();
-                    Vector3 origin = new Vector3(approach.x, approach.y, height).mulAdd(inward, -2);
-                    hit = BoardGeometry.hit(scene, new Ray(origin, inward));
-                    assertNotNull(hit, "Picking bounds must include a ramp above both hexes' ground levels");
-                    assertEquals(FIRST, hit.coords());
-                    assertEquals(2, Math.sqrt(hit.distance()), 0.01);
-                }
             }
         }
     }

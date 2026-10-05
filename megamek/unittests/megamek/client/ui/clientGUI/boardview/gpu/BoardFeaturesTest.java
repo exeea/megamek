@@ -11,6 +11,7 @@ import java.util.Map;
 
 import megamek.common.Hex;
 import megamek.common.board.Coords;
+import megamek.common.units.BipedMek;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
@@ -19,6 +20,36 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardFeaturesTest {
+    @ParameterizedTest
+    @ValueSource(ints = { 1, 3, 7, 10 })
+    void industrialHeightProvidesCoverWithoutOccupiableStoreys(int height) {
+        Hex hex = new Hex(2);
+        hex.addTerrain(new Terrain(Terrains.INDUSTRIAL, height));
+        Coords coords = new Coords(2, 3);
+        for (String suffix : new String[] { "a", "b", "c", "d" }) {
+            String asset = "buildings/saxarba/misc/heavy_industrial_" + suffix;
+            var features = BoardFeatures.capture(hex, coords, Map.of(Terrains.INDUSTRIAL, asset));
+            assertEquals(1, features.size());
+            assertEquals(BoardScene.FeatureKind.INDUSTRIAL, features.getFirst().kind());
+            assertEquals(height, features.getFirst().height());
+            assertEquals(asset, features.getFirst().asset());
+        }
+        BipedMek unit = new BipedMek();
+        assertTrue(unit.isElevationValid(0, hex));
+        for (int elevation = 1; elevation <= height; elevation++) {
+            assertFalse(unit.isElevationValid(elevation, hex), "Industrial height is cover, not a building floor");
+        }
+        hex.addTerrain(new Terrain(Terrains.BUILDING, 2));
+        hex.addTerrain(new Terrain(Terrains.BLDG_ELEV, 3));
+        assertTrue(unit.isElevationValid(1, hex), "A coexisting real building retains its authoritative floors");
+        var mixed = BoardFeatures.capture(hex, coords, Map.of(Terrains.BUILDING, "building",
+              Terrains.INDUSTRIAL, "industry"));
+        assertTrue(mixed.stream().anyMatch(feature -> feature.kind() == BoardScene.FeatureKind.BUILDING
+              && feature.height() == 3));
+        assertTrue(mixed.stream().anyMatch(feature -> feature.kind() == BoardScene.FeatureKind.INDUSTRIAL
+              && feature.height() == height));
+    }
+
     @ParameterizedTest
     @ValueSource(strings = { "", "desert", "snow", "volcano", "dirt", "lunar" })
     void modeledBridgesKeepTheUnderlyingTerrainMaterial(String theme) {
@@ -41,7 +72,7 @@ class BoardFeaturesTest {
     }
 
     @ParameterizedTest
-    @EnumSource(BoardScene.Surface.class)
+    @EnumSource(value = BoardScene.Surface.class, mode = EnumSource.Mode.EXCLUDE, names = "SAND")
     void modeledStructuresKeepTheirGroundWithoutErasingOtherTerrainMarkings(BoardScene.Surface surface) {
         Hex hex = new Hex(0);
         hex.setTheme(surface.name().toLowerCase(Locale.ROOT));
@@ -92,7 +123,7 @@ class BoardFeaturesTest {
         hex.setTheme("volcano");
         hex.addTerrain(new Terrain(Terrains.WATER_FLUFF, 1));
         assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
-        assertEquals(BoardScene.Surface.ROCK, BoardFeatures.surface(hex));
+        assertEquals(BoardScene.Surface.VOLCANO, BoardFeatures.surface(hex));
         assertFalse(BoardLiquid.capture(hex).present());
         hex.addTerrain(new Terrain(Terrains.WATER, 2));
         assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
@@ -165,7 +196,7 @@ class BoardFeaturesTest {
     }
 
     @Test
-    void desertAndSandyWoodsGrowDesertSpeciesAtEveryDensity() {
+    void theThemeSelectsDesertSpeciesWhileSandKeepsItsOwnBiomesTrees() {
         Coords coords = new Coords(3, 2);
         for (int density = 1; density <= 3; density++) {
             Hex hex = new Hex(0);
@@ -181,8 +212,9 @@ class BoardFeaturesTest {
             assertEquals(themed, BoardFeatures.capture(hex, coords, Map.of()), "Ground paving must not change the biome's trees");
             hex.removeTerrain(Terrains.PAVEMENT);
             hex.setTheme("");
+            var temperate = BoardFeatures.capture(hex, coords, Map.of());
             hex.addTerrain(new Terrain(Terrains.SAND, 1));
-            assertEquals(themed, BoardFeatures.capture(hex, coords, Map.of()), "Sandy woods use the same palm selection");
+            assertEquals(temperate, BoardFeatures.capture(hex, coords, Map.of()), "Loose sand does not create a desert biome");
             hex.addTerrain(new Terrain(Terrains.SNOW, 1));
             assertTrue(BoardFeatures.capture(hex, coords, Map.of()).stream().allMatch(feature -> feature.asset().endsWith("-snow")),
                   "Snow retains the existing winter variants");
@@ -267,7 +299,9 @@ class BoardFeaturesTest {
     void surfaceMaterialsAndCropsFollowTheHex() {
         Hex hex = new Hex(0);
         hex.addTerrain(new Terrain(Terrains.SAND, 1));
-        assertEquals(BoardScene.Surface.SAND, BoardFeatures.surface(hex));
+        assertEquals(BoardScene.Surface.GRASS, BoardFeatures.surface(hex));
+        assertTrue(BoardSurfaceBlend.capture(hex).sand() > .9f);
+        assertTrue(BoardSurfaceBlend.capture(hex).grass() > 0, "Sand retains its exposed substrate");
         hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1));
         assertEquals(BoardScene.Surface.CONCRETE, BoardFeatures.surface(hex));
         for (int scatter : new int[] { Terrains.ROUGH, Terrains.RUBBLE }) {
@@ -278,7 +312,9 @@ class BoardFeaturesTest {
             hex.setTheme("rock");
             assertEquals(BoardScene.Surface.ROCK, BoardFeatures.surface(hex));
             hex.addTerrain(new Terrain(Terrains.SAND, 1));
-            assertEquals(BoardScene.Surface.SAND, BoardFeatures.surface(hex));
+            assertEquals(BoardScene.Surface.ROCK, BoardFeatures.surface(hex));
+            assertTrue(BoardSurfaceBlend.capture(hex).sand() > .9f);
+            assertTrue(BoardSurfaceBlend.capture(hex).rock() > 0);
         }
         hex.removeAllTerrains();
         hex.setTheme("");

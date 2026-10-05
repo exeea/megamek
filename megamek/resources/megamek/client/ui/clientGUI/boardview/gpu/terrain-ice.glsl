@@ -23,6 +23,13 @@ const vec3 ICE_BARE = vec3(.40, .50, .56);
 const vec3 ICE_SNOW = vec3(.84, .88, .91);
 const vec3 ICE_JOINT = vec3(.46, .54, .59);
 
+// The normal map is baked for the unturned 24 m field. A transformed sample needs the inverse basis change and
+// the matching gradient scale, including the anisotropic wind stretch. Offsets only change the sampled position.
+vec3 iceMappedNormal(vec2 uv, mat2 transform) {
+    vec3 normal = (texture(u_iceNormal, uv).xyz * 255.0 - 128.0) / 127.0;
+    return normalize(vec3(transpose(transform) * normal.xy, normal.z));
+}
+
 // The shared 64² noise with smoothed cells, texels the given spacing in metres apart. The base level avoids mip
 // selection jumps at the cell borders; the fields are broad enough not to alias.
 vec3 iceNoise(vec2 metres, float spacing, vec2 offset) {
@@ -138,7 +145,8 @@ vec3 iceFinish(vec3 underlying) {
     // Broad world fields, and which of two differently rotated samples of the maps shows, so the 24 m repeat does not
     // read across a lake.
     vec3 broad = iceNoise(metres, 12.0, vec2(9.3, 41.7)) * .65 + iceNoise(metres, 4.0, vec2(27.1, 3.9)) * .35;
-    vec2 turned = mat2(.81, -.59, .59, .81) * uv * 1.37 + vec2(.41, .17);
+    mat2 iceTurn = mat2(.81, -.59, .59, .81) * 1.37;
+    vec2 turned = iceTurn * uv + vec2(.41, .17);
     float swap = smoothstep(.40, .60, broad.x);
     vec4 properties = mix(texture(u_iceSurface, uv), texture(u_iceSurface, turned), swap);
     float margin = slab * (1.0 - v_color.a);
@@ -152,7 +160,8 @@ vec3 iceFinish(vec3 underlying) {
     float healed = smoothstep(.25, .65, along.x);
     float fade = (1.0 - smoothstep(.2, .8, pixel)) * (1.0 - thin);
     // Drifted snow: shallow wind streaks and the ice's relief showing through where it is thin.
-    vec2 wind = mat2(.94, .34, -.34, .94) * metres * vec2(.28, 1.0);
+    mat2 windStretch = mat2(.28, 0.0, 0.0, 1.0) * mat2(.94, .34, -.34, .94);
+    vec2 wind = windStretch * metres;
     float drift = iceNoise(wind, 1.6, vec2(11.3, 5.5)).y;
     // Snow lies on most floes, blown into soft-edged patches that cross their joints; thin ice at a broken edge
     // carries less.
@@ -172,9 +181,9 @@ vec3 iceFinish(vec3 underlying) {
     if (detail * u_iceNormals > .001 && face.z > .5) {
         // Polished bare ice undulates gently. Snow has its own broader, softer dunes: the same map, stretched
         // along the wind. Shards at a broken edge lean each their own way.
-        vec3 polished = texture(u_iceNormal, mix(uv, turned, swap)).xyz;
-        vec3 dunes = texture(u_iceNormal, wind / 9.0).xyz;
-        vec3 micro = (mix(polished, dunes, snow) * 255.0 - 128.0) / 127.0;
+        vec3 polished = mix(iceMappedNormal(uv, mat2(1.0)), iceMappedNormal(turned, iceTurn), swap);
+        vec3 dunes = iceMappedNormal(wind / 9.0, windStretch * (24.0 / 9.0));
+        vec3 micro = mix(polished, dunes, snow);
         vec3 tangent = normalize(vec3(face.z, 0.0, -face.x));
         micro.xy = micro.xy * detail * mix(.45, .8, snow) + tilt;
         normal = normalize(tangent * micro.x - cross(face, tangent) * micro.y + face * micro.z);
@@ -199,7 +208,7 @@ vec3 iceFinish(vec3 underlying) {
     sky = mix(sky, ambient * .85, smoothstep(.12, .6, roughness));
     float fresnel = (.018 + .982 * pow(1.0 - max(0.0, dot(view, lead ? face : normal)), 5.0))
           * (1.0 - .7 * smoothstep(.15, .8, roughness));
-    vec3 tint = toLinear(texture(u_iceColor, mix(uv, turned, swap)).rgb);
+    vec3 tint = toLinear(mix(texture(u_iceColor, uv).rgb, texture(u_iceColor, turned).rgb, swap));
     tint /= max(dot(tint, vec3(.333)), .05);
     vec3 bare = ICE_BARE * mix(vec3(1.0), tint, .35) * (1.0 + cloudy * .35) + vec3(.55) * cracks;
     // Snow grain from the drift streaks and the ice's height field.

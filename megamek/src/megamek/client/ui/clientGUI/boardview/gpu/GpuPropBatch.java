@@ -56,6 +56,11 @@ final class GpuPropBatch implements Disposable {
         add(source, pageId, visible);
     }
 
+    /** Cutaway caches change with the hovered floor; draw them without replacing a whole static page. */
+    void addDynamic(RenderableProvider props) {
+        props.getRenderables(separate, null);
+    }
+
     void add(Array<Renderable> parts, int pageId, boolean visible) {
         for (Renderable value : parts) {
             if (enabled && eligible(value)) {

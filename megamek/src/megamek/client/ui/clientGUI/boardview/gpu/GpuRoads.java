@@ -350,19 +350,26 @@ final class GpuRoads {
                   BoardGeometry.corner(tile.coords(), elevation, i + 1).add(0, 0, lift), -1));
         }
         if (footing != null) {
-            float offset = (patch.lift() + .01f - SURFACE_LIFT) * BoardGeometry.hexScale();
-            for (var face : footing.facets()) {
-                if (face.part() != BoardBridge.Part.TOP) { continue; }
-                result.add(new BoardTacticalGeometry.Triangle(new Vector3(face.a()).add(0, 0, offset),
-                      new Vector3(face.b()).add(0, 0, offset), new Vector3(face.c()).add(0, 0, offset), -1));
-            }
+            result.addAll(deck(patch, footing));
+        }
+        return result;
+    }
+
+    /** Sloped decks carry every coat on the same triangles as the structural surface. */
+    static List<BoardTacticalGeometry.Triangle> deck(Patch patch, BoardBridge.Shape shape) {
+        List<BoardTacticalGeometry.Triangle> result = new ArrayList<>();
+        float offset = (patch.lift() + .01f - SURFACE_LIFT) * BoardGeometry.hexScale();
+        for (var face : shape.facets()) {
+            if (face.part() != BoardBridge.Part.TOP) { continue; }
+            result.add(new BoardTacticalGeometry.Triangle(new Vector3(face.a()).add(0, 0, offset),
+                  new Vector3(face.b()).add(0, 0, offset), new Vector3(face.c()).add(0, 0, offset), -1));
         }
         return result;
     }
 
     static List<BoardTacticalGeometry.Triangle> deck(BoardScene.Tile tile, BoardScene.Feature bridge, Patch patch,
-          BoardBridgeFooting footing, Map<Coords, BoardSurface> surfaces) {
-        var result = deck(tile, bridge, patch, footing.shape());
+          BoardBridgeFooting footing, Map<Coords, BoardSurface> surfaces, BoardBridge.Shape slope) {
+        var result = slope == null ? deck(tile, bridge, patch, footing.shape()) : deck(patch, slope);
         for (int d = 0; d < 6; d++) {
             if ((footing.bareExits() & (1 << d)) == 0) { continue; }
             // Only the existing dry bank carries the apron. Never drape it onto the surface under the span.
@@ -396,17 +403,12 @@ final class GpuRoads {
 
     /** Shape/coverage data only: repeating albedo, normals and roughness keep their original full resolution. */
     static MaskData mask(BoardRoad road, Patch patch) {
-        return mask(road, patch, true);
-    }
-
-    static MaskData mask(BoardRoad road, Patch patch, boolean clipToHex) {
+        // The supporting terrain already clips the paint. Its fitted edge can extend beyond the original hex box.
         var bounds = patch.shape().getBounds2D();
-        double halfWidth = clipToHex ? BoardGeometry.TILE_WIDTH / 2f : Double.POSITIVE_INFINITY;
-        double halfHeight = clipToHex ? BoardGeometry.TILE_HEIGHT / 2f : Double.POSITIVE_INFINITY;
-        int x = (int) Math.floor(Math.max(-halfWidth, bounds.getMinX())) - 1;
-        int y = (int) Math.floor(Math.max(-halfHeight, bounds.getMinY())) - 1;
-        int w = Math.max(1, (int) Math.ceil(Math.min(halfWidth, bounds.getMaxX())) - x + 1);
-        int h = Math.max(1, (int) Math.ceil(Math.min(halfHeight, bounds.getMaxY())) - y + 1);
+        int x = (int) Math.floor(bounds.getMinX()) - 1;
+        int y = (int) Math.floor(bounds.getMinY()) - 1;
+        int w = Math.max(1, (int) Math.ceil(bounds.getMaxX()) - x + 1);
+        int h = Math.max(1, (int) Math.ceil(bounds.getMaxY()) - y + 1);
         int density = 4;
         var image = new BufferedImage(w * density, h * density, BufferedImage.TYPE_INT_ARGB);
         var graphics = image.createGraphics();

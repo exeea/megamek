@@ -76,7 +76,7 @@ class BoardGrassBankTest {
 
     @Test
     void turfKeepsAuthoredTerrainColorsInsteadOfAnAtlasTint() {
-        for (int family : new int[] { 1, 4, 5 }) {
+        for (int family : new int[] { 1, 3, 4, 5 }) {
             var cover = BoardSurfaceBlend.capture(new Hex(0, "ground_fluff:" + family + ":1", "grass"));
             var scene = BoardSurfaceBlendTest.scene(c -> {
                 var tile = BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, c.getX() < 4 ? 2 : 0, -1, 0);
@@ -90,7 +90,7 @@ class BoardGrassBankTest {
             var turf = GpuBankTurf.plant(scene, tile, surface);
             assertNotNull(turf);
             for (int at = 0; at < turf.size; at += GpuBankTurf.STRIDE) {
-                for (int material = 0; material < 7; material++) {
+                for (int material = 0; material < BoardScene.Surface.values().length; material++) {
                     assertEquals(cover.weight(material), turf.get(at + 9 + material), .001f,
                           "Authored material proportion for family " + material);
                 }
@@ -109,7 +109,7 @@ class BoardGrassBankTest {
                 float z = turf.get(at + 2);
                 low = Math.min(low, z); high = Math.max(high, z);
                 float weight = 0;
-                for (int family = 0; family < 7; family++) { weight += turf.get(at + 9 + family); }
+                for (int family = 0; family < BoardScene.Surface.values().length; family++) { weight += turf.get(at + 9 + family); }
                 assertEquals(1, weight, .001f, "Turf inherits the installed material proportions");
             }
             assertTrue(high - low < BoardRelief.metres(3.5f), "No stretched curtain: " + (high - low));

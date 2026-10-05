@@ -33,6 +33,7 @@ import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.graphics.glutils.HdpiUtils;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
@@ -212,6 +213,7 @@ class GpuBuildingHoverSmokeTest {
         var terrain = (GpuTerrain) field(view, "terrain");
         var ui = (GpuBoardHud) field(view, "ui");
         var camera = view.boardCamera.camera;
+        checkRoofHover(view, terrain, scene, ui);
         checkCutaway(terrain);
         checkRenderedStoreys(view, terrain, ui);
         checkModularStoreys(view, ui);
@@ -296,6 +298,49 @@ class GpuBuildingHoverSmokeTest {
         return result;
     }
 
+    private static void checkRoofHover(GpuBattleView view, GpuTerrain terrain, BoardScene scene, GpuBoardHud ui) throws Exception {
+        var camera = view.boardCamera.camera;
+        var bounds = terrain.roofBounds(BUILDING);
+        float roofZ = (scene.tile(BUILDING).elevation() + 5) * BoardGeometry.level();
+        Input original = Gdx.input;
+        Input pointer = mock(Input.class);
+        Gdx.input = pointer;
+        var floor = GpuBattleView.class.getDeclaredMethod("hoverFloorZ");
+        floor.setAccessible(true);
+        int checked = 0, wrong = 0;
+        float low = Float.POSITIVE_INFINITY, high = Float.NEGATIVE_INFINITY;
+        try {
+            for (int dx = 1; dx < 12; dx++) {
+                for (int dy = 1; dy < 12; dy++) {
+                    var vertical = new Ray(new Vector3(bounds.min.x + bounds.getWidth() * dx / 12,
+                          bounds.min.y + bounds.getHeight() * dy / 12, bounds.max.z + 100), new Vector3(0, 0, -1));
+                    var roof = terrain.selectionHit(scene, vertical);
+                    if (roof == null || !BUILDING.equals(roof.coords())) { continue; }
+                    Vector3 point = vertical.getEndPoint(new Vector3(), (float) Math.sqrt(roof.distance()));
+                    if (point.z < roofZ - BoardGeometry.level() / 2) { continue; }
+                    var screen = camera.project(point.cpy(), 0, 0, camera.viewportWidth, camera.viewportHeight);
+                    int x = Math.round(screen.x), y = Gdx.graphics.getHeight() - Math.round(screen.y);
+                    if (ui.hit(x, y)) { continue; }
+                    var ray = camera.getPickRay(x, y, 0, 0, camera.viewportWidth, camera.viewportHeight);
+                    var hit = terrain.selectionHit(scene, ray);
+                    if (hit == null || !BUILDING.equals(hit.coords())) { continue; }
+                    Vector3 visible = ray.getEndPoint(new Vector3(), (float) Math.sqrt(hit.distance()));
+                    if (visible.dst2(point) > 4) { continue; }
+                    when(pointer.getX()).thenReturn(x);
+                    when(pointer.getY()).thenReturn(y);
+                    original.getInputProcessor().mouseMoved(x, y);
+                    float hover = (float) field(view, "hoverZ");
+                    low = Math.min(low, hover); high = Math.max(high, hover);
+                    checked++;
+                    if ((float) floor.invoke(view) != roofZ) { wrong++; }
+                }
+            }
+            System.out.println("ROOF hover samples=" + checked + " wrong=" + wrong + " range=" + low + ".." + high + " nominal=" + roofZ);
+            assertTrue(checked > 20, "Sweep must cover the visible roof");
+            assertEquals(0, wrong, "All visible roof points must select the roof, including near its edge");
+        } finally { Gdx.input = original; }
+    }
+
     private static void checkCutaway(GpuTerrain terrain) throws Exception {
         var floors = GpuModularBuildingSmokeTest.floors(terrain, BUILDING);
         assertEquals(5, floors.size());
@@ -354,11 +399,13 @@ class GpuBuildingHoverSmokeTest {
         } finally { terrain.dispose(); }
     }
 
-    private static void checkRenderedStoreys(GpuBattleView view, GpuTerrain terrain, GpuBoardHud ui) {
+    private static void checkRenderedStoreys(GpuBattleView view, GpuTerrain terrain, GpuBoardHud ui) throws Exception {
         var camera = view.boardCamera.camera;
         HdpiUtils.glViewport(0, 0, (int) camera.viewportWidth, (int) camera.viewportHeight);
         ScreenUtils.clear(0, 0, 0, 1, true);
         terrain.render(camera, false);
+        var pages = (GpuPropBatch) field(terrain, "propBatch");
+        long pageBuilds = pages.rebuilds();
         int width = Gdx.graphics.getBackBufferWidth(), height = Gdx.graphics.getBackBufferHeight();
         var buildingBounds = terrain.roofBounds(BUILDING);
         Pixmap baseline = Pixmap.createFromFrameBuffer(0, 0, width, height);
@@ -369,11 +416,14 @@ class GpuBuildingHoverSmokeTest {
                 terrain.animate(0, List.of(), level == 1 ? 1 : .5f, BUILDING, level * BoardGeometry.level());
                 ScreenUtils.clear(0, 0, 0, 1, true);
                 terrain.render(camera, false);
+                assertEquals(pageBuilds, pages.rebuilds(),
+                      "Opening/closing a building storey must not rebuild static prop pages");
                 Pixmap hiddenWalls = Pixmap.createFromFrameBuffer(0, 0, width, height);
                 terrain.renderTransparent(camera);
                 Pixmap opened = Pixmap.createFromFrameBuffer(0, 0, width, height);
                 try {
                     int changedInside = 0, visibleWalls = 0, unchangedOutside = 0, changedOutside = 0;
+                    String outsideSample = "";
                     for (int x = 0; x < width; x += 4) {
                         for (int y = 0; y < 0 + camera.viewportHeight; y += 4) {
                             Vector3 point = new Vector3((x + .5f) / camera.viewportWidth * 2 - 1,
@@ -393,7 +443,10 @@ class GpuBuildingHoverSmokeTest {
                                       + Math.abs((hidden >>> 8 & 255) - (b >>> 8 & 255));
                                 if (wallContribution > 10) { visibleWalls++; }
                             } else {
-                                if (difference > 10) { changedOutside++; }
+                                if (difference > 10) {
+                                    changedOutside++;
+                                    outsideSample = " at pixel " + x + "," + y + " world=" + point + " delta=" + difference;
+                                }
                                 else { unchangedOutside++; }
                             }
                         }
@@ -403,7 +456,7 @@ class GpuBuildingHoverSmokeTest {
                               "build/gpu-board-review/hover-floor-" + (camera.projection.val[Matrix4.M33] == 0) + ".png"), opened, -1, true);
                     }
                     assertTrue(unchangedOutside > 100, "Other storeys and roof must remain visible");
-                    assertEquals(0, changedOutside, "Hover must not alter walls outside the highlighted storey: " + level);
+                    assertEquals(0, changedOutside, "Hover must not alter walls outside the highlighted storey: " + level + outsideSample);
                     if (level < 5 && level != 1) {
                         assertTrue(changedInside > 10, "The highlighted storey's walls must become translucent: " + level);
                         assertTrue(visibleWalls > 10, "Hovered walls must remain visible rather than disappearing: " + level);

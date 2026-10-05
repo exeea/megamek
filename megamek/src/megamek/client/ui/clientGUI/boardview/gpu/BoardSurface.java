@@ -81,11 +81,11 @@ final class BoardSurface {
     record Geometry(int elevation, int waterDepth, boolean frozen, int roadExits, BoardScene.Surface surface,
           BoardLiquid liquid, boolean detailedGround, List<BoardScene.Feature> features, int ramps,
           List<BoardConcrete.Shift> coast, BoardRoad.Kind road, BoardScene.Biome biome, int cliffTopExits, boolean bare,
-          BoardSurfaceBlend.Cover groundCover) { }
+          BoardSurfaceBlend.Cover groundCover, boolean ultraSublevel) { }
 
     /** What of a hex further out can reach a hex's shape: through the water's shore, its level, liquid and ground. */
     record Shape(int elevation, int waterDepth, BoardLiquid liquid, boolean detailedGround, BoardScene.Surface surface,
-          int roadExits, BoardRoad.Kind road, int cliffTopExits) { }
+          int roadExits, BoardRoad.Kind road, int cliffTopExits, boolean ultraSublevel) { }
 
     /** A hex's own geometry and its six neighbours', and the shapes of the hexes out to {@link #SHORE_RINGS}. */
     record Key(List<Geometry> near, List<Shape> far) { }
@@ -126,14 +126,14 @@ final class BoardSurface {
     /** The hex's shape as a hex further out reads it, with the given water depth. */
     static Shape shape(BoardScene.Tile tile, int waterDepth) {
         return new Shape(tile.elevation(), waterDepth, tile.liquid(), tile.detailedGround(), tile.surface(),
-              tile.roadExits(), tile.road(), tile.cliffTopExits());
+              tile.roadExits(), tile.road(), tile.cliffTopExits(), tile.ultraSublevel());
     }
 
     private static Geometry geometry(BoardScene scene, BoardScene.Tile tile) {
         return tile == null ? null : new Geometry(tile.elevation(), tile.waterDepth(), tile.frozen(), tile.roadExits(),
               tile.surface(), tile.liquid(), tile.detailedGround(), tile.features(), ramps(scene, tile),
               BoardConcrete.of(scene).corners(tile.coords()), tile.road(), tile.biome(), tile.cliffTopExits(), tile.bare(),
-              tile.groundCover());
+              tile.groundCover(), tile.ultraSublevel());
     }
 
     static int ramps(BoardScene scene, BoardScene.Tile tile) {
@@ -475,14 +475,17 @@ final class BoardSurface {
         this.lod = lod;
         this.scene = scene;
         this.tile = tile;
-        center = BoardGeometry.center(tile.coords(), tile.elevation());
+        center = BoardGeometry.center(tile.coords(), tile.groundLevel());
         for (int edge = 0; edge < 6; edge++) {
-            corners[edge] = BoardGeometry.corner(tile.coords(), tile.elevation(), edge);
+            corners[edge] = BoardGeometry.corner(tile.coords(), tile.groundLevel(), edge);
         }
         ramps = ramps(scene, tile);
         // The relief first: a water hex lays out its waterline round the steps the relief puts beside it.
         relief = new BoardRelief(scene, tile, ramps, lod);
-        if (tile.liquid().present()) {
+        if (tile.ultraSublevel()) {
+            // A closed, flat cap below the mouth; neighbouring columns supply the pit's cliffs.
+            fan(corners, center.z, Finish.TOP);
+        } else if (tile.liquid().present()) {
             river(scene);
         } else if (ramps != 0 || BoardRoad.rendered(tile)) {
             road(scene);
@@ -496,7 +499,7 @@ final class BoardSurface {
             // Only faces reaching the hex outline can meet a neighbour's: a bed's inner rings never do.
             if (i < interiorFrom || i >= interiorTo) { edgeTopography.add(faces.get(i)); }
         }
-        if (detailed) {
+        if (detailed && !tile.ultraSublevel()) {
             if (ramps != 0 && relief.graded() && tile.surface() != BoardScene.Surface.CONCRETE) {
                 roadRelief();
                 simplifyRoad();
@@ -693,14 +696,16 @@ final class BoardSurface {
         return square(p.x - a.x - t * dx) + square(p.y - a.y - t * dy) < .000004f;
     }
 
-    /** A bridge approach reaches the deck at the edge; ordinary roads share their height change across both hexes. */
+    /** Roads and connected bridge decks share their height change across the insets of both hexes. */
     static float roadEdgeElevation(BoardScene.Tile tile, BoardScene.Tile neighbor, int direction) {
-        if (neighbor == null || tile.liquid().present()) {
+        if (neighbor == null || tile.ultraSublevel() || neighbor.ultraSublevel() || tile.liquid().present()) {
             return tile.elevation();
         }
         var bridge = connectingBridge(tile, neighbor, direction);
         if (bridge != null) {
-            return neighbor.elevation() + bridge.elevation();
+            // A raised bridge owns its solid approach, leaving the bank and its shoreline intact underneath.
+            if (neighbor.elevation() + bridge.elevation() > tile.elevation()) { return tile.elevation(); }
+            return BoardBridge.edgeElevation(neighbor, tile, (direction + 3) % 6);
         }
         return hasRoadApproach(tile, neighbor, direction)
               ? (tile.elevation() + neighbor.elevation()) / 2f : tile.elevation();
@@ -708,7 +713,8 @@ final class BoardSurface {
 
     /** Presentation only: a road end can meet unpaved ground across at most two levels. */
     static boolean hasRoadApproach(BoardScene.Tile tile, BoardScene.Tile neighbor, int direction) {
-        if (neighbor == null || tile.liquid().present() || neighbor.liquid().present()) {
+        if (neighbor == null || tile.ultraSublevel() || neighbor.ultraSublevel()
+              || tile.liquid().present() || neighbor.liquid().present()) {
             return false;
         }
         boolean exit = (tile.roadExits() & (1 << direction)) != 0;
@@ -1933,7 +1939,6 @@ final class BoardSurface {
                 result[edge * SHORE_SEGMENTS + segment] = point;
             }
         }
-        BoardConcrete.straighten(scene, tile, result);
         return result;
     }
 
@@ -2188,10 +2193,8 @@ final class BoardSurface {
             return;
         }
         float largestRise = 0;
-        boolean bridge = false;
         for (int direction = 0; direction < 6; direction++) {
             BoardScene.Tile neighbor = scene.tile(tile.coords().translated(direction));
-            bridge |= (ramps & 1 << direction) != 0 && connectingBridge(tile, neighbor, direction) != null;
             largestRise = Math.max(largestRise, Math.abs(roadEdgeElevation(tile,
                   neighbor, direction) * BoardGeometry.level() - center.z));
         }
@@ -2200,8 +2203,6 @@ final class BoardSurface {
         int sections = largestRise == 0 ? 1 : 2 * (int) Math.ceil(Math.sqrt(largestRise / (3 * .06f * BoardGeometry.hexScale())) / 2);
         var stations = new TreeSet<Float>();
         for (int i = 0; i <= sections; i++) { stations.add(i / (float) sections); }
-        // Bridge approaches fit both vertical curves into one half-hex. Detail only their two flat joins.
-        if (bridge) { stations.add(.04f); stations.add(.96f); }
         List<Float> runs = new ArrayList<>(stations);
         Vector3[] hub = new Vector3[6];
         for (int i = 0; i < 6; i++) {
@@ -2598,7 +2599,10 @@ final class BoardSurface {
     }
 
     private float edgeDistance(Vector3 p, int edge) {
-        Vector3 a = corners[edge], b = corners[(edge + 1) % 6];
+        return edgeDistance(p, corners[edge], corners[(edge + 1) % 6]);
+    }
+
+    private static float edgeDistance(Vector3 p, Vector3 a, Vector3 b) {
         float ex = b.x - a.x, ey = b.y - a.y;
         return Math.abs((p.x - a.x) * ey - (p.y - a.y) * ex) / (float) Math.hypot(ex, ey);
     }
@@ -2611,8 +2615,10 @@ final class BoardSurface {
             float area = ramp.along().x * ramp.across().y - ramp.along().y * ramp.across().x;
             float t = (dx * ramp.across().y - dy * ramp.across().x) / area;
             float side = (ramp.along().x * dy - ramp.along().y * dx) / area;
-            float lateral = Math.max(0, Math.max(-side, side - 1)) * ramp.across().len();
-            float behind = Math.max(0, -ramp.extension() - t) * ramp.along().len();
+            // Rounded coordinates on the corridor boundary must stay pinned, including during untangling.
+            float epsilon = outlineTolerance(p);
+            float lateral = Math.max(0, Math.max(-side, side - 1) * ramp.across().len() - epsilon);
+            float behind = Math.max(0, (-ramp.extension() - t) * ramp.along().len() - epsilon);
             keep = Math.min(keep, BoardRelief.smooth((float) Math.hypot(lateral, behind) / (RAMP_FADE * BoardGeometry.hexScale())));
         }
         return keep;
@@ -2633,11 +2639,16 @@ final class BoardSurface {
             for (int j = 0; j <= across; j++) {
                 float s = j / (float) across;
                 Vector3 p = new Vector3(shoulder).lerp(ground, s);
-                p.z = shoulder.z + (ground.z - shoulder.z) * BoardRelief.smooth(s);
+                // Concrete has a steep retaining face and a grounded foot. Keep its profile continuous so the
+                // foot and the adjoining shoreline still share one boundary when the natural rim moves.
+                float fall = ramp.deck() ? Math.min(1, s * across) : BoardRelief.smooth(s);
+                p.z = shoulder.z + (ground.z - shoulder.z) * fall;
                 // Small weathered folds belong to the earthwork, fading completely at pavement and untouched ground.
                 float weathering = BoardRelief.noise(p.x / (5 * BoardGeometry.hexScale()), p.y / (5 * BoardGeometry.hexScale())) - .5f;
                 float envelope = 16 * s * s * (1 - s) * (1 - s);
-                p.z += weathering * envelope * Math.min(Math.abs(shoulder.z - ground.z) * .12f, .8f * BoardGeometry.hexScale());
+                if (!ramp.deck()) {
+                    p.z += weathering * envelope * Math.min(Math.abs(shoulder.z - ground.z) * .12f, .8f * BoardGeometry.hexScale());
+                }
                 row[j] = p;
                 if (previous != null && j > 0) {
                     if (left) { quad(previous[j], row[j], row[j - 1], previous[j - 1], Finish.TOP); }
@@ -2648,7 +2659,7 @@ final class BoardSurface {
         }
     }
 
-    /** A parabolic vertical curve leaves the flat hub, then holds its grade through the shared gate. */
+    /** Ordinary roads leave the hub on a vertical curve; bridge approaches share the span's planar inset. */
     private record RoadRamp(Vector3 origin, Vector3 along, Vector3 across, float rise, boolean deck) {
 
         private static float eased(float t) {
@@ -2656,8 +2667,8 @@ final class BoardSurface {
         }
 
         float progress(float t) {
-            // A bridge owns no matching half-ramp: finish the whole curve before reaching its level deck.
-            return deck ? t < .5f ? .5f * eased(2 * t) : 1 - .5f * eased(2 * (1 - t)) : eased(t);
+            // Match the bridge's existing planar inset; the two halves share both height and grade at the edge.
+            return deck ? t : eased(t);
         }
 
         float extension() {
@@ -2674,7 +2685,7 @@ final class BoardSurface {
             float area = along.x * across.y - along.y * across.x;
             float t = ((p.x - origin.x) * across.y - (p.y - origin.y) * across.x) / area;
             t = (t + extension()) / (1 + extension());
-            return deck ? t <= .2501f || t >= .7499f : t <= .5001f;
+            return !deck && t <= .5001f;
         }
 
         Vector3 normal(Vector3 p) {
@@ -2687,7 +2698,7 @@ final class BoardSurface {
             if (Math.abs(p.z - origin.z - rise * extended(t))
                   > .2f * BoardGeometry.hexScale()) { return null; }
             t = Math.clamp((t + extension()) / (1 + extension()), 0, 1);
-            float slope = Math.min(2 * (deck ? 2 * Math.min(t, 1 - t) : t), 1) / (.75f * (1 + extension()));
+            float slope = deck ? 1 : Math.min(2 * t, 1) / (.75f * (1 + extension()));
             return new Vector3(along.x, along.y, rise * slope).crs(across).nor();
         }
     }
@@ -2709,9 +2720,39 @@ final class BoardSurface {
     float roadLevels() {
         float levels = 0;
         for (RoadRamp ramp : roadRamps) {
-            levels = Math.max(levels, Math.abs(ramp.rise()) * (ramp.deck() ? 1 : 2) / BoardGeometry.level());
+            levels = Math.max(levels, Math.abs(ramp.rise()) * 2 / BoardGeometry.level());
         }
         return levels;
+    }
+
+    /** The bridge approach's existing cut/fill faces receive concrete without changing road paint or picking. */
+    boolean bridgeSupport(Face face) {
+        return ramps != 0 && bridgeSupport(scene, tile, face);
+    }
+
+    /** Finished geometry can use the same material decision for ground cover without retaining its builder. */
+    static boolean bridgeSupport(BoardScene scene, BoardScene.Tile tile, Face face) {
+        if (tile.roadExits() == 0 || tile.liquid().present()
+              || (face.finish() != Finish.TOP && face.finish() != Finish.WALL)) { return false; }
+        float ground = tile.elevation() * BoardGeometry.level(), epsilon = .001f * BoardGeometry.hexScale();
+        float high = Math.max(face.a().z, Math.max(face.b().z, face.c().z));
+        float low = Math.min(face.a().z, Math.min(face.b().z, face.c().z));
+        if (high <= ground + epsilon && low >= ground - epsilon) { return false; }
+        int edge = face.landEdge();
+        if (edge < 0) {
+            var middle = new Vector3(face.a()).add(face.b()).add(face.c()).scl(1f / 3);
+            float nearest = Float.POSITIVE_INFINITY;
+            for (int i = 0; i < 6; i++) {
+                float distance = edgeDistance(middle, BoardGeometry.corner(tile.coords(), 0, i),
+                      BoardGeometry.corner(tile.coords(), 0, i + 1));
+                if (distance < nearest) { nearest = distance; edge = i; }
+            }
+        }
+        int direction = BoardGeometry.edgeDirection(edge);
+        var next = scene.tile(tile.coords().translated(direction));
+        if (next == null || connectingBridge(tile, next, direction) == null) { return false; }
+        float rise = roadEdgeElevation(tile, next, direction) - tile.elevation();
+        return rise > 0 ? high > ground + epsilon : rise < 0 && low < ground - epsilon;
     }
 
     private void fan(Vector3[] polygon, float z, Finish finish) {
@@ -2819,6 +2860,13 @@ final class BoardSurface {
         return new Vector3(corners[k]).add(shift[0], shift[1], 0);
     }
 
+    /** Road profiles precede the relief pass; water and ordinary ground already include the shore's corner shift. */
+    private Vector3 topographyCorner(int k) {
+        int corner = Math.floorMod(k, 6);
+        return !tile.liquid().present() && (ramps != 0 || BoardRoad.rendered(tile))
+              ? corners[corner] : moved(corner);
+    }
+
     /** Whether connected liquid continues across this edge, which a bank never crosses and only a fall descends. */
     boolean mouth(int edge) {
         return (openMouths & 1 << edge) != 0;
@@ -2860,11 +2908,18 @@ final class BoardSurface {
             }
             BoardSurface adjacent = neighbor == null ? null : neighbors.get(neighbor.coords());
             if (adjacent == null && neighbor != null) { adjacent = new BoardSurface(scene, neighbor, false, lod); }
-            boolean basin = crests[edge] != null && adjacent != null && adjacent.relief.waterfallFoot((edge + 3) % 6);
+            // The basin owns the submerged cliff. The upper column stops at its rim instead of drawing
+            // another wall over the same concrete quay or drowned cliff down to the seabed.
+            boolean basin = adjacent != null && adjacent.relief.wetCliff((edge + 3) % 6);
+            // Compare both profiles at the same edge parameter, in each profile's own coordinate space.
+            // Sampling a road at the shifted shore instead samples inside its ramp and leaves its wall short.
+            Vector3 roofA = topographyCorner(edge), roofB = topographyCorner(edge + 1);
+            Vector3 footA = adjacent == null ? null : adjacent.topographyCorner(edge + 4);
+            Vector3 footB = adjacent == null ? null : adjacent.topographyCorner(edge + 3);
             TreeSet<Float> cuts = new TreeSet<>(List.of(0f, 1f));
-            cuts(a, b, cuts);
+            cuts(roofA, roofB, cuts);
             if (adjacent != null) {
-                adjacent.cuts(a, b, cuts);
+                adjacent.cuts(footA, footB, cuts);
             }
             // The stretch of the edge a crest spans, where its own wall replaces the straight one.
             Crest crest = crests[edge];
@@ -2881,20 +2936,20 @@ final class BoardSurface {
                 Vector3 start = new Vector3(a).lerp(b, from);
                 Vector3 end = new Vector3(a).lerp(b, to);
                 boolean graded = ramps != 0 || adjacent != null && adjacent.ramps != 0;
-                // Gentle liquid mouths share continuous bank/bed endpoints. Sampling inside the interval instead
-                // leaves their wall a fraction short of both banks, visible as pinholes at close camera distances.
-                boolean inset = !waterSlope(tile, neighbor) && (!graded || crest == null
-                      && (tile.liquid().present() || neighbor != null && neighbor.liquid().present()));
-                Vector3 sampleA = inset ? new Vector3(start).lerp(end, 0.001f) : start;
-                Vector3 sampleB = inset ? new Vector3(end).lerp(start, 0.001f) : end;
+                // Graded roads and gentle liquid mouths need their exact endpoints, including beside water;
+                // inset samples shorten the wall at the bank's breaks and leave pinholes along the ramp.
+                boolean inset = !graded && !waterSlope(tile, neighbor);
+                float sampleA = inset ? from + (to - from) * .001f : from;
+                float sampleB = inset ? to - (to - from) * .001f : to;
                 // A road cut is discontinuous; both endpoints must come from this interval's own roof.
-                Vector3 interval = graded ? new Vector3(start).lerp(end, .5f) : null;
-                start.z = edgeHeight(sampleA, interval);
-                end.z = edgeHeight(sampleB, interval);
+                Vector3 interval = graded ? new Vector3(roofA).lerp(roofB, (from + to) / 2) : null;
+                start.z = edgeHeight(new Vector3(roofA).lerp(roofB, sampleA), interval);
+                end.z = edgeHeight(new Vector3(roofA).lerp(roofB, sampleB), interval);
+                Vector3 lowerInterval = graded && adjacent != null ? new Vector3(footA).lerp(footB, (from + to) / 2) : null;
                 float lowA = adjacent == null ? floor : basin ? neighbor.elevation() * BoardGeometry.level()
-                      : adjacent.edgeHeight(sampleA, interval);
+                      : adjacent.edgeHeight(new Vector3(footA).lerp(footB, sampleA), lowerInterval);
                 float lowB = adjacent == null ? floor : basin ? neighbor.elevation() * BoardGeometry.level()
-                      : adjacent.edgeHeight(sampleB, interval);
+                      : adjacent.edgeHeight(new Vector3(footA).lerp(footB, sampleB), lowerInterval);
                 float dA = start.z - lowA, dB = end.z - lowB;
                 if (dA < -0.001f && dB > 0.001f) {
                     float t = -dA / (dB - dA);

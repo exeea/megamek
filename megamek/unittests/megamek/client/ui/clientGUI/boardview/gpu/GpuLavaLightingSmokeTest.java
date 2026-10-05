@@ -23,6 +23,8 @@ import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
+import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.client.ui.clientGUI.boardview.BoardFieldOfView;
 import megamek.common.board.Coords;
@@ -80,6 +82,24 @@ class GpuLavaLightingSmokeTest {
                     assertArrayEquals(lit, draw(batch, object, environment, camera), "The same source restores the same light");
                     environment.remove(GpuLavaLighting.TYPE);
                     assertArrayEquals(unlit, draw(batch, object, environment, camera), "An environment without lava resets uniforms");
+                    environment.set(lights);
+                    var at = new Coords(3, 2);
+                    // A mushroom near the receiving object's visible side, rather than at the edge of its falloff.
+                    Vector3 root = position.cpy().add(20, -18, -12);
+                    var fungus = GpuFungus.light(5, at, BoardFungus.CUPS.getFirst(),
+                          new BoundingBox(root.cpy().add(-16, -16, 0), root.cpy().add(16, 16, 30)));
+                    lights.setFungus(List.of(fungus));
+                    lights.update(bank(BoardLiquid.Kind.NONE, false), camera.camera);
+                    double fungalRed = red(draw(batch, object, environment, camera));
+                    assertTrue(fungalRed > red(unlit) + .15,
+                          "Mushrooms illuminate nearby objects: red increase " + (fungalRed - red(unlit)));
+                    lights.update(bank(BoardLiquid.Kind.NONE, true), camera.camera);
+                    assertArrayEquals(unlit, draw(batch, object, environment, camera), "Hidden fungi do not leak light");
+                    lights.update(bank(BoardLiquid.Kind.NONE, false), camera.camera, false);
+                    assertArrayEquals(unlit, draw(batch, object, environment, camera), "Tactical View excludes prop lights");
+                    lights.setFungus(List.of());
+                    lights.update(bank(BoardLiquid.Kind.NONE, false), camera.camera);
+                    assertArrayEquals(unlit, draw(batch, object, environment, camera), "Retiring props retires their lights");
                     terrain.update(scene);
                     terrain.animate(.5f, List.of());
                     frame.render(terrain, camera, scene, List.of(object), batch);

@@ -64,6 +64,7 @@ final class RigidGlb {
 
     static final class Data extends ModelData {
         final Map<String, Image> images = new HashMap<>();
+        final Map<String, Float> alphaTests = new HashMap<>();
     }
 
     static ModelData load(FileHandle file) {
@@ -181,23 +182,43 @@ final class RigidGlb {
             Set<String> materialNames = new HashSet<>();
             for (var sourceMaterial : source.getMaterialModels()) {
                 var material = (MaterialModelV2) sourceMaterial;
-                require(material.getAlphaMode() == MaterialModelV2.AlphaMode.OPAQUE,
-                      "Rigid kits use opaque materials");
+                require(material.getAlphaMode() != MaterialModelV2.AlphaMode.BLEND,
+                      "Rigid kits use opaque or alpha-tested materials");
                 var target = new ModelMaterial();
                 target.id = material.getName();
                 require(target.id != null && materialNames.add(target.id), "Material names must be unique");
+                if (material.getAlphaMode() == MaterialModelV2.AlphaMode.MASK) {
+                    float cutoff = material.getAlphaCutoff();
+                    require(Float.isFinite(cutoff) && cutoff >= 0 && cutoff <= 1, "Invalid alpha cutoff");
+                    result.alphaTests.put(target.id, cutoff);
+                }
                 float[] color = material.getBaseColorFactor();
                 target.diffuse = new Color(display(color[0]), display(color[1]), display(color[2]), color[3]);
-                if (material.getBaseColorTexture() != null) {
-                    require(material.getBaseColorTexcoord() == null || material.getBaseColorTexcoord() == 0,
+                for (int usage : new int[] { ModelTexture.USAGE_DIFFUSE, ModelTexture.USAGE_NORMAL, ModelTexture.USAGE_AMBIENT }) {
+                    var sourceTexture = switch (usage) {
+                        case ModelTexture.USAGE_NORMAL -> material.getNormalTexture();
+                        case ModelTexture.USAGE_AMBIENT -> material.getOcclusionTexture();
+                        default -> material.getBaseColorTexture();
+                    };
+                    if (sourceTexture == null) { continue; }
+                    Integer coordinate = switch (usage) {
+                        case ModelTexture.USAGE_NORMAL -> material.getNormalTexcoord();
+                        case ModelTexture.USAGE_AMBIENT -> material.getOcclusionTexcoord();
+                        default -> material.getBaseColorTexcoord();
+                    };
+                    require(coordinate == null || coordinate == 0,
                           "Only TEXCOORD_0 is supported");
-                    var image = asset.images().get(material.getBaseColorTexture());
+                    require(usage != ModelTexture.USAGE_NORMAL || material.getNormalScale() == 1,
+                          "Bake normal strength into the map");
+                    require(usage != ModelTexture.USAGE_AMBIENT || material.getOcclusionStrength() == 1,
+                          "Bake occlusion strength into the map");
+                    var image = asset.images().get(sourceTexture);
                     result.images.put(image.key(), image);
                     var texture = new ModelTexture();
                     texture.id = target.id;
-                    texture.usage = ModelTexture.USAGE_DIFFUSE;
+                    texture.usage = usage;
                     texture.fileName = image.key();
-                    target.textures = new com.badlogic.gdx.utils.Array<>();
+                    if (target.textures == null) { target.textures = new com.badlogic.gdx.utils.Array<>(); }
                     target.textures.add(texture);
                 }
                 result.materials.add(target);

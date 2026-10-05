@@ -13,6 +13,7 @@ import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import com.badlogic.gdx.files.FileHandle;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -186,13 +187,16 @@ class RigidGlbTest {
     }
 
     @Test
-    void doubleSidedDoesNotEnableUnsupportedAlphaModes() throws Exception {
-        for (String mode : new String[] { "BLEND", "MASK" }) {
-            var document = document();
-            ((ObjectNode) document.get("materials").get(0)).put("doubleSided", true).put("alphaMode", mode);
-            var file = file(document, false);
-            assertThrows(IllegalArgumentException.class, () -> RigidGlb.load(file));
-        }
+    void cutoutsKeepTheirAuthoredThresholdWithoutEnablingBlendedKits() throws Exception {
+        var document = document();
+        ((ObjectNode) document.get("materials").get(0)).put("doubleSided", true)
+              .put("alphaMode", "MASK").put("alphaCutoff", .37f);
+        var data = (RigidGlb.Data) RigidGlb.load(file(document, false));
+        assertEquals(.37f, data.alphaTests.get(data.materials.first().id), .0001f);
+        assertEquals(6, data.meshes.first().parts[0].indices.length, "Cutout backs remain visible");
+        ((ObjectNode) document.get("materials").get(0)).put("alphaMode", "BLEND");
+        var file = file(document, false);
+        assertThrows(IllegalArgumentException.class, () -> RigidGlb.load(file));
     }
 
     private ObjectNode levels() throws Exception {
@@ -261,6 +265,56 @@ class RigidGlbTest {
         ((ObjectNode) textured.get("images").get(0)).put("uri", "https://invalid.example/foliage.png");
         var remote = file(textured, false);
         assertThrows(IllegalArgumentException.class, () -> RigidGlb.load(remote));
+    }
+
+    @Test
+    void retainsAuthoredNormalTextureAlongsideColorWithoutAllocatingGraphics() throws Exception {
+        var textured = document();
+        var images = textured.putArray("images");
+        images.addObject().put("uri", "skin.png");
+        images.addObject().put("uri", "skin-normal.png");
+        var textures = textured.putArray("textures");
+        textures.addObject().put("source", 0);
+        textures.addObject().put("source", 1);
+        var material = (ObjectNode) textured.get("materials").get(0);
+        ((ObjectNode) material.get("pbrMetallicRoughness")).putObject("baseColorTexture").put("index", 0);
+        material.putObject("normalTexture").put("index", 1);
+        Files.write(directory.resolve("skin.png"), encodedImage("png"));
+        Files.write(directory.resolve("skin-normal.png"), encodedImage("png"));
+        var data = RigidGlb.load(file(textured, false));
+        assertEquals(2, data.materials.first().textures.size);
+        assertEquals(com.badlogic.gdx.graphics.g3d.model.data.ModelTexture.USAGE_NORMAL,
+              data.materials.first().textures.get(1).usage);
+        assertEquals(directory.resolve("skin-normal.png").toString(),
+              data.materials.first().textures.get(1).fileName);
+        ((ObjectNode) material.get("normalTexture")).put("scale", .2);
+        var unsupported = file(textured, false);
+        assertThrows(IllegalArgumentException.class, () -> RigidGlb.load(unsupported));
+    }
+
+    @Test
+    void retainsPackedOcclusionTextureAlongsideColorAndNormal() throws Exception {
+        var textured = document();
+        var images = textured.putArray("images");
+        var textures = textured.putArray("textures");
+        for (String name : List.of("leaf.png", "leaf-normal.png", "leaf-surface.png")) {
+            images.addObject().put("uri", name);
+            textures.addObject().put("source", images.size() - 1);
+            Files.write(directory.resolve(name), encodedImage("png"));
+        }
+        var material = (ObjectNode) textured.get("materials").get(0);
+        ((ObjectNode) material.get("pbrMetallicRoughness")).putObject("baseColorTexture").put("index", 0);
+        material.putObject("normalTexture").put("index", 1);
+        var occlusion = material.putObject("occlusionTexture").put("index", 2);
+        var data = RigidGlb.load(file(textured, false));
+        assertEquals(3, data.materials.first().textures.size);
+        var surface = data.materials.first().textures.get(2);
+        assertEquals(com.badlogic.gdx.graphics.g3d.model.data.ModelTexture.USAGE_AMBIENT, surface.usage);
+        assertEquals(directory.resolve("leaf-surface.png").toString(), surface.fileName);
+        occlusion.put("texCoord", 1);
+        assertThrows(IllegalArgumentException.class, () -> RigidGlb.load(file(textured, false)));
+        occlusion.put("texCoord", 0).put("strength", .3);
+        assertThrows(IllegalArgumentException.class, () -> RigidGlb.load(file(textured, false)));
     }
 
     static byte[] encodedImage(String format) throws Exception {

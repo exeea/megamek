@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.TextureArray;
 import com.badlogic.gdx.graphics.g3d.Attribute;
 import com.badlogic.gdx.graphics.g3d.Attributes;
@@ -63,7 +64,7 @@ final class GpuMagmaShader extends Attribute {
         return new Material("magma:" + mode, new GpuMagmaShader(mode, maps, field), IntAttribute.createCullFace(GL20.GL_NONE));
     }
 
-    static void register(DefaultShader shader) {
+    static void register(DefaultShader shader, Texture fallback) {
         shader.register("u_magmaMaps", new BaseShader.LocalSetter() {
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
@@ -82,7 +83,9 @@ final class GpuMagmaShader extends Attribute {
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                 var magma = attributes.get(GpuMagmaShader.class, TYPE);
-                if (magma != null && magma.field != null) { target.set(id, magma.field.texture); }
+                // Crust disables the field through u_magmaFieldMap, but its sampler stays active in the program.
+                // Always bind a 2D texture: a stale unit can be reused for an array and invalidate the entire draw.
+                target.set(id, magma != null && magma.field != null ? magma.field.texture : fallback);
             }
         });
         shader.register("u_magmaFieldMap", new BaseShader.LocalSetter() {

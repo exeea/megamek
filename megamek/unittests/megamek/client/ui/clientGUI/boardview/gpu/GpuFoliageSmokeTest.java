@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.imageio.ImageIO;
 
@@ -20,6 +21,7 @@ import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.Configuration;
+import megamek.common.Hex;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -46,12 +48,28 @@ class GpuFoliageSmokeTest {
                             if (tile.features().isEmpty()) { continue; }
                             String name = tile.features().getFirst().asset();
                             var model = assets.model(name);
-                            assertEquals(snow, model.getMaterial("snow") != null, name);
+                            assertEquals(snow, model.getMaterial("snow") != null
+                                  || model.getMaterial("canopy-snow-cutout") != null, name);
                             for (var material : model.materials) {
                                 var map = material.get(TextureAttribute.class, TextureAttribute.Diffuse);
                                 assertNotNull(map, name + ": " + material.id);
                                 // The impostor cards carry their own rendered atlas, not a shared detail map.
                                 if (material.id.equals("impostor")) { continue; }
+                                if (material.id.endsWith("-cutout")) {
+                                    assertEquals(512, map.textureDescription.texture.getWidth());
+                                    assertEquals(512, map.textureDescription.texture.getHeight());
+                                    assertEquals(Texture.TextureWrap.ClampToEdge, map.textureDescription.texture.getVWrap());
+                                    continue;
+                                }
+                                if (material.id.equals("cactus")) {
+                                    assertEquals(512, map.textureDescription.texture.getWidth());
+                                    var normal = material.get(TextureAttribute.class, TextureAttribute.Normal);
+                                    assertNotNull(normal, "Cactus ribs use the authored normal map");
+                                    assertSame(assets.material("foliage/cactus-skin-normal"),
+                                          normal.textureDescription.texture);
+                                    assertSame(assets.material("foliage/cactus-skin"), map.textureDescription.texture);
+                                    continue;
+                                }
                                 assertEquals(64, map.textureDescription.texture.getWidth());
                                 assertEquals(64, map.textureDescription.texture.getHeight());
                                 assertEquals(Texture.TextureWrap.Repeat, map.textureDescription.texture.getVWrap());
@@ -69,6 +87,33 @@ class GpuFoliageSmokeTest {
                               "trees-" + (snow ? "snow" : "summer") + ".png"));
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                     }
+                    var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
+                          BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+                    try {
+                        for (boolean natural : new boolean[] { false, true }) {
+                            BoardScene forest = forest(natural);
+                            terrain.update(forest);
+                            for (boolean overhead : new boolean[] { false, true }) {
+                                camera = new BoardCamera();
+                                camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                                camera.setIsometric(!overhead);
+                                camera.fit(forest);
+                                GpuTerrainLodSmokeTest.settle(terrain, null, forest, camera);
+                                frame.render(terrain, camera, forest);
+                                GpuReviewFrame.save(new File(System.getProperty("megamek.gpu.screenshots"),
+                                      "forest-" + (natural ? "stands" : "mixed") + (overhead ? "-top" : "") + ".png"));
+                            }
+                            camera.setIsometric(true);
+                            camera.center(BoardGeometry.center(new Coords(5, 4), 0).add(0, 0, 18));
+                            camera.camera.zoom = .32f;
+                            camera.update();
+                            GpuTerrainLodSmokeTest.settle(terrain, null, forest, camera);
+                            frame.render(terrain, camera, forest);
+                            GpuReviewFrame.save(new File(System.getProperty("megamek.gpu.screenshots"),
+                                  "forest-" + (natural ? "stands" : "mixed") + "-close.png"));
+                        }
+                    } finally { frame.dispose(); }
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) {
                     failure.set(error);
                 } finally {
@@ -82,20 +127,38 @@ class GpuFoliageSmokeTest {
     }
 
     private static BoardScene treeScene(boolean snow) throws Exception {
-        List<String> names = new ArrayList<>(List.of("tree", "tree-broad", "tree-slender", "birch", "pine", "pine-tall",
-              "pine-broad", "willow", "tree-dead"));
+        List<String> names = new ArrayList<>(BoardTreeDistributionTest.BASIC_TREES);
+        names.add("tree-dead");
         if (!snow) { names.addAll(List.of("palm", "palm-bent", "cactus", "cactus-flowers")); }
         File ground = new File(Configuration.dataDir(), "models/board/tileset/saxarba/base/base_"
               + (snow ? "snow_light" : "default") + "_0.png");
         BoardScene.Pixels pixels = new BoardScene.Pixels(ImageIO.read(ground));
         List<BoardScene.Tile> tiles = new ArrayList<>();
-        for (int index = 0; index < 16; index++) {
+        for (int index = 0; index < 25; index++) {
             List<BoardScene.Feature> tree = index < names.size()
-                  ? List.of(new BoardScene.Feature(names.get(index) + (snow ? "-snow" : ""), 0, 0, 20, 1.1f, 2, 0))
+                  ? List.of(new BoardScene.Feature(names.get(index) + (snow ? "-snow" : ""), 0, 0, 20, 1.1f, 2, 0,
+                        BoardScene.FeatureKind.TREE))
                   : List.of();
-            tiles.add(new BoardScene.Tile(new Coords(index % 4, index / 4), 0, -1, false, 0,
+            tiles.add(new BoardScene.Tile(new Coords(index / 5, index % 5), 0, -1, false, 0,
                   snow ? BoardScene.Surface.SNOW : BoardScene.Surface.GRASS, pixels, null, null, tree, List.of()));
         }
-        return new BoardScene(0, 4, 4, tiles, List.of(), List.of(), -1, "", List.of(), new BoardScene.Light(-24, -30));
+        return new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of(), new BoardScene.Light(-24, -30));
+    }
+
+    private static BoardScene forest(boolean natural) {
+        var tiles = new ArrayList<BoardScene.Tile>();
+        for (int x = 0; x < 12; x++) {
+            for (int y = 0; y < 10; y++) {
+                var coords = new Coords(x, y);
+                String cover = x == 0 || x == 11 || y == 0 || y == 9 || x == 6 ? ""
+                      : "woods:" + (y < 5 ? 1 : 2) + ";foliage_elev:2";
+                var hex = new Hex(0, cover + (x == 6 ? ";road:1:9" : ""), "", coords);
+                var base = BoardBiomeTest.tile(coords, BoardScene.Biome.NONE, 0);
+                tiles.add(new BoardScene.Tile(coords, 0, -1, false, x == 6 ? 9 : 0, BoardScene.Surface.GRASS,
+                      base.ground(), null, null, null, null, BoardTreeDistributionTest.capture(hex, coords, natural),
+                      List.of(), BoardLiquid.NONE, null, true, BoardRoad.capture(hex)));
+            }
+        }
+        return new BoardScene(0, 12, 10, tiles, List.of(), List.of(), -1, "", List.of(), new BoardScene.Light(-24, -30));
     }
 }

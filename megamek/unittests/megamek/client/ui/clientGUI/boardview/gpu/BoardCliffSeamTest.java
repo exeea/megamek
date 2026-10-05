@@ -10,12 +10,15 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.FutureTask;
+import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.math.Vector3;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
+import megamek.common.game.Game;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -45,6 +48,183 @@ class BoardCliffSeamTest {
     @ValueSource(booleans = { false, true })
     void adjoiningCliffsShareTheirBoundaries(boolean transitions) {
         BoardSculptTest.withTransitions(transitions, BoardCliffSeamTest::checkBoundaries);
+    }
+
+    @Test
+    void commCenterBoardCutNormalsStaySeparateFromTheRoadAbove() throws Exception {
+        BoardScene scene = capturedScene("GrassLands/16x17 Grasslands River CommCenter.board");
+        for (Coords at : List.of(new Coords(0, 2), new Coords(0, 3))) {
+            for (TerrainLod lod : TerrainLod.values()) {
+                var surface = new BoardSurface(scene, scene.tile(at), lod);
+                int checked = 0;
+                for (var face : surface.walls(scene, BoardGeometry.floor(scene))) {
+                    if (scene.tile(at.translated(BoardGeometry.edgeDirection(face.landEdge()))) != null) { continue; }
+                    Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
+                    for (Vector3 point : List.of(face.a(), face.b(), face.c())) {
+                        assertTrue(surface.relief.shade(point).normal().epsilonEquals(normal, .0001f),
+                              "The map cut must not inherit upward road normals at " + at + ", " + lod + ": " + point);
+                    }
+                    checked++;
+                }
+                assertTrue(checked > 0, "Exercise the exposed board cut beside the road");
+            }
+        }
+    }
+
+    @ParameterizedTest(name = "quay {0}")
+    @ValueSource(strings = { "Templates/SeaPort.board", "Map Set 7/16x17 Seaport.board" })
+    void seaportQuayPanelsStayClosedAndFaceTheWater(String path) throws Exception {
+        BoardScene scene = capturedScene(path);
+        for (TerrainLod lod : TerrainLod.values()) {
+            Map<Segment, Integer> joined = new HashMap<>();
+            Map<Coords, List<BoardSurface.Face>> quays = new HashMap<>();
+            for (var tile : scene.tiles()) {
+                var surface = new BoardSurface(scene, tile, lod);
+                countEdges(joined, surface.faces);
+                var walls = surface.walls(scene, BoardGeometry.floor(scene));
+                countEdges(joined, walls);
+                if (!tile.liquid().present() && tile.surface() == BoardScene.Surface.CONCRETE) {
+                    for (var face : walls) {
+                        if (face.landEdge() < 0) { continue; }
+                        var water = scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(face.landEdge())));
+                        if (water == null || !water.liquid().present()) { continue; }
+                        for (var vertex : List.of(face.a(), face.b(), face.c())) {
+                            assertTrue(vertex.z >= water.elevation() * BoardGeometry.level() - .001f,
+                                  "Only the basin owns the submerged quay: " + tile.coords() + " beside " + water.coords()
+                                        + ", " + lod + ": " + vertex);
+                        }
+                    }
+                }
+                if (!tile.liquid().present()) { continue; }
+                List<BoardSurface.Face> panels = surface.faces.stream().filter(face -> face.finish() == BoardSurface.Finish.WALL
+                      && face.landEdge() >= 0 && BoardConcrete.concreteBank(scene, tile, face.landEdge())).toList();
+                if (!panels.isEmpty()) {
+                    quays.put(tile.coords(), panels);
+                    checkSubmergedShading(surface);
+                }
+                Vector3 center = BoardGeometry.center(tile.coords(), 0);
+                for (var face : panels) {
+                    for (var vertex : List.of(face.a(), face.b(), face.c())) {
+                        assertEquals(BoardRelief.Kind.SUBMERGED_CLIFF, surface.relief.shade(vertex).kind(),
+                              "The complete panel keeps underwater shading at " + tile.coords() + ", " + lod);
+                    }
+                    Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
+                    Vector3 towardWater = new Vector3(center).sub(face.a());
+                    towardWater.z = 0;
+                    assertTrue(normal.dot(towardWater) > 0,
+                          "Quay panel faces the water at " + tile.coords() + ", " + lod + ": " + face);
+                }
+            }
+            assertFalse(quays.isEmpty());
+            for (var quay : quays.entrySet()) {
+                Map<Segment, Integer> boundary = new HashMap<>();
+                countEdges(boundary, quay.getValue());
+                assertJoined(boundary, joined, "SeaPort quay " + quay.getKey() + ", " + lod);
+            }
+        }
+    }
+
+    @Test
+    void seaportApronFitsBothSidesWithoutLoweringBuildingFoundations() throws Exception {
+        BoardScene scene = capturedScene("Map Set 7/16x17 Seaport.board");
+        assertEquals(BoardConcrete.Mode.EVERYWHERE, BoardConcrete.mode());
+        BoardConcrete shape = BoardConcrete.of(scene);
+        Vector3 a = shape.corner(new Coords(2, 1), 3), b = shape.corner(new Coords(5, 2), 5);
+        Vector3 along = new Vector3(b).sub(a).nor();
+        Vector3 back = shape.corner(new Coords(2, 1), 2);
+        for (int x = 2; x <= 5; x++) {
+            Coords coords = new Coords(x, x / 2);
+            for (int k = 3; k <= 5; k++) {
+                Vector3 offset = shape.corner(coords, k).sub(a);
+                assertEquals(0, along.x * offset.y - along.y * offset.x, .003f,
+                      "The northwest quay stays straight beside inland buildings: " + coords + " corner " + k);
+            }
+            for (int k = 0; k <= 2; k++) {
+                Vector3 offset = shape.corner(coords, k).sub(back);
+                assertEquals(0, along.x * offset.y - along.y * offset.x, .003f,
+                      "The inland side stays straight and parallel to the quay: " + coords + " corner " + k);
+            }
+        }
+        List<BoardSurface.Face> originalGround = new ArrayList<>();
+        try {
+            BoardConcrete.tune(BoardConcrete.Mode.OFF);
+            for (var tile : scene.tiles()) { originalGround.addAll(new BoardSurface(scene, tile).groundFaces()); }
+        } finally { BoardConcrete.tune(BoardConcrete.Mode.EVERYWHERE); }
+        BoardSurface.Cache surfaces = new BoardSurface.Cache();
+        for (var tile : scene.tiles()) {
+            if (tile.features().stream().noneMatch(feature -> feature.kind() == BoardScene.FeatureKind.BUILDING)) { continue; }
+            Vector3 center = BoardGeometry.center(tile.coords(), tile.elevation());
+            for (int k = 0; k < 6; k++) {
+                Vector3 corner = BoardGeometry.corner(tile.coords(), tile.elevation(), k);
+                for (float radius : new float[] { 0, .5f, .99f }) {
+                    Vector3 point = new Vector3(center).lerp(corner, radius);
+                    // Natural shoreline cutbacks outside the actual building already exist without fitting.
+                    float previousHeight = BoardSurface.sampleHeight(originalGround, point.x, point.y, Float.NaN);
+                    if (!Float.isFinite(previousHeight) || Math.abs(previousHeight - center.z) >= .001f) { continue; }
+                    boolean supported = false;
+                    for (Coords at : tile.coords().allAtDistanceOrLess(1)) {
+                        var neighbor = scene.tile(at);
+                        if (neighbor == null) { continue; }
+                        float height = BoardSurface.sampleHeight(surfaces.get(scene, neighbor).faces, point.x, point.y, Float.NaN);
+                        supported |= Math.abs(height - center.z) < .001f;
+                    }
+                    assertTrue(supported, "Fitting preserves existing building support: " + tile.coords() + " " + point);
+                }
+            }
+        }
+    }
+
+    static BoardScene capturedScene(String path) throws Exception {
+        FutureTask<BoardScene> capture = new FutureTask<>(() -> {
+            var board = new Board();
+            board.load(new File("data/boards/" + path));
+            var game = new Game();
+            game.setBoard(board);
+            try (var source = new GpuMapSource(game, null, null)) { return source.takeFrame().scene(); }
+        });
+        SwingUtilities.invokeAndWait(capture);
+        return capture.get();
+    }
+
+    @Test
+    void commCenterBoardCutsMeetEverySlope() throws Exception {
+        BoardScene scene = capturedScene("GrassLands/16x17 Grasslands River CommCenter.board");
+        float floor = BoardGeometry.floor(scene);
+        for (TerrainLod lod : TerrainLod.values()) {
+            Map<Segment, Integer> joined = new HashMap<>();
+            Map<String, List<BoardSurface.Face>> cuts = new HashMap<>();
+            for (var tile : scene.tiles()) {
+                Coords at = tile.coords();
+                if (at.getX() > 1 && at.getX() < scene.width() - 2 && at.getY() > 1 && at.getY() < scene.height() - 2) { continue; }
+                var surface = new BoardSurface(scene, tile, lod);
+                countEdges(joined, surface.faces);
+                var walls = surface.walls(scene, floor);
+                countEdges(joined, walls);
+                if (!tile.liquid().present()) {
+                    for (int edge = 0; edge < 6; edge++) {
+                        if (scene.tile(at.translated(BoardGeometry.edgeDirection(edge))) != null) { continue; }
+                        int cut = edge;
+                        var panels = walls.stream().filter(face -> face.landEdge() == cut).toList();
+                        Vector3 outward = BoardGeometry.corner(at, 0, edge).add(BoardGeometry.corner(at, 0, edge + 1))
+                              .scl(.5f).sub(BoardGeometry.center(at, 0)).nor();
+                        for (var face : panels) {
+                            Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
+                            assertTrue(normal.dot(outward) > 0,
+                                  "The board cut must not fold inward at " + at + ", edge " + edge + ", " + lod);
+                        }
+                        cuts.put(at + " edge " + edge, panels);
+                    }
+                }
+            }
+            long bottom = Math.round(floor * 1000);
+            assertFalse(cuts.isEmpty());
+            for (var cut : cuts.entrySet()) {
+                Map<Segment, Integer> boundary = new HashMap<>();
+                countEdges(boundary, cut.getValue());
+                boundary.keySet().removeIf(edge -> edge.a.z == bottom && edge.b.z == bottom);
+                assertJoined(boundary, joined, "CommCenter map-edge slope at " + cut.getKey() + ", " + lod);
+            }
+        }
     }
 
     @Test

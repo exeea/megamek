@@ -5,6 +5,7 @@ import java.awt.Rectangle;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiConsumer;
+import java.util.function.Function;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
@@ -15,6 +16,7 @@ import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
+import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.board.Coords;
 
 /** One camera for the 3D view and the Tactical View: orbit presets and free flight over the same board geometry. */
@@ -55,6 +57,9 @@ final class BoardCamera {
     private boolean orbitFit;
     /** Render-thread movement constraint supplied by the board view, borrowing its installed terrain geometry. */
     BiConsumer<Vector3, Vector3> flightCollision;
+    /** Render-thread picking against the installed terrain, shared with pointer selection. */
+    Function<Ray, BoardGeometry.Hit> terrainHit;
+    private boolean orbitAnchored;
     private float overviewZoom;
     private Vector3 overviewFocus;
     private boolean overviewFit;
@@ -229,6 +234,11 @@ final class BoardCamera {
         if (!before.equals(camera.position)) { update(); }
     }
 
+    void terrainChanged() {
+        orbitAnchored = false;
+        constrainFlight();
+    }
+
     /** Enclose the near-plane corners even with a wide lens or viewport, so looking around cannot clip a cliff. */
     float collisionRadius() {
         float halfHeight = (float) Math.tan(Math.toRadians(camera.fieldOfView / 2));
@@ -314,9 +324,10 @@ final class BoardCamera {
         setFirstPerson(false);
         stopFraming();
         stopRotation();
+        anchorOrbit();
         azimuth = value ? 45 : 0;
         tilt = value ? ISOMETRIC_TILT : 0;
-        update();
+        updateCamera();
     }
 
     boolean tactical() {
@@ -398,6 +409,7 @@ final class BoardCamera {
             return;
         }
         stopRotation();
+        anchorOrbit();
         azimuth = wrapDegrees(azimuth + rotation);
         tilt(inclination);
     }
@@ -410,8 +422,9 @@ final class BoardCamera {
         }
         stopFraming();
         fitToWindow = false;
+        anchorOrbit();
         tilt = MathUtils.clamp(tilt + inclination, 0, MAX_TILT);
-        update();
+        updateCamera();
     }
 
     /**
@@ -427,6 +440,7 @@ final class BoardCamera {
         }
         stopFraming();
         fitToWindow = false;
+        anchorOrbit();
         float remaining = isRotating() ? rotationSweep * (1 - rotationProgress()) : 0;
         // The target is tracked apart from the eased path so that whole steps from a preset land exactly on it again.
         rotationTarget = wrapDegrees((isRotating() ? rotationTarget : azimuth) + direction * ROTATION_STEP);
@@ -468,9 +482,32 @@ final class BoardCamera {
         if (!isRotating()) {
             return;
         }
+        anchorOrbit();
         rotationElapsed = Math.min(rotationElapsed + seconds, ROTATION_SECONDS);
         azimuth = isRotating() ? wrapDegrees(rotationStart + rotationSweep * rotationProgress()) : rotationTarget;
-        update();
+        updateCamera();
+    }
+
+    /** Keep the visible center fixed through orbit/tilt until a pan, zoom, framing or terrain change. */
+    private void anchorOrbit() {
+        if (orbitAnchored || terrainHit == null) { return; }
+        Vector3 origin = camera.position.cpy();
+        if (!camera.perspective) {
+            origin.mulAdd(new Vector3(camera.direction).crs(camera.up).nor(), -viewOffsetPixels * camera.zoom);
+        }
+        Ray ray = new Ray(origin, camera.perspective ? new Vector3(focus).sub(origin) : camera.direction);
+        BoardGeometry.Hit hit = terrainHit.apply(ray);
+        if (hit == null) { return; }
+        Vector3 pivot = ray.getEndPoint(new Vector3(), (float) Math.sqrt(hit.distance()));
+        if (camera.perspective) {
+            // Change the orbit distance, not the eye or lens: every visible point keeps its screen position.
+            float depth = new Vector3(pivot).sub(camera.position).dot(camera.direction);
+            if (depth <= camera.near) { return; }
+            camera.zoom *= depth / camera.distance();
+        }
+        focus.set(pivot);
+        orbitAnchored = true;
+        updateCamera();
     }
 
     private float rotationProgress() {
@@ -1010,6 +1047,12 @@ final class BoardCamera {
     }
 
     void update() {
+        orbitAnchored = false;
+        updateCamera();
+    }
+
+    /** Angle changes retain the terrain pivot; changes to framing invalidate it through update(). */
+    private void updateCamera() {
         orientation(azimuth, tilt, camera.direction, camera.up);
         camera.direction.scl(-1);
         // Parallel rays still need their origins in front of all visible ground. At a tilted, zoomed-out view,

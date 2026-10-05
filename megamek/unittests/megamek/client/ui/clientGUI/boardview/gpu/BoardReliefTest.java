@@ -114,19 +114,17 @@ class BoardReliefTest {
     }
 
     @Test
-    void concreteStandsInFlatSlabsAndFromThreeLevelsOnBedrockUnderASlab() {
+    void tallConcreteCliffsRemainFlatDownToTheirFeet() {
         float m = BoardRelief.metres(1);
-        for (int level : new int[] { 2, 3 }) {
+        for (int level : new int[] { 3, 6 }) {
             BoardScene scene = scene(level, true, BoardScene.Surface.CONCRETE);
             BoardSurface surface = new BoardSurface(scene, scene.tile(CENTER));
             Vector3 center = BoardGeometry.center(CENTER, level);
-            float underside = (level - 1) * BoardGeometry.LEVEL;
-            int slab = 0, rock = 0;
+            int samples = 0;
             for (BoardSurface.Face face : surface.walls(scene, BoardGeometry.floor(scene))) {
                 // A rectangular slab needs only corner vertices; also measure inside its triangles.
                 Vector3 middle = new Vector3(face.a()).add(face.b()).add(face.c()).scl(1 / 3f);
-                boolean panel = level == 2 || Math.min(face.a().z, Math.min(face.b().z, face.c().z)) >= underside - .001f;
-                for (Vector3 p : panel ? List.of(face.a(), face.b(), face.c(), middle) : List.of(face.a(), face.b(), face.c())) {
+                for (Vector3 p : List.of(face.a(), face.b(), face.c(), middle)) {
                     // Distance beyond the nearest logical edge; the rounded corners are skipped.
                     float beyond = -Float.MAX_VALUE, along = 0;
                     for (int edge = 0; edge < 6; edge++) {
@@ -145,16 +143,11 @@ class BoardReliefTest {
                         }
                     }
                     if (along < .15f || along > .85f) { continue; }
-                    if (level == 2 || p.z > underside - .005f * BoardGeometry.LEVEL) {
-                        assertEquals(0, beyond, .01f * m, "Cast concrete faces are flat, at " + p);
-                        slab++;
-                    } else if (p.z > .45f * underside) {
-                        assertTrue(beyond < -.45f * m, "The bedrock stands back under the slab, at " + p);
-                        rock++;
-                    }
+                    assertEquals(0, beyond, .01f * m, "Cast concrete faces are flat, at " + p);
+                    samples++;
                 }
             }
-            assertTrue(slab > 0 && (level == 2 || rock > 0), "Both parts were measured");
+            assertTrue(samples > 0, "Every face was measured");
         }
     }
 

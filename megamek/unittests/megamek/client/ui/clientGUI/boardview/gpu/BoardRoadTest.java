@@ -371,7 +371,7 @@ class BoardRoadTest {
         }
     }
 
-    private static float maskAlpha(GpuRoads.MaskData mask, float x, float y) {
+    static float maskAlpha(GpuRoads.MaskData mask, float x, float y) {
         int px = (int) Math.floor((x - mask.x()) / mask.width() * mask.pixels().width());
         int py = (int) Math.floor((y - mask.y()) / mask.height() * mask.pixels().height());
         if (px < 0 || py < 0 || px >= mask.pixels().width() || py >= mask.pixels().height()) { return 0; }

@@ -26,6 +26,9 @@ import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.TextureArray;
 import com.badlogic.gdx.graphics.TextureArrayData;
 import com.badlogic.gdx.graphics.g3d.Model;
+import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
+import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
+import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.JsonReader;
@@ -40,6 +43,7 @@ final class GpuAssets implements Disposable {
     private final Map<String, List<Model>> modelLods = new HashMap<>();
     private final Map<Interior, Model> interiors = new HashMap<>();
     private final Map<String, GpuBuilding> buildings = new HashMap<>();
+    private final Map<BoardIndustrial.Layout, Model> industrial = new HashMap<>();
     private final Map<String, Texture> materials = new HashMap<>();
     private final Map<String, Cliff> cliffs = new HashMap<>();
     private final Map<Boolean, TextureArray> magmas = new HashMap<>();
@@ -207,6 +211,10 @@ final class GpuAssets implements Disposable {
 
     /** Custom kits override the exact tileset path for buildings, fuel tanks and industrial structures. */
     GpuBuilding.Assembly building(String asset, int levels, long seed) {
+        return building(asset, levels, seed, true);
+    }
+
+    GpuBuilding.Assembly building(String asset, int levels, long seed, boolean withInterior) {
         if (!asset.startsWith("buildings/")) { return null; }
         if (!buildings.containsKey(asset)) {
             File customRoot = new File(Configuration.dataDir(), "models/buildings");
@@ -214,11 +222,43 @@ final class GpuAssets implements Disposable {
             buildings.put(asset, file.file().isFile() ? new GpuBuilding(file, customRoot.toPath(), this::createModel) : null);
         }
         GpuBuilding building = buildings.get(asset);
-        return building == null ? null : building.assemble(levels, seed);
+        return building == null ? null : building.assemble(levels, seed, withInterior);
     }
 
     void retainBuildings(java.util.Set<GpuBuilding.Assembly> live) {
         buildings.values().stream().filter(java.util.Objects::nonNull).forEach(building -> building.retain(live));
+    }
+
+    Model industrial(BoardIndustrial.Layout layout) {
+        return industrial.computeIfAbsent(layout, key -> {
+            // Textures are asset-owned; decode before allocating native mesh buffers.
+            Texture paint = material("industrial/paint"), steel = material("industrial/steel");
+            var data = BoardIndustrial.model(key);
+            Texture fan = data.materials.size > 2 ? material("industrial/fan") : null;
+            Model model = new Model(data);
+            for (var surface : model.materials) {
+                if (surface.id.equals("fan")) {
+                    // Shared opaque diffuse material stays eligible for the existing prop batch.
+                    surface.set(TextureAttribute.createDiffuse(fan));
+                    continue;
+                }
+                boolean painted = surface.id.equals("paint");
+                surface.set(TextureAttribute.createDiffuse(painted ? paint : steel));
+                float shine = painted ? .12f : .3f;
+                surface.set(ColorAttribute.createSpecular(shine, shine, shine, 1),
+                      FloatAttribute.createShininess(painted ? 20 : 45));
+            }
+            return model;
+        });
+    }
+
+    /** Procedural models belong to this renderer and survive while installed or cached chunks use them. */
+    void retainIndustrial(java.util.Set<Model> live) {
+        industrial.values().removeIf(model -> {
+            if (live.contains(model)) { return false; }
+            model.dispose();
+            return true;
+        });
     }
 
     private Model createModel(ModelData data) {
@@ -368,8 +408,8 @@ final class GpuAssets implements Disposable {
             texture.setWrap(wrap, wrap);
             if (repeating && (file.parent().name().equals("cliffs") || file.parent().name().equals("ground")
                   || file.parent().name().equals("sculpt") || file.parent().name().equals("roads")
-                  || file.parent().name().equals("ice"))) {
-                // Cliff relief needs its full resolution; mipmaps and supported anisotropy handle distance.
+                  || file.parent().name().equals("ice") || file.parent().name().equals("industrial"))) {
+                // Detailed materials retain full resolution; mipmaps and supported anisotropy handle distance.
                 texture.setAnisotropicFilter(8);
             } else if (repeating) {
                 int level = Math.max(0, (int) Math.ceil(Math.log(Math.max(texture.getWidth(), texture.getHeight()) / 128.0) / Math.log(2)));
@@ -554,6 +594,8 @@ final class GpuAssets implements Disposable {
 
     @Override
     public void dispose() {
+        industrial.values().forEach(Model::dispose);
+        industrial.clear();
         buildings.values().stream().filter(java.util.Objects::nonNull).forEach(GpuBuilding::dispose);
         buildings.clear();
         interiors.values().forEach(Model::dispose);

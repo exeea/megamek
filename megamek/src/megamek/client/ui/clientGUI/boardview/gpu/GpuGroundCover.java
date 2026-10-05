@@ -76,7 +76,8 @@ final class GpuGroundCover implements Disposable {
         List<BoardSurface.Face> ground = new ArrayList<>(surface.top().stream()
               .filter(face -> face.finish() == BoardSurface.Finish.TOP).toList());
         if (BoardGeometry.tuning().stepsBetweenTops()) { ground.addAll(surface.slopes()); }
-        ground.removeIf(face -> new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor().z <= .7f);
+        ground.removeIf(face -> BoardSurface.bridgeSupport(scene, tile, face)
+              || new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor().z <= .7f);
         var roots = new FloatArray();
         if (ground.isEmpty()) { return roots; }
         var support = new GpuBiomeVegetation.Support(ground);
@@ -98,6 +99,8 @@ final class GpuGroundCover implements Disposable {
             }
         }
         float iceReach = BoardRelief.metres(ICE_BORDER_REACH);
+        var obstacles = new BoardObstacles(scene, tile);
+        var root = new Vector3();
         for (int rank = 0; rank < ROOTS_PER_HEX; rank++) {
             // The same random sequence at every detail level: every candidate draws its place and its growth chance
             // before any ground-dependent rejection.
@@ -110,6 +113,10 @@ final class GpuGroundCover implements Disposable {
             var face = support.face(x, y);
             if (face == null) { continue; }
             float z = face.height(x, y);
+            // Test the actual authored triangles: geyser basins/rims and other
+            // scenery leave the surrounding grass and empty gaps untouched.
+            if (!obstacles.isEmpty() && obstacles.obstructs(root.set(x, y, z), 2 * BoardGeometry.hexScale(),
+                  MAX_HEIGHT_FRACTION * BoardGeometry.width())) { continue; }
             if (road != null && road.distance((x - centerX) / BoardGeometry.hexScale(),
                   (y - centerY) / BoardGeometry.hexScale()) < BoardRoad.SHOULDER + 1) { continue; }
             boolean iced = false;
@@ -119,7 +126,7 @@ final class GpuGroundCover implements Disposable {
                 iced |= Math.hypot(x - edge[0].x - t * ex, y - edge[0].y - t * ey) < iceReach;
             }
             if (iced) { continue; }
-            float grass = boundary ? BoardSurfaceBlend.sample(scene, tile, x, y, z).grass()
+            float grass = boundary ? BoardSurfaceBlend.grass(tile, BoardSurfaceBlend.sample(scene, tile, x, y, z), x, y)
                   : tile.surface() == BoardScene.Surface.GRASS ? 1 : 0;
             if (chance <= grass * BoardRelief.smooth((grass - .55f) / .35f)) {
                 roots.addAll(x, y, z - sink, rank);

@@ -33,6 +33,61 @@ class GpuBridgeSmokeTest {
     private static final Coords CENTER = BoardSurfaceBlendTest.CENTER;
 
     @Test
+    void koziceRaisedBridgeApproachesRenderWithoutHoles() throws Exception {
+        var scene = GpuRoadSourceTest.scene("unofficial/Strategoslevel3/32x17 (CDS) Kozice Valley Grain Mills.board");
+        var at = new Coords(19, 8);
+        File output = new File(System.getProperty("megamek.gpu.screenshots"), "bridges");
+        Files.createDirectories(output.toPath());
+        var failure = new AtomicReference<Throwable>();
+        var config = GpuBoardWindow.configuration(false);
+        config.setWindowedMode(1280, 960);
+        config.setInitialVisible(false);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                var terrain = new GpuTerrain();
+                var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
+                      BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+                try {
+                    var camera = new BoardCamera();
+                    camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                    camera.setIsometric(true);
+                    camera.camera.zoom = .15f;
+                    camera.center(BoardGeometry.center(at, 0));
+                    frame.prepare(terrain, camera, scene);
+                    terrain.update(scene);
+                    terrain.animate(0, List.of());
+                    for (int azimuth : new int[] { 70, 250 }) {
+                        camera.orbit(azimuth - camera.azimuth(), 0);
+                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        frame.render(terrain, camera, scene);
+                        GpuReviewFrame.save(new File(output, "kozice-bridge-" + azimuth + ".png"));
+                    }
+                    camera.orbit(70 - camera.azimuth(), 0);
+                    camera.camera.zoom = .075f;
+                    for (int y : new int[] { 7, 9 }) {
+                        camera.center(BoardGeometry.center(new Coords(19, y), 0).lerp(BoardGeometry.center(at, 0), .5f));
+                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        frame.render(terrain, camera, scene);
+                        GpuReviewFrame.save(new File(output, "kozice-ramp-" + (y + 1) + ".png"));
+                        for (float t : new float[] { .35f, .65f }) {
+                            var point = BoardGeometry.center(at, 0).lerp(BoardGeometry.center(new Coords(19, y), 0), t);
+                            var hit = terrain.selectionHit(scene, new Ray(new Vector3(point.x, point.y, 200), new Vector3(0, 0, -1)));
+                            assertNotNull(hit, "Both halves of the installed ramp must be pickable");
+                            assertEquals(t < .5f ? at : new Coords(19, y), hit.coords());
+                            assertEquals((1.5f - 2 * t) * BoardGeometry.level() + GpuRoads.SURFACE_LIFT * BoardGeometry.hexScale(),
+                                  200 - Math.sqrt(hit.distance()), .02f, "Picking must follow the rendered solid, above the bank");
+                        }
+                    }
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) { failure.set(error); }
+                finally { frame.dispose(); terrain.dispose(); Gdx.app.exit(); }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Kozice raised bridge approaches", failure.get()); }
+    }
+
+    @Test
     void forestsEndBridgeMeetsTheRoadsOnBothBanks() throws Exception {
         var scene = GpuRoadSourceTest.scene("unofficial/Strategoslevel3/32x17 (CW) Forests End  - Road.board");
         var at = new Coords(8, 8);

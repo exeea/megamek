@@ -131,7 +131,7 @@ final class BoardRoad {
     }
 
     static BoardRoad of(BoardScene scene, BoardScene.Tile tile) {
-        return layout(tile.coords(), tile.roadExits(), tile.road(), direction -> {
+        var road = layout(tile.coords(), tile.roadExits(), tile.road(), direction -> {
             var neighbor = scene.tile(tile.coords().translated(direction));
             if (neighbor != null && BoardSurface.connectingBridge(tile, neighbor, direction) != null) {
                 return BoardBridge.kind(scene, neighbor);
@@ -139,6 +139,35 @@ final class BoardRoad {
             return neighbor != null && (neighbor.roadExits() & (1 << ((direction + 3) % 6))) != 0
                   ? neighbor.road() : Kind.NONE;
         }, bends(tile.coords(), at -> Node.of(scene.tile(at))));
+        return road.meetConcrete(scene, tile);
+    }
+
+    /** Carry the whole approach to a fitted concrete edge; the supporting ground clips its diagonal join. */
+    private BoardRoad meetConcrete(BoardScene scene, BoardScene.Tile tile) {
+        List<Float> lengths = null;
+        for (int direction = 0; direction < 6; direction++) {
+            if ((tile.roadExits() & 1 << direction) == 0) { continue; }
+            var neighbor = scene.tile(tile.coords().translated(direction));
+            if (neighbor == null || neighbor.surface() != BoardScene.Surface.CONCRETE || neighbor.liquid().present()
+                  || neighbor.elevation() != tile.elevation()) { continue; }
+            var shifts = BoardConcrete.of(scene).corners(tile.coords());
+            Vector2 axis = border(tile.coords(), direction);
+            float distance = axis.len(), reach = .06f * distance;
+            axis.nor();
+            int edge = Math.floorMod(1 - direction, 6);
+            for (int k : new int[] { edge, (edge + 1) % 6 }) {
+                var shift = shifts.get(k);
+                var corner = BoardGeometry.corner(tile.coords(), 0, k);
+                float x = (corner.x + shift.x() - BoardGeometry.centerX(tile.coords())) / BoardGeometry.hexScale();
+                float y = (corner.y + shift.y() - BoardGeometry.centerY(tile.coords())) / BoardGeometry.hexScale();
+                reach = Math.max(reach, x * axis.x + y * axis.y - distance);
+            }
+            if (reach > .06f * distance) {
+                if (lengths == null) { lengths = new ArrayList<>(List.of(0f, 0f, 0f, 0f, 0f, 0f)); }
+                lengths.set(direction, reach);
+            }
+        }
+        return lengths == null ? this : extended(lengths);
     }
 
     /** Capture has no scene yet. The widest supported verge conservatively clears mixed-width joins. */

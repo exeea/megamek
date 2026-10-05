@@ -17,6 +17,7 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
+import megamek.common.game.Game;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -25,6 +26,7 @@ import org.junit.jupiter.api.Test;
  * board named by {@code megamek.gpu.boards} (paths under data/boards, comma separated) straight down and from an
  * oblique angle, at the hour {@code megamek.gpu.boards.hour}, with hex transitions as by default, drawn as on the board
  * ({@link GpuReviewFrame}), or in the Tactical View's tileset columns with {@code megamek.gpu.boards.tactical}.
+ * Set {@code megamek.gpu.boards.mapEditor} to capture through the map editor instead of the game client.
  */
 @Tag("on-demand")
 class GpuBoardFileSmokeTest {
@@ -48,14 +50,22 @@ class GpuBoardFileSmokeTest {
         for (String path : boards.split(",")) {
             Board board = new Board();
             board.load(new File("data/boards", path.trim()));
-            try (GpuBoardFixture fixture = GpuBoardFixture.create(board)) {
-                AtomicReference<BoardScene> scene = new AtomicReference<>();
+            AtomicReference<BoardScene> scene = new AtomicReference<>();
+            if (Boolean.getBoolean("megamek.gpu.boards.mapEditor")) {
                 SwingUtilities.invokeAndWait(() -> {
-                    fixture.source.refresh();
-                    scene.set(fixture.source.takeFrame().scene());
+                    var game = new Game();
+                    game.setBoard(board);
+                    try (var source = new GpuMapSource(game, null, null)) { scene.set(source.takeFrame().scene()); }
                 });
-                scenes.add(scene.get());
+            } else {
+                try (GpuBoardFixture fixture = GpuBoardFixture.create(board)) {
+                    SwingUtilities.invokeAndWait(() -> {
+                        fixture.source.refresh();
+                        scene.set(fixture.source.takeFrame().scene());
+                    });
+                }
             }
+            scenes.add(scene.get());
             names.add(new File(path.trim()).getName().replaceFirst("\\.board$", "").toLowerCase(Locale.ROOT)
                   .replaceAll("[^a-z0-9]+", "-").replaceAll("^-|-$", ""));
         }

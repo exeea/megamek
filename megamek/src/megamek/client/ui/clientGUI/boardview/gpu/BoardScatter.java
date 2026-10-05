@@ -59,12 +59,12 @@ final class BoardScatter {
     }
 
     static BoardShape bush(BoardScene.Surface surface, int variant) {
-        return shape("bush-" + ((surface == BoardScene.Surface.GRASS ? BUSHES / 2 : 0)
+        return shape("bush-" + ((surface == BoardScene.Surface.GRASS || surface == BoardScene.Surface.TROPICAL ? BUSHES / 2 : 0)
               + Math.floorMod(variant, BUSHES / 2)));
     }
 
     static BoardShape plant(BoardScene.Surface surface) {
-        return shape(surface == BoardScene.Surface.GRASS ? "plant" : "plant-dry");
+        return shape(surface == BoardScene.Surface.GRASS || surface == BoardScene.Surface.TROPICAL ? "plant" : "plant-dry");
     }
 
     /** Bushes stand just above tall grass, with a level cap to keep unusually shallow boards readable. */
@@ -79,7 +79,8 @@ final class BoardScatter {
      * depth-zero shallows can justify liquid-tile dressing; reject deeper beds before loading kits.
      */
     static boolean allowed(BoardScene.Tile tile) {
-        return !tile.bare() && !tile.liquid().volcanic() && (!tile.liquid().present() || tile.waterDepth() == 0);
+        return !tile.ultraSublevel() && !tile.bare() && !tile.liquid().volcanic()
+              && (!tile.liquid().present() || tile.waterDepth() == 0);
     }
 
     /** A dry-bank placement must not spill underwater; shallow stones must visibly break the water surface. */
@@ -103,10 +104,11 @@ final class BoardScatter {
         }
         BoardScene.Surface surface = BoardFeatures.surface(hex);
         float density = switch (surface) {
-            case GRASS -> .16f;
-            case ROCK, LUNAR -> .18f;
+            case GRASS, TROPICAL -> .16f;
+            case ROCK, LUNAR, VOLCANO -> .18f;
+            case FUNGUS -> .09f;
             case DIRT -> .12f;
-            case SAND -> .10f;
+            case SAND, DESERT, MARS -> .10f;
             case SNOW -> .06f;
             case CONCRETE -> 0;
         };
@@ -117,11 +119,14 @@ final class BoardScatter {
         }
         int count = 3 + random.nextInt(4);
         String theme = hex.getTheme() == null ? "" : hex.getTheme().toLowerCase(Locale.ROOT);
-        boolean plants = !theme.contains("lunar") && !theme.contains("mars") && !theme.contains("volcan");
+        boolean plants = !hex.containsTerrain(Terrains.SAND)
+              && !theme.contains("lunar") && !theme.contains("mars") && !theme.contains("volcan");
         for (int index = 0; index < count; index++) {
             int choice = random.nextInt(10);
             String asset = choice % 2 == 0 ? "scatter-rock" : "scatter-slab";
-            if (plants && surface == BoardScene.Surface.GRASS) {
+            if (plants && surface == BoardScene.Surface.TROPICAL && choice < 8) {
+                asset = "scatter-plant";
+            } else if (plants && surface == BoardScene.Surface.GRASS) {
                 if (choice < 5 || hex.containsTerrain(Terrains.TUNDRA) && choice < 8) {
                     asset = hex.containsTerrain(Terrains.TUNDRA) ? "scatter-dry-grass" : "scatter-grass";
                 } else if (choice < 8) {
@@ -129,8 +134,11 @@ final class BoardScatter {
                 }
             } else if (plants && surface == BoardScene.Surface.DIRT && choice < 4) {
                 asset = "scatter-dry-grass";
-            } else if (plants && surface == BoardScene.Surface.SAND && choice == 0) {
+            } else if (plants && (surface == BoardScene.Surface.SAND || surface == BoardScene.Surface.DESERT) && choice == 0) {
                 asset = "scatter-plant";
+            }
+            if (surface == BoardScene.Surface.FUNGUS) {
+                asset = BoardFungus.SCATTER.get(random.nextInt(BoardFungus.SCATTER.size()));
             }
             double angle = random.nextDouble() * Math.PI * 2;
             float radius = 16 + 12 * (float) Math.sqrt(random.nextFloat());

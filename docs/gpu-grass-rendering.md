@@ -94,8 +94,14 @@ case left, grow in over half a second instead of appearing at once
 (`GpuGroundCover.visible`); roots a chunk brought while off screen show
 complete.
 
-The meadow field varies blade height and thickness continuously, keeping short
-growth in sparse patches. It is also used for ground color. Avoid introducing a
+The meadow field varies blade height and thickness continuously, keeping shorter
+growth in sparse patches. Blades full-coverage proportions:
+height varies linearly from .025 to .07 of hex width before the meadow factor,
+and width from .0015 to .0028. The realism pass's shorter, narrower distribution
+was reverted at the user's request; root count and projected-density LOD were
+unchanged. The shared maximum height also controls shrub sizing; altering blade
+proportions must not unintentionally admit more shrub geometry through placement checks.
+The meadow field is also used for ground color. Avoid introducing a
 separate fragment cutoff or procedural field that makes bare ground disagree with
 root placement. Grass is drawn after opaque terrain so its instances do not split
 terrain material batches.

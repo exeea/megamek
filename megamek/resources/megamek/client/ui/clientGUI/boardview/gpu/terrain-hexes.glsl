@@ -17,6 +17,13 @@ float biomeNoise(vec2 p) {
           mix(biomeHash(cell + ivec2(0, 1)), biomeHash(cell + ivec2(1, 1)), t.x), t.y);
 }
 
+// BoardSurfaceBlend.sandExposure: sparse windows through windblown sand into the local substrate. This field
+// also selects grass roots on the CPU, so living tufts occupy exposed turf instead of the uninterrupted drifts.
+float sandExposure(vec2 metres) {
+    float field = .75 * biomeNoise(metres / 6.0) + .25 * biomeNoise(metres / 1.7 + vec2(19.0, -7.0));
+    return smoothstep(.60, .74, field);
+}
+
 // Signed distance in metres from a hex's centre offset to its outline; negative inside.
 float biomeHexDistance(vec2 p) {
     p = abs(p);

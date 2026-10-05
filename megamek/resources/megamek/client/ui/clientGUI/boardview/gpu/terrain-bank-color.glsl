@@ -1,10 +1,11 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // The atlas supplies blade detail; the installed terrain supplies all pigment and elevation grading.
 uniform sampler2DArray u_terrainLayers;
-uniform vec2 u_turfMaterials[7]; // ground color layer, metres per repeat, in BoardScene.Surface order
+uniform vec2 u_turfMaterials[SURFACE_FAMILIES]; // ground color layer, metres per repeat, in BoardScene.Surface order
 uniform float u_metre, u_levelHeight;
 in vec4 v_turfWeights;
-in vec3 v_turfOthers;
+in vec4 v_turfOthers;
+in vec4 v_turfArid;
 
 vec3 turfColor(vec3 artwork) {
     vec3 world = v_cloudPosition / u_metre;
@@ -12,8 +13,8 @@ vec3 turfColor(vec3 artwork) {
     vec2 p = vec2(world.x, -world.y);
     vec3 pigment = vec3(0.0);
     float total = 0.0;
-    for (int family = 0; family < 7; family++) {
-        float weight = family < 4 ? v_turfWeights[family] : v_turfOthers[family - 4];
+    for (int family = 0; family < SURFACE_FAMILIES; family++) {
+        float weight = family < 4 ? v_turfWeights[family] : family < 8 ? v_turfOthers[family - 4] : v_turfArid[family - 8];
         if (weight <= .0001) continue;
         vec2 material = u_turfMaterials[family];
         // Same two world-space projections as the ground; a little filtering leaves fine blade detail to the atlas.

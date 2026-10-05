@@ -61,19 +61,24 @@ final class BoardObstacles {
     private void add(BoardScene scene, BoardScene.Tile tile) {
         for (var feature : tile.features()) {
             // Bridges already have height-aware passage/approach clearance. Fields are ground cover, not solids.
-            if (feature.kind() != BoardScene.FeatureKind.BUILDING && feature.kind() != BoardScene.FeatureKind.PROP
+            if (feature.kind() != BoardScene.FeatureKind.BUILDING && feature.kind() != BoardScene.FeatureKind.INDUSTRIAL
+                  && feature.kind() != BoardScene.FeatureKind.PROP
+                  && feature.kind() != BoardScene.FeatureKind.SCENERY
                   || feature.asset().equals("bridge") || feature.asset().equals("field")) { continue; }
-            boolean custom = feature.asset().startsWith("buildings/")
+            boolean procedural = BoardIndustrial.supports(feature);
+            boolean custom = !procedural && feature.asset().startsWith("buildings/")
                   && BoardArtwork.customBuildingFile(feature.asset()).isFile();
             File root = new File(Configuration.dataDir(), custom ? "models/buildings" : "models/board");
             File file = custom ? BoardArtwork.customBuildingFile(feature.asset())
                   : new File(root, feature.asset() + ".glb");
-            var geometry = MODELS.computeIfAbsent(file.getAbsoluteFile(), key -> new BoardKit<>(() -> {
+            var geometry = procedural ? null : MODELS.computeIfAbsent(file.getAbsoluteFile(), key -> new BoardKit<>(() -> {
                 var data = RigidGlb.loadLods(new FileHandle(key), root.toPath()).getFirst();
                 return new Geometry(BoardShape.shapes(data, custom), custom ? GpuBuilding.parts(data) : Map.of());
             })).get();
             List<Vector3> points = new ArrayList<>();
-            if (custom) {
+            if (procedural) {
+                points.addAll(BoardIndustrial.triangles(BoardIndustrial.layout(scene, tile, feature)));
+            } else if (custom) {
                 var modules = GpuBuilding.select(geometry.modules(), Math.max(1, Math.round(feature.height())),
                       GpuBuilding.seed(tile, feature));
                 for (String module : modules.stream().distinct().toList()) {
@@ -112,9 +117,12 @@ final class BoardObstacles {
             }
             boolean fitHeight = custom || feature.kind() == BoardScene.FeatureKind.BUILDING
                   || feature.asset().startsWith("buildings/");
-            float verticalScale = custom ? BoardGeometry.level() / GpuBuilding.LEVEL_HEIGHT
+            float verticalScale = feature.kind() == BoardScene.FeatureKind.SCENERY ? scale
+                  : custom ? BoardGeometry.level() / GpuBuilding.LEVEL_HEIGHT
                   : feature.height() * BoardGeometry.level() / (fitHeight ? bounds.getDepth() : 1);
-            float low = ground + feature.elevation() * BoardGeometry.level() + bounds.min.z * verticalScale;
+            // Scenery grounds its lowest authored vertex, including models with an offset origin.
+            float low = ground + feature.elevation() * BoardGeometry.level()
+                  + (feature.kind() == BoardScene.FeatureKind.SCENERY ? 0 : bounds.min.z * verticalScale);
             float height = custom ? feature.height() * BoardGeometry.level() : bounds.getDepth() * verticalScale;
             footprints.add(new Footprint(List.copyOf(points), low, low + height + upperGround - ground, bounds));
         }

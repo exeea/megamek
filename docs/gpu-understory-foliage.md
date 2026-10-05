@@ -38,12 +38,14 @@ The meshes and their textures are in the sibling `mm-data` repository:
 | Highland | Elevated grass or tundra | 460 | 236 | 92 |
 | Rocky | Rock and volcanic themes | 460 | 236 | 92 |
 | Wetland | Swamp, mud, water or dirt | 460 | 236 | 92 |
-| Desert | Sand or desert theme | 478 | 238 | 94 |
-| Jungle | Jungle terrain | 472 | 228 | 96 |
-| Barren | Mars and lunar themes | 456 | 232 | 96 |
+| Desert | Desert theme | 478 | 238 | 94 |
+| Jungle | Jungle terrain or tropical theme | 472 | 228 | 96 |
+| Barren | Lunar theme | 456 | 232 | 96 |
 | Snow | Snow terrain or theme | 460 | 236 | 92 |
 
-Snow takes precedence; jungle then selects its own understory, followed by desert,
+The [Mars coral kit](gpu-mars-corals.md) supplies Martian cover at every foliage
+height, including on snow. For the other themes, snow takes precedence; jungle
+or the tropical theme then selects jungle understory, followed by desert,
 barren and wetland overrides. Existing light/heavy/ultra-heavy counts and deterministic
 placement remain shared with the tree path. Foliage is only added for actual woods or
 jungle terrain.

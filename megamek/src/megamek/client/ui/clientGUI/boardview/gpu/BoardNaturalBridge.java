@@ -59,6 +59,8 @@ final class BoardNaturalBridge {
                     float[] settled = ground.relief.settle(point.x, point.y, BoardRelief.metres(.7f));
                     point.set(settled[0], settled[1], BoardSurface.sampleHeight(contact, settled[0], settled[1],
                           BoardGeometry.groundZ(next)) - BoardRelief.metres(.025f));
+                } else if (BoardBridge.connected(tile, next, d)) {
+                    point.z = BoardBridge.edgeElevation(tile, next, d) * BoardGeometry.level();
                 }
                 outline.add(new Rim(point, d));
             }
@@ -91,7 +93,7 @@ final class BoardNaturalBridge {
             for (int i = 0; i < rim.size(); i++) {
                 var edge = rim.get(i);
                 var point = new Vector3(center).lerp(edge.point(), t);
-                // Keep the centre and the joined mouths at deck height, with shallow erosion across the cap.
+                // Keep the centre at deck height and joined mouths at their shared height, with shallow cap erosion.
                 point.z -= Math.min(BoardRelief.metres(1.4f), space * .16f) * t * (1 - t)
                       * (.3f + .7f * noise(point.x * .35f, point.y * .35f));
                 if (edge.exit() < 0) {
@@ -106,7 +108,8 @@ final class BoardNaturalBridge {
                     float u = Math.clamp(new Vector3(point).sub(center).dot(gate) / gate.len2(), 0, 1);
                     float join = Math.clamp(2 * u - 1, 0, 1);
                     anchored = Math.max(anchored, anchoring(scene, next, point) * join);
-                    room = Math.min(room, space + (clearance(next, center.z) - space) * join);
+                    float nextLevel = (next.elevation() + BoardBridge.feature(next).elevation()) * BoardGeometry.level();
+                    room = Math.min(room, space + (clearance(next, nextLevel) - space) * join);
                 }
                 float crown = Math.min(BoardRelief.metres(2.7f) * (.82f + .3f * noise(point.x * .35f, point.y * .35f)), room * .43f);
                 float spring = Math.min(BoardRelief.metres(5.3f), room * .79f);

@@ -846,6 +846,8 @@ tasks.register('gpuBoardSmoke', Test) {
         includeTestsMatching 'megamek.client.ui.gdx.*SmokeTest'
     }
     jvmArgs = mmJvmOptions
+    // Native frame timings must not include bytecode coverage overhead; regular tests supply coverage.
+    jacoco.enabled = false
     systemProperty 'java.awt.headless', 'false'
     systemProperty 'megamek.gpu.referenceFoliage', new File(gradle.includedBuild('mm-data').projectDir,
             'tools/board-models/foliage').absolutePath

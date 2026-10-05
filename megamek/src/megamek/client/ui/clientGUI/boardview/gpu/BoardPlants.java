@@ -14,7 +14,7 @@ import com.badlogic.gdx.utils.FloatArray;
  */
 record BoardPlants(GpuBiomeVegetation.Crops crops, FloatArray reeds, FloatArray grass, FloatArray turf) {
     static BoardPlants plant(BoardScene scene, BoardScene.Tile tile, BoardTacticalGeometry.Surface support, TerrainLod lod) {
-        if (lod == TerrainLod.DISTANT) { return null; }
+        if (tile.ultraSublevel() || lod == TerrainLod.DISTANT) { return null; }
         var kind = BoardBiome.plantKind(scene, tile);
         GpuBiomeVegetation.Crops crops = kind == BoardScene.Biome.FIELD ? GpuBiomeVegetation.plant(scene, tile, support) : null;
         // Reed tiers start at 240, 64 and 12 projected pixels per hex; a chunk at medium or coarse detail never

@@ -3,7 +3,7 @@
 // Borrow the asset cache's earth maps on every terrain family, including array-backed boundary draws.
 uniform sampler2D u_biomeSoil, u_biomeSoilNormal;
 uniform float u_biomeSoilTile;
-void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, float rim, float materialHeight,
+void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, float rim, float materialHeight, float sand,
       inout vec3 color, inout vec3 normal, inout float cavity,
       inout float grass, inout vec3 bounce, out float pool, out float damp) {
     pool = 0.0; damp = 0.0;
@@ -106,6 +106,8 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
         vec3 silt = mix(vec3(.29, .25, .175), vec3(.40, .345, .245), broad) * crumbs;
         vec3 moss = mix(vec3(.20, .225, .085), vec3(.33, .315, .16), broad) * crumbs;
         vec3 mud = mix(peat, silt, quick);
+        // SAND can coexist with swamp/mud. Keep damp mineral grains and ripples on its exposed margins.
+        mud = mix(mud, color * .68, sand);
         float depth = 1.0 - smoothstep(.22, .455, wet);
         vec3 shallow = mix(mud * .82, vec3(.13, .16, .13), depth * .83);
         float algae = smoothstep(.52, .66, broad) * smoothstep(.39, .44, wet) * (1.0 - bare);
@@ -128,7 +130,7 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
                   : drapedNormal(u_biomeSoilNormal, projection.top, projection.x, projection.y,
                         face, projection.side, u_biomeSoilTile, broad, projection.lying);
             soilNormal = normalize(mix(face, soilNormal, terrainNormalDetail));
-            normal = normalize(mix(normal, soilNormal, wetland));
+            normal = normalize(mix(normal, soilNormal, wetland * (1.0 - sand)));
         }
         normal = normalize(normal - gradient * wetland * (1.0 - bare));
         // The water's eased wind and integrated drift (GpuOcean): a change of wind never makes the ripples jump. The

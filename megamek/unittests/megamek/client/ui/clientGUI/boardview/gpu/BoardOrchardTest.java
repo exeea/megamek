@@ -26,16 +26,15 @@ class BoardOrchardTest {
 
     @ParameterizedTest
     @ValueSource(strings = { "", "desert", "tropical", "snow", "lunar" })
-    void orchardMarkerSelectsSixFruitTreeFormsEvenForLevelOneCover(String theme) {
+    void orchardMarkerKeepsFruitTreesAtEveryCoverHeight(String theme) {
         Coords coords = new Coords(3, 2);
         Hex hex = new Hex(0, "woods:1;fluff:12", theme, coords);
         for (int height : new int[] { 1, 2, 3 }) {
             hex.addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, height));
             var trees = BoardFeatures.capture(hex, coords, Map.of());
             assertEquals(6, trees.size());
-            assertEquals(6, trees.stream().map(BoardScene.Feature::asset).distinct().count());
-            assertEquals(3, trees.stream().map(BoardScene.Feature::x).distinct().count());
-            assertEquals(2, trees.stream().map(BoardScene.Feature::y).distinct().count());
+            assertTrue(trees.stream().allMatch(tree -> FORMS.contains(
+                  tree.asset().replace("orchard-", "").replace("-snow", ""))));
             for (var tree : trees) {
                 assertTrue(tree.asset().startsWith("orchard-"));
                 assertEquals(theme.equals("snow"), tree.asset().endsWith("-snow"));
@@ -48,10 +47,10 @@ class BoardOrchardTest {
     }
 
     @Test
-    void plantedRowsContinueAcrossStaggeredHexColumns() {
+    void disablingNaturalDistributionRestoresPlantedRowsAcrossStaggeredHexColumns() {
         for (Coords coords : List.of(new Coords(0, 0), new Coords(1, 0), new Coords(2, 1))) {
             Hex hex = new Hex(0, "woods:1;fluff:12;foliage_elev:2", "", coords);
-            for (var tree : BoardFeatures.capture(hex, coords, Map.of())) {
+            for (var tree : BoardTreeDistributionTest.capture(hex, coords, false)) {
                 float x = BoardGeometry.centerX(coords) / BoardGeometry.hexScale() + tree.x();
                 float y = BoardGeometry.centerY(coords) / BoardGeometry.hexScale() + tree.y();
                 assertEquals(0, Math.floorMod(Math.round(x), 21), "Columns share one planting grid");
@@ -133,7 +132,10 @@ class BoardOrchardTest {
                 assertEquals(30, high, 1f, "LOD preserves the tree height: " + name);
                 boolean hasSnow = false;
                 for (var material : data.materials) {
-                    hasSnow |= material.id.equals("snow");
+                    hasSnow |= material.id.equals("snow") || material.id.equals("canopy-snow-cutout");
+                    if (material.id.endsWith("-cutout")) {
+                        assertEquals(.5f, ((RigidGlb.Data) data).alphaTests.get(material.id), .0001f);
+                    }
                     assertEquals(1, material.textures.size);
                     var image = ((RigidGlb.Data) data).images.get(material.textures.first().fileName);
                     assertTrue(new File(image.file()).isFile(), "The sampler cache key must resolve to a shipped texture");

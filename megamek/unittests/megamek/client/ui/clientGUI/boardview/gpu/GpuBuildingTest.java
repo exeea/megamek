@@ -34,36 +34,49 @@ class GpuBuildingTest {
     }
 
     @Test
-    void aFiveLevelBuildingHasOneGroundFourUpperFloorsAndOneRoof() {
-        var parts = GpuBuilding.parts(modules("kit-floor0", "kit-floor1", "kit-roof0"));
-        assertEquals(List.of("floor0", "floor1", "floor1", "floor1", "floor1", "roof0"),
+    void aFiveLevelBuildingHasOneBaseFourFloorsAndOneRoof() {
+        var parts = GpuBuilding.parts(modules("kit-base0", "kit-floor0", "kit-roof0"));
+        assertEquals(List.of("base0", "floor0", "floor0", "floor0", "floor0", "roof0"),
               GpuBuilding.select(parts, 5, 41));
-        assertEquals(List.of("floor0", "roof0"), GpuBuilding.select(parts, 1, 41));
+        assertEquals(List.of("base0", "roof0"), GpuBuilding.select(parts, 1, 41));
         assertThrows(IllegalArgumentException.class, () -> GpuBuilding.select(parts, 0, 41));
     }
 
     @Test
+    void variantNumbersDoNotNeedToStartAtZero() {
+        var parts = GpuBuilding.parts(modules("kit-base4", "kit-floor7", "kit-roof3"));
+        assertEquals(List.of("base4", "floor7", "roof3"), GpuBuilding.select(parts, 2, 41));
+    }
+
+    @Test
     void randomVariantsAreStableAcrossCameraLodAndHeightChanges() {
-        var parts = GpuBuilding.parts(modules("kit-floor0", "kit-floor1", "kit-floor7", "kit-roof0", "kit-roof3"));
-        var reordered = GpuBuilding.parts(modules("far-roof3", "far-floor7", "far-floor0", "far-roof0", "far-floor1"));
+        var parts = GpuBuilding.parts(modules("kit-base0", "kit-base4", "kit-floor0", "kit-floor7", "kit-roof0", "kit-roof3"));
+        var reordered = GpuBuilding.parts(modules("far-roof3", "far-floor7", "far-base4", "far-floor0", "far-roof0", "far-base0"));
         Set<String> seen = new java.util.HashSet<>();
         for (long seed = 0; seed < 80; seed++) {
+            var one = GpuBuilding.select(parts, 1, seed);
             var five = GpuBuilding.select(parts, 5, seed);
             var ten = GpuBuilding.select(parts, 10, seed);
             assertEquals(five, GpuBuilding.select(reordered, 5, seed));
+            assertEquals(List.of(five.getFirst(), five.getLast()), one);
             assertEquals(five.subList(0, 5), ten.subList(0, 5));
             assertEquals(five.getLast(), ten.getLast());
+            assertTrue(Set.of("base0", "base4").contains(five.getFirst()));
+            assertTrue(five.subList(1, 5).stream().allMatch(Set.of("floor0", "floor7")::contains));
+            assertTrue(Set.of("roof0", "roof3").contains(five.getLast()));
             seen.addAll(five);
         }
-        assertEquals(Set.of("floor0", "floor1", "floor7", "roof0", "roof3"), seen);
+        assertEquals(Set.of("base0", "base4", "floor0", "floor7", "roof0", "roof3"), seen);
     }
 
     @Test
     void rejectsIncompleteOrAmbiguousKits() {
         for (String[] names : new String[][] {
-              { "kit-floor1", "kit-roof0" }, { "kit-floor0", "kit-roof0" },
-              { "kit-floor0", "kit-floor1" }, { "kit-floor0", "other-floor0", "kit-floor1", "kit-roof0" },
-              { "kit-floor0", "kit-floor1", "kit-roof0", "kit-extra" } }) {
+              { "kit-floor0", "kit-floor1", "kit-roof0" }, { "kit-base0", "kit-roof0" },
+              { "kit-base0", "kit-floor0" }, { "kit-base0", "other-base0", "kit-floor0", "kit-roof0" },
+              { "kit-base0", "kit-floor0", "other-floor0", "kit-roof0" },
+              { "kit-base0", "kit-floor0", "kit-roof0", "other-roof0" },
+              { "kit-base0", "kit-floor0", "kit-roof0", "kit-extra" } }) {
             assertThrows(IllegalArgumentException.class, () -> GpuBuilding.parts(modules(names)));
         }
     }
@@ -98,16 +111,24 @@ class GpuBuildingTest {
         assertEquals(2, lods.size());
         for (int lod = 0; lod < lods.size(); lod++) {
             Map<String, String> names = GpuBuilding.parts(lods.get(lod));
-            assertEquals(Set.of("roof0", "floor0", "floor1", "floor2"), names.keySet());
+            assertEquals(Set.of("base0", "floor0", "floor1", "roof0"), names.keySet());
             int current = lod;
             IntStream.range(0, lods.get(lod).nodes.size).forEach(index -> {
                 var node = lods.get(current).nodes.get(index);
                 String role = names.entrySet().stream().filter(entry -> entry.getValue().equals(node.id))
                       .findFirst().orElseThrow().getKey();
-                assertEquals(Map.of("floor0", 0f, "floor1", 18f, "floor2", 36f, "roof0", 54f).get(role),
+                assertEquals(Map.of("base0", 0f, "floor0", 18f, "floor1", 36f, "roof0", 54f).get(role),
                       node.translation.z, .001f);
                 assertEquals(current * 110, node.translation.x, .001f, "Viewer LODs stand beside one another");
             });
         }
+    }
+
+    @Test
+    void shippedLightBuildingHasOneLodWithSeparateBaseAndFloor() {
+        var file = new FileHandle(BoardArtwork.customBuildingFile("buildings/saxarba/building_light/building_light_00"));
+        var lods = GpuBuilding.lods(file.nameWithoutExtension(), RigidGlb.loadLods(file));
+        assertEquals(1, lods.size());
+        assertEquals(Set.of("base0", "floor0", "roof0"), GpuBuilding.parts(lods.getFirst()).keySet());
     }
 }

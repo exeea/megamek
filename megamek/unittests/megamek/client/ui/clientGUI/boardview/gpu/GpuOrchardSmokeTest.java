@@ -75,7 +75,14 @@ class GpuOrchardSmokeTest {
                                 for (var material : model.materials) {
                                     var map = material.get(TextureAttribute.class, TextureAttribute.Diffuse);
                                     assertNotNull(map);
-                                    // Snow has its own map, and the impostor cards their own rendered atlas.
+                                    if (material.id.endsWith("-cutout")) {
+                                        var woodland = assets.model("tree" + (snow ? "-snow" : ""))
+                                              .getMaterial(material.id).get(TextureAttribute.class, TextureAttribute.Diffuse);
+                                        assertSame(woodland.textureDescription.texture, map.textureDescription.texture,
+                                              "Orchards share the existing leaf cutout and clamped sampler");
+                                        continue;
+                                    }
+                                    // Legacy snow has its own map, and the impostor cards their own rendered atlas.
                                     if (material.id.equals("snow") || material.id.equals("impostor")) { continue; }
                                     if (atlas == null) { atlas = map.textureDescription.texture; }
                                     assertSame(atlas, map.textureDescription.texture, "LOD borrows the shared atlas");

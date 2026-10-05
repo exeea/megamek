@@ -184,7 +184,7 @@ class BoardBridgeFootingTest {
         var road = footing.road(deck, at);
         var patches = GpuRoads.deckPatches(tile, deck, road, footing);
         var asphalt = patches.stream().filter(p -> p.texture().equals("roads/asphalt")).findFirst().orElseThrow();
-        var mask = GpuRoads.mask(road, asphalt, false);
+        var mask = GpuRoads.mask(road, asphalt);
         assertTrue(mask.y() < -BoardGeometry.TILE_HEIGHT / 2 - reach + 1);
         int painted = 0, gaps = 0;
         var marks = patches.stream().filter(p -> p.texture().equals("concrete")).findFirst().orElseThrow();
@@ -219,7 +219,7 @@ class BoardBridgeFootingTest {
             String material = GpuRoads.texture(kind);
             var tail = patches.stream().filter(p -> p.texture().equals(material) && p.endFade() > 0
                   && !p.fade().wheels()).findFirst().orElseThrow();
-            var mask = GpuRoads.mask(road, tail, false);
+            var mask = GpuRoads.mask(road, tail);
             float start = -BoardGeometry.TILE_HEIGHT / 2 - footing.lengths().get(3);
             float end = start - BoardRelief.metres(7) / scale;
             assertTrue(maskAlpha(mask, 0, start - .05f) > .95f, "The landing starts with the deck's material");
@@ -234,7 +234,7 @@ class BoardBridgeFootingTest {
                 var gravel = patches.stream().filter(p -> p.texture().equals("roads/gravel")).findFirst().orElseThrow();
                 float tip = start - BoardRelief.metres(5) / scale;
                 assertEquals(0, maskAlpha(mask, 0, tip), "Asphalt ends before the loose gravel");
-                assertTrue(maskAlpha(GpuRoads.mask(road, gravel, false), 0, tip) > 0, "Gravel carries the final transition");
+                assertTrue(maskAlpha(GpuRoads.mask(road, gravel), 0, tip) > 0, "Gravel carries the final transition");
             }
             assertFalse(GpuRoads.drape(tile, surfaces.get(at.translated(3)), tail).isEmpty(),
                   "Existing bank triangles carry the apron");

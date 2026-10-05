@@ -11,6 +11,7 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
+import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrains;
@@ -19,24 +20,36 @@ import megamek.common.units.Terrains;
 final class BoardFeatures {
     /** Width in tile pixels of a Rough boulder at feature scale one; placement and meshing share this size. */
     static final float ROUGH_BOULDER_WIDTH = 12;
+    /** Cosmetic stands and irregular spacing for all vegetation; false restores the original layouts. */
+    static final boolean NATURAL_TREE_DISTRIBUTION = true;
     /** Half-diagonal in tile pixels of the 6.4-pixel square dragon-tooth footprint; clears roads and hex edges. */
     private static final float DRAGON_TOOTH_RADIUS = 4.6f;
     /** Ultra rough's tooth spacing in tile pixels, the closest that still reads as separate teeth. */
     private static final float CLOSE_TEETH_SPACING = 11;
     /** Tree species by where they grow; repeated names are the common ones. */
     private static final List<String> TEMPERATE = List.of("tree", "pine", "tree-broad", "birch", "tree-slender",
-          "pine-tall", "pine-broad");
+          "pine-tall", "pine-broad", "tree-forked", "tree-layered", "birch-tall", "birch-spreading", "birch-young",
+          "pine-slender", "pine-layered");
     private static final List<String> HIGHLAND = List.of("pine", "pine-tall", "pine-broad", "tree-slender", "pine-tall",
-          "birch");
-    private static final List<String> ROCKY = List.of("pine", "tree-dead", "pine-tall", "pine-broad");
-    private static final List<String> WETLAND = List.of("willow", "tree-slender", "tree-dead", "willow", "tree");
+          "birch", "pine-slender", "pine-layered", "pine-slender", "pine-layered", "birch-tall", "birch-young");
+    private static final List<String> ROCKY = List.of("pine", "tree-dead", "pine-tall", "pine-broad", "pine-slender",
+          "pine-layered");
+    private static final List<String> WETLAND = List.of("willow", "tree-slender", "tree-dead", "willow", "tree",
+          "willow-broad", "willow-broad", "birch-spreading", "tree-forked");
     private static final List<String> BARREN = List.of("tree-dead");
-    private static final List<String> PARK = List.of("tree-broad", "tree", "birch");
+    private static final List<String> PARK = List.of("tree-broad", "tree", "birch", "tree-forked", "tree-layered",
+          "birch-spreading");
     private static final List<String> DESERT = List.of("cactus", "palm", "tree-dead", "cactus-flowers", "palm-bent",
           "cactus");
     private static final List<String> PALMS = List.of("palm", "palm-bent");
+    private static final List<String> TROPICAL = List.of("palm", "palm-bent", "tree-broad", "palm", "tree-slender",
+          "palm-bent", "palm", "tree-forked", "palm-bent", "tree-layered");
     private static final List<String> ORCHARD = List.of("orchard-round", "orchard-spreading", "orchard-upright",
           "orchard-vase", "orchard-leaning", "orchard-young");
+    static final List<String> MARS_CORALS = List.of("mars/finger-spires", "mars/fan-scalloped", "mars/tube-grove",
+          "mars/antler-crown", "mars/plate-terraces", "mars/brain-lobes",
+          "mars/finger-crown", "mars/fan-folded", "mars/tube-crown",
+          "mars/organ-pipes", "mars/spiral-whorls", "mars/lattice-spires");
     private BoardFeatures() { }
 
     /** The tileset's orchard marker changes woods appearance, never creates cover by itself. */
@@ -51,7 +64,13 @@ final class BoardFeatures {
     }
 
     static boolean detailedGround(Hex hex, Map<Integer, String> structureModels, Set<Integer> blankTerrains) {
+        return detailedGround(hex, structureModels, blankTerrains, BoardArtwork.Scenery.EMPTY);
+    }
+
+    static boolean detailedGround(Hex hex, Map<Integer, String> structureModels, Set<Integer> blankTerrains,
+          BoardArtwork.Scenery scenery) {
         for (int terrain : hex.getTerrainTypes()) {
+            if (scenery.terrains().contains(terrain)) { continue; }
             if (blankTerrains.contains(terrain) && switch (terrain) {
                 case Terrains.FLUFF, Terrains.GROUND_FLUFF, Terrains.ROAD_FLUFF, Terrains.WATER_FLUFF -> true;
                 default -> false;
@@ -61,7 +80,7 @@ final class BoardFeatures {
                       Terrains.PAVEMENT, Terrains.SNOW, Terrains.WATER, Terrains.HAZARDOUS_LIQUID, Terrains.RAPIDS, Terrains.ROUGH,
                       Terrains.CLIFF_TOP, Terrains.CLIFF_BOTTOM, Terrains.INCLINE_TOP, Terrains.INCLINE_BOTTOM,
                       Terrains.INCLINE_HIGH_TOP, Terrains.INCLINE_HIGH_BOTTOM, Terrains.METAL_CONTENT,
-                      Terrains.DEPLOYMENT_ZONE, Terrains.IMPASSABLE, Terrains.FIRE, Terrains.SMOKE,
+                      Terrains.DEPLOYMENT_ZONE, Terrains.IMPASSABLE, Terrains.ULTRA_SUBLEVEL, Terrains.FIRE, Terrains.SMOKE,
                       Terrains.BRIDGE, Terrains.BRIDGE_CF, Terrains.BRIDGE_ELEV, Terrains.BRIDGE_REPAIRED,
                       Terrains.FIELDS, Terrains.SWAMP, Terrains.MUD, Terrains.ICE, Terrains.BLACK_ICE, Terrains.BLDG_BASE_COLLAPSED,
                       Terrains.ARMS, Terrains.LEGS, Terrains.WATER_FLUFF -> true;
@@ -95,17 +114,20 @@ final class BoardFeatures {
         if (hex.containsTerrain(Terrains.PAVEMENT)) {
             return BoardScene.Surface.CONCRETE;
         }
-        if (desert(hex)) {
-            return BoardScene.Surface.SAND;
-        }
+        // The theme supplies geology. BoardSurfaceBlend captures the independent gameplay SAND cover.
+        if (theme.contains("mars")) { return BoardScene.Surface.MARS; }
+        if (desert(hex)) { return BoardScene.Surface.DESERT; }
         if (theme.contains("lunar")) { return BoardScene.Surface.LUNAR; }
-        if (theme.contains("rock") || theme.contains("volcan")) {
+        if (theme.contains("fungus")) { return BoardScene.Surface.FUNGUS; }
+        if (theme.contains("volcan")) { return BoardScene.Surface.VOLCANO; }
+        if (tropical(hex)) { return BoardScene.Surface.TROPICAL; }
+        if (theme.contains("rock")) {
             return BoardScene.Surface.ROCK;
         }
         // Fields and reed marshes replace the flat cover in the biome shader. Their banks retain the theme's
         // grass/soil mantle; classifying the whole column as dirt leaves a bare cutout around every plantation.
         if (hex.containsTerrain(Terrains.MUD) || hex.terrainLevel(Terrains.SWAMP) > 1
-              || theme.contains("dirt") || theme.contains("mars")) {
+              || theme.contains("dirt")) {
             return BoardScene.Surface.DIRT;
         }
         return BoardScene.Surface.GRASS;
@@ -134,7 +156,24 @@ final class BoardFeatures {
     /** The board supplies the neighbouring roads, whose course through this hex scenery keeps clear of. */
     static List<BoardScene.Feature> capture(Hex hex, Coords coords, Map<Integer, String> structureModels,
           Set<Integer> blankTerrains, Function<Coords, Hex> board) {
+        return capture(hex, coords, structureModels, blankTerrains, board, BoardArtwork.Scenery.EMPTY);
+    }
+
+    static List<BoardScene.Feature> capture(Hex hex, Coords coords, Map<Integer, String> structureModels,
+          Set<Integer> blankTerrains, Function<Coords, Hex> board, BoardArtwork.Scenery scenery) {
+        return capture(hex, coords, structureModels, blankTerrains, board, scenery, NATURAL_TREE_DISTRIBUTION);
+    }
+
+    static List<BoardScene.Feature> capture(Hex hex, Coords coords, Map<Integer, String> structureModels,
+          Set<Integer> blankTerrains, Function<Coords, Hex> board, BoardArtwork.Scenery scenery,
+          boolean natural) {
+        if (hex.containsTerrain(Terrains.ULTRA_SUBLEVEL)) { return List.of(); }
         List<BoardScene.Feature> result = new ArrayList<>();
+        for (String asset : scenery.models()) {
+            // Nominal roof elevation bounds CPU decoration clearance. Rendering settles onto the actual solid mesh.
+            int roof = structureModels.containsKey(Terrains.BUILDING) ? Math.max(1, hex.terrainLevel(Terrains.BLDG_ELEV)) : 0;
+            result.add(new BoardScene.Feature(asset, 0, 0, 0, 1, 1, roof, BoardScene.FeatureKind.SCENERY));
+        }
         int variant = Math.floorMod(coords.getX() * 31 + coords.getY() * 17, 4);
         // Terrain levels are the game's collectable limb counts, not damage inferred from nearby units.
         for (int type = 0; type < 2; type++) {
@@ -155,8 +194,11 @@ final class BoardFeatures {
                 default -> Terrains.INDUSTRIAL;
             };
             result.add(new BoardScene.Feature(structure.getValue(), 0, 0, 0, 1,
-                  Math.max(1, hex.terrainLevel(heightTerrain)), 0, structure.getKey() == Terrains.BUILDING
-                        ? BoardScene.FeatureKind.BUILDING : BoardScene.FeatureKind.PROP));
+                  Math.max(1, hex.terrainLevel(heightTerrain)), 0, switch (structure.getKey()) {
+                      case Terrains.BUILDING -> BoardScene.FeatureKind.BUILDING;
+                      case Terrains.INDUSTRIAL -> BoardScene.FeatureKind.INDUSTRIAL;
+                      default -> BoardScene.FeatureKind.PROP;
+                  }));
         }
         if (hex.containsTerrain(Terrains.FIELDS) && !detailedGround(hex, structureModels, blankTerrains)) {
             add(result, "field", 1, 0, 0);
@@ -169,25 +211,39 @@ final class BoardFeatures {
         boolean jungle = hex.containsTerrain(Terrains.JUNGLE);
         BoardRoad road = BoardRoad.capture(hex) == BoardRoad.Kind.NONE ? null
               : BoardRoad.clearance(coords, hex, board);
-        if (jungle || hex.containsTerrain(Terrains.WOODS)) {
-            boolean orchard = orchard(hex);
+        if ((jungle || hex.containsTerrain(Terrains.WOODS)) && !scenery.modelTerrains().contains(Terrains.WOODS)) {
+            // Snow/pavement change the ground, not the planet's vegetation (including low cover and jungle).
+            boolean mars = hex.getTheme() != null && hex.getTheme().toLowerCase(Locale.ROOT).contains("mars");
+            boolean orchard = !mars && orchard(hex);
+            boolean fungus = surface(hex) == BoardScene.Surface.FUNGUS;
             int density = hex.terrainLevel(jungle ? Terrains.JUNGLE : Terrains.WOODS);
-            int count = density >= 3 ? 16 : density == 2 ? 9 : orchard ? 6 : 3;
+            int count = fungus || mars ? (density >= 3 ? 6 : density == 2 ? 4 : 2)
+                  : density >= 3 ? 16 : density == 2 ? 9 : orchard ? 6 : 3;
             // Foliage reaches its rules height. Level-one cover uses proportioned shrubs; taller woods keep
             // broad tree crowns so the canopy reads as an obstacle. Light woods have the broadest tree crowns.
             float height = Math.max(1, hex.terrainLevel(Terrains.FOLIAGE_ELEV));
             float crown = orchard ? (density >= 3 ? .62f : .82f)
                   : density >= 3 ? 1.35f : density == 2 ? 1.45f : 1.7f;
-            List<String> species = orchard ? orchardSpecies(hex)
+            List<String> species = mars ? MARS_CORALS : fungus ? BoardFungus.COVER : orchard ? orchardSpecies(hex)
                   : height == 1 ? List.of(shrub(hex, jungle)) : species(hex, jungle);
+            // Cosmetic understory shares the canopy's placement, road clearance, grounding and tree LODs.
+            boolean understory = surface(hex) == BoardScene.Surface.TROPICAL && height > 1 && !orchard;
+            if (understory) { count *= 2; }
+            Random treeRandom = natural ? new Random(coords.getX() * 73_856_093L ^ coords.getY() * 19_349_663L) : null;
             for (int index = 0; index < count; index++) {
+                boolean low = understory && index % 2 == 1;
                 double angle = index * (density >= 2 ? 2.399963 : 2 * Math.PI / count) + variant;
                 // Space light foliage around the centre; dense foliage fills an equal-area spiral.
                 float radius = density >= 2 ? 28 * (float) Math.sqrt(index / (count - 1f))
                       : 20 + index * 2;
-                String tree = species.get(Math.floorMod(coords.getX() * 31 + coords.getY() * 17 + index, species.size()));
+                // Keep the density and bounded footprint, but break identical per-hex spirals.
+                if (natural) {
+                    angle += treeRandom.nextFloat() * .7f - .35f;
+                    radius = Math.min(28, radius) * (.86f + treeRandom.nextFloat() * .14f);
+                }
+                if (fungus || mars) { radius *= .8f; }
                 float x = (float) Math.cos(angle) * radius, y = (float) Math.sin(angle) * radius;
-                if (orchard) {
+                if (orchard && !natural) {
                     // Light orchard rows align across the 63x72 staggered hex lattice.
                     int columns = density >= 3 ? 4 : 3;
                     int rows = count / columns;
@@ -195,15 +251,30 @@ final class BoardFeatures {
                     x = (index % columns - (columns - 1) * .5f) * spacing;
                     y = (index / columns - (rows - 1) * .5f) * (density == 1 ? 36 : spacing);
                 }
-                // Preserve the authoritative woods density, relocating trunks to the verge instead of deleting trees.
+                // Keep the chosen visual density, relocating trunks to the verge instead of deleting them.
                 for (int attempt = 0; road != null && road.distance(x, y) < BoardRoad.SHOULDER + 2 && attempt < 24; attempt++) {
                     angle += 2.399963;
                     x = (float) Math.cos(angle) * 29;
                     y = (float) Math.sin(angle) * 29;
                 }
+                // Every biome uses the same distribution. Eligibility and size still describe its vegetation:
+                // one mature fungal cup reaches cover height; tropical understory uses its low plant model.
+                List<String> choices = low ? List.of("foliage-jungle") : fungus && index == 0 ? BoardFungus.CUPS : species;
+                int speciesIndex = understory ? index / 2 : index;
+                String tree = natural ? BoardTreeDistribution.species(choices, coords, x, y, treeRandom.nextLong())
+                      : choices.get(Math.floorMod(coords.getX() * 31 + coords.getY() * 17 + speciesIndex, choices.size()));
+                float foliageHeight = low ? .4f + (index % 3) * .06f : height * (1f + (index % 3) * .05f);
+                if (fungus) {
+                    foliageHeight = height * (tree.startsWith("fungus/spore-") ? .46f + (index % 3) * .08f
+                          : index == 0 ? 1 : .7f + (index % 3) * .1f);
+                } else if (mars) {
+                    foliageHeight = height * (index == 0 ? 1 : .7f + (index % 3) * .1f);
+                }
                 result.add(new BoardScene.Feature(tree, x,
-                      y, index * 137.5f, crown * (0.9f + (index % 3) * 0.1f),
-                      height * (1f + (index % 3) * 0.05f), 0, BoardScene.FeatureKind.TREE));
+                      y, natural ? treeRandom.nextFloat() * 360
+                            : index * 137.5f + (mars ? Math.floorMod(coords.getX() * 97 + coords.getY() * 53, 360) : 0),
+                      (low ? .9f : crown) * (0.9f + (index % 3) * 0.1f),
+                      foliageHeight, 0, BoardScene.FeatureKind.TREE));
             }
         }
         rough(hex, coords, result, board);
@@ -327,7 +398,7 @@ final class BoardFeatures {
 
     /**
      * The trees that grow on this hex's ground: palms in jungle; cacti, palms and dead trees in the desert; conifers
-     * on rock and on highland meadows two levels up or more; willows on wet dirt; dead trees on Mars and the Moon;
+     * on rock and on highland meadows two levels up or more; willows on wet dirt; dead trees on the Moon;
      * park trees on pavement. Snowfields grow the highland's conifers and birches, and snow keeps every species in its
      * winter form.
      */
@@ -335,10 +406,11 @@ final class BoardFeatures {
         BoardScene.Surface surface = surface(hex);
         String theme = hex.getTheme() == null ? "" : hex.getTheme().toLowerCase(Locale.ROOT);
         boolean snow = surface == BoardScene.Surface.SNOW;
+        if (!snow && tropical(hex)) { return TROPICAL; }
         if (!snow && jungle) { return PALMS; }
         if (!snow && desert(hex)) { return DESERT; }
-        List<String> trees = theme.contains("mars") || theme.contains("lunar") ? BARREN : switch (surface) {
-            case ROCK, LUNAR -> ROCKY;
+        List<String> trees = theme.contains("lunar") ? BARREN : switch (surface) {
+            case ROCK, LUNAR, VOLCANO -> ROCKY;
             case DIRT -> WETLAND;
             case CONCRETE -> PARK;
             case SNOW -> HIGHLAND;
@@ -349,7 +421,11 @@ final class BoardFeatures {
 
     private static boolean desert(Hex hex) {
         String theme = hex.getTheme() == null ? "" : hex.getTheme().toLowerCase(Locale.ROOT);
-        return hex.containsTerrain(Terrains.SAND) || theme.contains("desert") || theme.contains("sand");
+        return theme.contains("desert") || theme.contains("sand");
+    }
+
+    private static boolean tropical(Hex hex) {
+        return hex.getTheme() != null && hex.getTheme().toLowerCase(Locale.ROOT).contains("tropical");
     }
 
     private static List<String> orchardSpecies(Hex hex) {
@@ -364,17 +440,17 @@ final class BoardFeatures {
         String family;
         if (surface == BoardScene.Surface.SNOW) {
             family = "snow";
-        } else if (jungle) {
+        } else if (jungle || tropical(hex)) {
             family = "jungle";
         } else if (desert(hex)) {
             family = "desert";
-        } else if (theme.contains("mars") || theme.contains("lunar")) {
+        } else if (theme.contains("lunar")) {
             family = "barren";
         } else if (hex.containsAnyTerrainOf(Terrains.SWAMP, Terrains.MUD, Terrains.WATER)) {
             family = "wetland";
         } else {
             family = switch (surface) {
-                case ROCK, LUNAR -> "rocky";
+                case ROCK, LUNAR, VOLCANO -> "rocky";
                 case DIRT -> "wetland";
                 case CONCRETE -> "temperate";
                 default -> hex.getLevel() >= 2 || hex.containsTerrain(Terrains.TUNDRA) ? "highland" : "temperate";

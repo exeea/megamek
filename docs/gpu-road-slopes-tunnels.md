@@ -59,7 +59,8 @@ independent copies of cached footprint areas.
   (up to two levels), `BoardRelief.retainingWalls` builds straight precast panels on a
   footing, each capped in half-metre steps just above the cut, standing in front of the
   cut face. At most a level is walled; a taller cliff stays a rock cut. A slope beneath a
-  road never gets a wall. The panels use the tunnel portals' concrete texture.
+  road never gets a wall. Panel heights start at the local footing, including below
+  elevation zero. The panels use the tunnel portals' concrete texture.
 
 Shared cliff samples use the same canonical floating-point parameter on both
 sides. Ramp simplification preserves boundary segments. Native ground adjoining

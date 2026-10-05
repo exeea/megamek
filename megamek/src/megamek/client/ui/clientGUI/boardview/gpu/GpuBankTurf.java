@@ -31,7 +31,7 @@ final class GpuBankTurf implements Disposable {
         public Turf copy() { return new Turf(); }
     }
 
-    static final int STRIDE = 16;
+    static final int STRIDE = 9 + BoardScene.Surface.values().length;
     private static final float[] ROWS = { 0, .23f, .42f, .68f, 1 };
     private final List<FloatArray> current = new ArrayList<>(), previous = new ArrayList<>();
     private ModelInstance instance;
@@ -51,8 +51,10 @@ final class GpuBankTurf implements Disposable {
         var vertices = new FloatArray();
         List<BoardSurface.Face> faces = new ArrayList<>(surface.top());
         faces.addAll(surface.walls());
+        faces.removeIf(face -> BoardSurface.bridgeSupport(scene, tile, face));
         var support = new GpuBiomeVegetation.Support(faces);
         var center = BoardGeometry.center(tile.coords(), tile.elevation());
+        var obstacles = new BoardObstacles(scene, tile);
         float m = BoardRelief.metres(1), level = BoardGeometry.level();
         var road = BoardRoad.rendered(tile) ? BoardRoad.of(scene, tile) : null;
         boolean boundary = BoardSurfaceBlend.boundary(scene, tile);
@@ -83,6 +85,7 @@ final class GpuBankTurf implements Disposable {
                     float chance = random.nextFloat();
                     previousVariant = variant;
                     if (root == null || band == 1 && chance < .23f) { continue; }
+                    if (obstacles.obstructs(root, width * .5f, length)) { continue; }
                     var cover = boundary ? BoardSurfaceBlend.sampleCliff(scene, tile, root.x, root.y, root.z)
                           : BoardSurfaceBlend.solid(BoardScene.Surface.GRASS);
                     float grass = cover.grass();
@@ -182,7 +185,8 @@ final class GpuBankTurf implements Disposable {
               (variant % 3 + (flip ? 1 - col * .5f : col * .5f)) / 3,
               // Keep the free end inside its atlas cell: fract(v * 2) must not wrap the tip's wind weight to zero.
               (variant / 3 + .001f + ROWS[row] * .998f) / 2);
-        into.addAll(cover.grass(), cover.dirt(), cover.sand(), cover.rock(), cover.concrete(), cover.snow(), cover.lunar());
+        into.addAll(cover.grass(), cover.dirt(), cover.sand(), cover.rock(), cover.concrete(), cover.snow(), cover.lunar(), cover.fungus());
+        into.addAll(cover.desert(), cover.mars(), cover.volcano(), cover.tropical());
     }
 
     static String vertex(String source) {
@@ -190,7 +194,7 @@ final class GpuBankTurf implements Disposable {
         return source.replace("void main() {", wind + "\n" + GpuShaderSource.read("terrain-bank-turf.glsl") + "\nvoid main() {")
               .replace("vec4 pos = u_worldTrans * vec4(a_position, 1.0);", "vec4 pos = vec4(turfPosition(), 1.0);\n"
                     + "v_coverData = vec2(1.0, .75); v_coverRoot = a_position.xy / u_worldMetre;\n"
-                    + "v_turfWeights = a_turfWeights; v_turfOthers = a_turfOthers;");
+                    + "v_turfWeights = a_turfWeights; v_turfOthers = a_turfOthers; v_turfArid = a_turfArid;");
     }
 
     void begin() { current.clear(); }
@@ -211,7 +215,8 @@ final class GpuBankTurf implements Disposable {
         var mesh = new Mesh(true, vertices.size / STRIDE, 0, VertexAttribute.Position(), VertexAttribute.Normal(),
               VertexAttribute.ColorPacked(), VertexAttribute.TexCoords(0),
               new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_turfWeights"),
-              new VertexAttribute(VertexAttributes.Usage.Generic, 3, "a_turfOthers", 1));
+              new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_turfOthers", 1),
+              new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_turfArid", 2));
         mesh.setVertices(vertices.items, 0, vertices.size);
         var builder = new ModelBuilder();
         builder.begin();

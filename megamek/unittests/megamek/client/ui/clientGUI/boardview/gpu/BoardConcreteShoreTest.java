@@ -13,6 +13,8 @@ import java.util.Set;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardConcreteShoreTest {
     private static final Coords CENTER = new Coords(3, 3);
@@ -257,7 +259,7 @@ class BoardConcreteShoreTest {
     }
 
     @Test
-    void concreteKeepsSharpHexEdgesBesideHigherAndLowerGround() {
+    void concreteKeepsStraightEdgesBesideHigherAndLowerGround() {
         BoardConcrete.Mode original = BoardConcrete.mode();
         try {
             BoardConcrete.tune(BoardConcrete.Mode.OFF);
@@ -273,7 +275,14 @@ class BoardConcreteShoreTest {
                     }
                 }
                 BoardScene scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
-                assertStraightSamples(new BoardSurface(scene, scene.tile(CENTER)), CENTER);
+                BoardSurface surface = new BoardSurface(scene, scene.tile(CENTER));
+                for (int e = 0; e < 6; e++) {
+                    Vector3 a = surface.relief.seam(e, e, 0), b = surface.relief.seam(e, e, 1);
+                    for (int i = 1; i < 12; i++) {
+                        assertEquals(0, distance(a, b, surface.relief.seam(e, e, i / 12f)), .002f,
+                              "Straight edge " + e + " beside level " + elevation);
+                    }
+                }
             }
         } finally { BoardConcrete.tune(original); }
     }
@@ -441,7 +450,7 @@ class BoardConcreteShoreTest {
     }
 
     @Test
-    void neighboringConcreteBanksJoinInAStraightLineWhenTheWaterCentreIsClear() {
+    void neighboringConcreteBanksFollowTheSameFittedEdgeAsTheLand() {
         var original = BoardRelief.tuning();
         try {
             for (float width : new float[] { .05f, .5f, 1 }) {
@@ -451,10 +460,12 @@ class BoardConcreteShoreTest {
                           BoardScene.Surface.CONCRETE, false);
                     BoardSurface surface = new BoardSurface(scene, scene.tile(CENTER));
                     int edge = Math.floorMod(-direction, 6), n = BoardSurface.SHORE_SEGMENTS;
-                    Vector3 a = surface.outline.get(edge * n), b = surface.outline.get((edge + 2) % 6 * n);
-                    for (int i = 1; i < 2 * n; i++) {
-                        Vector3 p = surface.outline.get((edge * n + i) % (6 * n));
-                        assertEquals(0, distance(a, b, p), .002f, "Straight concrete edge, direction=" + direction);
+                    for (int e : new int[] { edge, (edge + 1) % 6 }) {
+                        for (int i = 0; i < n; i++) {
+                            Vector3 p = surface.outline.get(e * n + i), expected = surface.relief.seam(e, e, i / (float) n);
+                            assertEquals(expected.x, p.x, .002f, "Shared concrete shoreline, direction=" + direction);
+                            assertEquals(expected.y, p.y, .002f);
+                        }
                     }
                     assertWaterCentre(surface);
                 }
@@ -465,18 +476,93 @@ class BoardConcreteShoreTest {
     }
 
     @Test
-    void longConcreteQuayHasNoHexByHexDentsBesideItsBuildings() {
+    void concreteQuayWallsContinueVerticallyToTheBedBesideBuildingsAtEveryDetail() {
         BoardScene scene = GpuRiverTerrainSmokeTest.quayScene(BoardScene.Surface.CONCRETE);
-        float line = Float.NaN;
-        for (int y = 4; y <= 7; y++) {
-            BoardSurface water = new BoardSurface(scene, scene.tile(new Coords(3, y)));
-            int n = BoardSurface.SHORE_SEGMENTS;
-            for (int i = 0; i <= 2 * n; i++) {
-                Vector3 p = water.outline.get((5 * n + i) % (6 * n));
-                if (Float.isNaN(line)) { line = p.x; }
-                assertEquals(line, p.x, .002f, "One continuous constructed edge at row " + y);
+        for (TerrainLod lod : TerrainLod.values()) {
+            for (int y = 4; y <= 7; y++) {
+                BoardSurface water = new BoardSurface(scene, scene.tile(new Coords(3, y)), lod);
+                int walls = 0;
+                for (var face : water.faces) {
+                    if (face.landEdge() < 0 || !BoardConcrete.concreteBank(scene, water.tile, face.landEdge())
+                          || face.finish() != BoardSurface.Finish.WALL) { continue; }
+                    walls++;
+                    int e = face.landEdge();
+                    Vector3 a = water.relief.seam(e, e, 0), b = water.relief.seam(e, e, 1);
+                    for (Vector3 p : List.of(face.a(), face.b(), face.c())) {
+                        assertEquals(0, distance(a, b, p), .002f, "The submerged wall stays on the quay's edge: " + lod);
+                    }
+                }
+                assertTrue(walls > 0, "Concrete owns a full underwater wall");
+                assertUnfolded(water, "Quay bed " + lod);
             }
         }
+    }
+
+    @Test
+    void concreteBanksBesideDescendingWaterKeepFiniteContactGeometry() {
+        for (int direction = 0; direction < 6; direction++) {
+            Coords upstream = CENTER.translated(direction);
+            List<BoardScene.Tile> tiles = new ArrayList<>();
+            for (int x = 0; x < 7; x++) {
+                for (int y = 0; y < 7; y++) {
+                    Coords at = new Coords(x, y);
+                    boolean water = at.equals(CENTER) || at.equals(upstream);
+                    tiles.add(new BoardScene.Tile(at, at.equals(upstream) ? 1 : 0, water ? 2 : -1, false, 0,
+                          water ? BoardScene.Surface.GRASS : BoardScene.Surface.CONCRETE,
+                          null, null, null, null, null, List.of(), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE,
+                          null, true));
+                }
+            }
+            BoardScene scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
+            BoardSurface surface = new BoardSurface(scene, scene.tile(CENTER));
+            for (var face : surface.waterFaces) {
+                for (Vector3 p : List.of(face.a(), face.b(), face.c())) {
+                    assertTrue(Float.isFinite(p.x) && Float.isFinite(p.y) && Float.isFinite(p.z),
+                          "The stream remains a valid surface at the level quay, direction=" + direction);
+                }
+            }
+            assertWaterCentre(surface);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = { 0, 2 })
+    void aeroBaseRunwayContinuesAcrossTheNarrowConnectorToTheTrunk(int elevation) {
+        BoardScene scene = aeroBaseAtElevation(elevation);
+        BoardConcrete shape = BoardConcrete.of(scene);
+        Vector3 a = shape.corner(new Coords(9, 5), 0), b = shape.corner(new Coords(10, 6), 0);
+        Coords join = new Coords(6, 4);
+        assertEquals(0, distance(a, b, shape.corner(join, 1)), .003f,
+              "The connector meets the continued runway edge");
+        assertEquals(0, distance(a, b, shape.corner(join, 2)), .003f,
+              "The runway reaches the trunk without a triangular notch");
+        assertEquals(shape.corner(new Coords(5, 1), 0).x, shape.corner(join, 2).x, .003f,
+              "The continued runway meets the trunk's vertical side");
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = { 0, 2 })
+    void aeroBaseTaxiwayKeepsItsDiagonalSidePastTheJunctionAndToTheMapEdge(int elevation) {
+        BoardScene scene = aeroBaseAtElevation(elevation);
+        BoardConcrete shape = BoardConcrete.of(scene);
+        Coords arm = new Coords(12, 3);
+        Vector3 a = shape.corner(arm, 3), b = shape.corner(arm, 4);
+        for (int[] vertex : new int[][] { { 13, 4, 0 }, { 14, 4, 4 }, { 14, 4, 5 }, { 15, 4, 4 }, { 15, 4, 5 } }) {
+            Vector3 p = shape.corner(new Coords(vertex[0], vertex[1]), vertex[2]);
+            assertEquals(0, distance(a, b, p), .003f,
+                  "No extra concrete apron below the diagonal taxiway: " + p);
+        }
+        assertEquals(shape.corner(new Coords(13, 5), 0).x, shape.corner(new Coords(13, 4), 0).x, .003f,
+              "The two taxiway sides meet at one corner");
+    }
+
+    private static BoardScene aeroBaseAtElevation(int elevation) {
+        BoardScene scene = GpuRiverTerrainSmokeTest.pavedMapScene(1);
+        if (elevation == 0) { return scene; }
+        return scene.withTiles(scene.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(),
+              tile.surface() == BoardScene.Surface.CONCRETE ? elevation : tile.elevation(), -1, false, 0,
+              tile.surface(), tile.ground(), null, null, null, null, tile.features(), List.of(), BoardLiquid.NONE, null,
+              tile.detailedGround())).toList());
     }
 
     @Test

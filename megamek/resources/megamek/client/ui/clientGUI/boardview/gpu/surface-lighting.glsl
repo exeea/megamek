@@ -109,6 +109,23 @@ float sculptShadow(vec3 normal, vec3 light) {
 #endif
 }
 
+// Shared dielectric response: callers can reuse their shadow sample for mapped leaves as well as opaque surfaces.
+float dielectricSheen(vec3 normal, vec3 light, vec3 view, float film, float roughness) {
+    float incidence = max(0.0, dot(normal, light));
+    if (incidence <= 0.0) return 0.0;
+    vec3 halfway = light + view;
+    vec3 halfVector = halfway * inversesqrt(max(dot(halfway, halfway), 1e-8));
+    float nv = max(.001, dot(normal, view)), nh = max(0.0, dot(normal, halfVector));
+    float r = mix(clamp(roughness, .15, .98), .12, film);
+    float a2 = r * r * r * r;
+    float denominator = nh * nh * (a2 - 1.0) + 1.0;
+    float distribution = a2 / max(3.14159265 * denominator * denominator, .0001);
+    float k = (r + 1.0) * (r + 1.0) / 8.0;
+    float visibility = nv / (nv * (1.0 - k) + k) * incidence / (incidence * (1.0 - k) + k);
+    float fresnel = .04 + .96 * pow(1.0 - max(0.0, dot(view, halfVector)), 5.0);
+    return distribution * visibility * fresnel / (4.0 * nv);
+}
+
 void surfaceLighting(vec3 normal, float film, float roughness, out vec3 ambient, out vec3 direct, out vec3 sheen) {
     ambient = skyLight(normal, GROUND_ALBEDO) + lavaIrradiance(v_cloudPosition, normal);
     direct = vec3(0.0);
@@ -121,16 +138,7 @@ void surfaceLighting(vec3 normal, float film, float roughness, out vec3 ambient,
         direct += u_dirLights[i].color * incidence;
         if (roughness >= 0.0 && incidence > 0.0) {
             // Dielectric GGX for materials with authored roughness. Wet pores develop a smoother water film.
-            vec3 halfVector = normalize(light + view);
-            float nv = max(.001, dot(normal, view)), nh = max(0.0, dot(normal, halfVector));
-            float r = mix(clamp(roughness, .15, .98), .12, film);
-            float a2 = r * r * r * r;
-            float denominator = nh * nh * (a2 - 1.0) + 1.0;
-            float distribution = a2 / max(3.14159265 * denominator * denominator, .0001);
-            float k = (r + 1.0) * (r + 1.0) / 8.0;
-            float visibility = nv / (nv * (1.0 - k) + k) * incidence / (incidence * (1.0 - k) + k);
-            float fresnel = .04 + .96 * pow(1.0 - max(0.0, dot(view, halfVector)), 5.0);
-            sheen += u_dirLights[i].color * distribution * visibility * fresnel / (4.0 * nv);
+            sheen += u_dirLights[i].color * dielectricSheen(normal, light, view, film, roughness);
         } else if (film > 0.0 && incidence > 0.0) {
             vec3 halfVector = normalize(light + view);
             float exponent = mix(12.0, 96.0, film);
