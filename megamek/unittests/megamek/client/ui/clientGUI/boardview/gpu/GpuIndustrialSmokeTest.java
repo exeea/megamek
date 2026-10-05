@@ -16,6 +16,9 @@ import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
+import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
+import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
+import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
@@ -65,6 +68,9 @@ class GpuIndustrialSmokeTest {
                 assertEquals(0, org.lwjgl.opengl.GL11.glGetTexParameteri(GL20.GL_TEXTURE_2D,
                       com.badlogic.gdx.graphics.GL30.GL_TEXTURE_BASE_LEVEL), "Industrial detail is not clamped to 128px");
             }
+            var fan = assets.material("industrial/fan");
+            assertEquals(128, fan.getWidth());
+            assertEquals(128, fan.getHeight());
             for (int family = 0; family < 4; family++) {
                 for (int height : new int[] { 1, 7, 10 }) {
                     var scene = BoardIndustrialTest.scene(Map.of(BoardIndustrialTest.CENTER, family), height, 0);
@@ -72,6 +78,17 @@ class GpuIndustrialSmokeTest {
                     var model = assets.industrial(layout);
                     assertSame(model, assets.industrial(layout), "Unchanged layouts reuse their GPU model");
                     assertEquals(height * 18, model.calculateBoundingBox(new BoundingBox()).max.z, .001f);
+                    for (var material : model.materials) {
+                        if (material.id.equals("fan")) {
+                            assertSame(fan, material.get(TextureAttribute.class, TextureAttribute.Diffuse).textureDescription.texture,
+                                  "All fans share one small asset-owned texture");
+                            assertEquals(ColorAttribute.Diffuse | TextureAttribute.Diffuse, material.getMask(),
+                                  "Opaque fan panels remain eligible for the static prop batch");
+                        }
+                    }
+                    int fanIndices = 0;
+                    for (var part : model.meshParts) { if (part.id.equals("fan")) { fanIndices += part.size; } }
+                    assertEquals(family == 0 ? 12 : 0, fanIndices, "Each of the two generators needs only one fan quad");
                     assets.retainIndustrial(java.util.Set.of(model));
                 }
             }
@@ -172,7 +189,8 @@ class GpuIndustrialSmokeTest {
             terrain.setTacticalView(false);
             BoardScene connected = scene(4);
             terrain.update(connected);
-            var joint = BoardGeometry.center(SITES.get(0), 0).lerp(BoardGeometry.center(SITES.get(1), 0), .49f);
+            var port = BoardIndustrialTest.layout(connected, SITES.getFirst()).ports().getFirst();
+            var joint = BoardGeometry.center(SITES.getFirst(), 0).add(port.x() - port.dx() * .5f, port.y() - port.dy() * .5f, 0);
             var ray = new Ray(joint.add(0, 0, 400), new Vector3(0, 0, -1));
             float before = terrain.hit(connected, ray).distance();
             BoardScene isolated = scene(4, false);
@@ -215,11 +233,16 @@ class GpuIndustrialSmokeTest {
             json.append("{\"name\":\"").append((char) ('a' + i)).append("\",\"vertices\":")
                   .append(java.util.Arrays.toString(data.meshes.first().vertices))
                   .append(",\"position\":").append(java.util.Arrays.toString(new float[] { position.x, position.y, position.z }))
-                  .append(",\"paintTriangles\":").append(java.util.Arrays.toString(java.util.stream.IntStream
-                        .range(0, data.meshes.first().parts[0].indices.length / 3)
-                        .map(index -> Short.toUnsignedInt(data.meshes.first().parts[0].indices[index * 3]) / 3).toArray()))
+                  .append(",\"paintTriangles\":").append(partTriangles(data, "paint"))
+                  .append(",\"fanTriangles\":").append(partTriangles(data, "fan"))
                   .append('}');
         }
         java.nio.file.Files.writeString(new File(output, "geometry.json").toPath(), json.append("]}").toString());
+    }
+
+    private static String partTriangles(ModelData data, String id) {
+        var part = java.util.Arrays.stream(data.meshes.first().parts).filter(value -> value.id.equals(id)).findFirst().orElse(null);
+        return part == null ? "[]" : java.util.Arrays.toString(java.util.stream.IntStream.range(0, part.indices.length / 3)
+              .map(index -> Short.toUnsignedInt(part.indices[index * 3]) / 3).toArray());
     }
 }

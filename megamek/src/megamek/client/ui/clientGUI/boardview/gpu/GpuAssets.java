@@ -233,8 +233,15 @@ final class GpuAssets implements Disposable {
         return industrial.computeIfAbsent(layout, key -> {
             // Textures are asset-owned; decode before allocating native mesh buffers.
             Texture paint = material("industrial/paint"), steel = material("industrial/steel");
-            Model model = new Model(BoardIndustrial.model(key));
+            var data = BoardIndustrial.model(key);
+            Texture fan = data.materials.size > 2 ? material("industrial/fan") : null;
+            Model model = new Model(data);
             for (var surface : model.materials) {
+                if (surface.id.equals("fan")) {
+                    // Shared opaque diffuse material stays eligible for the existing prop batch.
+                    surface.set(TextureAttribute.createDiffuse(fan));
+                    continue;
+                }
                 boolean painted = surface.id.equals("paint");
                 surface.set(TextureAttribute.createDiffuse(painted ? paint : steel));
                 float shine = painted ? .12f : .3f;

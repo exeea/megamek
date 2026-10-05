@@ -95,11 +95,21 @@ class BoardIndustrialTest {
                 Vector3 a = world(scene, CENTER, first.ports().get(index));
                 Vector3 b = world(scene, next, second.ports().get(index));
                 assertEquals(0, a.dst(b), .001f, "Opposite pipe ends meet across different equipment and ground heights");
+                assertEquals(-first.ports().get(index).dx(), second.ports().get(index).dx(), .0001f);
+                assertEquals(-first.ports().get(index).dy(), second.ports().get(index).dy(), .0001f);
             }
             for (var entry : Map.of(CENTER, first, next, second).entrySet()) {
                 for (var p : entry.getValue().ports()) {
-                    Vector3 outward = new Vector3(p.x(), p.y(), 0).nor();
+                    Vector3 outward = new Vector3(p.dx(), p.dy(), 0);
                     Vector3 end = new Vector3(p.x(), p.y(), p.z()), hit = new Vector3();
+                    assertEquals(0, (p.x() - p.source().x()) * p.dy()
+                          - (p.y() - Math.copySign(24, p.y())) * p.dx(), .001f,
+                          "The equipment bend and connector share one straight run");
+                    // Sample inside a face, not exactly on the pipe's shared top-vertex seam.
+                    Vector3 approach = new Vector3(end).mulAdd(outward, -4).add(-p.dy() * .17f, p.dx() * .17f, 3);
+                    assertTrue(Intersector.intersectRayTriangles(new Ray(approach, new Vector3(0, 0, -1)),
+                          BoardIndustrial.triangles(entry.getValue()), hit));
+                    assertEquals(p.z() + 1.1f, hit.z, .12f, "The connector approach is a straight pipe without a side jog");
                     assertTrue(Intersector.intersectRayTriangles(new Ray(new Vector3(end).mulAdd(outward, 2), outward.scl(-1)),
                           BoardIndustrial.triangles(entry.getValue()), hit));
                     assertEquals(0, hit.dst(end), .02f, "The actual mesh reaches the agreed joint");
@@ -133,7 +143,7 @@ class BoardIndustrialTest {
     void equipmentTopsHaveOneVisibleSurfaceWithoutCoplanarOverlays(int family) {
         for (int height : new int[] { 1, 7 }) {
             float[] vertices = BoardIndustrial.model(layout(scene(Map.of(CENTER, family), height, 0), CENTER)).meshes.first().vertices;
-            // Jitter avoids triangulation edges. Test actual uppermost surfaces, including shallow fan recesses.
+            // Jitter avoids triangulation edges. Test actual uppermost surfaces, including textured fan panels.
             for (float x = -34.713f; x < 34; x += 1.31f) {
                 for (float y = -30.319f; y < 31; y += 1.27f) {
                     float top = Float.NEGATIVE_INFINITY;

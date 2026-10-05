@@ -28,7 +28,7 @@ final class BoardIndustrial {
     record Equipment(Machine machine, float x, float y, float radius, float height, Cap cap, int detail) { }
     record Connection(Equipment from, Equipment to, float height, float routeY) { }
     /** Local authored coordinates; both neighbors independently derive the same world-space joint. */
-    record Port(int direction, float x, float y, float z) { }
+    record Port(int direction, float x, float y, float z, float dx, float dy, Equipment source) { }
     record Layout(List<Equipment> equipment, List<Connection> connections, List<Port> ports) { }
 
     private static final Color IVORY = new Color(.92f, .9f, .83f, 1);
@@ -37,6 +37,7 @@ final class BoardIndustrial {
     private static final Color DARK = new Color(.32f, .36f, .39f, 1);
     private static final Color COPPER = new Color(.74f, .5f, .3f, 1);
     private static final Color YELLOW = new Color(.88f, .66f, .23f, 1);
+    private static final Color FAN = new Color(Color.WHITE);
     private static final int SIDES = 16;
 
     private BoardIndustrial() { }
@@ -46,14 +47,14 @@ final class BoardIndustrial {
               && feature.asset().matches("buildings/(?:saxarba/)?misc/heavy_industrial_[a-d]");
     }
 
-    static Layout layout(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature feature) {
+    private static List<Equipment> equipment(BoardScene.Tile tile, BoardScene.Feature feature) {
         var random = new SplittableRandom(GpuBuilding.seed(tile, feature));
         float height = Math.max(1, feature.height()) * BoardGeometry.MODEL_LEVEL_HEIGHT;
         int detail = random.nextInt(4);
         Cap cap = Cap.values()[random.nextInt(Cap.values().length)];
         float shortHeight = height * (float) random.nextDouble(.3, .48);
         float mediumHeight = height * (float) random.nextDouble(.57, .78);
-        List<Equipment> equipment = switch (feature.asset().charAt(feature.asset().length() - 1)) {
+        return switch (feature.asset().charAt(feature.asset().length() - 1)) {
             case 'a' -> List.of(new Equipment(Machine.COOLER, -20, 0, 12, height, cap, detail),
                   new Equipment(Machine.GENERATOR, 19, -4, 9, mediumHeight, cap, detail),
                   new Equipment(Machine.GENERATOR, 16, 23, 5, shortHeight, cap, (detail + 1) % 4));
@@ -66,6 +67,12 @@ final class BoardIndustrial {
                   new Equipment(Machine.COLUMN, -18, -8, 7, mediumHeight, cap, detail),
                   new Equipment(Machine.EXCHANGER, -16, 23, 4, shortHeight, cap, detail));
         };
+    }
+
+    static Layout layout(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature feature) {
+        List<Equipment> equipment = equipment(tile, feature);
+        float height = equipment.getFirst().height();
+        int detail = equipment.getFirst().detail();
         List<Connection> connections = new ArrayList<>();
         for (int i = 1; i < equipment.size(); i++) {
             Equipment from = equipment.getFirst(), to = equipment.get(i);
@@ -92,12 +99,33 @@ final class BoardIndustrial {
             var pair = new SplittableRandom(Math.min(ownSeed, nextSeed) * 31 + Math.max(ownSeed, nextSeed));
             float px = (BoardGeometry.centerX(next.coords()) - BoardGeometry.centerX(tile.coords())) / BoardGeometry.hexScale() / 2;
             float py = (BoardGeometry.centerY(next.coords()) - BoardGeometry.centerY(tile.coords())) / BoardGeometry.hexScale() / 2;
-            ports.add(new Port(direction, px, py, low + (high - low) * (float) pair.nextDouble(.22, .42) - ground));
+            List<Equipment> other = equipment(next, neighbor);
+            float joint = low + (high - low) * (float) pair.nextDouble(.22, .42);
+            ports.add(port(direction, px, py, joint - ground, joint - nextGround, equipment, other));
             if (high - low >= 36) {
-                ports.add(new Port(direction, px, py, low + (high - low) * (float) pair.nextDouble(.65, .85) - ground));
+                joint = low + (high - low) * (float) pair.nextDouble(.65, .85);
+                ports.add(port(direction, px, py, joint - ground, joint - nextGround, equipment, other));
             }
         }
         return new Layout(equipment, List.copyOf(connections), List.copyOf(ports));
+    }
+
+    private static Equipment source(List<Equipment> equipment, float x, float y, float z) {
+        return equipment.stream().filter(e -> e.height() >= z + 1.5f)
+              .min(Comparator.comparingDouble(e -> (e.x() - x) * (e.x() - x) + (e.y() - y) * (e.y() - y))).orElseThrow();
+    }
+
+    private static Port port(int direction, float x, float y, float z, float otherZ,
+          List<Equipment> equipment, List<Equipment> other) {
+        Equipment own = source(equipment, x, y, z), neighbor = source(other, -x, -y, otherZ);
+        float routeY = Math.copySign(24, y);
+        Vector3 start = v(own.x(), routeY, 0);
+        Vector3 run = v(2 * x + neighbor.x(), 2 * y - routeY, 0).sub(start);
+        // Intersect one straight run between the two equipment bends with the shared hex edge.
+        float fraction = ((x - start.x) * x + (y - start.y) * y) / (run.x * x + run.y * y);
+        Vector3 joint = new Vector3(start).mulAdd(run, fraction);
+        run.nor();
+        return new Port(direction, joint.x, joint.y, z, run.x, run.y, own);
     }
 
     /** The same triangles feed GPU upload, physical picking and cosmetic obstacle clearance. */
@@ -124,20 +152,16 @@ final class BoardIndustrial {
             mesh.tube(v(side * 26, y, z), v(side * 26, y, z + .8f), 1.2f, STEEL, 8);
         }
         for (Port port : layout.ports()) {
-            Equipment source = layout.equipment().stream().filter(e -> e.height() >= port.z() + 1.5f)
-                  .min(Comparator.comparingDouble(e -> (e.x() - port.x()) * (e.x() - port.x())
-                        + (e.y() - port.y()) * (e.y() - port.y()))).orElseThrow();
             float y = Math.copySign(24, port.y());
             Vector3 end = v(port.x(), port.y(), port.z());
-            Vector3 outward = v(port.x(), port.y(), 0).nor();
+            Vector3 outward = v(port.dx(), port.dy(), 0);
             Vector3 neck = new Vector3(end).mulAdd(outward, -6);
-            Vector3 nozzle = attachment(source, port.z());
-            mesh.pipe(COPPER, 1.1f, nozzle, v(nozzle.x, y, nozzle.z), v(nozzle.x, y, port.z()),
-                  v(neck.x, y, port.z()), neck, end);
+            Vector3 nozzle = attachment(port.source(), port.z());
+            mesh.pipe(COPPER, 1.1f, nozzle, v(nozzle.x, y, nozzle.z), v(nozzle.x, y, port.z()), end);
             mesh.tube(new Vector3(end).mulAdd(outward, -1), new Vector3(end).mulAdd(outward, -.5f), 1.5f, STEEL, 10);
             // The elevated section has a real footing on its own hex, even when the other hex is higher.
             support(mesh, nozzle.x, y, Math.max(port.z(), nozzle.z));
-            support(mesh, neck.x, neck.y, port.z());
+            if (neck.dst2(v(nozzle.x, y, port.z())) > 36) { support(mesh, neck.x, neck.y, port.z()); }
         }
         mesh.supports.forEach((point, height) -> {
             mesh.box(point.x(), point.y(), .4f, 2, 2, .8f, STEEL);
@@ -326,38 +350,17 @@ final class BoardIndustrial {
     }
 
     private static void fan(Mesh mesh, float x, float y, float z, float r) {
-        float rotor = r * .7f;
-        // The roof has a real opening. No body/roof/fan discs are layered on nearly the same plane.
-        List<Float> angles = new ArrayList<>();
-        for (int i = 0; i < SIDES; i++) { angles.add(i * (float) Math.PI * 2 / SIDES); }
-        float corner = (float) Math.atan2(r * 1.15f, r * .95f);
-        angles.add(corner); angles.add((float) Math.PI - corner);
-        angles.add((float) Math.PI + corner); angles.add((float) Math.PI * 2 - corner);
-        angles.sort(Float::compare);
-        for (int i = 0; i < angles.size(); i++) {
-            float a = angles.get(i), b = angles.get((i + 1) % angles.size());
-            mesh.quad(v(x + rotor * cos(a), y + rotor * sin(a), z), roofEdge(x, y, z, r, a), roofEdge(x, y, z, r, b),
-                  v(x + rotor * cos(b), y + rotor * sin(b), z), Vector3.Z, Vector3.Z, TEAL);
-            mesh.quad(v(x + rotor * cos(a), y + rotor * sin(a), z), v(x + rotor * cos(b), y + rotor * sin(b), z),
-                  v(x + rotor * cos(b), y + rotor * sin(b), z - 1.2f), v(x + rotor * cos(a), y + rotor * sin(a), z - 1.2f),
-                  v(-cos(a), -sin(a), 0), v(-cos(b), -sin(b), 0), DARK);
-            mesh.triangle(v(x, y, z - 1.2f), v(x + rotor * cos(a), y + rotor * sin(a), z - 1.2f),
-                  v(x + rotor * cos(b), y + rotor * sin(b), z - 1.2f), Vector3.Z, Vector3.Z, Vector3.Z, DARK);
+        float panel = r * .8f, width = r * .95f, depth = r * 1.15f;
+        Vector3[] inner = { v(x - panel, y - panel, z), v(x + panel, y - panel, z),
+              v(x + panel, y + panel, z), v(x - panel, y + panel, z) };
+        Vector3[] outer = { v(x - width, y - depth, z), v(x + width, y - depth, z),
+              v(x + width, y + depth, z), v(x - width, y + depth, z) };
+        // One opaque textured quad replaces the rotor and its recess. The surrounding roof shares its edges.
+        mesh.strip(inner[0], inner[1], inner[2], inner[3], Vector3.Z, Vector3.Z, FAN, 0, 1, 0, 1);
+        for (int i = 0; i < 4; i++) {
+            int next = (i + 1) % 4;
+            mesh.quad(outer[i], outer[next], inner[next], inner[i], Vector3.Z, Vector3.Z, TEAL);
         }
-        for (int i = 0; i < 6; i++) {
-            float a = i * (float) Math.PI / 3;
-            Vector3 u = v(cos(a), sin(a), 0), w = v(-sin(a), cos(a), 0), p = v(x, y, z - .45f);
-            mesh.quad(new Vector3(p).mulAdd(u, rotor * .15f).mulAdd(w, -.3f), new Vector3(p).mulAdd(u, rotor * .9f),
-                  new Vector3(p).mulAdd(u, rotor * .7f).mulAdd(w, rotor * .23f), new Vector3(p).mulAdd(u, rotor * .15f).mulAdd(w, .3f),
-                  Vector3.Z, Vector3.Z, STEEL);
-        }
-        mesh.cylinder(x, y, z - .6f, z - .3f, rotor * .18f, STEEL);
-    }
-
-    private static Vector3 roofEdge(float x, float y, float z, float r, float angle) {
-        float distance = Math.min(r * .95f / Math.max(.00001f, Math.abs(cos(angle))),
-              r * 1.15f / Math.max(.00001f, Math.abs(sin(angle))));
-        return v(x + distance * cos(angle), y + distance * sin(angle), z);
     }
 
     private static Vector3 v(float x, float y, float z) { return new Vector3(x, y, z); }
@@ -371,6 +374,7 @@ final class BoardIndustrial {
         final FloatArray vertices = new FloatArray();
         final ShortArray paintIndices = new ShortArray();
         final ShortArray metalIndices = new ShortArray();
+        final ShortArray fanIndices = new ShortArray();
 
         void vertex(Vector3 p, Vector3 normal, Color color) {
             vertex(p, normal, color, textureU(p, normal), textureV(p, normal));
@@ -380,8 +384,8 @@ final class BoardIndustrial {
             int index = vertices.size / RigidGlb.STRIDE;
             if (index >= 65_535) { throw new IllegalArgumentException("Industrial mesh exceeds rigid vertex limit"); }
             boolean paint = color == IVORY || color == TEAL || color == YELLOW;
-            (paint ? paintIndices : metalIndices).add((short) index);
-            float tile = paint ? 32 : 10;
+            (color == FAN ? fanIndices : paint ? paintIndices : metalIndices).add((short) index);
+            float tile = color == FAN ? 1 : paint ? 32 : 10;
             vertices.addAll(p.x, p.y, p.z, normal.x, normal.y, normal.z, color.r, color.g, color.b, 1,
                   u / tile, v / tile);
         }
@@ -548,18 +552,19 @@ final class BoardIndustrial {
             var data = new ModelData();
             data.id = "heavy-industrial";
             var mesh = new ModelMesh();
-            mesh.id = "industrial"; mesh.vertices = vertices.toArray(); mesh.parts = new ModelMeshPart[2];
+            int parts = fanIndices.isEmpty() ? 2 : 3;
+            mesh.id = "industrial"; mesh.vertices = vertices.toArray(); mesh.parts = new ModelMeshPart[parts];
             mesh.attributes = new VertexAttribute[] { VertexAttribute.Position(), VertexAttribute.Normal(),
                   VertexAttribute.ColorUnpacked(), VertexAttribute.TexCoords(0) };
             data.meshes.add(mesh);
             var node = new ModelNode();
             node.id = "industrial"; node.meshId = mesh.id;
-            node.parts = new ModelNodePart[2];
-            for (int i = 0; i < 2; i++) {
+            node.parts = new ModelNodePart[parts];
+            for (int i = 0; i < parts; i++) {
                 var part = new ModelMeshPart();
-                part.id = i == 0 ? "paint" : "steel";
+                part.id = i == 0 ? "paint" : i == 1 ? "steel" : "fan";
                 part.primitiveType = GL20.GL_TRIANGLES;
-                part.indices = (i == 0 ? paintIndices : metalIndices).toArray();
+                part.indices = (i == 0 ? paintIndices : i == 1 ? metalIndices : fanIndices).toArray();
                 mesh.parts[i] = part;
                 var material = new ModelMaterial();
                 material.id = part.id; material.diffuse = new Color(Color.WHITE);

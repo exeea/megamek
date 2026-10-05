@@ -81,6 +81,7 @@ class GpuForestBenchmarkSmokeTest {
                         long lod = System.nanoTime();
                         terrain.renderShadows(camera.camera, List.of());
                         frame(terrain, camera, null);
+                        Gdx.gl.glFinish();
                         double switchMillis = (System.nanoTime() - lod) / 1e6;
                         for (int i = 0; i < WARMUP; i++) {
                             timings.beginFrame(false);
