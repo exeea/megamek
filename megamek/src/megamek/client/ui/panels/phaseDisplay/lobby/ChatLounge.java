@@ -307,7 +307,8 @@ public class ChatLounge extends AbstractPhaseDisplay
     private JPanel panGroundMap;
 
     private JComboBox<Comparable<?>> comMapSizes;
-    private final JButton butBoardPreview = new JButton(Messages.getString("BoardSelectionDialog.ViewGameBoard"));
+    private final JButton butBoardPreview2D = new JButton(Messages.getString("BoardSelectionDialog.ViewGameBoard2D"));
+    private final JButton butBoardPreview3D = new JButton(Messages.getString("BoardSelectionDialog.ViewGameBoard3D"));
     private final JButton butGenerateBattlefield = new JButton(Messages.getString("ChatLounge.GenerateBattlefield"));
     private final JPanel panMapButtons = new JPanel();
     private final JLabel lblBoardsAvailable = new JLabel();
@@ -479,7 +480,8 @@ public class ChatLounge extends AbstractPhaseDisplay
         butAdd.addActionListener(lobbyListener);
         butAddBot.addActionListener(lobbyListener);
         butArmy.addActionListener(lobbyListener);
-        butBoardPreview.addActionListener(lobbyListener);
+        butBoardPreview2D.addActionListener(lobbyListener);
+        butBoardPreview3D.addActionListener(lobbyListener);
         butGenerateBattlefield.addActionListener(lobbyListener);
         butBotSettings.addActionListener(lobbyListener);
         butCompact.addActionListener(lobbyListener);
@@ -949,11 +951,13 @@ public class ChatLounge extends AbstractPhaseDisplay
         FixedYPanel bottomPanel = new FixedYPanel();
         bottomPanel.setBorder(new EmptyBorder(10, 0, 0, 0));
         bottomPanel.add(butGenerateBattlefield);
-        bottomPanel.add(butBoardPreview);
+        bottomPanel.add(butBoardPreview2D);
+        bottomPanel.add(butBoardPreview3D);
         bottomPanel.add(butSaveMapSetup);
         bottomPanel.add(butLoadMapSetup);
 
-        butBoardPreview.setToolTipText(Messages.getString("BoardSelectionDialog.ViewGameBoardTooltip"));
+        butBoardPreview2D.setToolTipText(Messages.getString("BoardSelectionDialog.ViewGameBoardTooltip"));
+        butBoardPreview3D.setToolTipText(Messages.getString("BoardSelectionDialog.ViewGameBoardTooltip"));
         butGenerateBattlefield.setToolTipText(Messages.getString("ChatLounge.GenerateBattlefieldTooltip"));
 
         // The left side panel including the game map preview
@@ -1503,15 +1507,18 @@ public class ChatLounge extends AbstractPhaseDisplay
         }
     }
 
-    public void previewGameBoard() {
+    private Board getBoardForPreview() {
         Board serverBoard = serverGeneratedBoard();
         if (serverBoard == null) {
             LOGGER.debug("[LobbyBoard] no server-built battlefield - preview uses a local roll of the map settings");
         }
-        Board newBoard = (serverBoard != null)
+        return (serverBoard != null)
               ? serverBoard
               : ServerBoardHelper.getPossibleGameBoard(mapSettings, false);
-        boardPreviewGame.setBoard(newBoard);
+    }
+
+    public void previewGameBoard() {
+        boardPreviewGame.setBoard(getBoardForPreview());
         if ((previewBV == null) && !initializeBoardPreview()) {
             return;
         }
@@ -2236,8 +2243,11 @@ public class ChatLounge extends AbstractPhaseDisplay
                       mapSettings);
                 rmd.activateDialog(clientgui.getTilesetManager().getThemes());
 
-            } else if (ev.getSource().equals(butBoardPreview)) {
+            } else if (ev.getSource().equals(butBoardPreview2D)) {
                 previewGameBoard();
+
+            } else if (ev.getSource().equals(butBoardPreview3D)) {
+                GpuBoardWindow.openPreview(clientgui.getFrame(), getBoardForPreview());
 
             } else if (ev.getSource().equals(butGenerateBattlefield)) {
                 LOGGER.debug("[LobbyBoard] requesting battlefield generation from the server");
@@ -2894,7 +2904,8 @@ public class ChatLounge extends AbstractPhaseDisplay
         butAdd.removeActionListener(lobbyListener);
         butAddBot.removeActionListener(lobbyListener);
         butArmy.removeActionListener(lobbyListener);
-        butBoardPreview.removeActionListener(lobbyListener);
+        butBoardPreview2D.removeActionListener(lobbyListener);
+        butBoardPreview3D.removeActionListener(lobbyListener);
         butGenerateBattlefield.removeActionListener(lobbyListener);
         butBotSettings.removeActionListener(lobbyListener);
         butCompact.removeActionListener(lobbyListener);

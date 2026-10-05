@@ -24,6 +24,58 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardConcreteMeshTest {
+    @Test
+    void commCenterBorderSlopeUsesItsActualFaceNormals() throws Exception {
+        BoardScene scene = commCenter();
+        for (TerrainLod lod : TerrainLod.values()) {
+            BoardSurface surface = new BoardSurface(scene, scene.tile(new Coords(0, 10)), lod);
+            var panels = surface.walls(scene, BoardGeometry.floor(scene)).stream()
+                  .filter(face -> face.landEdge() == 4).toList();
+            assertTrue(panels.size() >= 2, "The two-level concrete drop beside 0112 is present");
+            for (var face : panels) {
+                Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
+                for (var vertex : List.of(face.a(), face.b(), face.c())) {
+                    assertTrue(surface.relief.shade(vertex).normal().epsilonEquals(normal, .0001f),
+                          "A concrete face must not inherit its horizontal rim's texture projection: " + lod + " " + face);
+                }
+            }
+        }
+    }
+
+    @Test
+    void commCenterFittedSlopeKeepsAStraightRimAndConstantWidth() throws Exception {
+        BoardScene scene = commCenter();
+        assertEquals(BoardConcrete.Mode.EVERYWHERE, BoardConcrete.mode(), "Exercise the default fitted concrete outline");
+        BoardConcrete shape = BoardConcrete.of(scene);
+        Coords first = new Coords(1, 14), last = new Coords(2, 15);
+        Vector3 a = shape.corner(first, 3), direction = shape.corner(last, 5).sub(a).nor();
+        float rimDistance = Float.NaN;
+        for (Coords at : List.of(first, last)) {
+            BoardSurface surface = new BoardSurface(scene, scene.tile(at));
+            for (int k = 3; k <= 5; k++) {
+                Vector3 rim = surface.relief.seam(k, k, 0).sub(a);
+                float distance = direction.x * rim.y - direction.y * rim.x;
+                if (Float.isNaN(rimDistance)) { rimDistance = distance; }
+                assertEquals(rimDistance, distance, .003f,
+                      "The rim above 0216 follows the fitted straight boundary: " + at + " corner " + k);
+            }
+            for (var face : surface.walls(scene, BoardGeometry.floor(scene))) {
+                if (face.landEdge() != 3 && face.landEdge() != 4) { continue; }
+                for (var vertex : List.of(face.a(), face.b(), face.c())) {
+                    Vector3 offset = new Vector3(vertex).sub(a);
+                    float distance = direction.x * offset.y - direction.y * offset.x;
+                    float expected = rimDistance * (2 * vertex.z / BoardGeometry.level() - 1);
+                    assertEquals(expected, distance, .003f,
+                          "The entire concrete slope remains planar across former hex edges at " + at);
+                }
+            }
+        }
+    }
+
+    private static BoardScene commCenter() throws Exception {
+        return BoardCliffSeamTest.capturedScene("GrassLands/16x17 Grasslands River CommCenter.board");
+    }
+
     @ParameterizedTest
     @ValueSource(ints = { 1, 2, 3, 6 })
     void markedCliffsStayPlanarForTheirFullHeightAtEveryDetail(int levels) {

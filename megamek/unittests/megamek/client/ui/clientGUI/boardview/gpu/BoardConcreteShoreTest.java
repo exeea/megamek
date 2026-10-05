@@ -13,6 +13,8 @@ import java.util.Set;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardConcreteShoreTest {
     private static final Coords CENTER = new Coords(3, 3);
@@ -523,9 +525,10 @@ class BoardConcreteShoreTest {
         }
     }
 
-    @Test
-    void aeroBaseRunwayContinuesAcrossTheNarrowConnectorToTheTrunk() {
-        BoardScene scene = GpuRiverTerrainSmokeTest.pavedMapScene(1);
+    @ParameterizedTest
+    @ValueSource(ints = { 0, 2 })
+    void aeroBaseRunwayContinuesAcrossTheNarrowConnectorToTheTrunk(int elevation) {
+        BoardScene scene = aeroBaseAtElevation(elevation);
         BoardConcrete shape = BoardConcrete.of(scene);
         Vector3 a = shape.corner(new Coords(9, 5), 0), b = shape.corner(new Coords(10, 6), 0);
         Coords join = new Coords(6, 4);
@@ -537,9 +540,10 @@ class BoardConcreteShoreTest {
               "The continued runway meets the trunk's vertical side");
     }
 
-    @Test
-    void aeroBaseTaxiwayKeepsItsDiagonalSidePastTheJunctionAndToTheMapEdge() {
-        BoardScene scene = GpuRiverTerrainSmokeTest.pavedMapScene(1);
+    @ParameterizedTest
+    @ValueSource(ints = { 0, 2 })
+    void aeroBaseTaxiwayKeepsItsDiagonalSidePastTheJunctionAndToTheMapEdge(int elevation) {
+        BoardScene scene = aeroBaseAtElevation(elevation);
         BoardConcrete shape = BoardConcrete.of(scene);
         Coords arm = new Coords(12, 3);
         Vector3 a = shape.corner(arm, 3), b = shape.corner(arm, 4);
@@ -550,6 +554,15 @@ class BoardConcreteShoreTest {
         }
         assertEquals(shape.corner(new Coords(13, 5), 0).x, shape.corner(new Coords(13, 4), 0).x, .003f,
               "The two taxiway sides meet at one corner");
+    }
+
+    private static BoardScene aeroBaseAtElevation(int elevation) {
+        BoardScene scene = GpuRiverTerrainSmokeTest.pavedMapScene(1);
+        if (elevation == 0) { return scene; }
+        return scene.withTiles(scene.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(),
+              tile.surface() == BoardScene.Surface.CONCRETE ? elevation : tile.elevation(), -1, false, 0,
+              tile.surface(), tile.ground(), null, null, null, null, tile.features(), List.of(), BoardLiquid.NONE, null,
+              tile.detailedGround())).toList());
     }
 
     @Test

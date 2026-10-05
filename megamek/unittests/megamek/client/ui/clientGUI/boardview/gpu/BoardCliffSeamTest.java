@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.FutureTask;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
@@ -17,6 +18,7 @@ import com.badlogic.gdx.math.Vector3;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
+import megamek.common.game.Game;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -48,15 +50,10 @@ class BoardCliffSeamTest {
         BoardSculptTest.withTransitions(transitions, BoardCliffSeamTest::checkBoundaries);
     }
 
-    @Test
-    void seaportQuayPanelsStayClosedAndFaceTheWater() throws Exception {
-        var board = new Board();
-        board.load(new File("data/boards/Templates/SeaPort.board"));
-        BoardScene scene;
-        try (var fixture = GpuBoardFixture.create(board)) {
-            SwingUtilities.invokeAndWait(fixture.source::refresh);
-            scene = fixture.source.takeFrame().scene();
-        }
+    @ParameterizedTest(name = "quay {0}")
+    @ValueSource(strings = { "Templates/SeaPort.board", "Map Set 7/16x17 Seaport.board" })
+    void seaportQuayPanelsStayClosedAndFaceTheWater(String path) throws Exception {
+        BoardScene scene = capturedScene(path);
         for (TerrainLod lod : TerrainLod.values()) {
             Map<Segment, Integer> joined = new HashMap<>();
             Map<Coords, List<BoardSurface.Face>> quays = new HashMap<>();
@@ -80,7 +77,10 @@ class BoardCliffSeamTest {
                 if (!tile.liquid().present()) { continue; }
                 List<BoardSurface.Face> panels = surface.faces.stream().filter(face -> face.finish() == BoardSurface.Finish.WALL
                       && face.landEdge() >= 0 && BoardConcrete.concreteBank(scene, tile, face.landEdge())).toList();
-                if (!panels.isEmpty()) { quays.put(tile.coords(), panels); }
+                if (!panels.isEmpty()) {
+                    quays.put(tile.coords(), panels);
+                    checkSubmergedShading(surface);
+                }
                 Vector3 center = BoardGeometry.center(tile.coords(), 0);
                 for (var face : panels) {
                     for (var vertex : List.of(face.a(), face.b(), face.c())) {
@@ -101,6 +101,60 @@ class BoardCliffSeamTest {
                 assertJoined(boundary, joined, "SeaPort quay " + quay.getKey() + ", " + lod);
             }
         }
+    }
+
+    @Test
+    void seaportApronFitsBothSidesWithoutLoweringBuildingFoundations() throws Exception {
+        BoardScene scene = capturedScene("Map Set 7/16x17 Seaport.board");
+        assertEquals(BoardConcrete.Mode.EVERYWHERE, BoardConcrete.mode());
+        BoardConcrete shape = BoardConcrete.of(scene);
+        Vector3 a = shape.corner(new Coords(2, 1), 3), b = shape.corner(new Coords(5, 2), 5);
+        Vector3 along = new Vector3(b).sub(a).nor();
+        Vector3 back = shape.corner(new Coords(2, 1), 2);
+        for (int x = 2; x <= 5; x++) {
+            Coords coords = new Coords(x, x / 2);
+            for (int k = 3; k <= 5; k++) {
+                Vector3 offset = shape.corner(coords, k).sub(a);
+                assertEquals(0, along.x * offset.y - along.y * offset.x, .003f,
+                      "The northwest quay stays straight beside inland buildings: " + coords + " corner " + k);
+            }
+            for (int k = 0; k <= 2; k++) {
+                Vector3 offset = shape.corner(coords, k).sub(back);
+                assertEquals(0, along.x * offset.y - along.y * offset.x, .003f,
+                      "The inland side stays straight and parallel to the quay: " + coords + " corner " + k);
+            }
+        }
+        BoardSurface.Cache surfaces = new BoardSurface.Cache();
+        for (var tile : scene.tiles()) {
+            if (tile.features().stream().noneMatch(feature -> feature.kind() == BoardScene.FeatureKind.BUILDING)) { continue; }
+            Vector3 center = BoardGeometry.center(tile.coords(), tile.elevation());
+            for (int k = 0; k < 6; k++) {
+                Vector3 corner = BoardGeometry.corner(tile.coords(), tile.elevation(), k);
+                for (float radius : new float[] { 0, .5f, .99f }) {
+                    Vector3 point = new Vector3(center).lerp(corner, radius);
+                    boolean supported = false;
+                    for (Coords at : tile.coords().allAtDistanceOrLess(1)) {
+                        var neighbor = scene.tile(at);
+                        if (neighbor == null) { continue; }
+                        float height = BoardSurface.sampleHeight(surfaces.get(scene, neighbor).faces, point.x, point.y, Float.NaN);
+                        supported |= Math.abs(height - center.z) < .001f;
+                    }
+                    assertTrue(supported, "Fitting preserves support beneath the entire building hex: " + tile.coords() + " " + point);
+                }
+            }
+        }
+    }
+
+    static BoardScene capturedScene(String path) throws Exception {
+        FutureTask<BoardScene> capture = new FutureTask<>(() -> {
+            var board = new Board();
+            board.load(new File("data/boards/" + path));
+            var game = new Game();
+            game.setBoard(board);
+            try (var source = new GpuMapSource(game, null, null)) { return source.takeFrame().scene(); }
+        });
+        SwingUtilities.invokeAndWait(capture);
+        return capture.get();
     }
 
     @Test

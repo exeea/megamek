@@ -3,6 +3,9 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -149,24 +152,16 @@ final class BoardConcrete {
             corner.border &= corner.tiles.size() == 2 && (corner.previous == null) != (corner.next == null);
             corner.pinned = !corner.border && (corner.tiles.size() != 3 || corner.previous == null || corner.next == null);
             for (BoardScene.Tile tile : corner.tiles) {
+                corner.pinned |= fixedBoundary(scene, corner, tile);
                 if (outside(tile)) {
                     if (tile.liquid().present()) {
                         corner.pinned |= tile.frozen() || waterLevel != null && waterLevel != tile.elevation();
                         waterLevel = tile.elevation();
-                    } else {
-                        corner.pinned |= protectedOutside(scene, tile);
                     }
                 } else {
-                    corner.pinned |= protectedLand(scene, tile) || dryLevel != null && dryLevel != tile.elevation();
+                    corner.pinned |= dryLevel != null && dryLevel != tile.elevation();
                     corner.pinned |= dockLinks(scene, tile) == 0;
                     dryLevel = tile.elevation();
-                    // A foundation also pins its immediate apron: adjoining empty paving must not form a notch
-                    // against a building's unchanged hex boundary.
-                    for (int d = 0; d < 6; d++) {
-                        BoardScene.Tile neighbor = scene.tile(tile.coords().translated(d));
-                        corner.pinned |= neighbor != null && !neighbor.liquid().present()
-                              && (outside(neighbor) ? protectedOutside(scene, neighbor) : fixedFootprint(neighbor));
-                    }
                 }
             }
             if (!corner.pinned) {
@@ -180,18 +175,24 @@ final class BoardConcrete {
                 }
             }
         }
-        Set<Corner> visited = new HashSet<>();
-        // Open chains first; otherwise starting midway would split a continuous quay at an arbitrary hex.
-        for (Corner corner : corners.values()) {
-            if (corner.previous == null) { simplifyChain(corner, visited, scene); }
-        }
-        for (Corner corner : corners.values()) { simplifyChain(corner, visited, scene); }
+        simplify(corners.values(), scene, null);
+        Set<Corner> continued = continueSides(corners.values(), scene);
+        if (!continued.isEmpty()) { simplify(corners.values(), scene, continued); }
         Map<Long, Shift> result = new TreeMap<>();
         corners.forEach((key, corner) -> {
             float dx = corner.point.x - corner.original.x, dy = corner.point.y - corner.original.y;
             if (Math.hypot(dx, dy) > .001f) { result.put(key, new Shift(dx, dy)); }
         });
         shifts = Map.copyOf(result);
+    }
+
+    private static void simplify(Collection<Corner> corners, BoardScene scene, Set<Corner> changed) {
+        Set<Corner> visited = new HashSet<>();
+        // Open chains first; otherwise starting midway would split a continuous quay at an arbitrary hex.
+        for (Corner corner : corners) {
+            if (corner.previous == null) { simplifyChain(corner, visited, scene, changed); }
+        }
+        for (Corner corner : corners) { simplifyChain(corner, visited, scene, changed); }
     }
 
     private static Corner coastCorner(Map<Long, Corner> corners, BoardScene scene, Coords coords, int k) {
@@ -278,13 +279,13 @@ final class BoardConcrete {
         return true;
     }
 
-    private static void simplifyChain(Corner start, Set<Corner> visited, BoardScene scene) {
+    private static void simplifyChain(Corner start, Set<Corner> visited, BoardScene scene, Set<Corner> changed) {
         if (visited.contains(start)) { return; }
         List<Corner> chain = new ArrayList<>();
         for (Corner at = start; at != null && visited.add(at); at = at.next) {
             chain.add(at);
         }
-        if (chain.size() < 3) { return; }
+        if (chain.size() < 3 || changed != null && Collections.disjoint(chain, changed)) { return; }
         if (chain.getLast().next == start && fitRectangle(chain, scene)) { return; }
         if (chain.getLast().next == start) {
             int anchor = 0;
@@ -328,6 +329,84 @@ final class BoardConcrete {
     }
 
     private record Run(int first, int last, Line line, boolean rectangle) { }
+
+    /** An established straight side can continue beyond its end across a paved junction. */
+    private record Side(Line line, Vector3 a, Vector3 b) { }
+
+    /** Prefer a longer established side across a short paved branch, then refit only the affected chains. */
+    private static Set<Corner> continueSides(Collection<Corner> corners, BoardScene scene) {
+        Map<Coords, List<Side>> nearby = new HashMap<>();
+        Map<Corner, Float> lengths = new HashMap<>();
+        Set<Corner> visited = new HashSet<>();
+        float scale = BoardGeometry.hexScale();
+        for (Corner corner : corners) {
+            if (corner.next == null || visited.contains(corner)) { continue; }
+            if (corner.point.dst2(corner.next.point) < .000001f * scale * scale) { visited.add(corner); continue; }
+            Vector3 along = new Vector3(corner.next.point).sub(corner.point).nor();
+            Line line = new Line(-along.y, along.x, -along.y * corner.point.x + along.x * corner.point.y);
+            Corner first = corner, last = corner.next;
+            while (first.previous != null && first.previous != corner && !visited.contains(first.previous)
+                  && Math.abs(line.side(first.previous.point)) < .003f * scale) { first = first.previous; }
+            while (last.next != null && last != first && !visited.contains(last)
+                  && Math.abs(line.side(last.next.point)) < .003f * scale) { last = last.next; }
+            float length = first.point.dst(last.point);
+            for (Corner at = first; at != last; at = at.next) {
+                visited.add(at);
+                lengths.put(at, length);
+                // Reuse an exact fixed-width rail rather than recovering a slightly different line from float vertices.
+                if (at.rail != null && line.same(at.rail)) { line = at.rail; }
+            }
+            if (length < 1.5f * BoardGeometry.width()) { continue; }
+            Side side = new Side(line, new Vector3(first.point), new Vector3(last.point));
+            for (Corner end : List.of(first, last)) {
+                for (BoardScene.Tile tile : end.tiles) {
+                    nearby.computeIfAbsent(tile.coords(), ignored -> new ArrayList<>()).add(side);
+                }
+            }
+        }
+        Set<Corner> changed = new HashSet<>();
+        for (Corner corner : corners) {
+            if (corner.next == null || corner.rail != null || corner.pinned || corner.next.pinned
+                  || lengths.getOrDefault(corner, 0f) == 0) { continue; }
+            Vector3 middle = new Vector3(corner.original).lerp(corner.next.original, .5f);
+            BoardScene.Tile owner = corner.tiles.stream().filter(tile -> tile.surface() == BoardScene.Surface.CONCRETE
+                  && !tile.liquid().present() && corner.next.tiles.contains(tile)).findFirst().orElse(null);
+            if (owner == null) { continue; }
+            Set<Side> candidates = new HashSet<>();
+            for (Coords at : owner.coords().allAtDistanceOrLess(3)) { candidates.addAll(nearby.getOrDefault(at, List.of())); }
+            float error = 24 * scale;
+            Vector3 direction = new Vector3(corner.next.point).sub(corner.point).nor();
+            for (Side side : candidates) {
+                if (side.a.dst(side.b) <= lengths.get(corner) + .001f * scale) { continue; }
+                float facing = -direction.y * side.line.nx + direction.x * side.line.ny;
+                // A continuation repairs a turn at a branch; it must not shift an already parallel side.
+                if (facing <= 0 || facing > .98f) { continue; }
+                float distance = Math.abs(side.line.side(middle));
+                if (distance >= error) { continue; }
+                Vector3 point = side.line.project(middle), along = new Vector3(side.b).sub(side.a);
+                float t = new Vector3(point).sub(side.a).dot(along) / along.len2();
+                if (t >= 0 && t <= 1) { continue; }
+                Vector3 end = t < 0 ? side.a : side.b;
+                float gap = end.dst(point);
+                if (gap < BoardGeometry.width() / 2 || gap > 3 * BoardGeometry.width()) { continue; }
+                boolean paved = true;
+                int steps = (int) Math.ceil(gap / (BoardGeometry.width() / 4));
+                for (int step = 1; paved && step < steps; step++) {
+                    Vector3 p = new Vector3(end).lerp(point, step / (float) steps);
+                    BoardScene.Tile tile = BoardGeometry.tile(scene, p.x, p.y);
+                    paved &= tile != null && (corner.tiles.contains(tile) || corner.next.tiles.contains(tile)
+                          || tile.surface() == BoardScene.Surface.CONCRETE && !tile.liquid().present()
+                                && tile.elevation() == owner.elevation());
+                }
+                if (paved && clearEdge(scene, corner, side.line.project(corner.original), side.line.project(corner.next.original))) {
+                    corner.rail = side.line;
+                    error = distance;
+                    changed.add(corner);
+                }
+            }
+        }
+        return changed;
+    }
 
     private static Line dockRail(BoardScene scene, BoardScene.Tile land, Vector3 a, Vector3 b) {
         int links = dockLinks(scene, land);
@@ -528,7 +607,7 @@ final class BoardConcrete {
             float side = (dx * (cy - a.y) - dy * (cx - a.x)) / length;
             if (outside(tile) ? side > -17.999f * BoardGeometry.hexScale()
                   : side < 15.999f * BoardGeometry.hexScale()) { return false; }
-            if (!tile.liquid().present() && (outside(tile) ? protectedOutside(scene, tile) : protectedLand(scene, tile))) {
+            if (fixedBoundary(scene, corner, tile)) {
                 for (int k = 0; k < 6; k++) {
                     Vector3 p = BoardGeometry.corner(tile.coords(), 0, k);
                     float clearance = dx * (p.y - a.y) - dy * (p.x - a.x);
@@ -548,11 +627,12 @@ final class BoardConcrete {
               || feature.kind() == BoardScene.FeatureKind.PROP);
     }
 
-    private static boolean protectedOutside(BoardScene scene, BoardScene.Tile tile) {
-        // A flat road can meet a moved concrete edge on the same ground plane. Height-changing approaches and
-        // foundations stay fixed. The centre and the road connection remain in their original game hex.
-        if (tile.roadExits() != 0 && BoardSurface.ramps(scene, tile) == 0 && tile.features().isEmpty()) { return false; }
-        return protectedLand(scene, tile);
+    private static boolean fixedBoundary(BoardScene scene, Corner corner, BoardScene.Tile tile) {
+        // Moving a material boundary on one ground plane preserves the complete neighbouring foundation.
+        // Structures on the concrete itself, height changes and road ramps keep their original footprint.
+        return !tile.liquid().present() && protectedLand(scene, tile)
+              && (!outside(tile) || tile.ultraSublevel() || BoardSurface.ramps(scene, tile) != 0
+                    || corner.tiles.stream().anyMatch(other -> other.liquid().present() || other.elevation() != tile.elevation()));
     }
 
     private static boolean outside(BoardScene.Tile tile) {

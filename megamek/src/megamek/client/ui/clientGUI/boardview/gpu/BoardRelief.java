@@ -1078,15 +1078,8 @@ final class BoardRelief {
             float end = Math.max(0, 1 - Math.min(Math.abs(z - bottom), Math.abs(z - top)) / reach);
             float weight = (inside ? 1 : 0) + 8 * end * end;
             if (weight <= 0) { continue; }
-            // The rendered hex is slightly compressed vertically. Its edge normal is not quite the line
-            // between hex centres; use the actual edge so planar slopes meet their corner offsets exactly.
-            int edge = Math.floorMod(1 - upper.coords().direction(lower.coords()), 6), next = (edge + 1) % 6;
-            float nx = (CORNER_DY[next] - CORNER_DY[edge]) * BoardGeometry.height() / 2;
-            float ny = (CORNER_DX[edge] - CORNER_DX[next]) * BoardGeometry.width() / 4;
-            float length = (float) Math.hypot(nx, ny);
-            if (nx * (lower.x() - upper.x()) + ny * (lower.y() - upper.y()) < 0) { length = -length; }
-            nx /= length;
-            ny /= length;
+            Vector3 normal = bandNormal(upper, lower);
+            float nx = normal.x, ny = normal.y;
             float b = band(upper, lower, z, corner.x, corner.y);
             widest = Math.max(widest, room(upper, lower));
             a11 += weight * nx * nx;
@@ -1096,9 +1089,16 @@ final class BoardRelief {
             b2 += weight * ny * b;
         }
         float determinant = a11 * a22 - a12 * a12;
-        if (widest <= 0 || determinant < 1e-4f) { return result; }
-        result[0] = (a22 * b1 - a12 * b2) / determinant;
-        result[1] = (a11 * b2 - a12 * b1) / determinant;
+        float trace = a11 + a22;
+        if (widest <= 0 || trace < 1e-4f) { return result; }
+        if (determinant < 1e-4f * trace * trace) {
+            // Fitting can put both incident edges on one line. Its offset needs no tangent displacement.
+            result[0] = b1 / trace;
+            result[1] = b2 / trace;
+        } else {
+            result[0] = (a22 * b1 - a12 * b2) / determinant;
+            result[1] = (a11 * b2 - a12 * b1) / determinant;
+        }
         // Seams asking for opposite bands on a narrow angle could otherwise throw the corner far out.
         float length = (float) Math.hypot(result[0], result[1]), limit = 1.5f * widest;
         if (length > limit) {
@@ -1106,6 +1106,15 @@ final class BoardRelief {
             result[1] *= limit / length;
         }
         return result;
+    }
+
+    /** Slopes offset the shared fitted boundary, including edges that no longer follow the hex lattice. */
+    private Vector3 bandNormal(Site upper, Site lower) {
+        int e = Math.floorMod(1 - upper.coords().direction(lower.coords()), 6);
+        Vector3 a = coast.corner(upper.coords(), e), b = coast.corner(upper.coords(), e + 1);
+        Vector3 normal = new Vector3(b.y - a.y, a.x - b.x, 0).nor();
+        if (normal.x * (lower.x() - upper.x()) + normal.y * (lower.y() - upper.y()) < 0) { normal.scl(-1); }
+        return normal;
     }
 
     /**
@@ -1183,6 +1192,7 @@ final class BoardRelief {
         final Site lower;
         final float nx;
         final float ny;
+        final Vector3 bandNormal;
         final float length;
         final boolean profiled;
         /** Two graded roads meet across this edge; see {@link #gate(Site, Site)}. */
@@ -1235,6 +1245,7 @@ final class BoardRelief {
             rimPinned = upper != null && upper.fixedOutline();
             gate = upper != null && lower != null && gate(upper, lower) && dry(first) && dry(second);
             profiled = upper != null && lower != null && upper.sculpted() && (lower.sculpted() || lower.liquid()) && !gate;
+            bandNormal = profiled ? bandNormal(upper, lower) : new Vector3(nx, ny, 0);
             room = profiled ? room(upper, lower) : 0;
             footRoom = room > 0 ? band(upper, lower, bottom(), (a.x + b.x) * .5f, (a.y + b.y) * .5f) : 0;
             drop = upper != null && lower != null ? drop(upper, lower) : 0;
@@ -1487,11 +1498,13 @@ final class BoardRelief {
             float own = spans && edge.room > 0 ? band(edge.upper, edge.lower, z, px, py) * rest : 0;
             bandOffset(edge.a, z, bandA);
             bandOffset(edge.b, z, bandB);
-            float ta = bandA[0] * ex + bandA[1] * ey, tb = bandB[0] * ex + bandB[1] * ey;
+            float sx = -edge.bandNormal.y, sy = edge.bandNormal.x;
+            if (sx * ex + sy * ey < 0) { sx = -sx; sy = -sy; }
+            float ta = bandA[0] * sx + bandA[1] * sy, tb = bandB[0] * sx + bandB[1] * sy;
             tangentRoom += Math.min(0, (tb - ta) / edge.length);
             float slide = ta * (1 - t) + tb * t - ta * wa - tb * wb;
-            bx = edge.nx * own + bandA[0] * wa + bandB[0] * wb + ex * slide;
-            by = edge.ny * own + bandA[1] * wa + bandB[1] * wb + ey * slide;
+            bx = edge.bandNormal.x * own + bandA[0] * wa + bandB[0] * wb + sx * slide;
+            by = edge.bandNormal.y * own + bandA[1] * wa + bandB[1] * wb + sy * slide;
         }
         cornerOffset(edge.a, z, scratchA);
         cornerOffset(edge.b, z, scratchB);
@@ -3256,7 +3269,22 @@ final class BoardRelief {
                 for (BoardSurface.Side side : entry.getValue()) { straightWall(side, result); }
             }
         }
+        if (self.family() == CONCRETE) {
+            result.replaceAll(face -> {
+                Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
+                return new BoardSurface.Face(wallVertex(face.a(), normal), wallVertex(face.b(), normal),
+                      wallVertex(face.c(), normal), face.finish(), face.landEdge());
+            });
+        }
         return result;
+    }
+
+    /** Every poured face has its actual normal, even at a twisted junction, without changing the shared top. */
+    private Vector3 wallVertex(Vector3 source, Vector3 normal) {
+        Vector3 vertex = new Vector3(source);
+        Shade shade = shades.get(source);
+        shades.put(vertex, new Shade(normal, shade.kind(), shade.occlusion(), shade.level(), shade.rim(), shade.foot(), shade.tint()));
+        return vertex;
     }
 
     /** Whether the sides of one edge, as the shore moves its corners, cover it completely at one foot height. */
@@ -3737,12 +3765,6 @@ final class BoardRelief {
         for (int r = 0; r < last; r += rightStride) { perimeter.add(grid[r][columns]); }
         int topStart = perimeter.size();
         for (int i = columns; i > 0; i -= topSamples(e) == 1 ? columns : 1) { perimeter.add(grid[last][i]); }
-        for (int i = 0; i < perimeter.size(); i++) {
-            Vector3 source = perimeter.get(i), p = new Vector3(source);
-            Shade shade = shades.get(source);
-            shades.put(p, new Shade(normal, shade.kind(), shade.occlusion(), shade.level(), shade.rim(), shade.foot(), shade.tint()));
-            perimeter.set(i, p);
-        }
         if (perimeter.size() == 4) {
             addQuad(result, perimeter.get(0), perimeter.get(1), perimeter.get(2), perimeter.get(3), BoardSurface.Finish.CAP, e);
         } else {

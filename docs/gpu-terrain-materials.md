@@ -70,6 +70,8 @@ its own material down to the foot, without a rock foundation or fallen rubble.
 Natural terrain must not spread its material across concrete or subdivide it for that blend.
 Concrete shores continue vertically to the water bed using the same fitted boundary
 as the land; no independent shoreline shortcut or sloping beach crosses that wall.
+Building foundations keep their corners, while nearby paving can still straighten
+its water-facing edge into a quay.
 The water hex owns the submerged panel; the land column stops at its rim so those
 faces cannot overlap and flicker.
 Both GPU views omit the old `quay_fluff` sprites (`fluff:100`, used by
