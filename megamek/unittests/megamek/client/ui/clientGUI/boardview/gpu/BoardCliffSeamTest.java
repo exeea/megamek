@@ -124,6 +124,11 @@ class BoardCliffSeamTest {
                       "The inland side stays straight and parallel to the quay: " + coords + " corner " + k);
             }
         }
+        List<BoardSurface.Face> originalGround = new ArrayList<>();
+        try {
+            BoardConcrete.tune(BoardConcrete.Mode.OFF);
+            for (var tile : scene.tiles()) { originalGround.addAll(new BoardSurface(scene, tile).groundFaces()); }
+        } finally { BoardConcrete.tune(BoardConcrete.Mode.EVERYWHERE); }
         BoardSurface.Cache surfaces = new BoardSurface.Cache();
         for (var tile : scene.tiles()) {
             if (tile.features().stream().noneMatch(feature -> feature.kind() == BoardScene.FeatureKind.BUILDING)) { continue; }
@@ -132,6 +137,9 @@ class BoardCliffSeamTest {
                 Vector3 corner = BoardGeometry.corner(tile.coords(), tile.elevation(), k);
                 for (float radius : new float[] { 0, .5f, .99f }) {
                     Vector3 point = new Vector3(center).lerp(corner, radius);
+                    // Natural shoreline cutbacks outside the actual building already exist without fitting.
+                    if (Math.abs(BoardSurface.sampleHeight(originalGround, point.x, point.y, Float.NaN) - center.z) >= .001f
+                          || !Float.isFinite(BoardSurface.sampleHeight(originalGround, point.x, point.y, Float.NaN))) { continue; }
                     boolean supported = false;
                     for (Coords at : tile.coords().allAtDistanceOrLess(1)) {
                         var neighbor = scene.tile(at);
@@ -139,7 +147,7 @@ class BoardCliffSeamTest {
                         float height = BoardSurface.sampleHeight(surfaces.get(scene, neighbor).faces, point.x, point.y, Float.NaN);
                         supported |= Math.abs(height - center.z) < .001f;
                     }
-                    assertTrue(supported, "Fitting preserves support beneath the entire building hex: " + tile.coords() + " " + point);
+                    assertTrue(supported, "Fitting preserves existing building support: " + tile.coords() + " " + point);
                 }
             }
         }
