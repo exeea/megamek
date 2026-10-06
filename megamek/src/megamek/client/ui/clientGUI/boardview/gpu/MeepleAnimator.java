@@ -50,6 +50,19 @@ final class MeepleAnimator {
         return anatomy == null ? unit.height() : anatomy.superHeavy() ? 3 : 2;
     }
 
+    /**
+     * A Mek whose miniature is on the {@link MiniatureHeights} list stands at that miniature's height, measured against
+     * the assault meeple; any other unit keeps its family and weight class height. Superheavies keep theirs too: they
+     * already stand three levels tall, and the list's ruler is the two-level assault.
+     */
+    static float meepleHeightScale(BoardScene.Unit unit, UnitFamilyScale family) {
+        var anatomy = unit.model() == null || unit.model().state() == null ? null : unit.model().state().structure().anatomy();
+        if (anatomy == null || anatomy.miniatureHeightScale() == null || anatomy.superHeavy()) {
+            return family.meepleHeightScale();
+        }
+        return UnitFamilyScale.MEK_ASSAULT.meepleHeightScale() * anatomy.miniatureHeightScale();
+    }
+
     static float bounce(UnitMotion.Sample motion) {
         if (!motion.moving() || (motion.type() != EntityMovementType.MOVE_WALK
               && motion.type() != EntityMovementType.MOVE_RUN && motion.type() != EntityMovementType.MOVE_SPRINT)) { return 0; }
@@ -93,7 +106,7 @@ final class MeepleAnimator {
               : unit.model().state().structure().family().forUnit(unit);
         horizontal *= family.meepleScale();
         float vertical = height * BoardGeometry.level() * BoardGeometry.unitHeightScale() / MeepleVisual.HEIGHT
-              * family.meepleScale() * family.meepleHeightScale();
+              * family.meepleScale() * meepleHeightScale(unit, family);
         boolean rear = posture.side() == FallSide.REAR;
         float fall = posture.fallen();
         float pitch = topView ? 0 : (rear ? 90 : -90) * fall * fall;

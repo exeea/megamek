@@ -350,7 +350,8 @@ public final class BoardSurfaceBlend {
             float total = 0;
             float interpolation = 0;
             float width = BoardRelief.metres(WIDTH_METRES);
-            float mx = x / BoardRelief.metres(1), my = y / BoardRelief.metres(1);
+            float metre = BoardRelief.metres(1), level = BoardGeometry.level();
+            float mx = x / metre, my = y / metre;
             float offset = 0;
             float bed = 0;
             int bedFamily = 0;
@@ -379,7 +380,7 @@ public final class BoardSurfaceBlend {
             for (BoardScene.Tile tile : tiles) {
                 // A contact spreads and meanders down the exposed column; it starts at the plateau's own cover.
                 // The bounded world-metre field is identical at every mesh LOD.
-                float below = water ? 0 : Math.max(0, (BoardGeometry.groundZ(tile) - z) / BoardRelief.metres(1));
+                float below = water ? 0 : Math.max(0, (BoardGeometry.groundZ(tile) - z) / metre);
                 // The cliff's talus projects beyond its plateau footprint. Carry its broken material out with it,
                 // so the receiving floor does not cut off the contact before the protruding foot is reached.
                 float toe = BoardRelief.metres(Math.min(2.4f, below * .3f));
@@ -401,11 +402,11 @@ public final class BoardSurfaceBlend {
                 if (water) {
                     // Land continues down into the basin; only cover from below this height is attenuated.
                     // The water surface is the reference, not its recessed bed or an absolute height difference.
-                    float dz = Math.max(0, Math.max(z, at.elevation() * BoardGeometry.level()) - BoardGeometry.groundZ(tile))
-                          / BoardGeometry.level();
+                    float dz = Math.max(0, Math.max(z, at.elevation() * level) - BoardGeometry.groundZ(tile))
+                          / level;
                     weight *= 1 - BoardRelief.smooth((dz - .35f) / .65f);
                 } else {
-                    float above = Math.max(0, (z - BoardGeometry.groundZ(tile)) / BoardRelief.metres(1));
+                    float above = Math.max(0, (z - BoardGeometry.groundZ(tile)) / metre);
                     weight *= 1 - BoardRelief.smooth(above / FOOT_METRES);
                 }
                 if (weight < .0001f) { continue; }
@@ -437,8 +438,9 @@ public final class BoardSurfaceBlend {
             float fitted = coast.distance(coords, x, y);
             if (Float.isFinite(fitted)) { return fitted; }
             float dx = Math.abs(x - BoardGeometry.centerX(coords)), dy = Math.abs(y - BoardGeometry.centerY(coords));
-            float a = BoardGeometry.height() / 2, b = BoardGeometry.width() / 4;
-            return Math.max(dy - a, (a * dx + b * dy - BoardGeometry.width() * BoardGeometry.height() / 4)
+            float width = BoardGeometry.width(), height = BoardGeometry.height();
+            float a = height / 2, b = width / 4;
+            return Math.max(dy - a, (a * dx + b * dy - width * height / 4)
                   / (float) Math.sqrt(a * a + b * b));
         }
     }
