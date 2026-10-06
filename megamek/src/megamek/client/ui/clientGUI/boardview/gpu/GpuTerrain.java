@@ -23,6 +23,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -590,12 +591,16 @@ final class GpuTerrain implements Disposable {
     private final Environment environment = new Environment();
     private final GpuLavaLighting lavaLighting = new GpuLavaLighting();
     private final List<Chunk> chunks = new ArrayList<>();
-    // At most four in-flight chunks and eight replaced chunks. A small worker pool leaves CPU capacity for
-    // rendering/input instead of borrowing every common-pool worker. All GL ownership stays on the render thread.
-    private final ExecutorService detailWorker = new ForkJoinPool(Math.max(1, Math.min(2,
-          Runtime.getRuntime().availableProcessors() / 2)), pool -> {
+    // At most four in-flight chunks and eight replaced chunks. Each chunk also fans its hexes out on this pool
+    // through parallelStream, so loading scales with workers. Half the cores, at most eight, still leaves CPU
+    // capacity for rendering/input instead of borrowing every common-pool worker. All GL ownership stays on the
+    // render thread.
+    private static final int DETAIL_WORKERS = Math.max(1, Math.min(8, Runtime.getRuntime().availableProcessors() / 2));
+    // getPoolIndex() is not assigned until the worker registers, so it reads 0 here; number the threads ourselves.
+    private final AtomicInteger detailWorkerCount = new AtomicInteger();
+    private final ExecutorService detailWorker = new ForkJoinPool(DETAIL_WORKERS, pool -> {
         var thread = ForkJoinPool.defaultForkJoinWorkerThreadFactory.newThread(pool);
-        thread.setName("terrain-detail-" + thread.getPoolIndex());
+        thread.setName("terrain-detail-" + detailWorkerCount.getAndIncrement());
         return thread;
     }, null, false);
     private final Map<Integer, Chunk> detailCache = new LinkedHashMap<>();
