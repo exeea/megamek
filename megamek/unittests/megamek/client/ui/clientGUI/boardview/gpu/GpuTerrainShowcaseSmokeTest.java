@@ -84,6 +84,8 @@ class GpuTerrainShowcaseSmokeTest {
           new View("rim-clay", true, 12, 30, .2f, new Coords(8, 5), 2, true, 1f),
           new View("base", true, 22, -40, .22f, new Coords(4, 5), 1, false, .8f),
           new View("formation", true, 18, 150, .3f, new Coords(12, 4), 2, false, .8f),
+          new View("rough", true, 18, 150, .12f, new Coords(12, 6), 0, false, .8f),
+          new View("rough-ridge", true, 18, 150, .12f, new Coords(12, 4), 5, false, .8f),
           new View("ridge", true, 10, -100, .32f, new Coords(2, 9), 1, false, .8f),
           new View("corner", true, 20, 60, .1f, new Coords(12, 4), 3, false, .8f),
           new View("notch", true, 25, 200, .12f, new Coords(8, 4), 2, false, .8f),

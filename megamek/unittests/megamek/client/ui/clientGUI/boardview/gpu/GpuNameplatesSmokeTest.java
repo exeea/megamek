@@ -624,8 +624,7 @@ class GpuNameplatesSmokeTest {
         Map<BoardScene.Unit, Vector3> iconAnchors = new HashMap<>();
         board.draw(camera -> {
             if (tactical) {
-                icons.update(true, camera, board.scene, status, unit -> unit.id() == status.actorId(),
-                      unit -> unit.id() == hovered, board.poses, iconAnchors);
+                icons.update(true, camera, board.scene, status, board.poses, iconAnchors);
                 icons.render(camera);
             }
         });

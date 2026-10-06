@@ -1737,8 +1737,8 @@ final class BoardRelief {
         float m = metres(1);
         float big = prominence(drop);
         float amplitude = .6f + .4f * smooth((drop / BoardGeometry.level() - 1) / 2);
-        // A transition's room lets a tall cliff's masses stand out and cut in further; its bedding stays as it is.
-        float masses = banded ? 1 + .25f * big : 1;
+        // Spend the existing displacement on broad formations; fine cracks remain in the material.
+        float masses = banded ? 1 + .4f * big : 1;
         float h = z - bottom, d = top - z;
         float mx = px / m, my = py / m, mz = z / m;
         // One oblique joint system continues across hexes. Longer masses along its strike form ribs and fins,
@@ -1749,17 +1749,23 @@ final class BoardRelief {
         float[] cell = CELL.get();
         float joint = 0, column = 0;
         if (banded && big > 0 && g.cast() < 1) {
-            cells(jx / g.cellWidth(), jy / g.cellWidth(), 3.5f, cell);
+            // Major joints are wider than the secondary blocks and persist through several beds. Slow variation
+            // with absolute height keeps tall walls from becoming identical extruded columns.
+            cells(jx / (g.cellWidth() * 1.8f), jy / (g.cellWidth() * 1.8f),
+                  3.5f + mz / (g.cellHeight() * 4), cell);
             column = cell[0];
-            joint = (1 - smooth(cell[1] / .18f)) * big;
+            joint = (1 - smooth(cell[1] / .12f)) * big;
         }
-        // Rim formations follow the drop: a thin lip on one- and two-level steps, a heavy, frequent caprock from three.
-        float capHeight = m * lerp(.9f, 1.8f, big);
+        // Resistant beds leave occasional ledges, not a continuous mushroom lid. A missing cap also loses its
+        // undercut, so the same intact mass can continue all the way to the rim.
         float capScale = lerp(9, 19, structure);
         float capNoise = noise(mx / capScale + 17.3f, my / capScale - 4.1f);
-        float capOut = m * lerp(.28f, 1.5f, big) * smooth((capNoise - lerp(.42f, .12f, big)) / .2f)
+        float capHeight = m * lerp(.9f, 1.5f, big) * lerp(1, .7f + .6f * capNoise, big);
+        float capPresence = smooth((capNoise - lerp(.42f, .38f, big)) / lerp(.2f, .25f, big));
+        float capOut = m * lerp(.28f, 1.1f, big) * capPresence
               * (.6f + .8f * capNoise) * g.cap() * (1 - .9f * joint);
-        float under = m * lerp(.2f, .75f, big) * (.4f + capNoise) * g.cap() * (1 - .6f * joint);
+        float under = m * lerp(.2f, .45f, big) * (.4f + capNoise) * g.cap()
+              * (1 - .6f * joint) * lerp(1, capPresence, big);
         float t = d / capHeight;
         float cap = capOut * capShape(t) - under * bump((t - 1.6f) / .75f);
         // Soft ground's low steps are banks of the soil mantle: little jointing, leaning back from the rim. A
@@ -1784,16 +1790,21 @@ final class BoardRelief {
         }
         // Body: broad buttresses, jointed masses split by dark fractures, and bedding ledges.
         cells(jx / g.cellWidth(), jy / g.cellWidth(), mz / g.cellHeight(), cell);
-        float body = (g.buttress() * gradient(jx / lerp(12, 18, structure) + 3.3f, jy / lerp(12, 14, structure) + .7f)
-              + g.cells() * lerp(cell[0], column, .4f * structure)
-              - g.fractures() * (1 - smooth(cell[1] / .16f))) * masses
+        float body = (g.buttress() * lerp(1, 1.5f, structure)
+              * gradient(jx / lerp(12, 28, structure) + 3.3f, jy / lerp(12, 22, structure) + .7f)
+              + g.cells() * lerp(cell[0], column, .65f * structure)
+              - g.fractures() * (1 - smooth(cell[1] / .16f)) * lerp(1, .65f, structure)) * masses
               + g.strata() * strata(mx, my, mz, g.bedding())
               + .18f * (1 - g.cast()) * gradient(mx / 1.3f, my / 1.3f, mz / 1.3f);
         // The lip keeps part of the joint pattern, so the rim outline is broken rather than smooth; deep rims more so.
-        float rimBody = lerp(.3f, banded ? .8f : .75f, big);
+        float rimBody = lerp(.3f, banded ? 1 : .75f, big);
         float taper = smooth(h / Math.max(m * 1.0f, talusHeight * .6f))
               * (rimBody + (1 - rimBody) * smooth(d / (capHeight * 1.2f)));
-        float result = cap + foot + lean + (body * m * amplitude * taper - retreat) * firm;
+        // Upper rock retreats gradually instead of balancing a broad lid on a narrower stem. This uses the same
+        // mass field and remains bounded by the existing cliff envelope and its road/shore contacts.
+        float upperRetreat = m * g.recess() * structure * (.4f + .6f * capNoise) * (1 - .35f * column)
+              * smooth((h / (top - bottom) - .2f) / .8f);
+        float result = cap + foot + lean + (body * m * amplitude * taper - retreat - upperRetreat) * firm;
         if (banded && big > 0 && g.cast() < 1) {
             // The same clefts break the cap, dissect the face and feed its talus. Quiet stretches retain a solid
             // shelf; a failed joint must not leave a continuous lid over the recess below it.
@@ -1996,7 +2007,6 @@ final class BoardRelief {
         }
         float base = tile.elevation() * BoardGeometry.level();
         List<Vector3> boundary = new ArrayList<>();
-        List<Float> parameters = new ArrayList<>();
         int[] starts = new int[7];
         for (int e = 0; e < 6; e++) {
             Edge edge = edge(e);
@@ -2011,7 +2021,6 @@ final class BoardRelief {
                     p.z = groundHeight(p.x, p.y);
                 }
                 boundary.add(p);
-                parameters.add(e + i / (float) count);
             }
         }
         starts[6] = boundary.size();
@@ -2043,72 +2052,21 @@ final class BoardRelief {
             pits(destination);
             return;
         }
-        // A deeply notched outline needs a safety band before its sparse interior can be triangulated.
-        int count = boundary.size();
-        float band = BoardGeometry.width() * .045f;
-        List<Vector3> rim = new ArrayList<>(count);
-        float[] radius = new float[count];
-        float[] reach = new float[count];
-        for (int j = 0; j < count; j++) {
-            Vector3 b = boundary.get(j);
-            reach[j] = (float) Math.hypot(b.x - center.x, b.y - center.y);
-        }
-        for (int j = 0; j < count; j++) {
-            // Inside the nearest boundary samples too, so a jog in a jointed rim cannot fold the band.
-            float minimum = reach[j];
-            for (int w = -2; w <= 2; w++) { minimum = Math.min(minimum, reach[Math.floorMod(j + w, count)]); }
-            radius[j] = minimum - band;
-            Vector3 b = boundary.get(j);
-            float f = radius[j] / reach[j];
-            Vector3 p = new Vector3(center.x + (b.x - center.x) * f, center.y + (b.y - center.y) * f, 0);
-            p.z = groundHeight(p.x, p.y);
-            rim.add(p);
-            shades.put(p, groundShade(p));
-        }
-        for (int j = 0; j < count; j++) {
-            int n = (j + 1) % count;
-            Vector3 a = rim.get(j), b = boundary.get(j), c = boundary.get(n), d = rim.get(n);
-            // Where a joint notches the rim, one side of the notch can run radially; split each quad of the band along
-            // the diagonal that keeps both of its triangles facing up.
-            if (Math.min(upward(a, b, c), upward(a, c, d)) >= Math.min(upward(a, b, d), upward(b, c, d))) {
-                addTriangle(destination, a, b, c, BoardSurface.Finish.TOP);
-                addTriangle(destination, a, c, d, BoardSurface.Finish.TOP);
+        // A concave rim can reverse its bearing around the hex centre. Radial inset rings then fold too.
+        // Triangulate the real outline with the same planar-polygon helper as shores; nearby views keep one
+        // interior material sample per triangle so cliff shading does not stretch across the whole plateau.
+        List<BoardSurface.Face> top = new ArrayList<>();
+        BoardSurface.polygon(boundary.toArray(Vector3[]::new), BoardSurface.Finish.TOP, top);
+        for (BoardSurface.Face face : top) {
+            if (detail.dressing) {
+                Vector3 middle = new Vector3(face.a()).add(face.b()).add(face.c()).scl(1 / 3f);
+                shades.put(middle, groundShade(middle));
+                addTriangle(destination, middle, face.a(), face.b(), BoardSurface.Finish.TOP);
+                addTriangle(destination, middle, face.b(), face.c(), BoardSurface.Finish.TOP);
+                addTriangle(destination, middle, face.c(), face.a(), BoardSurface.Finish.TOP);
             } else {
-                addTriangle(destination, a, b, d, BoardSurface.Finish.TOP);
-                addTriangle(destination, b, c, d, BoardSurface.Finish.TOP);
+                addTriangle(destination, face.a(), face.b(), face.c(), BoardSurface.Finish.TOP);
             }
-        }
-        List<Vector3> outer = rim;
-        if (detail.topSamples > 0) {
-            int per = detail.topSamples;
-            List<Vector3> inner = new ArrayList<>(6 * per);
-            List<Float> innerParameters = new ArrayList<>(6 * per);
-            for (int e = 0; e < 6; e++) {
-                int edgeCount = starts[e + 1] - starts[e];
-                int edgeSamples = Math.min(per, edgeCount);
-                for (int k = 0; k < edgeSamples; k++) {
-                    // Bearing of a boundary sample; radius below the band's minimum around that bearing.
-                    int sample = starts[e] + Math.round(k * edgeCount / (float) edgeSamples);
-                    float minimum = Float.POSITIVE_INFINITY;
-                    int window = Math.max(1, edgeCount / per);
-                    for (int w = -window; w <= window; w++) {
-                        minimum = Math.min(minimum, radius[Math.floorMod(sample + w, count)]);
-                    }
-                    Vector3 bearing = boundary.get(sample);
-                    float distance = (float) Math.hypot(bearing.x - center.x, bearing.y - center.y);
-                    float f = .6f * minimum / distance;
-                    Vector3 p = new Vector3(center.x + (bearing.x - center.x) * f, center.y + (bearing.y - center.y) * f, 0);
-                    p.z = groundHeight(p.x, p.y);
-                    inner.add(p);
-                    innerParameters.add(parameters.get(sample));
-                    shades.put(p, groundShade(p));
-                }
-            }
-            zipper(destination, outer, parameters, inner, innerParameters);
-            outer = inner;
-        }
-        for (int j = 0; j < outer.size(); j++) {
-            addTriangle(destination, center, outer.get(j), outer.get((j + 1) % outer.size()), BoardSurface.Finish.TOP);
         }
         rocks(destination, center);
         field(destination, center);
@@ -2398,7 +2356,7 @@ final class BoardRelief {
      */
     private static void strip(List<BoardSurface.Face> out, List<Vector3> outer, List<Float> outerParameters,
           List<Vector3> inner, List<Float> innerParameters, int first, int count, boolean mouths) {
-        boolean[][] reaches = stripReachable(outer, inner, false);
+        boolean[][] reaches = stripReachable(outer, inner);
         int i = 0, j = 0;
         while (i + 1 < outer.size() || j + 1 < inner.size()) {
             boolean alongOuter = j + 1 >= inner.size() || i + 1 < outer.size()
@@ -2533,9 +2491,8 @@ final class BoardRelief {
             TerrainLod lod = tile.liquid().present() ? TerrainLod.FULL : detail;
             BoardShape rock = outcrop ? BoardRocks.outcrop(variant, lod) : BoardRocks.rock(family, variant, lod);
             // Bedding strikes alike across neighbouring hexes and turns slowly over the board.
-            float turn = outcrop ? (float) (2 * Math.PI) * noise(spot[0] / (BoardGeometry.width() * 5),
-                  spot[1] / (BoardGeometry.width() * 5)) + (feature.rotation() / 360 - .5f) * .7f
-                  : (float) Math.toRadians(feature.rotation());
+            // Capture supplies the common fracture direction and each fragment's local variation.
+            float turn = (float) Math.toRadians(feature.rotation());
             float c = (float) Math.cos(turn), s = (float) Math.sin(turn), across = outcrop ? 1 : .8f;
             // Each rock repeats corners across its polygons. Sample each corner once, against only the nearby
             // ground triangles, rather than rescanning a tall cliff's entire grid for every polygon vertex.
@@ -2573,11 +2530,12 @@ final class BoardRelief {
             Vector3 base;
             float top;
             if (outcrop) {
-                // Bedrock keeps its authored proportions, a little steepened to read from above, within the captured
-                // height. Its skirt flares out of the plain: a fifth lies below the ground, and the root is never above
-                // the downhill side.
+                // Bedrock keeps its authored proportions, a little steepened within the captured height.
+                // Limit burial by the actual mesh rise, rather than the larger height bound; a small fragment
+                // spanning a slope must still emerge from the ground at its centre.
                 float rise = Math.min(rock.height() * size * 1.3f, height / .8f);
-                base = new Vector3(spot[0], spot[1], Math.min(support - rise * .2f, low));
+                float root = Math.max(support - rise * .35f, Math.min(support - rise * .2f, low));
+                base = new Vector3(spot[0], spot[1], root);
                 top = base.z + rise;
             } else {
                 // Keep the summit near the local surface and bury the root below the downhill side. The uphill faces
@@ -2824,7 +2782,7 @@ final class BoardRelief {
         if (!detail.dressing || !self.detailed() || tile.surface() != BoardScene.Surface.CONCRETE) { return; }
         float m = metres(1);
         List<BoardScene.Feature> trees = tile.features().stream()
-              .filter(feature -> feature.kind() == BoardScene.FeatureKind.TREE).toList();
+              .filter(feature -> feature.kind() == BoardScene.FeatureKind.TREE && !feature.authoredPlacement()).toList();
         // Every pit of a stand has the same size, small enough that no two of them touch.
         float spacing = Float.POSITIVE_INFINITY;
         for (int i = 0; i < trees.size(); i++) {
@@ -3158,35 +3116,9 @@ final class BoardRelief {
         return nz / Math.max((float) Math.sqrt(nx * nx + ny * ny + nz * nz), 1e-12f);
     }
 
-    /** Stitch two closed, counter-clockwise rings sampled at different parameters (edge index plus fraction). */
-    private static void zipper(List<BoardSurface.Face> out, List<Vector3> outer, List<Float> outerParameters,
-          List<Vector3> inner, List<Float> innerParameters) {
-        int i = 0, j = 0, n = outer.size(), m = inner.size();
-        boolean[][] reaches = stripReachable(outer, inner, true);
-        while (i < n || j < m) {
-            float nextOuter = i + 1 < n ? outerParameters.get(i + 1) : 6;
-            float nextInner = j + 1 < m ? innerParameters.get(j + 1) : 6;
-            boolean alongOuter = i < n && (j >= m || nextOuter <= nextInner);
-            if (i < n && j < m) {
-                boolean outerValid = reaches[i + 1][j]
-                      && upward(inner.get(j), outer.get(i), outer.get((i + 1) % n)) >= 0;
-                boolean innerValid = reaches[i][j + 1]
-                      && upward(inner.get(j), outer.get(i), inner.get((j + 1) % m)) >= 0;
-                if (outerValid != innerValid) { alongOuter = outerValid; }
-            }
-            if (alongOuter) {
-                addTriangle(out, inner.get(j % m), outer.get(i), outer.get((i + 1) % n), BoardSurface.Finish.TOP);
-                i++;
-            } else {
-                addTriangle(out, inner.get(j % m), outer.get(i % n), inner.get((j + 1) % m), BoardSurface.Finish.TOP);
-                j++;
-            }
-        }
-    }
-
-    /** Shared by shores and top rings: only follow diagonals that can finish without folding a concave rim. */
-    private static boolean[][] stripReachable(List<Vector3> outer, List<Vector3> inner, boolean closed) {
-        int n = outer.size() - (closed ? 0 : 1), m = inner.size() - (closed ? 0 : 1);
+    /** Only follow diagonals that can finish a shore strip without folding a concave rim. */
+    private static boolean[][] stripReachable(List<Vector3> outer, List<Vector3> inner) {
+        int n = outer.size() - 1, m = inner.size() - 1;
         boolean[][] reaches = new boolean[n + 1][m + 1];
         for (int i = n; i >= 0; i--) {
             for (int j = m; j >= 0; j--) {

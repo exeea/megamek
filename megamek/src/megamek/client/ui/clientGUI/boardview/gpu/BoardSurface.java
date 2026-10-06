@@ -2161,12 +2161,12 @@ final class BoardSurface {
         return relief.slope(edge) ? relief.reach(edge) + tuning().hug() * scale : tuning().beach() * scale;
     }
 
-    /** Curved channels can be concave; a centre fan would fill parts of their banks with water. */
-    private static void polygon(Vector3[] contour, Finish finish, List<Face> destination) {
+    /** Triangulates a planar outline, including concave shores and cliff rims that cannot use a centre fan. */
+    static void polygon(Vector3[] contour, Finish finish, List<Face> destination) {
         float[] xy = new float[contour.length * 2];
         for (int i = 0; i < contour.length; i++) {
-            xy[i * 2] = contour[i].x;
-            xy[i * 2 + 1] = contour[i].y;
+            xy[i * 2] = contour[i].x - contour[0].x;
+            xy[i * 2 + 1] = contour[i].y - contour[0].y;
         }
         var indices = new EarClippingTriangulator().computeTriangles(xy);
         for (int i = 0; i < indices.size; i += 3) {

@@ -8,9 +8,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.utils.JsonReader;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Configuration;
 import megamek.common.Hex;
@@ -20,6 +23,55 @@ import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 
 class BoardSceneryTest {
+    @Test
+    void compositionsReuseMeshesWithoutChangingAuthoredTransformsOrTreeDensity() {
+        Path root = Configuration.dataDir().toPath().resolve("models/board");
+        var catalog = new JsonReader().parse(new FileHandle(root.resolve("scenery/layouts.json").toFile()));
+        int trees = 0;
+        int benches = 0;
+        for (var entry : catalog) {
+            var layout = BoardSceneryLayouts.layout(entry.name);
+            assertEquals(entry.size, layout.components().size());
+            var scenery = new BoardArtwork.Scenery(List.of(entry.name), Set.of(Terrains.FLUFF), Set.of(Terrains.FLUFF), 0);
+            var coords = new Coords(7, 9);
+            var hex = new Hex(0);
+            var captured = BoardFeatures.capture(hex, coords, Map.of(), Set.of(), ignored -> null, scenery, true);
+            var natural = captured.stream().filter(BoardScene.Feature::authoredPlacement).toList();
+            var planted = BoardFeatures.capture(hex, coords, Map.of(), Set.of(), ignored -> null, scenery, false).stream()
+                  .filter(BoardScene.Feature::authoredPlacement).toList();
+            assertEquals(layout.components().size(), natural.size(), entry.name);
+            assertEquals(captured, BoardFeatures.capture(hex, coords, Map.of(), Set.of(), ignored -> null, scenery, true));
+            for (int i = 0; i < layout.components().size(); i++) {
+                var authored = layout.components().get(i);
+                var component = natural.get(i);
+                assertEquals(authored.kind(), component.kind());
+                assertEquals(authored.x(), component.x());
+                assertEquals(authored.y(), component.y());
+                assertEquals(authored.z(), component.elevation() * BoardGeometry.MODEL_LEVEL_HEIGHT, .0001f);
+                assertEquals(authored.scale(), component.scale());
+                assertEquals(authored.asset(), planted.get(i).asset());
+                assertEquals(authored.rotation(), planted.get(i).rotation());
+                assertTrue(Files.isRegularFile(root.resolve(component.asset() + ".glb")));
+                if (component.kind() == BoardScene.FeatureKind.TREE) {
+                    trees++;
+                    assertEquals(authored.scale() * 30, component.height() * BoardGeometry.MODEL_LEVEL_HEIGHT, .0001f);
+                } else {
+                    // The remaining furniture meshes cannot carry duplicate copies of the shared trees.
+                    var data = RigidGlb.loadLods(new FileHandle(root.resolve(component.asset() + ".glb").toFile()), root).getFirst();
+                    for (var material : data.materials) { assertFalse(material.id.endsWith("-cutout"), entry.name); }
+                }
+                if (authored.asset().equals("scenery/components/bench")) { benches++; }
+            }
+            if (layout.components().stream().noneMatch(c -> c.asset().equals(entry.name))) {
+                assertFalse(Files.exists(root.resolve(entry.name + ".glb")), "Compositions need no duplicate mesh");
+            }
+            assertFalse(hex.containsTerrain(Terrains.WOODS), "Decorative trees do not create gameplay cover");
+        }
+        assertEquals(97, catalog.size);
+        assertEquals(422, trees);
+        assertTrue(benches > 10, "The same bench mesh is reused by picnic and garden layouts");
+    }
+
     @Test
     void tacticalSceneryKeepsOriginalArtworkSeparateFromTheGroundOnRoofsAndUnderwater() {
         for (String support : List.of("pavement:1", "water:2",
@@ -65,7 +117,11 @@ class BoardSceneryTest {
         Path root = Configuration.dataDir().toPath().resolve("models/board");
         try (var files = Files.walk(root.resolve("scenery"))) {
             var models = files.filter(p -> p.toString().endsWith(".glb")).toList();
-            assertTrue(models.size() >= 281, "The full family and rotation catalog is shipped");
+            int compositions = 0;
+            for (var entry : new JsonReader().parse(new FileHandle(root.resolve("scenery/layouts.json").toFile()))) {
+                if (!Files.exists(root.resolve(entry.name + ".glb"))) { compositions++; }
+            }
+            assertTrue(models.size() + compositions >= 281, "The full model and composition catalog is shipped");
             for (Path file : models) {
                 var data = RigidGlb.loadLods(new FileHandle(file.toFile()), root).getFirst();
                 assertFalse(data.meshes.isEmpty(), file.toString());

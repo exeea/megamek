@@ -5,10 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.HashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.imageio.ImageIO;
 
@@ -17,9 +19,11 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g3d.Environment;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
+import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.shaders.DepthShader;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
 import com.badlogic.gdx.math.Vector3;
@@ -67,7 +71,7 @@ class GpuShrubSmokeTest {
                                 diameter = ((BoundingBox) field(prop, "bounds")).getDimensions(new Vector3()).len();
                             }
                         }
-                        Texture atlas = null;
+                        var atlases = new HashMap<String, Texture>();
                         int[] triangles = new int[TreeLod.LEVELS];
                         for (int lod = 0; lod < TreeLod.LEVELS; lod++) {
                             var model = assets.lodModel(name, lod);
@@ -77,10 +81,13 @@ class GpuShrubSmokeTest {
                                 assertNotNull(map);
                                 // The impostor cards carry their own rendered atlas.
                                 if (material.id.equals("impostor")) { continue; }
-                                if (atlas == null) { atlas = map.textureDescription.texture; }
-                                assertSame(atlas, map.textureDescription.texture, "Every LOD and part borrows one atlas");
+                                Texture atlas = atlases.computeIfAbsent(material.id, ignored -> map.textureDescription.texture);
+                                assertSame(atlas, map.textureDescription.texture, "Every LOD shares its material maps");
+                                assertNotNull(material.get(TextureAttribute.class, TextureAttribute.Normal));
+                                assertNotNull(material.get(TextureAttribute.class, TextureAttribute.Ambient));
                             }
                         }
+                        assertTrue(triangles[0] <= 480 && triangles[1] <= 240 && triangles[2] <= 96 && triangles[3] <= 12);
                         camera.center(BoardGeometry.center(new Coords(0, 0), 0).add(0, 0, 9));
                         int nearColour = 0, nearDepth = 0;
                         for (int lod : new int[] { 0, 1, 2, 3, 0 }) {
@@ -101,6 +108,7 @@ class GpuShrubSmokeTest {
                         }
                     }
                     profiler.disable();
+                    checkCoverage(assets);
                     List<BoardScene.Tile> tiles = new ArrayList<>();
                     for (int index = 0; index < FAMILIES.size(); index++) {
                         tiles.add(tile(FAMILIES.get(index), new Coords(index % 4, index / 4), ground));
@@ -136,6 +144,38 @@ class GpuShrubSmokeTest {
         profiler.reset();
         draw.run();
         return (int) profiler.getVertexCount().total;
+    }
+
+    private static void checkCoverage(GpuAssets assets) {
+        var batch = new ModelBatch();
+        var environment = new Environment();
+        environment.set(ColorAttribute.createAmbientLight(1, 1, 1, 1));
+        try {
+            for (String family : FAMILIES) {
+                String name = "foliage-" + family;
+                var bounds = assets.model(name).calculateBoundingBox(new BoundingBox());
+                for (float tilt : new float[] { 0, 55, 80 }) {
+                    for (int bearing = 0; bearing < 360; bearing += 90) {
+                        var camera = new BoardCamera();
+                        camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                        camera.orbit(bearing, tilt);
+                        camera.center(new Vector3(0, 0, 10.8f));
+                        camera.camera.zoom = bounds.getDimensions(new Vector3()).len() * 1.2f / 160;
+                        camera.update();
+                        int near = GpuTreeLodSmokeTest.coverage(GpuTreeLodSmokeTest.render(batch, environment,
+                              assets.lodModel(name, 0), camera));
+                        assertTrue(near > 100, name);
+                        for (int lod = 1; lod <= 2; lod++) {
+                            int far = GpuTreeLodSmokeTest.coverage(GpuTreeLodSmokeTest.render(batch, environment,
+                                  assets.lodModel(name, lod), camera));
+                            double retained = (double) far / near;
+                            assertTrue(retained >= .67 && retained <= 1.5,
+                                  name + " LOD" + lod + " coverage=" + retained + " tilt=" + tilt + " bearing=" + bearing);
+                        }
+                    }
+                }
+            }
+        } finally { batch.dispose(); }
     }
 
     private static Object field(Object target, String name) throws ReflectiveOperationException {

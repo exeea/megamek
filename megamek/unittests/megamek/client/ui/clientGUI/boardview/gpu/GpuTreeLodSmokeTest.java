@@ -370,7 +370,7 @@ class GpuTreeLodSmokeTest {
         return pixels();
     }
 
-    private static BufferedImage render(ModelBatch batch, Environment environment, Model model, BoardCamera camera) {
+    static BufferedImage render(ModelBatch batch, Environment environment, Model model, BoardCamera camera) {
         for (Material material : model.materials) {
             if (material.id.equals("impostor")) {
                 material.set(new BlendingAttribute(false, GL20.GL_ONE, GL20.GL_ZERO, 1),
@@ -406,7 +406,7 @@ class GpuTreeLodSmokeTest {
         return diameter * Gdx.graphics.getBackBufferHeight() / Gdx.graphics.getHeight() / pixels;
     }
 
-    private static int coverage(BufferedImage image) {
+    static int coverage(BufferedImage image) {
         int background = image.getRGB(0, 0), count = 0;
         for (int y = 0; y < image.getHeight(); y++) {
             for (int x = 0; x < image.getWidth(); x++) {

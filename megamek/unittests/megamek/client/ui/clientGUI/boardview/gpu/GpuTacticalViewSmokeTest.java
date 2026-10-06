@@ -320,7 +320,7 @@ class GpuTacticalViewSmokeTest {
         shown.put(contact, new UnitFootprint.Pose(contact, poses.get(enemy).position(), 0));
         shown.put(unlisted, new UnitFootprint.Pose(unlisted, poses.get(own).position(), 0));
         icons.update(true, view.boardCamera.camera, scene.withUnits(List.of(contact, unlisted)),
-              (GpuBattleStatus.Snapshot) field(icons, "status"), unit -> false, unit -> false, shown, new HashMap<>());
+              (GpuBattleStatus.Snapshot) field(icons, "status"), shown, new HashMap<>());
         ModelInstance blip = icons.instance(contact);
         assertTrue(part(blip, "dashed").enabled && !part(blip, "frame").enabled && !part(blip, "tick").enabled,
               "A sensor contact has a dashed frame and no facing tick");
@@ -627,8 +627,7 @@ class GpuTacticalViewSmokeTest {
         moved.put(enemy, new UnitFootprint.Pose(enemy, position, poses.get(enemy).facing()));
         var status = (GpuBattleStatus.Snapshot) field(icons, "status");
         // The own unit is hovered; verifyStates covers the client's selection.
-        icons.update(true, view.boardCamera.camera, scene, status, unit -> false,
-              unit -> unit != enemy, moved, new HashMap<>());
+        icons.update(true, view.boardCamera.camera, scene, status, moved, new HashMap<>());
         ModelInstance icon = icons.instance(enemy);
         Vector3 center = icon.transform.getTranslation(new Vector3());
         assertEquals(position.x, center.x, .0001f);

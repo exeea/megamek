@@ -216,19 +216,25 @@ final class BoardGeometry {
     }
 
     static boolean contains(Coords coords, float x, float y) {
-        float dx = Math.abs(x - centerX(coords));
-        float dy = Math.abs(y - centerY(coords));
-        return dy <= height() / 2 + 0.001f && (height() / 2) * dx + (width() / 4) * dy <= width() * height() / 4 + 0.001f;
+        return contains(coords.getX(), coords.getY(), x, y, width(), height());
+    }
+
+    /** The same footprint test with the board's dimensions read once by the caller. */
+    private static boolean contains(int column, int row, float x, float y, float width, float height) {
+        float dx = Math.abs(x - (column * width * 0.75f + width / 2));
+        float dy = Math.abs(y - -(row * height + (column & 1) * height / 2 + height / 2));
+        return dy <= height / 2 + 0.001f && (height / 2) * dx + (width / 4) * dy <= width * height / 4 + 0.001f;
     }
 
     /** The hex whose footprint holds (x, y), or null off the board. */
     static BoardScene.Tile tile(BoardScene scene, float x, float y) {
-        int column = (int) Math.floor(x / (width() * .75f));
-        int row = (int) Math.floor(-y / height());
+        float width = width(), height = height();
+        int column = (int) Math.floor(x / (width * .75f));
+        int row = (int) Math.floor(-y / height);
         for (int cx = column - 1; cx <= column + 1; cx++) {
             for (int cy = row - 1; cy <= row + 1; cy++) {
-                BoardScene.Tile tile = scene.tile(new Coords(cx, cy));
-                if (tile != null && contains(tile.coords(), x, y)) { return tile; }
+                BoardScene.Tile tile = scene.tile(cx, cy);
+                if (tile != null && contains(cx, cy, x, y, width, height)) { return tile; }
             }
         }
         return null;

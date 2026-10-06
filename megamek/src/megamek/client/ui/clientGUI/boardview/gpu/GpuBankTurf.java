@@ -58,6 +58,7 @@ final class GpuBankTurf implements Disposable {
         float m = BoardRelief.metres(1), level = BoardGeometry.level();
         var road = BoardRoad.rendered(tile) ? BoardRoad.of(scene, tile) : null;
         boolean boundary = BoardSurfaceBlend.boundary(scene, tile);
+        var sampler = new BoardSurfaceBlend.Sampler(scene, tile);
         for (int edge = 0; edge < 6; edge++) {
             if ((edges & (1 << edge)) == 0) { continue; }
             var a = BoardGeometry.corner(tile.coords(), 0, edge);
@@ -86,7 +87,7 @@ final class GpuBankTurf implements Disposable {
                     previousVariant = variant;
                     if (root == null || band == 1 && chance < .23f) { continue; }
                     if (obstacles.obstructs(root, width * .5f, length)) { continue; }
-                    var cover = boundary ? BoardSurfaceBlend.sampleCliff(scene, tile, root.x, root.y, root.z)
+                    var cover = boundary ? sampler.sampleCliff(root.x, root.y, root.z)
                           : BoardSurfaceBlend.solid(BoardScene.Surface.GRASS);
                     float grass = cover.grass();
                     if (chance > grass * BoardRelief.smooth((grass - .55f) / .35f)) { continue; }

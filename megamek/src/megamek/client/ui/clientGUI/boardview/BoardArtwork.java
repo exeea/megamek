@@ -25,6 +25,7 @@ import java.util.function.Function;
 import megamek.MMConstants;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.gpu.BoardRough;
+import megamek.client.ui.clientGUI.boardview.gpu.BoardSceneryLayouts;
 import megamek.client.ui.clientGUI.boardview.gpu.BoardSurfaceBlend;
 import megamek.client.ui.tileset.HexTileset;
 import megamek.client.ui.tileset.TilesetManager;
@@ -463,7 +464,8 @@ public final class BoardArtwork implements AutoCloseable {
                 int extension = source.lastIndexOf('.');
                 String asset = extension < 0 ? "" : "scenery/" + source.substring(0, extension);
                 boolean model = !asset.isEmpty() && sceneryModels.computeIfAbsent(asset,
-                      name -> new File(Configuration.dataDir(), "models/board/" + name + ".glb").isFile());
+                      name -> BoardSceneryLayouts.hasLayout(name)
+                            || new File(Configuration.dataDir(), "models/board/" + name + ".glb").isFile());
                 // Keep ground paint in the tileset's authored order, below structured pavement edges.
                 if (original != null && (model || !types.contains(Terrains.GROUND_FLUFF))) {
                     (model ? objects : original).drawImage(layer, 0, 0, null);

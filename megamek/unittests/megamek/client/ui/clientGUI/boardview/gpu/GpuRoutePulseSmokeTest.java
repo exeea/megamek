@@ -530,8 +530,7 @@ class GpuRoutePulseSmokeTest {
     }
 
     private static void icons(GpuUnitIcons icons, GpuBoardSpaceHarness board, Camera camera) {
-        icons.update(true, camera, board.scene, STATUS, unit -> unit.id() == ATLAS, unit -> false, board.poses,
-              new HashMap<>());
+        icons.update(true, camera, board.scene, STATUS, board.poses, new HashMap<>());
         icons.render(camera);
     }
 

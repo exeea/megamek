@@ -152,9 +152,16 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
     /** Flat lettering at positions chosen by the weapon handler, independently oriented toward the camera. */
     record RangeLabel(Coords coords, int rgb, String label) { }
 
-    public Tile tile(Coords coords) {
-        return coords.getX() < 0 || coords.getY() < 0 || coords.getX() >= width || coords.getY() >= height
-              ? null : tiles.get(coords.getX() * height + coords.getY());
+    public Tile tile(Coords coords) { return tile(coords.getX(), coords.getY()); }
+
+    Tile tile(int x, int y) {
+        return x < 0 || y < 0 || x >= width || y >= height ? null : tiles.get(x * height + y);
+    }
+
+    /** The tile beside another in a hex direction, without constructing its coordinates. */
+    Tile neighbor(Tile tile, int direction) {
+        int x = tile.coords().getX(), y = tile.coords().getY();
+        return tile(Coords.xInDir(x, y, direction), Coords.yInDir(x, y, direction));
     }
 
     /** Render materials. A tile's surface supplies its geology; groundCover can put shared SAND over any theme. */
@@ -184,9 +191,14 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
     /** Captured visual ground treatment; movement and cover modifiers remain in the game terrain. */
     enum Biome { NONE, FIELD, MARSH, QUICKSAND, MUD }
 
-    /** Authored model or scatter shape, placement in tile pixels, and height in elevation levels. */
+    /** Authored model or scatter shape, placement in tile pixels, and height/root lift in elevation levels. */
     record Feature(String asset, float x, float y, float rotation, float scale, float height, float elevation,
-          FeatureKind kind, int bridgeExits) {
+          FeatureKind kind, int bridgeExits, boolean authoredPlacement) {
+        Feature(String asset, float x, float y, float rotation, float scale, float height, float elevation,
+              FeatureKind kind, int bridgeExits) {
+            this(asset, x, y, rotation, scale, height, elevation, kind, bridgeExits, false);
+        }
+
         Feature(String asset, float x, float y, float rotation, float scale, float height, float elevation,
               FeatureKind kind) {
             this(asset, x, y, rotation, scale, height, elevation, kind, 0);
@@ -354,7 +366,8 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
                           feature.height(), feature.elevation() + depth, feature.kind(), feature.bridgeExits());
                 }
                 switch (feature.kind()) {
-                    case TREE, SCATTER -> { }
+                    case TREE -> { if (feature.authoredPlacement()) { kept.add(feature); } }
+                    case SCATTER -> { }
                     case ROUGH -> { if (feature.asset().equals("rough/dragon-tooth")) { kept.add(feature); } }
                     case PROP -> { if (!feature.asset().equals("field")) { kept.add(feature); } }
                     // Nothing lies loose without gravity. Rough is bedrock breaking the surface: every third boulder
@@ -403,6 +416,14 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
 
         boolean water() {
             return waterDepth >= 0;
+        }
+
+        /** Whether a captured structure stands here; its ground then keeps the slab rather than natural cover. */
+        boolean building() {
+            for (Feature feature : features) {
+                if (feature.kind() == FeatureKind.BUILDING) { return true; }
+            }
+            return false;
         }
 
         /** Visual cap below an ultra-sublevel's mouth, including pits beside ground at the same authored level. */

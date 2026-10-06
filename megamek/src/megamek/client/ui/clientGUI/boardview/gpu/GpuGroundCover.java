@@ -100,6 +100,7 @@ final class GpuGroundCover implements Disposable {
         }
         float iceReach = BoardRelief.metres(ICE_BORDER_REACH);
         var obstacles = new BoardObstacles(scene, tile);
+        var cover = new BoardSurfaceBlend.Sampler(scene, tile);
         var root = new Vector3();
         for (int rank = 0; rank < ROOTS_PER_HEX; rank++) {
             // The same random sequence at every detail level: every candidate draws its place and its growth chance
@@ -126,7 +127,7 @@ final class GpuGroundCover implements Disposable {
                 iced |= Math.hypot(x - edge[0].x - t * ex, y - edge[0].y - t * ey) < iceReach;
             }
             if (iced) { continue; }
-            float grass = boundary ? BoardSurfaceBlend.grass(tile, BoardSurfaceBlend.sample(scene, tile, x, y, z), x, y)
+            float grass = boundary ? BoardSurfaceBlend.grass(tile, cover.sample(x, y, z), x, y)
                   : tile.surface() == BoardScene.Surface.GRASS ? 1 : 0;
             if (chance <= grass * BoardRelief.smooth((grass - .55f) / .35f)) {
                 roots.addAll(x, y, z - sink, rank);

@@ -855,6 +855,27 @@ tasks.register('gpuBoardSmoke', Test) {
     outputs.upToDateWhen { false }
 }
 
+// Explicit opt-in: times CPU terrain chunk preparation on a region of a real board and digests its output, so a
+// loading speed-up can be compared against the geometry and materials it must not change.
+tasks.register('gpuTerrainLoadBenchmark', Test) {
+    description = 'Times terrain chunk preparation for a board region and prints a digest of the result'
+    group = 'verification'
+    dependsOn testClasses, stageDataFiles
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform { includeTags 'on-demand' }
+    filter {
+        includeTestsMatching 'megamek.client.ui.clientGUI.boardview.gpu.GpuTerrainLoadBenchmarkTest'
+    }
+    def recording = System.getProperty('megamek.gpu.benchmarkJfr')
+    jvmArgs = recording == null ? mmJvmOptions
+          : mmJvmOptions + ['-XX:StartFlightRecording=filename=' + recording + ',settings=profile,dumponexit=true']
+    jacoco.enabled = false
+    systemProperties System.properties.findAll { it.key.toString().startsWith('megamek.gpu.benchmark') }
+    testLogging { showStandardStreams = true }
+    outputs.upToDateWhen { false }
+}
+
 jacocoTestReport {
     dependsOn(test)
     reports {

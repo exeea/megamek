@@ -13,11 +13,13 @@ import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class TerrainLodTest {
-    @Test
-    void distantCliffTopsDoNotFoldAtBrokenRims() {
+    @ParameterizedTest
+    @EnumSource(TerrainLod.class)
+    void cliffTopsDoNotFoldAtBrokenRims(TerrainLod detail) {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < 11; x++) {
             for (int y = 0; y < 7; y++) {
@@ -29,11 +31,11 @@ class TerrainLodTest {
         var scene = new BoardScene(0, 11, 7, tiles, List.of(), List.of(), -1, "", List.of());
         int compared = 0;
         for (var tile : tiles) {
-            var surface = new BoardSurface(scene, tile, TerrainLod.DISTANT);
+            var surface = new BoardSurface(scene, tile, detail);
             for (var face : surface.faces) {
                 if (face.finish() != BoardSurface.Finish.TOP) { continue; }
                 float projected = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).z;
-                assertTrue(projected >= -.001f, "Broken cliff rims must not fold over at " + tile.coords());
+                assertTrue(projected >= -.001f, "Broken cliff rims must not fold over at " + tile.coords() + ": " + face);
                 compared++;
             }
         }

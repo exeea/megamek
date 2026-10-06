@@ -170,6 +170,13 @@ final class BoardFeatures {
         if (hex.containsTerrain(Terrains.ULTRA_SUBLEVEL)) { return List.of(); }
         List<BoardScene.Feature> result = new ArrayList<>();
         for (String asset : scenery.models()) {
+            var layout = BoardSceneryLayouts.layout(asset);
+            if (layout != null) {
+                List<String> species = surface(hex) == BoardScene.Surface.SNOW
+                      ? PARK.stream().map(tree -> tree + "-snow").toList() : PARK;
+                result.addAll(layout.features(coords, species, natural));
+                continue;
+            }
             // Nominal roof elevation bounds CPU decoration clearance. Rendering settles onto the actual solid mesh.
             int roof = structureModels.containsKey(Terrains.BUILDING) ? Math.max(1, hex.terrainLevel(Terrains.BLDG_ELEV)) : 0;
             result.add(new BoardScene.Feature(asset, 0, 0, 0, 1, 1, roof, BoardScene.FeatureKind.SCENERY));
@@ -300,6 +307,8 @@ final class BoardFeatures {
             float clearance = BoardRoad.SHOULDER + feature.scale() * switch (feature.asset()) {
                 case "rough/charred-stump" -> 3;
                 case "rough/dragon-tooth" -> DRAGON_TOOTH_RADIUS;
+                // Unit rock meshes fit a square, so a rotated corner reaches beyond half the width.
+                case "rough-boulder", BoardRocks.OUTCROP -> ROUGH_BOULDER_WIDTH * .65f;
                 default -> ROUGH_BOULDER_WIDTH / 2;
             };
             // Bridge decks follow the complete road footprint, including dead ends and solid roundabout islands.
@@ -308,7 +317,7 @@ final class BoardFeatures {
                         && !(BoardRoad.roundabout(exits) && Math.hypot(x, y) < BoardRoad.ROUNDABOUT_RADIUS));
         };
         // A route removes the cover on its line. Keep the authoritative count beside it, as woods do: teeth close
-        // their spacing, and other cover packs its spiral up to three times as densely.
+        // their spacing, and other cover offers up to three times as many placement candidates.
         if (teeth) {
             // Standard teeth spread across the hex; ultra rough fills it at the closest spacing.
             result.addAll(dragonTeeth(count, ultra ? CLOSE_TEETH_SPACING : 20, clear));
@@ -316,8 +325,8 @@ final class BoardFeatures {
         }
         List<BoardScene.Feature> placed = List.of();
         for (int spread = count; placed.size() < count && spread <= 3 * count; spread++) {
-            List<BoardScene.Feature> pieces = roughSpiral(coords, felled, ultra, spread).stream().filter(clear)
-                  .limit(count).toList();
+            var candidates = felled ? roughSpiral(coords, true, ultra, spread) : roughRocks(coords, spread);
+            List<BoardScene.Feature> pieces = candidates.stream().filter(clear).limit(count).toList();
             if (pieces.size() > placed.size()) { placed = pieces; }
         }
         result.addAll(placed);
@@ -355,6 +364,39 @@ final class BoardFeatures {
         float w = BoardGeometry.TILE_WIDTH / 2, h = BoardGeometry.TILE_HEIGHT / 2;
         float slope = (h * (w - Math.abs(x)) - w / 2 * Math.abs(y)) / (float) Math.hypot(h, w / 2);
         return Math.min(h - Math.abs(y), slope);
+    }
+
+    /** Fractured groups: a rooted mass and two smaller pieces, using the existing bounded cover budget. */
+    private static List<BoardScene.Feature> roughRocks(Coords coords, int count) {
+        Random random = new Random(coords.getX() * 73_856_093L ^ coords.getY() * 19_349_663L ^ 0xb01deL);
+        // Board-space noise gives nearby hexes a common fracture direction, independent of camera, scale and LOD.
+        float strike = 360 * BoardRelief.noise(coords.getX() * .15f,
+              -(coords.getY() + (coords.getX() & 1) * .5f) * BoardGeometry.TILE_HEIGHT / (5 * BoardGeometry.TILE_WIDTH));
+        // Repacking beside a route also rotates the candidate groups, rather than only crowding rejected slots.
+        double phase = random.nextFloat() * 2 * Math.PI + count * 2.399963, bearing = phase;
+        float turn = strike;
+        List<BoardScene.Feature> result = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            int part = i % 3;
+            if (part == 0) {
+                bearing = phase + (i / 3) * 2.399963 + random.nextFloat() * .45;
+                turn = strike + (random.nextFloat() - .5f) * 26;
+            }
+            float size = part == 0 ? .96f + random.nextFloat() * .22f
+                  : part == 1 ? .64f + random.nextFloat() * .16f : .38f + random.nextFloat() * .18f;
+            float height = part == 0 ? .42f + random.nextFloat() * .12f
+                  : part == 1 ? .25f + random.nextFloat() * .11f : .14f + random.nextFloat() * .08f;
+            // Keep the old equal-area reach: grouping changes bearings, not the required cover at slopes/feet.
+            // The parent stays far enough inside to support the larger zero-gravity outcrop too.
+            float radius = 29 * (float) Math.sqrt(i / (count - 1f));
+            if (part == 0) { radius = Math.min(23, radius); }
+            double angle = bearing + (part == 0 ? 0 : part == 1 ? .4 : -.4) + random.nextFloat() * .15;
+            result.add(new BoardScene.Feature("rough-boulder", (float) Math.cos(angle) * radius,
+                  (float) Math.sin(angle) * radius,
+                  turn + (random.nextFloat() - .5f) * (part == 0 ? 12 : 50), size, height, 0,
+                  BoardScene.FeatureKind.BOULDER));
+        }
+        return result;
     }
 
     /** Boulders or fallen timber on an equal-area spiral of {@code count} pieces. */
