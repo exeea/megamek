@@ -67,7 +67,7 @@ class BoardSceneryTest {
             }
             assertFalse(hex.containsTerrain(Terrains.WOODS), "Decorative trees do not create gameplay cover");
         }
-        assertEquals(97, catalog.size);
+        assertEquals(105, catalog.size);
         assertEquals(422, trees);
         assertTrue(benches > 10, "The same bench mesh is reused by picnic and garden layouts");
     }

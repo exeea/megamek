@@ -1458,8 +1458,8 @@ final class BoardRelief {
      * Displaced point of an edge at canonical parameter t and height z (horizontal offset only). Each corner's fillet
      * moves the outline by its displacement times (1 - u/s)^3, u being the distance from the corner and s the fillet
      * length. A displacement of s/6 toward the far side makes the outlines meeting at the corner tangent-continuous,
-     * so no corner keeps a crease. The relief then follows the rounded outline's own normal and blends into each
-     * corner's canonical relief, which every edge through that corner shares.
+     * so no corner keeps a crease. Relief moves along the face normal and blends into each corner's canonical
+     * relief, which every edge through that corner shares.
      */
     private Vector3 edgePoint(Edge edge, float t, float z) {
         if (!edge.gate) { return reliefPoint(edge, t, z); }

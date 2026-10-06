@@ -2169,9 +2169,44 @@ final class BoardSurface {
             xy[i * 2 + 1] = contour[i].y - contour[0].y;
         }
         var indices = new EarClippingTriangulator().computeTriangles(xy);
+        int start = destination.size();
         for (int i = 0; i < indices.size; i += 3) {
             destination.add(new Face(contour[indices.get(i)], contour[indices.get(i + 2)],
                   contour[indices.get(i + 1)], finish));
+        }
+        // Ear clipping can leave a collinear boundary sample in a zero-area ear. Dropping that ear loses
+        // the shared rim segmentation. Flip its internal diagonal into the adjacent triangle instead;
+        // this keeps every boundary vertex and the same triangle count without moving the outline.
+        for (int pass = 0; pass < contour.length; pass++) {
+            boolean changed = false;
+            for (int i = start; i < destination.size(); i++) {
+                Face face = destination.get(i);
+                Vector3[] p = { face.a(), face.b(), face.c() };
+                int longest = 0;
+                for (int k = 1; k < 3; k++) {
+                    if (p[k].dst2(p[(k + 1) % 3]) > p[longest].dst2(p[(longest + 1) % 3])) { longest = k; }
+                }
+                Vector3 a = p[longest], b = p[(longest + 1) % 3], c = p[(longest + 2) % 3];
+                float tolerance = .001f * BoardGeometry.hexScale() * a.dst(b);
+                if (Math.abs(upward(face)) > tolerance) { continue; }
+                for (int j = start; j < destination.size(); j++) {
+                    if (i == j) { continue; }
+                    Face other = destination.get(j);
+                    Vector3[] q = { other.a(), other.b(), other.c() };
+                    for (int k = 0; k < 3; k++) {
+                        if (q[k] != b || q[(k + 1) % 3] != a) { continue; }
+                        Vector3 d = q[(k + 2) % 3];
+                        Face first = new Face(d, b, c, finish), second = new Face(d, c, a, finish);
+                        if (Math.min(upward(first), upward(second)) <= tolerance) { continue; }
+                        destination.set(i, first);
+                        destination.set(j, second);
+                        changed = true;
+                        break;
+                    }
+                    if (destination.get(i) != face) { break; }
+                }
+            }
+            if (!changed) { break; }
         }
     }
 
