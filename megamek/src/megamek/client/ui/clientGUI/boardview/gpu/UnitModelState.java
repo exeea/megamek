@@ -12,6 +12,7 @@ import megamek.client.ui.tileset.EquipmentModelPolicy;
 import megamek.client.ui.tileset.UnitModelEquipment;
 import megamek.client.ui.util.PlayerColour;
 import megamek.common.alphaStrike.conversion.ASConverter;
+import megamek.common.annotations.Nullable;
 import megamek.common.battleArmor.BattleArmor;
 import megamek.common.battlefieldSupport.BFSAssetType;
 import megamek.common.battlefieldSupport.BattlefieldSupportAsset;
@@ -70,7 +71,16 @@ record UnitModelState(Structure structure, Appearance appearance, Pose pose) {
     /** A squadron borrows actual visible member state; it never creates additional game entities. */
     record FlightMember(int id, Structure structure) { }
 
-    record MekAnatomy(String configuration, List<String> hands, List<String> lowerArms, int size, int weightClass) {
+    /**
+     * @param miniatureHeightScale the physical miniature's height as a multiple of the reference assault miniature,
+     *                             or {@code null} when the unit is not on the {@link MiniatureHeights} list
+     */
+    record MekAnatomy(String configuration, List<String> hands, List<String> lowerArms, int size, int weightClass,
+          @Nullable Float miniatureHeightScale) {
+        MekAnatomy(String configuration, List<String> hands, List<String> lowerArms, int size, int weightClass) {
+            this(configuration, hands, lowerArms, size, weightClass, null);
+        }
+
         MekAnatomy(String configuration, List<String> hands, List<String> lowerArms) {
             this(configuration, hands, lowerArms, 3, EntityWeightClass.WEIGHT_HEAVY);
         }
@@ -163,7 +173,8 @@ record UnitModelState(Structure structure, Appearance appearance, Pose pose) {
         MekAnatomy anatomy = entity instanceof Mek mek ? new MekAnatomy(mek instanceof QuadMek ? "quad"
               : mek instanceof TripodMek ? "tripod" : "biped",
               UnitModelEquipment.armsWith(mek, Mek.ACTUATOR_HAND), UnitModelEquipment.armsWith(mek, Mek.ACTUATOR_LOWER_ARM),
-              ASConverter.sizeFor(mek), mek.getWeightClass()) : null;
+              ASConverter.sizeFor(mek), mek.getWeightClass(),
+              MiniatureHeights.instance().heightScale(mek.getUnitFileUUID())) : null;
         List<FlightMember> fighters = new ArrayList<>();
         Map<Integer, Appearance> fighterAppearances = new HashMap<>();
         if (entity instanceof FighterSquadron squadron && entity.getGame() != null) {
