@@ -25,6 +25,7 @@ import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import com.badlogic.gdx.Gdx;
@@ -3520,10 +3521,8 @@ final class GpuTerrain implements Disposable {
 
     private static void coveredPolygons(BoardSurface surface, BoardSurface.Face face, List<BoardSurface> waters,
           Consumer<List<MeshPartBuilder.VertexInfo>> polygonConsumer) {
-        if (openWater(surface.tile) != null && List.of(face.a(), face.b(), face.c()).stream().allMatch(p -> {
-            BoardRelief.Shade shade = surface.relief.shade(p);
-            return shade != null && shade.kind() == BoardRelief.Kind.SUBMERGED_CLIFF;
-        })) {
+        if (openWater(surface.tile) != null
+              && allCorners(surface, face, shade -> shade != null && shade.kind() == BoardRelief.Kind.SUBMERGED_CLIFF)) {
             // This is the pool's own vertical bed boundary. Its projection lies on (or behind an undercut in)
             // the water outline, so an XY coverage test cannot decide whether it is submerged. Keep the bed's
             // waterline and material mapping; the shader uses height to leave the narrow emerged rim dry.
@@ -3533,16 +3532,23 @@ final class GpuTerrain implements Disposable {
                   sculptVertex(face.c(), surface.relief.shade(face.c()), shore, surface)));
             return;
         }
-        if (List.of(face.a(), face.b(), face.c()).stream().allMatch(p -> {
-            BoardRelief.Shade shade = surface.relief.shade(p);
-            return shade != null && shade.kind().cliff();
-        })) {
+        if (allCorners(surface, face, shade -> shade != null && shade.kind().cliff())) {
             // Exterior walls stand outside the basin. A recess beneath the upper pool's footprint is still solid
             // rock, not an infinitely deep water column. Only lower pools can submerge this side of the cliff;
             // the basin's own submerged walls are handled above.
-            waters = waters.stream().filter(water -> water.tile.elevation() < surface.tile.elevation()).toList();
+            List<BoardSurface> lower = new ArrayList<>(waters.size());
+            for (BoardSurface water : waters) {
+                if (water.tile.elevation() < surface.tile.elevation()) { lower.add(water); }
+            }
+            waters = lower;
         }
         coveredPolygons(face, waters, p -> sculptVertex(p, surface.relief.shade(p), Float.NaN, surface), polygonConsumer);
+    }
+
+    /** Runs once or twice per sculpted face, so the three corners are tested directly rather than streamed. */
+    private static boolean allCorners(BoardSurface surface, BoardSurface.Face face, Predicate<BoardRelief.Shade> test) {
+        return test.test(surface.relief.shade(face.a())) && test.test(surface.relief.shade(face.b()))
+              && test.test(surface.relief.shade(face.c()));
     }
 
     private static void coveredPolygons(BoardSurface.Face face, List<BoardSurface> waters,
@@ -3599,11 +3605,13 @@ final class GpuTerrain implements Disposable {
     /** Keep the half-space below a plane and retain the outside polygon for subsequent water triangles. */
     private static List<MeshPartBuilder.VertexInfo> splitCovered(List<MeshPartBuilder.VertexInfo> polygon,
           Vector3 origin, Vector3 normal, List<List<MeshPartBuilder.VertexInfo>> outside) {
-        List<MeshPartBuilder.VertexInfo> inside = new ArrayList<>(), dry = new ArrayList<>();
+        // A plane cut adds at most one vertex to each side.
+        List<MeshPartBuilder.VertexInfo> inside = new ArrayList<>(polygon.size() + 1);
+        List<MeshPartBuilder.VertexInfo> dry = new ArrayList<>(polygon.size() + 1);
         var previous = polygon.getLast();
-        float before = new Vector3(previous.position).sub(origin).dot(normal);
+        float before = planeDistance(previous.position, origin, normal);
         for (var point : polygon) {
-            float after = new Vector3(point.position).sub(origin).dot(normal);
+            float after = planeDistance(point.position, origin, normal);
             if ((before <= 0) != (after <= 0)) {
                 var crossing = new MeshPartBuilder.VertexInfo().set(previous).lerp(point, before / (before - after));
                 inside.add(crossing);
@@ -3615,6 +3623,14 @@ final class GpuTerrain implements Disposable {
         }
         if (dry.size() >= 3) { outside.add(dry); }
         return inside;
+    }
+
+    /**
+     * Same arithmetic, in the same order, as {@code new Vector3(point).sub(origin).dot(normal)}, so results are
+     * bit-identical, without allocating a vector for every vertex of every water clip.
+     */
+    private static float planeDistance(Vector3 point, Vector3 origin, Vector3 normal) {
+        return (point.x - origin.x) * normal.x + (point.y - origin.y) * normal.y + (point.z - origin.z) * normal.z;
     }
 
     private static void surfacePolygon(Supplier<MeshPartBuilder> triangles, List<MeshPartBuilder.VertexInfo> polygon) {

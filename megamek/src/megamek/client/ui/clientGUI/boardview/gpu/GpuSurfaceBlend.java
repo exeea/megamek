@@ -140,7 +140,8 @@ final class GpuSurfaceBlend extends Attribute {
 
     static void appendPolygon(Map<Palette, List<Triangle>> groups, int family,
           List<MeshPartBuilder.VertexInfo> polygon, Function<Vector3, BoardSurfaceBlend.Cover> cover, float spacing) {
-        var points = polygon.stream().map(v -> new Point(v, cover.apply(v.position))).toList();
+        List<Point> points = new ArrayList<>(polygon.size());
+        for (var vertex : polygon) { points.add(new Point(vertex, cover.apply(vertex.position))); }
         for (int i = 1; i + 1 < points.size(); i++) {
             var a = points.getFirst().vertex().position;
             var b = points.get(i).vertex().position;
