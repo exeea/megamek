@@ -48,6 +48,7 @@ import org.junit.jupiter.api.Test;
 
 /** Separated-water benchmark including edits and deployment using the actual client painters. */
 @Tag("on-demand")
+@Tag("gpu-benchmark")
 class GpuBoardPerformanceSmokeTest {
     @Test
     void measuresTerrainUpdatesAndSeparatedWater() throws Exception {

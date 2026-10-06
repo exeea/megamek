@@ -23,6 +23,7 @@ import org.lwjgl.glfw.GLFW;
 
 /** Exercise actual terrain handoffs while zooming: fixed-mesh plant cross-fades alone cannot detect rebuild stalls. */
 @Tag("on-demand")
+@Tag("gpu-benchmark")
 class GpuBiomeZoomSmokeTest {
     @Test
     void grassFieldsAndMarshZoomWithTerrainDetailEnabled() throws Exception {

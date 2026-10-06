@@ -29,6 +29,7 @@ import org.junit.jupiter.api.Test;
 
 /** Full battle-view terrain workload, including cold cover, travel, units, shadows, atmosphere and UI. */
 @Tag("on-demand")
+@Tag("gpu-benchmark")
 class GpuTerrainBenchmarkSmokeTest {
     private static final int SIZE = 32;
     private static final int WARMUP = 24;

@@ -35,6 +35,7 @@ import org.junit.jupiter.api.Test;
 
 /** Full production scene probe. Timings include submission + GPU completion, not window/vsync waiting. */
 @Tag("on-demand")
+@Tag("gpu-benchmark")
 class GpuMixedUnitBenchmarkSmokeTest {
     private static final List<String> DESIGNS = List.of("Atlas AS7-D.mtf", "Barghest BGS-1T.mtf", "Triskelion TRK-4V.mtf",
           "Elemental BA [Laser] (Sqd5).blk", "Foot Platoon (AFFS) (Laser 3067+).blk", "Bulldog Medium Tank.blk",
