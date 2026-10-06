@@ -1493,16 +1493,7 @@ final class BoardRelief {
         float ua = edge.a.fillet > 0 ? Math.min(1, along / edge.a.fillet) : 1;
         float ub = edge.b.fillet > 0 ? Math.min(1, (edge.length - along) / edge.b.fillet) : 1;
         float fa = (1 - ua) * (1 - ua) * (1 - ua), fb = (1 - ub) * (1 - ub) * (1 - ub);
-        float ga = edge.a.fillet > 0 ? -3 * (1 - ua) * (1 - ua) / edge.a.fillet : 0;
-        float gb = edge.b.fillet > 0 ? 3 * (1 - ub) * (1 - ub) / edge.b.fillet : 0;
         float rx = scratchA[0] * fa + scratchB[0] * fb, ry = scratchA[1] * fa + scratchB[1] * fb;
-        float tx = lx / edge.length + scratchA[0] * ga + scratchB[0] * gb;
-        float ty = ly / edge.length + scratchA[1] * ga + scratchB[1] * gb;
-        float nl = (float) Math.sqrt(tx * tx + ty * ty), nx = ty / nl, ny = -tx / nl;
-        if (nx * edge.nx + ny * edge.ny < 0) {
-            nx = -nx;
-            ny = -ny;
-        }
         float blend = .3f * edge.length;
         float wa = 1 - smooth(along / blend), wb = 1 - smooth((edge.length - along) / blend), rest = 1 - wa - wb;
         boolean spans = edge.profiled && z >= edge.bottom() - EPSILON && z <= edge.top() + EPSILON;
@@ -1529,27 +1520,12 @@ final class BoardRelief {
         }
         cornerOffset(edge.a, z, scratchA);
         cornerOffset(edge.b, z, scratchB);
-        float d = 0, dx = nx, dy = ny;
+        float d = 0;
         if (rest > 0 && spans) {
             // The relief is a function of where the face stands, so a band moves it along instead of squeezing it.
             float fx = px + bx, fy = py + by;
             d = profile(fx, fy, z, edge.bottom(), edge.top(), edge.drop, BoardRelief.geology().get(edge.upper.family()),
                   edge.footPinned, edge.rimPinned, edge.room > 0);
-            if (edge.room > 0) {
-                float up = Math.clamp((z - edge.bottom()) / (edge.top() - edge.bottom()), 0, 1);
-                // The relief of a transition moves its rim along rays from the upper hex's centre and its foot along
-                // rays to the lower one's, so both tops stay star-shaped around their anchors however deep the cuts;
-                // between them it follows the rounded outline, as the relief of every wall does.
-                float ux = fx - edge.upper.x(), uy = fy - edge.upper.y();
-                float vx = edge.lower.x() - fx, vy = edge.lower.y() - fy;
-                float ul = (float) Math.hypot(ux, uy), vl = (float) Math.hypot(vx, vy);
-                float rim = smooth((up - .75f) / .25f), foot = 1 - smooth(up / .25f), face = 1 - rim - foot;
-                dx = nx * face + ux / ul * rim + vx / vl * foot;
-                dy = ny * face + uy / ul * rim + vy / vl * foot;
-                float length = (float) Math.hypot(dx, dy);
-                dx /= length;
-                dy /= length;
-            }
         }
         // A corner's relief slides the edges through it along themselves too. A band can shorten the available edge,
         // so its relief needs a longer fade to keep adjacent columns from reversing into a thin folded strip.
@@ -1561,10 +1537,11 @@ final class BoardRelief {
         // A shore's move of a corner runs out evenly along each edge through it, so those edges stay straight.
         float[] ma = edge.a.move(), mb = edge.b.move();
         float qx = ma[0] * (1 - t) + mb[0] * t, qy = ma[1] * (1 - t) + mb[1] * t;
-        // Written so that at a corner (weights exactly one) every edge through it adds the identical offset.
-        return new Vector3(px + rx + bx + qx + dx * d * rest + scratchA[0] * wa + ta * ex * (sa - wa)
+        // Local relief moves across the face, never along it: noisy radial/rounded normals can reverse adjacent
+        // columns into a loop at a broken rim. Shared corners still supply their exact offsets and bounded slides.
+        return new Vector3(px + rx + bx + qx + edge.nx * d * rest + scratchA[0] * wa + ta * ex * (sa - wa)
                     + scratchB[0] * wb + tb * ex * (sb - wb),
-              py + ry + by + qy + dy * d * rest + scratchA[1] * wa + ta * ey * (sa - wa)
+              py + ry + by + qy + edge.ny * d * rest + scratchA[1] * wa + ta * ey * (sa - wa)
                     + scratchB[1] * wb + tb * ey * (sb - wb), z);
     }
 
