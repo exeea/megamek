@@ -3161,6 +3161,11 @@ final class GpuTerrain implements Disposable {
         bed = surface.renderBed(bed);
         Map<GpuSurfaceBlend.Palette, List<GpuSurfaceBlend.Triangle>> groups = new LinkedHashMap<>();
         float spacing = GpuSurfaceBlend.spacing(lod);
+        // Banks, beds and cliff feet of this tile share corners and subdivision midpoints; sample each position once.
+        Function<Vector3, BoardSurfaceBlend.Cover> groundCover = BoardSurfaceBlend.remembering(
+              p -> BoardSurfaceBlend.sample(scene, tile, p.x, p.y, p.z));
+        Function<Vector3, BoardSurfaceBlend.Cover> cliffCover = BoardSurfaceBlend.remembering(
+              p -> BoardSurfaceBlend.sampleCliff(scene, tile, p.x, p.y, p.z));
         // Open-water banks belong to their adjacent land. Process them with the shared water field below,
         // before a water hex's authored mixture can consume these faces and repaint the shore with its nominal theme.
         if (openWater(tile) == null && BoardSurfaceBlend.cliffBoundary(scene, tile)) {
@@ -3184,8 +3189,7 @@ final class GpuTerrain implements Disposable {
             for (var face : blended) {
                 boolean cliff = surface.relief.shade(face.a()).kind() != BoardRelief.Kind.GROUND;
                 coveredPolygons(surface, face, waters, polygon -> GpuSurfaceBlend.appendPolygon(groups, BoardSurfaceBlend.family(tile),
-                      polygon, p -> cliff ? BoardSurfaceBlend.sampleCliff(scene, tile, p.x, p.y, p.z)
-                            : BoardSurfaceBlend.sample(scene, tile, p.x, p.y, p.z), spacing));
+                      polygon, cliff ? cliffCover : groundCover, spacing));
             }
         }
         if (openWater(tile) != null) {
@@ -3208,7 +3212,7 @@ final class GpuTerrain implements Disposable {
             var waters = coveringWaters(scene, surface, surfaces);
             for (var face : blended) {
                 coveredPolygons(surface, face, waters, polygon -> GpuSurfaceBlend.appendPolygon(groups,
-                      surface.family(face), polygon, p -> BoardSurfaceBlend.sample(scene, tile, p.x, p.y, p.z), spacing));
+                      surface.family(face), polygon, groundCover, spacing));
             }
             for (var face : bed) {
                 coveredPolygons(face, waters, p -> {
@@ -3216,8 +3220,7 @@ final class GpuTerrain implements Disposable {
                     return shade != null ? sculptVertex(p, shade, Float.NaN, surface)
                           : vertex(p, bedNormals.get(p), 99, 99,
                                 new Color(1, (tile.elevation() + 64) / 255f, 0, .3f));
-                }, polygon -> GpuSurfaceBlend.appendPolygon(groups, surface.family(face), polygon,
-                      p -> BoardSurfaceBlend.sample(scene, tile, p.x, p.y, p.z), spacing));
+                }, polygon -> GpuSurfaceBlend.appendPolygon(groups, surface.family(face), polygon, groundCover, spacing));
             }
             bed.clear();
         }
