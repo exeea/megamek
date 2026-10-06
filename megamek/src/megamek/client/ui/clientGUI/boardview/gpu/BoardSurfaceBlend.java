@@ -85,6 +85,7 @@ public final class BoardSurfaceBlend {
     }
 
     static int transitionFamily(Hex hex) {
+        if (hex.getAppearance().containsKey("ground")) { hex = megamek.common.board.BoardEditorBlueprint.get().artwork(hex, "ground"); }
         var terrain = hex.getTerrain(Terrains.GROUND_FLUFF);
         if (terrain == null || !terrain.hasExitsSpecified() || terrain.getExits() < 1 || terrain.getExits() > 5) {
             return -1;
@@ -101,6 +102,7 @@ public final class BoardSurfaceBlend {
 
     /** Capture authored material proportions once; the renderer never reads or changes the source hex. */
     static Cover capture(Hex hex) {
+        if (hex.getAppearance().containsKey("ground")) { hex = megamek.common.board.BoardEditorBlueprint.get().artwork(hex, "ground"); }
         int base = BoardFeatures.surface(hex).ordinal(), target = transitionFamily(hex);
         // Natural transitions describe the substrate; pavement covers it with concrete.
         if (base == BoardScene.Surface.CONCRETE.ordinal()) { return solid(base); }

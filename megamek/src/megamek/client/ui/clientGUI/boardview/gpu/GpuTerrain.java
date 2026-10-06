@@ -639,6 +639,7 @@ final class GpuTerrain implements Disposable {
     private final Set<Coords> atlasTileChanges = new HashSet<>();
     private final Set<Coords> markingChanges = new HashSet<>();
     private Map<GroundSlot, BoardScene.Pixels> terrainPixels = Map.of(), normalPixels = Map.of();
+    private Map<DecalSlot, BoardScene.Pixels> decalPixels = Map.of();
     private final GpuGroundCover groundCover = new GpuGroundCover();
     private final GpuBiomeVegetation biomeVegetation = new GpuBiomeVegetation();
     private final GpuBiomeSurface biomes = new GpuBiomeSurface();
@@ -839,6 +840,12 @@ final class GpuTerrain implements Disposable {
         private final boolean structure;
         /** Height-only industrial cover has neither occupiable storeys nor building cutaways. */
         private final boolean industrial;
+        /** Cosmetic cover, including instanced fungi; excluded from wireframe fill and lines. */
+        private boolean scatter;
+        /** Authored object identity, shared by both camera presentations and precise model picking. */
+        private String decorationId;
+        private float decorationAnchorZ;
+        private String receiver;
         /** World support height for an interior floor; NaN for shells and other props. */
         private final float floorZ;
         private ModelInstance hoverOpaque;
@@ -958,6 +965,15 @@ final class GpuTerrain implements Disposable {
         public Impostor copy() { return new Impostor(value); }
     }
 
+    /** Plant material roles are authored in the GLB, so new plant assets need no editor-specific ID mapping. */
+    static boolean foliageModel(Model model) {
+        for (Material material : model.materials) {
+            if (material.id.startsWith("bark") || material.id.startsWith("canopy") || material.id.equals("cactus")
+                  || material.id.equals("fungus") || material.id.equals("mycelium") || material.id.equals("coral")) { return true; }
+        }
+        return false;
+    }
+
     /** Marks a tree model's materials for the foliage shader, once; instances copy the marks. */
     private static Model foliage(Model model) {
         for (Material material : model.materials) {
@@ -1004,7 +1020,7 @@ final class GpuTerrain implements Disposable {
           { "snow", "scree", "granite-contact", "snow" },
           { "lunar", "lunar-scree", "lunar-cliff", "lunar-cliff" },
           { "fungus-ground", "fungus-mat", "fungus-cliff", "fungus-fibres" },
-          { "desert-hardpan", "pavement", "sandstone", "sandstone" },
+          { "desert-hardpan", "pavement", "sandstone", "sandstone-cap" },
           { "mars-hardpan", "mars-hardpan", "mars-bedrock", "mars-hardpan" },
           { "volcano-ground", "volcano-ground", "volcano-basalt", "volcano-ground" },
           { "tropical-ground", "dirt", "granite-contact", "soil-contact" },
@@ -1089,7 +1105,9 @@ final class GpuTerrain implements Disposable {
         final List<ModelInstance> opaque = new ArrayList<>();
         Array<Renderable> terrainRenderables;
         GpuTerrainDepth depthTerrain;
+        /** Packed and instanced cosmetic cover share one visibility decision in every pass. */
         final List<ModelInstance> scatter = new ArrayList<>();
+        final GpuTreeInstances.Stand scatterStand = new GpuTreeInstances.Stand();
         float scatterDiameter;
         boolean scatterVisible = true;
         final List<ModelInstance> overlays = new ArrayList<>();
@@ -1190,9 +1208,13 @@ final class GpuTerrain implements Disposable {
         private static void opaqueMaterials(Array<Renderable> renderables) {
             for (Renderable renderable : renderables) {
                 renderable.material = new Material(renderable.material);
-                renderable.material.remove(BlendingAttribute.Type);
+                // Alpha-tested GLB cards are opaque cutouts, not building transparency. LibGDX's shaders
+                // require the blending attribute even when blending is disabled to apply their alpha test.
+                if (renderable.material.has(FloatAttribute.AlphaTest)) {
+                    renderable.material.set(new BlendingAttribute(false, GL20.GL_ONE, GL20.GL_ZERO, 1));
+                } else { renderable.material.remove(BlendingAttribute.Type); }
                 renderable.material.remove(DepthTestAttribute.Type);
-                renderable.material.remove(IntAttribute.CullFace);
+                // Keep authored culling, including the reversed winding of mirrored native placements.
             }
         }
 
@@ -1388,7 +1410,7 @@ final class GpuTerrain implements Disposable {
     void update(BoardScene scene) {
         update(scene, null);
         while (busy()) {
-            refine(null);
+            refine(null, true);
             if (busy()) { java.util.concurrent.locks.LockSupport.parkNanos(1_000_000); }
         }
     }
@@ -1531,19 +1553,23 @@ final class GpuTerrain implements Disposable {
     private UpdatePlan prepareUpdate(Request request, BoardScene beforeScene, float previousFloor,
           BoardConcrete previousCoast, Map<Coords, BoardFlow.Current> previousCurrents,
           Map<GroundSlot, BoardScene.Pixels> previousColors, Map<GroundSlot, BoardScene.Pixels> previousNormals,
-          boolean changedTuning, boolean changedLimbScale, BoardScene.Pixels incline, BoardScene.Pixels highIncline,
+          Map<DecalSlot, BoardScene.Pixels> previousDecals, boolean changedTuning, boolean changedLimbScale,
+          boolean changedLimbModel, BoardScene.Pixels incline, BoardScene.Pixels highIncline,
           TerrainLoadProgress progress) {
         BoardScene scene = request.scene();
         progress.begin("layout", 1);
         long generation = request.generation();
-        Map<GroundSlot, BoardScene.Pixels> terrainPixels = new ConcurrentHashMap<>();
-        Map<GroundSlot, BoardScene.Pixels> normalPixels = new ConcurrentHashMap<>();
-        Map<DecalSlot, BoardScene.Pixels> decalPixels = new ConcurrentHashMap<>();
+        Map<GroundSlot, BoardScene.Pixels> terrainPixels = new ConcurrentHashMap<>(scene.tiles().size() * 2);
+        Map<GroundSlot, BoardScene.Pixels> normalPixels = new ConcurrentHashMap<>(scene.tiles().size() * 2);
+        Map<DecalSlot, BoardScene.Pixels> decalPixels = new ConcurrentHashMap<>(scene.tiles().size() * 2);
         float nextFloor = BoardGeometry.floor(scene);
         boolean rebuildAll = changedTuning || beforeScene == null || !sameBoard(beforeScene, scene);
         boolean changedFlow = rebuildAll;
         Map<Coords, BoardFlow.Current> nextCurrents = previousCurrents;
-        BoardConcrete nextCoast = BoardConcrete.of(scene);
+        // The fitted concrete outline reads ground, water, levels, roads and features. An edit that changes none
+        // of them keeps the previous fit, and the corner comparison below then has nothing to find.
+        boolean refit = rebuildAll || previousCoast == null || concreteInputsChanged(beforeScene, scene);
+        BoardConcrete nextCoast = refit ? BoardConcrete.of(scene) : BoardConcrete.adopt(scene, previousCoast);
         progress.advance();
         progress.begin("changes", scene.tiles().size());
         Set<Coords> changedTiles = new HashSet<>();
@@ -1559,28 +1585,38 @@ final class GpuTerrain implements Disposable {
                     changedTiles.add(tile.coords());
                 }
                 BoardScene.Tile before = beforeScene.tiles().get(index);
-                if (before.blackIce() != tile.blackIce() || before.bare() != tile.bare()
-                      || before.ultraSublevel() != tile.ultraSublevel()) { changedTiles.add(tile.coords()); }
-                changedFlow |= !before.coords().equals(tile.coords()) || before.elevation() != tile.elevation()
-                      || before.frozen() != tile.frozen() || !before.liquid().equals(tile.liquid());
+                // A capture keeps the tile instance of every hex it did not touch; only its fitted concrete
+                // corners, which a neighbour's edit can move, still need checking.
+                boolean same = before == tile;
+                if (!same && (before.blackIce() != tile.blackIce() || before.bare() != tile.bare()
+                      || before.ultraSublevel() != tile.ultraSublevel()
+                      || !before.appearance().equals(tile.appearance()))) { changedTiles.add(tile.coords()); }
+                // Artwork is recomposed for dirtied chunks only, so a hex whose decal or tileset artwork changed is
+                // dirtied here; the atlas comparison that used to notice it now sees just those chunks.
+                if (!same && (!Objects.equals(decals(before), decals(tile))
+                      || !Objects.equals(before.tilesetDecals(), tile.tilesetDecals())
+                      || !Objects.equals(before.tilesetScenery(), tile.tilesetScenery()))) { changedTiles.add(tile.coords()); }
+                // Currents run between liquid hexes only (BoardFlow); dry ground changes level without moving them.
+                changedFlow |= !same && (!before.coords().equals(tile.coords()) || !before.liquid().equals(tile.liquid())
+                      || tile.liquid().present() && (before.elevation() != tile.elevation() || before.frozen() != tile.frozen()));
                 // Rim vertex colors come from the selected ground artwork, not the atlas texture.
-                if (!before.ground().equals(tile.ground()) || !Objects.equals(before.normals(), tile.normals())) {
+                if (!same && (!before.ground().equals(tile.ground()) || !Objects.equals(before.normals(), tile.normals()))) {
                     changedTiles.add(tile.coords());
                 }
-                if (!before.coords().equals(tile.coords())) {
+                if (!same && !before.coords().equals(tile.coords())) {
                     rebuildAll = true;
                 } else {
                     // A water shore reaches the banks and corners it shapes from further out (BoardSurface.Key);
                     // joined landforms also depend on the neighbours' road approaches, two hexes out.
-                    boolean shore = before.elevation() != tile.elevation() || before.waterDepth() != tile.waterDepth()
+                    boolean shore = !same && (before.elevation() != tile.elevation() || before.waterDepth() != tile.waterDepth()
                           || !before.liquid().equals(tile.liquid()) || before.roadExits() != tile.roadExits()
                           || before.road() != tile.road()
                           || before.cliffTopExits() != tile.cliffTopExits() || before.ultraSublevel() != tile.ultraSublevel()
-                          || before.surface() != tile.surface() || before.detailedGround() != tile.detailedGround()
-                          || !nextCoast.sameCorners(previousCoast, tile.coords());
-                    if (shore || before.frozen() != tile.frozen() || before.biome() != tile.biome()
+                          || before.surface() != tile.surface() || before.detailedGround() != tile.detailedGround())
+                          || refit && !nextCoast.sameCorners(previousCoast, tile.coords());
+                    if (shore || !same && (before.frozen() != tile.frozen() || before.biome() != tile.biome()
                           || !before.groundCover().equals(tile.groundCover())
-                          || !before.features().equals(tile.features())) {
+                          || !before.features().equals(tile.features()))) {
                         int reach = shore ? editReach(beforeScene, scene, at) : 2;
                         for (int x = at.getX() - reach; x <= at.getX() + reach; x++) {
                             for (int y = at.getY() - reach - 1; y <= at.getY() + reach + 1; y++) {
@@ -1630,8 +1666,26 @@ final class GpuTerrain implements Disposable {
         Set<Coords> changedChunks = new HashSet<>();
         changedTiles.forEach(coords -> dirtyChunk(changedChunks, coords));
         boolean all = rebuildAll;
-        progress.begin("textures", scene.tiles().size());
-        scene.tiles().parallelStream().forEach(tile -> request.settings().run(() -> {
+        // The hexes of untouched chunks keep every artwork slot of the previous build, which captured the same
+        // pixel objects for them; an edit recomposes only the chunks it dirtied.
+        List<BoardScene.Tile> retextured;
+        if (all || changedLimbModel) {
+            retextured = scene.tiles();
+        } else {
+            terrainPixels.putAll(previousColors);
+            normalPixels.putAll(previousNormals);
+            decalPixels.putAll(previousDecals);
+            retextured = new ArrayList<>();
+            for (Coords chunk : changedChunks) {
+                for (int x = chunk.getX() * CHUNK_SIZE; x < Math.min(scene.width(), (chunk.getX() + 1) * CHUNK_SIZE); x++) {
+                    for (int y = chunk.getY() * CHUNK_SIZE; y < Math.min(scene.height(), (chunk.getY() + 1) * CHUNK_SIZE); y++) {
+                        retextured.add(scene.tile(x, y));
+                    }
+                }
+            }
+        }
+        progress.begin("textures", retextured.size());
+        retextured.parallelStream().forEach(tile -> request.settings().run(() -> {
             checkBuild(generation);
             BoardRim.Images material = tile.detailedGround() ? new BoardRim.Images(tile.ground(), tile.normals())
                   : !all && !changedChunks.contains(new Coords(tile.coords().getX() / CHUNK_SIZE, tile.coords().getY() / CHUNK_SIZE))
@@ -1645,28 +1699,46 @@ final class GpuTerrain implements Disposable {
             // Riverbanks borrow adjacent ground art, never its cliff-top decoration.
             // The atlas shares these slots whenever the top has no rim.
             terrainPixels.put(baseSlot, tile.ground());
-            if (material.normal() != null) {
-                normalPixels.put(topSlot, material.normal());
-            }
-            if (tile.normals() != null) {
-                normalPixels.put(baseSlot, tile.normals());
-            }
-            if (decals(tile) != null) {
-                decalPixels.put(new DecalSlot(tile.coords(), 0), decals(tile));
-            }
-            if (tile.tilesetDecals() != null) {
-                decalPixels.put(new DecalSlot(tile.coords(), 1), tile.tilesetDecals());
-            }
-            if (tile.tilesetScenery() != null) {
-                decalPixels.put(new DecalSlot(tile.coords(), 2), tile.tilesetScenery());
+            if (material.normal() != null) { normalPixels.put(topSlot, material.normal()); } else { normalPixels.remove(topSlot); }
+            if (tile.normals() != null) { normalPixels.put(baseSlot, tile.normals()); } else { normalPixels.remove(baseSlot); }
+            BoardScene.Pixels[] overlays = { decals(tile), tile.tilesetDecals(), tile.tilesetScenery() };
+            for (int kind = 0; kind < overlays.length; kind++) {
+                DecalSlot slot = new DecalSlot(tile.coords(), kind);
+                if (overlays[kind] != null) { decalPixels.put(slot, overlays[kind]); } else { decalPixels.remove(slot); }
             }
             progress.advance();
         }));
-        rims.retainUsed();
+        // A full build retains only the rim compositions it used; an edit keeps those of the hexes it left alone.
+        if (all) { rims.retainUsed(); }
         progress.begin("atlases", 4);
         return new UpdatePlan(nextFloor, nextCoast, nextCurrents, rebuildAll, changedChunks, changedTiles,
               terrainPixels, normalPixels, decalPixels);
 
+    }
+
+    /** Whether any hex changed what the concrete fit reads: its ground, water, level, roads or structures. */
+    private static boolean concreteInputsChanged(BoardScene before, BoardScene after) {
+        for (int index = 0; index < after.tiles().size(); index++) {
+            BoardScene.Tile was = before.tiles().get(index), is = after.tiles().get(index);
+            if (was == is) { continue; }
+            if (was.surface() != is.surface() || !was.liquid().equals(is.liquid()) || was.elevation() != is.elevation()
+                  || was.waterDepth() != is.waterDepth() || was.frozen() != is.frozen()
+                  || was.ultraSublevel() != is.ultraSublevel() || was.bare() != is.bare()
+                  || was.roadExits() != is.roadExits() || was.road() != is.road()
+                  || was.cliffTopExits() != is.cliffTopExits() || was.detailedGround() != is.detailedGround()
+                  || !structures(was).equals(structures(is))) { return true; }
+        }
+        return false;
+    }
+
+    /** The features the concrete fit reads: structures and props such as bridges, never trees, rocks or scenery. */
+    private static List<BoardScene.Feature> structures(BoardScene.Tile tile) {
+        List<BoardScene.Feature> result = new ArrayList<>();
+        for (BoardScene.Feature feature : tile.features()) {
+            if (feature.kind() == BoardScene.FeatureKind.BUILDING || feature.kind() == BoardScene.FeatureKind.INDUSTRIAL
+                  || feature.kind() == BoardScene.FeatureKind.PROP) { result.add(feature); }
+        }
+        return result;
     }
 
     private static int editReach(BoardScene before, BoardScene after, Coords at) {
@@ -1750,6 +1822,10 @@ final class GpuTerrain implements Disposable {
 
     /** A bounded edit pipeline shares two CPU workers; GL collection/upload remains under the frame budget. */
     boolean refine(Camera camera) {
+        return refine(camera, false);
+    }
+
+    boolean refine(Camera camera, boolean editing) {
         if (drapeChanged) {
             drapeChanged = false;
             return true;
@@ -1760,8 +1836,11 @@ final class GpuTerrain implements Disposable {
             prepareTerrainMaterials();
         }
         // While opening/replacing a board, use more of the loading frame for uploads instead of stretching each
-        // chunk's handoffs over several frames. Interactive edits retain their smaller budget.
-        long deadline = System.nanoTime() + (coverScene == null ? 8_000_000 : 2_000_000);
+        // chunk's handoffs over several frames. An editor change gets a larger bounded slice so each small edit
+        // does not wait dozens of frames (its collection and upload take about 60 ms of render-thread time, a
+        // handful of frames at this slice); ordinary camera refinement keeps the two-millisecond budget.
+        long deadline = System.nanoTime() + (coverScene == null ? 8_000_000
+              : editing && (requested != null || rebuild != null) ? 12_000_000 : 2_000_000);
         drainRetired(deadline);
         if (requested == null && rebuild == null && detailJob == null) { return false; }
         do {
@@ -1842,17 +1921,21 @@ final class GpuTerrain implements Disposable {
         }
         if (requested != null) {
             if (rebuild == null) {
+                Model previousLimbModel = limbModel;
                 if (limbModel == null && unitModels != null && requested.scene().tiles().stream()
                       .anyMatch(tile -> tile.features().stream().anyMatch(feature -> feature.kind() == BoardScene.FeatureKind.LIMB))) {
                     var limb = unitModels.equipment("Limb Club");
                     limbModel = limb == null ? null : limb.model();
                 }
+                // Limbs becoming drawable switch the decal artwork of every hex that carries them.
+                boolean changedLimbModel = limbModel != previousLimbModel;
                 Request request = requested;
                 BoardScene previous = coverScene;
                 float bottom = floor;
                 BoardConcrete previousCoast = coast;
                 Map<Coords, BoardFlow.Current> flow = currents;
                 Map<GroundSlot, BoardScene.Pixels> colors = terrainPixels, normals = normalPixels;
+                Map<DecalSlot, BoardScene.Pixels> overlays = decalPixels;
                 BoardScene.Pixels incline = assets.inclineMask(), highIncline = assets.highInclineMask();
                 boolean changedTuning = installedSettings == null
                       || !sameSettings(installedSettings, request.settings());
@@ -1860,8 +1943,8 @@ final class GpuTerrain implements Disposable {
                       && installedSettings.geometry().unitScale() != request.settings().geometry().unitScale();
                 TerrainLoadProgress progress = new TerrainLoadProgress();
                 rebuild = new Rebuild(request, CompletableFuture.supplyAsync(() -> request.settings().call(
-                      () -> prepareUpdate(request, previous, bottom, previousCoast, flow, colors, normals,
-                            changedTuning, changedLimbScale, incline, highIncline, progress)), detailWorker), progress);
+                      () -> prepareUpdate(request, previous, bottom, previousCoast, flow, colors, normals, overlays,
+                            changedTuning, changedLimbScale, changedLimbModel, incline, highIncline, progress)), detailWorker), progress);
                 return false;
             }
             if (!rebuild.preparation.isDone()) { return false; }
@@ -2034,6 +2117,7 @@ final class GpuTerrain implements Disposable {
         currents = plan.currents();
         terrainPixels = plan.colors();
         normalPixels = plan.normals();
+        decalPixels = plan.decals();
         chunkRows = (scene.height() + CHUNK_SIZE - 1) / CHUNK_SIZE;
         if (requested == rebuild.request) { requested = null; }
         rebuild = null;
@@ -2332,6 +2416,20 @@ final class GpuTerrain implements Disposable {
         if (sculpted) {
             sculpt(solid, overlay, chunk, scene, tile, surface, top, surfaces, prepared.sculpts().get(tile.coords()), magma);
         }
+        // Field stones and shrubs share the scatter pass, while retaining their canonical picking/support faces.
+        var fieldScatter = surface.faces.stream().filter(BoardSurface.Face::scatter).toList();
+        if (!fieldScatter.isEmpty()) {
+            BoundingBox bounds = new BoundingBox().inf();
+            for (var face : fieldScatter) { bounds.ext(face.a()).ext(face.b()).ext(face.c()); }
+            chunk.bounds.ext(bounds);
+            chunk.scatterDiameter = Math.max(chunk.scatterDiameter, bounds.getDimensions(new Vector3()).len());
+            for (var group : byFamily(surface, fieldScatter).entrySet()) {
+                Material material = sculptMaterial(group.getKey());
+                if (sculpted && !tile.liquid().present()) { material = GpuIceShader.ground(material, scene, tile); }
+                float shore = tile.liquid().present() ? GpuWaterShader.palette(tile.liquid()) : Float.NaN;
+                scatter.addTriangles(material, mesh -> sculptedFaces(mesh, surface, group.getValue(), shore, scene, surfaces));
+            }
+        }
         if (tile.frozen() && tile.water()) {
             // One shared material in the existing transparent pass reveals the already-rendered bed/units.
             // No per-hex texture, refraction target or additional surface mesh is needed.
@@ -2340,6 +2438,7 @@ final class GpuTerrain implements Disposable {
             liquid.addTriangles(ice, meshes -> drawnIce(meshes, surface));
         }
         for (BoardSurface.Face face : sculpted ? List.<BoardSurface.Face>of() : surface.faces) {
+            if (face.scatter()) { continue; }
             if (face.finish() == BoardSurface.Finish.ROUGH) { continue; }
             if (face.finish() == BoardSurface.Finish.ICE) { continue; }
             chunk.bounds.ext(face.a()).ext(face.b()).ext(face.c());
@@ -2535,7 +2634,9 @@ final class GpuTerrain implements Disposable {
                 ModelInstance instance = new ModelInstance(foliage(assets.lodModel(placement.asset(), 0)));
                 instance.transform.set(placement.transform());
                 BoundingBox bounds = instance.calculateBoundingBox(new BoundingBox()).mul(instance.transform);
-                chunk.props.add(new Prop(tile.coords(), instance, bounds, placement.asset(), false));
+                var prop = new Prop(tile.coords(), instance, bounds, placement.asset(), false);
+                prop.scatter = true;
+                chunk.props.add(prop);
                 chunk.bounds.ext(bounds);
             }
         }
@@ -2560,13 +2661,14 @@ final class GpuTerrain implements Disposable {
             chunk.bounds.ext(bounds);
         }
         var features = tile.features();
-        if (features.stream().anyMatch(f -> f.kind() == BoardScene.FeatureKind.SCENERY || f.authoredPlacement())) {
+        if (features.stream().anyMatch(f -> f.kind() == BoardScene.FeatureKind.SCENERY || f.authoredPlacement() || f.decoration() != null)) {
             // Install solid supports first, regardless of the captured artwork layer order.
             features = features.stream().sorted(Comparator.comparing(f -> f.kind() == BoardScene.FeatureKind.SCENERY
-                  || f.authoredPlacement())).toList();
+                  || f.authoredPlacement() || f.decoration() != null)).toList();
         }
         List<Prop> supports = new ArrayList<>();
         for (BoardScene.Feature feature : features) {
+            if (feature.decoration() != null && feature.decoration().kind().equals("decal")) { continue; }
             // Rough boulders are already part of the shared terrain mesh, shading and picking geometry.
             if (feature.kind() == BoardScene.FeatureKind.BOULDER || feature.kind() == BoardScene.FeatureKind.ROUGH) { continue; }
             boolean fungus = BoardFungus.asset(feature.asset());
@@ -2602,15 +2704,16 @@ final class GpuTerrain implements Disposable {
                 continue;
             }
             boolean generatedIndustrial = BoardIndustrial.supports(feature);
-            GpuBuilding.Assembly building = generatedIndustrial ? null : assets.building(feature.asset(), Math.round(feature.height()),
+            GpuBuilding.Assembly building = generatedIndustrial || feature.decoration() != null ? null : assets.building(feature.asset(), Math.round(feature.height()),
                   GpuBuilding.seed(tile, feature), feature.kind() == BoardScene.FeatureKind.BUILDING);
-            Model model = generatedIndustrial ? assets.industrial(BoardIndustrial.layout(scene, tile, feature))
+            Model model = feature.decoration() != null ? assets.decoration(feature.asset())
+                  : generatedIndustrial ? assets.industrial(BoardIndustrial.layout(scene, tile, feature))
                   : building != null ? building.model(0)
                   : limb ? limbModel : feature.kind() == BoardScene.FeatureKind.TREE
                   ? assets.lodModel(feature.asset(), 0)
                   : assets.model(bridge ? BoardBridge.asset(feature.bridgeExits()) : feature.asset());
             ModelInstance instance = building != null ? building.instance(0)
-                  : new ModelInstance(feature.kind() == BoardScene.FeatureKind.TREE || fungus ? foliage(model) : model);
+                  : new ModelInstance(feature.kind() == BoardScene.FeatureKind.TREE || fungus || foliageModel(model) ? foliage(model) : model);
             if (bridge) {
                 Material deck = instance.getMaterial("bridge-deck");
                 deck.set(roadMaterial(GpuRoads.texture(prepared.bridges().get(tile.coords()).kind()).substring("roads/".length()), false));
@@ -2671,7 +2774,19 @@ final class GpuTerrain implements Disposable {
                 }
                 base -= (bounds.min.z + rootInset) * coralScale;
             }
-            if (limb) {
+            if (feature.decoration() != null) {
+                var object = feature.decoration();
+                float anchorX = BoardGeometry.centerX(tile.coords()) + (float) object.x() * BoardGeometry.width();
+                float anchorY = BoardGeometry.centerY(tile.coords()) + (float) object.y() * BoardGeometry.height();
+                float receiver = decorationHeight(feature, surface, prepared.bridgeShapes().get(tile.coords()), supports, anchorX, anchorY)
+                      + feature.elevation() * BoardGeometry.level();
+                if (!Float.isFinite(receiver)) { continue; }
+                float scale = feature.scale() * BoardGeometry.hexScale();
+                instance.transform.setToTranslation(px, py, receiver).rotate(Vector3.Z, feature.rotation())
+                      .scale(object.mirror() ? -scale : scale, scale, scale);
+                // Reflected meshes reverse winding; render both faces without changing shared asset materials.
+                if (object.mirror()) { instance.materials.forEach(m -> m.set(IntAttribute.createCullFace(GL20.GL_NONE))); }
+            } else if (limb) {
                 // Lay the held limb on its side, then ground its actual bounds. No unit/entity is created.
                 float scale = feature.scale() * BoardGeometry.unitScale() * BoardGeometry.hexScale();
                 instance.transform.setToTranslation(px, py, base).rotate(Vector3.Z, feature.rotation())
@@ -2730,14 +2845,19 @@ final class GpuTerrain implements Disposable {
                   Math.max(bounds.getWidth(), bounds.getHeight()) * .5f, bounds.getDepth())
                   || !surface.relief.visibleScatter(new Vector3(px, py, base), bounds.getDepth()))) { continue; }
             var prop = new Prop(tile.coords(), instance, bounds,
-                  feature.kind() == BoardScene.FeatureKind.TREE || fungus ? feature.asset() : null,
+                  feature.decoration() == null && (feature.kind() == BoardScene.FeatureKind.TREE || fungus) ? feature.asset() : null,
                   feature.kind() == BoardScene.FeatureKind.LIMB, building,
-                  feature.kind() == BoardScene.FeatureKind.BUILDING || feature.asset().startsWith("buildings/"),
+                  feature.decoration() != null || feature.kind() == BoardScene.FeatureKind.BUILDING || feature.asset().startsWith("buildings/"),
                   Float.NaN, feature.kind() == BoardScene.FeatureKind.INDUSTRIAL);
+            prop.scatter = feature.kind() == BoardScene.FeatureKind.SCATTER;
+            prop.decorationId = feature.decoration() == null ? null : feature.decoration().id();
+            prop.decorationAnchorZ = instance.transform.val[Matrix4.M23] - feature.elevation() * BoardGeometry.level();
+            prop.receiver = feature.kind() == BoardScene.FeatureKind.BUILDING ? "building"
+                  : feature.kind() == BoardScene.FeatureKind.INDUSTRIAL ? "industrial" : null;
             chunk.props.add(prop);
-            if (feature.kind() == BoardScene.FeatureKind.BUILDING
+            if (feature.decoration() == null && (feature.kind() == BoardScene.FeatureKind.BUILDING
                   || feature.kind() == BoardScene.FeatureKind.INDUSTRIAL
-                  || feature.kind() == BoardScene.FeatureKind.PROP && !bridge && !feature.asset().equals("field")) {
+                  || feature.kind() == BoardScene.FeatureKind.PROP && !bridge && !feature.asset().equals("field"))) {
                 supports.add(prop);
             }
             if (feature.kind() == BoardScene.FeatureKind.BUILDING) {
@@ -2763,24 +2883,111 @@ final class GpuTerrain implements Disposable {
             chunk.bounds.ext(bounds);
         }
         placeDecals(build, tile, surface, supports);
+        placeDecorationPaint(build, tile, surface, supports);
+    }
+
+    /** An authored prop uses exactly its chosen support, even if another structure lies above that support. */
+    private float decorationHeight(BoardScene.Feature feature, BoardSurface surface, BoardBridge.Shape bridge,
+          List<Prop> supports, float x, float y) {
+        var placement = feature.decoration().placement();
+        if (placement.mode().equals("absolute")) { return placement.level().floatValue() * BoardGeometry.level(); }
+        String receiver = placement.receiver().terrain();
+        float height = Float.NEGATIVE_INFINITY;
+        if (receiver.equals("ground")) { height = surface.height(x, y); }
+        else if (receiver.equals("bridge") && bridge != null) {
+            for (var facet : bridge.facets()) {
+                if (facet.part() == BoardBridge.Part.TOP) {
+                    height = Math.max(height, new BoardSurface.Face(facet.a(), facet.b(), facet.c(), BoardSurface.Finish.TOP).height(x, y));
+                }
+            }
+        } else if (receiver.equals("building") || receiver.equals("industrial")) {
+            var point = new Vector3();
+            for (Prop support : supports) {
+                if (!receiver.equals(support.receiver)) { continue; }
+                var ray = new Ray(new Vector3(x, y, support.bounds.max.z + 1), new Vector3(0, 0, -1));
+                if (hitProp(support, ray, point)) { height = Math.max(height, point.z); }
+            }
+        }
+        return height + placement.offset().floatValue() * BoardGeometry.level();
+    }
+
+    private List<BoardSurface.Face> decorationReceivers(String receiver, ChunkBuild build, BoardScene.Tile tile,
+          BoardSurface surface, List<Prop> supports) {
+        if (receiver.equals("ground")) {
+            return surface.faces.stream().filter(f -> f.finish() != BoardSurface.Finish.ICE && BoardDecals.upward(f)).toList();
+        }
+        List<BoardSurface.Face> faces = new ArrayList<>();
+        if (receiver.equals("bridge")) {
+            var bridge = build.prepared.bridgeShapes().get(tile.coords());
+            if (bridge != null) {
+                for (var facet : bridge.facets()) {
+                    if (facet.part() == BoardBridge.Part.TOP) { faces.add(new BoardSurface.Face(facet.a(), facet.b(), facet.c(), BoardSurface.Finish.TOP)); }
+                }
+            }
+        } else {
+            for (Prop prop : supports) {
+                if (!receiver.equals(prop.receiver)) { continue; }
+                faces.addAll(receiverFaces(prop));
+            }
+        }
+        return faces;
+    }
+
+    private void placeDecorationPaint(ChunkBuild build, BoardScene.Tile tile, BoardSurface surface, List<Prop> supports) {
+        var paint = tile.features().stream().map(BoardScene.Feature::decoration).filter(java.util.Objects::nonNull)
+              .filter(d -> d.kind().equals("decal")).sorted(Comparator.comparingInt(megamek.common.board.BoardDecoration::drawOrder)
+                    .thenComparing(megamek.common.board.BoardDecoration::id)).toList();
+        int layer = 0;
+        for (var object : paint) {
+            Texture texture = assets.decorationPaint(object.asset());
+            if (texture == null) { continue; }
+            var receivers = decorationReceivers(object.placement().receiver().terrain(), build, tile, surface, supports);
+            var faces = BoardDecals.project(tile.coords(), receivers, object);
+            float lift = (BoardDecals.LIFT + ++layer * .015f) * BoardGeometry.hexScale();
+            Material material = material(texture, true);
+            for (int target : new int[] { 4, 5 }) {
+                build.layers.get(target).addTriangles(material, meshes -> {
+                    for (var face : faces) {
+                        var normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
+                        meshes.get().triangle(decorationVertex(face.a(), tile.coords(), object, normal, lift),
+                              decorationVertex(face.b(), tile.coords(), object, normal, lift),
+                              decorationVertex(face.c(), tile.coords(), object, normal, lift));
+                    }
+                });
+            }
+        }
+    }
+
+    private static MeshPartBuilder.VertexInfo decorationVertex(Vector3 point, Coords coords,
+          megamek.common.board.BoardDecoration object, Vector3 normal, float lift) {
+        double angle = Math.toRadians(object.rotation());
+        double dx = point.x - BoardGeometry.centerX(coords) - object.x() * BoardGeometry.width();
+        double dy = point.y - BoardGeometry.centerY(coords) - object.y() * BoardGeometry.height();
+        float u = .5f + (float) ((dx * Math.cos(angle) + dy * Math.sin(angle)) / BoardGeometry.width()) * (object.mirror() ? -1 : 1);
+        float v = .5f - (float) ((-dx * Math.sin(angle) + dy * Math.cos(angle)) / BoardGeometry.height());
+        return vertex(new Vector3(point).add(0, 0, lift), normal, u, v, Color.WHITE);
+    }
+
+    private List<BoardSurface.Face> receiverFaces(Prop prop) {
+        List<BoardSurface.Face> faces = new ArrayList<>();
+        List<Vector3> points = new ArrayList<>();
+        Map<Mesh, float[]> vertices = new HashMap<>();
+        Map<Mesh, short[]> indices = new HashMap<>();
+        for (Node node : prop.instance().nodes) { triangles(node, points, vertices, indices); }
+        for (int i = 0; i < points.size(); i += 3) {
+            var face = new BoardSurface.Face(points.get(i).mul(prop.instance().transform),
+                  points.get(i + 1).mul(prop.instance().transform), points.get(i + 2).mul(prop.instance().transform),
+                  BoardSurface.Finish.TOP);
+            if (BoardDecals.upward(face)) { faces.add(face); }
+        }
+        return faces;
     }
 
     /** Project after supports are installed; both presentations borrow the same structure and bridge meshes. */
     private void placeDecals(ChunkBuild build, BoardScene.Tile tile, BoardSurface surface, List<Prop> supports) {
         if (decals(tile) == null && tile.tilesetDecals() == null && tile.tilesetScenery() == null) { return; }
         List<BoardSurface.Face> raised = new ArrayList<>();
-        for (Prop prop : supports) {
-            List<Vector3> points = new ArrayList<>();
-            Map<Mesh, float[]> vertices = new HashMap<>();
-            Map<Mesh, short[]> indices = new HashMap<>();
-            for (Node node : prop.instance().nodes) { triangles(node, points, vertices, indices); }
-            for (int i = 0; i < points.size(); i += 3) {
-                var face = new BoardSurface.Face(points.get(i).mul(prop.instance().transform),
-                      points.get(i + 1).mul(prop.instance().transform), points.get(i + 2).mul(prop.instance().transform),
-                      BoardSurface.Finish.TOP);
-                if (BoardDecals.upward(face)) { raised.add(face); }
-            }
-        }
+        for (Prop prop : supports) { raised.addAll(receiverFaces(prop)); }
         var bridge = build.prepared.bridgeShapes().get(tile.coords());
         for (boolean original : new boolean[] { false, true }) {
             if (original ? tile.tilesetDecals() == null && tile.tilesetScenery() == null : decals(tile) == null) { continue; }
@@ -2949,8 +3156,13 @@ final class GpuTerrain implements Disposable {
                     }
                     // Instances have mutable fading/LoD state, while their authored models remain asset-owned.
                     for (Prop prop : previous.props) {
-                        tile.props.add(new Prop(coords, new ModelInstance(prop.instance()), prop.bounds(),
-                              prop.treeAsset, prop.hardSurface, prop.building, prop.structure, prop.floorZ, prop.industrial));
+                        Prop copy = new Prop(coords, new ModelInstance(prop.instance()), prop.bounds(),
+                              prop.treeAsset, prop.hardSurface, prop.building, prop.structure, prop.floorZ, prop.industrial);
+                        copy.scatter = prop.scatter;
+                        copy.decorationId = prop.decorationId;
+                        copy.decorationAnchorZ = prop.decorationAnchorZ;
+                        copy.receiver = prop.receiver;
+                        tile.props.add(copy);
                     }
                     for (InteriorStruts strut : previous.struts) {
                         tile.struts.add(new InteriorStruts(coords, new ModelInstance(strut.instance)));
@@ -3049,7 +3261,8 @@ final class GpuTerrain implements Disposable {
                 if (prop.building != null && prop.building.interior() != null) { chunk.sharedInteriors.add(prop.building.interior()); }
                 if (prop.tree()) {
                     chunk.treeDiameter = Math.max(chunk.treeDiameter, prop.treeDiameter);
-                    chunk.stand.add(prop.treeAsset, prop.instance().transform);
+                    if (prop.scatter) { chunk.scatterDiameter = Math.max(chunk.scatterDiameter, prop.treeDiameter); }
+                    (prop.scatter ? chunk.scatterStand : chunk.stand).add(prop.treeAsset, prop.instance().transform);
                     var glow = GpuFungus.light(scene.height(), prop.coords(), prop.treeAsset, prop.bounds());
                     if (glow != null) { chunk.fungalLights.add(glow); }
                     GpuFungus.Emitter emitter = GpuFungus.emitter(prop.treeAsset, prop.bounds());
@@ -3152,6 +3365,7 @@ final class GpuTerrain implements Disposable {
         List<BoardSurface.Face> bed = new ArrayList<>();
         for (BoardSurface.Face face : surface.faces) {
             // A water hex's banks are sculpted ground whatever its artwork; its ice keeps the artwork.
+            if (face.scatter()) { continue; }
             if (face.finish() == BoardSurface.Finish.ROUGH) { continue; }
             if (face.finish() == BoardSurface.Finish.ICE) { continue; }
             boolean art = face.finish() == BoardSurface.Finish.ICE
@@ -3345,6 +3559,14 @@ final class GpuTerrain implements Disposable {
             var patch = preparedPatch.patch();
             var mask = new GpuRoads.Mask(masks.region(preparedPatch.mask().pixels()), preparedPatch.mask());
             String road = patch.texture().startsWith("roads/") ? patch.texture().substring("roads/".length()) : null;
+            if (road != null && patch.texture().equals(GpuRoads.texture(tile.road()))) {
+                var style = tile.appearance().get("road");
+                if (style != null) {
+                    var variant = megamek.common.board.BoardEditorBlueprint.get().variant(style.variant());
+                    String authored = style.material() != null ? style.material() : variant == null ? "" : variant.material();
+                    if (!authored.isBlank()) { road = authored; }
+                }
+            }
             int maps = road != null ? GpuRoads.MATERIALS.indexOf(road) : 3 + SCULPT_LAYERS.indexOf(patch.texture());
             Material material;
             float coat = Color.WHITE.toFloatBits();
@@ -3508,9 +3730,31 @@ final class GpuTerrain implements Disposable {
     /** One drawn water triangle and its clipping planes, derived once per hex for every face it may cover. */
     private record WaterTop(BoardSurface water, BoardSurface.Face top, float minX, float maxX, float minY, float maxY,
           float maxZ, float nx, float ny, float nz, float[] edges) {
+        /** World units of slack for float rounding before a piece beyond a clipping plane is left unclipped. */
+        private static final float MARGIN = .01f;
+
         /** Whether a face's bounds can meet this triangle's; a face wholly above its surface stays dry. */
         boolean reaches(float faceMinX, float faceMaxX, float faceMinY, float faceMaxY, float faceMinZ) {
             return faceMaxX >= minX && faceMinX <= maxX && faceMaxY >= minY && faceMinY <= maxY && faceMinZ < maxZ;
+        }
+
+        /**
+         * Whether every vertex of a piece lies beyond one of the four clipping planes by more than rounding. The
+         * clips only ever cut a piece, so each crossing they create lies between two of its vertices and is beyond
+         * that plane too: the clip at that plane would keep nothing, and the piece would be handed back whole.
+         */
+        boolean misses(List<MeshPartBuilder.VertexInfo> polygon) {
+            for (int plane = 0; plane < 4; plane++) {
+                Vector3 origin = plane == 1 ? top.b() : plane == 2 ? top.c() : top.a();
+                float planeX = plane < 3 ? edges[plane * 2] : nx, planeY = plane < 3 ? edges[plane * 2 + 1] : ny;
+                float planeZ = plane < 3 ? 0 : nz;
+                boolean beyond = true;
+                for (int i = 0; i < polygon.size() && beyond; i++) {
+                    beyond = planeDistance(polygon.get(i).position, origin, planeX, planeY, planeZ) > MARGIN;
+                }
+                if (beyond) { return true; }
+            }
+            return false;
         }
     }
 
@@ -3695,16 +3939,20 @@ final class GpuTerrain implements Disposable {
             BoardSurface.Face top = water.top();
             Vector3 origin = top.a();
             float[] edges = water.edges();
-            List<List<MeshPartBuilder.VertexInfo>> remaining = new ArrayList<>();
-            for (List<MeshPartBuilder.VertexInfo> polygon : dry) {
-                List<MeshPartBuilder.VertexInfo> wet = polygon;
-                List<List<MeshPartBuilder.VertexInfo>> outside = new ArrayList<>();
+            // The pieces stay as they are until this triangle actually splits one of them.
+            List<List<MeshPartBuilder.VertexInfo>> remaining = null;
+            for (int index = 0; index < dry.size(); index++) {
+                List<MeshPartBuilder.VertexInfo> polygon = dry.get(index);
+                boolean reaches = !water.misses(polygon);
+                List<MeshPartBuilder.VertexInfo> wet = reaches ? polygon : List.of();
+                List<List<MeshPartBuilder.VertexInfo>> outside = reaches ? new ArrayList<>() : List.of();
                 for (int edge = 0; edge < 3 && wet.size() >= 3; edge++) {
                     Vector3 corner = edge == 0 ? top.a() : edge == 1 ? top.b() : top.c();
                     wet = splitCovered(wet, corner, edges[edge * 2], edges[edge * 2 + 1], 0, outside);
                 }
                 if (wet.size() >= 3) { wet = splitCovered(wet, origin, water.nx(), water.ny(), water.nz(), outside); }
                 if (wet.size() >= 3) {
+                    if (remaining == null) { remaining = new ArrayList<>(dry.subList(0, index)); }
                     remaining.addAll(outside);
                     List<MeshPartBuilder.VertexInfo> tinted = new ArrayList<>();
                     for (var vertex : wet) {
@@ -3718,9 +3966,9 @@ final class GpuTerrain implements Disposable {
                         tinted.add(new MeshPartBuilder.VertexInfo().set(vertex).setCol(data));
                     }
                     polygonConsumer.accept(tinted);
-                } else { remaining.add(polygon); }
+                } else if (remaining != null) { remaining.add(polygon); }
             }
-            dry = remaining;
+            if (remaining != null) { dry = remaining; }
         }
         dry.forEach(polygonConsumer);
     }
@@ -4185,7 +4433,7 @@ final class GpuTerrain implements Disposable {
                     Float lowest = occupiedHexes.get(prop.coords());
                     boolean hoverSupport = prop.coords.equals(hoverCoords)
                           && Math.abs(prop.floorZ - hoverFloor) < .05f * BoardGeometry.hexScale();
-                    if (!prop.industrial && lowest != null && (Float.isNaN(prop.floorZ)
+                    if (prop.decorationId == null && !prop.industrial && lowest != null && (Float.isNaN(prop.floorZ)
                           || prop.floorZ > lowest + .05f * BoardGeometry.hexScale() && !hoverSupport)) {
                         faded.add(prop);
                     }
@@ -4193,15 +4441,16 @@ final class GpuTerrain implements Disposable {
             }
             if (hoverCoords != null) {
                 for (Prop prop : chunk.cutaways) {
-                    if (!prop.industrial && Float.isNaN(prop.floorZ) && prop.coords.equals(hoverCoords)) { faded.add(prop); }
+                    if (prop.decorationId == null && !prop.industrial && Float.isNaN(prop.floorZ) && prop.coords.equals(hoverCoords)) { faded.add(prop); }
                 }
             }
             boolean changedOccupancy = !faded.equals(chunk.faded) || changedHover || chunk.cutaways.stream().anyMatch(prop ->
-                  !prop.industrial && Float.isNaN(prop.floorZ) && prop.coords.equals(hoverCoords)
+                  prop.decorationId == null && !prop.industrial && Float.isNaN(prop.floorZ) && prop.coords.equals(hoverCoords)
                         && (prop.hoverOpaque != null) != !occupiedHexes.containsKey(prop.coords));
             if (changedOccupancy || changedOpacity) {
                 chunk.faded = Set.copyOf(faded);
                 for (Prop prop : chunk.cutaways) {
+                    if (prop.decorationId != null) { continue; }
                     boolean hoverShell = !prop.industrial && Float.isNaN(prop.floorZ) && prop.coords.equals(hoverCoords);
                     boolean hoverOnly = hoverShell && !occupiedHexes.containsKey(prop.coords);
                     for (Material material : prop.instance().materials) {
@@ -4268,6 +4517,114 @@ final class GpuTerrain implements Disposable {
     Coords pick(BoardScene scene, Ray ray) {
         BoardGeometry.Hit hit = selectionHit(scene, ray);
         return hit == null ? null : hit.coords();
+    }
+
+    record DecorationHit(Coords coords, String id, float distance, float anchorZ) { }
+
+    record EditorObject(String id, BoundingBox bounds, float anchorLevel) { }
+
+    private TileMesh editorTile(Coords coords) {
+        if (coords == null || chunkRows == 0) { return null; }
+        int index = (coords.getX() / CHUNK_SIZE) * chunkRows + coords.getY() / CHUNK_SIZE;
+        return index < 0 || index >= chunks.size() ? null : chunks.get(index).tileMeshes.get(coords);
+    }
+
+    /** Derived from installed geometry, including composition parts. These are display data, never document state. */
+    List<EditorObject> editorObjects(Coords coords) {
+        TileMesh tile = editorTile(coords);
+        if (tile == null) { return List.of(); }
+        return installedSettings.call(() -> {
+            Map<String, EditorObject> result = new LinkedHashMap<>();
+            for (Prop prop : tile.props) {
+                if (prop.decorationId == null) { continue; }
+                EditorObject previous = result.get(prop.decorationId);
+                if (previous != null) { previous.bounds().ext(prop.bounds); }
+                else { result.put(prop.decorationId, new EditorObject(prop.decorationId, new BoundingBox(prop.bounds),
+                      prop.decorationAnchorZ / BoardGeometry.level())); }
+            }
+            return List.copyOf(result.values());
+        });
+    }
+
+    /** The cut through the actual ground triangles; internal hexes have no exposed vertical wall of their own. */
+    List<Vector3> editorGroundProfile(Coords coords, boolean east) {
+        if (editorTile(coords) == null || coverScene == null) { return List.of(); }
+        return installedSettings.call(() -> {
+            Chunk chunk = chunks.get(coords.getX() / CHUNK_SIZE * chunkRows + coords.getY() / CHUNK_SIZE);
+            var surface = tacticalSurface(coverScene, chunk, coords, floor);
+            List<Vector3> samples = new ArrayList<>();
+            for (int i = 0; i <= 48; i++) {
+                float position = (i / 48f - .5f) * .998f;
+                float x = BoardGeometry.centerX(coords) + (east ? 0 : position * BoardGeometry.width());
+                float y = BoardGeometry.centerY(coords) + (east ? position * BoardGeometry.height() : 0);
+                float z = Float.NEGATIVE_INFINITY;
+                for (var face : surface.top()) { z = Math.max(z, face.height(x, y)); }
+                for (var face : surface.slopes()) { z = Math.max(z, face.height(x, y)); }
+                if (Float.isFinite(z)) { samples.add(new Vector3(x, y, z)); }
+            }
+            return samples;
+        });
+    }
+
+    /** A second camera borrows the installed hex meshes, transforms, materials and animation clocks. */
+    void renderEditorSection(Camera camera, Coords coords, String isolate) {
+        TileMesh tile = editorTile(coords);
+        if (tile == null) { return; }
+        installedSettings.call(() -> {
+            shadingPass++;
+            batch.begin(camera);
+            try {
+                batch.render((out, pool) -> {
+                    for (TileRange range : tile.ranges) {
+                        if (range.layer() == 5 || !isolate.isEmpty()) { continue; }
+                        Renderable part = pool.obtain();
+                        part.worldTransform.idt(); part.material = range.material();
+                        part.meshPart.set("editor-section", range.mesh(), range.offset(), range.count(), GL20.GL_TRIANGLES);
+                        if (part.material.has(Sculpt.TYPE)) { prepareTerrainMaterial(part.material, range.mesh().getVertexAttributes()); }
+                        out.add(part);
+                    }
+                }, environment);
+                for (Prop prop : tile.props) {
+                    if (!Float.isNaN(prop.floorZ) || !isolate.isEmpty() && !isolate.equals(prop.decorationId)) { continue; }
+                    batch.render(prop.instance(), environment);
+                }
+            } finally { batch.end(); }
+            return null;
+        });
+    }
+
+    /** Side-view picking deliberately ignores adjacent hexes and uses the same model triangles as board picking. */
+    String editorSectionPick(Coords coords, Ray ray) {
+        TileMesh tile = editorTile(coords);
+        if (tile == null) { return null; }
+        Vector3 point = new Vector3(); float nearest = Float.POSITIVE_INFINITY; String result = null;
+        for (Prop prop : tile.props) {
+            if (prop.decorationId != null && hitProp(prop, ray, point) && ray.origin.dst2(point) < nearest) {
+                nearest = ray.origin.dst2(point); result = prop.decorationId;
+            }
+        }
+        return result;
+    }
+
+    /** Native editor selection uses the same installed instances and triangle picker as both board cameras. */
+    DecorationHit decorationHit(BoardScene scene, Ray ray) {
+        if (!ready(scene)) { return null; }
+        return installedSettings.call(() -> {
+            BoardGeometry.Hit solid = hitInstalled(presentation(scene), ray, true);
+            float nearest = solid == null ? Float.POSITIVE_INFINITY : solid.distance() + .001f;
+            DecorationHit result = null;
+            Vector3 point = new Vector3();
+            for (Chunk chunk : chunks) {
+                if (!Intersector.intersectRayBoundsFast(ray, chunk.bounds)) { continue; }
+                for (Prop prop : chunk.props) {
+                    if (prop.decorationId != null && hitProp(prop, ray, point) && ray.origin.dst2(point) <= nearest) {
+                        nearest = ray.origin.dst2(point);
+                        result = new DecorationHit(prop.coords, prop.decorationId, nearest, prop.instance.transform.val[Matrix4.M23]);
+                    }
+                }
+            }
+            return result;
+        });
     }
 
     /** Hover and clicks use the ground beneath foliage and industrial cover, which have no occupiable floors. */
@@ -4434,6 +4791,7 @@ final class GpuTerrain implements Disposable {
         for (int chunkIndex = 0; chunkIndex < chunks.size(); chunkIndex++) {
             Chunk chunk = chunks.get(chunkIndex);
             boolean visible = camera.frustum.boundsInFrustum(chunk.bounds);
+            boolean scatterVisible = terrain && visible && chunk.scatterVisible;
             if (terrain) {
                 int page = chunkIndex / chunkRows / GpuTerrainPages.CHUNKS_PER_PAGE * terrainPageRows
                       + chunkIndex % chunkRows / GpuTerrainPages.CHUNKS_PER_PAGE;
@@ -4446,9 +4804,12 @@ final class GpuTerrain implements Disposable {
                 // Keep the complete opaque source cached and draw the opened chunk separately.
                 propBatch.add(chunk.shadowProps, propPage, visible && chunk.faded.isEmpty());
                 if (visible && !chunk.faded.isEmpty()) { propBatch.addDynamic(chunk.solidProps); }
-                propBatch.add(chunk.scatterRenderables, propPage, terrain && visible && chunk.scatterVisible);
+                propBatch.add(chunk.scatterRenderables, propPage, scatterVisible);
             }
-            if (terrain) { trees.add(chunk.stand, chunk.treeLod, visible); }
+            if (terrain) {
+                trees.add(chunk.stand, chunk.treeLod, visible);
+                trees.add(chunk.scatterStand, chunk.treeLod, scatterVisible);
+            }
             if (!visible) {
                 continue;
             }
@@ -4721,10 +5082,14 @@ final class GpuTerrain implements Disposable {
         int coarsest = shadows && camera.viewportWidth / SHADOW_RESOLUTION >= BoardRelief.metres(.5f) ? 2 : 0;
         for (Chunk chunk : chunks) {
             boolean visible = camera.frustum.boundsInFrustum(chunk.bounds);
-            if (!columns) { trees.add(chunk.stand, Math.max(chunk.treeLod, coarsest), visible); }
+            boolean scatterVisible = includeScatter && visible && chunk.scatterVisible;
+            if (!columns) {
+                trees.add(chunk.stand, Math.max(chunk.treeLod, coarsest), visible);
+                trees.add(chunk.scatterStand, Math.max(chunk.treeLod, coarsest), scatterVisible);
+            }
             if (visible) {
                 if (!columns) { pass.render(chunk.depthTerrain); }
-                if (!columns && includeScatter && chunk.scatterVisible) {
+                if (!columns && scatterVisible) {
                     chunk.scatter.forEach(pass::render);
                 }
                 pass.render(shadows ? chunk.shadowProps : chunk.solidProps);

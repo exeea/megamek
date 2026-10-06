@@ -107,11 +107,15 @@ per-instance materials while retaining shared mesh/texture ownership.
 
 The HUD's Wireframe utility (beside Tactical view; also on the tuning panel's Camera page)
 draws terrain, buildings and trees as green lines,
-and units with a separate thermal shader. Decorative scatter is omitted from both
-wireframe lines and its depth fill. The two views exclude each other: turning the wireframe on leaves the Tactical
+and units with a separate thermal shader. All cosmetic scatter, including baked field stones and shrubs and
+instanced ground/cliff fungi, is omitted from both wireframe lines and its depth fill.
+The terrain's packed meshes and instanced scatter models share the same chunk scatter visibility in color,
+depth and shadow passes; the wireframe excludes that layer.
+The two views exclude each other: turning the wireframe on leaves the Tactical
 View, and entering the Tactical View turns the wireframe off. The unit pass borrows the same posed models,
 visible parts, sprite alpha cutouts and scene depth as the shaded view. Sensor contacts
-and tactical overview icons retain their existing presentation.
+and tactical overview icons retain their existing presentation. Source bloom, glare and lens reflections are
+suppressed in wireframe; leaving it restores the configured glare strength.
 
 `GpuBoardSource` captures `Entity.heat` only when `tracksHeat()` is true. The value stays
 in `BoardScene.Unit` and follows the displayed movement/combat snapshots; the render
