@@ -158,10 +158,12 @@ class GpuShadowCacheSmokeTest {
 
     private static void fullPass(GpuTerrain terrain, List<ModelInstance> units) throws ReflectiveOperationException {
         var shadow = (DirectionalShadowLight) terrain.environment().shadowMap;
-        var draw = GpuTerrain.class.getDeclaredMethod("renderDepth", Camera.class, List.class, ModelBatch.class, boolean.class);
+        var draw = GpuTerrain.class.getDeclaredMethod("renderDepth", Camera.class, List.class, ModelBatch.class, boolean.class,
+              boolean.class);
         draw.setAccessible(true);
+        // As the full shadow pass draws: shadows on, scatter included.
         shadow.begin();
-        try { draw.invoke(terrain, shadow.getCamera(), units, field(terrain, "depthBatch"), true); }
+        try { draw.invoke(terrain, shadow.getCamera(), units, field(terrain, "depthBatch"), true, true); }
         finally { shadow.end(); }
     }
 
