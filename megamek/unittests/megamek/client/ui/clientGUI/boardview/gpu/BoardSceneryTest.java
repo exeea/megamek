@@ -44,6 +44,8 @@ class BoardSceneryTest {
             for (int i = 0; i < layout.components().size(); i++) {
                 var authored = layout.components().get(i);
                 var component = natural.get(i);
+                assertFalse(component.asset().matches("scenery/components/.*-[0-9a-f]{8}"),
+                      "Shared asset identities must not depend on parameter hashes");
                 assertEquals(authored.kind(), component.kind());
                 assertEquals(authored.x(), component.x());
                 assertEquals(authored.y(), component.y());
@@ -123,6 +125,10 @@ class BoardSceneryTest {
             }
             assertTrue(models.size() + compositions >= 281, "The full model and composition catalog is shipped");
             for (Path file : models) {
+                if (file.getParent().endsWith("components")) {
+                    assertFalse(file.getFileName().toString().matches(".*-[0-9a-f]{8}\\.glb"),
+                          "No obsolete hashed component stays in the asset pool");
+                }
                 var data = RigidGlb.loadLods(new FileHandle(file.toFile()), root).getFirst();
                 assertFalse(data.meshes.isEmpty(), file.toString());
             }

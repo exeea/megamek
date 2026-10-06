@@ -3,9 +3,13 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuCamouflageReview.field;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.image.BufferedImage;
+import java.io.File;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -13,13 +17,19 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
+import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
+import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.VertexAttributes.Usage;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
+import megamek.common.Hex;
+import megamek.common.board.Board;
 import megamek.common.board.Coords;
+import megamek.common.units.Terrain;
+import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -91,7 +101,16 @@ class GpuTilesetTerrainSmokeTest {
             assertEquals(-4 * BoardGeometry.level(), face.a().z, .001f, "The artwork follows the edited bed depth");
         }
 
-        // Both natural banks and quays meet liquid with full coverage, without a shore fade at the boundary.
+        // A bank borrows land art across a section boundary, even when only the land's pixels changed.
+        water.set(edge.getX() * HEIGHT + edge.getY(), land(edge, art));
+        scene = scene.withTiles(water);
+        terrain.update(scene, bedFloor, assets);
+        water = new ArrayList<>(water);
+        water.set(edge.getX() * HEIGHT + edge.getY(), land(edge, pixels(0xff907050)));
+        scene = scene.withTiles(water);
+        assertEquals(Set.of(0, rows), rebuilt(terrain, chunks, scene, bedFloor, assets));
+
+        // Sand fades over the solid bank; liquid keeps its existing opacity right up to its fitted boundary.
         Coords center = new Coords(1, 1);
         for (var bank : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.CONCRETE)) {
             List<BoardScene.Tile> shore = new ArrayList<>();
@@ -104,14 +123,19 @@ class GpuTilesetTerrainSmokeTest {
             scene = new BoardScene(0, 3, 3, shore, List.of(), List.of(), -1, "", List.of());
             terrain.update(scene, bedFloor, assets);
             var liquid = (ModelInstance) field(chunks.values().iterator().next(), "liquid");
+            var support = terrain.surface(scene, center, bedFloor);
             int vertices = 0;
             for (var mesh : liquid.model.meshes) {
                 int stride = mesh.getVertexSize() / Float.BYTES;
                 int alpha = mesh.getVertexAttribute(Usage.ColorUnpacked).offset / Float.BYTES + 3;
+                int position = mesh.getVertexAttribute(Usage.Position).offset / Float.BYTES;
                 float[] data = new float[mesh.getNumVertices() * stride];
                 mesh.getVertices(data);
                 for (int i = 0; i < mesh.getNumVertices(); i++) {
                     assertEquals(1, data[i * stride + alpha], .0001f, "Water must not fade beside " + bank);
+                    float x = data[i * stride + position], y = data[i * stride + position + 1];
+                    assertTrue(support.water().stream().anyMatch(face -> Float.isFinite(face.height(x, y))),
+                          "Uploaded water stays inside the same shore boundary used by picking: " + bank);
                     vertices++;
                 }
             }
@@ -119,9 +143,77 @@ class GpuTilesetTerrainSmokeTest {
         }
     }
 
+    @Test
+    void capturesNaturalShoresAndARaisedPoolWithTheRealTileset() throws Exception {
+        int width = 12, height = 10;
+        Hex[] hexes = new Hex[width * height];
+        for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+            boolean river = x == 3 || y >= 6 && x >= 2 && x <= 5;
+            boolean pool = x == 8 && y == 4;
+            Hex hex = new Hex(pool ? 6 : x >= 7 ? 1 : y < 5 ? 2 : 0);
+            if (river || pool) { hex.addTerrain(new Terrain(Terrains.WATER, pool || x == 3 ? 1 : 2)); }
+            if (x == 6 && y >= 6) { hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1)); }
+            hexes[y * width + x] = hex;
+        }
+        var failure = new AtomicReference<Throwable>();
+        try (var fixture = GpuBoardFixture.create(new Board(width, height, hexes))) {
+            SwingUtilities.invokeAndWait(fixture.source::refresh);
+            BoardScene scene = fixture.source.takeFrame().scene();
+            var config = GpuBoardWindow.configuration(false);
+            config.setWindowedMode(1440, 1080);
+            new Lwjgl3Application(new ApplicationAdapter() {
+                @Override public void create() {
+                    GpuTerrain terrain = new GpuTerrain();
+                    GpuReviewFrame frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
+                          BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+                    try {
+                        File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"),
+                              "tactical-shores");
+                        Files.createDirectories(output.toPath());
+                        BoardCamera camera = new BoardCamera();
+                        camera.resize(1440, 1080);
+                        terrain.update(scene);
+                        Coords pool = new Coords(8, 4);
+                        var original = terrain.tacticalSurface(pool);
+                        terrain.setTacticalView(true);
+                        assertNotSame(original, terrain.tacticalSurface(pool));
+                        terrain.setTacticalView(false);
+                        assertSame(original, terrain.tacticalSurface(pool), "Switching views retains the exact 3D terrain");
+                        terrain.setTacticalView(true);
+                        for (boolean oblique : new boolean[] { false, true }) {
+                            camera.setIsometric(oblique);
+                            camera.camera.zoom = .65f;
+                            camera.center(BoardGeometry.center(new Coords(5, 5), 2));
+                            frame.render(terrain, camera, scene);
+                            terrain.animate(.5f, List.of());
+                            frame.render(terrain, camera, scene);
+                            GpuReviewFrame.save(new File(output, oblique ? "oblique.png" : "top.png"));
+                        }
+                        camera.camera.zoom = .16f;
+                        camera.center(BoardGeometry.center(new Coords(8, 4), 5));
+                        frame.render(terrain, camera, scene);
+                        GpuReviewFrame.save(new File(output, "raised-pool.png"));
+                        assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                    } catch (Throwable error) { failure.set(error); }
+                    finally {
+                        frame.dispose();
+                        terrain.dispose();
+                        Gdx.app.exit();
+                    }
+                }
+            }, config);
+        }
+        if (failure.get() != null) { throw new AssertionError("Tactical shore review", failure.get()); }
+    }
+
     private static BoardScene.Tile pool(Coords coords, int depth, BoardScene.Pixels art) {
         return new BoardScene.Tile(coords, 0, depth, false, 0, BoardScene.Surface.GRASS, art, null, null, null, null,
               List.of(), List.of(), BoardLiquid.WATER, art);
+    }
+
+    private static BoardScene.Tile land(Coords coords, BoardScene.Pixels art) {
+        return new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS, art, null, null, null, null,
+              List.of(), List.of(), BoardLiquid.NONE, art);
     }
 
     /** The indices of the sections whose meshes an update to {@code scene} replaced. */

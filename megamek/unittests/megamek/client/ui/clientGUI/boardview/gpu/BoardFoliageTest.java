@@ -138,7 +138,7 @@ class BoardFoliageTest {
     }
 
     @ParameterizedTest
-    @CsvSource({ "'', 0, temperate", "'', 2, highland", "rock, 0, rocky", "volcano, 0, rocky",
+    @CsvSource({ "'', 0, temperate", "'', 2, highland", "rock, 0, rocky", "volcano, 0, volcano",
           "dirt, 0, wetland", "lunar, 0, barren", "Desert, 0, desert",
           "sand, 0, desert", "snow, 0, snow" })
     void lowWoodsUseBiomeShrubsAtEveryDensity(String theme, int elevation, String family) {

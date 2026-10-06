@@ -34,6 +34,7 @@ final class BoardFeatures {
           "birch", "pine-slender", "pine-layered", "pine-slender", "pine-layered", "birch-tall", "birch-young");
     private static final List<String> ROCKY = List.of("pine", "tree-dead", "pine-tall", "pine-broad", "pine-slender",
           "pine-layered");
+    static final List<String> VOLCANO_TREES = List.of("tree-volcano-crown", "tree-volcano-forked", "tree-volcano-spire");
     private static final List<String> WETLAND = List.of("willow", "tree-slender", "tree-dead", "willow", "tree",
           "willow-broad", "willow-broad", "birch-spreading", "tree-forked");
     private static final List<String> BARREN = List.of("tree-dead");
@@ -221,7 +222,8 @@ final class BoardFeatures {
         if ((jungle || hex.containsTerrain(Terrains.WOODS)) && !scenery.modelTerrains().contains(Terrains.WOODS)) {
             // Snow/pavement change the ground, not the planet's vegetation (including low cover and jungle).
             boolean mars = hex.getTheme() != null && hex.getTheme().toLowerCase(Locale.ROOT).contains("mars");
-            boolean orchard = !mars && orchard(hex);
+            boolean volcano = hex.getTheme() != null && hex.getTheme().toLowerCase(Locale.ROOT).contains("volcan");
+            boolean orchard = !mars && !volcano && orchard(hex);
             boolean fungus = surface(hex) == BoardScene.Surface.FUNGUS;
             int density = hex.terrainLevel(jungle ? Terrains.JUNGLE : Terrains.WOODS);
             int count = fungus || mars ? (density >= 3 ? 6 : density == 2 ? 4 : 2)
@@ -231,10 +233,12 @@ final class BoardFeatures {
             float height = Math.max(1, hex.terrainLevel(Terrains.FOLIAGE_ELEV));
             float crown = orchard ? (density >= 3 ? .62f : .82f)
                   : density >= 3 ? 1.35f : density == 2 ? 1.45f : 1.7f;
-            List<String> species = mars ? MARS_CORALS : fungus ? BoardFungus.COVER : orchard ? orchardSpecies(hex)
+            List<String> species = mars ? MARS_CORALS
+                  : volcano ? (height == 1 ? List.of("foliage-volcano") : VOLCANO_TREES)
+                  : fungus ? BoardFungus.COVER : orchard ? orchardSpecies(hex)
                   : height == 1 ? List.of(shrub(hex, jungle)) : species(hex, jungle);
             // Cosmetic understory shares the canopy's placement, road clearance, grounding and tree LODs.
-            boolean understory = surface(hex) == BoardScene.Surface.TROPICAL && height > 1 && !orchard;
+            boolean understory = surface(hex) == BoardScene.Surface.TROPICAL && height > 1 && !orchard && !volcano;
             if (understory) { count *= 2; }
             Random treeRandom = natural ? new Random(coords.getX() * 73_856_093L ^ coords.getY() * 19_349_663L) : null;
             for (int index = 0; index < count; index++) {
