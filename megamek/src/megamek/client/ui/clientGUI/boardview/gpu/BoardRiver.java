@@ -11,6 +11,10 @@ import megamek.common.board.Coords;
 /** Shared stream paths through connected water hexes. Only visual geometry; the board still supplies water depth. */
 final class BoardRiver {
     private static final int STEPS = 12;
+    /** Perlin gradients here sum two unit offsets and the result is scaled by 1.4: no sample exceeds this. */
+    private static final float MAX_GRADIENT = 2.8f;
+    /** World units of slack for float rounding in a channel's bound before it may be skipped. */
+    private static final float CLEARANCE_MARGIN = .05f;
     private final BoardScene scene;
     private final BoardRelief.Tuning tuning;
     private final float scale = BoardGeometry.hexScale();
@@ -27,6 +31,8 @@ final class BoardRiver {
         private final List<Span> spans;
         private final float depthA, depthB;
         private final boolean broadA, broadB, detailedA, detailedB, uniform;
+        /** The spans' bounds, and the largest radius any point of the channel can have at any wander. */
+        private final float minX, minY, maxX, maxY, reach;
 
         Channel(List<Span> spans, BoardScene.Tile a, BoardScene.Tile b, boolean broadA, boolean broadB) {
             this.spans = spans;
@@ -37,6 +43,29 @@ final class BoardRiver {
             detailedA = a.detailedGround();
             detailedB = b.detailedGround();
             uniform = depthA == depthB && broadA == broadB && detailedA == detailedB;
+            float left = Float.POSITIVE_INFINITY, bottom = Float.POSITIVE_INFINITY;
+            float right = Float.NEGATIVE_INFINITY, top = Float.NEGATIVE_INFINITY;
+            for (Span span : spans) {
+                left = Math.min(left, Math.min(span.ax(), span.ax() + span.dx()));
+                right = Math.max(right, Math.max(span.ax(), span.ax() + span.dx()));
+                bottom = Math.min(bottom, Math.min(span.ay(), span.ay() + span.dy()));
+                top = Math.max(top, Math.max(span.ay(), span.ay() + span.dy()));
+            }
+            minX = left;
+            maxX = right;
+            minY = bottom;
+            maxY = top;
+            // The radius grows with the wander and changes monotonically along the channel (the tuning keeps
+            // riverWidth within 0.05..1), so the endpoints at the largest wander bound every point of it; open water
+            // and special artwork add their own fixed caps.
+            float wanderBound = .3f * tuning.shoreWander() * MAX_GRADIENT;
+            reach = Math.max(Math.max(radius(0, wanderBound), radius(1, wanderBound)), Math.max(72 * scale, width / 2));
+        }
+
+        /** How far a point lies outside the channel's bounds; no span comes nearer than this. */
+        float clearance(float x, float y) {
+            float dx = Math.max(Math.max(minX - x, x - maxX), 0), dy = Math.max(Math.max(minY - y, y - maxY), 0);
+            return (float) Math.sqrt(dx * dx + dy * dy);
         }
 
         float field(float x, float y, float wander) {
@@ -116,6 +145,9 @@ final class BoardRiver {
             List<Channel> channels = sample.channels();
             for (int i = 0; i < channels.size(); i++) {
                 Channel channel = channels.get(i);
+                // A channel whose field cannot come within the rounding of the union so far leaves it unchanged:
+                // smoothMin is an exact minimum once the two values differ by its rounding or more.
+                if (channel.reach - channel.clearance(x, y) + CLEARANCE_MARGIN <= result - round) { continue; }
                 float value = channel.field(x, y, wander);
                 result = round > 0 ? -BoardRelief.smoothMin(-result, -value, round) : Math.max(result, value);
                 if (result >= limit) { return result; }

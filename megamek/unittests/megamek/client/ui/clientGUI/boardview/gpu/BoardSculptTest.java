@@ -240,7 +240,7 @@ class BoardSculptTest {
             for (BoardSurface.Face face : surface.faces) {
                 Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
                 if (face.finish() == BoardSurface.Finish.TOP) {
-                    assertTrue(normal.z > 0, "Top triangles face upward (no folds)");
+                    assertTrue(normal.z > 0, "Top triangles face upward (no folds) at " + tile.coords() + ": " + face);
                 }
                 for (Vector3 p : List.of(face.a(), face.b(), face.c())) {
                     assertTrue(Float.isFinite(p.x) && Float.isFinite(p.y) && Float.isFinite(p.z));

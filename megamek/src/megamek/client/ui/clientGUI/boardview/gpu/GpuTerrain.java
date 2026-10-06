@@ -23,10 +23,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import com.badlogic.gdx.Gdx;
@@ -591,32 +589,25 @@ final class GpuTerrain implements Disposable {
     private final Environment environment = new Environment();
     private final GpuLavaLighting lavaLighting = new GpuLavaLighting();
     private final List<Chunk> chunks = new ArrayList<>();
-    // At most four in-flight chunks and eight replaced chunks. Each chunk also fans its hexes out on this pool
-    // through parallelStream, so loading scales with workers. Half the cores, at most eight, still leaves CPU
-    // capacity for rendering/input instead of borrowing every common-pool worker. All GL ownership stays on the
-    // render thread.
-    private static final int DETAIL_WORKERS = Math.max(1, Math.min(8, Runtime.getRuntime().availableProcessors() / 2));
-    // getPoolIndex() is not assigned until the worker registers, so it reads 0 here; number the threads ourselves.
-    private final AtomicInteger detailWorkerCount = new AtomicInteger();
-    private final ExecutorService detailWorker = new ForkJoinPool(DETAIL_WORKERS, pool -> {
-        var thread = ForkJoinPool.defaultForkJoinWorkerThreadFactory.newThread(pool);
-        thread.setName("terrain-detail-" + detailWorkerCount.getAndIncrement());
-        return thread;
-    }, null, false);
+    // At most four in-flight chunks and eight replaced chunks. Half the cores, at most eight, build terrain: each
+    // chunk spreads its hexes across the pool, while the other half keeps rendering, input and garbage collection
+    // responsive. All GL ownership stays on the render thread.
+    static final int DEFAULT_WORKERS = Math.max(1, Math.min(8, Runtime.getRuntime().availableProcessors() / 2));
+    private final ExecutorService detailWorker = TerrainSettings.workers(DEFAULT_WORKERS);
     private final Map<Integer, Chunk> detailCache = new LinkedHashMap<>();
     private record DetailJob(long generation, int index, Chunk source, TerrainLod lod, BoardScene scene,
           TerrainSettings settings, float floor, boolean rebuilding, CompletableFuture<Prepared> surfaces,
           ChunkBuild build, CompletableFuture<Void> meshes, TerrainLoadProgress progress) {
         boolean ready() { return build == null ? surfaces.isDone() : meshes == null || meshes.isDone(); }
     }
-    private record Prepared(Map<Coords, BoardSurface> surfaces, GpuWaterShader.Field.Prepared water,
+    record Prepared(Map<Coords, BoardSurface> surfaces, GpuWaterShader.Field.Prepared water,
           GpuWaterShader.Field.Prepared lava,
           Map<Coords, BoardTacticalGeometry.Surface> topography, Map<Coords, BoardPlants> plants,
           Map<Coords, SculptPlan> sculpts,
           Map<Coords, BoardFlow.Current> currents, Map<Coords, List<RoadPatch>> roads,
           Map<Coords, BoardBridge.Deck> bridges, Map<Coords, BoardBridge.Shape> bridgeShapes,
           Map<Coords, Map<BoardSurface.Side, List<BoardSurface.Face>>> walls, Set<Coords> reused) { }
-    private record RoadPatch(GpuRoads.Patch patch, GpuRoads.MaskData mask,
+    record RoadPatch(GpuRoads.Patch patch, GpuRoads.MaskData mask,
           List<BoardTacticalGeometry.Triangle> triangles, boolean flat) { }
     private record Request(long generation, BoardScene scene, TerrainSettings settings) { }
     private record UpdatePlan(float floor, BoardConcrete coast, Map<Coords, BoardFlow.Current> currents,
@@ -1984,7 +1975,7 @@ final class GpuTerrain implements Disposable {
         detailJob = new DetailJob(generation, index, source, lod, scene, settings, bottom, rebuilding,
               CompletableFuture.supplyAsync(() -> settings.call(
                     () -> prepare(scene, x, y, bottom, lod, flow, settings, reuse, waterShapes,
-                          () -> checkBuild(generation), progress)), detailWorker), null, null, progress);
+                          () -> checkBuild(generation), progress, roadMaskData)), detailWorker), null, null, progress);
     }
 
     private void prepareAtlases(BoardScene scene, UpdatePlan plan, TerrainLoadProgress progress) {
@@ -2175,9 +2166,11 @@ final class GpuTerrain implements Disposable {
         return limbModel != null && tile.decalsWithoutLimbs() != null ? tile.decalsWithoutLimbs() : tile.decals();
     }
 
-    private Prepared prepare(BoardScene scene, int startX, int startY, float floor, TerrainLod lod,
+    /** The CPU side of one chunk: pure terrain work that any worker can run, with no GL or renderer state. */
+    static Prepared prepare(BoardScene scene, int startX, int startY, float floor, TerrainLod lod,
           Map<Coords, BoardFlow.Current> currents, TerrainSettings settings, Set<Coords> reused,
-          Map<Coords, BoardSurface.WaterGeometry> waterShapes, Runnable check, TerrainLoadProgress progress) {
+          Map<Coords, BoardSurface.WaterGeometry> waterShapes, Runnable check, TerrainLoadProgress progress,
+          GpuRoads.Masks masks) {
         check.run();
         // Sculpting is pure CPU work per hex: prepare the chunk's surfaces and cliffs in parallel, then build meshes.
         List<BoardScene.Tile> chunkTiles = new ArrayList<>();
@@ -2251,7 +2244,7 @@ final class GpuTerrain implements Disposable {
                     check.run();
                     var triangles = GpuRoads.drape(surface.tile, surface, patch);
                     if (!triangles.isEmpty() && !patch.shape().isEmpty()) {
-                        patches.add(new RoadPatch(patch, roadMaskData.share(GpuRoads.mask(road, patch)), triangles, false));
+                        patches.add(new RoadPatch(patch, masks.share(GpuRoads.mask(road, patch)), triangles, false));
                     }
                 }
             }
@@ -2271,7 +2264,7 @@ final class GpuTerrain implements Disposable {
                 for (var patch : GpuRoads.deckPatches(tile, deck, road, footing)) {
                     check.run();
                     if (patch.shape().isEmpty()) { continue; }
-                    patches.add(new RoadPatch(patch, roadMaskData.share(GpuRoads.mask(road, patch)),
+                    patches.add(new RoadPatch(patch, masks.share(GpuRoads.mask(road, patch)),
                           GpuRoads.deck(tile, feature, patch, footing, surfaces, slope), true));
                 }
             }
@@ -2567,9 +2560,10 @@ final class GpuTerrain implements Disposable {
             chunk.bounds.ext(bounds);
         }
         var features = tile.features();
-        if (features.stream().anyMatch(f -> f.kind() == BoardScene.FeatureKind.SCENERY)) {
+        if (features.stream().anyMatch(f -> f.kind() == BoardScene.FeatureKind.SCENERY || f.authoredPlacement())) {
             // Install solid supports first, regardless of the captured artwork layer order.
-            features = features.stream().sorted(Comparator.comparing(f -> f.kind() == BoardScene.FeatureKind.SCENERY)).toList();
+            features = features.stream().sorted(Comparator.comparing(f -> f.kind() == BoardScene.FeatureKind.SCENERY
+                  || f.authoredPlacement())).toList();
         }
         List<Prop> supports = new ArrayList<>();
         for (BoardScene.Feature feature : features) {
@@ -2653,7 +2647,7 @@ final class GpuTerrain implements Disposable {
                   key -> coralRootRadius(key, bounds.min.z + rootInset)) * coralScale : BoardRelief.metres(.8f);
             float px = BoardGeometry.centerX(tile.coords()) + feature.x() * BoardGeometry.hexScale();
             float py = BoardGeometry.centerY(tile.coords()) + feature.y() * BoardGeometry.hexScale();
-            if (feature.kind() == BoardScene.FeatureKind.TREE || fungusScatter) {
+            if (feature.kind() == BoardScene.FeatureKind.TREE && !feature.authoredPlacement() || fungusScatter) {
                 // A tree stands on its hex's own ground, never over a receding rim or a transition's slope.
                 // Roadside cover keeps its captured route clearance instead of being pulled toward the carriageway.
                 float[] spot = surface.relief.settle(px, py,
@@ -2684,6 +2678,14 @@ final class GpuTerrain implements Disposable {
                       .rotate(Vector3.Y, 90).scale(scale, scale, scale);
                 BoundingBox placed = new BoundingBox(bounds).mul(instance.transform);
                 instance.transform.val[Matrix4.M23] += base - placed.min.z + .12f * BoardGeometry.hexScale();
+            } else if (feature.authoredPlacement()) {
+                // Components share their composition's supporting plane and retain their local origins and offsets.
+                float scale = feature.scale() * BoardGeometry.hexScale();
+                base = scenerySupport(surface, prepared.bridgeShapes().get(tile.coords()), supports,
+                      BoardGeometry.centerX(tile.coords()), BoardGeometry.centerY(tile.coords()));
+                instance.transform.setToTranslation(px, py,
+                            base + feature.elevation() * BoardGeometry.MODEL_LEVEL_HEIGHT * BoardGeometry.hexScale())
+                      .rotate(Vector3.Z, feature.rotation()).scale(scale, scale, scale);
             } else if (feature.kind() == BoardScene.FeatureKind.SCENERY) {
                 // Scenery is authored in tile units, like bridge furniture. A game level is not its thickness.
                 float scale = feature.scale() * BoardGeometry.hexScale();
@@ -3161,6 +3163,7 @@ final class GpuTerrain implements Disposable {
         bed = surface.renderBed(bed);
         Map<GpuSurfaceBlend.Palette, List<GpuSurfaceBlend.Triangle>> groups = new LinkedHashMap<>();
         float spacing = GpuSurfaceBlend.spacing(lod);
+        var sampler = new BoardSurfaceBlend.Sampler(scene, tile);
         // Open-water banks belong to their adjacent land. Process them with the shared water field below,
         // before a water hex's authored mixture can consume these faces and repaint the shore with its nominal theme.
         if (openWater(tile) == null && BoardSurfaceBlend.cliffBoundary(scene, tile)) {
@@ -3184,8 +3187,7 @@ final class GpuTerrain implements Disposable {
             for (var face : blended) {
                 boolean cliff = surface.relief.shade(face.a()).kind() != BoardRelief.Kind.GROUND;
                 coveredPolygons(surface, face, waters, polygon -> GpuSurfaceBlend.appendPolygon(groups, BoardSurfaceBlend.family(tile),
-                      polygon, p -> cliff ? BoardSurfaceBlend.sampleCliff(scene, tile, p.x, p.y, p.z)
-                            : BoardSurfaceBlend.sample(scene, tile, p.x, p.y, p.z), spacing));
+                      polygon, p -> cliff ? sampler.sampleCliff(p.x, p.y, p.z) : sampler.sample(p.x, p.y, p.z), spacing));
             }
         }
         if (openWater(tile) != null) {
@@ -3208,16 +3210,16 @@ final class GpuTerrain implements Disposable {
             var waters = coveringWaters(scene, surface, surfaces);
             for (var face : blended) {
                 coveredPolygons(surface, face, waters, polygon -> GpuSurfaceBlend.appendPolygon(groups,
-                      surface.family(face), polygon, p -> BoardSurfaceBlend.sample(scene, tile, p.x, p.y, p.z), spacing));
+                      surface.family(face), polygon, p -> sampler.sample(p.x, p.y, p.z), spacing));
             }
             for (var face : bed) {
-                coveredPolygons(face, waters, p -> {
+                coveredPolygons(face, waters, Integer.MAX_VALUE, p -> {
                     var shade = surface.relief.shade(p);
                     return shade != null ? sculptVertex(p, shade, Float.NaN, surface)
                           : vertex(p, bedNormals.get(p), 99, 99,
                                 new Color(1, (tile.elevation() + 64) / 255f, 0, .3f));
                 }, polygon -> GpuSurfaceBlend.appendPolygon(groups, surface.family(face), polygon,
-                      p -> BoardSurfaceBlend.sample(scene, tile, p.x, p.y, p.z), spacing));
+                      p -> sampler.sample(p.x, p.y, p.z), spacing));
             }
             bed.clear();
         }
@@ -3476,7 +3478,7 @@ final class GpuTerrain implements Disposable {
         Map<Vector3, Short> indices = new java.util.IdentityHashMap<>();
         MeshPartBuilder previous = null;
         Function<Vector3, Short> vertex = null;
-        Map<BoardSurface, List<BoardSurface>> coverage = new java.util.IdentityHashMap<>();
+        Map<BoardSurface, WaterCover> coverage = new java.util.IdentityHashMap<>();
         for (BoardSurface.Face face : faces) {
             BoardSurface water = openWater(surface.tile) == null ? null : surface;
             if (water == null && face.landEdge() >= 0) {
@@ -3487,7 +3489,7 @@ final class GpuTerrain implements Disposable {
                 }
             }
             if (water != null) {
-                List<BoardSurface> waters = coverage.computeIfAbsent(water, own -> coveringWaters(scene, own, surfaces));
+                WaterCover waters = coverage.computeIfAbsent(water, own -> coveringWaters(scene, own, surfaces));
                 coveredFace(triangles, surface, face, waters);
                 continue;
             }
@@ -3503,60 +3505,182 @@ final class GpuTerrain implements Disposable {
         }
     }
 
-    private static List<BoardSurface> coveringWaters(BoardScene scene, BoardSurface own, Map<Coords, BoardSurface> surfaces) {
-        List<BoardSurface> joined = new ArrayList<>(List.of(own));
+    /** One drawn water triangle and its clipping planes, derived once per hex for every face it may cover. */
+    private record WaterTop(BoardSurface water, BoardSurface.Face top, float minX, float maxX, float minY, float maxY,
+          float maxZ, float nx, float ny, float nz, float[] edges) {
+        /** Whether a face's bounds can meet this triangle's; a face wholly above its surface stays dry. */
+        boolean reaches(float faceMinX, float faceMaxX, float faceMinY, float faceMaxY, float faceMinZ) {
+            return faceMaxX >= minX && faceMinX <= maxX && faceMaxY >= minY && faceMinY <= maxY && faceMinZ < maxZ;
+        }
+    }
+
+    /**
+     * The drawn water triangles that can cover a hex's faces, in the order they are applied, binned on a grid so a
+     * face tests the few triangles near it rather than every triangle of up to seven water hexes.
+     */
+    private static final class WaterCover {
+        private final List<WaterTop> tops;
+        private final float minX, minY, cell;
+        private final int columns, rows;
+        private final int[][] cells;
+        private final int[] seen;
+        private int[] candidates = new int[64];
+        private int stamp;
+
+        WaterCover(List<WaterTop> tops) {
+            this.tops = tops;
+            float left = Float.POSITIVE_INFINITY, bottom = Float.POSITIVE_INFINITY;
+            float right = Float.NEGATIVE_INFINITY, top = Float.NEGATIVE_INFINITY;
+            for (WaterTop water : tops) {
+                left = Math.min(left, water.minX());
+                bottom = Math.min(bottom, water.minY());
+                right = Math.max(right, water.maxX());
+                top = Math.max(top, water.maxY());
+            }
+            // Water triangles span a fraction of a hex; cells of a sixth of a hex width hold a few of them each.
+            cell = BoardGeometry.width() / 6;
+            minX = left;
+            minY = bottom;
+            columns = tops.isEmpty() ? 0 : (int) ((right - left) / cell) + 1;
+            rows = tops.isEmpty() ? 0 : (int) ((top - bottom) / cell) + 1;
+            cells = new int[columns * rows][];
+            seen = new int[tops.size()];
+            int[] counts = new int[cells.length];
+            for (int pass = 0; pass < 2; pass++) {
+                for (int i = 0; i < tops.size(); i++) {
+                    WaterTop water = tops.get(i);
+                    for (int r = row(water.minY()); r <= row(water.maxY()); r++) {
+                        for (int c = column(water.minX()); c <= column(water.maxX()); c++) {
+                            if (pass == 0) { counts[r * columns + c]++; } else { cells[r * columns + c][counts[r * columns + c]++] = i; }
+                        }
+                    }
+                }
+                if (pass == 0) {
+                    for (int i = 0; i < cells.length; i++) { cells[i] = new int[counts[i]]; }
+                    Arrays.fill(counts, 0);
+                }
+            }
+        }
+
+        private int column(float x) { return Math.clamp((int) ((x - minX) / cell), 0, columns - 1); }
+
+        private int row(float y) { return Math.clamp((int) ((y - minY) / cell), 0, rows - 1); }
+
+        /** The triangles whose bounds meet a face's, below a ceiling elevation, in application order. */
+        int collect(float faceMinX, float faceMaxX, float faceMinY, float faceMaxY, float faceMinZ, int ceiling) {
+            if (tops.isEmpty() || faceMaxX < minX || faceMaxY < minY
+                  || faceMinX > minX + columns * cell || faceMinY > minY + rows * cell) { return 0; }
+            stamp++;
+            int count = 0;
+            int lastRow = row(faceMaxY), lastColumn = column(faceMaxX);
+            for (int r = row(faceMinY); r <= lastRow; r++) {
+                for (int c = column(faceMinX); c <= lastColumn; c++) {
+                    for (int index : cells[r * columns + c]) {
+                        if (seen[index] == stamp) { continue; }
+                        seen[index] = stamp;
+                        WaterTop water = tops.get(index);
+                        if (water.water().tile.elevation() >= ceiling
+                              || !water.reaches(faceMinX, faceMaxX, faceMinY, faceMaxY, faceMinZ)) { continue; }
+                        if (count == candidates.length) { candidates = Arrays.copyOf(candidates, count * 2); }
+                        candidates[count++] = index;
+                    }
+                }
+            }
+            Arrays.sort(candidates, 0, count);
+            return count;
+        }
+
+        WaterTop candidate(int i) { return tops.get(candidates[i]); }
+    }
+
+    private static WaterCover coveringWaters(BoardScene scene, BoardSurface own, Map<Coords, BoardSurface> surfaces) {
+        List<WaterTop> joined = new ArrayList<>();
+        waterTops(own, joined);
         // Rocks and cliff corners can project across a mouth into the next water hex.
         for (int direction = 0; direction < 6; direction++) {
             BoardScene.Tile next = openWater(scene.tile(own.tile.coords().translated(direction)));
-            if (next != null) { joined.add(surfaces.computeIfAbsent(next.coords(), key -> new BoardSurface(scene, next))); }
+            if (next != null) {
+                waterTops(surfaces.computeIfAbsent(next.coords(), key -> new BoardSurface(scene, next)), joined);
+            }
         }
-        return joined;
+        return new WaterCover(joined);
+    }
+
+    private static WaterCover waterTops(List<BoardSurface> waters) {
+        List<WaterTop> result = new ArrayList<>();
+        for (BoardSurface water : waters) { waterTops(water, result); }
+        return new WaterCover(result);
+    }
+
+    /** The planes as Vector3's cross product and normalisation compute them, without a vector per polygon. */
+    private static void waterTops(BoardSurface water, List<WaterTop> result) {
+        for (BoardSurface.Face top : water.waterFaces) {
+            Vector3 a = top.a(), b = top.b(), c = top.c();
+            float abx = b.x - a.x, aby = b.y - a.y, abz = b.z - a.z, acx = c.x - a.x, acy = c.y - a.y, acz = c.z - a.z;
+            float nx = aby * acz - abz * acy, ny = abz * acx - abx * acz, nz = abx * acy - aby * acx;
+            float length = nx * nx + ny * ny + nz * nz;
+            if (length != 0 && length != 1) {
+                float scale = 1f / (float) Math.sqrt(length);
+                nx *= scale;
+                ny *= scale;
+                nz *= scale;
+            }
+            if (nz <= .00001f) { continue; }
+            float[] edges = new float[6];
+            for (int edge = 0; edge < 3; edge++) {
+                Vector3 from = edge == 0 ? a : edge == 1 ? b : c, to = edge == 0 ? b : edge == 1 ? c : a;
+                float ex = to.y - from.y, ey = from.x - to.x, span = ex * ex + ey * ey;
+                if (span != 0 && span != 1) {
+                    float scale = 1f / (float) Math.sqrt(span);
+                    ex *= scale;
+                    ey *= scale;
+                }
+                edges[edge * 2] = ex;
+                edges[edge * 2 + 1] = ey;
+            }
+            result.add(new WaterTop(water, top, Math.min(a.x, Math.min(b.x, c.x)), Math.max(a.x, Math.max(b.x, c.x)),
+                  Math.min(a.y, Math.min(b.y, c.y)), Math.max(a.y, Math.max(b.y, c.y)), Math.max(a.z, Math.max(b.z, c.z)),
+                  nx, ny, nz, edges));
+        }
     }
 
     /** Split at the drawn water triangles, so absorption cannot escape onto an exposed bank or cliff. */
     static void coveredFace(MeshPartBuilder mesh, BoardSurface surface, BoardSurface.Face face,
           List<BoardSurface> waters) {
-        coveredFace(() -> mesh, surface, face, waters);
+        coveredFace(() -> mesh, surface, face, waterTops(waters));
     }
 
     private static void coveredFace(Supplier<MeshPartBuilder> triangles, BoardSurface surface, BoardSurface.Face face,
-          List<BoardSurface> waters) {
+          WaterCover waters) {
         coveredPolygons(surface, face, waters, polygon -> surfacePolygon(triangles, polygon));
     }
 
-    private static void coveredPolygons(BoardSurface surface, BoardSurface.Face face, List<BoardSurface> waters,
+    private static void coveredPolygons(BoardSurface surface, BoardSurface.Face face, WaterCover waters,
           Consumer<List<MeshPartBuilder.VertexInfo>> polygonConsumer) {
-        if (openWater(surface.tile) != null
-              && allCorners(surface, face, shade -> shade != null && shade.kind() == BoardRelief.Kind.SUBMERGED_CLIFF)) {
+        BoardRelief.Shade a = surface.relief.shade(face.a()), b = surface.relief.shade(face.b()), c = surface.relief.shade(face.c());
+        if (openWater(surface.tile) != null && submergedCliff(a) && submergedCliff(b) && submergedCliff(c)) {
             // This is the pool's own vertical bed boundary. Its projection lies on (or behind an undercut in)
             // the water outline, so an XY coverage test cannot decide whether it is submerged. Keep the bed's
             // waterline and material mapping; the shader uses height to leave the narrow emerged rim dry.
             float shore = GpuWaterShader.palette(surface.tile.liquid());
-            polygonConsumer.accept(List.of(sculptVertex(face.a(), surface.relief.shade(face.a()), shore, surface),
-                  sculptVertex(face.b(), surface.relief.shade(face.b()), shore, surface),
-                  sculptVertex(face.c(), surface.relief.shade(face.c()), shore, surface)));
+            polygonConsumer.accept(List.of(sculptVertex(face.a(), a, shore, surface),
+                  sculptVertex(face.b(), b, shore, surface), sculptVertex(face.c(), c, shore, surface)));
             return;
         }
-        if (allCorners(surface, face, shade -> shade != null && shade.kind().cliff())) {
-            // Exterior walls stand outside the basin. A recess beneath the upper pool's footprint is still solid
-            // rock, not an infinitely deep water column. Only lower pools can submerge this side of the cliff;
-            // the basin's own submerged walls are handled above.
-            List<BoardSurface> lower = new ArrayList<>(waters.size());
-            for (BoardSurface water : waters) {
-                if (water.tile.elevation() < surface.tile.elevation()) { lower.add(water); }
-            }
-            waters = lower;
-        }
-        coveredPolygons(face, waters, p -> sculptVertex(p, surface.relief.shade(p), Float.NaN, surface), polygonConsumer);
+        // Exterior walls stand outside the basin. A recess beneath the upper pool's footprint is still solid
+        // rock, not an infinitely deep water column. Only lower pools can submerge this side of the cliff;
+        // the basin's own submerged walls are handled above.
+        int ceiling = cliff(a) && cliff(b) && cliff(c) ? surface.tile.elevation() : Integer.MAX_VALUE;
+        coveredPolygons(face, waters, ceiling, p -> sculptVertex(p, surface.relief.shade(p), Float.NaN, surface), polygonConsumer);
     }
 
-    /** Runs once or twice per sculpted face, so the three corners are tested directly rather than streamed. */
-    private static boolean allCorners(BoardSurface surface, BoardSurface.Face face, Predicate<BoardRelief.Shade> test) {
-        return test.test(surface.relief.shade(face.a())) && test.test(surface.relief.shade(face.b()))
-              && test.test(surface.relief.shade(face.c()));
+    private static boolean submergedCliff(BoardRelief.Shade shade) {
+        return shade != null && shade.kind() == BoardRelief.Kind.SUBMERGED_CLIFF;
     }
 
-    private static void coveredPolygons(BoardSurface.Face face, List<BoardSurface> waters,
+    private static boolean cliff(BoardRelief.Shade shade) { return shade != null && shade.kind().cliff(); }
+
+    private static void coveredPolygons(BoardSurface.Face face, WaterCover waters, int ceiling,
           Function<Vector3, MeshPartBuilder.VertexInfo> vertices, Consumer<List<MeshPartBuilder.VertexInfo>> polygonConsumer) {
         List<List<MeshPartBuilder.VertexInfo>> dry = new ArrayList<>();
         dry.add(List.of(vertices.apply(face.a()), vertices.apply(face.b()), vertices.apply(face.c())));
@@ -3565,58 +3689,61 @@ final class GpuTerrain implements Disposable {
         float minY = Math.min(face.a().y, Math.min(face.b().y, face.c().y));
         float maxY = Math.max(face.a().y, Math.max(face.b().y, face.c().y));
         float minZ = Math.min(face.a().z, Math.min(face.b().z, face.c().z));
-        for (BoardSurface water : waters) {
-            for (BoardSurface.Face top : water.waterFaces) {
-                if (dry.isEmpty()) { break; }
-                if (maxX < Math.min(top.a().x, Math.min(top.b().x, top.c().x))
-                      || minX > Math.max(top.a().x, Math.max(top.b().x, top.c().x))
-                      || maxY < Math.min(top.a().y, Math.min(top.b().y, top.c().y))
-                      || minY > Math.max(top.a().y, Math.max(top.b().y, top.c().y))
-                      || minZ >= Math.max(top.a().z, Math.max(top.b().z, top.c().z))) { continue; }
-                Vector3 normal = new Vector3(top.b()).sub(top.a()).crs(new Vector3(top.c()).sub(top.a())).nor();
-                if (normal.z <= .00001f) { continue; }
-                List<List<MeshPartBuilder.VertexInfo>> remaining = new ArrayList<>();
-                Vector3[] corners = { top.a(), top.b(), top.c() };
-                for (List<MeshPartBuilder.VertexInfo> polygon : dry) {
-                    List<MeshPartBuilder.VertexInfo> wet = polygon;
-                    List<List<MeshPartBuilder.VertexInfo>> outside = new ArrayList<>();
-                    for (int edge = 0; edge < 3 && wet.size() >= 3; edge++) {
-                        Vector3 a = corners[edge], b = corners[(edge + 1) % 3];
-                        wet = splitCovered(wet, a, new Vector3(b.y - a.y, a.x - b.x, 0).nor(), outside);
-                    }
-                    if (wet.size() >= 3) { wet = splitCovered(wet, top.a(), normal, outside); }
-                    if (wet.size() >= 3) {
-                        remaining.addAll(outside);
-                        List<MeshPartBuilder.VertexInfo> tinted = new ArrayList<>();
-                        for (var vertex : wet) {
-                            Vector3 p = vertex.position;
-                            float height = top.a().z - (normal.x * (p.x - top.a().x) + normal.y * (p.y - top.a().y)) / normal.z;
-                            float kind = vertex.color.b;
-                            boolean ground = kind < .125f;
-                            Color data = waterColor(vertex.color.r, height, shoreTint(GpuWaterShader.palette(water.tile.liquid()),
-                                  ground ? (vertex.color.a - .3f) / .1f : 0));
-                            if (!ground) { data.b = (224 + 240 * data.b) / 255f; }
-                            tinted.add(new MeshPartBuilder.VertexInfo().set(vertex).setCol(data));
-                        }
-                        polygonConsumer.accept(tinted);
-                    } else { remaining.add(polygon); }
+        int count = waters.collect(minX, maxX, minY, maxY, minZ, ceiling);
+        for (int i = 0; i < count && !dry.isEmpty(); i++) {
+            WaterTop water = waters.candidate(i);
+            BoardSurface.Face top = water.top();
+            Vector3 origin = top.a();
+            float[] edges = water.edges();
+            List<List<MeshPartBuilder.VertexInfo>> remaining = new ArrayList<>();
+            for (List<MeshPartBuilder.VertexInfo> polygon : dry) {
+                List<MeshPartBuilder.VertexInfo> wet = polygon;
+                List<List<MeshPartBuilder.VertexInfo>> outside = new ArrayList<>();
+                for (int edge = 0; edge < 3 && wet.size() >= 3; edge++) {
+                    Vector3 corner = edge == 0 ? top.a() : edge == 1 ? top.b() : top.c();
+                    wet = splitCovered(wet, corner, edges[edge * 2], edges[edge * 2 + 1], 0, outside);
                 }
-                dry = remaining;
+                if (wet.size() >= 3) { wet = splitCovered(wet, origin, water.nx(), water.ny(), water.nz(), outside); }
+                if (wet.size() >= 3) {
+                    remaining.addAll(outside);
+                    List<MeshPartBuilder.VertexInfo> tinted = new ArrayList<>();
+                    for (var vertex : wet) {
+                        Vector3 p = vertex.position;
+                        float height = origin.z - (water.nx() * (p.x - origin.x) + water.ny() * (p.y - origin.y)) / water.nz();
+                        float kind = vertex.color.b;
+                        boolean ground = kind < .125f;
+                        Color data = waterColor(vertex.color.r, height, shoreTint(GpuWaterShader.palette(water.water().tile.liquid()),
+                              ground ? (vertex.color.a - .3f) / .1f : 0));
+                        if (!ground) { data.b = (224 + 240 * data.b) / 255f; }
+                        tinted.add(new MeshPartBuilder.VertexInfo().set(vertex).setCol(data));
+                    }
+                    polygonConsumer.accept(tinted);
+                } else { remaining.add(polygon); }
             }
+            dry = remaining;
         }
         dry.forEach(polygonConsumer);
     }
 
     /** Keep the half-space below a plane and retain the outside polygon for subsequent water triangles. */
     private static List<MeshPartBuilder.VertexInfo> splitCovered(List<MeshPartBuilder.VertexInfo> polygon,
-          Vector3 origin, Vector3 normal, List<List<MeshPartBuilder.VertexInfo>> outside) {
+          Vector3 origin, float nx, float ny, float nz, List<List<MeshPartBuilder.VertexInfo>> outside) {
+        // Most clipping planes do not cross this polygon. Keep its vertices instead of allocating two
+        // replacement lists for every nearby water triangle; only an actual crossing needs interpolation.
+        int count = 0;
+        for (var point : polygon) { if (planeDistance(point.position, origin, nx, ny, nz) <= 0) { count++; } }
+        if (count == polygon.size()) { return polygon; }
+        if (count == 0) {
+            if (polygon.size() >= 3) { outside.add(polygon); }
+            return List.of();
+        }
         // A plane cut adds at most one vertex to each side.
         List<MeshPartBuilder.VertexInfo> inside = new ArrayList<>(polygon.size() + 1);
         List<MeshPartBuilder.VertexInfo> dry = new ArrayList<>(polygon.size() + 1);
         var previous = polygon.getLast();
-        float before = planeDistance(previous.position, origin, normal);
+        float before = planeDistance(previous.position, origin, nx, ny, nz);
         for (var point : polygon) {
-            float after = planeDistance(point.position, origin, normal);
+            float after = planeDistance(point.position, origin, nx, ny, nz);
             if ((before <= 0) != (after <= 0)) {
                 var crossing = new MeshPartBuilder.VertexInfo().set(previous).lerp(point, before / (before - after));
                 inside.add(crossing);
@@ -3630,12 +3757,8 @@ final class GpuTerrain implements Disposable {
         return inside;
     }
 
-    /**
-     * Same arithmetic, in the same order, as {@code new Vector3(point).sub(origin).dot(normal)}, so results are
-     * bit-identical, without allocating a vector for every vertex of every water clip.
-     */
-    private static float planeDistance(Vector3 point, Vector3 origin, Vector3 normal) {
-        return (point.x - origin.x) * normal.x + (point.y - origin.y) * normal.y + (point.z - origin.z) * normal.z;
+    private static float planeDistance(Vector3 point, Vector3 origin, float nx, float ny, float nz) {
+        return (point.x - origin.x) * nx + (point.y - origin.y) * ny + (point.z - origin.z) * nz;
     }
 
     private static void surfacePolygon(Supplier<MeshPartBuilder> triangles, List<MeshPartBuilder.VertexInfo> polygon) {
@@ -3643,7 +3766,7 @@ final class GpuTerrain implements Disposable {
             var a = polygon.getFirst();
             var b = polygon.get(i);
             var c = polygon.get(i + 1);
-            if (new Vector3(b.position).sub(a.position).crs(new Vector3(c.position).sub(a.position)).len2() > 1e-8f) {
+            if (!GpuSurfaceBlend.degenerate(a.position, b.position, c.position)) {
                 triangles.get().triangle(a, b, c);
             }
         }

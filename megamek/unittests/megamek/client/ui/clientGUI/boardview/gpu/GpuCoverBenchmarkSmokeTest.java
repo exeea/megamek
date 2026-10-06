@@ -43,6 +43,7 @@ import org.junit.jupiter.params.provider.ValueSource;
  * driven like the battle view does, with a movement envelope around the focus. Measured, not asserted.
  */
 @Tag("on-demand")
+@Tag("gpu-benchmark")
 class GpuCoverBenchmarkSmokeTest {
     private static final String MESA_CITY = "data/boards/unofficial/SimonLandmine/96x102/96x102 MesaCity1.board";
     private static final String ELEVATED_HIGHWAY = "data/boards/unofficial/Vamp/Elevated Highway.board";

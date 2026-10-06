@@ -110,10 +110,11 @@ final class GpuSurfaceBlend extends Attribute {
 
     static Map<Palette, List<Triangle>> prepare(BoardScene scene, BoardScene.Tile tile, List<BoardSurface.Face> faces,
           Function<Vector3, MeshPartBuilder.VertexInfo> vertices, float spacing) {
+        var sampler = new BoardSurfaceBlend.Sampler(scene, tile);
         return prepare(BoardSurfaceBlend.family(tile), faces, vertices,
               v -> v.color.b > .375f && v.color.b < .625f
-                    ? BoardSurfaceBlend.sampleCliff(scene, tile, v.position.x, v.position.y, v.position.z)
-                    : BoardSurfaceBlend.sample(scene, tile, v.position.x, v.position.y, v.position.z), spacing);
+                    ? sampler.sampleCliff(v.position.x, v.position.y, v.position.z)
+                    : sampler.sample(v.position.x, v.position.y, v.position.z), spacing);
     }
 
     private static Map<Palette, List<Triangle>> prepare(int family, List<BoardSurface.Face> faces,
@@ -142,13 +143,20 @@ final class GpuSurfaceBlend extends Attribute {
           List<MeshPartBuilder.VertexInfo> polygon, Function<Vector3, BoardSurfaceBlend.Cover> cover, float spacing) {
         List<Point> points = new ArrayList<>(polygon.size());
         for (var vertex : polygon) { points.add(new Point(vertex, cover.apply(vertex.position))); }
+        Function<MeshPartBuilder.VertexInfo, BoardSurfaceBlend.Cover> vertexCover = v -> cover.apply(v.position);
         for (int i = 1; i + 1 < points.size(); i++) {
-            var a = points.getFirst().vertex().position;
-            var b = points.get(i).vertex().position;
-            var c = points.get(i + 1).vertex().position;
-            if (new Vector3(b).sub(a).crs(new Vector3(c).sub(a)).len2() <= 1e-8f) { continue; }
-            append(groups, family, v -> cover.apply(v.position), points.getFirst(), points.get(i), points.get(i + 1), spacing, 0);
+            Point a = points.getFirst(), b = points.get(i), c = points.get(i + 1);
+            if (degenerate(a.vertex().position, b.vertex().position, c.vertex().position)) { continue; }
+            append(groups, family, vertexCover, a, b, c, spacing, 0);
         }
+    }
+
+    /** Whether three positions span no area, by the squared length of their cross product. */
+    static boolean degenerate(Vector3 a, Vector3 b, Vector3 c) {
+        float abx = b.x - a.x, aby = b.y - a.y, abz = b.z - a.z;
+        float acx = c.x - a.x, acy = c.y - a.y, acz = c.z - a.z;
+        float x = aby * acz - abz * acy, y = abz * acx - abx * acz, z = abx * acy - aby * acx;
+        return x * x + y * y + z * z <= 1e-8f;
     }
 
     private static void append(Map<Palette, List<Triangle>> groups, int family,

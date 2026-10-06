@@ -138,7 +138,7 @@ class BoardFoliageTest {
     }
 
     @ParameterizedTest
-    @CsvSource({ "'', 0, temperate", "'', 2, highland", "rock, 0, rocky", "volcano, 0, rocky",
+    @CsvSource({ "'', 0, temperate", "'', 2, highland", "rock, 0, rocky", "volcano, 0, volcano",
           "dirt, 0, wetland", "lunar, 0, barren", "Desert, 0, desert",
           "sand, 0, desert", "snow, 0, snow" })
     void lowWoodsUseBiomeShrubsAtEveryDensity(String theme, int elevation, String family) {
@@ -213,11 +213,18 @@ class BoardFoliageTest {
             assertEquals(0, low, .001f, "All detail levels remain grounded");
             assertTrue(high > 14 && high <= 19, "LOD changes must preserve the authored low silhouette");
             if (lod == 0) { assertEquals(18, high - low, .001f); }
-            // Every level lists the file's materials: the family's atlas for the meshes and its impostor cards' atlas.
+            // Every mesh part binds its source-aligned relief and surface maps; impostors retain their baked atlas.
             for (var material : data.materials) {
-                assertEquals(1, material.textures.size);
-                String file = material.textures.first().fileName.replace('\\', '/');
-                assertTrue(file.contains("/shrubs/" + family + ".png") || file.contains("/impostors/foliage-" + family + ".png"));
+                assertEquals(material.id.equals("impostor") ? 1 : 3, material.textures.size);
+                for (var texture : material.textures) {
+                    String file = texture.fileName.replace('\\', '/');
+                    assertTrue(file.contains("/textures/foliage/"), file);
+                    var image = ((RigidGlb.Data) data).images.get(texture.fileName);
+                    assertTrue(image != null && image.file() != null && Files.isRegularFile(Path.of(image.file())), file);
+                }
+                if (material.id.endsWith("-cutout")) {
+                    assertEquals(.5f, ((RigidGlb.Data) data).alphaTests.get(material.id));
+                }
             }
             previous = triangles;
         }

@@ -20,6 +20,7 @@ import org.junit.jupiter.params.provider.ValueSource;
  * level, and planting grass, crops and reeds on it. Measured on shipped boards, reported, not asserted.
  */
 @Tag("on-demand")
+@Tag("gpu-benchmark")
 class GpuCoverPlantingSmokeTest {
     private static final Map<String, String> BOARDS = Map.of(
           "elevated", "data/boards/unofficial/Vamp/Elevated Highway.board",

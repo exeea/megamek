@@ -445,6 +445,7 @@ tasks.register('stageData', Sync) {
     group = 'build'
     from("${mmDataDir}/data") {
         include "models/**/*.*"
+        include "board-editor/**/*.json"
         suiteDataRules.MegaMek.loose.each { pattern -> include pattern }
     }
     into mmDataOut
@@ -840,7 +841,11 @@ tasks.register('gpuBoardSmoke', Test) {
     dependsOn testClasses, stageDataFiles
     testClassesDirs = sourceSets.test.output.classesDirs
     classpath = sourceSets.test.runtimeClasspath
-    useJUnitPlatform { includeTags 'on-demand' }
+    // The benchmarks print timings and assert only that GL reports no error; gpuBoardBenchmark runs them.
+    useJUnitPlatform {
+        includeTags 'on-demand'
+        excludeTags 'gpu-benchmark'
+    }
     filter {
         includeTestsMatching 'megamek.client.ui.clientGUI.boardview.gpu.*SmokeTest'
         includeTestsMatching 'megamek.client.ui.gdx.*SmokeTest'
@@ -852,6 +857,50 @@ tasks.register('gpuBoardSmoke', Test) {
     systemProperty 'megamek.gpu.referenceFoliage', new File(gradle.includedBuild('mm-data').projectDir,
             'tools/board-models/foliage').absolutePath
     systemProperty 'megamek.gpu.screenshots', layout.buildDirectory.dir('gpu-board-review').get().asFile.absolutePath
+    outputs.upToDateWhen { false }
+}
+
+// Explicit opt-in: the GPU benchmarks among the smoke classes, which report timings (ground cover, forests, biome
+// zooms, board performance) rather than check what is drawn. Their knobs are the megamek.gpu.* system properties.
+tasks.register('gpuBoardBenchmark', Test) {
+    description = 'Runs the GPU board benchmarks, which print timing reports instead of checking the rendering'
+    group = 'verification'
+    dependsOn testClasses, stageDataFiles
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform { includeTags 'gpu-benchmark' }
+    filter {
+        includeTestsMatching 'megamek.client.ui.clientGUI.boardview.gpu.*SmokeTest'
+    }
+    jvmArgs = mmJvmOptions
+    jacoco.enabled = false
+    systemProperty 'java.awt.headless', 'false'
+    systemProperty 'megamek.gpu.referenceFoliage', new File(gradle.includedBuild('mm-data').projectDir,
+            'tools/board-models/foliage').absolutePath
+    systemProperty 'megamek.gpu.screenshots', layout.buildDirectory.dir('gpu-board-review').get().asFile.absolutePath
+    systemProperties System.properties.findAll { it.key.toString().startsWith('megamek.gpu.') }
+    testLogging { showStandardStreams = true }
+    outputs.upToDateWhen { false }
+}
+
+// Explicit opt-in: times CPU terrain chunk preparation on a region of a real board and digests its output, so a
+// loading speed-up can be compared against the geometry and materials it must not change.
+tasks.register('gpuTerrainLoadBenchmark', Test) {
+    description = 'Times terrain chunk preparation for a board region and prints a digest of the result'
+    group = 'verification'
+    dependsOn testClasses, stageDataFiles
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform { includeTags 'on-demand' }
+    filter {
+        includeTestsMatching 'megamek.client.ui.clientGUI.boardview.gpu.GpuTerrainLoadBenchmarkTest'
+    }
+    def recording = System.getProperty('megamek.gpu.benchmarkJfr')
+    jvmArgs = recording == null ? mmJvmOptions
+          : mmJvmOptions + ['-XX:StartFlightRecording=filename=' + recording + ',settings=profile,dumponexit=true']
+    jacoco.enabled = false
+    systemProperties System.properties.findAll { it.key.toString().startsWith('megamek.gpu.benchmark') }
+    testLogging { showStandardStreams = true }
     outputs.upToDateWhen { false }
 }
 

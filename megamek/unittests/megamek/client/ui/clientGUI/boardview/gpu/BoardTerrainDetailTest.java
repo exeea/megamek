@@ -51,7 +51,8 @@ class BoardTerrainDetailTest {
         Coords coords = new Coords(2, 2);
         for (var family : BoardScene.Surface.values()) {
             Hex hex = roughHex(family, 1);
-            assertEquals(family, BoardFeatures.surface(hex));
+            assertEquals(family == BoardScene.Surface.SAND ? BoardScene.Surface.GRASS : family,
+                  BoardFeatures.surface(hex), "Gameplay sand is cover over its theme, not a replacement geology");
             assertTrue(BoardFeatures.detailedGround(hex, Map.of()), "Rough artwork is replaced by the terrain engine");
             var features = BoardFeatures.capture(hex, coords, Map.of());
             assertEquals(9, features.size());
@@ -61,7 +62,8 @@ class BoardTerrainDetailTest {
             assertTrue(BoardFeatures.capture(hex, coords, Map.of()).size() > features.size(), "Ultra rough has more cover");
             hex.addTerrain(new Terrain(Terrains.WOODS, 1));
             var wooded = BoardFeatures.capture(hex, coords, Map.of());
-            assertEquals(3, wooded.stream().filter(f -> f.kind() == BoardScene.FeatureKind.TREE).count());
+            assertTrue(wooded.stream().anyMatch(f -> f.kind() == BoardScene.FeatureKind.TREE),
+                  "Rough coexists with the theme's woods, whose species/count are captured independently");
             assertEquals(18, wooded.stream().filter(f -> f.kind() == BoardScene.FeatureKind.BOULDER).count());
             hex.removeTerrain(Terrains.ROUGH);
             assertTrue(BoardFeatures.capture(hex, coords, Map.of()).stream()
@@ -114,6 +116,47 @@ class BoardTerrainDetailTest {
                 assertEquals(center.z, UnitLandingSupports.terrain(scene, center.x, center.y, new BoardSurface.Cache()), .01f,
                       "Vehicles use the ground beneath the Rough");
                 assertEquals(surface.faces, new BoardSurface(scene, tile).faces, "Rebuilding never reshuffles the rocks");
+            }
+        }
+    }
+
+    @Test
+    void groupedRocksKeepTheirWholeFootprintsInsideTheHexAndClearOfRoutes() {
+        Coords coords = new Coords(2, 2);
+        for (var family : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.DESERT, BoardScene.Surface.VOLCANO)) {
+            for (int type : new int[] { Terrains.ROAD, Terrains.BRIDGE }) {
+                for (int exits = 0; exits < 64; exits++) {
+                    Hex hex = roughHex(family, 2);
+                    if (exits != 0) { hex.addTerrain(new Terrain(type, 1, true, exits)); }
+                    var route = BoardRoad.clearance(coords, exits);
+                    var features = BoardFeatures.capture(hex, coords, Map.of()).stream()
+                          .filter(f -> f.kind() == BoardScene.FeatureKind.BOULDER).toList();
+                    assertTrue(features.size() <= 18, "Grouping does not add rock instances");
+                    for (int i = 0; i < features.size(); i++) {
+                        var feature = features.get(i);
+                        double turn = Math.toRadians(feature.rotation());
+                        float c = (float) Math.cos(turn), sine = (float) Math.sin(turn);
+                        float size = BoardFeatures.ROUGH_BOULDER_WIDTH * feature.scale();
+                        int variant = coords.getX() * 31 + coords.getY() * 17 + i;
+                        for (var polygon : BoardRocks.rock(family, variant, TerrainLod.FULL).polygons()) {
+                            for (Vector3 p : polygon.points()) {
+                                float x = feature.x() + size * (c * p.x - sine * p.y * .8f);
+                                float y = feature.y() + size * (sine * p.x + c * p.y * .8f);
+                                assertTrue(Math.abs(y) <= 36.001f && Math.abs(x) + Math.abs(y) * 21 / 36 <= 42.001f,
+                                      "Rock footprint leaves its hex: " + feature + " at " + x + "," + y);
+                                if (exits != 0) {
+                                    assertTrue(route.distance(x, y) >= BoardRoad.SHOULDER - .001f,
+                                          "Rock crosses the route shoulder: " + family + " exits=" + exits
+                                                + " " + feature + " at " + x + "," + y);
+                                    if (type == Terrains.BRIDGE && BoardRoad.roundabout(exits)) {
+                                        assertTrue(Math.hypot(x, y) >= BoardRoad.ROUNDABOUT_RADIUS,
+                                              "Bridge roundabout islands remain clear too");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -187,6 +230,11 @@ class BoardTerrainDetailTest {
             case DIRT -> hex.setTheme("dirt");
             case ROCK -> hex.setTheme("rock");
             case LUNAR -> hex.setTheme("lunar");
+            case FUNGUS -> hex.setTheme("fungus");
+            case DESERT -> hex.setTheme("desert");
+            case MARS -> hex.setTheme("mars");
+            case VOLCANO -> hex.setTheme("volcano");
+            case TROPICAL -> hex.setTheme("tropical");
             default -> { }
         }
         return hex;

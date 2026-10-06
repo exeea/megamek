@@ -78,7 +78,9 @@ final class BoardConcrete {
     float distance(Coords coords, float x, float y) {
         float[] outline = footprints.get(tileKey(coords));
         if (outline == null) { return Float.NaN; }
-        float nearest = Float.POSITIVE_INFINITY, ax = 0, ay = 0;
+        // The nearest edge is chosen on exact squared offsets; only that offset is measured, as every edge was.
+        double nearest = Double.POSITIVE_INFINITY;
+        float nearestX = 0, nearestY = 0, ax = 0, ay = 0;
         boolean inside = false;
         for (int k = 0; k <= 6; k++) {
             int index = (k % 6) * 2;
@@ -86,13 +88,20 @@ final class BoardConcrete {
             if (k > 0) {
                 float dx = bx - ax, dy = by - ay;
                 float t = Math.clamp(((x - ax) * dx + (y - ay) * dy) / Math.max(dx * dx + dy * dy, .00001f), 0, 1);
-                nearest = Math.min(nearest, (float) Math.hypot(x - ax - t * dx, y - ay - t * dy));
+                float px = x - ax - t * dx, py = y - ay - t * dy;
+                double squared = (double) px * px + (double) py * py;
+                if (squared < nearest) {
+                    nearest = squared;
+                    nearestX = px;
+                    nearestY = py;
+                }
                 if ((ay > y) != (by > y) && x < ax + (y - ay) * dx / dy) { inside = !inside; }
             }
             ax = bx;
             ay = by;
         }
-        return inside ? -nearest : nearest;
+        float distance = (float) Math.hypot(nearestX, nearestY);
+        return inside ? -distance : distance;
     }
 
     List<Shift> corners(Coords coords) {

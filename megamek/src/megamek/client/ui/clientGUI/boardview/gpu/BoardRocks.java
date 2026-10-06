@@ -25,7 +25,10 @@ final class BoardRocks {
     }
 
     static boolean blocks(BoardScene.Surface surface) {
-        return surface == BoardScene.Surface.SAND || surface == BoardScene.Surface.CONCRETE;
+        return switch (surface) {
+            case SAND, DESERT, MARS, VOLCANO, CONCRETE -> true;
+            default -> false;
+        };
     }
 
     static BoardShape rock(boolean block, int variant) {

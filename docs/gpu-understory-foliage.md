@@ -11,7 +11,7 @@
 | `GpuAssets / GpuTreeInstances` | Load and instance shrub/cactus/reed assets using the shared foliage drawing path. |
 | `TreeLod` | Select visual detail while preserving common placement across the asset's mesh levels. |
 
-Level-one woods and jungle use eight purpose-built understory GLBs. `BoardFeatures`
+Level-one woods and jungle use nine purpose-built understory GLBs. `BoardFeatures`
 chooses a family from the existing terrain and theme. `GpuTerrain` scales these
 models uniformly to the foliage height, preserving their authored proportions.
 They use the existing tree placement, asset cache, instancing and colour/depth/shadow
@@ -36,7 +36,8 @@ The meshes and their textures are in the sibling `mm-data` repository:
 | --- | --- | ---: | ---: | ---: |
 | Temperate | Grass and paved parks | 460 | 236 | 92 |
 | Highland | Elevated grass or tundra | 460 | 236 | 92 |
-| Rocky | Rock and volcanic themes | 460 | 236 | 92 |
+| Rocky | Rock theme | 460 | 236 | 92 |
+| Volcanic | Volcanic woods and jungle | 480 | 240 | 96 |
 | Wetland | Swamp, mud, water or dirt | 460 | 236 | 92 |
 | Desert | Desert theme | 478 | 238 | 94 |
 | Jungle | Jungle terrain or tropical theme | 472 | 228 | 96 |
@@ -44,7 +45,8 @@ The meshes and their textures are in the sibling `mm-data` repository:
 | Snow | Snow terrain or theme | 460 | 236 | 92 |
 
 The [Mars coral kit](gpu-mars-corals.md) supplies Martian cover at every foliage
-height, including on snow. For the other themes, snow takes precedence; jungle
+height, including on snow. Volcanic themes likewise retain cinder trees and their
+low thickets on snow and pavement. For the other themes, snow takes precedence; jungle
 or the tropical theme then selects jungle understory, followed by desert,
 barren and wetland overrides. Existing light/heavy/ultra-heavy counts and deterministic
 placement remain shared with the tree path. Foliage is only added for actual woods or

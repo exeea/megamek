@@ -50,7 +50,7 @@ final class GpuPropBatch implements Disposable {
     }
 
     void add(RenderableProvider props, int pageId, boolean visible) {
-        // Chunk.solidProps supplies persistent renderables and does not need a temporary renderable pool.
+        // Chunk caches supply persistent renderables and do not need a temporary renderable pool.
         source.clear();
         props.getRenderables(source, null);
         add(source, pageId, visible);

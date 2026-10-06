@@ -20,7 +20,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-/** Exact roof-level picks must not alternate between the roof and its last storey. */
+/** Long camera rays must pick flat roofs and modular roof trim without alternating with the last storey. */
 @Tag("on-demand")
 class GpuRoofHoverSmokeTest {
     private static final Coords CENTER = new Coords(4, 4);
