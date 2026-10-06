@@ -445,6 +445,7 @@ tasks.register('stageData', Sync) {
     group = 'build'
     from("${mmDataDir}/data") {
         include "models/**/*.*"
+        include "board-editor/**/*.json"
         suiteDataRules.MegaMek.loose.each { pattern -> include pattern }
     }
     into mmDataOut
