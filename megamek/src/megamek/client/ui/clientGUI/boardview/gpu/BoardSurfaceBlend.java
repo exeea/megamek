@@ -1,9 +1,12 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 
+import com.badlogic.gdx.math.Vector3;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
@@ -238,6 +241,20 @@ public final class BoardSurfaceBlend {
         if (water(at)) { return sampleWater(scene, at, x, y, z); }
         return sampleAt(scene, at, cover(owner, z), x, y, z, false);
     }
+
+    /**
+     * Remembers each cover by its exact position for one tile's preparation. A sample depends only on the scene, the
+     * owner and the position, and polygon corners and subdivision midpoints shared between triangles are sampled
+     * again and again; on a shore each sample visits up to 49 tiles. The map is not thread-safe, so each task makes
+     * its own.
+     */
+    static Function<Vector3, Cover> remembering(Function<Vector3, Cover> sampler) {
+        Map<Position, Cover> covers = new HashMap<>();
+        return point -> covers.computeIfAbsent(new Position(point.x, point.y, point.z), key -> sampler.apply(point));
+    }
+
+    /** Record equality compares the floats exactly, so a remembered cover is returned only for the identical input. */
+    private record Position(float x, float y, float z) { }
 
     private static boolean water(BoardScene.Tile tile) {
         return tile != null && tile.liquid().present() && !tile.liquid().volcanic() && !tile.frozen();
