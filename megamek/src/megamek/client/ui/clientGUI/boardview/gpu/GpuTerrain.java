@@ -3737,7 +3737,9 @@ final class GpuTerrain implements Disposable {
             if (polygon.size() >= 3) { outside.add(polygon); }
             return List.of();
         }
-        List<MeshPartBuilder.VertexInfo> inside = new ArrayList<>(), dry = new ArrayList<>();
+        // A plane cut adds at most one vertex to each side.
+        List<MeshPartBuilder.VertexInfo> inside = new ArrayList<>(polygon.size() + 1);
+        List<MeshPartBuilder.VertexInfo> dry = new ArrayList<>(polygon.size() + 1);
         var previous = polygon.getLast();
         float before = planeDistance(previous.position, origin, nx, ny, nz);
         for (var point : polygon) {
