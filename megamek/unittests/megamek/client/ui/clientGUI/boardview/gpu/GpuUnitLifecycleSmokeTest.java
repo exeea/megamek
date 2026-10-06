@@ -160,6 +160,13 @@ class GpuUnitLifecycleSmokeTest {
                             assertTrue(textures.isEmpty(), "Undisposed textures: " + textures);
                             assertTrue(buffers.isEmpty(), "Undisposed buffers: " + buffers);
                             System.out.println("View resource peak: " + peakTextures + " textures, " + peakBuffers + " buffers; all released.");
+                            // As GpuMixedUnitBenchmarkSmokeTest checked on close: the asset library keeps nothing once the view is gone.
+                            var library = field(this, "unitModels");
+                            for (String cache : List.of("assemblies", "modular", "descriptors", "failed", "modelTextures")) {
+                                Object value = field(library, cache);
+                                assertTrue(value instanceof Map<?, ?> map ? map.isEmpty() : ((java.util.Set<?>) value).isEmpty(),
+                                      "library " + cache);
+                            }
                             for (String cache : List.of("unitInstances", "animators", "unitDamage", "unitTints")) {
                                 assertTrue(((Map<?, ?>) field(this, cache)).isEmpty(), cache);
                             }

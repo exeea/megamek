@@ -33,6 +33,7 @@ import org.junit.jupiter.api.Test;
  * not asserted; a software renderer's frame times say little about a GPU, but memory and build times carry over.
  */
 @Tag("on-demand")
+@Tag("gpu-benchmark")
 class GpuForestBenchmarkSmokeTest {
     private static final int SIZE = 40;
     private static final int WARMUP = 24;

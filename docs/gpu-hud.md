@@ -784,6 +784,9 @@ checkout. `test` excludes `@Tag("on-demand")`, runs `checkstyleMain` first and s
 - `gpuBoardSmoke` runs the on-demand tests named `megamek.client.ui.clientGUI.boardview.gpu.*SmokeTest` and
   `megamek.client.ui.gdx.*SmokeTest`, and always reruns. Most open hidden windows; `GpuBoardWindowSmokeTest` opens
   the real, maximised native window.
+- `gpuBoardBenchmark` runs the smoke classes tagged `gpu-benchmark` instead: the benchmarks that print timing
+  reports and assert only that GL reports no error (ground cover, forests, biome zooms, board, terrain, mixed-unit
+  and unit-model draw cost). `gpuBoardSmoke` leaves them out; their knobs are the `megamek.gpu.*` system properties.
 - Screenshots go to `megamek/build/gpu-board-review` (system property `megamek.gpu.screenshots`). Side-by-side
   comparisons with the hud-v3 screenshots read the folder named by `megamek.gpu.hudMock` (default
   `../../megamek_temp/docs/design/claude-ui-concepts/hud-v3`, relative to `megamek`) and are skipped without it.

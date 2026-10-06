@@ -36,6 +36,7 @@ import org.junit.jupiter.api.Test;
 
 /** Bounded C0 instance/draw-cost probe, not a frame-rate promise for a complete animated board. */
 @Tag("on-demand")
+@Tag("gpu-benchmark")
 class GpuUnitModelBenchmarkSmokeTest {
     @Test
     void measuresSharedBodiesWithIndependentAttachmentInstances() {
