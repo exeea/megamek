@@ -1630,9 +1630,10 @@ final class BoardRelief {
      * Room a step takes on each side of its edge, in world units: none unless hex transitions or padding are on, and
      * only between detailed grounds, water among them. Special artwork, buildings and roads keep their outline
      * on the hex edge; water keeps its own where {@link #band} says. Pits have no ground to carry a talus apron.
+     * Dry cliffs need less transition width than gentle slopes, leaving more of their plateau and ridge connections.
      */
     private static float room(Site upper, Site lower) {
-        return BoardGeometry.tuning().stepsBetweenTops() && upper != null && lower != null
+        float width = BoardGeometry.tuning().stepsBetweenTops() && upper != null && lower != null
               && upper.level() != lower.level() && upper.detailed() && lower.detailed()
               && !(upper.liquid() && lower.liquid())
               && !upper.fixedRoad() && !lower.fixedRoad()
@@ -1640,6 +1641,11 @@ final class BoardRelief {
               && !(upper.family() == CONCRETE && wall(upper, lower))
               && !wetCliff(upper, lower)
               ? stepRoom() : 0;
+        if (width > 0 && BoardGeometry.tuning().padding() == 0 && !upper.fixedOutline() && !lower.fixedOutline()) {
+            // Keep the existing cliff relief and shared corners; reduce only the room spent on its inset and apron.
+            width *= lerp(1, .6f, prominence(drop(upper, lower)));
+        }
+        return width;
     }
 
     private static boolean wetCliff(Site upper, Site lower) {
@@ -2047,6 +2053,21 @@ final class BoardRelief {
         }
         // Work in shared passes so a new diagonal cannot recursively chase an unsplit boundary into slivers.
         for (int pass = 0; pass < 12; pass++) {
+            // Thin ears need no extra shading samples across their width. Lock both sides of their edges before
+            // planning any splits, so refinement cannot collapse a sliver and leave its neighbour's edge unpaired.
+            float minimumWidth = metres(.25f);
+            for (BoardSurface.Face face : top) {
+                Vector3 a = face.a(), b = face.b(), c = face.c();
+                float area = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+                float longest = Math.max(a.dst2(b), Math.max(b.dst2(c), c.dst2(a)));
+                if (area * area > minimumWidth * minimumWidth * longest) { continue; }
+                Vector3[] points = { a, b, c };
+                for (int i = 0; i < 3; i++) {
+                    Vector3 from = points[i], to = points[(i + 1) % 3];
+                    splits.put(new TopEdge(from, to), null);
+                    splits.put(new TopEdge(to, from), null);
+                }
+            }
             boolean split = false;
             for (BoardSurface.Face face : top) {
                 split |= topSplit(face.a(), face.b(), splits) != null;

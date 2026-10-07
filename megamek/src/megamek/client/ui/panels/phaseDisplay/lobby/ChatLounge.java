@@ -319,6 +319,8 @@ public class ChatLounge extends AbstractPhaseDisplay
     private ClientDialog boardPreviewW;
     private final Game boardPreviewGame = new Game();
     private transient BoardView previewBV;
+    /** Map selection shown in the open 2D preview, so each loaded map gets one 3D-content warning. */
+    private List<String> previewBoards = List.of();
     private transient RulerDialog previewRuler;
     Dimension currentMapButtonSize = new Dimension(0, 0);
     private final JCheckBox showPlayerDeployment = new JCheckBox(Messages.getString("ChatLounge.showPlayerDeployment"));
@@ -1534,6 +1536,12 @@ public class ChatLounge extends AbstractPhaseDisplay
             boardPreviewGame.setPlayer(player.getId(), player.copy());
         }
         boardPreviewW.setVisible(true);
+        // Deployment toggles and the server's rebuild of the same selection are not a new map
+        List<String> boards = new ArrayList<>(mapSettings.getBoardsSelectedVector());
+        if (!boards.equals(previewBoards)) {
+            previewBoards = boards;
+            BoardView.warnIfThreeDOnly(boardPreviewW, boardPreviewGame.getBoard(), false);
+        }
     }
 
     /**
@@ -4347,6 +4355,7 @@ public class ChatLounge extends AbstractPhaseDisplay
             boardPreviewW.dispose();
             boardPreviewW = null;
         }
+        previewBoards = List.of();
     }
 
     @Override

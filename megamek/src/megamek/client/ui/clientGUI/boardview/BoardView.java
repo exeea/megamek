@@ -381,6 +381,21 @@ public final class BoardView extends AbstractBoardView
         this(state.getGame(), controller, clientgui, state.getBoardId(), state.getTilesetManager(), state);
     }
 
+    /**
+     * Shows the warning, once per board load, that this 2D view ignores the board's 3D-only content. Does nothing for
+     * a board without such content. Safe to call off the EDT.
+     *
+     * @param editor true for the classic 2D editor, whose save drops that content
+     */
+    public static void warnIfThreeDOnly(@Nullable Component parent, @Nullable Board board, boolean editor) {
+        if ((board == null) || !board.hasThreeDOnlyContent()) {
+            return;
+        }
+        String message = Messages.getString(editor ? "BoardView.threeDOnlyEditor" : "BoardView.threeDOnly");
+        SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(parent, message,
+              Messages.getString("BoardView.threeDOnlyTitle"), JOptionPane.WARNING_MESSAGE));
+    }
+
     private BoardView(Game game, MegaMekController controller, @Nullable ClientGUI clientgui, int boardId,
           @Nullable TilesetManager sharedTileset, @Nullable BoardClientState sharedState) throws IOException {
         super(boardId);

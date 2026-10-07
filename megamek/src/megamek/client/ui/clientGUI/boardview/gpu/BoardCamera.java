@@ -65,8 +65,9 @@ final class BoardCamera {
     private boolean overviewFit;
     private boolean fitToWindow;
     private float displayScale = 1;
-    /** Render-owned board dimensions, installed by fit() when the view receives a new board. */
+    /** Render-owned bounds, installed by fit() and refreshed with the displayed terrain snapshot. */
     private int boardColumns, boardRows;
+    private float boardTopLevel;
     private float entranceElapsed = ENTRANCE_SECONDS;
     private float entranceZoom;
     /** Screen composition only: focus remains the world-space orbit pivot in the unobstructed board area. */
@@ -237,7 +238,8 @@ final class BoardCamera {
         if (!before.equals(camera.position)) { update(); }
     }
 
-    void terrainChanged() {
+    void terrainChanged(BoardScene scene) {
+        updateBoardBounds(scene);
         orbitAnchored = false;
         constrainFlight();
     }
@@ -882,7 +884,7 @@ final class BoardCamera {
             zoom(factor);
             Vector3 after = pointOnPlane(x, y, focus.z);
             if (before != null && after != null) { focus.add(before.sub(after)); }
-            constrainPan();
+            constrainPan(null);
             update();
             return;
         }
@@ -891,7 +893,7 @@ final class BoardCamera {
         float difference = before - camera.zoom;
         moveOnBoard((x - camera.viewportWidth / 2 + viewOffsetPixels) * difference,
               (y - camera.viewportHeight / 2 + viewVerticalOffset) * difference);
-        constrainPan();
+        constrainPan(null);
         update();
     }
 
@@ -910,8 +912,7 @@ final class BoardCamera {
 
     /** Frame a displayed subset with the same projection and height bounds as a complete board. */
     void fit(BoardScene scene, List<BoardScene.Tile> shown) {
-        boardColumns = scene.width();
-        boardRows = scene.height();
+        updateBoardBounds(scene);
         setFirstPerson(false);
         stopFraming();
         fitToWindow = true;
@@ -961,7 +962,13 @@ final class BoardCamera {
         update();
     }
 
-    /** Initial framing uses nominal heights before meshes load; support placement still uses the actual geometry. */
+    private void updateBoardBounds(BoardScene scene) {
+        boardColumns = scene.width();
+        boardRows = scene.height();
+        boardTopLevel = (float) scene.tiles().stream().mapToDouble(BoardCamera::fitTop).max().orElse(0);
+    }
+
+    /** Framing and pan limits share nominal heights; support placement still uses the actual geometry. */
     private static float fitTop(BoardScene.Tile tile) {
         float top = tile.elevation();
         for (var feature : tile.features()) {
@@ -1001,6 +1008,7 @@ final class BoardCamera {
         }
         stopFraming();
         fitToWindow = false;
+        Vector3 previous = focus.cpy();
         if (camera.perspective) {
             float x = camera.viewportWidth / 2 - viewOffsetPixels, y = camera.viewportHeight / 2 - viewVerticalOffset;
             Vector3 before = pointOnPlane(x, y, focus.z);
@@ -1009,27 +1017,81 @@ final class BoardCamera {
         } else {
             moveOnBoard(-dx * camera.zoom, dy * camera.zoom);
         }
-        constrainPan();
+        constrainPan(previous);
         update();
     }
 
     /**
-     * Keep the full viewport's center over the board, including the area behind HUD panels. Inset the hex perimeter to keep
-     * every point in the allowed rectangle on the map, including its corners at close zoom. All edge hexes remain
-     * reachable. Clamping each world axis separately lets a drag slide along an edge and reverse immediately.
+     * Keep the full viewport's center over the board, including the area behind HUD panels. The inset footprint
+     * extends up to the highest terrain or feature, so a tall column remains reachable when its base leaves the view.
+     * Clip a drag along its requested direction: clamping world axes separately would redirect it at rotated edges.
      */
-    private void constrainPan() {
+    private void constrainPan(Vector3 previous) {
         if (boardColumns <= 0 || boardRows <= 0) { return; }
         // The orbit pivot belongs to the unobstructed area; constrain the viewport center on its ground plane.
-        float dx = viewOffsetPixels * camera.zoom, dy = viewVerticalOffset * camera.zoom;
-        moveOnBoard(dx, dy);
+        Vector3 attempted = focus.cpy();
+        Vector3 offset = boardMovement(viewOffsetPixels * camera.zoom, viewVerticalOffset * camera.zoom);
+        focus.add(offset);
         float width = BoardGeometry.width(), height = BoardGeometry.height();
         // Stay just inside the silhouette, avoiding round-off on an exact outer edge when projecting a distant eye.
         float inset = Math.min(width, height) * .001f;
-        focus.x = MathUtils.clamp(focus.x, width * .25f + inset, boardColumns * width * .75f - inset);
-        focus.y = MathUtils.clamp(focus.y, -boardRows * height + inset,
-              (boardColumns == 1 ? 0 : -height * .5f) - inset);
-        moveOnBoard(-dx, -dy);
+        float left = width * .25f + inset, right = boardColumns * width * .75f - inset;
+        float bottom = -boardRows * height + inset, top = (boardColumns == 1 ? 0 : -height * .5f) - inset;
+        // Project the elevated footprint onto the current pan plane along the viewport-center ray.
+        float elevation = Math.max(0, boardTopLevel * BoardGeometry.level() - focus.z);
+        Vector3 rise = new Vector3(camera.direction.x, camera.direction.y, 0).scl(-elevation / camera.direction.z);
+        if (previous != null) {
+            Vector3 start = previous.cpy().add(offset);
+            Vector3 travel = attempted.cpy().sub(previous);
+            float[] interval = { 0, 1 };
+            // The swept rectangle has the four axis bounds and two sides parallel to the height projection.
+            Vector3 side = new Vector3(camera.direction).crs(camera.up).nor();
+            float sideLow = Math.min(side.x * left, side.x * right) + Math.min(side.y * bottom, side.y * top);
+            float sideHigh = Math.max(side.x * left, side.x * right) + Math.max(side.y * bottom, side.y * top);
+            if (restrictPan(interval, start.x, travel.x, left + Math.min(0, rise.x), right + Math.max(0, rise.x))
+                  && restrictPan(interval, start.y, travel.y, bottom + Math.min(0, rise.y), top + Math.max(0, rise.y))
+                  && restrictPan(interval, start.dot(side), travel.dot(side), sideLow, sideHigh)) {
+                focus.set(previous).mulAdd(travel, interval[1]);
+                return;
+            }
+        }
+        // Zoom, framing or terrain edits can leave the starting center outside the current footprint.
+        clampPanFootprint(left, right, bottom, top, rise);
+        focus.sub(offset);
+    }
+
+    private static boolean restrictPan(float[] interval, float start, float travel, float low, float high) {
+        // A previous clipped position can round just beyond its edge. Treat it as on the edge, not a fresh overshoot.
+        float lower = start - low, upper = high - start;
+        if (lower > -.001f) { lower = Math.max(0, lower); }
+        if (upper > -.001f) { upper = Math.max(0, upper); }
+        return restrict(interval, -travel, lower) && restrict(interval, travel, upper);
+    }
+
+    /** Clamp to the footprint swept screen-up by the board's height, rather than widening its sideways bounds. */
+    private void clampPanFootprint(float left, float right, float bottom, float top, Vector3 rise) {
+        Vector3 nearest = new Vector3(MathUtils.clamp(focus.x, left, right),
+              MathUtils.clamp(focus.y, bottom, top), focus.z);
+        if (nearest.equals(focus)) { return; }
+        if (!rise.isZero(.00001f)) {
+            float[] interval = { 0, 1 };
+            if (restrict(interval, -rise.x, right - focus.x) && restrict(interval, rise.x, focus.x - left)
+                  && restrict(interval, -rise.y, top - focus.y) && restrict(interval, rise.y, focus.y - bottom)) {
+                return; // The center ray crosses the board volume at an allowed height.
+            }
+            Vector3 candidate = new Vector3(MathUtils.clamp(focus.x - rise.x, left, right) + rise.x,
+                  MathUtils.clamp(focus.y - rise.y, bottom, top) + rise.y, focus.z);
+            if (candidate.dst2(focus) < nearest.dst2(focus)) { nearest.set(candidate); }
+            // The swept boundary consists of the two rectangles and the segments joining their corners.
+            for (float x : new float[] { left, right }) {
+                for (float y : new float[] { bottom, top }) {
+                    float along = MathUtils.clamp(((focus.x - x) * rise.x + (focus.y - y) * rise.y) / rise.len2(), 0, 1);
+                    candidate.set(x, y, focus.z).mulAdd(rise, along);
+                    if (candidate.dst2(focus) < nearest.dst2(focus)) { nearest.set(candidate); }
+                }
+            }
+        }
+        focus.set(nearest);
     }
 
     /** Screen coordinates use the bottom-left origin, without relying on a global graphics viewport. */
@@ -1045,11 +1107,15 @@ final class BoardCamera {
     }
 
     private void moveOnBoard(float dx, float dy) {
+        focus.add(boardMovement(dx, dy));
+    }
+
+    private Vector3 boardMovement(float dx, float dy) {
         Vector3 right = new Vector3(camera.direction).crs(camera.up).nor();
         Vector3 up = new Vector3(camera.up.x, camera.up.y, 0);
         // Invert the projected length so dragging follows the pointer without lifting the orbit pivot.
         up.scl(1 / up.len2());
-        focus.mulAdd(right, dx).mulAdd(up, dy);
+        return right.scl(dx).mulAdd(up, dy);
     }
 
     void center(Vector3 position) {

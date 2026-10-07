@@ -4,6 +4,7 @@ package megamek.client.ui.gdx;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
+import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
@@ -32,6 +33,7 @@ public final class UiNumber extends Table {
     private final double step;
     private double value;
     private boolean held;
+    private Input capturedInput;
 
     public UiNumber(UiKit ui, Stage stage, String name, double initial, double min, double max, double step,
           BiConsumer<String, Boolean> change) {
@@ -76,15 +78,22 @@ public final class UiNumber extends Table {
             double start;
             boolean dragged;
             @Override public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
-                if (button != Input.Buttons.LEFT) { return false; }
+                if (button != Input.Buttons.LEFT || pointer != 0 || held) { return false; }
                 stage.setKeyboardFocus(null);
                 origin = event.getStageX(); originY = event.getStageY(); start = value; dragged = false; held = true;
                 syncSlider(value);
                 popup.showAbove(caption, 0);
                 if (dial != null) { popup.validate(); dial.begin(event.getStageX(), event.getStageY(), value); }
+                // The desktop backend supplies unbounded virtual coordinates while keeping the cursor hidden
+                // and anchored, then restores its visible position on release. Do not take over another capture.
+                if (!Gdx.input.isCursorCatched()) {
+                    capturedInput = Gdx.input;
+                    capturedInput.setCursorCatched(true);
+                }
                 return true;
             }
             @Override public void touchDragged(InputEvent event, float x, float y, int pointer) {
+                if (!held) { return; }
                 float distance = event.getStageX() - origin;
                 if (Math.hypot(distance, event.getStageY() - originY) > 3) { dragged = true; }
                 if (dragged) {
@@ -95,8 +104,14 @@ public final class UiNumber extends Table {
                 }
             }
             @Override public void touchUp(InputEvent event, float x, float y, int pointer, int button) {
+                if (!held) { return; }
                 held = false;
+                if (capturedInput != null) {
+                    capturedInput.setCursorCatched(false);
+                    capturedInput = null;
+                }
                 if (dragged) { finish(); popup.cancel(); }
+                else if (event.isTouchFocusCancel()) { popup.cancel(); }
             }
         });
         field.addListener(new FocusListener() {
@@ -195,8 +210,15 @@ public final class UiNumber extends Table {
         if (dial != null) { dial.setName(id + "-dial"); }
         return this;
     }
-    public void dismiss() { popup.cancel(); }
-    public void close() { popup.cancel(); popup.remove(); }
+    public void dismiss() {
+        if (held && getStage() != null) { getStage().cancelTouchFocus(caption); }
+        popup.cancel();
+    }
+    @Override protected void setStage(Stage stage) {
+        if (getStage() != null && getStage() != stage) { dismiss(); }
+        super.setStage(stage);
+    }
+    public void close() { dismiss(); popup.remove(); }
     public static String format(double value) {
         return java.math.BigDecimal.valueOf(Math.round(value * 10000) / 10000.0).stripTrailingZeros().toPlainString();
     }

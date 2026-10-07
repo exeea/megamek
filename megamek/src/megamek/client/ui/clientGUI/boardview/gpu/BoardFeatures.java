@@ -135,14 +135,19 @@ final class BoardFeatures {
     }
 
     static BoardScene.Biome biome(Hex hex) {
-        if (hex.containsAnyTerrainOf(Terrains.ICE, Terrains.WATER, Terrains.HAZARDOUS_LIQUID, Terrains.PAVEMENT, Terrains.MAGMA)) {
+        if (hex.containsAnyTerrainOf(Terrains.ICE, Terrains.WATER, Terrains.HAZARDOUS_LIQUID, Terrains.MAGMA)) {
             return BoardScene.Biome.NONE;
         }
+        boolean tundra = hex.containsTerrain(Terrains.TUNDRA) && !hex.containsAnyTerrainOf(Terrains.SNOW, Terrains.SAND);
+        // Lichens colonize pavement, but wetland soil and planted fields do not replace a constructed slab.
+        if (hex.containsTerrain(Terrains.PAVEMENT)) { return tundra ? BoardScene.Biome.TUNDRA : BoardScene.Biome.NONE; }
         if (hex.containsTerrain(Terrains.SWAMP)) {
             return hex.terrainLevel(Terrains.SWAMP) == 1 ? BoardScene.Biome.MARSH : BoardScene.Biome.QUICKSAND;
         }
         if (hex.containsTerrain(Terrains.FIELDS)) { return BoardScene.Biome.FIELD; }
-        return hex.containsTerrain(Terrains.MUD) ? BoardScene.Biome.MUD : BoardScene.Biome.NONE;
+        if (hex.containsTerrain(Terrains.MUD)) { return BoardScene.Biome.MUD; }
+        // Snow terrain and loose sand cover the low tundra crust; a Snow theme can still show exposed tundra.
+        return tundra ? BoardScene.Biome.TUNDRA : BoardScene.Biome.NONE;
     }
 
     static List<BoardScene.Feature> capture(Hex hex, Coords coords, Map<Integer, String> structureModels) {
@@ -173,9 +178,7 @@ final class BoardFeatures {
         for (String asset : scenery.models()) {
             var layout = BoardSceneryLayouts.layout(asset);
             if (layout != null) {
-                List<String> species = surface(hex) == BoardScene.Surface.SNOW
-                      ? PARK.stream().map(tree -> tree + "-snow").toList() : PARK;
-                result.addAll(layout.features(coords, species, natural));
+                result.addAll(layout.features(coords, layoutSpecies(hex), natural));
                 continue;
             }
             // Nominal roof elevation bounds CPU decoration clearance. Rendering settles onto the actual solid mesh.
@@ -184,16 +187,24 @@ final class BoardFeatures {
         }
         int variant = Math.floorMod(coords.getX() * 31 + coords.getY() * 17, 4);
         // Terrain levels are the game's collectable limb counts, not damage inferred from nearby units.
-        for (int type = 0; type < 2; type++) {
-            int count = Math.max(0, hex.terrainLevel(type == 0 ? Terrains.ARMS : Terrains.LEGS));
-            for (int index = 0; index < count; index++) {
-                int slot = index * 2 + type;
-                double angle = slot * 2.399963 + variant;
-                float radius = 10 + slot % 4 * 4;
-                result.add(new BoardScene.Feature("Limb Club", (float) Math.cos(angle) * radius,
-                      (float) Math.sin(angle) * radius, (float) Math.toDegrees(angle), 1, 1, 0,
-                      BoardScene.FeatureKind.LIMB));
+        Random limbs = new Random(coords.getX() * 73_856_093L ^ coords.getY() * 19_349_663L ^ 0x41524D534C454753L);
+        List<BoardScene.Feature> placedLimbs = new ArrayList<>();
+        int arms = Math.max(0, hex.terrainLevel(Terrains.ARMS)), legs = Math.max(0, hex.terrainLevel(Terrains.LEGS));
+        // Reserve interleaved positions even for absent limbs: collecting an arm cannot move a remaining leg.
+        for (int slot = 0; slot < 2 * Math.max(arms, legs); slot++) {
+            float x = 0, y = 0;
+            for (int attempt = 0; attempt < 24; attempt++) {
+                double angle = limbs.nextDouble() * Math.PI * 2;
+                double radius = Math.sqrt(limbs.nextDouble()) * 24;
+                x = (float) (Math.cos(angle) * radius); y = (float) (Math.sin(angle) * radius);
+                float px = x, py = y;
+                if (placedLimbs.stream().noneMatch(p -> Math.hypot(p.x() - px, p.y() - py) < 12)) { break; }
             }
+            // Independent heading breaks the radial pattern; the seed keeps rebuilds and reloads stable.
+            var limb = new BoardScene.Feature(slot % 2 == 0 ? "salvage/arm" : "salvage/leg", x, y,
+                  limbs.nextFloat() * 360, 1, 1, 0, BoardScene.FeatureKind.LIMB);
+            placedLimbs.add(limb);
+            if (slot / 2 < (slot % 2 == 0 ? arms : legs)) { result.add(limb); }
         }
         for (var structure : structureModels.entrySet()) {
             int heightTerrain = switch (structure.getKey()) {
@@ -296,21 +307,43 @@ final class BoardFeatures {
         return List.copyOf(result);
     }
 
+    /** The park species a layout's broad tree slots grow on this hex, in their winter form on snow. */
+    static List<String> layoutSpecies(Hex hex) {
+        return surface(hex) == BoardScene.Surface.SNOW ? PARK.stream().map(tree -> tree + "-snow").toList() : PARK;
+    }
+
+    /** The same authored frame drives the drawn model, picking, shadows and ground-cover clearance. */
+    static com.badlogic.gdx.math.Matrix4 decorationTransform(Coords coords, BoardScene.Feature feature, float z) {
+        var object = feature.decoration();
+        float scale = feature.scale() * BoardGeometry.hexScale();
+        float partRotation = (feature.rotation() - (float) object.rotation()) * (object.mirror() ? -1 : 1);
+        return new com.badlogic.gdx.math.Matrix4().setToTranslation(
+                    BoardGeometry.centerX(coords) + feature.x() * BoardGeometry.hexScale(),
+                    BoardGeometry.centerY(coords) + feature.y() * BoardGeometry.hexScale(), z)
+              .rotate(com.badlogic.gdx.math.Vector3.Z, (float) object.rotation())
+              .rotate(com.badlogic.gdx.math.Vector3.Y, (float) object.rotationY())
+              .rotate(com.badlogic.gdx.math.Vector3.X, (float) object.rotationX())
+              .scale(object.mirror() ? -scale : scale, scale, scale)
+              .rotate(com.badlogic.gdx.math.Vector3.Z, partRotation);
+    }
+
     private static List<BoardScene.Feature> decorations(Hex hex) {
         List<BoardScene.Feature> result = new ArrayList<>();
         for (var object : hex.getDecorations()) {
+            // A prop whose asset is a layouts.json key expands into parts. Only the maglev compositions still place
+            // such props; this branch goes with them when legacy maglev decodes into routes.
             var layout = object.kind().equals("prop") ? BoardSceneryLayouts.layout(object.asset()) : null;
             var parts = layout == null ? List.of(new BoardSceneryLayouts.Component(object.asset(),
                   BoardScene.FeatureKind.PROP, 0, 0, 0, 0, 1)) : layout.components();
-            double angle = Math.toRadians(object.rotation());
             for (var part : parts) {
                 double x = part.x() * object.scale() * (object.mirror() ? -1 : 1), y = part.y() * object.scale();
+                double[] offset = object.rotateVector(x, y, part.z() * object.scale());
                 result.add(new BoardScene.Feature(part.asset(),
-                      (float) (object.x() * BoardGeometry.TILE_WIDTH + x * Math.cos(angle) - y * Math.sin(angle)),
-                      (float) (object.y() * BoardGeometry.TILE_HEIGHT + x * Math.sin(angle) + y * Math.cos(angle)),
+                      (float) (object.x() * BoardGeometry.TILE_WIDTH + offset[0]),
+                      (float) (object.y() * BoardGeometry.TILE_HEIGHT + offset[1]),
                       (float) (object.rotation() + (object.mirror() ? -part.rotation() : part.rotation())),
                       (float) (object.scale() * part.scale()), 1,
-                      (float) (part.z() * object.scale() / BoardGeometry.MODEL_LEVEL_HEIGHT),
+                      (float) (offset[2] / BoardGeometry.MODEL_LEVEL_HEIGHT),
                       BoardScene.FeatureKind.PROP, 0, false, object));
             }
         }

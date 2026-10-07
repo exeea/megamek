@@ -128,7 +128,9 @@ public final class UiTheme implements Disposable {
           Map.entry("layers", 0xE53B), Map.entry("replay", 0xE042), Map.entry("rewind", 0xE020),
           Map.entry("star", 0xE838), Map.entry("star-outline", 0xE838), Map.entry("tune", 0xE429),
           Map.entry("arrow-right", 0xE941), Map.entry("arrow-up", 0xE986), Map.entry("arrow-down", 0xE984),
-          Map.entry("triangle-left", 0xE5DE), Map.entry("wireframe", 0xF016));
+          Map.entry("triangle-left", 0xE5DE), Map.entry("wireframe", 0xF016),
+          Map.entry("tool-select", 0xF82F), Map.entry("tool-paint", 0xE3AE), Map.entry("tool-erase", 0xE6D0),
+          Map.entry("tool-sculpt", 0xE3F7), Map.entry("object-group", 0xE65B));
     /**
      * Icons the prototype draws filled. The shipped font has no filled named instance, so their outlines are closed:
      * every texel that the glyph's outline encloses becomes opaque.

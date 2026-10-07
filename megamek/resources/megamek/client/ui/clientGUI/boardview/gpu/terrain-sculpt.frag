@@ -386,7 +386,7 @@ void main() {
                   emission, roughness, volcanic);
         }
 #endif
-        if (natural) {
+        if (ground || cliff || bedrock) {
             biomeSurface(world, face, shore, above, cliff || bedrock ? v_diffuseUV.x : 0.0,
                   cliff || bedrock ? v_diffuseUV.y : v_diffuseUV.x, materialHeight, sand,
                   albedo, normal, cavity, grass, bounce, biomePool, biomeDamp);

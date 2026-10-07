@@ -189,7 +189,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
     enum FeatureKind { PROP, BUILDING, INDUSTRIAL, TREE, LIMB, SCATTER, BOULDER, ROUGH, SCENERY }
 
     /** Captured visual ground treatment; movement and cover modifiers remain in the game terrain. */
-    enum Biome { NONE, FIELD, MARSH, QUICKSAND, MUD }
+    enum Biome { NONE, FIELD, MARSH, QUICKSAND, MUD, TUNDRA }
 
     /** Authored model or scatter shape, placement in tile pixels, and height/root lift in elevation levels. */
     record Feature(String asset, float x, float y, float rotation, float scale, float height, float elevation,

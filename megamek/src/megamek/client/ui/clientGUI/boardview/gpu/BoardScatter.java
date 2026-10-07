@@ -125,7 +125,7 @@ final class BoardScatter {
             int choice = random.nextInt(10);
             String asset = choice % 2 == 0 ? "scatter-rock" : "scatter-slab";
             if (plants && surface == BoardScene.Surface.TROPICAL && choice < 8) {
-                asset = "scatter-plant";
+                asset = hex.containsTerrain(Terrains.TUNDRA) ? "scatter-dry-grass" : "scatter-plant";
             } else if (plants && surface == BoardScene.Surface.GRASS) {
                 if (choice < 5 || hex.containsTerrain(Terrains.TUNDRA) && choice < 8) {
                     asset = hex.containsTerrain(Terrains.TUNDRA) ? "scatter-dry-grass" : "scatter-grass";
