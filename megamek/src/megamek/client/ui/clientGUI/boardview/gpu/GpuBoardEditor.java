@@ -34,6 +34,7 @@ import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiChoiceGrid;
 import megamek.client.ui.gdx.UiChoiceStrip;
 import megamek.client.ui.gdx.UiKit;
+import megamek.client.ui.gdx.UiList;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.gdx.UiNumber;
 import megamek.client.ui.gdx.UiPopover;
@@ -66,6 +67,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     private final List<Preview> previews = new ArrayList<>();
     private final List<UiButton> tools = new ArrayList<>();
     private final List<UiButton> categories = new ArrayList<>();
+    private final List<UiList> contentLists = new ArrayList<>();
     private final UiButton undo, redo;
     private final Label stripTitle;
     private final Table contents = new Table(), sectionPanel, settingsLayer = new Table(), settingsBody = new Table();
@@ -357,7 +359,8 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
               + ":" + next.objects() + ":" + next.object() + ":" + next.elevation() + ":" + next.theme()
               + ":" + installedObjects.stream().map(object -> object.id() + "=" + object.anchorLevel()).toList();
         if (!key.equals(detailKey) && !(stage.getKeyboardFocus() instanceof TextField)
-              && numbers.stream().noneMatch(UiNumber::editing) && !section.dragging() && !choices.isVisible() && !themeLayer.isVisible() && !designLayer.isVisible()) {
+              && numbers.stream().noneMatch(UiNumber::editing) && contentLists.stream().noneMatch(UiList::busy)
+              && !section.dragging() && !choices.isVisible() && !themeLayer.isVisible() && !designLayer.isVisible()) {
             detailKey = key; showContents(); showDetails();
         }
         previews.removeIf(preview -> preview.image().getStage() == null);
@@ -366,9 +369,12 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         }
         layoutStrip(); layoutLibrary();
         libraryCards.removeIf(card -> card.getStage() == null);
-        thumbnails.update(2);
-        models.update();
-        samples.update();
+        // Give document edits the GL upload budget before constructing more palette previews.
+        if (terrain.get() == null || !terrain.get().busy()) {
+            thumbnails.update(2);
+            models.update();
+            samples.update();
+        }
         stage.getViewport().apply();
         for (UiButton card : libraryCards) {
             String keyId = (String) card.getUserObject();
@@ -620,7 +626,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         libraryOwner = owner; libraryGroup = ""; query = ""; searchField.setText(""); showLibrary(); if (snapshot != null) { showBrush(); }
     }
     private void showContents() {
-        contents.clearChildren(); contents.top();
+        contents.clearChildren(); contentLists.clear(); contents.top();
         if (snapshot.selected() == null) { hexTitle.setText("HEX INSPECTOR"); return; }
         hexTitle.setText("HEX " + (snapshot.selected().getX() + 1) + ", " + (snapshot.selected().getY() + 1));
         for (var component : blueprint.components()) {
@@ -631,25 +637,49 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             row.pressed(snapshot.object().isEmpty() && component.id().equals(snapshot.component()));
             contentRow(row, component.id().equals("ground") ? 40 : 30, false, component.present().isEmpty() ? null
                   : () -> send(Action.REMOVE_COMPONENT, component.id()));
-            for (var object : snapshot.objects()) {
-                if (object.placement().receiver() != null && component.receiver().equals(object.placement().receiver().terrain())) { contentObject(object, true); }
-            }
+            contentObjects(snapshot.objects().stream().filter(object -> object.placement().receiver() != null
+                  && component.receiver().equals(object.placement().receiver().terrain())).toList(), true);
         }
-        for (var object : snapshot.objects()) {
-            if (object.placement().receiver() == null || blueprint.components().stream().noneMatch(c -> c.receiver().equals(object.placement().receiver().terrain())
-                  && c.isPresent(name -> snapshot.property(name) != null))) { contentObject(object, false); }
-        }
+        var detached = snapshot.objects().stream().filter(object -> object.placement().receiver() == null
+              || blueprint.components().stream().noneMatch(c -> c.receiver().equals(object.placement().receiver().terrain())
+                    && c.isPresent(name -> snapshot.property(name) != null))).toList();
+        detached.stream().map(d -> d.placement().receiver()).distinct().forEach(receiver ->
+              contentObjects(detached.stream().filter(d -> java.util.Objects.equals(receiver, d.placement().receiver())).toList(), false));
     }
-    private void contentObject(BoardDecoration object, boolean attached) {
+
+    private void contentObjects(List<BoardDecoration> objects, boolean attached) {
+        if (objects.isEmpty()) { return; }
+        UiList stack = new UiList(ui); contentLists.add(stack);
+        stack.setName("editor-stack-" + (objects.getFirst().placement().receiver() == null ? "absolute" : objects.getFirst().placement().receiver().terrain()));
+        for (BoardDecoration object : objects) {
+            UiButton row = contentObject(object, objects.size() > 1);
+            Actor handle = objects.size() > 1 ? row.icons.getFirst() : null;
+            if (handle != null) {
+                handle.setTouchable(Touchable.enabled); handle.setName("editor-reorder-" + object.id());
+                ui.tip(handle).getActor().setText("Drag to reorder. Higher decals paint over lower decals on this surface.");
+            }
+            Table wrapper = new Table(); wrapper.add(row).growX().minWidth(0).height(40).pad(2);
+            stack.add(wrapper, handle);
+        }
+        if (objects.size() > 1) {
+            stack.reorderable((from, to) -> send(Action.REORDER_OBJECT, objects.get(from).id(),
+                  (to < from ? "before:" : "after:") + objects.get(to).id()));
+        }
+        contents.add(stack).growX().minWidth(0).padLeft(attached ? 16 : 0).row();
+    }
+
+    private UiButton contentObject(BoardDecoration object, boolean reorderable) {
         String level = height(object);
         if (terrain.get() != null) {
             var placed = installedObjects.stream().filter(o -> o.id().equals(object.id())).findFirst();
             if (placed.isPresent()) { level += " · L" + UiNumber.format(placed.get().anchorLevel()); }
         }
-        UiButton row = rowButton(objectLabel(object), level, object.kind().equals("prop") ? "unit" : "layers",
+        UiButton row = rowButton(objectLabel(object), level, reorderable ? "grip" : object.kind().equals("prop") ? "unit" : "layers",
               () -> send(Action.SELECT_OBJECT, object.id()));
         row.setName("editor-content-" + object.id()); row.pressed(object.id().equals(snapshot.object()));
-        contentRow(row, 40, attached, () -> send(Action.REMOVE_OBJECT, object.id(), ""));
+        UiButton remove = removeButton("", () -> send(Action.REMOVE_OBJECT, object.id(), ""));
+        remove.setName("editor-remove-" + object.id()); row.trailingAction(remove, 26);
+        return row;
     }
     private void showDetails() {
         String selection = snapshot.selected() + ":" + snapshot.object() + ":" + snapshot.component();

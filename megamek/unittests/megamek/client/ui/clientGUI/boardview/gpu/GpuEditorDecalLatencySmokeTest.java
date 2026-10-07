@@ -38,6 +38,8 @@ class GpuEditorDecalLatencySmokeTest {
         SwingUtilities.invokeAndWait(setup); GpuMapSource source = setup.get();
         AtomicReference<Throwable> failure = new AtomicReference<>();
         var config = GpuBoardWindow.configuration(false); config.setWindowedMode(1280, 800);
+        // A hidden window's swap interval can be driver-throttled independently of the editor's work.
+        config.useVsync(false); config.setForegroundFPS(60);
         List<Command> edits = List.of(new Command(Action.OBJECT_VALUE, "scale", "7"),
               new Command(Action.OBJECT_VALUE, "x", ".2"), new Command(Action.OBJECT_VALUE, "rotation", "35"),
               new Command(Action.REMOVE_OBJECT), new Command(Action.UNDO));
@@ -48,6 +50,8 @@ class GpuEditorDecalLatencySmokeTest {
                 long started, revision, firstFrame;
                 double maxFrame;
                 Object distant;
+                long warmUntil;
+                List<Object> solidMeshes;
                 private Object field(Object object, String name) throws Exception {
                     var field = object.getClass().getDeclaredField(name); field.setAccessible(true); return field.get(object);
                 }
@@ -61,12 +65,20 @@ class GpuEditorDecalLatencySmokeTest {
                         assertTrue(System.nanoTime() < deadline, "Large decal update stalled at " + index);
                         GpuTerrain terrain = terrain();
                         if (GpuBoardTestUi.loading(this) || terrain.busy()) { return; }
+                        if (warmUntil == 0) {
+                            GpuBoardTestUi.click("editor-library-Damage and debris");
+                            boardCamera.zoom(.45f); warmUntil = frames() + 90; return;
+                        }
+                        if (frames() < warmUntil) { return; }
                         if (started != 0) {
                             if (source.editorState().revision() == revision || frames() < firstFrame + 3) { return; }
                             var recipients = (Map<?, ?>) field(terrain, "installedPaint");
                             assertEquals(index == 3, recipients.isEmpty(), "Removing/restoring a decal updates its entire footprint");
                             if (index != 3) { assertTrue(recipients.size() > 30, "Scale seven spans many hexes"); }
                             assertSame(distant, ((List<?>) field(terrain, "chunks")).getLast());
+                            List<Object> current = new java.util.ArrayList<>();
+                            for (Object chunk : (List<?>) field(terrain, "chunks")) { current.addAll((List<?>) field(chunk, "opaque")); }
+                            assertEquals(solidMeshes, current, "Paint edits preserve every installed solid terrain mesh");
                             System.out.printf("DECAL %s recipients=%d input-to-install=%.1fms max-frame=%.1fms%n",
                                   edits.get(index), recipients.size(), (System.nanoTime() - started) / 1e6, maxFrame);
                             index++; started = 0;
@@ -74,7 +86,8 @@ class GpuEditorDecalLatencySmokeTest {
                         }
                         if (distant == null) {
                             distant = ((List<?>) field(terrain, "chunks")).getLast();
-                            boardCamera.zoom(.45f);
+                            solidMeshes = new java.util.ArrayList<>();
+                            for (Object chunk : (List<?>) field(terrain, "chunks")) { solidMeshes.addAll((List<?>) field(chunk, "opaque")); }
                         }
                         revision = source.editorState().revision(); firstFrame = frames(); maxFrame = 0; started = System.nanoTime();
                         source.editorCommand(edits.get(index), source.takeFrame().boardGeneration());

@@ -325,7 +325,7 @@ public final class BoardFile {
         }
         if (!hex.getDecorations().isEmpty()) {
             ArrayNode objects = node.putArray("decorations");
-            hex.getDecorations().stream().sorted(Comparator.comparing(BoardDecoration::id)).forEach(value -> {
+            hex.getDecorations().forEach(value -> {
                 ObjectNode object = objects.addObject().put("id", value.id()).put("kind", value.kind()).put("asset", value.asset());
                 put(object, "name", value.name());
                 if (value.x() != 0 || value.y() != 0) { object.putArray("position").add(value.x()).add(value.y()); }

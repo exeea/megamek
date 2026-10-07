@@ -27,6 +27,34 @@ class BoardEditorSessionTest {
         session.command(new Command(action, target, value), null);
     }
 
+    @Test void contentsReorderingUpdatesPaintAndSurvivesUndoAndSave() throws Exception {
+        var session = session();
+        var ground = megamek.common.board.BoardDecoration.Placement.ground();
+        var car = new megamek.common.board.BoardDecoration("car", "prop", "scenery/components/car-red", null, 0, 0, 0, false, 1, ground, 0);
+        var a = new megamek.common.board.BoardDecoration("a", "decal", "decal/saxarba/rubble_light_path", null, 0, 0, 0, false, 1, ground, 4);
+        var b = new megamek.common.board.BoardDecoration("b", "decal", "decal/saxarba/rubble_light_path", null, .2, 0, 0, false, 1, ground, 2);
+        var original = java.util.List.of(car, a, b);
+        session.board().getHex(at).setDecorations(original);
+        send(session, Action.SELECT_OBJECT, "", "car");
+        send(session, Action.REORDER_OBJECT, "b", "before:a");
+        var objects = session.snapshot().objects();
+        assertEquals(java.util.List.of("car", "b", "a"), objects.stream().map(d -> d.id()).toList());
+        assertTrue(objects.get(1).drawOrder() > objects.get(2).drawOrder());
+        assertEquals("car", session.snapshot().object(), "Reordering preserves selection");
+        assertEquals(b.placement(), objects.get(1).placement());
+        assertEquals(b.x(), objects.get(1).x());
+        send(session, Action.UNDO, "", "");
+        assertEquals(original, session.board().getHex(at).getDecorations());
+        send(session, Action.REDO, "", "");
+        send(session, Action.REORDER_OBJECT, "car", "after:a");
+        assertEquals("car", session.snapshot().objects().getLast().id());
+        Path file = directory.resolve("contents-order.board2"); session.save(file);
+        assertEquals(session.board().getHex(at).getDecorations(), BoardFile.read(file).getHex(at).getDecorations());
+        send(session, Action.SELECT_OBJECT, "", "a");
+        send(session, Action.OBJECT_VALUE, "order", "13");
+        assertEquals("a", session.snapshot().objects().getFirst().id(), "Numeric paint order and contents agree");
+    }
+
     @Test void buildsRoadAndBuildingContextWithoutAnyClassicEditor() {
         var session = session();
         send(session, Action.ADD_COMPONENT, "", "road");
@@ -60,7 +88,7 @@ class BoardEditorSessionTest {
         var copy = session.snapshot().objects();
         Path target = directory.resolve("composition.board2"); session.save(target);
         assertFalse(session.dirty());
-        assertEquals(copy.stream().sorted(java.util.Comparator.comparing(d -> d.id())).toList(), BoardFile.read(target).getHex(at).getDecorations());
+        assertEquals(copy, BoardFile.read(target).getHex(at).getDecorations());
         send(session, Action.COPY, "", "");
         send(session, Action.TOOL, "", "SELECT");
         session.pointer(new Coords(2, 1), 0, 0, false);
@@ -216,6 +244,37 @@ class BoardEditorSessionTest {
         session.finishStroke();
         assertEquals(target, session.snapshot().selected()); assertEquals(id, session.snapshot().object());
         assertEquals(java.util.List.of(new BoardEditorSession.Selection(target, id)), session.snapshot().selection());
+    }
+
+    @Test void clickingAndTransformingObjectsPreserveContentsOrderWithoutNoOpHistory() {
+        var session = session();
+        var first = new megamek.common.board.BoardDecoration("z", "prop", "scenery/components/car-red", null,
+              -.1, .1, 0, false, 1, megamek.common.board.BoardDecoration.Placement.ground(), 0);
+        var middle = new megamek.common.board.BoardDecoration("a", "prop", "scenery/components/car-silver", null,
+              0, -.1, 0, false, 1, megamek.common.board.BoardDecoration.Placement.ground(), 0);
+        var last = new megamek.common.board.BoardDecoration("x", "prop", "birch-young", null,
+              .1, .2, 0, false, 1, megamek.common.board.BoardDecoration.Placement.ground(), 0);
+        var original = java.util.List.of(first, middle, last);
+        session.board().getHex(at).setDecorations(original);
+        for (var object : java.util.List.of(middle, last, first)) {
+            session.pointer(at, object.x(), object.y(), false, object.id()); session.finishStroke();
+            assertEquals(original, session.board().getHex(at).getDecorations(), "A click cannot reorder or round local offsets");
+            assertFalse(session.dirty()); assertFalse(session.snapshot().canUndo(), "A click is not a document edit");
+        }
+        send(session, Action.OBJECT_VALUE, "scale", "1.5");
+        assertEquals(java.util.List.of("z", "a", "x"), session.snapshot().objects().stream().map(object -> object.id()).toList());
+        send(session, Action.UNDO, "", "");
+        assertEquals(original, session.board().getHex(at).getDecorations());
+        assertFalse(session.snapshot().canUndo());
+        session.pointer(at, last.x(), last.y(), false, last.id()); session.finishStroke();
+        session.pointer(at, first.x(), first.y(), false, first.id(), true); session.finishStroke();
+        session.pointer(at, last.x(), last.y(), false, last.id());
+        session.pointer(at, last.x() + .05, last.y(), true, last.id());
+        assertEquals(java.util.List.of("z", "a", "x"), session.board().getHex(at).getDecorations().stream().map(object -> object.id()).toList(),
+              "Group selection order cannot reorder same-owner objects during movement");
+        session.finishStroke(); send(session, Action.UNDO, "", "");
+        assertEquals(original, session.board().getHex(at).getDecorations());
+        assertFalse(session.snapshot().canUndo(), "The move remains a single undo operation");
     }
 
     @Test void draggingOffASupportFallsBackToGroundAndKeepsItsHeightOffset() {

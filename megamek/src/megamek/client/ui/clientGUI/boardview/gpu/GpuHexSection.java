@@ -199,7 +199,8 @@ final class GpuHexSection extends Widget implements com.badlogic.gdx.utils.Dispo
     private void drawSection(Batch batch, float parentAlpha) {
         int width = Math.max(1, (int) getWidth()), height = Math.max(1, (int) getHeight());
         batch.end();
-        boolean scissor = com.badlogic.gdx.Gdx.gl.glIsEnabled(com.badlogic.gdx.graphics.GL20.GL_SCISSOR_TEST);
+        // Scene2D owns clipping here. Querying GL synchronously waits for the entire board render on some drivers.
+        boolean scissor = com.badlogic.gdx.scenes.scene2d.utils.ScissorStack.peekScissors() != null;
         com.badlogic.gdx.Gdx.gl.glDisable(com.badlogic.gdx.graphics.GL20.GL_SCISSOR_TEST);
         try {
             if (buffer == null || buffer.getWidth() != width || buffer.getHeight() != height) {

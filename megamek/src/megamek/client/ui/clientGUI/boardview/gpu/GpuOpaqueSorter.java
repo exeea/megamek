@@ -39,6 +39,14 @@ final class GpuOpaqueSorter extends DefaultRenderableSorter {
         var a = left.material.get(BlendingAttribute.class, BlendingAttribute.Type);
         var b = right.material.get(BlendingAttribute.class, BlendingAttribute.Type);
         if (a != null && a.blended && b != null && b.blended) {
+            var paintA = left.material.get(GpuDecalOrder.class, GpuDecalOrder.TYPE);
+            var paintB = right.material.get(GpuDecalOrder.class, GpuDecalOrder.TYPE);
+            // Authored paint follows other surface coats. Mesh centres and texture batches cannot order it.
+            if ((paintA == null) != (paintB == null)) { return paintA == null ? -1 : 1; }
+            if (paintA != null) {
+                int layer = paintA.compareTo(paintB);
+                if (layer != 0) { return layer; }
+            }
             boolean roadA = left.material.has(GpuRoads.Mask.TYPE), roadB = right.material.has(GpuRoads.Mask.TYPE);
             // Road coats lie on opaque support: draw their base before wear/paint, then other transparency.
             // Chunk mesh centres cannot order overlapping coats reliably, especially after batching masks.

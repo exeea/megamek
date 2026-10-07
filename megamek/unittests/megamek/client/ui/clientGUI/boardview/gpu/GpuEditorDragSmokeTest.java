@@ -134,6 +134,7 @@ class GpuEditorDragSmokeTest {
                                 release(drag); step++; after = frames() + 5;
                             }
                             case 6 -> {
+                                if (!state.movePreview().isEmpty()) { return; }
                                 assertEquals(bridgeDestination, state.selected(), "Release uses the highlighted base, without repicking the cursor");
                                 assertEquals(10, state.property("bridge_elev").value());
                                 assertTrue(state.movePreview().isEmpty());

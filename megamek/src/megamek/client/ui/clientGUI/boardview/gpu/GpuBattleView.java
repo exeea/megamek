@@ -1892,6 +1892,9 @@ class GpuBattleView extends ApplicationAdapter {
 
         @Override
         public boolean mouseMoved(int x, int y) {
+            // Camera refreshes must not replace an editor drag's projected destination with a new cursor hit.
+            if (source.isEditor() && boardGesture && gestureButton == Input.Buttons.LEFT && !measurementGesture
+                  && (editorGrab != null || editorHexGrab != null)) { return true; }
             boolean overHud = ui.hit(x, y);
             Pick picked = overHud ? new Pick(null, Entity.NONE, Float.NaN) : pickSelection(x, y);
             hovered = picked.coords();

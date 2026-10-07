@@ -39,7 +39,7 @@ public final class BoardEditorSession {
     public enum Tool { SELECT, PAINT, ERASE }
     public enum Action {
         TOOL, COMPONENT, BRUSH, ADD_COMPONENT, REMOVE_COMPONENT, TERRAIN, REMOVE_TERRAIN, EDGE, AUTO_EDGES,
-        ELEVATION, ELEVATOR, THEME, VARIANT, BLEND, ASSET, SELECT_OBJECT, OBJECT_VALUE, DUPLICATE_OBJECT, REMOVE_OBJECT,
+        ELEVATION, ELEVATOR, THEME, VARIANT, BLEND, ASSET, SELECT_OBJECT, OBJECT_VALUE, DUPLICATE_OBJECT, REMOVE_OBJECT, REORDER_OBJECT,
         COPY, PASTE, UNDO, REDO, NEW, OPEN, SAVE, SAVE_AS, VALIDATE, MAP_THEME,
         CHOOSE_BRUSH, BRUSH_VALUE, SAMPLE, CLEAR_SELECTION, DELETE_SELECTION
     }
@@ -107,7 +107,7 @@ public final class BoardEditorSession {
         return new Snapshot(revision, title(), dirty(), !undo.isEmpty(), !redo.isEmpty(), tool, component,
               prototype == null ? "" : prototype.asset(), brush,
               selected, hex == null ? 0 : hex.getLevel(), hex == null || hex.getTheme() == null ? "" : hex.getTheme(),
-              properties(hex), hex == null ? Map.of() : hex.getAppearance(), hex == null ? List.of() : hex.getDecorations(),
+              properties(hex), hex == null ? Map.of() : hex.getAppearance(), hex == null ? List.of() : contentsOrder(hex),
               selectedObject, message, board().getWidth(), board().getHeight(), active, List.copyOf(selection), movePreview());
     }
 
@@ -233,6 +233,7 @@ public final class BoardEditorSession {
                     selection.clear(); selection.add(new Selection(selected, selectedObject));
                 }
                 case OBJECT_VALUE -> editObject(command.target(), command.value());
+                case REORDER_OBJECT -> edit(hex -> reorderObject(hex, command.target(), command.value()));
                 case DUPLICATE_OBJECT -> edit(hex -> {
                     BoardDecoration copy = object(hex).duplicate();
                     var objects = new ArrayList<>(hex.getDecorations()); objects.add(copy); hex.setDecorations(objects); selectedObject = copy.id();
@@ -490,7 +491,7 @@ public final class BoardEditorSession {
         Coords target = new megamek.common.board.CubeCoords(q, r, -q - r).roundToNearestHex().toOffset();
         require(board().contains(target), "Keep every object centre inside the board.");
         double x = object.x() + (owner.getX() - target.getX()) * .75;
-        double y = object.y() + target.getY() - owner.getY() + ((target.getX() & 1) - (owner.getX() & 1)) * .5;
+        double y = object.y() + (target.getY() - owner.getY()) + ((target.getX() & 1) - (owner.getX() & 1)) * .5;
         var placement = object.placement();
         if (placement.receiver() != null && !placement.receiver().terrain().equals("ground")) {
             String receiver = placement.receiver().terrain();
@@ -508,11 +509,16 @@ public final class BoardEditorSession {
         Set<String> ids = moved.values().stream().map(BoardDecoration::id).collect(java.util.stream.Collectors.toSet());
         Map<Coords, List<BoardDecoration>> contents = new LinkedHashMap<>();
         for (Coords at : selection.stream().filter(s -> ids.contains(s.object())).map(Selection::coords).distinct().toList()) {
-            contents.put(at, new ArrayList<>(board().getHex(at).getDecorations().stream().filter(d -> !ids.contains(d.id())).toList()));
+            contents.put(at, new ArrayList<>(board().getHex(at).getDecorations().stream()
+                  .filter(d -> !ids.contains(d.id()) || moved.containsKey(new Selection(at, d.id()))).toList()));
         }
         selection.removeIf(item -> ids.contains(item.object()));
         moved.forEach((item, object) -> {
-            contents.computeIfAbsent(item.coords(), at -> new ArrayList<>(board().getHex(at).getDecorations())).add(object);
+            var objects = contents.computeIfAbsent(item.coords(), at -> new ArrayList<>(board().getHex(at).getDecorations()));
+            int index = -1;
+            for (int i = 0; i < objects.size(); i++) { if (objects.get(i).id().equals(object.id())) { index = i; break; } }
+            // Transforming an existing object must not change its authored contents position.
+            if (index < 0) { objects.add(object); } else { objects.set(index, object); }
             selection.add(item);
             if (object.id().equals(selectedObject)) { selected = item.coords(); }
         });
@@ -736,6 +742,39 @@ public final class BoardEditorSession {
     private BoardDecoration object(Hex hex) {
         return hex.getDecorations().stream().filter(d -> d.id().equals(selectedObject)).findFirst()
               .orElseThrow(() -> new IllegalArgumentException("Select an object first."));
+    }
+
+    /** Contents keep authored list positions; decal slots show the same top-to-bottom order as the renderer. */
+    private static List<BoardDecoration> contentsOrder(Hex hex) {
+        var paint = hex.getDecorations().stream().filter(d -> d.kind().equals("decal"))
+              .sorted(Comparator.comparingInt(BoardDecoration::drawOrder).thenComparing(BoardDecoration::id).reversed()).iterator();
+        return hex.getDecorations().stream().map(d -> d.kind().equals("decal") ? paint.next() : d).toList();
+    }
+
+    private void reorderObject(Hex hex, String id, String destination) {
+        int split = destination.indexOf(':');
+        require(split > 0, "Choose a position in the contents list.");
+        boolean before = destination.substring(0, split).equals("before");
+        require(before || destination.substring(0, split).equals("after"), "Choose before or after the target.");
+        String targetId = destination.substring(split + 1);
+        if (id.equals(targetId)) { return; }
+        var objects = new ArrayList<>(contentsOrder(hex));
+        var moving = objects.stream().filter(d -> d.id().equals(id)).findFirst()
+              .orElseThrow(() -> new IllegalArgumentException("The dragged object is no longer in this hex."));
+        var target = objects.stream().filter(d -> d.id().equals(targetId)).findFirst()
+              .orElseThrow(() -> new IllegalArgumentException("The target object is no longer in this hex."));
+        require(Objects.equals(moving.placement().receiver(), target.placement().receiver()), "Reorder objects on the same surface.");
+        objects.remove(moving); objects.add(objects.indexOf(target) + (before ? 0 : 1), moving);
+        if (moving.kind().equals("decal")) {
+            var paint = objects.stream().filter(d -> d.kind().equals("decal")
+                  && Objects.equals(d.placement().receiver(), moving.placement().receiver())).toList();
+            long order = Math.max(paint.stream().mapToInt(BoardDecoration::drawOrder).max().orElse(0),
+                  (long) Integer.MIN_VALUE + paint.size() - 1);
+            for (var decal : paint) {
+                objects.set(objects.indexOf(decal), objectValue(decal, "order", Long.toString(order--)));
+            }
+        }
+        hex.setDecorations(objects);
     }
     private void replaceObject(Hex hex, java.util.function.UnaryOperator<BoardDecoration> transform) {
         BoardDecoration object = object(hex), next = transform.apply(object);

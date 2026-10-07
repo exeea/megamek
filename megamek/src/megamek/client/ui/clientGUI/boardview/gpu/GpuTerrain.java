@@ -605,12 +605,12 @@ final class GpuTerrain implements Disposable {
           Map<Coords, BoardFlow.Current> currents, Map<Coords, List<RoadPatch>> roads,
           Map<Coords, BoardBridge.Deck> bridges, Map<Coords, BoardBridge.Shape> bridgeShapes,
           Map<Coords, Map<BoardSurface.Side, List<BoardSurface.Face>>> walls, Set<Coords> reused,
-          Map<Coords, List<BoardDecals.Stamp>> paint) { }
+          Map<Coords, List<BoardDecals.Stamp>> paint, boolean paintOnly) { }
     record RoadPatch(GpuRoads.Patch patch, GpuRoads.MaskData mask,
           List<BoardTacticalGeometry.Triangle> triangles, boolean flat) { }
     private record Request(long generation, BoardScene scene, TerrainSettings settings) { }
     private record UpdatePlan(float floor, BoardConcrete coast, Map<Coords, BoardFlow.Current> currents,
-          boolean all, Set<Coords> changed, Set<Coords> changedTiles, Map<GroundSlot, BoardScene.Pixels> colors,
+          boolean all, Set<Coords> changed, Set<Coords> changedTiles, Set<Coords> paintOnly, Map<GroundSlot, BoardScene.Pixels> colors,
           Map<GroundSlot, BoardScene.Pixels> normals, Map<DecalSlot, BoardScene.Pixels> decals,
           Map<Coords, List<BoardDecals.Stamp>> paint) { }
     private Map<Coords, List<BoardDecals.Stamp>> installedPaint = Map.of();
@@ -1112,6 +1112,7 @@ final class GpuTerrain implements Disposable {
 
     private static final class Chunk implements Disposable {
         TerrainLod lod;
+        boolean paintOnlyUpdate;
         final Map<Coords, TileMesh> tileMeshes = new HashMap<>();
         final List<ModelInstance> opaque = new ArrayList<>();
         Array<Renderable> terrainRenderables;
@@ -1124,6 +1125,7 @@ final class GpuTerrain implements Disposable {
         final List<ModelInstance> overlays = new ArrayList<>();
         final List<ModelInstance> surfaceDecals = new ArrayList<>();
         final List<ModelInstance> tilesetDecals = new ArrayList<>();
+        final List<ModelInstance> authoredPaint = new ArrayList<>();
         final List<ModelInstance> water = new ArrayList<>();
         Array<Renderable> waterRenderables;
         final List<LiquidSurface> liquidMaterials = new ArrayList<>();
@@ -1265,7 +1267,7 @@ final class GpuTerrain implements Disposable {
         public void dispose() {
             GpuPropBatch.disposeMeshes(propRenderables);
             GpuPropBatch.disposeMeshes(shadowPropRenderables);
-            for (List<ModelInstance> layer : List.of(opaque, scatter, overlays, water, tactical, surfaceDecals, tilesetDecals)) {
+            for (List<ModelInstance> layer : List.of(opaque, scatter, overlays, water, tactical, surfaceDecals, tilesetDecals, authoredPaint)) {
                 layer.forEach(instance -> instance.model.dispose());
             }
             if (waterField != null) { waterField.dispose(); }
@@ -1598,7 +1600,7 @@ final class GpuTerrain implements Disposable {
         progress.begin("changes", scene.tiles().size());
         Set<Coords> changedTiles = new HashSet<>();
         Map<Coords, List<BoardDecals.Stamp>> paint = rebuildAll ? BoardDecals.index(scene) : BoardDecals.update(beforeScene, scene, previousPaint);
-        changedTiles.addAll(BoardDecals.changed(previousPaint, paint));
+        Set<Coords> changedPaint = BoardDecals.changed(previousPaint, paint);
         for (int index = 0; index < scene.tiles().size(); index++) {
             checkBuild(generation);
             BoardScene.Tile tile = scene.tiles().get(index);
@@ -1689,6 +1691,10 @@ final class GpuTerrain implements Disposable {
                 }
             }
         }
+        Set<Coords> textureChunks = new HashSet<>();
+        changedTiles.forEach(coords -> dirtyChunk(textureChunks, coords));
+        Set<Coords> paintOnly = new HashSet<>(changedPaint); paintOnly.removeAll(changedTiles);
+        changedTiles.addAll(changedPaint);
         Set<Coords> changedChunks = new HashSet<>();
         changedTiles.forEach(coords -> dirtyChunk(changedChunks, coords));
         boolean all = rebuildAll;
@@ -1702,7 +1708,7 @@ final class GpuTerrain implements Disposable {
             normalPixels.putAll(previousNormals);
             decalPixels.putAll(previousDecals);
             retextured = new ArrayList<>();
-            for (Coords chunk : changedChunks) {
+            for (Coords chunk : textureChunks) {
                 for (int x = chunk.getX() * CHUNK_SIZE; x < Math.min(scene.width(), (chunk.getX() + 1) * CHUNK_SIZE); x++) {
                     for (int y = chunk.getY() * CHUNK_SIZE; y < Math.min(scene.height(), (chunk.getY() + 1) * CHUNK_SIZE); y++) {
                         retextured.add(scene.tile(x, y));
@@ -1714,7 +1720,7 @@ final class GpuTerrain implements Disposable {
         retextured.parallelStream().forEach(tile -> request.settings().run(() -> {
             checkBuild(generation);
             BoardRim.Images material = tile.detailedGround() ? new BoardRim.Images(tile.ground(), tile.normals())
-                  : !all && !changedChunks.contains(new Coords(tile.coords().getX() / CHUNK_SIZE, tile.coords().getY() / CHUNK_SIZE))
+                  : !all && !textureChunks.contains(new Coords(tile.coords().getX() / CHUNK_SIZE, tile.coords().getY() / CHUNK_SIZE))
                         && previousColors.containsKey(new GroundSlot(tile.coords(), true))
                         ? new BoardRim.Images(previousColors.get(new GroundSlot(tile.coords(), true)),
                               previousNormals.get(new GroundSlot(tile.coords(), true)))
@@ -1737,16 +1743,17 @@ final class GpuTerrain implements Disposable {
         // A full build retains only the rim compositions it used; an edit keeps those of the hexes it left alone.
         if (all) { rims.retainUsed(); }
         progress.begin("atlases", 4);
-        return new UpdatePlan(nextFloor, nextCoast, nextCurrents, rebuildAll, changedChunks, changedTiles,
+        return new UpdatePlan(nextFloor, nextCoast, nextCurrents, rebuildAll, changedChunks, changedTiles, paintOnly,
               terrainPixels, normalPixels, decalPixels, paint);
 
     }
 
-    /** Whether any hex changed what the concrete fit reads: its ground, water, level, roads or structures. */
+    /** Authored paint does not change the solid terrain or its neighbour dependencies. */
     private static List<BoardScene.Feature> solidFeatures(BoardScene.Tile tile) {
         return tile.features().stream().filter(f -> f.decoration() == null || !f.decoration().kind().equals("decal")).toList();
     }
 
+    /** Whether any hex changed what the concrete fit reads: its ground, water, level, roads or structures. */
     private static boolean concreteInputsChanged(BoardScene before, BoardScene after) {
         for (int index = 0; index < after.tiles().size(); index++) {
             BoardScene.Tile was = before.tiles().get(index), is = after.tiles().get(index);
@@ -2072,10 +2079,25 @@ final class GpuTerrain implements Disposable {
         long generation = meshGeneration;
         Set<Coords> reuse = new HashSet<>();
         Map<Coords, BoardSurface.WaterGeometry> waterShapes = new HashMap<>();
-        if (rebuilding && source != null && source.lod == lod) {
+        Map<Coords, BoardTacticalGeometry.Surface> paintSurfaces = new HashMap<>();
+        boolean onlyPaint = rebuilding && source != null && !rebuild.plan.all()
+              && !atlasChanges.contains(new Coords(x / CHUNK_SIZE, y / CHUNK_SIZE))
+              && source.tileMeshes.keySet().stream().noneMatch(at -> rebuild.plan.changedTiles().contains(at)
+                    && !rebuild.plan.paintOnly().contains(at));
+        // Project onto the installed surface; camera refinement can change its detail independently later.
+        TerrainLod buildLod = onlyPaint ? source.lod : lod;
+        if (rebuilding && source != null && source.lod == buildLod) {
             for (Coords coords : source.tileMeshes.keySet()) {
-                if (!rebuild.plan.changedTiles().contains(coords)
-                      && !atlasTileChanges.contains(coords)) { reuse.add(coords); }
+                if (atlasTileChanges.contains(coords)) { continue; }
+                if (!rebuild.plan.changedTiles().contains(coords)) { reuse.add(coords); }
+                else if (rebuild.plan.paintOnly().contains(coords)) {
+                    TileMesh previous = source.tileMeshes.get(coords);
+                    var retained = previous.support == null ? null : previous.support.get();
+                    var cached = cpuGeometry.get(previous);
+                    if (retained == null && cached != null) { retained = cached.tactical(); }
+                    // Borrow exact installed support. A cache miss takes the normal terrain preparation path.
+                    if (retained != null) { paintSurfaces.put(coords, retained); reuse.add(coords); }
+                }
             }
         }
         if (source != null) {
@@ -2087,10 +2109,27 @@ final class GpuTerrain implements Disposable {
         }
         TerrainLoadProgress progress = new TerrainLoadProgress();
         var paint = rebuilding ? rebuild.plan.paint() : installedPaint;
-        detailJob = new DetailJob(generation, index, source, lod, scene, settings, bottom, rebuilding,
+        detailJob = new DetailJob(generation, index, source, buildLod, scene, settings, bottom, rebuilding,
               CompletableFuture.supplyAsync(() -> settings.call(
-                    () -> prepare(scene, x, y, bottom, lod, flow, settings, reuse, waterShapes,
-                          () -> checkBuild(generation), progress, roadMaskData, paint)), detailWorker), null, null, progress);
+                    () -> onlyPaint ? preparePaint(scene, x, y, bottom, buildLod, paintSurfaces, paint, () -> checkBuild(generation))
+                          : prepare(scene, x, y, bottom, buildLod, flow, settings, reuse, waterShapes,
+                          () -> checkBuild(generation), progress, roadMaskData, paint, paintSurfaces)), detailWorker), null, null, progress);
+    }
+
+    /** A paint edit needs receiving triangles only. It neither constructs nor uploads solid terrain or vegetation. */
+    private static Prepared preparePaint(BoardScene scene, int x, int y, float floor, TerrainLod lod,
+          Map<Coords, BoardTacticalGeometry.Surface> retained, Map<Coords, List<BoardDecals.Stamp>> paint, Runnable check) {
+        Map<Coords, BoardTacticalGeometry.Surface> support = new HashMap<>(retained);
+        for (int cx = x; cx < Math.min(scene.width(), x + CHUNK_SIZE); cx++) {
+            for (int cy = y; cy < Math.min(scene.height(), y + CHUNK_SIZE); cy++) {
+                check.run(); Coords at = new Coords(cx, cy);
+                if (!paint.getOrDefault(at, List.of()).isEmpty()) {
+                    support.computeIfAbsent(at, key -> BoardTacticalGeometry.Surface.of(new BoardSurface(scene, scene.tile(key), lod), scene, floor));
+                }
+            }
+        }
+        return new Prepared(Map.of(), null, null, support, Map.of(), Map.of(), Map.of(), Map.of(),
+              Map.of(), Map.of(), Map.of(), Set.of(), paint, true);
     }
 
     private void prepareAtlases(BoardScene scene, UpdatePlan plan, TerrainLoadProgress progress) {
@@ -2132,7 +2171,10 @@ final class GpuTerrain implements Disposable {
             int count = ((scene.width() + CHUNK_SIZE - 1) / CHUNK_SIZE) * ((scene.height() + CHUNK_SIZE - 1) / CHUNK_SIZE);
             for (int index = 0; index < count; index++) { chunks.add(rebuild.replacements.get(index)); }
         } else {
-            rebuild.replacements.forEach((index, next) -> retiredChunks.add(chunks.set(index, next)));
+            rebuild.replacements.forEach((index, next) -> {
+                if (next.paintOnlyUpdate) { installPaint(chunks.get(index), next); retiredChunks.add(next); }
+                else { retiredChunks.add(chunks.set(index, next)); }
+            });
             for (Coords at : markingChanges) {
                 int index = at.getX() * chunkRows + at.getY();
                 if (!rebuild.replacements.containsKey(index)) {
@@ -2187,6 +2229,18 @@ final class GpuTerrain implements Disposable {
         assets.retainBuildings(liveBuildings);
         assets.retainIndustrial(liveIndustrial);
         updateLight(scene.light());
+    }
+
+    /** Transfer only the new paint meshes; the temporary chunk retires the old ones through normal disposal. */
+    private static void installPaint(Chunk target, Chunk replacement) {
+        List<ModelInstance> old = new ArrayList<>(target.authoredPaint);
+        target.authoredPaint.clear(); target.authoredPaint.addAll(replacement.authoredPaint);
+        replacement.authoredPaint.clear(); replacement.authoredPaint.addAll(old);
+        replacement.tileMeshes.forEach((coords, next) -> {
+            TileMesh tile = target.tileMeshes.get(coords);
+            tile.paint.clear(); tile.paint.addAll(next.paint);
+            tile.ranges.removeIf(range -> range.layer() == 6); tile.ranges.addAll(next.ranges);
+        });
     }
 
     /** Retain one layout per sculpt variant, including ice/volcanic flags discovered in actual chunk materials. */
@@ -2289,13 +2343,14 @@ final class GpuTerrain implements Disposable {
           Map<Coords, BoardSurface.WaterGeometry> waterShapes, Runnable check, TerrainLoadProgress progress,
           GpuRoads.Masks masks) {
         return prepare(scene, startX, startY, floor, lod, currents, settings, reused, waterShapes, check, progress,
-              masks, BoardDecals.index(scene));
+              masks, BoardDecals.index(scene), Map.of());
     }
 
     private static Prepared prepare(BoardScene scene, int startX, int startY, float floor, TerrainLod lod,
           Map<Coords, BoardFlow.Current> currents, TerrainSettings settings, Set<Coords> reused,
           Map<Coords, BoardSurface.WaterGeometry> waterShapes, Runnable check, TerrainLoadProgress progress,
-          GpuRoads.Masks masks, Map<Coords, List<BoardDecals.Stamp>> paint) {
+          GpuRoads.Masks masks, Map<Coords, List<BoardDecals.Stamp>> paint,
+          Map<Coords, BoardTacticalGeometry.Surface> paintSurfaces) {
         check.run();
         // Sculpting is pure CPU work per hex: prepare the chunk's surfaces and cliffs in parallel, then build meshes.
         List<BoardScene.Tile> chunkTiles = new ArrayList<>();
@@ -2331,6 +2386,7 @@ final class GpuTerrain implements Disposable {
             progress.advance();
         }));
         Map<Coords, BoardTacticalGeometry.Surface> topography = new java.util.concurrent.ConcurrentHashMap<>();
+        topography.putAll(paintSurfaces);
         Map<Coords, BoardPlants> plants = new java.util.concurrent.ConcurrentHashMap<>();
         Map<Coords, SculptPlan> sculpts = new java.util.concurrent.ConcurrentHashMap<>();
         Map<Coords, List<RoadPatch>> roads = new java.util.concurrent.ConcurrentHashMap<>();
@@ -2403,7 +2459,7 @@ final class GpuTerrain implements Disposable {
         progress.advance();
         progress.begin("masks", 3);
         return new Prepared(surfaces, water, lava, topography, plants, sculpts, currents, roads,
-              bridges, bridgeShapes, walls, reused, paint);
+              bridges, bridgeShapes, walls, reused, paint, false);
     }
 
     /** Natural walls are the completed surface mesh, shared with picking; legacy skirts still follow their sides. */
@@ -2929,7 +2985,7 @@ final class GpuTerrain implements Disposable {
             chunk.bounds.ext(bounds);
         }
         placeDecals(build, tile, surface, supports);
-        placeDecorationPaint(build, tile, surface, supports);
+        placeDecorationPaint(build, tile, surface.faces, build.prepared.bridgeShapes().get(tile.coords()), supports);
     }
 
     /** Use the chosen support, or the sampled ground when that support has no surface beneath the anchor. */
@@ -2979,14 +3035,13 @@ final class GpuTerrain implements Disposable {
               geyser.origin().z + (geyser.active() ? 40 : 15) * geyser.scale());
     }
 
-    private List<BoardSurface.Face> decorationReceivers(String receiver, ChunkBuild build, BoardScene.Tile tile,
-          BoardSurface surface, List<Prop> supports) {
+    private List<BoardSurface.Face> decorationReceivers(String receiver, List<BoardSurface.Face> ground,
+          BoardBridge.Shape bridge, List<Prop> supports) {
         if (receiver.equals("ground")) {
-            return surface.faces.stream().filter(f -> f.finish() != BoardSurface.Finish.ICE && BoardDecals.upward(f)).toList();
+            return ground.stream().filter(f -> f.finish() != BoardSurface.Finish.ICE && BoardDecals.upward(f)).toList();
         }
         List<BoardSurface.Face> faces = new ArrayList<>();
         if (receiver.equals("bridge")) {
-            var bridge = build.prepared.bridgeShapes().get(tile.coords());
             if (bridge != null) {
                 for (var facet : bridge.facets()) {
                     if (facet.part() == BoardBridge.Part.TOP) { faces.add(new BoardSurface.Face(facet.a(), facet.b(), facet.c(), BoardSurface.Finish.TOP)); }
@@ -3001,28 +3056,29 @@ final class GpuTerrain implements Disposable {
         return faces;
     }
 
-    private void placeDecorationPaint(ChunkBuild build, BoardScene.Tile tile, BoardSurface surface, List<Prop> supports) {
+    private void placeDecorationPaint(ChunkBuild build, BoardScene.Tile tile, List<BoardSurface.Face> ground,
+          BoardBridge.Shape bridge, List<Prop> supports) {
         var paint = build.prepared.paint().getOrDefault(tile.coords(), List.of());
         for (var stamp : paint) {
             var object = stamp.object();
             Texture texture = assets.decorationPaint(object.asset());
             if (texture == null) { continue; }
-            var receivers = decorationReceivers(object.placement().receiver().terrain(), build, tile, surface, supports);
+            var receivers = decorationReceivers(object.placement().receiver().terrain(), ground, bridge, supports);
             var faces = BoardDecals.project(stamp.owner(), tile.coords(), receivers, object);
-            // The same order has the same lift in every recipient, independent of other paint in that hex.
-            float lift = (BoardDecals.LIFT + .04f * (float) (.5 + Math.atan(object.drawOrder()) / Math.PI)) * BoardGeometry.hexScale();
+            // Paint shares a support plane, writes no depth, and blends in explicit painter order.
+            float lift = (BoardDecals.LIFT + .02f) * BoardGeometry.hexScale();
             build.chunk.tileMeshes.get(tile.coords()).paint.add(new PaintedDecal(stamp, faces, lift));
             Material material = material(texture, true);
-            for (int target : new int[] { 4, 5 }) {
-                build.layers.get(target).addTriangles(material, meshes -> {
-                    for (var face : faces) {
-                        var normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
-                        meshes.get().triangle(decorationVertex(face.a(), stamp.owner(), object, normal, lift),
-                              decorationVertex(face.b(), stamp.owner(), object, normal, lift),
-                              decorationVertex(face.c(), stamp.owner(), object, normal, lift));
-                    }
-                });
-            }
+            material.set(new GpuDecalOrder(stamp));
+            // Both camera presentations draw this one mesh; legacy terrain art retains its separate layers.
+            build.layers.get(6).addTriangles(material, meshes -> {
+                for (var face : faces) {
+                    var normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
+                    meshes.get().triangle(decorationVertex(face.a(), stamp.owner(), object, normal, lift),
+                          decorationVertex(face.b(), stamp.owner(), object, normal, lift),
+                          decorationVertex(face.c(), stamp.owner(), object, normal, lift));
+                }
+            });
         }
     }
 
@@ -3150,7 +3206,7 @@ final class GpuTerrain implements Disposable {
         final TerrainLoadProgress progress;
         final int x, y, width, height;
         final float floor;
-        final List<Layer> layers = List.of(new Layer(), new Layer(), new Layer(), new Layer(), new Layer(), new Layer());
+        final List<Layer> layers = List.of(new Layer(), new Layer(), new Layer(), new Layer(), new Layer(), new Layer(), new Layer());
         Material scatterMaterial;
         // Derived once per model while preparing a chunk; no extra model data survives construction.
         final Map<Model, Float> coralRootRadii = new IdentityHashMap<>();
@@ -3171,6 +3227,8 @@ final class GpuTerrain implements Disposable {
             width = Math.min(CHUNK_SIZE, scene.width() - x);
             height = Math.min(CHUNK_SIZE, scene.height() - y);
             chunk.lod = lod;
+            chunk.paintOnlyUpdate = prepared.paintOnly();
+            if (chunk.paintOnlyUpdate) { progress.begin("paint", width * height); return; }
             Map<BoardScene.Pixels, BoardScene.Pixels> masks = new HashMap<>();
             prepared.roads().values().forEach(patches -> patches.forEach(p -> masks.put(p.mask().pixels(), p.mask().pixels())));
             if (source != null) {
@@ -3204,13 +3262,21 @@ final class GpuTerrain implements Disposable {
                 layers.forEach(layer -> layer.owner = coords);
                 TileMesh tile = new TileMesh();
                 chunk.tileMeshes.put(coords, tile);
-                if (prepared.reused().contains(coords)) {
+                if (chunk.paintOnlyUpdate) {
+                    TileMesh previous = source.tileMeshes.get(coords);
+                    var support = prepared.topography().get(coords);
+                    placeDecorationPaint(this, scene.tile(coords), support == null ? List.of() : support.faces(), previous.bridgeShape, previous.props);
+                    tile.bounds.set(previous.bounds);
+                } else if (prepared.reused().contains(coords)) {
                     TileMesh previous = source.tileMeshes.get(coords);
                     tile.support = previous.support;
                     tile.plants = previous.plants;
                     tile.bridgeShape = previous.bridgeShape;
-                    tile.paint.addAll(previous.paint);
+                    boolean repaint = !previous.paint.stream().map(PaintedDecal::stamp).toList()
+                          .equals(prepared.paint().getOrDefault(coords, List.of()));
+                    if (!repaint) { tile.paint.addAll(previous.paint); }
                     for (TileRange range : previous.ranges) {
+                        if (repaint && range.material().has(GpuDecalOrder.TYPE)) { continue; }
                         Material material = reusedMaterials.computeIfAbsent(range.material(), original -> {
                             Material copy = new Material(original);
                             GpuWaterShader water = copy.get(GpuWaterShader.class, GpuWaterShader.TYPE);
@@ -3240,6 +3306,10 @@ final class GpuTerrain implements Disposable {
                     }
                     chunk.props.addAll(tile.props);
                     chunk.struts.addAll(tile.struts);
+                    if (repaint) {
+                        var support = prepared.topography().get(coords);
+                        placeDecorationPaint(this, scene.tile(coords), support == null ? List.of() : support.faces(), tile.bridgeShape, tile.props);
+                    }
                     var cached = cpuGeometry.get(previous);
                     if (cached != null) { rememberGeometry(tile, cached); }
                     tile.bounds.set(previous.bounds);
@@ -3276,7 +3346,7 @@ final class GpuTerrain implements Disposable {
 
         boolean uploadUntil(long deadline) {
             List<List<ModelInstance>> targets = List.of(chunk.opaque, chunk.scatter, chunk.overlays, chunk.water,
-                  chunk.surfaceDecals, chunk.tilesetDecals);
+                  chunk.surfaceDecals, chunk.tilesetDecals, chunk.authoredPaint);
             while (uploadLayer < meshes.size()) {
                 MeshBatch batch = meshes.get(uploadLayer);
                 while (uploadBuffer < batch.buffers.size()) {
@@ -3294,6 +3364,7 @@ final class GpuTerrain implements Disposable {
         Chunk finish() {
             chunk.bounds.set(bounds);
             chunk.scatterDiameter = scatterDiameter;
+            if (chunk.paintOnlyUpdate) { progress.advance(); return chunk; }
             chunk.terrainRenderables = GpuTerrainDepth.snapshot(chunk.opaque);
             chunk.scatterRenderables = GpuTerrainDepth.snapshot(chunk.scatter);
             chunk.waterRenderables = GpuTerrainDepth.snapshot(chunk.water);
@@ -5067,6 +5138,7 @@ final class GpuTerrain implements Disposable {
                     if (terrain) { chunk.overlays.forEach(instance -> batch.render(instance, environment)); }
                     (tacticalView ? chunk.tilesetDecals : chunk.surfaceDecals)
                           .forEach(instance -> batch.render(instance, environment));
+                    chunk.authoredPaint.forEach(instance -> batch.render(instance, environment));
                 }
             }
             batch.end();

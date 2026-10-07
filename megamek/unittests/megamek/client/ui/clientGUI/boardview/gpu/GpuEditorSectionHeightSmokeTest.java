@@ -72,6 +72,7 @@ class GpuEditorSectionHeightSmokeTest {
                 int fixtureIndex;
                 long nextFrame;
                 float initialDeck, initialGround;
+                boolean sectionFramed;
 
                 private GpuTerrain terrain() throws ReflectiveOperationException {
                     var field = GpuBattleView.class.getDeclaredField("terrain"); field.setAccessible(true);
@@ -108,7 +109,9 @@ class GpuEditorSectionHeightSmokeTest {
                                 assertEquals(6, source.editorState().property("bridge_elev").value());
                                 assertEquals(initialDeck + 2, anchor("deck-car"), .05f, "The car follows the edited bridge deck");
                                 assertEquals(initialGround, anchor("ground-car"), .05f, "The ground prop keeps its own support");
-                                showSection();
+                                if (!sectionFramed) {
+                                    showSection(); sectionFramed = true; nextFrame = frames() + 1; return;
+                                }
                                 GpuBoardTestUi.capture(new File(output, "editor-section-bridge-height.png"));
                                 command(Action.UNDO, ""); next();
                             }
